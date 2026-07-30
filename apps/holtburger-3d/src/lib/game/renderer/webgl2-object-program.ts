@@ -84,9 +84,9 @@ uniform int uMaterialKind;
 uniform int uWrapRepeat;
 uniform int uUseDetail;
 uniform int uPalettedClipMap;
+// Packed object rects use pixel-space x, y, width, height for exact texel addressing.
 uniform vec4 uBaseRect;
 uniform vec4 uPaletteRect;
-uniform vec2 uPaletteSize;
 uniform vec4 uDetailRect;
 uniform vec4 uMaterialColor;
 uniform float uDetailTiling;
@@ -106,24 +106,82 @@ vec2 atlasUv(vec2 source, vec4 rect) {
 	return mix(rect.xy, rect.zw, source);
 }
 
+vec2 pixelRectUv(vec2 source, vec4 rect, vec2 atlasSize) {
+	return (rect.xy + source * rect.zw) / atlasSize;
+}
+
+ivec2 resolveIndexedCoordinate(ivec2 coordinate, ivec2 size) {
+	if (uWrapRepeat != 0) {
+		return ivec2(
+			((coordinate.x % size.x) + size.x) % size.x,
+			((coordinate.y % size.y) + size.y) % size.y
+		);
+	}
+	return clamp(coordinate, ivec2(0), size - ivec2(1));
+}
+
+float paletteIndexAt(ivec2 sourceCoordinate) {
+	ivec2 atlasCoordinate = ivec2(uBaseRect.xy) + sourceCoordinate;
+	vec4 encoded = texelFetch(uBase, atlasCoordinate, 0) * 255.0;
+	return uMaterialKind == 2
+		? floor(encoded.r + 0.5)
+		: floor(encoded.r + 0.5) + floor(encoded.g + 0.5) * 256.0;
+}
+
+vec4 paletteColor(float index) {
+	if (uPalettedClipMap != 0 && index < 8.0) return vec4(0.0);
+	vec2 paletteSize = max(uPaletteRect.zw, vec2(1.0));
+	if (index >= paletteSize.x * paletteSize.y) return vec4(0.0);
+	vec2 paletteCoordinate = vec2(
+		mod(index, paletteSize.x),
+		floor(index / paletteSize.x)
+	);
+	return texelFetch(
+		uPalette,
+		ivec2(uPaletteRect.xy + paletteCoordinate),
+		0
+	);
+}
+
+vec4 indexedColorAt(ivec2 coordinate, ivec2 sourceSize) {
+	return paletteColor(
+		paletteIndexAt(resolveIndexedCoordinate(coordinate, sourceSize))
+	);
+}
+
+vec4 sampleIndexedPaletteLinear(vec2 uv) {
+	ivec2 sourceSize = ivec2(uBaseRect.zw);
+	// Match normalized hardware bilinear sampling, whose texel centers lie at n + 0.5.
+	vec2 texelPosition = uv * vec2(sourceSize) - vec2(0.5);
+	ivec2 baseCoordinate = ivec2(floor(texelPosition));
+	vec2 blend = fract(texelPosition);
+	vec4 top = mix(
+		indexedColorAt(baseCoordinate, sourceSize),
+		indexedColorAt(baseCoordinate + ivec2(1, 0), sourceSize),
+		blend.x
+	);
+	vec4 bottom = mix(
+		indexedColorAt(baseCoordinate + ivec2(0, 1), sourceSize),
+		indexedColorAt(baseCoordinate + ivec2(1, 1), sourceSize),
+		blend.x
+	);
+	return mix(top, bottom, blend.y);
+}
+
 vec4 sampleMaterial() {
 	if (uMaterialKind == 0) return uMaterialColor;
 	vec2 uv = sourceUv();
 	if (uMaterialKind == 1) {
-		vec4 direct = texture(uBase, atlasUv(uv, uBaseRect)) * uMaterialColor;
+		vec4 direct = texture(
+			uBase,
+			pixelRectUv(uv, uBaseRect, vec2(textureSize(uBase, 0)))
+		) * uMaterialColor;
 		if (direct.a < uAlphaTest) discard;
 		return direct;
 	}
-	vec4 encoded = texture(uBase, atlasUv(uv, uBaseRect));
-	float index = uMaterialKind == 2
-		? floor(encoded.r * 255.0 + 0.5)
-		: floor(encoded.r * 255.0 + 0.5) + floor(encoded.g * 255.0 + 0.5) * 256.0;
-	if (uPalettedClipMap != 0 && index < 8.0) discard;
-	vec2 paletteSize = max(uPaletteSize, vec2(1.0));
-	if (index >= paletteSize.x * paletteSize.y) return vec4(0.0);
-	vec2 paletteCoordinate = vec2(mod(index, paletteSize.x), floor(index / paletteSize.x));
-	vec2 paletteUv = uPaletteRect.xy + (paletteCoordinate + vec2(0.5)) / paletteSize * (uPaletteRect.zw - uPaletteRect.xy);
-	return texture(uPalette, paletteUv) * uMaterialColor;
+	vec4 indexed = sampleIndexedPaletteLinear(uv) * uMaterialColor;
+	if (indexed.a < uAlphaTest) discard;
+	return indexed;
 }
 
 void main() {
@@ -156,7 +214,6 @@ interface WebGL2ObjectProgramBase {
 		readonly materialKind: WebGLUniformLocation;
 		readonly palette: WebGLUniformLocation;
 		readonly paletteRect: WebGLUniformLocation;
-		readonly paletteSize: WebGLUniformLocation;
 		readonly palettedClipMap: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
 		readonly useDetail: WebGLUniformLocation;
@@ -271,7 +328,6 @@ export function createWebGL2ObjectProgram(
 			materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
 			palette: requireWebGL2Uniform(gl, program, "uPalette"),
 			paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
-			paletteSize: requireWebGL2Uniform(gl, program, "uPaletteSize"),
 			palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 			projection: requireWebGL2Uniform(gl, program, "uProjection"),
 			useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),

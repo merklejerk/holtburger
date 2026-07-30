@@ -1446,11 +1446,9 @@ export class WebGL2Renderer implements Renderer {
 				baseResource.texture,
 				material.sampler.filtering,
 			);
-			this.#setAtlasRect(
+			this.#setPixelAtlasRect(
 				program.uniforms.baseRect,
 				baseBinding.placement.bounds,
-				baseResource.width,
-				baseResource.height,
 			);
 			gl.uniform1i(program.uniforms.base, 0);
 			gl.uniform1i(
@@ -1483,18 +1481,9 @@ export class WebGL2Renderer implements Renderer {
 					paletteResource.texture,
 					TextureFilteringMode.Nearest,
 				);
-				this.#setAtlasRect(
+				this.#setPixelAtlasRect(
 					program.uniforms.paletteRect,
 					paletteBinding.placement.bounds,
-					paletteResource.width,
-					paletteResource.height,
-				);
-				gl.uniform2f(
-					program.uniforms.paletteSize,
-					paletteBinding.placement.bounds.max.x -
-						paletteBinding.placement.bounds.min.x,
-					paletteBinding.placement.bounds.max.y -
-						paletteBinding.placement.bounds.min.y,
 				);
 				gl.uniform1i(program.uniforms.palette, 1);
 			}
@@ -1669,18 +1658,16 @@ export class WebGL2Renderer implements Renderer {
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 	}
 
-	#setAtlasRect(
+	#setPixelAtlasRect(
 		uniform: WebGLUniformLocation,
 		bounds: import("../math/types").AABB2,
-		width: number,
-		height: number,
 	): void {
 		this.#gl.uniform4f(
 			uniform,
-			bounds.min.x / width,
-			bounds.min.y / height,
-			bounds.max.x / width,
-			bounds.max.y / height,
+			bounds.min.x,
+			bounds.min.y,
+			bounds.max.x - bounds.min.x,
+			bounds.max.y - bounds.min.y,
 		);
 	}
 

@@ -177,15 +177,62 @@ describe("object fragment variants", () => {
 		);
 	});
 
-	it("maps palette indices through square palette payloads", () => {
+	it("filters indexed textures only after exact palette lookup", () => {
 		const shader = createObjectFragmentShader(false);
-		expect(shader).toContain("uniform vec2 uPaletteSize;");
+		expect(shader).toContain(
+			"vec2 texelPosition = uv * vec2(sourceSize) - vec2(0.5);",
+		);
+		expect(shader).toContain(
+			"vec4 encoded = texelFetch(uBase, atlasCoordinate, 0) * 255.0;",
+		);
+		expect(shader).toContain("ivec2(uPaletteRect.xy + paletteCoordinate)");
+		expect(shader).toContain("indexedColorAt(baseCoordinate, sourceSize)");
+		expect(shader).toContain(
+			"indexedColorAt(baseCoordinate + ivec2(1, 0), sourceSize)",
+		);
+		expect(shader).toContain(
+			"indexedColorAt(baseCoordinate + ivec2(0, 1), sourceSize)",
+		);
+		expect(shader).toContain(
+			"indexedColorAt(baseCoordinate + ivec2(1, 1), sourceSize)",
+		);
+		expect(shader).toContain("return mix(top, bottom, blend.y);");
+	});
+
+	it("reconstructs index16 values and wraps each bilinear tap within the source rect", () => {
+		const shader = createObjectFragmentShader(false);
+		expect(shader).toContain(
+			"floor(encoded.r + 0.5) + floor(encoded.g + 0.5) * 256.0",
+		);
+		expect(shader).toContain("((coordinate.x % size.x) + size.x) % size.x");
+		expect(shader).toContain(
+			"return clamp(coordinate, ivec2(0), size - ivec2(1));",
+		);
+	});
+
+	it("turns clipped palette taps transparent before blending and alpha testing", () => {
+		const shader = createObjectFragmentShader(false);
+		expect(shader).toContain(
+			"if (uPalettedClipMap != 0 && index < 8.0) return vec4(0.0);",
+		);
+		expect(shader).toContain(
+			"vec4 indexed = sampleIndexedPaletteLinear(uv) * uMaterialColor;",
+		);
+		expect(shader).toContain("if (indexed.a < uAlphaTest) discard;");
+		expect(shader).not.toContain("index < 8.0) discard");
+	});
+
+	it("maps palette indices through pixel-space palette rectangles", () => {
+		const shader = createObjectFragmentShader(false);
+		expect(shader).not.toContain("uPaletteSize");
+		expect(shader).toContain(
+			"vec2 paletteSize = max(uPaletteRect.zw, vec2(1.0));",
+		);
 		expect(shader).toContain(
 			"if (index >= paletteSize.x * paletteSize.y) return vec4(0.0);",
 		);
-		expect(shader).toContain(
-			"vec2 paletteCoordinate = vec2(mod(index, paletteSize.x), floor(index / paletteSize.x));",
-		);
+		expect(shader).toContain("mod(index, paletteSize.x)");
+		expect(shader).toContain("floor(index / paletteSize.x)");
 	});
 });
 

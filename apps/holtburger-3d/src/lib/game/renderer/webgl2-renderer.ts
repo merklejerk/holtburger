@@ -1047,6 +1047,8 @@ export class WebGL2Renderer implements Renderer {
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
+		gl.enable(gl.CULL_FACE);
+		gl.cullFace(gl.BACK);
 		gl.enable(gl.POLYGON_OFFSET_FILL);
 		gl.polygonOffset(TERRAIN_DEPTH_OFFSET.factor, TERRAIN_DEPTH_OFFSET.units);
 		gl.useProgram(this.#terrainProgram.program);
@@ -1086,6 +1088,7 @@ export class WebGL2Renderer implements Renderer {
 				landblockOffset,
 			);
 		}
+		gl.disable(gl.CULL_FACE);
 		gl.disable(gl.POLYGON_OFFSET_FILL);
 	}
 

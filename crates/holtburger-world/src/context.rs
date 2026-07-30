@@ -653,14 +653,15 @@ mod tests {
         CombatTargetStatus, WorldContext, WorldContextExt, burden_load_modifier,
         run_rate_from_skill_and_burden,
     };
+    use crate::attachment::PhysicsAttachment;
     use crate::entity::{Entity, EntityMotionSnapshot};
     use crate::stats::{AttributeType, SkillType};
-    use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::EquipMask;
     use holtburger_common::properties::{
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, Usable,
     };
+    use holtburger_common::{Guid, ParentLocation, Placement};
     use holtburger_protocol::messages::combat::CombatMode;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 
@@ -1038,7 +1039,7 @@ mod tests {
     }
 
     #[test]
-    fn physics_parent_alone_does_not_make_item_remote() {
+    fn attachment_alone_does_not_make_item_remote() {
         let player_guid = Guid(0x5000_0001);
         let item_guid = Guid(0x8000_0001);
 
@@ -1048,7 +1049,11 @@ mod tests {
         };
 
         let mut attached_item = entity(item_guid, "Attached Item");
-        attached_item.physics_parent_id = Some(Guid(0x7000_0001));
+        attached_item.attachment = Some(PhysicsAttachment {
+            parent: Guid(0x7000_0001),
+            location: ParentLocation::RightHand,
+            placement: Placement::RightHandCombat,
+        });
         attached_item
             .properties
             .ints

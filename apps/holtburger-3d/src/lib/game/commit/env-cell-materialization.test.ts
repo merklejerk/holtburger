@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { residentKey } from "../resolution/landblock-layer";
 import type { EnvCellId, LandblockId } from "../game-types";
 import { transformPoint3 } from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
@@ -38,7 +39,9 @@ describe("planEnvCellMaterialization", () => {
 		expect(
 			plan.residentJobs.map((job) => ({
 				cell: job.source.envCellId,
-				residents: job.source.staticResidents.map((entry) => entry.id),
+				residents: job.source.staticResidents.map((entry) =>
+					residentKey(entry.identity),
+				),
 			})),
 		).toEqual([
 			{ cell: "0x00010100", residents: ["shared"] },
@@ -98,9 +101,13 @@ describe("planEnvCellMaterialization", () => {
 		);
 
 		expect(
-			plan.residentJobs[0]?.source.staticResidents.map(({ id }) => id),
+			plan.residentJobs[0]?.source.staticResidents.map(({ identity }) =>
+				residentKey(identity),
+			),
 		).toEqual(["static"]);
-		expect(plan.deferredResidents.map(({ id }) => id)).toEqual(["animated"]);
+		expect(
+			plan.deferredResidents.map(({ identity }) => residentKey(identity)),
+		).toEqual(["animated"]);
 		expect(plan.diagnostics).toMatchObject({
 			defaultAnimatedResidentCount: 1,
 			expectedResidentCount: 2,
@@ -282,12 +289,12 @@ function presentation(animationId: string | null): ResolvedObjectPresentation {
 		parts: [
 			{
 				partIndex: 0,
-				parentPartIndex: null,
 				geometry: SHARED_GEOMETRY,
 				defaultScale: new Vec3(1, 1, 1),
 				materials: [SHARED_MATERIAL],
 			},
 		],
+		holdingLocations: new Map(),
 		placementPoses: new Map([
 			[0, { placementId: 0, partTransforms: [Mat4.identity()] }],
 		]),

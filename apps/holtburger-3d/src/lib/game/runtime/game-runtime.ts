@@ -83,9 +83,10 @@ import {
 	STATIC_DETAIL_ROLES,
 	type StaticDetailRole,
 } from "../resolution/static-detail-role";
-import type {
-	ResolvedOutdoorStaticLayerSource,
-	ResolvedStaticObjectLayerSource,
+import {
+	residentKey,
+	type ResolvedOutdoorStaticLayerSource,
+	type ResolvedStaticObjectLayerSource,
 } from "../resolution/landblock-layer";
 import {
 	computeSceneInterest,
@@ -1111,7 +1112,7 @@ export class GameRuntime {
 			landblockId,
 			layer,
 			reason: "setup-default-animation",
-			residentId: dynamic.id,
+			residentId: residentKey(dynamic.identity),
 			setupSourceId: dynamic.presentation.sourceAssetId,
 		};
 		const diagnostics = this.#deferredStaticDynamics.get(ownerId) ?? [];

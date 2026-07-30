@@ -101,6 +101,77 @@ describe("decodeOutdoorStaticRecord", () => {
 			),
 		).toThrow("out-of-range index");
 	});
+
+	it("indexes every attach point a setup offers by its named location", () => {
+		const source = decodeOutdoorStaticRecord(
+			buildResponse({
+				holdingLocations: [
+					{
+						location: "right-hand",
+						partIndex: 0,
+						frame: { origin: [1, 2, 3], orientation: [1, 0, 0, 0] },
+					},
+					{
+						location: "left-weapon",
+						partIndex: 0,
+						frame: { origin: [4, 5, 6], orientation: [1, 0, 0, 0] },
+					},
+				],
+			}),
+			LANDBLOCK_ID,
+			LandblockLayerKind.Buildings,
+		);
+
+		const attachPoints =
+			source.dynamicResidents[0]?.presentation.holdingLocations;
+		expect([...(attachPoints?.keys() ?? [])]).toEqual([
+			"right-hand",
+			"left-weapon",
+		]);
+		// Renderer space is AC's with Y and Z swapped and handedness flipped, matching the same
+		// conversion every other authored frame goes through.
+		expect(attachPoints?.get("left-weapon")).toMatchObject({
+			location: "left-weapon",
+			offsetTransform: { m41: 4, m42: 6, m43: -5 },
+			partIndex: 0,
+		});
+	});
+
+	it("rejects an attach point naming a location outside the enum", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({
+					holdingLocations: [
+						{
+							location: "third-hand",
+							partIndex: 0,
+							frame: { origin: [0, 0, 0], orientation: [1, 0, 0, 0] },
+						},
+					],
+				}),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("holdingLocations");
+	});
+
+	it("rejects an attach point naming a part the presentation does not have", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({
+					holdingLocations: [
+						{
+							location: "belt",
+							partIndex: 4,
+							frame: { origin: [0, 0, 0], orientation: [1, 0, 0, 0] },
+						},
+					],
+				}),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("names part 4 of 1");
+	});
 });
 
 function buildResponse(
@@ -108,6 +179,7 @@ function buildResponse(
 		readonly residents?: readonly Record<string, unknown>[];
 		readonly indices?: readonly number[];
 		readonly layer?: "buildings" | "objects" | "generated";
+		readonly holdingLocations?: readonly Record<string, unknown>[];
 	} = {},
 ): Uint8Array {
 	const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -182,13 +254,13 @@ function buildResponse(
 				parts: [
 					{
 						partIndex: 0,
-						parentPartIndex: null,
 						geometryId: "geometry",
 						defaultScale: [1, 1, 1],
 						defaultPlacement: null,
 						materialIds: ["surface/08000001"],
 					},
 				],
+				holdingLocations: options.holdingLocations ?? [],
 				defaultAnimationId: "0x030005cf",
 				defaultMotionTableId: null,
 				defaultScriptId: null,

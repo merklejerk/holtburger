@@ -8,6 +8,8 @@ import type {
 } from "../game/resolution/landblock-layer";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 import type {
+	ParentLocation,
+	ResolvedAttachPoint,
 	ResolvedGeometry,
 	ResolvedMaterial,
 	ResolvedObjectPart,
@@ -118,17 +120,34 @@ const directDefinition = z.object({
 });
 const setupPart = z.object({
 	partIndex: z.number().int().nonnegative(),
-	parentPartIndex: z.number().int().nonnegative().nullable(),
 	geometryId: z.string().min(1),
 	defaultScale: vec3,
 	defaultPlacement: frame.nullable(),
 	materialIds: z.array(z.string().min(1)),
+});
+const parentLocation = z.enum([
+	"none",
+	"right-hand",
+	"left-hand",
+	"shield",
+	"belt",
+	"quiver",
+	"heraldry",
+	"mouth",
+	"left-weapon",
+	"left-unarmed",
+]);
+const holdingLocation = z.object({
+	location: parentLocation,
+	partIndex: z.number().int().nonnegative(),
+	frame,
 });
 const setupDefinition = z.object({
 	id: z.string().min(1),
 	kind: z.literal("setup-model"),
 	sourceAssetId: z.string().min(1),
 	parts: z.array(setupPart),
+	holdingLocations: z.array(holdingLocation),
 	defaultAnimationId: datId.nullable(),
 	defaultMotionTableId: datId.nullable(),
 	defaultScriptId: datId.nullable(),
@@ -273,7 +292,7 @@ export function decodeOutdoorStaticRecord(
 			);
 		}
 		const resolved: ResolvedObjectResident = {
-			id: resident.id,
+			identity: { kind: "authored", sourceId: resident.id },
 			presentation: source.presentation,
 			placement: {
 				envCellId: null,
@@ -605,7 +624,6 @@ export function decodeStaticPresentation(
 			? [
 					decodePart(
 						0,
-						null,
 						definition.geometryId,
 						[1, 1, 1],
 						null,
@@ -617,7 +635,6 @@ export function decodeStaticPresentation(
 			: definition.parts.map((part) =>
 					decodePart(
 						part.partIndex,
-						part.parentPartIndex,
 						part.geometryId,
 						part.defaultScale,
 						part.defaultPlacement,
@@ -658,6 +675,7 @@ export function decodeStaticPresentation(
 			id: `presentation:${definition.id}`,
 			sourceAssetId: definition.sourceAssetId,
 			parts,
+			holdingLocations: decodeHoldingLocations(definition, parts.length),
 			placementPoses: new Map([[0, { placementId: 0, partTransforms }]]),
 			motion: null,
 			effects,
@@ -667,9 +685,41 @@ export function decodeStaticPresentation(
 	};
 }
 
+/**
+ * Index a setup's attach points by name.
+ *
+ * The host already validates each part index against the setup's part count. This re-checks against
+ * the resolved part list because appearance substitution, not the setup alone, decides how many
+ * parts a presentation actually has.
+ */
+function decodeHoldingLocations(
+	definition: StaticDefinitionManifest,
+	partCount: number,
+): ReadonlyMap<ParentLocation, ResolvedAttachPoint> {
+	if (definition.kind === "gfx-obj") return new Map();
+	const attachPoints = new Map<ParentLocation, ResolvedAttachPoint>();
+	for (const { location, partIndex, frame } of definition.holdingLocations) {
+		if (attachPoints.has(location)) {
+			throw new Error(
+				`Setup ${definition.id} declares attach point ${location} twice.`,
+			);
+		}
+		if (partIndex >= partCount) {
+			throw new Error(
+				`Setup ${definition.id} attach point ${location} names part ${partIndex} of ${partCount}.`,
+			);
+		}
+		attachPoints.set(location, {
+			location,
+			partIndex,
+			offsetTransform: acFrameTransform(frame, [1, 1, 1]),
+		});
+	}
+	return attachPoints;
+}
+
 function decodePart(
 	partIndex: number,
-	parentPartIndex: number | null,
 	geometryId: string,
 	defaultScale: readonly [number, number, number],
 	defaultPlacement: z.infer<typeof frame> | null,
@@ -701,7 +751,6 @@ function decodePart(
 	}
 	return {
 		partIndex,
-		parentPartIndex,
 		geometry,
 		defaultScale: renderScale(defaultScale),
 		materials: resolvedMaterials,

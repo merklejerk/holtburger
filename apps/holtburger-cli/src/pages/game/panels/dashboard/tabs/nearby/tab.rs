@@ -54,7 +54,7 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
 
             (e.position.landblock_id != Guid::NULL
                 || (e.wielder_id().is_some() && is_combat_implement)
-                || e.physics_parent_id.is_some())
+                || e.attachment.is_some())
                 || in_open_container
         })
         .collect();
@@ -70,7 +70,10 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     let candidate_guids: HashSet<Guid> = candidates.iter().map(|e| e.guid).collect();
 
     for e in &candidates {
-        let parent_id = e.container_id().or(e.wielder_id()).or(e.physics_parent_id);
+        let parent_id = e
+            .container_id()
+            .or(e.wielder_id())
+            .or(e.attachment.map(|attachment| attachment.parent));
 
         let is_root = if let Some(pid) = parent_id {
             !candidate_guids.contains(&pid)

@@ -126,7 +126,7 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.geometry[0]?.geometry.normals).toEqual(new Float32Array(9));
 	});
 
-	it("applies setup-style parent transforms and resident scale exactly once", () => {
+	it("applies each setup part transform against the object frame, not its siblings", () => {
 		const base = resident("setup", translation(10, 20, 30), new Vec3(2, 2, 2));
 		const root = base.presentation.parts[0]!;
 		const setupResident = {
@@ -141,15 +141,15 @@ describe("prepareStaticObjectGeometry", () => {
 							...root.geometry,
 							id: "geometry:setup-child" as const,
 						},
-						parentPartIndex: 0,
 						partIndex: 1,
 					},
 				],
+				holdingLocations: new Map(),
 				placementPoses: new Map([
 					[
 						0,
 						{
-							partTransforms: [Mat4.identity(), translation(1, 0, 0)],
+							partTransforms: [translation(5, 0, 0), translation(1, 0, 0)],
 							placementId: 0,
 						},
 					],
@@ -164,7 +164,7 @@ describe("prepareStaticObjectGeometry", () => {
 
 		expect(result?.geometry[0]?.geometry.positions).toEqual(
 			Float32Array.from([
-				10, 20, 30, 12, 20, 30, 10, 22, 30, 12, 20, 30, 14, 20, 30, 12, 22, 30,
+				20, 20, 30, 22, 20, 30, 20, 22, 30, 12, 20, 30, 14, 20, 30, 12, 22, 30,
 			]),
 		);
 	});
@@ -431,7 +431,7 @@ describe("prepareStaticObjectGeometry", () => {
 		).toEqual([3, 3, 6]);
 	});
 
-	it("applies setup hierarchy transforms once in generated instance streams", () => {
+	it("applies flat setup part transforms in generated instance streams", () => {
 		const base = resident(
 			"generated-setup",
 			translation(10, 20, 30),
@@ -450,15 +450,15 @@ describe("prepareStaticObjectGeometry", () => {
 							...root.geometry,
 							id: "geometry:generated-child" as const,
 						},
-						parentPartIndex: 0,
 						partIndex: 1,
 					},
 				],
+				holdingLocations: new Map(),
 				placementPoses: new Map([
 					[
 						0,
 						{
-							partTransforms: [Mat4.identity(), translation(1, 0, 0)],
+							partTransforms: [translation(5, 0, 0), translation(1, 0, 0)],
 							placementId: 0,
 						},
 					],
@@ -476,8 +476,8 @@ describe("prepareStaticObjectGeometry", () => {
 			.map(({ data }) => data.instances[0]!.sourceToLandblock)
 			.sort((left, right) => left.m41 - right.m41);
 		expect(transforms).toEqual([
-			new Mat4(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 10, 20, 30, 1),
 			new Mat4(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 12, 20, 30, 1),
+			new Mat4(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 20, 20, 30, 1),
 		]);
 	});
 
@@ -619,7 +619,7 @@ function resident(
 	};
 	return {
 		appearance: null,
-		id,
+		identity: { kind: "authored", sourceId: id },
 		localBounds: null,
 		placement: { envCellId: null, landblockId: "0xda55ffff", localTransform },
 		presentation: {
@@ -649,10 +649,10 @@ function resident(
 						textureCoordinates: Float32Array.from([0, 0, 1, 0, 0, 1]),
 					},
 					materials: [material],
-					parentPartIndex: null,
 					partIndex: 0,
 				},
 			],
+			holdingLocations: new Map(),
 			placementPoses: new Map([
 				[0, { partTransforms: [Mat4.identity()], placementId: 0 }],
 			]),

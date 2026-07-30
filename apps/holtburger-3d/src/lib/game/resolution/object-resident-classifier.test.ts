@@ -26,11 +26,12 @@ function resident(
 	animationId: string | null,
 ): ResolvedObjectResident {
 	return {
-		id,
+		identity: { kind: "authored", sourceId: id },
 		presentation: {
 			id: `presentation:${id}`,
 			sourceAssetId: `gfx-obj/0x0100000${id === "static" ? "1" : "2"}`,
 			parts: [],
+			holdingLocations: new Map(),
 			placementPoses: new Map(),
 			motion: null,
 			effects: {

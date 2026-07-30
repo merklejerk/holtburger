@@ -12,9 +12,20 @@ use holtburger_common::properties::{
 };
 use holtburger_common::{Guid, Vector3};
 
+/// One child object a parent announces, possibly before the client has seen that child.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicsChildData {
     pub guid: Guid,
+    pub location_id: u32,
+}
+
+/// The object this one is attached to, plus which of its attach points carries it.
+///
+/// The `PARENT` flag writes both fields in one run, and ACE only sets the flag when it has both
+/// (`WorldObject_Networking.cs:488`), so neither is representable without the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhysicsDescParent {
+    pub id: Guid,
     pub location_id: u32,
 }
 
@@ -831,8 +842,7 @@ pub struct ObjectDescriptionData {
     pub stable_id: Option<u32>,
     pub petable_id: Option<u32>,
     pub csetup_id: Option<u32>,
-    pub parent_id: Option<Guid>,
-    pub parent_loc: Option<u32>,
+    pub parent: Option<PhysicsDescParent>,
     pub children: Option<Vec<PhysicsChildData>>,
     pub obj_scale: Option<f32>,
     pub friction: Option<f32>,
@@ -861,8 +871,7 @@ impl Default for ObjectDescriptionData {
             stable_id: None,
             petable_id: None,
             csetup_id: None,
-            parent_id: None,
-            parent_loc: None,
+            parent: None,
             children: None,
             obj_scale: None,
             friction: None,
@@ -972,15 +981,15 @@ impl ProtocolUnpack for ObjectDescriptionData {
             *offset += 4;
         }
 
-        let mut parent_id = None;
-        let mut parent_loc = None;
+        let mut parent = None;
         if physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            parent_id = Some(Guid::unpack(data, offset)?);
+            let id = Guid::unpack(data, offset)?;
             if *offset + 4 > data.len() {
                 return None;
             }
-            parent_loc = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            let location_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
+            parent = Some(PhysicsDescParent { id, location_id });
         }
 
         let mut children = None;
@@ -1125,8 +1134,7 @@ impl ProtocolUnpack for ObjectDescriptionData {
             stable_id,
             petable_id,
             csetup_id,
-            parent_id,
-            parent_loc,
+            parent,
             children,
             obj_scale,
             friction,
@@ -1195,9 +1203,11 @@ impl ProtocolPack for ObjectDescriptionData {
                 .unwrap();
         }
         if self.physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            self.parent_id.unwrap().pack(buf);
-            buf.write_u32::<LittleEndian>(self.parent_loc.unwrap_or(0))
-                .unwrap();
+            let parent = self
+                .parent
+                .expect("PARENT flag is set without a parent link");
+            parent.id.pack(buf);
+            buf.write_u32::<LittleEndian>(parent.location_id).unwrap();
         }
         if self
             .physics_flags

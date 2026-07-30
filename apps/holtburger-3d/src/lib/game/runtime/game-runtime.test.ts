@@ -484,7 +484,7 @@ function promotedStaticArtifact(
 ): CommitBundle {
 	const promotedResident: ResolvedObjectResident = {
 		appearance: null,
-		id: "resident:promoted",
+		identity: { kind: "authored", sourceId: "resident:promoted" },
 		localBounds: null,
 		placement: {
 			envCellId: null,
@@ -501,6 +501,7 @@ function promotedStaticArtifact(
 			id: "presentation:promoted",
 			motion: null,
 			parts: [],
+			holdingLocations: new Map(),
 			placementPoses: new Map(),
 			selectionBounds: null,
 			sortingBounds: null,

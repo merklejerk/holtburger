@@ -60,6 +60,14 @@ export type ExplorerCameraFocusStatus =
 	| `Initial camera placement is outside selected EnvCell ${string}.`
 	| `Initial camera placement failed: ${string}`;
 
+/** Post-tick camera reconciliation consumed before attempting the matching render. */
+export interface ExplorerCameraResidencySync {
+	/** Exact pose and point-resolution result exposed by the Explorer HUD. */
+	readonly location: ExplorerCameraLocation;
+	/** Whether the runtime camera now owns a scope present in the current scene topology. */
+	readonly renderable: boolean;
+}
+
 /**
  * Explorer policy connecting user-requested scene interest to its free-fly camera.
  *
@@ -73,6 +81,8 @@ export class ExplorerCameraCoordinator {
 	readonly #unsubscribeAvailability: () => void;
 	#pending: PendingFocus | null = null;
 	#lastResidency: SceneResidency | null = null;
+	/** Last unresolved point issue already surfaced, preventing per-frame status churn. */
+	#lastResolutionIssue: ExplorerCameraFocusStatus | null = null;
 
 	constructor(
 		runtime: GameRuntime,
@@ -129,34 +139,53 @@ export class ExplorerCameraCoordinator {
 		this.#tryFocusInterior(pending, false);
 	}
 
-	/** Submit controller updates and return the residency resolved for the exact camera point. */
-	handleCameraState(state: FreeFlyCameraState): ExplorerCameraLocation {
+	/** Apply input-event policy without deriving residency from a potentially changing scene. */
+	handleCameraState(state: FreeFlyCameraState): void {
 		if (state.hasManualControl && this.#pending !== null) {
 			this.#pending = null;
 			this.#onStatus("Initial camera placement cancelled by manual control.");
 		}
+	}
+
+	/** Re-resolve the controller pose after runtime mutations and update the render camera once. */
+	syncCameraResidency(): ExplorerCameraResidencySync {
+		const state = this.#controller.snapshotState();
 		const resolution = resolveExplorerPointResidency(
 			this.#runtime.queryWorldPointResidencyCandidates(state.position),
 		);
 		const location = { position: state.position, residency: resolution };
 		if (resolution.kind === "resolved") {
+			this.#lastResolutionIssue = null;
 			this.#lastResidency = resolution.residency;
 			this.#runtime.setPrimaryCamera(createCamera(resolution.residency, state));
-			return location;
+			return { location, renderable: true };
 		}
 		if (resolution.kind === "ambiguous") {
-			this.#onStatus(
+			this.#reportResolutionIssue(
 				`Camera residency is ambiguous across EnvCells: ${resolution.candidates
 					.map(({ envCellId }) => envCellId)
 					.join(", ")}.`,
 			);
 		} else if (resolution.kind === "outside") {
-			this.#onStatus("Camera position is outside canonical world bounds.");
+			this.#reportResolutionIssue(
+				"Camera position is outside canonical world bounds.",
+			);
 		}
-		if (this.#lastResidency !== null) {
-			this.#runtime.setPrimaryCamera(createCamera(this.#lastResidency, state));
+		const lastResidency = this.#lastResidency;
+		if (
+			lastResidency !== null &&
+			lastResidency.envCellId !== null &&
+			resolution.kind === "ambiguous" &&
+			resolution.candidates.some(
+				(candidate) =>
+					candidate.envCellId === lastResidency.envCellId &&
+					candidate.landblockId === lastResidency.landblockId,
+			)
+		) {
+			this.#runtime.setPrimaryCamera(createCamera(lastResidency, state));
+			return { location, renderable: true };
 		}
-		return location;
+		return { location, renderable: false };
 	}
 
 	dispose(): void {
@@ -300,6 +329,12 @@ export class ExplorerCameraCoordinator {
 		this.#pending = null;
 		this.#controller.setAutomaticPose(pose);
 		this.#onStatus("Initial camera placement applied.");
+	}
+
+	#reportResolutionIssue(issue: ExplorerCameraFocusStatus): void {
+		if (this.#lastResolutionIssue === issue) return;
+		this.#lastResolutionIssue = issue;
+		this.#onStatus(issue);
 	}
 }
 

@@ -9,7 +9,14 @@ const COLOR_BYTES_PER_PIXEL = 4;
 const DEPTH_STENCIL_BYTES_PER_PIXEL = 4;
 /** Maximum render-layer label supported by the WebGL stencil attachment. */
 const MAXIMUM_PORTAL_RENDER_LAYER = 0xff;
+/** Depth offset used only when an authored visible surface shares the portal aperture plane. */
+const COPLANAR_PORTAL_MASK_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 
+/** Resident-depth comparison selected by the planner-owned mask source. */
+export type PortalMaskDepthCompare =
+	| "always"
+	| "less-or-equal"
+	| "less-or-equal-offset";
 /** Positive drawing-buffer extent owned by one scene-domain target generation. */
 export interface PortalRenderExtent {
 	readonly height: number;
@@ -60,7 +67,7 @@ export type PortalPassStateCommand =
 			readonly kind: "ordinary";
 	  }
 	| {
-			readonly depthCompare: "always" | "less-or-equal";
+			readonly depthCompare: PortalMaskDepthCompare;
 			readonly extent: PortalRenderExtent;
 			readonly framebuffer: WebGLFramebuffer;
 			readonly kind: "mask-write";
@@ -97,6 +104,7 @@ export function applyPortalPassState(
 	gl.viewport(0, 0, command.extent.width, command.extent.height);
 	gl.disable(gl.BLEND);
 	gl.disable(gl.CULL_FACE);
+	gl.disable(gl.POLYGON_OFFSET_FILL);
 	gl.disable(gl.SCISSOR_TEST);
 	if (command.kind === "clear" || command.kind === "ordinary") {
 		gl.colorMask(true, true, true, true);
@@ -116,6 +124,13 @@ export function applyPortalPassState(
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(command.depthCompare === "always" ? gl.ALWAYS : gl.LEQUAL);
 		gl.depthMask(false);
+		if (command.depthCompare === "less-or-equal-offset") {
+			gl.enable(gl.POLYGON_OFFSET_FILL);
+			gl.polygonOffset(
+				COPLANAR_PORTAL_MASK_DEPTH_OFFSET.factor,
+				COPLANAR_PORTAL_MASK_DEPTH_OFFSET.units,
+			);
+		}
 		gl.enable(gl.STENCIL_TEST);
 		gl.stencilMask(MAXIMUM_PORTAL_RENDER_LAYER);
 		if (command.stencilPolicy.kind === "replace") {
@@ -257,7 +272,7 @@ export class WebGL2PortalSubstrate {
 		indexCount: number,
 		clipFromLocal: Float32Array,
 		stencilPolicy: PortalMaskStencilPolicy,
-		depthCompare: "always" | "less-or-equal",
+		depthCompare: PortalMaskDepthCompare,
 	): void {
 		this.#drawMask(
 			{
@@ -462,7 +477,7 @@ export class WebGL2PortalSubstrate {
 
 	#drawMask(
 		command: {
-			readonly depthCompare: "always" | "less-or-equal";
+			readonly depthCompare: PortalMaskDepthCompare;
 			readonly kind: "mask-write";
 			readonly stencilPolicy: PortalMaskStencilPolicy;
 		},

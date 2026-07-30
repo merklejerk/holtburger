@@ -80,6 +80,8 @@ export interface ScenePortalCrossingInput {
 	readonly acceptedSide: "positive" | "negative";
 	/** Whether the source portal asserted an exact polygon match. */
 	readonly exactMatch: boolean;
+	/** Equal-depth mask ownership resolved from the authored source portal surface. */
+	readonly maskDepthPolicy: "allow-equal-depth" | "reject-equal-depth";
 	/** Stable reciprocal crossing, when the host proved one. */
 	readonly reciprocalCrossingId: PortalCrossingId | null;
 	/** Host-classified seam semantics retained for later rendering policy. */

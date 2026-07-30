@@ -16,6 +16,8 @@ use crate::portal_geometry::{
 pub struct GfxObjPortalAperture {
     pub portal_index: usize,
     pub polygon_ids: Vec<u16>,
+    /// Whether any aperture polygon is also selected as visible drawing-BSP geometry.
+    pub has_render_surface: bool,
     pub aperture: PortalAperture,
 }
 
@@ -65,6 +67,7 @@ pub fn build_gfx_obj_portal_apertures(gfx_obj: &GfxObj) -> Result<Vec<GfxObjPort
     let mut pairs = Vec::new();
     collect_drawing_bsp_portal_pairs(drawing_bsp, &mut pairs)
         .with_context(|| format!("Could not decode GfxObj 0x{:08X} portal pairs", gfx_obj.id))?;
+    let renderable_polygon_ids = collect_drawing_bsp_renderable_polygon_ids(drawing_bsp);
     pairs.sort_unstable();
     pairs.dedup();
     let mut apertures = Vec::new();
@@ -100,6 +103,9 @@ pub fn build_gfx_obj_portal_apertures(gfx_obj: &GfxObj) -> Result<Vec<GfxObjPort
             .collect::<Result<Vec<_>>>()?;
         apertures.push(GfxObjPortalAperture {
             portal_index,
+            has_render_surface: polygon_ids
+                .iter()
+                .any(|polygon_id| renderable_polygon_ids.contains(polygon_id)),
             polygon_ids,
             aperture: merge_coplanar_apertures(gfx_obj.id, portal_index, pieces)?,
         });
@@ -273,7 +279,31 @@ mod tests {
         assert_eq!(apertures.len(), 1);
         assert_eq!(apertures[0].portal_index, 3);
         assert_eq!(apertures[0].polygon_ids, [7]);
+        assert!(!apertures[0].has_render_surface);
         assert_eq!(apertures[0].aperture.triangle_indices, [0, 1, 2]);
+    }
+
+    #[test]
+    fn marks_a_building_portal_that_also_contributes_visible_geometry() {
+        let mut gfx_obj = triangle_gfx_obj();
+        gfx_obj.drawing_bsp = Some(BspNode::Port(BspPortal {
+            plane: holtburger_common::Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: 0.0,
+            },
+            pos: Box::new(leaf()),
+            neg: Box::new(leaf()),
+            sphere: None,
+            poly_ids: vec![7],
+            portal_polys: vec![PortalPoly {
+                poly_id: 7,
+                portal_index: 3,
+            }],
+        }));
+
+        let apertures = build_gfx_obj_portal_apertures(&gfx_obj).unwrap();
+
+        assert!(apertures[0].has_render_surface);
     }
 
     #[test]

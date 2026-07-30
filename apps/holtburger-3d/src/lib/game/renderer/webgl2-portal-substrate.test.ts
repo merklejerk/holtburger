@@ -46,6 +46,26 @@ describe("portal pass state", () => {
 		},
 		{
 			command: {
+				depthCompare: "less-or-equal-offset",
+				extent: { height: 32, width: 64 },
+				framebuffer: {} as WebGLFramebuffer,
+				kind: "mask-write",
+				stencilPolicy: { kind: "replace", value: 4 },
+			},
+			expected: {
+				colorMask: [false, false, false, false],
+				depthEnabled: true,
+				depthFunction: 0x0203,
+				depthMask: false,
+				stencilEnabled: true,
+				stencilFunction: [0x0207, 4, 0xff],
+				stencilOperation: [0x1e00, 0x1e00, 0x1e01],
+				stencilWriteMask: 0xff,
+				viewport: [0, 0, 64, 32],
+			},
+		},
+		{
+			command: {
 				depthCompare: "always",
 				extent: { height: 32, width: 64 },
 				framebuffer: {} as WebGLFramebuffer,
@@ -159,10 +179,41 @@ describe("portal pass state", () => {
 			expect(state.values).toMatchObject(expected);
 			expect(state.values.blendEnabled).toBe(false);
 			expect(state.values.cullEnabled).toBe(false);
+			expect(state.values.polygonOffsetEnabled).toBe(
+				command.kind === "mask-write" &&
+					command.depthCompare === "less-or-equal-offset",
+			);
+			if (
+				command.kind === "mask-write" &&
+				command.depthCompare === "less-or-equal-offset"
+			) {
+				expect(state.values.polygonOffset).toEqual([1, 1]);
+			}
 			expect(state.values.scissorEnabled).toBe(false);
 			expect(state.values.framebuffer).toBe(command.framebuffer);
 		},
 	);
+
+	it("disables portal-mask polygon offset before returning to scene drawing", () => {
+		const state = createFakeState();
+		applyPortalPassState(state.gl, {
+			depthCompare: "less-or-equal-offset",
+			extent: { height: 32, width: 64 },
+			framebuffer: {} as WebGLFramebuffer,
+			kind: "mask-write",
+			stencilPolicy: { kind: "replace", value: 4 },
+		});
+		expect(state.values.polygonOffsetEnabled).toBe(true);
+
+		applyPortalPassState(state.gl, {
+			extent: { height: 32, width: 64 },
+			framebuffer: {} as WebGLFramebuffer,
+			kind: "masked-ordinary",
+			renderLayer: 4,
+		});
+
+		expect(state.values.polygonOffsetEnabled).toBe(false);
+	});
 
 	it("reserves zero for the base and accepts render-layer labels through 255", () => {
 		const state = createFakeState();
@@ -254,6 +305,7 @@ function createFakeState(): FakeState {
 		KEEP: 0x1e00,
 		LEQUAL: 0x0203,
 		LESS: 0x0201,
+		POLYGON_OFFSET_FILL: 0x8037,
 		REPLACE: 0x1e01,
 		SCISSOR_TEST: 0x0c11,
 		STENCIL_TEST: 0x0b90,
@@ -290,6 +342,9 @@ function createFakeState(): FakeState {
 			enabled.add(capability);
 			recordCapabilities();
 		},
+		polygonOffset: (factor: number, units: number) => {
+			values.polygonOffset = [factor, units];
+		},
 		stencilFunc: (...args: number[]) => {
 			values.stencilFunction = args;
 		},
@@ -309,6 +364,7 @@ function createFakeState(): FakeState {
 		values.blendEnabled = enabled.has(constants.BLEND);
 		values.cullEnabled = enabled.has(constants.CULL_FACE);
 		values.depthEnabled = enabled.has(constants.DEPTH_TEST);
+		values.polygonOffsetEnabled = enabled.has(constants.POLYGON_OFFSET_FILL);
 		values.scissorEnabled = enabled.has(constants.SCISSOR_TEST);
 		values.stencilEnabled = enabled.has(constants.STENCIL_TEST);
 	}

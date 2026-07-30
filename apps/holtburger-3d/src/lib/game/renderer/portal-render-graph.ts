@@ -48,6 +48,7 @@ type PortalMaskSource =
 	  }
 	| {
 			readonly kind: "world-aperture";
+			readonly depthPolicy: ScenePortalCrossingInput["maskDepthPolicy"];
 			readonly visibilityApertureId: ScenePortalCrossingInput["visibilityAperture"]["id"];
 	  };
 
@@ -462,6 +463,7 @@ class PortalPlanningContext {
 					nearPlaneStraddle
 						? { kind: "near-clip-window", window: projection.window }
 						: {
+								depthPolicy: crossing.maskDepthPolicy,
 								kind: "world-aperture",
 								visibilityApertureId: apertureInput.id,
 							},

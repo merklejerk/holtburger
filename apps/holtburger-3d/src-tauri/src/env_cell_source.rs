@@ -313,7 +313,7 @@ pub(crate) async fn serialize_env_cell_source_record(
         .map(|(index, portal)| (portal.source, index))
         .collect::<HashMap<_, _>>();
     let mut building_gfx = BTreeMap::<u32, Arc<GfxObj>>::new();
-    let mut building_apertures = BTreeMap::<(usize, usize), usize>::new();
+    let mut building_apertures = BTreeMap::<(usize, usize), ResolvedBuildingAperture>::new();
     let mut crossings = Vec::<CrossingProjection>::new();
     let mut crossing_by_source_portal = HashMap::<LandblockEnvCellPortalRef, usize>::new();
     let mut unresolved_outside = Vec::<Value>::new();
@@ -322,6 +322,18 @@ pub(crate) async fn serialize_env_cell_source_record(
         let source_cell_index = cell_indices[&portal.source.env_cell_id];
         let aperture_index =
             aperture_indices_by_cell_polygon[&(portal.source.env_cell_id, portal.polygon_id)];
+        let mask_depth_policy = if prepared_cells[source_cell_index]
+            .projection
+            .apertures
+            .iter()
+            .find(|aperture| aperture.polygon_id == portal.polygon_id)
+            .expect("topology portal must have a projected source aperture")
+            .has_render_surface
+        {
+            MaskDepthPolicy::RejectEqualDepth
+        } else {
+            MaskDepthPolicy::AllowEqualDepth
+        };
         let crossing_index = crossings.len();
         ensure!(
             crossing_by_source_portal
@@ -343,6 +355,7 @@ pub(crate) async fn serialize_env_cell_source_record(
                     visibility_provenance: VisibilityApertureProvenance::AuthoredSource,
                     accepted_side: accepted_plane_side(portal.flags),
                     exact_match: (portal.flags & 0x01) != 0,
+                    mask_depth_policy,
                     reciprocal_index: None,
                     source: json!({
                         "kind": "env-cell",
@@ -376,6 +389,7 @@ pub(crate) async fn serialize_env_cell_source_record(
                     visibility_provenance: VisibilityApertureProvenance::AuthoredSource,
                     accepted_side: accepted_plane_side(portal.flags),
                     exact_match: (portal.flags & 0x01) != 0,
+                    mask_depth_policy,
                     reciprocal_index: None,
                     source: json!({
                         "kind": "env-cell",
@@ -390,7 +404,7 @@ pub(crate) async fn serialize_env_cell_source_record(
                     }),
                 });
                 if let Some(building_ref) = building_portal {
-                    let reverse_aperture_index = resolve_building_aperture(
+                    let reverse_aperture = resolve_building_aperture(
                         runtime,
                         source_batch,
                         *building_ref,
@@ -406,11 +420,12 @@ pub(crate) async fn serialize_env_cell_source_record(
                     crossings.push(CrossingProjection {
                         source_cell_index: None,
                         target_cell_index: Some(source_cell_index),
-                        source_aperture_index: reverse_aperture_index,
-                        visibility_aperture_index: reverse_aperture_index,
+                        source_aperture_index: reverse_aperture.aperture_index,
+                        visibility_aperture_index: reverse_aperture.aperture_index,
                         visibility_provenance: VisibilityApertureProvenance::AuthoredSource,
                         accepted_side: accepted_plane_side(building_portal.flags),
                         exact_match: (building_portal.flags & 0x01) != 0,
+                        mask_depth_policy: reverse_aperture.mask_depth_policy,
                         reciprocal_index: Some(crossing_index),
                         source: json!({
                             "kind": "building-transition",
@@ -513,9 +528,24 @@ struct CrossingProjection {
     visibility_provenance: VisibilityApertureProvenance,
     accepted_side: AcceptedPlaneSide,
     exact_match: bool,
+    mask_depth_policy: MaskDepthPolicy,
     reciprocal_index: Option<usize>,
     source: Value,
     relationship: Value,
+}
+
+/// Equal-depth ownership selected from the authored source portal's visible shell role.
+#[derive(Debug, Clone, Copy)]
+enum MaskDepthPolicy {
+    AllowEqualDepth,
+    RejectEqualDepth,
+}
+
+/// Cached projection facts owned by one authored building-transition aperture.
+#[derive(Debug, Clone, Copy)]
+struct ResolvedBuildingAperture {
+    aperture_index: usize,
+    mask_depth_policy: MaskDepthPolicy,
 }
 
 /// Static provenance explaining how one crossing selected its rendering aperture.
@@ -589,11 +619,12 @@ async fn resolve_building_aperture(
     source_batch: &LoadedLandblockSourceBatch,
     reference: LandblockBuildingPortalRef,
     gfx_cache: &mut BTreeMap<u32, Arc<GfxObj>>,
-    aperture_cache: &mut BTreeMap<(usize, usize), usize>,
+    aperture_cache: &mut BTreeMap<(usize, usize), ResolvedBuildingAperture>,
     apertures: &mut SerializedApertures,
-) -> Result<usize> {
-    if let Some(index) = aperture_cache.get(&(reference.building_index, reference.portal_index)) {
-        return Ok(*index);
+) -> Result<ResolvedBuildingAperture> {
+    if let Some(aperture) = aperture_cache.get(&(reference.building_index, reference.portal_index))
+    {
+        return Ok(*aperture);
     }
     let landblock = source_batch
         .landblock()
@@ -644,11 +675,16 @@ async fn resolve_building_aperture(
         selected.polygon_ids.clone(),
         &transformed,
     )?;
-    aperture_cache.insert(
-        (reference.building_index, reference.portal_index),
+    let resolved = ResolvedBuildingAperture {
         aperture_index,
-    );
-    Ok(aperture_index)
+        mask_depth_policy: if selected.has_render_surface {
+            MaskDepthPolicy::RejectEqualDepth
+        } else {
+            MaskDepthPolicy::AllowEqualDepth
+        },
+    };
+    aperture_cache.insert((reference.building_index, reference.portal_index), resolved);
+    Ok(resolved)
 }
 
 /// Resolve each directed crossing's rendering aperture without changing authored query geometry.
@@ -805,6 +841,10 @@ fn crossing_json(index: usize, crossing: &CrossingProjection) -> Value {
         "visibilityProvenance": visibility_provenance_json(crossing.visibility_provenance),
         "acceptedSide": accepted_side_name(crossing.accepted_side),
         "exactMatch": crossing.exact_match,
+        "maskDepthPolicy": match crossing.mask_depth_policy {
+            MaskDepthPolicy::AllowEqualDepth => "allow-equal-depth",
+            MaskDepthPolicy::RejectEqualDepth => "reject-equal-depth",
+        },
         "reciprocalCrossingIndex": crossing.reciprocal_index,
         "sourcePortal": crossing.source,
         "spatialRelationship": crossing.relationship,
@@ -1114,6 +1154,7 @@ mod tests {
             visibility_provenance: VisibilityApertureProvenance::AuthoredSource,
             accepted_side: AcceptedPlaneSide::Positive,
             exact_match,
+            mask_depth_policy: MaskDepthPolicy::AllowEqualDepth,
             reciprocal_index,
             source: json!({ "kind": "test" }),
             relationship: json!({

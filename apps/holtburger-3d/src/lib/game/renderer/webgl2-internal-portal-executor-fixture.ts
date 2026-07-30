@@ -494,6 +494,7 @@ function edge(
 		maskSource: nearClipWindow
 			? { kind: "near-clip-window", window: nearClipWindow }
 			: {
+					depthPolicy: "allow-equal-depth",
 					kind: "world-aperture",
 					visibilityApertureId: `portal-aperture:fixture/${apertureSuffix}`,
 				},

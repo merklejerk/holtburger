@@ -149,6 +149,51 @@ describe("portal graph execution", () => {
 		});
 	});
 
+	it("applies depth offset only to masks whose source surface rejects equal depth", () => {
+		const substrate = new RecordingSubstrate();
+		const base = internalPlan();
+		const [first, ...remaining] = base.maskEdges;
+		if (!first || first.maskSource.kind !== "world-aperture") {
+			throw new Error(
+				"Selective depth fixture requires a world-aperture edge.",
+			);
+		}
+		const plan: PortalRenderWorkPlan = {
+			...base,
+			maskEdges: [
+				{
+					...first,
+					maskSource: {
+						...first.maskSource,
+						depthPolicy: "reject-equal-depth",
+					},
+				},
+				...remaining,
+			],
+		};
+
+		executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: EXTENT,
+			plan,
+			renderExterior: () => undefined,
+			renderIndoorNodes: () => undefined,
+			resolveVisibilityAperture: resolvedMask,
+		});
+
+		expect(
+			substrate.maskDepthComparisons.filter(
+				(comparison) => comparison === "less-or-equal-offset",
+			),
+		).toHaveLength(1);
+		expect(
+			substrate.maskDepthComparisons.filter(
+				(comparison) => comparison === "less-or-equal",
+			),
+		).toHaveLength(3);
+	});
+
 	it("renders a near-plane target through its retained screen-space mask", () => {
 		const substrate = new RecordingSubstrate();
 		const rendered: string[][] = [];
@@ -541,6 +586,9 @@ describe("portal graph execution", () => {
 
 class RecordingSubstrate implements PortalExecutionSubstrate {
 	readonly calls: string[] = [];
+	readonly maskDepthComparisons: Array<
+		Parameters<PortalExecutionSubstrate["writeLayerMask"]>[6]
+	> = [];
 	readonly target = {} as WebGL2SceneDomainTarget;
 
 	constructor(private readonly failurePrefix: string | null = null) {}
@@ -588,6 +636,7 @@ class RecordingSubstrate implements PortalExecutionSubstrate {
 		...args: Parameters<PortalExecutionSubstrate["writeLayerMask"]>
 	): void {
 		const policy = args[5];
+		this.maskDepthComparisons.push(args[6]);
 		this.#record(
 			`mask:${policy.kind === "replace" ? policy.value : `${policy.from}->${policy.to}`}`,
 		);
@@ -983,6 +1032,7 @@ function hybridEdge(
 		maskSource: nearClipWindow
 			? { kind: "near-clip-window", window: nearClipWindow }
 			: {
+					depthPolicy: "allow-equal-depth",
 					kind: "world-aperture",
 					visibilityApertureId: `portal-aperture:${id}`,
 				},
@@ -1020,6 +1070,7 @@ function internalPlan(): PortalRenderWorkPlan {
 	) => ({
 		crossingId: `portal-crossing:${id}` as PortalCrossingId,
 		maskSource: {
+			depthPolicy: "allow-equal-depth" as const,
 			kind: "world-aperture" as const,
 			visibilityApertureId: `portal-aperture:${id}` as const,
 		},

@@ -29,6 +29,8 @@ pub struct CellStructProjection {
 pub struct CellStructPortalAperture {
     pub cell_struct_portal_index: usize,
     pub polygon_id: u16,
+    /// Whether this aperture polygon also contributes any material-bearing shell side.
+    pub has_render_surface: bool,
     pub aperture: PortalAperture,
 }
 
@@ -94,6 +96,10 @@ pub fn project_cell_struct(
             Ok(CellStructPortalAperture {
                 cell_struct_portal_index: portal_index,
                 polygon_id,
+                has_render_surface: shell
+                    .triangles
+                    .iter()
+                    .any(|triangle| triangle.polygon_id == polygon_id),
                 aperture,
             })
         })
@@ -202,7 +208,15 @@ mod tests {
         assert_eq!(projection.shell.triangles[0].polygon_id, 7);
         assert_eq!(projection.apertures.len(), 1);
         assert_eq!(projection.apertures[0].polygon_id, 8);
+        assert!(!projection.apertures[0].has_render_surface);
         assert!(projection.containment_hull.planes.is_empty());
+    }
+
+    #[test]
+    fn marks_a_portal_that_also_contributes_visible_shell_geometry() {
+        let projection = project_cell_struct(context(1), &triangle_cell_struct()).unwrap();
+
+        assert!(projection.apertures[0].has_render_surface);
     }
 
     #[test]

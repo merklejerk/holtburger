@@ -19,7 +19,7 @@ export interface ResolvedStaticTriangleMaterial {
 
 /** Resolve material, sampler, polygon-side, stippling, detail, and ordering as one contract. */
 export function resolveStaticTriangleMaterial(options: {
-	readonly detailRole: StaticDetailRole;
+	readonly detailRole: StaticDetailRole | null;
 	readonly geometry: ResolvedGeometry;
 	readonly materials: readonly ResolvedMaterial[];
 	readonly sourceLabel: string;

@@ -48,12 +48,12 @@ describe("object material planning", () => {
 		const first = planObjectMaterial(
 			texturedMaterial("0x05000001", 0x04),
 			TextureWrapMode.Clamp,
-			"object",
+			null,
 		);
 		const second = planObjectMaterial(
 			texturedMaterial("0x05000002", 0x04),
 			TextureWrapMode.Clamp,
-			"object",
+			null,
 		);
 
 		expect(first.id).not.toBe(second.id);
@@ -63,8 +63,8 @@ describe("object material planning", () => {
 
 	it("gives identical source facts a traversal-independent binding key", () => {
 		const input = texturedMaterial("0x05000001", 0);
-		expect(planObjectMaterial(input, TextureWrapMode.Repeat, "object").id).toBe(
-			planObjectMaterial({ ...input }, TextureWrapMode.Repeat, "object").id,
+		expect(planObjectMaterial(input, TextureWrapMode.Repeat, null).id).toBe(
+			planObjectMaterial({ ...input }, TextureWrapMode.Repeat, null).id,
 		);
 	});
 
@@ -83,13 +83,20 @@ describe("object material planning", () => {
 				"environment",
 			).detailRole,
 		).toBe("environment");
+		expect(
+			planObjectMaterial(
+				texturedMaterial("0x05000001", 0x20000),
+				TextureWrapMode.Clamp,
+				null,
+			).detailRole,
+		).toBeNull();
 	});
 
 	it("keeps otherwise identical bindings distinct by detail role", () => {
 		const input = texturedMaterial("0x05000001", 0);
 		expect(
 			planObjectMaterial(input, TextureWrapMode.Repeat, "building").id,
-		).not.toBe(planObjectMaterial(input, TextureWrapMode.Repeat, "object").id);
+		).not.toBe(planObjectMaterial(input, TextureWrapMode.Repeat, null).id);
 	});
 
 	it("fails indexed material planning without a palette", () => {
@@ -104,7 +111,7 @@ describe("object material planning", () => {
 					textureEncoding: "index8",
 				},
 				TextureWrapMode.Clamp,
-				"object",
+				null,
 			),
 		).toThrow("no palette dependency");
 	});

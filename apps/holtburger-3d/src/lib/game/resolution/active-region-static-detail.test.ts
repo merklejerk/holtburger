@@ -9,26 +9,24 @@ import type {
 import { ActiveRegionStaticDetailOwner } from "./active-region-static-detail";
 
 describe("ActiveRegionStaticDetailOwner", () => {
-	it("prepares every static role once, shares the set, then releases it", async () => {
+	it("prepares every rendered static role once, shares the set, then releases it", async () => {
 		const pixels = new FakeTexturePixelSource();
 		const owner = new ActiveRegionStaticDetailOwner(pixels);
 		const first = await owner.install(activeRegion(1));
 		const shared = await owner.install(activeRegion(1));
 
 		expect(shared).toBe(first);
-		expect(pixels.requests).toHaveLength(3);
+		expect(pixels.requests).toHaveLength(2);
 		expect(first.roles.building.sourceAssetId).toBe(
 			"surface-texture/0x05000102",
 		);
 		expect(first.roles.environment.sourceAssetId).toBe(
 			"surface-texture/0x05000103",
 		);
-		expect(first.roles.object.sourceAssetId).toBe("surface-texture/0x05000104");
 		expect([
 			first.roles.building.tiling,
 			first.roles.environment.tiling,
-			first.roles.object.tiling,
-		]).toEqual([3, 4, 5]);
+		]).toEqual([3, 4]);
 		expect(
 			Object.values(first.roles).every(
 				({ surface }) => surface.format === TexturePixelFormat.RGBA8,
@@ -38,7 +36,7 @@ describe("ActiveRegionStaticDetailOwner", () => {
 		owner.teardown();
 		expect(owner.binding).toBeNull();
 		await owner.install(activeRegion(2));
-		expect(pixels.requests).toHaveLength(6);
+		expect(pixels.requests).toHaveLength(4);
 	});
 
 	it("fails the complete installation when an authored static role is missing", async () => {
@@ -46,8 +44,8 @@ describe("ActiveRegionStaticDetailOwner", () => {
 			new FakeTexturePixelSource(),
 		);
 
-		await expect(owner.install(activeRegion(1, 3))).rejects.toThrow(
-			"no object detail texture role",
+		await expect(owner.install(activeRegion(1, 2))).rejects.toThrow(
+			"no environment detail texture role",
 		);
 		expect(owner.binding).toBeNull();
 	});

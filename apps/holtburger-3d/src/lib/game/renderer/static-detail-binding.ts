@@ -4,13 +4,13 @@ import type { StaticDetailRole } from "../resolution/static-detail-role";
 /**
  * Resolve one material's planned regional detail binding.
  *
- * Missing roles are fatal because silently dropping the overlay would hide an incomplete
- * active-region installation and produce domain-dependent material parity failures.
+ * A selected role must resolve; null is the explicit retail no-detail domain.
  */
 export function resolveStaticMaterialDetail<TBinding>(
 	material: Pick<StaticObjectMaterialBinding, "detailRole" | "source">,
 	resolve: (role: StaticDetailRole) => TBinding | null,
-): TBinding {
+): TBinding | null {
+	if (material.detailRole === null) return null;
 	const binding = resolve(material.detailRole);
 	if (binding === null) {
 		throw new Error(

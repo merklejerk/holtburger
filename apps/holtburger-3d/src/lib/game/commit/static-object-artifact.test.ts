@@ -133,7 +133,7 @@ function drawUnit(strategy: "baked" | "instanced"): StaticObjectDrawUnit {
 
 function material(): StaticObjectMaterialBinding {
 	return {
-		detailRole: "object",
+		detailRole: null,
 		palettedClipMap: false,
 		polygon: {
 			authoredCullMode: "landblock",

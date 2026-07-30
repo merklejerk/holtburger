@@ -32,7 +32,7 @@ export interface ActiveRegionStaticDetailBinding {
 }
 
 /**
- * Owns building, environment, and object detail payloads independently of landblock resources.
+ * Owns building and environment detail payloads independently of landblock resources.
  *
  * CPU preparation happens once per active-region generation. The runtime promotes the complete
  * role set into device ownership without adding regional textures to per-landblock atlas jobs.

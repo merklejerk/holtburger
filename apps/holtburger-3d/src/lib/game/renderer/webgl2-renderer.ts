@@ -1491,17 +1491,22 @@ export class WebGL2Renderer implements Renderer {
 		const detail = resolveStaticMaterialDetail(material, (role) =>
 			this.#world.resolveActiveRegionStaticDetail(role),
 		);
-		const detailResource = this.#resources.getTexture2D(
-			this.#world.resolveTexture2D(detail.key),
-		);
-		this.#bindObjectTexture(
-			2,
-			detailResource.texture,
-			TextureFilteringMode.Linear,
-		);
-		gl.uniform4f(program.uniforms.detailRect, 0, 0, 1, 1);
-		gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
-		gl.uniform1i(program.uniforms.detail, 2);
+		if (detail) {
+			const detailResource = this.#resources.getTexture2D(
+				this.#world.resolveTexture2D(detail.key),
+			);
+			this.#bindObjectTexture(
+				2,
+				detailResource.texture,
+				TextureFilteringMode.Linear,
+			);
+			gl.uniform4f(program.uniforms.detailRect, 0, 0, 1, 1);
+			gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
+			gl.uniform1i(program.uniforms.detail, 2);
+			gl.uniform1i(program.uniforms.useDetail, 1);
+		} else {
+			gl.uniform1i(program.uniforms.useDetail, 0);
+		}
 		gl.uniform1f(program.uniforms.luminosity, material.source.luminosity);
 		const geometry = this.#resources.getGeometry(object.geometry);
 		validateDrawRange(geometry, object.indexStart, object.indexCount);

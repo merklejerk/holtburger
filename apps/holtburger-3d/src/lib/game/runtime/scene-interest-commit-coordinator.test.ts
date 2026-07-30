@@ -10,6 +10,10 @@ import {
 	type SceneInterestMap,
 } from "./scene-interest";
 import {
+	resolveTerrainTextureFacts,
+	type TerrainCompositionFacts,
+} from "../terrain/types";
+import {
 	SceneInterestCommitCoordinator,
 	type SceneInterestCommitCoordinatorCallbacks,
 } from "./scene-interest-commit-coordinator";
@@ -77,24 +81,83 @@ describe("SceneInterestCommitCoordinator", () => {
 });
 
 function artifact(layer: LandblockLayerKind): CommitBundle {
+	if (
+		layer !== LandblockLayerKind.Terrain &&
+		layer !== LandblockLayerKind.Buildings &&
+		layer !== LandblockLayerKind.Objects
+	) {
+		throw new Error(`Coordinator fixture does not support ${layer}.`);
+	}
+	if (layer === LandblockLayerKind.Terrain) {
+		return {
+			commit: {
+				generation: {
+					gridSize: 9,
+					heightIndices: new Uint8Array(81),
+					heights: new Float32Array(81),
+					landblockId,
+					terrainSamples: new Uint16Array(81),
+					tileSize: 24,
+				},
+				presentation: {
+					composition: TERRAIN_COMPOSITION,
+					textures: resolveTerrainTextureFacts(TERRAIN_COMPOSITION),
+				},
+			},
+			dynamicEntities: [],
+			kind: CommitBundleSourceKind.LandblockLayer,
+			landblockId,
+			layer,
+		};
+	}
 	return {
-		commit: {},
+		commit: {
+			source: {
+				dynamicResidents: [],
+				kind: layer,
+				landblockId,
+				staticResidents: [],
+			},
+		},
 		dynamicEntities: [],
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer,
-	} as CommitBundle;
+	};
 }
 
-function createCallbacks(): SceneInterestCommitCoordinatorCallbacks & {
-	readonly prepared: ReturnType<typeof vi.fn>;
-	readonly unavailable: ReturnType<typeof vi.fn>;
-} {
+const TERRAIN_COMPOSITION: TerrainCompositionFacts = {
+	activeRegionKey: "coordinator-test",
+	cornerTerrainAlphaMaps: [
+		{ blendMaskTextureId: "0x05000002", terrainCode: 1 },
+	],
+	landscapeDetail: { textureId: "0x05000001", tiling: 1 },
+	roadAlphaMaps: [{ roadCode: 1, roadMaskTextureId: "0x05000003" }],
+	sideTerrainAlphaMaps: [],
+	terrainTypes: [
+		{
+			colorTextureId: "0x05000001",
+			colorVariation: {
+				maxVertexBrightness: 1,
+				maxVertexHue: 1,
+				maxVertexSaturation: 1,
+				minVertexBrightness: 1,
+				minVertexHue: 1,
+				minVertexSaturation: 1,
+			},
+			terrainType: 0,
+			tiling: 1,
+		},
+	],
+};
+
+function createCallbacks() {
 	return {
-		evict: vi.fn(),
-		failed: vi.fn(),
-		prepared: vi.fn(),
-		unavailable: vi.fn(),
+		evict: vi.fn<SceneInterestCommitCoordinatorCallbacks["evict"]>(),
+		failed: vi.fn<SceneInterestCommitCoordinatorCallbacks["failed"]>(),
+		prepared: vi.fn<SceneInterestCommitCoordinatorCallbacks["prepared"]>(),
+		unavailable:
+			vi.fn<SceneInterestCommitCoordinatorCallbacks["unavailable"]>(),
 	};
 }
 

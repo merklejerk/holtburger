@@ -487,8 +487,7 @@ function assertPortalSubstrateFixture(state) {
 		!metrics ||
 		metrics.envCellRenderMode !== "flat" ||
 		metrics.submittedPortalApertureDrawCount !== 0 ||
-		metrics.sceneDomainTargetCount !== 0 ||
-		metrics.portalExteriorContributionCount !== 0
+		metrics.sceneDomainTargetCount !== 0
 	) {
 		throw new Error(
 			`Portal substrate fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
@@ -558,7 +557,6 @@ function assertModeCycle(initialState, states) {
 		}
 		if (expectedMode === "flat") {
 			for (const key of [
-				"portalExteriorContributionCount",
 				"portalExecutionDurationMs",
 				"portalExteriorRenderCount",
 				"portalMaskEdgeCount",
@@ -626,7 +624,6 @@ function assertHybridPortalExecutionFixture(state) {
 	}
 	const expectedOutdoor = {
 		admittedVisibilityStateCount: 0,
-		exteriorContributionCount: 1,
 		exteriorRenderCount: 1,
 		maskDrawCount: 2,
 		maskEdgeCount: 2,
@@ -680,7 +677,6 @@ function assertHybridPortalExecutionFixture(state) {
 	}
 	const expectedHybridTrace = {
 		admittedVisibilityStateCount: 4,
-		exteriorContributionCount: 1,
 		exteriorRenderCount: 1,
 		maskDrawCount: 3,
 		maskEdgeCount: 4,
@@ -705,8 +701,7 @@ function assertHybridPortalExecutionFixture(state) {
 		!metrics ||
 		metrics.envCellRenderMode !== "flat" ||
 		metrics.submittedPortalApertureDrawCount !== 0 ||
-		metrics.sceneDomainTargetCount !== 0 ||
-		metrics.portalExteriorContributionCount !== 0
+		metrics.sceneDomainTargetCount !== 0
 	) {
 		throw new Error(
 			`Exterior composition fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
@@ -738,7 +733,6 @@ function assertInternalPortalExecutionFixture(state) {
 	}
 	const expectedTrace = {
 		admittedVisibilityStateCount: 5,
-		exteriorContributionCount: 0,
 		exteriorRenderCount: 0,
 		maskDrawCount: 4,
 		maskEdgeCount: 4,
@@ -758,7 +752,6 @@ function assertInternalPortalExecutionFixture(state) {
 	}
 	const expectedReverseTrace = {
 		admittedVisibilityStateCount: 2,
-		exteriorContributionCount: 0,
 		exteriorRenderCount: 0,
 		maskDrawCount: 1,
 		maskEdgeCount: 1,
@@ -784,8 +777,7 @@ function assertInternalPortalExecutionFixture(state) {
 		!metrics ||
 		metrics.envCellRenderMode !== "flat" ||
 		metrics.submittedPortalApertureDrawCount !== 0 ||
-		metrics.sceneDomainTargetCount !== 0 ||
-		metrics.portalExteriorContributionCount !== 0
+		metrics.sceneDomainTargetCount !== 0
 	) {
 		throw new Error(
 			`Internal portal execution fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,

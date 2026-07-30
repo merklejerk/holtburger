@@ -126,10 +126,16 @@ export function validatePortalRenderWorkPlan(
 		edgeById,
 		layerByNumber,
 	);
+	const exteriorStencilValues =
+		exterior?.kind === "masked"
+			? [
+					exterior.entryStencilValue,
+					...(exterior.suffix ? [exterior.suffix.stencilTransition.to] : []),
+				]
+			: [];
 	const expectedRequiredStencilValue = Math.max(
 		plan.capacity.maximumRenderLayer,
-		exterior?.stencilLabels?.entry ?? 0,
-		exterior?.stencilLabels?.suffix ?? 0,
+		...exteriorStencilValues,
 	);
 	if (
 		plan.capacity.requiredMaximumStencilValue !== expectedRequiredStencilValue
@@ -193,11 +199,6 @@ function validateExteriorComponent(
 			);
 		}
 	}
-	requireSameIds(
-		operation.indoorNodeIds,
-		expectedIndoorNodeIds,
-		"indoor component nodes",
-	);
 	if (operation.rootContained !== componentMembers.has(plan.rootNodeId)) {
 		throw new Error("Portal exterior operation has incorrect root membership.");
 	}
@@ -219,11 +220,6 @@ function validateExteriorComponent(
 	}
 	requireSameIds(operation.entryMaskEdgeIds, entryMaskEdgeIds, "entry masks");
 	requireSameIds(
-		operation.internalIndoorMaskEdgeIds,
-		internalIndoorMaskEdgeIds,
-		"internal indoor masks",
-	);
-	requireSameIds(
 		operation.returnMaskEdgeIds,
 		returnMaskEdgeIds,
 		"return masks",
@@ -239,46 +235,58 @@ function validateExteriorComponent(
 	const expectedStencilValue = sharesLayer
 		? plan.capacity.maximumRenderLayer + 1
 		: operation.renderLayer;
-	const hasSuffix =
-		!operation.rootContained && operation.indoorNodeIds.length > 0;
-	const expectedEntryStencilValue = hasSuffix
+	const expectSuffix =
+		!operation.rootContained && expectedIndoorNodeIds.length > 0;
+	const expectedEntryStencilValue = expectSuffix
 		? plan.capacity.maximumRenderLayer + 1
 		: expectedStencilValue;
-	const expectedSuffixStencilValue = hasSuffix
-		? expectedEntryStencilValue + 1
-		: null;
 	if (operation.renderLayer === 0) {
-		if (operation.stencilLabels !== null) {
+		if (operation.kind !== "unmasked" || operation.suffix !== null) {
 			throw new Error(
-				"Portal unmasked exterior root has ceremonially unused stencil labels.",
+				"Portal unmasked exterior root has ceremonially unused stencil state.",
 			);
 		}
 		return operation;
 	}
-	const labels = operation.stencilLabels;
-	if (!labels) {
-		throw new Error("Portal masked exterior operation has no stencil labels.");
+	if (operation.kind !== "masked") {
+		throw new Error(
+			"Portal masked exterior operation has no entry stencil label.",
+		);
 	}
 	if (
-		!Number.isInteger(labels.entry) ||
-		labels.entry <= 0 ||
-		labels.entry > plan.capacity.maximumAvailableStencilValue ||
-		labels.entry !== expectedEntryStencilValue
+		!Number.isInteger(operation.entryStencilValue) ||
+		operation.entryStencilValue <= 0 ||
+		operation.entryStencilValue > plan.capacity.maximumAvailableStencilValue ||
+		operation.entryStencilValue !== expectedEntryStencilValue
 	) {
 		throw new Error(
 			"Portal exterior operation has an incorrect entry stencil label.",
 		);
 	}
+	if (expectSuffix !== (operation.suffix !== null)) {
+		throw new Error(
+			"Portal exterior operation disagrees with its deferred indoor suffix.",
+		);
+	}
+	const { suffix } = operation;
+	if (!suffix) return operation;
+	requireSameIds(
+		suffix.indoorNodeIds,
+		expectedIndoorNodeIds,
+		"suffix indoor nodes",
+	);
+	requireSameIds(suffix.maskEdgeIds, internalIndoorMaskEdgeIds, "suffix masks");
+	const { from, to } = suffix.stencilTransition;
 	if (
-		labels.suffix !== expectedSuffixStencilValue ||
-		(labels.suffix !== null &&
-			(!Number.isInteger(labels.suffix) ||
-				labels.suffix <= 0 ||
-				labels.suffix > plan.capacity.maximumAvailableStencilValue ||
-				labels.suffix === labels.entry))
+		suffix.stencilTransition.kind !== "promote-if-equal" ||
+		!Number.isInteger(from) ||
+		!Number.isInteger(to) ||
+		from !== operation.entryStencilValue ||
+		to !== from + 1 ||
+		to > plan.capacity.maximumAvailableStencilValue
 	) {
 		throw new Error(
-			"Portal exterior operation has an incorrect suffix stencil label.",
+			"Portal exterior operation has an incorrect suffix stencil transition.",
 		);
 	}
 	return operation;

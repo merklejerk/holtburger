@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeTexturePixels } from "./decode-texture-pixels";
 import { TexturePurpose } from "../game/textures/types";
+import type { TexturePreparationServiceRequest } from "../game/textures/texture-preparer";
 
 describe("decodeTexturePixels", () => {
 	it("decodes an R8 terrain-mask response", () => {
@@ -53,7 +54,7 @@ describe("decodeTexturePixels", () => {
 			kind: "prepared-object-texture" as const,
 			purpose: TexturePurpose.ObjectIndex16,
 			sourceAssetId: "surface-texture/0x05001234" as const,
-		};
+		} satisfies TexturePreparationServiceRequest;
 		const response = decodeTexturePixels(
 			textureResponse({
 				format: "rg8",

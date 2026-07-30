@@ -15,8 +15,11 @@ import type {
 	Texture2DResourceKey,
 } from "./resource-manager";
 import type { GeometryKey } from "../geometry/types";
+import type { StaticGeometryKey } from "../systems/static-resources";
 import type { StaticObjectRenderable } from "../commit/artifacts";
+import type { StaticObjectMaterialBinding } from "../commit/artifacts";
 import type { InstanceStreamResourceKey } from "./resource-manager";
+import { TextureFilteringMode, TextureWrapMode } from "../textures/types";
 
 const VISIBLE_SCENE = {
 	entries: [],
@@ -106,7 +109,7 @@ describe("RenderWorld", () => {
 		);
 		expect(world.queryFlatScene(FRUSTUM, "0001")).toBe(VISIBLE_SCENE);
 		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
-		expect(world.resolveTerrainDrawUnit("0001", "0002")).toBe(TERRAIN);
+		expect(world.resolveTerrainDrawUnit("scene-node:1", "0002")).toBe(TERRAIN);
 		expect(world.resolveGeometry("terrain-geometry:0001" as GeometryKey)).toBe(
 			GEOMETRY,
 		);
@@ -126,16 +129,18 @@ describe("RenderWorld", () => {
 		const staticRenderable = {
 			drawUnits: [
 				{
-					geometry: "static-source-geometry:fixture" as GeometryKey,
+					geometry: "static-source-geometry:fixture" as StaticGeometryKey,
 					indexCount: 3,
 					indexStart: 0,
 					kind: "instanced",
 					instances: "static-instance-stream:static-install:1/cohort",
-					material: {},
+					material: staticMaterial(),
+					ordering: "opaque",
+					transparentSort: null,
 				},
 			],
 			frameStreamedInstances: [],
-		} as StaticObjectRenderable;
+		} satisfies StaticObjectRenderable;
 		expect(world.resolveStaticObjectRenderable(staticRenderable)).toEqual([
 			{
 				drawUnit: staticRenderable.drawUnits[0],
@@ -157,3 +162,30 @@ describe("RenderWorld", () => {
 		]);
 	});
 });
+
+function staticMaterial(): StaticObjectMaterialBinding {
+	return {
+		detailRole: null,
+		palettedClipMap: false,
+		polygon: {
+			authoredCullMode: "landblock",
+			cullFace: "back",
+			renderSide: "positive",
+			stippled: false,
+		},
+		sampler: {
+			filtering: TextureFilteringMode.Linear,
+			wrap: TextureWrapMode.Clamp,
+		},
+		source: {
+			color: [1, 1, 1, 1],
+			diffuseScale: 1,
+			id: "material:render-world-test",
+			kind: "solid-color",
+			luminosity: 0,
+			rawSurfaceFlags: 0,
+			translucency: 0,
+		},
+		textures: { base: null, palette: null },
+	};
+}

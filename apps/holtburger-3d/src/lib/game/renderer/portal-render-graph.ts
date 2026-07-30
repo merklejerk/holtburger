@@ -76,24 +76,26 @@ interface PortalExteriorTransition {
 	readonly targetNodeId: PortalRenderNodeId;
 }
 
-/** Complete interdependent stencil ownership for one masked exterior operation. */
-interface PortalExteriorStencilLabels {
-	/** Stencil label owning a masked exterior contribution in the portal target. */
-	readonly entry: number;
-	/** Distinct label owning the indoor suffix of a non-root exterior cycle. */
-	readonly suffix: number | null;
+/** Indoor members deferred until after one masked exterior contribution. */
+interface PortalExteriorSuffixOperation {
+	/** Component members drawn by this suffix and withheld from ordinary layer execution. */
+	readonly indoorNodeIds: readonly PortalRenderNodeId[];
+	/** Internal component masks whose targets are suffix members. */
+	readonly maskEdgeIds: readonly PortalCrossingId[];
+	/** Parent-constrained adjacent-label promotion executed for every suffix mask. */
+	readonly stencilTransition: {
+		readonly from: number;
+		readonly kind: "promote-if-equal";
+		readonly to: number;
+	};
 }
 
-/** Planner-authored execution split for the strongly connected component containing outdoors. */
-interface PortalExteriorComponentOperation {
+/** Graph facts shared by masked and unmasked execution of the outdoor component. */
+interface PortalExteriorComponentOperationBase {
 	/** Every graph edge entering this component from a different component. */
 	readonly entryMaskEdgeIds: readonly PortalCrossingId[];
 	/** Complete strongly connected component membership retained from layer planning. */
 	readonly componentNodeIds: readonly PortalRenderNodeId[];
-	/** Indoor members rendered into the cached exterior suffix when the component is non-root. */
-	readonly indoorNodeIds: readonly PortalRenderNodeId[];
-	/** Internal component masks whose targets are indoor suffix members. */
-	readonly internalIndoorMaskEdgeIds: readonly PortalCrossingId[];
 	/** Internal return edges consumed as cycle provenance without redrawing the outdoor base. */
 	readonly returnMaskEdgeIds: readonly PortalCrossingId[];
 	/** Unique render node owning the reusable outdoor scene-domain contribution. */
@@ -102,9 +104,22 @@ interface PortalExteriorComponentOperation {
 	readonly renderLayer: number;
 	/** Root components execute directly in the main target rather than as a detached suffix. */
 	readonly rootContained: boolean;
-	/** Complete labels consumed by masked direct execution; absent for an unmasked outdoor root. */
-	readonly stencilLabels: PortalExteriorStencilLabels | null;
 }
+
+/** Planner-authored execution split for the strongly connected component containing outdoors. */
+type PortalExteriorComponentOperation =
+	| (PortalExteriorComponentOperationBase & {
+			/** The outdoor root owns the cleared target and requires no stencil labels. */
+			readonly kind: "unmasked";
+			readonly suffix: null;
+	  })
+	| (PortalExteriorComponentOperationBase & {
+			/** Stencil label owning the masked exterior contribution in the portal target. */
+			readonly entryStencilValue: number;
+			readonly kind: "masked";
+			/** Deferred indoor bounce, present only when this non-root component owns one. */
+			readonly suffix: PortalExteriorSuffixOperation | null;
+	  });
 
 /** Complete preflight against the caller's WebGL stencil-value ceiling. */
 interface PortalMaskCapacityPreflight {
@@ -285,13 +300,18 @@ class PortalPlanningContext {
 			rootDomain.id,
 			layerFacts.maximumRenderLayer,
 		);
+		const exteriorStencilValues =
+			exteriorComponent?.kind === "masked"
+				? [
+						exteriorComponent.entryStencilValue,
+						...(exteriorComponent.suffix
+							? [exteriorComponent.suffix.stencilTransition.to]
+							: []),
+					]
+				: [];
 		const capacity = this.#createCapacity(
 			layerFacts.maximumRenderLayer,
-			Math.max(
-				layerFacts.maximumRenderLayer,
-				exteriorComponent?.stencilLabels?.entry ?? 0,
-				exteriorComponent?.stencilLabels?.suffix ?? 0,
-			),
+			Math.max(layerFacts.maximumRenderLayer, ...exteriorStencilValues),
 		);
 		if (
 			capacity.requiredMaximumStencilValue >
@@ -1003,23 +1023,32 @@ function createExteriorComponentOperation(
 		hasSuffix || sharesLayerWithAnotherContribution
 			? maximumRenderLayer + 1
 			: outdoor.renderLayer;
-	const suffixStencilValue = hasSuffix ? entryStencilValue + 1 : null;
-	return {
+	const common = {
 		componentNodeIds: [...component],
 		entryMaskEdgeIds: entryMaskEdgeIds.sort(),
-		indoorNodeIds,
-		internalIndoorMaskEdgeIds: internalIndoorMaskEdgeIds.sort(),
 		outdoorNodeId: outdoor.id,
 		renderLayer: outdoor.renderLayer,
 		returnMaskEdgeIds: returnMaskEdgeIds.sort(),
 		rootContained,
-		stencilLabels:
-			outdoor.renderLayer === 0
-				? null
-				: {
-						entry: entryStencilValue,
-						suffix: suffixStencilValue,
+	} satisfies PortalExteriorComponentOperationBase;
+	if (outdoor.renderLayer === 0) {
+		return { ...common, kind: "unmasked", suffix: null };
+	}
+	return {
+		...common,
+		entryStencilValue,
+		kind: "masked",
+		suffix: hasSuffix
+			? {
+					indoorNodeIds,
+					maskEdgeIds: internalIndoorMaskEdgeIds.sort(),
+					stencilTransition: {
+						from: entryStencilValue,
+						kind: "promote-if-equal",
+						to: entryStencilValue + 1,
 					},
+				}
+			: null,
 	};
 }
 

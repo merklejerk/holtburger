@@ -203,7 +203,6 @@ interface MutableFrameSelectionMetrics {
 	portalExecutionDurationMs: number;
 	sceneDomainTargetCount: number;
 	sceneDomainTargetBytes: number;
-	portalExteriorContributionCount: number;
 	submittedStaticObjectDrawCount: number;
 	submittedStaticObjectTriangleCount: number;
 	submittedBakedStaticObjectDrawCount: number;
@@ -285,7 +284,6 @@ export class WebGL2Renderer implements Renderer {
 		portalExecutionDurationMs: 0,
 		sceneDomainTargetCount: 0,
 		sceneDomainTargetBytes: 0,
-		portalExteriorContributionCount: 0,
 		visibleSceneEntries: 0,
 		visibleStaticLayerCount: 0,
 		visibleStaticNodeCount: 0,
@@ -490,8 +488,6 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalSubmittedRenderNodeCount +=
 			diagnostics.submittedRenderNodeCount;
 		metrics.portalExteriorRenderCount += diagnostics.exteriorRenderCount;
-		metrics.portalExteriorContributionCount +=
-			diagnostics.exteriorContributionCount;
 	}
 
 	/**
@@ -995,7 +991,6 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalExecutionDurationMs = 0;
 		metrics.sceneDomainTargetCount = 0;
 		metrics.sceneDomainTargetBytes = 0;
-		metrics.portalExteriorContributionCount = 0;
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
 		this.#visibleEnvCellScopes.clear();

@@ -71,8 +71,9 @@ describe("portal pass state", () => {
 				framebuffer: {} as WebGLFramebuffer,
 				kind: "mask-write",
 				stencilPolicy: {
-					expectedValue: 4,
-					kind: "increment-if-equal",
+					from: 4,
+					kind: "promote-if-equal",
+					to: 5,
 				},
 			},
 			expected: {
@@ -188,11 +189,25 @@ describe("portal pass state", () => {
 				framebuffer: {} as WebGLFramebuffer,
 				kind: "mask-write",
 				stencilPolicy: {
-					expectedValue: 255,
-					kind: "increment-if-equal",
+					from: 255,
+					kind: "promote-if-equal",
+					to: 256,
 				},
 			}),
-		).toThrow("cannot be incremented");
+		).toThrow("0 through 255");
+		expect(() =>
+			applyPortalPassState(state.gl, {
+				depthCompare: "always",
+				extent: { height: 1, width: 1 },
+				framebuffer: {} as WebGLFramebuffer,
+				kind: "mask-write",
+				stencilPolicy: {
+					from: 3,
+					kind: "promote-if-equal",
+					to: 5,
+				},
+			}),
+		).toThrow("adjacent label");
 	});
 
 	it("rejects invalid render extents before changing state", () => {
@@ -206,6 +221,18 @@ describe("portal pass state", () => {
 			}),
 		).toThrow("positive integers");
 		expect(state.values).toEqual({});
+	});
+
+	it("fails loudly when malformed runtime input bypasses the command union", () => {
+		const state = createFakeState();
+
+		expect(() =>
+			applyPortalPassState(state.gl, {
+				extent: { height: 1, width: 1 },
+				framebuffer: null,
+				kind: "malformed",
+			} as unknown as PortalPassStateCommand),
+		).toThrow("Unsupported portal pass-state command");
 	});
 });
 

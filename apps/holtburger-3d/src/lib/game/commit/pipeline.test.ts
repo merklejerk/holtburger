@@ -53,7 +53,10 @@ describe("StandardCommitPipeline", () => {
 			staticResidents: [],
 		} as unknown as ResolvedObjectLayerSource;
 		const sourceBatch = new RecordingSourceBatch(
-			new Map([
+			new Map<
+				LandblockSourceLayer,
+				ResolvedTerrainLayerSource | ResolvedObjectLayerSource | null
+			>([
 				[LandblockLayerKind.Terrain, terrain],
 				[LandblockLayerKind.Buildings, buildings],
 			]),
@@ -86,7 +89,10 @@ describe("StandardCommitPipeline", () => {
 		const objects = outdoorSource(landblockId, LandblockLayerKind.Objects);
 		const generated = outdoorSource(landblockId, LandblockLayerKind.Generated);
 		const sourceBatch = new RecordingSourceBatch(
-			new Map([
+			new Map<
+				LandblockSourceLayer,
+				ResolvedTerrainLayerSource | ResolvedObjectLayerSource | null
+			>([
 				[LandblockLayerKind.Terrain, terrain],
 				[LandblockLayerKind.Buildings, buildings],
 				[LandblockLayerKind.Objects, objects],

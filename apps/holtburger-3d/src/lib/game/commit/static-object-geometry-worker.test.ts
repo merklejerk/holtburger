@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Mat4, Vec3 } from "../math/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
-import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
+import type {
+	ResolvedObjectResident,
+	ResolvedOutdoorStaticLayerSource,
+} from "../resolution/landblock-layer";
 import type { ClosedWorkerPort } from "../workers/closed-worker";
 import { StaticObjectGeometryWorker } from "./static-object-geometry-worker-client";
 import {
@@ -125,7 +128,10 @@ describe("prepareStaticObjectGeometry", () => {
 					root,
 					{
 						...root,
-						geometry: { ...root.geometry, id: "geometry:setup-child" },
+						geometry: {
+							...root.geometry,
+							id: "geometry:setup-child" as const,
+						},
 						parentPartIndex: 0,
 						partIndex: 1,
 					},
@@ -173,6 +179,7 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(second?.geometry[0]?.geometry.indices).toEqual(
 			first?.geometry[0]?.geometry.indices,
 		);
+		if (!second) throw new Error("Expected the second geometry preparation.");
 		expect(second?.drawUnits).toEqual(
 			first?.drawUnits.map((drawUnit, index) => ({
 				...drawUnit,
@@ -188,7 +195,7 @@ describe("prepareStaticObjectGeometry", () => {
 		const objectsSource = {
 			...buildingsSource,
 			kind: LandblockLayerKind.Objects,
-		};
+		} satisfies ResolvedOutdoorStaticLayerSource;
 		const buildings = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Buildings,
 			resourceNamespace: "static-install:shared" as const,
@@ -430,7 +437,10 @@ describe("prepareStaticObjectGeometry", () => {
 					root,
 					{
 						...root,
-						geometry: { ...root.geometry, id: "geometry:generated-child" },
+						geometry: {
+							...root.geometry,
+							id: "geometry:generated-child" as const,
+						},
 						parentPartIndex: 0,
 						partIndex: 1,
 					},
@@ -563,7 +573,11 @@ function generatedSource(
 	};
 }
 
-function resident(id: string, localTransform: Mat4, scale: Vec3) {
+function resident(
+	id: string,
+	localTransform: Mat4,
+	scale: Vec3,
+): ResolvedObjectResident {
 	const flags = id.startsWith("transparent")
 		? 0x10
 		: id.startsWith("additive")
@@ -610,6 +624,7 @@ function resident(id: string, localTransform: Mat4, scale: Vec3) {
 						materialWrapModes: Uint8Array.from([0]),
 						normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
 						positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+						sourceDiagnostics: { rejectedDegenerateTriangles: [] },
 						textureCoordinates: Float32Array.from([0, 0, 1, 0, 0, 1]),
 					},
 					materials: [material],

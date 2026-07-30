@@ -354,7 +354,6 @@ export function runWebGL2HybridPortalExecutionFixture(
 			exteriorDepthOcclusionPassed: pixelMatches(occluderPixel, YELLOW),
 			hybridCyclePassed:
 				hybridTrace.exteriorRenderCount === 1 &&
-				hybridTrace.exteriorContributionCount === 1 &&
 				hybridTrace.submittedRenderNodeCount === 3 &&
 				pixelMatches(hybridSuffixPixel, INDOOR_BLEND) &&
 				pixelMatches(hybridExteriorPixel, RED) &&
@@ -511,14 +510,18 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 		},
 		exteriorComponent: {
 			componentNodeIds: [SUFFIX_NODE_ID, EXTERIOR_NODE_ID],
+			entryStencilValue: 2,
 			entryMaskEdgeIds: [CROSSING_A, CROSSING_B],
-			indoorNodeIds: [SUFFIX_NODE_ID],
-			internalIndoorMaskEdgeIds: [CROSSING_INTERNAL],
+			kind: "masked",
 			outdoorNodeId: EXTERIOR_NODE_ID,
 			renderLayer: 1,
 			returnMaskEdgeIds: [CROSSING_RETURN],
 			rootContained: false,
-			stencilLabels: { entry: 2, suffix: 3 },
+			suffix: {
+				indoorNodeIds: [SUFFIX_NODE_ID],
+				maskEdgeIds: [CROSSING_INTERNAL],
+				stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
+			},
 		},
 		exteriorTransitions: maskEdges.map((edge) => ({
 			crossingId: edge.crossingId,
@@ -635,22 +638,28 @@ function transitionPlan(
 			retainedRenderNodeCount: nearPlaneStraddle ? 3 : 2,
 			workItemCount: 0,
 		},
-		exteriorComponent: {
-			componentNodeIds: [EXTERIOR_NODE_ID],
-			entryMaskEdgeIds:
-				rootKind === "interior"
-					? nearPlaneStraddle
-						? [CROSSING_A]
-						: crossings
-					: [],
-			indoorNodeIds: [],
-			internalIndoorMaskEdgeIds: [],
-			outdoorNodeId: EXTERIOR_NODE_ID,
-			renderLayer: exteriorRoot ? 0 : 1,
-			returnMaskEdgeIds: [],
-			rootContained: exteriorRoot,
-			stencilLabels: exteriorRoot ? null : { entry: 1, suffix: null },
-		},
+		exteriorComponent: exteriorRoot
+			? {
+					componentNodeIds: [EXTERIOR_NODE_ID],
+					entryMaskEdgeIds: [],
+					kind: "unmasked",
+					outdoorNodeId: EXTERIOR_NODE_ID,
+					renderLayer: 0,
+					returnMaskEdgeIds: [],
+					rootContained: true,
+					suffix: null,
+				}
+			: {
+					componentNodeIds: [EXTERIOR_NODE_ID],
+					entryMaskEdgeIds: nearPlaneStraddle ? [CROSSING_A] : crossings,
+					entryStencilValue: 1,
+					kind: "masked",
+					outdoorNodeId: EXTERIOR_NODE_ID,
+					renderLayer: 1,
+					returnMaskEdgeIds: [],
+					rootContained: false,
+					suffix: null,
+				},
 		exteriorTransitions: maskEdges.map((edge) => ({
 			crossingId: edge.crossingId,
 			exteriorLandblockId: "0x0001ffff",

@@ -131,6 +131,8 @@ export interface ResolvedPortalCrossing {
 		  };
 	readonly acceptedSide: "positive" | "negative";
 	readonly exactMatch: boolean;
+	/** Whether an authored visible source surface owns fragments tying the aperture depth. */
+	readonly maskDepthPolicy: "allow-equal-depth" | "reject-equal-depth";
 	readonly reciprocalCrossingIndex: number | null;
 	readonly sourcePortal:
 		| {

@@ -301,6 +301,7 @@ function crossing(
 		acceptedSide,
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
+		maskDepthPolicy: "allow-equal-depth",
 		reciprocalCrossingId,
 		source,
 		sourceAperture: aperture,

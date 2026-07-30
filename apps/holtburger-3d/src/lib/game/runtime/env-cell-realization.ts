@@ -163,6 +163,7 @@ function environmentArtifact(
 				acceptedSide: crossing.acceptedSide,
 				exactMatch: crossing.exactMatch,
 				id: qualifyPortalCrossingId(plan.landblockId, crossing.id),
+				maskDepthPolicy: crossing.maskDepthPolicy,
 				reciprocalCrossingId:
 					crossing.reciprocalCrossingIndex === null
 						? null

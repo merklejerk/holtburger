@@ -748,6 +748,47 @@ scope-window work item did not retain its incoming crossing.
 - No renderer diagnostic was added. The existing edge, near-plane seed, node, submission, and
   timing metrics distinguish the failing and corrected scenarios.
 
+## Phase 10: Coplanar Opaque Portal Mask Depth
+
+Field verification in EnvCell `0x1A7302B2` exposed view-dependent holes through its floor into
+`0x1A73029D`. Flat rendering remained stable, excluding ordinary CellStruct Z-fighting. Archive
+inspection proved that six opaque floor polygons at `y = 232.399994` are also horizontal portal
+apertures into `0x1A73029D`; the target ceiling occupies the same plane but uses a fully transparent
+material. Unbiased `LEQUAL` mask rasterization therefore admitted fragments tying the visible floor,
+and the subsequent masked depth reset exposed the lower cell.
+
+### Task Checklist
+
+- [x] Confirm the artifact is portal-mode-only with an unchanged flat-mode comparison.
+- [x] Prove the source floor, portal apertures, and target ceiling are authored on the same plane.
+- [x] Carry source-surface equal-depth policy from CellStruct projection through the render plan.
+- [x] Apply slope-aware positive polygon offset only to masks sharing visible source geometry.
+- [x] Explicitly disable polygon offset before every non-mask scene pass.
+- [x] Confirm the original `0x1A7302B2` field view no longer exposes `0x1A73029D`.
+- [x] Cover mask activation and subsequent scene-pass restoration in the fixed-function state test.
+- [x] Document why near-plane `ALWAYS` masks are unaffected.
+
+### Decisions and Evidence
+
+- A constant-only `polygonOffset(0, 1)` did not stabilize the oblique floor. The accepted
+  `polygonOffset(1, 1)` adds the required screen-space depth-slope term while retaining the minimum
+  constant offset.
+- Applying that offset universally broke the production internal-portal GPU fixture because
+  material-free nested apertures require unbiased `LEQUAL`. Strict `LESS` failed the same fixture.
+  Equal-depth ownership is therefore an authored source-surface fact, not a global depth mode.
+- The bias belongs to material-free mask rasterization, not CellStruct geometry. Visible shells,
+  their depth, and their legitimate seams remain unchanged.
+- Positive bias makes a coincident source surface authoritative while material-free apertures keep
+  their established equality behavior. Near-plane window masks retain `ALWAYS`, so offset does not
+  change their explicit ownership-transfer semantics.
+- A same-pose `0x7D640113` A/B measured selective-bias planning at `0.7/0.4 ms` and execution at
+  `1.4/1.0 ms`; temporarily disabling the selective offset measured `0.7/0.7 ms` and `1.8/1.2 ms`.
+  The timer and frame noise exceed the difference, so the defensible conclusion is no measurable
+  CPU regression rather than a claimed speedup. The hard planner budget remains satisfied.
+- Classification occurs during content preparation. Per-frame work is one policy comparison per
+  world-aperture mask plus two fixed-function calls only for a biased mask. No new traversal,
+  geometry, allocation, or draw submission was introduced.
+
 ## Risks and Mitigations
 
 | Risk                                                                                             | Mitigation                                                                                                                             |

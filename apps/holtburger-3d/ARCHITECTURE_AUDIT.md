@@ -183,6 +183,13 @@ is unique, but contribution occurrences need not be: a root island can render or
 again through a parent-constrained exterior-return suffix. Deferred suffix nodes are withheld by
 the planner, not inferred by the executor.
 
+CellStruct and building-aperture projection record whether each authored portal also contributes
+visible source geometry. Crossings retain the resulting equal-depth mask policy through scene
+topology and the render plan. Only masks sharing a visible source surface use a positive polygon
+offset; material-free apertures retain unbiased `LEQUAL`, and every non-mask pass explicitly
+disables the offset. Near-plane ownership-transfer masks use `ALWAYS` and carry no source-surface
+depth policy.
+
 A same-domain topology boundary remains available to spatial queries and propagates clipped
 scope coverage, but produces no mask because ordinary depth already unifies its endpoint domain.
 Outdoor/indoor transitions render directly into one renderer-owned full-size color plus

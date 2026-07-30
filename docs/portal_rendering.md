@@ -209,8 +209,16 @@ from ordinary execution or additional masked work for a node already drawn elsew
 guarded increment is a typed planner/executor contract, not an executor-created route or general
 stencil stack.
 
-Internal masks use existing depth (`LEQUAL`) so nearer geometry can occlude an opening. The
-accepted browser matrix also covers opaque, alpha-tested, transparent, and additive contributions.
+Internal masks use existing depth (`LEQUAL`) so nearer geometry can occlude an opening. A portal
+polygon may also carry an opaque CellStruct surface, including horizontal floor portals such as
+`0x1A7302B2 -> 0x1A73029D`. Re-rasterizing that aperture at equal depth would let the mask
+intermittently replace its own visible floor as projection slope changes. The host therefore marks
+crossings whose authored source portal also contributes shell triangles. Only those mask writes
+enable `POLYGON_OFFSET_FILL` with `polygonOffset(1, 1)`, conservatively pushing the mask behind its
+coincident visible geometry. Material-free apertures retain unbiased `LEQUAL`, which preserves
+equality needed by nested portal unions. Scene passes explicitly disable polygon offset, so
+CellStruct depth and seams remain unbiased. The accepted browser matrix also covers opaque,
+alpha-tested, transparent, and additive contributions.
 
 ## Outdoor Transitions
 
@@ -266,7 +274,9 @@ world-space aperture. Each edge carries exactly one executable mask source: eith
 aperture or the retained near-clip window. The NDC straddle mask deliberately uses `ALWAYS`, because
 the exact footprint has already selected aperture-crossing rays and resident floor or terrain depth
 must not veto the ownership transfer. Depth is then reset only inside the mask and the adjacent
-domain renders directly. Ordinary world-aperture masks retain `LEQUAL`. Root color
+domain renders directly. Near-clip window masks carry no source-surface depth policy and this
+`ALWAYS` comparison remains unbiased. Ordinary world-aperture masks retain policy-selected
+`LEQUAL`. Root color
 and depth therefore remain authoritative outside the footprint; adjacent color and depth become
 authoritative inside it. Downstream portals continue through later layers and remain bounded by the
 inherited window. The policy is frame-local and does not merge permanent visibility islands or

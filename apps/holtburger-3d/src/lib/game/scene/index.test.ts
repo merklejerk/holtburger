@@ -655,6 +655,7 @@ function upsertCrossing(
 		acceptedSide: "positive",
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
+		maskDepthPolicy: "allow-equal-depth",
 		reciprocalCrossingId: null,
 		source,
 		sourceAperture: aperture,

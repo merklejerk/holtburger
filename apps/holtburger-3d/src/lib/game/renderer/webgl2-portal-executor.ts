@@ -8,6 +8,7 @@ import {
 } from "./webgl2-portal-mask";
 import type {
 	PortalMaskStencilPolicy,
+	PortalMaskDepthCompare,
 	PortalRenderExtent,
 	WebGL2SceneDomainTarget,
 } from "./webgl2-portal-substrate";
@@ -65,7 +66,7 @@ export interface PortalExecutionSubstrate {
 		indexCount: number,
 		clipFromLocal: Float32Array,
 		stencilPolicy: PortalMaskStencilPolicy,
-		depthCompare: "always" | "less-or-equal",
+		depthCompare: PortalMaskDepthCompare,
 	): void;
 	/** Add one exact screen-space straddle footprint to a render-layer union. */
 	writeLayerWindowMask(
@@ -118,6 +119,7 @@ export interface PortalFrameDiagnostics {
 
 interface PreparedPortalApertureMask {
 	readonly crossingId: PortalCrossingId;
+	readonly depthCompare: Exclude<PortalMaskDepthCompare, "always">;
 	readonly kind: "aperture";
 	readonly mask: ResolvedPortalMask;
 }
@@ -272,7 +274,7 @@ function writeMaskUnion(
 				mask.indexCount,
 				mask.clipFromLocal,
 				stencilPolicy,
-				"less-or-equal",
+				prepared.depthCompare,
 			);
 		}
 	}
@@ -301,6 +303,10 @@ function preparePortalExecution(
 		validateResolvedPortalMask(mask, edge.crossingId);
 		maskByEdgeId.set(edge.crossingId, {
 			crossingId: edge.crossingId,
+			depthCompare:
+				edge.maskSource.depthPolicy === "reject-equal-depth"
+					? "less-or-equal-offset"
+					: "less-or-equal",
 			kind: "aperture",
 			mask,
 		});

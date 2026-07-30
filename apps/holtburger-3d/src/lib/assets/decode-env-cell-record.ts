@@ -140,6 +140,7 @@ const crossingSchema = z.object({
 	]),
 	acceptedSide: z.enum(["positive", "negative"]),
 	exactMatch: z.boolean(),
+	maskDepthPolicy: z.enum(["allow-equal-depth", "reject-equal-depth"]),
 	reciprocalCrossingIndex: z.number().int().nonnegative().nullable(),
 	sourcePortal,
 	spatialRelationship,

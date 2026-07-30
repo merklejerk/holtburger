@@ -718,6 +718,7 @@ function hybridEdge(
 	return {
 		crossingId,
 		maskSource: {
+			depthPolicy: "allow-equal-depth",
 			kind: "world-aperture",
 			visibilityApertureId,
 		},
@@ -755,6 +756,7 @@ function transitionPlan(
 						window: createFixtureStraddleWindow(),
 					} as const)
 				: ({
+						depthPolicy: "allow-equal-depth",
 						kind: "world-aperture",
 						visibilityApertureId: apertureIds[index]!,
 					} as const),

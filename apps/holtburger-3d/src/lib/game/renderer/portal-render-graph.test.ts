@@ -755,6 +755,7 @@ describe("portal render graph planning", () => {
 			expect.objectContaining({
 				crossingId: forwardId,
 				maskSource: {
+					depthPolicy: "allow-equal-depth",
 					kind: "world-aperture",
 					visibilityApertureId: "portal-aperture:forward/visibility",
 				},
@@ -1173,6 +1174,7 @@ function crossing(
 		acceptedSide: options.acceptedSide ?? "positive",
 		exactMatch: options.exactMatch ?? true,
 		id: `portal-crossing:${id}`,
+		maskDepthPolicy: "allow-equal-depth",
 		reciprocalCrossingId: options.reciprocalCrossingId ?? null,
 		source,
 		sourceAperture: sceneAperture,

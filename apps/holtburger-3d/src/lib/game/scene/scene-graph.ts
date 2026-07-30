@@ -751,6 +751,7 @@ function copyPortalCrossing(
 		acceptedSide: crossing.acceptedSide,
 		exactMatch: crossing.exactMatch,
 		id: crossing.id,
+		maskDepthPolicy: crossing.maskDepthPolicy,
 		reciprocalCrossingId: crossing.reciprocalCrossingId,
 		source: { ...crossing.source },
 		sourceAperture: copyPortalAperture(crossing.sourceAperture),

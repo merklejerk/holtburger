@@ -26,7 +26,7 @@ export interface ObjectMaterialPlan {
 	readonly paletteTexture: AssetTextureKey | null;
 	readonly sampler: TextureSamplerPolicy;
 	/** Active-region detail role selected by the owning static render domain. */
-	readonly detailRole: StaticDetailRole;
+	readonly detailRole: StaticDetailRole | null;
 	/** Complete logical source requirements; pixel request routing derives from these facts. */
 	readonly textureRequirements: readonly AssetTextureFact[];
 	/** Retail clip maps discard indexed palette entries below eight during later shader compilation. */
@@ -43,7 +43,7 @@ const SURFACE_ADDITIVE = 0x10000;
 export function planObjectMaterial(
 	material: ResolvedMaterial,
 	wrap: TextureWrapMode,
-	detailRole: StaticDetailRole,
+	detailRole: StaticDetailRole | null,
 ): ObjectMaterialPlan {
 	const ordering = classifyObjectMaterialOrdering(material);
 	if (material.kind === "solid-color") {
@@ -156,7 +156,7 @@ function bindingId(
 	wrap: TextureWrapMode,
 	baseTexture: AssetTextureKey | null,
 	paletteTexture: AssetTextureKey | null,
-	detailRole: StaticDetailRole,
+	detailRole: StaticDetailRole | null,
 ): string {
 	return [
 		material.id,
@@ -167,6 +167,6 @@ function bindingId(
 		wrap,
 		baseTexture ?? "none",
 		paletteTexture ?? "none",
-		detailRole,
+		detailRole ?? "no-detail",
 	].join("|");
 }

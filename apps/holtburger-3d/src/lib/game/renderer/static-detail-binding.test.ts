@@ -3,7 +3,7 @@ import type { ResolvedMaterial } from "../resolution/presentation";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
 
 describe("static material detail binding", () => {
-	it.each(["building", "environment", "object"] as const)(
+	it.each(["building", "environment"] as const)(
 		"resolves the planned %s role",
 		(role) => {
 			const resolve = vi.fn(() => ({ role }));
@@ -17,6 +17,18 @@ describe("static material detail binding", () => {
 			expect(resolve).toHaveBeenCalledExactlyOnceWith(role);
 		},
 	);
+
+	it("does not resolve a detail texture for a no-detail render domain", () => {
+		const resolve = vi.fn();
+
+		expect(
+			resolveStaticMaterialDetail(
+				{ detailRole: null, source: material() },
+				resolve,
+			),
+		).toBeNull();
+		expect(resolve).not.toHaveBeenCalled();
+	});
 
 	it("fails loudly when the planned role is unavailable", () => {
 		expect(() =>

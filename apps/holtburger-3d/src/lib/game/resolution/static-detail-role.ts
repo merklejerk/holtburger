@@ -1,14 +1,13 @@
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { ResolvedStaticObjectLayerSource } from "./landblock-layer";
 
-/** Active-region detail texture selected by one static render domain. */
-export type StaticDetailRole = "building" | "environment" | "object";
+/** Active-region detail texture consumed by one proven static render domain. */
+export type StaticDetailRole = "building" | "environment";
 
 /** Complete stable role order used for preparation, publication, and diagnostics. */
 export const STATIC_DETAIL_ROLES: readonly StaticDetailRole[] = [
 	"building",
 	"environment",
-	"object",
 ];
 
 /**
@@ -19,13 +18,13 @@ export const STATIC_DETAIL_ROLES: readonly StaticDetailRole[] = [
  */
 export function staticObjectDetailRoleForSource(
 	source: ResolvedStaticObjectLayerSource,
-): StaticDetailRole {
+): StaticDetailRole | null {
 	switch (source.kind) {
 		case LandblockLayerKind.Buildings:
 			return "building";
 		case LandblockLayerKind.EnvCells:
 		case LandblockLayerKind.Generated:
 		case LandblockLayerKind.Objects:
-			return "object";
+			return null;
 	}
 }

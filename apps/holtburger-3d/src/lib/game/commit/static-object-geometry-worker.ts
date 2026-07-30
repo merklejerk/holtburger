@@ -760,7 +760,7 @@ function isInstanceEligibleTransform(part: PreparedResidentPart): boolean {
 }
 
 function createSourceTriangleContribution(options: {
-	readonly detailRole: StaticDetailRole;
+	readonly detailRole: StaticDetailRole | null;
 	readonly geometry: ResolvedGeometry;
 	readonly part: ResolvedObjectPart;
 	readonly partIndex: number;

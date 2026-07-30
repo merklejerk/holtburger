@@ -86,8 +86,8 @@ export interface StaticObjectLayerDiagnostics extends StaticObjectGeometryDiagno
 /** Source material plus polygon-owned facts; render pass policy remains renderer-private. */
 export interface StaticObjectMaterialBinding {
 	readonly source: ResolvedMaterial;
-	/** Active-region detail binding selected by the owning static render domain. */
-	readonly detailRole: StaticDetailRole;
+	/** Active-region detail binding selected by the owning static render domain, if any. */
+	readonly detailRole: StaticDetailRole | null;
 	/** Logical texture roles remain independent from their eventual atlas page placements. */
 	readonly textures: {
 		readonly base: AssetTextureKey | null;

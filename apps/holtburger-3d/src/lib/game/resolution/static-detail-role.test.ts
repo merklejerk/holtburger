@@ -6,9 +6,9 @@ import { staticObjectDetailRoleForSource } from "./static-detail-role";
 describe("static detail render domains", () => {
 	it.each([
 		[LandblockLayerKind.Buildings, "building"],
-		[LandblockLayerKind.EnvCells, "object"],
-		[LandblockLayerKind.Generated, "object"],
-		[LandblockLayerKind.Objects, "object"],
+		[LandblockLayerKind.EnvCells, null],
+		[LandblockLayerKind.Generated, null],
+		[LandblockLayerKind.Objects, null],
 	] as const)("maps %s to the %s role", (layer, role) => {
 		expect(staticObjectDetailRoleForSource(source(layer))).toBe(role);
 	});

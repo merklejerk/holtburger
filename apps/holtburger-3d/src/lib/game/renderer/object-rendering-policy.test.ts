@@ -242,6 +242,7 @@ describe("object fragment variants", () => {
 
 		expect(shader).toContain("float detailAlpha = clamp(detail.a, 0.0, 1.0);");
 		expect(shader).toContain(detailBlend);
+		expect(shader).toContain("if (uUseDetail != 0)");
 		expect(shader).not.toContain("mix(color.rgb, detail.rgb, detail.a)");
 		expect(shader.indexOf(luminosity)).toBeLessThan(
 			shader.indexOf(detailBlend),

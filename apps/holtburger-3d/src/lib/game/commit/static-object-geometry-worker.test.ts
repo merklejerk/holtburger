@@ -30,7 +30,7 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.drawUnits).toHaveLength(1);
 	});
 
-	it("retains the detail role selected by the static geometry domain", () => {
+	it("selects detail only for the building static geometry domain", () => {
 		const building = bake({
 			resourceNamespace: "static-install:building-detail" as const,
 			source: source([resident("opaque", Mat4.identity(), new Vec3(1, 1, 1))]),
@@ -51,8 +51,8 @@ describe("prepareStaticObjectGeometry", () => {
 		});
 
 		expect(building?.drawUnits[0]?.material.detailRole).toBe("building");
-		expect(generated?.drawUnits[0]?.material.detailRole).toBe("object");
-		expect(indoorResident?.drawUnits[0]?.material.detailRole).toBe("object");
+		expect(generated?.drawUnits[0]?.material.detailRole).toBeNull();
+		expect(indoorResident?.drawUnits[0]?.material.detailRole).toBeNull();
 	});
 
 	it("keeps transparent ranges independent by resident while merging additive ranges", () => {

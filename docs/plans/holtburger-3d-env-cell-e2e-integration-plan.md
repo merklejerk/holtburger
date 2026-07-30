@@ -12,9 +12,10 @@ interest, resource, scene, and WebGL pipelines so Explorer can render textured c
 their residents, traverse their directed portal topology conservatively, and establish camera
 residency without treating spatial overlap as authoritative connectivity.
 
-The implementation must also close the current static-material detail-texture parity gap. Building,
-environment, and object detail roles are active-region resources and must be selectable by every
-compatible static material, including environment-cell structures and residents.
+The implementation must also close the current static-material detail-texture parity gap. Building
+and environment detail roles are active-region resources selected by their shell render domains.
+Ordinary objects, including environment-cell residents, do not consume a detail texture in the
+proven retail D3D path.
 
 ### Current State
 
@@ -74,7 +75,7 @@ compatible static material, including environment-cell structures and residents.
 | Portal view window            | An exact camera-dependent normalized-device-coordinate region produced after homogeneous clipping and surviving every aperture crossed by one render-planning route. It is renderer-local, material-free, and unrelated to actor or camera residency. |
 | Portal render node            | The unique per-view executable owner for one reached render domain. Alternate portal routes add incoming visibility and mask edges to this node; they never create additional geometry submissions for it.                                            |
 | Portal render layer           | An ordered set of unique render nodes reached at the same derived mask depth. The executor unions the layer's admitted aperture masks, resets depth once inside that union, and draws every member node once.                                         |
-| Detail role                   | An active-region semantic texture binding: landscape, building, environment, or object.                                                                                                                                                               |
+| Detail role                   | An active-region semantic texture binding consumed by a proven render domain: landscape for terrain, building for building shells, or environment for CellStruct shells.                                                                              |
 
 ### In Scope
 
@@ -101,8 +102,8 @@ compatible static material, including environment-cell structures and residents.
 - Publish separate shell and static-resident culling groups inside each EnvCell scope. Aggregate
   bounds come from actual transformed member-node bounds rather than trusting the authored cell
   shell AABB to contain every resident.
-- Generalize active-region static detail resources to building, environment, and object roles and
-  select the correct role per material domain.
+- Generalize active-region static detail resources to building and environment roles, select the
+  correct role per shell domain, and represent ordinary-object domains explicitly as no detail.
 - Install cell shells, residents, bounds, scopes, and directed crossings atomically for one
   environment-cell layer receipt.
 - Preserve a permanent flat EnvCell render mode as the end-to-end midpoint and bird's-eye
@@ -267,7 +268,7 @@ find malformed or exceptional assets, but no later phase depends on guessing the
 | Reciprocal portals           | Retail `PView::ClipPortals` calls `OtherPortalClip` for non-`ExactMatch` links, transforming and clipping against the target portal's own polygon and side. The 2026-07-28 archive census found 110,316 validated non-exact internal reciprocal directions: 109,637 coplanar within `0.0002`, all within `0.001`, with maximum deviation `0.00090026855`; no canonical exterior transition was non-exact.                                           | Preserve the authored source aperture, side, reciprocal ID, and `ExactMatch` for topology and queries. At the app-host projection boundary, synthesize one effective visibility aperture by intersecting validated non-exact reciprocal polygons on a named `0.001` coplanarity/snap tolerance. Preserve source provenance and fail loudly above that tolerance. A missing reciprocal retains the retail-compatible source aperture plus an explicit unresolved diagnostic. Never synthesize a reverse crossing by flipping geometry. |
 | Outside/building transitions | `LandblockInteriorSystemAsset` already pairs raw EnvCell `Outside` endpoints with unique `LandblockInfo` building-portal claims. Retail `PView::DrawPortal`/`ConstructView(CBldPortal, CPolygon, ...)` enters the target EnvCell through the building GfxObj portal polygon; `CBldPortal::UnPack` uses the same flag-to-side decoding.                                                                                                              | Materialize both directions as authored crossings between the landblock/outdoor scope and EnvCell scope. The building-side aperture comes from its GfxObj portal polygon; the EnvCell side comes from its CellStruct. Every resolved exterior transition remains a mandatory portal-composite boundary even when its apertures match spatially, because terrain depth need not encode the opening. Missing claims remain explicit diagnostics.                                                                                        |
 | Potentially visible cells    | Retail `CEnvCell::grab_visible_cells`/`PView::DrawInside` seed listed cells, while `PView::ConstructView` and `AddViewToPortals` still follow portal links; `find_visible_child_cell` uses the list as a containment candidate set.                                                                                                                                                                                                                 | Preserve the list as preload/candidate provenance. It may broaden discovery but may not reject traversal or replace connectivity.                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Detail roles                 | Retail `LScape::SetDetailTexturing(landscape, building, environment, object)` maps indices `0`, `1`, `2`, and `3` respectively; `RenderDeviceD3D::DrawBuilding` and `DrawEnvCell` bind their domain roles. `REGION_DETAIL_ROLE_ORDER` already preserves that order in `holtburger-content`.                                                                                                                                                         | Terrain uses landscape detail; building shells use building; CellStruct shells use environment; non-building objects, including generated objects and EnvCell residents, use object. The owning render domain selects the role independently from raw surface flags.                                                                                                                                                                                                                                                                     |
+| Detail roles                 | Retail `LScape::SetDetailTexturing(landscape, building, environment, object)` loads four region descriptors. `RenderDeviceD3D::DrawBlock` scopes landscape detail to terrain, `DrawBuilding` scopes building detail to building geometry, and `DrawEnvCell` scopes environment detail to CellStruct geometry. `DrawPartCell` clears `curr_detail_surface` before drawing ordinary objects. | Terrain uses landscape detail; building shells use building; CellStruct shells use environment. Outdoor explicit/generated objects and EnvCell residents use no detail texture. The raw object descriptor remains source provenance but has no proven consumer in this D3D path. The owning render domain selects the role independently from raw surface flags.                                                                                                                     |
 | Static animated residents    | Retail `CEnvCell::init_static_objects` creates Stabs as static physics objects; default setup motion/script state registers through the static-animation path. The current 3D runtime deliberately defers this class in `GameRuntime.#deferStaticAuthoredDynamic`.                                                                                                                                                                                  | Account for every resident, materialize supported non-animated statics, and keep setup-default-animation residents on the explicit static-authored-animation deferral seam. Do not misroute them through spawned-dynamic installation.                                                                                                                                                                                                                                                                                                |
 | Portal rendering             | Retail `PView::GetClip`, `Render::copy_view`, `ClipPortals`, `AddViewToPortals`, and `OtherPortalClip` propagate clipped screen polygons, accumulate multiple views per destination cell, process newly appended views incrementally, and clip non-exact links through both authored apertures. `D3DPolyRender::DrawPortalPolyInternal` performs material-free depth behavior; retail stencil use found here is shadow-related, not portal-related. | Preserve the invariant, not the implementation: renderer-local exact portal windows bound planning using the host-resolved effective visibility aperture, while WebGL reproduces that same single aperture as the exact mask. Do not enumerate topology paths, repeat reciprocal intersection per frame, port retail allocation patterns, or promote render apertures/windows into shared spatial-query contracts.                                                                                                                    |
 | Exterior scene reuse         | Legacy `Webgl2Renderer.#renderSceneDomainTarget` renders the exterior once. `#renderOutdoorProjectionComposite` and `#drawPortalProjectionOutdoorCrossings` reuse it; `SOURCE_SCENE_COPY_FRAGMENT_SHADER` samples both exterior color and depth and writes `gl_FragDepth`.                                                                                                                                                                          | Preserve the scene-domain invariant without preserving the legacy breadth-layer graph: exterior geometry renders at most once per camera frame, while transition passes copy cached exterior color and depth through exact portal masks. Composite ping-pong is allowed only to avoid framebuffer feedback.                                                                                                                                                                                                                           |
@@ -403,8 +404,8 @@ case is identified; the algorithm does not depend on having a convenient retail 
   domain-independent static objects.
 - `OutdoorStaticLayerKind`, worker inputs, and `StaticLayerRealizer` where their actual contract is
   a static render layer or scoped static artifact.
-- Material binding from a boolean “has object detail” interpretation to a semantic
-  `DetailRole | null`.
+- Material binding from a boolean “has detail” interpretation to a semantic
+  `StaticDetailRole | null`.
 - Static placement inputs from a translation-only assumption to the existing complete
   `ScenePlacement` shape where EnvCell and resident composition requires it.
 - Scene crossing storage from a flat traversal scan to a source-scope adjacency index.
@@ -495,9 +496,8 @@ ActiveRegionData
   └─ StaticDetailTextureOwner
       ├─ Building detail
       ├─ Environment detail
-      └─ Object detail
-          └─ TextureManager regional bindings
-              └─ material DetailRole selection at draw time
+      └─ TextureManager regional bindings
+          └─ material StaticDetailRole or no-detail selection at draw time
 ```
 
 ## Target Contracts
@@ -824,18 +824,17 @@ independently selects an overlapping cell.
 enum StaticDetailRole {
   Building = "building",
   Environment = "environment",
-  Object = "object",
 }
 
 interface StaticMaterialBinding {
   // Existing base, palette, clip-map, blend, cull, and lighting facts remain.
-  readonly detailRole: StaticDetailRole;
+  readonly detailRole: StaticDetailRole | null;
 }
 ```
 
 The active-region texture owner resolves each role to a texture plus tiling factor. Landscape
-detail remains terrain-specific. Material planning chooses a semantic role; the renderer only
-resolves the active regional binding for that role.
+detail remains terrain-specific. The owning render domain selects a semantic role or the explicit
+no-detail state; the renderer resolves an active regional binding only for a selected role.
 
 ## Phased Implementation
 
@@ -884,12 +883,12 @@ case.
 
 - Replace `ActiveRegionObjectDetailOwner` with a role-aware owner whose name reflects all static
   detail textures.
-- Prepare building, environment, and object detail textures once per active region with typed
-  tiling facts and independent GPU ownership.
+- Prepare building and environment detail textures once per active region with typed tiling facts
+  and independent GPU ownership.
 - Replace renderer policy based on raw surface flags with a material-plan decision that retains the
   semantic `StaticDetailRole` selected by the render domain.
-- Apply building detail to building shells, environment detail to CellStruct shells, and object
-  detail to outdoor objects, generated objects, and indoor residents.
+- Apply building detail to building shells and environment detail to CellStruct shells. Preserve
+  the retail no-detail state for outdoor objects, generated objects, and indoor residents.
 - Keep landscape detail in the terrain path and keep regional detail textures out of per-landblock
   atlases.
 
@@ -1149,7 +1148,7 @@ fixtures.
   aggregate frustum bounds, then exact-test member nodes. Do not flatten all EnvCell nodes into one
   landblock-wide culling group.
 - Submit shell and resident ranges through the existing object material programs and pass ordering.
-- Bind environment detail to shells and the proven object/environment role to residents.
+- Bind environment detail to CellStruct shells and no detail texture to residents.
 - Keep portal aperture geometry out of visible material draws.
 - Force `BACK` culling for structured EnvCell shell ranges in flat mode. Keep authored culling for
   EnvCell residents and every other static range.
@@ -1171,7 +1170,8 @@ fixtures.
       materials preserve their authored cull mode.
 - [x] Preserve opaque, alpha-test, transparent, and additive ordering already established for
       objects.
-- [x] Exercise environment and object detail roles in a browser-visible fixture.
+- [x] Exercise environment detail on shells and the no-detail resident path in a browser-visible
+      fixture.
 - [x] Ensure malformed aperture data cannot reach a runtime “fail open” branch.
 - [x] Switch frame modes without content acquisition, resource rebuild, scene publication, or
       residency mutations.
@@ -2083,8 +2083,8 @@ npm run build
   arbitrary aperture shape, four-cell corner closure, and exterior reuse.
 - Overlap case: Explorer ambiguity plus authoritative camera trace connectivity.
 - Lifecycle: load, evict to zero resources/nodes/crossings, reload, destroy.
-- Synthetic material fixture: building/environment/object detail roles plus every established blend
-  class behind a portal mask.
+- Synthetic material fixture: building/environment detail roles, ordinary-object no-detail
+  bindings, and every established blend class behind a portal mask.
 
 Do not run the TUI. Archive-backed diagnostics and browser runs are non-interactive and opt-in.
 
@@ -2134,8 +2134,8 @@ Do not run the TUI. Archive-backed diagnostics and browser runs are non-interact
 - [x] CellStruct shell geometry, materials, apertures, containment, topology, and residents cross a
       strict versioned binary boundary.
 - [x] GfxObj and CellStruct share a focused polygon geometry primitive without conflated semantics.
-- [x] Building, environment, and object detail textures work through semantic active-region roles
-      for every supported static layer.
+- [x] Building and environment detail textures work through semantic active-region roles, while
+      ordinary-object layers retain the proven no-detail state.
 - [x] Every authored EnvCell static resident is materialized, explicitly deferred, or loudly
       unsupported.
 - [x] Cell shells and residents use landblock-space transforms and retain EnvCell scope identity.
@@ -2219,8 +2219,9 @@ These measurements can tune an implementation but cannot change the locked seman
 - CellStruct shells render all authored render polygons; only polygon emission is generalized with
   GfxObj.
 - Surface slots are signed, direct, and zero-based.
-- Detail texture roles follow render domain while source surfaces retain independent eligibility:
-  landscape, building, environment, and object.
+- Detail texture roles follow render domain rather than source-surface flags: landscape for
+  terrain, building for building shells, environment for CellStruct shells, and no detail for
+  ordinary objects.
 - Portal flags decode to an explicit authored-plane accepted side. Reciprocal crossings retain
   their own geometry and direction; reverse crossings are never synthesized.
 - EnvCell outside endpoints pair with LandblockInfo building portal claims. Their two authored
@@ -2566,15 +2567,15 @@ These measurements can tune an implementation but cannot change the locked seman
 #### Landed Shape
 
 - Replaced `ActiveRegionObjectDetailOwner` with one `ActiveRegionStaticDetailOwner` that prepares
-  building, environment, and object bindings as an all-or-nothing active-region payload.
+  building and environment bindings as an all-or-nothing active-region payload.
 - Added typed `StaticDetailRole` selection from static render domain:
   - buildings → building;
   - CellStruct shells → environment;
-  - explicit/generated objects and EnvCell residents → object.
+  - explicit/generated objects and EnvCell residents → no detail.
 - Moved detail-role selection into `ObjectMaterialPlan`. The raw `0x20000` surface flag remains on
   the source material as provenance, while `detailRole` becomes the renderer contract and part of
   stable material-binding identity.
-- Published all three prepared role textures under one active-region device owner. Replacement
+- Published both prepared role textures under one active-region device owner. Replacement
   stages the new role set before releasing the previous owner; per-landblock atlases never retain
   regional detail textures.
 - Replaced renderer inspection of raw flags plus the global building binding with one role-indexed
@@ -4278,7 +4279,9 @@ back to flat and are released by resize/destroy policy.
 - Restored retail's destination-color/inverse-source-alpha composition in the object shader:
   `base * (detail.rgb + 1 - detail.a)`.
 - Distinguished CellStruct shell geometry from objects resident inside an EnvCell. Shells consume
-  the environment role; resident objects consume the object role.
-- Made the static detail role mandatory and removed the unreachable optional-detail shader branch.
+  the environment role; resident objects consume no detail texture.
+- Kept detail selection nullable as the explicit ordinary-object domain state. Selected
+  building/environment roles remain mandatory at lookup, while the shader skips detail sampling
+  for the no-detail state.
 - Replaced flag-oriented planner tests with unflagged domain-role coverage and added shader
   composition coverage.

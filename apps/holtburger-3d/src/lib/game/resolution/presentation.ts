@@ -1,5 +1,5 @@
 import type { DatAssetId } from "../game-types";
-import { multiplyMat4, transformAABB3 } from "../math/matrices";
+import { transformAABB3 } from "../math/matrices";
 import { type AABB3, type Mat4, type Vec3 } from "../math/types";
 
 /** Stable identity for one reusable resident presentation definition. */
@@ -72,106 +72,28 @@ export type ResolvedMaterial = ResolvedMaterialFacts &
 		  }
 	);
 
-/** One part in a setup-backed presentation hierarchy. */
+/**
+ * One part of a setup-backed presentation.
+ *
+ * Retail composes every part directly against the object frame, so parts are siblings with no
+ * transform relationship to each other. Hierarchy exists only between objects, never within one.
+ */
 export interface ResolvedObjectPart {
 	readonly partIndex: number;
-	readonly parentPartIndex: number | null;
 	readonly geometry: ResolvedGeometry;
 	readonly defaultScale: Vec3;
 	readonly materials: readonly ResolvedMaterial[];
 }
 
-/**
- * Order a presentation hierarchy so every parent appears before its descendants.
- *
- * Both static baking and dynamic node installation consume this order; keeping hierarchy
- * validation here prevents their parent-before-child rules from drifting apart.
- */
-export function orderResolvedObjectParts(
-	parts: readonly ResolvedObjectPart[],
-): readonly ResolvedObjectPart[] {
-	const pending = new Map<number, ResolvedObjectPart>();
-	for (const part of parts) {
-		if (pending.has(part.partIndex)) {
-			throw new Error(
-				`Presentation contains duplicate part index ${part.partIndex}.`,
-			);
-		}
-		pending.set(part.partIndex, part);
-	}
-	for (const part of pending.values()) {
-		if (part.parentPartIndex !== null && !pending.has(part.parentPartIndex)) {
-			throw new Error(
-				`Part ${part.partIndex} references missing parent ${part.parentPartIndex}.`,
-			);
-		}
-	}
-	const ordered: ResolvedObjectPart[] = [];
-	const resolved = new Set<number>();
-	while (pending.size > 0) {
-		let progressed = false;
-		for (const [partIndex, part] of pending) {
-			if (part.parentPartIndex !== null && !resolved.has(part.parentPartIndex))
-				continue;
-			ordered.push(part);
-			resolved.add(partIndex);
-			pending.delete(partIndex);
-			progressed = true;
-		}
-		if (!progressed) {
-			throw new Error("Presentation contains a cyclic part hierarchy.");
-		}
-	}
-	return ordered;
-}
-
-/**
- * Compose one local transform per part into object-local space.
- *
- * Geometry preparation and presentation bounds share this path so hierarchy semantics cannot
- * drift between what is rendered and what is culled.
- */
-export function resolveObjectPartTransforms(
-	parts: readonly ResolvedObjectPart[],
-	localTransforms: readonly Mat4[],
-): ReadonlyMap<number, Mat4> {
-	const transforms = new Map<number, Mat4>();
-	for (const part of orderResolvedObjectParts(parts)) {
-		const localTransform = localTransforms[part.partIndex];
-		if (!localTransform) {
-			throw new Error(
-				`Presentation has no local transform for part ${part.partIndex}.`,
-			);
-		}
-		const parentTransform =
-			part.parentPartIndex === null
-				? null
-				: transforms.get(part.parentPartIndex);
-		if (part.parentPartIndex !== null && !parentTransform) {
-			throw new Error(
-				`Presentation has no transform for parent part ${part.parentPartIndex}.`,
-			);
-		}
-		transforms.set(
-			part.partIndex,
-			parentTransform
-				? multiplyMat4(parentTransform, localTransform)
-				: localTransform,
-		);
-	}
-	return transforms;
-}
-
 /** Derive conservative object-local bounds from the exact transforms used for rendering. */
 export function resolveObjectPresentationBounds(
 	parts: readonly ResolvedObjectPart[],
-	localTransforms: readonly Mat4[],
+	partTransforms: readonly Mat4[],
 ): AABB3 | null {
-	const transforms = resolveObjectPartTransforms(parts, localTransforms);
 	let bounds: AABB3 | null = null;
 	for (const part of parts) {
 		if (part.geometry.bounds === null) continue;
-		const transform = transforms.get(part.partIndex);
+		const transform = partTransforms[part.partIndex];
 		if (!transform) {
 			throw new Error(
 				`Presentation has no transform for part ${part.partIndex}.`,
@@ -182,6 +104,35 @@ export function resolveObjectPresentationBounds(
 		else bounds.union(partBounds);
 	}
 	return bounds;
+}
+
+/**
+ * Named attach point a parent object offers to child objects.
+ *
+ * Mirrors `ParentLocation` in `holtburger-common`, which mirrors ACE's enum of the same name.
+ */
+export type ParentLocation =
+	| "none"
+	| "right-hand"
+	| "left-hand"
+	| "shield"
+	| "belt"
+	| "quiver"
+	| "heraldry"
+	| "mouth"
+	| "left-weapon"
+	| "left-unarmed";
+
+/**
+ * One resolved attach point: the part that carries it and the offset frame on that part.
+ *
+ * Retail composes an attached child's frame as `parts[partIndex].frame ⊗ offset`
+ * (`CPhysicsObj::UpdateChild`, `acclient.c:308302`). `offsetTransform` is that second term.
+ */
+export interface ResolvedAttachPoint {
+	readonly location: ParentLocation;
+	readonly partIndex: number;
+	readonly offsetTransform: Mat4;
 }
 
 /** Named setup placement containing a local transform for every part. */
@@ -229,6 +180,8 @@ export interface ResolvedObjectPresentation {
 	readonly id: ResolvedPresentationId;
 	readonly sourceAssetId: DatAssetId;
 	readonly parts: readonly ResolvedObjectPart[];
+	/** Attach points this object offers to children, empty when its setup authors none. */
+	readonly holdingLocations: ReadonlyMap<ParentLocation, ResolvedAttachPoint>;
 	readonly placementPoses: ReadonlyMap<number, ResolvedPlacementPose>;
 	readonly motion: ResolvedMotionGraph | null;
 	readonly effects: ResolvedObjectEffectDefaults;

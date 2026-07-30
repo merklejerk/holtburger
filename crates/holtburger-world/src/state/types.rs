@@ -1,8 +1,8 @@
-use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
+use holtburger_common::{Guid, ParentLocation};
 use holtburger_content::SoulEmoteCatalog;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
@@ -24,6 +24,16 @@ use crate::{WorldBootstrap, WorldEvent};
 pub struct ServerTimeSync {
     pub server_time: f64,
     pub local_time: std::time::Instant,
+}
+
+/// A parent's announcement that some object hangs from one of its attach points.
+///
+/// The parent knows where the child hangs but not which pose the child adopts, so `placement`
+/// comes from the child's own description when it arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PendingChildLink {
+    pub(crate) parent: Guid,
+    pub(crate) location: ParentLocation,
 }
 
 /// The authoritative state of the game world.
@@ -57,6 +67,13 @@ pub struct WorldState {
     pub fellowship: Option<FellowshipState>,
     pub trade: Option<TradeState>,
     pub open_containers: std::collections::HashSet<Guid>,
+    /// Attachments a parent announced for children the client has not received yet, keyed by child.
+    ///
+    /// Object creation runs parent-first: retail's `CObjectMaint::SetChildren` makes placeholder
+    /// objects for children it has not seen (`acclient.c:~299700`). We keep the link instead and
+    /// apply it when the child hydrates. Bounded by entity lifecycle: an entry is consumed on the
+    /// child's arrival and dropped when its parent is removed.
+    pub(crate) pending_child_links: std::collections::HashMap<Guid, PendingChildLink>,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
     pub(crate) self_movement_capabilities_override: Option<SelfMovementCapabilities>,
 }
@@ -391,6 +408,7 @@ impl WorldState {
             fellowship: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
+            pending_child_links: std::collections::HashMap::new(),
             entity_lifecycle: EntityLifecycleStore::default(),
             self_movement_capabilities_override: None,
         }
@@ -450,6 +468,10 @@ impl WorldState {
             self.scene.remove_entity(guid, entity.position.landblock_id);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
+            // Pending links live only as long as the entities at either end of them.
+            self.pending_child_links.remove(&guid);
+            self.pending_child_links
+                .retain(|_, link| link.parent != guid);
 
             let dependent_guids: Vec<_> = self
                 .entities
@@ -457,7 +479,9 @@ impl WorldState {
                 .filter(|dependent| {
                     dependent.container_id() == Some(guid)
                         || dependent.wielder_id() == Some(guid)
-                        || dependent.physics_parent_id == Some(guid)
+                        || dependent
+                            .attachment
+                            .is_some_and(|attachment| attachment.parent == guid)
                 })
                 .map(|dependent| dependent.guid)
                 .collect();
@@ -482,8 +506,11 @@ impl WorldState {
                         detached_wielder = true;
                     }
 
-                    if dependent.physics_parent_id == Some(guid) {
-                        dependent.physics_parent_id = None;
+                    if dependent
+                        .attachment
+                        .is_some_and(|attachment| attachment.parent == guid)
+                    {
+                        dependent.attachment = None;
                         detached = true;
                     }
                 }

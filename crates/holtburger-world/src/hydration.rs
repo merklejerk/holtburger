@@ -212,12 +212,8 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
             self.dids
                 .insert(PropertyDataId::Setup, holtburger_common::Guid(v));
         }
-        if let Some(v) = odd.parent_id {
-            self.iids.insert(PropertyInstanceId::Wielder, v); // Note: Could be Container contextually, but Wielder is common for parent
-        }
-        if let Some(v) = odd.parent_loc {
-            self.ints.insert(PropertyInt::ParentLocation, v as i32);
-        }
+        // The physics parent link is not a property. It hydrates into `Entity::attachment`, which
+        // says what it is instead of guessing at `Wielder` versus `Container`.
         if let Some(v) = odd.obj_scale {
             self.floats.insert(PropertyFloat::DefaultScale, v as f64);
         }

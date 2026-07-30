@@ -314,7 +314,7 @@ function resolveResident(
 	resident: ResolvedEnvCellPresentation["residents"][number],
 ): ResolvedObjectResident {
 	return {
-		id: resident.id,
+		identity: { kind: "authored", sourceId: resident.id },
 		presentation: resident.presentation,
 		placement: resident.placement,
 		scale: resident.scale,

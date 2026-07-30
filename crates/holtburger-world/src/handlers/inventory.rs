@@ -1,4 +1,5 @@
 use crate::WorldEvent;
+use crate::attachment::PhysicsAttachment;
 use crate::book::BookData;
 use crate::entity::Entity;
 use crate::state::WorldState;
@@ -33,6 +34,16 @@ pub(crate) fn handle_message(
 
             let guid = entity.guid;
             let upsert_kind = state.upsert_entity_from_create(entity, events);
+            state.retain_announced_children(guid, data.children.as_deref(), events);
+            state.resolve_pending_child_link(guid, data.animation_frame.unwrap_or(0), events);
+            if guid != state.player.guid
+                && state
+                    .entities
+                    .get(guid)
+                    .is_some_and(|entity| entity.attachment.is_some())
+            {
+                state.delegate_attached_entity_position(guid, events);
+            }
             if state
                 .entities
                 .get(guid)
@@ -61,24 +72,31 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::ParentEvent(data) => {
+            let attachment = if data.parent_guid == Guid::NULL {
+                None
+            } else {
+                match PhysicsAttachment::from_wire(data.parent_guid, data.location, data.placement)
+                {
+                    Ok(attachment) => Some(attachment),
+                    Err(error) => {
+                        log::warn!(
+                            "ParentEvent for {:?} names an unusable attachment: {error}",
+                            data.child_guid
+                        );
+                        return false;
+                    }
+                }
+            };
             if let Some(entity) = state.entities.get_mut(data.child_guid) {
-                entity.physics_parent_id = if data.parent_guid == Guid::NULL {
-                    None
-                } else {
-                    Some(data.parent_guid)
-                };
+                entity.attachment = attachment;
             } else {
                 return false;
             }
 
-            if data.parent_guid != Guid::NULL
-                && data.child_guid != state.player.guid
-                && let Some(pos) = state.clear_entity_world_presence(data.child_guid)
-            {
-                events.push(WorldEvent::EntityMoved {
-                    guid: data.child_guid,
-                    pos,
-                });
+            // Attaching delegates the child's position to its parent rather than removing it from
+            // the world. The local player is never repositioned by an attachment it participates in.
+            if data.parent_guid != Guid::NULL && data.child_guid != state.player.guid {
+                state.delegate_attached_entity_position(data.child_guid, events);
             }
 
             let _ = state.reconcile_entity_retention(data.child_guid);

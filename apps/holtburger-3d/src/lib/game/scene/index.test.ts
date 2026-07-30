@@ -668,3 +668,267 @@ function upsertCrossing(
 	};
 	scene.upsertPortalCrossing(crossing);
 }
+
+describe("SceneGraph attachment dry run", () => {
+	// Phase 4 gate for the object attachment parity plan. These exercise the shape an attached
+	// entity will hold once `attachToPart` exists, using `createNode` to stand it up directly, so
+	// the culling and residency claims are proved against a real node rather than by reading.
+
+	it("culls a node under a parent part node through inherited residency", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode({
+			...rootInput,
+			cullingGroup: "dynamic",
+			localTransform: createTranslationMat4(new Vec3(10, 0, 0)),
+		});
+		const handPart = scene.createNode({
+			localBounds: null,
+			localTransform: createTranslationMat4(new Vec3(0, 2, 0)),
+			parentId: wielderRoot,
+		});
+		const heldItem = scene.createNode({
+			cullingGroup: "dynamic",
+			localBounds: AABB3.zero(),
+			localTransform: createTranslationMat4(new Vec3(0, 0, 1)),
+			parentId: handPart,
+		});
+
+		// The item is selected by a scope query it never declared residency for: it inherits the
+		// wielder's landblock and env cell, and its bounds reach the culling group aggregate.
+		expect(visiblePlacement(scene, heldItem)).toMatchObject({
+			envCellId: null,
+			landblockId: rootPlacement.landblockId,
+			scope: { kind: "outdoor" },
+		});
+		expect(
+			getMat4Translation(
+				scene.getResolvedPlacement(heldItem)!.localToLandblock,
+				Vec3.zero(),
+			),
+		).toEqual(new Vec3(10, 2, 1));
+	});
+
+	it("moves an attached node with its wielder without touching the node itself", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode({
+			...rootInput,
+			cullingGroup: "dynamic",
+		});
+		const handPart = scene.createNode({
+			localBounds: null,
+			localTransform: Mat4.identity(),
+			parentId: wielderRoot,
+		});
+		const heldItem = scene.createNode({
+			cullingGroup: "dynamic",
+			localBounds: AABB3.zero(),
+			localTransform: Mat4.identity(),
+			parentId: handPart,
+		});
+
+		scene.updateRootPlacement(wielderRoot, {
+			...rootPlacement,
+			localTransform: createTranslationMat4(new Vec3(4, 5, 6)),
+		});
+
+		expect(
+			getMat4Translation(
+				scene.getResolvedPlacement(heldItem)!.localToLandblock,
+				Vec3.zero(),
+			),
+		).toEqual(new Vec3(4, 5, 6));
+		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(heldItem);
+	});
+
+	it("keeps an attached node in its own culling group rather than its wielder's", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode({
+			...rootInput,
+			cullingGroup: "dynamic",
+		});
+		const handPart = scene.createNode({
+			localBounds: null,
+			localTransform: Mat4.identity(),
+			parentId: wielderRoot,
+		});
+		const heldItem = scene.createNode({
+			cullingGroup: "held-item",
+			localBounds: AABB3.zero(),
+			localTransform: Mat4.identity(),
+			parentId: handPart,
+		});
+
+		expect(scene.getCullingGroup(heldItem)).toBe("held-item");
+		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(heldItem);
+	});
+
+	it("requires a leaf before a node can leave the graph, so attach must move rather than recreate", () => {
+		const scene = new SceneGraph();
+		const itemRoot = createBoundedRoot(scene, rootPlacement.landblockId, null);
+		const itemPart = scene.createNode({
+			...boundedChildFields,
+			parentId: itemRoot,
+		});
+
+		expect(() => scene.destroyNode(itemRoot)).toThrow("still has children");
+		scene.destroyNode(itemPart);
+		scene.destroyNode(itemRoot);
+	});
+});
+
+describe("SceneGraph attach and detach transitions", () => {
+	it("moves a root under a part node and inherits its residency", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode({
+			...rootInput,
+			localTransform: createTranslationMat4(new Vec3(10, 0, 0)),
+		});
+		const handPart = scene.createNode({
+			localBounds: null,
+			localTransform: createTranslationMat4(new Vec3(0, 2, 0)),
+			parentId: wielderRoot,
+		});
+		const item = createBoundedRoot(scene, "0x0002ffff", null);
+
+		scene.attachToPart(
+			item,
+			handPart,
+			createTranslationMat4(new Vec3(0, 0, 1)),
+		);
+
+		expect(scene.getNode(item)).toMatchObject({ parentId: handPart });
+		expect(scene.getResolvedPlacement(item)).toMatchObject({
+			envCellId: null,
+			landblockId: rootPlacement.landblockId,
+		});
+		expect(
+			getMat4Translation(
+				scene.getResolvedPlacement(item)!.localToLandblock,
+				Vec3.zero(),
+			),
+		).toEqual(new Vec3(10, 2, 1));
+		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(item);
+	});
+
+	it("restores independent residency on detach", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode(rootInput);
+		const handPart = scene.createNode({
+			localBounds: null,
+			localTransform: Mat4.identity(),
+			parentId: wielderRoot,
+		});
+		const item = createBoundedRoot(scene, rootPlacement.landblockId, null);
+		scene.attachToPart(item, handPart, Mat4.identity());
+
+		scene.detachToPlacement(item, {
+			envCellId: null,
+			landblockId: "0x0002ffff",
+			localTransform: createTranslationMat4(new Vec3(7, 8, 9)),
+		});
+
+		expect(scene.getNode(item)).toMatchObject({
+			envCellId: null,
+			landblockId: "0x0002ffff",
+			parentId: null,
+		});
+		expect(scene.getResolvedPlacement(item)).toMatchObject({
+			landblockId: "0x0002ffff",
+		});
+		// The wielder no longer owns it, so its transform no longer answers to the wielder's.
+		scene.updateRootPlacement(wielderRoot, {
+			...rootPlacement,
+			localTransform: createTranslationMat4(new Vec3(100, 0, 0)),
+		});
+		expect(
+			getMat4Translation(
+				scene.getResolvedPlacement(item)!.localToLandblock,
+				Vec3.zero(),
+			),
+		).toEqual(new Vec3(7, 8, 9));
+	});
+
+	it("re-attaches to a different attach point without recreating the node", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode(rootInput);
+		const rightHand = scene.createNode({
+			localBounds: null,
+			localTransform: createTranslationMat4(new Vec3(1, 0, 0)),
+			parentId: wielderRoot,
+		});
+		const leftHand = scene.createNode({
+			localBounds: null,
+			localTransform: createTranslationMat4(new Vec3(-1, 0, 0)),
+			parentId: wielderRoot,
+		});
+		const item = createBoundedRoot(scene, rootPlacement.landblockId, null);
+
+		scene.attachToPart(item, rightHand, Mat4.identity());
+		scene.detachToPlacement(item, rootPlacement);
+		scene.attachToPart(item, leftHand, Mat4.identity());
+
+		expect(scene.getNode(item)).toMatchObject({ parentId: leftHand });
+		expect(
+			getMat4Translation(
+				scene.getResolvedPlacement(item)!.localToLandblock,
+				Vec3.zero(),
+			),
+		).toEqual(new Vec3(-1, 0, 0));
+	});
+
+	it("refuses transitions that would break the root and child arms", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode(rootInput);
+		const handPart = scene.createNode({
+			localBounds: null,
+			localTransform: Mat4.identity(),
+			parentId: wielderRoot,
+		});
+		const item = createBoundedRoot(scene, rootPlacement.landblockId, null);
+
+		expect(() => scene.detachToPlacement(item, rootPlacement)).toThrow(
+			"is not attached",
+		);
+		scene.attachToPart(item, handPart, Mat4.identity());
+		expect(() => scene.attachToPart(item, handPart, Mat4.identity())).toThrow(
+			"is already attached",
+		);
+	});
+
+	it("refuses to attach a node to its own descendant", () => {
+		const scene = new SceneGraph();
+		const root = createBoundedRoot(scene, rootPlacement.landblockId, null);
+		const descendant = scene.createNode({
+			...boundedChildFields,
+			parentId: root,
+		});
+
+		expect(() => scene.attachToPart(root, descendant, Mat4.identity())).toThrow(
+			"its own descendant",
+		);
+	});
+
+	it("keeps an attached subtree indexed under its new residency", () => {
+		const scene = new SceneGraph();
+		const wielderRoot = scene.createNode(rootInput);
+		const handPart = scene.createNode({
+			localBounds: null,
+			localTransform: Mat4.identity(),
+			parentId: wielderRoot,
+		});
+		const item = createBoundedRoot(scene, "0x0002ffff", null);
+		const itemPart = scene.createNode({
+			...boundedChildFields,
+			parentId: item,
+		});
+
+		scene.attachToPart(item, handPart, Mat4.identity());
+
+		const entries = queryScopes(scene, { kind: "outdoor" }).entries;
+		expect(entries).toContain(item);
+		expect(entries).toContain(itemPart);
+		expect(scene.getResolvedPlacement(itemPart)).toMatchObject({
+			landblockId: rootPlacement.landblockId,
+		});
+	});
+});

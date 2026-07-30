@@ -1,3 +1,4 @@
+use crate::attachment::PhysicsAttachment;
 use crate::book::BookData;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
@@ -257,7 +258,8 @@ pub struct Entity {
     pub weenie_flags: WeenieHeaderFlag,
     pub weenie_flags2: WeenieHeaderFlag2,
     pub physics_state: PhysicsState,
-    pub physics_parent_id: Option<Guid>,
+    /// Set while another object owns this entity's position. See [`PhysicsAttachment`].
+    pub attachment: Option<PhysicsAttachment>,
     pub autonomous_movement: bool,
     pub motion_snapshot: Option<EntityMotionSnapshot>,
     pub health_fraction: Option<f32>,
@@ -420,7 +422,22 @@ impl Entity {
         );
 
         self.physics_state = data.physics_state;
-        self.physics_parent_id = data.parent_id;
+        // The wire carries placement in the ANIMFRAME slot, defaulting to 0 when the flag is
+        // absent, exactly as `PhysicsDesc` initializes `animframe_id` (`acclient.c:318475`).
+        self.attachment = data.parent.and_then(|parent| {
+            PhysicsAttachment::from_wire(
+                parent.id,
+                parent.location_id,
+                data.animation_frame.unwrap_or(0),
+            )
+            .inspect_err(|error| {
+                log::warn!(
+                    "Entity {:?} description names an unusable attachment: {error}",
+                    self.guid
+                )
+            })
+            .ok()
+        });
 
         if let Some(v) = data.velocity {
             self.velocity = v;
@@ -475,7 +492,7 @@ impl Entity {
             weenie_flags2: WeenieHeaderFlag2::empty(),
 
             physics_state: PhysicsState::NONE,
-            physics_parent_id: None,
+            attachment: None,
             autonomous_movement: false,
             motion_snapshot: None,
             health_fraction: None,

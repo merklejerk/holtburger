@@ -174,6 +174,58 @@ export class SceneGraph {
 		this.#syncSpatialSubtree(node.id);
 	}
 
+	/**
+	 * Move a root node under another object's node, so that object owns its position.
+	 *
+	 * This is object-to-object attachment, the only hierarchy retail actually has. It takes an
+	 * already-resolved target node and offset transform rather than a named attach point, because
+	 * the same mechanism carries wielded items, particle emitters, and scripts
+	 * (`ParticleEmitter::SetParenting`, `acclient.c:317404`); only wielding derives its target from a
+	 * holding-location lookup, and that lookup belongs to the caller.
+	 *
+	 * The node crosses from the root arm of the node union to the child arm, surrendering its own
+	 * residency and inheriting its new ancestor's. Detaching requires a placement precisely because
+	 * that residency is gone rather than remembered.
+	 */
+	attachToPart(
+		nodeId: SceneNodeId,
+		parentNodeId: SceneNodeId,
+		localTransform: Mat4,
+	): void {
+		const node = this.#requireNode(nodeId);
+		if (node.parentId !== null) {
+			throw new Error(`Scene node ${nodeId} is already attached.`);
+		}
+		this.#requireNode(parentNodeId);
+		if (this.#isSelfOrDescendant(parentNodeId, nodeId)) {
+			throw new Error(
+				`Cannot attach scene node ${nodeId} to its own descendant ${parentNodeId}.`,
+			);
+		}
+		this.#nodes.set(nodeId, {
+			...carriedNodeFields(node, localTransform),
+			parentId: parentNodeId,
+		});
+		this.#requireNode(parentNodeId).children.add(nodeId);
+		this.#syncSpatialSubtree(nodeId);
+	}
+
+	/** Return an attached node to the world under its own residency. */
+	detachToPlacement(nodeId: SceneNodeId, placement: ScenePlacement): void {
+		const node = this.#requireNode(nodeId);
+		if (node.parentId === null) {
+			throw new Error(`Scene node ${nodeId} is not attached.`);
+		}
+		this.#requireNode(node.parentId).children.delete(nodeId);
+		this.#nodes.set(nodeId, {
+			...carriedNodeFields(node, placement.localTransform),
+			envCellId: placement.envCellId,
+			landblockId: placement.landblockId,
+			parentId: null,
+		});
+		this.#syncSpatialSubtree(nodeId);
+	}
+
 	updateLocalTransform(nodeId: SceneNodeId, transform: Mat4): void {
 		const node = this.#requireNode(nodeId);
 		if (node.parentId === null) {
@@ -508,6 +560,19 @@ export class SceneGraph {
 		};
 	}
 
+	/** Guard the acyclic invariant `#resolvePlacement`'s ancestor walk depends on. */
+	#isSelfOrDescendant(
+		candidateId: SceneNodeId,
+		ancestorId: SceneNodeId,
+	): boolean {
+		let node = this.#requireNode(candidateId);
+		while (true) {
+			if (node.id === ancestorId) return true;
+			if (node.parentId === null) return false;
+			node = this.#requireNode(node.parentId);
+		}
+	}
+
 	#requireNode(nodeId: SceneNodeId): SceneNodeRecord {
 		const node = this.#nodes.get(nodeId);
 		if (!node) {
@@ -732,6 +797,22 @@ function createSceneNodeRecord(
 	return {
 		...fields,
 		parentId: input.parentId,
+	};
+}
+
+/**
+ * Fields that survive a node moving between arms of the union.
+ *
+ * Identity, children, bounds, and culling group belong to the node; residency belongs to the arm.
+ * Rebuilding the record rather than mutating it is what keeps the arms enforced by construction.
+ */
+function carriedNodeFields(node: SceneNodeRecord, localTransform: Mat4) {
+	return {
+		children: node.children,
+		cullingGroup: node.cullingGroup,
+		id: node.id,
+		localBounds: node.localBounds,
+		localTransform: node.localTransform.copy(localTransform),
 	};
 }
 

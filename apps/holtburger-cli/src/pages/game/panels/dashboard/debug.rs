@@ -62,11 +62,12 @@ pub fn get_debug_info(
                 class
             )));
 
-            if let Some(parent_id) = e.physics_parent_id {
-                let parent_name = name_lookup(parent_id).unwrap_or_else(|| "Unknown".to_string());
+            if let Some(attachment) = e.attachment {
+                let parent_name =
+                    name_lookup(attachment.parent).unwrap_or_else(|| "Unknown".to_string());
                 lines.push(Line::from(format!(
-                    "Phys Parent: {:08X} ({})",
-                    parent_id, parent_name
+                    "Attached To: {:08X} ({}) at {}",
+                    attachment.parent, parent_name, attachment.location
                 )));
             }
 
@@ -289,7 +290,7 @@ pub fn get_debug_info(
                 || e.stable_id().is_some()
                 || e.petable_id().is_some()
                 || e.csetup_id().is_some()
-                || e.physics_parent_id.is_some()
+                || e.attachment.is_some()
                 || e.default_script_id().is_some()
                 || e.autonomous_movement
             {
@@ -306,8 +307,11 @@ pub fn get_debug_info(
                 if let Some(v) = e.csetup_id() {
                     lines.push(Line::from(format!("  CSetup:    0x{:08X}", v.0)));
                 }
-                if let Some(v) = e.physics_parent_id {
-                    lines.push(Line::from(format!("  PhysParentId: 0x{:08X}", v.0)));
+                if let Some(attachment) = e.attachment {
+                    lines.push(Line::from(format!(
+                        "  Attachment: 0x{:08X} {} / {}",
+                        attachment.parent.0, attachment.location, attachment.placement
+                    )));
                 }
                 if let Some(v) = e.default_script_id() {
                     lines.push(Line::from(format!(

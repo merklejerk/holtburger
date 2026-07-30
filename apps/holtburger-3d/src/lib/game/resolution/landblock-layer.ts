@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockId, WorldObjectGuid } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
 import type { ScenePlacement, SceneScope } from "../scene";
 import type {
@@ -10,15 +10,57 @@ import {
 	type OutdoorStaticLayerKind,
 } from "../runtime/scene-interest";
 import type {
+	ParentLocation,
 	ResolvedGeometry,
 	ResolvedMaterial,
 	ResolvedObjectAppearance,
 	ResolvedObjectPresentation,
 } from "./presentation";
 
+/**
+ * Another object owning this one's position, as the world resolved it.
+ *
+ * Mirrors `PhysicsAttachment` in `holtburger-world`. `placement` is the setup placement-frame key
+ * the server sent for this object, chosen independently of `location`.
+ */
+export interface ResolvedEntityAttachment {
+	readonly parent: WorldObjectGuid;
+	readonly location: ParentLocation;
+	readonly placement: number;
+}
+
+/**
+ * Who a resident is, which decides what relationships it can enter.
+ *
+ * The two arms are genuinely different populations. DAT-authored residents are placed by the
+ * landblock or cell that authored them and have no server identity at all — their content address
+ * is landblock-scoped and index-derived, so it could not name a parent in another landblock even if
+ * one existed. World objects carry a server GUID, which is global.
+ *
+ * Attachment therefore lives inside the world arm: an authored resident being attached to something
+ * is not a state this type can express. Housing hooks are not a counterexample — a hook is itself a
+ * `WorldObject` with a GUID, and hooking an item swaps the hook's own appearance rather than
+ * attaching a second object (`ACE/Source/ACE.Server/WorldObjects/Hook.cs:139-176`).
+ */
+export type ResolvedResidentIdentity =
+	| { readonly kind: "authored"; readonly sourceId: string }
+	| {
+			readonly kind: "world";
+			readonly guid: WorldObjectGuid;
+			/** Set when another object owns this one's position; its own placement is then unused. */
+			readonly attachment: ResolvedEntityAttachment | null;
+	  };
+
+/** Stable string key for resource addressing and diagnostics, derived from the identity. */
+export function residentKey(identity: ResolvedResidentIdentity): string {
+	return identity.kind === "authored"
+		? identity.sourceId
+		: `world/${identity.guid}`;
+}
+
 /** One placed object resident resolved from a layer source. */
 export interface ResolvedObjectResident {
-	readonly id: string;
+	readonly identity: ResolvedResidentIdentity;
 	readonly presentation: ResolvedObjectPresentation;
 	readonly placement: ScenePlacement;
 	readonly scale: Vec3;

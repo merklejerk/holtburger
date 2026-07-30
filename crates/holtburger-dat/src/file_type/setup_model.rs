@@ -3,8 +3,19 @@ use binrw::{
     BinRead, BinResult, BinWrite,
     io::{Read, Seek, Write},
 };
-use holtburger_common::{Sphere, Vector3};
+use holtburger_common::{ParentLocation, Placement, Sphere, Vector3};
 use std::collections::HashMap;
+
+/// Report a decode rejection at the reader's current position without losing the seek failure.
+fn decode_error<R: Seek>(reader: &mut R, message: String) -> binrw::Error {
+    match reader.stream_position() {
+        Ok(pos) => binrw::Error::Custom {
+            pos,
+            err: Box::new(message),
+        },
+        Err(error) => binrw::Error::Io(error),
+    }
+}
 
 #[derive(Debug, Clone, BinRead, BinWrite)]
 #[br(little)]
@@ -18,8 +29,13 @@ pub struct CylSphere {
 #[derive(Debug, Clone, BinRead, BinWrite)]
 #[br(little)]
 #[bw(little)]
+/// One attach point: which part of the owning setup carries it, and the offset frame on that part.
+///
+/// `part_index` indexes the setup's part array. Retail bounds-checks it against `num_parts` in
+/// `CPhysicsObj::UpdateChild` (`acclient.c:308302`) and falls back to the object frame when it is
+/// out of range, which is what makes it an index rather than an identifier.
 pub struct LocationType {
-    pub part_id: i32,
+    pub part_index: i32,
     pub frame: Frame,
 }
 
@@ -274,9 +290,12 @@ pub struct SetupModel {
     pub parts: Vec<u32>,
     pub parent_index: Vec<u32>,
     pub default_scale: Vec<Vector3>,
-    pub holding_locations: HashMap<i32, LocationType>,
+    /// Attach points this setup offers to child objects, keyed by the name a server sends.
+    pub holding_locations: HashMap<ParentLocation, LocationType>,
+    /// Authored in the file format but present in no setup in the retail archive.
     pub connection_points: HashMap<i32, LocationType>,
-    pub placement_frames: HashMap<i32, PlacementType>,
+    /// Authored poses, keyed by the name the server sends in the physics description.
+    pub placement_frames: HashMap<Placement, PlacementType>,
     pub cyl_spheres: Vec<CylSphere>,
     pub spheres: Vec<Sphere>,
     pub height: f32,
@@ -333,7 +352,16 @@ impl SetupModel {
         let mut holding_locations = HashMap::new();
         for _ in 0..num_holding {
             let key = i32::read_le(reader)?;
-            holding_locations.insert(key, LocationType::read_le(reader)?);
+            let location = u32::try_from(key)
+                .ok()
+                .and_then(ParentLocation::from_key)
+                .ok_or_else(|| {
+                    decode_error(
+                        reader,
+                        format!("SetupModel 0x{id:08X} holds an unknown attach point {key}"),
+                    )
+                })?;
+            holding_locations.insert(location, LocationType::read_le(reader)?);
         }
 
         // ConnectionPoints (Dict)
@@ -357,7 +385,16 @@ impl SetupModel {
         let mut placement_frames = HashMap::with_capacity(num_placements as usize);
         for _ in 0..num_placements as usize {
             let key = i32::read_le(reader)?;
-            placement_frames.insert(key, PlacementType::read(reader, num_parts)?);
+            let placement = u32::try_from(key)
+                .ok()
+                .and_then(Placement::from_key)
+                .ok_or_else(|| {
+                    decode_error(
+                        reader,
+                        format!("SetupModel 0x{id:08X} authors an unknown placement {key}"),
+                    )
+                })?;
+            placement_frames.insert(placement, PlacementType::read(reader, num_parts)?);
         }
 
         // CylSpheres (ACE uses a standard u32 count here, not a compressed array count)
@@ -444,11 +481,11 @@ impl SetupModel {
         }
 
         (self.holding_locations.len() as u32).write_le(writer)?;
-        let mut hold_keys: Vec<_> = self.holding_locations.keys().collect();
+        let mut hold_keys: Vec<_> = self.holding_locations.keys().copied().collect();
         hold_keys.sort();
-        for &k in hold_keys {
-            k.write_le(writer)?;
-            self.holding_locations.get(&k).unwrap().write_le(writer)?;
+        for key in hold_keys {
+            (key as i32).write_le(writer)?;
+            self.holding_locations.get(&key).unwrap().write_le(writer)?;
         }
 
         (self.connection_points.len() as u32).write_le(writer)?;
@@ -460,11 +497,11 @@ impl SetupModel {
         }
 
         (self.placement_frames.len() as i32).write_le(writer)?;
-        let mut place_keys: Vec<_> = self.placement_frames.keys().collect();
+        let mut place_keys: Vec<_> = self.placement_frames.keys().copied().collect();
         place_keys.sort();
-        for &k in place_keys {
-            k.write_le(writer)?;
-            self.placement_frames.get(&k).unwrap().write(writer)?;
+        for key in place_keys {
+            (key as i32).write_le(writer)?;
+            self.placement_frames.get(&key).unwrap().write(writer)?;
         }
 
         (self.cyl_spheres.len() as u32).write_le(writer)?;

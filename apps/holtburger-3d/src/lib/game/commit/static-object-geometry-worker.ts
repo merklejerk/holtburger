@@ -3,10 +3,11 @@ import {
 	staticObjectDetailRoleForSource,
 	type StaticDetailRole,
 } from "../resolution/static-detail-role";
-import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import {
-	orderResolvedObjectParts,
-	resolveObjectPartTransforms,
+	residentKey,
+	type ResolvedStaticObjectLayerSource,
+} from "../resolution/landblock-layer";
+import {
 	type ResolvedGeometry,
 	type ResolvedObjectPart,
 } from "../resolution/presentation";
@@ -299,12 +300,16 @@ function prepareStaticSource(
 	const sourceMaterialSlotIds = new Set<string>();
 	for (const resident of source.staticResidents) {
 		const residentScale = createScaleMat4(resident.scale);
-		const partTransforms = createPartTransforms(resident);
-		for (const part of orderResolvedObjectParts(resident.presentation.parts)) {
-			const partTransform = partTransforms.get(part.partIndex);
+		const defaultPose = resident.presentation.placementPoses.get(0);
+		if (!defaultPose)
+			throw new Error(
+				`Resident ${residentKey(resident.identity)} has no default placement pose.`,
+			);
+		for (const part of resident.presentation.parts) {
+			const partTransform = defaultPose.partTransforms[part.partIndex];
 			if (!partTransform) {
 				throw new Error(
-					`Resident ${resident.id} has no default transform for part ${part.partIndex}.`,
+					`Resident ${residentKey(resident.identity)} has no default transform for part ${part.partIndex}.`,
 				);
 			}
 			const sourceToLandblock = multiplyMat4(
@@ -327,7 +332,7 @@ function prepareStaticSource(
 				});
 				contributions.push(contribution);
 				sourceRangeIds.add(
-					`${resident.id}/part:${part.partIndex}/${contribution.bindingId}`,
+					`${residentKey(resident.identity)}/part:${part.partIndex}/${contribution.bindingId}`,
 				);
 				const materialSlot = part.geometry.materialSlotIndices[triangle];
 				if (materialSlot === undefined) {
@@ -336,7 +341,7 @@ function prepareStaticSource(
 					);
 				}
 				sourceMaterialSlotIds.add(
-					`${resident.id}/part:${part.partIndex}/material:${materialSlot}`,
+					`${residentKey(resident.identity)}/part:${part.partIndex}/material:${materialSlot}`,
 				);
 			}
 			parts.push({
@@ -344,7 +349,7 @@ function prepareStaticSource(
 				geometryId: part.geometry.id,
 				instanceAppearanceSupported: resident.appearance === null,
 				partIndex: part.partIndex,
-				residentId: resident.id,
+				residentId: residentKey(resident.identity),
 				sourceToLandblock,
 			});
 		}
@@ -844,18 +849,6 @@ function transformTriangleContribution(
 				? `${residentId}/part:${partIndex}/${source.bindingId}`
 				: null,
 	};
-}
-
-function createPartTransforms(
-	resident: ResolvedStaticObjectLayerSource["staticResidents"][number],
-): ReadonlyMap<number, Mat4> {
-	const pose = resident.presentation.placementPoses.get(0);
-	if (!pose)
-		throw new Error(`Resident ${resident.id} has no default placement pose.`);
-	return resolveObjectPartTransforms(
-		resident.presentation.parts,
-		pose.partTransforms,
-	);
 }
 
 function compareGroups(

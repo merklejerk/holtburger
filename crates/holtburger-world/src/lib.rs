@@ -8,6 +8,7 @@
 //!   narrow state mutations plus [`WorldEvent`] emission.
 
 pub mod assessment;
+pub mod attachment;
 pub mod book;
 pub mod bootstrap;
 pub mod context;
@@ -28,6 +29,7 @@ pub mod stats;
 pub mod vendor;
 
 pub use self::state::WorldState;
+pub use attachment::{AttachmentError, PhysicsAttachment};
 pub use bootstrap::WorldBootstrap;
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{

@@ -61,7 +61,7 @@ function resident(
 ): ResolvedObjectResident {
 	return {
 		appearance: null,
-		id: `synthetic-blended:${index}`,
+		identity: { kind: "authored", sourceId: `synthetic-blended:${index}` },
 		localBounds: LOCAL_BOUNDS,
 		placement: {
 			envCellId: null,
@@ -91,10 +91,10 @@ function presentation(
 				defaultScale: new Vec3(1, 1, 1),
 				geometry: triangleGeometry(index),
 				materials: [material(flags, index)],
-				parentPartIndex: null,
 				partIndex: 0,
 			},
 		],
+		holdingLocations: new Map(),
 		placementPoses: new Map([
 			[0, { partTransforms: [Mat4.identity()], placementId: 0 }],
 		]),

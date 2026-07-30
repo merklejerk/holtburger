@@ -2290,6 +2290,7 @@ dependencies = [
  "bitflags 2.11.0",
  "byteorder",
  "serde",
+ "serde_json",
  "strum 0.28.0",
  "strum_macros 0.28.0",
 ]

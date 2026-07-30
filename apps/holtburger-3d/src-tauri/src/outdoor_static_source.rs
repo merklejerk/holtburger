@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
+use holtburger_common::Placement;
 use holtburger_content::{ResolvedMaterialRecipe, ResolvedMaterialSource};
 use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
 use serde::Serialize;
@@ -118,7 +119,6 @@ impl OutdoorStaticSourceClosure {
             let material_ids = self.add_materials(runtime, &surface_ids).await?;
             parts.push(json!({
                 "partIndex": part.part_index,
-                "parentPartIndex": parent_part_index(&setup_model.parent_index, part.part_index),
                 "geometryId": geometry_id,
                 "defaultScale": setup_model.default_scale.get(part.part_index).map(ac_vec3_json).unwrap_or_else(unit_vec3_json),
                 "defaultPlacement": default_frames.and_then(|frames| frames.get(part.part_index)).map(frame_json),
@@ -131,6 +131,7 @@ impl OutdoorStaticSourceClosure {
             "kind": "setup-model",
             "sourceAssetId": id,
             "parts": parts,
+            "holdingLocations": setup_holding_locations(&setup_model)?,
             "defaultAnimationId": setup_model.default_animation.map(dat_id),
             "defaultMotionTableId": setup_model.default_motion_table.map(dat_id),
             "defaultScriptId": setup_model.default_script.map(dat_id),
@@ -450,13 +451,46 @@ fn render_surface_format_name(format: holtburger_dat::file_type::PixelFormatId) 
     }
 }
 
+/// Serialize the attach points a setup offers to child objects, ordered for stable output.
+///
+/// Retail treats an out-of-range attach part index as "use the object frame"
+/// (`CPhysicsObj::UpdateChild`, `acclient.c:308302`). No setup in the retail archive relies on that
+/// path, so an out-of-range index here means the source or the decode is wrong, not that a fallback
+/// is wanted.
+fn setup_holding_locations(setup_model: &holtburger_dat::file_type::SetupModel) -> Result<Value> {
+    let mut locations: Vec<_> = setup_model.holding_locations.iter().collect();
+    locations.sort_by_key(|(location, _)| **location);
+    locations
+        .into_iter()
+        .map(|(location, attach)| {
+            let part_index = usize::try_from(attach.part_index)
+                .ok()
+                .filter(|index| *index < setup_model.parts.len())
+                .with_context(|| {
+                    format!(
+                        "SetupModel 0x{:08X} attach point {location} names part {} of {}",
+                        setup_model.id,
+                        attach.part_index,
+                        setup_model.parts.len()
+                    )
+                })?;
+            Ok(json!({
+                "location": location,
+                "partIndex": part_index,
+                "frame": frame_json(&attach.frame),
+            }))
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Value::from)
+}
+
 fn select_setup_default_frames(
     setup_model: &holtburger_dat::file_type::SetupModel,
 ) -> Option<&[holtburger_dat::graphics::Frame]> {
     setup_model
         .placement_frames
-        .get(&0x65)
-        .or_else(|| setup_model.placement_frames.get(&0))
+        .get(&Placement::Resting)
+        .or_else(|| setup_model.placement_frames.get(&Placement::Default))
         .or_else(|| {
             setup_model
                 .placement_frames
@@ -465,16 +499,6 @@ fn select_setup_default_frames(
                 .map(|(_, placement)| placement)
         })
         .map(|placement| placement.anim_frame.frames.as_slice())
-}
-
-/// Project the DAT root conventions out of the typed object hierarchy before serialization.
-///
-/// Setup models use both `0xFFFFFFFF` and a self-parent index to identify root parts.
-fn parent_part_index(parent_indices: &[u32], part_index: usize) -> Option<u32> {
-    parent_indices
-        .get(part_index)
-        .copied()
-        .filter(|parent_index| *parent_index != u32::MAX && *parent_index as usize != part_index)
 }
 
 pub(crate) fn frame_json(frame: &holtburger_dat::graphics::Frame) -> Value {
@@ -526,21 +550,4 @@ pub(crate) fn serialize_outdoor_static_record_binary(
     bytes.extend(manifest_bytes);
     bytes.extend(section_bytes);
     Ok(bytes)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parent_part_index;
-
-    #[test]
-    fn root_parent_sentinel_is_not_serialized_as_a_part_reference() {
-        assert_eq!(parent_part_index(&[u32::MAX], 0), None);
-        assert_eq!(parent_part_index(&[u32::MAX, 0], 1), Some(0));
-    }
-
-    #[test]
-    fn self_parent_root_is_not_serialized_as_a_part_reference() {
-        assert_eq!(parent_part_index(&[1, 1], 0), Some(1));
-        assert_eq!(parent_part_index(&[1, 1], 1), None);
-    }
 }

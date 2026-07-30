@@ -1,4 +1,7 @@
-import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
+import {
+	residentKey,
+	type ResolvedStaticObjectLayerSource,
+} from "../resolution/landblock-layer";
 import { planObjectMaterial } from "../resolution/object-material-planner";
 import { staticObjectDetailRoleForSource } from "../resolution/static-detail-role";
 import { type AssetTextureFact, TextureWrapMode } from "../textures/types";
@@ -19,7 +22,7 @@ export function collectStaticObjectTextureDependencies(
 				const material = part.materials[slot];
 				if (!material) {
 					throw new Error(
-						`Static resident ${resident.id} part ${part.partIndex} triangle ${triangle} has no material slot ${slot}.`,
+						`Static resident ${residentKey(resident.identity)} part ${part.partIndex} triangle ${triangle} has no material slot ${slot}.`,
 					);
 				}
 				const plan = planObjectMaterial(

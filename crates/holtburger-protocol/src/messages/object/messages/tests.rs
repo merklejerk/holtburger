@@ -126,8 +126,10 @@ fn test_object_description_data_parity_complex() {
         mtable_id: Some(0x09000001),
         stable_id: Some(0x20000001),
         csetup_id: Some(0x02001111),
-        parent_id: Some(Guid(0x20000001)),
-        parent_loc: Some(1),
+        parent: Some(PhysicsDescParent {
+            id: Guid(0x20000001),
+            location_id: 1,
+        }),
         obj_scale: Some(1.5),
         default_script_id: Some(0x0F000001),
         default_script_intensity: Some(0.5),

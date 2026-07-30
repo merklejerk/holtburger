@@ -1,4 +1,5 @@
 use super::*;
+use crate::attachment::PhysicsAttachment;
 use crate::context::WorldContextExt;
 use crate::entity::EntityPositionSyncOutcome;
 use crate::spatial::{
@@ -6,12 +7,15 @@ use crate::spatial::{
     SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
     SpatialSamplingConfig,
 };
+use crate::state::types::PendingChildLink;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::{ParentLocation, Placement};
 use holtburger_protocol::messages::movement::{
     PositionPack, PositionType, ServerAutonomousPositionData, UpdatePositionFlag,
 };
+use holtburger_protocol::messages::object::messages::description::PhysicsChildData;
 use std::time::Instant;
 
 impl WorldState {
@@ -847,6 +851,140 @@ impl WorldState {
         }
     }
 
+    /// Record the children a parent announced, applying each one that has already arrived.
+    ///
+    /// A parent may name children the client has not received yet. Retail answers that with
+    /// placeholder objects (`CObjectMaint::SetChildren`); we keep the link and apply it on arrival,
+    /// which avoids a second object lifetime authority alongside the entity store.
+    pub(crate) fn retain_announced_children(
+        &mut self,
+        parent: Guid,
+        children: Option<&[PhysicsChildData]>,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let Some(children) = children else {
+            return;
+        };
+        for child in children {
+            let Some(location) = ParentLocation::from_key(child.location_id) else {
+                log::warn!(
+                    "Object {parent:?} announced child {:?} at unknown attach point {}",
+                    child.guid,
+                    child.location_id
+                );
+                continue;
+            };
+            let link = PendingChildLink { parent, location };
+
+            // A child that has already arrived is attached now; one that has not keeps its link
+            // until it does. Its own description is the authority on which pose it holds, so an
+            // already-attached child keeps its reported placement.
+            let Some(existing) = self.entities.get(child.guid) else {
+                self.pending_child_links.insert(child.guid, link);
+                continue;
+            };
+            let placement = existing
+                .attachment
+                .map_or(Placement::Default, |attachment| attachment.placement);
+            self.attach_child_to(child.guid, link, placement, events);
+        }
+    }
+
+    /// Apply an announcement that arrived before its child did.
+    ///
+    /// The child's own description wins when it names an attachment: it carries both the attach
+    /// point and the pose, where the announcement carries only the attach point.
+    pub(crate) fn resolve_pending_child_link(
+        &mut self,
+        guid: Guid,
+        placement_key: u32,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let Some(link) = self.pending_child_links.remove(&guid) else {
+            return;
+        };
+        if self
+            .entities
+            .get(guid)
+            .is_none_or(|entity| entity.attachment.is_some())
+        {
+            return;
+        }
+        let Some(placement) = Placement::from_key(placement_key) else {
+            log::warn!("Child {guid:?} arrived with unknown placement {placement_key}");
+            return;
+        };
+        self.attach_child_to(guid, link, placement, events);
+    }
+
+    fn attach_child_to(
+        &mut self,
+        guid: Guid,
+        link: PendingChildLink,
+        placement: Placement,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let Some(entity) = self.entities.get_mut(guid) else {
+            return;
+        };
+        entity.attachment = Some(PhysicsAttachment {
+            parent: link.parent,
+            location: link.location,
+            placement,
+        });
+        if guid != self.player.guid {
+            self.delegate_attached_entity_position(guid, events);
+        }
+        let _ = self.reconcile_entity_retention(guid);
+    }
+
+    /// Give an attached entity the position of the object that owns it.
+    ///
+    /// Attachment delegates position; it does not erase an object from the world. Retail keeps an
+    /// attached child in the world and recomputes its frame from the parent
+    /// (`CPhysicsObj::UpdateChild`, `acclient.c:308302`), and ACE does the coarse equivalent by
+    /// assigning the wielder's location to the item (`Creature_Equipment.cs`, `TrySetChild`).
+    ///
+    /// World stores only that coarse result. Resolving the attach point to a part frame is the
+    /// renderer's job, which is why nothing here reads setup data.
+    ///
+    /// Returns false when the parent is not hydrated: there is no position to delegate yet, and
+    /// inventing one would be worse than leaving the child where it was.
+    pub(crate) fn delegate_attached_entity_position(
+        &mut self,
+        guid: Guid,
+        events: &mut Vec<WorldEvent>,
+    ) -> bool {
+        let Some(parent) = self
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.attachment)
+            .map(|attachment| attachment.parent)
+        else {
+            return false;
+        };
+        let Some(parent_position) = self.entities.get(parent).map(|entity| entity.position) else {
+            return false;
+        };
+        let Some(entity) = self.entities.get_mut(guid) else {
+            return false;
+        };
+
+        let old_lb = entity.position.landblock_id;
+        entity.position = parent_position;
+        // An attached object does not simulate: its motion is entirely its parent's.
+        self.retire_authoritative_body_for_guid(guid);
+        if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+            Self::emit_runtime_body_removed(events, body_id);
+        }
+        self.scene.update_entity(guid, old_lb, parent_position);
+        events.push(WorldEvent::EntityMoved {
+            guid,
+            pos: parent_position,
+        });
+        true
+    }
+
     fn emit_entity_world_presence_cleared(&mut self, guid: Guid, events: &mut Vec<WorldEvent>) {
         if let Some(pos) = self.clear_entity_world_presence(guid) {
             if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
@@ -1027,7 +1165,7 @@ impl WorldState {
                 }
                 PropertyInstanceId::Wielder => {
                     if value == Guid::NULL {
-                        entity.physics_parent_id = None;
+                        entity.attachment = None;
                     }
 
                     if value != Guid::NULL && target_guid != self.player.guid {

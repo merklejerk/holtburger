@@ -33,7 +33,7 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 		staticResidents: [
 			{
 				appearance: null,
-				id: "explicit:0",
+				identity: { kind: "authored", sourceId: "explicit:0" },
 				localBounds: null,
 				placement: {
 					envCellId: null,
@@ -72,10 +72,10 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 								indexedMaterial("0x05000001", "0x04000001"),
 								indexedMaterial("0x05000002", "0x04000002"),
 							],
-							parentPartIndex: null,
 							partIndex: 0,
 						},
 					],
+					holdingLocations: new Map(),
 					placementPoses: new Map(),
 					selectionBounds: null,
 					sortingBounds: null,

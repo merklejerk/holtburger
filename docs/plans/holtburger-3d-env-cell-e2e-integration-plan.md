@@ -2911,10 +2911,10 @@ inspect_interior_projection -- dats/assets.hba` projected:
   SceneGraph's global ownership invariant would hide future cross-layer aliasing instead of fixing
   source-local names.
 - Retail `CPartArray::UpdateParts` combines each current animation frame directly with the owning
-  object frame and does not traverse `parent_index`. The current renderer's accumulated setup-part
-  hierarchy predates this phase and is retained to avoid an unrelated transform-model cutover.
-  Before animation parity work relies on parent indices, verify their actual retail purpose and
-  revisit whether static/default frames should be accumulated at all.
+  object frame and does not traverse `parent_index`. The accumulated setup-part hierarchy was
+  retained here to avoid an unrelated transform-model cutover.
+  Closed on 2026-07-30 by Phase 1 of the object attachment parity plan: setup parts are now composed
+  flat against the object frame, and `parent_index` is not serialized past the DAT decoder.
 
 ### 2026-07-27 — Phase 6 EnvCell Resident Placement Correction
 
@@ -2965,9 +2965,10 @@ inspect_interior_projection -- dats/assets.hba` projected:
   the current terminology, phase contract, and this correction record the proven semantics.
 - EnvCell identity remains scope/residency metadata rather than SceneGraph transform parenting,
   preserving the agreed landblock-space scene model.
-- Setup-part `parent_index` transform semantics are an independent open parity question. This
-  correction removes the erroneous whole-resident displacement without changing multipart
-  presentation behavior.
+- Setup-part `parent_index` transform semantics were an independent open parity question at the
+  time. This correction removed the erroneous whole-resident displacement without changing
+  multipart presentation behavior. The parity question is closed on 2026-07-30: parts compose flat
+  against the object frame.
 
 ### 2026-07-27 — Phase 7 Complete
 

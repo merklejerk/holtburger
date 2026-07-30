@@ -31,6 +31,8 @@ import type { StaticObjectMaterialBinding } from "./artifacts";
 import { resolveStaticTriangleMaterial } from "./static-material-binding";
 import { collectStaticObjectTextureDependencies } from "./static-object-texture-inputs";
 
+const SURFACE_BASE1_TEXTURE_MASK = 0x06;
+
 /** One contiguous CellStruct shell range with a complete renderer-neutral binding. */
 interface EnvCellShellMaterialRange {
 	readonly indexStart: number;
@@ -244,6 +246,7 @@ function planShellMaterialRanges(
 	const ranges: Array<
 		EnvCellShellMaterialRange & { readonly bindingId: string }
 	> = [];
+	let renderableIndexCount = 0;
 	for (
 		let triangle = 0;
 		triangle < geometry.materialSlotIndices.length;
@@ -256,6 +259,15 @@ function planShellMaterialRanges(
 			sourceLabel: `EnvCell ${cell.id} shell`,
 			triangle,
 		});
+		// Retail keeps portal polygons in CellStruct geometry but excludes EnvCell surfaces
+		// without a base image or clip map from both its immediate and built-mesh draw paths.
+		if (
+			(resolved.binding.source.rawSurfaceFlags & SURFACE_BASE1_TEXTURE_MASK) ===
+			0
+		) {
+			continue;
+		}
+		renderableIndexCount += 3;
 		addAssetTextureFacts(
 			textureRequirements,
 			resolved.textureRequirements,
@@ -284,9 +296,11 @@ function planShellMaterialRanges(
 	if (
 		geometry.materialSlotIndices.length * 3 !== geometry.indices.length ||
 		ranges.reduce((count, range) => count + range.indexCount, 0) !==
-			geometry.indices.length
+			renderableIndexCount
 	) {
-		throw new Error(`EnvCell ${cell.id} shell material ranges are incomplete.`);
+		throw new Error(
+			`EnvCell ${cell.id} shell material range accounting failed.`,
+		);
 	}
 	return ranges.map((range) => ({
 		indexStart: range.indexStart,

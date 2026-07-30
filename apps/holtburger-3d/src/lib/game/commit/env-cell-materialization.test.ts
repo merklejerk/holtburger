@@ -162,6 +162,39 @@ describe("planEnvCellMaterialization", () => {
 		).toThrow(/material count does not match/);
 	});
 
+	it("omits retail no-texture surfaces from EnvCell shell draw ranges", () => {
+		const sourceCell = cell("0x00010100", Mat4.identity(), []);
+		const shellGeometry = twoTriangleGeometry();
+		const plan = planEnvCellMaterialization(
+			layer([
+				{
+					...sourceCell,
+					structure: {
+						...sourceCell.structure,
+						geometry: shellGeometry,
+						surfaceSlotCount: 2,
+					},
+					materials: [solidColorMaterial(), SHARED_MATERIAL],
+				},
+			]),
+		);
+
+		expect(plan.shellGeometries[0]?.geometry.indices).toBe(
+			shellGeometry.indices,
+		);
+		expect(plan.shells[0]?.materialRanges).toMatchObject([
+			{
+				indexStart: 3,
+				indexCount: 3,
+				material: { source: { id: SHARED_MATERIAL.id } },
+			},
+		]);
+		expect(plan.diagnostics).toMatchObject({
+			shellMaterialRangeCount: 1,
+			uniqueShellMaterialCount: 1,
+		});
+	});
+
 	it("rejects a resident placement that claims another EnvCell", () => {
 		const sourceCell = cell("0x00010100", Mat4.identity(), [
 			resident("misowned", "0x00010101", STATIC_PRESENTATION),
@@ -287,12 +320,43 @@ function geometry(): ResolvedGeometry {
 	};
 }
 
+function twoTriangleGeometry(): ResolvedGeometry {
+	return {
+		...geometry(),
+		id: "geometry:two-triangles",
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
+		normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+		textureCoordinates: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+		indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+		materialSlotIndices: new Uint16Array([0, 1]),
+		materialWrapModes: new Uint8Array([0, 0]),
+		materialSideKinds: new Uint8Array([0, 0]),
+		materialSideTypes: new Uint8Array([1, 1]),
+		materialStippling: new Uint8Array([0, 0]),
+	};
+}
+
 function material(): ResolvedMaterial {
 	return {
 		id: "material:test",
+		kind: "texture",
+		colorTextureId: "0x06000001",
+		renderSurfaceId: "0x06000001",
+		paletteTextureId: null,
+		textureEncoding: "direct-color",
+		rawSurfaceFlags: 0x20002,
+		translucency: 0,
+		luminosity: 0,
+		diffuseScale: 1,
+	};
+}
+
+function solidColorMaterial(): ResolvedMaterial {
+	return {
+		id: "material:portal-sentinel",
 		kind: "solid-color",
-		color: [1, 1, 1, 1],
-		rawSurfaceFlags: 0x20000,
+		color: [1, 0, 0, 1],
+		rawSurfaceFlags: 0x01,
 		translucency: 0,
 		luminosity: 0,
 		diffuseScale: 1,

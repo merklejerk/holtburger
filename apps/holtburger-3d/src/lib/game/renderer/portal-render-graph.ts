@@ -18,9 +18,8 @@ import {
 } from "./portal-near-plane";
 import {
 	admitPortalViewWindow,
-	clipPortalWindowThroughNearClipAperture,
-	clipPortalWindowThroughAperture,
 	createFullPortalViewWindow,
+	PortalWindowProjector,
 	type PortalApertureProjectionInput,
 	type PortalViewWindow,
 	type PortalWindowProjectionResult,
@@ -31,7 +30,7 @@ import {
 /** Unique executable owner for one outdoor domain or proof-backed indoor visibility island. */
 type PortalRenderNodeId = `portal-render-node:${string}`;
 
-/** One reached render domain scheduled exactly once for the current view. */
+/** One reached render domain whose scene resources may serve multiple contributions. */
 interface PortalRenderNode {
 	readonly id: PortalRenderNodeId;
 	readonly incomingMaskEdgeIds: readonly PortalCrossingId[];
@@ -61,13 +60,6 @@ interface PortalMaskEdge {
 	readonly targetNodeId: PortalRenderNodeId;
 }
 
-/** Layer-wide stencil union followed by one draw of every unique member node. */
-interface PortalRenderLayer {
-	readonly incomingMaskEdgeIds: readonly PortalCrossingId[];
-	readonly renderLayer: number;
-	readonly renderNodeIds: readonly PortalRenderNodeId[];
-}
-
 /** Mandatory exterior scene-domain operation retained independently from indoor masks. */
 interface PortalExteriorTransition {
 	readonly crossingId: PortalCrossingId;
@@ -76,12 +68,25 @@ interface PortalExteriorTransition {
 	readonly targetNodeId: PortalRenderNodeId;
 }
 
-/** Indoor members deferred until after one masked exterior contribution. */
+/** One classified group submitted through an exterior suffix mask. */
+type PortalExteriorSuffixSubmission =
+	| {
+			/** Nodes omitted from ordinary contributions because the suffix is their only draw. */
+			readonly kind: "deferred";
+			readonly renderNodeIds: readonly PortalRenderNodeId[];
+	  }
+	| {
+			/** Nodes redrawn after an earlier ordinary contribution was replaced by exterior. */
+			readonly kind: "additional";
+			readonly renderNodeIds: readonly PortalRenderNodeId[];
+	  };
+
+/** Indoor work executed immediately after one masked exterior contribution. */
 interface PortalExteriorSuffixOperation {
-	/** Component members drawn by this suffix and withheld from ordinary layer execution. */
-	readonly indoorNodeIds: readonly PortalRenderNodeId[];
 	/** Internal component masks whose targets are suffix members. */
 	readonly maskEdgeIds: readonly PortalCrossingId[];
+	/** Complete planner-owned ordinary/deferred classification for suffix members. */
+	readonly submissions: readonly PortalExteriorSuffixSubmission[];
 	/** Parent-constrained adjacent-label promotion executed for every suffix mask. */
 	readonly stencilTransition: {
 		readonly from: number;
@@ -90,12 +95,15 @@ interface PortalExteriorSuffixOperation {
 	};
 }
 
-/** Graph facts shared by masked and unmasked execution of the outdoor component. */
-interface PortalExteriorComponentOperationBase {
+/** Planner-authored exterior contribution and its strongly connected component facts. */
+interface PortalExteriorRenderContribution {
 	/** Every graph edge entering this component from a different component. */
 	readonly entryMaskEdgeIds: readonly PortalCrossingId[];
 	/** Complete strongly connected component membership retained from layer planning. */
 	readonly componentNodeIds: readonly PortalRenderNodeId[];
+	readonly kind: "exterior";
+	/** Exact masks that establish exterior ownership for this contribution. */
+	readonly maskEdgeIds: readonly PortalCrossingId[];
 	/** Internal return edges consumed as cycle provenance without redrawing the outdoor base. */
 	readonly returnMaskEdgeIds: readonly PortalCrossingId[];
 	/** Unique render node owning the reusable outdoor scene-domain contribution. */
@@ -104,22 +112,29 @@ interface PortalExteriorComponentOperationBase {
 	readonly renderLayer: number;
 	/** Root components execute directly in the main target rather than as a detached suffix. */
 	readonly rootContained: boolean;
+	/** Stencil label owning this contribution; zero is valid only for the unmasked root. */
+	readonly stencilValue: number;
+	/** Indoor bounce, classified as deferred and/or additional planner work. */
+	readonly suffix: PortalExteriorSuffixOperation | null;
 }
 
-/** Planner-authored execution split for the strongly connected component containing outdoors. */
-type PortalExteriorComponentOperation =
-	| (PortalExteriorComponentOperationBase & {
-			/** The outdoor root owns the cleared target and requires no stencil labels. */
-			readonly kind: "unmasked";
-			readonly suffix: null;
-	  })
-	| (PortalExteriorComponentOperationBase & {
-			/** Stencil label owning the masked exterior contribution in the portal target. */
-			readonly entryStencilValue: number;
-			readonly kind: "masked";
-			/** Deferred indoor bounce, present only when this non-root component owns one. */
-			readonly suffix: PortalExteriorSuffixOperation | null;
-	  });
+/** One ordinary indoor contribution fully classified by the planner. */
+interface PortalIndoorRenderContribution {
+	readonly kind: "indoor";
+	readonly maskEdgeIds: readonly PortalCrossingId[];
+	readonly renderNodeIds: readonly PortalRenderNodeId[];
+	readonly stencilValue: number;
+}
+
+type PortalRenderContribution =
+	| PortalExteriorRenderContribution
+	| PortalIndoorRenderContribution;
+
+/** Ordered executable contributions sharing one completed graph layer. */
+interface PortalRenderLayer {
+	readonly contributions: readonly PortalRenderContribution[];
+	readonly renderLayer: number;
+}
 
 /** Complete preflight against the caller's WebGL stencil-value ceiling. */
 interface PortalMaskCapacityPreflight {
@@ -132,13 +147,13 @@ type ProjectionDiagnostics = PortalWindowProjectionResult["diagnostics"];
 
 /** Consumed pure-planner facts for Gate E and later frame diagnostics. */
 interface PortalRenderGraphDiagnostics {
-	readonly admittedWindowStateCount: number;
+	readonly admittedScopeWindowStateCount: number;
 	readonly attemptedCrossingCount: number;
 	readonly componentCount: number;
 	readonly cyclicComponentCount: number;
 	readonly duplicateOrSubsumedWindowStateCount: number;
 	readonly emptyWindowCount: number;
-	readonly maximumRetainedFragmentsPerNode: number;
+	readonly maximumRetainedFragmentsPerScope: number;
 	readonly nearPlaneSeedCount: number;
 	readonly projection: ProjectionDiagnostics;
 	readonly rejectedFacingCrossingCount: number;
@@ -153,7 +168,6 @@ interface PortalRenderGraphDiagnostics {
 export interface PortalRenderWorkPlan {
 	readonly capacity: PortalMaskCapacityPreflight;
 	readonly diagnostics: PortalRenderGraphDiagnostics;
-	readonly exteriorComponent: PortalExteriorComponentOperation | null;
 	readonly exteriorTransitions: readonly PortalExteriorTransition[];
 	readonly maskEdges: readonly PortalMaskEdge[];
 	readonly nodes: readonly PortalRenderNode[];
@@ -186,7 +200,6 @@ export type PortalRenderGraphPlanResult =
 interface IndexedPortalDomain {
 	readonly id: PortalRenderNodeId;
 	readonly kind: PortalRenderNode["kind"];
-	readonly scopes: readonly SceneScope[];
 }
 
 interface IndexedPortalTopology {
@@ -196,10 +209,10 @@ interface IndexedPortalTopology {
 }
 
 interface MutablePortalRenderNode {
-	coverage: PortalViewWindow | null;
 	readonly domain: IndexedPortalDomain;
 	readonly incomingMaskEdgeIds: Set<PortalCrossingId>;
 	renderLayer: number | null;
+	readonly selectedScopes: Map<string, SceneScope>;
 }
 
 interface MutablePortalMaskEdge {
@@ -214,8 +227,11 @@ interface IndexedPortalAperture extends PortalApertureProjectionInput {
 	readonly id: ScenePortalCrossingInput["visibilityAperture"]["id"];
 }
 
+/** Novel window coverage to expand from one exact topology scope. */
 interface PortalWindowWorkItem {
-	readonly nodeId: PortalRenderNodeId;
+	/** Crossing that admitted this window, retained to suppress only its immediate return. */
+	readonly incomingCrossing: ScenePortalCrossingInput | null;
+	readonly scope: SceneScope;
 	readonly window: PortalViewWindow;
 }
 
@@ -256,10 +272,12 @@ class PortalPlanningContext {
 	readonly #input: PortalRenderGraphPlanInput;
 	readonly #nodes = new Map<PortalRenderNodeId, MutablePortalRenderNode>();
 	readonly #projection = createProjectionDiagnostics();
+	readonly #projector: PortalWindowProjector;
 	readonly #queue: PortalWindowWorkItem[] = [];
 	readonly #selectedScopes = new Map<string, SceneScope>();
 	readonly #sameDomainBoundaryCrossingIds = new Set<PortalCrossingId>();
-	admittedWindowStateCount = 0;
+	readonly #scopeCoverage = new Map<string, PortalViewWindow>();
+	admittedScopeWindowStateCount = 0;
 	attemptedCrossingCount = 0;
 	duplicateOrSubsumedWindowStateCount = 0;
 	emptyWindowCount = 0;
@@ -269,15 +287,20 @@ class PortalPlanningContext {
 	constructor(index: IndexedPortalTopology, input: PortalRenderGraphPlanInput) {
 		this.#index = index;
 		this.#input = input;
+		this.#projector = new PortalWindowProjector(input);
 	}
 
 	plan(): PortalRenderWorkPlan {
 		const rootDomain = this.#requireDomain(this.#input.rootScope);
-		const rootNode = this.#ensureNode(rootDomain);
 		const rootWindow = createFullPortalViewWindow();
-		rootNode.coverage = rootWindow;
-		this.#queue.push({ nodeId: rootDomain.id, window: rootWindow });
-		this.admittedWindowStateCount += 1;
+		this.#selectScope(rootDomain, this.#input.rootScope);
+		this.#scopeCoverage.set(scopeKey(this.#input.rootScope), rootWindow);
+		this.#queue.push({
+			incomingCrossing: null,
+			scope: this.#input.rootScope,
+			window: rootWindow,
+		});
+		this.admittedScopeWindowStateCount += 1;
 
 		for (let cursor = 0; cursor < this.#queue.length; cursor += 1) {
 			this.#consumeWorkItem();
@@ -291,24 +314,26 @@ class PortalPlanningContext {
 		);
 		const nodes = this.#createNodes();
 		const maskEdges = this.#createEdges();
-		const renderLayers = createRenderLayers(nodes, maskEdges);
-		const exteriorComponent = createExteriorComponentOperation(
+		const exteriorContribution = createExteriorRenderContribution(
 			nodes,
 			maskEdges,
-			renderLayers,
 			layerFacts.components,
 			rootDomain.id,
 			layerFacts.maximumRenderLayer,
 		);
-		const exteriorStencilValues =
-			exteriorComponent?.kind === "masked"
-				? [
-						exteriorComponent.entryStencilValue,
-						...(exteriorComponent.suffix
-							? [exteriorComponent.suffix.stencilTransition.to]
-							: []),
-					]
-				: [];
+		const renderLayers = createRenderLayers(
+			nodes,
+			maskEdges,
+			exteriorContribution,
+		);
+		const exteriorStencilValues = exteriorContribution
+			? [
+					exteriorContribution.stencilValue,
+					...(exteriorContribution.suffix
+						? [exteriorContribution.suffix.stencilTransition.to]
+						: []),
+				]
+			: [];
 		const capacity = this.#createCapacity(
 			layerFacts.maximumRenderLayer,
 			Math.max(layerFacts.maximumRenderLayer, ...exteriorStencilValues),
@@ -328,16 +353,16 @@ class PortalPlanningContext {
 		return {
 			capacity,
 			diagnostics: {
-				admittedWindowStateCount: this.admittedWindowStateCount,
+				admittedScopeWindowStateCount: this.admittedScopeWindowStateCount,
 				attemptedCrossingCount: this.attemptedCrossingCount,
 				componentCount: layerFacts.componentCount,
 				cyclicComponentCount: layerFacts.cyclicComponentCount,
 				duplicateOrSubsumedWindowStateCount:
 					this.duplicateOrSubsumedWindowStateCount,
 				emptyWindowCount: this.emptyWindowCount,
-				maximumRetainedFragmentsPerNode: Math.max(
-					...[...this.#nodes.values()].map(
-						(node) => node.coverage?.fragments.length ?? 0,
+				maximumRetainedFragmentsPerScope: Math.max(
+					...[...this.#scopeCoverage.values()].map(
+						(coverage) => coverage.fragments.length,
 					),
 				),
 				nearPlaneSeedCount: maskEdges.filter(
@@ -351,7 +376,6 @@ class PortalPlanningContext {
 				retainedRenderNodeCount: nodes.length,
 				workItemCount: this.workItemCount,
 			},
-			exteriorComponent,
 			exteriorTransitions: maskEdges.flatMap((edge) => {
 				if (edge.spatialRelationship.kind !== "exterior-transition") return [];
 				return [
@@ -373,65 +397,67 @@ class PortalPlanningContext {
 	}
 
 	#expand(item: PortalWindowWorkItem): void {
-		const sourceNode = this.#requireNode(item.nodeId);
-		const seenCrossings = new Set<PortalCrossingId>();
-		for (const sourceScope of sourceNode.domain.scopes) {
-			for (const crossing of this.#index.view.outgoing(sourceScope)) {
-				if (seenCrossings.has(crossing.id)) continue;
-				seenCrossings.add(crossing.id);
-				this.attemptedCrossingCount += 1;
-				this.#consumeWorkItem();
-				if (!sameScope(crossing.source, sourceScope)) {
-					throw new Error(
-						`Portal topology returned ${crossing.id} from the wrong source scope.`,
-					);
-				}
-				const targetDomain = this.#requireDomain(crossing.target);
-				if (crossing.spatialRelationship.kind === "indoor-depth-continuous") {
-					if (sourceNode.domain.id !== targetDomain.id) {
-						throw new Error(
-							`Depth-continuous crossing ${crossing.id} spans render domains.`,
-						);
-					}
-					continue;
-				}
-				if (sourceNode.domain.id === targetDomain.id) {
-					// The crossing remains authoritative topology/query data, but both endpoint
-					// scopes are already drawn exactly once through a proven depth-continuous route.
-					// A mask cannot further constrain content already owned by the same draw domain.
-					this.#sameDomainBoundaryCrossingIds.add(crossing.id);
-					continue;
-				}
-				const apertureInput = createVisibilityApertureInput(crossing);
-				const anchorAperture = this.#anchorAperture(apertureInput);
-				const nearPlaneStraddle = apertureIntersectsCameraNearClipVolume(
-					this.#input.nearClipVolume,
-					anchorAperture,
+		const sourceDomain = this.#requireDomain(item.scope);
+		for (const crossing of this.#index.view.outgoing(item.scope)) {
+			if (
+				item.incomingCrossing &&
+				(crossing.id === item.incomingCrossing.reciprocalCrossingId ||
+					crossing.sourceAperture.id ===
+						item.incomingCrossing.sourceAperture.id)
+			) {
+				continue;
+			}
+			this.attemptedCrossingCount += 1;
+			this.#consumeWorkItem();
+			if (!sameScope(crossing.source, item.scope)) {
+				throw new Error(
+					`Portal topology returned ${crossing.id} from the wrong source scope.`,
 				);
-				if (!nearPlaneStraddle && !this.#facesCamera(crossing)) {
-					this.rejectedFacingCrossingCount += 1;
-					continue;
-				}
-				const projection = nearPlaneStraddle
-					? clipPortalWindowThroughNearClipAperture(
-							this.#input,
-							item.window,
-							apertureInput,
-						)
-					: clipPortalWindowThroughAperture(
-							this.#input,
-							item.window,
-							apertureInput,
-						);
-				addProjectionDiagnostics(this.#projection, projection.diagnostics);
-				if (projection.kind === "empty") {
-					this.emptyWindowCount += 1;
-					continue;
-				}
-				const targetNode = this.#ensureNode(targetDomain);
+			}
+			const targetDomain = this.#requireDomain(crossing.target);
+			const sameDomain = sourceDomain.id === targetDomain.id;
+			if (
+				crossing.spatialRelationship.kind === "indoor-depth-continuous" &&
+				!sameDomain
+			) {
+				throw new Error(
+					`Depth-continuous crossing ${crossing.id} spans render domains.`,
+				);
+			}
+			if (
+				sameDomain &&
+				crossing.spatialRelationship.kind !== "indoor-depth-continuous"
+			) {
+				// This boundary still constrains which member scope is reached even though
+				// its endpoints share ordinary depth and therefore require no stencil mask.
+				this.#sameDomainBoundaryCrossingIds.add(crossing.id);
+			}
+			const apertureInput = createVisibilityApertureInput(crossing);
+			const anchorAperture = this.#anchorAperture(apertureInput);
+			const nearPlaneStraddle = apertureIntersectsCameraNearClipVolume(
+				this.#input.nearClipVolume,
+				anchorAperture,
+			);
+			if (!nearPlaneStraddle && !this.#facesCamera(crossing)) {
+				this.rejectedFacingCrossingCount += 1;
+				continue;
+			}
+			const projection = nearPlaneStraddle
+				? this.#projector.clipThroughNearClipAperture(
+						item.window,
+						apertureInput,
+					)
+				: this.#projector.clipThroughAperture(item.window, apertureInput);
+			addProjectionDiagnostics(this.#projection, projection.diagnostics);
+			if (projection.kind === "empty") {
+				this.emptyWindowCount += 1;
+				continue;
+			}
+			this.#selectScope(targetDomain, crossing.target);
+			if (!sameDomain) {
 				this.#admitEdge(
 					crossing,
-					sourceNode.domain.id,
+					sourceDomain.id,
 					targetDomain.id,
 					nearPlaneStraddle
 						? { kind: "near-clip-window", window: projection.window }
@@ -440,21 +466,23 @@ class PortalPlanningContext {
 								visibilityApertureId: apertureInput.id,
 							},
 				);
-				const admission = admitPortalViewWindow(
-					targetNode.coverage,
-					projection.window,
-				);
-				if (!admission.delta) {
-					this.duplicateOrSubsumedWindowStateCount += 1;
-					continue;
-				}
-				targetNode.coverage = admission.coverage;
-				this.admittedWindowStateCount += 1;
-				this.#queue.push({
-					nodeId: targetDomain.id,
-					window: admission.delta,
-				});
 			}
+			const targetScopeKey = scopeKey(crossing.target);
+			const admission = admitPortalViewWindow(
+				this.#scopeCoverage.get(targetScopeKey) ?? null,
+				projection.window,
+			);
+			if (!admission.delta) {
+				this.duplicateOrSubsumedWindowStateCount += 1;
+				continue;
+			}
+			this.#scopeCoverage.set(targetScopeKey, admission.coverage);
+			this.admittedScopeWindowStateCount += 1;
+			this.#queue.push({
+				incomingCrossing: crossing,
+				scope: crossing.target,
+				window: admission.delta,
+			});
 		}
 	}
 
@@ -539,15 +567,23 @@ class PortalPlanningContext {
 		const existing = this.#nodes.get(domain.id);
 		if (existing) return existing;
 		const node: MutablePortalRenderNode = {
-			coverage: null,
 			domain,
 			incomingMaskEdgeIds: new Set(),
 			renderLayer: null,
+			selectedScopes: new Map(),
 		};
 		this.#nodes.set(domain.id, node);
-		for (const scope of domain.scopes) {
-			this.#selectedScopes.set(scopeKey(scope), scope);
-		}
+		return node;
+	}
+
+	#selectScope(
+		domain: IndexedPortalDomain,
+		scope: SceneScope,
+	): MutablePortalRenderNode {
+		const node = this.#ensureNode(domain);
+		const key = scopeKey(scope);
+		node.selectedScopes.set(key, scope);
+		this.#selectedScopes.set(key, scope);
 		return node;
 	}
 
@@ -573,7 +609,7 @@ class PortalPlanningContext {
 		return [...this.#nodes.values()]
 			.sort((left, right) => left.domain.id.localeCompare(right.domain.id))
 			.map((node) => {
-				if (!node.coverage || node.renderLayer === null) {
+				if (node.selectedScopes.size === 0 || node.renderLayer === null) {
 					throw new Error(
 						`Portal render node ${node.domain.id} is incomplete.`,
 					);
@@ -583,7 +619,9 @@ class PortalPlanningContext {
 					incomingMaskEdgeIds: [...node.incomingMaskEdgeIds].sort(),
 					kind: node.domain.kind,
 					renderLayer: node.renderLayer,
-					scopes: node.domain.scopes,
+					scopes: [...node.selectedScopes.values()].sort((left, right) =>
+						scopeKey(left).localeCompare(scopeKey(right)),
+					),
 				};
 			});
 	}
@@ -645,7 +683,6 @@ function indexTopology(view: SceneTopologyView): IndexedPortalTopology {
 			const domain = {
 				id: "portal-render-node:outdoor",
 				kind: "outdoor",
-				scopes: [topologyScope.scope],
 			} as const;
 			domainByScopeKey.set(key, domain);
 			continue;
@@ -662,11 +699,8 @@ function indexTopology(view: SceneTopologyView): IndexedPortalTopology {
 		const domain: IndexedPortalDomain = {
 			id: `portal-render-node:${islandId}`,
 			kind: "indoor-visibility-island",
-			scopes: scopes.sort((left, right) =>
-				scopeKey(left).localeCompare(scopeKey(right)),
-			),
 		};
-		for (const scope of domain.scopes) {
+		for (const scope of scopes) {
 			domainByScopeKey.set(scopeKey(scope), domain);
 		}
 	}
@@ -708,11 +742,7 @@ function createApertureInput(
 	source: ScenePortalCrossingInput["sourceAperture"],
 ): IndexedPortalAperture {
 	return {
-		aperture: {
-			indices: source.indices,
-			plane: source.plane,
-			vertices: source.vertices,
-		},
+		aperture: source,
 		id: source.id,
 		landblockCoordinates: getLandblockCoordinates(source.landblockId),
 	};
@@ -932,37 +962,62 @@ function createStronglyConnectedComponents(
 function createRenderLayers(
 	nodes: readonly PortalRenderNode[],
 	edges: readonly PortalMaskEdge[],
+	exterior: PortalExteriorRenderContribution | null,
 ): readonly PortalRenderLayer[] {
 	const nodesByLayer = new Map<number, PortalRenderNodeId[]>();
+	const deferredNodeIds = new Set(
+		exterior?.suffix?.submissions.flatMap((submission) =>
+			submission.kind === "deferred" ? submission.renderNodeIds : [],
+		) ?? [],
+	);
 	for (const node of nodes) {
+		if (node.kind === "outdoor" || deferredNodeIds.has(node.id)) continue;
 		const layer = nodesByLayer.get(node.renderLayer) ?? [];
 		layer.push(node.id);
 		nodesByLayer.set(node.renderLayer, layer);
 	}
-	return [...nodesByLayer.entries()]
-		.sort(([left], [right]) => left - right)
-		.map(([renderLayer, renderNodeIds]) => {
-			const members = new Set(renderNodeIds);
-			return {
-				incomingMaskEdgeIds: edges
-					.filter((edge) => renderLayer !== 0 && members.has(edge.targetNodeId))
-					.map((edge) => edge.crossingId)
-					.sort(),
-				renderLayer,
-				renderNodeIds: renderNodeIds.sort(),
-			};
+	if (exterior) {
+		const layer = nodesByLayer.get(exterior.renderLayer) ?? [];
+		nodesByLayer.set(exterior.renderLayer, layer);
+	}
+	return [...nodesByLayer.keys()]
+		.sort((left, right) => left - right)
+		.map((renderLayer) => {
+			const renderNodeIds = (nodesByLayer.get(renderLayer) ?? []).sort();
+			const contributions: PortalRenderContribution[] = [];
+			if (exterior?.renderLayer === renderLayer) contributions.push(exterior);
+			if (renderNodeIds.length > 0) {
+				const members = new Set(renderNodeIds);
+				contributions.push({
+					kind: "indoor",
+					maskEdgeIds:
+						renderLayer === 0
+							? []
+							: edges
+									.filter((edge) => members.has(edge.targetNodeId))
+									.map((edge) => edge.crossingId)
+									.sort(),
+					renderNodeIds,
+					stencilValue: renderLayer,
+				});
+			}
+			if (contributions.length === 0) {
+				throw new Error(
+					`Portal render layer ${renderLayer} has no contribution.`,
+				);
+			}
+			return { contributions, renderLayer };
 		});
 }
 
 /** Retain the exterior SCC split so the mechanical executor never reconstructs graph ownership. */
-function createExteriorComponentOperation(
+function createExteriorRenderContribution(
 	nodes: readonly PortalRenderNode[],
 	edges: readonly PortalMaskEdge[],
-	renderLayers: readonly PortalRenderLayer[],
 	components: readonly (readonly PortalRenderNodeId[])[],
 	rootNodeId: PortalRenderNodeId,
 	maximumRenderLayer: number,
-): PortalExteriorComponentOperation | null {
+): PortalExteriorRenderContribution | null {
 	const outdoorNodes = nodes.filter((node) => node.kind === "outdoor");
 	if (outdoorNodes.length === 0) return null;
 	if (outdoorNodes.length !== 1) {
@@ -976,12 +1031,6 @@ function createExteriorComponentOperation(
 		throw new Error("Portal outdoor node has no strongly connected component.");
 	}
 	const componentMembers = new Set(component);
-	const componentLayer = renderLayers.find(
-		(layer) => layer.renderLayer === outdoor.renderLayer,
-	);
-	if (!componentLayer) {
-		throw new Error("Portal outdoor node has no render layer.");
-	}
 	const nodeById = new Map(nodes.map((node) => [node.id, node]));
 	const indoorNodeIds = component
 		.filter((nodeId) => nodeId !== outdoor.id)
@@ -1012,44 +1061,79 @@ function createExteriorComponentOperation(
 		}
 	}
 	const rootContained = componentMembers.has(rootNodeId);
-	const mainExteriorMemberIds = rootContained
-		? new Set<PortalRenderNodeId>([outdoor.id])
-		: componentMembers;
-	const sharesLayerWithAnotherContribution = componentLayer.renderNodeIds.some(
-		(nodeId) => !mainExteriorMemberIds.has(nodeId),
+	const outdoorIsRoot = outdoor.id === rootNodeId;
+	const sharesLayerWithAnotherContribution = nodes.some(
+		(node) =>
+			node.renderLayer === outdoor.renderLayer &&
+			!componentMembers.has(node.id),
 	);
-	const hasSuffix = !rootContained && indoorNodeIds.length > 0;
-	const entryStencilValue =
+	const hasSuffix = indoorNodeIds.length > 0 && !outdoorIsRoot;
+	const stencilValue =
 		hasSuffix || sharesLayerWithAnotherContribution
 			? maximumRenderLayer + 1
 			: outdoor.renderLayer;
-	const common = {
+	// The outdoor root owns the unmasked target. Indoor members of its SCC remain
+	// ordinary forward-layer work; return edges only record cycle provenance.
+	const maskEdgeIds = outdoorIsRoot
+		? []
+		: (rootContained ? returnMaskEdgeIds : entryMaskEdgeIds).sort();
+	const contribution: PortalExteriorRenderContribution = {
 		componentNodeIds: [...component],
 		entryMaskEdgeIds: entryMaskEdgeIds.sort(),
+		kind: "exterior",
+		maskEdgeIds,
 		outdoorNodeId: outdoor.id,
 		renderLayer: outdoor.renderLayer,
 		returnMaskEdgeIds: returnMaskEdgeIds.sort(),
 		rootContained,
-	} satisfies PortalExteriorComponentOperationBase;
-	if (outdoor.renderLayer === 0) {
-		return { ...common, kind: "unmasked", suffix: null };
-	}
-	return {
-		...common,
-		entryStencilValue,
-		kind: "masked",
+		stencilValue,
 		suffix: hasSuffix
 			? {
-					indoorNodeIds,
 					maskEdgeIds: internalIndoorMaskEdgeIds.sort(),
+					submissions: createExteriorSuffixSubmissions(
+						indoorNodeIds,
+						nodeById,
+						outdoor.renderLayer,
+					),
 					stencilTransition: {
-						from: entryStencilValue,
+						from: stencilValue,
 						kind: "promote-if-equal",
-						to: entryStencilValue + 1,
+						to: stencilValue + 1,
 					},
 				}
 			: null,
 	};
+	if (
+		outdoor.renderLayer === 0 &&
+		(contribution.maskEdgeIds.length > 0 || contribution.suffix)
+	) {
+		throw new Error("Portal outdoor root has masked component work.");
+	}
+	return contribution;
+}
+
+function createExteriorSuffixSubmissions(
+	indoorNodeIds: readonly PortalRenderNodeId[],
+	nodeById: ReadonlyMap<PortalRenderNodeId, PortalRenderNode>,
+	exteriorRenderLayer: number,
+): readonly PortalExteriorSuffixSubmission[] {
+	const additional: PortalRenderNodeId[] = [];
+	const deferred: PortalRenderNodeId[] = [];
+	for (const nodeId of indoorNodeIds) {
+		const node = nodeById.get(nodeId);
+		if (!node) throw new Error(`Portal suffix node ${nodeId} is unavailable.`);
+		(node.renderLayer < exteriorRenderLayer ? additional : deferred).push(
+			nodeId,
+		);
+	}
+	return [
+		...(additional.length > 0
+			? [{ kind: "additional" as const, renderNodeIds: additional.sort() }]
+			: []),
+		...(deferred.length > 0
+			? [{ kind: "deferred" as const, renderNodeIds: deferred.sort() }]
+			: []),
+	];
 }
 
 function validatePlanInput(input: PortalRenderGraphPlanInput): void {

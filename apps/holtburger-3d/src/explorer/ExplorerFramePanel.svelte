@@ -108,10 +108,14 @@
 				<code>{metrics.envCellShellCullOverrideCount}</code>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Portal nodes submitted / planned</span>
+				<span class="ac-param-key">Portal node submissions / unique nodes</span>
 				<code
 					>{metrics.portalSubmittedRenderNodeCount} / {metrics.portalRenderNodeCount}</code
 				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Portal scope-window states</span>
+				<code>{metrics.portalAdmittedScopeWindowStateCount}</code>
 			</div>
 			<div class="ac-param-row">
 				<span class="ac-param-key">Portal layers / mask edges / draws</span>

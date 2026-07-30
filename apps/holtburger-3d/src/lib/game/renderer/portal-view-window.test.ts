@@ -74,6 +74,36 @@ describe("portal view windows", () => {
 		expect(partial.coverage.fragments).toHaveLength(2);
 	});
 
+	it("clips nested source windows monotonically through the same aperture", () => {
+		const apertureInput = aperture([
+			[-0.75, -0.75, 0],
+			[0.75, -0.75, 0],
+			[0.75, 0.75, 0],
+			[-0.75, 0.75, 0],
+		]);
+		const superset = requiredWindow([rectangle(-0.8, -0.8, 0.8, 0.8)]);
+		const subset = requiredWindow([rectangle(-0.4, -0.4, 0.4, 0.4)]);
+		const supersetResult = clipPortalWindowThroughAperture(
+			IDENTITY_PROJECTION,
+			superset,
+			apertureInput,
+		);
+		const subsetResult = clipPortalWindowThroughAperture(
+			IDENTITY_PROJECTION,
+			subset,
+			apertureInput,
+		);
+		expect(supersetResult.kind).toBe("visible");
+		expect(subsetResult.kind).toBe("visible");
+		if (supersetResult.kind !== "visible" || subsetResult.kind !== "visible") {
+			return;
+		}
+
+		expect(
+			admitPortalViewWindow(supersetResult.window, subsetResult.window).delta,
+		).toBeNull();
+	});
+
 	it("projects an authored triangle without assuming a quad", () => {
 		const result = clipPortalWindowThroughAperture(
 			IDENTITY_PROJECTION,
@@ -234,7 +264,7 @@ describe("portal view windows", () => {
 
 		expect(result.kind).toBe("visible");
 		if (result.kind !== "visible") return;
-		expect(result.window.fragments).toHaveLength(4);
+		expect(result.window.fragments).toHaveLength(2);
 		expect(
 			portalViewWindowContainsPoint(result.window, new Vec2(0.5, -0.5)),
 		).toBe(true);

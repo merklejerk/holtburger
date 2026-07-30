@@ -68,6 +68,8 @@ export interface FrameSelectionMetrics {
 	readonly portalRejectedFacingCrossingCount: number;
 	/** Mask boundaries omitted because both endpoints share one render domain. */
 	readonly portalSameDomainBoundaryCrossingCount: number;
+	/** Novel scope-local portal windows admitted by the bounded planner. */
+	readonly portalAdmittedScopeWindowStateCount: number;
 	readonly portalRenderLayerCount: number;
 	readonly portalRenderNodeCount: number;
 	readonly portalSubmittedRenderNodeCount: number;

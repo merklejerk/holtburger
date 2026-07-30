@@ -195,6 +195,7 @@ interface MutableFrameSelectionMetrics {
 	portalNearPlaneSeedCount: number;
 	portalRejectedFacingCrossingCount: number;
 	portalSameDomainBoundaryCrossingCount: number;
+	portalAdmittedScopeWindowStateCount: number;
 	portalRenderLayerCount: number;
 	portalRenderNodeCount: number;
 	portalSubmittedRenderNodeCount: number;
@@ -276,6 +277,7 @@ export class WebGL2Renderer implements Renderer {
 		portalNearPlaneSeedCount: 0,
 		portalRejectedFacingCrossingCount: 0,
 		portalSameDomainBoundaryCrossingCount: 0,
+		portalAdmittedScopeWindowStateCount: 0,
 		portalRenderLayerCount: 0,
 		portalRenderNodeCount: 0,
 		portalSubmittedRenderNodeCount: 0,
@@ -440,13 +442,7 @@ export class WebGL2Renderer implements Renderer {
 			destination: null,
 			extent: { height: this.#frameHeight, width: this.#frameWidth },
 			plan: result.plan,
-			renderExterior: () => {
-				const outdoorNodeId = result.plan.exteriorComponent?.outdoorNodeId;
-				if (!outdoorNodeId) {
-					throw new Error(
-						"Portal executor requested exterior rendering without an outdoor graph node.",
-					);
-				}
+			renderExterior: (_target, outdoorNodeId) => {
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
@@ -483,6 +479,8 @@ export class WebGL2Renderer implements Renderer {
 			diagnostics.rejectedFacingCrossingCount;
 		metrics.portalSameDomainBoundaryCrossingCount +=
 			diagnostics.sameDomainBoundaryCrossingCount;
+		metrics.portalAdmittedScopeWindowStateCount +=
+			diagnostics.admittedScopeWindowStateCount;
 		metrics.portalRenderLayerCount += diagnostics.renderLayerCount;
 		metrics.portalRenderNodeCount += diagnostics.renderNodeCount;
 		metrics.portalSubmittedRenderNodeCount +=
@@ -566,13 +564,7 @@ export class WebGL2Renderer implements Renderer {
 			destination: null,
 			extent: { height: this.#frameHeight, width: this.#frameWidth },
 			plan: result.plan,
-			renderExterior: () => {
-				const outdoorNodeId = result.plan.exteriorComponent?.outdoorNodeId;
-				if (!outdoorNodeId) {
-					throw new Error(
-						"Portal executor requested exterior rendering without an outdoor graph node.",
-					);
-				}
+			renderExterior: (_target, outdoorNodeId) => {
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
@@ -983,6 +975,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalNearPlaneSeedCount = 0;
 		metrics.portalRejectedFacingCrossingCount = 0;
 		metrics.portalSameDomainBoundaryCrossingCount = 0;
+		metrics.portalAdmittedScopeWindowStateCount = 0;
 		metrics.portalRenderLayerCount = 0;
 		metrics.portalRenderNodeCount = 0;
 		metrics.portalSubmittedRenderNodeCount = 0;
@@ -1746,7 +1739,7 @@ function validateDrawRange(
  * accidentally treating each environment cell as an independent miniature scene.
  */
 function mergePortalNodeContributions(
-	renderNodeIds: PortalRenderWorkPlan["renderLayers"][number]["renderNodeIds"],
+	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
 	contributionsByNode: ReadonlyMap<string, PreparedSceneContributions>,
 ): PreparedSceneContributions {
 	const objects: ObjectFrameInput[] = [];

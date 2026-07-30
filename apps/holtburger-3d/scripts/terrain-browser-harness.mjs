@@ -611,6 +611,7 @@ function assertHybridPortalExecutionFixture(state) {
 		"interiorDepthOrderingPassed",
 		"multiWindowUnionPassed",
 		"noStaleViewReusePassed",
+		"rootReentryPassed",
 		"straddleDualSidePassed",
 		"straddleExteriorBranchPassed",
 		"targetReusePassed",
@@ -623,7 +624,7 @@ function assertHybridPortalExecutionFixture(state) {
 		}
 	}
 	const expectedOutdoor = {
-		admittedVisibilityStateCount: 0,
+		admittedScopeWindowStateCount: 0,
 		exteriorRenderCount: 1,
 		maskDrawCount: 2,
 		maskEdgeCount: 2,
@@ -632,8 +633,6 @@ function assertHybridPortalExecutionFixture(state) {
 		sameDomainBoundaryCrossingCount: 0,
 		renderLayerCount: 2,
 		renderNodeCount: 2,
-		selectedScopeCount: 0,
-		submittedRenderLayerCount: 2,
 		submittedRenderNodeCount: 2,
 	};
 	const expectedIndoor = { ...expectedOutdoor };
@@ -657,7 +656,6 @@ function assertHybridPortalExecutionFixture(state) {
 	const expectedIndoorStraddle = {
 		...expectedOutdoorStraddle,
 		renderLayerCount: 3,
-		submittedRenderLayerCount: 3,
 	};
 	if (
 		JSON.stringify(fixture.outdoorStraddle) !==
@@ -676,7 +674,7 @@ function assertHybridPortalExecutionFixture(state) {
 		);
 	}
 	const expectedHybridTrace = {
-		admittedVisibilityStateCount: 4,
+		admittedScopeWindowStateCount: 4,
 		exteriorRenderCount: 1,
 		maskDrawCount: 3,
 		maskEdgeCount: 4,
@@ -685,8 +683,6 @@ function assertHybridPortalExecutionFixture(state) {
 		sameDomainBoundaryCrossingCount: 0,
 		renderLayerCount: 2,
 		renderNodeCount: 3,
-		selectedScopeCount: 3,
-		submittedRenderLayerCount: 2,
 		submittedRenderNodeCount: 3,
 	};
 	if (
@@ -694,6 +690,26 @@ function assertHybridPortalExecutionFixture(state) {
 	) {
 		throw new Error(
 			`Hybrid portal diagnostics mismatch: ${JSON.stringify(fixture.hybridTrace)}.`,
+		);
+	}
+	const expectedRootReentryTrace = {
+		admittedScopeWindowStateCount: 3,
+		exteriorRenderCount: 1,
+		maskDrawCount: 3,
+		maskEdgeCount: 3,
+		nearPlaneSeedCount: 0,
+		rejectedFacingCrossingCount: 0,
+		sameDomainBoundaryCrossingCount: 0,
+		renderLayerCount: 2,
+		renderNodeCount: 2,
+		submittedRenderNodeCount: 3,
+	};
+	if (
+		JSON.stringify(fixture.rootReentryTrace) !==
+		JSON.stringify(expectedRootReentryTrace)
+	) {
+		throw new Error(
+			`Root re-entry diagnostics mismatch: ${JSON.stringify(fixture.rootReentryTrace)}.`,
 		);
 	}
 	const metrics = state.metrics;
@@ -732,7 +748,7 @@ function assertInternalPortalExecutionFixture(state) {
 		}
 	}
 	const expectedTrace = {
-		admittedVisibilityStateCount: 5,
+		admittedScopeWindowStateCount: 5,
 		exteriorRenderCount: 0,
 		maskDrawCount: 4,
 		maskEdgeCount: 4,
@@ -741,8 +757,6 @@ function assertInternalPortalExecutionFixture(state) {
 		sameDomainBoundaryCrossingCount: 0,
 		renderLayerCount: 3,
 		renderNodeCount: 4,
-		selectedScopeCount: 4,
-		submittedRenderLayerCount: 3,
 		submittedRenderNodeCount: 4,
 	};
 	if (JSON.stringify(fixture.trace) !== JSON.stringify(expectedTrace)) {
@@ -751,7 +765,7 @@ function assertInternalPortalExecutionFixture(state) {
 		);
 	}
 	const expectedReverseTrace = {
-		admittedVisibilityStateCount: 2,
+		admittedScopeWindowStateCount: 2,
 		exteriorRenderCount: 0,
 		maskDrawCount: 1,
 		maskEdgeCount: 1,
@@ -760,8 +774,6 @@ function assertInternalPortalExecutionFixture(state) {
 		sameDomainBoundaryCrossingCount: 0,
 		renderLayerCount: 2,
 		renderNodeCount: 2,
-		selectedScopeCount: 2,
-		submittedRenderLayerCount: 2,
 		submittedRenderNodeCount: 2,
 	};
 	if (

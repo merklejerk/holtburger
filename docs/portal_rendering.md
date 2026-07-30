@@ -144,49 +144,70 @@ These are query primitives, not a player or third-person camera controller.
 
 ## Per-View Portal Planning
 
-Portal rendering starts from the camera's supplied scope and full screen-space view window.
-For each reached render domain, the planner:
+Portal rendering starts by assigning the full screen-space view window to the camera's supplied
+scope only. Traversal coverage and render ownership are separate:
+
+- one exact scope-local window controls which outgoing crossings may be traversed;
+- one proof-backed visibility island owns the geometry for its reached member scopes; and
+- reaching another scope in an existing island extends that node's selected scope list without
+  giving every island member the same window.
+
+For each admitted scope-window delta, the planner:
 
 1. considers source-keyed outgoing crossings;
-2. rejects apertures not facing the camera, except finite near-plane straddles;
-3. projects the effective visibility aperture;
-4. clips it through the incoming view window;
-5. admits only new, non-subsumed window coverage; and
-6. records a unique target render node plus an incoming mask edge.
+2. skips the proven reciprocal or shared authored aperture used to admit that delta;
+3. rejects apertures not facing the camera, except finite near-plane straddles;
+4. projects the effective visibility aperture;
+5. clips it through the incoming view window;
+6. admits only new, non-subsumed window coverage; and
+7. records a target render node and, only across render-domain boundaries, an incoming mask edge.
+
+Incoming-crossing provenance suppresses only immediate backtracking through the same physical
+portal. It does not suppress a later return through a different portal. This mirrors retail
+`PView::AddToCell`/`AddViewToPortals`, where the incoming portal is marked and excluded while
+expanding the newly reached cell.
+
+Depth-continuous seams and same-domain topology boundaries propagate the clipped window to their
+target scope without consuming stencil. A same-domain boundary can therefore constrain traversal
+even though ordinary depth already unifies its endpoints for drawing.
 
 Windows are renderer-local visibility geometry. Scene meshes are not CPU-clipped. Ordinary scene
 selection still uses frustum tests over scope/culling-group/node bounds.
 
-A render node owns one outdoor domain or one proof-backed indoor visibility island. Alternate
-routes add incoming mask edges; they do not create another geometry owner. A boundary whose two
-endpoints already belong to the same island remains in authoritative topology but cannot add a
-useful render mask.
+A render node owns one outdoor domain or one proof-backed indoor visibility island. Its geometry
+query contains only member scopes reached by exact traversal. Alternate routes add incoming mask
+edges; they do not create another geometry owner.
 
 The planner assigns render layers, identifies graph cycles, prepares the outdoor-containing
-component, and preflights the available eight-bit stencil labels. A work limit exists only as a
-failed-invariant guard; bounded window admission is the termination model.
+component, authors an executable contribution schedule, and preflights the available eight-bit
+stencil labels. Exact windows remove triangulation-only seams when adjacent pieces have a convex
+union and cache immutable aperture convex decomposition by source identity. Concave, holed,
+overlapping, and disconnected regions remain explicit. A work limit exists only as a
+failed-invariant guard; monotonic scope-local window admission is the termination model.
 
 ## Mask and Direct Ownership Execution
 
 The executor consumes the completed graph and derives no second topology or contribution plan.
 
-For each ordinary masked render layer:
+For each ordinary masked contribution:
 
 - every incoming effective aperture is drawn material-free into the same stencil label;
 - the union is completed before ordinary geometry is submitted;
 - depth is reset only inside that union when the target contribution requires a fresh scene
   domain; and
-- every reached render node is submitted once.
+- the planner-named render nodes are submitted under that label.
 
 Ordinary contributions use a layer-wide stencil union, not a paired source/target aperture
 protocol or increment/decrement mask stack. Before any same-layer contribution changes depth, the
 executor completes every unrelated entry union under its planner-owned label.
 
-A non-root cyclic exterior component has one additional, explicit intersection. Its entry and
-suffix labels are adjacent values above the ordinary render layers. Internal suffix apertures
-increment only pixels whose stencil still equals the entry label, so the result is exactly the
-suffix label and cannot escape the exterior entry region. This guarded increment is a typed
-planner/executor contract, not an executor-created route or general stencil stack.
+A cyclic exterior component may have one explicit indoor suffix. Its entry and suffix labels are
+adjacent values above the ordinary render layers. Internal suffix apertures increment only pixels
+whose stencil still equals the entry label, so the result is exactly the suffix label and cannot
+escape the exterior entry region. The suffix classifies each submitted node as either deferred
+from ordinary execution or additional masked work for a node already drawn elsewhere. This
+guarded increment is a typed planner/executor contract, not an executor-created route or general
+stencil stack.
 
 Internal masks use existing depth (`LEQUAL`) so nearer geometry can occlude an opening. The
 accepted browser matrix also covers opaque, alpha-tested, transparent, and additive contributions.
@@ -207,12 +228,14 @@ Color and depth inside the exterior label are then initialized to the view clear
 exterior renders once under that label. Root color and depth remain untouched outside the entry
 union.
 
-If the outdoor strongly connected component contains a re-entered indoor suffix, its internal
-masks promote only entry-owned pixels to the adjacent suffix label. Suffix depth is reset without
-changing the exterior color beneath it, then all suffix nodes render once under that label.
-Return-to-outdoor edges remain graph provenance and do not redraw the exterior. Unrelated
-same-layer contributions use distinct labels whose masks were completed before either
-contribution mutated depth.
+If the outdoor strongly connected component contains re-entered indoor work, its internal masks
+promote only entry-owned pixels to the adjacent suffix label. Suffix depth is reset without
+changing the exterior color beneath it, then the suffix submission groups render together under
+that label to preserve global material ordering. A root island may therefore render ordinarily at
+layer zero and again as an additional masked suffix after exterior initialization. Non-root
+suffix nodes can instead be deferred from ordinary execution. Return-to-outdoor edges remain graph
+provenance and do not redraw the exterior. Unrelated same-layer contributions use distinct labels
+whose masks were completed before either contribution mutated depth.
 
 The target is allocated lazily, reused at the same extent, replaced transactionally on resize,
 and destroyed with the renderer. Flat mode performs no target or portal work, although an already
@@ -228,7 +251,7 @@ ordered near-plane corners. Its five normalized planes are then reused for every
 world-space contact band is renderer-owned and independent from scene-query tolerances; plane
 degeneracy uses a separate dimensionless angular threshold.
 
-The renderer clips aperture triangles against that finite pyramid. Testing only its near-plane cap
+The renderer clips exact convex aperture pieces against that finite pyramid. Testing only its near-plane cap
 misses oblique apertures that enter the clipped volume without touching the cap. The half-space
 clipper classifies and intersects against the same expanded boundary, avoiding extrapolated
 vertices around the contact band. For a real volume intersection, the planner computes the
@@ -248,6 +271,10 @@ and depth therefore remain authoritative outside the footprint; adjacent color a
 authoritative inside it. Downstream portals continue through later layers and remain bounded by the
 inherited window. The policy is frame-local and does not merge permanent visibility islands or
 mutate camera or actor residency.
+
+When a straddled aperture fills the near plane, its ray footprint may legitimately cover the full
+screen. Incoming-crossing suppression prevents the reciprocal direction of that same aperture from
+immediately claiming the full screen again and redrawing the root over the adjacent domain.
 
 Multi-portal corners use the same closure process. There is no fixed-hop rule, aperture-AABB
 shortcut, or camera-point slab.
@@ -271,7 +298,8 @@ Proven by synthetic tests and selected archive/browser fixtures:
 - reciprocal intersection preprocessing;
 - Cell BSP point containment;
 - directed finite-aperture segment tracing;
-- unique render nodes with layer-wide stencil unions;
+- scope-local traversal with visibility-island render ownership;
+- explicit render contributions with unique node identity and repeated masked submissions;
 - indoor/outdoor cycles;
 - direct color/depth scene-domain ownership;
 - near-plane straddles;

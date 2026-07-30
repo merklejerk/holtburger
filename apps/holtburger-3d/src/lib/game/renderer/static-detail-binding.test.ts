@@ -18,18 +18,6 @@ describe("static material detail binding", () => {
 		},
 	);
 
-	it("skips lookup for an ineligible material", () => {
-		const resolve = vi.fn(() => ({ role: "object" }));
-
-		expect(
-			resolveStaticMaterialDetail(
-				{ detailRole: null, source: material() },
-				resolve,
-			),
-		).toBeNull();
-		expect(resolve).not.toHaveBeenCalled();
-	});
-
 	it("fails loudly when the planned role is unavailable", () => {
 		expect(() =>
 			resolveStaticMaterialDetail(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Mat4, Vec3 } from "../math/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
+	ResolvedEnvCellStaticObjectSource,
 	ResolvedObjectResident,
 	ResolvedOutdoorStaticLayerSource,
 } from "../resolution/landblock-layer";
@@ -29,21 +30,29 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.drawUnits).toHaveLength(1);
 	});
 
-	it("retains the eligible detail role selected by the static layer domain", () => {
+	it("retains the detail role selected by the static geometry domain", () => {
 		const building = bake({
 			resourceNamespace: "static-install:building-detail" as const,
-			source: source([resident("detail", Mat4.identity(), new Vec3(1, 1, 1))]),
+			source: source([resident("opaque", Mat4.identity(), new Vec3(1, 1, 1))]),
 		});
 		const generated = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
 			resourceNamespace: "static-install:object-detail" as const,
 			source: generatedSource([
-				resident("detail", Mat4.identity(), new Vec3(1, 1, 1)),
+				resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
+			]),
+		});
+		const indoorResident = prepareStaticObjectGeometry({
+			layer: LandblockLayerKind.EnvCells,
+			resourceNamespace: "static-install:env-cell-resident-detail" as const,
+			source: envCellResidentSource([
+				resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
 			]),
 		});
 
 		expect(building?.drawUnits[0]?.material.detailRole).toBe("building");
 		expect(generated?.drawUnits[0]?.material.detailRole).toBe("object");
+		expect(indoorResident?.drawUnits[0]?.material.detailRole).toBe("object");
 	});
 
 	it("keeps transparent ranges independent by resident while merging additive ranges", () => {
@@ -570,6 +579,18 @@ function generatedSource(
 	return {
 		...source(staticResidents),
 		kind: LandblockLayerKind.Generated,
+	};
+}
+
+function envCellResidentSource(
+	staticResidents: readonly ReturnType<typeof resident>[],
+): ResolvedEnvCellStaticObjectSource {
+	return {
+		dynamicResidents: [],
+		envCellId: "0xda550101",
+		kind: LandblockLayerKind.EnvCells,
+		landblockId: "0xda55ffff",
+		staticResidents,
 	};
 }
 

@@ -165,7 +165,7 @@ describe("RenderWorld", () => {
 
 function staticMaterial(): StaticObjectMaterialBinding {
 	return {
-		detailRole: null,
+		detailRole: "object",
 		palettedClipMap: false,
 		polygon: {
 			authoredCullMode: "landblock",

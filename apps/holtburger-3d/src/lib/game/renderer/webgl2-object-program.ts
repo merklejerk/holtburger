@@ -82,7 +82,6 @@ uniform sampler2D uDetail;
 uniform float uAlphaTest;
 uniform int uMaterialKind;
 uniform int uWrapRepeat;
-uniform int uUseDetail;
 uniform int uPalettedClipMap;
 // Packed object rects use pixel-space x, y, width, height for exact texel addressing.
 uniform vec4 uBaseRect;
@@ -186,12 +185,15 @@ vec4 sampleMaterial() {
 
 void main() {
 	vec4 color = sampleMaterial() * vInstanceColor;
-	if (uUseDetail != 0) {
-		vec2 detailUv = atlasUv(fract(vTextureCoordinate * uDetailTiling), uDetailRect);
-		vec4 detail = texture(uDetail, detailUv);
-		color.rgb = mix(color.rgb, detail.rgb, detail.a);
-	}
 	color.rgb += vec3(max(uLuminosity, 0.0));
+	vec2 detailUv = atlasUv(fract(vTextureCoordinate * uDetailTiling), uDetailRect);
+	vec4 detail = texture(uDetail, detailUv);
+	float detailAlpha = clamp(detail.a, 0.0, 1.0);
+	color.rgb = clamp(
+		color.rgb * (detail.rgb + (1.0 - detailAlpha)),
+		vec3(0.0),
+		vec3(1.0)
+	);
 	${fogApplication}
 	fragmentColor = color;
 }
@@ -216,7 +218,6 @@ interface WebGL2ObjectProgramBase {
 		readonly paletteRect: WebGLUniformLocation;
 		readonly palettedClipMap: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
-		readonly useDetail: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 		readonly wrapRepeat: WebGLUniformLocation;
 	};
@@ -330,7 +331,6 @@ export function createWebGL2ObjectProgram(
 			paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
 			palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 			projection: requireWebGL2Uniform(gl, program, "uProjection"),
-			useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),
 			view: requireWebGL2Uniform(gl, program, "uView"),
 			wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
 		};

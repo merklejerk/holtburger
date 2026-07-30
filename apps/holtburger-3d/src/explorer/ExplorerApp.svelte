@@ -204,7 +204,7 @@
 					canvas: canvasElement!,
 					onChange(state) {
 						if (cameraCoordinator) {
-							cameraLocation = cameraCoordinator.handleCameraState(state);
+							cameraCoordinator.handleCameraState(state);
 						}
 					},
 				});
@@ -226,8 +226,17 @@
 
 					const tickStartedAt = performance.now();
 					gameRuntime.tick();
+					const residencySync = cameraCoordinator?.syncCameraResidency();
+					if (!residencySync) {
+						throw new Error(
+							"Explorer camera coordinator is unavailable during rendering.",
+						);
+					}
+					cameraLocation = residencySync.location;
 					const drawStartedAt = performance.now();
-					gameRuntime.render(performance.now() / 1_000);
+					if (residencySync.renderable) {
+						gameRuntime.render(performance.now() / 1_000);
+					}
 					const frameFinishedAt = performance.now();
 
 					frameMetrics = {

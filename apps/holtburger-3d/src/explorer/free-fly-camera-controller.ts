@@ -101,6 +101,14 @@ export class FreeFlyCameraController {
 		this.#setState({ ...pose, hasManualControl: false });
 	}
 
+	/** Copy the latest controller state for frame-ordered residency resolution. */
+	snapshotState(): FreeFlyCameraState {
+		return {
+			...this.#state,
+			position: this.#state.position.clone(),
+		};
+	}
+
 	dispose(): void {
 		this.#stopMovement();
 		this.#canvas.removeEventListener("pointerdown", this.#handlePointerDown);

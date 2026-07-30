@@ -230,13 +230,13 @@ function reverseStraddlePlan(): PortalRenderWorkPlan {
 			requiredMaximumStencilValue: 1,
 		},
 		diagnostics: {
-			admittedWindowStateCount: 2,
+			admittedScopeWindowStateCount: 2,
 			attemptedCrossingCount: 1,
 			componentCount: 2,
 			cyclicComponentCount: 0,
 			duplicateOrSubsumedWindowStateCount: 0,
 			emptyWindowCount: 0,
-			maximumRetainedFragmentsPerNode: 1,
+			maximumRetainedFragmentsPerScope: 1,
 			nearPlaneSeedCount: 1,
 			projection: emptyFixtureProjectionDiagnostics(),
 			rejectedFacingCrossingCount: 0,
@@ -245,21 +245,12 @@ function reverseStraddlePlan(): PortalRenderWorkPlan {
 			retainedRenderNodeCount: 2,
 			workItemCount: 2,
 		},
-		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [reverseEdge],
 		nodes,
 		renderLayers: [
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [TARGET],
-			},
-			{
-				incomingMaskEdgeIds: [reverseCrossing],
-				renderLayer: 1,
-				renderNodeIds: [LEFT],
-			},
+			indoorLayer(0, [TARGET]),
+			indoorLayer(1, [LEFT], [reverseCrossing]),
 		],
 		rootNodeId: TARGET,
 		selectedScopes: nodes.flatMap((value) => value.scopes),
@@ -444,13 +435,13 @@ function internalFixturePlan(): PortalRenderWorkPlan {
 			requiredMaximumStencilValue: 2,
 		},
 		diagnostics: {
-			admittedWindowStateCount: 5,
+			admittedScopeWindowStateCount: 5,
 			attemptedCrossingCount: 4,
 			componentCount: 4,
 			cyclicComponentCount: 0,
 			duplicateOrSubsumedWindowStateCount: 1,
 			emptyWindowCount: 0,
-			maximumRetainedFragmentsPerNode: 2,
+			maximumRetainedFragmentsPerScope: 2,
 			nearPlaneSeedCount: 0,
 			projection: emptyFixtureProjectionDiagnostics(),
 			rejectedFacingCrossingCount: 0,
@@ -459,31 +450,36 @@ function internalFixturePlan(): PortalRenderWorkPlan {
 			retainedRenderNodeCount: 4,
 			workItemCount: 5,
 		},
-		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [rootLeft, rootRight, leftTarget, rightTarget],
 		nodes,
 		renderLayers: [
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [ROOT],
-			},
-			{
-				incomingMaskEdgeIds: [ROOT_LEFT, ROOT_RIGHT],
-				renderLayer: 1,
-				renderNodeIds: [LEFT, RIGHT],
-			},
-			{
-				incomingMaskEdgeIds: [LEFT_TARGET, RIGHT_TARGET],
-				renderLayer: 2,
-				renderNodeIds: [TARGET],
-			},
+			indoorLayer(0, [ROOT]),
+			indoorLayer(1, [LEFT, RIGHT], [ROOT_LEFT, ROOT_RIGHT]),
+			indoorLayer(2, [TARGET], [LEFT_TARGET, RIGHT_TARGET]),
 		],
 		rootNodeId: ROOT,
 		selectedScopes: nodes.flatMap((value) => value.scopes),
 		topologyRevision: 1,
 	} as PortalRenderWorkPlan;
+}
+
+function indoorLayer(
+	renderLayer: number,
+	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
+	maskEdgeIds: readonly PortalCrossingId[] = [],
+): PortalRenderWorkPlan["renderLayers"][number] {
+	return {
+		contributions: [
+			{
+				kind: "indoor",
+				maskEdgeIds,
+				renderNodeIds,
+				stencilValue: renderLayer,
+			},
+		],
+		renderLayer,
+	};
 }
 
 function edge(

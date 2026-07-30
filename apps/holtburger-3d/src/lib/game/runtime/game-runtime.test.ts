@@ -34,6 +34,7 @@ describe("GameRuntime view and interest control", () => {
 			portalRenderLayerCount: 0,
 			portalRenderNodeCount: 0,
 			portalSameDomainBoundaryCrossingCount: 0,
+			portalAdmittedScopeWindowStateCount: 0,
 			portalSubmittedRenderNodeCount: 0,
 			sceneDomainTargetBytes: 0,
 			sceneDomainTargetCount: 0,

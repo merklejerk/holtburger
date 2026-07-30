@@ -40,17 +40,70 @@ describe("portal render graph planning", () => {
 			planInput(OUTDOOR_SCOPE),
 		);
 
-		expect(plan.exteriorComponent).toEqual({
+		expect(requireExteriorContribution(plan)).toEqual({
 			componentNodeIds: ["portal-render-node:outdoor"],
 			entryMaskEdgeIds: [],
-			kind: "unmasked",
+			kind: "exterior",
+			maskEdgeIds: [],
 			outdoorNodeId: "portal-render-node:outdoor",
 			renderLayer: 0,
 			returnMaskEdgeIds: [],
 			rootContained: true,
+			stencilValue: 0,
 			suffix: null,
 		});
 		expect(plan.capacity.requiredMaximumStencilValue).toBe(0);
+	});
+
+	it("keeps an outdoor root unmasked when its component contains an indoor cycle", () => {
+		const inside = envCellScope("inside");
+		const exteriorTransition = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const plan = requirePlan(
+			topology(
+				[topologyScope(OUTDOOR_SCOPE, null), topologyScope(inside, "inside")],
+				[
+					crossing("outside-inside", OUTDOOR_SCOPE, inside, {
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("inside-outside", inside, OUTDOOR_SCOPE, {
+						spatialRelationship: exteriorTransition,
+					}),
+				],
+			),
+			planInput(OUTDOOR_SCOPE),
+		);
+
+		expect(requireExteriorContribution(plan)).toEqual({
+			componentNodeIds: [
+				"portal-render-node:env-cell-island:inside",
+				"portal-render-node:outdoor",
+			],
+			entryMaskEdgeIds: [],
+			kind: "exterior",
+			maskEdgeIds: [],
+			outdoorNodeId: "portal-render-node:outdoor",
+			renderLayer: 0,
+			returnMaskEdgeIds: ["portal-crossing:inside-outside"],
+			rootContained: true,
+			stencilValue: 0,
+			suffix: null,
+		});
+		expect(plan.renderLayers).toEqual([
+			{
+				contributions: [requireExteriorContribution(plan)],
+				renderLayer: 0,
+			},
+			indoorLayer(
+				1,
+				["portal-render-node:env-cell-island:inside"],
+				["portal-crossing:outside-inside"],
+			),
+		]);
+		expect(plan.capacity.requiredMaximumStencilValue).toBe(1);
+		expect(plan.diagnostics.cyclicComponentCount).toBe(1);
 	});
 
 	it("returns one unmasked base layer for an isolated root", () => {
@@ -70,11 +123,7 @@ describe("portal render graph planning", () => {
 			},
 		]);
 		expect(plan.renderLayers).toEqual([
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: ["portal-render-node:env-cell-island:root"],
-			},
+			indoorLayer(0, ["portal-render-node:env-cell-island:root"]),
 		]);
 		expect(plan.maskEdges).toEqual([]);
 		expect(plan.selectedScopes).toEqual([root]);
@@ -177,8 +226,8 @@ describe("portal render graph planning", () => {
 				),
 			),
 		).toHaveLength(1);
-		// Each rectangular aperture deliberately retains its two authored triangle fragments.
-		expect(plan.diagnostics.maximumRetainedFragmentsPerNode).toBe(4);
+		// Each rectangular aperture collapses its authored triangulation to one exact fragment.
+		expect(plan.diagnostics.maximumRetainedFragmentsPerScope).toBe(2);
 		expect(plan.diagnostics.retainedMaskEdgeCount).toBe(4);
 		expect(plan.diagnostics.retainedRenderNodeCount).toBe(4);
 	});
@@ -240,20 +289,66 @@ describe("portal render graph planning", () => {
 			retainedMaskEdgeCount: 2,
 		});
 		expect(plan.renderLayers).toEqual([
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: ["portal-render-node:env-cell-island:root"],
-			},
-			{
-				incomingMaskEdgeIds: ["portal-crossing:root-child"],
-				renderLayer: 1,
-				renderNodeIds: ["portal-render-node:env-cell-island:child"],
-			},
+			indoorLayer(0, ["portal-render-node:env-cell-island:root"]),
+			indoorLayer(
+				1,
+				["portal-render-node:env-cell-island:child"],
+				["portal-crossing:root-child"],
+			),
 		]);
 		expect(plan.maskEdges.map((edge) => edge.crossingId)).toContain(
 			"portal-crossing:child-root",
 		);
+	});
+
+	it("terminates an alternating-domain cycle without discarding subsumed transitions", () => {
+		const root = envCellScope("root");
+		const other = envCellScope("other");
+		const exteriorTransition = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const leftWindow = rectangle(-0.8, -0.8, 0.2, 0.8);
+		const plan = requirePlan(
+			topology(
+				[
+					topologyScope(root, "root"),
+					topologyScope(other, "other"),
+					topologyScope(OUTDOOR_SCOPE, null),
+				],
+				[
+					crossing("root-outside", root, OUTDOOR_SCOPE, {
+						aperture: leftWindow,
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("outside-other", OUTDOOR_SCOPE, other, {
+						aperture: leftWindow,
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("other-outside", other, OUTDOOR_SCOPE, {
+						aperture: leftWindow,
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("outside-root", OUTDOOR_SCOPE, root, {
+						aperture: leftWindow,
+						spatialRelationship: exteriorTransition,
+					}),
+				],
+			),
+			planInput(root),
+		);
+
+		expect(plan.maskEdges.map((edge) => edge.crossingId)).toEqual([
+			"portal-crossing:other-outside",
+			"portal-crossing:outside-other",
+			"portal-crossing:outside-root",
+			"portal-crossing:root-outside",
+		]);
+		expect(plan.diagnostics).toMatchObject({
+			cyclicComponentCount: 1,
+			duplicateOrSubsumedWindowStateCount: 2,
+		});
+		expect(plan.diagnostics.workItemCount).toBeLessThan(20);
 	});
 
 	it("collapses only proven depth-continuous scopes into one render node", () => {
@@ -278,6 +373,69 @@ describe("portal render graph planning", () => {
 		expect(plan.nodes[0]?.scopes).toEqual([first, second]);
 		expect(plan.maskEdges).toEqual([]);
 		expect(plan.selectedScopes).toEqual([first, second]);
+	});
+
+	it("traverses an L-shaped island by reached scope and retains its root return", () => {
+		const root = envCellScope("root");
+		const nearDoor = envCellScope("near-door");
+		const farDoor = envCellScope("far-door");
+		const unrelatedDoor = envCellScope("unrelated-door");
+		const sharedIsland = "l-building";
+		const exteriorTransition = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const depthContinuous = {
+			kind: "indoor-depth-continuous",
+			reciprocalApertureId: "portal-aperture:root-near-reciprocal",
+		} as const;
+		const nearWindow = rectangle(-0.8, -0.8, 0.5, 0.8);
+		const farWindow = rectangle(-0.2, -0.5, 0.3, 0.5);
+		const unrelatedWindow = rectangle(0.65, -0.5, 0.9, 0.5);
+		const plan = requirePlan(
+			topology(
+				[
+					topologyScope(root, sharedIsland),
+					topologyScope(nearDoor, sharedIsland),
+					topologyScope(farDoor, sharedIsland),
+					topologyScope(unrelatedDoor, sharedIsland),
+					topologyScope(OUTDOOR_SCOPE, null),
+				],
+				[
+					crossing("root-near", root, nearDoor, {
+						aperture: nearWindow,
+						spatialRelationship: depthContinuous,
+					}),
+					crossing("near-outside", nearDoor, OUTDOOR_SCOPE, {
+						aperture: nearWindow,
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("outside-far", OUTDOOR_SCOPE, farDoor, {
+						aperture: farWindow,
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("unrelated-outside", unrelatedDoor, OUTDOOR_SCOPE, {
+						aperture: unrelatedWindow,
+						spatialRelationship: exteriorTransition,
+					}),
+				],
+			),
+			planInput(root),
+		);
+
+		expect(plan.maskEdges.map((edge) => edge.crossingId)).toEqual([
+			"portal-crossing:near-outside",
+			"portal-crossing:outside-far",
+		]);
+		expect(
+			plan.nodes.find((node) => node.id.endsWith(sharedIsland))?.scopes,
+		).toEqual([farDoor, nearDoor, root]);
+		expect(plan.selectedScopes).toEqual([
+			farDoor,
+			nearDoor,
+			OUTDOOR_SCOPE,
+			root,
+		]);
 	});
 
 	it("retains same-domain boundaries as topology without emitting redundant masks", () => {
@@ -356,17 +514,52 @@ describe("portal render graph planning", () => {
 			window: expect.any(Object),
 		});
 		expect(plan.renderLayers).toEqual([
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: ["portal-render-node:env-cell-island:root"],
-			},
-			{
-				incomingMaskEdgeIds: ["portal-crossing:straddled"],
-				renderLayer: 1,
-				renderNodeIds: ["portal-render-node:env-cell-island:adjacent"],
-			},
+			indoorLayer(0, ["portal-render-node:env-cell-island:root"]),
+			indoorLayer(
+				1,
+				["portal-render-node:env-cell-island:adjacent"],
+				["portal-crossing:straddled"],
+			),
 		]);
+	});
+
+	it("does not immediately backtrack through a straddled reciprocal portal", () => {
+		const root = envCellScope("root");
+		const exteriorTransition = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const plan = requirePlan(
+			topology(
+				[topologyScope(root, "root"), topologyScope(OUTDOOR_SCOPE, null)],
+				[
+					crossing("exit", root, OUTDOOR_SCOPE, {
+						reciprocalCrossingId: "portal-crossing:return",
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("return", OUTDOOR_SCOPE, root, {
+						reciprocalCrossingId: "portal-crossing:exit",
+						spatialRelationship: exteriorTransition,
+					}),
+				],
+			),
+			planInput(root, { nearClipVolume: testNearClipVolume(1) }),
+		);
+
+		expect(plan.maskEdges.map((edge) => edge.crossingId)).toEqual([
+			"portal-crossing:exit",
+		]);
+		expect(plan.diagnostics).toMatchObject({
+			attemptedCrossingCount: 1,
+			cyclicComponentCount: 0,
+			nearPlaneSeedCount: 1,
+		});
+		expect(requireExteriorContribution(plan)).toMatchObject({
+			componentNodeIds: ["portal-render-node:outdoor"],
+			maskEdgeIds: ["portal-crossing:exit"],
+			rootContained: false,
+			suffix: null,
+		});
 	});
 
 	it("seeds an aperture contained between the eye and near cap", () => {
@@ -397,14 +590,16 @@ describe("portal render graph planning", () => {
 		expect(maskBounds.min.y).toBeCloseTo(-0.4);
 		expect(maskBounds.max.x).toBeCloseTo(0.4);
 		expect(maskBounds.max.y).toBeCloseTo(0.4);
-		expect(plan.renderLayers[0]?.renderNodeIds).toEqual([
-			"portal-render-node:env-cell-island:root",
-		]);
-		expect(plan.renderLayers[1]).toEqual({
-			incomingMaskEdgeIds: ["portal-crossing:inside-near-clip-volume"],
-			renderLayer: 1,
-			renderNodeIds: ["portal-render-node:env-cell-island:adjacent"],
-		});
+		expect(plan.renderLayers[0]).toEqual(
+			indoorLayer(0, ["portal-render-node:env-cell-island:root"]),
+		);
+		expect(plan.renderLayers[1]).toEqual(
+			indoorLayer(
+				1,
+				["portal-render-node:env-cell-island:adjacent"],
+				["portal-crossing:inside-near-clip-volume"],
+			),
+		);
 	});
 
 	it("propagates the straddle footprint before planning outdoor branches", () => {
@@ -438,21 +633,16 @@ describe("portal render graph planning", () => {
 		);
 
 		expect(plan.renderLayers).toEqual([
+			indoorLayer(0, ["portal-render-node:env-cell-island:root"]),
 			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: ["portal-render-node:env-cell-island:root"],
-			},
-			{
-				incomingMaskEdgeIds: ["portal-crossing:root-outside"],
+				contributions: [expect.objectContaining({ kind: "exterior" })],
 				renderLayer: 1,
-				renderNodeIds: ["portal-render-node:outdoor"],
 			},
-			{
-				incomingMaskEdgeIds: ["portal-crossing:outside-other-building"],
-				renderLayer: 2,
-				renderNodeIds: ["portal-render-node:env-cell-island:other-building"],
-			},
+			indoorLayer(
+				2,
+				["portal-render-node:env-cell-island:other-building"],
+				["portal-crossing:outside-other-building"],
+			),
 		]);
 	});
 
@@ -508,16 +698,16 @@ describe("portal render graph planning", () => {
 			},
 		]);
 		expect(plan.renderLayers.slice(1)).toEqual([
-			{
-				incomingMaskEdgeIds: ["portal-crossing:root-parent"],
-				renderLayer: 1,
-				renderNodeIds: ["portal-render-node:env-cell-island:parent"],
-			},
-			{
-				incomingMaskEdgeIds: ["portal-crossing:parent-adjacent"],
-				renderLayer: 2,
-				renderNodeIds: ["portal-render-node:env-cell-island:adjacent"],
-			},
+			indoorLayer(
+				1,
+				["portal-render-node:env-cell-island:parent"],
+				["portal-crossing:root-parent"],
+			),
+			indoorLayer(
+				2,
+				["portal-render-node:env-cell-island:adjacent"],
+				["portal-crossing:parent-adjacent"],
+			),
 		]);
 		expect(
 			plan.maskEdges.find(
@@ -561,11 +751,15 @@ describe("portal render graph planning", () => {
 			planInput(root),
 		);
 
-		expect(plan.maskEdges).toHaveLength(2);
-		expect(plan.maskEdges[0]?.maskSource).toEqual({
-			kind: "world-aperture",
-			visibilityApertureId: "portal-aperture:forward/visibility",
-		});
+		expect(plan.maskEdges).toEqual([
+			expect.objectContaining({
+				crossingId: forwardId,
+				maskSource: {
+					kind: "world-aperture",
+					visibilityApertureId: "portal-aperture:forward/visibility",
+				},
+			}),
+		]);
 		expect(plan.capacity).toMatchObject({
 			maximumRenderLayer: 1,
 			requiredMaximumStencilValue: 1,
@@ -606,7 +800,7 @@ describe("portal render graph planning", () => {
 			kind: "failed",
 			reason: "mask-capacity",
 			requiredMaximumStencilValue: 2,
-			workItemCount: 6,
+			workItemCount: 5,
 		});
 		expect(
 			new PortalRenderGraphPlanner().plan(
@@ -649,15 +843,16 @@ describe("portal render graph planning", () => {
 				targetNodeId: "portal-render-node:outdoor",
 			},
 		]);
-		expect(plan.exteriorComponent).toEqual({
+		expect(requireExteriorContribution(plan)).toEqual({
 			componentNodeIds: ["portal-render-node:outdoor"],
-			entryStencilValue: 1,
 			entryMaskEdgeIds: ["portal-crossing:outside"],
-			kind: "masked",
+			kind: "exterior",
+			maskEdgeIds: ["portal-crossing:outside"],
 			outdoorNodeId: "portal-render-node:outdoor",
 			renderLayer: 1,
 			returnMaskEdgeIds: [],
 			rootContained: false,
+			stencilValue: 1,
 			suffix: null,
 		});
 	});
@@ -691,26 +886,72 @@ describe("portal render graph planning", () => {
 			planInput(root),
 		);
 
-		expect(plan.exteriorComponent).toEqual({
+		expect(requireExteriorContribution(plan)).toEqual({
 			componentNodeIds: [
 				"portal-render-node:env-cell-island:suffix",
 				"portal-render-node:outdoor",
 			],
-			entryStencilValue: 2,
 			entryMaskEdgeIds: ["portal-crossing:enter-outside"],
-			kind: "masked",
+			kind: "exterior",
+			maskEdgeIds: ["portal-crossing:enter-outside"],
 			outdoorNodeId: "portal-render-node:outdoor",
 			renderLayer: 1,
 			returnMaskEdgeIds: ["portal-crossing:suffix-outside"],
 			rootContained: false,
+			stencilValue: 2,
 			suffix: {
-				indoorNodeIds: ["portal-render-node:env-cell-island:suffix"],
 				maskEdgeIds: ["portal-crossing:outside-suffix"],
+				submissions: [
+					{
+						kind: "deferred",
+						renderNodeIds: ["portal-render-node:env-cell-island:suffix"],
+					},
+				],
 				stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
 			},
 		});
 		expect(plan.capacity.requiredMaximumStencilValue).toBe(3);
 		expect(plan.diagnostics.cyclicComponentCount).toBe(1);
+	});
+
+	it("retains a root-contained exterior return as an additional suffix", () => {
+		const root = envCellScope("root");
+		const exteriorTransition = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const plan = requirePlan(
+			topology(
+				[topologyScope(root, "root"), topologyScope(OUTDOOR_SCOPE, null)],
+				[
+					crossing("root-outside", root, OUTDOOR_SCOPE, {
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("outside-root", OUTDOOR_SCOPE, root, {
+						spatialRelationship: exteriorTransition,
+					}),
+				],
+			),
+			planInput(root),
+		);
+
+		expect(requireExteriorContribution(plan)).toMatchObject({
+			componentNodeIds: [
+				"portal-render-node:env-cell-island:root",
+				"portal-render-node:outdoor",
+			],
+			kind: "exterior",
+			rootContained: true,
+			suffix: {
+				maskEdgeIds: ["portal-crossing:outside-root"],
+				submissions: [
+					{
+						kind: "additional",
+						renderNodeIds: ["portal-render-node:env-cell-island:root"],
+					},
+				],
+			},
+		});
 	});
 
 	it("does not conflate an exterior suffix with an unrelated same-layer branch", () => {
@@ -745,13 +986,19 @@ describe("portal render graph planning", () => {
 			planInput(root),
 		);
 
-		expect(plan.exteriorComponent?.componentNodeIds).toEqual([
+		const exterior = requireExteriorContribution(plan);
+		expect(exterior.componentNodeIds).toEqual([
 			"portal-render-node:env-cell-island:suffix",
 			"portal-render-node:outdoor",
 		]);
-		expect(plan.exteriorComponent?.suffix).toEqual({
-			indoorNodeIds: ["portal-render-node:env-cell-island:suffix"],
+		expect(exterior.suffix).toEqual({
 			maskEdgeIds: ["portal-crossing:outside-suffix"],
+			submissions: [
+				{
+					kind: "deferred",
+					renderNodeIds: ["portal-render-node:env-cell-island:suffix"],
+				},
+			],
 			stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
 		});
 		expect(plan.capacity).toMatchObject({
@@ -759,21 +1006,50 @@ describe("portal render graph planning", () => {
 			requiredMaximumStencilValue: 3,
 		});
 		expect(plan.renderLayers[1]).toEqual({
-			incomingMaskEdgeIds: [
-				"portal-crossing:enter-outside",
-				"portal-crossing:outside-suffix",
-				"portal-crossing:root-sibling",
-				"portal-crossing:suffix-outside",
+			contributions: [
+				exterior,
+				{
+					kind: "indoor",
+					maskEdgeIds: ["portal-crossing:root-sibling"],
+					renderNodeIds: ["portal-render-node:env-cell-island:sibling"],
+					stencilValue: 1,
+				},
 			],
 			renderLayer: 1,
-			renderNodeIds: [
-				"portal-render-node:env-cell-island:sibling",
-				"portal-render-node:env-cell-island:suffix",
-				"portal-render-node:outdoor",
-			],
 		});
 	});
 });
+
+function indoorLayer(
+	renderLayer: number,
+	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
+	maskEdgeIds: readonly PortalCrossingId[] = [],
+): PortalRenderWorkPlan["renderLayers"][number] {
+	return {
+		contributions: [
+			{
+				kind: "indoor",
+				maskEdgeIds,
+				renderNodeIds,
+				stencilValue: renderLayer,
+			},
+		],
+		renderLayer,
+	};
+}
+
+function requireExteriorContribution(
+	plan: PortalRenderWorkPlan,
+): Extract<
+	PortalRenderWorkPlan["renderLayers"][number]["contributions"][number],
+	{ readonly kind: "exterior" }
+> {
+	const contribution = plan.renderLayers
+		.flatMap((layer) => layer.contributions)
+		.find((candidate) => candidate.kind === "exterior");
+	if (!contribution) throw new Error("Expected an exterior contribution.");
+	return contribution;
+}
 
 function requirePlan(
 	topologyView: SceneTopologyView,

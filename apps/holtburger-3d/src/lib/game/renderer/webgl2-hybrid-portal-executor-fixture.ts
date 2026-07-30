@@ -63,6 +63,10 @@ export interface WebGL2HybridPortalExecutionFixtureResult {
 	readonly multiWindowUnionPassed: boolean;
 	/** The second independent view contains no color from the first exterior render. */
 	readonly noStaleViewReusePassed: boolean;
+	/** Root pixels cleared by exterior are restored only through the parent-constrained return. */
+	readonly rootReentryPassed: boolean;
+	/** Root-contained cycle execution counts retained for regression diagnosis. */
+	readonly rootReentryTrace: PortalFrameDiagnostics;
 	/** Exterior-root sequencing and bounded draw counts consumed by Gate F. */
 	readonly outdoorRoot: PortalFrameDiagnostics;
 	/** Indoor-root sequencing and bounded draw counts consumed by Gate F. */
@@ -84,6 +88,9 @@ export interface WebGL2HybridPortalExecutionFixtureResult {
 		readonly indoorStraddleInterior: readonly number[];
 		readonly multiWindow: readonly number[];
 		readonly outdoorStraddleInterior: readonly number[];
+		readonly rootReentryExterior: readonly number[];
+		readonly rootReentryParentRejected: readonly number[];
+		readonly rootReentrySuffix: readonly number[];
 		readonly straddleClipped: readonly number[];
 		readonly tunnel: readonly number[];
 		readonly tunnelNotch: readonly number[];
@@ -341,6 +348,41 @@ export function runWebGL2HybridPortalExecutionFixture(
 		const hybridExteriorPixel = readPixel(gl, 6, 6);
 		const hybridNotchPixel = readPixel(gl, 3, 6);
 
+		let rootDrawCount = 0;
+		const rootReentryTrace = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: FIXTURE_EXTENT,
+			plan: rootReentryCyclePlan(),
+			renderExterior: () =>
+				drawScene(gl, sceneProgram, {
+					color: normalized(RED),
+					depth: 0.8,
+					kind: "opaque",
+					maximum: [1, 1],
+					minimum: [-1, -1],
+				}),
+			renderIndoorNodes: (_target, renderNodeIds) => {
+				if (!renderNodeIds.includes(INTERIOR_NODE_ID as never)) return;
+				rootDrawCount += 1;
+				if (rootDrawCount === 1) {
+					drawScene(gl, sceneProgram, {
+						color: normalized(BLUE),
+						depth: 0.7,
+						kind: "opaque",
+						maximum: [1, 1],
+						minimum: [-1, -1],
+					});
+				} else {
+					drawIndoorBlendSequence(gl, sceneProgram);
+				}
+			},
+			resolveVisibilityAperture,
+		});
+		const rootReentrySuffixPixel = readPixel(gl, 1, 1);
+		const rootReentryExteriorPixel = readPixel(gl, 3, 1);
+		const rootReentryParentRejectedPixel = readPixel(gl, 6, 6);
+
 		const webGlError = gl.getError();
 		if (webGlError !== gl.NO_ERROR) {
 			throw new Error(
@@ -391,10 +433,23 @@ export function runWebGL2HybridPortalExecutionFixture(
 				indoorStraddleInterior: [...indoorStraddleInteriorPixel],
 				multiWindow: [...multiWindowPixel],
 				outdoorStraddleInterior: [...outdoorStraddleInteriorPixel],
+				rootReentryExterior: [...rootReentryExteriorPixel],
+				rootReentryParentRejected: [...rootReentryParentRejectedPixel],
+				rootReentrySuffix: [...rootReentrySuffixPixel],
 				straddleClipped: [...straddleClippedPixel],
 				tunnel: [...tunnelPixel],
 				tunnelNotch: [...tunnelNotchPixel],
 			},
+			rootReentryPassed:
+				rootDrawCount === 2 &&
+				rootReentryTrace.exteriorRenderCount === 1 &&
+				rootReentryTrace.maskDrawCount === 3 &&
+				rootReentryTrace.renderNodeCount === 2 &&
+				rootReentryTrace.submittedRenderNodeCount === 3 &&
+				pixelMatches(rootReentrySuffixPixel, INDOOR_BLEND) &&
+				pixelMatches(rootReentryExteriorPixel, RED) &&
+				pixelMatches(rootReentryParentRejectedPixel, BLUE),
+			rootReentryTrace,
 			straddleDualSidePassed:
 				outdoorStraddle.exteriorRenderCount === 1 &&
 				outdoorStraddle.submittedRenderNodeCount === 3 &&
@@ -493,13 +548,13 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 			requiredMaximumStencilValue: 3,
 		},
 		diagnostics: {
-			admittedWindowStateCount: 4,
+			admittedScopeWindowStateCount: 4,
 			attemptedCrossingCount: 4,
 			componentCount: 2,
 			cyclicComponentCount: 1,
 			duplicateOrSubsumedWindowStateCount: 1,
 			emptyWindowCount: 0,
-			maximumRetainedFragmentsPerNode: 2,
+			maximumRetainedFragmentsPerScope: 2,
 			nearPlaneSeedCount: 0,
 			projection: emptyFixtureProjectionDiagnostics(),
 			rejectedFacingCrossingCount: 0,
@@ -507,21 +562,6 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 			retainedMaskEdgeCount: maskEdges.length,
 			retainedRenderNodeCount: nodes.length,
 			workItemCount: 4,
-		},
-		exteriorComponent: {
-			componentNodeIds: [SUFFIX_NODE_ID, EXTERIOR_NODE_ID],
-			entryStencilValue: 2,
-			entryMaskEdgeIds: [CROSSING_A, CROSSING_B],
-			kind: "masked",
-			outdoorNodeId: EXTERIOR_NODE_ID,
-			renderLayer: 1,
-			returnMaskEdgeIds: [CROSSING_RETURN],
-			rootContained: false,
-			suffix: {
-				indoorNodeIds: [SUFFIX_NODE_ID],
-				maskEdgeIds: [CROSSING_INTERNAL],
-				stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
-			},
 		},
 		exteriorTransitions: maskEdges.map((edge) => ({
 			crossingId: edge.crossingId,
@@ -532,20 +572,135 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 		maskEdges,
 		nodes,
 		renderLayers: [
+			indoorLayer(0, [INTERIOR_NODE_ID]),
 			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [INTERIOR_NODE_ID],
-			},
-			{
-				incomingMaskEdgeIds: [
-					CROSSING_A,
-					CROSSING_B,
-					CROSSING_INTERNAL,
-					CROSSING_RETURN,
+				contributions: [
+					{
+						componentNodeIds: [SUFFIX_NODE_ID, EXTERIOR_NODE_ID],
+						entryMaskEdgeIds: [CROSSING_A, CROSSING_B],
+						kind: "exterior",
+						maskEdgeIds: [CROSSING_A, CROSSING_B],
+						outdoorNodeId: EXTERIOR_NODE_ID,
+						renderLayer: 1,
+						returnMaskEdgeIds: [CROSSING_RETURN],
+						rootContained: false,
+						stencilValue: 2,
+						suffix: {
+							maskEdgeIds: [CROSSING_INTERNAL],
+							submissions: [
+								{
+									kind: "deferred",
+									renderNodeIds: [SUFFIX_NODE_ID],
+								},
+							],
+							stencilTransition: {
+								from: 2,
+								kind: "promote-if-equal",
+								to: 3,
+							},
+						},
+					},
 				],
 				renderLayer: 1,
-				renderNodeIds: [SUFFIX_NODE_ID, EXTERIOR_NODE_ID],
+			},
+		],
+		rootNodeId: INTERIOR_NODE_ID,
+		selectedScopes: nodes.flatMap((value) => value.scopes),
+		topologyRevision: 1,
+	} as PortalRenderWorkPlan;
+}
+
+function rootReentryCyclePlan(): PortalRenderWorkPlan {
+	const enterOutside = hybridEdge(
+		CROSSING_A,
+		INTERIOR_NODE_ID,
+		EXTERIOR_NODE_ID,
+		APERTURE_A,
+	);
+	const returnInside = hybridEdge(
+		CROSSING_INTERNAL,
+		EXTERIOR_NODE_ID,
+		INTERIOR_NODE_ID,
+		APERTURE_INTERNAL,
+	);
+	const returnOutsideParent = hybridEdge(
+		CROSSING_B,
+		EXTERIOR_NODE_ID,
+		INTERIOR_NODE_ID,
+		APERTURE_B,
+	);
+	const maskEdges = [enterOutside, returnInside, returnOutsideParent];
+	const nodes = [
+		{
+			...node(INTERIOR_NODE_ID, "indoor-visibility-island", 0),
+			incomingMaskEdgeIds: [CROSSING_INTERNAL, CROSSING_B],
+		},
+		{
+			...node(EXTERIOR_NODE_ID, "outdoor", 1),
+			incomingMaskEdgeIds: [CROSSING_A],
+		},
+	] as const;
+	return {
+		capacity: {
+			maximumAvailableStencilValue: 255,
+			maximumRenderLayer: 1,
+			requiredMaximumStencilValue: 3,
+		},
+		diagnostics: {
+			admittedScopeWindowStateCount: 3,
+			attemptedCrossingCount: 3,
+			componentCount: 1,
+			cyclicComponentCount: 1,
+			duplicateOrSubsumedWindowStateCount: 1,
+			emptyWindowCount: 0,
+			maximumRetainedFragmentsPerScope: 2,
+			nearPlaneSeedCount: 0,
+			projection: emptyFixtureProjectionDiagnostics(),
+			rejectedFacingCrossingCount: 0,
+			sameDomainBoundaryCrossingCount: 0,
+			retainedMaskEdgeCount: maskEdges.length,
+			retainedRenderNodeCount: nodes.length,
+			workItemCount: 3,
+		},
+		exteriorTransitions: maskEdges.map((edge) => ({
+			crossingId: edge.crossingId,
+			exteriorLandblockId: "0x0001ffff",
+			sourceNodeId: edge.sourceNodeId,
+			targetNodeId: edge.targetNodeId,
+		})),
+		maskEdges,
+		nodes,
+		renderLayers: [
+			indoorLayer(0, [INTERIOR_NODE_ID]),
+			{
+				contributions: [
+					{
+						componentNodeIds: [INTERIOR_NODE_ID, EXTERIOR_NODE_ID],
+						entryMaskEdgeIds: [],
+						kind: "exterior",
+						maskEdgeIds: [CROSSING_A],
+						outdoorNodeId: EXTERIOR_NODE_ID,
+						renderLayer: 1,
+						returnMaskEdgeIds: [CROSSING_A],
+						rootContained: true,
+						stencilValue: 2,
+						suffix: {
+							maskEdgeIds: [CROSSING_INTERNAL, CROSSING_B],
+							submissions: [
+								{
+									kind: "additional",
+									renderNodeIds: [INTERIOR_NODE_ID],
+								},
+							],
+							stencilTransition: {
+								from: 2,
+								kind: "promote-if-equal",
+								to: 3,
+							},
+						},
+					},
+				],
+				renderLayer: 1,
 			},
 		],
 		rootNodeId: INTERIOR_NODE_ID,
@@ -616,6 +771,29 @@ function transitionPlan(
 		? otherInteriorRenderLayer
 		: targetRenderLayer;
 	const exteriorRoot = rootKind === "exterior";
+	const exteriorContribution = {
+		componentNodeIds: [EXTERIOR_NODE_ID],
+		entryMaskEdgeIds: exteriorRoot
+			? []
+			: nearPlaneStraddle
+				? [CROSSING_A]
+				: [...crossings],
+		kind: "exterior" as const,
+		maskEdgeIds: exteriorRoot
+			? []
+			: nearPlaneStraddle
+				? [CROSSING_A]
+				: [...crossings],
+		outdoorNodeId: EXTERIOR_NODE_ID,
+		renderLayer: exteriorRoot ? 0 : 1,
+		returnMaskEdgeIds: [],
+		rootContained: exteriorRoot,
+		stencilValue: exteriorRoot ? 0 : 1,
+		suffix: null,
+	} satisfies Extract<
+		PortalRenderWorkPlan["renderLayers"][number]["contributions"][number],
+		{ readonly kind: "exterior" }
+	>;
 	return {
 		capacity: {
 			maximumAvailableStencilValue: 255,
@@ -623,13 +801,13 @@ function transitionPlan(
 			requiredMaximumStencilValue: maximumRenderLayer,
 		},
 		diagnostics: {
-			admittedWindowStateCount: 0,
+			admittedScopeWindowStateCount: 0,
 			attemptedCrossingCount: 0,
 			componentCount: 0,
 			cyclicComponentCount: 0,
 			duplicateOrSubsumedWindowStateCount: 0,
 			emptyWindowCount: 0,
-			maximumRetainedFragmentsPerNode: 0,
+			maximumRetainedFragmentsPerScope: 0,
 			nearPlaneSeedCount: nearPlaneStraddle ? 1 : 0,
 			projection: emptyFixtureProjectionDiagnostics(),
 			rejectedFacingCrossingCount: 0,
@@ -638,28 +816,6 @@ function transitionPlan(
 			retainedRenderNodeCount: nearPlaneStraddle ? 3 : 2,
 			workItemCount: 0,
 		},
-		exteriorComponent: exteriorRoot
-			? {
-					componentNodeIds: [EXTERIOR_NODE_ID],
-					entryMaskEdgeIds: [],
-					kind: "unmasked",
-					outdoorNodeId: EXTERIOR_NODE_ID,
-					renderLayer: 0,
-					returnMaskEdgeIds: [],
-					rootContained: true,
-					suffix: null,
-				}
-			: {
-					componentNodeIds: [EXTERIOR_NODE_ID],
-					entryMaskEdgeIds: nearPlaneStraddle ? [CROSSING_A] : crossings,
-					entryStencilValue: 1,
-					kind: "masked",
-					outdoorNodeId: EXTERIOR_NODE_ID,
-					renderLayer: 1,
-					returnMaskEdgeIds: [],
-					rootContained: false,
-					suffix: null,
-				},
 		exteriorTransitions: maskEdges.map((edge) => ({
 			crossingId: edge.crossingId,
 			exteriorLandblockId: "0x0001ffff",
@@ -692,44 +848,32 @@ function transitionPlan(
 			? exteriorRoot
 				? [
 						{
-							incomingMaskEdgeIds: [],
+							contributions: [exteriorContribution],
 							renderLayer: 0,
-							renderNodeIds: [rootNodeId],
 						},
-						{
-							incomingMaskEdgeIds: crossings,
-							renderLayer: 1,
-							renderNodeIds: [targetNodeId, OTHER_INTERIOR_NODE_ID],
-						},
+						indoorLayer(1, [targetNodeId, OTHER_INTERIOR_NODE_ID], crossings),
 					]
 				: [
+						indoorLayer(0, [rootNodeId]),
 						{
-							incomingMaskEdgeIds: [],
-							renderLayer: 0,
-							renderNodeIds: [rootNodeId],
-						},
-						{
-							incomingMaskEdgeIds: [CROSSING_A],
+							contributions: [exteriorContribution],
 							renderLayer: 1,
-							renderNodeIds: [targetNodeId],
 						},
-						{
-							incomingMaskEdgeIds: [CROSSING_B],
-							renderLayer: 2,
-							renderNodeIds: [OTHER_INTERIOR_NODE_ID],
-						},
+						indoorLayer(2, [OTHER_INTERIOR_NODE_ID], [CROSSING_B]),
 					]
 			: [
-					{
-						incomingMaskEdgeIds: [],
-						renderLayer: 0,
-						renderNodeIds: [rootNodeId],
-					},
-					{
-						incomingMaskEdgeIds: crossings,
-						renderLayer: 1,
-						renderNodeIds: [targetNodeId],
-					},
+					exteriorRoot
+						? {
+								contributions: [exteriorContribution],
+								renderLayer: 0,
+							}
+						: indoorLayer(0, [rootNodeId]),
+					exteriorRoot
+						? indoorLayer(1, [targetNodeId], crossings)
+						: {
+								contributions: [exteriorContribution],
+								renderLayer: 1,
+							},
 				],
 		rootNodeId,
 		selectedScopes: [],
@@ -746,6 +890,24 @@ function createFixtureStraddleWindow() {
 	]);
 	if (!window) throw new Error("Fixture straddle window is empty.");
 	return window;
+}
+
+function indoorLayer(
+	renderLayer: number,
+	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
+	maskEdgeIds: readonly PortalCrossingId[] = [],
+): PortalRenderWorkPlan["renderLayers"][number] {
+	return {
+		contributions: [
+			{
+				kind: "indoor",
+				maskEdgeIds,
+				renderNodeIds,
+				stencilValue: renderLayer,
+			},
+		],
+		renderLayer,
+	};
 }
 
 function node(

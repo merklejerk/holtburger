@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-30_
 
 ## Tech Lead North Stars
 
@@ -14,8 +14,9 @@ _Last updated: 2026-07-28_
   environment shells, and environment-cell residents.
 - Keep explorer camera policy in the explorer. Shared runtime APIs expose facts and directed query
   primitives rather than implementing a future game client's movement controller.
-- Make portal rendering correct by construction: one unique owner for each reached render domain,
-  one effective aperture per mask edge, and one renderer-local schedule.
+- Make portal rendering correct by construction: scope-local traversal, one unique owner for each
+  render domain, and one explicit schedule that distinguishes node identity from contribution
+  occurrences.
 
 ## 1. Current System Shape
 
@@ -62,10 +63,11 @@ commit, revision, owner, publication, and eviction lifecycle.
 | `game/systems/env-cell-system.ts`                | Failure-atomic ownership of scopes, crossings, shell nodes, aperture geometry, and rollback.                                                            |
 | `game/scene/scene-graph.ts`                      | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
 | `game/renderer/render-world.ts`                  | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
-| `game/renderer/portal-render-graph.ts`           | Per-view portal windows, traversal, unique render domains, mask edges, render layers, exterior-component scheduling, and capacity preflight.            |
+| `game/renderer/portal-view-window.ts`            | Exact normalized window construction, convex source decomposition, scope-coverage admission, projection, and clipping.                                  |
+| `game/renderer/portal-render-graph.ts`           | Scope-local traversal, unique render domains, mask edges, explicit contributions, exterior scheduling, and capacity preflight.                          |
 | `game/renderer/portal-render-plan-validation.ts` | Pure validation and indexing of the completed planner contract before any GPU resource resolution.                                                      |
 | `game/renderer/webgl2-portal-executor.ts`        | Stateless execution of the completed graph; it invents no topology or second contribution schedule.                                                     |
-| `game/renderer/webgl2-portal-substrate.ts`       | Two extent-keyed scene-domain targets and explicit WebGL color/depth/stencil state transitions.                                                         |
+| `game/renderer/webgl2-portal-substrate.ts`       | One extent-keyed scene-domain target and explicit WebGL color/depth/stencil state transitions.                                                          |
 
 ## 3. Environment-Cell Source and Ownership Flow
 
@@ -167,23 +169,26 @@ effective front/back rejection for each side already expanded by the host.
 
 Portal mode starts from the camera's supplied scope. The planner:
 
-1. groups depth-continuous indoor scopes into unique render domains;
-2. propagates exact clipped view windows through forward-facing effective apertures;
-3. retains each reached domain once and records alternate routes as incoming mask edges;
-4. treats finite near-plane/aperture intersections as dual-side seeds;
-5. assigns render layers and an explicit exterior-component operation; and
-6. preflights stencil capacity and a corruption-only work ceiling.
+1. seeds only the camera scope with the full view window;
+2. propagates exact clipped windows through source-keyed crossings;
+3. crosses depth-continuous seams without masks while retaining scope-local coverage;
+4. maps reached scopes to unique render domains without selecting unrelated island members;
+5. records cross-domain masks before coverage subsumption;
+6. assigns explicit ordinary, exterior, deferred, and additional contribution occurrences; and
+7. preflights stencil capacity and a corruption-only work ceiling.
 
-The executor unions every layer's aperture masks into one stencil label, then submits each reached
-node once for that layer. A same-domain topology boundary remains available to spatial queries but
-produces no mask: both endpoint scopes are already owned by the same unique draw domain, so a mask
-cannot constrain them further.
+The executor consumes this schedule mechanically. It unions each contribution's masks under its
+planner-owned label, resets depth only where declared, and submits the named nodes. Node identity
+is unique, but contribution occurrences need not be: a root island can render ordinarily and then
+again through a parent-constrained exterior-return suffix. Deferred suffix nodes are withheld by
+the planner, not inferred by the executor.
 
-Outdoor/indoor transitions use two renderer-owned full-size targets: an exterior source and a
-composite destination. Exterior color and depth are rendered once per view and copied through
-transition masks. The same ordinary contribution path handles opaque, alpha-tested, transparent,
-and additive content. Targets are lazy, extent-keyed, retained across a switch back to flat mode,
-and disposed on resize or renderer destruction.
+A same-domain topology boundary remains available to spatial queries and propagates clipped
+scope coverage, but produces no mask because ordinary depth already unifies its endpoint domain.
+Outdoor/indoor transitions render directly into one renderer-owned full-size color plus
+depth-stencil target. Exterior color and depth render once per view. The same contribution path
+handles opaque, alpha-tested, transparent, and additive content. The target is lazy, extent-keyed,
+retained across a switch back to flat mode, and disposed on resize or renderer destruction.
 
 ## 7. Boundary Audit
 
@@ -223,8 +228,8 @@ imports shared behavior through an outdoor-owned module.
 - `visibilityProvenance` is source-validation evidence. Runtime diagnostics aggregate the resulting
   authored/intersection counts instead of carrying provenance into every frame.
 - Static texture-fact compatibility and owner-ID parsing each have one runtime implementation.
-- Portal-plan topology, layer, transition, and exterior-component validation completes before the
-  WebGL executor resolves masks or allocates targets.
+- Portal-plan topology, contribution roles, labels, masks, transitions, and exterior facts are
+  validated before the WebGL executor resolves masks or allocates targets.
 
 ## 9. Complexity, Debt, and Pruning Targets
 
@@ -237,7 +242,8 @@ Current large-file concentration:
 | `src-tauri/src/lib.rs`             |         1,292 | Broad Tauri composition hub; split by command family when next materially touched.                                                                                                         |
 | `runtime/game-runtime.ts`          |         1,219 | Legitimate composition root. Typed owner parsing and texture merging are now delegated; keep feature policy in planners, realizers, and systems.                                           |
 | `assets/decode-env-cell-record.ts` |         1,140 | Strict semantic validation remains dense after shared binary-section and static-presentation decoding were extracted.                                                                      |
-| `renderer/portal-render-graph.ts`  |         1,053 | Complex domain algorithm with strong pure-test coverage. Avoid mixing GPU commands into it.                                                                                                |
+| `renderer/portal-render-graph.ts`  |         1,179 | Complex domain algorithm with strong pure-test coverage. Keep traversal, scheduling, and capacity here; avoid mixing GPU commands into it.                                                 |
+| `renderer/portal-view-window.ts`   |           983 | Exact geometry hot path. Convex decomposition and normalization are cohesive but performance-sensitive; preserve archive timing gates when changing it.                                    |
 
 There is no evidence-backed duplicate material or portal renderer to delete. The main risk is
 future accretion into the renderer and host serializer hubs. The correct next refactor trigger is a
@@ -247,9 +253,9 @@ Known concessions:
 
 - Flat mode intentionally renders all resident EnvCells, so it is an inspection mode rather than a
   scalable gameplay visibility policy.
-- Same-domain topology boundaries cannot create a useful stencil separation after their endpoint
-  scopes have merged into one proven visibility island; they remain query-visible and are
-  diagnosed.
+- Same-domain topology boundaries remain query-visible and propagate clipped scope reachability,
+  but cannot create a useful stencil separation after their endpoints map to one proven render
+  domain.
 - Portal targets remain allocated after returning to flat mode to make mode changes cheap. They
   are released on resize/destroy, and their bytes are reported.
 - Explorer residency is best effort and has no portal-crossing history. That is correct for the

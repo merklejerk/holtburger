@@ -16,8 +16,14 @@ interface PortalViewWindowFragment {
 	readonly vertices: readonly Vec2[];
 }
 
+const NORMALIZED_PORTAL_VIEW_WINDOW: unique symbol = Symbol(
+	"normalized-portal-view-window",
+);
+
 /** An exact, possibly multipart NDC visibility region. */
 export interface PortalViewWindow {
+	/** Constructor-owned brand preventing callers from bypassing normalization. */
+	readonly [NORMALIZED_PORTAL_VIEW_WINDOW]: true;
 	readonly fragments: readonly PortalViewWindowFragment[];
 }
 
@@ -33,6 +39,40 @@ export interface PreparedPortalProjection {
 export interface PortalApertureProjectionInput {
 	readonly aperture: PlanarAperture;
 	readonly landblockCoordinates: LandblockCoordinates;
+}
+
+/** Validated per-view projection reused across every aperture traversal in one plan. */
+export class PortalWindowProjector {
+	readonly #projection: PreparedPortalProjection;
+
+	constructor(projection: PreparedPortalProjection) {
+		validatePreparedPortalProjection(projection);
+		this.#projection = projection;
+	}
+
+	clipThroughAperture(
+		inherited: PortalViewWindow,
+		aperture: PortalApertureProjectionInput,
+	): PortalWindowProjectionResult {
+		return clipPortalWindowThroughProjectedAperture(
+			this.#projection,
+			inherited,
+			aperture,
+			HOMOGENEOUS_CLIP_DISTANCES,
+		);
+	}
+
+	clipThroughNearClipAperture(
+		inherited: PortalViewWindow,
+		aperture: PortalApertureProjectionInput,
+	): PortalWindowProjectionResult {
+		return clipPortalWindowThroughProjectedAperture(
+			this.#projection,
+			inherited,
+			aperture,
+			NEAR_CLIP_APERTURE_DISTANCES,
+		);
+	}
 }
 
 /** Consumed algorithmic cost facts for Gate E and focused geometry tests. */
@@ -103,6 +143,10 @@ const NEAR_CLIP_APERTURE_DISTANCES: readonly HomogeneousClipDistance[] = [
 	(vertex) => vertex.w - PORTAL_WINDOW_NDC_EPSILON,
 	...HOMOGENEOUS_CLIP_DISTANCES.slice(0, 4),
 ];
+const CONVEX_APERTURE_LOOPS = new WeakMap<
+	PlanarAperture,
+	readonly (readonly number[])[]
+>();
 
 /** Build the full normalized-device-coordinate root view. */
 export function createFullPortalViewWindow(): PortalViewWindow {
@@ -131,19 +175,113 @@ export function createPortalViewWindow(
 		}
 	}
 	if (byIdentity.size === 0) return null;
+	const merged = mergeAdjacentConvexFragments([...byIdentity.values()]);
 	return {
-		fragments: [...byIdentity.entries()]
-			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([, fragment]) => fragment),
+		[NORMALIZED_PORTAL_VIEW_WINDOW]: true,
+		fragments: merged.sort((left, right) =>
+			polygonIdentity(left.vertices).localeCompare(
+				polygonIdentity(right.vertices),
+			),
+		),
 	};
+}
+
+/**
+ * Delete triangulation-only seams when two adjacent fragments have an exactly convex union.
+ *
+ * The merge is topology preserving: fragments must share one complete oppositely directed edge,
+ * and the boundary left after deleting that edge must remain convex. Partial overlaps, holes,
+ * concave unions, and disconnected components remain separate.
+ */
+function mergeAdjacentConvexFragments(
+	fragments: readonly PortalViewWindowFragment[],
+): PortalViewWindowFragment[] {
+	const merged = fragments.map((fragment) => ({
+		vertices: fragment.vertices,
+	}));
+	for (let leftIndex = 0; leftIndex < merged.length; leftIndex += 1) {
+		for (let rightIndex = leftIndex + 1; rightIndex < merged.length; ) {
+			const vertices = mergeAdjacentConvexPolygons(
+				merged[leftIndex]!.vertices,
+				merged[rightIndex]!.vertices,
+			);
+			if (!vertices) {
+				rightIndex += 1;
+				continue;
+			}
+			merged[leftIndex] = { vertices };
+			merged.splice(rightIndex, 1);
+			rightIndex = leftIndex + 1;
+		}
+	}
+	return merged;
+}
+
+function mergeAdjacentConvexPolygons(
+	left: readonly Vec2[],
+	right: readonly Vec2[],
+): readonly Vec2[] | null {
+	for (let leftEdge = 0; leftEdge < left.length; leftEdge += 1) {
+		const leftStart = left[leftEdge]!;
+		const leftEnd = left[(leftEdge + 1) % left.length]!;
+		for (let rightEdge = 0; rightEdge < right.length; rightEdge += 1) {
+			if (
+				!pointsApproximatelyEqual(
+					leftStart,
+					right[(rightEdge + 1) % right.length]!,
+				) ||
+				!pointsApproximatelyEqual(leftEnd, right[rightEdge]!)
+			) {
+				continue;
+			}
+			const boundary = [
+				...polygonPath(left, (leftEdge + 1) % left.length, leftEdge),
+				...polygonPath(
+					right,
+					(rightEdge + 2) % right.length,
+					(rightEdge + right.length - 1) % right.length,
+				),
+			];
+			if (!polygonIsConvex(boundary)) return null;
+			return normalizeConvexPolygon(boundary);
+		}
+	}
+	return null;
+}
+
+function polygonPath(
+	vertices: readonly Vec2[],
+	startIndex: number,
+	endIndex: number,
+): readonly Vec2[] {
+	const path: Vec2[] = [];
+	for (let index = startIndex; ; index = (index + 1) % vertices.length) {
+		path.push(vertices[index]!);
+		if (index === endIndex) return path;
+	}
+}
+
+function polygonIsConvex(vertices: readonly Vec2[]): boolean {
+	if (vertices.length < 3) return false;
+	for (let index = 0; index < vertices.length; index += 1) {
+		if (
+			edgeDistance(
+				vertices[index]!,
+				vertices[(index + 1) % vertices.length]!,
+				vertices[(index + 2) % vertices.length]!,
+			) < -PORTAL_WINDOW_NDC_EPSILON
+		) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /** Return conservative NDC bounds for one exact multipart window. */
 export function portalViewWindowBounds(window: PortalViewWindow): AABB2 {
-	const normalized = requireNormalizedWindow(window);
-	const first = normalized.fragments[0]!.vertices[0]!;
+	const first = window.fragments[0]!.vertices[0]!;
 	const bounds = new AABB2(first.clone(), first.clone());
-	for (const fragment of normalized.fragments) {
+	for (const fragment of window.fragments) {
 		for (const vertex of fragment.vertices) {
 			bounds.min.x = Math.min(bounds.min.x, vertex.x);
 			bounds.min.y = Math.min(bounds.min.y, vertex.y);
@@ -162,8 +300,7 @@ export function portalViewWindowContainsPoint(
 	if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
 		throw new Error("Portal-window point must be finite.");
 	}
-	const normalized = requireNormalizedWindow(window);
-	return normalized.fragments.some((fragment) =>
+	return window.fragments.some((fragment) =>
 		pointInConvexPolygon(fragment.vertices, point),
 	);
 }
@@ -178,17 +315,15 @@ export function admitPortalViewWindow(
 	coverage: PortalViewWindow | null,
 	candidate: PortalViewWindow,
 ): PortalViewWindowAdmission {
-	const normalizedCandidate = requireNormalizedWindow(candidate);
 	if (!coverage) {
 		return {
-			coverage: normalizedCandidate,
-			delta: normalizedCandidate,
+			coverage: candidate,
+			delta: candidate,
 		};
 	}
-	const normalizedCoverage = requireNormalizedWindow(coverage);
-	const novelFragments = normalizedCandidate.fragments.filter(
+	const novelFragments = candidate.fragments.filter(
 		(candidateFragment) =>
-			!normalizedCoverage.fragments.some((coverageFragment) =>
+			!coverage.fragments.some((coverageFragment) =>
 				convexPolygonContainsPolygon(
 					coverageFragment.vertices,
 					candidateFragment.vertices,
@@ -199,9 +334,9 @@ export function admitPortalViewWindow(
 		novelFragments.map((fragment) => fragment.vertices),
 	);
 	if (!delta) {
-		return { coverage: normalizedCoverage, delta: null };
+		return { coverage, delta: null };
 	}
-	const retainedFragments = normalizedCoverage.fragments.filter(
+	const retainedFragments = coverage.fragments.filter(
 		(coverageFragment) =>
 			!delta.fragments.some((novelFragment) =>
 				convexPolygonContainsPolygon(
@@ -228,11 +363,9 @@ export function clipPortalWindowThroughAperture(
 	inherited: PortalViewWindow,
 	aperture: PortalApertureProjectionInput,
 ): PortalWindowProjectionResult {
-	return clipPortalWindowThroughProjectedAperture(
-		projection,
+	return new PortalWindowProjector(projection).clipThroughAperture(
 		inherited,
 		aperture,
-		HOMOGENEOUS_CLIP_DISTANCES,
 	);
 }
 
@@ -247,11 +380,9 @@ export function clipPortalWindowThroughNearClipAperture(
 	inherited: PortalViewWindow,
 	aperture: PortalApertureProjectionInput,
 ): PortalWindowProjectionResult {
-	return clipPortalWindowThroughProjectedAperture(
-		projection,
+	return new PortalWindowProjector(projection).clipThroughNearClipAperture(
 		inherited,
 		aperture,
-		NEAR_CLIP_APERTURE_DISTANCES,
 	);
 }
 
@@ -261,7 +392,6 @@ function clipPortalWindowThroughProjectedAperture(
 	aperture: PortalApertureProjectionInput,
 	clipDistances: readonly HomogeneousClipDistance[],
 ): PortalWindowProjectionResult {
-	validatePreparedPortalProjection(projection);
 	const diagnostics = createDiagnostics();
 	const projected = projectAperture(
 		projection,
@@ -273,11 +403,7 @@ function clipPortalWindowThroughProjectedAperture(
 		diagnostics.emptyExactIntersectionCount += 1;
 		return emptyResult(diagnostics);
 	}
-	const intersection = intersectWindows(
-		requireNormalizedWindow(inherited),
-		projected,
-		diagnostics,
-	);
+	const intersection = intersectWindows(inherited, projected, diagnostics);
 	if (!intersection) {
 		diagnostics.emptyExactIntersectionCount += 1;
 		return emptyResult(diagnostics);
@@ -302,34 +428,18 @@ function projectAperture(
 		projection.anchorCoordinates,
 	);
 	const output: Vec2[][] = [];
-	for (let index = 0; index < input.aperture.indices.length; index += 3) {
-		diagnostics.inputTriangleCount += 1;
-		let polygon = [
+	diagnostics.inputTriangleCount += input.aperture.indices.length / 3;
+	for (const loop of convexApertureVertexLoops(input.aperture)) {
+		let polygon = loop.map((vertexIndex) =>
 			transformApertureVertex(
 				projection.clipFromAnchor,
 				input.aperture.vertices,
-				input.aperture.indices[index]!,
+				vertexIndex,
 				offset.x,
 				offset.z,
 				diagnostics,
 			),
-			transformApertureVertex(
-				projection.clipFromAnchor,
-				input.aperture.vertices,
-				input.aperture.indices[index + 1]!,
-				offset.x,
-				offset.z,
-				diagnostics,
-			),
-			transformApertureVertex(
-				projection.clipFromAnchor,
-				input.aperture.vertices,
-				input.aperture.indices[index + 2]!,
-				offset.x,
-				offset.z,
-				diagnostics,
-			),
-		];
+		);
 		for (const distance of clipDistances) {
 			polygon = clipHomogeneousPolygon(polygon, distance, diagnostics);
 			if (polygon.length < 3) break;
@@ -362,6 +472,122 @@ function projectAperture(
 		output.push(normalized);
 	}
 	return createPortalViewWindow(output);
+}
+
+function convexApertureVertexLoops(
+	aperture: PlanarAperture,
+): readonly (readonly number[])[] {
+	const cached = CONVEX_APERTURE_LOOPS.get(aperture);
+	if (cached) return cached;
+	validatePlanarAperture(aperture);
+	const loops: number[][] = [];
+	for (let index = 0; index < aperture.indices.length; index += 3) {
+		loops.push([
+			aperture.indices[index]!,
+			aperture.indices[index + 1]!,
+			aperture.indices[index + 2]!,
+		]);
+	}
+	for (let leftIndex = 0; leftIndex < loops.length; leftIndex += 1) {
+		for (let rightIndex = leftIndex + 1; rightIndex < loops.length; ) {
+			const merged = mergeAdjacentApertureLoops(
+				loops[leftIndex]!,
+				loops[rightIndex]!,
+				aperture,
+			);
+			if (!merged) {
+				rightIndex += 1;
+				continue;
+			}
+			loops[leftIndex] = merged;
+			loops.splice(rightIndex, 1);
+			rightIndex = leftIndex + 1;
+		}
+	}
+	CONVEX_APERTURE_LOOPS.set(aperture, loops);
+	return loops;
+}
+
+function mergeAdjacentApertureLoops(
+	left: readonly number[],
+	right: readonly number[],
+	aperture: PlanarAperture,
+): number[] | null {
+	for (let leftEdge = 0; leftEdge < left.length; leftEdge += 1) {
+		const leftStart = left[leftEdge]!;
+		const leftEnd = left[(leftEdge + 1) % left.length]!;
+		for (let rightEdge = 0; rightEdge < right.length; rightEdge += 1) {
+			if (
+				leftStart !== right[(rightEdge + 1) % right.length] ||
+				leftEnd !== right[rightEdge]
+			) {
+				continue;
+			}
+			const boundary = [
+				...indexLoopPath(left, (leftEdge + 1) % left.length, leftEdge),
+				...indexLoopPath(
+					right,
+					(rightEdge + 2) % right.length,
+					(rightEdge + right.length - 1) % right.length,
+				),
+			];
+			return apertureLoopIsConvex(boundary, aperture) ? boundary : null;
+		}
+	}
+	return null;
+}
+
+function indexLoopPath(
+	vertices: readonly number[],
+	startIndex: number,
+	endIndex: number,
+): number[] {
+	const path: number[] = [];
+	for (let index = startIndex; ; index = (index + 1) % vertices.length) {
+		path.push(vertices[index]!);
+		if (index === endIndex) return path;
+	}
+}
+
+function apertureLoopIsConvex(
+	loop: readonly number[],
+	aperture: PlanarAperture,
+): boolean {
+	let orientation = 0;
+	for (let index = 0; index < loop.length; index += 1) {
+		const first = apertureVertex(aperture.vertices, loop[index]!);
+		const second = apertureVertex(
+			aperture.vertices,
+			loop[(index + 1) % loop.length]!,
+		);
+		const third = apertureVertex(
+			aperture.vertices,
+			loop[(index + 2) % loop.length]!,
+		);
+		const firstX = second[0] - first[0];
+		const firstY = second[1] - first[1];
+		const firstZ = second[2] - first[2];
+		const secondX = third[0] - second[0];
+		const secondY = third[1] - second[1];
+		const secondZ = third[2] - second[2];
+		const turn =
+			(firstY * secondZ - firstZ * secondY) * aperture.plane.normal.x +
+			(firstZ * secondX - firstX * secondZ) * aperture.plane.normal.y +
+			(firstX * secondY - firstY * secondX) * aperture.plane.normal.z;
+		if (Math.abs(turn) <= Number.EPSILON) continue;
+		const turnOrientation = Math.sign(turn);
+		if (orientation !== 0 && turnOrientation !== orientation) return false;
+		orientation = turnOrientation;
+	}
+	return orientation !== 0;
+}
+
+function apertureVertex(
+	vertices: Float32Array,
+	index: number,
+): readonly [number, number, number] {
+	const offset = index * 3;
+	return [vertices[offset]!, vertices[offset + 1]!, vertices[offset + 2]!];
 }
 
 function transformApertureVertex(
@@ -670,14 +896,6 @@ function polygonIdentity(vertices: readonly Vec2[]): string {
 				)}`,
 		)
 		.join("|");
-}
-
-function requireNormalizedWindow(window: PortalViewWindow): PortalViewWindow {
-	const normalized = createPortalViewWindow(
-		window.fragments.map((fragment) => fragment.vertices),
-	);
-	if (!normalized) throw new Error("Portal view window must contain geometry.");
-	return normalized;
 }
 
 /** Reject malformed shared projection facts before traversal starts. */

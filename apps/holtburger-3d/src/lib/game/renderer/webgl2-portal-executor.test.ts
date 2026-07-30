@@ -21,9 +21,9 @@ const OUTDOOR = "portal-render-node:outdoor" as const;
 const SUFFIX = "portal-render-node:suffix" as const;
 const SIBLING = "portal-render-node:sibling" as const;
 
-type MaskedExteriorComponent = Extract<
-	NonNullable<PortalRenderWorkPlan["exteriorComponent"]>,
-	{ readonly kind: "masked" }
+type ExteriorContribution = Extract<
+	PortalRenderWorkPlan["renderLayers"][number]["contributions"][number],
+	{ readonly kind: "exterior" }
 >;
 
 describe("portal graph execution", () => {
@@ -56,6 +56,46 @@ describe("portal graph execution", () => {
 			exteriorRenderCount: 1,
 			maskDrawCount: 0,
 			submittedRenderNodeCount: 1,
+		});
+	});
+
+	it("renders an indoor member of the outdoor root component as ordinary masked work", () => {
+		const substrate = new RecordingSubstrate();
+		const rendered: string[][] = [];
+
+		const diagnostics = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: EXTENT,
+			plan: outdoorRootCyclePlan(),
+			renderExterior: () => substrate.calls.push("render:exterior"),
+			renderIndoorNodes: (_target, nodeIds) => {
+				rendered.push([...nodeIds]);
+				substrate.calls.push(`render:${nodeIds.join(",")}`);
+			},
+			resolveVisibilityAperture: resolvedMask,
+		});
+
+		expect(substrate.calls).toEqual([
+			"resize",
+			"clear",
+			"begin-target",
+			"render:exterior",
+			"mask:1",
+			"reset:1",
+			"begin-masked:1",
+			`render:${SIBLING}`,
+			"present",
+			"restore",
+		]);
+		expect(rendered).toEqual([[SIBLING]]);
+		expect(diagnostics).toMatchObject({
+			exteriorRenderCount: 1,
+			maskDrawCount: 1,
+			maskEdgeCount: 2,
+			renderLayerCount: 2,
+			renderNodeCount: 2,
+			submittedRenderNodeCount: 2,
 		});
 	});
 
@@ -96,7 +136,7 @@ describe("portal graph execution", () => {
 		]);
 		expect(rendered.flat()).toEqual([ROOT, LEFT, RIGHT, TARGET]);
 		expect(diagnostics).toEqual({
-			admittedVisibilityStateCount: 5,
+			admittedScopeWindowStateCount: 5,
 			exteriorRenderCount: 0,
 			maskDrawCount: 4,
 			maskEdgeCount: 5,
@@ -105,8 +145,6 @@ describe("portal graph execution", () => {
 			sameDomainBoundaryCrossingCount: 0,
 			renderLayerCount: 3,
 			renderNodeCount: 4,
-			selectedScopeCount: 4,
-			submittedRenderLayerCount: 3,
 			submittedRenderNodeCount: 4,
 		});
 	});
@@ -210,7 +248,7 @@ describe("portal graph execution", () => {
 		{
 			createBasePlan: hybridPlan,
 			label: "duplicate",
-			mutate: (exterior: MaskedExteriorComponent) => {
+			mutate: (exterior: ExteriorContribution) => {
 				if (!exterior.suffix) throw new Error("Fixture suffix is missing.");
 				return {
 					...exterior,
@@ -228,27 +266,27 @@ describe("portal graph execution", () => {
 		{
 			createBasePlan: hybridPlan,
 			label: "zero",
-			mutate: (exterior: MaskedExteriorComponent) => ({
+			mutate: (exterior: ExteriorContribution) => ({
 				...exterior,
-				entryStencilValue: 0,
+				stencilValue: 0,
 			}),
 		},
 		{
 			createBasePlan: hybridPlan,
 			label: "out-of-range",
-			mutate: (exterior: MaskedExteriorComponent) => ({
+			mutate: (exterior: ExteriorContribution) => ({
 				...exterior,
-				entryStencilValue: 256,
+				stencilValue: 256,
 			}),
 		},
 		{
 			createBasePlan: indoorRootExteriorBranchPlan,
 			label: "ceremonial",
-			mutate: (exterior: MaskedExteriorComponent) => ({
+			mutate: (exterior: ExteriorContribution) => ({
 				...exterior,
 				suffix: {
-					indoorNodeIds: [],
 					maskEdgeIds: [],
+					submissions: [],
 					stencilTransition: {
 						from: 1,
 						kind: "promote-if-equal" as const,
@@ -262,14 +300,8 @@ describe("portal graph execution", () => {
 		({ createBasePlan, mutate }) => {
 			const substrate = new RecordingSubstrate();
 			const base = createBasePlan();
-			const exterior = base.exteriorComponent;
-			if (exterior?.kind !== "masked") {
-				throw new Error("Fixture requires a masked exterior operation.");
-			}
-			const plan = {
-				...base,
-				exteriorComponent: mutate(exterior),
-			};
+			const exterior = requireExteriorContribution(base);
+			const plan = replaceExteriorContribution(base, mutate(exterior));
 
 			expect(() =>
 				executePortalGraph(substrate, {
@@ -330,9 +362,77 @@ describe("portal graph execution", () => {
 			maskEdgeCount: 4,
 			renderLayerCount: 2,
 			renderNodeCount: 4,
-			submittedRenderLayerCount: 2,
 			submittedRenderNodeCount: 4,
 		});
+	});
+
+	it("redraws a root island through an additional exterior suffix", () => {
+		const substrate = new RecordingSubstrate();
+		const rendered: string[][] = [];
+
+		const diagnostics = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: EXTENT,
+			plan: rootReentryPlan(),
+			renderExterior: () => substrate.calls.push("render:exterior"),
+			renderIndoorNodes: (_target, nodeIds) => {
+				rendered.push([...nodeIds]);
+				substrate.calls.push(`render:${nodeIds.join(",")}`);
+			},
+			resolveVisibilityAperture: resolvedMask,
+		});
+
+		expect(substrate.calls).toEqual([
+			"resize",
+			"clear",
+			"begin-target",
+			`render:${ROOT}`,
+			"mask:2",
+			"initialize:2",
+			"begin-masked:2",
+			"render:exterior",
+			"mask:2->3",
+			"reset:3",
+			"begin-masked:3",
+			`render:${ROOT}`,
+			"present",
+			"restore",
+		]);
+		expect(rendered).toEqual([[ROOT], [ROOT]]);
+		expect(diagnostics).toMatchObject({
+			exteriorRenderCount: 1,
+			maskDrawCount: 2,
+			renderNodeCount: 2,
+			submittedRenderNodeCount: 3,
+		});
+	});
+
+	it("rejects a suffix that defers an ordinarily submitted root", () => {
+		const substrate = new RecordingSubstrate();
+		const base = rootReentryPlan();
+		const exterior = requireExteriorContribution(base);
+		if (!exterior.suffix) throw new Error("Fixture suffix is missing.");
+		const plan = replaceExteriorContribution(base, {
+			...exterior,
+			suffix: {
+				...exterior.suffix,
+				submissions: [{ kind: "deferred", renderNodeIds: [ROOT] }],
+			},
+		});
+
+		expect(() =>
+			executePortalGraph(substrate, {
+				clearColor: [0, 0, 0, 1],
+				destination: null,
+				extent: EXTENT,
+				plan,
+				renderExterior: () => undefined,
+				renderIndoorNodes: () => undefined,
+				resolveVisibilityAperture: resolvedMask,
+			}),
+		).toThrow(/deferred.*ordinary scheduling/);
+		expect(substrate.calls).toEqual([]);
 	});
 
 	it("keeps outdoor portal traversal behind a masked indoor-root straddle", () => {
@@ -521,6 +621,55 @@ function resolvedMask(): ResolvedPortalMask {
 	};
 }
 
+function indoorContribution(
+	stencilValue: number,
+	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
+	maskEdgeIds: readonly PortalCrossingId[] = [],
+): Extract<
+	PortalRenderWorkPlan["renderLayers"][number]["contributions"][number],
+	{ readonly kind: "indoor" }
+> {
+	return { kind: "indoor", maskEdgeIds, renderNodeIds, stencilValue };
+}
+
+function indoorLayer(
+	renderLayer: number,
+	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
+	maskEdgeIds: readonly PortalCrossingId[] = [],
+): PortalRenderWorkPlan["renderLayers"][number] {
+	return {
+		contributions: [
+			indoorContribution(renderLayer, renderNodeIds, maskEdgeIds),
+		],
+		renderLayer,
+	};
+}
+
+function requireExteriorContribution(
+	plan: PortalRenderWorkPlan,
+): ExteriorContribution {
+	const contribution = plan.renderLayers
+		.flatMap((layer) => layer.contributions)
+		.find((candidate) => candidate.kind === "exterior");
+	if (!contribution) throw new Error("Fixture requires exterior work.");
+	return contribution;
+}
+
+function replaceExteriorContribution(
+	plan: PortalRenderWorkPlan,
+	replacement: ExteriorContribution,
+): PortalRenderWorkPlan {
+	return {
+		...plan,
+		renderLayers: plan.renderLayers.map((layer) => ({
+			...layer,
+			contributions: layer.contributions.map((contribution) =>
+				contribution.kind === "exterior" ? replacement : contribution,
+			),
+		})),
+	};
+}
+
 function outdoorRootPlan(): PortalRenderWorkPlan {
 	const base = internalPlan();
 	return {
@@ -537,25 +686,84 @@ function outdoorRootPlan(): PortalRenderWorkPlan {
 			retainedMaskEdgeCount: 0,
 			retainedRenderNodeCount: 1,
 		},
-		exteriorComponent: {
-			componentNodeIds: [OUTDOOR],
-			entryMaskEdgeIds: [],
-			kind: "unmasked",
-			outdoorNodeId: OUTDOOR,
-			renderLayer: 0,
-			returnMaskEdgeIds: [],
-			rootContained: true,
-			suffix: null,
-		},
 		exteriorTransitions: [],
 		maskEdges: [],
 		nodes: [portalNode(OUTDOOR, "outdoor", 0, [])],
 		renderLayers: [
 			{
-				incomingMaskEdgeIds: [],
+				contributions: [
+					{
+						componentNodeIds: [OUTDOOR],
+						entryMaskEdgeIds: [],
+						kind: "exterior",
+						maskEdgeIds: [],
+						outdoorNodeId: OUTDOOR,
+						renderLayer: 0,
+						returnMaskEdgeIds: [],
+						rootContained: true,
+						stencilValue: 0,
+						suffix: null,
+					},
+				],
 				renderLayer: 0,
-				renderNodeIds: [OUTDOOR],
 			},
+		],
+		rootNodeId: OUTDOOR,
+		selectedScopes: [],
+	};
+}
+
+function outdoorRootCyclePlan(): PortalRenderWorkPlan {
+	const base = internalPlan();
+	const outsideInside = hybridEdge("outside-inside", OUTDOOR, SIBLING, true);
+	const insideOutside = hybridEdge("inside-outside", SIBLING, OUTDOOR, true);
+	const maskEdges = [insideOutside, outsideInside];
+	return {
+		...base,
+		capacity: {
+			maximumAvailableStencilValue: 255,
+			maximumRenderLayer: 1,
+			requiredMaximumStencilValue: 1,
+		},
+		diagnostics: {
+			...base.diagnostics,
+			componentCount: 1,
+			cyclicComponentCount: 1,
+			retainedMaskEdgeCount: 2,
+			retainedRenderNodeCount: 2,
+		},
+		exteriorTransitions: maskEdges.map((edge) => ({
+			crossingId: edge.crossingId,
+			exteriorLandblockId: "0x0001ffff",
+			sourceNodeId: edge.sourceNodeId,
+			targetNodeId: edge.targetNodeId,
+		})),
+		maskEdges,
+		nodes: [
+			portalNode(OUTDOOR, "outdoor", 0, [insideOutside.crossingId]),
+			portalNode(SIBLING, "indoor-visibility-island", 1, [
+				outsideInside.crossingId,
+			]),
+		],
+		renderLayers: [
+			{
+				contributions: [
+					{
+						componentNodeIds: [OUTDOOR, SIBLING],
+						entryMaskEdgeIds: [],
+						kind: "exterior",
+						maskEdgeIds: [],
+						outdoorNodeId: OUTDOOR,
+						renderLayer: 0,
+						returnMaskEdgeIds: [insideOutside.crossingId],
+						rootContained: true,
+						stencilValue: 0,
+						suffix: null,
+					},
+				],
+				renderLayer: 0,
+			},
+			indoorLayer(1, [SIBLING], [outsideInside.crossingId]),
 		],
 		rootNodeId: OUTDOOR,
 		selectedScopes: [],
@@ -583,21 +791,6 @@ function hybridPlan(): PortalRenderWorkPlan {
 			retainedMaskEdgeCount: maskEdges.length,
 			retainedRenderNodeCount: 4,
 		},
-		exteriorComponent: {
-			componentNodeIds: [OUTDOOR, SUFFIX],
-			entryStencilValue: 2,
-			entryMaskEdgeIds: [enterOutside.crossingId],
-			kind: "masked",
-			outdoorNodeId: OUTDOOR,
-			renderLayer: 1,
-			returnMaskEdgeIds: [suffixOutside.crossingId],
-			rootContained: false,
-			suffix: {
-				indoorNodeIds: [SUFFIX],
-				maskEdgeIds: [outsideSuffix.crossingId],
-				stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
-			},
-		},
 		exteriorTransitions: [enterOutside, outsideSuffix, suffixOutside].map(
 			(edge) => ({
 				crossingId: edge.crossingId,
@@ -621,15 +814,91 @@ function hybridPlan(): PortalRenderWorkPlan {
 			]),
 		],
 		renderLayers: [
+			indoorLayer(0, [ROOT]),
 			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [ROOT],
-			},
-			{
-				incomingMaskEdgeIds: maskEdges.map((edge) => edge.crossingId),
+				contributions: [
+					{
+						componentNodeIds: [OUTDOOR, SUFFIX],
+						entryMaskEdgeIds: [enterOutside.crossingId],
+						kind: "exterior",
+						maskEdgeIds: [enterOutside.crossingId],
+						outdoorNodeId: OUTDOOR,
+						renderLayer: 1,
+						returnMaskEdgeIds: [suffixOutside.crossingId],
+						rootContained: false,
+						stencilValue: 2,
+						suffix: {
+							maskEdgeIds: [outsideSuffix.crossingId],
+							submissions: [{ kind: "deferred", renderNodeIds: [SUFFIX] }],
+							stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
+						},
+					},
+					indoorContribution(1, [SIBLING], [rootSibling.crossingId]),
+				],
 				renderLayer: 1,
-				renderNodeIds: [OUTDOOR, SIBLING, SUFFIX],
+			},
+		],
+		rootNodeId: ROOT,
+		selectedScopes: [],
+	};
+}
+
+function rootReentryPlan(): PortalRenderWorkPlan {
+	const base = internalPlan();
+	const rootOutside = hybridEdge("root-outside", ROOT, OUTDOOR, true);
+	const outsideRoot = hybridEdge("outside-root", OUTDOOR, ROOT, true);
+	const maskEdges = [rootOutside, outsideRoot];
+	return {
+		...base,
+		capacity: {
+			maximumAvailableStencilValue: 255,
+			maximumRenderLayer: 1,
+			requiredMaximumStencilValue: 3,
+		},
+		diagnostics: {
+			...base.diagnostics,
+			componentCount: 1,
+			cyclicComponentCount: 1,
+			retainedMaskEdgeCount: 2,
+			retainedRenderNodeCount: 2,
+		},
+		exteriorTransitions: maskEdges.map((edge) => ({
+			crossingId: edge.crossingId,
+			exteriorLandblockId: "0x0001ffff",
+			sourceNodeId: edge.sourceNodeId,
+			targetNodeId: edge.targetNodeId,
+		})),
+		maskEdges,
+		nodes: [
+			portalNode(ROOT, "indoor-visibility-island", 0, [outsideRoot.crossingId]),
+			portalNode(OUTDOOR, "outdoor", 1, [rootOutside.crossingId]),
+		],
+		renderLayers: [
+			indoorLayer(0, [ROOT]),
+			{
+				contributions: [
+					{
+						componentNodeIds: [ROOT, OUTDOOR],
+						entryMaskEdgeIds: [],
+						kind: "exterior",
+						maskEdgeIds: [rootOutside.crossingId],
+						outdoorNodeId: OUTDOOR,
+						renderLayer: 1,
+						returnMaskEdgeIds: [rootOutside.crossingId],
+						rootContained: true,
+						stencilValue: 2,
+						suffix: {
+							maskEdgeIds: [outsideRoot.crossingId],
+							submissions: [{ kind: "additional", renderNodeIds: [ROOT] }],
+							stencilTransition: {
+								from: 2,
+								kind: "promote-if-equal",
+								to: 3,
+							},
+						},
+					},
+				],
+				renderLayer: 1,
 			},
 		],
 		rootNodeId: ROOT,
@@ -662,17 +931,6 @@ function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 			retainedMaskEdgeCount: 2,
 			retainedRenderNodeCount: 3,
 		},
-		exteriorComponent: {
-			componentNodeIds: [OUTDOOR, ROOT],
-			entryMaskEdgeIds: [],
-			entryStencilValue: 1,
-			kind: "masked",
-			outdoorNodeId: OUTDOOR,
-			renderLayer: 1,
-			returnMaskEdgeIds: [seed.crossingId],
-			rootContained: true,
-			suffix: null,
-		},
 		exteriorTransitions: [seed, outsideSibling].map((edge) => ({
 			crossingId: edge.crossingId,
 			exteriorLandblockId: "0x0001ffff",
@@ -688,21 +946,25 @@ function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 			]),
 		],
 		renderLayers: [
+			indoorLayer(0, [ROOT]),
 			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [ROOT],
-			},
-			{
-				incomingMaskEdgeIds: [seed.crossingId],
+				contributions: [
+					{
+						componentNodeIds: [OUTDOOR],
+						entryMaskEdgeIds: [seed.crossingId],
+						kind: "exterior",
+						maskEdgeIds: [seed.crossingId],
+						outdoorNodeId: OUTDOOR,
+						renderLayer: 1,
+						returnMaskEdgeIds: [],
+						rootContained: false,
+						stencilValue: 1,
+						suffix: null,
+					},
+				],
 				renderLayer: 1,
-				renderNodeIds: [OUTDOOR],
 			},
-			{
-				incomingMaskEdgeIds: [outsideSibling.crossingId],
-				renderLayer: 2,
-				renderNodeIds: [SIBLING],
-			},
+			indoorLayer(2, [SIBLING], [outsideSibling.crossingId]),
 		],
 		rootNodeId: ROOT,
 		selectedScopes: [],
@@ -780,13 +1042,13 @@ function internalPlan(): PortalRenderWorkPlan {
 			requiredMaximumStencilValue: 2,
 		},
 		diagnostics: {
-			admittedWindowStateCount: 5,
+			admittedScopeWindowStateCount: 5,
 			attemptedCrossingCount: 7,
 			componentCount: 1,
 			cyclicComponentCount: 1,
 			duplicateOrSubsumedWindowStateCount: 1,
 			emptyWindowCount: 0,
-			maximumRetainedFragmentsPerNode: 2,
+			maximumRetainedFragmentsPerScope: 2,
 			nearPlaneSeedCount: 0,
 			projection: {
 				broadPhaseRejectedPairCount: 0,
@@ -807,7 +1069,6 @@ function internalPlan(): PortalRenderWorkPlan {
 			retainedRenderNodeCount: 4,
 			workItemCount: 12,
 		},
-		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [leftTarget, rightTarget, rootLeft, rootRight, targetRoot],
 		nodes: [
@@ -841,21 +1102,13 @@ function internalPlan(): PortalRenderWorkPlan {
 			},
 		],
 		renderLayers: [
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [ROOT],
-			},
-			{
-				incomingMaskEdgeIds: [rootLeft.crossingId, rootRight.crossingId],
-				renderLayer: 1,
-				renderNodeIds: [LEFT, RIGHT],
-			},
-			{
-				incomingMaskEdgeIds: [leftTarget.crossingId, rightTarget.crossingId],
-				renderLayer: 2,
-				renderNodeIds: [TARGET],
-			},
+			indoorLayer(0, [ROOT]),
+			indoorLayer(
+				1,
+				[LEFT, RIGHT],
+				[rootLeft.crossingId, rootRight.crossingId],
+			),
+			indoorLayer(2, [TARGET], [leftTarget.crossingId, rightTarget.crossingId]),
 		],
 		rootNodeId: ROOT,
 		selectedScopes: [
@@ -892,11 +1145,11 @@ function rootSeedPlan(): PortalRenderWorkPlan {
 		},
 		diagnostics: {
 			...base.diagnostics,
-			admittedWindowStateCount: 2,
+			admittedScopeWindowStateCount: 2,
 			attemptedCrossingCount: 1,
 			componentCount: 2,
 			cyclicComponentCount: 0,
-			maximumRetainedFragmentsPerNode: 1,
+			maximumRetainedFragmentsPerScope: 1,
 			nearPlaneSeedCount: 1,
 			rejectedFacingCrossingCount: 0,
 			retainedMaskEdgeCount: 1,
@@ -906,16 +1159,8 @@ function rootSeedPlan(): PortalRenderWorkPlan {
 		maskEdges: [seedEdge],
 		nodes,
 		renderLayers: [
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [ROOT],
-			},
-			{
-				incomingMaskEdgeIds: [seedEdge.crossingId],
-				renderLayer: 1,
-				renderNodeIds: [LEFT],
-			},
+			indoorLayer(0, [ROOT]),
+			indoorLayer(1, [LEFT], [seedEdge.crossingId]),
 		],
 		selectedScopes: nodes.flatMap((node) => node.scopes),
 	};

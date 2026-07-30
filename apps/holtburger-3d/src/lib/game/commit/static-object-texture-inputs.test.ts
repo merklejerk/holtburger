@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Mat4, Vec3 } from "../math/types";
 import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
+import type { ResolvedMaterial } from "../resolution/presentation";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import { TexturePurpose } from "../textures/types";
 import { collectStaticObjectTextureDependencies } from "./static-object-texture-inputs";
@@ -62,6 +63,9 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 								materialWrapModes: Uint8Array.from([1]),
 								normals: Float32Array.from([]),
 								positions: Float32Array.from([]),
+								sourceDiagnostics: {
+									rejectedDegenerateTriangles: [],
+								},
 								textureCoordinates: Float32Array.from([]),
 							},
 							materials: [
@@ -83,7 +87,10 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 	};
 }
 
-function indexedMaterial(colorTextureId: string, paletteTextureId: string) {
+function indexedMaterial(
+	colorTextureId: string,
+	paletteTextureId: string,
+): ResolvedMaterial {
 	return {
 		colorTextureId,
 		diffuseScale: 1,

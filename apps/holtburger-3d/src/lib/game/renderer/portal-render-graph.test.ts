@@ -43,13 +43,12 @@ describe("portal render graph planning", () => {
 		expect(plan.exteriorComponent).toEqual({
 			componentNodeIds: ["portal-render-node:outdoor"],
 			entryMaskEdgeIds: [],
-			indoorNodeIds: [],
-			internalIndoorMaskEdgeIds: [],
+			kind: "unmasked",
 			outdoorNodeId: "portal-render-node:outdoor",
 			renderLayer: 0,
 			returnMaskEdgeIds: [],
 			rootContained: true,
-			stencilLabels: null,
+			suffix: null,
 		});
 		expect(plan.capacity.requiredMaximumStencilValue).toBe(0);
 	});
@@ -652,14 +651,14 @@ describe("portal render graph planning", () => {
 		]);
 		expect(plan.exteriorComponent).toEqual({
 			componentNodeIds: ["portal-render-node:outdoor"],
+			entryStencilValue: 1,
 			entryMaskEdgeIds: ["portal-crossing:outside"],
-			indoorNodeIds: [],
-			internalIndoorMaskEdgeIds: [],
+			kind: "masked",
 			outdoorNodeId: "portal-render-node:outdoor",
 			renderLayer: 1,
 			returnMaskEdgeIds: [],
 			rootContained: false,
-			stencilLabels: { entry: 1, suffix: null },
+			suffix: null,
 		});
 	});
 
@@ -697,14 +696,18 @@ describe("portal render graph planning", () => {
 				"portal-render-node:env-cell-island:suffix",
 				"portal-render-node:outdoor",
 			],
+			entryStencilValue: 2,
 			entryMaskEdgeIds: ["portal-crossing:enter-outside"],
-			indoorNodeIds: ["portal-render-node:env-cell-island:suffix"],
-			internalIndoorMaskEdgeIds: ["portal-crossing:outside-suffix"],
+			kind: "masked",
 			outdoorNodeId: "portal-render-node:outdoor",
 			renderLayer: 1,
 			returnMaskEdgeIds: ["portal-crossing:suffix-outside"],
 			rootContained: false,
-			stencilLabels: { entry: 2, suffix: 3 },
+			suffix: {
+				indoorNodeIds: ["portal-render-node:env-cell-island:suffix"],
+				maskEdgeIds: ["portal-crossing:outside-suffix"],
+				stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
+			},
 		});
 		expect(plan.capacity.requiredMaximumStencilValue).toBe(3);
 		expect(plan.diagnostics.cyclicComponentCount).toBe(1);
@@ -746,9 +749,10 @@ describe("portal render graph planning", () => {
 			"portal-render-node:env-cell-island:suffix",
 			"portal-render-node:outdoor",
 		]);
-		expect(plan.exteriorComponent?.stencilLabels).toEqual({
-			entry: 2,
-			suffix: 3,
+		expect(plan.exteriorComponent?.suffix).toEqual({
+			indoorNodeIds: ["portal-render-node:env-cell-island:suffix"],
+			maskEdgeIds: ["portal-crossing:outside-suffix"],
+			stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
 		});
 		expect(plan.capacity).toMatchObject({
 			maximumRenderLayer: 1,

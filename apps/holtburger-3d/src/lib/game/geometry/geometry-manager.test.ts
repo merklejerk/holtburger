@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RenderGeometryData } from "../renderer/geometry";
 import type {
 	GeometryResourceKey,
+	InstanceStreamResourceKey,
 	RendererResourceManager,
 	RenderResourceKey,
 	Texture2DResourceKey,
@@ -10,6 +11,7 @@ import type {
 	TextureArrayLayerUpload,
 	TextureArrayResourceKey,
 } from "../renderer/resource-manager";
+import type { StaticInstanceStreamData } from "../systems/static-resources";
 import { GeometryManager } from "./geometry-manager";
 import { createTerrainGeometryKey } from "./types";
 
@@ -55,6 +57,13 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometry++}`;
 		this.created.push(key);
 		return key;
+	}
+
+	createStaticInstanceStream(
+		data: StaticInstanceStreamData,
+	): InstanceStreamResourceKey {
+		void data;
+		throw new Error("Geometry manager tests do not create instance streams.");
 	}
 
 	replaceGeometry(

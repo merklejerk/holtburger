@@ -722,6 +722,226 @@ Review correctness, complexity, and measurements before deleting the old path.
   instrumentation, and broader scene submission optimization remain explicitly separate future
   work rather than concessions hidden in this cutover.
 
+## Phase 7: Postmortem Contract Refinement
+
+The completed cutover is behaviorally accepted, but the subsequent branch comparison exposed type
+shapes that make the correct execution contract harder to understand than necessary. This phase
+must preserve the accepted direct-ownership trace while making invalid entry/suffix combinations
+unrepresentable.
+
+### Deliverables
+
+- Reshape `PortalExteriorComponentOperation` as a discriminated unmasked/masked operation so an
+  unmasked outdoor root cannot carry ceremonial stencil state.
+- Collapse the non-root suffix's indoor node ids, mask edge ids, parent entry label, and destination
+  suffix label into one nullable composite operation.
+- Preserve planner ownership of both labels and capacity preflight; the executor must not derive
+  labels or reconstruct SCC membership.
+- Express suffix promotion as an explicit typed transition containing both `from` and `to` labels.
+  The substrate must require `to === from + 1` before implementing the transition with
+  equality-constrained `INCR`.
+- Restore `PreparedPortalContribution` as an honest discriminated union so only indoor
+  contributions carry `renderNodeIds`.
+- Remove executor non-null assertions made unnecessary by the refined planner contract.
+
+### Task Checklist
+
+- [x] Dry-run the refined types against outdoor root, masked singleton exterior, non-root exterior
+      SCC, root-contained exterior SCC, near-plane straddle, and same-layer sibling plans.
+- [x] Refactor planner construction and stencil-capacity calculation around the composite suffix.
+- [x] Refactor plan validation to prove the same invariants without compensating for invalid type
+      combinations.
+- [x] Refactor executor preparation to consume the composite operation directly.
+- [x] Refine `PortalMaskStencilPolicy` to name both labels of a guarded promotion.
+- [x] Convert `PreparedPortalContribution` to a discriminated union.
+- [x] Update focused planner, validator, executor, and substrate tests.
+
+### Acceptance Criteria
+
+- The accepted `replace(entry)` then `promote-if-equal(entry, suffix)` GPU trace is unchanged.
+- A plan cannot represent suffix nodes, suffix masks, or a suffix label independently.
+- An outdoor-root operation cannot represent unused stencil labels.
+- The executor contains no SCC analysis, label allocation, or non-null assertion for suffix state.
+- Every label written by the substrate remains planner-authored and included in capacity preflight.
+
+### Decisions and Course Corrections
+
+- The Claude branch's unconditional suffix `REPLACE` is explicitly rejected. A distinct label
+  prevents collisions but does not constrain the suffix to its parent exterior entry region.
+- The Claude branch's composite suffix and discriminated contribution shapes are accepted as
+  maintainability improvements only after incorporating the Codex branch's parent-label invariant.
+- `initializeMaskedScene` and direct-ownership terminology remain the canonical names.
+- Dry-running the graph shapes showed that `rootContained` is topology provenance rather than the
+  execution discriminator: a root-containing exterior SCC can still render the outdoor node under
+  a mask. The landed union therefore discriminates `unmasked` from `masked` execution while
+  retaining `rootContained` as an independently validated graph fact.
+- The planner is the sole author of `suffix | null`; the validator independently re-derives whether
+  graph facts require a suffix, while the executor only consumes the composite operation. This
+  preserves a real validation boundary without repeating scheduling policy in execution.
+- `PortalExteriorSuffixOperation` now owns indoor nodes, mask edges, and a typed
+  `promote-if-equal { from, to }` transition. The substrate rejects non-adjacent labels before
+  issuing `INCR`.
+- The executor now filters ordinary indoor work with direct suffix membership, contains no
+  component-membership reconstruction, stencil fallback, suffix non-null assertion, or dead
+  exterior `renderNodeIds`.
+- Focused planner/executor/substrate verification passes 3 files / 43 tests; `npm run check` and
+  ESLint pass after the contract cutover.
+
+## Phase 8: Ceremonial Plumbing and State Cleanup
+
+### Deliverables
+
+- Remove `exteriorContributionCount` and `portalExteriorContributionCount` end to end. They are
+  identical to the retained exterior render counts and therefore provide no independent fact.
+- Remove the stale `TEXTURE1` unbind from ordinary-pass restoration; the surviving portal path
+  samples no second scene texture.
+- Remove the redundant outer allocation catch when the inner target allocator already performs
+  transactional cleanup.
+- Make `applyPortalPassState` fail loudly for an unsupported runtime command while retaining
+  compile-time exhaustiveness.
+- Re-evaluate the duplicated masked reset draw setup. Share a private implementation only if it
+  remains sentinel-free and makes the two public operations easier to read.
+- Retain the root-anchored `/.worktrees/` ignore rule. Repository-local linked worktrees are part of
+  the development workflow, and the rule prevents a routine `git add .` from staging a complete
+  worktree checkout.
+
+### Task Checklist
+
+- [x] Delete the redundant exterior contribution diagnostic from executor, renderer, Explorer,
+      harness expectations, tests, and documentation.
+- [x] Delete stale texture-unit restoration and redundant allocation error plumbing.
+- [x] Add an exhaustive unsupported-command failure to portal pass-state application.
+- [x] Dry-run a private reset helper and retain it only if it reduces duplication without
+      introducing `null`, default, or boolean-mode parameters.
+- [x] Search production portal code for newly dead fields, duplicate counters, non-null assertions,
+      obsolete texture-unit state, and copy/composite terminology.
+
+### Acceptance Criteria
+
+- Exterior exactly-once evidence remains available through `exteriorRenderCount` and submitted node
+  counts without a second synchronized metric.
+- Ordinary-pass restoration touches only state used by the surviving renderer path.
+- Allocation failure remains transactional with one obvious cleanup owner.
+- Pass-state dispatch is compile-time exhaustive and fails loudly for malformed runtime input.
+- `/.worktrees/` remains ignored and no linked-worktree contents enter the diff.
+
+### Decisions and Course Corrections
+
+- This phase applies addition through subtraction; it must not introduce replacement diagnostics or
+  generalized state abstractions.
+- The public `resetMaskedDepth` and `initializeMaskedScene` operations remain distinct even if a
+  private draw helper proves worthwhile.
+- Removed `exteriorContributionCount` and `portalExteriorContributionCount` from executor
+  diagnostics, renderer metrics, Explorer presentation, harness expectations, and tests.
+  `exteriorRenderCount` plus submitted-node counts retain the independent exactly-once evidence.
+- Removed the stale `TEXTURE1` unbind and the outer allocation catch. The inner target allocator
+  remains the sole partial-resource cleanup owner, while the outer `finally` still restores
+  framebuffer and texture bindings.
+- The private reset-helper dry run was rejected. A sentinel-free helper would add another
+  discriminated command and branch merely to hide two short public operations whose different
+  color behavior is load-bearing.
+- Adding an exhaustive runtime failure exposed that `clear | ordinary` was encoded as one union
+  member with a union-valued discriminant. Split them into honest variants so TypeScript proves
+  exhaustiveness; malformed runtime input now fails loudly and has focused coverage.
+- Final stale-surface searches find no duplicate contribution metric, `TEXTURE1`, old stencil
+  label shape, executor component-membership filter, obsolete promotion name, or portal copy /
+  two-target terminology in production sources, permanent portal documentation, or the harness.
+- Focused verification passes 2 files / 26 tests, including the new malformed-command case;
+  `npm run check`, ESLint, and Knip pass after cleanup.
+
+## Phase 9: Test Typechecking and Lean Verification
+
+The postmortem found that `npm run check` excludes `src/**/*.test.ts`, while Vitest transpiles tests
+without providing a complete TypeScript correctness gate. This allowed stale test doubles and
+deleted types to survive intermediate refactors.
+
+### Deliverables
+
+- Add a test-inclusive TypeScript configuration and package script, or extend the existing check
+  pipeline with an equivalent explicit test typecheck.
+- Keep permanent coverage focused on current planner, stencil-policy, execution-order, and
+  substrate invariants.
+- Do not restore historical screenshot comparisons, copy-shader reproductions, capture plumbing,
+  or other archaeological regression fixtures for the retired two-target mechanism.
+- Do not port the Claude branch's additional uncovered-background browser fixture. Existing
+  executor operation tests and substrate initialization fixtures remain the chosen lean coverage
+  boundary.
+
+### Task Checklist
+
+- [x] Inspect the app/test TypeScript configuration and add the smallest explicit test-typechecking
+      command.
+- [x] Prove the new command catches a deliberately stale test-only type or test double, then revert
+      the deliberate failure.
+- [x] Run focused portal tests and the complete frontend suite.
+- [x] Run app checks, test typechecking, ESLint, Knip, formatting, build, and relevant Rust checks.
+- [x] Run the existing substrate, hybrid, and internal production-WebGL browser fixtures without
+      adding historical capture cases.
+- [x] Review the final diff for unrelated behavior changes, expanded fixture archaeology, and
+      hollow diagnostics.
+- [x] Update these phases with landed decisions, verification counts, and any concessions.
+
+### Acceptance Criteria
+
+- Production and test TypeScript sources both have explicit typechecking gates.
+- The new gate fails on a stale test-only contract and passes after that deliberate break is
+  reverted.
+- Existing direct-ownership unit and browser fixtures pass without new historical fixtures.
+- No rendering algorithm, graph scheduling, stencil ownership, or visual output changes.
+- The final diff is smaller or structurally simpler in the affected production contracts.
+
+### Decisions and Course Corrections
+
+- The first test-inclusive `tsconfig` prototype exposed 66 existing TypeScript errors across 17
+  test files, spanning Explorer camera coordination, asset decoding, commit fixtures, geometry,
+  renderer, runtime, scene tracing, terrain, texture layout/preparation, and the portal executor.
+- The failures are substantive stale contracts rather than one configuration mismatch: examples
+  include missing interface methods and fields, invalid discriminants and template-literal ids,
+  obsolete commit shapes, unsafe nullable results, stale mock signatures, and two portal executor
+  calls that still pass arguments to the now-zero-argument resolved-mask fixture.
+- Making the universal gate green was therefore a cross-subsystem test migration, not the planned
+  small tooling addition. The scope expansion across all 17 affected test files was explicitly
+  approved; restricting the gate to portal tests, adding suppressions, or weakening compiler
+  options was rejected.
+- Added `tsconfig.test.json`, added `check:tests`, and made the main `check` script invoke it.
+  Migrated all 66 failures to zero without inline suppressions or compiler-option concessions.
+- The migration tightened the production `decodeOutdoorStaticRecord` return type because the
+  implementation has no nullable path; record absence remains represented by the enclosing batch.
+  Test fixtures now use complete runtime diagnostics, discriminated commit variants, typed
+  resource-manager capabilities, branded scene identities, and contract-typed mock signatures.
+- Stale terrain work in the runtime test remains fail-fast through typed throwing accessors rather
+  than an invalid `{ commit: {} }` cast. No historical portal fixture, screenshot comparison, or
+  retired copy-path coverage was introduced.
+- A negative-control removal of `createStaticInstanceStream` from a test-only renderer resource
+  manager failed `check:tests` with the expected missing-capability errors. Restoring the method
+  returned the complete check pipeline to green.
+- Focused portal verification passes 3 files / 44 tests. The complete frontend suite passes 71
+  files / 384 tests. App/Svelte/production/test TypeScript checks, ESLint, Knip, Prettier, Vite
+  production build, Cargo check, and Clippy with warnings denied all pass.
+- The first browser-harness attempt was blocked because the managed sandbox denied its content host
+  permission to bind an ephemeral local port (`EPERM`). After the environment restriction was
+  removed, all three existing fixtures passed without adding an alternate or historical fixture.
+- The substrate fixture passes parent-constrained aperture and window masks, nested confinement,
+  masked-scene initialization, depth reset with retained color, ordered overwrites, state
+  restoration, resize/disposal accounting, final presentation, and context-loss rejection.
+- The hybrid fixture passes outdoor and indoor roots, both near-plane straddle directions, the
+  non-root exterior cycle, blend/depth ordering, multi-window union, stale-view rejection, and
+  target reuse. Every exterior-bearing trace reports exactly one exterior render.
+- The internal production-WebGL fixture passes exact concave-mask and nested-depth confinement,
+  layer union, alpha testing, material ordering, both near-plane directions, and unique node
+  submission.
+
+## Follow-up Definition of Done
+
+- [x] Exterior entry/suffix state is valid by construction and consumed mechanically.
+- [x] Parent-constrained adjacent-label promotion remains the only suffix execution policy.
+- [x] Contribution types expose only fields their variants consume.
+- [x] Redundant diagnostics and stale fixed-function cleanup are removed.
+- [x] Repository-local worktrees remain ignored.
+- [x] Tests are typechecked explicitly.
+- [x] No retired copy-path or screenshot archaeology is restored.
+- [x] All existing verification gates pass.
+
 ## Risks and Mitigations
 
 | Risk                                                             | Mitigation                                                                                                          |
@@ -770,4 +990,6 @@ Review correctness, complexity, and measurements before deleting the old path.
    and transfer-work reductions without inventing a percentage threshold.
 3. Resolved in Phase 3: `portalCompositeCount` became
    `portalExteriorContributionCount`, preserving useful exactly-once diagnostics without naming a
-   deleted copy operation.
+   deleted copy operation. The Phase 8 postmortem reopens that decision because the renamed metric
+   remains exactly equivalent to `portalExteriorRenderCount`; the follow-up removes it rather than
+   preserving ceremonial telemetry.

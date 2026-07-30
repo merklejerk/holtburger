@@ -21,6 +21,11 @@ const OUTDOOR = "portal-render-node:outdoor" as const;
 const SUFFIX = "portal-render-node:suffix" as const;
 const SIBLING = "portal-render-node:sibling" as const;
 
+type MaskedExteriorComponent = Extract<
+	NonNullable<PortalRenderWorkPlan["exteriorComponent"]>,
+	{ readonly kind: "masked" }
+>;
+
 describe("portal graph execution", () => {
 	it("renders an outdoor root directly without masks, initialization, or copies", () => {
 		const substrate = new RecordingSubstrate();
@@ -48,7 +53,6 @@ describe("portal graph execution", () => {
 			"restore",
 		]);
 		expect(diagnostics).toMatchObject({
-			exteriorContributionCount: 1,
 			exteriorRenderCount: 1,
 			maskDrawCount: 0,
 			submittedRenderNodeCount: 1,
@@ -93,7 +97,6 @@ describe("portal graph execution", () => {
 		expect(rendered.flat()).toEqual([ROOT, LEFT, RIGHT, TARGET]);
 		expect(diagnostics).toEqual({
 			admittedVisibilityStateCount: 5,
-			exteriorContributionCount: 0,
 			exteriorRenderCount: 0,
 			maskDrawCount: 4,
 			maskEdgeCount: 5,
@@ -195,10 +198,7 @@ describe("portal graph execution", () => {
 				renderIndoorNodes: () => undefined,
 				resolveVisibilityAperture: () => {
 					resolutionCount += 1;
-					return resolvedMask(
-						"portal-aperture:unused",
-						"portal-crossing:root-left",
-					);
+					return resolvedMask();
 				},
 			}),
 		).toThrow("names an indoor edge");
@@ -210,35 +210,66 @@ describe("portal graph execution", () => {
 		{
 			createBasePlan: hybridPlan,
 			label: "duplicate",
-			stencilLabels: { entry: 2, suffix: 2 },
+			mutate: (exterior: MaskedExteriorComponent) => {
+				if (!exterior.suffix) throw new Error("Fixture suffix is missing.");
+				return {
+					...exterior,
+					suffix: {
+						...exterior.suffix,
+						stencilTransition: {
+							from: 2,
+							kind: "promote-if-equal" as const,
+							to: 2,
+						},
+					},
+				};
+			},
 		},
 		{
 			createBasePlan: hybridPlan,
 			label: "zero",
-			stencilLabels: { entry: 0, suffix: 3 },
+			mutate: (exterior: MaskedExteriorComponent) => ({
+				...exterior,
+				entryStencilValue: 0,
+			}),
 		},
 		{
 			createBasePlan: hybridPlan,
 			label: "out-of-range",
-			stencilLabels: { entry: 256, suffix: 3 },
+			mutate: (exterior: MaskedExteriorComponent) => ({
+				...exterior,
+				entryStencilValue: 256,
+			}),
 		},
 		{
 			createBasePlan: indoorRootExteriorBranchPlan,
 			label: "ceremonial",
-			stencilLabels: { entry: 1, suffix: 2 },
+			mutate: (exterior: MaskedExteriorComponent) => ({
+				...exterior,
+				suffix: {
+					indoorNodeIds: [],
+					maskEdgeIds: [],
+					stencilTransition: {
+						from: 1,
+						kind: "promote-if-equal" as const,
+						to: 2,
+					},
+				},
+			}),
 		},
 	])(
-		"rejects $label exterior labels before target allocation",
-		({ createBasePlan, stencilLabels }) => {
+		"rejects $label exterior stencil state before target allocation",
+		({ createBasePlan, mutate }) => {
 			const substrate = new RecordingSubstrate();
 			const base = createBasePlan();
+			const exterior = base.exteriorComponent;
+			if (exterior?.kind !== "masked") {
+				throw new Error("Fixture requires a masked exterior operation.");
+			}
 			const plan = {
 				...base,
-				exteriorComponent: {
-					...base.exteriorComponent!,
-					stencilLabels,
-				},
-			} as PortalRenderWorkPlan;
+				exteriorComponent: mutate(exterior),
+			};
 
 			expect(() =>
 				executePortalGraph(substrate, {
@@ -250,7 +281,7 @@ describe("portal graph execution", () => {
 					renderIndoorNodes: () => undefined,
 					resolveVisibilityAperture: resolvedMask,
 				}),
-			).toThrow(/stencil label/);
+			).toThrow(/stencil|suffix/);
 			expect(substrate.calls).toEqual([]);
 		},
 	);
@@ -282,7 +313,7 @@ describe("portal graph execution", () => {
 			"initialize:2",
 			"begin-masked:2",
 			"render:exterior",
-			"mask:2+1",
+			"mask:2->3",
 			"reset:3",
 			"begin-masked:3",
 			`render:${SUFFIX}`,
@@ -294,7 +325,6 @@ describe("portal graph execution", () => {
 		]);
 		expect(rendered).toEqual([[ROOT], [SUFFIX], [SIBLING]]);
 		expect(diagnostics).toMatchObject({
-			exteriorContributionCount: 1,
 			exteriorRenderCount: 1,
 			maskDrawCount: 3,
 			maskEdgeCount: 4,
@@ -354,10 +384,7 @@ describe("portal graph execution", () => {
 				renderExterior: () => undefined,
 				renderIndoorNodes: () => undefined,
 				resolveVisibilityAperture: () => ({
-					...resolvedMask(
-						"portal-aperture:invalid",
-						"portal-crossing:root-left",
-					),
+					...resolvedMask(),
 					clipFromLocal: new Float32Array(15),
 				}),
 			}),
@@ -462,7 +489,7 @@ class RecordingSubstrate implements PortalExecutionSubstrate {
 	): void {
 		const policy = args[5];
 		this.#record(
-			`mask:${policy.kind === "replace" ? policy.value : `${policy.expectedValue}+1`}`,
+			`mask:${policy.kind === "replace" ? policy.value : `${policy.from}->${policy.to}`}`,
 		);
 	}
 
@@ -471,7 +498,7 @@ class RecordingSubstrate implements PortalExecutionSubstrate {
 	): void {
 		const policy = args[2];
 		this.#record(
-			`window-mask:${policy.kind === "replace" ? policy.value : `${policy.expectedValue}+1`}`,
+			`window-mask:${policy.kind === "replace" ? policy.value : `${policy.from}->${policy.to}`}`,
 		);
 	}
 
@@ -513,13 +540,12 @@ function outdoorRootPlan(): PortalRenderWorkPlan {
 		exteriorComponent: {
 			componentNodeIds: [OUTDOOR],
 			entryMaskEdgeIds: [],
-			indoorNodeIds: [],
-			internalIndoorMaskEdgeIds: [],
+			kind: "unmasked",
 			outdoorNodeId: OUTDOOR,
 			renderLayer: 0,
 			returnMaskEdgeIds: [],
 			rootContained: true,
-			stencilLabels: null,
+			suffix: null,
 		},
 		exteriorTransitions: [],
 		maskEdges: [],
@@ -559,14 +585,18 @@ function hybridPlan(): PortalRenderWorkPlan {
 		},
 		exteriorComponent: {
 			componentNodeIds: [OUTDOOR, SUFFIX],
+			entryStencilValue: 2,
 			entryMaskEdgeIds: [enterOutside.crossingId],
-			indoorNodeIds: [SUFFIX],
-			internalIndoorMaskEdgeIds: [outsideSuffix.crossingId],
+			kind: "masked",
 			outdoorNodeId: OUTDOOR,
 			renderLayer: 1,
 			returnMaskEdgeIds: [suffixOutside.crossingId],
 			rootContained: false,
-			stencilLabels: { entry: 2, suffix: 3 },
+			suffix: {
+				indoorNodeIds: [SUFFIX],
+				maskEdgeIds: [outsideSuffix.crossingId],
+				stencilTransition: { from: 2, kind: "promote-if-equal", to: 3 },
+			},
 		},
 		exteriorTransitions: [enterOutside, outsideSuffix, suffixOutside].map(
 			(edge) => ({
@@ -635,13 +665,13 @@ function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 		exteriorComponent: {
 			componentNodeIds: [OUTDOOR, ROOT],
 			entryMaskEdgeIds: [],
-			indoorNodeIds: [ROOT],
-			internalIndoorMaskEdgeIds: [],
+			entryStencilValue: 1,
+			kind: "masked",
 			outdoorNodeId: OUTDOOR,
 			renderLayer: 1,
 			returnMaskEdgeIds: [seed.crossingId],
 			rootContained: true,
-			stencilLabels: { entry: 1, suffix: null },
+			suffix: null,
 		},
 		exteriorTransitions: [seed, outsideSibling].map((edge) => ({
 			crossingId: edge.crossingId,

@@ -8,6 +8,8 @@ import {
 } from "./types";
 import {
 	type PreparedTextureSurface,
+	type TexturePreparationServiceRequest,
+	type TexturePreparationServiceResponse,
 	WorkerTexturePreparer,
 } from "./texture-preparer";
 
@@ -50,7 +52,7 @@ describe("WorkerTexturePreparer", () => {
 });
 
 class DeferredTexturePixelSource implements TexturePixelSource {
-	readonly requests = [];
+	readonly requests: TexturePreparationServiceRequest[] = [];
 	#resolve: (() => void) | undefined;
 	readonly #surface: PreparedTextureSurface;
 	readonly #requestComplete = new Promise<void>((resolve) => {
@@ -61,11 +63,9 @@ class DeferredTexturePixelSource implements TexturePixelSource {
 		this.#surface = surface;
 	}
 
-	async loadTexturePixels(request: {
-		readonly kind: "prepared-texture-surface";
-		readonly purpose: TexturePurpose;
-		readonly sourceAssetId: string;
-	}) {
+	async loadTexturePixels(
+		request: TexturePreparationServiceRequest,
+	): Promise<TexturePreparationServiceResponse> {
 		this.requests.push(request);
 		await this.#requestComplete;
 		return {

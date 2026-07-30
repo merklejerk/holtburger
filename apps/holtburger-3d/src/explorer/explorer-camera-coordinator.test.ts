@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GameRuntime } from "../lib/game/runtime/game-runtime";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
+import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { LoDConfig } from "../lib/game/runtime/types";
 import { AABB3, Vec3 } from "../lib/game/math/types";
 import type { FreeFlyCameraController } from "./free-fly-camera-controller";
@@ -72,7 +73,7 @@ describe("ExplorerCameraCoordinator", () => {
 		);
 		emit({
 			kind: "scene-content-failed",
-			layer: "terrain",
+			layer: LandblockLayerKind.Terrain,
 			message: "terrain exploded",
 			residency: { envCellId: null, landblockId: "0x0102ffff" },
 			revision: 1 as never,

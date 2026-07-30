@@ -3,7 +3,7 @@ import type { AtlasRequirementHandle } from "../textures/atlas/resident-texture-
 import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
 import { createAssetTextureKey, TexturePurpose } from "../textures/types";
 import type { SceneInterestRevision } from "./scene-availability";
-import { LandblockLayerKind } from "./scene-interest";
+import { LandblockLayerKind, type StaticLayerKind } from "./scene-interest";
 import {
 	type StaticLayerAtlas,
 	type StaticLayerCurrentness,
@@ -29,7 +29,7 @@ describe("StaticLayerRealizer", () => {
 
 		expect(atlas.prepared).toBe(1);
 		expect(geometry.started).toBe(true);
-		atlas.resolve("ready");
+		atlas.resolve();
 		geometry.resolve("geometry");
 		await expect(pending).resolves.toEqual({
 			geometry: "geometry",
@@ -55,7 +55,7 @@ describe("StaticLayerRealizer", () => {
 		);
 		const pending = realizer.realize(input(LandblockLayerKind.Objects));
 		current.current = false;
-		atlas.resolve("ready");
+		atlas.resolve();
 		geometry.resolve("geometry");
 
 		await expect(pending).resolves.toEqual({ kind: "stale" });
@@ -224,7 +224,13 @@ describe("StaticLayerRealizer", () => {
 	});
 });
 
-function input(layer = LandblockLayerKind.Buildings) {
+function input(layer: StaticLayerKind = LandblockLayerKind.Buildings): {
+	readonly layer: StaticLayerKind;
+	readonly owner: "buildings";
+	readonly revision: SceneInterestRevision;
+	readonly source: string;
+	readonly textureRequirements: readonly [typeof FACT];
+} {
 	return {
 		layer,
 		owner: "buildings" as const,
@@ -327,7 +333,7 @@ class FakePublisher implements StaticLayerPublisher<string, "buildings"> {
 		return Promise.resolve();
 	}
 	replace(o: {
-		readonly layer: LandblockLayerKind;
+		readonly layer: StaticLayerKind;
 		readonly revision: SceneInterestRevision;
 	}): Promise<void> {
 		if (this.fail) return Promise.reject(new Error("replace failed"));
@@ -337,8 +343,8 @@ class FakePublisher implements StaticLayerPublisher<string, "buildings"> {
 }
 class FakeCurrentness implements StaticLayerCurrentness<"buildings"> {
 	current = true;
-	layers: LandblockLayerKind[] = [];
-	isCurrent(_: "buildings", layer: LandblockLayerKind): boolean {
+	layers: StaticLayerKind[] = [];
+	isCurrent(_: "buildings", layer: StaticLayerKind): boolean {
 		this.layers.push(layer);
 		return this.current;
 	}
@@ -347,13 +353,14 @@ class FakeCurrentness implements StaticLayerCurrentness<"buildings"> {
 class FakeFailureReporter {
 	failures: Array<{
 		readonly cause: unknown;
-		readonly layer: LandblockLayerKind;
+		readonly layer: StaticLayerKind;
 		readonly owner: "buildings";
 		readonly revision: SceneInterestRevision;
 	}> = [];
 
 	reportAtlasFailure(options: {
 		readonly cause: unknown;
+		readonly layer: StaticLayerKind;
 		readonly owner: "buildings";
 		readonly revision: SceneInterestRevision;
 	}): void {

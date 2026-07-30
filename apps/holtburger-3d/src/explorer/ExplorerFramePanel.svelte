@@ -131,12 +131,9 @@
 				>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key"
-					>Exterior renders / contributions / retained targets</span
-				>
+				<span class="ac-param-key">Exterior renders / retained targets</span>
 				<code
 					>{metrics.portalExteriorRenderCount} /
-					{metrics.portalExteriorContributionCount} /
 					{metrics.sceneDomainTargetCount}</code
 				>
 			</div>

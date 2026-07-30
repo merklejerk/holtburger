@@ -182,7 +182,15 @@ function layer(
 		cells,
 		portalApertures: [],
 		portalCrossings: [],
-		diagnostics: { unresolvedOutsideEndpoints: [] },
+		diagnostics: {
+			unresolvedOutsideEndpoints: [],
+			unresolvedVisibilityReciprocals: [],
+			visibilityApertureCounts: {
+				authoredSourceCrossings: 0,
+				reciprocalIntersectionCrossings: 0,
+				synthesizedIntersectionGeometries: 0,
+			},
+		},
 	};
 }
 

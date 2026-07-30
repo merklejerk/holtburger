@@ -226,7 +226,7 @@ export function runWebGL2PortalSubstrateFixture(
 			0,
 			nested.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			{ expectedValue: 3, kind: "increment-if-equal" },
+			{ from: 3, kind: "promote-if-equal", to: 4 },
 			"always",
 		);
 		substrate.initializeMaskedScene(initialTarget, 4, [0.8, 0.8, 0.1, 1], 1);
@@ -250,8 +250,9 @@ export function runWebGL2PortalSubstrateFixture(
 			"always",
 		);
 		substrate.writeLayerWindowMask(initialTarget, fullWindow, {
-			expectedValue: 5,
-			kind: "increment-if-equal",
+			from: 5,
+			kind: "promote-if-equal",
+			to: 6,
 		});
 		substrate.initializeMaskedScene(initialTarget, 6, [0.2, 0.8, 0.2, 1], 1);
 		substrate.initializeMaskedScene(initialTarget, 7, [0.8, 0.2, 0.1, 1], 0.9);

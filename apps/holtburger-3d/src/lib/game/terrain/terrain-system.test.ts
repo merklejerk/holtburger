@@ -3,6 +3,7 @@ import type { RenderGeometryData } from "../renderer/geometry";
 import { GeometryManager } from "../geometry/geometry-manager";
 import type {
 	GeometryResourceKey,
+	InstanceStreamResourceKey,
 	RendererResourceManager,
 	RenderResourceKey,
 	Texture2DResourceKey,
@@ -11,8 +12,9 @@ import type {
 	TextureArrayLayerUpload,
 	TextureArrayResourceKey,
 } from "../renderer/resource-manager";
+import type { StaticInstanceStreamData } from "../systems/static-resources";
 import { AABB3, Mat4, Vec3 } from "../math/types";
-import { SceneGraph } from "../scene";
+import { SceneGraph, type SceneNodeId } from "../scene";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import type { TextureFact } from "../textures/types";
@@ -205,7 +207,7 @@ function createTerrainSystem(
 function installTerrain(
 	terrain: TerrainSystem<string, string>,
 	source: ReturnType<typeof createInstallation>,
-): string {
+): SceneNodeId {
 	return terrain.install(ownerId(source.landblockId), {
 		localBounds: AABB3.zero(),
 		placement: {
@@ -400,6 +402,13 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometry++}`;
 		this.created.push(key);
 		return key;
+	}
+
+	createStaticInstanceStream(
+		data: StaticInstanceStreamData,
+	): InstanceStreamResourceKey {
+		void data;
+		throw new Error("Terrain system tests do not create instance streams.");
 	}
 
 	replaceGeometry(

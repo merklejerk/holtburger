@@ -4,9 +4,14 @@ import {
 	CommitBundleSourceKind,
 	type CommitBundle,
 	type CommitPipeline,
+	type StaticLandblockLayerCommitTerrain,
 } from "../commit/types";
 import { createLandblockWorldOrigin } from "../landblocks";
-import { Quat, Vec3 } from "../math/types";
+import { Mat4, Quat, Vec3 } from "../math/types";
+import type {
+	ResolvedObjectResident,
+	ResolvedOutdoorStaticLayerSource,
+} from "../resolution/landblock-layer";
 import type { FrameSelectionMetrics, Renderer } from "../renderer/renderer";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
@@ -18,9 +23,30 @@ describe("GameRuntime view and interest control", () => {
 		const requestedLayers: LandblockIdLayer[] = [];
 		const frames: Parameters<Renderer["drawFrame"]>[0][] = [];
 		const frameSelectionMetrics: FrameSelectionMetrics = {
+			envCellRenderMode: "portal",
+			envCellShellCullOverrideCount: 0,
+			portalExecutionDurationMs: 0,
+			portalExteriorRenderCount: 0,
+			portalMaskEdgeCount: 0,
+			portalNearPlaneSeedCount: 0,
+			portalPlanningDurationMs: 0,
+			portalRejectedFacingCrossingCount: 0,
+			portalRenderLayerCount: 0,
+			portalRenderNodeCount: 0,
+			portalSameDomainBoundaryCrossingCount: 0,
+			portalSubmittedRenderNodeCount: 0,
+			sceneDomainTargetBytes: 0,
+			sceneDomainTargetCount: 0,
+			submittedEnvCellResidentDrawCount: 0,
+			submittedEnvCellResidentTriangleCount: 0,
+			submittedEnvCellShellDrawCount: 0,
+			submittedEnvCellShellTriangleCount: 0,
+			submittedPortalApertureDrawCount: 0,
 			terrainFrameInputs: 2,
 			viewCount: 1,
 			visibleDynamics: 3,
+			visibleEnvCellResidentNodes: 0,
+			visibleEnvCellScopeCount: 0,
 			visibleEnvCellShells: 5,
 			visibleSceneEntries: 11,
 			visibleStaticLayerCount: 3,
@@ -57,7 +83,6 @@ describe("GameRuntime view and interest control", () => {
 			getFrameSelectionMetrics: () => frameSelectionMetrics,
 		};
 		const pipeline: CommitPipeline = {
-			async destroy() {},
 			async prepareLandblockLayers(layers): Promise<readonly CommitBundle[]> {
 				requestedLayers.push(...layers);
 				return [];
@@ -419,20 +444,21 @@ function generatedSceneInterest(anchorLandblockId: string) {
 
 /** Minimal stale artifact: applying it would fail, so a passing test proves it was discarded. */
 function staleTerrainArtifact(landblockId: string): CommitBundle {
+	const commit: StaticLandblockLayerCommitTerrain = {
+		get generation(): never {
+			throw new Error("Withdrawn terrain artifact was applied.");
+		},
+		get presentation(): never {
+			throw new Error("Withdrawn terrain artifact was applied.");
+		},
+	};
 	return {
-		commit: new Proxy(
-			{},
-			{
-				get() {
-					throw new Error("Withdrawn terrain artifact was applied.");
-				},
-			},
-		),
+		commit,
 		dynamicEntities: [],
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Terrain,
-	} as CommitBundle;
+	};
 }
 
 /** Minimal promoted record: any accidental dynamic installation reaches the throwing resource port. */
@@ -455,25 +481,41 @@ function promotedStaticArtifact(
 		| LandblockLayerKind.Objects
 		| LandblockLayerKind.Generated,
 ): CommitBundle {
-	return {
-		commit: {
-			source: {
-				dynamicResidents: [],
-				kind: layer,
-				landblockId,
-				staticResidents: [],
-			} as import("../resolution/landblock-layer").ResolvedObjectLayerSource,
+	const promotedResident: ResolvedObjectResident = {
+		appearance: null,
+		id: "resident:promoted",
+		localBounds: null,
+		placement: {
+			envCellId: null,
+			landblockId,
+			localTransform: Mat4.identity(),
 		},
-		dynamicEntities: [
-			{
-				id: "resident:promoted",
-				placement: { envCellId: null, landblockId },
-				presentation: {
-					effects: { animationId: "0x09000001" },
-					sourceAssetId: "0x02000001",
-				},
-			} as CommitBundle["dynamicEntities"][number],
-		],
+		presentation: {
+			effects: {
+				animationId: "0x09000001",
+				physicsScriptId: null,
+				physicsScriptTableId: null,
+				soundTableId: null,
+			},
+			id: "presentation:promoted",
+			motion: null,
+			parts: [],
+			placementPoses: new Map(),
+			selectionBounds: null,
+			sortingBounds: null,
+			sourceAssetId: "0x02000001",
+		},
+		scale: new Vec3(1, 1, 1),
+	};
+	const source = {
+		dynamicResidents: [],
+		kind: layer,
+		landblockId,
+		staticResidents: [],
+	} satisfies ResolvedOutdoorStaticLayerSource;
+	return {
+		commit: { source },
+		dynamicEntities: [promotedResident],
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer,
@@ -481,9 +523,7 @@ function promotedStaticArtifact(
 }
 
 class DeferredCommitPipeline implements CommitPipeline {
-	readonly #pending: Array<
-		(resolve: (artifacts: readonly CommitBundle[]) => void) => void
-	> = [];
+	readonly #pending: Array<(artifacts: readonly CommitBundle[]) => void> = [];
 
 	async prepareLandblockLayers(): Promise<readonly CommitBundle[]> {
 		return new Promise((resolve) => this.#pending.push(resolve));
@@ -494,6 +534,4 @@ class DeferredCommitPipeline implements CommitPipeline {
 		if (!resolve) throw new Error("No commit preparation is pending.");
 		resolve(artifacts);
 	}
-
-	async destroy(): Promise<void> {}
 }

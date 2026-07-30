@@ -41,9 +41,10 @@ export type PortalMaskStencilPolicy =
 			readonly value: number;
 	  }
 	| {
-			/** Increment pixels owned by this value; the planner guarantees the result is its suffix. */
-			readonly expectedValue: number;
-			readonly kind: "increment-if-equal";
+			/** Promote pixels from one planner-owned label to its adjacent suffix label. */
+			readonly from: number;
+			readonly kind: "promote-if-equal";
+			readonly to: number;
 	  };
 
 /** Fixed-function pass baselines established without inspecting ambient renderer state. */
@@ -51,7 +52,12 @@ export type PortalPassStateCommand =
 	| {
 			readonly extent: PortalRenderExtent;
 			readonly framebuffer: WebGLFramebuffer | null;
-			readonly kind: "clear" | "ordinary";
+			readonly kind: "clear";
+	  }
+	| {
+			readonly extent: PortalRenderExtent;
+			readonly framebuffer: WebGLFramebuffer | null;
+			readonly kind: "ordinary";
 	  }
 	| {
 			readonly depthCompare: "always" | "less-or-equal";
@@ -121,15 +127,16 @@ export function applyPortalPassState(
 			);
 			gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
 		} else {
-			requireMaskStencilValue(command.stencilPolicy.expectedValue);
-			if (command.stencilPolicy.expectedValue === MAXIMUM_PORTAL_RENDER_LAYER) {
+			requireMaskStencilValue(command.stencilPolicy.from);
+			requireMaskStencilValue(command.stencilPolicy.to);
+			if (command.stencilPolicy.to !== command.stencilPolicy.from + 1) {
 				throw new Error(
-					"Portal parent stencil value cannot be incremented beyond 255.",
+					"Portal stencil promotion must target the adjacent label.",
 				);
 			}
 			gl.stencilFunc(
 				gl.EQUAL,
-				command.stencilPolicy.expectedValue,
+				command.stencilPolicy.from,
 				MAXIMUM_PORTAL_RENDER_LAYER,
 			);
 			gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR);
@@ -169,6 +176,7 @@ export function applyPortalPassState(
 		gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
 		return;
 	}
+	assertNever(command);
 }
 
 /**
@@ -406,8 +414,6 @@ export class WebGL2PortalSubstrate {
 		this.#assertAlive();
 		const gl = this.#gl;
 		applyPortalPassState(gl, { extent, framebuffer, kind: "ordinary" });
-		gl.activeTexture(gl.TEXTURE1);
-		gl.bindTexture(gl.TEXTURE_2D, null);
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_2D, null);
 		gl.useProgram(null);
@@ -505,14 +511,10 @@ export class WebGL2PortalSubstrate {
 			);
 		}
 		const previous = captureAllocationBindings(this.#gl);
-		let target: WebGL2SceneDomainTarget | null = null;
 		try {
-			target = allocateSceneDomainTarget(this.#gl, extent, "portal");
+			const target = allocateSceneDomainTarget(this.#gl, extent, "portal");
 			this.#allocatedTargetCount += 1;
 			return target;
-		} catch (cause) {
-			if (target) this.#disposeTarget(target);
-			throw cause;
 		} finally {
 			restoreAllocationBindings(this.#gl, previous);
 		}
@@ -924,4 +926,11 @@ function requireResource<T>(value: T | null, label: string): T {
 
 function isNormalized(value: number): boolean {
 	return Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/** Fail loudly if malformed runtime input escapes the compile-time pass-state union. */
+function assertNever(value: never): never {
+	throw new Error(
+		`Unsupported portal pass-state command: ${JSON.stringify(value)}.`,
+	);
 }

@@ -79,7 +79,7 @@ describe("fixed-page resident atlas layout", () => {
 			key: createAssetTextureKey(directPurpose, "0x05000011"),
 			purpose: directPurpose,
 			width: 2,
-		};
+		} satisfies AtlasLayoutEntry;
 		const directPlan = planStableAtlasLayout(
 			{
 				correlationId: "direct",

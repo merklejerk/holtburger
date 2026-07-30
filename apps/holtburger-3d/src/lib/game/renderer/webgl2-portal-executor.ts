@@ -102,7 +102,6 @@ export interface PortalExecutionInput {
 /** Consumed planner and GPU facts retained for portal-frame diagnostics. */
 export interface PortalFrameDiagnostics {
 	readonly admittedVisibilityStateCount: number;
-	readonly exteriorContributionCount: number;
 	readonly exteriorRenderCount: number;
 	readonly maskDrawCount: number;
 	readonly maskEdgeCount: number;
@@ -130,12 +129,18 @@ interface PreparedPortalWindowMask {
 
 type PreparedPortalMask = PreparedPortalApertureMask | PreparedPortalWindowMask;
 
-interface PreparedPortalContribution {
-	readonly kind: "exterior" | "indoor";
-	readonly masks: readonly PreparedPortalMask[];
-	readonly renderNodeIds: readonly PortalRenderNodeId[];
-	readonly stencilValue: number;
-}
+type PreparedPortalContribution =
+	| {
+			readonly kind: "exterior";
+			readonly masks: readonly PreparedPortalMask[];
+			readonly stencilValue: number;
+	  }
+	| {
+			readonly kind: "indoor";
+			readonly masks: readonly PreparedPortalMask[];
+			readonly renderNodeIds: readonly PortalRenderNodeId[];
+			readonly stencilValue: number;
+	  };
 
 interface PreparedPortalLayer {
 	readonly contributions: readonly PreparedPortalContribution[];
@@ -143,10 +148,12 @@ interface PreparedPortalLayer {
 }
 
 interface PreparedExteriorSuffix {
-	readonly entryStencilValue: number;
 	readonly indoorNodeIds: readonly PortalRenderNodeId[];
 	readonly masks: readonly PreparedPortalMask[];
-	readonly stencilValue: number;
+	readonly stencilTransition: Extract<
+		PortalMaskStencilPolicy,
+		{ readonly kind: "promote-if-equal" }
+	>;
 }
 
 interface PreparedPortalExecution {
@@ -171,7 +178,6 @@ export function executePortalGraph(
 	let submittedRenderLayerCount = 0;
 	let submittedRenderNodeCount = 0;
 	let maskDrawCount = 0;
-	let exteriorContributionCount = 0;
 	let exteriorRenderCount = 0;
 	try {
 		substrate.clearTarget(target, input.clearColor, 1, 0);
@@ -203,17 +209,18 @@ export function executePortalGraph(
 				}
 				if (contribution.kind === "exterior") {
 					input.renderExterior(target);
-					exteriorContributionCount += 1;
 					exteriorRenderCount += 1;
 					submittedRenderNodeCount += 1;
 					const suffix = prepared.exteriorSuffix;
 					if (suffix) {
-						maskDrawCount += writeMaskUnion(substrate, target, suffix.masks, {
-							expectedValue: suffix.entryStencilValue,
-							kind: "increment-if-equal",
-						});
-						substrate.resetMaskedDepth(target, suffix.stencilValue, 1);
-						substrate.beginMaskedPass(target, suffix.stencilValue);
+						maskDrawCount += writeMaskUnion(
+							substrate,
+							target,
+							suffix.masks,
+							suffix.stencilTransition,
+						);
+						substrate.resetMaskedDepth(target, suffix.stencilTransition.to, 1);
+						substrate.beginMaskedPass(target, suffix.stencilTransition.to);
 						input.renderIndoorNodes(target, suffix.indoorNodeIds);
 						submittedRenderNodeCount += suffix.indoorNodeIds.length;
 					}
@@ -231,7 +238,6 @@ export function executePortalGraph(
 	return {
 		admittedVisibilityStateCount:
 			prepared.plan.diagnostics.admittedWindowStateCount,
-		exteriorContributionCount,
 		exteriorRenderCount,
 		maskDrawCount,
 		maskEdgeCount: prepared.plan.maskEdges.length,
@@ -304,18 +310,22 @@ function preparePortalExecution(
 	if (exterior) {
 		requirePreparedMasks(maskByEdgeId, [
 			...exterior.entryMaskEdgeIds,
-			...exterior.internalIndoorMaskEdgeIds,
+			...(exterior.suffix?.maskEdgeIds ?? []),
 			...exterior.returnMaskEdgeIds,
 		]);
 	}
-	const componentMembers = new Set(exterior?.componentNodeIds ?? []);
+	const suffixMemberIds = new Set(exterior?.suffix?.indoorNodeIds ?? []);
 	const layers = plan.renderLayers.map((layer): PreparedPortalLayer => {
 		const contributions: PreparedPortalContribution[] = [];
 		const indoorNodeIds = layer.renderNodeIds.filter((nodeId) => {
-			const node = nodeById.get(nodeId)!;
+			const node = nodeById.get(nodeId);
+			if (!node) {
+				throw new Error(
+					`Portal render layer references missing node ${nodeId}.`,
+				);
+			}
 			return (
-				node.kind === "indoor-visibility-island" &&
-				(exterior?.rootContained !== false || !componentMembers.has(nodeId))
+				node.kind === "indoor-visibility-island" && !suffixMemberIds.has(nodeId)
 			);
 		});
 		if (
@@ -333,8 +343,10 @@ function preparePortalExecution(
 			contributions.push({
 				kind: "exterior",
 				masks: requirePreparedMasks(maskByEdgeId, exteriorMaskEdgeIds),
-				renderNodeIds: [exterior.outdoorNodeId],
-				stencilValue: exterior.stencilLabels?.entry ?? exterior.renderLayer,
+				stencilValue:
+					exterior.kind === "masked"
+						? exterior.entryStencilValue
+						: exterior.renderLayer,
 			});
 		}
 		if (indoorNodeIds.length > 0) {
@@ -374,18 +386,16 @@ function preparePortalExecution(
 		return { contributions, renderLayer: layer.renderLayer };
 	});
 	return {
-		exteriorSuffix:
-			exterior && !exterior.rootContained && exterior.indoorNodeIds.length > 0
-				? {
-						entryStencilValue: exterior.stencilLabels!.entry,
-						indoorNodeIds: exterior.indoorNodeIds,
-						masks: requirePreparedMasks(
-							maskByEdgeId,
-							exterior.internalIndoorMaskEdgeIds,
-						),
-						stencilValue: exterior.stencilLabels!.suffix!,
-					}
-				: null,
+		exteriorSuffix: exterior?.suffix
+			? {
+					indoorNodeIds: exterior.suffix.indoorNodeIds,
+					masks: requirePreparedMasks(
+						maskByEdgeId,
+						exterior.suffix.maskEdgeIds,
+					),
+					stencilTransition: exterior.suffix.stencilTransition,
+				}
+			: null,
 		layers,
 		plan,
 	};

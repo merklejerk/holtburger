@@ -48,6 +48,9 @@ describe("authoritative-anchor portal tracing", () => {
 			["portal-crossing:first", 0.25],
 			["portal-crossing:second", 0.75],
 		]);
+		if (result.kind !== "complete") {
+			throw new Error(`Expected a complete trace, received ${result.kind}.`);
+		}
 		expect(result.residency).toEqual(residency(CELL_THREE));
 	});
 

@@ -191,7 +191,7 @@ export function decodeOutdoorStaticRecord(
 	response: Uint8Array,
 	requestedLandblockId: LandblockId,
 	expectedLayer: OutdoorStaticLayerKind,
-): ResolvedObjectLayerSource | null {
+): ResolvedObjectLayerSource {
 	if (response.byteLength < HEADER_LENGTH) {
 		throw new Error("Outdoor static record is shorter than its binary header.");
 	}

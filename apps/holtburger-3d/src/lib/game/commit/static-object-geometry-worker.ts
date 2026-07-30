@@ -1,6 +1,6 @@
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import {
-	staticDetailRoleForLayer,
+	staticObjectDetailRoleForSource,
 	type StaticDetailRole,
 } from "../resolution/static-detail-role";
 import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
@@ -293,7 +293,7 @@ function prepareBakedStaticObjectGeometry(
 function prepareStaticSource(
 	source: ResolvedStaticObjectLayerSource,
 ): PreparedStaticSource {
-	const detailRole = staticDetailRoleForLayer(source.kind);
+	const detailRole = staticObjectDetailRoleForSource(source);
 	const parts: PreparedResidentPart[] = [];
 	const sourceRangeIds = new Set<string>();
 	const sourceMaterialSlotIds = new Set<string>();

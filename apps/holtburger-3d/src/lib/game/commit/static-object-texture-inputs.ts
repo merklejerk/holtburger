@@ -1,6 +1,6 @@
 import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import { planObjectMaterial } from "../resolution/object-material-planner";
-import { staticDetailRoleForLayer } from "../resolution/static-detail-role";
+import { staticObjectDetailRoleForSource } from "../resolution/static-detail-role";
 import { type AssetTextureFact, TextureWrapMode } from "../textures/types";
 import { mergeAssetTextureFacts } from "../textures/texture-facts";
 
@@ -9,7 +9,7 @@ export function collectStaticObjectTextureDependencies(
 	source: ResolvedStaticObjectLayerSource,
 ): readonly AssetTextureFact[] {
 	const dependencies: AssetTextureFact[] = [];
-	const detailRole = staticDetailRoleForLayer(source.kind);
+	const detailRole = staticObjectDetailRoleForSource(source);
 	for (const resident of source.staticResidents) {
 		for (const part of resident.presentation.parts) {
 			for (const [

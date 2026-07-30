@@ -1,4 +1,5 @@
 import { LandblockLayerKind } from "../runtime/scene-interest";
+import type { ResolvedStaticObjectLayerSource } from "./landblock-layer";
 
 /** Active-region detail texture selected by one static render domain. */
 export type StaticDetailRole = "building" | "environment" | "object";
@@ -11,19 +12,18 @@ export const STATIC_DETAIL_ROLES: readonly StaticDetailRole[] = [
 ];
 
 /**
- * Select the retail detail domain for a non-terrain static layer.
+ * Select the retail detail domain for a source of static object geometry.
  *
- * Source-surface eligibility remains a separate material fact; this only identifies which
- * active-region binding an eligible material is allowed to consume.
+ * EnvCell sources contain resident objects; CellStruct shells select the environment role
+ * directly at their separate materialization boundary.
  */
-export function staticDetailRoleForLayer(
-	layer: Exclude<LandblockLayerKind, LandblockLayerKind.Terrain>,
+export function staticObjectDetailRoleForSource(
+	source: ResolvedStaticObjectLayerSource,
 ): StaticDetailRole {
-	switch (layer) {
+	switch (source.kind) {
 		case LandblockLayerKind.Buildings:
 			return "building";
 		case LandblockLayerKind.EnvCells:
-			return "environment";
 		case LandblockLayerKind.Generated:
 		case LandblockLayerKind.Objects:
 			return "object";

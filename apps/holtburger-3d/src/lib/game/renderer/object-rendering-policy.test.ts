@@ -234,6 +234,19 @@ describe("object fragment variants", () => {
 		expect(shader).toContain("mod(index, paletteSize.x)");
 		expect(shader).toContain("floor(index / paletteSize.x)");
 	});
+
+	it("composes static detail with retail destination-color blending", () => {
+		const shader = createObjectFragmentShader(false);
+		const luminosity = "color.rgb += vec3(max(uLuminosity, 0.0));";
+		const detailBlend = "color.rgb * (detail.rgb + (1.0 - detailAlpha))";
+
+		expect(shader).toContain("float detailAlpha = clamp(detail.a, 0.0, 1.0);");
+		expect(shader).toContain(detailBlend);
+		expect(shader).not.toContain("mix(color.rgb, detail.rgb, detail.a)");
+		expect(shader.indexOf(luminosity)).toBeLessThan(
+			shader.indexOf(detailBlend),
+		);
+	});
 });
 
 describe("objectBlendPolicy", () => {

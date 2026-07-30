@@ -68,10 +68,10 @@ describe("object material planning", () => {
 		);
 	});
 
-	it("combines source eligibility with the selected static detail domain", () => {
+	it("retains the owning detail domain independently of raw surface flags", () => {
 		expect(
 			planObjectMaterial(
-				texturedMaterial("0x05000001", 0x20000),
+				texturedMaterial("0x05000001", 0),
 				TextureWrapMode.Clamp,
 				"building",
 			).detailRole,
@@ -83,17 +83,10 @@ describe("object material planning", () => {
 				"environment",
 			).detailRole,
 		).toBe("environment");
-		expect(
-			planObjectMaterial(
-				texturedMaterial("0x05000001", 0),
-				TextureWrapMode.Clamp,
-				"object",
-			).detailRole,
-		).toBeNull();
 	});
 
 	it("keeps otherwise identical bindings distinct by detail role", () => {
-		const input = texturedMaterial("0x05000001", 0x20000);
+		const input = texturedMaterial("0x05000001", 0);
 		expect(
 			planObjectMaterial(input, TextureWrapMode.Repeat, "building").id,
 		).not.toBe(planObjectMaterial(input, TextureWrapMode.Repeat, "object").id);

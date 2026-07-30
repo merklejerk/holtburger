@@ -80,6 +80,8 @@ const CLEAR_COLOR = {
 
 const DETAIL_FADE_NEAR = 10;
 const DETAIL_FADE_FAR = 50;
+/** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
+const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 /** Corruption guard only; fixed-point convergence, not this number, terminates valid planning. */
 const PORTAL_PLANNING_WORK_ITEM_LIMIT = 100_000;
 
@@ -1041,9 +1043,12 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		fog: FrameInput["environment"]["distanceFog"],
 	): void {
+		if (view.terrain.length === 0) return;
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
+		gl.enable(gl.POLYGON_OFFSET_FILL);
+		gl.polygonOffset(TERRAIN_DEPTH_OFFSET.factor, TERRAIN_DEPTH_OFFSET.units);
 		gl.useProgram(this.#terrainProgram.program);
 		gl.uniformMatrix4fv(
 			this.#terrainProgram.uniforms.projection,
@@ -1081,6 +1086,7 @@ export class WebGL2Renderer implements Renderer {
 				landblockOffset,
 			);
 		}
+		gl.disable(gl.POLYGON_OFFSET_FILL);
 	}
 
 	#bindTerrainResources(input: TerrainFrameInput): void {

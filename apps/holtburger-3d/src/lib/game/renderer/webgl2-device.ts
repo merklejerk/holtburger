@@ -18,6 +18,11 @@ import {
 	runWebGL2InternalPortalExecutionFixture,
 	type WebGL2InternalPortalExecutionFixtureResult,
 } from "./webgl2-internal-portal-executor-fixture";
+import type { TextureFilteringCapabilities } from "./texture-filtering-policy";
+import {
+	probeWebGL2TextureFilteringSupport,
+	type WebGL2TextureFilteringSupport,
+} from "./webgl2-texture-filtering-support";
 
 /** One transient RGBA preview copied from a live two-dimensional GPU texture. */
 export interface Texture2DReadback {
@@ -62,6 +67,8 @@ export class WebGL2Device {
 	readonly #canvas: HTMLCanvasElement;
 	/** Context retained so this device, rather than one renderer, owns context loss. */
 	readonly #gl: WebGL2RenderingContext;
+	/** One context-lifetime filtering probe shared by UI capability and backend sampler consumers. */
+	readonly #textureFilteringSupport: WebGL2TextureFilteringSupport;
 	#status: WebGL2DeviceStatus = { kind: "ready" };
 	readonly #onContextLost = (event: Event): void => {
 		event.preventDefault();
@@ -80,10 +87,12 @@ export class WebGL2Device {
 		canvas: HTMLCanvasElement,
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
+		textureFilteringSupport: WebGL2TextureFilteringSupport,
 	) {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.resources = resources;
+		this.#textureFilteringSupport = textureFilteringSupport;
 		this.#canvas.addEventListener("webglcontextlost", this.#onContextLost);
 		this.#canvas.addEventListener(
 			"webglcontextrestored",
@@ -102,7 +111,8 @@ export class WebGL2Device {
 		if (!gl) throw new Error("WebGL2 is not available in this browser.");
 
 		const resources = new WebGL2ResourceManager(gl);
-		return new WebGL2Device(canvas, gl, resources);
+		const textureFilteringSupport = probeWebGL2TextureFilteringSupport(gl);
+		return new WebGL2Device(canvas, gl, resources, textureFilteringSupport);
 	}
 
 	/** Exercise context loss on an isolated device so the active renderer remains usable. */
@@ -150,6 +160,7 @@ export class WebGL2Device {
 			this.#gl,
 			this.resources,
 			world,
+			this.#textureFilteringSupport,
 			() => this.#assertReady(),
 		);
 	}
@@ -184,6 +195,12 @@ export class WebGL2Device {
 	/** Return a copied discriminant suitable for app-level restart policy and diagnostics. */
 	getStatus(): WebGL2DeviceStatus {
 		return { ...this.#status };
+	}
+
+	/** Return device filtering limits without exposing WebGL extension state to the frontend. */
+	getTextureFilteringCapabilities(): TextureFilteringCapabilities {
+		this.#assertReady();
+		return { ...this.#textureFilteringSupport.capabilities };
 	}
 
 	/**

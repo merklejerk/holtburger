@@ -6,8 +6,8 @@ import type {
 } from "../renderer/resource-manager";
 import {
 	createAssetTextureKey,
+	packedObjectTexturePreparation,
 	TexturePurpose,
-	TextureWrapMode,
 } from "./types";
 import {
 	type PackedAtlasBindingDelegate,
@@ -28,7 +28,9 @@ describe("TextureManager", () => {
 					? {
 							placement: {
 								bounds: new AABB2(new Vec2(0, 0), new Vec2(1, 1)),
-								preparation: { gutterPixels: 4, wrap: TextureWrapMode.Repeat },
+								preparation: packedObjectTexturePreparation(
+									TexturePurpose.ObjectDirectColor,
+								),
 							},
 							resource,
 						}

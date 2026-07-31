@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	createAssetTextureKey,
+	packedObjectTexturePreparation,
 	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
 	TexturePurpose,
 } from "../types";
@@ -9,12 +10,22 @@ import { buildAtlasPage } from "./page-build";
 
 describe("buildAtlasPage", () => {
 	it("materializes a complete production-size fixed page", () => {
+		const gutterPixels = packedObjectTexturePreparation(
+			TexturePurpose.ObjectDirectColor,
+		).gutterPixels;
 		const key = createAssetTextureKey(
 			TexturePurpose.ObjectDirectColor,
 			"0x05000000",
 		);
 		const result = buildAtlasPage({
-			page: page(TexturePurpose.ObjectDirectColor, key, 4, 4, 1, 1),
+			page: page(
+				TexturePurpose.ObjectDirectColor,
+				key,
+				gutterPixels,
+				gutterPixels,
+				1,
+				1,
+			),
 			pageSize: STATIC_OBJECT_TEXTURE_PAGE_SIZE,
 			sources: [
 				{ height: 1, key, pixels: Uint8Array.of(1, 2, 3, 4), width: 1 },
@@ -29,6 +40,11 @@ describe("buildAtlasPage", () => {
 	});
 
 	it("materializes direct-color source pixels with their repeat-safe gutter", () => {
+		const gutterPixels = packedObjectTexturePreparation(
+			TexturePurpose.ObjectDirectColor,
+		).gutterPixels;
+		const sourceSize = 2;
+		const pageSize = sourceSize + gutterPixels * 2;
 		const key = createAssetTextureKey(
 			TexturePurpose.ObjectDirectColor,
 			"0x05000001",
@@ -37,16 +53,31 @@ describe("buildAtlasPage", () => {
 			1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 4, 0, 0, 255,
 		]);
 		const result = buildAtlasPage({
-			page: page(TexturePurpose.ObjectDirectColor, key, 4, 4, 2, 2),
-			pageSize: 12,
-			sources: [{ height: 2, key, pixels: sourcePixels, width: 2 }],
+			page: page(
+				TexturePurpose.ObjectDirectColor,
+				key,
+				gutterPixels,
+				gutterPixels,
+				sourceSize,
+				sourceSize,
+			),
+			pageSize,
+			sources: [
+				{ height: sourceSize, key, pixels: sourcePixels, width: sourceSize },
+			],
 		});
 
 		expect(result.copiedSourceBytes).toBe(sourcePixels.byteLength);
 		expect(result.pageBits).not.toBe(sourcePixels);
-		expect(pixel(result.pageBits, 12, 4, 4)).toEqual([1, 0, 0, 255]);
-		expect(pixel(result.pageBits, 12, 3, 3)).toEqual([4, 0, 0, 255]);
-		expect(pixel(result.pageBits, 12, 6, 6)).toEqual([1, 0, 0, 255]);
+		expect(
+			pixel(result.pageBits, pageSize, gutterPixels, gutterPixels),
+		).toEqual([1, 0, 0, 255]);
+		expect(
+			pixel(result.pageBits, pageSize, gutterPixels - 1, gutterPixels - 1),
+		).toEqual([4, 0, 0, 255]);
+		expect(
+			pixel(result.pageBits, pageSize, pageSize - 1, pageSize - 1),
+		).toEqual([4, 0, 0, 255]);
 		expect(sourcePixels).toEqual(
 			Uint8Array.from([1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 4, 0, 0, 255]),
 		);

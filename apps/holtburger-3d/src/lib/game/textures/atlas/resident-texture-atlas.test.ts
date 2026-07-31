@@ -17,7 +17,11 @@ import type { AssetTextureSource } from "../texture-manager";
 import type { TexturePreparer } from "../texture-preparer";
 import {
 	createAssetTextureKey,
+	packedObjectTexturePreparation,
 	type AssetTextureFact,
+	textureMipChainByteLength,
+	texturePurposeMipLevelCount,
+	TexturePixelFormat,
 	TexturePurpose,
 } from "../types";
 import {
@@ -32,6 +36,13 @@ const DIRECT_COLOR = fact(TexturePurpose.ObjectDirectColor, "0x06000001");
 const SECOND_DIRECT = fact(TexturePurpose.ObjectDirectColor, "0x06000003");
 const INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000002");
 const SECOND_INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000004");
+const FIXTURE_SOURCE_SIZE = 1;
+const FIXTURE_DIRECT_COLOR_GUTTER = packedObjectTexturePreparation(
+	TexturePurpose.ObjectDirectColor,
+).gutterPixels;
+const FIXTURE_PAGE_SIZE =
+	2 **
+	Math.ceil(Math.log2(FIXTURE_SOURCE_SIZE + FIXTURE_DIRECT_COLOR_GUTTER * 2));
 
 describe("ResidentTextureAtlas", () => {
 	it("retains shared residency when only the buildings owner is withdrawn", async () => {
@@ -100,7 +111,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: planner,
 				pageBuilder: new FixturePageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: resources,
 			},
 		);
@@ -241,7 +252,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: new FixtureLayoutPlanner(),
 				pageBuilder: new FixturePageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: resources,
 			},
 		);
@@ -253,23 +264,48 @@ describe("ResidentTextureAtlas", () => {
 		const binding = atlas.getAtlasBinding(DIRECT_COLOR.key);
 		expect(binding).not.toBeNull();
 		expect(resources.uploads).toHaveLength(1);
-		expect(binding!.placement.bounds.min).toMatchObject({ x: 4, y: 4 });
+		expect(binding!.placement.bounds.min).toMatchObject({
+			x: FIXTURE_DIRECT_COLOR_GUTTER,
+			y: FIXTURE_DIRECT_COLOR_GUTTER,
+		});
+		const sourcePixelOffset =
+			(FIXTURE_DIRECT_COLOR_GUTTER * FIXTURE_PAGE_SIZE +
+				FIXTURE_DIRECT_COLOR_GUTTER) *
+			4;
 		expect(
-			resources.uploads[0]?.data.slice((4 * 16 + 4) * 4, (4 * 16 + 5) * 4),
+			resources.uploads[0]?.data.slice(
+				sourcePixelOffset,
+				sourcePixelOffset + 4,
+			),
 		).toEqual(Uint8Array.of(1, 2, 3, 4));
 		expect(atlas.getPreparedSource(DIRECT_COLOR.key).pixels).toEqual(
 			source(DIRECT_COLOR).pixels,
 		);
+		const mipLevels = texturePurposeMipLevelCount(
+			TexturePurpose.ObjectDirectColor,
+			FIXTURE_PAGE_SIZE,
+			FIXTURE_PAGE_SIZE,
+		);
+		const devicePageBytes = textureMipChainByteLength({
+			format: TexturePixelFormat.RGBA8,
+			height: FIXTURE_PAGE_SIZE,
+			mipLevels,
+			width: FIXTURE_PAGE_SIZE,
+		});
+		const allocationSize =
+			FIXTURE_SOURCE_SIZE + FIXTURE_DIRECT_COLOR_GUTTER * 2;
+		expect(resources.uploads[0]?.mipLevels).toBe(mipLevels);
 		expect(atlas.getAtlasPageDiagnostics()[0]).toMatchObject({
-			allocatedPixelRatio: 81 / 256,
-			height: 16,
-			occupiedPixelRatio: 1 / 256,
-			width: 16,
+			allocatedPixelRatio: allocationSize ** 2 / FIXTURE_PAGE_SIZE ** 2,
+			byteLength: devicePageBytes,
+			height: FIXTURE_PAGE_SIZE,
+			occupiedPixelRatio: FIXTURE_SOURCE_SIZE ** 2 / FIXTURE_PAGE_SIZE ** 2,
+			width: FIXTURE_PAGE_SIZE,
 		});
 		expect(atlas.getDiagnostics()).toMatchObject({
 			copiedSourceBytes: 4,
-			peakPageBytes: 16 * 16 * 4,
-			uploadedPageBytes: 16 * 16 * 4,
+			peakPageBytes: devicePageBytes,
+			uploadedPageBytes: FIXTURE_PAGE_SIZE ** 2 * 4,
 			uploadedPageCount: 1,
 		});
 
@@ -278,7 +314,7 @@ describe("ResidentTextureAtlas", () => {
 		expect(resources.released).toEqual([binding!.resource]);
 		expect(atlas.getDiagnostics()).toMatchObject({
 			activePageBytes: 0,
-			releasedPageBytes: 16 * 16 * 4,
+			releasedPageBytes: devicePageBytes,
 			releasedPageCount: 1,
 		});
 	});
@@ -290,7 +326,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: planner,
 				pageBuilder: new FixturePageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: new FixtureRendererResources(),
 			},
 		);
@@ -315,7 +351,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: new FixtureLayoutPlanner(),
 				pageBuilder: new FixturePageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: new FixtureRendererResources(),
 			},
 		);
@@ -342,7 +378,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: new FragmentingLayoutPlanner(),
 				pageBuilder: new FixturePageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: resources,
 			},
 		);
@@ -372,7 +408,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: new FragmentingLayoutPlanner(),
 				pageBuilder: new FailingCompactPageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: new FixtureRendererResources(),
 			},
 		);
@@ -398,7 +434,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: new FixtureLayoutPlanner(),
 				pageBuilder: new FixturePageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: resources,
 			},
 		);
@@ -429,7 +465,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: planner,
 				pageBuilder: new FixturePageBuilder(),
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: resources,
 			},
 		);
@@ -454,7 +490,7 @@ describe("ResidentTextureAtlas", () => {
 			{
 				layoutPlanner: new FixtureLayoutPlanner(),
 				pageBuilder,
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: new FixtureRendererResources(),
 			},
 		);
@@ -571,7 +607,7 @@ class FixtureLayoutPlanner implements ResidentAtlasLayoutPlanner {
 	destroy(): void {}
 
 	async plan(request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0]) {
-		return planStableAtlasLayout(request, { pageSize: 16 });
+		return planStableAtlasLayout(request, { pageSize: FIXTURE_PAGE_SIZE });
 	}
 }
 
@@ -613,7 +649,7 @@ class FragmentingLayoutPlanner implements ResidentAtlasLayoutPlanner {
 			return {
 				correlationId: request.correlationId,
 				insertedKeys: [request.entries[1]!.key],
-				pageSize: 16,
+				pageSize: FIXTURE_PAGE_SIZE,
 				pages: request.entries.map((entry, index) => ({
 					pageId: createAtlasPageId(request.purpose, index),
 					placements: [
@@ -628,7 +664,7 @@ class FragmentingLayoutPlanner implements ResidentAtlasLayoutPlanner {
 				releasedKeys: [],
 			};
 		}
-		return planStableAtlasLayout(request, { pageSize: 16 });
+		return planStableAtlasLayout(request, { pageSize: FIXTURE_PAGE_SIZE });
 	}
 }
 
@@ -651,12 +687,16 @@ class DeferredFirstLayoutPlanner implements ResidentAtlasLayoutPlanner {
 	): Promise<ReturnType<typeof planStableAtlasLayout>> {
 		this.#requests += 1;
 		if (this.#requests > 1) {
-			return Promise.resolve(planStableAtlasLayout(request, { pageSize: 16 }));
+			return Promise.resolve(
+				planStableAtlasLayout(request, { pageSize: FIXTURE_PAGE_SIZE }),
+			);
 		}
 		this.#resolveFirstRequest();
 		return new Promise((resolve) => {
 			this.#resolvePlan = () =>
-				resolve(planStableAtlasLayout(request, { pageSize: 16 }));
+				resolve(
+					planStableAtlasLayout(request, { pageSize: FIXTURE_PAGE_SIZE }),
+				);
 		});
 	}
 

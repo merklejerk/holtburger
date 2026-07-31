@@ -2,7 +2,6 @@ import type { ResolvedMaterial } from "./presentation";
 import type { StaticDetailRole } from "./static-detail-role";
 import {
 	createAssetTextureKey,
-	TextureFilteringMode,
 	TexturePurpose,
 	TextureWrapMode,
 	type AssetTextureKey,
@@ -54,7 +53,7 @@ export function planObjectMaterial(
 			baseTexture: null,
 			detailRole,
 			paletteTexture: null,
-			sampler: sampler(wrap, TextureFilteringMode.Linear),
+			sampler: sampler(wrap),
 			textureRequirements: [],
 			palettedClipMap: false,
 		};
@@ -110,12 +109,7 @@ export function planObjectMaterial(
 		baseTexture,
 		detailRole,
 		paletteTexture,
-		sampler: sampler(
-			wrap,
-			material.textureEncoding === "direct-color"
-				? TextureFilteringMode.Linear
-				: TextureFilteringMode.Nearest,
-		),
+		sampler: sampler(wrap),
 		textureRequirements,
 		palettedClipMap:
 			material.textureEncoding !== "direct-color" &&
@@ -139,11 +133,8 @@ export function classifyObjectMaterialOrdering(
 	return "opaque";
 }
 
-function sampler(
-	wrap: TextureWrapMode,
-	filtering: TextureFilteringMode,
-): TextureSamplerPolicy {
-	return { filtering, wrap };
+function sampler(wrap: TextureWrapMode): TextureSamplerPolicy {
+	return { wrap };
 }
 
 function flags(material: ResolvedMaterial): number {

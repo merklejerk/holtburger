@@ -1,9 +1,19 @@
 import type { LandblockId } from "../game-types";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
+import {
+	DEFAULT_TEXTURE_FILTERING_POLICY,
+	type TextureFilteringPolicy,
+} from "./texture-filtering-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
+
+/** Dynamic renderer quality choices independent from content and resource identity. */
+interface RenderQualitySettings {
+	/** Global draw-time policy for filterable normalized textures. */
+	readonly textureFiltering: TextureFilteringPolicy;
+}
 
 /** Dynamic display choices applied to a frame without changing world data or GPU setup. */
 export interface FrameSettings {
@@ -11,12 +21,17 @@ export interface FrameSettings {
 	readonly distanceFogEnabled: boolean;
 	/** Environment-cell visibility and presentation policy for this frame. */
 	readonly envCellRenderMode: EnvCellRenderMode;
+	/** Quality policy snapshotted once for every rendered frame. */
+	readonly quality: RenderQualitySettings;
 }
 
 /** Default dynamic display choices matching the region-authored presentation. */
 export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 	distanceFogEnabled: true,
 	envCellRenderMode: "portal",
+	quality: {
+		textureFiltering: DEFAULT_TEXTURE_FILTERING_POLICY,
+	},
 };
 
 /** Camera state for one camera or portal view. The renderer collects scene content itself. */

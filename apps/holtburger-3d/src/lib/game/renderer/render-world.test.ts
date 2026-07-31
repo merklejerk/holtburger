@@ -19,7 +19,7 @@ import type { StaticGeometryKey } from "../systems/static-resources";
 import type { StaticObjectRenderable } from "../commit/artifacts";
 import type { StaticObjectMaterialBinding } from "../commit/artifacts";
 import type { InstanceStreamResourceKey } from "./resource-manager";
-import { TextureFilteringMode, TextureWrapMode } from "../textures/types";
+import { TextureWrapMode } from "../textures/types";
 
 const VISIBLE_SCENE = {
 	entries: [],
@@ -174,7 +174,6 @@ function staticMaterial(): StaticObjectMaterialBinding {
 			stippled: false,
 		},
 		sampler: {
-			filtering: TextureFilteringMode.Linear,
 			wrap: TextureWrapMode.Clamp,
 		},
 		source: {

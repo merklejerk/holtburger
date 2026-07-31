@@ -10,7 +10,8 @@ import type {
 import {
 	packedObjectTexturePreparation,
 	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
-	texturePixelFormatByteLength,
+	textureMipChainByteLength,
+	texturePurposeMipLevelCount,
 	texturePurposePolicy,
 	type AssetTextureKey,
 	type PackedObjectTexturePurpose,
@@ -32,14 +33,18 @@ interface PublishedAtlasPage {
 
 /** Device-publication counters separate from logical claim and source retention state. */
 export interface AtlasPagePublicationDiagnostics {
+	/** Retained device allocation bytes including every purpose-promised mip level. */
 	readonly activePageBytes: number;
 	readonly activePageCount: number;
 	readonly bindingCount: number;
 	readonly longestPublicationDurationMs: number;
+	/** Largest retained device allocation observed, including mip levels. */
 	readonly peakPageBytes: number;
 	readonly publicationDurationMs: number;
+	/** Released device allocation bytes including every purpose-promised mip level. */
 	readonly releasedPageBytes: number;
 	readonly releasedPageCount: number;
+	/** Level-zero worker payload bytes submitted for texture creation. */
 	readonly uploadedPageBytes: number;
 	readonly uploadedPageCount: number;
 }
@@ -156,7 +161,11 @@ export class AtlasPagePublication {
 						data: page.pageBits,
 						format: texturePurposePolicy(page.purpose).format,
 						height: page.height,
-						mipLevels: mipLevelCount(page.purpose, page.width, page.height),
+						mipLevels: texturePurposeMipLevelCount(
+							page.purpose,
+							page.width,
+							page.height,
+						),
 						width: page.width,
 					}),
 				);
@@ -316,10 +325,13 @@ function pageByteLength(
 	purpose: PackedObjectTexturePurpose,
 	pageSize: number,
 ): number {
-	return (
-		pageSize ** 2 *
-		texturePixelFormatByteLength(texturePurposePolicy(purpose).format)
-	);
+	const purposePolicy = texturePurposePolicy(purpose);
+	return textureMipChainByteLength({
+		format: purposePolicy.format,
+		height: pageSize,
+		mipLevels: texturePurposeMipLevelCount(purpose, pageSize, pageSize),
+		width: pageSize,
+	});
 }
 
 function texturePlacement(
@@ -337,13 +349,4 @@ function texturePlacement(
 		),
 		preparation: packedObjectTexturePreparation(purpose),
 	};
-}
-
-function mipLevelCount(
-	purpose: PackedObjectTexturePurpose,
-	width: number,
-	height: number,
-): number {
-	if (!texturePurposePolicy(purpose).generateMipmaps) return 1;
-	return Math.floor(Math.log2(Math.max(width, height))) + 1;
 }

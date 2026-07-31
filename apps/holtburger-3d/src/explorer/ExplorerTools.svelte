@@ -13,6 +13,7 @@
 	} from "../lib/game/renderer/renderer";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
+	import type { TextureFilteringPolicy } from "../lib/game/renderer/texture-filtering-policy";
 
 	type ExplorerTabId =
 		| "world"
@@ -51,6 +52,13 @@
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
+		/** Effective filterable texture quality selected for the next frame. */
+		readonly textureFiltering: TextureFilteringPolicy;
+		/** Device-supported texture filtering choices in display order. */
+		readonly textureFilteringOptions: readonly TextureFilteringPolicy[];
+		/** Raw device maximum shown beside the client-capped choices. */
+		readonly maximumTextureAnisotropy: number | null;
+		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
 		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
 		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
 		/** Latest low-rate outdoor-static and texture atlas diagnostic snapshot. */
@@ -70,6 +78,10 @@
 		updateDistanceFog,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
+		textureFiltering,
+		textureFilteringOptions,
+		maximumTextureAnisotropy,
+		updateTextureFiltering,
 		frameSelectionMetrics,
 		staticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
@@ -179,6 +191,10 @@
 								{updateDistanceFog}
 								{envCellRenderMode}
 								{updateEnvCellRenderMode}
+								{textureFiltering}
+								{textureFilteringOptions}
+								{maximumTextureAnisotropy}
+								{updateTextureFiltering}
 							/>
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel metrics={frameSelectionMetrics} />

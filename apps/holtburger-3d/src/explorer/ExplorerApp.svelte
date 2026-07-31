@@ -36,6 +36,12 @@
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 	import type { ExplorerCameraLocation as ExplorerCameraLocationState } from "./explorer-camera-location";
+	import {
+		resolveTextureFilteringPolicy,
+		supportedTextureFilteringPolicies,
+		type TextureFilteringCapabilities,
+		type TextureFilteringPolicy,
+	} from "../lib/game/renderer/texture-filtering-policy";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -58,6 +64,8 @@
 	);
 	let cameraLocation = $state<ExplorerCameraLocationState | null>(null);
 	let activeRegion = $state<ActiveRegionSource | undefined>(undefined);
+	let textureFilteringCapabilities =
+		$state<TextureFilteringCapabilities | null>(null);
 	let environmentSelection = $state<ExplorerEnvironmentSelection>({
 		dayIndex: 0,
 		timeOfDay: 0.5,
@@ -65,6 +73,19 @@
 	});
 	/** Explorer-local dynamic display choices; they do not alter resolved regional data. */
 	let frameSettings = $state<FrameSettings>({ ...DEFAULT_FRAME_SETTINGS });
+	const supportedTextureFiltering = $derived(
+		textureFilteringCapabilities === null
+			? []
+			: supportedTextureFilteringPolicies(textureFilteringCapabilities),
+	);
+	const effectiveTextureFiltering = $derived(
+		textureFilteringCapabilities === null
+			? frameSettings.quality.textureFiltering
+			: resolveTextureFilteringPolicy(
+					frameSettings.quality.textureFiltering,
+					textureFilteringCapabilities,
+				),
+	);
 
 	function updateEnvironment(selection: ExplorerEnvironmentSelection): void {
 		environmentSelection = selection;
@@ -78,6 +99,16 @@
 
 	function updateEnvCellRenderMode(mode: EnvCellRenderMode): void {
 		frameSettings = { ...frameSettings, envCellRenderMode: mode };
+		applyFrameSettings();
+	}
+
+	function updateTextureFiltering(
+		textureFiltering: TextureFilteringPolicy,
+	): void {
+		frameSettings = {
+			...frameSettings,
+			quality: { ...frameSettings.quality, textureFiltering },
+		};
 		applyFrameSettings();
 	}
 
@@ -144,6 +175,7 @@
 			staticObjectRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
+			textureFilteringCapabilities = null;
 			activeRegionSource = undefined;
 			staticDetailOwner = undefined;
 			activeRegion = undefined;
@@ -185,6 +217,8 @@
 					await staticDetailOwner.install(activeRegion);
 				if (destroyed) return;
 				webglDevice = await WebGL2Device.build(canvasElement!);
+				textureFilteringCapabilities =
+					webglDevice.getTextureFilteringCapabilities();
 				if (destroyed) return;
 				commitPipeline = await StandardCommitPipeline.build({
 					sourceBatch,
@@ -308,6 +342,11 @@
 			{updateDistanceFog}
 			envCellRenderMode={frameSettings.envCellRenderMode}
 			{updateEnvCellRenderMode}
+			textureFiltering={effectiveTextureFiltering}
+			textureFilteringOptions={supportedTextureFiltering}
+			maximumTextureAnisotropy={textureFilteringCapabilities?.maximumAnisotropy ??
+				null}
+			{updateTextureFiltering}
 			{frameSelectionMetrics}
 			{staticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}

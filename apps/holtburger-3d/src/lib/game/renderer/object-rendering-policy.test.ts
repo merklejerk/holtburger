@@ -210,6 +210,29 @@ describe("object fragment variants", () => {
 		);
 	});
 
+	it("preserves continuous gradients across repeated direct and detail texture seams", () => {
+		const shader = createObjectFragmentShader(false);
+		expect(shader).toContain(
+			"vec2 atlasUv = rectOrigin + fract(continuousSource) * rectExtent;",
+		);
+		expect(shader).toContain(
+			"vec2 atlasGradientX = dFdx(continuousSource) * rectExtent;",
+		);
+		expect(shader).toContain(
+			"vec2 atlasGradientY = dFdy(continuousSource) * rectExtent;",
+		);
+		expect(shader).toContain(
+			"return textureGrad(atlasTexture, atlasUv, atlasGradientX, atlasGradientY);",
+		);
+		expect(shader).toContain(
+			"? sampleRepeatingPixelRect(uBase, vTextureCoordinate, uBaseRect)",
+		);
+		expect(shader).toContain("vTextureCoordinate * uDetailTiling,");
+		expect(shader).not.toContain(
+			"atlasUv(fract(vTextureCoordinate * uDetailTiling), uDetailRect)",
+		);
+	});
+
 	it("turns clipped palette taps transparent before blending and alpha testing", () => {
 		const shader = createObjectFragmentShader(false);
 		expect(shader).toContain(

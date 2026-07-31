@@ -10,6 +10,7 @@ import {
 import {
 	TexturePurpose,
 	createAssetTextureKey,
+	packedObjectTexturePreparation,
 	type PackedObjectTexturePurpose,
 } from "../types";
 
@@ -74,11 +75,16 @@ describe("fixed-page resident atlas layout", () => {
 
 	it("derives allocation bounds from purpose and validates free-space geometry", () => {
 		const directPurpose = TexturePurpose.ObjectDirectColor;
+		const gutterPixels =
+			packedObjectTexturePreparation(directPurpose).gutterPixels;
+		const contentSize = 2;
+		const allocationSize = contentSize + gutterPixels * 2;
+		const pageSize = allocationSize + 6;
 		const directEntry = {
-			height: 2,
+			height: contentSize,
 			key: createAssetTextureKey(directPurpose, "0x05000011"),
 			purpose: directPurpose,
-			width: 2,
+			width: contentSize,
 		} satisfies AtlasLayoutEntry;
 		const directPlan = planStableAtlasLayout(
 			{
@@ -88,29 +94,39 @@ describe("fixed-page resident atlas layout", () => {
 				pages: [],
 				purpose: directPurpose,
 			},
-			{ pageSize: 16 },
+			{ pageSize },
 		);
 		const directPage = directPlan.pages[0]!;
 		const directPlacement = directPage.placements[0]!;
 
 		expect(directPlacement.contentBounds).toEqual({
-			height: 2,
-			width: 2,
-			x: 4,
-			y: 4,
+			height: contentSize,
+			width: contentSize,
+			x: gutterPixels,
+			y: gutterPixels,
 		});
 		expect(
 			allocationBoundsForPlacement(directPurpose, directPlacement),
 		).toEqual({
-			height: 10,
-			width: 10,
+			height: allocationSize,
+			width: allocationSize,
 			x: 0,
 			y: 0,
 		});
-		expect(reconstructFreeRectangles(directPage, 16)).toEqual(
+		expect(reconstructFreeRectangles(directPage, pageSize)).toEqual(
 			expect.arrayContaining([
-				{ height: 16, width: 6, x: 10, y: 0 },
-				{ height: 6, width: 16, x: 0, y: 10 },
+				{
+					height: pageSize,
+					width: pageSize - allocationSize,
+					x: allocationSize,
+					y: 0,
+				},
+				{
+					height: pageSize - allocationSize,
+					width: pageSize,
+					x: 0,
+					y: allocationSize,
+				},
 			]),
 		);
 	});

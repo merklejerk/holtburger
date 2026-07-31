@@ -26,12 +26,21 @@
 	} from "../../lib/game/runtime/game-runtime";
 	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
 	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
-	import type { FrameSelectionMetrics } from "../../lib/game/renderer/renderer";
+	import {
+		DEFAULT_FRAME_SETTINGS,
+		type FrameSelectionMetrics,
+		type FrameSettings,
+	} from "../../lib/game/renderer/renderer";
 	import type {
 		PortalExecutionProbeResult,
 		PortalRenderGraphProbeResult,
 		WebGL2Renderer,
 	} from "../../lib/game/renderer/webgl2-renderer";
+	import {
+		isTextureFilteringPolicy,
+		type TextureFilteringCapabilities,
+		type TextureFilteringPolicy,
+	} from "../../lib/game/renderer/texture-filtering-policy";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -67,6 +76,8 @@
 		readonly setEnvCellRenderMode: (
 			envCellRenderMode: "flat" | "portal",
 		) => void;
+		/** Change filterable texture quality without changing content or resources. */
+		readonly setTextureFiltering: (policy: string) => void;
 		/** Withdraw every terrain and outdoor-static layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
 		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
@@ -99,6 +110,8 @@
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
+		readonly frameSettings: FrameSettings;
+		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		/** Browser main-thread timing facts accumulated during this harness session. */
 		readonly timing: TerrainHarnessTiming;
 		readonly staticObjects: StaticObjectRuntimeDiagnostics | null;
@@ -147,6 +160,11 @@
 	let contentSource: HttpLandblockContentSource | undefined;
 	let runtime: GameRuntime | undefined;
 	let renderer: WebGL2Renderer | undefined;
+	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
+	let frameSettings: FrameSettings = {
+		...DEFAULT_FRAME_SETTINGS,
+		envCellRenderMode: "flat",
+	};
 	let portalTargetCapabilities: PortalTargetCapabilityProbe | null = null;
 	let portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null = null;
 	let portalSubstrate: WebGL2PortalSubstrateFixtureResult | null = null;
@@ -290,10 +308,21 @@
 
 	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
 		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
-		runtime.setFrameSettings({
-			distanceFogEnabled: true,
-			envCellRenderMode,
-		});
+		frameSettings = { ...frameSettings, envCellRenderMode };
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setTextureFiltering(rawPolicy: string): void {
+		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!isTextureFilteringPolicy(rawPolicy)) {
+			throw new Error(`Unknown texture filtering policy ${rawPolicy}.`);
+		}
+		const policy: TextureFilteringPolicy = rawPolicy;
+		frameSettings = {
+			...frameSettings,
+			quality: { ...frameSettings.quality, textureFiltering: policy },
+		};
+		runtime.setFrameSettings(frameSettings);
 	}
 
 	function clearSceneInterest(): void {
@@ -461,6 +490,7 @@
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
+				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
 				if (fixture === "portal-substrate") {
 					portalTargetCapabilities = device.probePortalTargetCapabilities();
 					portalSubstrate = device.probePortalSubstrate();
@@ -492,10 +522,7 @@
 					contentSource,
 				);
 				// Harness comparisons select their render policy explicitly and start from flat.
-				runtime.setFrameSettings({
-					distanceFogEnabled: true,
-					envCellRenderMode: "flat",
-				});
+				runtime.setFrameSettings(frameSettings);
 				staticDetailOwner = new ActiveRegionStaticDetailOwner(contentSource);
 				runtime.installActiveRegionStaticDetails(
 					await staticDetailOwner.install(contentSource.activeRegion),
@@ -525,12 +552,14 @@
 					setCameraLandblock,
 					setEnvCellCamera,
 					setEnvCellRenderMode,
+					setTextureFiltering,
 					tracePortalSegment,
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;
 						return {
 							error,
+							frameSettings,
 							hybridPortalExecution,
 							frames,
 							internalPortalExecution,
@@ -561,6 +590,7 @@
 								longTaskCount: timing.longTaskCount,
 								longestLongTaskMs: timing.longestLongTaskMs,
 							},
+							textureFilteringCapabilities,
 						};
 					},
 				};

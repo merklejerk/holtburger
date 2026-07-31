@@ -24,6 +24,7 @@ import {
 	isAssetTextureKey,
 	assetTextureKeyMatchesSource,
 	textureArrayKeyMatchesPurpose,
+	texturePurposeMipLevelCount,
 	texturePurposePolicy,
 } from "./types";
 
@@ -80,6 +81,7 @@ export interface TextureAtlasBinding {
 /** Read-only resident-atlas facts for runtime diagnostics. */
 export interface TextureManagerDiagnostics {
 	readonly activeAtlasPages: number;
+	/** Retained atlas device allocation bytes including purpose-promised mip levels. */
 	readonly activeAtlasPageBytes: number;
 	/** Largest simultaneously resident device-page allocation observed since runtime start. */
 	readonly peakAtlasPageBytes: number;
@@ -90,10 +92,10 @@ export interface TextureManagerDiagnostics {
 	readonly failedAtlasCompactions: number;
 	/** Completed page-build source copies transferred into the closed worker boundary. */
 	readonly copiedAtlasSourceBytes: number;
-	/** Complete fixed-page payload bytes submitted to the device resource manager. */
+	/** Complete level-zero fixed-page payload bytes submitted to the device resource manager. */
 	readonly uploadedAtlasPageBytes: number;
 	readonly uploadedAtlasPages: number;
-	/** Device-page bytes and resources explicitly released after replacement or shutdown. */
+	/** Device allocation bytes, including mip levels, released after replacement or shutdown. */
 	readonly releasedAtlasPageBytes: number;
 	readonly releasedAtlasPages: number;
 	/** Failed physical plan publications; optional compaction failures are included. */
@@ -135,6 +137,7 @@ export interface TextureAtlasPageEntryDiagnostics {
 export interface TextureAtlasPageDiagnostics {
 	/** Area occupied by content plus purpose-derived gutters divided by complete page area. */
 	readonly allocatedPixelRatio: number;
+	/** Retained device allocation bytes including purpose-promised mip levels. */
 	readonly byteLength: number;
 	readonly entryCount: number;
 	/** Largest immediately reusable free rectangle divided by complete page area. */
@@ -531,9 +534,11 @@ function createTextureArrayResourceDescription(
 		format: purposePolicy.format,
 		height: source.height,
 		layerCapacity: source.layers.length,
-		mipLevels: purposePolicy.generateMipmaps
-			? Math.floor(Math.log2(Math.max(source.width, source.height))) + 1
-			: 1,
+		mipLevels: texturePurposeMipLevelCount(
+			source.purpose,
+			source.width,
+			source.height,
+		),
 		width: source.width,
 	};
 }
@@ -544,17 +549,11 @@ function createTexture2DUpload(source: AssetTextureSource): Texture2DUpload {
 		data: source.pixels,
 		format: purposePolicy.format,
 		height: source.height,
-		mipLevels: mipLevelCount(source.purpose, source.width, source.height),
+		mipLevels: texturePurposeMipLevelCount(
+			source.purpose,
+			source.width,
+			source.height,
+		),
 		width: source.width,
 	};
-}
-
-function mipLevelCount(
-	purpose: TexturePurpose,
-	width: number,
-	height: number,
-): number {
-	return texturePurposePolicy(purpose).generateMipmaps
-		? Math.floor(Math.log2(Math.max(width, height))) + 1
-		: 1;
 }

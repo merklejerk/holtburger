@@ -130,15 +130,24 @@ describe("GameRuntime view and interest control", () => {
 		expect(frames[0]?.frameSettings).toEqual({
 			distanceFogEnabled: true,
 			envCellRenderMode: "portal",
+			quality: {
+				textureFiltering: "anisotropic-2x",
+			},
 		});
 		runtime.setFrameSettings({
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
+			quality: {
+				textureFiltering: "nearest",
+			},
 		});
 		runtime.render(2);
 		expect(frames[1]?.frameSettings).toEqual({
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
+			quality: {
+				textureFiltering: "nearest",
+			},
 		});
 		expect(runtime.getFrameSelectionMetrics()).toEqual(frameSelectionMetrics);
 		const queriedPoint = createLandblockWorldOrigin("0x0102ffff").add(

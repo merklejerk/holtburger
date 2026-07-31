@@ -4,7 +4,6 @@ import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-l
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import {
 	createAssetTextureKey,
-	TextureFilteringMode,
 	TexturePurpose,
 	TextureWrapMode,
 } from "../textures/types";
@@ -142,7 +141,6 @@ function material(): StaticObjectMaterialBinding {
 			stippled: false,
 		},
 		sampler: {
-			filtering: TextureFilteringMode.Linear,
 			wrap: TextureWrapMode.Clamp,
 		},
 		source: {

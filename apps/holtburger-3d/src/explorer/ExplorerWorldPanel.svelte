@@ -13,6 +13,10 @@
 	import { parseResidenceInput } from "./world-input";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type { EnvCellRenderMode } from "../lib/game/renderer/renderer";
+	import {
+		textureFilteringPolicyLabel,
+		type TextureFilteringPolicy,
+	} from "../lib/game/renderer/texture-filtering-policy";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -35,6 +39,13 @@
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
+		/** Effective filterable texture quality selected for the next frame. */
+		readonly textureFiltering: TextureFilteringPolicy;
+		/** Device-supported texture filtering choices in display order. */
+		readonly textureFilteringOptions: readonly TextureFilteringPolicy[];
+		/** Raw device maximum reported independently from the client 8x ceiling. */
+		readonly maximumTextureAnisotropy: number | null;
+		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
 	}
 
 	let {
@@ -48,6 +59,10 @@
 		updateDistanceFog,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
+		textureFiltering,
+		textureFilteringOptions,
+		maximumTextureAnisotropy,
+		updateTextureFiltering,
 	}: Props = $props();
 
 	let interestInput = $state("0000");
@@ -264,4 +279,34 @@
 			</label>
 		</fieldset>
 	{/if}
+	<fieldset
+		class="explorer-section explorer-environment-controls"
+		disabled={!runtimeReady || maximumTextureAnisotropy === null}
+	>
+		<legend>Render quality</legend>
+		<label class="explorer-environment-field">
+			<span>Texture filtering</span>
+			<select
+				class="explorer-control explorer-control--select"
+				value={textureFiltering}
+				onchange={(event) =>
+					updateTextureFiltering(
+						(event.currentTarget as HTMLSelectElement)
+							.value as TextureFilteringPolicy,
+					)}
+			>
+				{#each textureFilteringOptions as policy}
+					<option value={policy}>{textureFilteringPolicyLabel(policy)}</option>
+				{/each}
+			</select>
+		</label>
+		<p>
+			Device maximum:
+			{maximumTextureAnisotropy === null
+				? "detecting"
+				: maximumTextureAnisotropy > 1
+					? `${maximumTextureAnisotropy}x`
+					: "linear only"}
+		</p>
+	</fieldset>
 </div>

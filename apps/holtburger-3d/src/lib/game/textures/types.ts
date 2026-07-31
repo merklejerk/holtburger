@@ -32,7 +32,7 @@ export enum TexturePurpose {
 /** Initial fixed dimensions for every resident static-object texture page. */
 export const STATIC_OBJECT_TEXTURE_PAGE_SIZE = 2048;
 /** Evidence-backed filterable gutter for packed static-object direct-color textures. */
-const STATIC_OBJECT_TEXTURE_GUTTER_PIXELS: TextureGutterPixels = 4;
+const STATIC_OBJECT_TEXTURE_GUTTER_PIXELS: TextureGutterPixels = 8;
 
 /** Texture purposes admitted by the runtime static-object atlas. */
 export type PackedObjectTexturePurpose =
@@ -120,26 +120,76 @@ export function texturePixelFormatByteLength(
 	}
 }
 
-/** Filtering modes available to draw-time sampler policy. */
-export enum TextureFilteringMode {
-	Linear = "linear",
-	Nearest = "nearest",
+/** Return the complete mip level count down to one texel for positive dimensions. */
+export function completeTextureMipLevelCount(
+	width: number,
+	height: number,
+): number {
+	if (
+		!Number.isInteger(width) ||
+		!Number.isInteger(height) ||
+		width <= 0 ||
+		height <= 0
+	) {
+		throw new Error("Texture dimensions must be positive integers.");
+	}
+	return Math.floor(Math.log2(Math.max(width, height))) + 1;
 }
 
-/** Draw-time sampling selected independently from texture resource identity. */
+/** Return retained device bytes for one normalized texture and allocated mip range. */
+export function textureMipChainByteLength(options: {
+	readonly format: TexturePixelFormat;
+	readonly height: number;
+	readonly mipLevels: number;
+	readonly width: number;
+}): number {
+	const maximumMipLevels = completeTextureMipLevelCount(
+		options.width,
+		options.height,
+	);
+	if (
+		!Number.isInteger(options.mipLevels) ||
+		options.mipLevels <= 0 ||
+		options.mipLevels > maximumMipLevels
+	) {
+		throw new Error(
+			`Texture mip level count must be between 1 and ${maximumMipLevels}.`,
+		);
+	}
+	const bytesPerPixel = texturePixelFormatByteLength(options.format);
+	let total = 0;
+	let width = options.width;
+	let height = options.height;
+	for (let level = 0; level < options.mipLevels; level += 1) {
+		total += width * height * bytesPerPixel;
+		width = Math.max(1, Math.floor(width / 2));
+		height = Math.max(1, Math.floor(height / 2));
+	}
+	return total;
+}
+
+/** Source-local draw-time sampling selected independently from texture resource identity. */
 export interface TextureSamplerPolicy {
-	/** Texel filtering required by the consuming material or draw. */
-	readonly filtering: TextureFilteringMode;
-	/** Hardware edge behavior required by the consuming material or draw. */
+	/** Source-local UV edge behavior implemented by the object shader and prepared gutters. */
 	readonly wrap: TextureWrapMode;
 }
+
+/** Purpose-owned accessible mip range with no independently invalid eligibility and cap fields. */
+export type TextureMipPolicy =
+	| { readonly kind: "level-zero" }
+	| { readonly kind: "complete" }
+	| {
+			readonly kind: "maximum-level";
+			/** Inclusive maximum mip level accessible to generation and sampling. */
+			readonly maximumLevel: number;
+	  };
 
 /** Device-relevant policy fixed by a texture's semantic purpose. */
 export interface TexturePurposePolicy {
 	/** Physical pixel format uploaded to the graphics device. */
 	readonly format: TexturePixelFormat;
-	/** Whether complete device resources should allocate a mip chain. */
-	readonly generateMipmaps: boolean;
+	/** Accessible mip range allocated and generated independently from current filtering quality. */
+	readonly mipPolicy: TextureMipPolicy;
 }
 
 /** Test whether a purpose is supported by the fixed-page static-object atlas. */
@@ -177,6 +227,31 @@ export function packedObjectTexturePreparation(
 			throw new Error(
 				`Texture purpose ${purpose} is not packable for static buildings.`,
 			);
+	}
+}
+
+/** Return the deepest mip whose base-level footprint fits within one prepared gutter. */
+export function gutterIsolatedMaximumMipLevel(
+	gutterPixels: TextureGutterPixels,
+): number {
+	return Math.floor(Math.log2(Math.max(1, gutterPixels)));
+}
+
+/** Resolve one purpose's promised accessible mip count for validated texture dimensions. */
+export function texturePurposeMipLevelCount(
+	purpose: TexturePurpose,
+	width: number,
+	height: number,
+): number {
+	const completeMipLevels = completeTextureMipLevelCount(width, height);
+	const mipPolicy = texturePurposePolicy(purpose).mipPolicy;
+	switch (mipPolicy.kind) {
+		case "level-zero":
+			return 1;
+		case "complete":
+			return completeMipLevels;
+		case "maximum-level":
+			return Math.min(completeMipLevels, mipPolicy.maximumLevel + 1);
 	}
 }
 
@@ -269,34 +344,38 @@ export function texturePurposePolicy(
 		case TexturePurpose.ObjectDetail:
 			return {
 				format: TexturePixelFormat.RGBA8,
-				generateMipmaps: true,
+				mipPolicy: { kind: "complete" },
 			};
 		case TexturePurpose.ObjectDirectColor:
-			// Packed object pages begin at level zero only until per-entry mip isolation exists.
 			return {
 				format: TexturePixelFormat.RGBA8,
-				generateMipmaps: false,
+				mipPolicy: {
+					kind: "maximum-level",
+					maximumLevel: gutterIsolatedMaximumMipLevel(
+						STATIC_OBJECT_TEXTURE_GUTTER_PIXELS,
+					),
+				},
 			};
 		case TexturePurpose.TerrainBlendMask:
 		case TexturePurpose.TerrainRoadMask:
 			return {
 				format: TexturePixelFormat.R8,
-				generateMipmaps: false,
+				mipPolicy: { kind: "level-zero" },
 			};
 		case TexturePurpose.ObjectIndex8:
 			return {
 				format: TexturePixelFormat.R8,
-				generateMipmaps: false,
+				mipPolicy: { kind: "level-zero" },
 			};
 		case TexturePurpose.ObjectIndex16:
 			return {
 				format: TexturePixelFormat.RG8,
-				generateMipmaps: false,
+				mipPolicy: { kind: "level-zero" },
 			};
 		case TexturePurpose.ObjectPalette:
 			return {
 				format: TexturePixelFormat.RGBA8,
-				generateMipmaps: false,
+				mipPolicy: { kind: "level-zero" },
 			};
 	}
 }

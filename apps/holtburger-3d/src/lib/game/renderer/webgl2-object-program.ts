@@ -102,12 +102,36 @@ vec2 sourceUv() {
 	return uWrapRepeat != 0 ? fract(vTextureCoordinate) : clamp(vTextureCoordinate, 0.0, 1.0);
 }
 
-vec2 atlasUv(vec2 source, vec4 rect) {
-	return mix(rect.xy, rect.zw, source);
-}
-
 vec2 pixelRectUv(vec2 source, vec4 rect, vec2 atlasSize) {
 	return (rect.xy + source * rect.zw) / atlasSize;
+}
+
+vec4 sampleRepeatingAtlasRect(
+	sampler2D atlasTexture,
+	vec2 continuousSource,
+	vec2 rectOrigin,
+	vec2 rectExtent
+) {
+	// Preserve the continuous footprint across virtual repeat seams; fract derivatives
+	// would otherwise select coarse atlas mips even when the surface is viewed up close.
+	vec2 atlasUv = rectOrigin + fract(continuousSource) * rectExtent;
+	vec2 atlasGradientX = dFdx(continuousSource) * rectExtent;
+	vec2 atlasGradientY = dFdy(continuousSource) * rectExtent;
+	return textureGrad(atlasTexture, atlasUv, atlasGradientX, atlasGradientY);
+}
+
+vec4 sampleRepeatingPixelRect(
+	sampler2D atlasTexture,
+	vec2 continuousSource,
+	vec4 rect
+) {
+	vec2 atlasSize = vec2(textureSize(atlasTexture, 0));
+	return sampleRepeatingAtlasRect(
+		atlasTexture,
+		continuousSource,
+		rect.xy / atlasSize,
+		rect.zw / atlasSize
+	);
 }
 
 ivec2 resolveIndexedCoordinate(ivec2 coordinate, ivec2 size) {
@@ -172,9 +196,13 @@ vec4 sampleMaterial() {
 	if (uMaterialKind == 0) return uMaterialColor;
 	vec2 uv = sourceUv();
 	if (uMaterialKind == 1) {
-		vec4 direct = texture(
-			uBase,
-			pixelRectUv(uv, uBaseRect, vec2(textureSize(uBase, 0)))
+		vec4 direct = (
+			uWrapRepeat != 0
+				? sampleRepeatingPixelRect(uBase, vTextureCoordinate, uBaseRect)
+				: texture(
+					uBase,
+					pixelRectUv(uv, uBaseRect, vec2(textureSize(uBase, 0)))
+				)
 		) * uMaterialColor;
 		if (direct.a < uAlphaTest) discard;
 		return direct;
@@ -188,8 +216,12 @@ void main() {
 	vec4 color = sampleMaterial() * vInstanceColor;
 	color.rgb += vec3(max(uLuminosity, 0.0));
 	if (uUseDetail != 0) {
-		vec2 detailUv = atlasUv(fract(vTextureCoordinate * uDetailTiling), uDetailRect);
-		vec4 detail = texture(uDetail, detailUv);
+		vec4 detail = sampleRepeatingAtlasRect(
+			uDetail,
+			vTextureCoordinate * uDetailTiling,
+			uDetailRect.xy,
+			uDetailRect.zw - uDetailRect.xy
+		);
 		float detailAlpha = clamp(detail.a, 0.0, 1.0);
 		color.rgb = clamp(
 			color.rgb * (detail.rgb + (1.0 - detailAlpha)),

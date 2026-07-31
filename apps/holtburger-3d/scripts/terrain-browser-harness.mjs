@@ -12,6 +12,14 @@ const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
 const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 const DEFAULT_SETTLE_MS = 10_000;
 const DEFAULT_PORTAL_GRAPH_WORK_LIMIT = 100_000;
+/** Harness-local mirror of the browser policy contract, including capability admission. */
+const TEXTURE_FILTERING_OPTIONS = [
+	{ minimumAnisotropy: 1, policy: "nearest" },
+	{ minimumAnisotropy: 1, policy: "linear" },
+	{ minimumAnisotropy: 2, policy: "anisotropic-2x" },
+	{ minimumAnisotropy: 4, policy: "anisotropic-4x" },
+	{ minimumAnisotropy: 8, policy: "anisotropic-8x" },
+];
 const workspaceDats = resolve(
 	fileURLToPath(new URL("../../../", import.meta.url)),
 	"dats",
@@ -56,6 +64,8 @@ try {
 						relocateLandblockId: options.relocateLandblockId,
 						portalTrace: result.portalTrace,
 						frameMode: options.frameMode,
+						textureFiltering: options.textureFiltering,
+						filteringCycleStates: result.filteringCycleStates,
 						modeCycleStates: result.modeCycleStates,
 						portalExecution: result.portalExecution,
 						portalRenderGraph: result.portalRenderGraph,
@@ -93,6 +103,9 @@ try {
 	}
 	if (options.modeCycle) {
 		assertModeCycle(result.initialState, result.modeCycleStates);
+	}
+	if (options.filteringCycle) {
+		assertFilteringCycle(result.initialState, result.filteringCycleStates);
 	}
 	if (options.fixture === "portal-substrate") {
 		assertPortalSubstrateFixture(result.state);
@@ -136,6 +149,8 @@ function parseArgs(args) {
 		executePortal: false,
 		frameMode: null,
 		modeCycle: false,
+		filteringCycle: false,
+		textureFiltering: null,
 		lifecycle: false,
 		fixture: null,
 		screenshotPath: null,
@@ -262,6 +277,21 @@ function parseArgs(args) {
 			case "--mode-cycle":
 				parsed.modeCycle = true;
 				break;
+			case "--filtering-cycle":
+				parsed.filteringCycle = true;
+				break;
+			case "--texture-filtering":
+				parsed.textureFiltering = requireValue(args, ++index, arg);
+				if (
+					!TEXTURE_FILTERING_OPTIONS.some(
+						({ policy }) => policy === parsed.textureFiltering,
+					)
+				) {
+					throw new Error(
+						`--texture-filtering must be one of ${TEXTURE_FILTERING_OPTIONS.map(({ policy }) => policy).join(", ")}.`,
+					);
+				}
+				break;
 			case "--fixture":
 				parsed.fixture = requireValue(args, ++index, arg);
 				if (
@@ -318,6 +348,11 @@ function parseArgs(args) {
 	) {
 		throw new Error(
 			"--generated-object-radius must be no greater than --building-radius.",
+		);
+	}
+	if (parsed.filteringCycle && parsed.textureFiltering !== null) {
+		throw new Error(
+			"--filtering-cycle and --texture-filtering cannot be combined.",
 		);
 	}
 	if (parsed.cameraLandblockId && parsed.relocateLandblockId) {
@@ -406,6 +441,9 @@ Options:
   --frame-mode <flat|portal>
                          Change continuous rendering policy without reloading content.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
+  --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
+  --texture-filtering <mode>
+                         Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
   --fixture <name>      Use the blended, instanced, portal-hybrid-execution,
                          portal-internal-execution, or portal-substrate fixture.
   --settle-ms <ms>      Wait after requesting terrain. Default: ${DEFAULT_SETTLE_MS}
@@ -505,6 +543,10 @@ function briefHarnessReport(result) {
 		finalMetrics: result.state.metrics,
 		initialMetrics: result.initialState.metrics,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
+		filteringCycle: result.filteringCycleStates.map(
+			({ frameSettings }) => frameSettings.quality.textureFiltering,
+		),
+		filteringCapabilities: result.state.textureFilteringCapabilities,
 		ready: result.state.ready,
 		sourceBatches: result.state.sourceBatches.map(
 			({ landblockId, layers, responseBytes }) => ({
@@ -591,6 +633,31 @@ function assertModeCycle(initialState, states) {
 		) {
 			throw new Error(
 				`Mode cycle snapshot ${index} drifted retained portal target ownership.`,
+			);
+		}
+	}
+}
+
+function assertFilteringCycle(initialState, states) {
+	const maximum =
+		initialState.textureFilteringCapabilities?.maximumAnisotropy ?? 1;
+	const expected = supportedTextureFilteringPolicies(maximum);
+	if (states.length !== expected.length) {
+		throw new Error(
+			`Filtering cycle produced ${states.length} snapshots, expected ${expected.length}.`,
+		);
+	}
+	const initialResources = JSON.stringify(initialState.staticObjects);
+	for (const [index, policy] of expected.entries()) {
+		const state = states[index];
+		if (state?.frameSettings?.quality?.textureFiltering !== policy) {
+			throw new Error(
+				`Filtering cycle step ${index} expected ${policy}: ${JSON.stringify(state?.frameSettings)}.`,
+			);
+		}
+		if (JSON.stringify(state.staticObjects) !== initialResources) {
+			throw new Error(
+				`Filtering cycle ${policy} changed resident resources without a content request.`,
 			);
 		}
 	}
@@ -894,6 +961,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				options.cameraPitchDegrees,
 			],
 		);
+		if (options.filteringCycle || options.textureFiltering !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setTextureFiltering",
+				[options.textureFiltering ?? "nearest"],
+			);
+		}
 		if (options.envCellRadius !== null) {
 			await waitForEnvCellPublication(client, options.landblockId);
 		}
@@ -919,6 +993,27 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 		}
 		const modeCycleStates = [];
+		const filteringCycleStates = [];
+		if (options.filteringCycle) {
+			const maximum =
+				initialState.textureFilteringCapabilities?.maximumAnisotropy ?? 1;
+			const policies = supportedTextureFilteringPolicies(maximum);
+			for (const policy of policies) {
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setTextureFiltering",
+					[policy],
+				);
+				await delay(100);
+				filteringCycleStates.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+						[],
+					),
+				);
+			}
+		}
 		if (options.modeCycle) {
 			for (const mode of ["portal", "flat", "portal", "flat"]) {
 				await evaluate(
@@ -1083,6 +1178,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			consoleMessages,
 			generatedDisabledState,
 			initialState,
+			filteringCycleStates,
 			modeCycleStates,
 			lifecycleState,
 			portalRenderGraph,
@@ -1095,6 +1191,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	} finally {
 		client.close();
 	}
+}
+
+function supportedTextureFilteringPolicies(maximumAnisotropy) {
+	return TEXTURE_FILTERING_OPTIONS.filter(
+		({ minimumAnisotropy }) => minimumAnisotropy <= maximumAnisotropy,
+	).map(({ policy }) => policy);
 }
 
 function startChild(command, args) {

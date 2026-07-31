@@ -23,7 +23,7 @@ import {
 } from "./portal-render-graph";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { StaticObjectDrawUnit } from "../commit/artifacts";
-import { TextureFilteringMode, TextureWrapMode } from "../textures/types";
+import { TextureWrapMode } from "../textures/types";
 import type {
 	FrameInput,
 	FrameSelectionMetrics,
@@ -40,6 +40,8 @@ import type { TerrainProgramInput } from "./terrain-program-input";
 import {
 	WebGL2ResourceManager,
 	type WebGL2GeometryBinding,
+	type WebGL2Texture2DBinding,
+	type WebGL2TextureArrayBinding,
 } from "./webgl2-resource-manager";
 import {
 	createWebGL2TerrainProgram,
@@ -70,6 +72,15 @@ import {
 	type PortalFrameDiagnostics,
 } from "./webgl2-portal-executor";
 import type { ResolvedPortalMask } from "./webgl2-portal-mask";
+import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
+import {
+	WebGL2TextureSamplerCatalog,
+	type TextureSamplingClass,
+} from "./webgl2-texture-sampler-catalog";
+import {
+	DEFAULT_TEXTURE_FILTERING_POLICY,
+	type TextureFilteringPolicy,
+} from "./texture-filtering-policy";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -241,6 +252,7 @@ export class WebGL2Renderer implements Renderer {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #resources: WebGL2ResourceManager;
+	readonly #textureSamplers: WebGL2TextureSamplerCatalog;
 	/** Device-wide guard preventing draws through any stale handle after context loss. */
 	readonly #assertDeviceReady: () => void;
 	readonly #frameInstances: FrameInstanceStreamArena;
@@ -260,6 +272,9 @@ export class WebGL2Renderer implements Renderer {
 	readonly #blendedInstancedObjectProgram: WebGL2InstancedObjectProgram;
 	/** Float-compatible fallback keeps inactive object samplers independent from terrain bindings. */
 	readonly #objectFallbackTexture: WebGLTexture;
+	/** Requested quality captured at frame entry and consumed by every nested draw path. */
+	#frameTextureFiltering: TextureFilteringPolicy =
+		DEFAULT_TEXTURE_FILTERING_POLICY;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
 	readonly #frameSelectionMetrics: MutableFrameSelectionMetrics = {
 		envCellRenderMode: "flat",
@@ -323,9 +338,17 @@ export class WebGL2Renderer implements Renderer {
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
 		world: RenderWorld,
+		textureFilteringSupport: WebGL2TextureFilteringSupport,
 		assertDeviceReady: () => void,
 	): Promise<WebGL2Renderer> {
-		return new WebGL2Renderer(canvas, gl, resources, world, assertDeviceReady);
+		return new WebGL2Renderer(
+			canvas,
+			gl,
+			resources,
+			world,
+			textureFilteringSupport,
+			assertDeviceReady,
+		);
 	}
 
 	protected constructor(
@@ -333,12 +356,17 @@ export class WebGL2Renderer implements Renderer {
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
 		world: RenderWorld,
+		textureFilteringSupport: WebGL2TextureFilteringSupport,
 		assertDeviceReady: () => void,
 	) {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#resources = resources;
 		this.#assertDeviceReady = assertDeviceReady;
+		this.#textureSamplers = new WebGL2TextureSamplerCatalog(
+			gl,
+			textureFilteringSupport,
+		);
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
 		this.#portalSubstrate = new WebGL2PortalSubstrate(gl);
 		this.#world = world;
@@ -367,6 +395,7 @@ export class WebGL2Renderer implements Renderer {
 
 	drawFrame(input: FrameInput): void {
 		this.#assertDeviceReady();
+		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		this.#resizeCanvasForDpr();
 		this.#resetFrameSelectionMetrics(
 			input.views.length,
@@ -600,6 +629,7 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	async destroy(): Promise<void> {
+		this.#textureSamplers.destroy();
 		this.#portalSubstrate.destroy();
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
@@ -1109,56 +1139,84 @@ export class WebGL2Renderer implements Renderer {
 		const gl = this.#gl;
 		this.#bindTexture2D(
 			0,
-			surfaceField.texture,
+			surfaceField,
 			this.#terrainProgram.uniforms.surfaceField,
+			"exact",
+			TextureWrapMode.Clamp,
 		);
 		this.#bindTexture2D(
 			1,
-			composition.texture,
+			composition,
 			this.#terrainProgram.uniforms.composition,
+			"exact",
+			TextureWrapMode.Clamp,
 		);
 		this.#bindTextureArray(
 			2,
-			colors.texture,
+			colors,
 			this.#terrainProgram.uniforms.colors,
+			"filterable",
+			TextureWrapMode.Repeat,
 		);
 		this.#bindTextureArray(
 			3,
-			blendMasks.texture,
+			blendMasks,
 			this.#terrainProgram.uniforms.blendMasks,
+			"filterable",
+			TextureWrapMode.Repeat,
 		);
 		this.#bindTextureArray(
 			4,
-			roadMasks.texture,
+			roadMasks,
 			this.#terrainProgram.uniforms.roadMasks,
+			"filterable",
+			TextureWrapMode.Repeat,
 		);
 		this.#bindTexture2D(
 			5,
-			detail.texture,
+			detail,
 			this.#terrainProgram.uniforms.detail,
+			"filterable",
+			TextureWrapMode.Repeat,
 		);
 		gl.activeTexture(gl.TEXTURE0);
 	}
 
 	#bindTexture2D(
 		unit: number,
-		texture: WebGLTexture,
+		resource: WebGL2Texture2DBinding,
 		uniform: WebGLUniformLocation,
+		samplingClass: TextureSamplingClass,
+		wrap: TextureWrapMode,
 	): void {
 		const gl = this.#gl;
 		gl.activeTexture(gl.TEXTURE0 + unit);
-		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.bindTexture(gl.TEXTURE_2D, resource.texture);
+		this.#textureSamplers.bind(unit, {
+			mipLevels: resource.mipLevels,
+			policy: this.#frameTextureFiltering,
+			samplingClass,
+			wrap,
+		});
 		gl.uniform1i(uniform, unit);
 	}
 
 	#bindTextureArray(
 		unit: number,
-		texture: WebGLTexture,
+		resource: WebGL2TextureArrayBinding,
 		uniform: WebGLUniformLocation,
+		samplingClass: TextureSamplingClass,
+		wrap: TextureWrapMode,
 	): void {
 		const gl = this.#gl;
 		gl.activeTexture(gl.TEXTURE0 + unit);
-		gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+		gl.bindTexture(gl.TEXTURE_2D_ARRAY, resource.texture);
+		this.#textureSamplers.bind(unit, {
+			mipLevels: resource.description.mipLevels,
+			policy: this.#frameTextureFiltering,
+			samplingClass,
+			wrap,
+		});
 		gl.uniform1i(uniform, unit);
 	}
 
@@ -1444,7 +1502,10 @@ export class WebGL2Renderer implements Renderer {
 			this.#bindObjectTexture(
 				0,
 				baseResource.texture,
-				material.sampler.filtering,
+				baseResource.mipLevels,
+				material.source.textureEncoding === "direct-color"
+					? "filterable"
+					: "exact",
 			);
 			this.#setPixelAtlasRect(
 				program.uniforms.baseRect,
@@ -1479,7 +1540,8 @@ export class WebGL2Renderer implements Renderer {
 				this.#bindObjectTexture(
 					1,
 					paletteResource.texture,
-					TextureFilteringMode.Nearest,
+					paletteResource.mipLevels,
+					"exact",
 				);
 				this.#setPixelAtlasRect(
 					program.uniforms.paletteRect,
@@ -1498,7 +1560,8 @@ export class WebGL2Renderer implements Renderer {
 			this.#bindObjectTexture(
 				2,
 				detailResource.texture,
-				TextureFilteringMode.Linear,
+				detailResource.mipLevels,
+				"filterable",
 			);
 			gl.uniform4f(program.uniforms.detailRect, 0, 0, 1, 1);
 			gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
@@ -1612,11 +1675,7 @@ export class WebGL2Renderer implements Renderer {
 			[1, program.uniforms.palette],
 			[2, program.uniforms.detail],
 		] as const) {
-			this.#bindObjectTexture(
-				unit,
-				this.#objectFallbackTexture,
-				TextureFilteringMode.Nearest,
-			);
+			this.#bindObjectTexture(unit, this.#objectFallbackTexture, 1, "exact");
 			gl.uniform1i(uniform, unit);
 		}
 		gl.uniformMatrix4fv(
@@ -1642,24 +1701,19 @@ export class WebGL2Renderer implements Renderer {
 	#bindObjectTexture(
 		unit: number,
 		texture: WebGLTexture,
-		filtering: TextureFilteringMode,
+		mipLevels: number,
+		samplingClass: TextureSamplingClass,
 	): void {
 		const gl = this.#gl;
 		gl.activeTexture(gl.TEXTURE0 + unit);
 		gl.bindTexture(gl.TEXTURE_2D, texture);
+		this.#textureSamplers.bind(unit, {
+			mipLevels,
+			policy: this.#frameTextureFiltering,
+			samplingClass,
+			wrap: TextureWrapMode.Clamp,
+		});
 		this.#frameSelectionMetrics.objectTexturePageBinds += 1;
-		gl.texParameteri(
-			gl.TEXTURE_2D,
-			gl.TEXTURE_MIN_FILTER,
-			filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR,
-		);
-		gl.texParameteri(
-			gl.TEXTURE_2D,
-			gl.TEXTURE_MAG_FILTER,
-			filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR,
-		);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 	}
 
 	#setPixelAtlasRect(
@@ -1839,7 +1893,6 @@ function objectMaterialSortKey(input: {
 		material.textures.base ?? "solid",
 		material.textures.palette ?? "none",
 		material.polygon.cullFace,
-		material.sampler.filtering,
 		material.sampler.wrap,
 	].join("|");
 }

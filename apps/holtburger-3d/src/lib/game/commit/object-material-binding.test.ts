@@ -3,7 +3,7 @@ import type {
 	ResolvedGeometry,
 	ResolvedMaterial,
 } from "../resolution/presentation";
-import { resolveStaticTriangleMaterial } from "./static-material-binding";
+import { resolveObjectTriangleMaterial } from "./object-material-binding";
 
 const MATERIAL: ResolvedMaterial = {
 	id: "material:side-expansion-test",
@@ -15,18 +15,18 @@ const MATERIAL: ResolvedMaterial = {
 	diffuseScale: 1,
 };
 
-describe("resolveStaticTriangleMaterial", () => {
+describe("resolveObjectTriangleMaterial", () => {
 	it("keeps both CullMode.None expansions one-sided", () => {
 		const geometry = expandedGeometry([0, 1], [1, 1]);
 
-		const positive = resolveStaticTriangleMaterial({
+		const positive = resolveObjectTriangleMaterial({
 			detailRole: "environment",
 			geometry,
 			materials: [MATERIAL],
 			sourceLabel: "expanded CullMode.None fixture",
 			triangle: 0,
 		});
-		const reversed = resolveStaticTriangleMaterial({
+		const reversed = resolveObjectTriangleMaterial({
 			detailRole: "environment",
 			geometry,
 			materials: [MATERIAL],
@@ -50,7 +50,7 @@ describe("resolveStaticTriangleMaterial", () => {
 	});
 
 	it("preserves counter-clockwise authored rejection as front-face culling", () => {
-		const resolved = resolveStaticTriangleMaterial({
+		const resolved = resolveObjectTriangleMaterial({
 			detailRole: "environment",
 			geometry: expandedGeometry([0], [3]),
 			materials: [MATERIAL],

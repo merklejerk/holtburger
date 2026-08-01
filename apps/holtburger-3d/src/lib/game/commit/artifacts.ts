@@ -17,7 +17,7 @@ import type { ResolvedMaterial } from "../resolution/presentation";
 import type {
 	StaticGeometryKey,
 	StaticInstallResourceNamespace,
-	StaticInstanceData,
+	ObjectInstanceData,
 	StaticInstanceStreamKey,
 	StaticInstanceStreamSource,
 } from "../systems/static-resources";
@@ -28,11 +28,11 @@ import type {
 } from "../textures/types";
 
 /** Transform, color, and source-local center floats retained by one transparent template. */
-const FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_FLOAT_COUNT = 23;
+const FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_FLOAT_COUNT = 23;
 
 /** Fixed numeric payload bytes retained by one transparent instance template. */
-export const FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_BYTES =
-	FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_FLOAT_COUNT *
+export const FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES =
+	FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_FLOAT_COUNT *
 	Float32Array.BYTES_PER_ELEMENT;
 
 /** Geometry strategies observed for one static-object preparation attempt. */
@@ -79,12 +79,12 @@ export interface StaticObjectLayerDiagnostics extends StaticObjectGeometryDiagno
 	readonly resolvedStaticResidentCount: number;
 	/** Static residents represented by the published geometry, or zero for an empty artifact. */
 	readonly materializedStaticResidentCount: number;
-	/** Source residents promoted to the existing runtime-deferred dynamic seam. */
+	/** Source residents promoted to the authored dynamic runtime. */
 	readonly promotedDynamicResidentCount: number;
 }
 
 /** Source material plus polygon-owned facts; render pass policy remains renderer-private. */
-export interface StaticObjectMaterialBinding {
+export interface ObjectMaterialBinding {
 	readonly source: ResolvedMaterial;
 	/** Active-region detail binding selected by the owning static render domain, if any. */
 	readonly detailRole: StaticDetailRole | null;
@@ -119,7 +119,7 @@ export interface BakedStaticDrawUnit {
 	readonly geometry: StaticGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
-	readonly material: StaticObjectMaterialBinding;
+	readonly material: ObjectMaterialBinding;
 	/** Renderer-neutral ordering class selected from lossless source material facts. */
 	readonly ordering: ObjectMaterialOrdering;
 	/** Stable distance-sort input present only for transparent ranges. */
@@ -136,7 +136,7 @@ export interface InstancedStaticDrawUnit {
 	readonly instances: StaticInstanceStreamKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
-	readonly material: StaticObjectMaterialBinding;
+	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
 	readonly transparentSort: null;
 }
@@ -149,14 +149,14 @@ export type StaticObjectDrawUnit =
 /**
  * Immutable transparent instance retained on the CPU so the renderer can order it for each view.
  */
-export interface FrameStreamedStaticInstanceTemplate {
+export interface FrameStreamedObjectInstanceTemplate {
 	/** Complete semantic cohort identity for adjacent compatible-run coalescing. */
 	readonly cohortKey: string;
 	readonly geometry: StaticGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
-	readonly material: StaticObjectMaterialBinding;
-	readonly instance: StaticInstanceData;
+	readonly material: ObjectMaterialBinding;
+	readonly instance: ObjectInstanceData;
 	/** Stable distance-sort facts expressed in the reusable source-local geometry frame. */
 	readonly transparentSort: {
 		readonly center: Vec3;
@@ -168,7 +168,7 @@ export interface FrameStreamedStaticInstanceTemplate {
 export interface StaticObjectRenderable {
 	readonly drawUnits: readonly StaticObjectDrawUnit[];
 	/** Camera-ordered transparent contributions uploaded through renderer-owned frame storage. */
-	readonly frameStreamedInstances: readonly FrameStreamedStaticInstanceTemplate[];
+	readonly frameStreamedInstances: readonly FrameStreamedObjectInstanceTemplate[];
 }
 
 /** One immutable object publication emitted before SceneGraph assigns its node identity. */
@@ -207,7 +207,7 @@ export interface EnvCellDrawUnit {
 	/** Number of selected geometry indices. */
 	readonly indexCount: number;
 	/** Renderer-neutral material source selected for this draw. */
-	readonly material: StaticObjectMaterialBinding;
+	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
 	/** Stable shell-local ordering facts required only for transparent ranges. */
 	readonly transparentSort: {

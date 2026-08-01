@@ -35,6 +35,33 @@ describe("GeometryManager", () => {
 		geometry.dropOwner("terrain:b");
 		expect(resources.released).toEqual(["geometry-resource:0"]);
 	});
+
+	it("rolls back replacement leases and resources before preserving the previous owner set", () => {
+		const resources = new FakeRendererResourceManager();
+		const geometry = new GeometryManager<string>(resources);
+		const previousKey = createTerrainGeometryKey("0x1111ffff");
+		geometry.reserveKeys("terrain", [previousKey]);
+		geometry.upsertGeometry({
+			geometry: createTerrainGeometry(),
+			key: previousKey,
+		});
+		resources.failOnCreateNumber = 2;
+
+		expect(() =>
+			geometry.replaceOwner("terrain", [
+				{
+					geometry: createTerrainGeometry(),
+					key: createTerrainGeometryKey("0x2222ffff"),
+				},
+				{
+					geometry: createTerrainGeometry(),
+					key: createTerrainGeometryKey("0x3333ffff"),
+				},
+			]),
+		).toThrow("geometry creation failed");
+		expect(geometry.getResource(previousKey)).toBe("geometry-resource:0");
+		expect(resources.released).toEqual(["geometry-resource:1"]);
+	});
 });
 
 function createTerrainGeometry(): RenderGeometryData {
@@ -50,10 +77,13 @@ function createTerrainGeometry(): RenderGeometryData {
 class FakeRendererResourceManager implements RendererResourceManager {
 	readonly created: GeometryResourceKey[] = [];
 	readonly released: RenderResourceKey[] = [];
+	failOnCreateNumber: number | null = null;
 	#nextGeometry = 0;
 
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
 		void geometry;
+		if (this.#nextGeometry === this.failOnCreateNumber)
+			throw new Error("geometry creation failed");
 		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometry++}`;
 		this.created.push(key);
 		return key;

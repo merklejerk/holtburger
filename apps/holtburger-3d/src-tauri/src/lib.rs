@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 
 pub use landblock_source_batch::LandblockSourceLayer;
 
+mod animation_source;
 mod binary_source_record;
 pub mod cell_struct_projection;
 mod env_cell_source;
@@ -27,6 +28,7 @@ pub mod portal_geometry;
 pub mod portal_visibility;
 mod source_projection;
 
+use animation_source::serialize_animation_record_binary;
 use binary_source_record::BinarySectionWriter;
 use env_cell_source::serialize_env_cell_source_record;
 use landblock_source_batch::{
@@ -91,6 +93,12 @@ struct LoadTexturePixelsRequest {
     source_asset_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadAnimationRequest {
+    animation_id: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HostStatus {
@@ -149,6 +157,18 @@ async fn load_texture_pixels(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Loads one immutable DAT animation as a compact typed binary record.
+#[tauri::command]
+async fn load_animation(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadAnimationRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_animation_bytes(&state.runtime, &request.animation_id)
+        .await
+        .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Builds the canonical landblock source batch used by Tauri and the headless browser harness.
 pub async fn load_landblock_source_batch_bytes(
     runtime: &ContentAssetRuntime,
@@ -188,6 +208,22 @@ pub async fn load_texture_pixels_bytes(
         },
     )
     .await
+}
+
+/// Build the canonical typed animation response used by Tauri and focused host tests.
+pub async fn load_animation_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_animation_id: &str,
+) -> Result<Vec<u8>> {
+    let animation_id = parse_typed_dat_id(raw_animation_id, 0x03)?;
+    let asset = runtime
+        .load(ContentAssetRequest::Animation(animation_id))
+        .await
+        .with_context(|| format!("Could not load Animation 0x{animation_id:08X}"))?;
+    let ContentAsset::Animation(animation) = asset else {
+        unreachable!("Animation request must return an Animation")
+    };
+    serialize_animation_record_binary(&animation)
 }
 
 async fn build_landblock_source_batch_response(
@@ -409,6 +445,10 @@ fn parse_typed_asset_id(raw_asset_id: &str, prefix: &str, expected_type: u32) ->
     let raw_id = raw_asset_id
         .strip_prefix(prefix)
         .with_context(|| format!("asset id must start with {prefix:?}"))?;
+    parse_typed_dat_id(raw_id, expected_type)
+}
+
+fn parse_typed_dat_id(raw_id: &str, expected_type: u32) -> Result<u32> {
     let raw_hex = raw_id
         .strip_prefix("0x")
         .or_else(|| raw_id.strip_prefix("0X"))
@@ -871,6 +911,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             host_status,
             load_active_region_data,
+            load_animation,
             load_landblock_source_batch,
             load_texture_pixels
         ])

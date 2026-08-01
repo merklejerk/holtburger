@@ -23,16 +23,50 @@ describe("collectStaticObjectTextureDependencies", () => {
 			}),
 		]);
 	});
+
+	it("includes promoted template textures in the authored layer atlas requirement", () => {
+		const source = objectsSourceWithOneReferencedMaterial();
+		const resident = source.staticResidents[0]!;
+		const dynamic = {
+			...resident,
+			behavior: {
+				animationId: "0x03000001",
+				kind: "animation-only",
+				physicsScriptId: null,
+				physicsScriptTableId: null,
+				soundTableId: null,
+			},
+			identity: { kind: "authored", sourceId: "animated:0" },
+			setupId: "0x02000001",
+		} as const;
+
+		const requirements = collectStaticObjectTextureDependencies({
+			...source,
+			dynamicSources: [dynamic],
+			staticResidents: [],
+		});
+
+		expect(requirements.map(({ sourceAssetId }) => sourceAssetId)).toEqual([
+			"0x05000001",
+			"0x04000001",
+		]);
+	});
 });
 
 function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSource {
 	return {
-		dynamicResidents: [],
+		dynamicSources: [],
 		kind: LandblockLayerKind.Objects,
 		landblockId: "0xda55ffff",
 		staticResidents: [
 			{
-				appearance: null,
+				behavior: {
+					animationId: null,
+					kind: "none",
+					physicsScriptId: null,
+					physicsScriptTableId: null,
+					soundTableId: null,
+				},
 				identity: { kind: "authored", sourceId: "explicit:0" },
 				localBounds: null,
 				placement: {
@@ -41,14 +75,8 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 					localTransform: Mat4.identity(),
 				},
 				presentation: {
-					effects: {
-						animationId: null,
-						physicsScriptId: null,
-						physicsScriptTableId: null,
-						soundTableId: null,
-					},
+					appearanceKey: "gfx-obj:0x01000001",
 					id: "presentation:explicit:0",
-					motion: null,
 					parts: [
 						{
 							defaultScale: new Vec3(1, 1, 1),
@@ -82,6 +110,7 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 					sourceAssetId: "0x01000001",
 				},
 				scale: new Vec3(1, 1, 1),
+				setupId: null,
 			},
 		],
 	};

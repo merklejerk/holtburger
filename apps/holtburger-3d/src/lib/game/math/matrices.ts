@@ -403,7 +403,8 @@ export function transformAABB3(
 	return target;
 }
 
-function createRotationMat4(rotation: Quat): Mat4 {
+/** Create a rigid rotation matrix from a normalized quaternion. */
+export function createRotationMat4(rotation: Quat): Mat4 {
 	const { w, x, y, z } = rotation;
 	return new Mat4(
 		1 - 2 * (y * y + z * z),

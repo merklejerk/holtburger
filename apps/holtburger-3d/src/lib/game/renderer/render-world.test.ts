@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Frustum } from "../math/frustum";
-import { Vec3 } from "../math/types";
+import { Mat4, Vec3 } from "../math/types";
 import type { SceneTopologyView, VisibleScene } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { TextureArrayBinding } from "../textures/texture-manager";
@@ -14,12 +14,16 @@ import type {
 	GeometryResourceKey,
 	Texture2DResourceKey,
 } from "./resource-manager";
-import type { GeometryKey } from "../geometry/types";
+import type { GeometryKey, ObjectGeometryKey } from "../geometry/types";
 import type { StaticGeometryKey } from "../systems/static-resources";
 import type { StaticObjectRenderable } from "../commit/artifacts";
-import type { StaticObjectMaterialBinding } from "../commit/artifacts";
+import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { InstanceStreamResourceKey } from "./resource-manager";
 import { TextureWrapMode } from "../textures/types";
+import type {
+	PartVisualTemplateKey,
+	VisibleRigidPartContribution,
+} from "../systems/components";
 
 const VISIBLE_SCENE = {
 	entries: [],
@@ -47,6 +51,7 @@ const ARRAY = {
 describe("RenderWorld", () => {
 	it("exposes only renderer queries over live runtime systems", () => {
 		const calls: string[] = [];
+		const dynamic = dynamicContribution();
 		const world = new RenderWorld({
 			geometry: {
 				getResource: () => {
@@ -84,7 +89,10 @@ describe("RenderWorld", () => {
 				},
 			},
 			staticObjects: { getRenderable: () => null },
-			dynamics: { getRenderable: () => null },
+			dynamics: {
+				getVisibleContributions: (nodeId) =>
+					nodeId === "scene-node:9" ? [dynamic] : null,
+			},
 			envCells: {
 				getCellRenderable: () => null,
 				getPortalDrawUnit: () => null,
@@ -110,6 +118,13 @@ describe("RenderWorld", () => {
 		expect(world.queryFlatScene(FRUSTUM, "0001")).toBe(VISIBLE_SCENE);
 		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
 		expect(world.resolveTerrainDrawUnit("scene-node:1", "0002")).toBe(TERRAIN);
+		expect(world.getRenderContribution("scene-node:9", "0002")).toEqual({
+			contributions: [dynamic],
+			kind: "dynamic",
+		});
+		expect(world.resolveDynamicContributions([dynamic])).toEqual([
+			{ drawUnit: dynamic, geometry: GEOMETRY },
+		]);
 		expect(world.resolveGeometry("terrain-geometry:0001" as GeometryKey)).toBe(
 			GEOMETRY,
 		);
@@ -154,6 +169,7 @@ describe("RenderWorld", () => {
 			"topology",
 			"terrain",
 			"geometry",
+			"geometry",
 			"texture-2d",
 			"texture-2d",
 			"texture-array",
@@ -163,7 +179,32 @@ describe("RenderWorld", () => {
 	});
 });
 
-function staticMaterial(): StaticObjectMaterialBinding {
+function dynamicContribution(): VisibleRigidPartContribution {
+	return {
+		domain: {
+			key: "0x0001ffff/outdoor",
+			landblockId: "0x0001ffff",
+			scope: { kind: "outdoor" },
+		},
+		drawUnit: {
+			batchKey: "part/range",
+			geometry: "object-geometry:fixture" as ObjectGeometryKey,
+			indexCount: 3,
+			indexStart: 0,
+			material: staticMaterial(),
+			ordering: "opaque",
+			partIndex: 0,
+			templatePartKey: "part-visual-template:fixture" as PartVisualTemplateKey,
+		},
+		instance: {
+			color: { a: 1, b: 1, g: 1, r: 1 },
+			sourceToLandblock: Mat4.identity(),
+		},
+		transparentSort: null,
+	};
+}
+
+function staticMaterial(): ObjectMaterialBinding {
 	return {
 		detailRole: null,
 		palettedClipMap: false,

@@ -1,7 +1,6 @@
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
+import type {
+	CommitPipeline,
+	LandblockLayerCommit,
 } from "../../lib/game/commit/types";
 import type { LandblockId } from "../../lib/game/game-types";
 import { createTranslationMat4 } from "../../lib/game/math/matrices";
@@ -27,7 +26,7 @@ const LOCAL_BOUNDS = new AABB3(new Vec3(0, 0, 0), new Vec3(3, 5, 0));
 export class SyntheticBlendedBuildingPipeline implements CommitPipeline {
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
-	): Promise<readonly CommitBundle[]> {
+	): Promise<readonly LandblockLayerCommit[]> {
 		return [...layers]
 			.filter(({ layer }) => layer === LandblockLayerKind.Buildings)
 			.map(({ id }) => buildingBundle(id));
@@ -36,9 +35,9 @@ export class SyntheticBlendedBuildingPipeline implements CommitPipeline {
 	async destroy(): Promise<void> {}
 }
 
-function buildingBundle(landblockId: LandblockId): CommitBundle {
+function buildingBundle(landblockId: LandblockId): LandblockLayerCommit {
 	const source: ResolvedOutdoorStaticLayerSource = {
-		dynamicResidents: [],
+		dynamicSources: [],
 		kind: LandblockLayerKind.Buildings,
 		landblockId,
 		staticResidents: MATERIAL_FLAGS.map((flags, index) =>
@@ -47,8 +46,6 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 	};
 	return {
 		commit: { source },
-		dynamicEntities: [],
-		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Buildings,
 	};
@@ -60,7 +57,13 @@ function resident(
 	index: number,
 ): ResolvedObjectResident {
 	return {
-		appearance: null,
+		behavior: {
+			animationId: null,
+			kind: "none",
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
 		identity: { kind: "authored", sourceId: `synthetic-blended:${index}` },
 		localBounds: LOCAL_BOUNDS,
 		placement: {
@@ -70,6 +73,7 @@ function resident(
 		},
 		presentation: presentation(flags, index),
 		scale: new Vec3(1, 1, 1),
+		setupId: null,
 	};
 }
 
@@ -78,14 +82,8 @@ function presentation(
 	index: number,
 ): ResolvedObjectPresentation {
 	return {
-		effects: {
-			animationId: null,
-			physicsScriptId: null,
-			physicsScriptTableId: null,
-			soundTableId: null,
-		},
+		appearanceKey: `appearance:synthetic-blended:${index}`,
 		id: `presentation:synthetic-blended:${index}`,
-		motion: null,
 		parts: [
 			{
 				defaultScale: new Vec3(1, 1, 1),

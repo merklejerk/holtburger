@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-	STATIC_TRANSPARENT_SORT_DISTANCE,
-	STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED,
-	formAdjacentTransparentInstanceRuns,
+	OBJECT_TRANSPARENT_SORT_DISTANCE,
+	OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED,
+	formAdjacentObjectInstanceRuns,
 	objectBlendPolicy,
-	orderTransparentStaticRanges,
+	orderTransparentObjectRanges,
 } from "./object-rendering-policy";
 import {
 	createObjectFragmentShader,
 	createObjectVertexShader,
 } from "./webgl2-object-program";
 
-describe("orderTransparentStaticRanges", () => {
+describe("orderTransparentObjectRanges", () => {
 	it("sorts nearby ranges back-to-front with stable equal-distance ties", () => {
-		const ordered = orderTransparentStaticRanges(
+		const ordered = orderTransparentObjectRanges(
 			[entry("tie-b", 4), entry("near", 2), entry("far", 8), entry("tie-a", 4)],
 			() => 0,
 		);
@@ -28,7 +28,7 @@ describe("orderTransparentStaticRanges", () => {
 	});
 
 	it("orders far ranges by deterministic batching compatibility", () => {
-		const ordered = orderTransparentStaticRanges(
+		const ordered = orderTransparentObjectRanges(
 			[
 				{ ...entry("a-2", 40), range: { cohort: "a", id: "a-2" } },
 				{ ...entry("b-1", 20), range: { cohort: "b", id: "b-1" } },
@@ -43,16 +43,16 @@ describe("orderTransparentStaticRanges", () => {
 			"b-1",
 		]);
 		expect(ordered.near).toEqual([]);
-		expect(STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED).toBe(
-			STATIC_TRANSPARENT_SORT_DISTANCE * STATIC_TRANSPARENT_SORT_DISTANCE,
+		expect(OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED).toBe(
+			OBJECT_TRANSPARENT_SORT_DISTANCE * OBJECT_TRANSPARENT_SORT_DISTANCE,
 		);
 	});
 
 	it("separates far candidates from the near camera-sorted phase", () => {
-		const ordered = orderTransparentStaticRanges(
+		const ordered = orderTransparentObjectRanges(
 			[
-				entry("near-first", STATIC_TRANSPARENT_SORT_DISTANCE - 1),
-				entry("far-second", STATIC_TRANSPARENT_SORT_DISTANCE + 1),
+				entry("near-first", OBJECT_TRANSPARENT_SORT_DISTANCE - 1),
+				entry("far-second", OBJECT_TRANSPARENT_SORT_DISTANCE + 1),
 			],
 			() => 0,
 		);
@@ -87,15 +87,15 @@ describe("orderTransparentStaticRanges", () => {
 		) => left.cohort.localeCompare(right.cohort);
 
 		expect(
-			orderTransparentStaticRanges(sourceOrder, compareCohorts).near.map(
+			orderTransparentObjectRanges(sourceOrder, compareCohorts).near.map(
 				({ range }) => range.id,
 			),
 		).toEqual(["red", "blue", "yellow"]);
-		const far = orderTransparentStaticRanges(
+		const far = orderTransparentObjectRanges(
 			sourceOrder.map((entry) => ({
 				...entry,
 				distanceSquared:
-					entry.distanceSquared + STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED * 4,
+					entry.distanceSquared + OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED * 4,
 			})),
 			compareCohorts,
 		).far;
@@ -103,7 +103,7 @@ describe("orderTransparentStaticRanges", () => {
 	});
 });
 
-describe("formAdjacentTransparentInstanceRuns", () => {
+describe("formAdjacentObjectInstanceRuns", () => {
 	it("coalesces only adjacent compatible frame instances after global ordering", () => {
 		const ordered = [
 			{ cohort: "a", frame: true, id: "a1" },
@@ -113,7 +113,7 @@ describe("formAdjacentTransparentInstanceRuns", () => {
 			{ cohort: "b", frame: true, id: "b1" },
 		];
 
-		const submissions = formAdjacentTransparentInstanceRuns(
+		const submissions = formAdjacentObjectInstanceRuns(
 			ordered,
 			(value) => value.frame,
 			(left, right) => left.cohort === right.cohort,
@@ -135,7 +135,7 @@ describe("formAdjacentTransparentInstanceRuns", () => {
 			{ cohort: "a", id: "a2" },
 		];
 
-		const submissions = formAdjacentTransparentInstanceRuns(
+		const submissions = formAdjacentObjectInstanceRuns(
 			ordered,
 			() => true,
 			(left, right) => left.cohort === right.cohort,
@@ -148,6 +148,26 @@ describe("formAdjacentTransparentInstanceRuns", () => {
 					: submission.values.map(({ id }) => id),
 			),
 		).toEqual([["a1"], ["b1"], ["a2"]]);
+	});
+
+	it("keeps identical part batches separated across render domains", () => {
+		const ordered = [
+			{ batch: "wing", domain: "outdoor", id: "a" },
+			{ batch: "wing", domain: "outdoor", id: "b" },
+			{ batch: "wing", domain: "cell:1", id: "c" },
+		];
+
+		expect(
+			formAdjacentObjectInstanceRuns(
+				ordered,
+				() => true,
+				(left, right) =>
+					left.batch === right.batch && left.domain === right.domain,
+			),
+		).toEqual([
+			{ kind: "frame-instance-run", values: ordered.slice(0, 2) },
+			{ kind: "frame-instance-run", values: ordered.slice(2) },
+		]);
 	});
 });
 

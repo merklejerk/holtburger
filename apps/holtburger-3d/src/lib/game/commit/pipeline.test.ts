@@ -14,7 +14,7 @@ import { StandardCommitPipeline } from "./pipeline";
 describe("StandardCommitPipeline", () => {
 	it("hands resolved building source to the runtime without preparing pixels or geometry", async () => {
 		const source = {
-			dynamicResidents: [],
+			dynamicSources: [],
 			kind: LandblockLayerKind.Buildings,
 			landblockId: "0xda55ffff",
 			staticResidents: [],
@@ -32,8 +32,6 @@ describe("StandardCommitPipeline", () => {
 		).resolves.toEqual([
 			{
 				commit: { source },
-				dynamicEntities: [],
-				kind: 0,
 				landblockId: source.landblockId,
 				layer: LandblockLayerKind.Buildings,
 			},
@@ -47,7 +45,7 @@ describe("StandardCommitPipeline", () => {
 			landblockId,
 		} as unknown as ResolvedTerrainLayerSource;
 		const buildings = {
-			dynamicResidents: [],
+			dynamicSources: [],
 			kind: LandblockLayerKind.Buildings,
 			landblockId,
 			staticResidents: [],
@@ -148,7 +146,7 @@ function outdoorSource(
 		| LandblockLayerKind.Generated,
 ): ResolvedObjectLayerSource {
 	return {
-		dynamicResidents: [],
+		dynamicSources: [],
 		kind,
 		landblockId,
 		staticResidents: [],

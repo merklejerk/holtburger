@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LandblockLayerKind } from "./scene-interest";
 import {
+	dynamicGenerationToResourceOwnerId,
 	landblockLayerToOwnerId,
 	parseLandblockLayerOwnerId,
 } from "./owner-ids";
@@ -16,9 +17,13 @@ describe("landblock-layer owner IDs", () => {
 		).toEqual({ landblockId, layer: LandblockLayerKind.EnvCells });
 	});
 
-	it("rejects spawned owners at the landblock-layer boundary", () => {
-		expect(() => parseLandblockLayerOwnerId("spawned:fixture")).toThrow(
-			"not a landblock-layer owner",
+	it("derives a private resource owner for each dynamic generation", () => {
+		const owner = landblockLayerToOwnerId(
+			"0xda55ffff",
+			LandblockLayerKind.Buildings,
+		);
+		expect(dynamicGenerationToResourceOwnerId(owner, 7)).toBe(
+			"dynamic-generation:landblock-layer:0xda55ffff/buildings/7",
 		);
 	});
 });

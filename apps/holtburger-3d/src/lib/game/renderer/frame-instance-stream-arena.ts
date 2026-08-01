@@ -1,4 +1,4 @@
-import type { StaticInstanceData } from "../systems/static-resources";
+import type { ObjectInstanceData } from "../systems/static-resources";
 import {
 	WebGL2InstanceBuffer,
 	type WebGL2InstanceBufferBinding,
@@ -22,7 +22,7 @@ export class FrameInstanceStreamArena {
 	}
 
 	/** Orphan and upload the complete ordered population for one sequentially rendered view. */
-	prepareView(instances: readonly StaticInstanceData[]): void {
+	prepareView(instances: readonly ObjectInstanceData[]): void {
 		if (this.#buffer.resetFrame(instances.length)) this.#growthCount += 1;
 		this.#buffer.updateRange(0, instances);
 		this.#viewHighWaterMark = Math.max(

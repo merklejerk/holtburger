@@ -23,15 +23,14 @@ import {
 	validateBinarySections,
 } from "./binary-source-record";
 import {
-	acFrameTransform,
 	decodeStaticGeometry,
 	decodeStaticMaterial,
 	decodeStaticPresentation,
-	renderScale,
 	staticDefinitionSchema,
 	staticGeometrySchema,
 	staticMaterialSchema,
 } from "./decode-static-source-record";
+import { acFrameTransform, renderScale } from "./ac-frame";
 
 const MAGIC = "HBEC";
 const VERSION = 2;
@@ -695,6 +694,8 @@ function decodeCells(
 					id: resident.id,
 					sourceDid: resident.sourceDid,
 					presentation: source.presentation,
+					setupId: source.setupId,
+					behavior: source.behavior,
 					placement: {
 						landblockId,
 						envCellId: id,
@@ -702,7 +703,6 @@ function decodeCells(
 					},
 					scale: renderScale([1, 1, 1]),
 					localBounds: source.localBounds,
-					appearance: null,
 				};
 			});
 		const placementOffset = cellIndex * 7;

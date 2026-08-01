@@ -1,11 +1,11 @@
-/** Retail-proven radius within which transparent static ranges sort back-to-front every frame. */
-export const STATIC_TRANSPARENT_SORT_DISTANCE = 16;
+/** Retail-proven radius within which transparent object ranges sort back-to-front every frame. */
+export const OBJECT_TRANSPARENT_SORT_DISTANCE = 16;
 /** Squared form used by the frame-time sorter; derived to avoid a duplicated threshold literal. */
-export const STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED =
-	STATIC_TRANSPARENT_SORT_DISTANCE * STATIC_TRANSPARENT_SORT_DISTANCE;
+export const OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED =
+	OBJECT_TRANSPARENT_SORT_DISTANCE * OBJECT_TRANSPARENT_SORT_DISTANCE;
 
 /** One transparent baked range paired with its current-frame camera distance. */
-export interface TransparentStaticRange<T> {
+export interface TransparentObjectRange<T> {
 	/** Precomputed squared camera distance; avoids per-comparison coordinate work and allocations. */
 	readonly distanceSquared: number;
 	readonly range: T;
@@ -13,15 +13,15 @@ export interface TransparentStaticRange<T> {
 }
 
 /** Far batchable and near distance-ordered transparent phases for one view. */
-export interface OrderedTransparentStaticRanges<T> {
+export interface OrderedTransparentObjectRanges<T> {
 	/** Candidates outside the near-sort radius, ordered for deterministic draw compatibility. */
-	readonly far: readonly TransparentStaticRange<T>[];
+	readonly far: readonly TransparentObjectRange<T>[];
 	/** Candidates inside the near-sort radius, ordered back-to-front. */
-	readonly near: readonly TransparentStaticRange<T>[];
+	readonly near: readonly TransparentObjectRange<T>[];
 }
 
 /** One phase-ordered transparent submission after adjacent frame cohorts are identified. */
-export type TransparentStaticSubmission<T> =
+export type ObjectFrameSubmission<T> =
 	| { readonly kind: "single"; readonly value: T }
 	| { readonly kind: "frame-instance-run"; readonly values: readonly T[] };
 
@@ -56,14 +56,14 @@ export function objectBlendPolicy(rawSurfaceFlags: number): ObjectBlendPolicy {
 }
 
 /** Partition one view's transparency and independently order its batchable far and sorted near phases. */
-export function orderTransparentStaticRanges<T>(
-	ranges: readonly TransparentStaticRange<T>[],
+export function orderTransparentObjectRanges<T>(
+	ranges: readonly TransparentObjectRange<T>[],
 	compareFarForBatching: (left: T, right: T) => number,
-): OrderedTransparentStaticRanges<T> {
-	const far: TransparentStaticRange<T>[] = [];
-	const near: TransparentStaticRange<T>[] = [];
+): OrderedTransparentObjectRanges<T> {
+	const far: TransparentObjectRange<T>[] = [];
+	const near: TransparentObjectRange<T>[] = [];
 	for (const range of ranges) {
-		(range.distanceSquared <= STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED
+		(range.distanceSquared <= OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED
 			? near
 			: far
 		).push(range);
@@ -86,12 +86,12 @@ export function orderTransparentStaticRanges<T>(
 /**
  * Form frame-instance runs only after phase ordering, leaving every non-frame value as a barrier.
  */
-export function formAdjacentTransparentInstanceRuns<T>(
+export function formAdjacentObjectInstanceRuns<T>(
 	ordered: readonly T[],
 	isFrameInstance: (value: T) => boolean,
 	isCompatible: (left: T, right: T) => boolean,
-): readonly TransparentStaticSubmission<T>[] {
-	const submissions: TransparentStaticSubmission<T>[] = [];
+): readonly ObjectFrameSubmission<T>[] {
+	const submissions: ObjectFrameSubmission<T>[] = [];
 	for (const value of ordered) {
 		if (!isFrameInstance(value)) {
 			submissions.push({ kind: "single", value });

@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 ## Tech Lead North Stars
 
@@ -32,6 +32,11 @@ flowchart TD
     Decode --> Materialize[source-to-materialization plans]
     Materialize --> Realize[revision-scoped realization]
     Realize --> Systems[SceneGraph and typed owner systems]
+    Host --> HBAN[HBAN typed animation records]
+    HBAN --> AnimRepo[shared animation repository]
+    Systems --> Dynamic[template, animation, hook, and pose systems]
+    AnimRepo --> Dynamic
+    Dynamic --> World
     Systems --> World[read-only RenderWorld]
     World --> Flat[flat scope selection]
     World --> Portal[portal graph planning]
@@ -61,6 +66,10 @@ commit, revision, owner, publication, and eviction lifecycle.
 | `game/runtime/static-layer-realizer.ts`          | Revision currentness, geometry/atlas rendezvous, publication ordering, and stale-work withdrawal.                                                       |
 | `game/runtime/env-cell-realization.ts`           | Reuses the static preparer for residents, builds proof-backed visibility islands, and creates one environment artifact.                                 |
 | `game/systems/env-cell-system.ts`                | Failure-atomic ownership of scopes, crossings, shell nodes, aperture geometry, and rollback.                                                            |
+| `game/systems/dynamic-entity-system.ts`          | Owner-atomic authored dynamic trees, shared template/animation leases, activation bounds, rigid-part contributions, and static visual fallback.         |
+| `game/systems/animation-system.ts`               | Independent deterministic playback clocks, retail semantic traversal, discontinuity handling, and fractional rigid-pose sampling.                       |
+| `game/systems/hook-system.ts`                    | Persistent visual-hook state, fixed-clock `SetOmega`, bounded provenance, and explicit deferred-effect observations.                                    |
+| `game/systems/pose-system.ts`                    | Render-cadence publication of visual-root and rigid-part samples; no clocks, content preparation, or residency policy.                                  |
 | `game/scene/scene-graph.ts`                      | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
 | `game/renderer/render-world.ts`                  | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
 | `game/renderer/portal-view-window.ts`            | Exact normalized window construction, convex source decomposition, scope-coverage admission, projection, and clipping.                                  |
@@ -102,13 +111,37 @@ Every environment-cell static resident enters the same classifier, material plan
 texture dependency collector, atlas, geometry manager, static object system, and renderer used by
 outdoor static residents. Jobs are partitioned by EnvCell before batching, so no baked node,
 instance stream, transparent population, or draw contribution spans scopes. Default-animated
-residents remain explicitly deferred to the dynamic path.
+residents are promoted to the authored dynamic path while script-only residents retain valid static
+presentation for the effects plan.
 
 Publication is failure-atomic across the environment and its residents. Geometry and atlas work
 may prepare concurrently, but only a current scene-interest revision can publish. Stale work
 withdraws its atlas claim and cannot become authoritative scene state.
 
-## 4. Scene Graph and Spatial Queries
+## 4. Authored Dynamic Presentation
+
+Setup-backed residents with a default animation leave static baking but retain their authored root
+placement and scope. One appearance key owns a shared visual template; one animation ID owns a
+shared immutable prepared clip. Entity identity appears only in mutable playback phase, hook state,
+pose, and root ownership. GPU geometry remains leased through `GeometryManager`, texture facts join
+the source layer's atlas claim, and dynamic parts enter the same frame-streamed object arena as
+static transparent and compatible opaque/cutout contributions.
+
+Animation preparation and template preparation settle together behind the owner generation. The
+runtime validates part coverage and computes conservative bounds by sweeping every rigid animation
+frame through the same retail-shaped transform used by static baking and dynamic rendering. A
+`SetOmega` clip expands that sweep to a rotation-invariant envelope. Visibility is published only
+after initial independent phase, persistent hook state, pose, resources, and bounds are complete.
+Structural or unknown visual hooks keep a valid resting presentation with provenance rather than
+activating partial behavior.
+
+`AnimationSystem` advances semantic playback and hooks at 30 Hz, rebases gaps above two seconds,
+and samples fractional rigid poses at render cadence. `HookSystem` integrates retail axis-angle
+visual-root rotation on that semantic clock. `PoseSystem` alone publishes the sampled visual root
+and part poses; the scene graph then composes them under the unchanged authored root. Static-default
+position frames remain prepared but unused, matching retail's null root-offset path.
+
+## 5. Scene Graph and Spatial Queries
 
 All root transforms are landblock-local. A root carries `landblockId`, optional `envCellId`, and a
 local-to-landblock transform; children inherit the root residency and compose transforms exactly
@@ -138,7 +171,7 @@ The explorer uses candidate containment for best-effort initial/free-fly placeme
 last resolved residency when overlap is ambiguous. No player movement, authoritative portal
 history, third-person camera residency, or client controller policy has been implemented.
 
-## 5. Authored and Effective Apertures
+## 6. Authored and Effective Apertures
 
 An authored aperture is material-free planar triangle geometry in landblock space. It retains its
 plane, accepted traversal side, bounds, source identity, and polygon provenance. It is used by
@@ -159,7 +192,7 @@ Indoor reciprocal seams join one visibility island only when the host proves exa
 identity, `ExactMatch` on both sides, equivalent apertures, opposed accepted half-spaces, and cell
 bounds separated by the portal plane. Any failed proof remains an explicit topology boundary.
 
-## 6. Rendering Modes and Portal Execution
+## 7. Rendering Modes and Portal Execution
 
 Flat mode selects outdoor plus every resident EnvCell scope, applies ordinary frustum/group/node
 culling, and performs no portal planning, masks, targets, or composition. It forces single-sided
@@ -197,7 +230,7 @@ depth-stencil target. Exterior color and depth render once per view. The same co
 handles opaque, alpha-tested, transparent, and additive content. The target is lazy, extent-keyed,
 retained across a switch back to flat mode, and disposed on resize or renderer destruction.
 
-## 7. Boundary Audit
+## 8. Boundary Audit
 
 | Layer                 | May own                                                                    | Must not own                                             |
 | --------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------- |

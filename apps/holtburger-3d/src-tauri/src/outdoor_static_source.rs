@@ -64,6 +64,7 @@ impl OutdoorStaticSourceClosure {
         self.definitions.push(json!({
             "id": id,
             "kind": "gfx-obj",
+            "appearanceKey": id,
             "sourceAssetId": id,
             "geometryId": geometry_id,
             "materialIds": material_ids,
@@ -129,6 +130,8 @@ impl OutdoorStaticSourceClosure {
         self.definitions.push(json!({
             "id": id,
             "kind": "setup-model",
+            "appearanceKey": appearance.appearance_key,
+            "setupId": dat_id(setup_model_id),
             "sourceAssetId": id,
             "parts": parts,
             "holdingLocations": setup_holding_locations(&setup_model)?,

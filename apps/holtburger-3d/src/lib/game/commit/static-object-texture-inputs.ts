@@ -1,19 +1,29 @@
-import {
-	residentKey,
-	type ResolvedStaticObjectLayerSource,
-} from "../resolution/landblock-layer";
+import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import { planObjectMaterial } from "../resolution/object-material-planner";
 import { staticObjectDetailRoleForSource } from "../resolution/static-detail-role";
 import { type AssetTextureFact, TextureWrapMode } from "../textures/types";
 import { mergeAssetTextureFacts } from "../textures/texture-facts";
 
-/** Collect exactly the logical pixel dependencies used by static object triangles. */
+/** Collect logical pixel dependencies for static draws and promoted visual templates together. */
 export function collectStaticObjectTextureDependencies(
 	source: ResolvedStaticObjectLayerSource,
 ): readonly AssetTextureFact[] {
 	const dependencies: AssetTextureFact[] = [];
 	const detailRole = staticObjectDetailRoleForSource(source);
-	for (const resident of source.staticResidents) {
+	collectResidentDependencies(dependencies, source.staticResidents, detailRole);
+	collectResidentDependencies(dependencies, source.dynamicSources, null);
+	return mergeAssetTextureFacts(dependencies, "Authored object source");
+}
+
+function collectResidentDependencies(
+	dependencies: AssetTextureFact[],
+	residents: readonly {
+		readonly identity: { readonly sourceId: string };
+		readonly presentation: ResolvedStaticObjectLayerSource["staticResidents"][number]["presentation"];
+	}[],
+	detailRole: ReturnType<typeof staticObjectDetailRoleForSource>,
+): void {
+	for (const resident of residents) {
 		for (const part of resident.presentation.parts) {
 			for (const [
 				triangle,
@@ -22,7 +32,7 @@ export function collectStaticObjectTextureDependencies(
 				const material = part.materials[slot];
 				if (!material) {
 					throw new Error(
-						`Static resident ${residentKey(resident.identity)} part ${part.partIndex} triangle ${triangle} has no material slot ${slot}.`,
+						`Authored resident ${resident.identity.sourceId} part ${part.partIndex} triangle ${triangle} has no material slot ${slot}.`,
 					);
 				}
 				const plan = planObjectMaterial(
@@ -36,5 +46,4 @@ export function collectStaticObjectTextureDependencies(
 			}
 		}
 	}
-	return mergeAssetTextureFacts(dependencies, "Static object");
 }

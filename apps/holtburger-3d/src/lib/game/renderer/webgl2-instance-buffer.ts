@@ -1,7 +1,7 @@
 import { mat4ToFloat32Array } from "../math/matrices";
 import {
-	STATIC_INSTANCE_RECORD_FLOAT_COUNT,
-	type StaticInstanceData,
+	OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+	type ObjectInstanceData,
 } from "../systems/static-resources";
 
 /** Fixed matrix-column locations consumed by the instanced object vertex program. */
@@ -11,7 +11,7 @@ const OBJECT_INSTANCE_COLOR_ATTRIBUTE_LOCATION = 7;
 /** Float count in one object instance record: one matrix followed by one RGBA color. */
 /** Byte stride shared by persistent and frame-streamed object instance buffers. */
 export const OBJECT_INSTANCE_STRIDE_BYTES =
-	STATIC_INSTANCE_RECORD_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
+	OBJECT_INSTANCE_RECORD_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
 
 /** Upload policy selected from the lifetime of the instance population. */
 export type WebGL2InstanceBufferUsage = "persistent-static" | "frame-dynamic";
@@ -45,7 +45,7 @@ export class WebGL2InstanceBuffer {
 	}
 
 	/** Publish the complete immutable contents of a persistent buffer exactly once. */
-	publishPersistent(instances: readonly StaticInstanceData[]): void {
+	publishPersistent(instances: readonly ObjectInstanceData[]): void {
 		this.#requireUsage("persistent-static");
 		if (this.#capacity !== 0 || this.#populatedInstanceCount !== 0) {
 			throw new Error("Persistent instance buffer has already been published.");
@@ -82,7 +82,7 @@ export class WebGL2InstanceBuffer {
 	/** Upload a contiguous range without reallocating or changing instance-record layout. */
 	updateRange(
 		firstInstance: number,
-		instances: readonly StaticInstanceData[],
+		instances: readonly ObjectInstanceData[],
 	): void {
 		this.#requireAlive();
 		requireNonNegativeInteger(firstInstance, "First instance");
@@ -191,13 +191,13 @@ export function bindWebGL2ObjectInstanceRange(
 
 /** Encode typed instance facts into the single backend record layout. */
 export function encodeObjectInstances(
-	instances: readonly StaticInstanceData[],
+	instances: readonly ObjectInstanceData[],
 ): Float32Array {
 	const values = new Float32Array(
-		instances.length * STATIC_INSTANCE_RECORD_FLOAT_COUNT,
+		instances.length * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
 	);
 	for (const [index, instance] of instances.entries()) {
-		const offset = index * STATIC_INSTANCE_RECORD_FLOAT_COUNT;
+		const offset = index * OBJECT_INSTANCE_RECORD_FLOAT_COUNT;
 		mat4ToFloat32Array(
 			instance.sourceToLandblock,
 			values.subarray(offset, offset + 16),

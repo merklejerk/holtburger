@@ -37,18 +37,18 @@ export class StaticObjectGeometryWorker {
 	async prepare(
 		job: StaticObjectGeometryPreparationJob,
 	): Promise<StaticObjectGeometryPreparationResult | null> {
-		// Dynamic residents remain runtime-owned. Shared definition buffers must survive static
+		// Dynamic sources remain runtime-owned. Shared definition buffers must survive static
 		// worker transfer so a later dynamic materializer still receives a complete resident.
 		const runtimeOwnedBuffers =
 			job.layer === LandblockLayerKind.EnvCells
 				? geometryBuffers([
 						...job.source.staticResidents,
-						...job.source.dynamicResidents,
+						...job.source.dynamicSources,
 					])
-				: geometryBuffers(job.source.dynamicResidents);
+				: geometryBuffers(job.source.dynamicSources);
 		const workerJob: StaticObjectGeometryPreparationJob = {
 			...job,
-			source: { ...job.source, dynamicResidents: [] },
+			source: { ...job.source, dynamicSources: [] },
 		};
 		const result = await this.#geometry.dispatch(
 			workerJob,

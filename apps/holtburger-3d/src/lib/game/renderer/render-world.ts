@@ -9,10 +9,10 @@ import type {
 	VisibleScene,
 } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
-import type { DynamicEntityRenderable } from "../systems/components";
+import type { VisibleRigidPartContribution } from "../systems/components";
 import type {
 	EnvCellRenderable,
-	FrameStreamedStaticInstanceTemplate,
+	FrameStreamedObjectInstanceTemplate,
 	PortalDrawUnit,
 	StaticObjectDrawUnit,
 	StaticObjectRenderable,
@@ -67,7 +67,9 @@ interface RenderWorldSystems {
 		getRenderable(nodeId: SceneNodeId): StaticObjectRenderable | null;
 	};
 	readonly dynamics: {
-		getRenderable(nodeId: SceneNodeId): DynamicEntityRenderable | null;
+		getVisibleContributions(
+			nodeId: SceneNodeId,
+		): readonly VisibleRigidPartContribution[] | null;
 	};
 	readonly envCells: {
 		getCellRenderable(nodeId: SceneNodeId): EnvCellRenderable | null;
@@ -101,7 +103,10 @@ export type RenderContribution =
 			readonly kind: "static-object";
 			readonly renderable: StaticObjectRenderable;
 	  }
-	| { readonly kind: "dynamic"; readonly renderable: DynamicEntityRenderable }
+	| {
+			readonly kind: "dynamic";
+			readonly contributions: readonly VisibleRigidPartContribution[];
+	  }
 	| { readonly kind: "env-cell"; readonly renderable: EnvCellRenderable }
 	| { readonly kind: "terrain"; readonly drawUnit: TerrainDrawUnit };
 
@@ -117,7 +122,7 @@ export interface ResolvedStaticObjectNode {
 	readonly placement: ResolvedScenePlacement;
 	readonly drawUnits: readonly ResolvedStaticDrawUnit[];
 	readonly frameStreamedInstances: readonly {
-		readonly template: FrameStreamedStaticInstanceTemplate;
+		readonly template: FrameStreamedObjectInstanceTemplate;
 		readonly geometry: GeometryResourceKey;
 	}[];
 }
@@ -178,8 +183,8 @@ export class RenderWorld {
 			}
 			return { cullingGroup, kind: "static-object", renderable: staticObject };
 		}
-		const dynamic = this.#systems.dynamics.getRenderable(nodeId);
-		if (dynamic) return { kind: "dynamic", renderable: dynamic };
+		const dynamic = this.#systems.dynamics.getVisibleContributions(nodeId);
+		if (dynamic) return { contributions: dynamic, kind: "dynamic" };
 		const cell = this.#systems.envCells.getCellRenderable(nodeId);
 		if (cell) return { kind: "env-cell", renderable: cell };
 		const terrain = this.resolveTerrainDrawUnit(nodeId, anchorLandblockId);
@@ -225,14 +230,12 @@ export class RenderWorld {
 		};
 	}
 
-	resolveDynamicRenderable(
-		renderable: DynamicEntityRenderable,
-	): readonly ResolvedGeometryDrawUnit<
-		DynamicEntityRenderable["parts"][number]
-	>[] {
-		return renderable.parts.map((drawUnit) => ({
-			drawUnit,
-			geometry: this.resolveGeometry(drawUnit.geometry),
+	resolveDynamicContributions(
+		contributions: readonly VisibleRigidPartContribution[],
+	): readonly ResolvedGeometryDrawUnit<VisibleRigidPartContribution>[] {
+		return contributions.map((contribution) => ({
+			drawUnit: contribution,
+			geometry: this.resolveGeometry(contribution.drawUnit.geometry),
 		}));
 	}
 

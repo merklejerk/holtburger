@@ -74,6 +74,14 @@ export interface StaticLayerRealizationInput<TSource, TOwner extends string> {
 	readonly revision: SceneInterestRevision;
 	readonly source: TSource;
 	readonly textureRequirements: readonly AssetTextureFact[];
+	/** Optional staged companion publication prepared before any active static state is replaced. */
+	readonly prepareCompanion?: () => Promise<StaticLayerCompanionPublication>;
+}
+
+/** Synchronous companion cutover paired with one already prepared static realization. */
+export interface StaticLayerCompanionPublication {
+	commit(): void;
+	release(): void;
 }
 
 /** Typed result consumed by the later runtime handoff; dynamic entities deliberately stay absent. */
@@ -152,16 +160,21 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 	}
 
 	/** Withdraw every pending exact requirement without destroying shared atlas or publisher state. */
-	destroy(): void {
+	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		const settlements: Promise<unknown>[] = [];
 		for (const pendingByRevision of this.#pending.values()) {
 			for (const pending of pendingByRevision.values()) {
-				void this.#atlas.withdrawOwnerRevision(pending.atlasHandle);
+				settlements.push(
+					this.#atlas.withdrawOwnerRevision(pending.atlasHandle),
+					pending.completion,
+				);
 			}
 		}
 		this.#pending.clear();
 		this.#geometry.destroy?.();
+		await Promise.allSettled(settlements);
 	}
 
 	async #realize(
@@ -175,12 +188,17 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 			source: input.source,
 			textureRequirements: input.textureRequirements,
 		});
+		const companion = input.prepareCompanion?.();
+		let preparedCompanion: StaticLayerCompanionPublication | null = null;
 		let published = false;
 		try {
-			const [preparedGeometry, atlasCompletion] = await Promise.all([
-				geometry,
-				atlasHandle.completion,
-			]);
+			const [preparedGeometry, atlasCompletion, companionPublication] =
+				await Promise.all([
+					geometry,
+					atlasHandle.completion,
+					companion ?? Promise.resolve(null),
+				]);
+			preparedCompanion = companionPublication;
 			if (atlasCompletion !== "ready") {
 				if (this.#isCurrent(input.owner, input.layer, input.revision)) {
 					if (atlasCompletion !== "withdrawn") {
@@ -192,10 +210,12 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 						});
 					}
 				}
+				preparedCompanion?.release();
 				await this.#atlas.withdrawOwnerRevision(atlasHandle);
 				return { kind: "stale" };
 			}
 			if (!this.#isCurrent(input.owner, input.layer, input.revision)) {
+				preparedCompanion?.release();
 				await this.#atlas.withdrawOwnerRevision(atlasHandle);
 				return { kind: "stale" };
 			}
@@ -211,11 +231,14 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 					this.#publisher.removeExact(input.owner, input.revision),
 					this.#atlas.withdrawOwnerRevision(atlasHandle),
 				]);
+				preparedCompanion?.release();
 				return { kind: "stale" };
 			}
 			await this.#atlas.activateOwnerRevision(atlasHandle);
+			preparedCompanion?.commit();
 			return { geometry: preparedGeometry, kind: "published" };
 		} catch (cause) {
+			preparedCompanion?.release();
 			await Promise.all([
 				this.#atlas.withdrawOwnerRevision(atlasHandle),
 				published

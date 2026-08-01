@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { LandblockId } from "../game/game-types";
-import { createScaleMat4 } from "../game/math/matrices";
-import { AABB3, Mat4, Quat, Vec3 } from "../game/math/types";
+import { AABB3, Mat4, Vec3 } from "../game/math/types";
 import type {
 	ResolvedObjectLayerSource,
 	ResolvedObjectResident,
@@ -16,13 +15,17 @@ import type {
 	ResolvedObjectPresentation,
 } from "../game/resolution/presentation";
 import { resolveObjectPresentationBounds } from "../game/resolution/presentation";
-import { classifyObjectResidents } from "../game/resolution/object-resident-classifier";
+import {
+	classifyObjectResidents,
+	resolveObjectBehavior,
+} from "../game/resolution/object-resident-classifier";
 import {
 	type BinarySectionManifest,
 	binarySectionSchema,
 	readBinarySectionSlice,
 	validateBinarySections,
 } from "./binary-source-record";
+import { acFrameTransform, renderScale } from "./ac-frame";
 
 const HEADER_LENGTH = 12;
 const MAGIC = "HBSO";
@@ -114,6 +117,7 @@ export const staticMaterialSchema = z.object({
 const directDefinition = z.object({
 	id: z.string().min(1),
 	kind: z.literal("gfx-obj"),
+	appearanceKey: z.string().min(1),
 	sourceAssetId: z.string().min(1),
 	geometryId: z.string().min(1),
 	materialIds: z.array(z.string().min(1)),
@@ -145,6 +149,8 @@ const holdingLocation = z.object({
 const setupDefinition = z.object({
 	id: z.string().min(1),
 	kind: z.literal("setup-model"),
+	appearanceKey: z.string().min(1),
+	setupId: datId,
 	sourceAssetId: z.string().min(1),
 	parts: z.array(setupPart),
 	holdingLocations: z.array(holdingLocation),
@@ -195,10 +201,8 @@ export type StaticDefinitionManifest = z.infer<typeof staticDefinitionSchema>;
 export interface DecodedStaticPresentation {
 	readonly presentation: ResolvedObjectPresentation;
 	readonly localBounds: AABB3 | null;
-}
-export interface AcFrame {
-	readonly origin: readonly [number, number, number];
-	readonly orientation: readonly [number, number, number, number];
+	readonly setupId: string | null;
+	readonly behavior: import("../game/resolution/landblock-layer").ResolvedObjectBehavior;
 }
 export type OutdoorStaticLayerKind =
 	| LandblockLayerKind.Buildings
@@ -293,7 +297,9 @@ export function decodeOutdoorStaticRecord(
 		}
 		const resolved: ResolvedObjectResident = {
 			identity: { kind: "authored", sourceId: resident.id },
+			setupId: source.setupId,
 			presentation: source.presentation,
+			behavior: source.behavior,
 			placement: {
 				envCellId: null,
 				landblockId: manifest.landblockId as LandblockId,
@@ -303,17 +309,16 @@ export function decodeOutdoorStaticRecord(
 			},
 			scale: renderScale(resident.scale),
 			localBounds: source.localBounds,
-			appearance: null,
 		};
 		residents.push(resolved);
 	}
-	const { staticResidents, dynamicResidents } =
+	const { staticResidents, dynamicSources } =
 		classifyObjectResidents(residents);
 	return {
 		kind: expectedLayer,
 		landblockId: manifest.landblockId as LandblockId,
 		staticResidents,
-		dynamicResidents,
+		dynamicSources,
 	};
 }
 
@@ -648,37 +653,39 @@ export function decodeStaticPresentation(
 			? [Mat4.identity()]
 			: definition.parts.map((part) =>
 					part.defaultPlacement === null
-						? scaleTransform(part.defaultScale)
-						: acFrameTransform(part.defaultPlacement, part.defaultScale),
+						? Mat4.identity()
+						: acFrameTransform(part.defaultPlacement, [1, 1, 1]),
 				);
 	const presentationBounds = resolveObjectPresentationBounds(
 		parts,
 		partTransforms,
+		new Vec3(1, 1, 1),
 	);
-	const effects =
+	const behavior =
 		definition.kind === "setup-model"
-			? {
+			? resolveObjectBehavior({
 					animationId: definition.defaultAnimationId,
 					physicsScriptId: definition.defaultScriptId,
 					physicsScriptTableId: definition.defaultScriptTableId,
 					soundTableId: definition.defaultSoundTableId,
-				}
-			: {
+				})
+			: resolveObjectBehavior({
 					animationId: null,
 					physicsScriptId: null,
 					physicsScriptTableId: null,
 					soundTableId: null,
-				};
+				});
 	return {
 		localBounds: presentationBounds,
+		setupId: definition.kind === "setup-model" ? definition.setupId : null,
+		behavior,
 		presentation: {
+			appearanceKey: definition.appearanceKey,
 			id: `presentation:${definition.id}`,
 			sourceAssetId: definition.sourceAssetId,
 			parts,
 			holdingLocations: decodeHoldingLocations(definition, parts.length),
 			placementPoses: new Map([[0, { placementId: 0, partTransforms }]]),
-			motion: null,
-			effects,
 			selectionBounds: null,
 			sortingBounds: null,
 		},
@@ -755,48 +762,6 @@ function decodePart(
 		defaultScale: renderScale(defaultScale),
 		materials: resolvedMaterials,
 	};
-}
-
-export function acFrameTransform(
-	input: AcFrame,
-	scale: readonly [number, number, number],
-): Mat4 {
-	const [w, x, y, z] = input.orientation;
-	const rotation = new Quat(w, x, z, -y);
-	const magnitude = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
-	if (magnitude === 0)
-		throw new Error("Outdoor static record contains a zero frame orientation.");
-	const qw = rotation.w / magnitude;
-	const qx = rotation.x / magnitude;
-	const qy = rotation.y / magnitude;
-	const qz = rotation.z / magnitude;
-	const transformedScale = renderScale(scale);
-	return new Mat4(
-		(1 - 2 * (qy * qy + qz * qz)) * transformedScale.x,
-		2 * (qx * qy + qw * qz) * transformedScale.x,
-		2 * (qx * qz - qw * qy) * transformedScale.x,
-		0,
-		2 * (qx * qy - qw * qz) * transformedScale.y,
-		(1 - 2 * (qx * qx + qz * qz)) * transformedScale.y,
-		2 * (qy * qz + qw * qx) * transformedScale.y,
-		0,
-		2 * (qx * qz + qw * qy) * transformedScale.z,
-		2 * (qy * qz - qw * qx) * transformedScale.z,
-		(1 - 2 * (qx * qx + qy * qy)) * transformedScale.z,
-		0,
-		input.origin[0],
-		input.origin[2],
-		-input.origin[1],
-		1,
-	);
-}
-
-export function renderScale(scale: readonly [number, number, number]): Vec3 {
-	return new Vec3(scale[0], scale[2], scale[1]);
-}
-
-function scaleTransform(scale: readonly [number, number, number]): Mat4 {
-	return createScaleMat4(renderScale(scale));
 }
 
 function toBounds(value: z.infer<typeof bounds> | null): AABB3 | null {

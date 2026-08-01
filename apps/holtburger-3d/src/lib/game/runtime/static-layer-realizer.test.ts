@@ -129,6 +129,59 @@ describe("StaticLayerRealizer", () => {
 		expect(atlas.events).toEqual(["prepare:1", "withdraw:1"]);
 	});
 
+	it("prepares companion state before replacing the active static revision", async () => {
+		const atlas = new FakeAtlas();
+		const geometry = deferred<string>();
+		const publisher = new FakePublisher();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			publisher,
+			new FakeCurrentness(),
+		);
+		const pending = realizer.realize({
+			...input(),
+			prepareCompanion: async () => {
+				throw new Error("companion failed");
+			},
+		});
+		atlas.resolve();
+		geometry.resolve("geometry");
+
+		await expect(pending).rejects.toThrow(
+			"failed to realize: companion failed",
+		);
+		expect(publisher.events).toEqual([]);
+	});
+
+	it("releases a prepared companion when currentness turns stale", async () => {
+		const atlas = new FakeAtlas();
+		const geometry = deferred<string>();
+		const currentness = new FakeCurrentness();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			new FakePublisher(),
+			currentness,
+		);
+		let released = false;
+		const pending = realizer.realize({
+			...input(),
+			prepareCompanion: async () => ({
+				commit: () => undefined,
+				release: () => {
+					released = true;
+				},
+			}),
+		});
+		currentness.current = false;
+		atlas.resolve();
+		geometry.resolve("geometry");
+
+		await expect(pending).resolves.toEqual({ kind: "stale" });
+		expect(released).toBe(true);
+	});
+
 	it("removes an exact published revision when atlas activation fails", async () => {
 		const atlas = new FakeAtlas();
 		atlas.failActivation = true;

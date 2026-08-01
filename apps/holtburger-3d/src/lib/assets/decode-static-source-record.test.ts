@@ -16,7 +16,7 @@ describe("decodeOutdoorStaticRecord", () => {
 		);
 
 		expect(source.staticResidents).toHaveLength(1);
-		expect(source.dynamicResidents).toHaveLength(1);
+		expect(source.dynamicSources).toHaveLength(1);
 		expect(
 			source.staticResidents[0]?.presentation.parts[0]?.geometry.indices,
 		).toEqual(Uint32Array.from([0, 1, 2]));
@@ -30,9 +30,8 @@ describe("decodeOutdoorStaticRecord", () => {
 				sideKind: "positive",
 			},
 		]);
-		expect(source.dynamicResidents[0]?.presentation.effects.animationId).toBe(
-			"0x030005cf",
-		);
+		expect(source.dynamicSources[0]?.behavior.animationId).toBe("0x030005cf");
+		expect(source.dynamicSources[0]?.setupId).toBe("0x02000001");
 	});
 
 	it("decodes a Level 2 object record with its typed layer identity", () => {
@@ -44,7 +43,7 @@ describe("decodeOutdoorStaticRecord", () => {
 
 		expect(source.kind).toBe(LandblockLayerKind.Objects);
 		expect(source.staticResidents).toHaveLength(1);
-		expect(source.dynamicResidents).toHaveLength(1);
+		expect(source.dynamicSources).toHaveLength(1);
 	});
 
 	it("decodes a present empty Level 3 generated record", () => {
@@ -55,7 +54,7 @@ describe("decodeOutdoorStaticRecord", () => {
 		);
 
 		expect(source).toMatchObject({
-			dynamicResidents: [],
+			dynamicSources: [],
 			kind: LandblockLayerKind.Generated,
 			landblockId: LANDBLOCK_ID,
 			staticResidents: [],
@@ -123,7 +122,7 @@ describe("decodeOutdoorStaticRecord", () => {
 		);
 
 		const attachPoints =
-			source.dynamicResidents[0]?.presentation.holdingLocations;
+			source.dynamicSources[0]?.presentation.holdingLocations;
 		expect([...(attachPoints?.keys() ?? [])]).toEqual([
 			"right-hand",
 			"left-weapon",
@@ -243,6 +242,7 @@ function buildResponse(
 			{
 				id: "direct",
 				kind: "gfx-obj",
+				appearanceKey: "gfx-obj:0x01000001",
 				sourceAssetId: "gfx-obj/01000001",
 				geometryId: "geometry",
 				materialIds: ["surface/08000001"],
@@ -250,6 +250,8 @@ function buildResponse(
 			{
 				id: "animated",
 				kind: "setup-model",
+				appearanceKey: "setup:0x02000001|base",
+				setupId: "0x02000001",
 				sourceAssetId: "setup-model/02000001",
 				parts: [
 					{

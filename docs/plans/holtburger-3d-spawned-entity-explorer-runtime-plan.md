@@ -40,6 +40,8 @@ later physics demonstrations.
 - Snapshot plus sequenced delta projection across the real Tauri boundary.
 - Spawn, despawn, focused appearance replacement, complete generation replacement, scale,
   attach/detach, direct playback, script activation, teleport/rebase, and reset.
+- Shared entity-to-entity attachment resolution and animated parent-part following, introduced here
+  because spawned attach/detach supplies the first concrete mutable lifecycle consumer.
 - A complete shared `MotionCatalog` and pure `MotionResolver` producing time-anchored
   `ResolvedMotionPlan` values.
 - Deterministic explorer time with pause, resume, and step.
@@ -319,6 +321,9 @@ repository, executes phases, samples authored root data, and composes motion onl
 - Preserve compatible playback and attachments under focused mutation; tear down all old mutable
   state under complete replacement.
 - Make attached entities inherit ancestor residency and current animated part transforms.
+- Land the shared frontend attachment consumer deferred by the authored-animation plan; authored and
+  spawned sources may reuse it, but spawned world state remains the first authoritative mutation
+  producer.
 
 #### Acceptance Criteria
 

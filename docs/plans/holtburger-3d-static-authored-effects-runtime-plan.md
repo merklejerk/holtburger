@@ -32,9 +32,11 @@ it does not create an effects-specific entity runtime or pull spawned-entity inf
 - Safe preparation and runtime execution of intentional cyclic script graphs.
 - Expansion of the prepared hook-command union for every static-authored behavior proven by evidence.
 - Concrete visual mutation consumers required by authored scripts.
+- Animation-time `ReplaceObjectHook` execution with pre-staged shared replacement-part resources,
+  atomic per-entity part selection, and replacement-aware conservative bounds.
 - Concrete particle playback/rendering for the proven `CreateParticle` workload.
 - Concrete sound asset/playback behavior for the proven `SoundTweaked` workload.
-- Lighting behavior where the refreshed authored script/hook census demonstrates a consumer.
+- Lighting behavior where the representative authored script/hook evidence demonstrates a consumer.
 - Atomic promotion of script-only authored residents after their complete behavior closure is ready.
 - Combined animation and script clocks on the same entity without merging their ownership.
 
@@ -50,6 +52,9 @@ it does not create an effects-specific entity runtime or pull spawned-entity inf
 - Moving behavior-resource ownership into `HookSystem` or embedding decoded timelines in entity
   source records.
 - Network-triggered physics scripts, combat effects, projectiles, or gameplay authority.
+- Entity-to-entity attachment mutation and animated parent-part following; those enter with the
+  spawned lifecycle consumer in the spawned-entity plan. Particle/effect attachment to an authored
+  root or part remains in scope here.
 
 ## Ground Truth and Existing Precedent
 
@@ -63,6 +68,8 @@ it does not create an effects-specific entity runtime or pull spawned-entity inf
     dispatch animation hooks.
   - `CAnimHook::GetSubDataIDs` and hook-specific implementations: dependency assets are enumerable
     before execution.
+  - `ReplaceObjectHook` and `CPartArray` object-description mutation paths: timed part replacement
+    selects a new part visual without replacing entity identity.
 - `ACE/Source/ACE.DatLoader/FileTypes/PhysicsScript.cs`
 - `ACE/Source/ACE.DatLoader/FileTypes/PhysicsScriptTable.cs`
 - `ACE/Source/ACE.DatLoader/Entity/AnimationHooks/*`
@@ -98,6 +105,11 @@ The representative setup appearances do not use default physics-script tables. T
 therefore an evidence gate for broader shipped content rather than something to infer from the
 representative regions.
 
+The Plan A butterfly animations do not exercise `ReplaceObjectHook`. This plan nevertheless owns
+that named behavior by product decision. Phase 1 must select a small shipped example that exercises
+the hook and prove its part index, replacement GfxObj dependency, execution timing, resource
+lifetime, and bound consequences; an exhaustive archive census is not required.
+
 ## North Stars
 
 1. Implement measured authored effects before generic effect infrastructure.
@@ -126,13 +138,16 @@ setup default script/table IDs
   -> prepared commands
   -> HookSystem ordered dispatch
        |- visual mutation ports -> shared pose/entity state
+       |- ReplaceObject -> per-entity part selection + conservative bound
        |- CreateParticle -> particle runtime -> renderer
        |- SoundTweaked -> audio runtime
        `- CallPES -> scheduled script activation
 ```
 
 Animation and script producers may target the same entity, but neither advances or owns the other's
-clock. Equal-time ordering, reentrancy, teardown, and generation checks are explicit.
+clock. Animation-time replacement commands enter this same dispatch boundary after their immutable
+part dependencies are staged. Equal-time ordering, reentrancy, teardown, and generation checks are
+explicit.
 
 ## Phased Implementation
 
@@ -140,12 +155,13 @@ clock. Equal-time ordering, reentrancy, teardown, and generation checks are expl
 
 #### Deliverables
 
-- Refresh the complete production setup default-script/table census, including transitive hook and
-  asset dependencies.
+- Refresh a representative setup default-script/table evidence set, including each selected root's
+  transitive hook and asset dependencies.
 - Prove record timing units, table keys/intensity selection, `CallPES` delay/repetition behavior, and
   equal-time command ordering from retail/ACE.
 - Inventory current audio, particle, lighting, and asset-decoding code before designing consumers.
-- Classify every reachable hook as visual, particle, audio, lighting, chained script, or unsupported
+- Classify every hook reachable from the representative roots, plus the selected shipped
+  `ReplaceObjectHook` example, as visual, particle, audio, lighting, chained script, or unsupported
   with a named evidence gap.
 
 #### Acceptance Criteria
@@ -211,16 +227,22 @@ clock. Equal-time ordering, reentrancy, teardown, and generation checks are expl
 
 #### Deliverables
 
-- Implement the visual mutation commands reached by the authored census through narrow generation-
-  safe ports.
+- Implement the visual mutation commands reached by the representative evidence set through narrow
+  generation-safe ports.
 - Keep timed visibility, translucency, luminosity, diffusion, scale, omega, texture velocity, and
   other proven modifiers as named state rather than a generic transform/property bag.
+- Implement `ReplaceObjectHook` as a named structural visual command. Prepare and lease every
+  referenced replacement part before activation, switch one entity's part selection atomically at
+  dispatch, and update its conservative bound without mutating shared base templates.
 - Compose visual state through the existing pose/template/render contracts.
 
 #### Acceptance Criteria
 
 - Every proven visual command changes its named runtime consumer and is observable in a fixture.
 - Commands perform no resource preparation during dispatch.
+- Repeated replacement parts share immutable geometry/material resources while each entity retains
+  independent current part selection.
+- Replacement cannot expose missing geometry, stale bounds, or a partially switched material set.
 - `HookSystem` owns neither visual state nor template/resource lifetime.
 - Unsupported visual commands report source asset, record time, and target identity.
 
@@ -341,9 +363,9 @@ evidence but must be removed after results are recorded.
 
 ### Effect Scope Expands Into a Universal Engine
 
-Implement only behavior reached by the authored census. Add typed consumers per effect family and
-reject a generic effect graph, property bag, or event bus without multiple proven producers and
-consumers.
+Implement only behavior reached by the representative evidence set plus the explicitly required
+`ReplaceObjectHook`. Add typed consumers per effect family and reject a generic effect graph,
+property bag, or event bus without multiple proven producers and consumers.
 
 ### Cyclic Scripts Cause Infinite Preparation or Dispatch
 
@@ -376,6 +398,8 @@ swap atomically. Failure leaves the valid static presentation visible with diagn
 - [ ] Every supported setup default physics script/table is decoded, prepared, and scheduled.
 - [ ] Intentional script cycles prepare finitely and execute through bounded scheduled repetition.
 - [ ] All measured visual, particle, audio, and chained-script commands have real consumers.
+- [ ] Animation-time `ReplaceObjectHook` has an atomic, replacement-bound-aware consumer distinct
+      from appearance-time `ObjDesc.anim_part_changes`.
 - [ ] Script and animation clocks remain independent and deterministic.
 - [ ] Script-only and combined authored residents execute without duplicate presentation resources.
 - [ ] Effects follow current authored entity/part transforms and clean up with their owners.
@@ -390,13 +414,10 @@ swap atomically. Failure leaves the valid static presentation visible with diagn
 
 ## Open Questions
 
-1. Which physics-script-table keys and intensity rules are exercised by the complete shipped setup
-   inventory?
+1. Which selected shipped physics-script-table example proves its keys and intensity rules?
 2. What exact equal-time ordering does retail use across animation hooks, physics-script records, and
    chained `CallPES` activation?
 3. Which particle asset fields and coordinate-space rules are required by every authored
    `CreateParticle` event?
 4. What sound table/asset path, gain/pitch transformation, attenuation, and lifetime semantics does
    retail use for `SoundTweaked`?
-5. Which additional hook types appear outside the representative regions, and which belong to static
-   authored fidelity versus later spawned gameplay behavior?

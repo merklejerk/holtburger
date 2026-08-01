@@ -42,6 +42,8 @@ Outcome:
 - Rigid parts use frame-streamed compatible instance cohorts.
 - Semantic hooks and fractional visual interpolation remain distinct.
 - Required visual hooks such as `SetOmega` execute deterministically.
+- Appearance-time part selection is prepared here; timed `ReplaceObjectHook` behavior remains in the
+  effects plan and entity attachments remain in the spawned-entity plan.
 - Authored placement and residency remain authoritative, matching retail's static-animation
   null-root-offset behavior.
 - Script-only behavior remains explicitly deferred with valid static presentation.
@@ -58,6 +60,8 @@ Outcome:
 - Setup default physics scripts and tables are decoded, prepared, scheduled, and shared.
 - `CallPES`, including intentional cyclic graphs, executes through bounded scheduled activation.
 - Proven visual hook commands have real consumers.
+- `ReplaceObjectHook` atomically selects pre-staged shared replacement-part resources and updates
+  conservative presentation bounds.
 - Authored `CreateParticle` and `SoundTweaked` events produce real particle and audio behavior.
 - Script-only and combined authored residents activate on the same entity/pose/resource architecture
   as animated residents.
@@ -74,6 +78,8 @@ Outcome:
 - `ExplorerRuntime` orchestrates a shared `holtburger-world` state instance and deterministic time.
 - Spawned lifecycle and mutations cross Tauri through a recoverable snapshot/sequenced-delta feed.
 - World state owns canonical appearance, generation, placement, attachment, and motion facts.
+- Spawned attach/detach provides the concrete lifecycle consumer for shared animated parent-part
+  following.
 - `MotionCatalog` and `MotionResolver` produce shared `ResolvedMotionPlan` values in Rust.
 - The frontend executes plans and sparse placement anchors without consuming raw motion tables or
   per-frame host transforms.
@@ -131,11 +137,11 @@ The 2026-07-31 archive census used production `dats/assets.hba` and radius-one s
 
 Representative default animations:
 
-| Setup        | Animation    | DA55 | DC58 | Frames / parts | Material passes | Required hook |
-| ------------ | ------------ | ---: | ---: | -------------- | --------------- | ------------- |
-| `0x02000493` | `0x030006CB` |   22 |   77 | 90 / 2         | 2 alpha-test    | `SetOmega`    |
-| `0x02000494` | `0x030006CA` |   19 |   82 | 90 / 2         | 2 alpha-test    | `SetOmega`    |
-| `0x020005AC` | `0x03000751` |    3 |    3 | 7 / 2          | 2 opaque        | `SetOmega`    |
+| Setup        | Animation    | DA55 | DC58 | Frames / parts | Slots per part | Material | Required hook |
+| ------------ | ------------ | ---: | ---: | -------------- | -------------: | -------- | ------------- |
+| `0x02000493` | `0x030006CB` |   22 |   77 | 90 / 2         |              1 | cutout   | `SetOmega`    |
+| `0x02000494` | `0x030006CA` |   19 |   82 | 90 / 2         |              1 | cutout   | `SetOmega`    |
+| `0x020005AC` | `0x03000751` |    3 |    3 | 7 / 2          |              1 | opaque   | `SetOmega`    |
 
 The butterflies share part/material resources but have different setup/template and animation
 identities. Their authored setup spheres have radius zero and are not conservative animation bounds.

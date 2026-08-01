@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
-	type StaticLandblockLayerCommitTerrain,
+import type { AnimationAssetSource } from "../../assets/animation-asset-source";
+import type {
+	CommitPipeline,
+	LandblockLayerCommit,
+	StaticLandblockLayerCommitTerrain,
 } from "../commit/types";
 import { createLandblockWorldOrigin } from "../landblocks";
-import { Mat4, Quat, Vec3 } from "../math/types";
+import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
-	ResolvedObjectResident,
+	AuthoredDynamicSource,
 	ResolvedOutdoorStaticLayerSource,
 } from "../resolution/landblock-layer";
 import type { FrameSelectionMetrics, Renderer } from "../renderer/renderer";
@@ -17,6 +17,33 @@ import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
+
+const ANIMATION_SOURCE: AnimationAssetSource = {
+	async loadAnimation(animationId) {
+		return {
+			frameCount: 1,
+			hooks: [],
+			id: animationId,
+			partCount: 1,
+			partFrames: [Mat4.identity()],
+			positionFrames: [],
+		};
+	},
+	destroy() {},
+};
+
+const TEST_RESOURCES = {
+	createGeometry: () => "geometry-resource:1",
+	createStaticInstanceStream: () => "instance-stream-resource:1",
+	createTexture2D: () => "texture-2d-resource:1",
+	createTextureArray: () => "texture-array-resource:1",
+	async destroy() {},
+	generateTextureArrayMipmaps() {},
+	releaseResource: () => true,
+	replaceGeometry() {},
+	replaceTexture2D() {},
+	uploadTextureArrayLayer() {},
+} as RendererResourceManager;
 
 describe("GameRuntime view and interest control", () => {
 	it("keeps frontend scene interest independent from the primary camera", async () => {
@@ -45,7 +72,8 @@ describe("GameRuntime view and interest control", () => {
 			submittedPortalApertureDrawCount: 0,
 			terrainFrameInputs: 2,
 			viewCount: 1,
-			visibleDynamics: 3,
+			visibleDynamicEntityCount: 3,
+			visibleDynamicPartCount: 0,
 			visibleEnvCellResidentNodes: 0,
 			visibleEnvCellScopeCount: 0,
 			visibleEnvCellShells: 5,
@@ -59,17 +87,19 @@ describe("GameRuntime view and interest control", () => {
 			submittedPersistentInstancedDrawCount: 0,
 			submittedPersistentInstanceCount: 0,
 			submittedInstancedSourceTriangleCount: 0,
-			transparentStaticCandidateCount: 0,
-			farTransparentStaticCandidateCount: 0,
-			nearTransparentStaticCandidateCount: 0,
+			transparentObjectCandidateCount: 0,
+			farTransparentObjectCandidateCount: 0,
+			nearTransparentObjectCandidateCount: 0,
 			transparentFrameRunCount: 0,
 			farTransparentFrameRunCount: 0,
 			nearTransparentFrameRunCount: 0,
-			transparentFrameUploadCount: 0,
-			transparentFrameUploadBytes: 0,
-			submittedTransparentStaticDrawCount: 0,
+			frameInstanceUploadCount: 0,
+			frameInstanceUploadBytes: 0,
+			submittedTransparentObjectDrawCount: 0,
 			submittedTransparentInstanceCount: 0,
-			submittedAdditiveStaticDrawCount: 0,
+			submittedAdditiveObjectDrawCount: 0,
+			submittedDynamicDrawCount: 0,
+			submittedDynamicInstanceCount: 0,
 			frameInstanceCapacity: 0,
 			frameInstanceGrowthCount: 0,
 			frameInstanceViewHighWaterMark: 0,
@@ -84,19 +114,22 @@ describe("GameRuntime view and interest control", () => {
 			getFrameSelectionMetrics: () => frameSelectionMetrics,
 		};
 		const pipeline: CommitPipeline = {
-			async prepareLandblockLayers(layers): Promise<readonly CommitBundle[]> {
+			async prepareLandblockLayers(
+				layers,
+			): Promise<readonly LandblockLayerCommit[]> {
 				requestedLayers.push(...layers);
 				return [];
 			},
 		};
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => renderer,
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 
 		runtime.updateSceneInterest({
@@ -181,12 +214,13 @@ describe("GameRuntime view and interest control", () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -202,12 +236,13 @@ describe("GameRuntime view and interest control", () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -236,12 +271,13 @@ describe("GameRuntime view and interest control", () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -267,12 +303,13 @@ describe("GameRuntime view and interest control", () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -286,16 +323,17 @@ describe("GameRuntime view and interest control", () => {
 		await runtime.destroy();
 	});
 
-	it("defers a promoted building resident without creating dynamic resources", async () => {
+	it("activates a promoted building owner set with shared playback", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
@@ -304,12 +342,13 @@ describe("GameRuntime view and interest control", () => {
 		runtime.tick();
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		expect(runtime.getDeferredStaticDynamicDiagnostics()).toEqual([
+		expect(runtime.getAuthoredDynamicResidentDiagnostics()).toEqual([
 			{
-				defaultAnimationId: "0x09000001",
+				defaultAnimationId: "0x03000001",
 				landblockId: "0xda55ffff",
 				layer: LandblockLayerKind.Buildings,
-				reason: "setup-default-animation",
+				blockingHooks: [],
+				presentationMode: "animated",
 				residentId: "resident:promoted",
 				setupSourceId: "0x02000001",
 			},
@@ -320,7 +359,7 @@ describe("GameRuntime view and interest control", () => {
 				expectedResidentCount: 1,
 				landblockId: "0xda55ffff",
 				promotedDynamicResidentCount: 1,
-				runtimeDeferredResidentCount: 1,
+				runtimeDynamicResidentCount: 1,
 				staticArtifactInstalled: false,
 			}),
 		]);
@@ -332,12 +371,13 @@ describe("GameRuntime view and interest control", () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
@@ -346,7 +386,7 @@ describe("GameRuntime view and interest control", () => {
 		runtime.tick();
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		expect(runtime.getDeferredStaticDynamicDiagnostics()).toEqual([
+		expect(runtime.getAuthoredDynamicResidentDiagnostics()).toEqual([
 			expect.objectContaining({
 				landblockId: "0xda55ffff",
 				layer: LandblockLayerKind.Objects,
@@ -367,12 +407,13 @@ describe("GameRuntime view and interest control", () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
-			resources: {} as RendererResourceManager,
+			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
 		);
 
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));
@@ -381,7 +422,7 @@ describe("GameRuntime view and interest control", () => {
 		runtime.tick();
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		expect(runtime.getDeferredStaticDynamicDiagnostics()).toEqual([
+		expect(runtime.getAuthoredDynamicResidentDiagnostics()).toEqual([
 			expect.objectContaining({
 				landblockId: "0xda55ffff",
 				layer: LandblockLayerKind.Generated,
@@ -453,7 +494,7 @@ function generatedSceneInterest(anchorLandblockId: string) {
 }
 
 /** Minimal stale artifact: applying it would fail, so a passing test proves it was discarded. */
-function staleTerrainArtifact(landblockId: string): CommitBundle {
+function staleTerrainArtifact(landblockId: string): LandblockLayerCommit {
 	const commit: StaticLandblockLayerCommitTerrain = {
 		get generation(): never {
 			throw new Error("Withdrawn terrain artifact was applied.");
@@ -464,23 +505,21 @@ function staleTerrainArtifact(landblockId: string): CommitBundle {
 	};
 	return {
 		commit,
-		dynamicEntities: [],
-		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Terrain,
 	};
 }
 
 /** Minimal promoted record: any accidental dynamic installation reaches the throwing resource port. */
-function promotedBuildingArtifact(landblockId: string): CommitBundle {
+function promotedBuildingArtifact(landblockId: string): LandblockLayerCommit {
 	return promotedStaticArtifact(landblockId, LandblockLayerKind.Buildings);
 }
 
-function promotedObjectArtifact(landblockId: string): CommitBundle {
+function promotedObjectArtifact(landblockId: string): LandblockLayerCommit {
 	return promotedStaticArtifact(landblockId, LandblockLayerKind.Objects);
 }
 
-function promotedGeneratedArtifact(landblockId: string): CommitBundle {
+function promotedGeneratedArtifact(landblockId: string): LandblockLayerCommit {
 	return promotedStaticArtifact(landblockId, LandblockLayerKind.Generated);
 }
 
@@ -490,9 +529,15 @@ function promotedStaticArtifact(
 		| LandblockLayerKind.Buildings
 		| LandblockLayerKind.Objects
 		| LandblockLayerKind.Generated,
-): CommitBundle {
-	const promotedResident: ResolvedObjectResident = {
-		appearance: null,
+): LandblockLayerCommit {
+	const promotedResident: AuthoredDynamicSource = {
+		behavior: {
+			animationId: "0x03000001",
+			kind: "animation-only",
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
 		identity: { kind: "authored", sourceId: "resident:promoted" },
 		localBounds: null,
 		placement: {
@@ -501,46 +546,73 @@ function promotedStaticArtifact(
 			localTransform: Mat4.identity(),
 		},
 		presentation: {
-			effects: {
-				animationId: "0x09000001",
-				physicsScriptId: null,
-				physicsScriptTableId: null,
-				soundTableId: null,
-			},
+			appearanceKey: "setup:0x02000001|base",
 			id: "presentation:promoted",
-			motion: null,
-			parts: [],
+			parts: [
+				{
+					defaultScale: new Vec3(1, 1, 1),
+					geometry: {
+						bounds: AABB3.zero(),
+						id: "geometry:promoted",
+						indices: new Uint32Array([0, 1, 2]),
+						materialSideKinds: new Uint8Array([0]),
+						materialSideTypes: new Uint8Array([0]),
+						materialSlotIndices: new Uint16Array([0]),
+						materialStippling: new Uint8Array([0]),
+						materialWrapModes: new Uint8Array([0]),
+						normals: new Float32Array(9),
+						positions: new Float32Array(9),
+						sourceDiagnostics: { rejectedDegenerateTriangles: [] },
+						textureCoordinates: new Float32Array(6),
+					},
+					materials: [
+						{
+							color: [1, 1, 1, 1],
+							diffuseScale: 1,
+							id: "material:promoted",
+							kind: "solid-color",
+							luminosity: 0,
+							rawSurfaceFlags: 0,
+							translucency: 0,
+						},
+					],
+					partIndex: 0,
+				},
+			],
 			holdingLocations: new Map(),
-			placementPoses: new Map(),
+			placementPoses: new Map([
+				[0, { partTransforms: [Mat4.identity()], placementId: 0 }],
+			]),
 			selectionBounds: null,
 			sortingBounds: null,
 			sourceAssetId: "0x02000001",
 		},
 		scale: new Vec3(1, 1, 1),
+		setupId: "0x02000001",
 	};
 	const source = {
-		dynamicResidents: [],
+		dynamicSources: [promotedResident],
 		kind: layer,
 		landblockId,
 		staticResidents: [],
 	} satisfies ResolvedOutdoorStaticLayerSource;
 	return {
 		commit: { source },
-		dynamicEntities: [promotedResident],
-		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer,
 	};
 }
 
 class DeferredCommitPipeline implements CommitPipeline {
-	readonly #pending: Array<(artifacts: readonly CommitBundle[]) => void> = [];
+	readonly #pending: Array<
+		(artifacts: readonly LandblockLayerCommit[]) => void
+	> = [];
 
-	async prepareLandblockLayers(): Promise<readonly CommitBundle[]> {
+	async prepareLandblockLayers(): Promise<readonly LandblockLayerCommit[]> {
 		return new Promise((resolve) => this.#pending.push(resolve));
 	}
 
-	resolveNext(artifacts: readonly CommitBundle[]): void {
+	resolveNext(artifacts: readonly LandblockLayerCommit[]): void {
 		const resolve = this.#pending.shift();
 		if (!resolve) throw new Error("No commit preparation is pending.");
 		resolve(artifacts);

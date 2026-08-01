@@ -1,12 +1,12 @@
 import type { ColorF } from "../pixels/types";
 import type { Mat4 } from "../math/types";
 
-/** Matrix plus RGBA modulation values retained for every immutable static instance. */
-export const STATIC_INSTANCE_RECORD_FLOAT_COUNT = 20;
+/** Matrix plus RGBA modulation values retained for every object instance. */
+export const OBJECT_INSTANCE_RECORD_FLOAT_COUNT = 20;
 
-/** Strategy-neutral payload bytes represented by one static instance record. */
-export const STATIC_INSTANCE_RECORD_BYTES =
-	STATIC_INSTANCE_RECORD_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
+/** Strategy-neutral payload bytes represented by one object instance record. */
+export const OBJECT_INSTANCE_RECORD_BYTES =
+	OBJECT_INSTANCE_RECORD_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
 
 /** Opaque namespace shared by every installation-scoped static resource. */
 export type StaticInstallResourceNamespace = `static-install:${string}`;
@@ -27,8 +27,8 @@ export type StaticGeometryKey =
 export type StaticInstanceStreamKey =
 	`static-instance-stream:${StaticInstallResourceNamespace}/${string}`;
 
-/** Per-instance values consumed by the initial static-object instancing program. */
-export interface StaticInstanceData {
+/** Per-instance values consumed by the shared object instancing program. */
+export interface ObjectInstanceData {
 	/** Source geometry transform flattened into the owning landblock coordinate space. */
 	readonly sourceToLandblock: Mat4;
 	/** Per-instance color modulation after source appearance overrides are resolved. */
@@ -38,7 +38,7 @@ export interface StaticInstanceData {
 /** Complete immutable payload for one static instance cohort. */
 export interface StaticInstanceStreamData {
 	/** Instances drawn together by every draw unit referencing this stream. */
-	readonly instances: readonly StaticInstanceData[];
+	readonly instances: readonly ObjectInstanceData[];
 }
 
 /** Keyed stream publication crossing the static-baker worker boundary. */

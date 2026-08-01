@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
-} from "../commit/types";
+import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
@@ -80,7 +76,7 @@ describe("SceneInterestCommitCoordinator", () => {
 	});
 });
 
-function artifact(layer: LandblockLayerKind): CommitBundle {
+function artifact(layer: LandblockLayerKind): LandblockLayerCommit {
 	if (
 		layer !== LandblockLayerKind.Terrain &&
 		layer !== LandblockLayerKind.Buildings &&
@@ -104,8 +100,6 @@ function artifact(layer: LandblockLayerKind): CommitBundle {
 					textures: resolveTerrainTextureFacts(TERRAIN_COMPOSITION),
 				},
 			},
-			dynamicEntities: [],
-			kind: CommitBundleSourceKind.LandblockLayer,
 			landblockId,
 			layer,
 		};
@@ -113,14 +107,12 @@ function artifact(layer: LandblockLayerKind): CommitBundle {
 	return {
 		commit: {
 			source: {
-				dynamicResidents: [],
+				dynamicSources: [],
 				kind: layer,
 				landblockId,
 				staticResidents: [],
 			},
 		},
-		dynamicEntities: [],
-		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer,
 	};

@@ -5,11 +5,11 @@ import type {
 import { planObjectMaterial } from "../resolution/object-material-planner";
 import type { StaticDetailRole } from "../resolution/static-detail-role";
 import { TextureWrapMode } from "../textures/types";
-import type { StaticObjectMaterialBinding } from "./artifacts";
+import type { ObjectMaterialBinding } from "./artifacts";
 
 /** Complete renderer-neutral binding and stable identity for one authored static triangle. */
-export interface ResolvedStaticTriangleMaterial {
-	readonly binding: StaticObjectMaterialBinding;
+export interface ResolvedObjectTriangleMaterial {
+	readonly binding: ObjectMaterialBinding;
 	readonly bindingId: string;
 	readonly ordering: ReturnType<typeof planObjectMaterial>["ordering"];
 	readonly textureRequirements: ReturnType<
@@ -18,13 +18,13 @@ export interface ResolvedStaticTriangleMaterial {
 }
 
 /** Resolve material, sampler, polygon-side, stippling, detail, and ordering as one contract. */
-export function resolveStaticTriangleMaterial(options: {
+export function resolveObjectTriangleMaterial(options: {
 	readonly detailRole: StaticDetailRole | null;
 	readonly geometry: ResolvedGeometry;
 	readonly materials: readonly ResolvedMaterial[];
 	readonly sourceLabel: string;
 	readonly triangle: number;
-}): ResolvedStaticTriangleMaterial {
+}): ResolvedObjectTriangleMaterial {
 	const slot = options.geometry.materialSlotIndices[options.triangle];
 	const material = options.materials[slot ?? -1];
 	if (!material) {
@@ -78,7 +78,7 @@ export function resolveStaticTriangleMaterial(options: {
 
 function authoredCullMode(
 	value: number,
-): StaticObjectMaterialBinding["polygon"]["authoredCullMode"] {
+): ObjectMaterialBinding["polygon"]["authoredCullMode"] {
 	switch (value) {
 		case 0:
 			return "landblock";
@@ -95,7 +95,7 @@ function authoredCullMode(
 
 function effectiveCullFace(
 	value: number,
-): StaticObjectMaterialBinding["polygon"]["cullFace"] {
+): ObjectMaterialBinding["polygon"]["cullFace"] {
 	// Rust expands None and Clockwise into explicit reversed-winding sides. Each resulting range
 	// must remain one-sided or the paired ranges submit the same coplanar surface twice.
 	return value === 3 ? "front" : "back";
@@ -103,7 +103,7 @@ function effectiveCullFace(
 
 function renderSide(
 	value: number,
-): StaticObjectMaterialBinding["polygon"]["renderSide"] {
+): ObjectMaterialBinding["polygon"]["renderSide"] {
 	switch (value) {
 		case 0:
 			return "positive";

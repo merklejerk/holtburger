@@ -16,11 +16,10 @@ import {
 	type LandblockIdLayer,
 	type OutdoorStaticLayerKind,
 } from "../runtime/scene-interest";
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
-	type StaticLandblockLayerCommitTerrain,
+import type {
+	CommitPipeline,
+	LandblockLayerCommit,
+	StaticLandblockLayerCommitTerrain,
 } from "./types";
 import { planEnvCellMaterialization } from "./env-cell-materialization";
 
@@ -44,7 +43,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
-	): Promise<readonly CommitBundle[]> {
+	): Promise<readonly LandblockLayerCommit[]> {
 		const bundles = await Promise.all(
 			[...groupLandblockLayers(layers).values()].map((group) =>
 				this.#prepareLandblockBatch(group),
@@ -57,7 +56,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 
 	async #prepareLandblockBatch(
 		layers: readonly LandblockIdLayer[],
-	): Promise<readonly CommitBundle[]> {
+	): Promise<readonly LandblockLayerCommit[]> {
 		const landblockId = layers[0]?.id;
 		if (!landblockId) return [];
 		if (layers.some((layer) => layer.id !== landblockId)) {
@@ -95,7 +94,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 	#prepareSourceRecord(
 		batch: LandblockSourceBatch,
 		layer: LandblockIdLayer,
-	): CommitBundle | [] {
+	): LandblockLayerCommit | [] {
 		if (
 			layer.layer !== LandblockLayerKind.Terrain &&
 			layer.layer !== LandblockLayerKind.EnvCells &&
@@ -146,11 +145,11 @@ export class StandardCommitPipeline implements CommitPipeline {
 		return this.#prepareOutdoorStaticLayer(source);
 	}
 
-	#prepareTerrainLayer(source: ResolvedTerrainLayerSource): CommitBundle {
+	#prepareTerrainLayer(
+		source: ResolvedTerrainLayerSource,
+	): LandblockLayerCommit {
 		return {
 			commit: this.#createTerrainSourceCommit(source),
-			dynamicEntities: [],
-			kind: CommitBundleSourceKind.LandblockLayer,
 			landblockId: source.landblockId,
 			layer: LandblockLayerKind.Terrain,
 		};
@@ -167,22 +166,20 @@ export class StandardCommitPipeline implements CommitPipeline {
 
 	#prepareOutdoorStaticLayer(
 		source: ResolvedOutdoorStaticLayerSource,
-	): CommitBundle {
+	): LandblockLayerCommit {
 		return {
 			commit: { source },
-			dynamicEntities: source.dynamicResidents,
-			kind: CommitBundleSourceKind.LandblockLayer,
 			landblockId: source.landblockId,
 			layer: source.kind,
 		};
 	}
 
-	#prepareEnvCellLayer(source: ResolvedEnvCellLayerSource): CommitBundle {
+	#prepareEnvCellLayer(
+		source: ResolvedEnvCellLayerSource,
+	): LandblockLayerCommit {
 		const plan = planEnvCellMaterialization(source);
 		return {
 			commit: { plan },
-			dynamicEntities: plan.deferredResidents,
-			kind: CommitBundleSourceKind.LandblockLayer,
 			landblockId: source.landblockId,
 			layer: LandblockLayerKind.EnvCells,
 		};

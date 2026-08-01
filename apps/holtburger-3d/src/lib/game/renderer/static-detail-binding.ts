@@ -1,4 +1,4 @@
-import type { StaticObjectMaterialBinding } from "../commit/artifacts";
+import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { StaticDetailRole } from "../resolution/static-detail-role";
 
 /**
@@ -7,7 +7,7 @@ import type { StaticDetailRole } from "../resolution/static-detail-role";
  * A selected role must resolve; null is the explicit retail no-detail domain.
  */
 export function resolveStaticMaterialDetail<TBinding>(
-	material: Pick<StaticObjectMaterialBinding, "detailRole" | "source">,
+	material: Pick<ObjectMaterialBinding, "detailRole" | "source">,
 	resolve: (role: StaticDetailRole) => TBinding | null,
 ): TBinding | null {
 	if (material.detailRole === null) return null;

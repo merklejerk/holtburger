@@ -20,6 +20,28 @@ export class GeometryManager<TOwnerId extends string = string> {
 		for (const key of keys) this.#leases.addLease(owner, key);
 	}
 
+	/** Replace one owner's exact geometry set without releasing its surviving or replacement keys. */
+	replaceOwner(owner: TOwnerId, sources: readonly GeometrySource[]): void {
+		const sourceByKey = new Map(sources.map((source) => [source.key, source]));
+		const previousKeys = new Set(this.#leases.iterOwnerLeases(owner));
+		const addedKeys: GeometryKey[] = [];
+		try {
+			for (const source of sourceByKey.values()) {
+				if (this.#leases.addLease(owner, source.key))
+					addedKeys.push(source.key);
+				this.upsertGeometry(source);
+			}
+		} catch (cause) {
+			for (const key of addedKeys) this.#leases.dropLease(owner, key);
+			this.#releaseUnownedGeometry();
+			throw cause;
+		}
+		for (const key of previousKeys) {
+			if (!sourceByKey.has(key)) this.#leases.dropLease(owner, key);
+		}
+		this.#releaseUnownedGeometry();
+	}
+
 	/**
 	 * Materialize complete geometry only while at least one owner reserves its key.
 	 * Repeated publication for an idempotent key is a no-op.
@@ -51,6 +73,10 @@ export class GeometryManager<TOwnerId extends string = string> {
 	/** Drop one owner's geometry retention and release resources with no remaining owner. */
 	dropOwner(owner: TOwnerId): void {
 		this.#leases.dropOwner(owner);
+		this.#releaseUnownedGeometry();
+	}
+
+	#releaseUnownedGeometry(): void {
 		for (const key of this.#leases.takeEmptyLeases()) {
 			const geometry = this.#geometry.get(key);
 			if (!geometry) continue;

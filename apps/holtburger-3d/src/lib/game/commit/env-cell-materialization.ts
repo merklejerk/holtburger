@@ -27,8 +27,8 @@ import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { ScenePlacement, SceneScope } from "../scene";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 import { addAssetTextureFacts } from "../textures/texture-facts";
-import type { StaticObjectMaterialBinding } from "./artifacts";
-import { resolveStaticTriangleMaterial } from "./static-material-binding";
+import type { ObjectMaterialBinding } from "./artifacts";
+import { resolveObjectTriangleMaterial } from "./object-material-binding";
 import { collectStaticObjectTextureDependencies } from "./static-object-texture-inputs";
 
 const SURFACE_BASE1_TEXTURE_MASK = 0x06;
@@ -37,7 +37,7 @@ const SURFACE_BASE1_TEXTURE_MASK = 0x06;
 interface EnvCellShellMaterialRange {
 	readonly indexStart: number;
 	readonly indexCount: number;
-	readonly material: StaticObjectMaterialBinding;
+	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
 }
 
@@ -100,7 +100,7 @@ export interface EnvCellMaterializationPlan {
 	readonly apertures: readonly ResolvedPortalAperture[];
 	readonly crossings: readonly ResolvedPortalCrossing[];
 	readonly residentJobs: readonly EnvCellResidentMaterializationJob[];
-	readonly deferredResidents: readonly ResolvedObjectResident[];
+	readonly dynamicSources: readonly import("../resolution/landblock-layer").AuthoredDynamicSource[];
 	readonly diagnostics: EnvCellMaterializationDiagnostics;
 }
 
@@ -121,7 +121,8 @@ export function planEnvCellMaterialization(
 	const shells: EnvCellShellMaterializationPlan[] = [];
 	const scopes: EnvCellScopeMaterializationPlan[] = [];
 	const residentJobs: EnvCellResidentMaterializationJob[] = [];
-	const deferredResidents: ResolvedObjectResident[] = [];
+	const dynamicSources: import("../resolution/landblock-layer").AuthoredDynamicSource[] =
+		[];
 	let expectedResidentCount = 0;
 	let plannedStaticResidentCount = 0;
 	let shellMaterialRangeCount = 0;
@@ -182,13 +183,13 @@ export function planEnvCellMaterialization(
 		expectedResidentCount += residents.length;
 		const classified = classifyObjectResidents(residents);
 		plannedStaticResidentCount += classified.staticResidents.length;
-		deferredResidents.push(...classified.dynamicResidents);
+		dynamicSources.push(...classified.dynamicSources);
 		const residentSource: ResolvedEnvCellStaticObjectSource = {
 			kind: LandblockLayerKind.EnvCells,
 			landblockId: source.landblockId,
 			envCellId: cell.id,
 			staticResidents: classified.staticResidents,
-			dynamicResidents: classified.dynamicResidents,
+			dynamicSources: classified.dynamicSources,
 		};
 		residentJobs.push({
 			id: `env-cell-resident-job:${source.landblockId}/${cell.id}`,
@@ -217,7 +218,7 @@ export function planEnvCellMaterialization(
 		apertures: source.portalApertures,
 		crossings: source.portalCrossings,
 		residentJobs,
-		deferredResidents,
+		dynamicSources,
 		diagnostics: {
 			expectedCellCount: source.cells.length,
 			shellCount: shells.length,
@@ -225,7 +226,7 @@ export function planEnvCellMaterialization(
 			crossingCount: source.portalCrossings.length,
 			expectedResidentCount,
 			plannedStaticResidentCount,
-			defaultAnimatedResidentCount: deferredResidents.length,
+			defaultAnimatedResidentCount: dynamicSources.length,
 			unsupportedResidentCount: 0,
 			shellMaterialRangeCount,
 			uniqueShellGeometryCount: shellGeometries.size,
@@ -252,7 +253,7 @@ function planShellMaterialRanges(
 		triangle < geometry.materialSlotIndices.length;
 		triangle += 1
 	) {
-		const resolved = resolveStaticTriangleMaterial({
+		const resolved = resolveObjectTriangleMaterial({
 			detailRole: "environment",
 			geometry,
 			materials: cell.materials,
@@ -315,11 +316,12 @@ function resolveResident(
 ): ResolvedObjectResident {
 	return {
 		identity: { kind: "authored", sourceId: resident.id },
+		setupId: resident.setupId,
 		presentation: resident.presentation,
+		behavior: resident.behavior,
 		placement: resident.placement,
 		scale: resident.scale,
 		localBounds: resident.localBounds,
-		appearance: resident.appearance,
 	};
 }
 

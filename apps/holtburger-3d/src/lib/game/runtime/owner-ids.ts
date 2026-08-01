@@ -2,10 +2,8 @@ import type { LandblockId } from "../game-types";
 import { LandblockLayerKind } from "./scene-interest";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 
-/** Stable runtime lifetime identity for a static layer or spawned entity. */
-export type OwnerId =
-	| `landblock-layer:${LandblockId}/${LandblockLayerKind}`
-	| `spawned:${string}`;
+/** Stable runtime lifetime identity for one authored static layer. */
+export type OwnerId = `landblock-layer:${LandblockId}/${LandblockLayerKind}`;
 
 /** Runtime lifetime identity for resource leases owned exclusively by one terrain source. */
 export type TerrainResourceOwnerId = `terrain-resource:${LandblockId}`;
@@ -19,6 +17,9 @@ export type StaticRevisionResourceOwnerId =
 /** Shell/aperture lease kept separate from resident geometry owned by StaticObjectSystem. */
 export type EnvCellRevisionResourceOwnerId =
 	`env-cell-revision:${OwnerId}/${number}`;
+/** Private geometry lease for one prepared authored-dynamic owner generation. */
+export type DynamicGenerationResourceOwnerId =
+	`dynamic-generation:${OwnerId}/${number}`;
 
 /** Any runtime owner admitted by geometry and texture resource managers. */
 export type ResourceOwnerId =
@@ -26,7 +27,8 @@ export type ResourceOwnerId =
 	| TerrainResourceOwnerId
 	| ActiveRegionResourceOwnerId
 	| StaticRevisionResourceOwnerId
-	| EnvCellRevisionResourceOwnerId;
+	| EnvCellRevisionResourceOwnerId
+	| DynamicGenerationResourceOwnerId;
 
 /** Return the runtime owner responsible for one static landblock layer. */
 export function landblockLayerToOwnerId(
@@ -57,11 +59,6 @@ export function parseLandblockLayerOwnerId(owner: OwnerId): {
 	};
 }
 
-/** Return the runtime owner responsible for one independently spawned entity. */
-export function spawnedEntityToOwnerId(entityId: string): OwnerId {
-	return `spawned:${entityId}`;
-}
-
 /** Return the private resource owner for one terrain source installation. */
 export function terrainSourceToOwnerId(
 	landblockId: LandblockId,
@@ -90,6 +87,14 @@ export function envCellRevisionToResourceOwnerId(
 	revision: number,
 ): EnvCellRevisionResourceOwnerId {
 	return `env-cell-revision:${owner}/${revision}`;
+}
+
+/** Derive collision-free dynamic geometry ownership from the layer owner and generation. */
+export function dynamicGenerationToResourceOwnerId(
+	owner: OwnerId,
+	generation: number,
+): DynamicGenerationResourceOwnerId {
+	return `dynamic-generation:${owner}/${generation}`;
 }
 
 /** Derive geometry keys from the same authoritative layer owner and revision as their lease. */

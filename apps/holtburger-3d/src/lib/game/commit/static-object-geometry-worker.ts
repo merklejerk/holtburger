@@ -12,7 +12,6 @@ import {
 	type ResolvedObjectPart,
 } from "../resolution/presentation";
 import {
-	createScaleMat4,
 	multiplyMat4,
 	transformNormal3,
 	transformPoint3,
@@ -23,18 +22,19 @@ import type { StaticGeometryKey } from "../geometry/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
 	StaticInstallResourceNamespace,
-	StaticInstanceData,
+	ObjectInstanceData,
 	StaticInstanceStreamKey,
 	StaticInstanceStreamSource,
 } from "../systems/static-resources";
-import { STATIC_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
+import { OBJECT_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
 import type {
-	FrameStreamedStaticInstanceTemplate,
+	FrameStreamedObjectInstanceTemplate,
 	StaticObjectDrawUnit,
-	StaticObjectMaterialBinding,
+	ObjectMaterialBinding,
 } from "./artifacts";
-import { FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_BYTES } from "./artifacts";
-import { resolveStaticTriangleMaterial } from "./static-material-binding";
+import { FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES } from "./artifacts";
+import { resolveObjectTriangleMaterial } from "./object-material-binding";
+import { composeObjectPartTransform } from "../resolution/object-part-transform";
 
 /** One closed geometry job containing no runtime, device, or atlas callbacks. */
 export interface StaticObjectGeometryPreparationJob {
@@ -48,7 +48,7 @@ export interface StaticObjectGeometryPreparationJob {
 interface BakedStaticObjectRange {
 	readonly indexStart: number;
 	readonly indexCount: number;
-	readonly material: StaticObjectMaterialBinding;
+	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
 	/** Stable sorter input exists only for transparent ranges. */
 	readonly transparentSort: {
@@ -65,7 +65,7 @@ export interface StaticObjectGeometryPreparationResult {
 	}[];
 	readonly instanceStreams: readonly StaticInstanceStreamSource[];
 	readonly drawUnits: readonly StaticObjectDrawUnit[];
-	readonly frameStreamedInstances: readonly FrameStreamedStaticInstanceTemplate[];
+	readonly frameStreamedInstances: readonly FrameStreamedObjectInstanceTemplate[];
 	readonly bounds: AABB3;
 	readonly metrics: {
 		readonly sourceResidentCount: number;
@@ -91,7 +91,7 @@ export interface StaticObjectGeometryPreparationResult {
 }
 
 interface SourceTriangleContribution {
-	readonly binding: StaticObjectMaterialBinding;
+	readonly binding: ObjectMaterialBinding;
 	readonly bindingId: string;
 	readonly ordering: ObjectMaterialOrdering;
 	/** Source triangle identity retained for exact partition membership. */
@@ -108,7 +108,7 @@ interface BakedTriangleContribution extends SourceTriangleContribution {
 }
 
 interface ContributionGroup {
-	readonly binding: StaticObjectMaterialBinding;
+	readonly binding: ObjectMaterialBinding;
 	readonly bindingId: string;
 	readonly ordering: ObjectMaterialOrdering;
 	readonly triangles: BakedTriangleContribution[];
@@ -119,7 +119,6 @@ interface PreparedResidentPart {
 	readonly contributions: readonly SourceTriangleContribution[];
 	readonly geometryId: ResolvedGeometry["id"];
 	/** Unresolved substitutions require the explicit baked path until resolution owns them. */
-	readonly instanceAppearanceSupported: boolean;
 	readonly partIndex: number;
 	readonly residentId: string;
 	readonly sourceToLandblock: Mat4;
@@ -299,7 +298,6 @@ function prepareStaticSource(
 	const sourceRangeIds = new Set<string>();
 	const sourceMaterialSlotIds = new Set<string>();
 	for (const resident of source.staticResidents) {
-		const residentScale = createScaleMat4(resident.scale);
 		const defaultPose = resident.presentation.placementPoses.get(0);
 		if (!defaultPose)
 			throw new Error(
@@ -314,9 +312,12 @@ function prepareStaticSource(
 			}
 			const sourceToLandblock = multiplyMat4(
 				resident.placement.localTransform,
-				residentScale,
+				composeObjectPartTransform(
+					partTransform,
+					resident.scale,
+					part.defaultScale,
+				),
 			);
-			multiplyMat4(sourceToLandblock, partTransform, sourceToLandblock);
 			const contributions: SourceTriangleContribution[] = [];
 			for (
 				let triangle = 0;
@@ -347,7 +348,6 @@ function prepareStaticSource(
 			parts.push({
 				contributions,
 				geometryId: part.geometry.id,
-				instanceAppearanceSupported: resident.appearance === null,
 				partIndex: part.partIndex,
 				residentId: residentKey(resident.identity),
 				sourceToLandblock,
@@ -364,14 +364,14 @@ function prepareStaticSource(
 }
 
 interface InstancedGeometryPartition {
-	readonly binding: StaticObjectMaterialBinding;
+	readonly binding: ObjectMaterialBinding;
 	readonly contributions: readonly SourceTriangleContribution[];
 	readonly identity: string;
 	readonly ordering: ObjectMaterialOrdering;
 }
 
 interface PersistentInstanceCohort {
-	readonly instances: StaticInstanceData[];
+	readonly instances: ObjectInstanceData[];
 	readonly partitionIdentities: Set<string>;
 }
 
@@ -384,7 +384,7 @@ function prepareGeneratedStaticObjectGeometry(
 	const instanceParts: PreparedResidentPart[] = [];
 	const fallbackParts: PreparedResidentPart[] = [];
 	for (const part of prepared.parts) {
-		if (part.instanceAppearanceSupported && isInstanceEligibleTransform(part)) {
+		if (isInstanceEligibleTransform(part)) {
 			instanceParts.push(part);
 		} else {
 			fallbackParts.push(part);
@@ -405,7 +405,7 @@ function prepareGeneratedStaticObjectGeometry(
 	const partitions = new Map<string, InstancedGeometryPartition>();
 	const persistentCohorts = new Map<string, PersistentInstanceCohort>();
 	const transparentMembers: Array<{
-		readonly instance: StaticInstanceData;
+		readonly instance: ObjectInstanceData;
 		readonly partitionIdentity: string;
 		readonly residentId: string;
 		readonly partIndex: number;
@@ -531,7 +531,7 @@ function prepareGeneratedStaticObjectGeometry(
 		}
 	}
 	const frameStreamedInstances = transparentMembers.map(
-		(member): FrameStreamedStaticInstanceTemplate => {
+		(member): FrameStreamedObjectInstanceTemplate => {
 			const partition = partitions.get(member.partitionIdentity);
 			const geometryKey = partitionGeometryKeys.get(member.partitionIdentity);
 			const geometryData = partitionGeometry.get(member.partitionIdentity);
@@ -569,7 +569,7 @@ function prepareGeneratedStaticObjectGeometry(
 				drawUnits.length - (bakedFallback?.drawUnits.length ?? 0),
 			persistentInstanceCount,
 			persistentStreamBytes:
-				persistentInstanceCount * STATIC_INSTANCE_RECORD_BYTES,
+				persistentInstanceCount * OBJECT_INSTANCE_RECORD_BYTES,
 			persistentStreamCount: instanceStreams.length,
 			sourcePartCount: prepared.sourcePartCount,
 			sourceMaterialSlotCount: prepared.sourceMaterialSlotCount,
@@ -577,7 +577,7 @@ function prepareGeneratedStaticObjectGeometry(
 			sourceResidentCount: prepared.sourceResidentCount,
 			transparentTemplateBytes:
 				frameStreamedInstances.length *
-				FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_BYTES,
+				FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES,
 			transparentTemplateCohortCount: new Set(
 				frameStreamedInstances.map(({ cohortKey }) => cohortKey),
 			).size,
@@ -771,7 +771,7 @@ function createSourceTriangleContribution(options: {
 	readonly partIndex: number;
 	readonly triangle: number;
 }): SourceTriangleContribution {
-	const { binding, bindingId, ordering } = resolveStaticTriangleMaterial({
+	const { binding, bindingId, ordering } = resolveObjectTriangleMaterial({
 		detailRole: options.detailRole,
 		geometry: options.geometry,
 		materials: options.part.materials,

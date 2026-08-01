@@ -1,11 +1,8 @@
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
+import type { AnimationAssetSource } from "../../assets/animation-asset-source";
+import { animationHookCommand } from "../../assets/decode-animation-record";
 import { log, LogLevel } from "../../logs";
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
-	type DynamicEntityCommit,
-} from "../commit/types";
+import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
 import type {
 	EnvCellMaterializationDiagnostics,
 	EnvCellMaterializationPlan,
@@ -33,12 +30,16 @@ import {
 } from "../terrain/terrain-generator";
 import { TerrainSystem } from "../terrain/terrain-system";
 import { StaticObjectSystem } from "../systems/static-object-system";
+import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
 import {
-	DynamicEntitySystem,
-	InlineDynamicVisualPreparer,
-} from "../systems/dynamic-entity-system";
+	InlineObjectVisualTemplatePreparer,
+	ObjectVisualTemplateManager,
+} from "../systems/object-visual-template-manager";
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
+import { HookSystem } from "../systems/hook-system";
+import { PoseSystem } from "../systems/pose-system";
+import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 import {
 	TextureManager,
@@ -62,15 +63,17 @@ import { collectStaticObjectTextureDependencies } from "../commit/static-object-
 import type { StaticObjectLayerArtifact } from "../commit/artifacts";
 import {
 	StaticLayerRealizer,
+	type StaticLayerCompanionPublication,
 	type StaticLayerGeometryPreparer,
 } from "./static-layer-realizer";
 import {
 	activeRegionResourceToOwnerId,
 	type ActiveRegionResourceOwnerId,
+	dynamicGenerationToResourceOwnerId,
+	type DynamicGenerationResourceOwnerId,
 	landblockLayerToOwnerId,
 	parseLandblockLayerOwnerId,
 	type ResourceOwnerId,
-	spawnedEntityToOwnerId,
 	staticRevisionToInstallNamespace,
 	staticRevisionToResourceOwnerId,
 	envCellRevisionToResourceOwnerId,
@@ -85,6 +88,7 @@ import {
 } from "../resolution/static-detail-role";
 import {
 	residentKey,
+	type AuthoredDynamicSource,
 	type ResolvedOutdoorStaticLayerSource,
 	type ResolvedStaticObjectLayerSource,
 } from "../resolution/landblock-layer";
@@ -164,6 +168,7 @@ const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics 
 
 /** Runtime-owned collaborators that tests may replace with focused fakes. */
 export interface GameRuntimeDependencies {
+	readonly animationSource: AnimationAssetSource;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -181,18 +186,25 @@ export interface GameRuntimeRenderDevice {
 
 /** One completed static artifact retained with the currently relevant interest revision. */
 interface PendingCommitArtifact {
-	readonly artifact: CommitBundle;
+	readonly artifact: LandblockLayerCommit;
 	readonly revision: SceneInterestRevision;
 }
 
-/** One complete promoted resident retained for diagnostics until static-authored dynamics activate. */
-export interface DeferredStaticDynamicDiagnostic {
+/** One activated authored-dynamic resident or valid static visual fallback. */
+export interface AuthoredDynamicResidentDiagnostic {
 	readonly layer: LandblockLayerKind;
 	readonly landblockId: LandblockId;
 	readonly residentId: string;
 	readonly setupSourceId: string;
 	readonly defaultAnimationId: string | null;
-	readonly reason: "setup-default-animation";
+	readonly presentationMode: "animated" | "static-visual-fallback";
+	readonly blockingHooks: readonly {
+		readonly animationId: string;
+		readonly frameIndex: number;
+		readonly authoredOrder: number;
+		readonly command: string;
+		readonly reason: "deferred-structural" | "unsupported-visual";
+	}[];
 }
 
 /** One installed outdoor-static layer's source-to-runtime diagnostic snapshot. */
@@ -203,8 +215,8 @@ export interface StaticObjectLayerRuntimeDiagnostics extends StaticObjectLayerDi
 	readonly landblockId: LandblockId;
 	/** Scene nodes published by this exact layer revision. */
 	readonly sceneNodeCount: number;
-	/** Promoted residents held at the explicit runtime deferral seam. */
-	readonly runtimeDeferredResidentCount: number;
+	/** Promoted residents owned by the authored dynamic runtime. */
+	readonly runtimeDynamicResidentCount: number;
 	/** Whether this source emitted a static artifact rather than only promoted residents. */
 	readonly staticArtifactInstalled: boolean;
 }
@@ -269,15 +281,22 @@ export class GameRuntime {
 	>;
 	readonly #instances: StaticInstanceStreamManager<ResourceOwnerId>;
 	/** Dynamic roots, articulated part nodes, and presentation preparation. */
-	readonly #dynamics: DynamicEntitySystem<ResourceOwnerId>;
+	readonly #dynamics: DynamicEntitySystem<
+		OwnerId,
+		DynamicGenerationResourceOwnerId
+	>;
 	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
 	readonly #envCells: EnvCellSystem<OwnerId, ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
-	/** Static-authored dynamics deliberately deferred without creating runtime resources. */
-	readonly #deferredStaticDynamics = new Map<
+	/** Persistent visual hook state advanced only by the authored behavior clock. */
+	readonly #hooks: HookSystem;
+	/** Final render-cadence pose publication, separate from playback clocks. */
+	readonly #pose: PoseSystem;
+	/** Active authored-dynamic residents grouped by their source owner. */
+	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
-		DeferredStaticDynamicDiagnostic[]
+		AuthoredDynamicResidentDiagnostic[]
 	>();
 	/** Source-to-runtime outdoor-static snapshots removed with their layer owner. */
 	readonly #staticObjectLayerDiagnostics = new Map<
@@ -311,6 +330,8 @@ export class GameRuntime {
 	readonly #sceneInterestCoordinator: SceneInterestCommitCoordinator;
 	/** Completed asynchronous commits awaiting the next synchronous runtime tick. */
 	readonly #commitArtifacts: PendingCommitArtifact[] = [];
+	/** Static-realization continuations awaited before runtime-owned resources are destroyed. */
+	readonly #realizationContinuations = new Set<Promise<void>>();
 	/** Frontend listeners informed when placement facts become available or fail. */
 	readonly #sceneAvailabilityListeners = new Set<SceneAvailabilityListener>();
 	/** Current primary-view input used for visibility and rendering. */
@@ -477,10 +498,16 @@ export class GameRuntime {
 		});
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
-			this.#geometry,
-			new InlineDynamicVisualPreparer(),
+			new ObjectVisualTemplateManager<DynamicGenerationResourceOwnerId>(
+				this.#geometry,
+				new InlineObjectVisualTemplatePreparer(),
+			),
+			new AnimationAssetRepository(dependencies.animationSource),
+			dynamicGenerationToResourceOwnerId,
 		);
-		this.#animation = new AnimationSystem(this.#dynamics);
+		this.#hooks = new HookSystem();
+		this.#animation = new AnimationSystem(this.#hooks);
+		this.#pose = new PoseSystem(this.#dynamics);
 		this.#terrain = new TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>(
 			this.#scene,
 			dependencies.terrainGenerator,
@@ -532,12 +559,14 @@ export class GameRuntime {
 		device: GameRuntimeRenderDevice,
 		commitPipeline: CommitPipeline,
 		texturePixelSource: TexturePixelSource,
+		animationSource: AnimationAssetSource,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
 			WorkerTexturePreparer.build(texturePixelSource),
 		]);
 		const runtime = new GameRuntime(device.resources, commitPipeline, {
+			animationSource,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
 					? new InlineStaticObjectGeometryPreparer()
@@ -625,9 +654,20 @@ export class GameRuntime {
 		return this.#renderer?.getFrameSelectionMetrics?.() ?? null;
 	}
 
-	/** Snapshot structured diagnostics for static-authored residents deferred pending dynamic activation. */
-	getDeferredStaticDynamicDiagnostics(): readonly DeferredStaticDynamicDiagnostic[] {
-		return [...this.#deferredStaticDynamics.values()].flat();
+	/** Snapshot active authored dynamics and any hook-blocked static visual fallbacks. */
+	getAuthoredDynamicResidentDiagnostics(): readonly AuthoredDynamicResidentDiagnostic[] {
+		return [...this.#authoredDynamicResidents.values()].flat();
+	}
+
+	/** Snapshot dynamic preparation, playback, hook, and pose costs at their owning layers. */
+	getAuthoredDynamicRuntimeDiagnostics() {
+		return {
+			animation: this.#animation.getDiagnostics(),
+			dynamics: this.#dynamics.getDiagnostics(),
+			hooks: this.#hooks.getDiagnostics(),
+			pose: this.#pose.getDiagnostics(),
+			residents: this.getAuthoredDynamicResidentDiagnostics(),
+		};
 	}
 
 	/** Snapshot app-local outdoor-static lifecycle, resource, and atlas-arbitration diagnostics. */
@@ -739,7 +779,6 @@ export class GameRuntime {
 	tick(): void {
 		if (this.#destroyed) return;
 		this.#drainCommitArtifacts();
-		this.#animation.update();
 	}
 
 	/** Advance ordered runtime state and draw one frontend-scheduled frame. */
@@ -754,6 +793,7 @@ export class GameRuntime {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		this.#pose.publish(this.#animation.update(timeSeconds));
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		renderer.drawFrame({
 			anchorLandblockId,
@@ -785,14 +825,17 @@ export class GameRuntime {
 		this.#destroyed = true;
 		this.#sceneInterestCoordinator.destroy();
 		this.#commitArtifacts.length = 0;
+		await Promise.all([
+			this.#staticLayerRealizer.destroy(),
+			this.#envCellRealizer.destroy(),
+		]);
+		await Promise.allSettled([...this.#realizationContinuations]);
 		await this.#renderer?.destroy();
 		this.#renderer = null;
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
-		this.#staticLayerRealizer.destroy();
-		this.#envCellRealizer.destroy();
 		this.#residentAtlas.destroy();
 		await this.#textures.destroy();
 		await this.#texturePreparer.destroy();
@@ -812,7 +855,6 @@ export class GameRuntime {
 			if (!pending) continue;
 			const { artifact, revision } = pending;
 			if (
-				artifact.kind === CommitBundleSourceKind.LandblockLayer &&
 				!this.#sceneInterestCoordinator.ownsDispatch(
 					{ id: artifact.landblockId, layer: artifact.layer },
 					revision,
@@ -820,19 +862,12 @@ export class GameRuntime {
 			) {
 				continue;
 			}
-			if (artifact.kind === CommitBundleSourceKind.LandblockLayer) {
-				this.#commitLandblockLayer(artifact, revision);
-			} else {
-				this.#commitSpawnedEntity(artifact);
-			}
+			this.#commitLandblockLayer(artifact, revision);
 		}
 	}
 
 	#commitLandblockLayer(
-		artifact: Extract<
-			CommitBundle,
-			{ kind: CommitBundleSourceKind.LandblockLayer }
-		>,
+		artifact: LandblockLayerCommit,
 		revision: SceneInterestRevision,
 	): void {
 		const ownerId = landblockLayerToOwnerId(
@@ -869,9 +904,8 @@ export class GameRuntime {
 	#installTerrainLayer(
 		ownerId: OwnerId,
 		artifact: Extract<
-			CommitBundle,
+			LandblockLayerCommit,
 			{
-				kind: CommitBundleSourceKind.LandblockLayer;
 				layer: LandblockLayerKind.Terrain;
 			}
 		>,
@@ -892,7 +926,6 @@ export class GameRuntime {
 		artifact: {
 			readonly landblockId: LandblockId;
 			readonly layer: OutdoorStaticLayerKind;
-			readonly dynamicEntities: readonly DynamicEntityCommit[];
 			readonly commit: import("../commit/types").StaticObjectLayerSourceCommit;
 		},
 		revision: SceneInterestRevision,
@@ -909,68 +942,70 @@ export class GameRuntime {
 		this.#textureFactCollectionDurationMs +=
 			performance.now() - factCollectionStartedAt;
 		this.#textureFactCollectionCount += 1;
-		void this.#staticLayerRealizer
-			.realize({
-				layer: artifact.layer,
-				owner: ownerId,
-				revision,
-				source: artifact.commit.source,
-				textureRequirements,
-			})
-			.then((result) => {
-				if (result.kind !== "published") return;
-				for (const dynamic of artifact.dynamicEntities) {
-					this.#deferStaticAuthoredDynamic(
-						ownerId,
-						artifact.layer,
-						artifact.landblockId,
-						dynamic,
-					);
-				}
-				this.#staticObjectLayerDiagnostics.set(ownerId, {
-					...(result.geometry?.geometryDiagnostics ??
-						EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS),
-					cullingGroup: artifact.layer,
-					expectedResidentCount:
-						artifact.commit.source.staticResidents.length +
-						artifact.dynamicEntities.length,
+		this.#trackRealizationContinuation(
+			this.#staticLayerRealizer
+				.realize({
 					layer: artifact.layer,
-					landblockId: artifact.landblockId,
-					materializedStaticResidentCount:
-						artifact.commit.source.staticResidents.length,
-					promotedDynamicResidentCount: artifact.dynamicEntities.length,
-					resolvedStaticResidentCount:
-						artifact.commit.source.staticResidents.length,
-					runtimeDeferredResidentCount: artifact.dynamicEntities.length,
-					sceneNodeCount: result.geometry?.objects.length ?? 0,
-					staticArtifactInstalled: result.geometry !== null,
-				});
-			})
-			.catch((error) => {
-				if (
-					!this.#sceneInterestCoordinator.ownsDispatch(
-						{ id: artifact.landblockId, layer: artifact.layer },
-						revision,
-					)
-				)
-					return;
-				log(error, LogLevel.Error);
-				this.#publishSceneAvailability({
-					kind: "scene-content-failed",
-					layer: artifact.layer,
-					message: error instanceof Error ? error.message : String(error),
-					residency: { envCellId: null, landblockId: artifact.landblockId },
+					owner: ownerId,
+					prepareCompanion: () =>
+						this.#prepareStaticAuthoredDynamics(
+							ownerId,
+							artifact.layer,
+							artifact.landblockId,
+							artifact.commit.source.dynamicSources,
+						),
 					revision,
-				});
-			});
+					source: artifact.commit.source,
+					textureRequirements,
+				})
+				.then(async (result) => {
+					if (result.kind !== "published") return;
+					this.#staticObjectLayerDiagnostics.set(ownerId, {
+						...(result.geometry?.geometryDiagnostics ??
+							EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS),
+						cullingGroup: artifact.layer,
+						expectedResidentCount:
+							artifact.commit.source.staticResidents.length +
+							artifact.commit.source.dynamicSources.length,
+						layer: artifact.layer,
+						landblockId: artifact.landblockId,
+						materializedStaticResidentCount:
+							artifact.commit.source.staticResidents.length,
+						promotedDynamicResidentCount:
+							artifact.commit.source.dynamicSources.length,
+						resolvedStaticResidentCount:
+							artifact.commit.source.staticResidents.length,
+						runtimeDynamicResidentCount:
+							artifact.commit.source.dynamicSources.length,
+						sceneNodeCount: result.geometry?.objects.length ?? 0,
+						staticArtifactInstalled: result.geometry !== null,
+					});
+				})
+				.catch((error) => {
+					if (
+						!this.#sceneInterestCoordinator.ownsDispatch(
+							{ id: artifact.landblockId, layer: artifact.layer },
+							revision,
+						)
+					)
+						return;
+					log(error, LogLevel.Error);
+					this.#publishSceneAvailability({
+						kind: "scene-content-failed",
+						layer: artifact.layer,
+						message: error instanceof Error ? error.message : String(error),
+						residency: { envCellId: null, landblockId: artifact.landblockId },
+						revision,
+					});
+				}),
+		);
 	}
 
 	#realizeEnvCellLayer(
 		ownerId: OwnerId,
 		artifact: Extract<
-			CommitBundle,
+			LandblockLayerCommit,
 			{
-				kind: CommitBundleSourceKind.LandblockLayer;
 				layer: LandblockLayerKind.EnvCells;
 			}
 		>,
@@ -989,140 +1024,192 @@ export class GameRuntime {
 			],
 			"EnvCell layer",
 		);
-		void this.#envCellRealizer
-			.realize({
-				layer: LandblockLayerKind.EnvCells,
-				owner: ownerId,
-				revision,
-				source: plan,
-				textureRequirements,
-			})
-			.then((result) => {
-				if (result.kind !== "published") return;
-				for (const dynamic of artifact.dynamicEntities) {
-					this.#deferStaticAuthoredDynamic(
-						ownerId,
-						artifact.layer,
-						artifact.landblockId,
-						dynamic,
-					);
-				}
-				this.#envCellLayerDiagnostics.set(ownerId, {
-					...plan.diagnostics,
-					...result.geometry.residentGeometryDiagnostics,
-					indoorDepthContinuousCrossingCount: plan.crossings.filter(
-						(crossing) =>
-							crossing.spatialRelationship.kind === "indoor-depth-continuous",
-					).length,
-					indoorTopologyBoundaryCrossingCount: plan.crossings.filter(
-						(crossing) =>
-							crossing.spatialRelationship.kind === "indoor-topology-boundary",
-					).length,
-					exteriorTransitionCrossingCount: plan.crossings.filter(
-						(crossing) =>
-							crossing.spatialRelationship.kind === "exterior-transition",
-					).length,
-					landblockId: artifact.landblockId,
-					potentiallyVisibleReferenceCount: plan.scopes.reduce(
-						(count, scope) => count + scope.potentiallyVisibleEnvCellIds.size,
-						0,
-					),
-					sceneResidentNodeCount:
-						result.geometry.residents?.objects.length ?? 0,
-					sceneShellNodeCount: result.geometry.environment.cellShells.length,
-					visibilityIslandCount: new Set(
-						result.geometry.environment.scopes.map(
-							(scope) => scope.visibilityIslandId,
+		this.#trackRealizationContinuation(
+			this.#envCellRealizer
+				.realize({
+					layer: LandblockLayerKind.EnvCells,
+					owner: ownerId,
+					prepareCompanion: () =>
+						this.#prepareStaticAuthoredDynamics(
+							ownerId,
+							artifact.layer,
+							artifact.landblockId,
+							plan.dynamicSources,
 						),
-					).size,
-				});
-				this.#publishSceneAvailability({
-					kind: "env-cell-topology-available",
-					landblockId: artifact.landblockId,
 					revision,
-				});
-			})
-			.catch((error) => {
-				if (
-					!this.#sceneInterestCoordinator.ownsDispatch(
-						{
-							id: artifact.landblockId,
-							layer: LandblockLayerKind.EnvCells,
+					source: plan,
+					textureRequirements,
+				})
+				.then(async (result) => {
+					if (result.kind !== "published") return;
+					this.#envCellLayerDiagnostics.set(ownerId, {
+						...plan.diagnostics,
+						...result.geometry.residentGeometryDiagnostics,
+						indoorDepthContinuousCrossingCount: plan.crossings.filter(
+							(crossing) =>
+								crossing.spatialRelationship.kind === "indoor-depth-continuous",
+						).length,
+						indoorTopologyBoundaryCrossingCount: plan.crossings.filter(
+							(crossing) =>
+								crossing.spatialRelationship.kind ===
+								"indoor-topology-boundary",
+						).length,
+						exteriorTransitionCrossingCount: plan.crossings.filter(
+							(crossing) =>
+								crossing.spatialRelationship.kind === "exterior-transition",
+						).length,
+						landblockId: artifact.landblockId,
+						potentiallyVisibleReferenceCount: plan.scopes.reduce(
+							(count, scope) => count + scope.potentiallyVisibleEnvCellIds.size,
+							0,
+						),
+						sceneResidentNodeCount:
+							result.geometry.residents?.objects.length ?? 0,
+						sceneShellNodeCount: result.geometry.environment.cellShells.length,
+						visibilityIslandCount: new Set(
+							result.geometry.environment.scopes.map(
+								(scope) => scope.visibilityIslandId,
+							),
+						).size,
+					});
+					this.#publishSceneAvailability({
+						kind: "env-cell-topology-available",
+						landblockId: artifact.landblockId,
+						revision,
+					});
+				})
+				.catch((error) => {
+					if (
+						!this.#sceneInterestCoordinator.ownsDispatch(
+							{
+								id: artifact.landblockId,
+								layer: LandblockLayerKind.EnvCells,
+							},
+							revision,
+						)
+					) {
+						return;
+					}
+					log(error, LogLevel.Error);
+					this.#publishSceneAvailability({
+						kind: "scene-content-failed",
+						layer: artifact.layer,
+						message: error instanceof Error ? error.message : String(error),
+						residency: {
+							envCellId: null,
+							landblockId: artifact.landblockId,
 						},
 						revision,
-					)
-				) {
-					return;
-				}
-				log(error, LogLevel.Error);
-				this.#publishSceneAvailability({
-					kind: "scene-content-failed",
-					layer: artifact.layer,
-					message: error instanceof Error ? error.message : String(error),
-					residency: {
-						envCellId: null,
-						landblockId: artifact.landblockId,
-					},
-					revision,
-				});
-			});
-	}
-
-	#commitSpawnedEntity(
-		artifact: Extract<CommitBundle, { kind: CommitBundleSourceKind.Spawned }>,
-	): void {
-		const ownerId = spawnedEntityToOwnerId(artifact.id);
-		this.#installDynamic(
-			ownerId,
-			artifact.commit.placement.landblockId,
-			artifact.commit,
+					});
+				}),
 		);
 	}
 
-	#installDynamic(
-		ownerId: OwnerId,
-		landblockId: LandblockId,
-		dynamic: DynamicEntityCommit,
-	): void {
-		if (dynamic.placement.landblockId !== landblockId) {
-			throw new Error(
-				`Dynamic placement belongs to ${dynamic.placement.landblockId}, expected ${landblockId}.`,
-			);
-		}
-		const nodeId = this.#dynamics.install(ownerId, dynamic);
-		const pose = this.#dynamics.getPose(nodeId);
-		if (!pose)
-			throw new Error(`Installed dynamic ${nodeId} has no initial pose.`);
-		this.#animation.install(ownerId, nodeId, pose);
-	}
-
-	#deferStaticAuthoredDynamic(
+	async #prepareStaticAuthoredDynamics(
 		ownerId: OwnerId,
 		layer: LandblockLayerKind,
 		landblockId: LandblockId,
-		dynamic: DynamicEntityCommit,
-	): void {
-		if (dynamic.placement.landblockId !== landblockId) {
+		sources: readonly AuthoredDynamicSource[],
+	): Promise<StaticLayerCompanionPublication> {
+		if (this.#destroyed)
 			throw new Error(
-				`Deferred dynamic placement belongs to ${dynamic.placement.landblockId}, expected ${landblockId}.`,
+				"Cannot prepare authored dynamics after runtime shutdown.",
 			);
+		for (const source of sources) {
+			if (source.placement.landblockId !== landblockId) {
+				throw new Error(
+					`Authored dynamic placement belongs to ${source.placement.landblockId}, expected ${landblockId}.`,
+				);
+			}
 		}
-		const diagnostic: DeferredStaticDynamicDiagnostic = {
-			defaultAnimationId: dynamic.presentation.effects.animationId,
-			landblockId,
-			layer,
-			reason: "setup-default-animation",
-			residentId: residentKey(dynamic.identity),
-			setupSourceId: dynamic.presentation.sourceAssetId,
-		};
-		const diagnostics = this.#deferredStaticDynamics.get(ownerId) ?? [];
-		diagnostics.push(diagnostic);
-		this.#deferredStaticDynamics.set(ownerId, diagnostics);
-		log(
-			{ kind: "static-authored-dynamic-deferred", ...diagnostic },
-			LogLevel.Info,
+		const installation = this.#dynamics.replaceOwner(ownerId, sources);
+		const outcome = await installation.ready;
+		if (outcome === "superseded")
+			throw new Error("Authored dynamic preparation was superseded.");
+		const prepared = installation.getPreparedEntities();
+		let animationStage: ReturnType<AnimationSystem<OwnerId>["stageOwner"]>;
+		try {
+			animationStage = this.#animation.stageOwner(
+				ownerId,
+				prepared.flatMap(({ animation, nodeId, source }) =>
+					animation.kind === "activatable"
+						? [
+								{
+									animation: animation.animation,
+									nodeId,
+									residentIdentity: residentKey(source.identity),
+								},
+							]
+						: [],
+				),
+			);
+		} catch (cause) {
+			installation.release();
+			throw cause;
+		}
+		const diagnostics = prepared.map(
+			({ animation, source }): AuthoredDynamicResidentDiagnostic => ({
+				blockingHooks:
+					animation.kind === "retain-static-presentation"
+						? animation.blockingHooks.map((hook) => ({
+								animationId: animation.animation.id,
+								authoredOrder: hook.authoredOrder,
+								command: animationHookCommand(hook),
+								reason:
+									hook.kind === "replace-object"
+										? "deferred-structural"
+										: "unsupported-visual",
+								frameIndex: hook.frameIndex,
+							}))
+						: [],
+				defaultAnimationId: source.behavior.animationId,
+				landblockId,
+				layer,
+				presentationMode:
+					animation.kind === "activatable"
+						? "animated"
+						: "static-visual-fallback",
+				residentId: residentKey(source.identity),
+				setupSourceId: source.setupId,
+			}),
 		);
-		// Future activation replaces this body with #installDynamic(ownerId, landblockId, dynamic).
+		let state: "prepared" | "committed" | "released" = "prepared";
+		try {
+			installation.prepareCommit(animationStage.samples);
+		} catch (cause) {
+			animationStage.release();
+			installation.release();
+			throw cause;
+		}
+		return {
+			commit: () => {
+				if (state !== "prepared")
+					throw new Error(`Cannot commit dynamic companion in state ${state}.`);
+				try {
+					installation.commit();
+					animationStage.commit();
+				} catch (cause) {
+					animationStage.release();
+					installation.release();
+					state = "released";
+					throw cause;
+				}
+				state = "committed";
+				this.#authoredDynamicResidents.set(ownerId, diagnostics);
+				for (const diagnostic of diagnostics) {
+					log(
+						{ kind: "static-authored-dynamic-active", ...diagnostic },
+						LogLevel.Info,
+					);
+				}
+			},
+			release: () => {
+				if (state !== "prepared") return;
+				animationStage.release();
+				installation.release();
+				state = "released";
+			},
+		};
 	}
 
 	#evictStaticLayer(
@@ -1138,7 +1225,7 @@ export class GameRuntime {
 		} else {
 			this.#staticObjects.evict(ownerId, revision);
 		}
-		this.#deferredStaticDynamics.delete(ownerId);
+		this.#authoredDynamicResidents.delete(ownerId);
 		this.#staticObjectLayerDiagnostics.delete(ownerId);
 		this.#envCellLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
@@ -1152,6 +1239,13 @@ export class GameRuntime {
 
 	#publishSceneAvailability(event: SceneAvailabilityEvent): void {
 		for (const listener of this.#sceneAvailabilityListeners) listener(event);
+	}
+
+	#trackRealizationContinuation(continuation: Promise<void>): void {
+		this.#realizationContinuations.add(continuation);
+		void continuation.finally(() => {
+			this.#realizationContinuations.delete(continuation);
+		});
 	}
 }
 

@@ -14,7 +14,7 @@ import {
 import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId, SceneScope } from "../scene";
-import { scopeFor } from "../scene/scope";
+import { scopeFor, scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import {
 	PortalRenderGraphPlanner,
@@ -22,7 +22,11 @@ import {
 	type PortalRenderWorkPlan,
 } from "./portal-render-graph";
 import type { TerrainDrawUnit } from "../terrain/types";
-import type { StaticObjectDrawUnit } from "../commit/artifacts";
+import type {
+	ObjectMaterialBinding,
+	StaticObjectDrawUnit,
+} from "../commit/artifacts";
+import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import { TextureWrapMode } from "../textures/types";
 import type {
 	FrameInput,
@@ -35,7 +39,7 @@ import type {
 	GeometryResourceKey,
 	InstanceStreamResourceKey,
 } from "./resource-manager";
-import { STATIC_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
+import { OBJECT_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
 import type { TerrainProgramInput } from "./terrain-program-input";
 import {
 	WebGL2ResourceManager,
@@ -58,10 +62,10 @@ import {
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
 import {
-	formAdjacentTransparentInstanceRuns,
+	formAdjacentObjectInstanceRuns,
 	objectBlendPolicy,
-	orderTransparentStaticRanges,
-	type TransparentStaticRange,
+	orderTransparentObjectRanges,
+	type TransparentObjectRange,
 } from "./object-rendering-policy";
 import type { WebGL2InstanceBufferBinding } from "./webgl2-instance-buffer";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
@@ -106,7 +110,13 @@ interface TerrainFrameInput {
 
 /** One opaque or alpha-test static-object range paired with its resolved node placement. */
 interface ObjectFrameInput {
-	readonly source: "outdoor" | "env-cell-shell" | "env-cell-resident";
+	readonly source:
+		| "outdoor"
+		| "env-cell-shell"
+		| "env-cell-resident"
+		| "dynamic";
+	/** Scene/portal residency boundary that must never be crossed by an instance run. */
+	readonly renderDomainKey: string;
 	readonly cullFaceOverride:
 		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
 		| null;
@@ -122,7 +132,7 @@ interface ObjectFrameInput {
 		  }
 		| {
 				readonly cohortKey: string;
-				readonly instance: import("../systems/static-resources").StaticInstanceData;
+				readonly instance: import("../systems/static-resources").ObjectInstanceData;
 				readonly kind: "frame-template";
 		  }
 		| {
@@ -133,9 +143,12 @@ interface ObjectFrameInput {
 		  };
 	readonly landblockId: string;
 	readonly localToLandblock: Mat4;
-	readonly material: StaticObjectDrawUnit["material"];
-	readonly ordering: StaticObjectDrawUnit["ordering"];
-	readonly transparentSort: StaticObjectDrawUnit["transparentSort"];
+	readonly material: ObjectMaterialBinding;
+	readonly ordering: ObjectMaterialOrdering;
+	readonly transparentSort: {
+		readonly stableId: string;
+		readonly center: Vec3;
+	} | null;
 }
 
 type AnyObjectProgram =
@@ -194,7 +207,8 @@ interface MutableFrameSelectionMetrics {
 	terrainFrameInputs: number;
 	visibleStaticLayerCount: number;
 	visibleStaticNodeCount: number;
-	visibleDynamics: number;
+	visibleDynamicEntityCount: number;
+	visibleDynamicPartCount: number;
 	visibleEnvCellShells: number;
 	visibleEnvCellScopeCount: number;
 	visibleEnvCellResidentNodes: number;
@@ -224,17 +238,19 @@ interface MutableFrameSelectionMetrics {
 	submittedPersistentInstancedDrawCount: number;
 	submittedPersistentInstanceCount: number;
 	submittedInstancedSourceTriangleCount: number;
-	transparentStaticCandidateCount: number;
-	farTransparentStaticCandidateCount: number;
-	nearTransparentStaticCandidateCount: number;
+	transparentObjectCandidateCount: number;
+	farTransparentObjectCandidateCount: number;
+	nearTransparentObjectCandidateCount: number;
 	transparentFrameRunCount: number;
 	farTransparentFrameRunCount: number;
 	nearTransparentFrameRunCount: number;
-	transparentFrameUploadCount: number;
-	transparentFrameUploadBytes: number;
-	submittedTransparentStaticDrawCount: number;
+	frameInstanceUploadCount: number;
+	frameInstanceUploadBytes: number;
+	submittedTransparentObjectDrawCount: number;
 	submittedTransparentInstanceCount: number;
-	submittedAdditiveStaticDrawCount: number;
+	submittedAdditiveObjectDrawCount: number;
+	submittedDynamicDrawCount: number;
+	submittedDynamicInstanceCount: number;
 	frameInstanceCapacity: number;
 	frameInstanceGrowthCount: number;
 	frameInstanceViewHighWaterMark: number;
@@ -280,7 +296,8 @@ export class WebGL2Renderer implements Renderer {
 		envCellRenderMode: "flat",
 		terrainFrameInputs: 0,
 		viewCount: 0,
-		visibleDynamics: 0,
+		visibleDynamicEntityCount: 0,
+		visibleDynamicPartCount: 0,
 		visibleEnvCellShells: 0,
 		visibleEnvCellScopeCount: 0,
 		visibleEnvCellResidentNodes: 0,
@@ -313,17 +330,19 @@ export class WebGL2Renderer implements Renderer {
 		submittedPersistentInstancedDrawCount: 0,
 		submittedPersistentInstanceCount: 0,
 		submittedInstancedSourceTriangleCount: 0,
-		transparentStaticCandidateCount: 0,
-		farTransparentStaticCandidateCount: 0,
-		nearTransparentStaticCandidateCount: 0,
+		transparentObjectCandidateCount: 0,
+		farTransparentObjectCandidateCount: 0,
+		nearTransparentObjectCandidateCount: 0,
 		transparentFrameRunCount: 0,
 		farTransparentFrameRunCount: 0,
 		nearTransparentFrameRunCount: 0,
-		transparentFrameUploadCount: 0,
-		transparentFrameUploadBytes: 0,
-		submittedTransparentStaticDrawCount: 0,
+		frameInstanceUploadCount: 0,
+		frameInstanceUploadBytes: 0,
+		submittedTransparentObjectDrawCount: 0,
 		submittedTransparentInstanceCount: 0,
-		submittedAdditiveStaticDrawCount: 0,
+		submittedAdditiveObjectDrawCount: 0,
+		submittedDynamicDrawCount: 0,
+		submittedDynamicInstanceCount: 0,
 		frameInstanceCapacity: 0,
 		frameInstanceGrowthCount: 0,
 		frameInstanceViewHighWaterMark: 0,
@@ -895,6 +914,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: drawUnit.material,
 						ordering: drawUnit.ordering,
+						renderDomainKey: `${node.placement.landblockId}/${scopeKey(node.placement.scope)}`,
 						source,
 						transparentSort: drawUnit.transparentSort,
 					});
@@ -916,6 +936,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: template.material,
 						ordering: "transparent",
+						renderDomainKey: `${node.placement.landblockId}/${scopeKey(node.placement.scope)}`,
 						source,
 						transparentSort: template.transparentSort,
 					});
@@ -923,8 +944,34 @@ export class WebGL2Renderer implements Renderer {
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
-				this.#frameSelectionMetrics.visibleDynamics += 1;
-				void this.#world.resolveDynamicRenderable(contribution.renderable);
+				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
+				this.#frameSelectionMetrics.visibleDynamicPartCount +=
+					contribution.contributions.length;
+				for (const resolved of this.#world.resolveDynamicContributions(
+					contribution.contributions,
+				)) {
+					const { domain, drawUnit, instance, transparentSort } =
+						resolved.drawUnit;
+					objects.push({
+						cullFaceOverride: null,
+						drawKind: "instanced",
+						geometry: resolved.geometry,
+						indexCount: drawUnit.indexCount,
+						indexStart: drawUnit.indexStart,
+						instances: {
+							cohortKey: `${domain.key}/${drawUnit.batchKey}`,
+							instance,
+							kind: "frame-template",
+						},
+						landblockId: domain.landblockId,
+						localToLandblock: instance.sourceToLandblock,
+						material: drawUnit.material,
+						ordering: drawUnit.ordering,
+						renderDomainKey: domain.key,
+						source: "dynamic",
+						transparentSort,
+					});
+				}
 				continue;
 			}
 			if (contribution.kind === "env-cell") {
@@ -954,6 +1001,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: resolved.drawUnit.material,
 						ordering: resolved.drawUnit.ordering,
+						renderDomainKey: `${node.placement.landblockId}/${scopeKey(node.placement.scope)}`,
 						source: "env-cell-shell",
 						transparentSort: resolved.drawUnit.transparentSort,
 					});
@@ -993,7 +1041,8 @@ export class WebGL2Renderer implements Renderer {
 		metrics.envCellRenderMode = envCellRenderMode;
 		metrics.terrainFrameInputs = 0;
 		metrics.viewCount = viewCount;
-		metrics.visibleDynamics = 0;
+		metrics.visibleDynamicEntityCount = 0;
+		metrics.visibleDynamicPartCount = 0;
 		metrics.visibleEnvCellShells = 0;
 		metrics.visibleEnvCellScopeCount = 0;
 		metrics.visibleEnvCellResidentNodes = 0;
@@ -1028,17 +1077,19 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedPersistentInstancedDrawCount = 0;
 		metrics.submittedPersistentInstanceCount = 0;
 		metrics.submittedInstancedSourceTriangleCount = 0;
-		metrics.transparentStaticCandidateCount = 0;
-		metrics.farTransparentStaticCandidateCount = 0;
-		metrics.nearTransparentStaticCandidateCount = 0;
+		metrics.transparentObjectCandidateCount = 0;
+		metrics.farTransparentObjectCandidateCount = 0;
+		metrics.nearTransparentObjectCandidateCount = 0;
 		metrics.transparentFrameRunCount = 0;
 		metrics.farTransparentFrameRunCount = 0;
 		metrics.nearTransparentFrameRunCount = 0;
-		metrics.transparentFrameUploadCount = 0;
-		metrics.transparentFrameUploadBytes = 0;
-		metrics.submittedTransparentStaticDrawCount = 0;
+		metrics.frameInstanceUploadCount = 0;
+		metrics.frameInstanceUploadBytes = 0;
+		metrics.submittedTransparentObjectDrawCount = 0;
 		metrics.submittedTransparentInstanceCount = 0;
-		metrics.submittedAdditiveStaticDrawCount = 0;
+		metrics.submittedAdditiveObjectDrawCount = 0;
+		metrics.submittedDynamicDrawCount = 0;
+		metrics.submittedDynamicInstanceCount = 0;
 		metrics.frameInstanceCapacity = 0;
 		metrics.frameInstanceGrowthCount = 0;
 		metrics.frameInstanceViewHighWaterMark = 0;
@@ -1254,10 +1305,11 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		fog: FrameInput["environment"]["distanceFog"],
 	): void {
-		const objects = view.objects.filter(
+		const candidates = view.objects.filter(
 			({ ordering }) => ordering === "opaque" || ordering === "alpha-test",
 		);
-		if (objects.length === 0) return;
+		if (candidates.length === 0) return;
+		const objects = this.#prepareFrameInstanceRuns([candidates]).objects;
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
@@ -1279,7 +1331,7 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#drawBlendedObjects(view: PreparedView): void {
-		const transparent: TransparentStaticRange<ObjectFrameInput>[] = [];
+		const transparent: TransparentObjectRange<ObjectFrameInput>[] = [];
 		const additive: ObjectFrameInput[] = [];
 		for (const object of view.objects) {
 			if (object.ordering === "additive") {
@@ -1325,21 +1377,22 @@ export class WebGL2Renderer implements Renderer {
 		additive.sort((left, right) =>
 			objectMaterialSortKey(left).localeCompare(objectMaterialSortKey(right)),
 		);
-		const orderedTransparent = orderTransparentStaticRanges(
+		const orderedTransparent = orderTransparentObjectRanges(
 			transparent,
 			compareFarTransparentBatchOrder,
 		);
-		this.#frameSelectionMetrics.transparentStaticCandidateCount +=
+		this.#frameSelectionMetrics.transparentObjectCandidateCount +=
 			transparent.length;
-		this.#frameSelectionMetrics.farTransparentStaticCandidateCount +=
+		this.#frameSelectionMetrics.farTransparentObjectCandidateCount +=
 			orderedTransparent.far.length;
-		this.#frameSelectionMetrics.nearTransparentStaticCandidateCount +=
+		this.#frameSelectionMetrics.nearTransparentObjectCandidateCount +=
 			orderedTransparent.near.length;
-		const sortedTransparent = this.#prepareFrameTransparentRuns({
+		const sortedBlended = this.#prepareFrameBlendedRuns({
+			additive,
 			far: orderedTransparent.far.map(({ range }) => range),
 			near: orderedTransparent.near.map(({ range }) => range),
 		});
-		if (sortedTransparent.length === 0 && additive.length === 0) return;
+		if (sortedBlended.length === 0) return;
 		const gl = this.#gl;
 		gl.depthMask(false);
 		gl.enable(gl.BLEND);
@@ -1347,7 +1400,7 @@ export class WebGL2Renderer implements Renderer {
 			| WebGL2ObjectProgram
 			| WebGL2InstancedObjectProgram
 			| null = null;
-		for (const object of [...sortedTransparent, ...additive]) {
+		for (const object of sortedBlended) {
 			const program =
 				object.drawKind === "instanced"
 					? this.#blendedInstancedObjectProgram
@@ -1364,15 +1417,35 @@ export class WebGL2Renderer implements Renderer {
 	/**
 	 * Upload both transparent phases once while keeping their independent run boundaries.
 	 */
-	#prepareFrameTransparentRuns(ordered: {
+	#prepareFrameBlendedRuns(ordered: {
+		readonly additive: readonly ObjectFrameInput[];
 		readonly far: readonly ObjectFrameInput[];
 		readonly near: readonly ObjectFrameInput[];
 	}): readonly ObjectFrameInput[] {
-		const orderedInstances: import("../systems/static-resources").StaticInstanceData[] =
+		const prepared = this.#prepareFrameInstanceRuns([
+			ordered.far,
+			ordered.near,
+			ordered.additive,
+		]);
+		const [farRunCount = 0, nearRunCount = 0] = prepared.runCounts;
+		this.#frameSelectionMetrics.transparentFrameRunCount +=
+			farRunCount + nearRunCount;
+		this.#frameSelectionMetrics.farTransparentFrameRunCount += farRunCount;
+		this.#frameSelectionMetrics.nearTransparentFrameRunCount += nearRunCount;
+		return prepared.objects;
+	}
+
+	/** Form phase-local compatible runs and upload their complete sequential instance population. */
+	#prepareFrameInstanceRuns(phases: readonly (readonly ObjectFrameInput[])[]): {
+		readonly objects: readonly ObjectFrameInput[];
+		readonly runCounts: readonly number[];
+	} {
+		const orderedInstances: import("../systems/static-resources").ObjectInstanceData[] =
 			[];
-		const submissions: ObjectFrameInput[] = [];
-		const schedulePhase = (phase: readonly ObjectFrameInput[]) =>
-			formAdjacentTransparentInstanceRuns(
+		const objects: ObjectFrameInput[] = [];
+		const runCounts: number[] = [];
+		for (const phase of phases) {
+			const scheduled = formAdjacentObjectInstanceRuns(
 				phase,
 				(object) => object.instances?.kind === "frame-template",
 				(left, right) =>
@@ -1380,53 +1453,48 @@ export class WebGL2Renderer implements Renderer {
 					right.instances?.kind === "frame-template" &&
 					compareFrameTemplateBatchIdentity(left, right) === 0,
 			);
-		const farScheduled = schedulePhase(ordered.far);
-		const nearScheduled = schedulePhase(ordered.near);
-		const farRunCount = farScheduled.filter(
-			(submission) => submission.kind === "frame-instance-run",
-		).length;
-		const nearRunCount = nearScheduled.filter(
-			(submission) => submission.kind === "frame-instance-run",
-		).length;
-		this.#frameSelectionMetrics.transparentFrameRunCount +=
-			farRunCount + nearRunCount;
-		this.#frameSelectionMetrics.farTransparentFrameRunCount += farRunCount;
-		this.#frameSelectionMetrics.nearTransparentFrameRunCount += nearRunCount;
-		const scheduled = [...farScheduled, ...nearScheduled];
-		for (const submission of scheduled) {
-			if (submission.kind === "single") {
-				submissions.push(submission.value);
-				continue;
-			}
-			const [object, ...rest] = submission.values;
-			if (!object || object.instances?.kind !== "frame-template") {
-				throw new Error("Frame-instance run has no template.");
-			}
-			const firstInstance = orderedInstances.length;
-			orderedInstances.push(object.instances.instance);
-			for (const adjacent of rest) {
-				if (adjacent.instances?.kind !== "frame-template") {
-					throw new Error("Frame-instance run contains a non-template value.");
+			runCounts.push(
+				scheduled.filter(
+					(submission) => submission.kind === "frame-instance-run",
+				).length,
+			);
+			for (const submission of scheduled) {
+				if (submission.kind === "single") {
+					objects.push(submission.value);
+					continue;
 				}
-				orderedInstances.push(adjacent.instances.instance);
+				const [object, ...rest] = submission.values;
+				if (!object || object.instances?.kind !== "frame-template") {
+					throw new Error("Frame-instance run has no template.");
+				}
+				const firstInstance = orderedInstances.length;
+				orderedInstances.push(object.instances.instance);
+				for (const adjacent of rest) {
+					if (adjacent.instances?.kind !== "frame-template") {
+						throw new Error(
+							"Frame-instance run contains a non-template value.",
+						);
+					}
+					orderedInstances.push(adjacent.instances.instance);
+				}
+				objects.push({
+					...object,
+					instances: {
+						cohortKey: object.instances.cohortKey,
+						firstInstance,
+						instanceCount: submission.values.length,
+						kind: "frame-range",
+					},
+				});
 			}
-			submissions.push({
-				...object,
-				instances: {
-					cohortKey: object.instances.cohortKey,
-					firstInstance,
-					instanceCount: submission.values.length,
-					kind: "frame-range",
-				},
-			});
 		}
 		this.#frameInstances.prepareView(orderedInstances);
 		if (orderedInstances.length > 0) {
-			this.#frameSelectionMetrics.transparentFrameUploadCount += 1;
-			this.#frameSelectionMetrics.transparentFrameUploadBytes +=
-				orderedInstances.length * STATIC_INSTANCE_RECORD_BYTES;
+			this.#frameSelectionMetrics.frameInstanceUploadCount += 1;
+			this.#frameSelectionMetrics.frameInstanceUploadBytes +=
+				orderedInstances.length * OBJECT_INSTANCE_RECORD_BYTES;
 		}
-		return submissions;
+		return { objects, runCounts };
 	}
 
 	#drawObjectRange(
@@ -1622,9 +1690,15 @@ export class WebGL2Renderer implements Renderer {
 			);
 		}
 		const sourceTriangleCount = object.indexCount / 3;
-		this.#frameSelectionMetrics.submittedStaticObjectDrawCount += 1;
-		this.#frameSelectionMetrics.submittedStaticObjectTriangleCount +=
-			sourceTriangleCount * submittedInstanceCount;
+		if (object.source === "dynamic") {
+			this.#frameSelectionMetrics.submittedDynamicDrawCount += 1;
+			this.#frameSelectionMetrics.submittedDynamicInstanceCount +=
+				submittedInstanceCount;
+		} else {
+			this.#frameSelectionMetrics.submittedStaticObjectDrawCount += 1;
+			this.#frameSelectionMetrics.submittedStaticObjectTriangleCount +=
+				sourceTriangleCount * submittedInstanceCount;
+		}
 		if (object.source === "env-cell-shell") {
 			this.#frameSelectionMetrics.submittedEnvCellShellDrawCount += 1;
 			this.#frameSelectionMetrics.submittedEnvCellShellTriangleCount +=
@@ -1637,7 +1711,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#frameSelectionMetrics.submittedEnvCellResidentTriangleCount +=
 				sourceTriangleCount * submittedInstanceCount;
 		}
-		if (object.drawKind === "baked") {
+		if (object.drawKind === "baked" && object.source !== "dynamic") {
 			this.#frameSelectionMetrics.submittedBakedStaticObjectDrawCount += 1;
 			this.#frameSelectionMetrics.submittedBakedStaticObjectTriangleCount +=
 				sourceTriangleCount;
@@ -1651,14 +1725,14 @@ export class WebGL2Renderer implements Renderer {
 			}
 		}
 		if (object.ordering === "transparent") {
-			this.#frameSelectionMetrics.submittedTransparentStaticDrawCount += 1;
+			this.#frameSelectionMetrics.submittedTransparentObjectDrawCount += 1;
 			if (object.drawKind === "instanced") {
 				this.#frameSelectionMetrics.submittedTransparentInstanceCount +=
 					submittedInstanceCount;
 			}
 		}
 		if (object.ordering === "additive") {
-			this.#frameSelectionMetrics.submittedAdditiveStaticDrawCount += 1;
+			this.#frameSelectionMetrics.submittedAdditiveObjectDrawCount += 1;
 		}
 	}
 
@@ -1826,9 +1900,17 @@ function sortObjectFrameInputs(objects: ObjectFrameInput[]): void {
 		}
 		const ordering = left.ordering.localeCompare(right.ordering);
 		if (ordering !== 0) return ordering;
-		return objectMaterialSortKey(left).localeCompare(
+		const material = objectMaterialSortKey(left).localeCompare(
 			objectMaterialSortKey(right),
 		);
+		if (material !== 0) return material;
+		if (
+			left.instances?.kind === "frame-template" &&
+			right.instances?.kind === "frame-template"
+		) {
+			return compareFrameTemplateBatchIdentity(left, right);
+		}
+		return 0;
 	});
 }
 
@@ -1876,6 +1958,8 @@ function compareFrameTemplateBatchIdentity(
 	}
 	return (
 		leftInstances.cohortKey.localeCompare(rightInstances.cohortKey) ||
+		left.source.localeCompare(right.source) ||
+		left.renderDomainKey.localeCompare(right.renderDomainKey) ||
 		left.geometry.localeCompare(right.geometry) ||
 		left.landblockId.localeCompare(right.landblockId) ||
 		left.indexStart - right.indexStart ||

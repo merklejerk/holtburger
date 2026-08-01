@@ -93,8 +93,10 @@ describe("prepareStaticObjectGeometry", () => {
 				resourceNamespace: "static-install:empty" as const,
 				source: {
 					...source([]),
-					dynamicResidents: [
-						resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
+					dynamicSources: [
+						dynamicSource(
+							resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
+						),
 					],
 				},
 			}),
@@ -262,13 +264,10 @@ describe("prepareStaticObjectGeometry", () => {
 		);
 		const input = {
 			...source([staticResident]),
-			dynamicResidents: [
-				{ ...staticResident, id: "dynamic-shared-definition" },
-			],
+			dynamicSources: [dynamicSource(staticResident)],
 		};
 		const positions =
-			input.dynamicResidents[0]!.presentation.parts[0]!.geometry.positions
-				.buffer;
+			input.dynamicSources[0]!.presentation.parts[0]!.geometry.positions.buffer;
 		const worker = new StaticObjectGeometryWorker({
 			createGeometryWorker: () => new TransferWorkerPort(),
 		});
@@ -281,7 +280,7 @@ describe("prepareStaticObjectGeometry", () => {
 
 		expect(positions.byteLength).toBeGreaterThan(0);
 		expect(
-			input.dynamicResidents[0]!.presentation.parts[0]!.geometry.positions,
+			input.dynamicSources[0]!.presentation.parts[0]!.geometry.positions,
 		).toEqual(Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]));
 		expect(result?.drawUnits).toHaveLength(1);
 		worker.destroy();
@@ -566,7 +565,7 @@ function source(
 	staticResidents: readonly ReturnType<typeof resident>[],
 ): ResolvedOutdoorStaticLayerSource {
 	return {
-		dynamicResidents: [],
+		dynamicSources: [],
 		kind: LandblockLayerKind.Buildings,
 		landblockId: "0xda55ffff",
 		staticResidents,
@@ -586,7 +585,7 @@ function envCellResidentSource(
 	staticResidents: readonly ReturnType<typeof resident>[],
 ): ResolvedEnvCellStaticObjectSource {
 	return {
-		dynamicResidents: [],
+		dynamicSources: [],
 		envCellId: "0xda550101",
 		kind: LandblockLayerKind.EnvCells,
 		landblockId: "0xda55ffff",
@@ -618,19 +617,19 @@ function resident(
 		translucency: 0,
 	};
 	return {
-		appearance: null,
+		behavior: {
+			animationId: null,
+			kind: "none",
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
 		identity: { kind: "authored", sourceId: id },
 		localBounds: null,
 		placement: { envCellId: null, landblockId: "0xda55ffff", localTransform },
 		presentation: {
-			effects: {
-				animationId: null,
-				physicsScriptId: null,
-				physicsScriptTableId: null,
-				soundTableId: null,
-			},
+			appearanceKey: `appearance:${id}`,
 			id: `presentation:${id}` as const,
-			motion: null,
 			parts: [
 				{
 					defaultScale: new Vec3(1, 1, 1),
@@ -661,6 +660,23 @@ function resident(
 			sourceAssetId: "0x01000001",
 		},
 		scale,
+		setupId: null,
+	};
+}
+
+function dynamicSource(
+	sourceResident: ReturnType<typeof resident>,
+): import("../resolution/landblock-layer").AuthoredDynamicSource {
+	return {
+		...sourceResident,
+		behavior: {
+			animationId: "0x03000001",
+			kind: "animation-only",
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
+		setupId: "0x02000001",
 	};
 }
 

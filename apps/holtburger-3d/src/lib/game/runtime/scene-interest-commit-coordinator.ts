@@ -1,9 +1,5 @@
 import { log, LogLevel } from "../../logs";
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
-} from "../commit/types";
+import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
 import {
 	diffSceneInterest,
 	groupLandblockLayers,
@@ -28,7 +24,7 @@ export interface SceneInterestCommitCoordinatorCallbacks {
 		readonly revision: SceneInterestRevision;
 	}) => void;
 	readonly prepared: (options: {
-		readonly artifact: CommitBundle;
+		readonly artifact: LandblockLayerCommit;
 		readonly revision: SceneInterestRevision;
 	}) => void;
 	readonly unavailable: (options: {
@@ -110,7 +106,6 @@ export class SceneInterestCommitCoordinator {
 			);
 			const preparedLayers = new Set<string>();
 			for (const artifact of artifacts) {
-				if (artifact.kind !== CommitBundleSourceKind.LandblockLayer) continue;
 				const layer = { id: artifact.landblockId, layer: artifact.layer };
 				if (!requestedLayers.has(layerKey(layer))) continue;
 				if (!this.#isCurrent(layer, dispatchRevision)) continue;

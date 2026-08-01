@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId, WorldObjectGuid } from "../game-types";
+import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
 import type { ScenePlacement, SceneScope } from "../scene";
 import type {
@@ -10,63 +10,91 @@ import {
 	type OutdoorStaticLayerKind,
 } from "../runtime/scene-interest";
 import type {
-	ParentLocation,
 	ResolvedGeometry,
 	ResolvedMaterial,
-	ResolvedObjectAppearance,
 	ResolvedObjectPresentation,
 } from "./presentation";
 
-/**
- * Another object owning this one's position, as the world resolved it.
- *
- * Mirrors `PhysicsAttachment` in `holtburger-world`. `placement` is the setup placement-frame key
- * the server sent for this object, chosen independently of `location`.
- */
-export interface ResolvedEntityAttachment {
-	readonly parent: WorldObjectGuid;
-	readonly location: ParentLocation;
-	readonly placement: number;
+/** Landblock-scoped identity of one DAT-authored resident. */
+export interface ResolvedResidentIdentity {
+	readonly kind: "authored";
+	readonly sourceId: string;
 }
-
-/**
- * Who a resident is, which decides what relationships it can enter.
- *
- * The two arms are genuinely different populations. DAT-authored residents are placed by the
- * landblock or cell that authored them and have no server identity at all — their content address
- * is landblock-scoped and index-derived, so it could not name a parent in another landblock even if
- * one existed. World objects carry a server GUID, which is global.
- *
- * Attachment therefore lives inside the world arm: an authored resident being attached to something
- * is not a state this type can express. Housing hooks are not a counterexample — a hook is itself a
- * `WorldObject` with a GUID, and hooking an item swaps the hook's own appearance rather than
- * attaching a second object (`ACE/Source/ACE.Server/WorldObjects/Hook.cs:139-176`).
- */
-export type ResolvedResidentIdentity =
-	| { readonly kind: "authored"; readonly sourceId: string }
-	| {
-			readonly kind: "world";
-			readonly guid: WorldObjectGuid;
-			/** Set when another object owns this one's position; its own placement is then unused. */
-			readonly attachment: ResolvedEntityAttachment | null;
-	  };
 
 /** Stable string key for resource addressing and diagnostics, derived from the identity. */
 export function residentKey(identity: ResolvedResidentIdentity): string {
-	return identity.kind === "authored"
-		? identity.sourceId
-		: `world/${identity.guid}`;
+	return identity.sourceId;
 }
+
+interface ResolvedBehaviorIds {
+	/** Setup default sound table retained for the authored-effects plan. */
+	readonly soundTableId: DatAssetId | null;
+}
+
+type ResolvedScriptIds =
+	| {
+			readonly physicsScriptId: DatAssetId;
+			readonly physicsScriptTableId: DatAssetId | null;
+	  }
+	| {
+			readonly physicsScriptId: null;
+			readonly physicsScriptTableId: DatAssetId;
+	  };
+
+/** Closed setup-default capability classification, computed once at the decode boundary. */
+export type ResolvedObjectBehavior = ResolvedBehaviorIds &
+	(
+		| {
+				readonly kind: "none";
+				readonly animationId: null;
+				readonly physicsScriptId: null;
+				readonly physicsScriptTableId: null;
+		  }
+		| {
+				readonly kind: "animation-only";
+				readonly animationId: DatAssetId;
+				readonly physicsScriptId: null;
+				readonly physicsScriptTableId: null;
+		  }
+		| (ResolvedScriptIds & {
+				readonly kind: "script-only";
+				readonly animationId: null;
+		  })
+		| (ResolvedScriptIds & {
+				readonly kind: "animation-and-script";
+				readonly animationId: DatAssetId;
+		  })
+	);
 
 /** One placed object resident resolved from a layer source. */
 export interface ResolvedObjectResident {
 	readonly identity: ResolvedResidentIdentity;
+	/** Setup DAT identity, or null for a direct GfxObj presentation. */
+	readonly setupId: DatAssetId | null;
 	readonly presentation: ResolvedObjectPresentation;
+	/** IDs only; decoded animation/script payloads remain behind content asset requests. */
+	readonly behavior: ResolvedObjectBehavior;
 	readonly placement: ScenePlacement;
 	readonly scale: Vec3;
 	/** Bounds in the object's root-local coordinate space. */
 	readonly localBounds: AABB3 | null;
-	readonly appearance: ResolvedObjectAppearance | null;
+}
+
+/** Authored resident promoted from static baking because its setup owns a default animation. */
+export interface AuthoredDynamicSource {
+	readonly identity: ResolvedResidentIdentity;
+	/** Exact SetupModel DAT identity used to load setup-default behavior assets. */
+	readonly setupId: DatAssetId;
+	/** Resolved visual selection; immutable resources are shared by canonical appearance identity. */
+	readonly presentation: ResolvedObjectPresentation;
+	readonly scale: Vec3;
+	readonly placement: ScenePlacement;
+	readonly localBounds: AABB3 | null;
+	/** Animation-capable default behavior; decoded payloads are deliberately absent. */
+	readonly behavior: Extract<
+		ResolvedObjectBehavior,
+		{ readonly kind: "animation-only" | "animation-and-script" }
+	>;
 }
 
 /** Reusable structured-interior definition embedded by environment cells. */
@@ -87,10 +115,11 @@ export interface ResolvedEnvCellResidentSource {
 	readonly id: string;
 	readonly sourceDid: string;
 	readonly presentation: ResolvedObjectPresentation;
+	readonly setupId: DatAssetId | null;
+	readonly behavior: ResolvedObjectBehavior;
 	readonly placement: ScenePlacement;
 	readonly scale: Vec3;
 	readonly localBounds: AABB3 | null;
-	readonly appearance: ResolvedObjectAppearance | null;
 }
 
 /** Environment-cell presentation composed from a reusable structure and cell facts. */
@@ -212,7 +241,7 @@ export interface ResolvedObjectLayerSource {
 		| LandblockLayerKind.Generated;
 	readonly landblockId: LandblockId;
 	readonly staticResidents: readonly ResolvedObjectResident[];
-	readonly dynamicResidents: readonly ResolvedObjectResident[];
+	readonly dynamicSources: readonly AuthoredDynamicSource[];
 }
 
 /** Outdoor-static source kinds admitted by shared geometry preparation and realization contracts. */
@@ -226,8 +255,8 @@ export interface ResolvedEnvCellStaticObjectSource {
 	readonly landblockId: LandblockId;
 	readonly envCellId: EnvCellId;
 	readonly staticResidents: readonly ResolvedObjectResident[];
-	/** Default-animated authored residents remain on the existing explicit deferral seam. */
-	readonly dynamicResidents: readonly ResolvedObjectResident[];
+	/** Animation sources retained so worker transfer cannot detach their shared visual buffers. */
+	readonly dynamicSources: readonly AuthoredDynamicSource[];
 }
 
 /** Static-object source shape shared by outdoor layers and one exact EnvCell scope. */

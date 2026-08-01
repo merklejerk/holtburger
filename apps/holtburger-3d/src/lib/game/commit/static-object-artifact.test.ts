@@ -9,9 +9,9 @@ import {
 } from "../textures/types";
 import { assembleStaticObjectArtifact } from "./static-object-artifact";
 import type {
-	FrameStreamedStaticInstanceTemplate,
+	FrameStreamedObjectInstanceTemplate,
 	StaticObjectDrawUnit,
-	StaticObjectMaterialBinding,
+	ObjectMaterialBinding,
 } from "./artifacts";
 import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
 
@@ -69,7 +69,7 @@ function geometryResult(
 ): StaticObjectGeometryPreparationResult {
 	const drawUnits: StaticObjectDrawUnit[] =
 		strategy === "frame-streamed" ? [] : [drawUnit(strategy)];
-	const frameStreamedInstances: FrameStreamedStaticInstanceTemplate[] =
+	const frameStreamedInstances: FrameStreamedObjectInstanceTemplate[] =
 		strategy === "frame-streamed"
 			? [
 					{
@@ -130,7 +130,7 @@ function drawUnit(strategy: "baked" | "instanced"): StaticObjectDrawUnit {
 		: { ...common, instances: STREAM_KEY, kind: "instanced" };
 }
 
-function material(): StaticObjectMaterialBinding {
+function material(): ObjectMaterialBinding {
 	return {
 		detailRole: null,
 		palettedClipMap: false,
@@ -168,7 +168,7 @@ function instance() {
 
 function source(): ResolvedOutdoorStaticLayerSource {
 	return {
-		dynamicResidents: [],
+		dynamicSources: [],
 		kind: LandblockLayerKind.Generated,
 		landblockId: "0xda55ffff",
 		staticResidents: [],

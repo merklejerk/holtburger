@@ -85,6 +85,9 @@ try {
 						metrics: result.state.metrics,
 						ready: result.state.ready,
 						screenshotPath: options.screenshotPath,
+						isolateAuthoredDynamics: options.isolateAuthoredDynamics,
+						excludeAuthoredDynamics: options.excludeAuthoredDynamics,
+						measureMs: options.measureMs,
 						settleMs: options.settleMs,
 					},
 			null,
@@ -134,9 +137,12 @@ function parseArgs(args) {
 		envCellRadius: null,
 		cameraPitchDegrees: -45,
 		cameraYawDegrees: 0,
+		cameraHeight: 600,
 		explicitObjectRadius: null,
 		generatedObjectRadius: null,
 		disableGeneratedBeforeCapture: false,
+		isolateAuthoredDynamics: false,
+		excludeAuthoredDynamics: false,
 		cameraLandblockId: null,
 		relocateLandblockId: null,
 		traceAnchorCellId: null,
@@ -154,6 +160,7 @@ function parseArgs(args) {
 		lifecycle: false,
 		fixture: null,
 		screenshotPath: null,
+		measureMs: 0,
 		settleMs: DEFAULT_SETTLE_MS,
 	};
 	for (let index = 0; index < args.length; index += 1) {
@@ -211,6 +218,12 @@ function parseArgs(args) {
 			case "--disable-generated-before-capture":
 				parsed.disableGeneratedBeforeCapture = true;
 				break;
+			case "--isolate-authored-dynamics":
+				parsed.isolateAuthoredDynamics = true;
+				break;
+			case "--exclude-authored-dynamics":
+				parsed.excludeAuthoredDynamics = true;
+				break;
 			case "--camera-landblock":
 				parsed.cameraLandblockId = requireValue(args, ++index, arg);
 				break;
@@ -227,6 +240,12 @@ function parseArgs(args) {
 				parsed.cameraPitchDegrees = Number(requireValue(args, ++index, arg));
 				if (!Number.isFinite(parsed.cameraPitchDegrees)) {
 					throw new Error("--camera-pitch must be finite.");
+				}
+				break;
+			case "--camera-height":
+				parsed.cameraHeight = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.cameraHeight)) {
+					throw new Error("--camera-height must be finite.");
 				}
 				break;
 			case "--lifecycle":
@@ -317,6 +336,12 @@ function parseArgs(args) {
 					throw new Error("--settle-ms must be a non-negative number.");
 				}
 				break;
+			case "--measure-ms":
+				parsed.measureMs = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.measureMs) || parsed.measureMs < 0) {
+					throw new Error("--measure-ms must be a non-negative number.");
+				}
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -353,6 +378,11 @@ function parseArgs(args) {
 	if (parsed.filteringCycle && parsed.textureFiltering !== null) {
 		throw new Error(
 			"--filtering-cycle and --texture-filtering cannot be combined.",
+		);
+	}
+	if (parsed.isolateAuthoredDynamics && parsed.excludeAuthoredDynamics) {
+		throw new Error(
+			"--isolate-authored-dynamics and --exclude-authored-dynamics cannot be combined.",
 		);
 	}
 	if (parsed.cameraLandblockId && parsed.relocateLandblockId) {
@@ -420,6 +450,10 @@ Options:
   --generated-object-radius <n> Request generated objects within the building neighborhood.
   --disable-generated-before-capture
                          Withdraw generated interest after the initial snapshot.
+  --isolate-authored-dynamics
+                         Keep terrain and promoted outdoor dynamics but strip outdoor statics.
+  --exclude-authored-dynamics
+                         Keep outdoor statics but strip promoted dynamics.
   --camera-yaw <degrees>    Initial and relocation camera yaw. Default: 0
   --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
   --camera-landblock <hex>  Move only the camera after the initial request.
@@ -447,6 +481,7 @@ Options:
   --fixture <name>      Use the blended, instanced, portal-hybrid-execution,
                          portal-internal-execution, or portal-substrate fixture.
   --settle-ms <ms>      Wait after requesting terrain. Default: ${DEFAULT_SETTLE_MS}
+  --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --chrome-path <path>  Chrome executable. Default: ${DEFAULT_CHROME_PATH}
 `);
@@ -535,7 +570,24 @@ function assertPortalSubstrateFixture(state) {
 
 function briefHarnessReport(result) {
 	const staticObjects = result.state.staticObjects;
+	const authoredDynamics = result.state.authoredDynamics;
 	return {
+		authoredDynamics:
+			authoredDynamics === null
+				? null
+				: {
+						animation: authoredDynamics.animation,
+						dynamics: authoredDynamics.dynamics,
+						hooks: {
+							activeHookStateCount: authoredDynamics.hooks.activeHookStateCount,
+							deferredHookCount: authoredDynamics.hooks.deferredHookCount,
+							executedHookCount: authoredDynamics.hooks.executedHookCount,
+							recentObservationCount:
+								authoredDynamics.hooks.observations.length,
+						},
+						pose: authoredDynamics.pose,
+						residentCount: authoredDynamics.residents.length,
+					},
 		consoleMessages: result.consoleMessages.filter(
 			({ level }) => level === "error" || level === "exception",
 		),
@@ -907,7 +959,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const fixture = options.fixture
 		? `&fixture=${encodeURIComponent(options.fixture)}`
 		: "";
-	const pageUrl = `${viteUrl}/harness/terrain/?contentHost=${encodeURIComponent(contentHostUrl)}${fixture}`;
+	const dynamicIsolation = options.isolateAuthoredDynamics
+		? "&isolateAuthoredDynamics=true"
+		: "";
+	const dynamicExclusion = options.excludeAuthoredDynamics
+		? "&excludeAuthoredDynamics=true"
+		: "";
+	const pageUrl = `${viteUrl}/harness/terrain/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -1164,6 +1222,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				],
 			);
 			await delay(50);
+		}
+		if (options.measureMs > 0) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.resetTiming",
+				[],
+			);
+			await delay(options.measureMs);
 		}
 		const state = await evaluate(
 			client,

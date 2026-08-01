@@ -5,6 +5,10 @@
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import { SyntheticInstancedObjectPipeline } from "./synthetic-instanced-object-pipeline";
+	import {
+		DynamicOnlyLandblockSource,
+		WithoutAuthoredDynamicsLandblockSource,
+	} from "./dynamic-only-landblock-source";
 	import type { EnvCellId, LandblockId } from "../../lib/game/game-types";
 	import {
 		createLandblockWorldOrigin,
@@ -46,7 +50,22 @@
 	const CAMERA_NEAR = 0.5;
 	const CAMERA_FAR = 2_000;
 	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
-	const CAMERA_HEIGHT = 600;
+	const cameraHeightSource = new URLSearchParams(window.location.search).get(
+		"cameraHeight",
+	);
+	const CAMERA_HEIGHT =
+		cameraHeightSource === null ? 600 : Number(cameraHeightSource);
+	const ISOLATE_AUTHORED_DYNAMICS =
+		new URLSearchParams(window.location.search).get(
+			"isolateAuthoredDynamics",
+		) === "true";
+	const EXCLUDE_AUTHORED_DYNAMICS =
+		new URLSearchParams(window.location.search).get(
+			"excludeAuthoredDynamics",
+		) === "true";
+	if (!Number.isFinite(CAMERA_HEIGHT)) {
+		throw new Error("Terrain harness camera height must be finite.");
+	}
 
 	interface TerrainHarnessApi {
 		/** Request canonical outdoor layers for one neighborhood. */
@@ -78,6 +97,8 @@
 		) => void;
 		/** Change filterable texture quality without changing content or resources. */
 		readonly setTextureFiltering: (policy: string) => void;
+		/** Reset steady-state frame timing after asynchronous content publication settles. */
+		readonly resetTiming: () => void;
 		/** Withdraw every terrain and outdoor-static layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
 		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
@@ -110,6 +131,9 @@
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
+		readonly authoredDynamics: ReturnType<
+			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+		> | null;
 		readonly frameSettings: FrameSettings;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		/** Browser main-thread timing facts accumulated during this harness session. */
@@ -137,12 +161,31 @@
 	}
 
 	interface TerrainHarnessTiming {
+		readonly sampleCount: number;
+		readonly averageTickMs: number;
+		readonly averageRenderMs: number;
+		readonly averageFrameWorkMs: number;
+		readonly longestTickMs: number;
+		readonly longestRenderMs: number;
+		readonly longestFrameWorkMs: number;
 		/** Largest requestAnimationFrame gap after the harness began drawing. */
 		readonly longestFrameGapMs: number;
 		/** Long Task API events observed while this harness was mounted. */
 		readonly longTaskCount: number;
 		/** Largest Long Task API event duration. */
 		readonly longestLongTaskMs: number;
+	}
+
+	interface TerrainHarnessTimingAccumulator {
+		sampleCount: number;
+		totalTickMs: number;
+		totalRenderMs: number;
+		longestTickMs: number;
+		longestRenderMs: number;
+		longestFrameWorkMs: number;
+		longestFrameGapMs: number;
+		longTaskCount: number;
+		longestLongTaskMs: number;
 	}
 
 	interface HarnessGlobal {
@@ -152,7 +195,14 @@
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let error: string | null = $state(null);
 	let frames = 0;
-	let timing: TerrainHarnessTiming = $state({
+	let lastFrameAt: number | undefined;
+	let timing: TerrainHarnessTimingAccumulator = $state({
+		sampleCount: 0,
+		totalTickMs: 0,
+		totalRenderMs: 0,
+		longestTickMs: 0,
+		longestRenderMs: 0,
+		longestFrameWorkMs: 0,
 		longestFrameGapMs: 0,
 		longTaskCount: 0,
 		longestLongTaskMs: 0,
@@ -330,6 +380,37 @@
 		runtime.clearSceneInterest();
 	}
 
+	function resetTiming(): void {
+		timing = {
+			sampleCount: 0,
+			totalTickMs: 0,
+			totalRenderMs: 0,
+			longestTickMs: 0,
+			longestRenderMs: 0,
+			longestFrameWorkMs: 0,
+			longestFrameGapMs: 0,
+			longTaskCount: 0,
+			longestLongTaskMs: 0,
+		};
+		lastFrameAt = undefined;
+	}
+
+	function timingSnapshot(): TerrainHarnessTiming {
+		const divisor = Math.max(1, timing.sampleCount);
+		return {
+			averageFrameWorkMs: (timing.totalTickMs + timing.totalRenderMs) / divisor,
+			averageRenderMs: timing.totalRenderMs / divisor,
+			averageTickMs: timing.totalTickMs / divisor,
+			longestFrameGapMs: timing.longestFrameGapMs,
+			longestFrameWorkMs: timing.longestFrameWorkMs,
+			longestLongTaskMs: timing.longestLongTaskMs,
+			longestRenderMs: timing.longestRenderMs,
+			longestTickMs: timing.longestTickMs,
+			longTaskCount: timing.longTaskCount,
+			sampleCount: timing.sampleCount,
+		};
+	}
+
 	function tracePortalSegment(
 		rawEnvCellId: string,
 		start: readonly [number, number, number],
@@ -476,7 +557,6 @@
 
 		let destroyed = false;
 		let frameHandle: number | undefined;
-		let lastFrameAt: number | undefined;
 		let longTaskObserver: PerformanceObserver | undefined;
 		let pipeline:
 			| StandardCommitPipeline
@@ -489,6 +569,11 @@
 		const start = async (): Promise<void> => {
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
+				const landblockSource = ISOLATE_AUTHORED_DYNAMICS
+					? new DynamicOnlyLandblockSource(contentSource)
+					: EXCLUDE_AUTHORED_DYNAMICS
+						? new WithoutAuthoredDynamicsLandblockSource(contentSource)
+						: contentSource;
 				device = await WebGL2Device.build(canvasElement!);
 				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
 				if (fixture === "portal-substrate") {
@@ -508,7 +593,7 @@
 						: fixture === "instanced"
 							? new SyntheticInstancedObjectPipeline()
 							: await StandardCommitPipeline.build({
-									sourceBatch: contentSource,
+									sourceBatch: landblockSource,
 								});
 				runtime = await GameRuntime.build(
 					{
@@ -519,6 +604,7 @@
 						resources: device.resources,
 					},
 					pipeline,
+					contentSource,
 					contentSource,
 				);
 				// Harness comparisons select their render policy explicitly and start from flat.
@@ -553,11 +639,14 @@
 					setEnvCellCamera,
 					setEnvCellRenderMode,
 					setTextureFiltering,
+					resetTiming,
 					tracePortalSegment,
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;
 						return {
+							authoredDynamics:
+								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
 							error,
 							frameSettings,
 							hybridPortalExecution,
@@ -585,11 +674,7 @@
 							staticObjects,
 							sourceBatches:
 								contentSource?.getLandblockSourceBatchDiagnostics() ?? [],
-							timing: {
-								longestFrameGapMs: timing.longestFrameGapMs,
-								longTaskCount: timing.longTaskCount,
-								longestLongTaskMs: timing.longestLongTaskMs,
-							},
+							timing: timingSnapshot(),
 							textureFilteringCapabilities,
 						};
 					},
@@ -607,7 +692,25 @@
 						};
 					}
 					lastFrameAt = now;
-					runtime.frame(now / 1_000);
+					const tickStartedAt = performance.now();
+					runtime.tick();
+					const renderStartedAt = performance.now();
+					runtime.render(renderStartedAt / 1_000);
+					const frameFinishedAt = performance.now();
+					const tickMs = renderStartedAt - tickStartedAt;
+					const renderMs = frameFinishedAt - renderStartedAt;
+					timing = {
+						...timing,
+						longestFrameWorkMs: Math.max(
+							timing.longestFrameWorkMs,
+							frameFinishedAt - tickStartedAt,
+						),
+						longestRenderMs: Math.max(timing.longestRenderMs, renderMs),
+						longestTickMs: Math.max(timing.longestTickMs, tickMs),
+						sampleCount: timing.sampleCount + 1,
+						totalRenderMs: timing.totalRenderMs + renderMs,
+						totalTickMs: timing.totalTickMs + tickMs,
+					};
 					frames += 1;
 					frameHandle = window.requestAnimationFrame(frame);
 				};

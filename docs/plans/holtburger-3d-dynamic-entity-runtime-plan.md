@@ -35,6 +35,8 @@ pose, resource, and renderer systems instead of designing them alongside transpo
 
 Plan: [holtburger-3d-static-authored-animation-runtime-plan.md](holtburger-3d-static-authored-animation-runtime-plan.md)
 
+Progress: Complete after renewed retail visual/performance validation (2026-08-01).
+
 Outcome:
 
 - Setup-backed authored residents with default animation render and animate.
@@ -192,7 +194,8 @@ scenario policy, sessions, and transport remain local.
 
 ## Overall Definition of Done
 
-- [ ] The static-authored animation plan is complete with real representative workload evidence.
+- [x] The static-authored animation plan has retail visual parity and representative workload
+      performance evidence.
 - [ ] The static-authored effects plan is complete with real script, particle, and sound consumers.
 - [ ] The spawned entity/Explorer runtime plan is complete across the Rust/Tauri/TypeScript boundary.
 - [ ] Authored and spawned entities reuse one frontend template, behavior, pose, effect, and renderer

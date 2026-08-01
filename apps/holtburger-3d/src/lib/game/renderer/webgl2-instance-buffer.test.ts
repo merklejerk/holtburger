@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Mat4 } from "../math/types";
-import type { StaticInstanceData } from "../systems/static-resources";
+import type { ObjectInstanceData } from "../systems/static-resources";
 import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import {
 	OBJECT_INSTANCE_STRIDE_BYTES,
@@ -108,7 +108,7 @@ describe("WebGL2InstanceBuffer", () => {
 function instance(
 	sourceToLandblock: Mat4,
 	color: readonly [number, number, number, number],
-): StaticInstanceData {
+): ObjectInstanceData {
 	return {
 		color: { a: color[3], b: color[2], g: color[1], r: color[0] },
 		sourceToLandblock,

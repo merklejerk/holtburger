@@ -18,7 +18,7 @@ function source(
 	kind: ResolvedStaticObjectLayerSource["kind"],
 ): ResolvedStaticObjectLayerSource {
 	const common = {
-		dynamicResidents: [],
+		dynamicSources: [],
 		landblockId: "0xda55ffff" as const,
 		staticResidents: [],
 	};

@@ -6,6 +6,7 @@
 	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
 	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
+	import type { GameRuntime } from "../lib/game/runtime/game-runtime";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type {
 		EnvCellRenderMode,
@@ -61,6 +62,9 @@
 		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
 		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
 		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
+		readonly authoredDynamicRuntimeDiagnostics: ReturnType<
+			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+		> | null;
 		/** Latest low-rate outdoor-static and texture atlas diagnostic snapshot. */
 		readonly staticObjectRuntimeDiagnostics: StaticObjectRuntimeDiagnostics | null;
 		/** Explicit diagnostic readback of one active packed atlas page. */
@@ -83,6 +87,7 @@
 		maximumTextureAnisotropy,
 		updateTextureFiltering,
 		frameSelectionMetrics,
+		authoredDynamicRuntimeDiagnostics,
 		staticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
 	}: Props = $props();
@@ -197,7 +202,10 @@
 								{updateTextureFiltering}
 							/>
 						{:else if activeTab.id === "frame"}
-							<ExplorerFramePanel metrics={frameSelectionMetrics} />
+							<ExplorerFramePanel
+								metrics={frameSelectionMetrics}
+								dynamics={authoredDynamicRuntimeDiagnostics}
+							/>
 						{:else if activeTab.id === "textures"}
 							<ExplorerTexturesPanel
 								diagnostics={staticObjectRuntimeDiagnostics}

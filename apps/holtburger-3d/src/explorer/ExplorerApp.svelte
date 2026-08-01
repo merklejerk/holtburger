@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { TauriAnimationAssetSource } from "../lib/assets/tauri-animation-asset-source";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -54,6 +55,9 @@
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let frameSelectionMetrics: FrameSelectionMetrics | null = $state(null);
+	let authoredDynamicRuntimeDiagnostics: ReturnType<
+		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+	> | null = $state(null);
 	let staticObjectRuntimeDiagnostics: StaticObjectRuntimeDiagnostics | null =
 		$state(null);
 	let lastFrameSelectionSampleAt = 0;
@@ -173,6 +177,7 @@
 			cameraLocation = null;
 			frameSelectionMetrics = null;
 			staticObjectRuntimeDiagnostics = null;
+			authoredDynamicRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
 			textureFilteringCapabilities = null;
@@ -229,6 +234,7 @@
 					webglDevice,
 					commitPipeline,
 					texturePixelSource,
+					TauriAnimationAssetSource.build(),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
 				applyEnvironment();
@@ -254,6 +260,7 @@
 						frameMetrics = null;
 						frameSelectionMetrics = null;
 						staticObjectRuntimeDiagnostics = null;
+						authoredDynamicRuntimeDiagnostics = null;
 						frameHandle = window.requestAnimationFrame(step);
 						return;
 					}
@@ -282,6 +289,8 @@
 						frameSelectionMetrics = gameRuntime.getFrameSelectionMetrics();
 						staticObjectRuntimeDiagnostics =
 							gameRuntime.getStaticObjectRuntimeDiagnostics();
+						authoredDynamicRuntimeDiagnostics =
+							gameRuntime.getAuthoredDynamicRuntimeDiagnostics();
 						lastFrameSelectionSampleAt = frameFinishedAt;
 					}
 					frameHandle = window.requestAnimationFrame(step);
@@ -348,6 +357,7 @@
 				null}
 			{updateTextureFiltering}
 			{frameSelectionMetrics}
+			{authoredDynamicRuntimeDiagnostics}
 			{staticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}
 		/>

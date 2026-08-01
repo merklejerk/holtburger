@@ -1,7 +1,7 @@
 use anyhow::Context;
 use holtburger_3d::{
     LandblockSourceLayer, discover_content_runtime, load_active_region_data_bytes,
-    load_landblock_source_batch_bytes, load_texture_pixels_bytes,
+    load_animation_bytes, load_landblock_source_batch_bytes, load_texture_pixels_bytes,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -36,6 +36,12 @@ struct TexturePixelsRequest {
     kind: String,
     purpose: String,
     source_asset_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimationRequest {
+    animation_id: String,
 }
 
 #[tokio::main]
@@ -109,6 +115,15 @@ async fn handle_connection(
             )
             .await
             {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/animation") => {
+            let request = serde_json::from_slice::<AnimationRequest>(&request.body)?;
+            match load_animation_bytes(runtime, &request.animation_id).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
                 }

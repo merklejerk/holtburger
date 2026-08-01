@@ -1,4 +1,7 @@
 import type { LandblockId } from "../game/game-types";
+import type { DatAssetId } from "../game/game-types";
+import type { AnimationAssetSource } from "./animation-asset-source";
+import { decodeAnimationRecord } from "./decode-animation-record";
 import type {
 	TexturePreparationServiceRequest,
 	TexturePreparationServiceResponse,
@@ -30,7 +33,10 @@ export interface HttpLandblockSourceBatchDiagnostic {
 
 /** Browser-compatible adapter for the same closed landblock batch contract used by Tauri. */
 export class HttpLandblockContentSource
-	implements LandblockSourceBatchSource, TexturePixelSource
+	implements
+		LandblockSourceBatchSource,
+		TexturePixelSource,
+		AnimationAssetSource
 {
 	readonly #baseUrl: URL;
 	readonly #activeRegion: ActiveRegionSource;
@@ -99,6 +105,15 @@ export class HttpLandblockContentSource
 		const bytes = await this.#postBinary("texture-pixels", request);
 		return decodeTexturePixels(bytes, request);
 	}
+
+	async loadAnimation(animationId: DatAssetId) {
+		return decodeAnimationRecord(
+			await this.#postBinary("animation", { animationId }),
+			animationId,
+		);
+	}
+
+	destroy(): void {}
 
 	async #postBinary(path: string, body: unknown): Promise<Uint8Array> {
 		return postBinary(this.#baseUrl, path, body);

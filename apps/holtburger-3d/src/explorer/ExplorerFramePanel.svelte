@@ -1,12 +1,16 @@
 <script lang="ts">
 	import type { FrameSelectionMetrics } from "../lib/game/renderer/renderer";
+	import type { GameRuntime } from "../lib/game/runtime/game-runtime";
 
 	interface Props {
 		/** Latest low-rate snapshot from the active renderer, if it exposes diagnostics. */
 		readonly metrics: FrameSelectionMetrics | null;
+		readonly dynamics: ReturnType<
+			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+		> | null;
 	}
 
-	let { metrics }: Props = $props();
+	let { metrics, dynamics }: Props = $props();
 </script>
 
 <div class="explorer-frame-panel">
@@ -15,6 +19,33 @@
 	{:else}
 		<p>Latest sampled renderer selection counts.</p>
 		<div class="ac-param-panel">
+			{#if dynamics !== null}
+				<div class="ac-param-row">
+					<span class="ac-param-key"
+						>Dynamic entities / templates / animations</span
+					>
+					<code
+						>{dynamics.dynamics.entityCount} /
+						{dynamics.dynamics.templates.templateCount} /
+						{dynamics.dynamics.animationResources.animationCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Animation sample / pose publish ms</span>
+					<code
+						>{dynamics.animation.lastSamplingDurationMs.toFixed(2)} /
+						{dynamics.pose.lastPublicationDurationMs.toFixed(2)}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Hook executed / deferred / fallback</span>
+					<code
+						>{dynamics.hooks.executedHookCount} /
+						{dynamics.hooks.deferredHookCount} /
+						{dynamics.dynamics.staticFallbackEntityCount}</code
+					>
+				</div>
+			{/if}
 			<div class="ac-param-row">
 				<span class="ac-param-key">Views</span>
 				<code>{metrics.viewCount}</code>
@@ -48,19 +79,19 @@
 			<div class="ac-param-row">
 				<span class="ac-param-key">Transparent candidates / runs</span>
 				<code
-					>{metrics.transparentStaticCandidateCount} / {metrics.transparentFrameRunCount}</code
+					>{metrics.transparentObjectCandidateCount} / {metrics.transparentFrameRunCount}</code
 				>
 			</div>
 			<div class="ac-param-row">
 				<span class="ac-param-key">Transparent far candidates / runs</span>
 				<code
-					>{metrics.farTransparentStaticCandidateCount} / {metrics.farTransparentFrameRunCount}</code
+					>{metrics.farTransparentObjectCandidateCount} / {metrics.farTransparentFrameRunCount}</code
 				>
 			</div>
 			<div class="ac-param-row">
 				<span class="ac-param-key">Transparent near candidates / runs</span>
 				<code
-					>{metrics.nearTransparentStaticCandidateCount} / {metrics.nearTransparentFrameRunCount}</code
+					>{metrics.nearTransparentObjectCandidateCount} / {metrics.nearTransparentFrameRunCount}</code
 				>
 			</div>
 			<div class="ac-param-row">
@@ -77,7 +108,9 @@
 			</div>
 			<div class="ac-param-row">
 				<span class="ac-param-key">Visible dynamics</span>
-				<code>{metrics.visibleDynamics}</code>
+				<code
+					>{metrics.visibleDynamicEntityCount} / {metrics.visibleDynamicPartCount}</code
+				>
 			</div>
 			<div class="ac-param-row">
 				<span class="ac-param-key">EnvCell mode / scopes</span>

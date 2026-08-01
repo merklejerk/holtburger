@@ -21,7 +21,7 @@ import { planEnvCellMaterialization } from "./env-cell-materialization";
 const LANDBLOCK_ID = "0x0001ffff" as LandblockId;
 const SHARED_GEOMETRY = geometry();
 const SHARED_MATERIAL = material();
-const STATIC_PRESENTATION = presentation(null);
+const STATIC_PRESENTATION = presentation();
 
 describe("planEnvCellMaterialization", () => {
 	it("moves structures independently while preserving authored landblock resident placements", () => {
@@ -89,8 +89,8 @@ describe("planEnvCellMaterialization", () => {
 		expect(outputs[0]?.geometry[0]?.key).toBe(outputs[1]?.geometry[0]?.key);
 	});
 
-	it("keeps default-animated authored residents on the explicit deferral branch", () => {
-		const animated = presentation("0x03000001");
+	it("promotes default-animated authored residents to the dynamic branch", () => {
+		const animated = presentation();
 		const plan = planEnvCellMaterialization(
 			layer([
 				cell("0x00010100", Mat4.identity(), [
@@ -106,7 +106,7 @@ describe("planEnvCellMaterialization", () => {
 			),
 		).toEqual(["static"]);
 		expect(
-			plan.deferredResidents.map(({ identity }) => residentKey(identity)),
+			plan.dynamicSources.map(({ identity }) => residentKey(identity)),
 		).toEqual(["animated"]);
 		expect(plan.diagnostics).toMatchObject({
 			defaultAnimatedResidentCount: 1,
@@ -267,7 +267,24 @@ function resident(
 	envCellId: EnvCellId,
 	source: ResolvedObjectPresentation,
 ): ResolvedEnvCellPresentation["residents"][number] {
+	const animationId = source === STATIC_PRESENTATION ? null : "0x03000001";
 	return {
+		behavior:
+			animationId === null
+				? {
+						animationId: null,
+						kind: "none",
+						physicsScriptId: null,
+						physicsScriptTableId: null,
+						soundTableId: null,
+					}
+				: {
+						animationId,
+						kind: "animation-only",
+						physicsScriptId: null,
+						physicsScriptTableId: null,
+						soundTableId: null,
+					},
 		id,
 		sourceDid: "0x02000001",
 		presentation: source,
@@ -278,12 +295,13 @@ function resident(
 		},
 		scale: new Vec3(1, 1, 1),
 		localBounds: bounds(),
-		appearance: null,
+		setupId: animationId === null ? null : "0x02000001",
 	};
 }
 
-function presentation(animationId: string | null): ResolvedObjectPresentation {
+function presentation(): ResolvedObjectPresentation {
 	return {
+		appearanceKey: "setup:0x02000001|base",
 		id: "presentation:test",
 		sourceAssetId: "0x02000001",
 		parts: [
@@ -298,13 +316,6 @@ function presentation(animationId: string | null): ResolvedObjectPresentation {
 		placementPoses: new Map([
 			[0, { placementId: 0, partTransforms: [Mat4.identity()] }],
 		]),
-		motion: null,
-		effects: {
-			animationId,
-			physicsScriptId: null,
-			physicsScriptTableId: null,
-			soundTableId: null,
-		},
 		selectionBounds: null,
 		sortingBounds: null,
 	};

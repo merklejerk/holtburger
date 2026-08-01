@@ -12,6 +12,7 @@ describe("resolveObjectPresentationBounds", () => {
 		const bounds = resolveObjectPresentationBounds(
 			[part(0), part(1, pointBounds)],
 			[scaleAndTranslateX(3, 10), scaleAndTranslateX(2, 1)],
+			new Vec3(1, 1, 1),
 		);
 
 		expect(bounds).toEqual(new AABB3(new Vec3(3, 0, 0), new Vec3(3, 0, 0)));
@@ -22,6 +23,7 @@ describe("resolveObjectPresentationBounds", () => {
 			resolveObjectPresentationBounds(
 				[part(1, new AABB3(new Vec3(0, 0, 0), new Vec3(0, 0, 0)))],
 				[Mat4.identity()],
+				new Vec3(1, 1, 1),
 			),
 		).toThrow("no transform for part 1");
 	});

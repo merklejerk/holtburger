@@ -1,7 +1,6 @@
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
+import type {
+	CommitPipeline,
+	LandblockLayerCommit,
 } from "../../lib/game/commit/types";
 import type { LandblockId } from "../../lib/game/game-types";
 import { createTranslationMat4 } from "../../lib/game/math/matrices";
@@ -26,7 +25,7 @@ const LOCAL_BOUNDS = new AABB3(new Vec3(-2, 0, 0), new Vec3(2, 6, 0));
 export class SyntheticInstancedObjectPipeline implements CommitPipeline {
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
-	): Promise<readonly CommitBundle[]> {
+	): Promise<readonly LandblockLayerCommit[]> {
 		return [...layers]
 			.filter(({ layer }) => layer === LandblockLayerKind.Generated)
 			.map(({ id }) => generatedBundle(id));
@@ -35,7 +34,7 @@ export class SyntheticInstancedObjectPipeline implements CommitPipeline {
 	async destroy(): Promise<void> {}
 }
 
-function generatedBundle(landblockId: LandblockId): CommitBundle {
+function generatedBundle(landblockId: LandblockId): LandblockLayerCommit {
 	const persistent = presentation("persistent", [
 		material("opaque", 0x10, 1),
 		material("alpha-test", 0x04, 0.7),
@@ -48,7 +47,7 @@ function generatedBundle(landblockId: LandblockId): CommitBundle {
 		material("transparent-inverse", 0x200, 0.55),
 	]);
 	const source: ResolvedOutdoorStaticLayerSource = {
-		dynamicResidents: [],
+		dynamicSources: [],
 		kind: LandblockLayerKind.Generated,
 		landblockId,
 		staticResidents: [
@@ -68,8 +67,6 @@ function generatedBundle(landblockId: LandblockId): CommitBundle {
 	};
 	return {
 		commit: { source },
-		dynamicEntities: [],
-		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Generated,
 	};
@@ -84,7 +81,13 @@ function resident(
 	z: number,
 ): ResolvedObjectResident {
 	return {
-		appearance: null,
+		behavior: {
+			animationId: null,
+			kind: "none",
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
 		identity: { kind: "authored", sourceId: `synthetic-instanced:${id}` },
 		localBounds: LOCAL_BOUNDS,
 		placement: {
@@ -94,6 +97,7 @@ function resident(
 		},
 		presentation,
 		scale: new Vec3(1, 1, 1),
+		setupId: null,
 	};
 }
 
@@ -102,14 +106,8 @@ function presentation(
 	materials: readonly ResolvedMaterial[],
 ): ResolvedObjectPresentation {
 	return {
-		effects: {
-			animationId: null,
-			physicsScriptId: null,
-			physicsScriptTableId: null,
-			soundTableId: null,
-		},
+		appearanceKey: `appearance:synthetic-instanced:${id}`,
 		id: `presentation:synthetic-instanced:${id}`,
-		motion: null,
 		parts: [
 			{
 				defaultScale: new Vec3(1, 1, 1),

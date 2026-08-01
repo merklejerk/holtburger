@@ -65,8 +65,10 @@ export interface FrameSelectionMetrics {
 	readonly visibleStaticLayerCount: number;
 	/** Visible static scene nodes selected after node-level frustum culling. */
 	readonly visibleStaticNodeCount: number;
-	/** Visible dynamic contributions selected before their draw path is implemented. */
-	readonly visibleDynamics: number;
+	/** Dynamic entity roots contributing visible rigid parts. */
+	readonly visibleDynamicEntityCount: number;
+	/** Visible rigid-part material ranges emitted by dynamic entities. */
+	readonly visibleDynamicPartCount: number;
 	/** Visible environment-cell shell contributions selected before their draw path is implemented. */
 	readonly visibleEnvCellShells: number;
 	readonly visibleEnvCellScopeCount: number;
@@ -109,32 +111,36 @@ export interface FrameSelectionMetrics {
 	/** Source triangles referenced by instanced draws before instance multiplication. */
 	readonly submittedInstancedSourceTriangleCount: number;
 	/** Transparent baked ranges and instance templates classified for view submission. */
-	readonly transparentStaticCandidateCount: number;
+	readonly transparentObjectCandidateCount: number;
 	/** Transparent candidates outside the near-sort radius and eligible for cohort batching. */
-	readonly farTransparentStaticCandidateCount: number;
+	readonly farTransparentObjectCandidateCount: number;
 	/** Transparent candidates inside the near-sort radius and ordered back-to-front. */
-	readonly nearTransparentStaticCandidateCount: number;
+	readonly nearTransparentObjectCandidateCount: number;
 	/** Adjacent compatible transparent instance runs emitted after global ordering. */
 	readonly transparentFrameRunCount: number;
 	/** Cohort-batched transparent instance runs emitted outside the near-sort radius. */
 	readonly farTransparentFrameRunCount: number;
 	/** Adjacent transparent instance runs emitted after near back-to-front ordering. */
 	readonly nearTransparentFrameRunCount: number;
-	/** Per-view transparent instance uploads with a non-empty population. */
-	readonly transparentFrameUploadCount: number;
-	/** Numeric bytes uploaded for transparent instances across all views. */
-	readonly transparentFrameUploadBytes: number;
-	/** Transparent static-object draw calls submitted after sorting. */
-	readonly submittedTransparentStaticDrawCount: number;
+	/** Per-view object-instance uploads with a non-empty population. */
+	readonly frameInstanceUploadCount: number;
+	/** Numeric bytes uploaded for frame-streamed object instances across all views. */
+	readonly frameInstanceUploadBytes: number;
+	/** Transparent object draw calls submitted after sorting. */
+	readonly submittedTransparentObjectDrawCount: number;
 	/** Frame-streamed transparent instances submitted after sorting. */
 	readonly submittedTransparentInstanceCount: number;
-	/** Additive static-object draw calls submitted in their deterministic phase. */
-	readonly submittedAdditiveStaticDrawCount: number;
-	/** Current reusable transparent frame-arena capacity in instances. */
+	/** Additive object draw calls submitted in their deterministic phase. */
+	readonly submittedAdditiveObjectDrawCount: number;
+	/** Dynamic compatible runs submitted through shared frame instancing. */
+	readonly submittedDynamicDrawCount: number;
+	/** Dynamic rigid-part instances submitted through shared frame instancing. */
+	readonly submittedDynamicInstanceCount: number;
+	/** Current reusable object frame-arena capacity in instances. */
 	readonly frameInstanceCapacity: number;
 	/** Lifetime geometric growth count for the reusable frame arena. */
 	readonly frameInstanceGrowthCount: number;
-	/** Lifetime largest per-view transparent instance population. */
+	/** Lifetime largest per-view object instance population. */
 	readonly frameInstanceViewHighWaterMark: number;
 	/** Object-program activation count across every rendered view. */
 	readonly objectProgramChanges: number;

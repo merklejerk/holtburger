@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TextureAtlasPageDiagnostics } from "../lib/game/textures/texture-manager";
@@ -9,8 +10,8 @@
 	type PageSort = "efficiency" | "entries" | "memory" | "page-id";
 
 	interface Props {
-		/** Latest resource-free texture atlas facts sampled by the active runtime. */
-		readonly diagnostics: StaticObjectRuntimeDiagnostics | null;
+		/** Read the latest expensive runtime snapshot while this inspector is mounted. */
+		readonly readDiagnostics: () => StaticObjectRuntimeDiagnostics | null;
 		/** Explicit one-off GPU page readback requested only when opening an inspector. */
 		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
 	}
@@ -20,11 +21,21 @@
 		readonly preview: Texture2DReadback;
 	}
 
-	let { diagnostics, readTextureAtlasPage }: Props = $props();
+	let { readDiagnostics, readTextureAtlasPage }: Props = $props();
+	let diagnostics = $state<StaticObjectRuntimeDiagnostics | null>(null);
 	let query = $state("");
 	let sort = $state<PageSort>("efficiency");
 	let inspection = $state<TexturePageInspection | null>(null);
 	let inspectionError = $state<string | null>(null);
+
+	onMount(() => {
+		const sample = (): void => {
+			diagnostics = readDiagnostics();
+		};
+		sample();
+		const interval = window.setInterval(sample, 250);
+		return () => window.clearInterval(interval);
+	});
 
 	const filteredPages = $derived.by(() => {
 		const queryWords = query

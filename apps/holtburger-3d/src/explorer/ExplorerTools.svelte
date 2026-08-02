@@ -60,8 +60,8 @@
 		readonly authoredDynamicRuntimeDiagnostics: ReturnType<
 			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
-		/** Latest low-rate outdoor-static and texture atlas diagnostic snapshot. */
-		readonly staticObjectRuntimeDiagnostics: StaticObjectRuntimeDiagnostics | null;
+		/** Read an outdoor-static and texture atlas snapshot for the Explorer inspector. */
+		readonly readStaticObjectRuntimeDiagnostics: () => StaticObjectRuntimeDiagnostics | null;
 		/** Explicit diagnostic readback of one active packed atlas page. */
 		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
 	}
@@ -83,7 +83,7 @@
 		updateTextureFiltering,
 		frameSelectionMetrics,
 		authoredDynamicRuntimeDiagnostics,
-		staticObjectRuntimeDiagnostics,
+		readStaticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
 	}: Props = $props();
 
@@ -203,7 +203,7 @@
 							/>
 						{:else if activeTab.id === "textures"}
 							<ExplorerTexturesPanel
-								diagnostics={staticObjectRuntimeDiagnostics}
+								readDiagnostics={readStaticObjectRuntimeDiagnostics}
 								{readTextureAtlasPage}
 							/>
 						{:else}

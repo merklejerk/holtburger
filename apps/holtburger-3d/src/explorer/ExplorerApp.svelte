@@ -58,8 +58,6 @@
 	let authoredDynamicRuntimeDiagnostics: ReturnType<
 		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 	> | null = $state(null);
-	let staticObjectRuntimeDiagnostics: StaticObjectRuntimeDiagnostics | null =
-		$state(null);
 	let lastFrameSelectionSampleAt = 0;
 	let startupError: string | null = $state(null);
 	let runtimeReady = $state(false);
@@ -114,6 +112,10 @@
 			quality: { ...frameSettings.quality, textureFiltering },
 		};
 		applyFrameSettings();
+	}
+
+	function readStaticObjectRuntimeDiagnostics(): StaticObjectRuntimeDiagnostics | null {
+		return gameRuntime?.getStaticObjectRuntimeDiagnostics() ?? null;
 	}
 
 	function applyEnvironment(): void {
@@ -176,7 +178,6 @@
 			runtimeReady = false;
 			cameraLocation = null;
 			frameSelectionMetrics = null;
-			staticObjectRuntimeDiagnostics = null;
 			authoredDynamicRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
@@ -259,7 +260,6 @@
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
 						frameSelectionMetrics = null;
-						staticObjectRuntimeDiagnostics = null;
 						authoredDynamicRuntimeDiagnostics = null;
 						frameHandle = window.requestAnimationFrame(step);
 						return;
@@ -287,8 +287,6 @@
 					};
 					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {
 						frameSelectionMetrics = gameRuntime.getFrameSelectionMetrics();
-						staticObjectRuntimeDiagnostics =
-							gameRuntime.getStaticObjectRuntimeDiagnostics();
 						authoredDynamicRuntimeDiagnostics =
 							gameRuntime.getAuthoredDynamicRuntimeDiagnostics();
 						lastFrameSelectionSampleAt = frameFinishedAt;
@@ -358,7 +356,7 @@
 			{updateTextureFiltering}
 			{frameSelectionMetrics}
 			{authoredDynamicRuntimeDiagnostics}
-			{staticObjectRuntimeDiagnostics}
+			{readStaticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}
 		/>
 	</div>

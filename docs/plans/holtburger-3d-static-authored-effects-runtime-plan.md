@@ -1,16 +1,35 @@
 # Holtburger 3D Static-Authored Effects Runtime Plan
 
-Status: Sequenced after static-authored animation fidelity
+Status: Queued — convergence Phase 5 resteered; ready for evidence-phase execution after convergence
 Created: 2026-07-31
+Convergence review: 2026-08-01
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
-Prerequisite: `docs/plans/holtburger-3d-static-authored-animation-runtime-plan.md`
+Prerequisites:
+
+- `docs/plans/holtburger-3d-static-authored-animation-runtime-plan.md`
+- `docs/plans/holtburger-3d-dynamic-entity-architecture-convergence-plan.md`
+
+## Convergence Provenance
+
+| Concern                                                                     | Branch-local status                     | Treatment                              |
+| --------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------- |
+| Canonical animation/hook foundation                                         | Complete on `3d-next` at `c09eb3c2`     | Preserve                               |
+| Claude `TransparentPart` source/effect behavior                             | Complete on `claude` only at `c938a438` | Donor-proven, not canonical completion |
+| Typed `TransparentPart` transport                                           | Complete on `3d-next`                   | Convergence Phase 3                    |
+| Atomic `SetOmega` / `TransparentPart` playback and rendering                | Complete on `3d-next`                   | Convergence Phase 4                    |
+| Remaining scripts, particles, audio, material effects, and structural hooks | Planned                                 | Resteered here by convergence Phase 5  |
+
+No checkbox or phase in this document is complete merely because a donor implementation exists.
+Convergence has now removed completed translucency scope and replaced the speculative router with a
+measured producer/consumer sequence. This plan remains queued only because the convergence plan is
+still active; its Phase 1 is otherwise executable without a new architecture decision.
 
 ## Context and Boundaries
 
 ### Goal
 
 Complete static-authored behavior fidelity by executing setup default physics scripts and their
-proven visual, particle, audio, lighting, and chained-script effects on the shared authored dynamic
+proven visual, particle, audio, material, and chained-script effects on the shared authored dynamic
 runtime.
 
 ### Problem Statement
@@ -21,8 +40,9 @@ animation works. The animation plan deliberately preserves script identity and s
 but does not decode, schedule, or execute physics scripts.
 
 This plan adds the second timed behavior producer and real effect consumers. It reuses the entity,
-template, pose, hook, resource-lifetime, and renderer architecture established by the animation plan;
-it does not create an effects-specific entity runtime or pull spawned-entity infrastructure forward.
+template, animation, effect, resource-lifetime, and renderer architecture established by the
+animation and convergence plans; it does not create an effects-specific entity runtime or pull
+spawned-entity infrastructure forward.
 
 ### In Scope
 
@@ -30,27 +50,29 @@ it does not create an effects-specific entity runtime or pull spawned-entity inf
 - Shared prepared script/table repositories and transitive dependency closure.
 - Deterministic per-entity physics-script clocks, type/intensity table selection, and `CallPES`.
 - Safe preparation and runtime execution of intentional cyclic script graphs.
-- Expansion of the prepared hook-command union for every static-authored behavior proven by evidence.
+- Expansion of one prepared behavior-command union only for static-authored behavior proven by
+  archive and reference evidence.
 - Concrete visual mutation consumers required by authored scripts.
 - Animation-time `ReplaceObjectHook` execution with pre-staged shared replacement-part resources,
   atomic per-entity part selection, and replacement-aware conservative bounds.
 - Concrete particle playback/rendering for the proven `CreateParticle` workload.
 - Concrete sound asset/playback behavior for the proven `SoundTweaked` workload.
-- Lighting behavior where the representative authored script/hook evidence demonstrates a consumer.
 - Atomic promotion of script-only authored residents after their complete behavior closure is ready.
 - Combined animation and script clocks on the same entity without merging their ownership.
 
 ### Out of Scope
 
-- Spawned/server entities, `ExplorerRuntime`, entity feeds, motion tables, sparse anchors, or runtime
+- Spawned/server entities, explorer drivers, entity feeds, motion tables, sparse anchors, or runtime
   reconciliation.
 - General-purpose particle authoring tools, audio middleware, environmental mixing, or a universal
   effect graph.
 - Implementing unused hook types merely because they exist in the DAT format.
 - Silently approximating unknown hook payloads, timing, asset lookup, attenuation, or attachment
   semantics.
-- Moving behavior-resource ownership into `HookSystem` or embedding decoded timelines in entity
-  source records.
+- Lighting work until an authored setup-default producer reaches a light command; the complete current
+  archive census finds none in setup-default animation or script closure.
+- Moving script, audio, or particle resource ownership into `EffectSystem`, or embedding decoded
+  timelines in entity source records.
 - Network-triggered physics scripts, combat effects, projectiles, or gameplay authority.
 - Entity-to-entity attachment mutation and animated parent-part following; those enter with the
   spawned lifecycle consumer in the spawned-entity plan. Particle/effect attachment to an authored
@@ -77,13 +99,15 @@ it does not create an effects-specific entity runtime or pull spawned-entity inf
 
 ### Existing Code to Extend
 
-- The authored entity/template/pose/hook systems landed by the prerequisite animation plan.
+- The authored entity/template/animation/effect systems landed by the prerequisite animation and
+  convergence plans.
 - `crates/holtburger-core/src/content_assets.rs`
 - `apps/holtburger-3d/src-tauri/src/lib.rs` compact binary content adapter patterns.
 - Existing texture, geometry, transparent ordering, and frame-stream infrastructure for particle
   rendering where their contracts are genuinely reusable.
-- Existing application audio or asset-decoding facilities discovered during Phase 1; do not invent a
-  parallel audio cache without first inventorying them.
+- No app-local particle or audio runtime currently exists. Phase 1 must inventory reusable
+  renderer/content primitives, then later phases add focused owners instead of pretending a dormant
+  facility is available.
 
 ### Measured Workload
 
@@ -105,21 +129,51 @@ The representative setup appearances do not use default physics-script tables. T
 therefore an evidence gate for broader shipped content rather than something to infer from the
 representative regions.
 
-The Plan A butterfly animations do not exercise `ReplaceObjectHook`. This plan nevertheless owns
-that named behavior by product decision. Phase 1 must select a small shipped example that exercises
-the hook and prove its part index, replacement GfxObj dependency, execution timing, resource
-lifetime, and bound consequences; an exhaustive archive census is not required.
+The 2026-08-01 convergence dry-run revalidated and widened that evidence against the current ignored
+`dats/assets.hba` without retaining an asset-dependent test:
+
+| Producer scope                    | Hook type         | Count | Named consumer                                       |
+| --------------------------------- | ----------------- | ----: | ---------------------------------------------------- |
+| All setup-default script closures | `SoundTable`      |    49 | Audio runtime + prepared sound-table lookup          |
+| All setup-default script closures | `Scale`           |    43 | `EffectSystem` scale state + dynamic publication     |
+| All setup-default script closures | `CreateParticle`  | 7,753 | Particle runtime/renderer                            |
+| All setup-default script closures | `CallPES`         |   352 | `PhysicsScriptSystem` scheduled activation           |
+| All setup-default script closures | `SoundTweaked`    |   319 | Audio runtime                                        |
+| All setup-default script closures | `TextureVelocity` |    11 | `EffectSystem` material state + renderer UV sampling |
+| All setup-default animations      | `SoundTable`      |     4 | Audio runtime + prepared sound-table lookup          |
+| All setup-default animations      | `TransparentPart` |    12 | Complete in convergence Phase 4                      |
+| All setup-default animations      | `SoundTweaked`    |    14 | Audio runtime                                        |
+| All setup-default animations      | `SetOmega`        |     8 | Complete in convergence Phase 4                      |
+
+The complete archive contains 2,161 setups with direct default scripts. Their `CallPES` closure
+reaches 2,190 scripts and includes the four representative self-cycles plus many additional shipped
+self-cycles. Six setup default-script tables are present (`0x34000005`, `0x340000A5`, `0x340000BA`,
+`0x340000BF`, `0x340000C7`, and `0x340000CE`), so table decoding remains real broader-content work
+despite its absence from DA55/DC58.
+
+The complete animation census found only two `ReplaceObjectHook` records, both on animation
+`0x0300055B` frame 0: forward replaces part 1 with GfxObj `0x01000BB4`, and backward replaces part 1
+with `0x01000BB5`. This is now the selected structural fixture. Replacement remains an explicit
+product requirement even though it is not in the setup-default animation subset.
+
+No setup-default script closure or setup-default animation emits a lighting hook. Lighting is
+therefore removed from this executable roadmap instead of receiving a speculative state field,
+system, or phase. The archive-wide animation vocabulary contains other gameplay-oriented hooks, but
+those remain outside this static-authored scope until a selected producer needs them.
 
 ## North Stars
 
 1. Implement measured authored effects before generic effect infrastructure.
-2. Animation and physics scripts are independent clocks that emit the same prepared command shape.
-3. `HookSystem` orders and dispatches commands; it does not own producers, resources, particles, or
-   audio.
+2. Animation and physics scripts are independent clocks that dispatch the same prepared behavior
+   command shape.
+3. `EffectSystem` owns persistent implemented visual/material state only. A focused
+   `BehaviorEventRouter` enters with `PhysicsScriptSystem`, when animation and scripts become two real
+   producers targeting effect, particle, audio, structural, and chained-script consumers.
 4. Preparation discovers and pins the complete transitive dependency closure before activation.
 5. Cyclic dependency graphs are valid authored content; preparation termination and runtime
    repetition are separate concerns.
-6. Effect instances follow current authored entity/part transforms produced by the shared pose path.
+6. Effect instances follow current authored entity/part transforms published by
+   `DynamicEntitySystem`; no standalone pose owner returns.
 7. Unknown behavior fails staging or reports unsupported execution with complete provenance; it never
    disappears silently.
 8. Script-only residents retain their static presentation until a real behavior consumer is ready.
@@ -135,47 +189,75 @@ setup default script/table IDs
   -> prepared script/table repositories
   -> transitive hook/effect dependency closure
   -> per-entity PhysicsScriptSystem clock
-  -> prepared commands
-  -> HookSystem ordered dispatch
-       |- visual mutation ports -> shared pose/entity state
+  -> prepared behavior commands
+  -> BehaviorEventRouter (introduced with the second producer and real consumers)
+       |- persistent visual/material commands -> EffectSystem
        |- ReplaceObject -> per-entity part selection + conservative bound
        |- CreateParticle -> particle runtime -> renderer
-       |- SoundTweaked -> audio runtime
+       |- SoundTable / SoundTweaked -> audio runtime
        `- CallPES -> scheduled script activation
 ```
 
 Animation and script producers may target the same entity, but neither advances or owns the other's
 clock. Animation-time replacement commands enter this same dispatch boundary after their immutable
 part dependencies are staged. Equal-time ordering, reentrancy, teardown, and generation checks are
-explicit.
+explicit. The router validates a generation-safe target, performs ordered synchronous dispatch, and
+records one exhaustive outcome per command; it owns no clocks, queues, effect state, or resources.
+
+### Convergence Debt Ledger
+
+| Landed seam or debt                                                     | Why it is honest now                                           | Scheduled replacement                                                                           |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `EffectSystem.executeDepartedFrames` accepts animation-specific records | Animation is still the only live producer                      | Phase 2 compiles one prepared command union; Phase 3 introduces the router and adapts animation |
+| `PartRenderState` contains only translucency                            | It has one real consumer and no speculative fields             | Phase 4 widens it only for proven scale/UV presentation facts                                   |
+| `ReplaceObjectHook` blocks animated activation                          | No replacement resources or bounds are prepared                | Phase 4 stages the two selected GfxObj variants and adds atomic structural dispatch             |
+| Script-only authored residents retain static presentation               | No script clock or effect closure exists                       | Phase 7 promotes them only after complete staged readiness                                      |
+| Particle and audio consumers are absent                                 | The app has no existing focused runtimes to reuse              | Phases 5 and 6 add named owners after Phase 1 evidence                                          |
+| Repository-wide Prettier has untouched baseline failures                | Convergence formats every touched file without unrelated churn | Convergence Phase 8, before this plan executes implementation                                   |
+
+None of these debts requires a second entity runtime or blocks the spawned architecture design. The
+first four are explicit implementation prerequisites before spawned entities may consume authored
+behavior systems.
 
 ## Phased Implementation
 
 ### Phase 1: Complete the Authored Script and Hook Evidence
 
+Progress: Not started — archive census complete; retail timing/selection evidence remains
+
 #### Deliverables
 
-- Refresh a representative setup default-script/table evidence set, including each selected root's
-  transitive hook and asset dependencies.
+- Reproduce the recorded DA55/DC58 root IDs and transitive dependencies as checked-in, source-first
+  fixtures; the archive-wide counts above are evidence, not runtime-asset test dependencies.
 - Prove record timing units, table keys/intensity selection, `CallPES` delay/repetition behavior, and
   equal-time command ordering from retail/ACE.
-- Inventory current audio, particle, lighting, and asset-decoding code before designing consumers.
-- Classify every hook reachable from the representative roots, plus the selected shipped
-  `ReplaceObjectHook` example, as visual, particle, audio, lighting, chained script, or unsupported
-  with a named evidence gap.
+- Inventory reusable audio, particle, material-animation, and asset-decoding code before designing
+  consumers; the convergence search found no existing app-local runtime for those families.
+- Prove the exact payload, dependency, coordinate/target, and lifetime semantics for the six unmet
+  hook types in the measured table above plus the selected `ReplaceObjectHook` example.
+- Decide from retail whether commands crossed during deterministic initial-phase replay are folded as
+  persistent state, emitted as ephemeral effects, or deliberately skipped per command family.
 
 #### Acceptance Criteria
 
-- Every implementation phase is backed by exact asset IDs, record shapes, and reference paths.
+- Every implementation phase is backed by exact asset IDs, record shapes, and reference paths; the
+  selected replacement fixture is `0x0300055B` part 1 / GfxObjs `0x01000BB4` and `0x01000BB5`.
 - The four known self-cycles and any additional cycles are recorded without being treated as corrupt
   content.
 - Unknown payload boundaries or selection rules remain explicit blockers rather than guesses.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **Convergence evidence:** The disposable full-archive script and animation census recorded above
+  decoded through the existing closed hook parser and was removed after execution. It confirms that
+  the next work is evidence completion, not another vocabulary or architecture discovery pass.
+- **Scope correction:** Lighting is absent from the measured setup-default producer closure and is
+  removed. `SoundTable`, `Scale`, and `TextureVelocity` are now explicit because the wider census
+  proves they are real; the old representative-only summary hid them.
 
 ### Phase 2: Decode, Transport, and Prepare Script Resources
+
+Progress: Not started
 
 #### Deliverables
 
@@ -184,7 +266,8 @@ explicit.
   transfer payloads.
 - Add typed script and table repositories with shared in-flight preparation, ready/failed state,
   acquired handles, and deterministic release.
-- Compile script records into immutable timed prepared commands.
+- Compile script and animation records into one immutable `PreparedBehaviorCommand` semantic union
+  carrying target-relative values and source provenance, not producer-specific transport wrappers.
 - Enumerate transitive dependencies with visited-set termination while preserving cyclic runtime
   edges.
 
@@ -201,12 +284,17 @@ explicit.
 
 ### Phase 3: Execute Physics Scripts and Chained Scheduling
 
+Progress: Not started
+
 #### Deliverables
 
 - Add `PhysicsScriptSystem` with independent per-entity clocks, selected intensity/state,
   generation-safe targets, and deterministic command crossing.
-- Feed commands into the existing `HookSystem` and define equal-time ordering across animation,
-  scripts, and chained activations.
+- Introduce `BehaviorEventRouter` at the first real multi-producer/multi-consumer cut. Adapt animation
+  dispatch and script dispatch to its generation-safe synchronous command port without moving either
+  producer's clock into the router.
+- Implement the retail-proven equal-time producer order in the runtime tick and preserve authored
+  order within each producer; the router records but does not invent temporal order.
 - Schedule `CallPES` activations without synchronous recursive execution.
 - Bound dispatch reentrancy independently of intentionally repeating scheduled scripts.
 - Tear down clocks, queued commands, and acquired closures atomically with owner removal.
@@ -218,6 +306,8 @@ explicit.
 - Large time steps neither drop nor duplicate timed commands.
 - Animation and script clocks remain independently testable and cannot mutate one another.
 - Removed/replaced owners cannot receive stale queued commands.
+- Every dispatched command records exactly one executed, folded, deferred, or rejected outcome with
+  producer asset, authored position/time, target identity, and generation.
 
 #### Decisions and Course Corrections
 
@@ -225,16 +315,18 @@ explicit.
 
 ### Phase 4: Implement Proven Visual Effect Commands
 
+Progress: Not started
+
 #### Deliverables
 
-- Implement the visual mutation commands reached by the representative evidence set through narrow
-  generation-safe ports.
-- Keep timed visibility, translucency, luminosity, diffusion, scale, omega, texture velocity, and
-  other proven modifiers as named state rather than a generic transform/property bag.
+- Implement measured `Scale` and `TextureVelocity` commands through narrow generation-safe ports.
+  Preserve landed `SetOmega` and `TransparentPart` behavior while adapting their dispatch boundary.
+- Widen `EffectState`, `EffectPresentationSample`, and `PartRenderState` only with the exact scale or
+  UV facts consumed in this phase; do not add luminosity, diffuse, lighting, or generic property bags.
 - Implement `ReplaceObjectHook` as a named structural visual command. Prepare and lease every
   referenced replacement part before activation, switch one entity's part selection atomically at
   dispatch, and update its conservative bound without mutating shared base templates.
-- Compose visual state through the existing pose/template/render contracts.
+- Compose visual state through existing animation/template/dynamic-publication/render contracts.
 
 #### Acceptance Criteria
 
@@ -243,7 +335,8 @@ explicit.
 - Repeated replacement parts share immutable geometry/material resources while each entity retains
   independent current part selection.
 - Replacement cannot expose missing geometry, stale bounds, or a partially switched material set.
-- `HookSystem` owns neither visual state nor template/resource lifetime.
+- `BehaviorEventRouter` owns neither visual state nor template/resource lifetime; `EffectSystem` retains
+  implemented visual state behind a narrow consumer port.
 - Unsupported visual commands report source asset, record time, and target identity.
 
 #### Decisions and Course Corrections
@@ -251,6 +344,8 @@ explicit.
 - Pending implementation.
 
 ### Phase 5: Add Authored Particle Fidelity
+
+Progress: Not started
 
 #### Deliverables
 
@@ -278,10 +373,13 @@ explicit.
 
 ### Phase 6: Add Authored Sound Fidelity
 
+Progress: Not started
+
 #### Deliverables
 
-- Prove `SoundTweaked` asset lookup, gain/pitch parameters, spatial origin, attenuation, repetition,
-  and teardown behavior from retail/ACE.
+- Prove `SoundTable` selection and `SoundTweaked` asset lookup,
+  priority/probability/volume, spatial origin, attenuation, repetition, and teardown behavior from
+  retail/ACE.
 - Add typed sound content decoding/transport and shared immutable audio asset preparation using
   existing facilities where available.
 - Add an app-local audio runtime that consumes prepared sound commands and current source transforms.
@@ -289,8 +387,8 @@ explicit.
 
 #### Acceptance Criteria
 
-- All three representative `SoundTweaked` events play the correct prepared sound with proven
-  parameters and spatial origin.
+- All representative and selected fixture `SoundTable` / `SoundTweaked` events play the correct
+  prepared sound with proven parameters and spatial origin.
 - Repeated sounds share immutable decoded assets while retaining independent playback state.
 - Owner removal and runtime shutdown stop or release sounds according to proven semantics.
 - Audio failure is attributable and does not silently masquerade as successful hook execution.
@@ -300,6 +398,8 @@ explicit.
 - Pending implementation.
 
 ### Phase 7: Activate Script-Only and Combined Authored Residents
+
+Progress: Not started
 
 #### Deliverables
 
@@ -320,6 +420,8 @@ explicit.
 - Pending implementation.
 
 ### Phase 8: Resteer, Measure, and Clean Up
+
+Progress: Not started
 
 #### Task Checklist
 
@@ -349,7 +451,8 @@ explicit.
 
 - Exact representative default-script root fixtures and complete transitive closures.
 - Four self-calling scripts proving finite preparation and scheduled runtime repetition.
-- All 17 `CreateParticle`, five `CallPES`, and three `SoundTweaked` representative events.
+- All 17 `CreateParticle`, five `CallPES`, and three `SoundTweaked` representative events, plus
+  selected `SoundTable`, `Scale`, and `TextureVelocity` fixtures from the wider census.
 - Independent animation/script clocks targeting one entity.
 - Equal-time hook ordering and large-delta catch-up.
 - Owner removal during preparation, dispatch, live particles, and live audio.
@@ -414,10 +517,13 @@ swap atomically. Failure leaves the valid static presentation visible with diagn
 
 ## Open Questions
 
-1. Which selected shipped physics-script-table example proves its keys and intensity rules?
+1. Which of the six censused physics-script tables is the smallest fixture that still proves keys,
+   modifier selection, fallback, and dependency closure?
 2. What exact equal-time ordering does retail use across animation hooks, physics-script records, and
    chained `CallPES` activation?
 3. Which particle asset fields and coordinate-space rules are required by every authored
    `CreateParticle` event?
-4. What sound table/asset path, gain/pitch transformation, attenuation, and lifetime semantics does
-   retail use for `SoundTweaked`?
+4. What sound-table/asset path, priority, probability, volume, attenuation, and lifetime semantics
+   does retail use for `SoundTable` and `SoundTweaked`?
+5. Which persistent commands fold into deterministic initial state, and which ephemeral audio or
+   particle commands retail suppresses or emits when a static object starts at an independent phase?

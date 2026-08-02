@@ -12,6 +12,9 @@ _Last updated: 2026-08-01_
   letting renderer policy leak back into the scene.
 - Reuse one static material, texture, atlas, geometry, and draw path across outdoor objects,
   environment shells, and environment-cell residents.
+- Keep one staged dynamic presentation runtime: immutable templates own geometry and atlas residency;
+  animation owns semantic traversal and smooth rigid-part sampling; effects own persistent visual
+  state; entity publication applies the complete sample.
 - Keep explorer camera policy in the explorer. Shared runtime APIs expose facts and directed query
   primitives rather than implementing a future game client's movement controller.
 - Make portal rendering correct by construction: scope-local traversal, one unique owner for each
@@ -34,7 +37,7 @@ flowchart TD
     Realize --> Systems[SceneGraph and typed owner systems]
     Host --> HBAN[HBAN typed animation records]
     HBAN --> AnimRepo[shared animation repository]
-    Systems --> Dynamic[template, animation, hook, and pose systems]
+    Systems --> Dynamic[template repository, animation, effects, and entity publication]
     AnimRepo --> Dynamic
     Dynamic --> World
     Systems --> World[read-only RenderWorld]
@@ -56,27 +59,27 @@ commit, revision, owner, publication, and eviction lifecycle.
 
 ## 2. Load-Bearing Bones
 
-| Boundary                                         | Owned invariant                                                                                                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src-tauri/src/landblock_source_batch.rs`        | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
-| `src-tauri/src/env_cell_source.rs`               | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
-| `src-tauri/src/cell_struct_projection.rs`        | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
-| `src/lib/assets/decode-env-cell-record.ts`       | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
-| `game/commit/env-cell-materialization.ts`        | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
-| `game/runtime/static-layer-realizer.ts`          | Revision currentness, geometry/atlas rendezvous, publication ordering, and stale-work withdrawal.                                                       |
-| `game/runtime/env-cell-realization.ts`           | Reuses the static preparer for residents, builds proof-backed visibility islands, and creates one environment artifact.                                 |
-| `game/systems/env-cell-system.ts`                | Failure-atomic ownership of scopes, crossings, shell nodes, aperture geometry, and rollback.                                                            |
-| `game/systems/dynamic-entity-system.ts`          | Owner-atomic authored dynamic trees, shared template/animation leases, activation bounds, rigid-part contributions, and static visual fallback.         |
-| `game/systems/animation-system.ts`               | Independent deterministic playback clocks, retail semantic traversal, discontinuity handling, and fractional rigid-pose sampling.                       |
-| `game/systems/hook-system.ts`                    | Persistent visual-hook state, fixed-clock `SetOmega`, bounded provenance, and explicit deferred-effect observations.                                    |
-| `game/systems/pose-system.ts`                    | Render-cadence publication of visual-root and rigid-part samples; no clocks, content preparation, or residency policy.                                  |
-| `game/scene/scene-graph.ts`                      | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
-| `game/renderer/render-world.ts`                  | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
-| `game/renderer/portal-view-window.ts`            | Exact normalized window construction, convex source decomposition, scope-coverage admission, projection, and clipping.                                  |
-| `game/renderer/portal-render-graph.ts`           | Scope-local traversal, unique render domains, mask edges, explicit contributions, exterior scheduling, and capacity preflight.                          |
-| `game/renderer/portal-render-plan-validation.ts` | Pure validation and indexing of the completed planner contract before any GPU resource resolution.                                                      |
-| `game/renderer/webgl2-portal-executor.ts`        | Stateless execution of the completed graph; it invents no topology or second contribution schedule.                                                     |
-| `game/renderer/webgl2-portal-substrate.ts`       | One extent-keyed scene-domain target and explicit WebGL color/depth/stencil state transitions.                                                          |
+| Boundary                                            | Owned invariant                                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/src/landblock_source_batch.rs`           | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
+| `src-tauri/src/env_cell_source.rs`                  | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
+| `src-tauri/src/cell_struct_projection.rs`           | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
+| `src/lib/assets/decode-env-cell-record.ts`          | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
+| `game/commit/env-cell-materialization.ts`           | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
+| `game/runtime/static-layer-realizer.ts`             | Revision currentness, geometry/atlas rendezvous, publication ordering, and stale-work withdrawal.                                                       |
+| `game/runtime/env-cell-realization.ts`              | Reuses the static preparer for residents, builds proof-backed visibility islands, and creates one environment artifact.                                 |
+| `game/systems/env-cell-system.ts`                   | Failure-atomic ownership of scopes, crossings, shell nodes, aperture geometry, and rollback.                                                            |
+| `game/systems/dynamic-entity-system.ts`             | Owner-atomic dynamic trees, staged activation, complete presentation publication, rigid-part contributions, and static visual fallback.                 |
+| `game/systems/object-visual-template-repository.ts` | Content-addressed immutable preparation plus staged geometry and atlas residency shared across dynamic owners.                                          |
+| `game/systems/animation-system.ts`                  | Independent deterministic playback clocks, retail semantic traversal, discontinuity handling, and fractional rigid-pose sampling.                       |
+| `game/systems/effect-system.ts`                     | Persistent `SetOmega` and per-part translucency state, deterministic timelines, bounded provenance, and fractional effect sampling.                     |
+| `game/scene/scene-graph.ts`                         | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
+| `game/renderer/render-world.ts`                     | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
+| `game/renderer/portal-view-window.ts`               | Exact normalized window construction, convex source decomposition, scope-coverage admission, projection, and clipping.                                  |
+| `game/renderer/portal-render-graph.ts`              | Scope-local traversal, unique render domains, mask edges, explicit contributions, exterior scheduling, and capacity preflight.                          |
+| `game/renderer/portal-render-plan-validation.ts`    | Pure validation and indexing of the completed planner contract before any GPU resource resolution.                                                      |
+| `game/renderer/webgl2-portal-executor.ts`           | Stateless execution of the completed graph; it invents no topology or second contribution schedule.                                                     |
+| `game/renderer/webgl2-portal-substrate.ts`          | One extent-keyed scene-domain target and explicit WebGL color/depth/stencil state transitions.                                                          |
 
 ## 3. Environment-Cell Source and Ownership Flow
 
@@ -122,24 +125,40 @@ withdraws its atlas claim and cannot become authoritative scene state.
 
 Setup-backed residents with a default animation leave static baking but retain their authored root
 placement and scope. One appearance key owns a shared visual template; one animation ID owns a
-shared immutable prepared clip. Entity identity appears only in mutable playback phase, hook state,
-pose, and root ownership. GPU geometry remains leased through `GeometryManager`, texture facts join
-the source layer's atlas claim, and dynamic parts enter the same frame-streamed object arena as
-static transparent and compatible opaque/cutout contributions.
+shared immutable prepared clip. Entity identity appears only in mutable playback, effect state,
+articulated pose data, and root ownership. `ObjectVisualTemplateRepository` stages the template's
+immutable preparation, indexed geometry, exact material ranges, and atlas residency as one lifecycle.
+Dynamic textures therefore do not depend on the containing static-layer atlas revision. Dynamic parts
+enter the same frame-streamed object arena as static transparent and compatible opaque/cutout
+contributions.
 
 Animation preparation and template preparation settle together behind the owner generation. The
 runtime validates part coverage and computes conservative bounds by sweeping every rigid animation
 frame through the same retail-shaped transform used by static baking and dynamic rendering. A
 `SetOmega` clip expands that sweep to a rotation-invariant envelope. Visibility is published only
-after initial independent phase, persistent hook state, pose, resources, and bounds are complete.
+after initial independent phase, persistent effect state, articulated pose, resources, and bounds are
+complete.
 Structural or unknown visual hooks keep a valid resting presentation with provenance rather than
 activating partial behavior.
 
 `AnimationSystem` advances semantic playback and hooks at 30 Hz, rebases gaps above two seconds,
-and samples fractional rigid poses at render cadence. `HookSystem` integrates retail axis-angle
-visual-root rotation on that semantic clock. `PoseSystem` alone publishes the sampled visual root
-and part poses; the scene graph then composes them under the unchanged authored root. Static-default
-position frames remain prepared but unused, matching retail's null root-offset path.
+and samples fractional rigid poses at render cadence. `EffectSystem` consumes typed behavior commands
+directly and integrates retail axis-angle visual-root rotation plus per-part translucency on that
+semantic clock. A dispatch-only hook system and pass-through pose system do not exist.
+`DynamicEntitySystem` publishes each complete articulated-pose-plus-effect sample; the scene graph
+then composes it under the unchanged authored root. Static-default position frames remain prepared but
+unused, matching retail's null-root-offset path.
+
+Full part translucency suppresses the draw. Partial translucency reclassifies that part into
+transparent submission, carries instance alpha without widening the persistent instance record, and
+uses stable transparent ordering. Effect teardown and owner replacement clear persistent ramps,
+rotation, and per-part state before an identity can be reused.
+
+This section describes the landed static-authored runtime only. Spawned entities remain queued behind
+the authored-effects plan. Their selected architecture extends this presentation runtime through one
+world-owned entity model and the existing view-event path, expanded with one complete initial
+snapshot and resnapshot after detected receiver lag. No second dynamic system, stateful feed
+projector, or frontend placement authority is currently implemented.
 
 ## 5. Scene Graph and Spatial Queries
 
@@ -251,7 +270,7 @@ Rust section writer and one TypeScript section validator/reader. Static geometry
 presentation decoding lives in the neutral `decode-static-source-record.ts`; HBEC no longer
 imports shared behavior through an outdoor-owned module.
 
-## 8. Terminology and Dead-Contract Audit
+## 9. Terminology and Dead-Contract Audit
 
 - `OutdoorStaticLayerKind` remains accurate for Buildings, Objects, and Generated. EnvCells is a
   distinct static layer because it also owns shells, topology, queries, and apertures.
@@ -270,8 +289,11 @@ imports shared behavior through an outdoor-owned module.
 - Static texture-fact compatibility and owner-ID parsing each have one runtime implementation.
 - Portal-plan topology, contribution roles, labels, masks, transitions, and exterior facts are
   validated before the WebGL executor resolves masks or allocates targets.
+- Dynamic presentation has one `ObjectVisualTemplateRepository`, one `AnimationSystem`, one
+  `EffectSystem`, and one `DynamicEntitySystem`. There is no `EntityTemplateCache`, `HookSystem`, or
+  `PoseSystem` compatibility path.
 
-## 9. Complexity, Debt, and Pruning Targets
+## 10. Complexity, Debt, and Pruning Targets
 
 Current large-file concentration:
 
@@ -301,7 +323,7 @@ Known concessions:
 - Explorer residency is best effort and has no portal-crossing history. That is correct for the
   explorer and deliberately insufficient for a future authoritative client controller.
 
-## 10. Verification Posture
+## 11. Verification Posture
 
 Pure geometry, containment, topology, portal-window, graph, and executor contracts use synthetic
 fixtures that require no local DAT/HBA archives. Archive-backed source and browser checks remain

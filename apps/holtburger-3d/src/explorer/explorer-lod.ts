@@ -15,11 +15,7 @@ export const DEFAULT_EXPLORER_LOD_CONFIG: LoDConfig = {
 };
 
 export type ExplorerLodRadius =
-	| "buildings"
-	| "envCells"
-	| "explicitObjects"
-	| "generatedObjects"
-	| "terrain";
+	"buildings" | "envCells" | "explicitObjects" | "generatedObjects" | "terrain";
 
 /** Apply one Explorer LoD control while preserving the outdoor radius hierarchy. */
 export function updateExplorerLodRadius(

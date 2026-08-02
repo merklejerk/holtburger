@@ -1,71 +1,89 @@
 # Holtburger 3D Spawned Entity and Explorer Runtime Plan
 
-Status: Sequenced after static-authored animation and effects fidelity
+Status: Queued — execute after the authored-effects plan
 Created: 2026-07-31
+Rewritten: 2026-08-01 from the convergence world/feed audit
+Refined: 2026-08-01 after recovery-scope review
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Prerequisites:
 
 - `docs/plans/holtburger-3d-static-authored-animation-runtime-plan.md`
 - `docs/plans/holtburger-3d-static-authored-effects-runtime-plan.md`
+- `docs/plans/holtburger-3d-dynamic-entity-architecture-convergence-plan.md`
+
+## Provenance and Execution Status
+
+| Concern                                   | Status                                                            | Treatment                                                        |
+| ----------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Canonical frontend dynamic foundation     | Complete on `3d-next` at `c09eb3c2`, then extended by convergence | Preserve and extend                                              |
+| Claude one-feed/two-drivers topology      | Donor-proven at `c938a438`                                        | Preserve one world/event contract, not donor machinery           |
+| World/entity/spatial/attachment semantics | Audited on `3d-next` on 2026-08-01                                | Extend existing `WorldState`; do not duplicate                   |
+| Current `ClientViewEvent` recovery        | Initial entity snapshot is incomplete                             | Extend `InitialViewState`; retain the existing ordered broadcast |
+| Spawned runtime implementation            | Not started                                                       | Execute the phases below in order                                |
+
+The previous sequence was unexecuted and is superseded by this refinement. The audit finding remains
+valid: the current initial-state request cannot reconstruct spawned entity presentation. The selected
+remedy is deliberately smaller because this project owns both ends of `ClientViewEvent`, Tokio
+broadcast reports receiver lag, and frequent server GUID reuse is not an observed requirement.
 
 ## Context and Boundaries
 
 ### Goal
 
-Add a durable Rust `ExplorerRuntime` that mutates shared authoritative world state and projects
-spawned entity lifecycle, appearance, behavior, motion, and sparse placement through a recoverable
-Tauri feed into the existing frontend dynamic presentation runtime.
+Add spawned entity lifecycle, lossless appearance, behavior, motion, attachment, and smooth sparse
+placement by driving one authoritative Rust world runtime from explorer scenarios or a future network
+client and consuming the existing `ClientViewEvent` path with a complete resnapshot capability.
 
-### Problem Statement
+### Audited Starting Point
 
-After authored animation and effects land, the frontend will have proven shared visual templates,
-rigid-part animation, scripts, hooks, effects, pose composition, resource lifetime, and instanced
-rendering. Spawned entities add a different class of problems: authoritative identity and generation,
-mutable appearance, attachments, server-style sequencing, semantic motion-table state, clock-domain
-mapping, sparse correction, and transport continuity.
+`holtburger-world::WorldState` already owns entity identity, accepted position sequencing, continuous
+versus forced correction events, typed attachments with late resolution, semantic motion commands,
+server-position anchors, runtime spatial bodies, and server-to-local time synchronization.
 
-Those concerns should not block authored fidelity, but they need a real producer when implemented.
-A TypeScript-local synthetic feed would prove only frontend consumption while Rust world state,
-motion resolution, serialization, clocks, and snapshot/delta handoff remain disconnected.
-`ExplorerRuntime` becomes the first production-shaped producer and a durable explorer growth seam for
-later physics demonstrations.
+The missing pieces are narrower than the earlier plan claimed:
+
+- `Entity` discards the lossless `ModelData` appearance payload.
+- `RequestInitialViewState` snapshots fellowship, vendor, trade, and runtime bodies but not complete
+  entities or appearance.
+- `ClientViewEvent` uses a bounded ordered Tokio broadcast. A lagging Rust receiver is notified, but
+  it currently has no complete entity snapshot to request in response.
+- Reduced `MotionKinematics` resolves velocity/omega profiles but omits animation selections, ranges,
+  rates, links, and modifiers.
+- The Tauri host exposes content exploration only; it has no world driver or spawned entity relay.
+- The frontend has no complete entity mirror, presentation-placement owner, runtime attachment
+  consumer, or motion-plan consumer.
+
+Static scene-interest commit bundles remain correct for authored companion publication. They are not
+a spawned mutation bus and must not be stretched into one.
 
 ### In Scope
 
-- App-local Rust `ExplorerRuntime` orchestration in `apps/holtburger-3d/src-tauri`.
-- One `holtburger-world` state instance with explicit domain mutation APIs for explorer scenarios.
-- Lossless world-owned visual selection, entity generations, placement, attachment, and semantic
-  motion state.
-- Host-side resolved appearance/template identity; no frontend WCID heuristics.
-- Snapshot plus sequenced delta projection across the real Tauri boundary.
-- Spawn, despawn, focused appearance replacement, complete generation replacement, scale,
-  attach/detach, direct playback, script activation, teleport/rebase, and reset.
-- Shared entity-to-entity attachment resolution and animated parent-part following, introduced here
-  because spawned attach/detach supplies the first concrete mutable lifecycle consumer.
-- A complete shared `MotionCatalog` and pure `MotionResolver` producing time-anchored
-  `ResolvedMotionPlan` values.
-- Deterministic explorer time with pause, resume, and step.
-- Frontend motion-plan execution, animation/root sampling, sparse placement anchors, continuous
-  correction, discontinuous snap, and motion-derived outdoor/environment-cell residency.
-- Reuse of authored template, animation, script, hook, particle, audio, pose, and renderer systems.
-- Diagnostics and host-backed scenarios that prove repeated dynamic entities share immutable assets
-  while retaining independent mutable state.
-- A clean future mapping from networked `ClientRuntime` world state into the same app-local
-  presentation projection adapter.
+- Lossless, semantic world-owned appearance and explicit focused versus complete replacement.
+- Explicit explorer domain mutations over the same `WorldState` invariants used by a future client.
+- One complete entity/body/attachment/motion snapshot added to the existing initial-view-state path.
+- Subscribe-before-request startup and stop-then-resnapshot recovery after Tokio `Lagged`.
+- One narrow app-local Tauri serializer/relay and explorer scenario driver.
+- Verification of Tauri listener ordering and delivery before adding transport sequencing.
+- Spawn, despawn, focused appearance mutation, complete replacement, attachment, semantic motion,
+  sparse correction, teleport, reset, pause, resume, and deterministic step scenarios.
+- Shared frontend template, animation, script, effect, renderer, and resource-lifetime systems.
+- Host-resolved motion selection and frontend smooth presentation between sparse authoritative samples.
+- Animated parent-part attachment following with ancestor-derived authoritative residency.
 
 ### Out of Scope
 
-- Login, sockets, session ownership, protocol dispatch, reconnect/resume, or complete server message
-  handling.
-- Manufacturing protocol messages to drive explorer scenarios.
-- A second app-local authoritative entity store or Tauri-only appearance truth.
-- A universal base runtime inherited by `ExplorerRuntime` and `ClientRuntime`.
-- Authoritative gameplay simulation, AI, combat, rollback, or server emulation.
-- Full collision/physics demonstrations. `ExplorerRuntime` is intentionally extensible toward them,
-  but they require a later concrete scenario and plan.
+- Login, sockets, protocol sequencing, reconnect/resume, or complete network message handling.
+- Manufacturing protocol packets for explorer scenarios.
+- A Tauri-local authoritative entity store or TypeScript-authored world truth.
+- A universal explorer/client runtime superclass.
+- A stateful `WorldViewProjector`, feed epoch, or global entity-delta sequence without measured need.
+- A permanent world generation tombstone store without evidence of harmful GUID reuse.
+- Wholesale replacement of `ClientViewEvent` entity/runtime-body variants.
+- Gameplay simulation, AI, combat, rollback, or a general physics feature set.
 - Per-render-frame host transform streaming.
-- Frontend motion-table parsing or motion selection.
-- Compatibility shims for obsolete spawned commit-pipeline or feed shapes.
+- Frontend motion-table decoding or semantic motion selection.
+- A second template cache, animation system, effect dispatcher, placement authority, or entity feed.
+- Compatibility shims for the superseded spawned commit-bundle proposal.
 
 ## Ground Truth and Existing Precedent
 
@@ -79,409 +97,503 @@ later physics demonstrations.
   - `CPartArray::SetPlacementFrame`: placement pose selection and fallback.
   - `CPartArray::DoObjDescChanges` and `DoObjDescChangesFromDefault`: focused appearance mutation.
   - `CObjectMaint::SetVisualDesc` and `ACCObjectMaint::SetVisualDesc`: sequence-gated visual changes
-    preserve entity identity.
-  - complete `UpdateObject` handling: object replacement recreates entity presentation.
+    preserve object identity.
+  - Complete `UpdateObject` handling: replacement recreates entity presentation.
 - `ACE/Source/ACE.DatLoader/FileTypes/MotionTable.cs`: styles, cycles, modifiers, links, animation
   ranges/rates, velocity, and omega.
-- `ACE/Source/ACE.Server/WorldObjects/Creature_Equipment.cs`: equipment uses focused `ObjDescEvent`.
-- `ACE/Source/ACE.Server/WorldObjects/Hook.cs`: setup/motion/physics/sound/scale changes use complete
-  update and reversal.
+- `ACE/Source/ACE.Server/WorldObjects/Creature_Equipment.cs`: equipment uses focused object-description
+  changes.
+- `ACE/Source/ACE.Server/WorldObjects/Hook.cs`: setup, motion, physics, sound, and scale changes use
+  complete replacement and reversal.
 
 ### Existing Code to Extend
 
-- The completed authored frontend systems from the prerequisite plans.
 - `crates/holtburger-world/src/entity.rs`
+- `crates/holtburger-world/src/attachment.rs`
+- `crates/holtburger-world/src/state/mutations.rs`
 - `crates/holtburger-world/src/state/motion_resolution.rs`
-- `crates/holtburger-world/src/bootstrap.rs`
-- `crates/holtburger-world/src/state/types.rs`
+- `crates/holtburger-world/src/spatial/`
 - `crates/holtburger-core/src/client/runtime.rs`
-- `crates/holtburger-core/src/client/simulation.rs`
-- `crates/holtburger-dat/src/file_type/motion_table.rs`
+- `crates/holtburger-core/src/client/runtime_body_view_cache.rs`
+- `crates/holtburger-core/src/client/types.rs`
+- `crates/holtburger-content/src/`
 - `apps/holtburger-3d/src-tauri/src/lib.rs`
 - `apps/holtburger-3d/src/lib/game/runtime/game-runtime.ts`
+- `apps/holtburger-3d/src/lib/game/systems/dynamic-entity-system.ts`
+- `apps/holtburger-3d/src/lib/game/systems/animation-system.ts`
+- `apps/holtburger-3d/src/lib/game/systems/effect-system.ts`
 - `apps/holtburger-3d/src/lib/game/scene/portal-trace.ts`
 
-### Known Gaps
+## Final Ownership Model
 
-- `holtburger-world::Entity` does not yet retain a lossless canonical equivalent of wire
-  `ModelData`, and no handler applies `ObjDescEvent`.
-- Current world motion resolution reduces tables to velocity/omega profiles and omits animation
-  selection, links, modifiers, and phase schedules.
-- The Tauri host owns content commands only and has no world runtime or entity stream.
-- The frontend has no runtime snapshot/delta consumer, placement anchor, motion plan, correction
-  owner, or dynamic portal traversal.
-- Spawned commit bundles are an unused scene-interest-shaped seam and must not become the runtime
-  mutation bus.
+| Fact                                               | Authoritative owner                              | First consumer in this plan                                   |
+| -------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------- |
+| Entity identity and lifecycle operation            | `holtburger-world`                               | Existing `ClientViewEvent` projection                         |
+| Semantic appearance                                | `holtburger-world`                               | Complete snapshot and visual-template staging                 |
+| Attachment and inherited residency                 | `holtburger-world`                               | Complete snapshot/deltas, then frontend attachment projection |
+| Accepted body placement and correction kind        | `holtburger-world`                               | Sparse placement projection                                   |
+| Semantic motion state and resolved selection       | `holtburger-world` using a content-built catalog | Spatial projection and frontend motion-plan playback          |
+| Complete initial entity snapshot                   | `holtburger-core` view contract                  | Existing client and Tauri consumers                           |
+| Broadcast lag detection                            | Each Rust `ClientViewEvent` receiver             | Stop forwarding and request a fresh snapshot                  |
+| Explorer scenarios and deterministic controls      | App-local Rust driver                            | Shared world mutation APIs                                    |
+| Tauri serialization, listener handshake, and relay | App-local Tauri adapter                          | Frontend entity mirror                                        |
+| Async presentation freshness                       | Existing frontend owner/staging generations      | Template, animation, and behavior activation                  |
+| Predicted rendered placement/residency             | Frontend `PlacementSystem`                       | Scene projection and renderer submission                      |
+| Final scene-node transform                         | Frontend presentation projection                 | Renderer-facing dynamic nodes                                 |
+| WebGL batching                                     | Renderer                                         | Dynamic draw submission                                       |
 
-The network handlers themselves remain out of scope. World-owned visual/motion state and explicit
-domain mutations gain a real explorer consumer here; future protocol handlers map into those same
-invariants later.
+World revisions or transport sequence fields land only with a concrete producer and consumer that can
+demonstrate out-of-order or undetectable loss. They are not an eager correctness bundle.
 
-## North Stars
+### 2026-08-01 Recovery-Scope Correction
 
-1. `ExplorerRuntime` and `ClientRuntime` are sibling composition roots over shared world/core
-   mechanics, not subclasses of a universal runtime.
-2. Authoritative entity, generation, appearance, placement, attachment, and motion invariants belong
-   to `holtburger-world`, not Tauri or TypeScript.
-3. Explorer command/scenario policy and projection transport remain app-local.
-4. The host resolves motion-table semantics once; the frontend executes resolved plans and never
-   consumes raw tables or keys.
-5. The frontend retains one current presentation placement/residency, seeded and rebased by sparse
-   host anchors.
-6. Host traffic scales with semantic mutations, plans, and anchors—not host ticks, render frames, or
-   frontend portal crossings.
-7. Snapshot/delta synchronization is recoverable: epoch and global sequence make loss detectable.
-8. Entity DTOs reference shared immutable content; they never embed animation, script, effect, or
-   motion-catalog payloads.
-9. Focused mutation preserves entity identity; complete replacement changes generation and tears
-   down all old mutable state atomically.
-10. Later explorer physics extends the authoritative world/runtime seam with a concrete consumer; it
-    does not distort this plan speculatively.
+- The original audit correctly found that the current initial-state request cannot reconstruct entity
+  presentation after loss. It did not prove that `ClientViewEvent` itself must be replaced.
+- The project owns `ClientRuntime`, every consumer, and the Tauri adapter. Expanding one
+  `InitialWorldStateSnapshot` event is cheaper and more maintainable than introducing a stateful
+  projector protocol.
+- Tokio broadcast preserves received order and returns `Lagged` when it overwrites unread events.
+  Recovery therefore needs a complete snapshot and a receiver state transition, not mandatory epoch
+  and sequence metadata.
+- Startup registers the receiver before requesting the snapshot. `ClientRuntime` serializes commands
+  and world mutations, so the single snapshot event is a stable replacement boundary: earlier entity
+  deltas are superseded and later deltas apply in order.
+- Server GUID reuse is infrequent, while `DynamicEntitySystem` already retains per-owner generations
+  across removal. That existing frontend lifecycle guard rejects stale asynchronous preparation after
+  despawn, respawn, or complete replacement; a world generation tombstone store does not yet earn its
+  keep.
+- Tauri is the only unproven delivery boundary. Phase 1 measures its listener-registration and relay
+  behavior. If it permits undetectable loss while a listener is alive, stop for review and add the
+  minimum proven sequencing contract there rather than prepaying for epochs everywhere.
 
 ## Target Runtime Shape
 
 ```text
-explorer UI/scenario command
-  -> ExplorerRuntime (app-local orchestration + deterministic clock)
-  -> holtburger-world state/domain mutations
-       |- canonical visual selection
-       |- generation / placement / attachment
-       `- semantic motion state
-  -> MotionResolver + host presentation projector
-  -> snapshot / sequenced deltas over Tauri
-  -> DynamicEntityFeed
-  -> existing frontend template/animation/script/effect/pose/render systems
+explorer scenario commands ----\
+                                -> one holtburger-world WorldState
+future network client events --/      |- identity + lifecycle
+                                       |- semantic appearance + attachment
+                                       |- authoritative body + residency
+                                       `- semantic motion state
+                                                    |
+                         holtburger-core ClientViewEvent projection
+                         complete snapshot + existing ordered deltas
+                                                    |
+                                  narrow app-local Tauri relay
+                                                    |
+                               frontend current-entity mirror
+                                                    |
+                    template / animation / script / effect staging
+                                                    |
+                       smooth PresentationPlacement + scene projection
+                                                    |
+                                     shared object renderer
 ```
 
-Motion-table path:
+The future network driver is not another runtime. It mutates the same world invariants and uses the
+same view contract. Session transport and reconnection stay in client composition; explorer scenarios
+and deterministic controls stay in app composition.
 
-```text
-MotionCatalog + entity semantic motion + prior plan + host time
-  -> ResolvedMotionPlan
-       |- ordered finite/repeating animation selections
-       `- matching velocity/omega per phase
-  -> frontend MotionSystem
-       |- prepared playback selection
-       `- PlacementSystem absolute-time projection
-```
+## Feed and Lifecycle Contracts
 
-## Host Runtime, Feed, and Clock Contracts
+### Startup and Resnapshot
 
-`ExplorerRuntime` owns a `holtburger-world` state instance, injected content/resolver/clock ports, and
-an ordered projection journal. It does not own WebGL nodes, frontend asset handles, portal
-presentation residency, or render cadence.
+The complete snapshot is one `ClientViewEvent` value containing one host-timeline sample and every
+frontend-relevant projected entity. Each entity joins identity, semantic appearance, attachment,
+current authoritative/runtime body facts, and semantic motion. It references shared immutable content
+by identity rather than embedding assets.
 
-One subscription handshake atomically returns a complete snapshot, feed epoch, next global sequence,
-and host timeline sample. Later envelopes carry epoch and monotonically increasing sequence. The
-frontend ignores duplicates, detects gaps or epoch changes, and requests a fresh snapshot instead of
-applying unknowable partial state. Per-entity generation and placement/behavior revisions remain
-necessary but do not replace stream continuity.
+Startup and recovery use the same state machine:
 
-One explicitly versioned host monotonic timeline defines plan and anchor effective times. Pause and
-deterministic step advance scenario time without wall-clock sleeps. Resynchronization is a named
-timeline update or fresh snapshot and cannot silently reinterpret an installed plan.
+1. register the Rust receiver and frontend listener;
+2. enter `awaiting-snapshot` and request initial view state;
+3. ignore entity/body/motion deltas until the complete snapshot arrives;
+4. atomically reconcile the snapshot; and
+5. apply later `ClientViewEvent` deltas in received order.
 
-`ResolvedMotionPlan` is a small entity-specific selected schedule, not a DAT record. Each phase pairs
-animation ID/range/rate steps with velocity/omega resolved from the same `MotionData` record and is
-explicitly finite or repeating. The frontend loads referenced animations through its shared
-repository, executes phases, samples authored root data, and composes motion only in
-`PlacementSystem`.
+If the Rust receiver returns `Lagged`, it stops forwarding entity deltas, re-enters
+`awaiting-snapshot`, and requests another snapshot. The last complete presentation may remain visible
+as stale, but receives no new behavior, motion, attachment, or placement input until reconciliation.
+Unrelated chat/status UI events need not be folded into the entity mirror.
+
+The plan does not require duplicate suppression because current producers do not retry view events.
+Snapshot reconciliation is idempotent by complete owner identity. If Tauri testing discovers a real
+duplicate or undetectable-loss mode, Phase 1 records the evidence and adds only the metadata needed for
+that mode.
+
+### Entity Mutation and Async Freshness
+
+Focused appearance mutation and complete replacement remain distinct world operations. Focused
+mutation updates semantic appearance, stages newly referenced resources under a frontend-local visual
+installation token, and atomically swaps the visual while preserving attachment, placement, and
+compatible behavior. Complete replacement invokes full retirement and a fresh entity installation.
+
+`DynamicEntitySystem` already increments and retains owner generations. Despawn, same-GUID respawn,
+and complete replacement therefore invalidate old template/animation preparation without a host
+generation field. Any later host-side asynchronous operation must introduce its own scoped freshness
+token with its first consumer; it may not justify a global generation preemptively.
+
+### Placement and Time
+
+`WorldBodyPlacement` is the sparse host sample: complete world pose, authoritative residency,
+attachment relationship when present, correction kind, and sample time. The exact Rust shape lands
+with its incremental event and frontend consumer.
+
+`PresentationPlacement` is the frontend-derived current result. It combines the newest accepted host
+sample with active resolved motion and correction policy at absolute mapped host time. It is never fed
+back as world truth. Only `PlacementSystem` writes it, and only scene projection applies it to the root
+node. Animation continues to sample rigid-part transforms smoothly at render cadence.
+
+The snapshot and motion/placement events provide one versioned mapping from host monotonic time to the
+frontend clock. Pause and deterministic step change scenario time through explicit timeline updates;
+delivery latency and asset readiness never shift a plan's semantic start time.
+
+### Motion
+
+The host consumes a content-built `MotionCatalog` and resolves semantic entity motion into a small,
+entity-specific `ResolvedMotionPlan`. A plan selects ordered animation ranges/rates and matching
+kinematics from the same authored motion records. The frontend loads referenced animations through the
+existing repository and begins at the absolute plan cursor after dependencies are ready.
+
+Animation position-frame contribution is an evidence gate, not permission to apply movement twice.
+Before the resolver lands, retail and ACE evidence must establish how position frames compose with
+motion-data velocity/omega. The selected composition is computed once in the host plan/spatial path;
+the frontend receives only the presentation facts required to predict the same trajectory.
 
 ## Phased Implementation
 
-### Phase 1: Establish World-Owned Runtime Entity State
+### Phase 1: Land a Recoverable Spawn/Despawn Vertical Slice
 
 #### Deliverables
 
-- Add a lossless world-owned visual-selection composite covering setup, appearance overrides, scale,
-  and focused/complete replacement semantics.
-- Add or refine explicit world-domain mutations for spawn, despawn, generation replacement,
-  placement, attachment, visual selection, direct behavior selection, and semantic motion state.
-- Separate reusable invariants currently buried in protocol handlers without changing network
-  behavior.
-- Delete the unused spawned landblock-commit shape.
+- Add a lossless world semantic appearance composite retaining setup, ordered palette/subpalette,
+  texture, and model substitutions plus existing scale/translucency/default behavior references.
+- Add a complete projected entity composite joining appearance, attachment, current runtime-body
+  truth, and semantic motion without embedding asset payloads.
+- Add one `InitialWorldStateSnapshot` variant to `ClientViewEvent` and emit it from
+  `RequestInitialViewState`; retain focused incremental entity/runtime-body events.
+- Teach the existing runtime-body read cache to consume the body portion of the complete snapshot;
+  do not turn it into a duplicate entity store.
+- Implement subscribe-before-request startup and `Lagged`-to-resnapshot receiver behavior.
+- Add an app-local explorer driver with injected world mutation, content, clock, and view-projection
+  dependencies; it owns scenario policy but no entity truth.
+- Add typed scenario commands for reset, spawn, despawn, and complete replacement.
+- Extract stateless world snapshot/event projection helpers into `holtburger-core` only when the
+  explorer becomes their second concrete consumer.
+- Select and test the narrow Tauri relay primitive, registering the frontend listener before starting
+  delivery and requesting the initial snapshot.
+- Make the Rust relay handle broadcast `Lagged` by pausing entity delivery and requesting/resending a
+  complete snapshot.
+- Add the frontend current-entity mirror and feed it into `GameRuntime` through a public dynamic-source
+  boundary.
+- Extract the facts currently trapped in `AuthoredDynamicSource` into one shared dynamic presentation
+  source consumed by `DynamicEntitySystem`; authored and spawned adapters compute it at their own
+  boundaries.
+- Stage projected visual identity through the existing content-addressed visual-template repository,
+  then atomically publish through `DynamicEntitySystem`.
 
 #### Acceptance Criteria
 
-- Explorer and client code can mutate the same world invariants without fake protocol messages.
-- No Tauri-only or frontend authoritative appearance/entity representation is introduced.
-- Focused visual mutation and complete generation replacement are distinct domain operations.
-- World APIs have no dependency on Tauri, WebGL, or explorer UI policy.
+- One snapshot reconstructs every projected entity without replay history.
+- A mutation serialized before the snapshot is represented by the snapshot; one serialized after it
+  arrives as a later delta.
+- Entity deltas received while awaiting a snapshot are ignored rather than partially applied.
+- Forced Tokio receiver lag triggers one resnapshot and produces state identical to a fresh snapshot.
+- Existing TUI/client consumers retain unrelated `ClientViewEvent` behavior.
+- A Rust scenario spawns repeated setup-backed entities across the real Tauri boundary and despawns
+  them with no leaked template, geometry, atlas, node, or pending-stage ownership.
+- Repeated identities share immutable templates while retaining independent mutable entity state.
+- Listener registration, initial snapshot, forced Rust relay lag, and webview reload each converge to
+  the current world without a parallel entity store.
+- Despawn, same-GUID respawn, or replacement at every asynchronous staging boundary cannot publish
+  stale work.
+- No motion table, attachment, or per-frame host transform is required for this slice.
+- If Tauri can lose a live-listener event without detection, implementation stops for user review
+  before adding a minimal transport sequence.
+- No feed epoch, global entity sequence, world generation store, or stateful projector is introduced.
+- Every snapshot field has a world producer and a same-phase frontend consumer.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- Populate during execution.
 
-### Phase 2: Build a Narrow `ExplorerRuntime` Lifecycle Slice
+### Phase 2: Replace Reduced Motion Resolution With One Proven Catalog
 
 #### Deliverables
 
-- Add app-local `ExplorerRuntime` with injected world/content/clock dependencies.
-- Add typed spawn, despawn, complete replace, and reset scenario commands.
-- Resolve setup/appearance into the same referential frontend entity source used by authored
-  presentation.
-- Add the host projection adapter, compact snapshot/delta envelope, epoch/sequence handshake,
-  resnapshot path, and TypeScript decoder.
-- Add `DynamicEntityFeed` consumption through `GameRuntime` without exposing system internals.
+- Prove retail transition, interruption, reversal, speed scaling, finite-link/cycle, and animation
+  position-frame composition from retail/ACE before fixing the final resolver contract.
+- Build a process-pinned `MotionCatalog` in `holtburger-content` containing the lossless authored facts
+  needed by the proven rules; `holtburger-world` consumes parsed data, never DAT paths.
+- Add a pure world-owned motion resolver from catalog, semantic entity motion, prior selection, and
+  host time to one `ResolvedMotionPlan`.
+- Replace reduced `MotionKinematics` as the authoritative selection source and make spatial-body
+  kinematics consume the active phase from the same resolution result.
+- Retain a reduced diagnostic view only if it has a distinct named diagnostic consumer.
 
 #### Acceptance Criteria
 
-- A Rust explorer command spawns several setup-backed entities across Tauri into the existing
-  frontend template/behavior/render path and despawns them without leaks.
-- Spawned and authored entities share templates, animations, scripts/effects, and renderer cohorts
-  where identity is compatible.
-- Duplicate envelopes are harmless; a forced gap or epoch reset produces a clean resnapshot.
-- No motion tables, projected movement, or per-frame host transforms are needed for this phase.
+- Animation selection and body kinematics originate from the same resolved authored records.
+- Styles, cycles, modifiers, links, ranges, rates, interruption, and reversal have reference-backed
+  tests with reachable failure messages.
+- Root contribution is applied once; a test distinguishes it from velocity/omega-only movement.
+- Catalog/resolver code has no Tauri, frontend, or session dependency.
+- Non-motion-table direct playback does not allocate placeholder graph state.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- Stop this phase for user review if retail evidence leaves root/velocity composition ambiguous.
 
-### Phase 3: Build the Shared Motion Catalog and Resolver
-
-#### Deliverables
-
-- Replace reduced `MotionKinematics` with a process-pinned `MotionCatalog` assembled by
-  `holtburger-content` and consumed by `holtburger-world`.
-- Retain setup defaults, styles, cycles, modifiers, links, animation ranges/rates, and per-record
-  velocity/omega.
-- Add a pure `MotionResolver` from catalog, semantic entity state, previous plan, and host time to one
-  `ResolvedMotionPlan`.
-- Migrate existing host grounded projection to active-phase kinematics from the same plan.
-- Prove style, cycle, modifier, transition, interruption, reversal, speed scaling, and finite-link to
-  repeating-cycle rules from retail/ACE.
-
-#### Acceptance Criteria
-
-- Playback selection and kinematics come from the same resolved motion records.
-- Existing host projection does not independently re-derive motion-table facts.
-- Non-motion-table animation/scripts do not allocate placeholder plan state.
-- Catalog/resolver code has no Tauri or frontend dependency.
-
-#### Decisions and Course Corrections
-
-- Pending implementation.
-
-### Phase 4: Add Deterministic Time and Motion-Plan Feed
+### Phase 3: Feed and Execute Resolved Motion Plans
 
 #### Deliverables
 
-- Add pause, resume, deterministic step, semantic motion change, direct playback, and reset commands.
-- Settle and implement the versioned host/frontend timeline mapping.
-- Project resolved plans and revisions through sequenced deltas.
-- Add frontend `MotionSystem` to stage referenced prepared animations and install plans generation-
-  safely without decoding motion tables.
-- Define late readiness: activation begins at the correct absolute plan cursor and follows proven
-  hook catch-up rather than shifting semantic time to I/O completion.
+- Add explorer commands for semantic motion, direct playback, pause, resume, deterministic step, and
+  timeline reset.
+- Project resolved plans through focused ordered `ClientViewEvent` deltas with absolute effective time.
+- Add a frontend motion-plan consumer that stages referenced prepared animations, installs a complete
+  plan under an entity-local installation token, and drives the existing `AnimationSystem`.
+- Start late-ready plans at the correct absolute semantic cursor and apply the already-proven departed-
+  frame hook catch-up policy without moving plan time to I/O completion.
+- Preserve smooth rigid-part sampling between semantic frames; plan updates do not create a second
+  pose or hook traversal path.
 
 #### Acceptance Criteria
 
-- One host plan drives many frontend frames without additional host traffic.
+- One host plan drives many frontend frames without further host messages.
 - Pause/step tests use an injected clock and never sleep.
-- Motion command changes replace plans atomically and stale revisions cannot affect new generations.
-- Missing clip/dependency failure is explicit and does not substitute unrelated playback.
+- Superseded plan preparation cannot affect the current entity installation.
+- Large and small accepted time advances emit equivalent ordered behavior events.
+- Missing animation dependencies fail explicitly and never substitute unrelated playback.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- Populate during execution.
 
-### Phase 5: Add Sparse Placement Projection and Residency
+### Phase 4: Add Sparse Presentation Placement and Corrections
 
 #### Deliverables
 
-- Define `PlacementAnchor` with complete pose/residency, sample time, generation, placement revision,
-  and continuous/discontinuous correction kind.
-- Add frontend `PlacementSystem` as the sole writer of world-root presentation placement/residency.
-- Sample anchor, active-phase velocity/omega, and animation root contribution from absolute host time.
-- Add named decaying continuous correction; generation changes, teleports, attachment changes, and
-  incompatible residency changes snap.
-- Generalize portal tracing for entity movement through multiple dense cells; normalize outdoor
-  endpoints and retain previous proven residency on missing/ambiguous topology.
+- Project `WorldBodyPlacement` only when accepted world-body state changes or a timeline reset requires
+  a new anchor; include continuous versus discontinuous correction semantics from existing world
+  outcomes.
+- Add frontend `PlacementSystem` as the sole owner of `PresentationPlacement` and root-node writes.
+- Predict from absolute anchor/plan time, apply named decaying continuous correction, and snap on
+  complete replacement, forced reposition, teleport, incompatible residency, or timeline reset.
+- Generalize portal tracing for a moving entity across multiple dense cells; normalize outdoor
+  endpoints and retain the last proven residency when topology is missing or ambiguous.
+- Keep server-authoritative pose available only as diagnostics if a real diagnostic view consumes it.
 
 #### Acceptance Criteria
 
-- Runtime motion stays smooth without per-frame host transforms and does not accumulate render-delta
+- Motion remains smooth at render cadence without per-frame host transforms or accumulated delta-time
   drift.
-- New anchors deterministically rebase one current frontend placement rather than creating parallel
-  authoritative/presentation residencies.
-- One sample can cross multiple environment-cell portals; unresolved topology never guesses.
-- Root motion, velocity, and omega change residency only through `PlacementSystem`.
+- An ordinary correction converges continuously; a forced correction snaps on the first eligible
+  presentation sample.
+- One large sample can cross multiple portals, and unavailable topology never guesses residency.
+- Animation, effects, and renderer code do not write root placement independently.
+- Clear, complete replacement, and resnapshot remove all prediction/correction state.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- Populate during execution.
 
-### Phase 6: Complete Runtime Mutation and Attachment Semantics
+### Phase 5: Add Focused Mutation, Attachments, and Behavior Commands
 
 #### Deliverables
 
-- Add focused appearance replacement, scale, attach/detach, direct script/effect activation, and
-  complete generation replacement commands/deltas.
-- Stage all new immutable dependencies before atomic activation.
-- Preserve compatible playback and attachments under focused mutation; tear down all old mutable
-  state under complete replacement.
-- Make attached entities inherit ancestor residency and current animated part transforms.
-- Land the shared frontend attachment consumer deferred by the authored-animation plan; authored and
-  spawned sources may reuse it, but spawned world state remains the first authoritative mutation
-  producer.
+- Add the first real focused appearance command, staging dependencies under a frontend-local visual
+  token before atomic activation while preserving compatible playback and effects.
+- Add attach/detach world operations and project attachment only now that a scenario and frontend
+  consumer exist.
+- Derive attached descendant residency from the resolved ancestor in world-owned projection logic.
+- Add frontend scene attachment to the parent's current animated part transform before visibility and
+  render submission; attachment never creates a second world-placement authority.
+- Add direct behavior/script/effect commands through the shared typed behavior seam delivered by the
+  authored-effects plan.
+- Exercise complete replacement as full retirement across templates, playback, effects, scripts,
+  queued behavior events, placement, attachments, and pending work.
 
 #### Acceptance Criteria
 
-- Focused replacement preserves root identity, generation, attachment, and compatible behavior.
-- Complete replacement cannot leave nodes, playback, scripts, effects, queued hooks, pending work, or
-  leases from the old generation.
-- Despawn during any preparation stage is leak-free.
-- Attached spawned entities follow current parent-part pose before visibility/rendering.
+- Focused mutation preserves identity, attachment, placement, and compatible behavior while swapping
+  the visual only after all dependencies are ready.
+- Attach-before-parent, parent replacement, detach, reattach, and ancestor despawn have deterministic
+  world and frontend results.
+- An attached child follows the selected animated parent part and inherits ancestor residency.
+- Complete replacement cannot retain any old mutable subsystem, queued event, or resource lease.
+- The app adapter contains no attachment resolution or appearance heuristics.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- Populate during execution.
 
-### Phase 7: Resteer for Client Sharing and Future Explorer Physics
-
-#### Task Checklist
-
-- [ ] Exercise repeated monsters, motion changes, appearance replacement, attachments, corrections,
-      teleports, feed gaps, epoch reset, late assets, and deterministic stepping end to end.
-- [ ] Measure host projection bytes, asset-transfer bytes, resolver work, frontend playback,
-      placement, portal traversal, effects, pose, upload, and draw separately.
-- [ ] Confirm traffic scales with semantic changes/anchors rather than clocks, frames, or cell
-      crossings.
-- [ ] Compare `ExplorerRuntime` and `ClientRuntime` call paths and extract only proven shared
-      mechanics into `world`/`core`; reject a generic runtime superclass.
-- [ ] Identify the first concrete explorer physics demonstration and write a separate plan from the
-      landed authority/time/projection seams.
-- [ ] Record the future protocol mapping for spawn, `ObjDescEvent`, complete update, movement, and
-      server time without implementing dormant handlers here.
-
-#### Acceptance Criteria
-
-- The host/frontend architecture is proven across the real boundary with no synthetic-only link.
-- Shared client/explorer mechanics have correct crate ownership and app policy remains local.
-- Future physics work can extend the runtime without replacing feed, clock, world state, or frontend
-  presentation contracts.
-- No speculative physics or network system entered this plan.
-
-#### Decisions and Course Corrections
-
-- Pending implementation.
-
-### Phase 8: Cleanup and Architectural Cutover
+### Phase 6: Prove Driver Sharing and Runtime Scale
 
 #### Deliverables
 
-- Remove old spawned commit branches, TypeScript-local architectural producers, reduced motion-
-  kinematics vocabulary, unsequenced feed events, duplicated appearance projection, and placeholder
-  runtime state.
-- Retain focused test fakes where they provide smaller unit coverage.
-- Update world/core/app architecture documentation and explorer diagnostics.
+- Exercise repeated creatures, motion transitions, focused replacement, complete replacement,
+  attachments, corrections, teleports, receiver lag/resnapshot, listener restart, late assets, and
+  deterministic stepping through host-backed scenarios.
+- Add a test network-driver adapter that applies representative decoded-domain operations to the same
+  world APIs without sockets or session policy.
+- Measure snapshot/delta bytes, immutable asset bytes, resolver work, frontend staging, motion,
+  presentation placement, portal traversal, effects, uploads, and draws as distinct scenarios justify.
+- Document the future protocol mapping for spawn, focused object description, complete update,
+  movement, and server time.
+- Identify the first concrete explorer physics demonstration and write a separate plan only if it is
+  now justified by the landed seam.
 
 #### Acceptance Criteria
 
-- Every production explorer scenario enters through `ExplorerRuntime`, shared world state, the host
-  projector, and `DynamicEntityFeed`.
-- No frontend path decodes motion tables or reconstructs visual identity heuristically.
-- No app-local authoritative entity store or base-runtime hierarchy exists.
-- Formatting, lint, tests, Rust checks, Clippy, and end-to-end host/frontend scenarios pass.
+- Explorer and representative client drivers produce equivalent view results for equivalent domain
+  operations.
+- Host traffic scales with semantic mutations and sparse anchors, not clocks, render frames, or
+  frontend portal crossings.
+- No generic runtime superclass, session-shaped shared contract, or unmeasured feed metadata is
+  introduced.
+- Every retained metric differs from another metric in a named scenario.
+- Future physics can extend world mutation/projection without replacing initial-state recovery, time,
+  or presentation contracts.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- Populate during execution.
 
-## Verification Strategy
+### Phase 7: Clean Cutover and Architecture Audit
 
-- Rust-host spawn/despawn/reset crossing Tauri into the existing frontend runtime.
-- Repeated identical spawned entities sharing templates, behavior assets, and compatible draws.
-- Focused versus complete replacement and stale generation/revision rejection.
-- Snapshot/delta duplicate, forced gap/resnapshot, and epoch reset.
-- Paused and deterministically stepped resolved motion without wall-clock sleeps.
-- Finite link to repeating cycle with matching playback and kinematic phase boundaries.
-- Plan effective before frontend asset readiness with absolute catch-up.
-- Sparse anchor driving many frames, continuous rebase, motion change, and discontinuous teleport.
-- Multi-cell portal traversal and topology-unavailable fallback.
-- Parent-part attachment following animated pose.
-- Despawn/replacement during every asynchronous staging boundary.
+#### Deliverables
+
+- Delete the runtime-body-only initial snapshot/cache, spawned commit seams, reduced authoritative
+  motion vocabulary, duplicate projections, and obsolete names once their replacements are consumed.
+- Retain focused incremental `ClientViewEvent` variants and small test fakes where they exercise the
+  production contracts.
+- Update world, core, Tauri, and frontend architecture documentation plus explorer diagnostics.
+- Run repository-wide vocabulary, dead-export, format, lint, test, Rust, and representative browser
+  gates.
+
+#### Acceptance Criteria
+
+- Every production scenario traverses app driver, shared world mutation, existing view-event contract,
+  narrow Tauri relay, frontend mirror, and the existing dynamic presentation runtime.
+- No frontend code parses motion tables, reconstructs appearance heuristically, or claims authoritative
+  placement/residency.
+- No app-local entity authority, parallel feed, pose system, or generic runtime hierarchy remains.
+- No epoch, global entity sequence, world generation tombstone, or stateful projector exists without
+  Phase 1 evidence and recorded review.
+- Formatting, TypeScript/Svelte checking, ESLint, Knip, frontend tests, Rust tests, Cargo check,
+  Rustfmt, and Clippy with warnings denied all pass.
+- Host-backed browser scenarios report correct lifecycle counts and no browser errors.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
+## Verification Matrix
+
+| Scenario                  | Required proof                                                          |
+| ------------------------- | ----------------------------------------------------------------------- |
+| Subscribe before snapshot | Earlier deltas are superseded; mutation after snapshot applies normally |
+| Receiver lag              | Entity forwarding pauses; resnapshot equals a fresh projection          |
+| Webview/listener restart  | Listener registers first and one snapshot reconstructs current state    |
+| Same-identity respawn     | Existing frontend owner generation rejects old preparation              |
+| Shared visual identity    | One template resource set, independent mutable entity state             |
+| Focused appearance        | Identity/attachment preserved; token-gated atomic visual swap           |
+| Complete replacement      | Every old mutable system and lease retires                              |
+| Late animation readiness  | Absolute plan cursor and ordered hook catch-up remain intact            |
+| Continuous correction     | Smooth convergence from one sparse anchor without drift                 |
+| Forced reposition         | Immediate snap and prediction reset                                     |
+| Multi-cell motion         | Directed portal chain traversed; ambiguity retains proven residency     |
+| Animated attachment       | Child follows current parent-part transform and ancestor residency      |
+| Driver parity             | Explorer and client adapter yield equivalent view state                 |
+
+No checked-in test may depend on runtime archives absent from the repository. Archive-backed evidence
+belongs in temporary diagnostics or the browser harness and is recorded before those diagnostics are
+removed.
 
 ## Risks and Mitigations
 
-### `ExplorerRuntime` Becomes a Second Client or God Runtime
+### Initial State Is Still Partial
 
-Keep it to scenario policy, deterministic time, orchestration of shared world/core mechanics, and
-presentation projection. It owns a shared world-state instance, not another entity model. Networking,
-gameplay, rendering, and frontend resources stay outside.
+Define one complete entity composite and prove that a fresh mirror equals the mirror reconstructed
+after forced lag. Runtime-body-only reset behavior is insufficient.
 
-### Host and Frontend Re-Derive Visual or Motion Truth
+### Snapshot Request Races With Deltas
 
-World owns canonical visual/motion state. The host projector resolves visual identity and
-`ResolvedMotionPlan`; frontend DTO consumers do not inspect WCID fragments or raw motion keys.
+Subscribe first, ignore entity deltas while awaiting the single snapshot event, and rely on the
+serialized runtime command/mutation boundary. The snapshot supersedes earlier deltas; later deltas
+remain ordered behind it.
 
-### Feed Loss Produces Undetectable Partial State
+### Tauri Hides Loss From the Rust Receiver
 
-Use atomic snapshot/subscription handoff, feed epoch, global sequence, and explicit resnapshot on
-gaps. Per-entity revisions remain additional mutation guards.
+Test listener registration, sustained delivery, and webview reload across the real boundary in Phase
 
-### Clock Mapping Drifts Animation and Placement Apart
+1. If loss while a live listener is genuinely undetectable, stop and review the smallest sequence or
+   acknowledgement contract justified by that evidence.
 
-Use one versioned host monotonic timeline for plans and anchors. Test latency, pause/step,
-resynchronization, delayed delivery, and late asset readiness against absolute sampling.
+### Rare GUID Reuse Admits Stale Frontend Work
 
-### Motion Is Applied Twice or Accumulates Drift
+Use the existing retained owner generation in `DynamicEntitySystem` for despawn, respawn, and complete
+replacement. Add host generation only if concrete asynchronous host work cannot use a narrower token.
 
-Resolve endpoint state from absolute anchor/plan time. Animation samples root data once;
-`PlacementSystem` alone combines root, velocity, and omega into current placement.
+### Host and Frontend Both Apply Motion
 
-### Dense Portal Topology Produces Wrong Residency
+Prove retail root/velocity composition first, then compute the selected rule once in the host
+resolution/spatial path. The frontend predicts the same presentation trajectory but never feeds it
+back or independently chooses semantics.
 
-Trace each previous-presented-point to absolute endpoint through directed apertures with multiple
-crossings. Retain prior proven residency on unavailable/ambiguous topology and await a later anchor.
+### Smooth Animation Is Lost During Authority Cleanup
 
-### Explorer and Client Duplicate Shared Mechanics
+Keep semantic frame/hook traversal discrete and retain current render-cadence rigid-part interpolation.
+Placement adds a smooth root transform; it does not replace animation sampling.
 
-Both operate on explicit shared world invariants. Extract additional stateless/core behavior only
-after two concrete call paths prove it is isomorphic; keep scenario and session policy separate.
+### Focused Mutation Accidentally Behaves Like Replacement
 
-### Durable Runtime Naming Invites Premature Physics
+Use separate world operations and frontend installation paths. Focused mutation stages and swaps one
+visual composite; complete replacement invokes full retirement.
 
-Require a concrete explorer demonstration and separate plan before adding physics capabilities. The
-runtime may grow, but this plan does not broaden merely because the name allows it.
+### Attachments Create Parallel Residency
+
+Derive authoritative descendant residency once in world-owned projection logic. Frontend parenting
+consumes that fact and applies the animated relative transform without authoring another residency.
+
+### Explorer Policy Leaks Into Shared Crates
+
+Keep scenario names, control UX, pause buttons, and deterministic demonstrations app-local. Shared
+crates expose domain mutations, snapshot/event projection, and reusable clock mechanics only after two
+concrete consumers prove the seam.
 
 ## Definition of Done
 
-- [ ] `ExplorerRuntime` owns shared world state, deterministic time, scenario orchestration, and a
-      sequenced projection journal.
-- [ ] Spawned lifecycle and mutations cross Tauri through a recoverable snapshot/delta feed.
-- [ ] World state retains canonical visual, generation, placement, attachment, and motion facts.
-- [ ] Spawned and authored entities reuse the same frontend visual, behavior, effect, pose, and
-      renderer systems.
-- [ ] Motion-table semantics resolve once in Rust into `ResolvedMotionPlan`.
-- [ ] Frontend motion and placement execute smoothly from plans and sparse anchors without raw tables
-      or per-frame host transforms.
-- [ ] Feed gaps, epoch changes, stale revisions, clock resynchronization, and late assets have tested
-      explicit behavior.
-- [ ] Focused mutation preserves identity; complete replacement/despawn removes all old mutable state
-      and leases.
-- [ ] Attachments follow animated parts and inherit ancestor residency.
-- [ ] `ExplorerRuntime` and `ClientRuntime` remain sibling composition roots without duplicated world
-      invariants or a speculative superclass.
-- [ ] Networking, gameplay simulation, and general physics remain absent.
-- [ ] Diagnostics distinguish feed/asset bytes, gaps/resnapshots, host time, plans, anchors,
-      corrections, portal crossings, entities, resources, effects, uploads, and draws.
-- [ ] All touched code passes repository formatting, linting, tests, Rust checks, and Clippy with
-      warnings denied.
-- [ ] Architecture documentation records the host/world/frontend ownership model.
+- [ ] World state retains lossless semantic appearance and explicit replacement semantics.
+- [ ] `RequestInitialViewState` emits one complete projected entity snapshot.
+- [ ] Subscribe-before-request and Tokio `Lagged` resnapshot behavior are tested and reconstructable.
+- [ ] Existing focused `ClientViewEvent` deltas remain the sole incremental event grammar.
+- [ ] Explorer and representative network-client drivers use the same world mutations and view types.
+- [ ] Spawned entities cross Tauri into the existing template, animation, effect, and renderer systems.
+- [ ] Tauri delivery is measured before any sequence or acknowledgement metadata is introduced.
+- [ ] Existing frontend owner generations reject stale same-GUID and replacement preparation.
+- [ ] Motion selection resolves once in Rust from a content-built catalog.
+- [ ] Frontend animation and placement remain smooth without raw motion tables or per-frame host input.
+- [ ] Root contribution is proven and applied exactly once.
+- [ ] Focused mutation preserves identity; complete replacement retires all old mutable state.
+- [ ] Attachments remain world-owned and follow animated parent parts in presentation.
+- [ ] Receiver lag, listener restart, timeline reset, and late assets have explicit tests.
+- [ ] No unproven epoch, global sequence, world generation store, or stateful projector lands.
+- [ ] No duplicate entity feed, placement authority, pose system, or motion-selection path survives.
+- [ ] Architecture documents and diagnostics match the landed ownership model.
+- [ ] All repository verification and representative host/browser gates pass.
 
-## Open Questions
+## Evidence Gates Requiring Resolution During Execution
 
-1. Which canonical world visual-selection fields are required to losslessly map current `ModelData`
-   and future focused `ObjDescEvent` updates?
-2. Which server sequence gates focused appearance changes, and exactly what survives complete
-   replacement?
-3. What are the exact retail transition, interruption, reversal, speed-scaling, and animation-root
-   composition rules for motion tables?
-4. Which versioned host/frontend timeline mapping best supports latency, pause/step, and future server
-   time synchronization?
-5. Which Tauri transport primitive provides ordered bounded delivery and atomic snapshot subscription
-   without turning UI events into a mutation bus?
-6. Does retail determine environment-cell residency from position origin or collision extent during
-   movement?
-7. What is the first concrete explorer physics scenario worth adding after this runtime lands?
+1. Prove the exact retail composition of animation position frames with motion-data velocity/omega
+   before Phase 2 fixes `ResolvedMotionPlan` and spatial integration.
+2. Prove the sequence gate and retained state for focused `ObjDescEvent` changes before Phase 5 fixes
+   the final focused-mutation contract.
+3. Select and test the concrete Tauri relay in Phase 1. Add sequencing only if a live-listener loss
+   mode cannot be detected by the Rust receiver or lifecycle handshake.
+4. Prove whether dense-cell residency uses origin or collision extent before Phase 4 finalizes moving
+   portal traversal.
+
+These gates may narrow a phase. They do not authorize a second runtime or an implicit fallback. Stop
+for user review if authoritative references remain ambiguous.

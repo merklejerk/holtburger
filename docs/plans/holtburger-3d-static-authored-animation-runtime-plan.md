@@ -4,6 +4,29 @@ Status: Complete after renewed retail validation and lifecycle hardening (2026-0
 Created: 2026-07-31
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 
+## Post-Completion Convergence Review — 2026-08-01
+
+This document remains the execution record for the completed canonical slice at `c09eb3c2`. Its
+checkboxes and original completion claims are unchanged. The parallel Claude slice at `c938a438` is
+donor evidence only and does not satisfy or replace any claim in this worktree.
+
+| Concern                                   | Branch-local status   | Convergence treatment                                                         |
+| ----------------------------------------- | --------------------- | ----------------------------------------------------------------------------- |
+| Authored dynamic activation and lifecycle | Complete on `3d-next` | Preserved as canonical foundation                                             |
+| Departed-frame semantic traversal         | Complete on `3d-next` | Preserved; Claude's final-frame-only traversal is rejected                    |
+| Smooth render-cadence rigid-part poses    | Complete on `3d-next` | Required canonical presentation behavior                                      |
+| Typed `TransparentPart` source/transport  | Complete on `3d-next` | Donor evidence reimplemented by convergence Phase 3; playback remains Phase 4 |
+| Visual-template atlas ownership           | Complete on `3d-next` | One geometry-and-atlas repository landed in convergence Phase 2               |
+
+Smooth interpolation is an intentional final-client quality choice. Semantic frame selection and hook
+execution remain discrete and retail-ordered; interpolated presentation samples never manufacture
+semantic crossings or hook events.
+
+The completed slice tied promoted dynamic texture lifetime to the containing static-layer atlas
+revision. That was correct for its authored-only scope, but it is not claimed as the final spawned
+materialization architecture. The active convergence plan owns that clean cutover without rewriting
+this historical record.
+
 ## Context and Boundaries
 
 ### Goal
@@ -466,7 +489,7 @@ Progress: Complete (2026-08-01)
   fractional part-pose interpolation.
 - Add per-entity setup-default playback with an independent deterministic phase derived from stable
   authored resident identity; shared animation resources never imply shared playback clocks.
-- Add a deterministic `HookSystem` and implement the visual hooks required by the representative
+- Add a deterministic effect owner and implement the visual hooks required by the representative
   evidence set, including persistent replacement-style `SetOmega` visual-root state.
 - Traverse semantic hooks using retail's departed-frame, direction-filtered ordering and carry
   accepted leftover time across cyclic seams without recursion.
@@ -476,8 +499,8 @@ Progress: Complete (2026-08-01)
   state without emitting transient or deferred effect hooks.
 - Advance `SetOmega` on a deterministic 30 Hz authored-behavior clock and interpolate committed
   visual-root orientations for rendering; never apply the raw omega payload once per render frame.
-- Add `PoseSystem` to compose authored root, visual-root modifiers, rigid-part pose, and scale once,
-  then publish final part transforms for visibility and rendering.
+- Compose authored root, visual-root modifiers, rigid-part pose, and scale once in entity-owned
+  presentation publication, then expose final part transforms for visibility and rendering.
 - Evaluate visual pose and publish final transforms once per rendered frame. Tune that cadence only
   from side-by-side visual evidence and a measured pose/propagation bottleneck.
 - Keep animation position frames prepared but unused by static default playback, matching retail's
@@ -497,7 +520,7 @@ Progress: Complete (2026-08-01)
   presentation without dispatching transient hooks.
 - `AnimationSystem` does not mutate scene nodes, authored placement, residency, resources, or
   renderer state.
-- `PoseSystem` does not own playback clocks or resource preparation.
+- `DynamicEntitySystem` publication does not own playback clocks or resource preparation.
 - Visual sampling and final transform publication run at render cadence in the initial
   implementation without visible stepping above the authored sample rate.
 - Script/effect hooks deferred to the next plan are observable with provenance and do not disappear.
@@ -520,15 +543,15 @@ Progress: Complete (2026-08-01)
 - `AnimationSystem` now owns only independent identity-derived clocks, fixed 30 Hz semantic steps,
   retail cyclic traversal, and fractional rigid-pose sampling. It returns immutable presentation
   samples and has no scene, resource, residency, or renderer port.
-- `HookSystem` owns persistent visual-hook state. It folds only persistent `SetOmega` state before
-  an independently phased first frame, integrates the decompiled axis-angle `delta * current`
-  rotation at the behavior clock, and exposes a fractional visual-root sample without mutating the
-  committed clock. Retail's small-vector threshold applies to committed behavior steps but not the
-  continuous render interpolation, avoiding high-refresh visual stepping. Deferred hooks retain
-  their command and semantic traversal location in bounded observations.
-- `PoseSystem` publishes visual-root and rigid-part samples at render cadence. Authored placement
-  remains the dynamic root, visual modifiers occupy one named child root, and retail part
-  composition remains the only scale-bearing layer. Position frames stay prepared and unused.
+- `EffectSystem` owns persistent visual-effect state. It folds `SetOmega` and implemented
+  `TransparentPart` history before an independently phased first frame, integrates the decompiled
+  axis-angle `delta * current` rotation at the behavior clock, and exposes fractional effect samples
+  without mutating committed state. Deferred hooks retain their command and semantic traversal
+  location in bounded observations.
+- `DynamicEntitySystem` publishes visual-root, rigid-part, and per-part render-state samples at render
+  cadence. Authored placement remains the dynamic root, visual modifiers occupy one named child root,
+  and retail part composition remains the only scale-bearing layer. Position frames stay prepared
+  and unused.
 - Activation is a synchronous final cutover after template, animation, hook policy, initial
   phase, initial pose, and conservative bounds are ready. Clips with structural or unknown visual
   blockers publish the resting presentation and static bounds instead of disappearing or partially
@@ -592,9 +615,10 @@ Progress: Complete (2026-08-01)
   side-by-side interactive visual task and did not justify changing the proven cadence or transform
   contracts.
 - The effects-plan dry run reuses the landed owner-atomic entity trees, template/animation leases,
-  `HookSystem` provenance, visual-root layer, `PoseSystem`, conservative-bound activation, and
-  frame-streamed renderer path. Plan B must add its concrete script/effect consumers and staged
-  replacement selections, but needs no alternate entity, pose, hook, or renderer architecture.
+  `EffectSystem` provenance, visual-root layer, entity-owned presentation publication,
+  conservative-bound activation, and frame-streamed renderer path. Plan B must add its concrete
+  script/effect consumers and staged replacement selections, but needs no alternate entity,
+  presentation, effect, or renderer architecture.
 - Representative clips emitted only supported `SetOmega`; combined residents retain script IDs for
   Plan B, and the synthetic deferred-effect fixture proves those events remain observable when
   encountered.
@@ -668,13 +692,13 @@ angular-speed parity, so Plan A's visual/performance signoff was premature.
   `MIN_QUANTUM_97 == 1 / 30`.
 - On each accepted static update, retail calls `Frame::grotate(m_omegaVector)` directly. Unlike the
   ordinary moving-physics path, it does not multiply the vector by elapsed seconds.
-- The landed `HookSystem` multiplied authored omega by `1 / 30` on every semantic step and by raw
+- The landed effect owner multiplied authored omega by `1 / 30` on every semantic step and by raw
   fractional seconds during interpolation. It therefore treated a per-update rotation vector as
   radians per second and produced approximately one-thirtieth of retail angular speed.
 - The earlier phrase “cyclic `SetOmega` observations” referred to a looping animation departing its
   authored frame-zero hook again on later cycles. The hook replaces persistent omega each time; it
   does not accumulate another angular velocity.
-- `HookSystem` now applies the raw authored omega once per fixed semantic update and interpolates by
+- `EffectSystem` now applies the raw authored omega once per fixed semantic update and interpolates by
   the fractional progress toward the next update. A representative `0.026797784` rad/update fixture
   proves 30 accepted steps produce `0.80393352` radians in one second, matching retail's direct
   application at the 30 Hz physics gate.

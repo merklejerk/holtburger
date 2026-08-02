@@ -10,6 +10,7 @@ import type { ObjectGeometryData } from "../renderer/geometry";
 import type { AABB3, Vec3 } from "../math/types";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 import { addAssetTextureFacts } from "../textures/texture-facts";
+import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
 import type { PartVisualTemplateKey, RigidPartDrawUnit } from "./components";
 
 declare const objectVisualTemplateKeyBrand: unique symbol;
@@ -56,7 +57,7 @@ export class InlineObjectVisualTemplatePreparer implements ObjectVisualTemplateP
 	async destroy(): Promise<void> {}
 }
 
-/** Prepared owner requirements that do not disturb the active owner until explicit commit. */
+/** Prepared consumer requirements that do not disturb the active owner until explicit commit. */
 export interface StagedObjectVisualTemplateOwner<TOwnerId extends string> {
 	readonly completion: Promise<
 		ReadonlyMap<ObjectVisualTemplateKey, ObjectVisualTemplate>
@@ -65,48 +66,110 @@ export interface StagedObjectVisualTemplateOwner<TOwnerId extends string> {
 	release(): void;
 }
 
-type TemplateState =
+/** Device-resource owner derived solely from one immutable visual-template identity. */
+export type ObjectVisualTemplateResourceOwnerId =
+	`object-visual-template-resource:${ObjectVisualTemplateKey}`;
+
+/** Opaque atlas claim retained by one prepared template entry. */
+export interface ObjectVisualTemplateAtlasClaim {
+	readonly completion: Promise<AtlasRequirementCompletion>;
+}
+
+/** Atlas operations required to make every prepared template texture drawable. */
+export interface ObjectVisualTemplateAtlas<
+	TClaim extends ObjectVisualTemplateAtlasClaim,
+> {
+	prepareOwnerRequirements(
+		ownerId: ObjectVisualTemplateResourceOwnerId,
+		revision: number,
+		facts: readonly AssetTextureFact[],
+	): TClaim;
+	activateOwnerRevision(claim: TClaim): Promise<void>;
+	withdrawOwnerRevision(claim: TClaim): Promise<void>;
+}
+
+/** Resource-free repository diagnostics consumed by runtime observability. */
+export interface ObjectVisualTemplateRepositoryDiagnostics {
+	readonly failedTemplateCount: number;
+	readonly preparingTemplateCount: number;
+	readonly readyTemplateCount: number;
+	readonly templateCount: number;
+}
+
+/** Dynamic-system boundary independent of the repository's concrete atlas claim type. */
+export interface ObjectVisualTemplateRepositoryPort<TOwnerId extends string> {
+	stageOwner(
+		sources: readonly AuthoredDynamicSource[],
+	): StagedObjectVisualTemplateOwner<TOwnerId>;
+	dropOwner(ownerId: TOwnerId): void;
+	getDiagnostics(): ObjectVisualTemplateRepositoryDiagnostics;
+	destroy(): Promise<void>;
+}
+
+type TemplateState<TClaim extends ObjectVisualTemplateAtlasClaim> =
 	| {
 			readonly kind: "preparing";
 			readonly completion: Promise<ObjectVisualTemplate>;
 	  }
-	| { readonly kind: "ready"; readonly template: ObjectVisualTemplate }
+	| {
+			readonly atlasClaim: TClaim;
+			readonly kind: "ready";
+			readonly template: ObjectVisualTemplate;
+	  }
 	| { readonly kind: "failed"; readonly cause: unknown };
 
-interface TemplateEntry<TOwnerId extends string> {
+interface TemplateEntry<
+	TOwnerId extends string,
+	TClaim extends ObjectVisualTemplateAtlasClaim,
+> {
 	readonly fingerprint: string;
 	readonly key: ObjectVisualTemplateKey;
 	readonly owners: Set<TOwnerId>;
 	stagingReferenceCount: number;
-	state: TemplateState;
+	state: TemplateState<TClaim>;
 }
 
 interface TemplateOwnerRecord {
 	readonly keys: ReadonlySet<ObjectVisualTemplateKey>;
 }
 
-/** Exact geometry ownership operations required by visual-template publication. */
-interface ObjectVisualTemplateGeometry<TOwnerId extends string> {
-	replaceOwner(ownerId: TOwnerId, sources: readonly GeometrySource[]): void;
-	dropOwner(ownerId: TOwnerId): void;
+/** Exact geometry ownership operations required by template residency. */
+export interface ObjectVisualTemplateGeometry {
+	replaceOwner(
+		ownerId: ObjectVisualTemplateResourceOwnerId,
+		sources: readonly GeometrySource[],
+	): void;
+	dropOwner(ownerId: ObjectVisualTemplateResourceOwnerId): void;
 }
 
-/** Shares immutable preparation while retaining device geometry only for current owner sets. */
-export class ObjectVisualTemplateManager<TOwnerId extends string> {
-	readonly #geometry: ObjectVisualTemplateGeometry<TOwnerId>;
+/** One immutable template key uses one atlas revision because changed content produces a new key. */
+const OBJECT_VISUAL_TEMPLATE_ATLAS_REVISION = 1;
+
+/** Shares immutable preparation and owns complete geometry-plus-atlas template residency. */
+export class ObjectVisualTemplateRepository<
+	TOwnerId extends string,
+	TClaim extends ObjectVisualTemplateAtlasClaim,
+> implements ObjectVisualTemplateRepositoryPort<TOwnerId> {
+	readonly #geometry: ObjectVisualTemplateGeometry;
+	readonly #atlas: ObjectVisualTemplateAtlas<TClaim>;
 	readonly #preparer: ObjectVisualTemplatePreparer;
 	readonly #entries = new Map<
 		ObjectVisualTemplateKey,
-		TemplateEntry<TOwnerId>
+		TemplateEntry<TOwnerId, TClaim>
 	>();
 	readonly #owners = new Map<TOwnerId, TemplateOwnerRecord>();
+	readonly #pendingDisposals = new Set<Promise<void>>();
+	/** Atlas cleanup failures retained for deterministic shutdown failure instead of rejection leaks. */
+	readonly #releaseFailures: unknown[] = [];
 	#destroyed = false;
 
 	constructor(
-		geometry: ObjectVisualTemplateGeometry<TOwnerId>,
+		geometry: ObjectVisualTemplateGeometry,
+		atlas: ObjectVisualTemplateAtlas<TClaim>,
 		preparer: ObjectVisualTemplatePreparer,
 	) {
 		this.#geometry = geometry;
+		this.#atlas = atlas;
 		this.#preparer = preparer;
 	}
 
@@ -115,7 +178,7 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 		sources: readonly AuthoredDynamicSource[],
 	): StagedObjectVisualTemplateOwner<TOwnerId> {
 		if (this.#destroyed)
-			throw new Error("Cannot prepare templates with a destroyed manager.");
+			throw new Error("Cannot prepare templates with a destroyed repository.");
 		const requirements = new Map<
 			ObjectVisualTemplateKey,
 			{ readonly fingerprint: string; readonly source: AuthoredDynamicSource }
@@ -135,7 +198,10 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 			}
 			requirements.set(key, { fingerprint, source });
 		}
-		const entries = new Map<ObjectVisualTemplateKey, TemplateEntry<TOwnerId>>();
+		const entries = new Map<
+			ObjectVisualTemplateKey,
+			TemplateEntry<TOwnerId, TClaim>
+		>();
 		try {
 			for (const [key, requirement] of requirements) {
 				const entry =
@@ -153,7 +219,7 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 		return {
 			commit: (ownerId: TOwnerId) => {
 				if (this.#destroyed)
-					throw new Error("Cannot commit templates after manager shutdown.");
+					throw new Error("Cannot commit templates after repository shutdown.");
 				if (state !== "staged")
 					throw new Error(`Cannot commit a template stage in state ${state}.`);
 				if (
@@ -180,11 +246,11 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 	}
 
 	/** Inspect one logical template's explicit preparation state without exposing its payload. */
-	getState(key: ObjectVisualTemplateKey): TemplateState["kind"] | null {
+	getState(key: ObjectVisualTemplateKey): TemplateState<TClaim>["kind"] | null {
 		return this.#entries.get(key)?.state.kind ?? null;
 	}
 
-	getDiagnostics() {
+	getDiagnostics(): ObjectVisualTemplateRepositoryDiagnostics {
 		const states = [...this.#entries.values()].map((entry) => entry.state.kind);
 		return {
 			failedTemplateCount: states.filter((state) => state === "failed").length,
@@ -199,55 +265,154 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		for (const ownerId of [...this.#owners.keys()]) this.dropOwner(ownerId);
-		await this.#preparer.destroy();
-		await Promise.allSettled(
-			[...this.#entries.values()].flatMap((entry) =>
-				entry.state.kind === "preparing" ? [entry.state.completion] : [],
-			),
+		const preparations = [...this.#entries.values()].flatMap((entry) =>
+			entry.state.kind === "preparing" ? [entry.state.completion] : [],
 		);
+		for (const entry of this.#entries.values()) {
+			if (entry.state.kind === "ready") {
+				this.#disposeReadyEntry(entry.key, entry.state.atlasClaim);
+			}
+		}
 		this.#entries.clear();
+		await this.#preparer.destroy();
+		await Promise.allSettled(preparations);
+		await Promise.allSettled([...this.#pendingDisposals]);
+		if (this.#releaseFailures.length > 0) {
+			throw new AggregateError(
+				this.#releaseFailures,
+				"One or more visual-template atlas claims failed to release.",
+			);
+		}
 	}
 
 	#startEntry(
 		key: ObjectVisualTemplateKey,
 		fingerprint: string,
 		source: AuthoredDynamicSource,
-	): TemplateEntry<TOwnerId> {
-		const entry: TemplateEntry<TOwnerId> = {
+	): TemplateEntry<TOwnerId, TClaim> {
+		const entry: TemplateEntry<TOwnerId, TClaim> = {
 			fingerprint,
 			key,
 			owners: new Set(),
 			stagingReferenceCount: 0,
 			state: { kind: "failed", cause: new Error("Preparation did not start.") },
 		};
-		const completion = this.#preparer
-			.prepare(source)
-			.then((template) => {
-				if (template.key !== key) {
-					throw new Error(
-						`Visual preparer returned ${template.key} for requested ${key}.`,
-					);
-				}
-				if (
-					this.#entries.get(key) !== entry ||
-					(entry.owners.size === 0 && entry.stagingReferenceCount === 0)
-				)
-					return template;
-				entry.state = { kind: "ready", template };
-				return template;
-			})
-			.catch((cause: unknown) => {
-				if (this.#entries.get(key) === entry)
-					entry.state = { kind: "failed", cause };
-				throw cause;
-			});
+		const completion = this.#prepareEntry(entry, source);
 		entry.state = { completion, kind: "preparing" };
 		this.#entries.set(key, entry);
 		return entry;
 	}
 
+	async #prepareEntry(
+		entry: TemplateEntry<TOwnerId, TClaim>,
+		source: AuthoredDynamicSource,
+	): Promise<ObjectVisualTemplate> {
+		let atlasClaim: TClaim | null = null;
+		let geometryRetained = false;
+		const resourceOwner = objectVisualTemplateResourceOwnerId(entry.key);
+		try {
+			const template = await this.#preparer.prepare(source);
+			if (template.key !== entry.key) {
+				throw new Error(
+					`Visual preparer returned ${template.key} for requested ${entry.key}.`,
+				);
+			}
+			if (!this.#entryIsRetained(entry)) return template;
+
+			geometryRetained = true;
+			this.#geometry.replaceOwner(resourceOwner, template.geometry);
+			atlasClaim = this.#atlas.prepareOwnerRequirements(
+				resourceOwner,
+				OBJECT_VISUAL_TEMPLATE_ATLAS_REVISION,
+				template.textureRequirements,
+			);
+			const atlasCompletion = await atlasClaim.completion;
+			if (atlasCompletion !== "ready") {
+				throw new Error(
+					`Visual template ${entry.key} atlas claim ${atlasCompletion === "withdrawn" ? "was withdrawn" : `failed: ${String(atlasCompletion.cause)}`}.`,
+				);
+			}
+			if (!this.#entryIsRetained(entry)) {
+				const releasedClaim = atlasClaim;
+				atlasClaim = null;
+				geometryRetained = false;
+				await this.#releasePreparedResources(
+					resourceOwner,
+					releasedClaim,
+					true,
+				);
+				return template;
+			}
+			await this.#atlas.activateOwnerRevision(atlasClaim);
+			if (!this.#entryIsRetained(entry)) {
+				const releasedClaim = atlasClaim;
+				atlasClaim = null;
+				geometryRetained = false;
+				await this.#releasePreparedResources(
+					resourceOwner,
+					releasedClaim,
+					true,
+				);
+				return template;
+			}
+			entry.state = { atlasClaim, kind: "ready", template };
+			return template;
+		} catch (cause) {
+			const releasedClaim = atlasClaim;
+			const releasedGeometry = geometryRetained;
+			let failure = cause;
+			try {
+				await this.#releasePreparedResources(
+					resourceOwner,
+					releasedClaim,
+					releasedGeometry,
+				);
+			} catch (cleanupCause) {
+				failure = new AggregateError(
+					[cause, cleanupCause],
+					`Visual template ${entry.key} preparation and rollback both failed.`,
+				);
+			}
+			if (this.#entries.get(entry.key) === entry) {
+				entry.state = { cause: failure, kind: "failed" };
+			}
+			throw failure;
+		}
+	}
+
+	async #releasePreparedResources(
+		resourceOwner: ObjectVisualTemplateResourceOwnerId,
+		atlasClaim: TClaim | null,
+		geometryRetained: boolean,
+	): Promise<void> {
+		const failures: unknown[] = [];
+		if (atlasClaim) {
+			try {
+				await this.#atlas.withdrawOwnerRevision(atlasClaim);
+			} catch (cause) {
+				failures.push(cause);
+			}
+		}
+		if (geometryRetained) {
+			try {
+				this.#geometry.dropOwner(resourceOwner);
+			} catch (cause) {
+				failures.push(cause);
+			}
+		}
+		if (failures.length > 0) {
+			throw new AggregateError(
+				failures,
+				`Visual template resources for ${resourceOwner} could not be released.`,
+			);
+		}
+	}
+
 	async #completeEntries(
-		entries: ReadonlyMap<ObjectVisualTemplateKey, TemplateEntry<TOwnerId>>,
+		entries: ReadonlyMap<
+			ObjectVisualTemplateKey,
+			TemplateEntry<TOwnerId, TClaim>
+		>,
 	): Promise<ReadonlyMap<ObjectVisualTemplateKey, ObjectVisualTemplate>> {
 		const templates = await Promise.all(
 			[...entries.values()].map((entry) => this.#entryCompletion(entry)),
@@ -256,7 +421,7 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 	}
 
 	#entryCompletion(
-		entry: TemplateEntry<TOwnerId>,
+		entry: TemplateEntry<TOwnerId, TClaim>,
 	): Promise<ObjectVisualTemplate> {
 		if (entry.state.kind === "preparing") return entry.state.completion;
 		if (entry.state.kind === "ready")
@@ -266,17 +431,16 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 
 	#commitOwner(
 		ownerId: TOwnerId,
-		entries: ReadonlyMap<ObjectVisualTemplateKey, TemplateEntry<TOwnerId>>,
+		entries: ReadonlyMap<
+			ObjectVisualTemplateKey,
+			TemplateEntry<TOwnerId, TClaim>
+		>,
 	): void {
-		const templates = [...entries.values()].map((entry) => {
+		for (const entry of entries.values()) {
 			if (entry.state.kind !== "ready")
 				throw new Error(`Template ${entry.key} is not ready for commit.`);
-			return entry.state.template;
-		});
-		this.#geometry.replaceOwner(
-			ownerId,
-			templates.flatMap((template) => template.geometry),
-		);
+		}
+		for (const entry of entries.values()) entry.owners.add(ownerId);
 		const previous = this.#owners.get(ownerId);
 		for (const key of previous?.keys ?? []) {
 			if (entries.has(key)) continue;
@@ -284,7 +448,6 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 			entry?.owners.delete(ownerId);
 			if (entry) this.#removeUnusedEntry(entry);
 		}
-		for (const entry of entries.values()) entry.owners.add(ownerId);
 		this.#owners.set(ownerId, {
 			keys: new Set(entries.keys()),
 		});
@@ -301,10 +464,9 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 			}
 			this.#owners.delete(ownerId);
 		}
-		this.#geometry.dropOwner(ownerId);
 	}
 
-	#releaseStagedEntry(entry: TemplateEntry<TOwnerId>): void {
+	#releaseStagedEntry(entry: TemplateEntry<TOwnerId, TClaim>): void {
 		if (entry.stagingReferenceCount <= 0)
 			throw new Error(
 				`Template ${entry.key} has no staged reference to release.`,
@@ -313,11 +475,41 @@ export class ObjectVisualTemplateManager<TOwnerId extends string> {
 		this.#removeUnusedEntry(entry);
 	}
 
-	#removeUnusedEntry(entry: TemplateEntry<TOwnerId>): void {
+	#removeUnusedEntry(entry: TemplateEntry<TOwnerId, TClaim>): void {
 		if (entry.owners.size === 0 && entry.stagingReferenceCount === 0) {
+			if (this.#entries.get(entry.key) !== entry) return;
 			this.#entries.delete(entry.key);
+			if (entry.state.kind === "ready") {
+				this.#disposeReadyEntry(entry.key, entry.state.atlasClaim);
+			}
 		}
 	}
+
+	#entryIsRetained(entry: TemplateEntry<TOwnerId, TClaim>): boolean {
+		return (
+			!this.#destroyed &&
+			this.#entries.get(entry.key) === entry &&
+			(entry.owners.size > 0 || entry.stagingReferenceCount > 0)
+		);
+	}
+
+	#disposeReadyEntry(key: ObjectVisualTemplateKey, atlasClaim: TClaim): void {
+		const disposal = this.#atlas
+			.withdrawOwnerRevision(atlasClaim)
+			.catch((cause: unknown) => {
+				this.#releaseFailures.push(cause);
+			})
+			.finally(() => this.#pendingDisposals.delete(disposal));
+		this.#pendingDisposals.add(disposal);
+		this.#geometry.dropOwner(objectVisualTemplateResourceOwnerId(key));
+	}
+}
+
+/** Derive the private device-resource owner for one immutable template. */
+function objectVisualTemplateResourceOwnerId(
+	key: ObjectVisualTemplateKey,
+): ObjectVisualTemplateResourceOwnerId {
+	return `object-visual-template-resource:${key}`;
 }
 
 /** Derive canonical template identity exclusively from immutable resolved content facts. */

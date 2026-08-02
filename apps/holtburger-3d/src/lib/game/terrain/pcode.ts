@@ -7,10 +7,7 @@ export const ROAD_TERRAIN_TYPE = 0x20;
 
 /** Ordered pcode corners match retail's southwest, southeast, northeast, northwest packing. */
 export type TerrainPcodeCorner =
-	| "southwest"
-	| "southeast"
-	| "northeast"
-	| "northwest";
+	"southwest" | "southeast" | "northeast" | "northwest";
 
 export interface TerrainOverlaySelection {
 	readonly terrainCode: number;

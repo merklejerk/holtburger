@@ -578,14 +578,14 @@ function briefHarnessReport(result) {
 				: {
 						animation: authoredDynamics.animation,
 						dynamics: authoredDynamics.dynamics,
-						hooks: {
-							activeHookStateCount: authoredDynamics.hooks.activeHookStateCount,
-							deferredHookCount: authoredDynamics.hooks.deferredHookCount,
-							executedHookCount: authoredDynamics.hooks.executedHookCount,
+						effects: {
+							residentEffectStateCount:
+								authoredDynamics.effects.residentEffectStateCount,
+							deferredHookCount: authoredDynamics.effects.deferredHookCount,
+							executedHookCount: authoredDynamics.effects.executedHookCount,
 							recentObservationCount:
-								authoredDynamics.hooks.observations.length,
+								authoredDynamics.effects.observations.length,
 						},
-						pose: authoredDynamics.pose,
 						residentCount: authoredDynamics.residents.length,
 					},
 		consoleMessages: result.consoleMessages.filter(

@@ -1,14 +1,27 @@
 # Holtburger 3D Dynamic Entity Runtime Roadmap
 
-Status: Split into sequenced implementation plans
+Status: Roadmap — convergence complete; authored effects queued next
 Created: 2026-07-31
 Evidence pass: 2026-07-31
 Roadmap split: 2026-07-31
+Convergence review: 2026-08-01
 
 ## Goal
 
 Reach high-fidelity authored world presentation first, then extend the proven frontend runtime to
-spawned entities through a durable Rust `ExplorerRuntime` and shared authoritative world state.
+spawned entities through one authoritative world runtime and a reconstructable view-event path driven
+by explorer scenarios or a future network client.
+
+## Convergence Provenance
+
+| Concern                           | Status                    | Evidence or owner                                                      |
+| --------------------------------- | ------------------------- | ---------------------------------------------------------------------- |
+| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                             |
+| Donor first slice                 | Complete on `claude` only | `c938a438`                                                             |
+| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`        |
+| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                          |
+| Effects execution                 | Queued                    | Resteered by convergence Phase 5; execute after convergence closes     |
+| Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; execute after effects |
 
 ## Why This Roadmap Is Split
 
@@ -17,7 +30,7 @@ The original plan combined three independently substantial outcomes:
 1. Rendering and animating static-authored dynamic residents.
 2. Executing authored physics scripts, particles, sound, and related effects.
 3. Building spawned-entity world state, host projection, motion-table resolution, clock mapping,
-   sparse placement, and the `ExplorerRuntime` boundary.
+   sparse placement, and the explorer-driver boundary.
 
 That ordering made the eventual client architecture compete with immediately visible authored-world
 fidelity. The plans are now sequenced by product value and dependency truth: prove the shared
@@ -27,9 +40,22 @@ population, and only then add mutable spawned entities and host-authoritative mo
 The split is also architectural addition through subtraction. The first plan no longer needs motion
 tables, sparse anchors, reconciliation, runtime portal traversal, or an explorer host merely to
 animate authored butterflies. The spawned plan inherits tested visual, animation, script, effect,
-pose, resource, and renderer systems instead of designing them alongside transport and world state.
+presentation, resource, and renderer systems instead of designing them alongside transport and world
+state.
 
 ## Sequenced Plans
+
+### 0. Dynamic-Entity Architecture Convergence
+
+Plan: [holtburger-3d-dynamic-entity-architecture-convergence-plan.md](holtburger-3d-dynamic-entity-architecture-convergence-plan.md)
+
+Progress: Complete on `3d-next` (2026-08-01).
+
+This completed execution record preserves the canonical animation slice, converges template
+materialization and proven effects, then audits and rewrites the spawned plan around one world
+runtime, one complete initial snapshot plus ordered deltas, and two drivers. The authored-effects plan
+is the next queued
+execution plan; it is not active until separately authorized.
 
 ### 1. Static-Authored Animation Fidelity
 
@@ -57,6 +83,8 @@ entity or motion-table scaffolding.
 
 Plan: [holtburger-3d-static-authored-effects-runtime-plan.md](holtburger-3d-static-authored-effects-runtime-plan.md)
 
+Progress: Queued with a convergence-audited executable sequence (2026-08-01).
+
 Outcome:
 
 - Setup default physics scripts and tables are decoded, prepared, scheduled, and shared.
@@ -65,7 +93,7 @@ Outcome:
 - `ReplaceObjectHook` atomically selects pre-staged shared replacement-part resources and updates
   conservative presentation bounds.
 - Authored `CreateParticle` and `SoundTweaked` events produce real particle and audio behavior.
-- Script-only and combined authored residents activate on the same entity/pose/resource architecture
+- Script-only and combined authored residents activate on the same entity/presentation/resource architecture
   as animated residents.
 
 This plan completes authored behavior fidelity before mutable runtime entities broaden lifecycle and
@@ -75,19 +103,23 @@ authority requirements.
 
 Plan: [holtburger-3d-spawned-entity-explorer-runtime-plan.md](holtburger-3d-spawned-entity-explorer-runtime-plan.md)
 
+Progress: Queued after the authored-effects plan; convergence audit and rewrite complete (2026-08-01).
+
 Outcome:
 
-- `ExplorerRuntime` orchestrates a shared `holtburger-world` state instance and deterministic time.
-- Spawned lifecycle and mutations cross Tauri through a recoverable snapshot/sequenced-delta feed.
-- World state owns canonical appearance, generation, placement, attachment, and motion facts.
+- Explorer scenarios and a future network client drive the same `holtburger-world` runtime and
+  projected view contract.
+- Spawned lifecycle and mutations cross Tauri through the existing view-event path with a complete
+  initial snapshot and explicit resnapshot after detected receiver lag.
+- World state owns canonical appearance, lifecycle operations, placement, attachment, and motion facts.
 - Spawned attach/detach provides the concrete lifecycle consumer for shared animated parent-part
   following.
 - `MotionCatalog` and `MotionResolver` produce shared `ResolvedMotionPlan` values in Rust.
 - The frontend executes plans and sparse placement anchors without consuming raw motion tables or
   per-frame host transforms.
-- Spawned entities reuse the authored visual, behavior, effect, pose, and renderer systems.
-- `ExplorerRuntime` and `ClientRuntime` remain sibling composition roots over shared world/core
-  mechanics, with no speculative base-runtime hierarchy.
+- Spawned entities reuse the authored visual, behavior, effect, presentation, and renderer systems.
+- App-local explorer and client composition remain policy boundaries over shared world/core mechanics,
+  with no second authoritative runtime or speculative base-runtime hierarchy.
 
 This plan establishes a durable growth seam for later explorer physics demonstrations, which require
 a separate concrete scenario and plan.
@@ -108,11 +140,15 @@ These contracts survive every roadmap stage:
 7. `apps/holtburger-3d/src-tauri` owns the narrow app-local host composition and projection adapter.
 8. The TypeScript frontend owns presentation playback, effects, scene transforms, visibility,
    rendering, and explorer UX.
-9. Immutable content resources are keyed and shared by content identity; mutable playback/effect
-   state is retained per activation.
+9. One content-addressed visual-template repository owns immutable preparation plus geometry and
+   atlas residency; mutable playback/effect state is retained per activation.
 10. Renderer batching remains renderer policy and never determines domain/resource identity.
 11. Unsupported behavior is observable with provenance; diagnostics never drive runtime decisions.
 12. No plan may introduce dormant infrastructure assigned to a later plan.
+13. Explorer and future network drivers mutate the same world-domain model and publish one complete
+    initial snapshot plus the existing ordered focused deltas.
+14. Feed epochs, global entity sequences, permanent generation tombstones, and a stateful projector
+    require measured need; they are not roadmap prerequisites.
 
 ## Shared Evidence
 
@@ -164,7 +200,7 @@ cycle detection must terminate preparation without rejecting intentional schedul
 ### Authored Fidelity Precedes Spawned Generality
 
 Authored residents are already present, numerous, and backed by exact content/reference evidence.
-They provide the best first consumers for templates, animation, scripts, effects, pose, and
+They provide the best first consumers for templates, animation, scripts, effects, presentation, and
 instancing. Spawned entities reuse those systems after their behavior is proven.
 
 ### Static Default Animation Does Not Require Runtime Placement Projection
@@ -180,17 +216,18 @@ The effects plan does not declare authored particles and sound complete merely b
 ports exist. The measured `CreateParticle` and `SoundTweaked` workload requires concrete visible and
 audible consumers.
 
-### ExplorerRuntime Is Durable but Not a Prerequisite
+### Explorer Is a Driver, Not Another World Runtime
 
-`ExplorerRuntime` remains the intended host for spawned test entities and later explorer simulation.
-It enters only after authored presentation systems are proven. It composes shared world state rather
-than creating an app-local authoritative model, and it grows only behind concrete explorer scenarios.
+Explorer scenarios remain the intended producer for spawned test entities and later simulation.
+They enter only after authored presentation systems are proven and drive the same world-domain
+mutations and projected events as a future network client. A narrow app-local composition adapter may
+own scenario policy and deterministic controls; it may not become a second authoritative entity model.
 
 ### No Universal Runtime Base Class
 
-`ExplorerRuntime` and `ClientRuntime` are sibling composition roots. Shared motion, spatial, world,
-and projection behavior moves into `world`/`core` when both have concrete use; application lifecycle,
-scenario policy, sessions, and transport remain local.
+Explorer and network-client composition remain local. Shared motion, spatial, world, and projection
+behavior lives in `world`/`core` when concrete consumers prove it; scenario policy, sessions, and
+transport remain local. No universal runtime base class is introduced.
 
 ## Overall Definition of Done
 
@@ -198,7 +235,7 @@ scenario policy, sessions, and transport remain local.
       performance evidence.
 - [ ] The static-authored effects plan is complete with real script, particle, and sound consumers.
 - [ ] The spawned entity/Explorer runtime plan is complete across the Rust/Tauri/TypeScript boundary.
-- [ ] Authored and spawned entities reuse one frontend template, behavior, pose, effect, and renderer
+- [ ] Authored and spawned entities reuse one frontend template, behavior, presentation, effect, and renderer
       architecture.
 - [ ] Static authored fidelity does not depend on motion tables, sparse anchors, or a spawned host.
 - [ ] Raw motion tables and authoritative world mutation remain outside the frontend.

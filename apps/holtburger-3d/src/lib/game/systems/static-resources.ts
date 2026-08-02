@@ -20,8 +20,7 @@ export type InstallStaticGeometryKey =
 
 /** Logical identity for either reusable or installation-specific static geometry. */
 export type StaticGeometryKey =
-	| ReusableStaticGeometryKey
-	| InstallStaticGeometryKey;
+	ReusableStaticGeometryKey | InstallStaticGeometryKey;
 
 /** Immutable cohort identity qualified by the installation that produced it. */
 export type StaticInstanceStreamKey =

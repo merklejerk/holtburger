@@ -31,17 +31,23 @@
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Animation sample / pose publish ms</span>
+					<span class="ac-param-key"
+						>Animation sample / presentation publish ms</span
+					>
 					<code
 						>{dynamics.animation.lastSamplingDurationMs.toFixed(2)} /
-						{dynamics.pose.lastPublicationDurationMs.toFixed(2)}</code
+						{dynamics.dynamics.lastPresentationPublicationDurationMs.toFixed(
+							2,
+						)}</code
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Hook executed / deferred / fallback</span>
+					<span class="ac-param-key"
+						>Effect hooks executed / deferred / fallback</span
+					>
 					<code
-						>{dynamics.hooks.executedHookCount} /
-						{dynamics.hooks.deferredHookCount} /
+						>{dynamics.effects.executedHookCount} /
+						{dynamics.effects.deferredHookCount} /
 						{dynamics.dynamics.staticFallbackEntityCount}</code
 					>
 				</div>

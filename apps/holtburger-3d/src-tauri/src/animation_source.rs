@@ -1,7 +1,8 @@
 use anyhow::{Result, ensure};
 use holtburger_dat::file_type::Animation;
 use holtburger_dat::file_type::setup_model::{
-    AnimationHook, AnimationHookPayload, TextureVelocityHookPayload, TextureVelocityPartHookPayload,
+    AnimationHook, AnimationHookPayload, TextureVelocityHookPayload,
+    TextureVelocityPartHookPayload, TransparentPartHookPayload,
 };
 use serde::Serialize;
 
@@ -55,8 +56,12 @@ enum AnimationHookPayloadManifest {
     },
     SetOmega {
         omega: [f32; 3],
-        byte_offset: usize,
-        byte_length: usize,
+    },
+    TransparentPart {
+        part_index: u32,
+        start: f32,
+        end: f32,
+        duration_seconds: f32,
     },
     TextureVelocity {
         u_speed: f32,
@@ -108,18 +113,18 @@ pub(crate) fn serialize_animation_record_binary(animation: &Animation) -> Result
                 .enumerate()
                 .map(move |(authored_order, hook)| (frame_index, authored_order, hook))
         })
-        .map(
-            |(frame_index, authored_order, hook)| AnimationHookManifest {
+        .map(|(frame_index, authored_order, hook)| {
+            Ok(AnimationHookManifest {
                 frame_index,
                 authored_order,
                 hook_type: hook.hook_type,
                 hook_name: hook_name(hook.hook_type),
                 direction: hook_direction(hook.direction),
                 raw_direction: hook.direction,
-                payload: hook_payload(hook, &mut hook_payload_bytes),
-            },
-        )
-        .collect::<Vec<_>>();
+                payload: hook_payload(hook, part_count, &mut hook_payload_bytes)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     writer.append_u8("hookPayloadBytes", &hook_payload_bytes);
     let (sections, section_bytes) = writer.finish();
     let manifest = AnimationRecordManifest {
@@ -148,8 +153,12 @@ fn frame_values(frame: &holtburger_dat::graphics::Frame) -> [f32; 7] {
     ]
 }
 
-fn hook_payload(hook: &AnimationHook, raw_payloads: &mut Vec<u8>) -> AnimationHookPayloadManifest {
-    match &hook.payload {
+fn hook_payload(
+    hook: &AnimationHook,
+    part_count: usize,
+    raw_payloads: &mut Vec<u8>,
+) -> Result<AnimationHookPayloadManifest> {
+    let payload = match &hook.payload {
         AnimationHookPayload::NoPayload => AnimationHookPayloadManifest::NoPayload,
         AnimationHookPayload::Raw(bytes) => {
             let (byte_offset, byte_length) = append_payload(raw_payloads, bytes);
@@ -166,15 +175,39 @@ fn hook_payload(hook: &AnimationHook, raw_payloads: &mut Vec<u8>) -> AnimationHo
             }
         }
         AnimationHookPayload::SetOmega(payload) => {
-            let (byte_offset, byte_length) =
-                append_payload(raw_payloads, &payload.raw_payload_bytes);
+            ensure!(
+                payload.omega.x.is_finite()
+                    && payload.omega.y.is_finite()
+                    && payload.omega.z.is_finite(),
+                "SetOmega payload contains a non-finite component"
+            );
             AnimationHookPayloadManifest::SetOmega {
                 omega: [payload.omega.x, payload.omega.y, payload.omega.z],
-                byte_offset,
-                byte_length,
+            }
+        }
+        AnimationHookPayload::TransparentPart(TransparentPartHookPayload {
+            part_index,
+            start,
+            end,
+            duration_seconds,
+        }) => {
+            ensure_part_index("TransparentPart", *part_index, part_count)?;
+            ensure!(
+                start.is_finite() && end.is_finite() && duration_seconds.is_finite(),
+                "TransparentPart payload contains a non-finite value"
+            );
+            AnimationHookPayloadManifest::TransparentPart {
+                part_index: *part_index,
+                start: *start,
+                end: *end,
+                duration_seconds: *duration_seconds,
             }
         }
         AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload { u_speed, v_speed }) => {
+            ensure!(
+                u_speed.is_finite() && v_speed.is_finite(),
+                "TextureVelocity payload contains a non-finite value"
+            );
             AnimationHookPayloadManifest::TextureVelocity {
                 u_speed: *u_speed,
                 v_speed: *v_speed,
@@ -184,12 +217,28 @@ fn hook_payload(hook: &AnimationHook, raw_payloads: &mut Vec<u8>) -> AnimationHo
             part_index,
             u_speed,
             v_speed,
-        }) => AnimationHookPayloadManifest::TextureVelocityPart {
-            part_index: *part_index,
-            u_speed: *u_speed,
-            v_speed: *v_speed,
-        },
-    }
+        }) => {
+            ensure_part_index("TextureVelocityPart", *part_index, part_count)?;
+            ensure!(
+                u_speed.is_finite() && v_speed.is_finite(),
+                "TextureVelocityPart payload contains a non-finite value"
+            );
+            AnimationHookPayloadManifest::TextureVelocityPart {
+                part_index: *part_index,
+                u_speed: *u_speed,
+                v_speed: *v_speed,
+            }
+        }
+    };
+    Ok(payload)
+}
+
+fn ensure_part_index(hook_name: &str, part_index: u32, part_count: usize) -> Result<()> {
+    ensure!(
+        usize::try_from(part_index)? < part_count,
+        "{hook_name} part index {part_index} is out of range for {part_count} parts"
+    );
+    Ok(())
 }
 
 fn append_payload(target: &mut Vec<u8>, payload: &[u8]) -> (usize, usize) {
@@ -264,12 +313,13 @@ mod tests {
     use super::*;
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_dat::file_type::animation::AnimationFlags;
-    use holtburger_dat::file_type::setup_model::{AnimationFrame, SetOmegaHookPayload};
+    use holtburger_dat::file_type::setup_model::{
+        AnimationFrame, SetOmegaHookPayload, TransparentPartHookPayload,
+    };
     use holtburger_dat::graphics::Frame;
 
     #[test]
     fn serializes_flat_frames_and_typed_hook_provenance() {
-        let raw_omega = [0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, 0x80, 0x3f];
         let animation = Animation {
             id: 0x0300_0001,
             flags: AnimationFlags::empty(),
@@ -286,14 +336,27 @@ mod tests {
                         z: 0.0,
                     },
                 }],
-                hooks: vec![AnimationHook {
-                    hook_type: 22,
-                    direction: 0,
-                    payload: AnimationHookPayload::SetOmega(SetOmegaHookPayload {
-                        omega: Vector3::new(0.0, 0.0, 1.0),
-                        raw_payload_bytes: raw_omega,
-                    }),
-                }],
+                hooks: vec![
+                    AnimationHook {
+                        hook_type: 22,
+                        direction: 0,
+                        payload: AnimationHookPayload::SetOmega(SetOmegaHookPayload {
+                            omega: Vector3::new(0.0, 0.0, 1.0),
+                        }),
+                    },
+                    AnimationHook {
+                        hook_type: 7,
+                        direction: 1,
+                        payload: AnimationHookPayload::TransparentPart(
+                            TransparentPartHookPayload {
+                                part_index: 0,
+                                start: 0.25,
+                                end: 1.0,
+                                duration_seconds: 0.75,
+                            },
+                        ),
+                    },
+                ],
             }],
         };
 
@@ -313,9 +376,59 @@ mod tests {
             manifest["hooks"][0]["payload"]["omega"],
             serde_json::json!([0.0, 0.0, 1.0])
         );
+        assert_eq!(manifest["hooks"][1]["hookName"], "transparent-part");
+        assert_eq!(manifest["hooks"][1]["direction"], "forward");
+        assert_eq!(manifest["hooks"][1]["payload"]["partIndex"], 0);
+        assert_eq!(manifest["hooks"][1]["payload"]["start"], 0.25);
+        assert_eq!(manifest["hooks"][1]["payload"]["end"], 1.0);
+        assert_eq!(manifest["hooks"][1]["payload"]["durationSeconds"], 0.75);
         assert_eq!(
-            &bytes[BINARY_HEADER_LENGTH + manifest_length..][28..40],
-            &raw_omega
+            manifest["sections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|section| section["name"] == "hookPayloadBytes")
+                .unwrap()["byteLength"],
+            0
         );
+    }
+
+    #[test]
+    fn rejects_invalid_transparent_part_projection_facts() {
+        let animation = |payload| Animation {
+            id: 0x0300_0001,
+            flags: AnimationFlags::empty(),
+            num_parts: 1,
+            num_frames: 1,
+            pos_frames: Vec::new(),
+            part_frames: vec![AnimationFrame {
+                frames: vec![Frame::default()],
+                hooks: vec![AnimationHook {
+                    hook_type: 7,
+                    direction: 0,
+                    payload: AnimationHookPayload::TransparentPart(payload),
+                }],
+            }],
+        };
+
+        let invalid_part =
+            serialize_animation_record_binary(&animation(TransparentPartHookPayload {
+                part_index: 1,
+                start: 0.0,
+                end: 1.0,
+                duration_seconds: 0.5,
+            }))
+            .expect_err("out-of-range TransparentPart should fail");
+        assert!(invalid_part.to_string().contains("out of range"));
+
+        let non_finite =
+            serialize_animation_record_binary(&animation(TransparentPartHookPayload {
+                part_index: 0,
+                start: f32::INFINITY,
+                end: 1.0,
+                duration_seconds: 0.5,
+            }))
+            .expect_err("non-finite TransparentPart should fail");
+        assert!(non_finite.to_string().contains("non-finite"));
     }
 }

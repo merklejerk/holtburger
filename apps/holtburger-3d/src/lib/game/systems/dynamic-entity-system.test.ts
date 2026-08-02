@@ -14,14 +14,17 @@ import type {
 	ResolvedObjectPresentation,
 } from "../resolution/presentation";
 import { SceneGraph } from "../scene";
+import type { DynamicPresentationSample } from "./animation-system";
 import { DynamicEntitySystem } from "./dynamic-entity-system";
 import {
 	InlineObjectVisualTemplatePreparer,
-	ObjectVisualTemplateManager,
+	ObjectVisualTemplateRepository,
 	objectVisualTemplateKey,
+	type ObjectVisualTemplateAtlas,
+	type ObjectVisualTemplateAtlasClaim,
 	type ObjectVisualTemplate,
 	type ObjectVisualTemplatePreparer,
-} from "./object-visual-template-manager";
+} from "./object-visual-template-repository";
 
 describe("DynamicEntitySystem authored ownership", () => {
 	it("installs and removes a promoted owner population as one set", async () => {
@@ -53,7 +56,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(() =>
 			system.replaceOwner("layer", [source("invalid", [0, 0])]),
 		).toThrow("duplicate part index 0");
-		expect(system.getRenderable(previous.nodeIds[0]!)).not.toBeNull();
+		expect(
+			system.getRenderable(requiredAt(previous.nodeIds, 0)),
+		).not.toBeNull();
 	});
 
 	it("does not publish resources from a superseded preparation", async () => {
@@ -81,7 +86,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		preparer.rejectNext(new Error("preparation failed"));
 		await expect(installation.ready).rejects.toThrow("preparation failed");
-		expect(system.getRenderable(installation.nodeIds[0]!)).toBeNull();
+		expect(
+			system.getRenderable(requiredAt(installation.nodeIds, 0)),
+		).toBeNull();
 	});
 
 	it("keeps the committed generation when asynchronous replacement preparation fails", async () => {
@@ -96,8 +103,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 		preparer.rejectNext(new Error("replacement failed"));
 		await expect(replacement.ready).rejects.toThrow("replacement failed");
 
-		expect(system.getRenderable(previous.nodeIds[0]!)).not.toBeNull();
-		expect(system.getRenderable(replacement.nodeIds[0]!)).toBeNull();
+		expect(
+			system.getRenderable(requiredAt(previous.nodeIds, 0)),
+		).not.toBeNull();
+		expect(system.getRenderable(requiredAt(replacement.nodeIds, 0))).toBeNull();
 	});
 
 	it("keeps the committed generation when replacement geometry allocation fails", async () => {
@@ -113,8 +122,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 		await expect(replacement.ready).rejects.toThrow(
 			"geometry replacement failed",
 		);
-		expect(system.getRenderable(previous.nodeIds[0]!)).not.toBeNull();
-		expect(system.getRenderable(replacement.nodeIds[0]!)).toBeNull();
+		expect(
+			system.getRenderable(requiredAt(previous.nodeIds, 0)),
+		).not.toBeNull();
+		expect(system.getRenderable(requiredAt(replacement.nodeIds, 0))).toBeNull();
 	});
 
 	it("awaits in-flight preparation before destroying shared repositories", async () => {
@@ -169,8 +180,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		expect(await installation.ready).toBe("ready");
 		commit(installation);
-		const first = system.getVisibleContributions(installation.nodeIds[0]!);
-		const second = system.getVisibleContributions(installation.nodeIds[1]!);
+		const firstNodeId = requiredAt(installation.nodeIds, 0);
+		const secondNodeId = requiredAt(installation.nodeIds, 1);
+		const first = system.getVisibleContributions(firstNodeId);
+		const second = system.getVisibleContributions(secondNodeId);
 		expect(first).toHaveLength(1);
 		expect(second).toHaveLength(1);
 		expect(first?.[0]?.drawUnit.batchKey).toBe(second?.[0]?.drawUnit.batchKey);
@@ -198,6 +211,52 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toContain(installation.nodeIds[0]);
 	});
 
+	it("publishes translucency through alpha, transparent ordering, sorting, and full suppression", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const shared = source("shared-translucency");
+		const installation = system.replaceOwner("layer", [
+			{ ...shared, identity: { kind: "authored", sourceId: "first" } },
+			{ ...shared, identity: { kind: "authored", sourceId: "second" } },
+		]);
+		expect(await installation.ready).toBe("ready");
+		const prepared = installation.getPreparedEntities();
+		const firstPrepared = prepared[0];
+		const secondPrepared = prepared[1];
+		if (!firstPrepared || !secondPrepared)
+			throw new Error("Expected two prepared dynamic entities.");
+		installation.prepareCommit([
+			presentationSample(firstPrepared, 0.25),
+			presentationSample(secondPrepared, 0.5),
+		]);
+		installation.commit();
+
+		const firstNodeId = requiredAt(installation.nodeIds, 0);
+		const secondNodeId = requiredAt(installation.nodeIds, 1);
+		const first = system.getVisibleContributions(firstNodeId)?.[0];
+		const second = system.getVisibleContributions(secondNodeId)?.[0];
+		expect(first).toMatchObject({
+			drawUnit: { ordering: "transparent" },
+			instance: { color: { a: 0.75 } },
+		});
+		expect(first?.transparentSort).not.toBeNull();
+		expect(second).toMatchObject({
+			drawUnit: { ordering: "transparent" },
+			instance: { color: { a: 0.5 } },
+		});
+		expect(first?.drawUnit.batchKey).toBe(second?.drawUnit.batchKey);
+
+		system.publishPresentation([presentationSample(firstPrepared, 1)]);
+		expect(system.getVisibleContributions(firstNodeId)).toEqual([]);
+
+		system.publishPresentation([presentationSample(firstPrepared, 0)]);
+		expect(system.getVisibleContributions(firstNodeId)?.[0]).toMatchObject({
+			drawUnit: { ordering: "opaque" },
+			instance: { color: { a: 1 } },
+			transparentSort: null,
+		});
+		expect(system.getDiagnostics().lastPublishedPresentationCount).toBe(1);
+	});
+
 	it("activates a blocked visual clip as valid static presentation", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -206,7 +265,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const installation = system.replaceOwner("layer", [source("blocked")]);
 		expect(await installation.ready).toBe("ready");
 		commit(installation);
-		const nodeId = installation.nodeIds[0]!;
+		const nodeId = requiredAt(installation.nodeIds, 0);
 		expect(system.getPreparedAnimation(nodeId)).toMatchObject({
 			kind: "retain-static-presentation",
 		});
@@ -224,24 +283,44 @@ function commit(
 	installation: ReturnType<DynamicEntitySystem<string>["replaceOwner"]>,
 ): void {
 	installation.prepareCommit(
-		installation.getPreparedEntities().flatMap(({ animation, nodeId }) =>
-			animation.kind === "activatable"
-				? [
-						{
-							nodeId,
-							pose: {
-								partToObjectTransforms: Array.from(
-									{ length: animation.animation.partCount },
-									() => Mat4.identity(),
-								),
-							},
-							visualRootTransform: Mat4.identity(),
-						},
-					]
-				: [],
-		),
+		installation
+			.getPreparedEntities()
+			.flatMap((prepared) =>
+				prepared.animation.kind === "activatable"
+					? [presentationSample(prepared, 0)]
+					: [],
+			),
 	);
 	installation.commit();
+}
+
+function presentationSample(
+	prepared: ReturnType<
+		ReturnType<
+			DynamicEntitySystem<string>["replaceOwner"]
+		>["getPreparedEntities"]
+	>[number],
+	translucency: number,
+): DynamicPresentationSample {
+	const { animation, nodeId } = prepared;
+	if (animation.kind !== "activatable")
+		throw new Error("Static fallback has no dynamic presentation sample.");
+	return {
+		articulatedPose: {
+			partToObjectTransforms: Array.from(
+				{ length: animation.animation.partCount },
+				() => Mat4.identity(),
+			),
+		},
+		effects: {
+			partRenderStates: Array.from(
+				{ length: animation.animation.partCount },
+				() => ({ translucency }),
+			),
+			rootRotationModifier: Mat4.identity(),
+		},
+		nodeId,
+	};
 }
 
 function createSystem(
@@ -250,7 +329,11 @@ function createSystem(
 ) {
 	const scene = new SceneGraph();
 	const geometry = new FixtureGeometry();
-	const templates = new ObjectVisualTemplateManager(geometry, preparer);
+	const templates = new ObjectVisualTemplateRepository(
+		geometry,
+		new ReadyTemplateAtlas(),
+		preparer,
+	);
 	const system = new DynamicEntitySystem<string>(
 		scene,
 		templates,
@@ -372,6 +455,13 @@ function prepared(id: string): ObjectVisualTemplate {
 	};
 }
 
+function requiredAt<T>(values: readonly T[], index: number): T {
+	const value = values[index];
+	if (value === undefined)
+		throw new Error(`Expected test value at index ${index}.`);
+	return value;
+}
+
 class DeferredPreparer implements ObjectVisualTemplatePreparer {
 	readonly #pending: Array<{
 		readonly resolve: (value: ObjectVisualTemplate) => void;
@@ -415,6 +505,24 @@ class FixtureGeometry {
 	}
 
 	dropOwner(): void {}
+}
+
+class ReadyTemplateAtlasClaim implements ObjectVisualTemplateAtlasClaim {
+	readonly completion = Promise.resolve("ready" as const);
+}
+
+class ReadyTemplateAtlas implements ObjectVisualTemplateAtlas<ReadyTemplateAtlasClaim> {
+	activateOwnerRevision(): Promise<void> {
+		return Promise.resolve();
+	}
+
+	prepareOwnerRequirements(): ReadyTemplateAtlasClaim {
+		return new ReadyTemplateAtlasClaim();
+	}
+
+	withdrawOwnerRevision(): Promise<void> {
+		return Promise.resolve();
+	}
 }
 
 class FixtureAnimationSource implements AnimationAssetSource {

@@ -3,10 +3,9 @@ import {
 	advanceCyclicFrame,
 	sampleAnimationPose,
 } from "../animation/animation-playback";
-import type { Mat4 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import type { ArticulatedPose } from "./components";
-import { HookSystem } from "./hook-system";
+import { EffectSystem, type EffectPresentationSample } from "./effect-system";
 
 const BEHAVIOR_STEP_SECONDS = 1 / 30;
 const DISCONTINUITY_SECONDS = 2;
@@ -27,25 +26,27 @@ export interface AnimationRuntimeDiagnostics {
 	readonly lastSemanticStepCount: number;
 }
 
-/** Render-cadence pose and visual-root sample produced without mutating scene state. */
-export interface AnimatedPresentationSample {
+/** Complete render-cadence presentation produced without mutating entity or scene state. */
+export interface DynamicPresentationSample {
+	readonly articulatedPose: ArticulatedPose;
+	readonly effects: EffectPresentationSample;
 	readonly nodeId: SceneNodeId;
-	readonly pose: ArticulatedPose;
-	readonly visualRootTransform: Mat4;
 }
 
 /** Fully initialized playback generation that leaves the active owner untouched until commit. */
 export interface StagedAnimationOwner {
-	readonly samples: readonly AnimatedPresentationSample[];
+	readonly samples: readonly DynamicPresentationSample[];
 	commit(): void;
 	release(): void;
 }
 
 /** Owns independent playback clocks and semantic traversal, but no scene or resource mutation. */
 export class AnimationSystem<TOwnerId extends string> {
-	readonly #hooks: HookSystem;
+	readonly #effects: EffectSystem;
 	readonly #records = new Map<SceneNodeId, AnimationRecord>();
 	readonly #owners = new Map<TOwnerId, Set<SceneNodeId>>();
+	readonly #stagedNodeIds = new Set<SceneNodeId>();
+	#destroyed = false;
 	#diagnostics: AnimationRuntimeDiagnostics = {
 		activePlaybackCount: 0,
 		discontinuityCount: 0,
@@ -53,8 +54,8 @@ export class AnimationSystem<TOwnerId extends string> {
 		lastSemanticStepCount: 0,
 	};
 
-	constructor(hooks: HookSystem) {
-		this.#hooks = hooks;
+	constructor(effects: EffectSystem) {
+		this.#effects = effects;
 	}
 
 	install(
@@ -62,26 +63,12 @@ export class AnimationSystem<TOwnerId extends string> {
 		nodeId: SceneNodeId,
 		residentIdentity: string,
 		animation: PreparedAnimation,
-	): AnimatedPresentationSample {
+	): DynamicPresentationSample {
+		if (this.#destroyed)
+			throw new Error("Cannot install destroyed animation playback.");
 		if (this.#records.has(nodeId))
 			throw new Error(`Animation state for ${nodeId} already exists.`);
-		const framePosition = independentPhase(
-			residentIdentity,
-			animation.frameCount,
-		);
-		const initialTraversal = advanceCyclicFrame(
-			0,
-			framePosition,
-			animation.frameCount,
-			"forward",
-		);
-		this.#hooks.install(nodeId, animation, initialTraversal.departedFrames);
-		const record: AnimationRecord = {
-			animation,
-			fractionalSeconds: 0,
-			framePosition,
-			lastTimeSeconds: null,
-		};
+		const record = this.#createRecord(nodeId, residentIdentity, animation);
 		this.#records.set(nodeId, record);
 		let nodes = this.#owners.get(ownerId);
 		if (!nodes) {
@@ -93,11 +80,13 @@ export class AnimationSystem<TOwnerId extends string> {
 	}
 
 	/** Advance semantic state at 30 Hz and sample smooth visual state at the supplied render time. */
-	update(timeSeconds: number): readonly AnimatedPresentationSample[] {
+	update(timeSeconds: number): readonly DynamicPresentationSample[] {
+		if (this.#destroyed)
+			throw new Error("Cannot update destroyed animation playback.");
 		if (!Number.isFinite(timeSeconds))
 			throw new Error("Animation time must be finite.");
 		const startedAt = performance.now();
-		const samples: AnimatedPresentationSample[] = [];
+		const samples: DynamicPresentationSample[] = [];
 		let semanticStepCount = 0;
 		for (const [nodeId, record] of this.#records) {
 			semanticStepCount += this.#advanceRecord(nodeId, record, timeSeconds);
@@ -125,8 +114,10 @@ export class AnimationSystem<TOwnerId extends string> {
 			readonly residentIdentity: string;
 		}[],
 	): StagedAnimationOwner {
+		if (this.#destroyed)
+			throw new Error("Cannot stage destroyed animation playback.");
 		const records = new Map<SceneNodeId, AnimationRecord>();
-		const samples: AnimatedPresentationSample[] = [];
+		const samples: DynamicPresentationSample[] = [];
 		try {
 			for (const installation of installations) {
 				if (
@@ -137,32 +128,20 @@ export class AnimationSystem<TOwnerId extends string> {
 						`Animation state for ${installation.nodeId} already exists.`,
 					);
 				}
-				const framePosition = independentPhase(
-					installation.residentIdentity,
-					installation.animation.frameCount,
-				);
-				const initialTraversal = advanceCyclicFrame(
-					0,
-					framePosition,
-					installation.animation.frameCount,
-					"forward",
-				);
-				this.#hooks.install(
+				const record = this.#createRecord(
 					installation.nodeId,
+					installation.residentIdentity,
 					installation.animation,
-					initialTraversal.departedFrames,
 				);
-				const record: AnimationRecord = {
-					animation: installation.animation,
-					fractionalSeconds: 0,
-					framePosition,
-					lastTimeSeconds: null,
-				};
 				records.set(installation.nodeId, record);
+				this.#stagedNodeIds.add(installation.nodeId);
 				samples.push(this.#sample(installation.nodeId, record));
 			}
 		} catch (cause) {
-			for (const nodeId of records.keys()) this.#hooks.remove(nodeId);
+			for (const nodeId of records.keys()) {
+				this.#effects.remove(nodeId);
+				this.#stagedNodeIds.delete(nodeId);
+			}
 			throw cause;
 		}
 		let state: "staged" | "committed" | "released" = "staged";
@@ -170,15 +149,22 @@ export class AnimationSystem<TOwnerId extends string> {
 			commit: () => {
 				if (state !== "staged")
 					throw new Error(`Cannot commit animation stage in state ${state}.`);
+				if (this.#destroyed)
+					throw new Error("Cannot commit destroyed animation playback.");
 				this.#removeOwnerRecords(ownerId);
-				for (const [nodeId, record] of records)
+				for (const [nodeId, record] of records) {
 					this.#records.set(nodeId, record);
+					this.#stagedNodeIds.delete(nodeId);
+				}
 				this.#owners.set(ownerId, new Set(records.keys()));
 				state = "committed";
 			},
 			release: () => {
 				if (state !== "staged") return;
-				for (const nodeId of records.keys()) this.#hooks.remove(nodeId);
+				for (const nodeId of records.keys()) {
+					this.#effects.remove(nodeId);
+					this.#stagedNodeIds.delete(nodeId);
+				}
 				state = "released";
 			},
 			samples,
@@ -189,12 +175,22 @@ export class AnimationSystem<TOwnerId extends string> {
 		this.#removeOwnerRecords(ownerId);
 	}
 
+	destroy(): void {
+		if (this.#destroyed) return;
+		this.#destroyed = true;
+		for (const nodeId of this.#records.keys()) this.#effects.remove(nodeId);
+		for (const nodeId of this.#stagedNodeIds) this.#effects.remove(nodeId);
+		this.#records.clear();
+		this.#owners.clear();
+		this.#stagedNodeIds.clear();
+	}
+
 	#removeOwnerRecords(ownerId: TOwnerId): void {
 		const nodes = this.#owners.get(ownerId);
 		if (!nodes) return;
 		for (const nodeId of nodes) {
 			this.#records.delete(nodeId);
-			this.#hooks.remove(nodeId);
+			this.#effects.remove(nodeId);
 		}
 		this.#owners.delete(ownerId);
 	}
@@ -223,20 +219,7 @@ export class AnimationSystem<TOwnerId extends string> {
 			BEHAVIOR_STEP_SECONDS
 		) {
 			semanticStepCount += 1;
-			this.#hooks.advanceCommittedRotation(nodeId);
-			const advance = advanceCyclicFrame(
-				record.framePosition,
-				record.animation.framesPerSecond * BEHAVIOR_STEP_SECONDS,
-				record.animation.frameCount,
-				"forward",
-			);
-			record.framePosition = advance.framePosition;
-			this.#hooks.executeDepartedFrames(
-				nodeId,
-				record.animation,
-				advance.departedFrames,
-				"forward",
-			);
+			this.#advanceSemanticStep(nodeId, record, "live");
 			record.fractionalSeconds = Math.max(
 				0,
 				record.fractionalSeconds - BEHAVIOR_STEP_SECONDS,
@@ -248,7 +231,7 @@ export class AnimationSystem<TOwnerId extends string> {
 	#sample(
 		nodeId: SceneNodeId,
 		record: AnimationRecord,
-	): AnimatedPresentationSample {
+	): DynamicPresentationSample {
 		const visualAdvance = advanceCyclicFrame(
 			record.framePosition,
 			record.fractionalSeconds * record.animation.framesPerSecond,
@@ -256,18 +239,75 @@ export class AnimationSystem<TOwnerId extends string> {
 			"forward",
 		);
 		return {
-			nodeId,
-			pose: {
+			articulatedPose: {
 				partToObjectTransforms: sampleAnimationPose(
 					record.animation,
 					visualAdvance.framePosition,
 				),
 			},
-			visualRootTransform: this.#hooks.sampleVisualRoot(
+			effects: this.#effects.samplePresentation(
 				nodeId,
+				record.fractionalSeconds,
 				record.fractionalSeconds / BEHAVIOR_STEP_SECONDS,
 			),
+			nodeId,
 		};
+	}
+
+	#createRecord(
+		nodeId: SceneNodeId,
+		residentIdentity: string,
+		animation: PreparedAnimation,
+	): AnimationRecord {
+		this.#effects.install(nodeId, animation.partCount);
+		const record: AnimationRecord = {
+			animation,
+			fractionalSeconds: 0,
+			framePosition: 0,
+			lastTimeSeconds: null,
+		};
+		try {
+			let remainingSeconds =
+				independentPhase(residentIdentity, animation.frameCount) /
+				animation.framesPerSecond;
+			while (
+				remainingSeconds + CLOCK_EPSILON_SECONDS >=
+				BEHAVIOR_STEP_SECONDS
+			) {
+				this.#advanceSemanticStep(nodeId, record, "initial-state");
+				remainingSeconds = Math.max(
+					0,
+					remainingSeconds - BEHAVIOR_STEP_SECONDS,
+				);
+			}
+			record.fractionalSeconds = remainingSeconds;
+			return record;
+		} catch (cause) {
+			this.#effects.remove(nodeId);
+			throw cause;
+		}
+	}
+
+	#advanceSemanticStep(
+		nodeId: SceneNodeId,
+		record: AnimationRecord,
+		mode: "initial-state" | "live",
+	): void {
+		this.#effects.advanceSemanticStep(nodeId, BEHAVIOR_STEP_SECONDS);
+		const advance = advanceCyclicFrame(
+			record.framePosition,
+			record.animation.framesPerSecond * BEHAVIOR_STEP_SECONDS,
+			record.animation.frameCount,
+			"forward",
+		);
+		record.framePosition = advance.framePosition;
+		this.#effects.executeDepartedFrames(
+			nodeId,
+			record.animation,
+			advance.departedFrames,
+			"forward",
+			mode,
+		);
 	}
 }
 

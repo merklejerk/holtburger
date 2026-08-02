@@ -24,7 +24,7 @@ describe("collectStaticObjectTextureDependencies", () => {
 		]);
 	});
 
-	it("includes promoted template textures in the authored layer atlas requirement", () => {
+	it("leaves promoted template textures to the visual-template repository", () => {
 		const source = objectsSourceWithOneReferencedMaterial();
 		const resident = source.staticResidents[0]!;
 		const dynamic = {
@@ -46,10 +46,7 @@ describe("collectStaticObjectTextureDependencies", () => {
 			staticResidents: [],
 		});
 
-		expect(requirements.map(({ sourceAssetId }) => sourceAssetId)).toEqual([
-			"0x05000001",
-			"0x04000001",
-		]);
+		expect(requirements).toEqual([]);
 	});
 });
 

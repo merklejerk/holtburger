@@ -63,14 +63,31 @@ pub enum AnimationHookPayload {
     Raw(Vec<u8>),
     ReplaceObject(Vec<u8>),
     SetOmega(SetOmegaHookPayload),
+    TransparentPart(TransparentPartHookPayload),
     TextureVelocity(TextureVelocityHookPayload),
     TextureVelocityPart(TextureVelocityPartHookPayload),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SetOmegaHookPayload {
+    /// Authored angular velocity in AC coordinates.
     pub omega: Vector3,
-    pub raw_payload_bytes: [u8; 12],
+}
+
+/// Part-local translucency endpoints and authored ramp duration.
+///
+/// The exact `u32 + f32 + f32 + f32` layout is proven by ACE's
+/// `TransparentPartHook.Unpack` and retail `TransparentPartHook::UnPack`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransparentPartHookPayload {
+    /// Zero-based setup part-array index.
+    pub part_index: u32,
+    /// Translucency at the start of the authored effect.
+    pub start: f32,
+    /// Translucency at the end of the authored effect.
+    pub end: f32,
+    /// Authored effect duration in seconds; retail treats very small values as immediate.
+    pub duration_seconds: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,7 +116,7 @@ impl AnimationHook {
             4 => AnimationHookPayload::NoPayload,                           // AnimationDone
             5 => AnimationHookPayload::ReplaceObject(read_replace_object_payload(reader)?),
             6 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // Ethereal (Ethereal: i32)
-            7 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // TransparentPart
+            7 => AnimationHookPayload::TransparentPart(read_transparent_part_payload(reader)?),
             8 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Luminous
             9 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // LuminousPart
             10 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Diffuse
@@ -109,7 +126,7 @@ impl AnimationHook {
             14 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DestroyParticle
             15 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // StopParticle
             16 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // NoDraw
-            17 => AnimationHookPayload::NoPayload,                          // DefaultScript
+            17 => AnimationHookPayload::NoPayload,                           // DefaultScript
             18 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DefaultScriptPart
             19 => AnimationHookPayload::Raw(read_exact_payload(reader, 8)?), // CallPES
             20 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Transparent
@@ -161,8 +178,15 @@ impl AnimationHookPayload {
                 Ok(())
             }
             Self::SetOmega(payload) => {
-                writer.write_all(&payload.raw_payload_bytes)?;
-                Ok(())
+                payload.omega.x.write_le(writer)?;
+                payload.omega.y.write_le(writer)?;
+                payload.omega.z.write_le(writer)
+            }
+            Self::TransparentPart(payload) => {
+                payload.part_index.write_le(writer)?;
+                payload.start.write_le(writer)?;
+                payload.end.write_le(writer)?;
+                payload.duration_seconds.write_le(writer)
             }
             Self::TextureVelocity(payload) => {
                 payload.u_speed.write_le(writer)?;
@@ -186,32 +210,34 @@ fn read_exact_payload<R: Read + Seek>(reader: &mut R, payload_size: usize) -> Bi
 }
 
 fn read_set_omega_payload<R: Read + Seek>(reader: &mut R) -> BinResult<SetOmegaHookPayload> {
-    let mut raw_payload_bytes = [0u8; 12];
-    reader.read_exact(&mut raw_payload_bytes)?;
-    let omega = Vector3 {
-        x: f32::from_le_bytes([
-            raw_payload_bytes[0],
-            raw_payload_bytes[1],
-            raw_payload_bytes[2],
-            raw_payload_bytes[3],
-        ]),
-        y: f32::from_le_bytes([
-            raw_payload_bytes[4],
-            raw_payload_bytes[5],
-            raw_payload_bytes[6],
-            raw_payload_bytes[7],
-        ]),
-        z: f32::from_le_bytes([
-            raw_payload_bytes[8],
-            raw_payload_bytes[9],
-            raw_payload_bytes[10],
-            raw_payload_bytes[11],
-        ]),
-    };
     Ok(SetOmegaHookPayload {
-        omega,
-        raw_payload_bytes,
+        omega: Vector3 {
+            x: f32::read_le(reader)?,
+            y: f32::read_le(reader)?,
+            z: f32::read_le(reader)?,
+        },
     })
+}
+
+fn read_transparent_part_payload<R: Read + Seek>(
+    reader: &mut R,
+) -> BinResult<TransparentPartHookPayload> {
+    let payload = TransparentPartHookPayload {
+        part_index: u32::read_le(reader)?,
+        start: f32::read_le(reader)?,
+        end: f32::read_le(reader)?,
+        duration_seconds: f32::read_le(reader)?,
+    };
+    if !payload.start.is_finite()
+        || !payload.end.is_finite()
+        || !payload.duration_seconds.is_finite()
+    {
+        return Err(decode_error(
+            reader,
+            "TransparentPart payload contains a non-finite value".to_owned(),
+        ));
+    }
+    Ok(payload)
 }
 
 fn read_replace_object_payload<R: Read + Seek>(reader: &mut R) -> BinResult<Vec<u8>> {
@@ -721,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn animation_hook_set_omega_reads_typed_payload_and_preserves_raw_bytes() {
+    fn animation_hook_set_omega_reads_typed_payload() {
         let raw_payload_bytes = [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd];
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&22u32.to_le_bytes());
@@ -740,9 +766,59 @@ mod tests {
                     y: 0.0,
                     z: f32::from_le_bytes([0x72, 0x20, 0x1d, 0xbd]),
                 },
-                raw_payload_bytes,
             })
         );
+    }
+
+    #[test]
+    fn animation_hook_transparent_part_reads_and_writes_exact_typed_payload() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&7u32.to_le_bytes());
+        bytes.extend_from_slice(&(-1i32).to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0.25f32.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.75f32.to_le_bytes());
+
+        let hook = AnimationHook::read(&mut Cursor::new(bytes.clone()))
+            .expect("TransparentPart should parse");
+
+        assert_eq!(hook.hook_type, 7);
+        assert_eq!(hook.direction, -1);
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::TransparentPart(TransparentPartHookPayload {
+                part_index: 2,
+                start: 0.25,
+                end: 1.0,
+                duration_seconds: 0.75,
+            })
+        );
+        let mut written = Cursor::new(Vec::new());
+        hook.write(&mut written)
+            .expect("TransparentPart should write");
+        assert_eq!(written.into_inner(), bytes);
+    }
+
+    #[test]
+    fn animation_hook_transparent_part_rejects_incomplete_and_non_finite_payloads() {
+        let mut incomplete = Vec::new();
+        incomplete.extend_from_slice(&7u32.to_le_bytes());
+        incomplete.extend_from_slice(&0i32.to_le_bytes());
+        incomplete.extend_from_slice(&1u32.to_le_bytes());
+        incomplete.extend_from_slice(&0.0f32.to_le_bytes());
+        assert!(AnimationHook::read(&mut Cursor::new(incomplete)).is_err());
+
+        let mut non_finite = Vec::new();
+        non_finite.extend_from_slice(&7u32.to_le_bytes());
+        non_finite.extend_from_slice(&0i32.to_le_bytes());
+        non_finite.extend_from_slice(&1u32.to_le_bytes());
+        non_finite.extend_from_slice(&f32::NAN.to_le_bytes());
+        non_finite.extend_from_slice(&1.0f32.to_le_bytes());
+        non_finite.extend_from_slice(&0.5f32.to_le_bytes());
+        let error = AnimationHook::read(&mut Cursor::new(non_finite))
+            .expect_err("TransparentPart NaN should fail");
+        assert!(error.to_string().contains("non-finite"));
     }
 
     #[test]

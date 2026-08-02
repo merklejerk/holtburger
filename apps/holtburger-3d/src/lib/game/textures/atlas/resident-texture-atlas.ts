@@ -1,4 +1,3 @@
-import type { SceneInterestRevision } from "../../runtime/scene-availability";
 import type { ClosedWorkerPoolDiagnostics } from "../../workers/closed-worker";
 import type {
 	RendererResourceManager,
@@ -35,7 +34,8 @@ import {
 /** Exact owner/revision requirement handle; callers retain it for activation or stale cleanup. */
 export interface AtlasRequirementHandle<TOwner extends string> {
 	readonly owner: TOwner;
-	readonly revision: SceneInterestRevision;
+	/** Exact owner-local revision; the atlas does not interpret the producer's revision domain. */
+	readonly revision: number;
 	/** Settles when this revision is ready, withdrawn, or fails preparation. */
 	readonly completion: Promise<AtlasRequirementCompletion>;
 }
@@ -136,12 +136,9 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	readonly #preparer: TexturePreparer;
 	readonly #physical: ResidentTextureAtlasPhysicalDependencies | null;
 	/** Owner/revision claim sets, kept private so stale cleanup stays exact. */
-	readonly #requirements = new Map<
-		TOwner,
-		Map<SceneInterestRevision, Requirement<TOwner>>
-	>();
+	readonly #requirements = new Map<TOwner, Map<number, Requirement<TOwner>>>();
 	/** The one active visible revision per owner, if any. */
-	readonly #publishedRevisions = new Map<TOwner, SceneInterestRevision>();
+	readonly #publishedRevisions = new Map<TOwner, number>();
 	/** Every owner/revision currently requiring a logical source. */
 	readonly #claimsByKey = new Map<AssetTextureKey, Set<Requirement<TOwner>>>();
 	/** Validated CPU sources retained while at least one exact claim exists. */
@@ -190,9 +187,14 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	 * Provisionally claim a complete logical requirement set. Identical repeated preparation returns
 	 * the original handle; conflicting facts for one owner/revision fail before any mutation.
 	 */
+	prepareOwnerRequirements<TRequestedOwner extends TOwner>(
+		owner: TRequestedOwner,
+		revision: number,
+		facts: readonly AssetTextureFact[],
+	): AtlasRequirementHandle<TRequestedOwner>;
 	prepareOwnerRequirements(
 		owner: TOwner,
-		revision: SceneInterestRevision,
+		revision: number,
 		facts: readonly AssetTextureFact[],
 	): AtlasRequirementHandle<TOwner> {
 		if (this.#destroyed)
@@ -224,10 +226,11 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			resolve,
 			state: "preparing",
 		};
-		const requirements =
-			ownerRequirements ??
-			new Map<SceneInterestRevision, Requirement<TOwner>>();
-		if (!ownerRequirements) this.#requirements.set(owner, requirements);
+		let requirements = ownerRequirements;
+		if (!requirements) {
+			requirements = new Map<number, Requirement<TOwner>>();
+			this.#requirements.set(owner, requirements);
+		}
 		requirements.set(revision, requirement);
 		for (const fact of normalizedFacts) this.#addClaim(fact, requirement);
 		void this.#prepareRequirement(requirement);
@@ -279,7 +282,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	 */
 	async evictOwnerRequirements(
 		owner: TOwner,
-		evictedRevision: SceneInterestRevision,
+		evictedRevision: number,
 	): Promise<void> {
 		const affectedPurposes: PackedObjectTexturePurpose[] = [];
 		const publishedRevision = this.#publishedRevisions.get(owner);
@@ -463,7 +466,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 
 	#withdrawExact(
 		owner: TOwner,
-		revision: SceneInterestRevision,
+		revision: number,
 		completion: Exclude<AtlasRequirementCompletion, "ready"> = "withdrawn",
 	): readonly PackedObjectTexturePurpose[] {
 		const requirement = this.#requirements.get(owner)?.get(revision);

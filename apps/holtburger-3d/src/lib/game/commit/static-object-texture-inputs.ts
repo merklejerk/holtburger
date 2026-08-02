@@ -4,14 +4,13 @@ import { staticObjectDetailRoleForSource } from "../resolution/static-detail-rol
 import { type AssetTextureFact, TextureWrapMode } from "../textures/types";
 import { mergeAssetTextureFacts } from "../textures/texture-facts";
 
-/** Collect logical pixel dependencies for static draws and promoted visual templates together. */
+/** Collect logical pixel dependencies owned by the static draw batch only. */
 export function collectStaticObjectTextureDependencies(
 	source: ResolvedStaticObjectLayerSource,
 ): readonly AssetTextureFact[] {
 	const dependencies: AssetTextureFact[] = [];
 	const detailRole = staticObjectDetailRoleForSource(source);
 	collectResidentDependencies(dependencies, source.staticResidents, detailRole);
-	collectResidentDependencies(dependencies, source.dynamicSources, null);
 	return mergeAssetTextureFacts(dependencies, "Authored object source");
 }
 

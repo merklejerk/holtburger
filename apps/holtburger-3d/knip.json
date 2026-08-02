@@ -3,7 +3,7 @@
 	"entry": [
 		"src/client/main.ts",
 		"src/explorer/main.ts",
-		"src/harness/terrain/main.ts"
+		"src/harness/browser/main.ts"
 	],
 	"ignoreDependencies": ["@types/rbush", "rbush"],
 	"ignoreIssues": {

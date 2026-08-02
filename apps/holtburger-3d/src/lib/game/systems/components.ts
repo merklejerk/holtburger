@@ -56,6 +56,12 @@ export interface ArticulatedPose {
 	readonly partToObjectTransforms: readonly Mat4[];
 }
 
+/** Effect-owned render state for one authored rigid part. */
+export interface PartRenderState {
+	/** Retail translucency: zero is unchanged and one suppresses the part entirely. */
+	readonly translucency: number;
+}
+
 /** Complete active state for one rigid setup part. */
 export interface ActiveDynamicPart {
 	/** Setup-authored geometry scale composed independently from rigid animation poses. */
@@ -66,22 +72,15 @@ export interface ActiveDynamicPart {
 	readonly nodeId: SceneNodeId;
 	/** Authored setup part addressed by animation frame tables. */
 	readonly partIndex: number;
+	/** Current effect state sampled atomically with this part's pose. */
+	readonly renderState: PartRenderState;
 }
 
-/** One active draw range with its ordering-dependent sort contract made explicit. */
-export type ActiveDynamicDrawUnit =
-	| {
-			readonly drawUnit: RigidPartDrawUnit & {
-				readonly ordering: "transparent";
-			};
-			readonly transparentSortCenter: Vec3;
-	  }
-	| {
-			readonly drawUnit: RigidPartDrawUnit & {
-				readonly ordering: Exclude<ObjectMaterialOrdering, "transparent">;
-			};
-			readonly transparentSortCenter: null;
-	  };
+/** One active draw range with the sort center needed by authored or effect-driven transparency. */
+export interface ActiveDynamicDrawUnit {
+	readonly drawUnit: RigidPartDrawUnit;
+	readonly transparentSortCenter: Vec3;
+}
 
 /** Persistent dynamic presentation attached to one entity root node. */
 export interface DynamicEntityRenderable {

@@ -33,12 +33,11 @@ import { StaticObjectSystem } from "../systems/static-object-system";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
 import {
 	InlineObjectVisualTemplatePreparer,
-	ObjectVisualTemplateManager,
-} from "../systems/object-visual-template-manager";
+	ObjectVisualTemplateRepository,
+} from "../systems/object-visual-template-repository";
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
-import { HookSystem } from "../systems/hook-system";
-import { PoseSystem } from "../systems/pose-system";
+import { EffectSystem } from "../systems/effect-system";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 import {
@@ -46,7 +45,10 @@ import {
 	type TextureAtlasPageDiagnostics,
 	type TexturePageId,
 } from "../textures/texture-manager";
-import { ResidentTextureAtlas } from "../textures/atlas/resident-texture-atlas";
+import {
+	ResidentTextureAtlas,
+	type AtlasRequirementHandle,
+} from "../textures/atlas/resident-texture-atlas";
 import { AtlasLayoutWorkerPool } from "../textures/atlas/layout-worker";
 import { AtlasPageBuildWorkerPool } from "../textures/atlas/page-build-worker";
 import type { Texture2DResourceKey } from "../renderer/resource-manager";
@@ -265,7 +267,7 @@ export class GameRuntime {
 	/** Logical texture preparation, device bindings, and shared owner retention. */
 	readonly #textures: TextureManager<ResourceOwnerId>;
 	/** Packed object-atlas authority injected into the generic texture facade. */
-	readonly #residentAtlas: ResidentTextureAtlas<OwnerId>;
+	readonly #residentAtlas: ResidentTextureAtlas<ResourceOwnerId>;
 	/** Immutable-object nodes, components, and resource publication. */
 	readonly #staticObjects: StaticObjectSystem<OwnerId, ResourceOwnerId>;
 	/** Source-to-static publication sequencing for independent outdoor static layers. */
@@ -289,10 +291,8 @@ export class GameRuntime {
 	readonly #envCells: EnvCellSystem<OwnerId, ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
-	/** Persistent visual hook state advanced only by the authored behavior clock. */
-	readonly #hooks: HookSystem;
-	/** Final render-cadence pose publication, separate from playback clocks. */
-	readonly #pose: PoseSystem;
+	/** Persistent visual-effect state advanced only by the authored behavior clock. */
+	readonly #effects: EffectSystem;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
@@ -353,7 +353,7 @@ export class GameRuntime {
 		this.#terrainGenerator = dependencies.terrainGenerator;
 		this.#texturePreparer = dependencies.texturePreparer;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
-		this.#residentAtlas = new ResidentTextureAtlas<OwnerId>(
+		this.#residentAtlas = new ResidentTextureAtlas<ResourceOwnerId>(
 			dependencies.texturePreparer,
 			typeof Worker === "undefined"
 				? null
@@ -413,7 +413,11 @@ export class GameRuntime {
 				);
 			},
 		};
-		this.#staticLayerRealizer = new StaticLayerRealizer({
+		this.#staticLayerRealizer = new StaticLayerRealizer<
+			ResolvedOutdoorStaticLayerSource,
+			StaticObjectLayerArtifact | null,
+			OwnerId
+		>({
 			atlas: this.#residentAtlas,
 			currentness: staticLayerCurrentness,
 			failureReporter: {
@@ -448,7 +452,11 @@ export class GameRuntime {
 			this.#geometry,
 			envCellRevisionToResourceOwnerId,
 		);
-		this.#envCellRealizer = new StaticLayerRealizer({
+		this.#envCellRealizer = new StaticLayerRealizer<
+			EnvCellMaterializationPlan,
+			EnvCellRealizationArtifact,
+			OwnerId
+		>({
 			atlas: this.#residentAtlas,
 			currentness: staticLayerCurrentness,
 			failureReporter: {
@@ -498,16 +506,19 @@ export class GameRuntime {
 		});
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
-			new ObjectVisualTemplateManager<DynamicGenerationResourceOwnerId>(
+			new ObjectVisualTemplateRepository<
+				DynamicGenerationResourceOwnerId,
+				AtlasRequirementHandle<ResourceOwnerId>
+			>(
 				this.#geometry,
+				this.#residentAtlas,
 				new InlineObjectVisualTemplatePreparer(),
 			),
 			new AnimationAssetRepository(dependencies.animationSource),
 			dynamicGenerationToResourceOwnerId,
 		);
-		this.#hooks = new HookSystem();
-		this.#animation = new AnimationSystem(this.#hooks);
-		this.#pose = new PoseSystem(this.#dynamics);
+		this.#effects = new EffectSystem();
+		this.#animation = new AnimationSystem(this.#effects);
 		this.#terrain = new TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>(
 			this.#scene,
 			dependencies.terrainGenerator,
@@ -659,13 +670,12 @@ export class GameRuntime {
 		return [...this.#authoredDynamicResidents.values()].flat();
 	}
 
-	/** Snapshot dynamic preparation, playback, hook, and pose costs at their owning layers. */
+	/** Snapshot dynamic preparation, playback, effect, and publication facts at their owners. */
 	getAuthoredDynamicRuntimeDiagnostics() {
 		return {
 			animation: this.#animation.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
-			hooks: this.#hooks.getDiagnostics(),
-			pose: this.#pose.getDiagnostics(),
+			effects: this.#effects.getDiagnostics(),
 			residents: this.getAuthoredDynamicResidentDiagnostics(),
 		};
 	}
@@ -793,7 +803,7 @@ export class GameRuntime {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
-		this.#pose.publish(this.#animation.update(timeSeconds));
+		this.#dynamics.publishPresentation(this.#animation.update(timeSeconds));
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		renderer.drawFrame({
 			anchorLandblockId,
@@ -832,6 +842,7 @@ export class GameRuntime {
 		await Promise.allSettled([...this.#realizationContinuations]);
 		await this.#renderer?.destroy();
 		this.#renderer = null;
+		this.#animation.destroy();
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();

@@ -28,10 +28,21 @@ const hookPayload = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("no-payload") }),
 	rawPayload.extend({ kind: z.literal("raw") }),
 	rawPayload.extend({ kind: z.literal("replace-object") }),
-	rawPayload.extend({
-		kind: z.literal("set-omega"),
-		omega: z.tuple([finiteNumber, finiteNumber, finiteNumber]),
-	}),
+	z
+		.object({
+			kind: z.literal("set-omega"),
+			omega: z.tuple([finiteNumber, finiteNumber, finiteNumber]),
+		})
+		.strict(),
+	z
+		.object({
+			durationSeconds: finiteNumber,
+			end: finiteNumber,
+			kind: z.literal("transparent-part"),
+			partIndex: z.number().int().nonnegative(),
+			start: finiteNumber,
+		})
+		.strict(),
 	z.object({
 		kind: z.literal("texture-velocity"),
 		uSpeed: finiteNumber,
@@ -74,10 +85,26 @@ interface AnimationHookBase {
 	readonly direction: AnimationHookDirection;
 }
 
+/** Typed semantic values carried by retail `TransparentPartHook`. */
+interface TransparentPartHookValues {
+	/** Authored ramp duration in seconds. */
+	readonly durationSeconds: number;
+	/** Translucency at the end of the effect. */
+	readonly end: number;
+	/** Zero-based setup part-array index. */
+	readonly partIndex: number;
+	/** Translucency at the start of the effect. */
+	readonly start: number;
+}
+
 /** Payload retained only for commands whose execution remains deferred or unsupported. */
 type DeferredAnimationHookPayload =
 	| { readonly kind: "no-payload" }
 	| { readonly kind: "raw"; readonly bytes: Uint8Array }
+	| {
+			readonly kind: "set-omega";
+			readonly omega: readonly [number, number, number];
+	  }
 	| {
 			readonly kind: "texture-velocity";
 			readonly uSpeed: number;
@@ -88,7 +115,8 @@ type DeferredAnimationHookPayload =
 			readonly partIndex: number;
 			readonly uSpeed: number;
 			readonly vSpeed: number;
-	  };
+	  }
+	| (TransparentPartHookValues & { readonly kind: "transparent-part" });
 
 /** Semantic runtime hook contract emitted after redundant transport facts are validated. */
 export type DecodedAnimationHook = AnimationHookBase &
@@ -98,6 +126,7 @@ export type DecodedAnimationHook = AnimationHookBase &
 				readonly kind: "set-omega";
 				readonly omega: Vec3;
 		  }
+		| (TransparentPartHookValues & { readonly kind: "transparent-part" })
 		| {
 				readonly kind: "semantic";
 				readonly command: "no-op" | "animation-done";
@@ -119,7 +148,9 @@ export type DecodedAnimationHook = AnimationHookBase &
 /** Hooks that prevent animated activation until their behavior receives an execution owner. */
 export type BlockingAnimationHook = Extract<
 	DecodedAnimationHook,
-	{ readonly kind: "replace-object" | "unsupported-visual" }
+	{
+		readonly kind: "replace-object" | "unsupported-visual";
+	}
 >;
 
 /** Derive the stable diagnostic command label from the normalized semantic arm. */
@@ -127,6 +158,8 @@ export function animationHookCommand(hook: DecodedAnimationHook): string {
 	switch (hook.kind) {
 		case "set-omega":
 			return "set-omega";
+		case "transparent-part":
+			return "transparent-part";
 		case "replace-object":
 			return "replace-object";
 		case "semantic":
@@ -228,7 +261,7 @@ export function decodeAnimationRecord(
 	return {
 		frameCount: manifest.frameCount,
 		hooks: manifest.hooks.map((hook) =>
-			decodeHook(hook, payloadBytes, manifest.animationId),
+			decodeHook(hook, payloadBytes, manifest.animationId, manifest.partCount),
 		),
 		id: manifest.animationId as DatAssetId,
 		partCount: manifest.partCount,
@@ -301,6 +334,7 @@ function decodeHook(
 	hook: z.infer<typeof manifestSchema>["hooks"][number],
 	payloadBytes: Uint8Array,
 	animationId: string,
+	partCount: number,
 ): DecodedAnimationHook {
 	const base: AnimationHookBase = {
 		authoredOrder: hook.authoredOrder,
@@ -349,6 +383,27 @@ function decodeHook(
 				rawPayload: payloadSlice(payloadBytes, payload, animationId),
 			};
 		}
+		case 7: {
+			const payload = requirePayloadKind(
+				hook.payload,
+				"transparent-part",
+				hook.hookType,
+				animationId,
+			);
+			if (payload.partIndex >= partCount) {
+				throw new Error(
+					`Animation ${animationId} TransparentPart index ${payload.partIndex} is out of range for ${partCount} parts.`,
+				);
+			}
+			return {
+				...base,
+				durationSeconds: payload.durationSeconds,
+				end: payload.end,
+				kind: "transparent-part",
+				partIndex: payload.partIndex,
+				start: payload.start,
+			};
+		}
 		case 22: {
 			const payload = requirePayloadKind(
 				hook.payload,
@@ -356,7 +411,6 @@ function decodeHook(
 				hook.hookType,
 				animationId,
 			);
-			payloadSlice(payloadBytes, payload, animationId);
 			return {
 				...base,
 				kind: "set-omega",
@@ -390,11 +444,13 @@ function deferredPayload(
 			return payload;
 		case "raw":
 		case "replace-object":
-		case "set-omega":
 			return {
 				bytes: payloadSlice(payloadBytes, payload, animationId),
 				kind: "raw",
 			};
+		case "set-omega":
+		case "transparent-part":
+			return payload;
 		case "texture-velocity":
 			return payload;
 		case "texture-velocity-part":
@@ -408,15 +464,19 @@ function requirePayloadKind<TKind extends z.infer<typeof hookPayload>["kind"]>(
 	hookType: number,
 	animationId: string,
 ): Extract<z.infer<typeof hookPayload>, { readonly kind: TKind }> {
-	if (payload.kind !== kind) {
+	if (!hasPayloadKind(payload, kind)) {
 		throw new Error(
 			`Animation ${animationId} hook type ${hookType} requires ${kind} payload, received ${payload.kind}.`,
 		);
 	}
-	return payload as Extract<
-		z.infer<typeof hookPayload>,
-		{ readonly kind: TKind }
-	>;
+	return payload;
+}
+
+function hasPayloadKind<TKind extends z.infer<typeof hookPayload>["kind"]>(
+	payload: z.infer<typeof hookPayload>,
+	kind: TKind,
+): payload is Extract<z.infer<typeof hookPayload>, { readonly kind: TKind }> {
+	return payload.kind === kind;
 }
 
 function payloadSlice(

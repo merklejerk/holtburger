@@ -128,8 +128,7 @@ interface PortalIndoorRenderContribution {
 }
 
 type PortalRenderContribution =
-	| PortalExteriorRenderContribution
-	| PortalIndoorRenderContribution;
+	PortalExteriorRenderContribution | PortalIndoorRenderContribution;
 
 /** Ordered executable contributions sharing one completed graph layer. */
 interface PortalRenderLayer {

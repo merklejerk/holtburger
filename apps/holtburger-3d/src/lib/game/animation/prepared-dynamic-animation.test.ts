@@ -3,7 +3,7 @@ import type { DecodedAnimationHook } from "../../assets/decode-animation-record"
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { createRotationMat4 } from "../math/matrices";
 import { rotationVectorQuaternion } from "./animation-playback";
-import type { ObjectVisualTemplate } from "../systems/object-visual-template-manager";
+import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
 import type { PreparedAnimation } from "./animation-asset-repository";
 import { prepareDynamicAnimation } from "./prepared-dynamic-animation";
 
@@ -51,6 +51,28 @@ describe("prepareDynamicAnimation", () => {
 			blockingHooks: [replacement],
 			kind: "retain-static-presentation",
 		});
+	});
+
+	it("activates TransparentPart after its effect owner is installed", () => {
+		const transparentPart: DecodedAnimationHook = {
+			authoredOrder: 0,
+			direction: "both",
+			durationSeconds: 0.5,
+			end: 1,
+			frameIndex: 0,
+			kind: "transparent-part",
+			partIndex: 0,
+			start: 0,
+		};
+
+		expect(
+			prepareDynamicAnimation(
+				animation([Mat4.identity()], [transparentPart]),
+				template(),
+				new Vec3(1, 1, 1),
+				AABB3.zero(),
+			),
+		).toMatchObject({ kind: "activatable" });
 	});
 
 	it("covers orientations between authored rigid-part keyframes", () => {

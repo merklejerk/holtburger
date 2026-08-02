@@ -111,15 +111,11 @@ interface TerrainFrameInput {
 /** One opaque or alpha-test static-object range paired with its resolved node placement. */
 interface ObjectFrameInput {
 	readonly source:
-		| "outdoor"
-		| "env-cell-shell"
-		| "env-cell-resident"
-		| "dynamic";
+		"outdoor" | "env-cell-shell" | "env-cell-resident" | "dynamic";
 	/** Scene/portal residency boundary that must never be crossed by an instance run. */
 	readonly renderDomainKey: string;
 	readonly cullFaceOverride:
-		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
-		| null;
+		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -1314,9 +1310,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		let activeProgram:
-			| WebGL2FogObjectProgram
-			| WebGL2FogInstancedObjectProgram
-			| null = null;
+			WebGL2FogObjectProgram | WebGL2FogInstancedObjectProgram | null = null;
 		for (const object of objects) {
 			const program =
 				object.drawKind === "instanced"
@@ -1397,9 +1391,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(false);
 		gl.enable(gl.BLEND);
 		let activeProgram:
-			| WebGL2ObjectProgram
-			| WebGL2InstancedObjectProgram
-			| null = null;
+			WebGL2ObjectProgram | WebGL2InstancedObjectProgram | null = null;
 		for (const object of sortedBlended) {
 			const program =
 				object.drawKind === "instanced"

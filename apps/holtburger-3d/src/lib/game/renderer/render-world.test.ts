@@ -125,6 +125,19 @@ describe("RenderWorld", () => {
 		expect(world.resolveDynamicContributions([dynamic])).toEqual([
 			{ drawUnit: dynamic, geometry: GEOMETRY },
 		]);
+		const translucent = dynamicContribution("transparent", 0.6);
+		expect(world.resolveDynamicContributions([translucent])).toEqual([
+			{
+				drawUnit: expect.objectContaining({
+					drawUnit: expect.objectContaining({ ordering: "transparent" }),
+					instance: expect.objectContaining({
+						color: expect.objectContaining({ a: 0.6 }),
+					}),
+					transparentSort: expect.objectContaining({ stableId: "part/range" }),
+				}),
+				geometry: GEOMETRY,
+			},
+		]);
 		expect(world.resolveGeometry("terrain-geometry:0001" as GeometryKey)).toBe(
 			GEOMETRY,
 		);
@@ -170,6 +183,7 @@ describe("RenderWorld", () => {
 			"terrain",
 			"geometry",
 			"geometry",
+			"geometry",
 			"texture-2d",
 			"texture-2d",
 			"texture-array",
@@ -179,7 +193,10 @@ describe("RenderWorld", () => {
 	});
 });
 
-function dynamicContribution(): VisibleRigidPartContribution {
+function dynamicContribution(
+	ordering: "opaque" | "transparent" = "opaque",
+	alpha = 1,
+): VisibleRigidPartContribution {
 	return {
 		domain: {
 			key: "0x0001ffff/outdoor",
@@ -192,15 +209,18 @@ function dynamicContribution(): VisibleRigidPartContribution {
 			indexCount: 3,
 			indexStart: 0,
 			material: staticMaterial(),
-			ordering: "opaque",
+			ordering,
 			partIndex: 0,
 			templatePartKey: "part-visual-template:fixture" as PartVisualTemplateKey,
 		},
 		instance: {
-			color: { a: 1, b: 1, g: 1, r: 1 },
+			color: { a: alpha, b: 1, g: 1, r: 1 },
 			sourceToLandblock: Mat4.identity(),
 		},
-		transparentSort: null,
+		transparentSort:
+			ordering === "transparent"
+				? { center: Vec3.zero(), stableId: "part/range" }
+				: null,
 	};
 }
 

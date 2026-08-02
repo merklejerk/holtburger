@@ -41,11 +41,148 @@ describe("decodeAnimationRecord", () => {
 			decodeAnimationRecord(animationResponse("sound"), "0x03000001"),
 		).toThrow("hook type 22 is named sound, expected set-omega");
 	});
+
+	it("rejects invalid frame, authored-order, and direction facts", () => {
+		expect(() =>
+			decodeAnimationRecord(
+				animationResponse("set-omega", { frameIndex: 1 }),
+				"0x03000001",
+			),
+		).toThrow("Animation hook frame 1 is out of range");
+		expect(() =>
+			decodeAnimationRecord(
+				animationResponse("set-omega", { authoredOrder: 1 }),
+				"0x03000001",
+			),
+		).toThrow("Animation frame 0 hook order is not contiguous");
+		expect(() =>
+			decodeAnimationRecord(
+				animationResponse("set-omega", {
+					direction: "forward",
+					rawDirection: -1,
+				}),
+				"0x03000001",
+			),
+		).toThrow("Animation hook set-omega direction facts disagree");
+	});
+
+	it("decodes a typed TransparentPart hook without retaining transport provenance", () => {
+		const decoded = decodeAnimationRecord(
+			transparentPartResponse(),
+			"0x03000001",
+		);
+
+		expect(decoded.hooks).toEqual([
+			{
+				authoredOrder: 0,
+				direction: "forward",
+				durationSeconds: 0.75,
+				end: 1,
+				frameIndex: 0,
+				kind: "transparent-part",
+				partIndex: 0,
+				start: 0.25,
+			},
+		]);
+	});
+
+	it("rejects malformed TransparentPart transport facts", () => {
+		expect(() =>
+			decodeAnimationRecord(
+				transparentPartResponse({ partIndex: 1 }),
+				"0x03000001",
+			),
+		).toThrow("TransparentPart index 1 is out of range for 1 parts");
+		expect(() =>
+			decodeAnimationRecord(
+				transparentPartResponse({ durationSeconds: undefined }),
+				"0x03000001",
+			),
+		).toThrow("durationSeconds");
+		expect(() =>
+			decodeAnimationRecord(
+				transparentPartResponse({ start: null }),
+				"0x03000001",
+			),
+		).toThrow("start");
+	});
+
+	it("rejects a TransparentPart hook with a mismatched typed payload", () => {
+		expect(() =>
+			decodeAnimationRecord(
+				animationResponse("transparent-part", {
+					hookType: 7,
+					payload: { kind: "set-omega", omega: [0, 0, 1] },
+					rawDirection: 0,
+				}),
+				"0x03000001",
+			),
+		).toThrow("hook type 7 requires transparent-part payload");
+	});
+
+	it("preserves genuinely deferred raw payloads and validates their section bounds", () => {
+		const payloadBytes = Uint8Array.from([1, 2, 3, 4]);
+		const decoded = decodeAnimationRecord(
+			animationResponse(
+				"sound",
+				{
+					hookType: 1,
+					payload: { byteLength: 4, byteOffset: 0, kind: "raw" },
+				},
+				payloadBytes,
+			),
+			"0x03000001",
+		);
+
+		expect(decoded.hooks[0]).toMatchObject({
+			command: "sound",
+			kind: "deferred-effect",
+			payload: { bytes: payloadBytes, kind: "raw" },
+		});
+		expect(() =>
+			decodeAnimationRecord(
+				animationResponse(
+					"sound",
+					{
+						hookType: 1,
+						payload: { byteLength: 5, byteOffset: 0, kind: "raw" },
+					},
+					payloadBytes,
+				),
+				"0x03000001",
+			),
+		).toThrow("hook payload exceeds its section");
+	});
 });
 
-function animationResponse(hookName = "set-omega"): Uint8Array {
+function transparentPartResponse(
+	overrides: Record<string, unknown> = {},
+): Uint8Array {
+	return animationResponse(
+		"transparent-part",
+		{
+			direction: "forward",
+			hookType: 7,
+			payload: {
+				durationSeconds: 0.75,
+				end: 1,
+				kind: "transparent-part",
+				partIndex: 0,
+				start: 0.25,
+				...overrides,
+			},
+			rawDirection: 1,
+		},
+		new Uint8Array(),
+	);
+}
+
+function animationResponse(
+	hookName = "set-omega",
+	hookOverrides: Record<string, unknown> = {},
+	hookPayload = new Uint8Array(),
+): Uint8Array {
 	const partFrames = new Float32Array([1, 2, 3, 1, 0, 0, 0]);
-	const hookPayload = Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 63]);
 	const manifest = {
 		animationId: "0x03000001",
 		byteOrder: "little-endian",
@@ -59,12 +196,11 @@ function animationResponse(hookName = "set-omega"): Uint8Array {
 				hookName,
 				hookType: 22,
 				payload: {
-					byteLength: hookPayload.length,
-					byteOffset: 0,
 					kind: "set-omega",
 					omega: [0, 0, 1],
 				},
 				rawDirection: 0,
+				...hookOverrides,
 			},
 		],
 		partCount: 1,

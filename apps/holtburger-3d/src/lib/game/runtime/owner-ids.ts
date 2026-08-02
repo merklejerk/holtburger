@@ -1,6 +1,7 @@
 import type { LandblockId } from "../game-types";
 import { LandblockLayerKind } from "./scene-interest";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
+import type { ObjectVisualTemplateResourceOwnerId } from "../systems/object-visual-template-repository";
 
 /** Stable runtime lifetime identity for one authored static layer. */
 export type OwnerId = `landblock-layer:${LandblockId}/${LandblockLayerKind}`;
@@ -28,7 +29,8 @@ export type ResourceOwnerId =
 	| ActiveRegionResourceOwnerId
 	| StaticRevisionResourceOwnerId
 	| EnvCellRevisionResourceOwnerId
-	| DynamicGenerationResourceOwnerId;
+	| DynamicGenerationResourceOwnerId
+	| ObjectVisualTemplateResourceOwnerId;
 
 /** Return the runtime owner responsible for one static landblock layer. */
 export function landblockLayerToOwnerId(

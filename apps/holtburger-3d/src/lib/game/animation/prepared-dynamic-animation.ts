@@ -3,7 +3,7 @@ import { AABB3, Vec3 } from "../math/types";
 import type {
 	ObjectVisualTemplate,
 	PartVisualTemplate,
-} from "../systems/object-visual-template-manager";
+} from "../systems/object-visual-template-repository";
 import type { PreparedAnimation } from "./animation-asset-repository";
 
 /** Complete animation preparation outcome consumed by the later atomic activation gate. */

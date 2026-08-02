@@ -1,5 +1,5 @@
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
-import { Mat4, Vec3 } from "../math/types";
+import { Mat4, Vec3, type AABB3 } from "../math/types";
 import type { SceneGraph, SceneNodeId } from "../scene";
 import { scopeKey } from "../scene/scope";
 import {
@@ -13,12 +13,13 @@ import type {
 	DynamicEntityRenderable,
 	VisibleRigidPartContribution,
 } from "./components";
-import type { AnimatedPresentationSample } from "./animation-system";
+import type { DynamicPresentationSample } from "./animation-system";
 import {
 	objectVisualTemplateKey,
-	type ObjectVisualTemplateManager,
+	type ObjectVisualTemplateRepositoryPort,
+	type PartVisualTemplate,
 	type StagedObjectVisualTemplateOwner,
-} from "./object-visual-template-manager";
+} from "./object-visual-template-repository";
 import {
 	AnimationAssetRepository,
 	type PreparedAnimationHandle,
@@ -34,7 +35,7 @@ interface DynamicEntityRecord {
 	/** Closed authored source retained for animation staging and deterministic phase identity. */
 	readonly source: AuthoredDynamicSource;
 	renderable: DynamicEntityRenderable;
-	pose: ArticulatedPose;
+	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
 	preparedAnimation: PreparedDynamicAnimation | null;
 }
@@ -54,7 +55,7 @@ export interface DynamicOwnerInstallation {
 	/** Read complete staged animation facts after `ready` resolves successfully. */
 	getPreparedEntities(): readonly PreparedDynamicEntity[];
 	/** Validate and apply initial samples while staged nodes remain unpublished. */
-	prepareCommit(initialSamples: readonly AnimatedPresentationSample[]): void;
+	prepareCommit(initialSamples: readonly DynamicPresentationSample[]): void;
 	/** Publish the already validated generation and retire its predecessor. */
 	commit(): void;
 	/** Release a successfully prepared generation that will not be committed. */
@@ -74,7 +75,7 @@ export class DynamicEntitySystem<
 	TTemplateOwnerId extends string = TOwnerId,
 > {
 	readonly #scene: SceneGraph;
-	readonly #templates: ObjectVisualTemplateManager<TTemplateOwnerId>;
+	readonly #templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>;
 	readonly #animations: AnimationAssetRepository;
 	readonly #templateOwnerId: (
 		ownerId: TOwnerId,
@@ -85,11 +86,18 @@ export class DynamicEntitySystem<
 	readonly #ownerGenerations = new Map<TOwnerId, number>();
 	/** Preparations awaited during shutdown so acquired handles cannot outlive repositories. */
 	readonly #pendingPreparations = new Set<Promise<unknown>>();
+	/** Current provisional template stage per owner, cancelled immediately on supersession. */
+	readonly #pendingTemplateStages = new Map<
+		TOwnerId,
+		StagedObjectVisualTemplateOwner<TTemplateOwnerId>
+	>();
 	#destroyed = false;
+	#lastPresentationPublicationDurationMs = 0;
+	#lastPublishedPresentationCount = 0;
 
 	constructor(
 		scene: SceneGraph,
-		templates: ObjectVisualTemplateManager<TTemplateOwnerId>,
+		templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>,
 		animations: AnimationAssetRepository,
 		templateOwnerId: (
 			ownerId: TOwnerId,
@@ -125,6 +133,8 @@ export class DynamicEntitySystem<
 		}
 		const generation = (this.#ownerGenerations.get(ownerId) ?? 0) + 1;
 		this.#ownerGenerations.set(ownerId, generation);
+		this.#pendingTemplateStages.get(ownerId)?.release();
+		this.#pendingTemplateStages.set(ownerId, templatePreparation);
 		const templateOwnerId = this.#templateOwnerId(ownerId, generation);
 		let state:
 			| "preparing"
@@ -151,6 +161,9 @@ export class DynamicEntitySystem<
 			})
 			.finally(() => {
 				this.#pendingPreparations.delete(preparationPromise);
+				if (this.#pendingTemplateStages.get(ownerId) === templatePreparation) {
+					this.#pendingTemplateStages.delete(ownerId);
+				}
 			});
 		return {
 			commit: () => {
@@ -238,7 +251,7 @@ export class DynamicEntitySystem<
 		}
 		const record: DynamicEntityRecord = {
 			animationHandle: null,
-			pose,
+			articulatedPose: pose,
 			renderable: { parts },
 			rootNodeId,
 			source: resident,
@@ -253,6 +266,8 @@ export class DynamicEntitySystem<
 			ownerId,
 			(this.#ownerGenerations.get(ownerId) ?? 0) + 1,
 		);
+		this.#pendingTemplateStages.get(ownerId)?.release();
+		this.#pendingTemplateStages.delete(ownerId);
 		this.#removeOwnerEntities(ownerId);
 	}
 
@@ -267,25 +282,35 @@ export class DynamicEntitySystem<
 		const entity = this.#entities.get(nodeId);
 		if (!entity) return null;
 		return entity.renderable.parts.flatMap((part) => {
+			const translucency = part.renderState.translucency;
+			// Retail sets the skip-draw bit only at exactly full translucency.
+			if (translucency === 1) return [];
 			const placement = this.#scene.getResolvedPlacement(part.nodeId);
 			if (!placement) {
 				throw new Error(`Dynamic part node ${part.nodeId} no longer exists.`);
 			}
 			return part.drawUnits.map((activeDrawUnit) => {
 				const drawUnit = activeDrawUnit.drawUnit;
+				const ordering =
+					translucency !== 0 && drawUnit.ordering === "opaque"
+						? "transparent"
+						: drawUnit.ordering;
 				return {
 					domain: {
 						key: `${placement.landblockId}/${scopeKey(placement.scope)}`,
 						landblockId: placement.landblockId,
 						scope: placement.scope,
 					},
-					drawUnit,
+					drawUnit:
+						ordering === drawUnit.ordering
+							? drawUnit
+							: { ...drawUnit, ordering },
 					instance: {
-						color: { a: 1, b: 1, g: 1, r: 1 },
+						color: { a: 1 - translucency, b: 1, g: 1, r: 1 },
 						sourceToLandblock: placement.localToLandblock,
 					},
 					transparentSort:
-						activeDrawUnit.transparentSortCenter !== null
+						ordering === "transparent"
 							? {
 									center: activeDrawUnit.transparentSortCenter,
 									stableId: `${entity.source.identity.sourceId}/part:${part.partIndex}/${drawUnit.batchKey}`,
@@ -297,7 +322,8 @@ export class DynamicEntitySystem<
 	}
 
 	getPose(nodeId: SceneNodeId): ArticulatedPose | null {
-		return this.#entities.get(nodeId)?.pose ?? null;
+		const entity = this.#entities.get(nodeId);
+		return entity ? entity.articulatedPose : null;
 	}
 
 	/** Inspect complete preparation without exposing repository handles or mutable staging state. */
@@ -315,6 +341,9 @@ export class DynamicEntitySystem<
 			).length,
 			animationResources: this.#animations.getDiagnostics(),
 			entityCount: this.#entities.size,
+			lastPresentationPublicationDurationMs:
+				this.#lastPresentationPublicationDurationMs,
+			lastPublishedPresentationCount: this.#lastPublishedPresentationCount,
 			staticFallbackEntityCount: prepared.filter(
 				(animation) => animation?.kind === "retain-static-presentation",
 			).length,
@@ -322,37 +351,26 @@ export class DynamicEntitySystem<
 		};
 	}
 
-	setPose(nodeId: SceneNodeId, pose: ArticulatedPose): void {
-		const entity = this.#entities.get(nodeId);
-		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
-		for (const part of entity.renderable.parts) {
-			const transform = pose.partToObjectTransforms[part.partIndex];
-			if (!transform) {
-				throw new Error(
-					`Dynamic entity ${nodeId} has no pose for part ${part.partIndex}.`,
-				);
-			}
-			this.#scene.updateLocalTransform(
-				part.nodeId,
-				composeObjectPartTransform(
-					transform,
-					entity.source.scale,
-					part.defaultScale,
-				),
-			);
+	/** Publish complete render-cadence samples to entity-owned state before the frame is selected. */
+	publishPresentation(samples: readonly DynamicPresentationSample[]): void {
+		const startedAt = performance.now();
+		for (const sample of samples) {
+			const entity = this.#entities.get(sample.nodeId);
+			if (!entity)
+				throw new Error(`Dynamic entity ${sample.nodeId} does not exist.`);
+			this.#applySample(entity, sample);
 		}
-		entity.pose = pose;
-	}
-
-	setVisualRootTransform(nodeId: SceneNodeId, transform: Mat4): void {
-		const entity = this.#entities.get(nodeId);
-		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
-		this.#scene.updateLocalTransform(entity.visualRootNodeId, transform);
+		this.#lastPresentationPublicationDurationMs = performance.now() - startedAt;
+		this.#lastPublishedPresentationCount = samples.length;
 	}
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		for (const preparation of this.#pendingTemplateStages.values()) {
+			preparation.release();
+		}
+		this.#pendingTemplateStages.clear();
 		for (const ownerId of [...this.#owners.keys()]) this.removeOwner(ownerId);
 		await Promise.allSettled([...this.#pendingPreparations]);
 		await this.#templates.destroy();
@@ -443,7 +461,7 @@ export class DynamicEntitySystem<
 		ownerId: TOwnerId,
 		generation: number,
 		entities: readonly DynamicEntityRecord[],
-		initialSamples: readonly AnimatedPresentationSample[],
+		initialSamples: readonly DynamicPresentationSample[],
 	): void {
 		if (this.#destroyed || this.#ownerGenerations.get(ownerId) !== generation)
 			throw new Error("Cannot prepare a superseded dynamic owner generation.");
@@ -495,18 +513,30 @@ export class DynamicEntitySystem<
 
 	#applySample(
 		entity: DynamicEntityRecord,
-		sample: AnimatedPresentationSample,
+		sample: DynamicPresentationSample,
 	): void {
+		if (
+			sample.effects.partRenderStates.length !== entity.renderable.parts.length
+		) {
+			throw new Error(
+				`Dynamic entity ${entity.rootNodeId} effect sample has ${sample.effects.partRenderStates.length} parts, expected ${entity.renderable.parts.length}.`,
+			);
+		}
+		const updatedParts = entity.renderable.parts.map((part) => {
+			const transform =
+				sample.articulatedPose.partToObjectTransforms[part.partIndex];
+			const renderState = sample.effects.partRenderStates[part.partIndex];
+			if (!transform || !renderState)
+				throw new Error(
+					`Dynamic entity ${entity.rootNodeId} has an incomplete presentation for part ${part.partIndex}.`,
+				);
+			return { part, renderState, transform };
+		});
 		this.#scene.updateLocalTransform(
 			entity.visualRootNodeId,
-			sample.visualRootTransform,
+			sample.effects.rootRotationModifier,
 		);
-		for (const part of entity.renderable.parts) {
-			const transform = sample.pose.partToObjectTransforms[part.partIndex];
-			if (!transform)
-				throw new Error(
-					`Dynamic entity ${entity.rootNodeId} has no pose for part ${part.partIndex}.`,
-				);
+		for (const { part, transform } of updatedParts) {
 			this.#scene.updateLocalTransform(
 				part.nodeId,
 				composeObjectPartTransform(
@@ -516,7 +546,13 @@ export class DynamicEntitySystem<
 				),
 			);
 		}
-		entity.pose = sample.pose;
+		entity.renderable = {
+			parts: updatedParts.map(({ part, renderState }) => ({
+				...part,
+				renderState,
+			})),
+		};
+		entity.articulatedPose = sample.articulatedPose;
 	}
 
 	#releaseStagedOwner(
@@ -601,6 +637,7 @@ function createActiveParts(
 					parentId: visualRootNodeId,
 				}),
 				partIndex,
+				renderState: { translucency: 0 },
 			});
 		}
 	} catch (cause) {
@@ -612,7 +649,7 @@ function createActiveParts(
 
 function mergePreparedParts(
 	activeParts: readonly ActiveDynamicPart[],
-	templateParts: readonly import("./object-visual-template-manager").PartVisualTemplate[],
+	templateParts: readonly PartVisualTemplate[],
 ): readonly ActiveDynamicPart[] {
 	const activeByIndex = new Map(
 		activeParts.map((part) => [part.partIndex, part] as const),
@@ -626,37 +663,21 @@ function mergePreparedParts(
 		return {
 			...active,
 			defaultScale: template.defaultScale,
-			drawUnits: template.drawUnits.map((drawUnit) =>
-				drawUnit.ordering === "transparent"
-					? {
-							drawUnit: {
-								...drawUnit,
-								ordering: drawUnit.ordering,
-							},
-							transparentSortCenter: requiredBoundsCenter(
-								template.localBounds,
-								template.partIndex,
-							),
-						}
-					: {
-							drawUnit: {
-								...drawUnit,
-								ordering: drawUnit.ordering,
-							},
-							transparentSortCenter: null,
-						},
-			),
+			drawUnits: template.drawUnits.map((drawUnit) => ({
+				drawUnit,
+				transparentSortCenter: requiredBoundsCenter(
+					template.localBounds,
+					template.partIndex,
+				),
+			})),
 		};
 	});
 }
 
-function requiredBoundsCenter(
-	bounds: import("../math/types").AABB3 | null,
-	partIndex: number,
-): Vec3 {
+function requiredBoundsCenter(bounds: AABB3 | null, partIndex: number): Vec3 {
 	if (!bounds)
 		throw new Error(
-			`Transparent dynamic part ${partIndex} has no local bounds.`,
+			`Renderable dynamic part ${partIndex} has no local bounds for transparent sorting.`,
 		);
 	return new Vec3(
 		(bounds.min.x + bounds.max.x) / 2,

@@ -4,15 +4,7 @@ import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
 
 type DragMode = "pan" | "rotate";
 type MovementKey =
-	| "a"
-	| "c"
-	| "d"
-	| "pagedown"
-	| "pageup"
-	| "s"
-	| "space"
-	| "w"
-	| "z";
+	"a" | "c" | "d" | "pagedown" | "pageup" | "s" | "space" | "w" | "z";
 
 interface ActiveDrag {
 	readonly lastX: number;

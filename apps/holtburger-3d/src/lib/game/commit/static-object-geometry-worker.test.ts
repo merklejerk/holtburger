@@ -25,9 +25,17 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.geometry[0]?.geometry.positions).toEqual(
 			Float32Array.from([10, 20, 30, 12, 20, 30, 10, 22, 30]),
 		);
-		expect(result?.bounds.min).toMatchObject({ x: 10, y: 20, z: 30 });
-		expect(result?.bounds.max).toMatchObject({ x: 12, y: 22, z: 30 });
-		expect(result?.drawUnits).toHaveLength(1);
+		expect(result?.objects[0]?.bounds.min).toMatchObject({
+			x: 10,
+			y: 20,
+			z: 30,
+		});
+		expect(result?.objects[0]?.bounds.max).toMatchObject({
+			x: 12,
+			y: 22,
+			z: 30,
+		});
+		expect(result?.objects[0]?.drawUnits).toHaveLength(1);
 	});
 
 	it("selects detail only for the building static geometry domain", () => {
@@ -50,9 +58,13 @@ describe("prepareStaticObjectGeometry", () => {
 			]),
 		});
 
-		expect(building?.drawUnits[0]?.material.detailRole).toBe("building");
-		expect(generated?.drawUnits[0]?.material.detailRole).toBeNull();
-		expect(indoorResident?.drawUnits[0]?.material.detailRole).toBeNull();
+		expect(building?.objects[0]?.drawUnits[0]?.material.detailRole).toBe(
+			"building",
+		);
+		expect(generated?.objects[0]?.drawUnits[0]?.material.detailRole).toBeNull();
+		expect(
+			indoorResident?.objects[0]?.drawUnits[0]?.material.detailRole,
+		).toBeNull();
 	});
 
 	it("keeps transparent ranges independent by resident while merging additive ranges", () => {
@@ -64,9 +76,9 @@ describe("prepareStaticObjectGeometry", () => {
 			resourceNamespace: "static-install:transparent" as const,
 			source: source(transparent),
 		});
-		expect(transparentResult?.drawUnits).toHaveLength(2);
+		expect(transparentResult?.objects[0]?.drawUnits).toHaveLength(2);
 		expect(
-			transparentResult?.drawUnits.every(
+			transparentResult?.objects[0]?.drawUnits.every(
 				(range) => range.transparentSort !== null,
 			),
 		).toBe(true);
@@ -78,8 +90,10 @@ describe("prepareStaticObjectGeometry", () => {
 				resident("additive-b", translation(2, 0, 0), new Vec3(1, 1, 1)),
 			]),
 		});
-		expect(additiveResult?.drawUnits).toHaveLength(1);
-		expect(additiveResult?.drawUnits[0]?.transparentSort).toBeNull();
+		expect(additiveResult?.objects[0]?.drawUnits).toHaveLength(1);
+		expect(
+			additiveResult?.objects[0]?.drawUnits[0]?.transparentSort,
+		).toBeNull();
 		expect(additiveResult?.metrics).toMatchObject({
 			bakedDrawUnitCount: 1,
 			sourceMaterialSlotCount: 2,
@@ -191,10 +205,10 @@ describe("prepareStaticObjectGeometry", () => {
 			first?.geometry[0]?.geometry.indices,
 		);
 		if (!second) throw new Error("Expected the second geometry preparation.");
-		expect(second?.drawUnits).toEqual(
-			first?.drawUnits.map((drawUnit, index) => ({
+		expect(second?.objects[0]?.drawUnits).toEqual(
+			first?.objects[0]?.drawUnits.map((drawUnit, index) => ({
 				...drawUnit,
-				geometry: second.drawUnits[index]!.geometry,
+				geometry: second.objects[0]!.drawUnits[index]!.geometry,
 			})),
 		);
 	});
@@ -282,7 +296,7 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(
 			input.dynamicSources[0]!.presentation.parts[0]!.geometry.positions,
 		).toEqual(Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]));
-		expect(result?.drawUnits).toHaveLength(1);
+		expect(result?.objects[0]?.drawUnits).toHaveLength(1);
 		worker.destroy();
 	});
 
@@ -304,7 +318,6 @@ describe("prepareStaticObjectGeometry", () => {
 				id: "presentation:generated-opaque-b" as const,
 			},
 		};
-
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
 			resourceNamespace: "static-install:generated-repeated" as const,
@@ -317,9 +330,9 @@ describe("prepareStaticObjectGeometry", () => {
 		);
 		expect(result?.instanceStreams).toHaveLength(1);
 		expect(result?.instanceStreams[0]?.data.instances).toHaveLength(2);
-		expect(result?.drawUnits).toHaveLength(1);
-		expect(result?.drawUnits[0]?.kind).toBe("instanced");
-		expect(result?.bounds.max).toMatchObject({ x: 11, y: 1, z: 0 });
+		expect(result?.objects[0]?.drawUnits).toHaveLength(1);
+		expect(result?.objects[0]?.drawUnits[0]?.kind).toBe("instanced");
+		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 11, y: 1, z: 0 });
 		expect(result?.metrics).toMatchObject({
 			bakedDrawUnitCount: 0,
 			persistentCohortCount: 1,
@@ -328,6 +341,64 @@ describe("prepareStaticObjectGeometry", () => {
 			persistentStreamCount: 1,
 			sourcePartCount: 2,
 			sourceResidentCount: 2,
+		});
+	});
+
+	it("partitions generated residents into tight cullable clusters while sharing geometry", () => {
+		const first = resident(
+			"generated-clustered",
+			translation(10, 0, -10),
+			new Vec3(1, 1, 1),
+		);
+		const second = {
+			...first,
+			identity: {
+				kind: "authored" as const,
+				sourceId: "generated-clustered-b",
+			},
+			placement: {
+				...first.placement,
+				localTransform: translation(100, 0, -10),
+			},
+		};
+		const third = {
+			...first,
+			identity: {
+				kind: "authored" as const,
+				sourceId: "generated-clustered-c",
+			},
+			placement: {
+				...first.placement,
+				localTransform: translation(10, 0, -100),
+			},
+		};
+
+		const result = prepareStaticObjectGeometry({
+			layer: LandblockLayerKind.Generated,
+			resourceNamespace: "static-install:generated-clustered" as const,
+			source: generatedSource([first, second, third]),
+		});
+
+		expect(result?.geometry).toHaveLength(1);
+		expect(result?.objects).toHaveLength(3);
+		expect(result?.objects.map(({ bounds }) => bounds.min.x)).toEqual([
+			10, 10, 100,
+		]);
+		expect(result?.objects.map(({ bounds }) => bounds.max.x)).toEqual([
+			11, 11, 101,
+		]);
+		expect(result?.objects.map(({ bounds }) => bounds.min.z)).toEqual([
+			-10, -100, -10,
+		]);
+		expect(result?.instanceStreams).toHaveLength(3);
+		expect(
+			result?.instanceStreams.map(({ data }) => data.instances.length),
+		).toEqual([1, 1, 1]);
+		expect(result?.metrics).toMatchObject({
+			persistentCohortCount: 3,
+			persistentDrawUnitCount: 3,
+			persistentInstanceCount: 3,
+			sourceResidentCount: 3,
 		});
 	});
 
@@ -343,14 +414,12 @@ describe("prepareStaticObjectGeometry", () => {
 			source: generatedSource(residents),
 		});
 
-		expect(result?.drawUnits.map(({ ordering }) => ordering).sort()).toEqual([
-			"additive",
-			"alpha-test",
-			"opaque",
-		]);
+		expect(
+			result?.objects[0]?.drawUnits.map(({ ordering }) => ordering).sort(),
+		).toEqual(["additive", "alpha-test", "opaque"]);
 		expect(result?.instanceStreams).toHaveLength(3);
-		expect(result?.frameStreamedInstances).toHaveLength(1);
-		expect(result?.frameStreamedInstances[0]).toMatchObject({
+		expect(result?.objects[0]?.frameStreamedInstances).toHaveLength(1);
+		expect(result?.objects[0]?.frameStreamedInstances[0]).toMatchObject({
 			transparentSort: {
 				center: { x: 1 / 3, y: 1 / 3, z: 0 },
 				stableId: expect.stringContaining("transparent"),
@@ -424,7 +493,7 @@ describe("prepareStaticObjectGeometry", () => {
 
 		expect(result?.geometry).toHaveLength(3);
 		expect(result?.instanceStreams).toHaveLength(2);
-		expect(result?.drawUnits).toHaveLength(3);
+		expect(result?.objects[0]?.drawUnits).toHaveLength(3);
 		expect(
 			result?.geometry.map(({ geometry }) => geometry.indices.length).sort(),
 		).toEqual([3, 3, 6]);
@@ -490,7 +559,7 @@ describe("prepareStaticObjectGeometry", () => {
 		});
 
 		expect(result?.instanceStreams).toEqual([]);
-		expect(result?.drawUnits[0]?.kind).toBe("baked");
+		expect(result?.objects[0]?.drawUnits[0]?.kind).toBe("baked");
 		expect(result?.metrics).toMatchObject({
 			bakedDrawUnitCount: 1,
 			persistentInstanceCount: 0,
@@ -507,17 +576,16 @@ describe("prepareStaticObjectGeometry", () => {
 			]),
 		});
 
-		expect(result?.drawUnits.map(({ kind }) => kind).sort()).toEqual([
-			"baked",
-			"instanced",
-		]);
+		expect(
+			result?.objects[0]?.drawUnits.map(({ kind }) => kind).sort(),
+		).toEqual(["baked", "instanced"]);
 		expect(result?.geometry).toHaveLength(2);
 		expect(result?.metrics).toMatchObject({
 			bakedDrawUnitCount: 1,
 			persistentDrawUnitCount: 1,
 			persistentInstanceCount: 1,
 		});
-		expect(result?.bounds.max).toMatchObject({ x: 7, y: 3, z: 0 });
+		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 7, y: 3, z: 0 });
 	});
 
 	it("rejects singular generated transforms instead of emitting corrupt instances", () => {

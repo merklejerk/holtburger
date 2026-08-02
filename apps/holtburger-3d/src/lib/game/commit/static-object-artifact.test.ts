@@ -43,10 +43,13 @@ describe("assembleStaticObjectArtifact", () => {
 	it("accepts one logical requirement shared by persistent and frame-streamed draws", () => {
 		const geometry = geometryResult("instanced");
 		const frameStreamedInstances =
-			geometryResult("frame-streamed").frameStreamedInstances;
+			geometryResult("frame-streamed").objects[0]!.frameStreamedInstances;
 
 		const artifact = assembleStaticObjectArtifact({
-			geometry: { ...geometry, frameStreamedInstances },
+			geometry: {
+				...geometry,
+				objects: [{ ...geometry.objects[0]!, frameStreamedInstances }],
+			},
 			resourceNamespace: INSTALL_NAMESPACE,
 			source: source(),
 			textureRequirements: [
@@ -61,6 +64,35 @@ describe("assembleStaticObjectArtifact", () => {
 
 		expect(artifact?.geometryDiagnostics.strategy).toBe("instanced");
 		expect(artifact?.textureRequirements).toHaveLength(1);
+	});
+
+	it("publishes every worker cluster as an independently bounded scene object", () => {
+		const geometry = geometryResult("instanced");
+		const first = geometry.objects[0]!;
+		const secondBounds = new AABB3(
+			new Vec3(96, 0, -48),
+			new Vec3(120, 20, -24),
+		);
+
+		const artifact = assembleStaticObjectArtifact({
+			geometry: {
+				...geometry,
+				objects: [first, { ...first, bounds: secondBounds }],
+			},
+			resourceNamespace: INSTALL_NAMESPACE,
+			source: source(),
+			textureRequirements: [
+				{
+					key: BASE_TEXTURE,
+					kind: "asset",
+					purpose: TexturePurpose.ObjectDirectColor,
+					sourceAssetId: "0x05000001",
+				},
+			],
+		});
+
+		expect(artifact?.objects).toHaveLength(2);
+		expect(artifact?.objects[1]?.localBounds).toBe(secondBounds);
 	});
 });
 
@@ -87,14 +119,12 @@ function geometryResult(
 				]
 			: [];
 	return {
-		bounds: AABB3.zero(),
-		drawUnits,
-		frameStreamedInstances,
 		geometry: [],
 		instanceStreams:
 			strategy === "instanced"
 				? [{ data: { instances: [instance()] }, key: STREAM_KEY }]
 				: [],
+		objects: [{ bounds: AABB3.zero(), drawUnits, frameStreamedInstances }],
 		metrics: {
 			bakedDrawUnitCount: strategy === "baked" ? 1 : 0,
 			bakedGeometryBytes: 0,

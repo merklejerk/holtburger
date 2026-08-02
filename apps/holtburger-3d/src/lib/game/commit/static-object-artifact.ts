@@ -19,10 +19,10 @@ export function assembleStaticObjectArtifact(options: {
 	const requiredTextures = new Set<AssetTextureKey>(
 		options.textureRequirements.map(({ key }) => key),
 	);
-	for (const range of [
-		...geometry.drawUnits,
-		...geometry.frameStreamedInstances,
-	]) {
+	for (const range of geometry.objects.flatMap((object) => [
+		...object.drawUnits,
+		...object.frameStreamedInstances,
+	])) {
 		for (const texture of [
 			range.material.textures.base,
 			range.material.textures.palette,
@@ -67,23 +67,19 @@ export function assembleStaticObjectArtifact(options: {
 		},
 		geometry: geometry.geometry,
 		instanceStreams: geometry.instanceStreams,
-		objects: [
-			{
-				localBounds: geometry.bounds,
-				placement: {
-					envCellId:
-						options.source.kind === "env-cells"
-							? options.source.envCellId
-							: null,
-					landblockId: options.source.landblockId,
-					localTransform: Mat4.identity(),
-				},
-				renderable: {
-					drawUnits: geometry.drawUnits,
-					frameStreamedInstances: geometry.frameStreamedInstances,
-				},
+		objects: geometry.objects.map((object) => ({
+			localBounds: object.bounds,
+			placement: {
+				envCellId:
+					options.source.kind === "env-cells" ? options.source.envCellId : null,
+				landblockId: options.source.landblockId,
+				localTransform: Mat4.identity(),
 			},
-		],
+			renderable: {
+				drawUnits: object.drawUnits,
+				frameStreamedInstances: object.frameStreamedInstances,
+			},
+		})),
 		resourceNamespace: options.resourceNamespace,
 		textureRequirements: options.textureRequirements,
 	};

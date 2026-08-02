@@ -108,42 +108,43 @@ type ResolvedGeometryResidents =
 function hydrateGeometryResult(
 	result: StaticObjectGeometryPreparationResult,
 ): StaticObjectGeometryPreparationResult {
-	const bounds = new AABB3(
-		new Vec3(result.bounds.min.x, result.bounds.min.y, result.bounds.min.z),
-		new Vec3(result.bounds.max.x, result.bounds.max.y, result.bounds.max.z),
-	);
 	return {
 		...result,
-		bounds,
-		drawUnits: result.drawUnits.map((drawUnit) =>
-			drawUnit.kind === "instanced" || drawUnit.transparentSort === null
-				? drawUnit
-				: {
-						...drawUnit,
-						transparentSort: {
-							...drawUnit.transparentSort,
-							center: new Vec3(
-								drawUnit.transparentSort.center.x,
-								drawUnit.transparentSort.center.y,
-								drawUnit.transparentSort.center.z,
-							),
+		objects: result.objects.map((object) => ({
+			bounds: new AABB3(
+				new Vec3(object.bounds.min.x, object.bounds.min.y, object.bounds.min.z),
+				new Vec3(object.bounds.max.x, object.bounds.max.y, object.bounds.max.z),
+			),
+			drawUnits: object.drawUnits.map((drawUnit) =>
+				drawUnit.kind === "instanced" || drawUnit.transparentSort === null
+					? drawUnit
+					: {
+							...drawUnit,
+							transparentSort: {
+								...drawUnit.transparentSort,
+								center: new Vec3(
+									drawUnit.transparentSort.center.x,
+									drawUnit.transparentSort.center.y,
+									drawUnit.transparentSort.center.z,
+								),
+							},
 						},
-					},
-		),
-		frameStreamedInstances: result.frameStreamedInstances.map((template) => ({
-			...template,
-			instance: {
-				...template.instance,
-				sourceToLandblock: hydrateMat4(template.instance.sourceToLandblock),
-			},
-			transparentSort: {
-				...template.transparentSort,
-				center: new Vec3(
-					template.transparentSort.center.x,
-					template.transparentSort.center.y,
-					template.transparentSort.center.z,
-				),
-			},
+			),
+			frameStreamedInstances: object.frameStreamedInstances.map((template) => ({
+				...template,
+				instance: {
+					...template.instance,
+					sourceToLandblock: hydrateMat4(template.instance.sourceToLandblock),
+				},
+				transparentSort: {
+					...template.transparentSort,
+					center: new Vec3(
+						template.transparentSort.center.x,
+						template.transparentSort.center.y,
+						template.transparentSort.center.z,
+					),
+				},
+			})),
 		})),
 		instanceStreams: result.instanceStreams.map((stream) => ({
 			...stream,

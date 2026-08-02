@@ -35,6 +35,12 @@ import type {
 import { FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES } from "./artifacts";
 import { resolveObjectTriangleMaterial } from "./object-material-binding";
 import { composeObjectPartTransform } from "../resolution/object-part-transform";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
+
+/** Two deterministic buckets per axis balance scenery rejection against extra draw submissions. */
+const GENERATED_SCENERY_CLUSTER_GRID_SIZE = 2;
+const GENERATED_SCENERY_CLUSTER_WORLD_SIZE =
+	OUTDOOR_LANDBLOCK_WORLD_SIZE / GENERATED_SCENERY_CLUSTER_GRID_SIZE;
 
 /** One closed geometry job containing no runtime, device, or atlas callbacks. */
 export interface StaticObjectGeometryPreparationJob {
@@ -64,9 +70,8 @@ export interface StaticObjectGeometryPreparationResult {
 		readonly geometry: ObjectGeometryData;
 	}[];
 	readonly instanceStreams: readonly StaticInstanceStreamSource[];
-	readonly drawUnits: readonly StaticObjectDrawUnit[];
-	readonly frameStreamedInstances: readonly FrameStreamedObjectInstanceTemplate[];
-	readonly bounds: AABB3;
+	/** Independently cullable render objects sharing this result's immutable resources. */
+	readonly objects: readonly StaticObjectGeometryRenderObject[];
 	readonly metrics: {
 		readonly sourceResidentCount: number;
 		readonly sourcePartCount: number;
@@ -88,6 +93,13 @@ export interface StaticObjectGeometryPreparationResult {
 		/** Wall-clock algorithm time measured inside the worker boundary. */
 		readonly workerDurationMs: number;
 	};
+}
+
+/** One worker-produced static object whose tight bounds own its complete render contribution. */
+interface StaticObjectGeometryRenderObject {
+	readonly bounds: AABB3;
+	readonly drawUnits: readonly StaticObjectDrawUnit[];
+	readonly frameStreamedInstances: readonly FrameStreamedObjectInstanceTemplate[];
 }
 
 interface SourceTriangleContribution {
@@ -116,6 +128,8 @@ interface ContributionGroup {
 }
 
 interface PreparedResidentPart {
+	/** Render-object partition shared by every part of the same source resident. */
+	readonly renderObjectKey: string;
 	readonly contributions: readonly SourceTriangleContribution[];
 	readonly geometryId: ResolvedGeometry["id"];
 	/** Unresolved substitutions require the explicit baked path until resolution owns them. */
@@ -143,11 +157,16 @@ export function prepareStaticObjectGeometry(
 	assertJobLayer(job);
 	const startedAt = performance.now();
 	const prepared = prepareStaticSource(job.source);
-	if (
-		job.layer === LandblockLayerKind.Generated ||
-		job.layer === LandblockLayerKind.EnvCells
-	) {
-		return prepareGeneratedStaticObjectGeometry(job, prepared, startedAt);
+	if (job.layer === LandblockLayerKind.Generated) {
+		return prepareClusteredGeneratedScenery(job, prepared, startedAt);
+	}
+	if (job.layer === LandblockLayerKind.EnvCells) {
+		return prepareInstancedStaticObjectGeometry(
+			job,
+			prepared,
+			startedAt,
+			new Map(),
+		);
 	}
 	return prepareBakedStaticObjectGeometry(job, prepared, startedAt);
 }
@@ -252,19 +271,23 @@ function prepareBakedStaticObjectGeometry(
 	const geometryKey =
 		`static-install-geometry:${job.resourceNamespace}/${keySuffix}` as StaticGeometryKey;
 	return {
-		bounds,
-		drawUnits: ranges.map((range) => ({
-			geometry: geometryKey,
-			indexCount: range.indexCount,
-			indexStart: range.indexStart,
-			kind: "baked" as const,
-			material: range.material,
-			ordering: range.ordering,
-			transparentSort: range.transparentSort,
-		})),
-		frameStreamedInstances: [],
 		geometry: [{ geometry, key: geometryKey }],
 		instanceStreams: [],
+		objects: [
+			{
+				bounds,
+				drawUnits: ranges.map((range) => ({
+					geometry: geometryKey,
+					indexCount: range.indexCount,
+					indexStart: range.indexStart,
+					kind: "baked" as const,
+					material: range.material,
+					ordering: range.ordering,
+					transparentSort: range.transparentSort,
+				})),
+				frameStreamedInstances: [],
+			},
+		],
 		metrics: {
 			bakedDrawUnitCount: ranges.length,
 			bakedGeometryBytes:
@@ -298,6 +321,10 @@ function prepareStaticSource(
 	const sourceRangeIds = new Set<string>();
 	const sourceMaterialSlotIds = new Set<string>();
 	for (const resident of source.staticResidents) {
+		const renderObjectKey =
+			source.kind === LandblockLayerKind.Generated
+				? generatedSceneryClusterKey(resident.placement.localTransform)
+				: "layer";
 		const defaultPose = resident.presentation.placementPoses.get(0);
 		if (!defaultPose)
 			throw new Error(
@@ -350,6 +377,7 @@ function prepareStaticSource(
 				geometryId: part.geometry.id,
 				partIndex: part.partIndex,
 				residentId: residentKey(resident.identity),
+				renderObjectKey,
 				sourceToLandblock,
 			});
 		}
@@ -361,6 +389,29 @@ function prepareStaticSource(
 		sourceMaterialSlotCount: sourceMaterialSlotIds.size,
 		sourceRangeCount: sourceRangeIds.size,
 	};
+}
+
+/** Assign one generated resident root to a stable landblock-local X/Z bucket. */
+function generatedSceneryClusterKey(localTransform: Mat4): string {
+	const x = sceneryClusterIndex(localTransform.m41);
+	const z = sceneryClusterIndex(-localTransform.m43);
+	return `${x}:${z}`;
+}
+
+/** Keep boundary/protruding roots in the nearest edge bucket without expanding the grid. */
+function sceneryClusterIndex(coordinate: number): number {
+	if (!Number.isFinite(coordinate)) {
+		throw new Error(
+			"Generated scenery root has a non-finite cluster coordinate.",
+		);
+	}
+	return Math.max(
+		0,
+		Math.min(
+			GENERATED_SCENERY_CLUSTER_GRID_SIZE - 1,
+			Math.floor(coordinate / GENERATED_SCENERY_CLUSTER_WORLD_SIZE),
+		),
+	);
 }
 
 interface InstancedGeometryPartition {
@@ -375,10 +426,138 @@ interface PersistentInstanceCohort {
 	readonly partitionIdentities: Set<string>;
 }
 
-function prepareGeneratedStaticObjectGeometry(
+interface PreparedPartitionGeometry {
+	readonly data: ObjectGeometryData;
+	readonly key: StaticGeometryKey;
+}
+
+function prepareClusteredGeneratedScenery(
 	job: StaticObjectGeometryPreparationJob,
 	prepared: PreparedStaticSource,
 	startedAt: number,
+): StaticObjectGeometryPreparationResult | null {
+	const sharedPartitionGeometry = new Map<string, PreparedPartitionGeometry>();
+	const results = [...groupPreparedPartsByRenderObject(prepared.parts)]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.flatMap(([clusterKey, parts]) => {
+			const result = prepareInstancedStaticObjectGeometry(
+				{
+					...job,
+					resourceNamespace:
+						`${job.resourceNamespace}/cluster:${clusterKey}` as StaticInstallResourceNamespace,
+				},
+				{
+					parts,
+					sourceMaterialSlotCount: 0,
+					sourcePartCount: 0,
+					sourceRangeCount: 0,
+					sourceResidentCount: 0,
+				},
+				startedAt,
+				sharedPartitionGeometry,
+			);
+			return result === null ? [] : [result];
+		});
+	if (results.length === 0) return null;
+	const geometryByKey = new Map<StaticGeometryKey, ObjectGeometryData>();
+	for (const result of results) {
+		for (const source of result.geometry) {
+			const existing = geometryByKey.get(source.key);
+			if (existing && existing !== source.geometry) {
+				throw new Error(
+					`Clustered scenery geometry ${source.key} has divergent resource data.`,
+				);
+			}
+			geometryByKey.set(source.key, source.geometry);
+		}
+	}
+	const geometry = [...geometryByKey].map(([key, data]) => ({
+		geometry: data,
+		key,
+	}));
+	const instancedGeometryKeys = new Set<StaticGeometryKey>();
+	const transparentCohortKeys = new Set<string>();
+	for (const result of results) {
+		for (const object of result.objects) {
+			for (const drawUnit of object.drawUnits) {
+				if (drawUnit.kind === "instanced") {
+					instancedGeometryKeys.add(drawUnit.geometry);
+				}
+			}
+			for (const template of object.frameStreamedInstances) {
+				instancedGeometryKeys.add(template.geometry);
+				transparentCohortKeys.add(template.cohortKey);
+			}
+		}
+	}
+	return {
+		geometry,
+		instanceStreams: results.flatMap((result) => result.instanceStreams),
+		objects: results.flatMap((result) => result.objects),
+		metrics: {
+			bakedDrawUnitCount: sumResultMetric(results, "bakedDrawUnitCount"),
+			bakedGeometryBytes: sumResultMetric(results, "bakedGeometryBytes"),
+			instancedGeometryBytes: geometry.reduce(
+				(total, source) =>
+					total +
+					(instancedGeometryKeys.has(source.key)
+						? objectGeometryBytes(source.geometry)
+						: 0),
+				0,
+			),
+			persistentCohortCount: sumResultMetric(results, "persistentCohortCount"),
+			persistentDrawUnitCount: sumResultMetric(
+				results,
+				"persistentDrawUnitCount",
+			),
+			persistentInstanceCount: sumResultMetric(
+				results,
+				"persistentInstanceCount",
+			),
+			persistentStreamBytes: sumResultMetric(results, "persistentStreamBytes"),
+			persistentStreamCount: sumResultMetric(results, "persistentStreamCount"),
+			sourceMaterialSlotCount: prepared.sourceMaterialSlotCount,
+			sourcePartCount: prepared.sourcePartCount,
+			sourceRangeCount: prepared.sourceRangeCount,
+			sourceResidentCount: prepared.sourceResidentCount,
+			transparentTemplateBytes: sumResultMetric(
+				results,
+				"transparentTemplateBytes",
+			),
+			transparentTemplateCohortCount: transparentCohortKeys.size,
+			transparentTemplateInstanceCount: sumResultMetric(
+				results,
+				"transparentTemplateInstanceCount",
+			),
+			workerDurationMs: performance.now() - startedAt,
+		},
+	};
+}
+
+function groupPreparedPartsByRenderObject(
+	parts: readonly PreparedResidentPart[],
+): ReadonlyMap<string, PreparedResidentPart[]> {
+	const objects = new Map<string, PreparedResidentPart[]>();
+	for (const part of parts) {
+		const object = objects.get(part.renderObjectKey);
+		if (object) object.push(part);
+		else objects.set(part.renderObjectKey, [part]);
+	}
+	return objects;
+}
+
+function sumResultMetric(
+	results: readonly StaticObjectGeometryPreparationResult[],
+	metric: keyof StaticObjectGeometryPreparationResult["metrics"],
+): number {
+	return results.reduce((total, result) => total + result.metrics[metric], 0);
+}
+
+function prepareInstancedStaticObjectGeometry(
+	job: StaticObjectGeometryPreparationJob,
+	prepared: PreparedStaticSource,
+	startedAt: number,
+	sharedPartitionGeometry: Map<string, PreparedPartitionGeometry>,
 ): StaticObjectGeometryPreparationResult | null {
 	if (prepared.parts.length === 0) return null;
 	const instanceParts: PreparedResidentPart[] = [];
@@ -402,6 +581,10 @@ function prepareGeneratedStaticObjectGeometry(
 		startedAt,
 		`${job.layer}-fallback`,
 	);
+	const bakedFallbackObject = bakedFallback?.objects[0] ?? null;
+	if (bakedFallback && !bakedFallbackObject) {
+		throw new Error("Baked static fallback has no render object.");
+	}
 	const partitions = new Map<string, InstancedGeometryPartition>();
 	const persistentCohorts = new Map<string, PersistentInstanceCohort>();
 	const transparentMembers: Array<{
@@ -411,7 +594,7 @@ function prepareGeneratedStaticObjectGeometry(
 		readonly partIndex: number;
 	}> = [];
 	const bounds = emptyBounds();
-	if (bakedFallback) bounds.union(bakedFallback.bounds);
+	if (bakedFallbackObject) bounds.union(bakedFallbackObject.bounds);
 	for (const part of instanceParts) {
 		const instance = {
 			color: { a: 1, b: 1, g: 1, r: 1 },
@@ -483,9 +666,14 @@ function prepareGeneratedStaticObjectGeometry(
 	for (const partition of [...partitions.values()].sort((left, right) =>
 		left.identity.localeCompare(right.identity),
 	)) {
-		const key =
-			`static-source-geometry:${partition.identity}` as StaticGeometryKey;
-		const data = createSourcePartitionGeometry(partition.contributions);
+		const preparedGeometry = sharedPartitionGeometry.get(
+			partition.identity,
+		) ?? {
+			data: createSourcePartitionGeometry(partition.contributions),
+			key: `static-source-geometry:${partition.identity}` as StaticGeometryKey,
+		};
+		sharedPartitionGeometry.set(partition.identity, preparedGeometry);
+		const { data, key } = preparedGeometry;
 		geometry.push({ geometry: data, key });
 		partitionGeometryKeys.set(partition.identity, key);
 		partitionGeometry.set(partition.identity, data);
@@ -493,8 +681,8 @@ function prepareGeneratedStaticObjectGeometry(
 	}
 
 	const instanceStreams: StaticInstanceStreamSource[] = [];
-	const drawUnits: StaticObjectDrawUnit[] = bakedFallback
-		? [...bakedFallback.drawUnits]
+	const drawUnits: StaticObjectDrawUnit[] = bakedFallbackObject
+		? [...bakedFallbackObject.drawUnits]
 		: [];
 	let persistentInstanceCount = 0;
 	for (const [index, [cohortIdentity, cohort]] of [
@@ -555,18 +743,16 @@ function prepareGeneratedStaticObjectGeometry(
 		},
 	);
 	return {
-		bounds,
-		drawUnits,
-		frameStreamedInstances,
 		geometry,
 		instanceStreams,
+		objects: [{ bounds, drawUnits, frameStreamedInstances }],
 		metrics: {
 			bakedDrawUnitCount: bakedFallback?.metrics.bakedDrawUnitCount ?? 0,
 			bakedGeometryBytes: bakedFallback?.metrics.bakedGeometryBytes ?? 0,
 			instancedGeometryBytes,
 			persistentCohortCount: persistentCohorts.size,
 			persistentDrawUnitCount:
-				drawUnits.length - (bakedFallback?.drawUnits.length ?? 0),
+				drawUnits.length - (bakedFallbackObject?.drawUnits.length ?? 0),
 			persistentInstanceCount,
 			persistentStreamBytes:
 				persistentInstanceCount * OBJECT_INSTANCE_RECORD_BYTES,

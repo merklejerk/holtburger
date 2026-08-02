@@ -114,6 +114,36 @@ describe("StaticObjectSystem", () => {
 			"resource:objects:1",
 		]);
 	});
+
+	it("publishes and evicts every independently cullable object in one layer", () => {
+		const scene = new FixtureScene();
+		const geometry = new FixtureGeometry();
+		const instances = new FixtureInstances();
+		const system = new StaticObjectSystem<"generated", string>(
+			scene as unknown as SceneGraph,
+			geometry as unknown as GeometryManager<string>,
+			instances as unknown as StaticInstanceStreamManager<string>,
+			(_, revision) => `resource:${revision}`,
+		);
+		const clustered = artifact("clustered");
+		const object = clustered.objects[0]!;
+
+		system.replaceObjects(
+			"generated",
+			revision(1),
+			{ ...clustered, objects: [object, { ...object }] },
+			LandblockLayerKind.Generated,
+		);
+
+		expect(scene.live).toEqual(["node:1", "node:2"]);
+		expect(scene.cullingGroups).toEqual([
+			LandblockLayerKind.Generated,
+			LandblockLayerKind.Generated,
+		]);
+
+		system.evict("generated", revision(1));
+		expect(scene.live).toEqual([]);
+	});
 });
 
 function artifact(id: string): StaticObjectLayerArtifact {

@@ -422,7 +422,7 @@ without content assembler errors or omissions:
       returned layer records.
 - [x] Add the batch request to Tauri and HTTP host boundaries.
 - [x] Move and rename the TypeScript source capability, Tauri adapter, and decoders.
-- [x] Update `ExplorerApp`, the terrain harness app, and HTTP source construction.
+- [x] Update `ExplorerApp`, the browser harness app, and HTTP source construction.
 - [x] Replace per-layer acquisition in `StandardCommitPipeline` with group-by-landblock batch
       acquisition and typed terrain/building commit fan-out.
 - [x] Rewrite terrain/building decoder fixtures against the batch envelope.
@@ -655,7 +655,7 @@ without content assembler errors or omissions:
 
 #### Deliverables
 
-- Add `--explicit-object-radius <n>` to the terrain browser harness.
+- Add `--explicit-object-radius <n>` to the browser harness.
 - Enforce the same hierarchy as Explorer: explicit-object radius is disabled or no greater than
   building radius, which is no greater than terrain radius.
 - Report building and explicit-object layer diagnostics separately.
@@ -700,7 +700,7 @@ without content assembler errors or omissions:
 
 #### Decisions and Course Corrections
 
-- The terrain harness accepts `--explicit-object-radius`, validates it against the building
+- The browser harness accepts `--explicit-object-radius`, validates it against the building
   radius, forwards it into scene interest, and includes it in its JSON report and lifecycle reload.
 - Harness output now separates `staticObjectLayers.buildings` and `staticObjectLayers.objects`.
   Each published layer reports its concrete culling group and scene-node count beside its existing

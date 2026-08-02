@@ -69,7 +69,7 @@ export interface FrameSelectionMetrics {
 	readonly visibleDynamicEntityCount: number;
 	/** Visible rigid-part material ranges emitted by dynamic entities. */
 	readonly visibleDynamicPartCount: number;
-	/** Visible environment-cell shell contributions selected before their draw path is implemented. */
+	/** Visible environment-cell shell contributions selected for the current view. */
 	readonly visibleEnvCellShells: number;
 	readonly visibleEnvCellScopeCount: number;
 	readonly visibleEnvCellResidentNodes: number;

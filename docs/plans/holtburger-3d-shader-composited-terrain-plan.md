@@ -56,7 +56,7 @@ Verification:
 - `npm run check`, `npm run test:ts` (93 tests), and `npm run build` pass. The camera-orientation
   regression test proves a controller-forward point transforms to camera-space `-Z` through the
   same quaternion and view-matrix path used for rendering.
-- The self-cleaning `npm run harness:terrain -- --landblock 0xda55ffff` run reaches a real
+- The self-cleaning `npm run harness:browser -- --landblock 0xda55ffff` run reaches a real
   textured frame with no browser errors after the runtime frame split.
 
 ### 2026-07-23 — Canonical-grid generator replaces the terrain stub
@@ -185,11 +185,11 @@ Remaining debt:
   average-and-clamp result on real neighboring landblocks. The implementation has source-proven
   formulas and a live WebGL2 capture, but does not claim visual parity.
 
-### 2026-07-23 — Headless WebGL2 terrain harness produces the first textured frame
+### 2026-07-23 — Headless WebGL2 browser harness produces the first textured frame
 
 Completed:
 
-- `npm run harness:terrain` adapts the legacy browser-harness pattern without importing its old
+- `npm run harness:browser` adapts the legacy browser-harness pattern without importing its old
   renderer or asset model. It starts a self-cleaning local content host, Vite, and headless Chrome;
   then CDP submits one outdoor scene interest plus a resolved camera and captures a PNG.
 - The diagnostic content host serves the exact existing `HBTR` terrain-source and `HBTP`
@@ -227,7 +227,7 @@ Decisions and debt:
 Verification:
 
 - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes.
-- `npm run harness:terrain -- --landblock 0xda55ffff --settle-ms 15000 --screenshot /tmp/holtburger-3d-da55-terrain.png`
+- `npm run harness:browser -- --landblock 0xda55ffff --settle-ms 15000 --screenshot /tmp/holtburger-3d-da55-terrain.png`
   yields a non-flat grass-and-road frame with no browser errors; the same command for
   `0xdc56ffff` yields a multi-terrain grass/dirt/water frame.
 
@@ -1194,7 +1194,7 @@ Run from `apps/holtburger-3d`:
 ```bash
 npm run test:ts
 npm run check:terrain-shader
-npm run harness:terrain -- --landblock 0xda55ffff --screenshot /tmp/holtburger-3d-da55-terrain.png
+npm run harness:browser -- --landblock 0xda55ffff --screenshot /tmp/holtburger-3d-da55-terrain.png
 npm run check
 npm run lint
 npm run format:check

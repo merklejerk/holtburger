@@ -13,7 +13,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"test:ts": "vitest run",
-		"harness:terrain": "node scripts/terrain-browser-harness.mjs",
+		"harness:browser": "node scripts/browser-harness.mjs",
 		"check:terrain-shader": "node scripts/validate-terrain-shader.mjs",
 		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:tests",
 		"check:tests": "tsc -p tsconfig.test.json",

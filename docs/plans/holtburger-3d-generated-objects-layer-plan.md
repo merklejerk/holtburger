@@ -290,7 +290,7 @@ asset sample when the corresponding reference implementation can be inspected.
   - outdoor-static realization, diagnostics, deferral, and owner lifecycle
 - `apps/holtburger-3d/src/lib/game/runtime/scene-interest.ts`
   - exact layer identities and generated interest selection
-- `apps/holtburger-3d/scripts/terrain-browser-harness.mjs`
+- `apps/holtburger-3d/scripts/browser-harness.mjs`
   - noninteractive source host, headless WebGL browser acceptance, lifecycle, metrics, and
     screenshots
 
@@ -979,7 +979,7 @@ Before runtime activation:
 
 #### Deliverables
 
-- Add `--generated-object-radius` to the terrain browser harness.
+- Add `--generated-object-radius` to the browser harness.
 - Enforce the existing radius policy: generated radius is optional and cannot exceed the building
   radius; it remains independent from the explicit-object radius.
 - Expose generated layer diagnostics separately from buildings and explicit objects.

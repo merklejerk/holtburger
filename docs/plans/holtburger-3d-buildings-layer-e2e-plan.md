@@ -963,7 +963,7 @@ merge ranges based on page placement, or project promoted residents into a diagn
   - resident versus frustum-visible building-layer nodes, draw calls, and triangles;
   - source, preparation, worker, installation, and render failures.
 - Preserve the existing Explorer building-radius control; do not force buildings into unrelated
-  terrain harnesses.
+  browser harnesses.
 
 #### Task Checklist
 
@@ -996,7 +996,7 @@ merge ranges based on page placement, or project promoted residents into a diagn
   resident/part/material-slot draws in DA55 from 192 complete material-and-polygon ranges; the
   latter is the honest pre-merge count because culling, side, and stippling facts can differ for
   the same source material slot. They collapse to 43 permitted baked ranges.
-- The existing terrain browser harness remains a terrain harness, but accepts a building radius,
+- The existing browser harness remains a browser harness, but accepts a building radius,
   a camera-anchor move, and a lifecycle clear/reload request. It does not become an Explorer UX
   dependency; its exported state is limited to immutable diagnostics.
 - A six-range app-local fixture proves the actual WebGL path submits three transparent and three
@@ -1542,7 +1542,7 @@ Debt:
   clustered by material and atlas facts within a class. Terrain and object programs now share one
   renderer-local horizontal-distance cubic fog GLSL fragment and one uniform binder; the terrain
   shader validator expands that fragment before running `glslangValidator`.
-- The existing non-interactive terrain harness now also requests radius-zero buildings through the
+- The existing non-interactive browser harness now also requests radius-zero buildings through the
   canonical HTTP source, browser workers, pipeline, runtime, and WebGL renderer. DA55FFFF completed
   this path in headless Chrome with no browser-console or WebGL errors; the captured viewport shows
   the expected settlement geometry over its terrain. It installs the active-region detail binding
@@ -1558,8 +1558,8 @@ Debt:
 Verification:
 
 - `npm run test:ts`, `npm run check`, `npm run lint:ts`, and `npm run check:terrain-shader` pass.
-- `npm run harness:terrain -- --settle-ms 1000` passes for DA55FFFF and
-  `npm run harness:terrain -- --landblock 0eba --settle-ms 1000` passes for 0EBAFFFF with no
+- `npm run harness:browser -- --settle-ms 1000` passes for DA55FFFF and
+  `npm run harness:browser -- --landblock 0eba --settle-ms 1000` passes for 0EBAFFFF with no
   browser-console or WebGL errors. The DA55 capture at `/tmp/holtburger-da55-buildings.png` was
   visually inspected and contains the expected settlement geometry.
 

@@ -268,7 +268,7 @@ find malformed or exceptional assets, but no later phase depends on guessing the
 | Reciprocal portals           | Retail `PView::ClipPortals` calls `OtherPortalClip` for non-`ExactMatch` links, transforming and clipping against the target portal's own polygon and side. The 2026-07-28 archive census found 110,316 validated non-exact internal reciprocal directions: 109,637 coplanar within `0.0002`, all within `0.001`, with maximum deviation `0.00090026855`; no canonical exterior transition was non-exact.                                           | Preserve the authored source aperture, side, reciprocal ID, and `ExactMatch` for topology and queries. At the app-host projection boundary, synthesize one effective visibility aperture by intersecting validated non-exact reciprocal polygons on a named `0.001` coplanarity/snap tolerance. Preserve source provenance and fail loudly above that tolerance. A missing reciprocal retains the retail-compatible source aperture plus an explicit unresolved diagnostic. Never synthesize a reverse crossing by flipping geometry. |
 | Outside/building transitions | `LandblockInteriorSystemAsset` already pairs raw EnvCell `Outside` endpoints with unique `LandblockInfo` building-portal claims. Retail `PView::DrawPortal`/`ConstructView(CBldPortal, CPolygon, ...)` enters the target EnvCell through the building GfxObj portal polygon; `CBldPortal::UnPack` uses the same flag-to-side decoding.                                                                                                              | Materialize both directions as authored crossings between the landblock/outdoor scope and EnvCell scope. The building-side aperture comes from its GfxObj portal polygon; the EnvCell side comes from its CellStruct. Every resolved exterior transition remains a mandatory portal-composite boundary even when its apertures match spatially, because terrain depth need not encode the opening. Missing claims remain explicit diagnostics.                                                                                        |
 | Potentially visible cells    | Retail `CEnvCell::grab_visible_cells`/`PView::DrawInside` seed listed cells, while `PView::ConstructView` and `AddViewToPortals` still follow portal links; `find_visible_child_cell` uses the list as a containment candidate set.                                                                                                                                                                                                                 | Preserve the list as preload/candidate provenance. It may broaden discovery but may not reject traversal or replace connectivity.                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Detail roles                 | Retail `LScape::SetDetailTexturing(landscape, building, environment, object)` loads four region descriptors. `RenderDeviceD3D::DrawBlock` scopes landscape detail to terrain, `DrawBuilding` scopes building detail to building geometry, and `DrawEnvCell` scopes environment detail to CellStruct geometry. `DrawPartCell` clears `curr_detail_surface` before drawing ordinary objects. | Terrain uses landscape detail; building shells use building; CellStruct shells use environment. Outdoor explicit/generated objects and EnvCell residents use no detail texture. The raw object descriptor remains source provenance but has no proven consumer in this D3D path. The owning render domain selects the role independently from raw surface flags.                                                                                                                     |
+| Detail roles                 | Retail `LScape::SetDetailTexturing(landscape, building, environment, object)` loads four region descriptors. `RenderDeviceD3D::DrawBlock` scopes landscape detail to terrain, `DrawBuilding` scopes building detail to building geometry, and `DrawEnvCell` scopes environment detail to CellStruct geometry. `DrawPartCell` clears `curr_detail_surface` before drawing ordinary objects.                                                          | Terrain uses landscape detail; building shells use building; CellStruct shells use environment. Outdoor explicit/generated objects and EnvCell residents use no detail texture. The raw object descriptor remains source provenance but has no proven consumer in this D3D path. The owning render domain selects the role independently from raw surface flags.                                                                                                                                                                      |
 | Static animated residents    | Retail `CEnvCell::init_static_objects` creates Stabs as static physics objects; default setup motion/script state registers through the static-animation path. The current 3D runtime deliberately defers this class in `GameRuntime.#deferStaticAuthoredDynamic`.                                                                                                                                                                                  | Account for every resident, materialize supported non-animated statics, and keep setup-default-animation residents on the explicit static-authored-animation deferral seam. Do not misroute them through spawned-dynamic installation.                                                                                                                                                                                                                                                                                                |
 | Portal rendering             | Retail `PView::GetClip`, `Render::copy_view`, `ClipPortals`, `AddViewToPortals`, and `OtherPortalClip` propagate clipped screen polygons, accumulate multiple views per destination cell, process newly appended views incrementally, and clip non-exact links through both authored apertures. `D3DPolyRender::DrawPortalPolyInternal` performs material-free depth behavior; retail stencil use found here is shadow-related, not portal-related. | Preserve the invariant, not the implementation: renderer-local exact portal windows bound planning using the host-resolved effective visibility aperture, while WebGL reproduces that same single aperture as the exact mask. Do not enumerate topology paths, repeat reciprocal intersection per frame, port retail allocation patterns, or promote render apertures/windows into shared spatial-query contracts.                                                                                                                    |
 | Exterior scene reuse         | Legacy `Webgl2Renderer.#renderSceneDomainTarget` renders the exterior once. `#renderOutdoorProjectionComposite` and `#drawPortalProjectionOutdoorCrossings` reuse it; `SOURCE_SCENE_COPY_FRAGMENT_SHADER` samples both exterior color and depth and writes `gl_FragDepth`.                                                                                                                                                                          | Preserve the scene-domain invariant without preserving the legacy breadth-layer graph: exterior geometry renders at most once per camera frame, while transition passes copy cached exterior color and depth through exact portal masks. Composite ping-pong is allowed only to avoid framebuffer feedback.                                                                                                                                                                                                                           |
@@ -2581,7 +2581,7 @@ These measurements can tune an implementation but cannot change the locked seman
 - Replaced renderer inspection of raw flags plus the global building binding with one role-indexed
   lookup. A material with a selected but missing role now fails loudly instead of silently losing
   its overlay.
-- Updated Explorer and the terrain browser harness to install the complete role set.
+- Updated Explorer and the browser harness to install the complete role set.
 
 #### Verification
 
@@ -2591,7 +2591,7 @@ These measurements can tune an implementation but cannot change the locked seman
 - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`: 21 tests passed.
 - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`:
   passed.
-- `npm run harness:terrain -- --building-radius 0 --explicit-object-radius 0
+- `npm run harness:browser -- --building-radius 0 --explicit-object-radius 0
 --generated-object-radius 0 --settle-ms 1000`: passed with no browser errors; rendered terrain
   plus building, explicit-object, and generated-object layers, submitting 111 static draws and
   12,180 triangles.
@@ -2651,7 +2651,7 @@ inspect_interior_projection -- dats/assets.hba` projected:
     fixtures;
   - the actual `0x00010100/0 → 0x00010103/0` reciprocal as depth-continuous;
   - 910 building aperture polygon pieces from 217 GfxObjs into 904 logical apertures.
-- `npm run harness:terrain -- --building-radius 0 --explicit-object-radius 0
+- `npm run harness:browser -- --building-radius 0 --explicit-object-radius 0
 --generated-object-radius 0 --settle-ms 1000`: passed with no browser errors and retained the
   Phase 1 baseline of 111 static draws and 12,180 triangles.
 
@@ -2842,7 +2842,7 @@ inspect_interior_projection -- dats/assets.hba` projected:
   their authored material culling and object/environment detail selection.
 - Added cold frame diagnostics for mode, scopes, shell/resident nodes and submissions, triangles,
   shell cull overrides, and the explicitly zero portal-mask/domain-target/composite work.
-- Extended the noninteractive terrain browser harness with `--env-cell-radius` so canonical
+- Extended the noninteractive browser harness with `--env-cell-radius` so canonical
   interiors can be exercised without the TUI or manual Explorer input.
 
 #### Verification
@@ -2850,7 +2850,7 @@ inspect_interior_projection -- dats/assets.hba` projected:
 - `npm run test:ts`: 54 files and 268 tests passed.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run build`: passed.
 - Canonical browser run:
-  `npm run harness:terrain -- --landblock 0001 --building-radius 0 --env-cell-radius 0
+  `npm run harness:browser -- --landblock 0001 --building-radius 0 --env-cell-radius 0
 --explicit-object-radius 0 --generated-object-radius 0 --camera-pitch -90 --settle-ms 15000`
   completed without browser, console, WebGL, stale-resource, or ownership errors.
 - The canonical frame reconciled 463 scopes/shells, 74 resident nodes, 1,710 shell draws / 5,652
@@ -2896,7 +2896,7 @@ inspect_interior_projection -- dats/assets.hba` projected:
 - `npm run test:ts`: 55 files and 269 tests passed.
 - `npm run check` and `npm run lint`: passed, including clippy with warnings denied.
 - Exact browser reproduction:
-  `npm run harness:terrain -- --landblock da55 --building-radius 2 --env-cell-radius 2
+  `npm run harness:browser -- --landblock da55 --building-radius 2 --env-cell-radius 2
 --explicit-object-radius 0 --generated-object-radius 0 --camera-pitch -90 --settle-ms 25000`
   completed with no application console errors. All 25 requested terrain/building/EnvCell source
   batches arrived; the anchor batch also carried its radius-zero object/generated layers.
@@ -3009,7 +3009,7 @@ inspect_interior_projection -- dats/assets.hba` projected:
 - `inspect_interior_projection dats/assets.hba` confirmed bounds-center containment for all five
   selected fixtures, including the rotated/reciprocal, 27-aperture, and 62-plane cells.
 - Canonical browser smoke:
-  `npm run harness:terrain -- --landblock da55 --building-radius 0 --env-cell-radius 0
+  `npm run harness:browser -- --landblock da55 --building-radius 0 --env-cell-radius 0
 --explicit-object-radius 0 --generated-object-radius 0 --camera-pitch -45 --settle-ms 15000`
   completed with no application/browser errors. It realized 236 cells, 488 residents, 528
   apertures/crossings, and retained zero portal draws, domain targets, composites, or traversals in
@@ -3293,7 +3293,7 @@ warnings` and `cargo fmt --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml
   topology-contract coverage only.
 - Knip rejected an eagerly exported `SceneVisibilityIslandId`; the unused export was removed.
   Phase 10 may name only the planner surface it actually consumes.
-- The terrain harness's `ready` state confirms renderer startup, not requested layer settlement. A
+- The browser harness's `ready` state confirms renderer startup, not requested layer settlement. A
   one-second EnvCell run returned an empty but error-free frame; the five-second run produced the
   evidence above. Future archive-backed gates must wait on expected content/source-batch facts or
   use an explicit measured settlement condition rather than treating `ready` as sufficient.
@@ -3499,7 +3499,7 @@ Do not silently rewrite completed phase history. Amend the forward plan and reco
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run build`, and
   `npm run format:check` passed.
 - Canonical flat browser run:
-  `npm run harness:terrain -- --landblock da55 --building-radius 0 --env-cell-radius 0
+  `npm run harness:browser -- --landblock da55 --building-radius 0 --env-cell-radius 0
 --explicit-object-radius 0 --generated-object-radius 0 --camera-pitch -45 --settle-ms 15000`
   completed without application/browser errors. It selected 132 EnvCell scopes, submitted 690
   shell draws / 2,816 shell triangles and 665 resident draws / 9,618 resident triangles, and

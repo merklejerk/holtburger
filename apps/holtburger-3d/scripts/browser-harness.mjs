@@ -96,12 +96,12 @@ try {
 	);
 	if (result.state.error) {
 		throw new Error(
-			`Terrain harness reported startup failure: ${result.state.error}`,
+			`Browser harness reported startup failure: ${result.state.error}`,
 		);
 	}
 	if (browserErrors.length > 0) {
 		throw new Error(
-			`Terrain harness observed browser errors: ${browserErrors.map(({ text }) => text).join(" | ")}`,
+			`Browser harness observed browser errors: ${browserErrors.map(({ text }) => text).join(" | ")}`,
 		);
 	}
 	if (options.modeCycle) {
@@ -438,7 +438,7 @@ function requireValue(args, index, label) {
 }
 
 function printHelp() {
-	process.stdout.write(`Usage: npm run harness:terrain -- [options]
+	process.stdout.write(`Usage: npm run harness:browser -- [options]
 
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
@@ -480,7 +480,7 @@ Options:
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
   --fixture <name>      Use the blended, instanced, portal-hybrid-execution,
                          portal-internal-execution, or portal-substrate fixture.
-  --settle-ms <ms>      Wait after requesting terrain. Default: ${DEFAULT_SETTLE_MS}
+  --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --chrome-path <path>  Chrome executable. Default: ${DEFAULT_CHROME_PATH}
@@ -942,18 +942,18 @@ async function startContentHost() {
 }
 
 async function startViteServer() {
-	if (await isUrlReady(`${DEFAULT_VITE_URL}/harness/terrain/`)) {
+	if (await isUrlReady(`${DEFAULT_VITE_URL}/harness/browser/`)) {
 		process.stderr.write(`Reusing Vite server at ${DEFAULT_VITE_URL}.\n`);
 		return DEFAULT_VITE_URL;
 	}
 	startChild("npm", ["run", "dev:vite"]);
-	await waitForUrl(`${DEFAULT_VITE_URL}/harness/terrain/`, 60_000);
+	await waitForUrl(`${DEFAULT_VITE_URL}/harness/browser/`, 60_000);
 	return DEFAULT_VITE_URL;
 }
 
 async function runHarness({ contentHostUrl, viteUrl }) {
 	const userDataDirectory = await mkdtemp(
-		join(tmpdir(), "holtburger-3d-terrain-"),
+		join(tmpdir(), "holtburger-3d-browser-harness-"),
 	);
 	tempDirectories.push(userDataDirectory);
 	const fixture = options.fixture
@@ -965,7 +965,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const dynamicExclusion = options.excludeAuthoredDynamics
 		? "&excludeAuthoredDynamics=true"
 		: "";
-	const pageUrl = `${viteUrl}/harness/terrain/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -1008,7 +1008,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		await waitForHarnessApi(client);
 		await evaluate(
 			client,
-			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 			[
 				options.landblockId,
 				options.buildingRadius,
@@ -1022,7 +1022,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.filteringCycle || options.textureFiltering !== null) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setTextureFiltering",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setTextureFiltering",
 				[options.textureFiltering ?? "nearest"],
 			);
 		}
@@ -1032,7 +1032,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		await delay(options.settleMs);
 		const initialState = await evaluate(
 			client,
-			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
 		if (
@@ -1041,7 +1041,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setEnvCellCamera",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellCamera",
 				[
 					options.envCellCameraId,
 					options.envCellCameraPosition,
@@ -1059,14 +1059,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			for (const policy of policies) {
 				await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setTextureFiltering",
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setTextureFiltering",
 					[policy],
 				);
 				await delay(100);
 				filteringCycleStates.push(
 					await evaluate(
 						client,
-						"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 						[],
 					),
 				);
@@ -1076,14 +1076,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			for (const mode of ["portal", "flat", "portal", "flat"]) {
 				await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setEnvCellRenderMode",
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellRenderMode",
 					[mode],
 				);
 				await delay(250);
 				modeCycleStates.push(
 					await evaluate(
 						client,
-						"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 						[],
 					),
 				);
@@ -1091,7 +1091,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		} else if (options.frameMode !== null) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setEnvCellRenderMode",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellRenderMode",
 				[options.frameMode],
 			);
 			await delay(250);
@@ -1099,7 +1099,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		const portalTrace = options.traceAnchorCellId
 			? await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.tracePortalSegment",
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.tracePortalSegment",
 					[
 						options.traceAnchorCellId,
 						options.traceStart,
@@ -1110,7 +1110,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		const portalRenderGraph = options.probePortalGraph
 			? await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.probePortalRenderGraph",
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalRenderGraph",
 					[
 						options.envCellCameraId,
 						options.envCellCameraPosition,
@@ -1123,7 +1123,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		const portalExecution = options.executePortal
 			? await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.probePortalExecution",
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalExecution",
 					[
 						options.envCellCameraId,
 						options.envCellCameraPosition,
@@ -1137,18 +1137,18 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.lifecycle) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.clearSceneInterest",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.clearSceneInterest",
 				[],
 			);
 			await delay(50);
 			const cleared = await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 				[
 					options.landblockId,
 					options.buildingRadius,
@@ -1162,7 +1162,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(options.settleMs);
 			const reloaded = await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
 			lifecycleState = { cleared, reloaded };
@@ -1171,7 +1171,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.relocateLandblockId) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 				[
 					options.relocateLandblockId,
 					options.buildingRadius,
@@ -1185,7 +1185,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(options.settleMs);
 			relocationState = await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
 		}
@@ -1193,7 +1193,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.disableGeneratedBeforeCapture) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 				[
 					options.relocateLandblockId ?? options.landblockId,
 					options.buildingRadius,
@@ -1207,14 +1207,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(options.settleMs);
 			generatedDisabledState = await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
 		}
 		if (options.cameraLandblockId) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setCameraLandblock",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setCameraLandblock",
 				[
 					options.cameraLandblockId,
 					options.cameraYawDegrees,
@@ -1226,14 +1226,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.measureMs > 0) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.resetTiming",
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming",
 				[],
 			);
 			await delay(options.measureMs);
 		}
 		const state = await evaluate(
 			client,
-			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
 		const screenshot = await client.send("Page.captureScreenshot", {
@@ -1299,18 +1299,13 @@ function waitForReadyLine(child, selectValue) {
 	return new Promise((resolve, reject) => {
 		let buffer = "";
 		const timeout = setTimeout(
-			() =>
-				reject(
-					new Error("Timed out waiting for terrain content host startup."),
-				),
+			() => reject(new Error("Timed out waiting for content host startup.")),
 			60_000,
 		);
 		child.once("exit", (code) => {
 			clearTimeout(timeout);
 			reject(
-				new Error(
-					`Terrain content host exited before startup with code ${code}.`,
-				),
+				new Error(`Content host exited before startup with code ${code}.`),
 			);
 		});
 		child.stdout.on("data", (chunk) => {
@@ -1442,13 +1437,13 @@ async function waitForHarnessApi(client) {
 		if (
 			await evaluateExpression(
 				client,
-				"Boolean(globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__)",
+				"Boolean(globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__)",
 			)
 		)
 			return;
 		if (Date.now() - startedAt >= 60_000) {
 			throw new Error(
-				`Timed out waiting for terrain harness API: ${JSON.stringify(await evaluateExpression(client, "({ text: document.body.innerText, title: document.title })"))}`,
+				`Timed out waiting for browser harness API: ${JSON.stringify(await evaluateExpression(client, "({ text: document.body.innerText, title: document.title })"))}`,
 			);
 		}
 		await delay(250);
@@ -1464,12 +1459,12 @@ async function waitForEnvCellPublication(client, requestedLandblockId) {
 	while (Date.now() < timeoutAt) {
 		const state = await evaluate(
 			client,
-			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
 		if (state.error) {
 			throw new Error(
-				`Terrain harness failed while awaiting EnvCell publication: ${state.error}`,
+				`Browser harness failed while awaiting EnvCell publication: ${state.error}`,
 			);
 		}
 		if (

@@ -423,7 +423,7 @@ resident pages.
 
 #### Deliverables
 
-- Extend an existing browser renderer/terrain harness rather than creating an unrelated sampling
+- Extend an existing browser harness rather than creating an unrelated sampling
   application.
 - Capture nearest, linear, anisotropic 2x/4x/8x comparisons for terrain, packed direct-color
   objects, indexed objects, details, and masks.
@@ -458,7 +458,7 @@ resident pages.
   placement alignment, then a safe atlas LOD cap. Custom per-entry mip construction or storage
   replacement requires a separate plan unless evidence proves the smaller corrections inadequate.
 - Completed 2026-07-30.
-- The production terrain harness reported a maximum anisotropy of 16 and cycled nearest, linear,
+- The production browser harness reported a maximum anisotropy of 16 and cycled nearest, linear,
   2x, 4x, and 8x both immediately after requesting content and after settlement. Resident
   static-object diagnostics remained byte-identical throughout the cycle, proving that switching
   did not recreate, replace, repack, or reload content.
@@ -530,7 +530,7 @@ resident pages.
 - `npm run test:ts` passed 455 tests in 75 files. `npm run check` passed with zero Svelte warnings;
   `npm run lint` passed ESLint, knip, and Rust clippy with warnings denied; and
   `npm run format:check` passed.
-- `npm run harness:terrain -- --brief --filtering-cycle --lifecycle --settle-ms 1000` passed on a
+- `npm run harness:browser -- --brief --filtering-cycle --lifecycle --settle-ms 1000` passed on a
   device reporting maximum anisotropy 16. It cycled nearest, linear, 2x, 4x, and 8x, drew 43 static
   object batches with 90 object texture-page binds, withdrew and reloaded da55 content, retained
   three atlas pages and 29 resident sources, and reported no application console messages.

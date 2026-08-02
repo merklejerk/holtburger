@@ -64,12 +64,12 @@
 			"excludeAuthoredDynamics",
 		) === "true";
 	if (!Number.isFinite(CAMERA_HEIGHT)) {
-		throw new Error("Terrain harness camera height must be finite.");
+		throw new Error("Browser harness camera height must be finite.");
 	}
 
-	interface TerrainHarnessApi {
+	interface BrowserHarnessApi {
 		/** Request canonical outdoor layers for one neighborhood. */
-		readonly requestOutdoorTerrain: (
+		readonly requestSceneInterest: (
 			landblockId: string,
 			buildingRadius: number,
 			envCellRadius: number | null,
@@ -99,7 +99,7 @@
 		readonly setTextureFiltering: (policy: string) => void;
 		/** Reset steady-state frame timing after asynchronous content publication settles. */
 		readonly resetTiming: () => void;
-		/** Withdraw every terrain and outdoor-static layer while retaining the harness runtime. */
+		/** Withdraw every requested scene layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
 		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
 		readonly tracePortalSegment: (
@@ -124,10 +124,10 @@
 			safetyWorkItemLimit: number,
 		) => PortalExecutionProbeResult;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
-		readonly state: () => TerrainHarnessState;
+		readonly state: () => BrowserHarnessState;
 	}
 
-	interface TerrainHarnessState {
+	interface BrowserHarnessState {
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
@@ -137,7 +137,7 @@
 		readonly frameSettings: FrameSettings;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		/** Browser main-thread timing facts accumulated during this harness session. */
-		readonly timing: TerrainHarnessTiming;
+		readonly timing: BrowserHarnessTiming;
 		readonly staticObjects: StaticObjectRuntimeDiagnostics | null;
 		/** Layer-separated static diagnostics prove outdoor-static lifetimes stay distinct. */
 		readonly staticObjectLayers: {
@@ -160,7 +160,7 @@
 		readonly ready: boolean;
 	}
 
-	interface TerrainHarnessTiming {
+	interface BrowserHarnessTiming {
 		readonly sampleCount: number;
 		readonly averageTickMs: number;
 		readonly averageRenderMs: number;
@@ -176,7 +176,7 @@
 		readonly longestLongTaskMs: number;
 	}
 
-	interface TerrainHarnessTimingAccumulator {
+	interface BrowserHarnessTimingAccumulator {
 		sampleCount: number;
 		totalTickMs: number;
 		totalRenderMs: number;
@@ -189,14 +189,14 @@
 	}
 
 	interface HarnessGlobal {
-		__HOLTBURGER_3D_TERRAIN_HARNESS__?: TerrainHarnessApi;
+		__HOLTBURGER_3D_BROWSER_HARNESS__?: BrowserHarnessApi;
 	}
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let error: string | null = $state(null);
 	let frames = 0;
 	let lastFrameAt: number | undefined;
-	let timing: TerrainHarnessTimingAccumulator = $state({
+	let timing: BrowserHarnessTimingAccumulator = $state({
 		sampleCount: 0,
 		totalTickMs: 0,
 		totalRenderMs: 0,
@@ -229,13 +229,13 @@
 		const match = /^(?:0x)?([0-9a-f]{4})(?:[0-9a-f]{4})?$/i.exec(value.trim());
 		if (!match) {
 			throw new Error(
-				"Terrain harness landblock id must contain four or eight hexadecimal digits.",
+				"Browser harness landblock id must contain four or eight hexadecimal digits.",
 			);
 		}
 		return `0x${match[1]!.toLowerCase()}ffff`;
 	}
 
-	function requestOutdoorTerrain(
+	function requestSceneInterest(
 		rawLandblockId: string,
 		buildingRadius: number,
 		envCellRadius: number | null,
@@ -244,10 +244,10 @@
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): void {
-		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (!Number.isInteger(buildingRadius) || buildingRadius < 0) {
 			throw new Error(
-				"Terrain harness building radius must be a non-negative integer.",
+				"Browser harness building radius must be a non-negative integer.",
 			);
 		}
 		if (
@@ -257,7 +257,7 @@
 				envCellRadius > buildingRadius)
 		) {
 			throw new Error(
-				"Terrain harness EnvCell radius must be a non-negative integer no greater than building radius.",
+				"Browser harness EnvCell radius must be a non-negative integer no greater than building radius.",
 			);
 		}
 		if (
@@ -267,7 +267,7 @@
 				explicitObjectRadius > buildingRadius)
 		) {
 			throw new Error(
-				"Terrain harness explicit-object radius must be a non-negative integer no greater than building radius.",
+				"Browser harness explicit-object radius must be a non-negative integer no greater than building radius.",
 			);
 		}
 		if (
@@ -277,11 +277,11 @@
 				generatedObjectRadius > buildingRadius)
 		) {
 			throw new Error(
-				"Terrain harness generated-object radius must be a non-negative integer no greater than building radius.",
+				"Browser harness generated-object radius must be a non-negative integer no greater than building radius.",
 			);
 		}
 		if (![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)) {
-			throw new Error("Terrain harness camera orientation must be finite.");
+			throw new Error("Browser harness camera orientation must be finite.");
 		}
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const usesGeneratedFixture = fixture === "instanced";
@@ -305,7 +305,7 @@
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): void {
-		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const origin = createLandblockWorldOrigin(landblockId);
 		runtime.setPrimaryCamera({
@@ -331,14 +331,14 @@
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): void {
-		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (
 			position.length !== 3 ||
 			!position.every(Number.isFinite) ||
 			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
 		) {
 			throw new Error(
-				"Terrain harness portal frame requires a finite position and orientation.",
+				"Browser harness portal frame requires a finite position and orientation.",
 			);
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "portal frame");
@@ -357,13 +357,13 @@
 	}
 
 	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
-		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		frameSettings = { ...frameSettings, envCellRenderMode };
 		runtime.setFrameSettings(frameSettings);
 	}
 
 	function setTextureFiltering(rawPolicy: string): void {
-		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (!isTextureFilteringPolicy(rawPolicy)) {
 			throw new Error(`Unknown texture filtering policy ${rawPolicy}.`);
 		}
@@ -376,7 +376,7 @@
 	}
 
 	function clearSceneInterest(): void {
-		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.clearSceneInterest();
 	}
 
@@ -395,7 +395,7 @@
 		lastFrameAt = undefined;
 	}
 
-	function timingSnapshot(): TerrainHarnessTiming {
+	function timingSnapshot(): BrowserHarnessTiming {
 		const divisor = Math.max(1, timing.sampleCount);
 		return {
 			averageFrameWorkMs: (timing.totalTickMs + timing.totalRenderMs) / divisor,
@@ -416,7 +416,7 @@
 		start: readonly [number, number, number],
 		endpoint: readonly [number, number, number],
 	): ReturnType<GameRuntime["tracePortalSegment"]> {
-		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		const envCellId = parseEnvCellId(rawEnvCellId, "trace");
 		if (
 			start.length !== 3 ||
@@ -424,7 +424,7 @@
 			![...start, ...endpoint].every(Number.isFinite)
 		) {
 			throw new Error(
-				"Terrain harness portal trace points must be finite xyz tuples.",
+				"Browser harness portal trace points must be finite xyz tuples.",
 			);
 		}
 		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
@@ -444,7 +444,7 @@
 		cameraPitchDegrees: number,
 		safetyWorkItemLimit: number,
 	): PortalRenderGraphProbeResult {
-		if (!renderer) throw new Error("Terrain harness renderer is not ready.");
+		if (!renderer) throw new Error("Browser harness renderer is not ready.");
 		if (
 			position.length !== 3 ||
 			!position.every(Number.isFinite) ||
@@ -453,7 +453,7 @@
 			safetyWorkItemLimit <= 0
 		) {
 			throw new Error(
-				"Terrain harness portal graph probe requires a finite position/orientation and positive integer work limit.",
+				"Browser harness portal graph probe requires a finite position/orientation and positive integer work limit.",
 			);
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "portal graph");
@@ -485,7 +485,7 @@
 		cameraPitchDegrees: number,
 		safetyWorkItemLimit: number,
 	): PortalExecutionProbeResult {
-		if (!renderer) throw new Error("Terrain harness renderer is not ready.");
+		if (!renderer) throw new Error("Browser harness renderer is not ready.");
 		if (
 			position.length !== 3 ||
 			!position.every(Number.isFinite) ||
@@ -494,7 +494,7 @@
 			safetyWorkItemLimit <= 0
 		) {
 			throw new Error(
-				"Terrain harness portal execution probe requires a finite position/orientation and positive integer work limit.",
+				"Browser harness portal execution probe requires a finite position/orientation and positive integer work limit.",
 			);
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "portal execution");
@@ -523,7 +523,7 @@
 		const match = /^(?:0x)?([0-9a-f]{8})$/i.exec(rawEnvCellId.trim());
 		if (!match) {
 			throw new Error(
-				`Terrain harness ${operation} EnvCell id must contain eight hexadecimal digits.`,
+				`Browser harness ${operation} EnvCell id must contain eight hexadecimal digits.`,
 			);
 		}
 		return `0x${match[1]!.toLowerCase()}`;
@@ -544,14 +544,14 @@
 
 	onMount(() => {
 		if (!canvasElement) {
-			error = "Terrain harness canvas was not mounted.";
+			error = "Browser harness canvas was not mounted.";
 			return;
 		}
 		const hostUrl = new URLSearchParams(window.location.search).get(
 			"contentHost",
 		);
 		if (!hostUrl) {
-			error = "Terrain harness requires a contentHost query parameter.";
+			error = "Browser harness requires a contentHost query parameter.";
 			return;
 		}
 
@@ -630,11 +630,11 @@
 					});
 					longTaskObserver.observe({ buffered: true, type: "longtask" });
 				}
-				hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__ = {
+				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
 					clearSceneInterest,
 					probePortalExecution,
 					probePortalRenderGraph,
-					requestOutdoorTerrain,
+					requestSceneInterest,
 					setCameraLandblock,
 					setEnvCellCamera,
 					setEnvCellRenderMode,
@@ -725,7 +725,7 @@
 			destroyed = true;
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			longTaskObserver?.disconnect();
-			delete hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__;
+			delete hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__;
 			staticDetailOwner?.teardown();
 			void runtime?.destroy().finally(async () => {
 				await pipeline?.destroy();
@@ -735,7 +735,7 @@
 	});
 </script>
 
-<canvas bind:this={canvasElement} aria-label="Terrain harness render viewport"
+<canvas bind:this={canvasElement} aria-label="Browser harness render viewport"
 ></canvas>
 
 <style>

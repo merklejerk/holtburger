@@ -262,13 +262,13 @@ This phase is the admitted fallback when Phase 1 shows that post-culling cohort 
 - [ ] Run `npm run check` from `apps/holtburger-3d`.
 - [ ] Run `npm run lint` from `apps/holtburger-3d` and treat all warnings as failures.
 - [ ] Run `npm run test:ts` from `apps/holtburger-3d`.
-- [ ] Run `npm run harness:terrain` to verify the working browser rendering slice.
+- [ ] Run `npm run harness:browser` to verify the working browser rendering slice.
 - [ ] Re-profile the centered gameplay view and edge-of-interest stress view with matching settings.
 - [ ] Compare physical state calls, instance-layout setup, object submission time, and total frame time against Phase 1.
 
 ### Acceptance Criteria
 
-- Automated checks and the terrain browser harness pass.
+- Automated checks and the browser harness pass.
 - The centered gameplay capture shows materially less object state-setup time without increased draw count or changed visible content.
 - The edge stress view does not regress structurally; any remaining cost is attributable to submitted work rather than repeated immutable-state setup.
 - No permanent expensive diagnostic path was added.
@@ -303,7 +303,7 @@ This phase is the admitted fallback when Phase 1 shows that post-culling cohort 
 - [ ] Resource replacement, release, and destruction delete dependent composite VAOs exactly once.
 - [ ] Opaque ordering clusters complete pipeline identity without weakening transparency.
 - [ ] Temporary diagnostics are removed.
-- [ ] Formatting, type checks, lint, tests, and the terrain browser harness pass.
+- [ ] Formatting, type checks, lint, tests, and the browser harness pass.
 - [ ] Matching before/after profiles demonstrate reduced state-setup cost in the centered gameplay scenario.
 - [ ] No renderer/device concern leaks into scene, worker, or artifact contracts.
 

@@ -575,14 +575,14 @@ Status: Complete (2026-07-25).
 #### Evidence
 
 The following commands ran against the local `dats/assets.hba` archive and the noninteractive,
-headless Explorer terrain harness. They do not run the interactive TUI.
+headless browser harness. They do not run the interactive TUI.
 
 ```sh
 cargo run -p holtburger-debug-harness --bin inspect_building_layer_evidence -- \
   --scan-setup-samples --sample-limit 1 0xda55ffff
 
 cd apps/holtburger-3d
-npm run harness:terrain -- --landblock 0xda55ffff --building-radius 1 --lifecycle \
+npm run harness:browser -- --landblock 0xda55ffff --building-radius 1 --lifecycle \
   --settle-ms 10000
 ```
 

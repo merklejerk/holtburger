@@ -206,7 +206,7 @@ interface PortalExteriorStencilLabels {
   - depth blit control: 2,048 exact matches, 0 mismatches; and
   - `DEPTH24_STENCIL8`: 24 depth bits and 8 stencil bits.
 - Course correction after the first field capture: the original synthetic run incorrectly used
-  `GameRuntime`'s pre-camera placeholder `far = 800`, while both the Explorer and terrain harness
+  `GameRuntime`'s pre-camera placeholder `far = 800`, while both the Explorer and browser harness
   install `far = 2000`. The fixture now requires its caller's active projection range instead of
   owning duplicated pseudo-runtime constants. The earlier 800-range result remains historical
   negative evidence rather than the accepted Explorer baseline.

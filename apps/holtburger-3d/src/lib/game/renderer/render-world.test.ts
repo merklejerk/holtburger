@@ -18,7 +18,6 @@ import type { GeometryKey, ObjectGeometryKey } from "../geometry/types";
 import type { StaticGeometryKey } from "../systems/static-resources";
 import type { StaticObjectRenderable } from "../commit/artifacts";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
-import type { InstanceStreamResourceKey } from "./resource-manager";
 import { TextureWrapMode } from "../textures/types";
 import type {
 	PartVisualTemplateKey,
@@ -40,8 +39,7 @@ const FRUSTUM = {
 } as const satisfies Frustum;
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
-const INSTANCE_STREAM =
-	"instance-stream-resource:1" as InstanceStreamResourceKey;
+const INSTANCE_DATA = { instances: [] } as const;
 const TEXTURE_2D = "texture-2d-resource:1" as Texture2DResourceKey;
 const ARRAY = {
 	layersByAssetId: new Map(),
@@ -60,9 +58,9 @@ describe("RenderWorld", () => {
 				},
 			},
 			instances: {
-				getResource: () => {
+				getData: () => {
 					calls.push("instances");
-					return INSTANCE_STREAM;
+					return INSTANCE_DATA;
 				},
 			},
 			staticDetails: { getBinding: () => null },
@@ -173,7 +171,7 @@ describe("RenderWorld", () => {
 			{
 				drawUnit: staticRenderable.drawUnits[0],
 				geometry: GEOMETRY,
-				instances: INSTANCE_STREAM,
+				instances: INSTANCE_DATA,
 			},
 		]);
 		expect(calls).toEqual([

@@ -21,7 +21,7 @@ import {
 
 const LOCAL_BOUNDS = new AABB3(new Vec3(-2, 0, 0), new Vec3(2, 6, 0));
 
-/** Closed source-first fixture proving persistent and camera-ordered instance submission. */
+/** Closed source-first fixture proving generated-static and camera-ordered instance submission. */
 export class SyntheticInstancedObjectPipeline implements CommitPipeline {
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
@@ -35,7 +35,7 @@ export class SyntheticInstancedObjectPipeline implements CommitPipeline {
 }
 
 function generatedBundle(landblockId: LandblockId): LandblockLayerCommit {
-	const persistent = presentation("persistent", [
+	const opaque = presentation("opaque", [
 		material("opaque", 0x10, 1),
 		material("alpha-test", 0x04, 0.7),
 		material("additive", 0x10100, 0.55),
@@ -51,8 +51,8 @@ function generatedBundle(landblockId: LandblockId): LandblockLayerCommit {
 		kind: LandblockLayerKind.Generated,
 		landblockId,
 		staticResidents: [
-			resident(landblockId, "persistent-red", persistent, 88, 70, -112),
-			resident(landblockId, "persistent-green", persistent, 100, 70, -112),
+			resident(landblockId, "opaque-red", opaque, 88, 70, -112),
+			resident(landblockId, "opaque-green", opaque, 100, 70, -112),
 			resident(
 				landblockId,
 				"source-first-yellow",

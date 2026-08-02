@@ -9,6 +9,7 @@ import {
 	transformNormal3,
 	transformPoint3,
 	transformAABB3,
+	writeMat4ToFloat32Array,
 } from "./matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "./types";
 
@@ -103,5 +104,33 @@ describe("matrix composition", () => {
 		expect(normalTarget.x).toBeCloseTo(3 / Math.sqrt(13));
 		expect(normalTarget.y).toBeCloseTo(2 / Math.sqrt(13));
 		expect(normalTarget.z).toBe(0);
+	});
+
+	it("writes matrix elements at an explicit caller-owned offset", () => {
+		const values = new Float32Array(20).fill(-1);
+		const matrix = new Mat4(
+			1,
+			2,
+			3,
+			4,
+			5,
+			6,
+			7,
+			8,
+			9,
+			10,
+			11,
+			12,
+			13,
+			14,
+			15,
+			16,
+		);
+
+		writeMat4ToFloat32Array(matrix, values, 2);
+
+		expect([...values]).toEqual([
+			-1, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, -1,
+		]);
 	});
 });

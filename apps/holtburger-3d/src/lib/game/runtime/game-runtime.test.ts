@@ -34,7 +34,6 @@ const ANIMATION_SOURCE: AnimationAssetSource = {
 
 const TEST_RESOURCES = {
 	createGeometry: () => "geometry-resource:1",
-	createStaticInstanceStream: () => "instance-stream-resource:1",
 	createTexture2D: () => "texture-2d-resource:1",
 	createTextureArray: () => "texture-array-resource:1",
 	async destroy() {},
@@ -84,8 +83,10 @@ describe("GameRuntime view and interest control", () => {
 			submittedStaticObjectTriangleCount: 0,
 			submittedBakedStaticObjectDrawCount: 0,
 			submittedBakedStaticObjectTriangleCount: 0,
-			submittedPersistentInstancedDrawCount: 0,
-			submittedPersistentInstanceCount: 0,
+			selectedGeneratedInstanceFragmentCount: 0,
+			selectedGeneratedInstanceCount: 0,
+			submittedCompactedGeneratedDrawCount: 0,
+			submittedCompactedGeneratedInstanceCount: 0,
 			submittedInstancedSourceTriangleCount: 0,
 			transparentObjectCandidateCount: 0,
 			farTransparentObjectCandidateCount: 0,
@@ -104,7 +105,7 @@ describe("GameRuntime view and interest control", () => {
 			frameInstanceGrowthCount: 0,
 			frameInstanceViewHighWaterMark: 0,
 			objectProgramChanges: 0,
-			objectTexturePageBinds: 0,
+			objectTextureBinds: 0,
 		};
 		const renderer: Renderer = {
 			async destroy() {},

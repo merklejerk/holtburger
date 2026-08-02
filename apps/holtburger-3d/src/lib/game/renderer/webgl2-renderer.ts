@@ -37,10 +37,15 @@ import type {
 import { RenderWorld } from "./render-world";
 import type {
 	GeometryResourceKey,
-	InstanceStreamResourceKey,
+	Texture2DResourceKey,
 } from "./resource-manager";
-import { OBJECT_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
+import {
+	OBJECT_INSTANCE_RECORD_BYTES,
+	type ObjectInstanceData,
+	type StaticInstanceStreamData,
+} from "../systems/static-resources";
 import type { TerrainProgramInput } from "./terrain-program-input";
+import { LandblockLayerKind } from "../runtime/scene-interest";
 import {
 	WebGL2ResourceManager,
 	type WebGL2GeometryBinding,
@@ -54,6 +59,7 @@ import {
 import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import {
 	createWebGL2ObjectProgram,
+	OBJECT_TEXTURE_UNITS,
 	type WebGL2FogObjectProgram,
 	type WebGL2FogInstancedObjectProgram,
 	type WebGL2InstancedObjectProgram,
@@ -63,11 +69,17 @@ import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
 import {
 	formAdjacentObjectInstanceRuns,
+	areStaticObjectDrawsCompatible,
+	comparePreparedObjectDrawState,
 	objectBlendPolicy,
 	orderTransparentObjectRanges,
+	type PreparedObjectAtlasBinding,
+	type PreparedObjectMaterial,
+	type PreparedObjectTextureBinding,
+	type PreparedStaticObjectDrawCompatibility,
+	type ObjectBlendPolicy,
 	type TransparentObjectRange,
 } from "./object-rendering-policy";
-import type { WebGL2InstanceBufferBinding } from "./webgl2-instance-buffer";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
 import { WebGL2PortalSubstrate } from "./webgl2-portal-substrate";
 import type { PreparedPortalProjection } from "./portal-view-window";
@@ -85,6 +97,7 @@ import {
 	DEFAULT_TEXTURE_FILTERING_POLICY,
 	type TextureFilteringPolicy,
 } from "./texture-filtering-policy";
+import { WebGL2ObjectStateApplicator } from "./webgl2-object-state-applicator";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -111,11 +124,16 @@ interface TerrainFrameInput {
 /** One opaque or alpha-test static-object range paired with its resolved node placement. */
 interface ObjectFrameInput {
 	readonly source:
-		"outdoor" | "env-cell-shell" | "env-cell-resident" | "dynamic";
+		| "outdoor"
+		| "generated"
+		| "env-cell-shell"
+		| "env-cell-resident"
+		| "dynamic";
 	/** Scene/portal residency boundary that must never be crossed by an instance run. */
 	readonly renderDomainKey: string;
 	readonly cullFaceOverride:
-		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
+		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
+		| null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -123,8 +141,8 @@ interface ObjectFrameInput {
 	readonly instances:
 		| null
 		| {
-				readonly kind: "persistent";
-				readonly resource: InstanceStreamResourceKey;
+				readonly data: StaticInstanceStreamData;
+				readonly kind: "static-fragment";
 		  }
 		| {
 				readonly cohortKey: string;
@@ -132,7 +150,6 @@ interface ObjectFrameInput {
 				readonly kind: "frame-template";
 		  }
 		| {
-				readonly cohortKey: string;
 				readonly firstInstance: number;
 				readonly instanceCount: number;
 				readonly kind: "frame-range";
@@ -145,6 +162,18 @@ interface ObjectFrameInput {
 		readonly stableId: string;
 		readonly center: Vec3;
 	} | null;
+}
+
+type PreparedObjectDrawCompatibility = PreparedStaticObjectDrawCompatibility<
+	WebGL2GeometryBinding,
+	WebGLTexture,
+	WebGLSampler
+>;
+
+/** One object contribution paired with every renderer-resolved fact consumed at submission. */
+interface PreparedObjectFrameInput extends ObjectFrameInput {
+	readonly blendPolicy: ObjectBlendPolicy;
+	readonly compatibility: PreparedObjectDrawCompatibility;
 }
 
 type AnyObjectProgram =
@@ -172,7 +201,7 @@ interface PreparedSceneContributions {
 	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
 	/** Opaque and alpha-test static-object ranges visible to this view. */
-	readonly objects: readonly ObjectFrameInput[];
+	readonly objects: readonly PreparedObjectFrameInput[];
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
@@ -231,8 +260,10 @@ interface MutableFrameSelectionMetrics {
 	submittedStaticObjectTriangleCount: number;
 	submittedBakedStaticObjectDrawCount: number;
 	submittedBakedStaticObjectTriangleCount: number;
-	submittedPersistentInstancedDrawCount: number;
-	submittedPersistentInstanceCount: number;
+	selectedGeneratedInstanceFragmentCount: number;
+	selectedGeneratedInstanceCount: number;
+	submittedCompactedGeneratedDrawCount: number;
+	submittedCompactedGeneratedInstanceCount: number;
 	submittedInstancedSourceTriangleCount: number;
 	transparentObjectCandidateCount: number;
 	farTransparentObjectCandidateCount: number;
@@ -251,7 +282,7 @@ interface MutableFrameSelectionMetrics {
 	frameInstanceGrowthCount: number;
 	frameInstanceViewHighWaterMark: number;
 	objectProgramChanges: number;
-	objectTexturePageBinds: number;
+	objectTextureBinds: number;
 }
 
 export class WebGL2Renderer implements Renderer {
@@ -268,12 +299,17 @@ export class WebGL2Renderer implements Renderer {
 	/** Device-wide guard preventing draws through any stale handle after context loss. */
 	readonly #assertDeviceReady: () => void;
 	readonly #frameInstances: FrameInstanceStreamArena;
+	/** Exact state mirror scoped to independently invalidated object phases. */
+	readonly #objectState: WebGL2ObjectStateApplicator;
 	/** Lazy portal mechanics; construction allocates no GPU target or shader resource. */
 	readonly #portalSubstrate: WebGL2PortalSubstrate;
 	/** Pure planner retaining only the immutable index for the active topology revision. */
 	readonly #portalRenderGraphPlanner = new PortalRenderGraphPlanner();
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
+	/** Renderer-local stable order for opaque WebGL identities that have no comparable value. */
+	readonly #objectDeviceIdentityOrders = new WeakMap<object, number>();
+	#nextObjectDeviceIdentityOrder = 0;
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
@@ -282,8 +318,11 @@ export class WebGL2Renderer implements Renderer {
 	/** Transparent and additive materials deliberately use a shader with no fog uniforms. */
 	readonly #blendedObjectProgram: WebGL2ObjectProgram;
 	readonly #blendedInstancedObjectProgram: WebGL2InstancedObjectProgram;
-	/** Float-compatible fallback keeps inactive object samplers independent from terrain bindings. */
-	readonly #objectFallbackTexture: WebGLTexture;
+	/** Complete float-compatible fallback for every statically active object sampler. */
+	readonly #objectFallbackBinding: PreparedObjectTextureBinding<
+		WebGLTexture,
+		WebGLSampler
+	>;
 	/** Requested quality captured at frame entry and consumed by every nested draw path. */
 	#frameTextureFiltering: TextureFilteringPolicy =
 		DEFAULT_TEXTURE_FILTERING_POLICY;
@@ -323,8 +362,10 @@ export class WebGL2Renderer implements Renderer {
 		submittedStaticObjectTriangleCount: 0,
 		submittedBakedStaticObjectDrawCount: 0,
 		submittedBakedStaticObjectTriangleCount: 0,
-		submittedPersistentInstancedDrawCount: 0,
-		submittedPersistentInstanceCount: 0,
+		selectedGeneratedInstanceFragmentCount: 0,
+		selectedGeneratedInstanceCount: 0,
+		submittedCompactedGeneratedDrawCount: 0,
+		submittedCompactedGeneratedInstanceCount: 0,
 		submittedInstancedSourceTriangleCount: 0,
 		transparentObjectCandidateCount: 0,
 		farTransparentObjectCandidateCount: 0,
@@ -343,7 +384,7 @@ export class WebGL2Renderer implements Renderer {
 		frameInstanceGrowthCount: 0,
 		frameInstanceViewHighWaterMark: 0,
 		objectProgramChanges: 0,
-		objectTexturePageBinds: 0,
+		objectTextureBinds: 0,
 	};
 	#frameWidth = 0;
 	#frameHeight = 0;
@@ -383,6 +424,7 @@ export class WebGL2Renderer implements Renderer {
 			textureFilteringSupport,
 		);
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
+		this.#objectState = new WebGL2ObjectStateApplicator(gl);
 		this.#portalSubstrate = new WebGL2PortalSubstrate(gl);
 		this.#world = world;
 		this.#terrainProgram = createWebGL2TerrainProgram(gl);
@@ -398,7 +440,15 @@ export class WebGL2Renderer implements Renderer {
 			distanceFog: false,
 			transformSource: "instanced",
 		});
-		this.#objectFallbackTexture = createObjectFallbackTexture(gl);
+		this.#objectFallbackBinding = {
+			sampler: this.#textureSamplers.getSampler({
+				mipLevels: 1,
+				policy: DEFAULT_TEXTURE_FILTERING_POLICY,
+				samplingClass: "exact",
+				wrap: TextureWrapMode.Clamp,
+			}),
+			texture: createObjectFallbackTexture(gl),
+		};
 		gl.clearColor(
 			CLEAR_COLOR.red,
 			CLEAR_COLOR.green,
@@ -492,6 +542,7 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
+					(left, right) => this.#comparePreparedObjectState(left, right),
 				);
 				this.#drawView({ ...prepared, ...contributions }, fog);
 			},
@@ -499,6 +550,7 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					renderNodeIds,
 					contributionsByNode,
+					(left, right) => this.#comparePreparedObjectState(left, right),
 				);
 				this.#drawView({ ...prepared, ...contributions }, fog);
 			},
@@ -614,6 +666,7 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
+					(left, right) => this.#comparePreparedObjectState(left, right),
 				);
 				this.#drawView({ ...prepared, ...contributions }, null);
 			},
@@ -621,6 +674,7 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					renderNodeIds,
 					contributionsByNode,
+					(left, right) => this.#comparePreparedObjectState(left, right),
 				);
 				this.#drawView({ ...prepared, ...contributions }, null);
 			},
@@ -651,7 +705,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl.deleteProgram(this.#instancedObjectProgram.program);
 		this.#gl.deleteProgram(this.#blendedObjectProgram.program);
 		this.#gl.deleteProgram(this.#blendedInstancedObjectProgram.program);
-		this.#gl.deleteTexture(this.#objectFallbackTexture);
+		this.#gl.deleteTexture(this.#objectFallbackBinding.texture);
 		this.#frameInstances.destroy();
 	}
 
@@ -870,7 +924,9 @@ export class WebGL2Renderer implements Renderer {
 				const source =
 					contribution.cullingGroup === "env-cell-static-residents"
 						? "env-cell-resident"
-						: "outdoor";
+						: contribution.cullingGroup === LandblockLayerKind.Generated
+							? "generated"
+							: "outdoor";
 				if (source === "env-cell-resident") {
 					this.#frameSelectionMetrics.visibleEnvCellResidentNodes += 1;
 				}
@@ -888,12 +944,17 @@ export class WebGL2Renderer implements Renderer {
 				}
 				for (const resolved of node.drawUnits) {
 					const { drawUnit } = resolved;
+					if (resolved.instances !== null && source !== "generated") {
+						throw new Error(
+							`${contribution.cullingGroup} static objects unexpectedly resolved instance fragments.`,
+						);
+					}
 					if (
 						drawUnit.kind === "instanced" &&
 						drawUnit.ordering === "transparent"
 					) {
 						throw new Error(
-							"Persistent transparent instance draw requires frame-streamed templates.",
+							"Transparent static instance draw requires a frame-streamed template.",
 						);
 					}
 					objects.push({
@@ -905,7 +966,7 @@ export class WebGL2Renderer implements Renderer {
 						instances:
 							resolved.instances === null
 								? null
-								: { kind: "persistent", resource: resolved.instances },
+								: { data: resolved.instances, kind: "static-fragment" },
 						landblockId: node.placement.landblockId,
 						localToLandblock: node.placement.localToLandblock,
 						material: drawUnit.material,
@@ -1025,8 +1086,162 @@ export class WebGL2Renderer implements Renderer {
 			});
 			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
-		sortObjectFrameInputs(objects);
-		return { objects, terrain };
+		const preparedObjects = objects.map((object) =>
+			this.#prepareObjectFrameInput(object, anchorLandblockId),
+		);
+		sortObjectFrameInputs(preparedObjects, (left, right) =>
+			this.#comparePreparedObjectState(left, right),
+		);
+		return { objects: preparedObjects, terrain };
+	}
+
+	/** Compile every draw-consumed constant once before ordering, grouping, or submission. */
+	#prepareObjectFrameInput(
+		object: ObjectFrameInput,
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+	): PreparedObjectFrameInput {
+		const geometry = this.#resources.getGeometry(object.geometry);
+		validateDrawRange(geometry, object.indexStart, object.indexCount);
+		const landblockOffset = createLandblockOffset(
+			getLandblockCoordinates(object.landblockId),
+			getLandblockCoordinates(anchorLandblockId),
+		);
+		const { material } = object;
+		const opacity = sourceOpacity(material.source.translucency);
+		const diffuse = Math.max(0, material.source.diffuseScale);
+		let preparedMaterial: PreparedObjectMaterial<WebGLTexture, WebGLSampler>;
+		if (material.source.kind === "solid-color") {
+			const [red, green, blue, alpha] = material.source.color;
+			preparedMaterial = {
+				color: [
+					red * diffuse,
+					green * diffuse,
+					blue * diffuse,
+					alpha * opacity,
+				],
+				kind: "solid-color",
+			};
+		} else {
+			const base = material.textures.base;
+			if (!base) {
+				throw new Error(
+					`Textured material ${material.source.id} has no base texture.`,
+				);
+			}
+			const baseBinding = this.#prepareObjectAtlasBinding(
+				base,
+				material.source.textureEncoding === "direct-color"
+					? "filterable"
+					: "exact",
+			);
+			const color = [diffuse, diffuse, diffuse, opacity] as const;
+			if (material.source.textureEncoding === "direct-color") {
+				preparedMaterial = { base: baseBinding, color, kind: "direct-color" };
+			} else {
+				const palette = material.textures.palette;
+				if (!palette) {
+					throw new Error(
+						`Indexed material ${material.source.id} has no palette texture.`,
+					);
+				}
+				preparedMaterial = {
+					base: baseBinding,
+					color,
+					kind: material.source.textureEncoding,
+					palette: this.#prepareObjectAtlasBinding(palette, "exact"),
+				};
+			}
+		}
+		const detail = resolveStaticMaterialDetail(material, (role) =>
+			this.#world.resolveActiveRegionStaticDetail(role),
+		);
+		return {
+			...object,
+			blendPolicy: objectBlendPolicy(material.source.rawSurfaceFlags),
+			compatibility: {
+				alphaTest:
+					object.ordering === "alpha-test" && material.source.kind === "texture"
+						? 200 / 255
+						: 0,
+				cullFace: object.cullFaceOverride ?? material.polygon.cullFace,
+				detail:
+					detail === null
+						? null
+						: {
+								...this.#prepareObjectTextureBinding(
+									this.#world.resolveTexture2D(detail.key),
+									"filterable",
+								),
+								rect: [0, 0, 1, 1],
+								tiling: detail.tiling,
+							},
+				geometry,
+				indexCount: object.indexCount,
+				indexStart: object.indexStart,
+				landblockOffset: [
+					landblockOffset.x,
+					landblockOffset.y,
+					landblockOffset.z,
+				],
+				luminosity: material.source.luminosity,
+				material: preparedMaterial,
+				palettedClipMap: material.palettedClipMap,
+				wrapRepeat: material.sampler.wrap === TextureWrapMode.Repeat,
+			},
+		};
+	}
+
+	#prepareObjectAtlasBinding(
+		key: NonNullable<ObjectMaterialBinding["textures"]["base"]>,
+		samplingClass: TextureSamplingClass,
+	): PreparedObjectAtlasBinding<WebGLTexture, WebGLSampler> {
+		const atlas = this.#world.resolveAtlasTexture(key);
+		const bounds = atlas.placement.bounds;
+		return {
+			...this.#prepareObjectTextureBinding(atlas.resource, samplingClass),
+			rect: [
+				bounds.min.x,
+				bounds.min.y,
+				bounds.max.x - bounds.min.x,
+				bounds.max.y - bounds.min.y,
+			],
+		};
+	}
+
+	#prepareObjectTextureBinding(
+		resource: Texture2DResourceKey,
+		samplingClass: TextureSamplingClass,
+	): PreparedObjectTextureBinding<WebGLTexture, WebGLSampler> {
+		const binding = this.#resources.getTexture2D(resource);
+		return {
+			sampler: this.#textureSamplers.getSampler({
+				mipLevels: binding.mipLevels,
+				policy: this.#frameTextureFiltering,
+				samplingClass,
+				wrap: TextureWrapMode.Clamp,
+			}),
+			texture: binding.texture,
+		};
+	}
+
+	#comparePreparedObjectState(
+		left: PreparedObjectFrameInput,
+		right: PreparedObjectFrameInput,
+	): number {
+		return comparePreparedObjectDrawState(
+			left.compatibility,
+			right.compatibility,
+			(identity) => this.#objectDeviceIdentityOrder(identity),
+		);
+	}
+
+	#objectDeviceIdentityOrder(identity: object): number {
+		const existing = this.#objectDeviceIdentityOrders.get(identity);
+		if (existing !== undefined) return existing;
+		const assigned = this.#nextObjectDeviceIdentityOrder;
+		this.#nextObjectDeviceIdentityOrder += 1;
+		this.#objectDeviceIdentityOrders.set(identity, assigned);
+		return assigned;
 	}
 
 	#resetFrameSelectionMetrics(
@@ -1070,8 +1285,10 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedStaticObjectTriangleCount = 0;
 		metrics.submittedBakedStaticObjectDrawCount = 0;
 		metrics.submittedBakedStaticObjectTriangleCount = 0;
-		metrics.submittedPersistentInstancedDrawCount = 0;
-		metrics.submittedPersistentInstanceCount = 0;
+		metrics.selectedGeneratedInstanceFragmentCount = 0;
+		metrics.selectedGeneratedInstanceCount = 0;
+		metrics.submittedCompactedGeneratedDrawCount = 0;
+		metrics.submittedCompactedGeneratedInstanceCount = 0;
 		metrics.submittedInstancedSourceTriangleCount = 0;
 		metrics.transparentObjectCandidateCount = 0;
 		metrics.farTransparentObjectCandidateCount = 0;
@@ -1090,7 +1307,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.frameInstanceGrowthCount = 0;
 		metrics.frameInstanceViewHighWaterMark = 0;
 		metrics.objectProgramChanges = 0;
-		metrics.objectTexturePageBinds = 0;
+		metrics.objectTextureBinds = 0;
 	}
 
 	/** Finish counters shared by ordinary frames and explicit portal execution probes. */
@@ -1114,6 +1331,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawOpaqueObjects(view, fog);
 		this.#drawBlendedObjects(view);
 		this.#gl.bindVertexArray(null);
+		this.#beginObjectPhase();
 	}
 
 	#drawTerrain(
@@ -1307,26 +1525,24 @@ export class WebGL2Renderer implements Renderer {
 		if (candidates.length === 0) return;
 		const objects = this.#prepareFrameInstanceRuns([candidates]).objects;
 		const gl = this.#gl;
+		this.#beginObjectPhase();
 		gl.depthMask(true);
-		gl.disable(gl.BLEND);
-		let activeProgram:
-			WebGL2FogObjectProgram | WebGL2FogInstancedObjectProgram | null = null;
+		this.#objectState.applyBlend(null);
 		for (const object of objects) {
 			const program =
 				object.drawKind === "instanced"
 					? this.#instancedObjectProgram
 					: this.#objectProgram;
-			if (program !== activeProgram) {
+			if (this.#objectState.applyProgram(program.program)) {
 				this.#activateObjectProgram(program, view, fog);
-				activeProgram = program;
 			}
-			this.#drawObjectRange(program, object, view);
+			this.#drawObjectRange(program, object);
 		}
 	}
 
 	#drawBlendedObjects(view: PreparedView): void {
-		const transparent: TransparentObjectRange<ObjectFrameInput>[] = [];
-		const additive: ObjectFrameInput[] = [];
+		const transparent: TransparentObjectRange<PreparedObjectFrameInput>[] = [];
+		const additive: PreparedObjectFrameInput[] = [];
 		for (const object of view.objects) {
 			if (object.ordering === "additive") {
 				additive.push(object);
@@ -1369,11 +1585,16 @@ export class WebGL2Renderer implements Renderer {
 			});
 		}
 		additive.sort((left, right) =>
-			objectMaterialSortKey(left).localeCompare(objectMaterialSortKey(right)),
+			compareObjectFrameBatchOrder(left, right, (first, second) =>
+				this.#comparePreparedObjectState(first, second),
+			),
 		);
 		const orderedTransparent = orderTransparentObjectRanges(
 			transparent,
-			compareFarTransparentBatchOrder,
+			(left, right) =>
+				compareFarTransparentBatchOrder(left, right, (first, second) =>
+					this.#comparePreparedObjectState(first, second),
+				),
 		);
 		this.#frameSelectionMetrics.transparentObjectCandidateCount +=
 			transparent.length;
@@ -1388,21 +1609,18 @@ export class WebGL2Renderer implements Renderer {
 		});
 		if (sortedBlended.length === 0) return;
 		const gl = this.#gl;
+		this.#objectState.invalidate();
 		gl.depthMask(false);
-		gl.enable(gl.BLEND);
-		let activeProgram:
-			WebGL2ObjectProgram | WebGL2InstancedObjectProgram | null = null;
 		for (const object of sortedBlended) {
 			const program =
 				object.drawKind === "instanced"
 					? this.#blendedInstancedObjectProgram
 					: this.#blendedObjectProgram;
-			if (program !== activeProgram) {
+			if (this.#objectState.applyProgram(program.program)) {
 				this.#activateObjectProgram(program, view, null);
-				activeProgram = program;
 			}
-			this.#configureObjectBlend(object.material);
-			this.#drawObjectRange(program, object, view);
+			this.#objectState.applyBlend(object.blendPolicy);
+			this.#drawObjectRange(program, object);
 		}
 	}
 
@@ -1410,10 +1628,10 @@ export class WebGL2Renderer implements Renderer {
 	 * Upload both transparent phases once while keeping their independent run boundaries.
 	 */
 	#prepareFrameBlendedRuns(ordered: {
-		readonly additive: readonly ObjectFrameInput[];
-		readonly far: readonly ObjectFrameInput[];
-		readonly near: readonly ObjectFrameInput[];
-	}): readonly ObjectFrameInput[] {
+		readonly additive: readonly PreparedObjectFrameInput[];
+		readonly far: readonly PreparedObjectFrameInput[];
+		readonly near: readonly PreparedObjectFrameInput[];
+	}): readonly PreparedObjectFrameInput[] {
 		const prepared = this.#prepareFrameInstanceRuns([
 			ordered.far,
 			ordered.near,
@@ -1428,22 +1646,53 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	/** Form phase-local compatible runs and upload their complete sequential instance population. */
-	#prepareFrameInstanceRuns(phases: readonly (readonly ObjectFrameInput[])[]): {
-		readonly objects: readonly ObjectFrameInput[];
+	#prepareFrameInstanceRuns(
+		phases: readonly (readonly PreparedObjectFrameInput[])[],
+	): {
+		readonly objects: readonly PreparedObjectFrameInput[];
 		readonly runCounts: readonly number[];
 	} {
-		const orderedInstances: import("../systems/static-resources").ObjectInstanceData[] =
-			[];
-		const objects: ObjectFrameInput[] = [];
+		const orderedInstances: ObjectInstanceData[] = [];
+		const objects: PreparedObjectFrameInput[] = [];
 		const runCounts: number[] = [];
 		for (const phase of phases) {
+			for (const object of phase) {
+				if (object.instances?.kind !== "static-fragment") continue;
+				if (object.source !== "generated") {
+					throw new Error(
+						`${object.source} object unexpectedly entered generated-scenery compaction.`,
+					);
+				}
+				this.#frameSelectionMetrics.selectedGeneratedInstanceFragmentCount += 1;
+				this.#frameSelectionMetrics.selectedGeneratedInstanceCount +=
+					object.instances.data.instances.length;
+			}
 			const scheduled = formAdjacentObjectInstanceRuns(
 				phase,
-				(object) => object.instances?.kind === "frame-template",
-				(left, right) =>
-					left.instances?.kind === "frame-template" &&
-					right.instances?.kind === "frame-template" &&
-					compareFrameTemplateBatchIdentity(left, right) === 0,
+				(object) =>
+					object.instances?.kind === "frame-template" ||
+					object.instances?.kind === "static-fragment",
+				(left, right) => {
+					if (
+						!areStaticObjectDrawsCompatible(
+							left.compatibility,
+							right.compatibility,
+						)
+					) {
+						return false;
+					}
+					if (
+						left.instances?.kind === "static-fragment" &&
+						right.instances?.kind === "static-fragment"
+					) {
+						return true;
+					}
+					return (
+						left.instances?.kind === "frame-template" &&
+						right.instances?.kind === "frame-template" &&
+						compareFrameTemplateBatchIdentity(left, right) === 0
+					);
+				},
 			);
 			runCounts.push(
 				scheduled.filter(
@@ -1455,26 +1704,27 @@ export class WebGL2Renderer implements Renderer {
 					objects.push(submission.value);
 					continue;
 				}
-				const [object, ...rest] = submission.values;
-				if (!object || object.instances?.kind !== "frame-template") {
-					throw new Error("Frame-instance run has no template.");
-				}
+				const object = submission.values[0];
 				const firstInstance = orderedInstances.length;
-				orderedInstances.push(object.instances.instance);
-				for (const adjacent of rest) {
-					if (adjacent.instances?.kind !== "frame-template") {
+				for (const adjacent of submission.values) {
+					if (adjacent.instances?.kind === "frame-template") {
+						orderedInstances.push(adjacent.instances.instance);
+					} else if (adjacent.instances?.kind === "static-fragment") {
+						orderedInstances.push(...adjacent.instances.data.instances);
+					} else {
 						throw new Error(
-							"Frame-instance run contains a non-template value.",
+							"Object instance run contains prepared range state.",
 						);
 					}
-					orderedInstances.push(adjacent.instances.instance);
 				}
+				const instanceCount = orderedInstances.length - firstInstance;
+				if (instanceCount === 0)
+					throw new Error("Object instance run is empty.");
 				objects.push({
 					...object,
 					instances: {
-						cohortKey: object.instances.cohortKey,
 						firstInstance,
-						instanceCount: submission.values.length,
+						instanceCount,
 						kind: "frame-range",
 					},
 				});
@@ -1491,8 +1741,7 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawObjectRange(
 		program: AnyObjectProgram,
-		object: ObjectFrameInput,
-		view: PreparedView,
+		object: PreparedObjectFrameInput,
 	): void {
 		if (
 			(object.drawKind === "baked") !==
@@ -1502,11 +1751,9 @@ export class WebGL2Renderer implements Renderer {
 				`${object.drawKind} draw cannot use ${program.transformSource} object program.`,
 			);
 		}
-		const { material } = object;
+		const { compatibility } = object;
 		const gl = this.#gl;
-		this.#configureObjectCulling(
-			object.cullFaceOverride ?? material.polygon.cullFace,
-		);
+		this.#objectState.applyCullFace(compatibility.cullFace);
 		if (program.transformSource === "baked") {
 			gl.uniformMatrix4fv(
 				program.uniforms.localToLandblock,
@@ -1514,145 +1761,75 @@ export class WebGL2Renderer implements Renderer {
 				mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
 			);
 		}
-		const offset = createLandblockOffset(
-			getLandblockCoordinates(object.landblockId),
-			view.anchorCoordinates,
-			this.#offsetScratch,
-		);
 		gl.uniform3f(
 			program.uniforms.landblockOffset,
-			offset.x,
-			offset.y,
-			offset.z,
+			compatibility.landblockOffset[0],
+			compatibility.landblockOffset[1],
+			compatibility.landblockOffset[2],
 		);
-		gl.uniform1i(
-			program.uniforms.wrapRepeat,
-			material.sampler.wrap === TextureWrapMode.Repeat ? 1 : 0,
-		);
+		gl.uniform1i(program.uniforms.wrapRepeat, compatibility.wrapRepeat ? 1 : 0);
 		gl.uniform1i(
 			program.uniforms.palettedClipMap,
-			material.palettedClipMap ? 1 : 0,
+			compatibility.palettedClipMap ? 1 : 0,
 		);
-		gl.uniform1f(
-			program.uniforms.alphaTest,
-			object.ordering === "alpha-test" && material.source.kind === "texture"
-				? 200 / 255
-				: 0,
-		);
-		const opacity = sourceOpacity(material.source.translucency);
-		const diffuse = Math.max(0, material.source.diffuseScale);
-		if (material.source.kind === "solid-color") {
-			const [red, green, blue, alpha] = material.source.color;
+		gl.uniform1f(program.uniforms.alphaTest, compatibility.alphaTest);
+		const preparedMaterial = compatibility.material;
+		if (preparedMaterial.kind === "solid-color") {
 			gl.uniform1i(program.uniforms.materialKind, 0);
-			gl.uniform4f(
-				program.uniforms.materialColor,
-				red * diffuse,
-				green * diffuse,
-				blue * diffuse,
-				alpha * opacity,
-			);
+			gl.uniform4f(program.uniforms.materialColor, ...preparedMaterial.color);
 		} else {
-			const base = material.textures.base;
-			if (!base)
-				throw new Error(
-					`Textured material ${material.source.id} has no base texture.`,
-				);
-			const baseBinding = this.#world.resolveAtlasTexture(base);
-			const baseResource = this.#resources.getTexture2D(baseBinding.resource);
-			this.#bindObjectTexture(
-				0,
-				baseResource.texture,
-				baseResource.mipLevels,
-				material.source.textureEncoding === "direct-color"
-					? "filterable"
-					: "exact",
+			this.#bindPreparedObjectTexture(
+				OBJECT_TEXTURE_UNITS.base,
+				preparedMaterial.base,
 			);
-			this.#setPixelAtlasRect(
-				program.uniforms.baseRect,
-				baseBinding.placement.bounds,
-			);
-			gl.uniform1i(program.uniforms.base, 0);
+			gl.uniform4f(program.uniforms.baseRect, ...preparedMaterial.base.rect);
 			gl.uniform1i(
 				program.uniforms.materialKind,
-				material.source.textureEncoding === "direct-color"
+				preparedMaterial.kind === "direct-color"
 					? 1
-					: material.source.textureEncoding === "index8"
+					: preparedMaterial.kind === "index8"
 						? 2
 						: 3,
 			);
-			gl.uniform4f(
-				program.uniforms.materialColor,
-				diffuse,
-				diffuse,
-				diffuse,
-				opacity,
-			);
-			if (material.source.textureEncoding !== "direct-color") {
-				const palette = material.textures.palette;
-				if (!palette)
-					throw new Error(
-						`Indexed material ${material.source.id} has no palette texture.`,
-					);
-				const paletteBinding = this.#world.resolveAtlasTexture(palette);
-				const paletteResource = this.#resources.getTexture2D(
-					paletteBinding.resource,
+			gl.uniform4f(program.uniforms.materialColor, ...preparedMaterial.color);
+			if (preparedMaterial.kind !== "direct-color") {
+				this.#bindPreparedObjectTexture(
+					OBJECT_TEXTURE_UNITS.palette,
+					preparedMaterial.palette,
 				);
-				this.#bindObjectTexture(
-					1,
-					paletteResource.texture,
-					paletteResource.mipLevels,
-					"exact",
-				);
-				this.#setPixelAtlasRect(
+				gl.uniform4f(
 					program.uniforms.paletteRect,
-					paletteBinding.placement.bounds,
+					...preparedMaterial.palette.rect,
 				);
-				gl.uniform1i(program.uniforms.palette, 1);
 			}
 		}
-		const detail = resolveStaticMaterialDetail(material, (role) =>
-			this.#world.resolveActiveRegionStaticDetail(role),
-		);
+		const { detail } = compatibility;
 		if (detail) {
-			const detailResource = this.#resources.getTexture2D(
-				this.#world.resolveTexture2D(detail.key),
-			);
-			this.#bindObjectTexture(
-				2,
-				detailResource.texture,
-				detailResource.mipLevels,
-				"filterable",
-			);
-			gl.uniform4f(program.uniforms.detailRect, 0, 0, 1, 1);
+			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.detail, detail);
+			gl.uniform4f(program.uniforms.detailRect, ...detail.rect);
 			gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
-			gl.uniform1i(program.uniforms.detail, 2);
 			gl.uniform1i(program.uniforms.useDetail, 1);
 		} else {
 			gl.uniform1i(program.uniforms.useDetail, 0);
 		}
-		gl.uniform1f(program.uniforms.luminosity, material.source.luminosity);
-		const geometry = this.#resources.getGeometry(object.geometry);
-		validateDrawRange(geometry, object.indexStart, object.indexCount);
-		gl.bindVertexArray(geometry.vertexArray);
+		gl.uniform1f(program.uniforms.luminosity, compatibility.luminosity);
+		const geometry = compatibility.geometry;
+		this.#objectState.applyVertexArray(geometry.vertexArray);
 		let submittedInstanceCount = 1;
 		if (object.drawKind === "instanced") {
 			if (!object.instances) {
 				throw new Error("Instanced draw has no resolved instance stream.");
 			}
-			if (object.instances.kind === "frame-template") {
-				throw new Error(
-					"Unprepared frame instance template reached submission.",
-				);
+			if (
+				object.instances.kind === "frame-template" ||
+				object.instances.kind === "static-fragment"
+			) {
+				throw new Error("Unprepared object instance data reached submission.");
 			}
-			const range =
-				object.instances.kind === "persistent"
-					? persistentInstanceRange(
-							this.#resources.getInstanceStream(object.instances.resource),
-						)
-					: this.#frameInstances.getRange(
-							object.instances.firstInstance,
-							object.instances.instanceCount,
-						);
+			const range = this.#frameInstances.getRange(
+				object.instances.firstInstance,
+				object.instances.instanceCount,
+			);
 			const instances = range.binding;
 			if (range.instanceCount === 0)
 				throw new Error("Instanced draw has an empty instance range.");
@@ -1710,9 +1887,12 @@ export class WebGL2Renderer implements Renderer {
 		} else {
 			this.#frameSelectionMetrics.submittedInstancedSourceTriangleCount +=
 				sourceTriangleCount;
-			if (object.instances?.kind === "persistent") {
-				this.#frameSelectionMetrics.submittedPersistentInstancedDrawCount += 1;
-				this.#frameSelectionMetrics.submittedPersistentInstanceCount +=
+			if (
+				object.source === "generated" &&
+				(object.ordering === "opaque" || object.ordering === "alpha-test")
+			) {
+				this.#frameSelectionMetrics.submittedCompactedGeneratedDrawCount += 1;
+				this.#frameSelectionMetrics.submittedCompactedGeneratedInstanceCount +=
 					submittedInstanceCount;
 			}
 		}
@@ -1734,16 +1914,7 @@ export class WebGL2Renderer implements Renderer {
 		fog: FrameInput["environment"]["distanceFog"],
 	): void {
 		const gl = this.#gl;
-		gl.useProgram(program.program);
 		this.#frameSelectionMetrics.objectProgramChanges += 1;
-		for (const [unit, uniform] of [
-			[0, program.uniforms.base],
-			[1, program.uniforms.palette],
-			[2, program.uniforms.detail],
-		] as const) {
-			this.#bindObjectTexture(unit, this.#objectFallbackTexture, 1, "exact");
-			gl.uniform1i(uniform, unit);
-		}
 		gl.uniformMatrix4fv(
 			program.uniforms.projection,
 			false,
@@ -1764,60 +1935,21 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	#bindObjectTexture(
+	/** Start one object-owned phase with complete bindings for every active sampler. */
+	#beginObjectPhase(): void {
+		this.#objectState.invalidate();
+		for (const unit of Object.values(OBJECT_TEXTURE_UNITS)) {
+			this.#bindPreparedObjectTexture(unit, this.#objectFallbackBinding);
+		}
+	}
+
+	#bindPreparedObjectTexture(
 		unit: number,
-		texture: WebGLTexture,
-		mipLevels: number,
-		samplingClass: TextureSamplingClass,
+		binding: PreparedObjectTextureBinding<WebGLTexture, WebGLSampler>,
 	): void {
-		const gl = this.#gl;
-		gl.activeTexture(gl.TEXTURE0 + unit);
-		gl.bindTexture(gl.TEXTURE_2D, texture);
-		this.#textureSamplers.bind(unit, {
-			mipLevels,
-			policy: this.#frameTextureFiltering,
-			samplingClass,
-			wrap: TextureWrapMode.Clamp,
-		});
-		this.#frameSelectionMetrics.objectTexturePageBinds += 1;
-	}
-
-	#setPixelAtlasRect(
-		uniform: WebGLUniformLocation,
-		bounds: import("../math/types").AABB2,
-	): void {
-		this.#gl.uniform4f(
-			uniform,
-			bounds.min.x,
-			bounds.min.y,
-			bounds.max.x - bounds.min.x,
-			bounds.max.y - bounds.min.y,
-		);
-	}
-
-	#configureObjectCulling(
-		cullFace: StaticObjectDrawUnit["material"]["polygon"]["cullFace"],
-	): void {
-		const gl = this.#gl;
-		gl.enable(gl.CULL_FACE);
-		gl.cullFace(cullFace === "front" ? gl.FRONT : gl.BACK);
-	}
-
-	#configureObjectBlend(material: StaticObjectDrawUnit["material"]): void {
-		const policy = objectBlendPolicy(material.source.rawSurfaceFlags);
-		const gl = this.#gl;
-		gl.blendFunc(
-			policy.source === "one"
-				? gl.ONE
-				: policy.source === "src-alpha"
-					? gl.SRC_ALPHA
-					: gl.ONE_MINUS_SRC_ALPHA,
-			policy.destination === "one"
-				? gl.ONE
-				: policy.destination === "src-alpha"
-					? gl.SRC_ALPHA
-					: gl.ONE_MINUS_SRC_ALPHA,
-		);
+		if (this.#objectState.applyTextureUnit(unit, binding)) {
+			this.#frameSelectionMetrics.objectTextureBinds += 1;
+		}
 	}
 
 	#resizeCanvasForDpr(): void {
@@ -1861,8 +1993,12 @@ function validateDrawRange(
 function mergePortalNodeContributions(
 	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
 	contributionsByNode: ReadonlyMap<string, PreparedSceneContributions>,
+	comparePreparedState: (
+		left: PreparedObjectFrameInput,
+		right: PreparedObjectFrameInput,
+	) => number,
 ): PreparedSceneContributions {
-	const objects: ObjectFrameInput[] = [];
+	const objects: PreparedObjectFrameInput[] = [];
 	const terrain: TerrainFrameInput[] = [];
 	const consumedNodeIds = new Set<string>();
 	for (const renderNodeId of renderNodeIds) {
@@ -1880,30 +2016,51 @@ function mergePortalNodeContributions(
 		objects.push(...contributions.objects);
 		terrain.push(...contributions.terrain);
 	}
-	sortObjectFrameInputs(objects);
+	sortObjectFrameInputs(objects, comparePreparedState);
 	return { objects, terrain };
 }
 
 /** Cluster opaque state without disturbing transparent ranges before distance ordering. */
-function sortObjectFrameInputs(objects: ObjectFrameInput[]): void {
+function sortObjectFrameInputs(
+	objects: PreparedObjectFrameInput[],
+	comparePreparedState: (
+		left: PreparedObjectFrameInput,
+		right: PreparedObjectFrameInput,
+	) => number,
+): void {
 	objects.sort((left, right) => {
 		if (left.ordering === "transparent" && right.ordering === "transparent") {
 			return 0;
 		}
 		const ordering = left.ordering.localeCompare(right.ordering);
 		if (ordering !== 0) return ordering;
-		const material = objectMaterialSortKey(left).localeCompare(
-			objectMaterialSortKey(right),
-		);
-		if (material !== 0) return material;
-		if (
-			left.instances?.kind === "frame-template" &&
-			right.instances?.kind === "frame-template"
-		) {
-			return compareFrameTemplateBatchIdentity(left, right);
-		}
-		return 0;
+		return compareObjectFrameBatchOrder(left, right, comparePreparedState);
 	});
+}
+
+/** Cluster transform source, then exact desired state, without granting merge permission. */
+function compareObjectFrameBatchOrder(
+	left: PreparedObjectFrameInput,
+	right: PreparedObjectFrameInput,
+	comparePreparedState: (
+		left: PreparedObjectFrameInput,
+		right: PreparedObjectFrameInput,
+	) => number,
+): number {
+	const transformSource = left.drawKind.localeCompare(right.drawKind);
+	if (transformSource !== 0) return transformSource;
+	if (
+		left.instances?.kind === "frame-template" &&
+		right.instances?.kind === "frame-template"
+	) {
+		// Cohort/domain identity is the existing semantic ordering contract. Exact state is
+		// rechecked by run formation, so a stale cohort safely fragments without paying to sort
+		// the normal path by facts that valid cohort construction already holds constant.
+		return compareFrameTemplateBatchIdentity(left, right);
+	}
+	const preparedState = comparePreparedState(left, right);
+	if (preparedState !== 0) return preparedState;
+	return compareStableObjectFrameIdentity(left, right);
 }
 
 /** Retail sources encode translucency as either a unit float or a legacy byte-scale value. */
@@ -1915,28 +2072,23 @@ function sourceOpacity(translucency: number): number {
 
 /** Cluster far transparency by the exact fields used to form frame-instance runs. */
 function compareFarTransparentBatchOrder(
-	left: ObjectFrameInput,
-	right: ObjectFrameInput,
+	left: PreparedObjectFrameInput,
+	right: PreparedObjectFrameInput,
+	comparePreparedState: (
+		left: PreparedObjectFrameInput,
+		right: PreparedObjectFrameInput,
+	) => number,
 ): number {
 	const leftFrame = left.instances?.kind === "frame-template";
 	const rightFrame = right.instances?.kind === "frame-template";
 	if (leftFrame !== rightFrame) return leftFrame ? -1 : 1;
-	if (leftFrame && rightFrame) {
-		return compareFrameTemplateBatchIdentity(left, right);
-	}
-	return (
-		objectMaterialSortKey(left).localeCompare(objectMaterialSortKey(right)) ||
-		left.geometry.localeCompare(right.geometry) ||
-		left.landblockId.localeCompare(right.landblockId) ||
-		left.indexStart - right.indexStart ||
-		left.indexCount - right.indexCount
-	);
+	return compareObjectFrameBatchOrder(left, right, comparePreparedState);
 }
 
 /** Compare the complete compatibility identity shared by sorting and adjacent run formation. */
 function compareFrameTemplateBatchIdentity(
-	left: ObjectFrameInput,
-	right: ObjectFrameInput,
+	left: PreparedObjectFrameInput,
+	right: PreparedObjectFrameInput,
 ): number {
 	const leftInstances = left.instances;
 	const rightInstances = right.instances;
@@ -1959,30 +2111,22 @@ function compareFrameTemplateBatchIdentity(
 	);
 }
 
-/** Keep opaque/alpha-test ordering classes intact while clustering equivalent atlas/program state. */
-function objectMaterialSortKey(input: {
-	readonly material: StaticObjectDrawUnit["material"];
-}): string {
-	const { material } = input;
-	return [
-		material.source.kind,
-		material.textures.base ?? "solid",
-		material.textures.palette ?? "none",
-		material.polygon.cullFace,
-		material.sampler.wrap,
-	].join("|");
-}
-
-function persistentInstanceRange(binding: WebGL2InstanceBufferBinding): {
-	readonly binding: WebGL2InstanceBufferBinding;
-	readonly firstInstance: 0;
-	readonly instanceCount: number;
-} {
-	return {
-		binding,
-		firstInstance: 0,
-		instanceCount: binding.populatedInstanceCount,
-	};
+/** Stable provenance order used only after every state-oriented comparison ties. */
+function compareStableObjectFrameIdentity(
+	left: PreparedObjectFrameInput,
+	right: PreparedObjectFrameInput,
+): number {
+	return (
+		left.source.localeCompare(right.source) ||
+		left.renderDomainKey.localeCompare(right.renderDomainKey) ||
+		left.geometry.localeCompare(right.geometry) ||
+		left.landblockId.localeCompare(right.landblockId) ||
+		left.indexStart - right.indexStart ||
+		left.indexCount - right.indexCount ||
+		(left.transparentSort?.stableId ?? "").localeCompare(
+			right.transparentSort?.stableId ?? "",
+		)
+	);
 }
 
 function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {

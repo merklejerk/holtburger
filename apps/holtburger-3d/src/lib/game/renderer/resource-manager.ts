@@ -1,6 +1,5 @@
 import type { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
-import type { StaticInstanceStreamData } from "../systems/static-resources";
 
 /** Opaque backend identity for one complete uploaded geometry resource. */
 export type GeometryResourceKey = `geometry-resource:${number}`;
@@ -10,8 +9,6 @@ export type Texture2DResourceKey = `texture-2d-resource:${number}`;
 
 /** Opaque backend identity for one uploaded two-dimensional texture array. */
 export type TextureArrayResourceKey = `texture-array-resource:${number}`;
-/** Opaque backend identity for one uploaded immutable static instance stream. */
-export type InstanceStreamResourceKey = `instance-stream-resource:${number}`;
 
 /** Integer texture formats that cannot use the asset-preparation pixel formats. */
 export enum IntegerTexture2DFormat {
@@ -26,8 +23,7 @@ export type Texture2DFormat = TexturePixelFormat | IntegerTexture2DFormat;
 export type RenderResourceKey =
 	| GeometryResourceKey
 	| Texture2DResourceKey
-	| TextureArrayResourceKey
-	| InstanceStreamResourceKey;
+	| TextureArrayResourceKey;
 
 /** Complete texture upload with dimensions required by graphics APIs. */
 export interface Texture2DUpload {
@@ -58,9 +54,6 @@ export interface TextureArrayLayerUpload {
 /** Backend resource boundary consumed by logical render and texture-storage systems. */
 export interface RendererResourceManager {
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey;
-	createStaticInstanceStream(
-		data: StaticInstanceStreamData,
-	): InstanceStreamResourceKey;
 	replaceGeometry(key: GeometryResourceKey, geometry: RenderGeometryData): void;
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey;
 	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void;

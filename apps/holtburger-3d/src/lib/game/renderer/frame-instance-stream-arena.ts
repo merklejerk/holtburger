@@ -18,7 +18,7 @@ export class FrameInstanceStreamArena {
 	#viewHighWaterMark = 0;
 
 	constructor(gl: WebGL2RenderingContext) {
-		this.#buffer = new WebGL2InstanceBuffer(gl, "frame-dynamic");
+		this.#buffer = new WebGL2InstanceBuffer(gl);
 	}
 
 	/** Orphan and upload the complete ordered population for one sequentially rendered view. */

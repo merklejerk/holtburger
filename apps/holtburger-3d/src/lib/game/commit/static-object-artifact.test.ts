@@ -40,7 +40,7 @@ describe("assembleStaticObjectArtifact", () => {
 		},
 	);
 
-	it("accepts one logical requirement shared by persistent and frame-streamed draws", () => {
+	it("accepts one logical requirement shared by static fragments and frame-streamed draws", () => {
 		const geometry = geometryResult("instanced");
 		const frameStreamedInstances =
 			geometryResult("frame-streamed").objects[0]!.frameStreamedInstances;
@@ -129,11 +129,11 @@ function geometryResult(
 			bakedDrawUnitCount: strategy === "baked" ? 1 : 0,
 			bakedGeometryBytes: 0,
 			instancedGeometryBytes: 0,
-			persistentCohortCount: strategy === "instanced" ? 1 : 0,
-			persistentDrawUnitCount: strategy === "instanced" ? 1 : 0,
-			persistentInstanceCount: strategy === "instanced" ? 1 : 0,
-			persistentStreamBytes: 0,
-			persistentStreamCount: strategy === "instanced" ? 1 : 0,
+			staticFragmentBytes: 0,
+			staticFragmentCohortCount: strategy === "instanced" ? 1 : 0,
+			staticFragmentCount: strategy === "instanced" ? 1 : 0,
+			staticFragmentDrawUnitCount: strategy === "instanced" ? 1 : 0,
+			staticFragmentInstanceCount: strategy === "instanced" ? 1 : 0,
 			sourceMaterialSlotCount: 1,
 			sourcePartCount: 1,
 			sourceRangeCount: 1,

@@ -3,7 +3,6 @@ import type { SceneInterestRevision } from "../../runtime/scene-availability";
 import type { RenderGeometryData } from "../../renderer/geometry";
 import type {
 	GeometryResourceKey,
-	InstanceStreamResourceKey,
 	RendererResourceManager,
 	RenderResourceKey,
 	Texture2DResourceKey,
@@ -12,7 +11,6 @@ import type {
 	TextureArrayLayerUpload,
 	TextureArrayResourceKey,
 } from "../../renderer/resource-manager";
-import type { StaticInstanceStreamData } from "../../systems/static-resources";
 import type { AssetTextureSource } from "../texture-manager";
 import type { TexturePreparer } from "../texture-preparer";
 import {
@@ -791,13 +789,6 @@ class FixtureRendererResources implements RendererResourceManager {
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
 		void geometry;
 		throw new Error("Geometry is outside this fixture.");
-	}
-
-	createStaticInstanceStream(
-		data: StaticInstanceStreamData,
-	): InstanceStreamResourceKey {
-		void data;
-		throw new Error("Instance streams are outside this fixture.");
 	}
 
 	replaceGeometry(

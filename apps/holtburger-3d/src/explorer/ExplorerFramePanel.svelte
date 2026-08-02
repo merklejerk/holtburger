@@ -77,9 +77,17 @@
 				>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Persistent draws / instances</span>
+				<span class="ac-param-key">Generated fragments / compacted draws</span>
 				<code
-					>{metrics.submittedPersistentInstancedDrawCount} / {metrics.submittedPersistentInstanceCount}</code
+					>{metrics.selectedGeneratedInstanceFragmentCount} / {metrics.submittedCompactedGeneratedDrawCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key"
+					>Generated selected / compacted instances</span
+				>
+				<code
+					>{metrics.selectedGeneratedInstanceCount} / {metrics.submittedCompactedGeneratedInstanceCount}</code
 				>
 			</div>
 			<div class="ac-param-row">
@@ -109,7 +117,7 @@
 			<div class="ac-param-row">
 				<span class="ac-param-key">Object program / texture bind calls</span>
 				<code
-					>{metrics.objectProgramChanges} / {metrics.objectTexturePageBinds}</code
+					>{metrics.objectProgramChanges} / {metrics.objectTextureBinds}</code
 				>
 			</div>
 			<div class="ac-param-row">

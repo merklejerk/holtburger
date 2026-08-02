@@ -36,7 +36,7 @@ export function assembleStaticObjectArtifact(options: {
 	}
 	const hasBakedOutput = geometry.metrics.bakedDrawUnitCount > 0;
 	const hasInstancedOutput =
-		geometry.metrics.persistentDrawUnitCount > 0 ||
+		geometry.metrics.staticFragmentDrawUnitCount > 0 ||
 		geometry.metrics.transparentTemplateInstanceCount > 0;
 	return {
 		geometryDiagnostics: {
@@ -44,11 +44,11 @@ export function assembleStaticObjectArtifact(options: {
 			bakedGeometryBytes: geometry.metrics.bakedGeometryBytes,
 			geometryWorkerDurationMs: geometry.metrics.workerDurationMs,
 			instancedGeometryBytes: geometry.metrics.instancedGeometryBytes,
-			persistentCohortCount: geometry.metrics.persistentCohortCount,
-			persistentDrawUnitCount: geometry.metrics.persistentDrawUnitCount,
-			persistentInstanceCount: geometry.metrics.persistentInstanceCount,
-			persistentStreamBytes: geometry.metrics.persistentStreamBytes,
-			persistentStreamCount: geometry.metrics.persistentStreamCount,
+			staticFragmentBytes: geometry.metrics.staticFragmentBytes,
+			staticFragmentCohortCount: geometry.metrics.staticFragmentCohortCount,
+			staticFragmentCount: geometry.metrics.staticFragmentCount,
+			staticFragmentDrawUnitCount: geometry.metrics.staticFragmentDrawUnitCount,
+			staticFragmentInstanceCount: geometry.metrics.staticFragmentInstanceCount,
 			sourceMaterialSlotCount: geometry.metrics.sourceMaterialSlotCount,
 			sourcePartCount: geometry.metrics.sourcePartCount,
 			sourceRangeCount: geometry.metrics.sourceRangeCount,

@@ -1,5 +1,6 @@
-import { mat4ToFloat32Array } from "../math/matrices";
+import { writeMat4ToFloat32Array } from "../math/matrices";
 import {
+	OBJECT_INSTANCE_RECORD_BYTES,
 	OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
 	type ObjectInstanceData,
 } from "../systems/static-resources";
@@ -8,13 +9,8 @@ import {
 const OBJECT_INSTANCE_MATRIX_ATTRIBUTE_LOCATIONS = [3, 4, 5, 6] as const;
 /** Fixed color-modulation location consumed by the instanced object vertex program. */
 const OBJECT_INSTANCE_COLOR_ATTRIBUTE_LOCATION = 7;
-/** Float count in one object instance record: one matrix followed by one RGBA color. */
-/** Byte stride shared by persistent and frame-streamed object instance buffers. */
-export const OBJECT_INSTANCE_STRIDE_BYTES =
-	OBJECT_INSTANCE_RECORD_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
-
-/** Upload policy selected from the lifetime of the instance population. */
-export type WebGL2InstanceBufferUsage = "persistent-static" | "frame-dynamic";
+/** Byte stride shared by every frame-streamed object instance range. */
+export const OBJECT_INSTANCE_STRIDE_BYTES = OBJECT_INSTANCE_RECORD_BYTES;
 
 /** Complete read-only binding needed to submit an instance-buffer range. */
 export interface WebGL2InstanceBufferBinding {
@@ -29,44 +25,34 @@ export interface WebGL2InstanceBufferBinding {
 /** Low-level WebGL2 owner for one object-instance buffer and its explicit storage contract. */
 export class WebGL2InstanceBuffer {
 	readonly #gl: WebGL2RenderingContext;
-	readonly #usage: WebGL2InstanceBufferUsage;
 	readonly #buffer: WebGLBuffer;
+	/** Reusable CPU staging storage whose record capacity tracks the GPU buffer. */
+	#encodedInstances = new Float32Array(0);
 	#capacity = 0;
 	#populatedInstanceCount = 0;
 	#destroyed = false;
 
-	constructor(gl: WebGL2RenderingContext, usage: WebGL2InstanceBufferUsage) {
+	constructor(gl: WebGL2RenderingContext) {
 		const buffer = gl.createBuffer();
-		if (!buffer)
-			throw new Error(`Failed to allocate ${usage} instance buffer.`);
+		if (!buffer) throw new Error("Failed to allocate frame instance buffer.");
 		this.#gl = gl;
-		this.#usage = usage;
 		this.#buffer = buffer;
-	}
-
-	/** Publish the complete immutable contents of a persistent buffer exactly once. */
-	publishPersistent(instances: readonly ObjectInstanceData[]): void {
-		this.#requireUsage("persistent-static");
-		if (this.#capacity !== 0 || this.#populatedInstanceCount !== 0) {
-			throw new Error("Persistent instance buffer has already been published.");
-		}
-		const values = encodeObjectInstances(instances);
-		this.#withBoundBuffer(() => {
-			this.#gl.bufferData(this.#gl.ARRAY_BUFFER, values, this.#gl.STATIC_DRAW);
-		});
-		this.#capacity = instances.length;
-		this.#populatedInstanceCount = instances.length;
 	}
 
 	/**
 	 * Reset one frame/view allocation, growing geometrically and orphaning its complete storage.
 	 */
 	resetFrame(requiredInstanceCount: number): boolean {
-		this.#requireUsage("frame-dynamic");
+		this.#requireAlive();
 		requireNonNegativeInteger(requiredInstanceCount, "Required instance count");
 		const previousCapacity = this.#capacity;
 		while (this.#capacity < requiredInstanceCount) {
 			this.#capacity = Math.max(1, this.#capacity * 2);
+		}
+		if (this.#capacity !== previousCapacity) {
+			this.#encodedInstances = new Float32Array(
+				this.#capacity * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+			);
 		}
 		this.#withBoundBuffer(() => {
 			this.#gl.bufferData(
@@ -92,12 +78,16 @@ export class WebGL2InstanceBuffer {
 			);
 		}
 		if (instances.length === 0) return;
-		const values = encodeObjectInstances(instances);
+		const firstFloat = firstInstance * OBJECT_INSTANCE_RECORD_FLOAT_COUNT;
+		const floatCount = instances.length * OBJECT_INSTANCE_RECORD_FLOAT_COUNT;
+		encodeObjectInstancesInto(instances, this.#encodedInstances, firstFloat);
 		this.#withBoundBuffer(() => {
 			this.#gl.bufferSubData(
 				this.#gl.ARRAY_BUFFER,
 				firstInstance * OBJECT_INSTANCE_STRIDE_BYTES,
-				values,
+				this.#encodedInstances,
+				firstFloat,
+				floatCount,
 			);
 		});
 		this.#populatedInstanceCount = Math.max(
@@ -120,15 +110,6 @@ export class WebGL2InstanceBuffer {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#gl.deleteBuffer(this.#buffer);
-	}
-
-	#requireUsage(expected: WebGL2InstanceBufferUsage): void {
-		this.#requireAlive();
-		if (this.#usage !== expected) {
-			throw new Error(
-				`${this.#usage} instance buffer cannot perform ${expected} storage operations.`,
-			);
-		}
 	}
 
 	#requireAlive(): void {
@@ -196,18 +177,25 @@ export function encodeObjectInstances(
 	const values = new Float32Array(
 		instances.length * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
 	);
-	for (const [index, instance] of instances.entries()) {
-		const offset = index * OBJECT_INSTANCE_RECORD_FLOAT_COUNT;
-		mat4ToFloat32Array(
-			instance.sourceToLandblock,
-			values.subarray(offset, offset + 16),
-		);
-		values.set(
-			[instance.color.r, instance.color.g, instance.color.b, instance.color.a],
-			offset + 16,
-		);
-	}
+	encodeObjectInstancesInto(instances, values, 0);
 	return values;
+}
+
+/** Write instance records at a caller-owned offset without allocating transient views. */
+function encodeObjectInstancesInto(
+	instances: readonly ObjectInstanceData[],
+	values: Float32Array,
+	firstFloat: number,
+): void {
+	for (let index = 0; index < instances.length; index += 1) {
+		const instance = instances[index];
+		const offset = firstFloat + index * OBJECT_INSTANCE_RECORD_FLOAT_COUNT;
+		writeMat4ToFloat32Array(instance.sourceToLandblock, values, offset);
+		values[offset + 16] = instance.color.r;
+		values[offset + 17] = instance.color.g;
+		values[offset + 18] = instance.color.b;
+		values[offset + 19] = instance.color.a;
+	}
 }
 
 function requireNonNegativeInteger(value: number, label: string): void {

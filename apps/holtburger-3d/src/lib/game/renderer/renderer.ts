@@ -104,10 +104,14 @@ export interface FrameSelectionMetrics {
 	readonly submittedBakedStaticObjectDrawCount: number;
 	/** Triangles submitted by baked static-object draws. */
 	readonly submittedBakedStaticObjectTriangleCount: number;
-	/** Persistent instanced draw calls submitted this frame. */
-	readonly submittedPersistentInstancedDrawCount: number;
-	/** Persistent instances submitted this frame. */
-	readonly submittedPersistentInstanceCount: number;
+	/** Visible generated-scenery fragments selected before post-culling compaction. */
+	readonly selectedGeneratedInstanceFragmentCount: number;
+	/** Generated-scenery instances selected before post-culling compaction. */
+	readonly selectedGeneratedInstanceCount: number;
+	/** Compacted generated-scenery draw calls submitted this frame. */
+	readonly submittedCompactedGeneratedDrawCount: number;
+	/** Generated-scenery instances submitted through compacted frame ranges. */
+	readonly submittedCompactedGeneratedInstanceCount: number;
 	/** Source triangles referenced by instanced draws before instance multiplication. */
 	readonly submittedInstancedSourceTriangleCount: number;
 	/** Transparent baked ranges and instance templates classified for view submission. */
@@ -144,8 +148,8 @@ export interface FrameSelectionMetrics {
 	readonly frameInstanceViewHighWaterMark: number;
 	/** Object-program activation count across every rendered view. */
 	readonly objectProgramChanges: number;
-	/** Object atlas/detail texture binds performed across every rendered view. */
-	readonly objectTexturePageBinds: number;
+	/** Physical two-dimensional object texture binds performed across every rendered view. */
+	readonly objectTextureBinds: number;
 }
 
 export interface Renderer {

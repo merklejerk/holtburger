@@ -86,7 +86,12 @@ describe("planEnvCellMaterialization", () => {
 		expect(
 			outputs.every((output) => output?.metrics.sourceResidentCount === 1),
 		).toBe(true);
-		expect(outputs[0]?.geometry[0]?.key).toBe(outputs[1]?.geometry[0]?.key);
+		expect(outputs[0]?.geometry[0]?.key).not.toBe(outputs[1]?.geometry[0]?.key);
+		expect(
+			outputs.every((output) =>
+				output?.objects[0]?.drawUnits.every(({ kind }) => kind === "baked"),
+			),
+		).toBe(true);
 	});
 
 	it("promotes default-animated authored residents to the dynamic branch", () => {
@@ -116,7 +121,7 @@ describe("planEnvCellMaterialization", () => {
 		});
 	});
 
-	it("realizes scoped resident streams over one shared immutable geometry source", async () => {
+	it("realizes one baked resident artifact per exact EnvCell scope", async () => {
 		const plan = planEnvCellMaterialization(
 			layer([
 				cell("0x00010100", cellTransform(10), [
@@ -153,9 +158,14 @@ describe("planEnvCellMaterialization", () => {
 			textureRequirements: [],
 		});
 
-		expect(realized.residents?.geometry).toHaveLength(1);
-		expect(realized.residents?.instanceStreams).toHaveLength(2);
+		expect(realized.residents?.geometry).toHaveLength(2);
+		expect(realized.residents?.instanceStreams).toEqual([]);
 		expect(realized.residents?.objects).toHaveLength(2);
+		expect(
+			realized.residents?.objects.every((object) =>
+				object.renderable.drawUnits.every(({ kind }) => kind === "baked"),
+			),
+		).toBe(true);
 		expect(
 			realized.residents?.objects.map(({ placement }) => placement.envCellId),
 		).toEqual(["0x00010100", "0x00010101"]);

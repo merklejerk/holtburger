@@ -154,23 +154,32 @@ export function mat4ToFloat32Array(
 	outBuffer?: Float32Array,
 ): Float32Array {
 	const out = outBuffer ?? new Float32Array(16);
-	out[0] = matrix.m11;
-	out[1] = matrix.m12;
-	out[2] = matrix.m13;
-	out[3] = matrix.m14;
-	out[4] = matrix.m21;
-	out[5] = matrix.m22;
-	out[6] = matrix.m23;
-	out[7] = matrix.m24;
-	out[8] = matrix.m31;
-	out[9] = matrix.m32;
-	out[10] = matrix.m33;
-	out[11] = matrix.m34;
-	out[12] = matrix.m41;
-	out[13] = matrix.m42;
-	out[14] = matrix.m43;
-	out[15] = matrix.m44;
+	writeMat4ToFloat32Array(matrix, out, 0);
 	return out;
+}
+
+/** Write one matrix into caller-owned float storage at an explicit element offset. */
+export function writeMat4ToFloat32Array(
+	matrix: Mat4,
+	out: Float32Array,
+	firstElement: number,
+): void {
+	out[firstElement] = matrix.m11;
+	out[firstElement + 1] = matrix.m12;
+	out[firstElement + 2] = matrix.m13;
+	out[firstElement + 3] = matrix.m14;
+	out[firstElement + 4] = matrix.m21;
+	out[firstElement + 5] = matrix.m22;
+	out[firstElement + 6] = matrix.m23;
+	out[firstElement + 7] = matrix.m24;
+	out[firstElement + 8] = matrix.m31;
+	out[firstElement + 9] = matrix.m32;
+	out[firstElement + 10] = matrix.m33;
+	out[firstElement + 11] = matrix.m34;
+	out[firstElement + 12] = matrix.m41;
+	out[firstElement + 13] = matrix.m42;
+	out[firstElement + 14] = matrix.m43;
+	out[firstElement + 15] = matrix.m44;
 }
 
 export function getMat4Translation(matrix: Mat4, targetVec?: Vec3): Vec3 {

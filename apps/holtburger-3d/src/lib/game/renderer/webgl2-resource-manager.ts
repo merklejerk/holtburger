@@ -1,7 +1,6 @@
 import {
 	IntegerTexture2DFormat,
 	type GeometryResourceKey,
-	type InstanceStreamResourceKey,
 	type RendererResourceManager,
 	type RenderResourceKey,
 	type TextureArrayDescription,
@@ -11,13 +10,8 @@ import {
 	type Texture2DResourceKey,
 	type Texture2DUpload,
 } from "./resource-manager";
-import type { StaticInstanceStreamData } from "../systems/static-resources";
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
-import {
-	WebGL2InstanceBuffer,
-	type WebGL2InstanceBufferBinding,
-} from "./webgl2-instance-buffer";
 
 /** WebGL draw binding retained for one semantic geometry resource. */
 export interface WebGL2GeometryBinding {
@@ -57,10 +51,6 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #geometry = new Map<GeometryResourceKey, WebGL2GeometryResource>();
 	readonly #textures = new Map<Texture2DResourceKey, WebGL2Texture2DBinding>();
-	readonly #instanceStreams = new Map<
-		InstanceStreamResourceKey,
-		WebGL2InstanceBuffer
-	>();
 	readonly #textureArrays = new Map<
 		TextureArrayResourceKey,
 		WebGL2TextureArrayBinding
@@ -68,7 +58,6 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	#nextGeometryId = 0;
 	#nextTextureId = 0;
 	#nextTextureArrayId = 0;
-	#nextInstanceStreamId = 0;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -78,32 +67,6 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometryId++}`;
 		this.#geometry.set(key, this.#uploadGeometry(geometry));
 		return key;
-	}
-
-	createStaticInstanceStream(
-		data: StaticInstanceStreamData,
-	): InstanceStreamResourceKey {
-		const buffer = new WebGL2InstanceBuffer(this.#gl, "persistent-static");
-		try {
-			buffer.publishPersistent(data.instances);
-		} catch (error) {
-			buffer.destroy();
-			throw error;
-		}
-		const key: InstanceStreamResourceKey = `instance-stream-resource:${this.#nextInstanceStreamId++}`;
-		this.#instanceStreams.set(key, buffer);
-		return key;
-	}
-
-	/** Return the complete immutable draw binding for one persistent instance stream. */
-	getInstanceStream(
-		key: InstanceStreamResourceKey,
-	): WebGL2InstanceBufferBinding {
-		const resource = this.#instanceStreams.get(key);
-		if (!resource) {
-			throw new Error(`Instance stream resource ${key} does not exist.`);
-		}
-		return resource.getBinding();
 	}
 
 	replaceGeometry(
@@ -218,15 +181,6 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 
 	releaseResource(key: RenderResourceKey): boolean {
-		if (key.startsWith("instance-stream-resource:")) {
-			const stream = this.#instanceStreams.get(
-				key as InstanceStreamResourceKey,
-			);
-			if (!stream) return false;
-			this.#instanceStreams.delete(key as InstanceStreamResourceKey);
-			stream.destroy();
-			return true;
-		}
 		if (isGeometryResourceKey(key)) {
 			const resource = this.#geometry.get(key);
 			if (!resource) return false;
@@ -259,11 +213,9 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		for (const resource of this.#textureArrays.values()) {
 			this.#gl.deleteTexture(resource.texture);
 		}
-		for (const stream of this.#instanceStreams.values()) stream.destroy();
 		this.#geometry.clear();
 		this.#textures.clear();
 		this.#textureArrays.clear();
-		this.#instanceStreams.clear();
 	}
 
 	#uploadGeometry(geometry: RenderGeometryData): WebGL2GeometryResource {

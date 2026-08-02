@@ -81,12 +81,12 @@ export interface StaticObjectGeometryPreparationResult {
 		readonly sourceRangeCount: number;
 		readonly bakedDrawUnitCount: number;
 		readonly bakedGeometryBytes: number;
-		readonly persistentCohortCount: number;
-		readonly persistentStreamCount: number;
-		readonly persistentDrawUnitCount: number;
-		readonly persistentInstanceCount: number;
+		readonly staticFragmentCohortCount: number;
+		readonly staticFragmentCount: number;
+		readonly staticFragmentDrawUnitCount: number;
+		readonly staticFragmentInstanceCount: number;
 		readonly instancedGeometryBytes: number;
-		readonly persistentStreamBytes: number;
+		readonly staticFragmentBytes: number;
 		readonly transparentTemplateCohortCount: number;
 		readonly transparentTemplateInstanceCount: number;
 		readonly transparentTemplateBytes: number;
@@ -159,14 +159,6 @@ export function prepareStaticObjectGeometry(
 	const prepared = prepareStaticSource(job.source);
 	if (job.layer === LandblockLayerKind.Generated) {
 		return prepareClusteredGeneratedScenery(job, prepared, startedAt);
-	}
-	if (job.layer === LandblockLayerKind.EnvCells) {
-		return prepareInstancedStaticObjectGeometry(
-			job,
-			prepared,
-			startedAt,
-			new Map(),
-		);
 	}
 	return prepareBakedStaticObjectGeometry(job, prepared, startedAt);
 }
@@ -296,11 +288,11 @@ function prepareBakedStaticObjectGeometry(
 				geometry.textureCoordinates.byteLength +
 				geometry.indices.byteLength,
 			instancedGeometryBytes: 0,
-			persistentCohortCount: 0,
-			persistentDrawUnitCount: 0,
-			persistentInstanceCount: 0,
-			persistentStreamBytes: 0,
-			persistentStreamCount: 0,
+			staticFragmentBytes: 0,
+			staticFragmentCohortCount: 0,
+			staticFragmentCount: 0,
+			staticFragmentDrawUnitCount: 0,
+			staticFragmentInstanceCount: 0,
 			sourcePartCount: prepared.sourcePartCount,
 			sourceRangeCount: prepared.sourceRangeCount,
 			sourceResidentCount: prepared.sourceResidentCount,
@@ -421,7 +413,7 @@ interface InstancedGeometryPartition {
 	readonly ordering: ObjectMaterialOrdering;
 }
 
-interface PersistentInstanceCohort {
+interface StaticInstanceFragmentCohort {
 	readonly instances: ObjectInstanceData[];
 	readonly partitionIdentities: Set<string>;
 }
@@ -505,17 +497,20 @@ function prepareClusteredGeneratedScenery(
 						: 0),
 				0,
 			),
-			persistentCohortCount: sumResultMetric(results, "persistentCohortCount"),
-			persistentDrawUnitCount: sumResultMetric(
+			staticFragmentCohortCount: sumResultMetric(
 				results,
-				"persistentDrawUnitCount",
+				"staticFragmentCohortCount",
 			),
-			persistentInstanceCount: sumResultMetric(
+			staticFragmentDrawUnitCount: sumResultMetric(
 				results,
-				"persistentInstanceCount",
+				"staticFragmentDrawUnitCount",
 			),
-			persistentStreamBytes: sumResultMetric(results, "persistentStreamBytes"),
-			persistentStreamCount: sumResultMetric(results, "persistentStreamCount"),
+			staticFragmentInstanceCount: sumResultMetric(
+				results,
+				"staticFragmentInstanceCount",
+			),
+			staticFragmentBytes: sumResultMetric(results, "staticFragmentBytes"),
+			staticFragmentCount: sumResultMetric(results, "staticFragmentCount"),
 			sourceMaterialSlotCount: prepared.sourceMaterialSlotCount,
 			sourcePartCount: prepared.sourcePartCount,
 			sourceRangeCount: prepared.sourceRangeCount,
@@ -586,7 +581,7 @@ function prepareInstancedStaticObjectGeometry(
 		throw new Error("Baked static fallback has no render object.");
 	}
 	const partitions = new Map<string, InstancedGeometryPartition>();
-	const persistentCohorts = new Map<string, PersistentInstanceCohort>();
+	const staticCohorts = new Map<string, StaticInstanceFragmentCohort>();
 	const transparentMembers: Array<{
 		readonly instance: ObjectInstanceData;
 		readonly partitionIdentity: string;
@@ -600,7 +595,7 @@ function prepareInstancedStaticObjectGeometry(
 			color: { a: 1, b: 1, g: 1, r: 1 },
 			sourceToLandblock: part.sourceToLandblock,
 		};
-		const persistentPartitionIdentities = new Set<string>();
+		const staticPartitionIdentities = new Set<string>();
 		const contributionsByPartition = groupSourceContributions(part);
 		for (const [identity, contributions] of contributionsByPartition) {
 			const first = contributions[0];
@@ -626,20 +621,20 @@ function prepareInstancedStaticObjectGeometry(
 					residentId: part.residentId,
 				});
 			} else {
-				persistentPartitionIdentities.add(identity);
+				staticPartitionIdentities.add(identity);
 			}
 		}
-		if (persistentPartitionIdentities.size > 0) {
-			// Every draw referencing this stream must consume the exact same instance population.
+		if (staticPartitionIdentities.size > 0) {
+			// Every draw referencing this fragment must consume the exact same instance population.
 			const cohortIdentity = JSON.stringify(
-				[...persistentPartitionIdentities].sort(),
+				[...staticPartitionIdentities].sort(),
 			);
-			const persistent = persistentCohorts.get(cohortIdentity) ?? {
+			const cohort = staticCohorts.get(cohortIdentity) ?? {
 				instances: [],
-				partitionIdentities: persistentPartitionIdentities,
+				partitionIdentities: staticPartitionIdentities,
 			};
-			persistent.instances.push(instance);
-			persistentCohorts.set(cohortIdentity, persistent);
+			cohort.instances.push(instance);
+			staticCohorts.set(cohortIdentity, cohort);
 		}
 	}
 	if (partitions.size === 0) {
@@ -684,10 +679,8 @@ function prepareInstancedStaticObjectGeometry(
 	const drawUnits: StaticObjectDrawUnit[] = bakedFallbackObject
 		? [...bakedFallbackObject.drawUnits]
 		: [];
-	let persistentInstanceCount = 0;
-	for (const [index, [cohortIdentity, cohort]] of [
-		...persistentCohorts.entries(),
-	]
+	let staticFragmentInstanceCount = 0;
+	for (const [index, [cohortIdentity, cohort]] of [...staticCohorts.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
 		.entries()) {
 		const streamKey =
@@ -696,14 +689,14 @@ function prepareInstancedStaticObjectGeometry(
 			data: { instances: cohort.instances },
 			key: streamKey,
 		});
-		persistentInstanceCount += cohort.instances.length;
+		staticFragmentInstanceCount += cohort.instances.length;
 		for (const partitionIdentity of [...cohort.partitionIdentities].sort()) {
 			const partition = partitions.get(partitionIdentity);
 			const geometryKey = partitionGeometryKeys.get(partitionIdentity);
 			const geometryData = partitionGeometry.get(partitionIdentity);
 			if (!partition || !geometryKey || !geometryData) {
 				throw new Error(
-					`Persistent cohort ${cohortIdentity} lost partition ${partitionIdentity}.`,
+					`Static fragment cohort ${cohortIdentity} lost partition ${partitionIdentity}.`,
 				);
 			}
 			drawUnits.push({
@@ -750,13 +743,13 @@ function prepareInstancedStaticObjectGeometry(
 			bakedDrawUnitCount: bakedFallback?.metrics.bakedDrawUnitCount ?? 0,
 			bakedGeometryBytes: bakedFallback?.metrics.bakedGeometryBytes ?? 0,
 			instancedGeometryBytes,
-			persistentCohortCount: persistentCohorts.size,
-			persistentDrawUnitCount:
+			staticFragmentCohortCount: staticCohorts.size,
+			staticFragmentDrawUnitCount:
 				drawUnits.length - (bakedFallbackObject?.drawUnits.length ?? 0),
-			persistentInstanceCount,
-			persistentStreamBytes:
-				persistentInstanceCount * OBJECT_INSTANCE_RECORD_BYTES,
-			persistentStreamCount: instanceStreams.length,
+			staticFragmentInstanceCount,
+			staticFragmentBytes:
+				staticFragmentInstanceCount * OBJECT_INSTANCE_RECORD_BYTES,
+			staticFragmentCount: instanceStreams.length,
 			sourcePartCount: prepared.sourcePartCount,
 			sourceMaterialSlotCount: prepared.sourceMaterialSlotCount,
 			sourceRangeCount: prepared.sourceRangeCount,

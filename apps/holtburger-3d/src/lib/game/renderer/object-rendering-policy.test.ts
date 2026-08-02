@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
 	OBJECT_TRANSPARENT_SORT_DISTANCE,
 	OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED,
+	areStaticObjectDrawsCompatible,
+	comparePreparedObjectDrawState,
 	formAdjacentObjectInstanceRuns,
 	objectBlendPolicy,
 	orderTransparentObjectRanges,
+	type PreparedStaticObjectDrawCompatibility,
 } from "./object-rendering-policy";
 import {
 	createObjectFragmentShader,
@@ -171,7 +174,157 @@ describe("formAdjacentObjectInstanceRuns", () => {
 	});
 });
 
+describe("areStaticObjectDrawsCompatible", () => {
+	it("accepts equal consumed state despite unrelated fragment provenance", () => {
+		const compatibility = staticCompatibility();
+		const left = { compatibility, sourceNode: "cluster:a" };
+		const right = {
+			compatibility: { ...compatibility },
+			sourceNode: "cluster:b",
+		};
+
+		expect(
+			areStaticObjectDrawsCompatible(left.compatibility, right.compatibility),
+		).toBe(true);
+		expect(
+			comparePreparedObjectDrawState(
+				left.compatibility,
+				right.compatibility,
+				compareIdentity,
+			),
+		).toBe(0);
+	});
+
+	it("rejects every changed draw-consumed compatibility field", () => {
+		const baseline = staticCompatibility();
+		const otherGeometry = identity("geometry:b");
+		const otherTexture = identity("texture:b");
+		const otherSampler = identity("sampler:b");
+		const incompatible: readonly AnyStaticCompatibility[] = [
+			{ ...baseline, geometry: otherGeometry },
+			{ ...baseline, indexStart: 4 },
+			{ ...baseline, indexCount: 9 },
+			{ ...baseline, cullFace: "front" },
+			{ ...baseline, landblockOffset: [1, 0, 0] },
+			{ ...baseline, wrapRepeat: true },
+			{ ...baseline, palettedClipMap: true },
+			{ ...baseline, alphaTest: 0 },
+			{ ...baseline, luminosity: 0.5 },
+			{
+				...baseline,
+				material: { ...baseline.material, kind: "index16" },
+			},
+			{
+				...baseline,
+				material: { ...baseline.material, color: [0.5, 1, 1, 1] },
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					base: { ...baseline.material.base, texture: otherTexture },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					base: { ...baseline.material.base, sampler: otherSampler },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					base: { ...baseline.material.base, rect: [1, 2, 4, 4] },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					palette: { ...baseline.material.palette, texture: otherTexture },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					palette: { ...baseline.material.palette, sampler: otherSampler },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					palette: { ...baseline.material.palette, rect: [0, 0, 32, 1] },
+				},
+			},
+			{ ...baseline, detail: null },
+			{
+				...baseline,
+				detail: { ...baseline.detail, texture: otherTexture },
+			},
+			{
+				...baseline,
+				detail: { ...baseline.detail, sampler: otherSampler },
+			},
+			{
+				...baseline,
+				detail: { ...baseline.detail, rect: [0, 0, 0.5, 1] },
+			},
+			{ ...baseline, detail: { ...baseline.detail, tiling: 8 } },
+		];
+
+		for (const candidate of incompatible) {
+			expect(areStaticObjectDrawsCompatible(baseline, candidate)).toBe(false);
+			expect(
+				comparePreparedObjectDrawState(baseline, candidate, compareIdentity),
+			).not.toBe(0);
+		}
+	});
+
+	it("keeps solid-color compatibility independent from unused texture state", () => {
+		const baseline = staticCompatibility();
+		const solid = {
+			...baseline,
+			detail: null,
+			material: {
+				color: [0.25, 0.5, 0.75, 1] as const,
+				kind: "solid-color" as const,
+			},
+		};
+
+		expect(areStaticObjectDrawsCompatible(solid, { ...solid })).toBe(true);
+		expect(
+			areStaticObjectDrawsCompatible(solid, {
+				...solid,
+				material: { ...solid.material, color: [0.25, 0.5, 0.75, 0.5] },
+			}),
+		).toBe(false);
+	});
+});
+
 describe("object fragment variants", () => {
+	it("guards every texture sample behind the material state that enables it", () => {
+		const shader = createObjectFragmentShader(false);
+		const solidReturn = shader.indexOf(
+			"if (uMaterialKind == 0) return uMaterialColor;",
+		);
+		const baseSample = shader.indexOf("sampleRepeatingPixelRect(uBase");
+		const directReturn = shader.indexOf("return direct;");
+		const paletteSample = shader.indexOf("sampleIndexedPaletteLinear(uv)");
+		const detailGuard = shader.indexOf("if (uUseDetail != 0)");
+		const detailSample = shader.indexOf(
+			"sampleRepeatingAtlasRect(\n\t\t\tuDetail",
+		);
+
+		expect(solidReturn).toBeGreaterThan(-1);
+		expect(solidReturn).toBeLessThan(baseSample);
+		expect(directReturn).toBeLessThan(paletteSample);
+		expect(detailGuard).toBeLessThan(detailSample);
+	});
+
 	it("omits fog uniforms and fog code from the blended program", () => {
 		expect(createObjectFragmentShader(false)).not.toContain("uFogEnabled");
 		expect(createObjectFragmentShader(false)).not.toContain("applyDistanceFog");
@@ -324,4 +477,70 @@ describe("objectBlendPolicy", () => {
 
 function entry(stableId: string, x: number) {
 	return { distanceSquared: x * x, range: stableId, stableId };
+}
+
+interface TestIdentity {
+	readonly name: string;
+}
+
+type AnyStaticCompatibility = PreparedStaticObjectDrawCompatibility<
+	TestIdentity,
+	TestIdentity,
+	TestIdentity
+>;
+
+type StaticCompatibility = Omit<
+	AnyStaticCompatibility,
+	"detail" | "material"
+> & {
+	readonly material: Extract<
+		AnyStaticCompatibility["material"],
+		{ readonly palette: unknown }
+	>;
+	readonly detail: NonNullable<AnyStaticCompatibility["detail"]>;
+};
+
+function identity(name: string): TestIdentity {
+	return { name };
+}
+
+function compareIdentity(left: TestIdentity): number {
+	let hash = 0;
+	for (const character of left.name) hash = hash * 31 + character.charCodeAt(0);
+	return hash;
+}
+
+function staticCompatibility(): StaticCompatibility {
+	const sampler = identity("sampler:a");
+	return {
+		alphaTest: 200 / 255,
+		cullFace: "back",
+		detail: {
+			rect: [0, 0, 1, 1],
+			sampler,
+			texture: identity("texture:detail"),
+			tiling: 4,
+		},
+		geometry: identity("geometry:a"),
+		indexCount: 6,
+		indexStart: 0,
+		landblockOffset: [0, 0, 0],
+		luminosity: 0,
+		material: {
+			base: {
+				rect: [0, 0, 4, 4],
+				sampler,
+				texture: identity("texture:base"),
+			},
+			color: [1, 1, 1, 1],
+			kind: "index8",
+			palette: {
+				rect: [0, 0, 16, 1],
+				sampler,
+				texture: identity("texture:palette"),
+			},
+		},
+		palettedClipMap: false,
+		wrapRepeat: false,
+	};
 }

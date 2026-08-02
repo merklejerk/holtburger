@@ -28,9 +28,9 @@ import type {
 } from "../textures/types";
 import type {
 	GeometryResourceKey,
-	InstanceStreamResourceKey,
 	Texture2DResourceKey,
 } from "./resource-manager";
+import type { StaticInstanceStreamData } from "../systems/static-resources";
 import type { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 import type { StaticDetailRole } from "../resolution/static-detail-role";
 
@@ -80,7 +80,7 @@ interface RenderWorldSystems {
 	readonly geometry: {
 		getResource(key: GeometryKey): GeometryResourceKey;
 	};
-	readonly instances: Pick<StaticInstanceStreamManager, "getResource">;
+	readonly instances: Pick<StaticInstanceStreamManager, "getData">;
 	readonly textures: {
 		getAtlasBinding(key: AssetTextureKey): TextureAtlasBinding;
 		getTexture2DResource(
@@ -114,7 +114,7 @@ export type RenderContribution =
 export interface ResolvedStaticDrawUnit {
 	readonly drawUnit: StaticObjectDrawUnit;
 	readonly geometry: GeometryResourceKey;
-	readonly instances: InstanceStreamResourceKey | null;
+	readonly instances: StaticInstanceStreamData | null;
 }
 
 /** One visible static node with its resolved landblock placement and device selections. */
@@ -205,7 +205,7 @@ export class RenderWorld {
 			geometry: this.resolveGeometry(drawUnit.geometry),
 			instances:
 				drawUnit.kind === "instanced"
-					? this.#systems.instances.getResource(drawUnit.instances)
+					? this.#systems.instances.getData(drawUnit.instances)
 					: null,
 		}));
 	}

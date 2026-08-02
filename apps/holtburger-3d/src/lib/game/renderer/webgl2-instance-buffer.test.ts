@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Mat4 } from "../math/types";
-import type { ObjectInstanceData } from "../systems/static-resources";
+import {
+	OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+	type ObjectInstanceData,
+} from "../systems/static-resources";
 import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import {
 	OBJECT_INSTANCE_STRIDE_BYTES,
@@ -21,25 +24,6 @@ describe("WebGL2InstanceBuffer", () => {
 		expect([...values]).toEqual([
 			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0.25, 0.5, 0.75, 1,
 		]);
-	});
-
-	it("publishes one immutable persistent stream with a complete draw binding", () => {
-		const fixture = fakeGl();
-		const buffer = new WebGL2InstanceBuffer(fixture.gl, "persistent-static");
-
-		buffer.publishPersistent([instance(Mat4.identity(), [1, 1, 1, 1])]);
-
-		expect(buffer.getBinding()).toMatchObject({
-			capacity: 1,
-			populatedInstanceCount: 1,
-			strideBytes: OBJECT_INSTANCE_STRIDE_BYTES,
-		});
-		expect(fixture.bufferData).toHaveLength(1);
-		expect(fixture.bufferData[0]?.usage).toBe(fixture.gl.STATIC_DRAW);
-		expect(fixture.bufferData[0]?.data).toBeInstanceOf(Float32Array);
-		expect(() =>
-			buffer.publishPersistent([instance(Mat4.identity(), [1, 1, 1, 1])]),
-		).toThrow("already been published");
 	});
 
 	it("reuses geometric frame capacity and orphans once per sequential view", () => {
@@ -76,12 +60,64 @@ describe("WebGL2InstanceBuffer", () => {
 			4 * OBJECT_INSTANCE_STRIDE_BYTES,
 		]);
 		expect(fixture.bufferSubData).toHaveLength(2);
+		expect(fixture.bufferSubData[0]?.data).toBe(fixture.bufferSubData[1]?.data);
+		expect(
+			fixture.bufferSubData.map(({ length, sourceOffset }) => ({
+				length,
+				sourceOffset,
+			})),
+		).toEqual([
+			{
+				length: 3 * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+				sourceOffset: 0,
+			},
+			{
+				length: 2 * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+				sourceOffset: 0,
+			},
+		]);
+
+		const reusedStorage = fixture.bufferSubData[1]?.data;
+		arena.prepareView([...instances, ...instances]);
+		expect(fixture.bufferSubData[2]?.data).not.toBe(reusedStorage);
+		expect(fixture.bufferSubData[2]?.data).toHaveLength(
+			8 * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+		);
+	});
+
+	it("uploads only the encoded range from its reusable staging storage", () => {
+		const fixture = fakeGl();
+		const buffer = new WebGL2InstanceBuffer(fixture.gl);
+		buffer.resetFrame(4);
+		buffer.updateRange(1, [
+			instance(
+				new Mat4(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
+				[0.25, 0.5, 0.75, 1],
+			),
+		]);
+
+		const upload = fixture.bufferSubData[0];
+		if (!upload) throw new Error("Expected one instance-buffer upload.");
+		expect(upload).toMatchObject({
+			length: OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+			offset: OBJECT_INSTANCE_STRIDE_BYTES,
+			sourceOffset: OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
+		});
+		expect([
+			...upload.data.slice(
+				upload.sourceOffset,
+				upload.sourceOffset + upload.length,
+			),
+		]).toEqual([
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0.25, 0.5, 0.75, 1,
+		]);
 	});
 
 	it("binds every matrix/color attribute with offsets selecting the requested run", () => {
 		const fixture = fakeGl();
-		const buffer = new WebGL2InstanceBuffer(fixture.gl, "persistent-static");
-		buffer.publishPersistent([
+		const buffer = new WebGL2InstanceBuffer(fixture.gl);
+		buffer.resetFrame(2);
+		buffer.updateRange(0, [
 			instance(Mat4.identity(), [1, 0, 0, 1]),
 			instance(Mat4.identity(), [0, 0, 1, 1]),
 		]);
@@ -124,12 +160,22 @@ function fakeGl(): {
 		stride: number;
 	}>;
 	readonly bufferData: Array<{ data: number | Float32Array; usage: number }>;
-	readonly bufferSubData: Array<{ data: Float32Array; offset: number }>;
+	readonly bufferSubData: Array<{
+		data: Float32Array;
+		length: number;
+		offset: number;
+		sourceOffset: number;
+	}>;
 	readonly createdBuffers: number;
 } {
 	let createdBuffers = 0;
 	const bufferData: Array<{ data: number | Float32Array; usage: number }> = [];
-	const bufferSubData: Array<{ data: Float32Array; offset: number }> = [];
+	const bufferSubData: Array<{
+		data: Float32Array;
+		length: number;
+		offset: number;
+		sourceOffset: number;
+	}> = [];
 	const attributePointers: Array<{
 		location: number;
 		offset: number;
@@ -149,8 +195,14 @@ function fakeGl(): {
 		) => {
 			bufferData.push({ data, usage });
 		},
-		bufferSubData: (_target: number, offset: number, data: Float32Array) => {
-			bufferSubData.push({ data, offset });
+		bufferSubData: (
+			_target: number,
+			offset: number,
+			data: Float32Array,
+			sourceOffset: number,
+			length: number,
+		) => {
+			bufferSubData.push({ data, length, offset, sourceOffset });
 		},
 		createBuffer: () => {
 			createdBuffers += 1;

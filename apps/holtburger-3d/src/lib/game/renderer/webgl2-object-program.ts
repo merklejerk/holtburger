@@ -7,6 +7,13 @@ import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
 /** Object transform source selected at shader compilation rather than through nullable uniforms. */
 export type ObjectVertexTransformSource = "baked" | "instanced";
 
+/** Fixed sampler units shared by every linked object-program variant. */
+export const OBJECT_TEXTURE_UNITS = {
+	base: 0,
+	palette: 1,
+	detail: 2,
+} as const;
+
 /** Build one object vertex variant with explicit fog and transform contracts. */
 export function createObjectVertexShader(
 	distanceFog: boolean,
@@ -371,6 +378,12 @@ export function createWebGL2ObjectProgram(
 			view: requireWebGL2Uniform(gl, program, "uView"),
 			wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
 		};
+		// Sampler-unit assignments are link-lifetime invariants. Program construction owns this
+		// one-time mutation; renderer state mirrors begin unknown after all programs are created.
+		gl.useProgram(program);
+		gl.uniform1i(uniforms.base, OBJECT_TEXTURE_UNITS.base);
+		gl.uniform1i(uniforms.palette, OBJECT_TEXTURE_UNITS.palette);
+		gl.uniform1i(uniforms.detail, OBJECT_TEXTURE_UNITS.detail);
 		const objectProgram: WebGL2ObjectProgram | WebGL2InstancedObjectProgram =
 			transformSource === "baked"
 				? {

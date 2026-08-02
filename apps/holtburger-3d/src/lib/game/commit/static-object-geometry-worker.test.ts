@@ -335,10 +335,10 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 11, y: 1, z: 0 });
 		expect(result?.metrics).toMatchObject({
 			bakedDrawUnitCount: 0,
-			persistentCohortCount: 1,
-			persistentDrawUnitCount: 1,
-			persistentInstanceCount: 2,
-			persistentStreamCount: 1,
+			staticFragmentCohortCount: 1,
+			staticFragmentDrawUnitCount: 1,
+			staticFragmentInstanceCount: 2,
+			staticFragmentCount: 1,
 			sourcePartCount: 2,
 			sourceResidentCount: 2,
 		});
@@ -395,14 +395,14 @@ describe("prepareStaticObjectGeometry", () => {
 			result?.instanceStreams.map(({ data }) => data.instances.length),
 		).toEqual([1, 1, 1]);
 		expect(result?.metrics).toMatchObject({
-			persistentCohortCount: 3,
-			persistentDrawUnitCount: 3,
-			persistentInstanceCount: 3,
+			staticFragmentCohortCount: 3,
+			staticFragmentDrawUnitCount: 3,
+			staticFragmentInstanceCount: 3,
 			sourceResidentCount: 3,
 		});
 	});
 
-	it("emits persistent and transparent generated strategies in one result", () => {
+	it("emits static fragments and transparent generated strategies in one result", () => {
 		const residents = ["opaque", "alpha-test", "additive", "transparent"].map(
 			(kind, index) =>
 				resident(kind, translation(index * 2, 0, 0), new Vec3(1, 1, 1)),
@@ -426,7 +426,7 @@ describe("prepareStaticObjectGeometry", () => {
 			},
 		});
 		expect(result?.metrics).toMatchObject({
-			persistentInstanceCount: 3,
+			staticFragmentInstanceCount: 3,
 			transparentTemplateCohortCount: 1,
 			transparentTemplateInstanceCount: 1,
 		});
@@ -562,7 +562,7 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.objects[0]?.drawUnits[0]?.kind).toBe("baked");
 		expect(result?.metrics).toMatchObject({
 			bakedDrawUnitCount: 1,
-			persistentInstanceCount: 0,
+			staticFragmentInstanceCount: 0,
 		});
 	});
 
@@ -582,8 +582,8 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.geometry).toHaveLength(2);
 		expect(result?.metrics).toMatchObject({
 			bakedDrawUnitCount: 1,
-			persistentDrawUnitCount: 1,
-			persistentInstanceCount: 1,
+			staticFragmentDrawUnitCount: 1,
+			staticFragmentInstanceCount: 1,
 		});
 		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 7, y: 3, z: 0 });
 	});

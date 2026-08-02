@@ -1,8 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type {
-	InstanceStreamResourceKey,
-	RendererResourceManager,
-} from "../renderer/resource-manager";
 import type { StaticInstanceStreamSource } from "./static-resources";
 import { StaticInstanceStreamManager } from "./static-instance-stream-manager";
 
@@ -10,38 +6,37 @@ const SOURCE = {
 	data: { instances: [] },
 	key: "static-instance-stream:static-install:fixture/cohort",
 } as const satisfies StaticInstanceStreamSource;
-const RESOURCE = "instance-stream-resource:1" as InstanceStreamResourceKey;
 
 describe("StaticInstanceStreamManager", () => {
-	it("preserves publish-once resources until the final semantic owner releases them", () => {
-		const created: StaticInstanceStreamSource["data"][] = [];
-		const released: InstanceStreamResourceKey[] = [];
-		const resources = {
-			createStaticInstanceStream: (
-				data: StaticInstanceStreamSource["data"],
-			) => {
-				created.push(data);
-				return RESOURCE;
-			},
-			releaseResource: (key: InstanceStreamResourceKey) => {
-				released.push(key);
-				return true;
-			},
-		} as unknown as RendererResourceManager;
-		const manager = new StaticInstanceStreamManager<"first" | "second">(
-			resources,
-		);
+	it("preserves immutable fragment data until the final semantic owner releases it", () => {
+		const manager = new StaticInstanceStreamManager<"first" | "second">();
 
 		manager.reserveKeys("first", [SOURCE.key]);
 		manager.reserveKeys("second", [SOURCE.key]);
 		manager.publish(SOURCE);
 		manager.publish(SOURCE);
 
-		expect(created).toEqual([SOURCE.data]);
-		expect(manager.getResource(SOURCE.key)).toBe(RESOURCE);
+		expect(manager.getData(SOURCE.key)).toBe(SOURCE.data);
 		manager.dropOwner("first");
-		expect(released).toEqual([]);
+		expect(manager.getData(SOURCE.key)).toBe(SOURCE.data);
 		manager.dropOwner("second");
-		expect(released).toEqual([RESOURCE]);
+		expect(() => manager.getData(SOURCE.key)).toThrow(
+			`Static instance stream ${SOURCE.key} does not exist.`,
+		);
+	});
+
+	it("does not replace live immutable data but permits key reuse after final release", () => {
+		const manager = new StaticInstanceStreamManager<"first" | "replacement">();
+		const replacement = { instances: [] };
+
+		manager.reserveKeys("first", [SOURCE.key]);
+		manager.publish(SOURCE);
+		manager.publish({ data: replacement, key: SOURCE.key });
+		expect(manager.getData(SOURCE.key)).toBe(SOURCE.data);
+
+		manager.dropOwner("first");
+		manager.reserveKeys("replacement", [SOURCE.key]);
+		manager.publish({ data: replacement, key: SOURCE.key });
+		expect(manager.getData(SOURCE.key)).toBe(replacement);
 	});
 });

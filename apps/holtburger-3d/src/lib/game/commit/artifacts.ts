@@ -37,7 +37,10 @@ export const FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES =
 
 /** Geometry strategies observed for one static-object preparation attempt. */
 export type StaticObjectGeometryStrategy =
-	"empty" | "baked" | "instanced" | "mixed";
+	| "empty"
+	| "baked"
+	| "instanced"
+	| "mixed";
 
 /** Strategy-neutral geometry-worker facts retained beside a materialized static layer artifact. */
 export interface StaticObjectGeometryDiagnostics {
@@ -54,12 +57,13 @@ export interface StaticObjectGeometryDiagnostics {
 	/** Baked draw ranges retained as the selected policy or an explicit fallback. */
 	readonly bakedFallbackRangeCount: number;
 	readonly bakedGeometryBytes: number;
-	readonly persistentCohortCount: number;
-	readonly persistentStreamCount: number;
-	readonly persistentDrawUnitCount: number;
-	readonly persistentInstanceCount: number;
+	readonly staticFragmentCohortCount: number;
+	readonly staticFragmentCount: number;
+	readonly staticFragmentDrawUnitCount: number;
+	readonly staticFragmentInstanceCount: number;
 	readonly instancedGeometryBytes: number;
-	readonly persistentStreamBytes: number;
+	/** Encoded generated-scenery instance payload retained on the CPU. */
+	readonly staticFragmentBytes: number;
 	readonly transparentTemplateCohortCount: number;
 	readonly transparentTemplateInstanceCount: number;
 	/** Fixed transform, color, and center payload bytes retained on the CPU. */
@@ -97,7 +101,10 @@ export interface ObjectMaterialBinding {
 	readonly polygon: {
 		/** Authored DAT polygon culling mode, retained as provenance after side expansion. */
 		readonly authoredCullMode:
-			"landblock" | "none" | "clockwise" | "counter-clockwise";
+			| "landblock"
+			| "none"
+			| "clockwise"
+			| "counter-clockwise";
 		/** Effective GPU face rejection for this already-expanded render side. */
 		readonly cullFace: "back" | "front";
 		/** Expanded source side that selected this draw range's material and winding. */
@@ -123,7 +130,7 @@ export interface BakedStaticDrawUnit {
 	} | null;
 }
 
-/** Instanced immutable geometry selected by one persistent instance cohort. */
+/** Instanced immutable geometry selected by one generated-scenery fragment cohort. */
 export interface InstancedStaticDrawUnit {
 	readonly kind: "instanced";
 	readonly geometry: StaticGeometryKey;
@@ -137,7 +144,8 @@ export interface InstancedStaticDrawUnit {
 
 /** Logical immutable-object draw contribution retained beside its spatial node. */
 export type StaticObjectDrawUnit =
-	BakedStaticDrawUnit | InstancedStaticDrawUnit;
+	| BakedStaticDrawUnit
+	| InstancedStaticDrawUnit;
 
 /**
  * Immutable transparent instance retained on the CPU so the renderer can order it for each view.

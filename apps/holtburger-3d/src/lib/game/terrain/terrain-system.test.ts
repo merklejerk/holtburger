@@ -3,7 +3,6 @@ import type { RenderGeometryData } from "../renderer/geometry";
 import { GeometryManager } from "../geometry/geometry-manager";
 import type {
 	GeometryResourceKey,
-	InstanceStreamResourceKey,
 	RendererResourceManager,
 	RenderResourceKey,
 	Texture2DResourceKey,
@@ -12,7 +11,6 @@ import type {
 	TextureArrayLayerUpload,
 	TextureArrayResourceKey,
 } from "../renderer/resource-manager";
-import type { StaticInstanceStreamData } from "../systems/static-resources";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { SceneGraph, type SceneNodeId } from "../scene";
 import { TextureManager } from "../textures/texture-manager";
@@ -402,13 +400,6 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometry++}`;
 		this.created.push(key);
 		return key;
-	}
-
-	createStaticInstanceStream(
-		data: StaticInstanceStreamData,
-	): InstanceStreamResourceKey {
-		void data;
-		throw new Error("Terrain system tests do not create instance streams.");
 	}
 
 	replaceGeometry(

@@ -1,27 +1,31 @@
-# Holtburger 3D Object Device-State Deduplication Plan
+# Holtburger 3D Object Submission Deduplication and Compaction Plan
 
 ## Context and Boundaries
 
 ### Goal
 
-Reduce exterior object-submission CPU time by eliminating redundant WebGL state changes and configuring immutable persistent instance inputs once, without weakening draw ordering or leaking renderer state into the scene graph.
+Reduce exterior object-submission CPU time and static draw count by applying exact object device state once, ordering legal work by its complete compatibility identity, and compacting compatible visible static-instance fragments after culling.
 
 ### In Scope
 
 - Deduplicate object-pass program, culling, blending, texture, sampler, active-texture-unit, and vertex-array state.
 - Make object-state ownership and invalidation explicit at renderer-controlled pass boundaries.
-- Improve opaque and alpha-test submission order using the complete pipeline identity that the renderer actually consumes.
-- Lazily create complete WebGL vertex arrays for persistent `(geometry, instance stream)` pairs when measured pair cardinality supports the tradeoff.
-- Preserve the existing frame-dynamic instance path, transparency ordering, portal rendering, terrain rendering, and generated-scenery 2x2 clustering policy.
-- Compare centered scene-interest gameplay views and an edge-of-interest stress view before and after the change.
+- Separate exact single-draw compatibility from state-reuse ordering and from caller-owned view/domain batching scopes.
+- Retain immutable generated-scenery instance records under their existing lease lifetime and compact compatible visible fragments into the renderer-owned frame-instance arena.
+- Move EnvCell static residents to the existing baked preparation strategy; keep dynamic and transparent run policy unchanged.
+- Delete the persistent GPU instance-stream path after compaction proves its replacement guarantees.
+- Initialize invariant object sampler-unit uniforms once per linked program and establish fallback texture state only at explicit pass boundaries.
+- Preserve transparency ordering, portal rendering, terrain rendering, and generated-scenery 2x2 spatial culling.
+- Compare the fixed centered gameplay and edge-of-interest stress workloads recorded below before and after each optimization.
 
 ### Out of Scope
 
-- Merging draw calls, geometry, instance streams, or atlas pages.
+- Merging geometry, atlas pages, baked draws, or transparent instance submissions.
 - Changing generated-scenery clustering or culling granularity.
 - Generic uniform-value caching.
 - A renderer-wide state mirror shared with terrain, uploads, or the portal substrate.
-- Moving WebGL device objects into scene graph, static-object artifact, or worker contracts.
+- Moving WebGL device objects into scene graph, static-object artifact, worker, or shared runtime contracts.
+- Persistent composite VAOs; measured pair cardinality rejected that design for this workload.
 - Optimizing GPU pixel cost, shader execution, or mesh complexity.
 - Permanent per-draw diagnostic collection in shared runtime paths.
 
@@ -30,215 +34,316 @@ Reduce exterior object-submission CPU time by eliminating redundant WebGL state 
 ### Reference Sources
 
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-renderer.ts`
-  - Owns object ordering, program activation, material binding, pass boundaries, and draw submission.
+  - Owns object resolution, ordering, program activation, material binding, pass boundaries, and submission; its post-culling preparation seam is where view-local compaction belongs.
+- `apps/holtburger-3d/src/lib/game/renderer/object-rendering-policy.ts`
+  - Owns pure transparency, blend, ordering, and adjacent-run policy.
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-instance-buffer.ts` and `frame-instance-stream-arena.ts`
+  - Define the 80-byte instance record, mutable range binding, encoding, upload, and reusable per-view arena.
+- `apps/holtburger-3d/src/lib/game/systems/static-resources.ts`
+  - Defines the renderer-neutral immutable instance records already emitted by static workers.
+- `apps/holtburger-3d/src/lib/game/systems/static-instance-stream-manager.ts`
+  - Owns semantic instance-stream leases but currently retains only the uploaded backend resource key.
+- `apps/holtburger-3d/src/lib/game/commit/artifacts.ts` and `static-object-geometry-worker.ts`
+  - Define and produce immutable static draw units and instance fragments without WebGL concerns.
+- `apps/holtburger-3d/src/lib/game/renderer/render-world.ts`
+  - Resolves visible scene contributions and is the boundary through which retained immutable fragment data reaches the renderer.
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-resource-manager.ts`
-  - Owns geometry VAOs, persistent instance buffers, resource replacement, and device-resource destruction.
-- `apps/holtburger-3d/src/lib/game/renderer/webgl2-instance-buffer.ts`
-  - Defines the shared instance record layout and currently configures locations 3-7 for every instanced draw.
+  - Owns geometry VAOs and currently owns the persistent instance buffers that this plan removes.
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-texture-sampler-catalog.ts`
-  - Provides stable immutable `WebGLSampler` identities suitable for exact state comparison.
-- `apps/holtburger-3d/src/lib/game/renderer/object-rendering-policy.test.ts`
-  - Existing home for pure object ordering and batching policy tests.
-- `apps/holtburger-3d/src/lib/game/renderer/webgl2-instance-buffer.test.ts`
-  - Existing fake-WebGL coverage for instance storage and attribute configuration.
+  - Provides stable immutable `WebGLSampler` identities suitable for exact comparison.
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-object-program.ts`
+  - Proves all four object variants statically declare base, palette, and detail samplers.
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-portal-executor.ts` and `webgl2-portal-substrate.ts`
-  - Independent WebGL state consumers that establish why object state must be explicitly invalidated.
+  - Independently mutate WebGL state and establish the object-cache invalidation boundary.
 
-### Established Facts
+### Established Code Facts
 
-- Geometry VAOs currently retain geometry attributes and the index buffer, but not instance attributes.
-- Every instanced draw currently repeats one array-buffer bind, five attribute enables, five pointer definitions, and five divisors.
-- Persistent instance streams are immutable and persistent draws consume the complete stream from instance zero.
-- Frame-dynamic instance ranges change their base byte offset and cannot use one immutable combined VAO under WebGL2's available draw API.
-- Texture atlas placement uniforms may change while the physical texture page and sampler remain identical.
-- Terrain and portal execution mutate WebGL state outside the object submission loop.
-- Opaque ordering currently clusters material state without first clustering baked versus instanced programs.
+- Each instanced draw currently performs one array-buffer bind, five attribute enables, five pointer definitions, and five divisors: 16 instance-layout calls after the geometry VAO bind.
+- Each object texture request currently performs `activeTexture`, `bindTexture`, and `bindSampler` even when the physical binding is unchanged.
+- Each object-program activation currently repeats three fallback texture/sampler bindings and three invariant sampler-unit uniform assignments.
+- Geometry VAOs retain geometry attributes and the element buffer but not instance attributes.
+- Persistent static streams are immutable and always consumed from instance zero; transparent instances already use CPU-retained frame templates instead.
+- The frame-instance arena already owns geometric growth, contiguous encoding, `bufferSubData`, range binding, and per-view upload metrics.
+- Static workers already emit the complete immutable CPU instance records. The current manager discards those records after creating one backend buffer.
+- Generated scenery and EnvCell static residents currently use the immutable instanced strategy. Buildings and explicit outdoor objects use baked geometry; CellStruct shells are separate non-instanced draws over shared shell geometry.
+- EnvCell resident jobs and scene nodes are intentionally partitioned by exact EnvCell scope. Archive evidence below shows that their scope-local instance populations are mostly singletons and do not justify retaining that strategy.
+- Texture atlas placement uniforms may change while the physical texture and sampler remain identical; placement uniforms therefore cannot be deduplicated as texture state.
+- Terrain and portal execution mutate WebGL state outside object submission.
+- Current opaque ordering clusters a string material key before baked-versus-instanced program identity and omits some state consumed by submission.
 
-### Structural Alternative to Evaluate
+## Pre-Implementation Evidence and Architecture Decision
 
-The 2x2 generated-scenery clusters are spatial visibility units, but they currently also determine persistent instance-stream and draw-call boundaries. That coupling can multiply submitted work as:
+### Fixed Workloads
 
-```text
-visible cluster x persistent cohort x geometry/material partition
+Evidence was collected on 2026-08-02 with real DAT content, flat rendering, a 3x3 scene interest centered on `0xda55ffff`, explicit/generated radii of one, camera height 6, pitch -15 degrees, a 10-second settle, and a 3-second measurement window.
+
+Centered workload:
+
+```sh
+npm run harness:browser -- --brief --landblock 0xda55ffff --building-radius 1 \
+  --explicit-object-radius 1 --generated-object-radius 1 --camera-height 6 \
+  --camera-pitch -15 --settle-ms 10000 --measure-ms 3000
 ```
 
-Before adopting composite VAOs as the long-term answer, evaluate post-culling cohort compaction. Under that model, scene selection still returns fine spatial fragments, but the renderer regroups compatible visible fragments, copies their instance records into a contiguous view-local stream, and submits each compatible geometry/material partition once for the regrouped cohort.
+Edge stress workload, with the camera moved east and turned back toward retained interest:
 
-This alternative could remove draw calls as well as instance-attribute setup, at the cost of encoding and uploading visible static instances. It should reuse or refine the existing frame-instance arena and cohort/run concepts rather than create a generated-scenery-specific renderer path. Static artifact contracts may expose immutable cohort fragments and compatibility identity, but must not contain WebGL resources or view policy.
+```sh
+npm run harness:browser -- --brief --landblock 0xda55ffff --building-radius 1 \
+  --explicit-object-radius 1 --generated-object-radius 1 \
+  --camera-landblock 0xda56ffff --camera-height 6 --camera-pitch -15 \
+  --camera-yaw 180 --settle-ms 10000 --measure-ms 3000
+```
 
-The decision must compare:
+The same edge placement at yaw 0 was rejected as a stress workload because it faced away from retained interest and submitted only 246 persistent draws.
 
-- visible instance count and upload bytes per view;
-- CPU encoding and `bufferSubData` time;
-- mergeable cohort-fragment count;
-- draw calls and instance-layout configurations eliminated;
-- multi-view and portal-view duplication;
-- retained CPU memory required for compactable immutable instance fragments.
+### Observed Work
 
-Composite VAOs remain the lower-risk fallback when compaction traffic costs more than the draw and state transitions it removes.
+A temporary one-shot renderer probe grouped persistent fragments only when they shared the same view, render-relevant landblock facts, geometry/index range, ordering, effective cull face, and complete material value. The probe was removed after capture.
+
+| Observation                                |  Centered | Edge stress |
+| ------------------------------------------ | --------: | ----------: |
+| Visible static nodes                       |        22 |          36 |
+| Submitted static-object draws              |       968 |       1,224 |
+| Persistent instanced draws                 |       776 |       1,000 |
+| Persistent instances                       |     2,991 |       3,455 |
+| Instance-layout configurations             |       813 |       1,079 |
+| Unique `(geometry, instance stream)` pairs |       776 |       1,000 |
+| Adjacent persistent-pair reuse             |         0 |           0 |
+| Compatible compacted persistent draws      |       337 |         520 |
+| Persistent draws eliminated                |       439 |         480 |
+| Mergeable fragments / groups               | 644 / 205 |   754 / 274 |
+| Compaction upload bytes per view           |   239,280 |     276,400 |
+| Existing frame-instance upload bytes       |    38,320 |      52,960 |
+| Object program changes                     |        47 |          80 |
+| Requested object texture bindings          |     1,349 |       1,750 |
+
+Repeated uninstrumented captures produced the same submitted-work counts. Their total render times are not used as CPU acceptance evidence: the centered capture averaged about 14.4 ms, while the inward-facing edge capture averaged about 128.7 ms and was dominated by view-dependent GPU/driver work. Implementation profiling must isolate object-submission CPU from total render time.
+
+These flat exterior captures contained no visible EnvCell scopes. Their compaction counts and draw targets therefore justify generated-scenery regrouping only.
+
+### EnvCell Resident Strategy Evidence
+
+An archive-backed A/B used `0x00d1ffff`, which contains 4,213 EnvCells and 3,331 classified static resident parts. The comparison changed only `prepareStaticObjectGeometry()` so EnvCell resident jobs used the existing baked branch, then restored the production branch after capture.
+
+```sh
+npm run harness:browser -- --brief --landblock 0x00d1ffff --building-radius 0 \
+  --env-cell-radius 0 --explicit-object-radius 0 --generated-object-radius 0 \
+  --camera-height 6 --camera-pitch -15 --settle-ms 15000 --measure-ms 3000
+```
+
+| EnvCell preparation observation         |     Instanced |     Baked |
+| --------------------------------------- | ------------: | --------: |
+| Static resident parts                   |         3,331 |     3,331 |
+| Persistent streams / instances          | 1,550 / 1,798 |     0 / 0 |
+| Average instances per persistent stream |          1.16 |       n/a |
+| Persistent draw units                   |         2,994 |         0 |
+| Transparent instance templates          |         1,533 |         0 |
+| Baked material ranges                   |             0 |     3,999 |
+| Prepared resident contributions         |         4,527 |     3,999 |
+| Geometry bytes                          |     3,332,880 | 8,227,116 |
+| Instance/template bytes                 |       284,876 |         0 |
+| Total retained payload bytes            |     3,617,756 | 8,227,116 |
+| Total backend geometry resource count   |        10,456 |    12,326 |
+| Geometry-worker duration                |      387.7 ms |  396.8 ms |
+
+The scope-local population of 1.16 instances per stream is insufficient to justify persistent instancing. Baking removes 1,550 mostly-singleton streams and reduces prepared resident contributions by 528. The admitted concession is approximately 4.61 MB more retained payload and 1,870 more geometry resources on this unusually large interior archive. A real portal-view comparison remains required because this materialization capture intentionally did not guess an interior camera pose.
+
+### Decision
+
+Proceed with post-culling static-fragment compaction and reject persistent composite VAOs.
+
+- Pair cardinality equals submitted persistent draw count in both workloads, so composite VAOs would create hundreds to one thousand pair-specific device objects without adjacent reuse.
+- Conservative compaction removes 56.6% of persistent draws in the centered workload and 48.0% in the edge workload.
+- The required single-view uploads are 239,280 and 276,400 bytes respectively. Actual encoding and `bufferSubData` cost still require direct implementation measurement, especially for multiple portal views, but the structural draw reduction justifies the compaction path.
+- The clean cutover bakes EnvCell static residents, retains only generated-scenery immutable CPU records in the leased static-instance manager, resolves those fragments through `RenderWorld`, uploads selected compatible runs through the existing frame arena, and deletes persistent instance buffers and their resource-manager API.
+- If measured compaction CPU cost fails the Phase 4 gate, stop and resteer. Composite VAOs are not the fallback unless a different representative workload disproves the cardinality evidence above.
 
 ## North Stars
 
-1. Cache only state the renderer can know exactly; never query WebGL to reconstruct it.
-2. One object-state applicator owns deduplication decisions; draw code declares desired state rather than growing scattered `last*` checks.
-3. Invalidate at explicit ownership boundaries instead of pretending the cache observes unrelated WebGL users.
-4. Keep immutable vertex-input construction with the resource owner that can destroy every dependency correctly.
-5. Optimize the centered gameplay view first and retain the edge-of-interest view as a stress test.
+1. Cache only state the renderer knows exactly; never query WebGL to reconstruct it.
+2. Prepare consumed draw facts once, but keep single-draw compatibility, state-reuse ordering, and batching scope as distinct decisions.
+3. Invalidate object state at explicit ownership boundaries instead of pretending the cache observes terrain or portal work.
+4. Preserve spatial fragments for visibility while allowing the renderer to choose GPU batch boundaries after culling.
+5. Keep immutable instance data and lease lifetime renderer-neutral; keep per-view grouping, encoding, upload, and WebGL state in the renderer.
 6. Preserve required transparent ordering even when it limits deduplication.
-7. Do not retain diagnostics whose own frame cost undermines the optimization.
+7. Prefer deleting the persistent GPU-stream mechanism over adding a second composite-VAO resource graph.
+8. Remove diagnostics whose frame cost would undermine the optimization.
 
-## Phase 1: Establish a Reproducible Baseline
+## Phase 1: Lock the Baseline and Draw-Compatibility Contract
 
 ### Deliverables
 
-- A recorded baseline for one centered scene-interest view and one edge-of-interest stress view.
-- Temporary, development-only observations of:
-  - submitted object draws;
-  - actual program changes and texture-page binds from existing metrics;
-  - instance-layout configuration count;
-  - unique persistent `(geometry, instance stream)` pairs;
-  - adjacent reuse of those pairs after current ordering.
-- An estimate of visible instance bytes and draw-count reduction available from regrouping compatible cluster fragments after culling.
-- A documented decision on whether pair cardinality is proportional to actual referenced draw bindings rather than an accidental Cartesian product.
+- The two commands above retained as the canonical before/after workloads.
+- A renderer-private prepared-draw value containing the facts consumed by object submission.
+- One object-pass static-instance compatibility comparison containing only facts that must match for one current `drawElementsInstanced` call.
+- A CPU profile isolating `#drawObjectRange`, instance layout binding, object texture binding, draw-call time, instance encoding, and `bufferSubData` for both workloads.
 
 ### Task Checklist
 
-- [ ] Fix camera placement, render settings, scene-interest radius, and generated-scenery 2x2 clustering for both captures.
-- [ ] Capture frame time and the call-tree cost of `#drawObjectRange`, `bindWebGL2ObjectInstanceRange`, texture binding, and the actual draw calls.
-- [ ] Collect pair cardinality and transition counts with temporary instrumentation or a one-shot Explorer probe; do not add continuous shared diagnostics.
-- [ ] Measure mergeable visible cohort fragments and estimate the encoding/upload traffic required to compact them into view-local runs.
-- [ ] Compare composite-VAO reuse against post-culling cohort compaction before selecting the persistent-instance optimization.
-- [ ] Remove or gate the observation path before completing the implementation.
+- [ ] Record browser, GPU/driver, build mode, viewport, filtering, and frame-mode facts beside the profile results.
+- [ ] Capture at least five settled samples per workload and compare medians rather than one frame.
+- [ ] Define a typed prepared-draw value containing resolved geometry/index range, effective raster state, texture/sampler requests, atlas placements, and every draw-constant material uniform consumed by current object submission.
+- [ ] Define static-instance compatibility from only the prepared facts that cannot vary within one current instanced draw: geometry/index range, effective cull face, landblock-offset uniform, texture/sampler bindings, and draw-constant material uniforms.
+- [ ] Keep ordering class as an outer pass partition, the instanced program implicit in static compaction, and render domain/EnvCell scope as an outer batching scope rather than pretending those are GL equality axes.
+- [ ] Resolve exact WebGL program, texture, sampler, and VAO identities once for the state applicator; do not put device objects into the pure ordering/grouping policy.
+- [ ] Account source-specific diagnostics from contributing fragments before compaction; do not split compatible batches merely to preserve old counters.
+- [ ] Keep per-instance transforms/colors and instance-fragment identity outside the compatibility value.
+- [ ] Put the focused static compatibility/grouping function in `object-rendering-policy.ts`; do not introduce a generic pass framework or another delimiter-concatenated material string.
+- [ ] Add focused tests in `object-rendering-policy.test.ts` proving one changed consumed field creates one incompatibility and irrelevant provenance does not.
+- [ ] Use temporary timing probes only when the browser profiler cannot isolate a call; remove them after capture.
 
 ### Acceptance Criteria
 
-- Both scenarios can be repeated with the same content and settings.
-- The plan records enough evidence to compare requested draw state with actual WebGL state changes.
-- Persistent combined VAOs proceed only for pairs that are actually referenced by submitted persistent draws.
-- The plan records whether post-culling compaction is expected to eliminate enough draw calls to justify its per-view upload cost.
+- Both workloads reproduce the submitted-work counts above before implementation.
+- Every compatibility or device-state field has a named consumer and a test where changing it matters.
+- Opaque and alpha-test compatibility is deterministic; transparent work cannot enter static compaction.
+- Generated scenery may compact across visible spatial clusters; EnvCell static residents are baked per exact EnvCell job and never enter compaction.
+- The baseline reports object-submission CPU separately from total render/GPU time.
 
 ### Decisions and Course Corrections
 
-- _To be filled during implementation._
+- Composite VAOs were rejected because unique pair count equaled persistent draw count and adjacent reuse was zero in both workloads.
+- The original outward-facing edge capture was rejected and replaced with the inward-facing yaw-180 workload.
+- _Additional decisions to be filled during implementation._
 
 ## Phase 2: Introduce Pass-Scoped Object State Application
 
 ### Deliverables
 
-- A focused renderer-backend component, colocated under `renderer/`, that tracks applied object device state.
-- A composite texture-unit binding containing both `WebGLTexture` and `WebGLSampler` identity.
-- Explicit object-pass invalidation/reset before state is applied after terrain or portal work.
-- Unit tests using a fake WebGL context to prove redundant calls are skipped and invalidation reapplies required state.
+- A focused renderer-backend component under `renderer/` that owns applied object device state.
+- A texture-unit binding containing both `WebGLTexture` and resolved `WebGLSampler` identity.
+- Explicit invalidation before every independently controlled object phase following terrain or portal work.
+- Fake-WebGL tests proving redundant calls are skipped and invalidation reapplies required state.
 
 ### Task Checklist
 
-- [ ] Define the complete cached object-device-state shape with comments describing ownership and invalidation.
+- [ ] Define the complete cached object-device-state shape with ownership and invalidation comments.
 - [ ] Add narrow operations for program, cull face, blend policy, texture/sampler unit, active texture unit, and VAO application.
-- [ ] Resolve sampler requests through `WebGL2TextureSamplerCatalog.getSampler()` once per requested binding and compare the resulting sampler object.
-- [ ] Count `objectTexturePageBinds` only when a physical texture binding is performed; keep its name and UI meaning honest or rename and sweep the vocabulary.
-- [ ] Replace local `activeProgram` variables and unconditional cull/blend/texture/VAO calls in object submission with the state applicator.
-- [ ] Reset object state at the beginning of each independently controlled object phase; do not rely on state left by terrain or portal callbacks.
-- [ ] Keep atlas-rect and other material uniforms outside this cache.
-- [ ] Test texture changes, sampler-only changes, program changes, cull/blend changes, repeated VAOs, and explicit invalidation.
+- [ ] Resolve sampler requests through `WebGL2TextureSamplerCatalog.getSampler()` once per desired binding and compare the returned sampler object.
+- [ ] Replace local `activeProgram` variables and unconditional cull/blend/texture/VAO calls with the applicator.
+- [ ] Reset to unknown state at object-phase boundaries; terrain and portal code must remain independent.
+- [ ] Keep atlas rectangles and other draw-constant uniforms outside the state cache.
+- [ ] Count physical texture binds only when `bindTexture` executes; rename `objectTexturePageBinds` and sweep its UI/tests if its current vocabulary becomes dishonest.
+- [ ] Test texture-only changes, sampler-only changes, program changes, cull/blend changes, repeated VAOs, active-unit transitions, and invalidation.
 
 ### Acceptance Criteria
 
-- Repeating an identical object state produces no redundant WebGL state calls.
-- Changing either a texture or its sampler applies exactly the required calls.
-- Beginning a new object phase reapplies state even when its desired values match the prior phase.
-- Terrain and portal rendering remain independent of the cache.
-- No generic uniform cache or `gl.getParameter` state reconstruction is introduced.
+- Repeating identical desired object state performs no redundant WebGL state calls.
+- Changing either texture or sampler performs exactly the necessary calls.
+- A new independently controlled object phase reapplies required state even when desired values match the prior phase.
+- No generic uniform cache or `gl.getParameter` reconstruction exists.
+- Existing terrain and portal fixtures pass unchanged in behavior.
 
 ### Decisions and Course Corrections
 
 - _To be filled during implementation._
 
-## Phase 3: Align Submission Order with Pipeline Identity
+## Phase 3: Align Opaque Submission Order with Desired State
 
 ### Deliverables
 
-- A pure, tested opaque/alpha-test comparator based on the state that affects batching.
-- Ordering that clusters transform source/program before material and then uses stable geometry/instance identity as a tie-breaker where legal.
-- Unchanged near-transparent distance ordering and phase-local far-transparent batching guarantees.
+- Opaque/alpha-test ordering that clusters the prepared device state actually consumed by submission without treating sort equality as permission to merge draws.
+- Program/transform source clustered before material device state, followed by stable geometry and fragment identity tie-breakers.
+- Unchanged near-transparent distance ordering and phase-local far-transparent batching.
 
 ### Task Checklist
 
-- [ ] Replace the string-only material sort decision with a named pipeline comparison that includes baked versus instanced program selection.
+- [ ] Replace `objectMaterialSortKey` and renderer-private partial comparisons with a focused prepared-state comparator.
 - [ ] Keep ordering classes distinct.
-- [ ] Add geometry and persistent stream identity only as tie-breakers after program and material compatibility.
-- [ ] Preserve frame-template compatibility ordering used to form upload runs.
-- [ ] Add tests covering alternating baked/instanced inputs, shared atlas pages, persistent streams, and transparent inputs.
+- [ ] Preserve frame-template compatibility ordering used to form transparent and dynamic upload runs.
+- [ ] Add deterministic tie-breakers without treating provenance, stable identity, or sort adjacency as draw compatibility.
+- [ ] Test alternating baked/instanced inputs, shared physical atlas pages with different placements, sampler-only differences, cull overrides, persistent/static fragments, and transparent barriers.
 
 ### Acceptance Criteria
 
-- Equivalent opaque inputs form contiguous program/material groups deterministically.
-- Sorting cannot move near-transparent objects out of required distance order.
-- Frame-template runs retain their existing compatibility invariants.
-- Program-change and state-transition counts do not regress in either baseline scenario.
+- Equivalent opaque inputs form contiguous program/material/geometry groups deterministically, while only the Phase 1 static compatibility function authorizes compaction.
+- Near-transparent objects remain back-to-front and never enter state-oriented reordering.
+- Far-transparent and frame-template runs retain their existing compatibility invariants.
+- Program changes and physical state transitions do not increase in either fixed workload.
 
 ### Decisions and Course Corrections
 
 - _To be filled during implementation._
 
-## Phase 4: Build Persistent Composite Vertex Arrays
+## Phase 4: Bake EnvCell Residents and Compact Generated Scenery
 
 ### Deliverables
 
-- A lazy resource-manager cache keyed by the exact `(GeometryResourceKey, InstanceStreamResourceKey)` pair.
-- A complete persistent instanced draw binding whose VAO contains geometry attributes, index binding, and instance attributes 3-7.
-- Correct invalidation when geometry is replaced or either dependency is released.
-- The existing mutable range-binding path retained exclusively for frame-dynamic instances.
+- EnvCell resident jobs use the existing baked static-object preparation branch and publish no instance streams or transparent instance templates.
+- `StaticInstanceStreamManager` retains generated-scenery `StaticInstanceStreamData` under its existing lease ownership instead of uploading a persistent backend buffer.
+- `RenderWorld` resolves immutable generated-scenery fragments without exposing WebGL resources or view policy.
+- The renderer groups compatible visible opaque/alpha-test generated-scenery fragments within the current view/pass, encodes each group contiguously, uploads once through the frame-instance arena, and submits one draw per group.
+- Persistent instance resource keys, buffers, creation/release APIs, renderer variants, metrics vocabulary, and tests are deleted in the same cutover.
 
-This phase is the admitted fallback when Phase 1 shows that post-culling cohort compaction would introduce excessive upload, encoding, memory, or multi-view cost. If compaction is favored, replace this phase with an implementation phase for renderer-neutral static cohort fragments and renderer-owned view compaction, and record that course correction below before changing contracts.
+### Guarantees Removed with the Old Mechanism and Their Replacements
+
+| Deleted guarantee/mechanism                          | Replacement                                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| One immutable GPU buffer per generated cohort        | Immutable CPU fragment retained by the leased static-instance manager                            |
+| Scope-local EnvCell resident instance streams        | Existing baked per-EnvCell geometry preparation                                                  |
+| Full persistent stream starts at instance zero       | Each compacted run receives an explicit frame-arena range                                        |
+| Resource-manager release destroys persistent buffers | Lease removal drops retained CPU data; frame-arena storage remains renderer-owned                |
+| Spatial cluster implicitly defines a draw boundary   | Spatial cluster remains a culling boundary; compatibility defines the post-culling draw boundary |
+| Persistent draw metrics identify the old path        | Static-fragment and compacted-run metrics describe the surviving mechanism                       |
+| Repeated per-draw instance attribute configuration   | One range configuration per compacted run; fewer runs are submitted                              |
 
 ### Task Checklist
 
-- [ ] Refactor the private geometry resource representation to retain the named buffer/layout facts needed to construct another complete VAO without duplicating buffer data.
-- [ ] Extract one shared instance-attribute configuration function so persistent composite construction and frame-dynamic range binding cannot drift in layout.
-- [ ] Add a resource-manager operation that lazily creates or returns the complete persistent binding for one referenced pair.
-- [ ] Enforce the persistent invariant that the complete immutable stream begins at instance zero.
-- [ ] Change persistent object submission to bind the composite VAO and draw without calling `bindWebGL2ObjectInstanceRange`.
-- [ ] Leave frame-dynamic submission on its current explicit range path.
-- [ ] Delete all composite VAOs dependent on a geometry before replacement or release.
-- [ ] Delete all composite VAOs dependent on an instance stream before release.
-- [ ] Delete remaining composite VAOs during resource-manager destruction.
-- [ ] Add resource-manager tests proving lazy reuse, no buffer-data duplication, replacement invalidation, release invalidation, and one-time destruction.
+- [ ] Route `LandblockLayerKind.EnvCells` through `prepareBakedStaticObjectGeometry()` and remove the now-dead EnvCell instanced-strategy tests and diagnostics expectations.
+- [ ] Preserve one baked artifact/scene node per exact EnvCell resident job, transparent stable ordering, atomic publication, replacement, and eviction.
+- [ ] Change the static-instance manager’s retained value from a backend key to generated-scenery immutable stream data and preserve reserve/publish/drop-owner atomicity.
+- [ ] Change `RenderWorld` resolved generated-scenery draw contracts to carry the immutable fragment data needed by renderer-owned compaction.
+- [ ] Assemble compacted static groups into the existing frame-arena population without introducing a universal run scheduler; dynamic and transparent policies remain separate callers of the same storage primitive.
+- [ ] Group generated scenery only within one prepared view and ordering pass.
+- [ ] Never merge across landblock-offset uniforms, transparency constraints, or portal draw-view invocations.
+- [ ] Encode each selected instance record once per view and upload the complete population in one arena preparation.
+- [ ] Preserve deterministic instance order within each compatibility group.
+- [ ] Delete `createStaticInstanceStream`, `getInstanceStream`, `InstanceStreamResourceKey`, persistent buffer usage, and obsolete release/destruction branches after all consumers move.
+- [ ] Rename or delete every surviving `persistent` symbol, metric, comment, UI label, and test that referred to the removed GPU mechanism.
+- [ ] Add manager tests for lease sharing, replacement, release, and immutable data resolution.
+- [ ] Add renderer-policy tests for group boundaries and fake-WebGL/arena tests for offsets, upload population, and one draw per compacted group.
+- [ ] Measure encode time, `bufferSubData` time, object-submission CPU, upload bytes, and draw reduction in both fixed workloads.
+- [ ] Exercise at least one multi-view portal fixture containing baked EnvCell residents and report generated-scenery upload bytes per draw-view invocation; do not silently reuse compacted ranges after the arena resets.
 
 ### Acceptance Criteria
 
-- A persistent pair configures instance attributes once per device-resource lifetime, not once per draw.
-- Repeated lookup of one pair returns the same live VAO.
-- Resource replacement and release cannot leave a cached VAO referencing destroyed buffers.
-- Composite cache size reflects referenced pairs only and remains within the cardinality observed in Phase 1.
-- Frame-dynamic offsets and draws behave exactly as before.
+- Centered persistent/static-equivalent draws fall from 776 to no more than the measured conservative estimate of 337 unless the final typed compatibility contract identifies and documents a missing incompatibility.
+- Edge persistent/static-equivalent draws fall from 1,000 to no more than 520 under the same rule.
+- The centered median object-submission CPU improves by at least 10% from the Phase 1 baseline.
+- The edge median object-submission CPU does not regress by more than 5%; total render time is reported separately because this view is pixel/driver dominated.
+- Compaction uploads remain attributable per view and within 10% of the measured instance-population estimates unless visible work changes.
+- The `0x00d1ffff` EnvCell materialization reports baked strategy, 3,999 baked ranges, zero persistent streams/instances, and zero transparent instance templates unless source content changes.
+- A selected EnvCell portal fixture preserves visible content and ordering after the baked cutover; its draw and frame-time deltas are recorded rather than assumed from whole-landblock preparation counts.
+- Static eviction and replacement leave no retained fragment data after the final lease drops.
+- No persistent instance WebGL buffer, composite VAO cache, or renderer-device object leaks into artifact, scene, worker, or `RenderWorld` contracts.
+- Dynamic and transparent instance offsets and ordering behave exactly as before.
 
 ### Decisions and Course Corrections
 
-- If measured pair cardinality is unexpectedly high, stop before landing composite VAOs and resteer toward ordering/reuse of the existing mutable geometry VAOs. Record the evidence and revised ownership model here.
-- If compatible visible cluster fragments merge well and upload cost is acceptable, replace composite VAOs with post-culling cohort compaction so spatial nodes no longer dictate GPU batch boundaries.
+- If actual compatibility produces materially fewer merges than the evidence probe, document the newly discovered consumed field before changing the draw target.
+- If encoding/upload cost fails the CPU gates, stop and profile the arena and retained-data shape before choosing another resource model. Do not default to composite VAOs against the recorded cardinality evidence.
 - _Additional decisions to be filled during implementation._
 
-## Phase 5: One-Time Program and Fallback Initialization
+## Phase 5: Initialize Invariant Program and Fallback State Once
 
 ### Deliverables
 
-- Object sampler-unit uniforms initialized once per linked program rather than on every activation.
-- Fallback texture bindings established only where required for complete, valid object sampling state.
-- Tests or shader-contract evidence documenting why disabled palette/detail paths remain valid.
+- Base, palette, and detail sampler-unit uniforms initialized once for every linked object program.
+- Fallback texture bindings established only at an explicit object-pass boundary when a unit otherwise lacks a valid compatible 2D texture.
+- Shader-contract tests documenting why disabled palette/detail paths remain valid.
 
 ### Task Checklist
 
-- [ ] Inspect the linked object shader variants and identify every statically active sampler.
-- [ ] Move invariant sampler-unit uniform assignments to explicit program initialization.
-- [ ] Bind fallback textures at an object-pass boundary only for units that otherwise lack a valid 2D texture; do not overwrite useful bindings on every program switch.
-- [ ] Remove redundant fallback binding from program activation.
-- [ ] Verify that solid-color, direct-color, indexed, alpha-test, detail, and no-detail materials retain correct behavior.
+- [ ] Move invariant sampler-unit assignments into explicit object-program initialization while that program is bound.
+- [ ] Establish pass-boundary fallback bindings through the object-state applicator without overwriting useful bindings on every program switch.
+- [ ] Remove fallback binding and sampler-unit assignments from program activation and per-material submission.
+- [ ] Verify solid-color, direct-color, indexed, alpha-test, detail, and no-detail materials.
 
 ### Acceptance Criteria
 
-- Program switching does not bind three fallback textures per activation.
+- Program switching performs no fallback texture bindings or sampler-unit uniform assignments.
 - Every statically active sampler has a valid compatible binding before drawing.
-- Sampler-unit uniform values remain correct for every object program variant.
+- Sampler-unit values remain correct for all four object program variants.
 
 ### Decisions and Course Corrections
 
@@ -248,31 +353,31 @@ This phase is the admitted fallback when Phase 1 shows that post-culling cohort 
 
 ### Deliverables
 
-- Temporary pair-count and transition instrumentation removed.
+- Temporary timing, pair-count, transition, and grouping probes removed.
 - Focused and full automated verification completed.
-- Before/after profiles for both baseline scenarios.
-- Plan decisions and course corrections updated to match the landed implementation.
+- Matching before/after profiles recorded for both fixed workloads and the selected portal fixture.
+- Plan decisions updated to describe the landed implementation rather than the abandoned persistent path.
 
 ### Task Checklist
 
-- [ ] Remove temporary logs, sets, counters, and probe-only allocations from the frame path.
-- [ ] Sweep obsolete helper names and comments after the clean cutover.
-- [ ] Run focused renderer tests while developing.
+- [ ] Remove temporary logs, sets, counters, URL flags, and probe-only allocations from the frame path.
+- [ ] Sweep obsolete `persistent`, composite-VAO, resource-key, helper, metric, comment, and UI vocabulary.
+- [ ] Run focused renderer, resource-manager, static-instance-manager, `RenderWorld`, and runtime tests while developing.
 - [ ] Run `npm run format:check` from `apps/holtburger-3d`.
 - [ ] Run `npm run check` from `apps/holtburger-3d`.
-- [ ] Run `npm run lint` from `apps/holtburger-3d` and treat all warnings as failures.
+- [ ] Run `npm run lint` from `apps/holtburger-3d` and treat warnings as failures.
 - [ ] Run `npm run test:ts` from `apps/holtburger-3d`.
-- [ ] Run `npm run harness:browser` to verify the working browser rendering slice.
-- [ ] Re-profile the centered gameplay view and edge-of-interest stress view with matching settings.
-- [ ] Compare physical state calls, instance-layout setup, object submission time, and total frame time against Phase 1.
+- [ ] Run `npm run harness:browser` plus the two fixed workload commands.
+- [ ] Re-profile physical state calls, layout setup, encoding/upload, draw calls, object-submission CPU, and total render time.
 
 ### Acceptance Criteria
 
-- Automated checks and the browser harness pass.
-- The centered gameplay capture shows materially less object state-setup time without increased draw count or changed visible content.
-- The edge stress view does not regress structurally; any remaining cost is attributable to submitted work rather than repeated immutable-state setup.
-- No permanent expensive diagnostic path was added.
-- The plan records the final pair cardinality, concessions, and profiling result.
+- Formatting, type checks, lint, tests, and browser harnesses pass.
+- The Phase 4 CPU and draw-count gates pass without changed visible content.
+- Physical program, cull, blend, texture, sampler, active-unit, and VAO calls decrease or remain unchanged in both workloads.
+- Portal fixtures retain correct ordering and state isolation, with per-view compaction traffic reported.
+- No permanent expensive diagnostic path remains.
+- The plan records final compatibility-group counts, upload bytes, concessions, and profiling results.
 
 ### Decisions and Course Corrections
 
@@ -280,35 +385,43 @@ This phase is the admitted fallback when Phase 1 shows that post-culling cohort 
 
 ## Risks and Mitigations
 
-| Risk                                                                             | Mitigation                                                                                                                                       |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| The cache becomes stale after another subsystem mutates WebGL state.             | Scope it to renderer-controlled object phases and always begin those phases from unknown state.                                                  |
-| Composite VAOs proliferate with clustered scenery.                               | Create only referenced pairs lazily, measure cardinality first, and stop at the Phase 4 steering point if growth is unreasonable.                |
-| View-local compaction trades state churn for encoding and upload cost.           | Measure visible bytes, CPU upload time, and portal/multi-view duplication before changing persistent artifact contracts.                         |
-| A compaction path becomes generated-scenery-specific policy.                     | Model renderer-neutral compatible static cohort fragments and keep provenance, culling policy, and WebGL resources out of the batching contract. |
-| Geometry replacement leaves VAOs pointing at deleted buffers.                    | Make dependent-VAO destruction part of the resource manager's replace/release invariants and test it directly.                                   |
-| State-oriented sorting breaks transparency.                                      | Restrict the new comparator to opaque/alpha-test work and retain existing transparent algorithms.                                                |
-| Texture dedupe skips an atlas placement update.                                  | Cache physical texture/sampler state only; continue applying logical atlas-rect uniforms per material.                                           |
-| Fallback removal creates incomplete sampler state.                               | Inspect every shader variant and retain one-time/pass-boundary compatible fallback bindings where required.                                      |
-| Instrumentation recreates the diagnostics overhead this work is meant to remove. | Use temporary or one-shot Explorer-only observation and remove it in cleanup.                                                                    |
-| A broad abstraction obscures the hot path.                                       | Keep the applicator object-specific and limited to measured WebGL state; do not build a generic command encoder.                                 |
+| Risk                                                                        | Mitigation                                                                                                                                                             |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The object cache becomes stale after another subsystem mutates WebGL state. | Scope it to renderer-controlled object phases and begin every independent phase from unknown state.                                                                    |
+| Compatibility omits a draw-consumed uniform or state field.                 | Prepare consumed facts once, give every compatibility field a named consumer, and test one reachable difference per field.                                             |
+| Compaction merges across a semantic or portal isolation boundary.           | Restrict generated-scenery grouping to one prepared view/pass and compare the landblock-offset uniform inside that scope.                                              |
+| One batching model becomes a speculative renderer framework.                | Add only the static compatibility function needed now; retain separate dynamic and transparent scheduling policies over the shared arena storage.                      |
+| View-local compaction trades draw churn for excessive encoding/upload cost. | Measure encoding, `bufferSubData`, and object-submission CPU against explicit Phase 4 gates in centered, edge, and multi-view workloads.                               |
+| Retaining CPU fragments materially increases memory.                        | Reuse worker-emitted immutable records under existing leases, remove duplicate persistent GPU storage, and report retained bytes in diagnostics during implementation. |
+| Baking EnvCell residents increases geometry bytes and device-object count.  | Record the admitted `0x00d1ffff` delta, verify selected portal-view draws, and keep the change only if lifecycle and frame-time evidence remain acceptable.            |
+| State-oriented sorting or compaction breaks transparency.                   | Exclude transparent work; preserve existing near-distance and far-compatible algorithms.                                                                               |
+| Texture dedupe skips an atlas placement update.                             | Cache physical texture/sampler state only; keep placement and material uniforms in the draw-compatibility/submission contract.                                         |
+| Fallback removal creates incomplete sampler state.                          | Initialize sampler units once and establish valid compatible fallbacks at explicit pass boundaries.                                                                    |
+| Instrumentation recreates the overhead being optimized.                     | Use profiler captures or temporary one-shot probes and remove them during cleanup.                                                                                     |
+| A broad abstraction obscures the hot path.                                  | Keep the applicator object-specific and the compatibility/grouping policy pure; do not build a generic command encoder.                                                |
 
 ## Definition of Done
 
 - [ ] Object state has one explicit renderer-owned applicator and clear invalidation boundaries.
 - [ ] Redundant program, cull, blend, texture, sampler, active-unit, and VAO calls are skipped.
-- [ ] Persistent instance attributes are configured once per admitted geometry/stream pair, or Phase 4 is explicitly resteered with measured evidence.
-- [ ] Composite VAOs and post-culling cohort compaction are compared using the Phase 1 workload rather than selected by intuition.
-- [ ] Frame-dynamic instance ranges retain correct offset behavior.
-- [ ] Resource replacement, release, and destruction delete dependent composite VAOs exactly once.
-- [ ] Opaque ordering clusters complete pipeline identity without weakening transparency.
+- [ ] Opaque/alpha-test sorting consumes prepared desired state, while static compaction uses a narrower single-draw compatibility comparison.
+- [ ] Spatial scene nodes remain visibility units but no longer force compatible static GPU draw boundaries.
+- [ ] Generated scenery compacts across compatible visible clusters; EnvCell static residents use baked per-cell preparation; dynamics retain their existing run policy.
+- [ ] Persistent GPU instance streams and all of their vocabulary are deleted.
+- [ ] Retained immutable instance data follows existing lease replacement and eviction guarantees.
+- [ ] Dynamic and transparent frame-instance ranges retain correct offsets and ordering.
+- [ ] Program switches no longer repeat invariant sampler initialization or fallback bindings.
 - [ ] Temporary diagnostics are removed.
-- [ ] Formatting, type checks, lint, tests, and the browser harness pass.
-- [ ] Matching before/after profiles demonstrate reduced state-setup cost in the centered gameplay scenario.
-- [ ] No renderer/device concern leaks into scene, worker, or artifact contracts.
+- [ ] Formatting, checks, lint, tests, and browser harnesses pass.
+- [ ] Matching profiles satisfy the Phase 4 CPU/draw gates and report multi-view upload cost.
+- [ ] No renderer/device concern leaks into scene, worker, artifact, or shared runtime contracts, and no generic render-pass framework is introduced.
 
 ## Open Questions
 
-- What measured pair cardinality would make composite VAO object count unacceptable on the target devices? Phase 1 should provide the concrete counts before we choose a limit.
-- How many compatible cluster fragments can be merged in the centered gameplay view, and how many bytes would view-local compaction upload per frame and per portal view?
-- Should the edge-of-interest view have a formal non-regression budget, or remain a qualitative stress case while the centered gameplay view is the optimization target?
+No user decision blocks execution. Implementation must still record:
+
+- the final typed compatibility fields and any difference from the conservative evidence probe;
+- measured encoding and `bufferSubData` cost on the fixed workloads;
+- retained CPU bytes after deleting duplicate persistent GPU buffers;
+- the selected baked-EnvCell portal-view draw/frame-time delta; and
+- per-view generated-scenery upload multiplication in the selected portal fixture.

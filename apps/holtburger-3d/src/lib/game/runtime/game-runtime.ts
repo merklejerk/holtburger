@@ -20,6 +20,7 @@ import {
 	type FrameSettings,
 	type FrameSelectionMetrics,
 	type Renderer,
+	type RendererFrameProfile,
 } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
@@ -663,6 +664,21 @@ export class GameRuntime {
 	/** Return the renderer's latest cold frame-selection snapshot, when available. */
 	getFrameSelectionMetrics(): FrameSelectionMetrics | null {
 		return this.#renderer?.getFrameSelectionMetrics?.() ?? null;
+	}
+
+	/** Return the latest opt-in renderer profile without enabling profiling implicitly. */
+	getRendererFrameProfile(): RendererFrameProfile | null {
+		return this.#renderer?.getFrameProfile?.() ?? null;
+	}
+
+	/** Explicitly enable or tear down renderer profiling for diagnostic frontends. */
+	setRendererFrameProfilingEnabled(enabled: boolean): void {
+		const renderer = this.#renderer;
+		if (!renderer) throw new Error("Renderer is unavailable.");
+		if (!renderer.setFrameProfilingEnabled) {
+			throw new Error("Renderer does not support explicit frame profiling.");
+		}
+		renderer.setFrameProfilingEnabled(enabled);
 	}
 
 	/** Snapshot active authored dynamics and any hook-blocked static visual fallbacks. */

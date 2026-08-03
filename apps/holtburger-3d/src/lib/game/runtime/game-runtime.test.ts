@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type {
@@ -51,11 +51,9 @@ describe("GameRuntime view and interest control", () => {
 		const frameSelectionMetrics: FrameSelectionMetrics = {
 			envCellRenderMode: "portal",
 			envCellShellCullOverrideCount: 0,
-			portalExecutionDurationMs: 0,
 			portalExteriorRenderCount: 0,
 			portalMaskEdgeCount: 0,
 			portalNearPlaneSeedCount: 0,
-			portalPlanningDurationMs: 0,
 			portalRejectedFacingCrossingCount: 0,
 			portalRenderLayerCount: 0,
 			portalRenderNodeCount: 0,
@@ -107,12 +105,15 @@ describe("GameRuntime view and interest control", () => {
 			objectProgramChanges: 0,
 			objectTextureBinds: 0,
 		};
+		const setFrameProfilingEnabled = vi.fn();
 		const renderer: Renderer = {
 			async destroy() {},
 			drawFrame(input) {
 				frames.push(input);
 			},
 			getFrameSelectionMetrics: () => frameSelectionMetrics,
+			getFrameProfile: () => null,
+			setFrameProfilingEnabled,
 		};
 		const pipeline: CommitPipeline = {
 			async prepareLandblockLayers(
@@ -184,6 +185,9 @@ describe("GameRuntime view and interest control", () => {
 			},
 		});
 		expect(runtime.getFrameSelectionMetrics()).toEqual(frameSelectionMetrics);
+		expect(runtime.getRendererFrameProfile()).toBeNull();
+		runtime.setRendererFrameProfilingEnabled(true);
+		expect(setFrameProfilingEnabled).toHaveBeenCalledWith(true);
 		const queriedPoint = createLandblockWorldOrigin("0x0102ffff").add(
 			new Vec3(1, 10, -1),
 		);

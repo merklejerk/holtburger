@@ -1,19 +1,127 @@
 <script lang="ts">
-	import type { FrameSelectionMetrics } from "../lib/game/renderer/renderer";
+	import type {
+		FrameSelectionMetrics,
+		RendererFrameProfile,
+	} from "../lib/game/renderer/renderer";
 	import type { GameRuntime } from "../lib/game/runtime/game-runtime";
 
 	interface Props {
 		/** Latest low-rate snapshot from the active renderer, if it exposes diagnostics. */
 		readonly metrics: FrameSelectionMetrics | null;
+		/** Latest opt-in CPU/GPU profile, or null before the first captured frame. */
+		readonly profile: RendererFrameProfile | null;
+		/** Whether the active renderer currently owns profiling resources. */
+		readonly profilingEnabled: boolean;
+		/** Explicitly create or tear down the renderer profiling session. */
+		readonly setProfilingEnabled: (enabled: boolean) => void;
+		/** Latest authored-dynamic residency diagnostics. */
 		readonly dynamics: ReturnType<
 			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
 	}
 
-	let { metrics, dynamics }: Props = $props();
+	let {
+		metrics,
+		profile,
+		profilingEnabled,
+		setProfilingEnabled,
+		dynamics,
+	}: Props = $props();
 </script>
 
 <div class="explorer-frame-panel">
+	<button
+		type="button"
+		class="explorer-action"
+		disabled={metrics === null}
+		onclick={() => setProfilingEnabled(!profilingEnabled)}
+	>
+		{profilingEnabled ? "Disable frame profiling" : "Enable frame profiling"}
+	</button>
+	{#if profilingEnabled}
+		{#if profile === null}
+			<p>Waiting for the first profiled frame.</p>
+		{:else}
+			<div class="ac-param-panel">
+				<div class="ac-param-row">
+					<span class="ac-param-key">CPU frame / rolling samples</span>
+					<code
+						>{profile.cpu.latestFrameNumber} / {profile.cpu.sampleCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">CPU total latest / mean / p95 ms</span>
+					<code
+						>{profile.cpu.latestTotalMs.toFixed(2)} / {profile.cpu.mean.totalMs.toFixed(
+							2,
+						)} / {profile.cpu.p95TotalMs.toFixed(2)}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key"
+						>CPU mean view / query / contributions / portal plan ms</span
+					>
+					<code
+						>{profile.cpu.mean.viewPreparationMs.toFixed(2)} / {profile.cpu.mean.sceneQueryMs.toFixed(
+							2,
+						)} / {profile.cpu.mean.contributionPreparationMs.toFixed(2)} / {profile.cpu.mean.portalGraphPlanningMs.toFixed(
+							2,
+						)}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key"
+						>CPU mean terrain / opaque / blended / other ms</span
+					>
+					<code
+						>{profile.cpu.mean.terrainSubmissionMs.toFixed(2)} / {profile.cpu.mean.opaqueSubmissionMs.toFixed(
+							2,
+						)} / {profile.cpu.mean.blendedSubmissionMs.toFixed(2)} / {profile.cpu.mean.otherMs.toFixed(
+							2,
+						)}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">CPU mean setup / final ms</span>
+					<code
+						>{profile.cpu.mean.setupMs.toFixed(2)} / {profile.cpu.mean.finalizationMs.toFixed(
+							2,
+						)}</code
+					>
+				</div>
+				{#if profile.gpu.kind === "available"}
+					<div class="ac-param-row">
+						<span class="ac-param-key"
+							>GPU command span / terrain / opaque / blended / other ms</span
+						>
+						<code
+							>{profile.gpu.totalMs.toFixed(2)} / {profile.gpu.terrainMs.toFixed(
+								2,
+							)} / {profile.gpu.opaqueMs.toFixed(2)} / {profile.gpu.blendedMs.toFixed(
+								2,
+							)} / {profile.gpu.otherMs.toFixed(2)}</code
+						>
+					</div>
+					<div class="ac-param-row">
+						<span class="ac-param-key">GPU source frame / pending frames</span>
+						<code
+							>{profile.gpu.frameNumber} / {profile.gpu.pendingFrameCount}</code
+						>
+					</div>
+				{:else if profile.gpu.kind === "unsupported"}
+					<p>GPU timestamp queries are unavailable on this device.</p>
+				{:else if profile.gpu.kind === "disjoint"}
+					<p>GPU clock was disjoint; invalid samples were discarded.</p>
+				{:else}
+					<p>Waiting on {profile.gpu.pendingFrameCount} GPU frame queries.</p>
+				{/if}
+			</div>
+			<p class="explorer-frame-note">
+				Profiling is opt-in and adds CPU clocks plus asynchronous GPU timestamp
+				queries. GPU results arrive from an earlier frame.
+			</p>
+		{/if}
+	{/if}
 	{#if metrics === null}
 		<p>Waiting for the renderer to produce a frame-selection snapshot.</p>
 	{:else}
@@ -191,13 +299,6 @@
 			<div class="ac-param-row">
 				<span class="ac-param-key">Retained portal target bytes</span>
 				<code>{metrics.sceneDomainTargetBytes}</code>
-			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Portal planning / execution ms</span>
-				<code
-					>{metrics.portalPlanningDurationMs.toFixed(2)} /
-					{metrics.portalExecutionDurationMs.toFixed(2)}</code
-				>
 			</div>
 		</div>
 		<p class="explorer-frame-note">

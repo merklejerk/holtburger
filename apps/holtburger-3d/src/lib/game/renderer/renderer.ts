@@ -91,8 +91,6 @@ export interface FrameSelectionMetrics {
 	readonly portalRenderNodeCount: number;
 	readonly portalSubmittedRenderNodeCount: number;
 	readonly portalExteriorRenderCount: number;
-	readonly portalPlanningDurationMs: number;
-	readonly portalExecutionDurationMs: number;
 	readonly sceneDomainTargetCount: number;
 	/** Retained color plus depth-stencil attachment bytes owned by portal targets. */
 	readonly sceneDomainTargetBytes: number;
@@ -130,9 +128,9 @@ export interface FrameSelectionMetrics {
 	readonly frameInstanceUploadCount: number;
 	/** Numeric bytes uploaded for frame-streamed object instances across all views. */
 	readonly frameInstanceUploadBytes: number;
-	/** Transparent object draw calls submitted after sorting. */
+	/** Transparent object draw calls submitted after transparent phase ordering. */
 	readonly submittedTransparentObjectDrawCount: number;
-	/** Frame-streamed transparent instances submitted after sorting. */
+	/** Frame-streamed transparent instances submitted after transparent phase ordering. */
 	readonly submittedTransparentInstanceCount: number;
 	/** Additive object draw calls submitted in their deterministic phase. */
 	readonly submittedAdditiveObjectDrawCount: number;
@@ -152,9 +150,98 @@ export interface FrameSelectionMetrics {
 	readonly objectTextureBinds: number;
 }
 
+/** Non-overlapping renderer CPU wall-time phases aggregated from profiled frames. */
+export interface RendererCpuFrameTimings {
+	/** CPU wall time spent submitting blended object work. */
+	readonly blendedSubmissionMs: number;
+	/** CPU wall time spent resolving and ordering selected scene contributions. */
+	readonly contributionPreparationMs: number;
+	/** CPU wall time spent finalizing renderer diagnostics. */
+	readonly finalizationMs: number;
+	/** CPU wall time spent submitting opaque object work. */
+	readonly opaqueSubmissionMs: number;
+	/** Renderer work outside the named spans, including portal masks and orchestration. */
+	readonly otherMs: number;
+	/** CPU wall time spent planning portal visibility and execution topology. */
+	readonly portalGraphPlanningMs: number;
+	/** CPU wall time spent querying visible scene identities. */
+	readonly sceneQueryMs: number;
+	/** CPU wall time spent preparing frame-global renderer state. */
+	readonly setupMs: number;
+	/** CPU wall time spent submitting terrain work. */
+	readonly terrainSubmissionMs: number;
+	/** CPU wall time spanning the complete renderer frame call. */
+	readonly totalMs: number;
+	/** CPU wall time spent deriving camera, projection, and frustum state. */
+	readonly viewPreparationMs: number;
+}
+
+/** Renderer CPU timings for one explicitly profiled frame. */
+export interface RendererCpuFrameProfile extends RendererCpuFrameTimings {
+	/** Monotonic renderer-local frame identifier. */
+	readonly frameNumber: number;
+}
+
+/** Short rolling CPU profile that exposes both attribution and frame-time variance. */
+export interface RendererCpuFrameProfileWindow {
+	/** Frame identifier of the most recently captured sample. */
+	readonly latestFrameNumber: number;
+	/** Total CPU wall time of the most recently captured sample. */
+	readonly latestTotalMs: number;
+	/** Per-phase arithmetic mean across the retained sample window. */
+	readonly mean: RendererCpuFrameTimings;
+	/** Nearest-rank 95th percentile of total CPU frame time. */
+	readonly p95TotalMs: number;
+	/** Number of frames represented by this profile window. */
+	readonly sampleCount: number;
+}
+
+/** Latest asynchronous GPU timing outcome for an explicitly enabled profiling session. */
+export type RendererGpuFrameProfile =
+	| { readonly kind: "unsupported" }
+	| {
+			readonly kind: "pending";
+			/** Submitted GPU frames whose timestamp results are not yet readable. */
+			readonly pendingFrameCount: number;
+	  }
+	| {
+			readonly kind: "disjoint";
+			/** New GPU frames submitted since invalid timing queries were discarded. */
+			readonly pendingFrameCount: number;
+	  }
+	| {
+			/** GPU timestamp span covering blended object commands. */
+			readonly blendedMs: number;
+			/** Renderer frame identifier associated with this delayed result. */
+			readonly frameNumber: number;
+			readonly kind: "available";
+			/** GPU timestamp span covering opaque object commands. */
+			readonly opaqueMs: number;
+			/** GPU command span outside the named phases. */
+			readonly otherMs: number;
+			/** Submitted GPU frames whose timestamp results are not yet readable. */
+			readonly pendingFrameCount: number;
+			/** GPU timestamp span covering terrain commands. */
+			readonly terrainMs: number;
+			/** GPU timestamp span from the first to last command in the frame. */
+			readonly totalMs: number;
+	  };
+
+/** Latest CPU frame and delayed GPU result from an explicitly enabled profiling session. */
+export interface RendererFrameProfile {
+	/** Synchronous CPU measurements summarized across the recent frame window. */
+	readonly cpu: RendererCpuFrameProfileWindow;
+	/** Most recently resolved asynchronous GPU measurement state. */
+	readonly gpu: RendererGpuFrameProfile;
+}
+
 export interface Renderer {
 	drawFrame(input: FrameInput): void;
 	destroy(): Promise<void>;
 	/** Return a cold diagnostic snapshot when this backend exposes frame selection metrics. */
 	getFrameSelectionMetrics?(): FrameSelectionMetrics;
+	/** Return the latest explicit profiling result, or null while profiling is disabled. */
+	getFrameProfile?(): RendererFrameProfile | null;
+	/** Opt into or fully tear down renderer profiling resources. */
+	setFrameProfilingEnabled?(enabled: boolean): void;
 }

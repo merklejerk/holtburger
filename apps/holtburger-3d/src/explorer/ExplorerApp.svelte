@@ -22,6 +22,7 @@
 		type FrameSettings,
 		type FrameSelectionMetrics,
 		type EnvCellRenderMode,
+		type RendererFrameProfile,
 	} from "../lib/game/renderer/renderer";
 	import {
 		ExplorerCameraCoordinator,
@@ -55,6 +56,8 @@
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let frameSelectionMetrics: FrameSelectionMetrics | null = $state(null);
+	let rendererFrameProfile: RendererFrameProfile | null = $state(null);
+	let rendererFrameProfilingEnabled = $state(false);
 	let authoredDynamicRuntimeDiagnostics: ReturnType<
 		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 	> | null = $state(null);
@@ -118,6 +121,16 @@
 		return gameRuntime?.getStaticObjectRuntimeDiagnostics() ?? null;
 	}
 
+	function updateRendererFrameProfiling(enabled: boolean): void {
+		if (!gameRuntime)
+			throw new Error("Renderer profiling requires an active runtime.");
+		gameRuntime.setRendererFrameProfilingEnabled(enabled);
+		rendererFrameProfilingEnabled = enabled;
+		rendererFrameProfile = enabled
+			? gameRuntime.getRendererFrameProfile()
+			: null;
+	}
+
 	function applyEnvironment(): void {
 		if (activeRegion) {
 			const environment = resolveSceneEnvironment(
@@ -178,6 +191,8 @@
 			runtimeReady = false;
 			cameraLocation = null;
 			frameSelectionMetrics = null;
+			rendererFrameProfile = null;
+			rendererFrameProfilingEnabled = false;
 			authoredDynamicRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
@@ -287,6 +302,7 @@
 					};
 					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {
 						frameSelectionMetrics = gameRuntime.getFrameSelectionMetrics();
+						rendererFrameProfile = gameRuntime.getRendererFrameProfile();
 						authoredDynamicRuntimeDiagnostics =
 							gameRuntime.getAuthoredDynamicRuntimeDiagnostics();
 						lastFrameSelectionSampleAt = frameFinishedAt;
@@ -355,6 +371,9 @@
 				null}
 			{updateTextureFiltering}
 			{frameSelectionMetrics}
+			{rendererFrameProfile}
+			{rendererFrameProfilingEnabled}
+			{updateRendererFrameProfiling}
 			{authoredDynamicRuntimeDiagnostics}
 			{readStaticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}

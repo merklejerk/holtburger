@@ -156,8 +156,8 @@ interface PortalRenderGraphDiagnostics {
 	readonly emptyWindowCount: number;
 	readonly maximumRetainedFragmentsPerScope: number;
 	readonly nearPlaneSeedCount: number;
-	/** Outdoor-to-indoor crossings rejected below the configured projected pixel area. */
-	readonly rejectedOutdoorTransitionFootprintCount: number;
+	/** Non-near-plane crossings rejected below the configured projected pixel area. */
+	readonly rejectedPortalFootprintCount: number;
 	readonly projection: ProjectionDiagnostics;
 	readonly rejectedFacingCrossingCount: number;
 	/** Authored mask boundaries already contained by one depth-continuous render domain. */
@@ -167,8 +167,8 @@ interface PortalRenderGraphDiagnostics {
 	readonly workItemCount: number;
 }
 
-/** Drawing-buffer policy for omitting negligible outdoor-to-indoor portal subtrees. */
-interface OutdoorTransitionFootprintPolicy {
+/** Drawing-buffer policy for omitting work behind negligible projected portal windows. */
+interface PortalFootprintPolicy {
 	/** Physical drawing-buffer dimensions used to convert NDC area into pixel area. */
 	readonly drawingBuffer: {
 		readonly height: number;
@@ -196,7 +196,7 @@ export interface PortalRenderWorkPlan {
 export interface PortalRenderGraphPlanInput extends PreparedPortalProjection {
 	readonly maximumStencilValue: number;
 	readonly nearClipVolume: CameraNearClipVolume;
-	readonly outdoorTransitionFootprint: OutdoorTransitionFootprintPolicy;
+	readonly portalFootprint: PortalFootprintPolicy;
 	readonly rootScope: SceneScope;
 	/** Corruption/failed-invariant guard, never the planner's termination algorithm. */
 	readonly safetyWorkItemLimit: number;
@@ -298,15 +298,15 @@ class PortalPlanningContext {
 	duplicateOrSubsumedWindowStateCount = 0;
 	emptyWindowCount = 0;
 	rejectedFacingCrossingCount = 0;
-	rejectedOutdoorTransitionFootprintCount = 0;
+	rejectedPortalFootprintCount = 0;
 	workItemCount = 0;
 
 	constructor(index: IndexedPortalTopology, input: PortalRenderGraphPlanInput) {
 		this.#index = index;
 		this.#input = input;
 		this.#pixelsPerNdcArea =
-			(input.outdoorTransitionFootprint.drawingBuffer.width *
-				input.outdoorTransitionFootprint.drawingBuffer.height) /
+			(input.portalFootprint.drawingBuffer.width *
+				input.portalFootprint.drawingBuffer.height) /
 			4;
 		this.#projector = new PortalWindowProjector(input);
 	}
@@ -389,8 +389,7 @@ class PortalPlanningContext {
 				nearPlaneSeedCount: maskEdges.filter(
 					(edge) => edge.maskSource.kind === "near-clip-window",
 				).length,
-				rejectedOutdoorTransitionFootprintCount:
-					this.rejectedOutdoorTransitionFootprintCount,
+				rejectedPortalFootprintCount: this.rejectedPortalFootprintCount,
 				projection: finishProjectionDiagnostics(this.#projection),
 				rejectedFacingCrossingCount: this.rejectedFacingCrossingCount,
 				sameDomainBoundaryCrossingCount:
@@ -476,16 +475,8 @@ class PortalPlanningContext {
 				this.emptyWindowCount += 1;
 				continue;
 			}
-			if (
-				this.#rejectsOutdoorTransitionFootprint(
-					crossing,
-					sourceDomain,
-					targetDomain,
-					nearPlaneStraddle,
-					projection.window,
-				)
-			) {
-				this.rejectedOutdoorTransitionFootprintCount += 1;
+			if (this.#rejectsPortalFootprint(nearPlaneStraddle, projection.window)) {
+				this.rejectedPortalFootprintCount += 1;
 				continue;
 			}
 			this.#selectScope(targetDomain, crossing.target);
@@ -522,20 +513,14 @@ class PortalPlanningContext {
 		}
 	}
 
-	#rejectsOutdoorTransitionFootprint(
-		crossing: ScenePortalCrossingInput,
-		sourceDomain: IndexedPortalDomain,
-		targetDomain: IndexedPortalDomain,
+	#rejectsPortalFootprint(
 		nearPlaneStraddle: boolean,
 		window: PortalViewWindow,
 	): boolean {
 		return (
 			!nearPlaneStraddle &&
-			crossing.spatialRelationship.kind === "exterior-transition" &&
-			sourceDomain.kind === "outdoor" &&
-			targetDomain.kind === "indoor-visibility-island" &&
 			portalViewWindowNdcArea(window) * this.#pixelsPerNdcArea <
-				this.#input.outdoorTransitionFootprint.minimumPixelArea
+				this.#input.portalFootprint.minimumPixelArea
 		);
 	}
 
@@ -1191,13 +1176,13 @@ function createExteriorSuffixSubmissions(
 
 function validatePlanInput(input: PortalRenderGraphPlanInput): void {
 	validatePreparedPortalProjection(input);
-	const footprint = input.outdoorTransitionFootprint;
+	const footprint = input.portalFootprint;
 	if (
 		!Number.isFinite(footprint.minimumPixelArea) ||
 		footprint.minimumPixelArea < 0
 	) {
 		throw new Error(
-			"Outdoor transition footprint minimum must be a non-negative finite number.",
+			"Portal footprint minimum must be a non-negative finite number.",
 		);
 	}
 	if (
@@ -1207,7 +1192,7 @@ function validatePlanInput(input: PortalRenderGraphPlanInput): void {
 		footprint.drawingBuffer.height <= 0
 	) {
 		throw new Error(
-			"Outdoor transition footprint drawing buffer must have positive integer dimensions.",
+			"Portal footprint drawing buffer must have positive integer dimensions.",
 		);
 	}
 	if (

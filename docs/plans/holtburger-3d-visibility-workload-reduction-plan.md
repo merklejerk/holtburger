@@ -1,6 +1,6 @@
 # Holtburger 3D Visibility Workload Reduction Plan
 
-Status: planned; implementation has not started.
+Status: active; Phases 0-2 complete with a `64px²` recursive portal-footprint cutoff accepted.
 Created: 2026-08-03
 Related investigation: `docs/plans/holtburger-3d-portal-frame-cpu-investigation.md`
 
@@ -75,7 +75,7 @@ a lower cadence without weakening semantic animation progression.
 
 - `apps/holtburger-3d/src/lib/game/renderer/portal-render-graph.ts`
   - owns scope-local fixed-point traversal, exact projected-window admission, render-domain
-    discovery, and the current outdoor-transition footprint predicate;
+    discovery, and the original entry-only footprint predicate;
   - applies the current cutoff after exact projection and before target-scope selection.
 - `apps/holtburger-3d/src/lib/game/renderer/portal-view-window.ts`
   - owns homogeneous clipping, exact multipart NDC windows, intersection, normalization, coverage
@@ -86,7 +86,7 @@ a lower cadence without weakening semantic animation progression.
   - establishes that traversal coverage belongs to exact scopes while visibility islands own draw
     scheduling.
 - `docs/plans/holtburger-3d-portal-frame-cpu-investigation.md`
-  - records the accepted outdoor-transition threshold matrix, target profiles, diagnostics, and
+  - records the original entry-only threshold matrix, target profiles, diagnostics, and
     residual workload.
 
 ### Generated Scenery
@@ -176,7 +176,7 @@ where practical so content, atlas state, camera, and viewport remain identical.
 
 ### Task Checklist
 
-- [x] Commit or otherwise isolate the accepted outdoor-transition cutoff before changing its
+- [x] Commit or otherwise isolate the accepted entry-only cutoff before changing its
       vocabulary or behavior.
 - [x] Express the indoor-root and hybrid cameras through existing harness controls; add only the
       missing parameterized placement control required for reproducibility, not a camera-specific
@@ -201,7 +201,7 @@ where practical so content, atlas state, camera, and viewport remain identical.
 
 ### Decisions and Course Corrections
 
-- The accepted outdoor-transition cutoff and this plan were isolated as commits `921ba1a8` and
+- The accepted entry-only cutoff and this plan were isolated as commits `921ba1a8` and
   `4e01b23d` before Phase 0 measurement began. The pre-existing `ACE`, `ACViewer`, and app-local
   `AGENTS.md` worktree changes were excluded.
 - Existing EnvCell position and orientation controls were sufficient for indoor and hybrid roots.
@@ -215,14 +215,14 @@ where practical so content, atlas state, camera, and viewport remain identical.
   contribution, and submits 72 static draws. The established hybrid camera remains EnvCell
   `0x7d640113`, position `[24078.5, 13.7, -19328.25]`, yaw/pitch `0`; it emits two nodes, two masks,
   one exterior render, 349 static draws, and 1,748 generated instance-fragment occurrences.
-- Every measurement explicitly set `--minimum-outdoor-transition-pixel-area 0`; generated
+- Every measurement explicitly set `--minimum-portal-footprint-pixel-area 0`; generated
   footprint rejection and visual animation cadence do not yet exist, so their baseline modes are
   structurally exact/full cadence.
 
 #### Reproducible Phase 0 Cameras
 
 All commands run from `apps/holtburger-3d`. Shared quality flags are physical viewport `690x852`,
-device scale `1`, anisotropic 2x filtering, portal frame mode, and a zero outdoor-transition cutoff.
+device scale `1`, anisotropic 2x filtering, portal frame mode, and a zero portal-footprint cutoff.
 
 | Workload                 | Parameterized camera                                                                                                                |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -313,7 +313,7 @@ evidence remain.
 
 ### Design
 
-Replace outdoor-transition-specific vocabulary with one recursive portal-footprint policy. After
+Replace entry-only vocabulary with one recursive portal-footprint policy. After
 each crossing is projected and intersected with its inherited window, reject a non-near-plane
 crossing whose final physical-pixel area is strictly below the configured threshold. Apply the
 decision before target-scope selection for cross-domain and same-domain traversal alike.
@@ -324,22 +324,22 @@ crossings and can admit the same target through a larger window.
 
 ### Task Checklist
 
-- [ ] Rename `minimumOutdoorTransitionPixelArea`, its default constant, planner policy, diagnostics,
+- [x] Rename the entry-only setting, default constant, planner policy, diagnostics,
       UI label, harness flag, tests, and documentation to generic portal-footprint vocabulary in one
       clean cutover.
-- [ ] Replace `#rejectsOutdoorTransitionFootprint()` with a predicate that depends only on the
+- [x] Collapse `#rejectsPortalFootprint()` to a predicate that depends only on the
       non-near-plane state, final inherited window area, and configured threshold.
-- [ ] Preserve zero-threshold graph identity and strict-less-than equality behavior.
-- [ ] Preserve the near-plane exemption for every crossing class.
-- [ ] Prove same-domain pruning omits the target scope and descendants without manufacturing a mask
+- [x] Preserve zero-threshold graph identity and strict-less-than equality behavior.
+- [x] Preserve the near-plane exemption for every crossing class.
+- [x] Prove same-domain pruning omits the target scope and descendants without manufacturing a mask
       edge or splitting its render domain.
-- [ ] Prove small indoor exits can omit exterior work while larger alternate exits still admit it.
-- [ ] Add dense-cycle, L-shaped re-entry, reciprocal, near-plane, indoor-root, and hybrid regression
+- [x] Prove small indoor exits can omit exterior work while larger alternate exits still admit it.
+- [x] Add dense-cycle, L-shaped re-entry, reciprocal, near-plane, indoor-root, and hybrid regression
       coverage.
-- [ ] Sweep candidate thresholds across the complete benchmark matrix. Use one universal threshold
+- [x] Sweep candidate thresholds across the complete benchmark matrix. Use one universal threshold
       unless evidence demonstrates a concrete crossing class that requires a distinct value.
-- [ ] Update the portable diagnostic schema once for the vocabulary and setting change.
-- [ ] Remove temporary crossing-class distributions after selecting or rejecting the policy.
+- [x] Update the portable diagnostic schema once for the vocabulary and setting change.
+- [x] Remove temporary crossing-class distributions after selecting or rejecting the policy.
 
 ### Acceptance Criteria
 
@@ -356,20 +356,47 @@ crossings and can admit the same target through a larger window.
 
 ### Decisions and Course Corrections
 
-- To be completed during execution.
+- The clean cutover uses `minimumPortalFootprintPixelArea`, `PortalFootprintPolicy`,
+  `rejectedPortalFootprintCount`, and `--minimum-portal-footprint-pixel-area`. No compatibility
+  aliases preserve the deleted entry-only policy vocabulary.
+- The Explorer frame diagnostic schema advances from version `2` to `3` because both the effective
+  setting and rejection metric changed names in the exported JSON contract.
+- The rejection predicate now consumes only the near-plane classification and final inherited
+  window. Same-domain and cross-domain crossings therefore share one decision before target-scope
+  selection; renderer-domain classification remains downstream and unchanged.
+- Focused coverage proves strict threshold equality, near-plane retention, same-domain descendant
+  omission, indoor-exit exterior omission, and larger alternate-route admission. The existing
+  dense-cycle, L-shaped re-entry, reciprocal, exact-oracle, internal executor, and hybrid executor
+  fixtures all continue to pass at the zero-threshold identity baseline.
+- DA55 threshold sweeps compared `0`, `4`, `16`, and `64px²`. The generic `16px²` policy rejected
+  four crossings, reduced portal nodes from 11 to 8 and static draws from 887 to 816, and reduced
+  mean profiled renderer CPU from `4.994ms` to `4.416ms` (`11.6%`) over matched 3-second captures.
+  `4px²` removed three crossings but showed no net timing reduction in its short sample. `64px²`
+  removed nine crossings and 117 static draws but measured `4.382ms`, effectively equal to
+  `16px²` on SwiftShader.
+- The `16px²` indoor-root and hybrid acceptance cameras rejected zero crossings. DC58 with EnvCell
+  radius zero retained its single outdoor node and rejected zero crossings. A parameterized DA55
+  sky-to-scene camera transition completed without errors; its final graph fell from 16 to 12 nodes
+  and from 1,154 to 1,068 static draws. Matched captures were visually indistinguishable under
+  inspection with normalized pixel RMSE `0.00393`.
+- Target-native Explorer use at `16px²` was anecdotally faster and showed no portal pop, disappearing
+  content, or flicker. Target-native motion at `64px²` exposed only very-far-distance portal pop,
+  which the user accepted as the intended fidelity/performance trade. The larger cutoff is therefore
+  the selected universal production default; the explicit override remains for diagnostics, not as
+  a parallel production policy.
 
 ## Phase 2: Portal Resteering Gate
 
-- [ ] Compare rejected crossing classes, eliminated descendants, planner cost, contribution cost,
+- [x] Compare rejected crossing classes, eliminated descendants, planner cost, contribution cost,
       submission work, screenshots, and motion behavior.
-- [ ] Decide whether recursive rejection ships with one threshold, class-specific thresholds, or
+- [x] Decide whether recursive rejection ships with one threshold, class-specific thresholds, or
       disabled. Do not retain unused policy fields.
-- [ ] Re-run the remaining generated and animation phases against the new settled workload.
-- [ ] Update both this plan and the portal CPU investigation with the accepted evidence.
-- [ ] Remove every portal distribution probe, measurement-only cycle, and unused harness control;
+- [x] Re-run the remaining generated and animation phases against the new settled workload.
+- [x] Update both this plan and the portal CPU investigation with the accepted evidence.
+- [x] Remove every portal distribution probe, measurement-only cycle, and unused harness control;
       retain only selected production settings, their explicit single-value overrides, and tests
       protecting lasting behavior.
-- [ ] Commit the portal phase independently before beginning generated-instance work.
+- [x] Commit the portal phase independently before beginning generated-instance work.
 
 ## Phase 3: Establish a Generated-Instance Cull Contract
 
@@ -471,6 +498,14 @@ Initial owner staging still produces a complete pose before publication. Skipped
 not mutate the last published presentation; the next sample evaluates the current clock and effect
 state directly rather than replaying missed visual interpolation.
 
+The current conservative animation-wide bounds belong specifically to anchored
+`AuthoredDynamicSource` residents: their authored scene root remains fixed while one known default
+clip moves visual parts beneath it. Do not silently promote that into the contract for future
+runtime-authored actors. Before such actors reuse this path, define authoritative root-motion
+ownership and a replaceable conservative envelope for the current appearance/clip. Runtime
+locomotion moves the authoritative root; presentation-only root translation stays in the local clip
+envelope. Never union every possible runtime animation into one lifetime AABB.
+
 ### Task Checklist
 
 - [ ] Introduce explicit `advance(timeSeconds)` and `sample(nodeIds)` operations with types that make
@@ -481,6 +516,8 @@ state directly rather than replaying missed visual interpolation.
 - [ ] Make duplicate or unknown sample requests fail loudly.
 - [ ] Change `DynamicEntitySystem.publishPresentation()` to accept sparse current samples while
       retaining exact entity ownership validation.
+- [ ] Keep the existing swept-bound policy explicitly scoped to anchored authored dynamics; do not
+      introduce a speculative runtime-actor fallback or generic lifetime-bound contract.
 - [ ] Add deterministic tests proving full-cadence and sparse-cadence runs reach identical semantic
       state and produce the same pose/effect presentation when sampled at the same final time.
 
@@ -599,7 +636,7 @@ Dry-run two scheduling shapes before choosing the cutover:
 
 ## Definition of Done
 
-- [ ] Recursive portal footprint rejection is either accepted with measured thresholds or removed.
+- [x] Recursive portal footprint rejection is either accepted with measured thresholds or removed.
 - [ ] Generated screen-size culling is either accepted with positive net benefit or removed.
 - [ ] Offscreen visual cadence reduction is either accepted with exact semantic behavior or removed.
 - [ ] Each accepted policy is explicit, typed, validated, recorded in diagnostics, and disabled by a

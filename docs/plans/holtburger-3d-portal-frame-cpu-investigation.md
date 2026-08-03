@@ -1,9 +1,9 @@
 # Holtburger 3D Portal Frame CPU Investigation
 
 Date: 2026-08-02
-Status: active target-native motion and reprofile validation; a `16px²` outdoor-transition cutoff
-is accepted under the deterministic harness, and empty frame-instance storage work and comparison
-sorting are accepted as removed on the target Apple/WebKit renderer.
+Status: active target-native reprofile validation; a universal `64px²` recursive portal-footprint
+cutoff is accepted, and empty frame-instance storage work and comparison sorting are accepted as
+removed on the target Apple/WebKit renderer.
 
 ## Context and Boundaries
 
@@ -1153,19 +1153,19 @@ After the empty-reset A/B:
   but this pair does not establish a user-visible wall-frame improvement; GPU work, presentation,
   sampling granularity, and ordinary frame variance remain outside this cutover's claim.
 
-## Phase 10: Cull Subpixel Outdoor-to-Indoor Portal Footprints
+## Phase 10: Cull Negligible Recursive Portal Footprints
 
-Status: implemented and accepted at a `16px²` production cutoff under the deterministic harness;
-target Apple/WebKit motion validation remains follow-up evidence.
+Status: implemented and accepted at a universal `64px²` production cutoff under deterministic and
+target Apple/WebKit motion validation.
 
 ### Goal
 
-Avoid constructing and consuming an interior render subtree when its outdoor transition portal's
-exact inherited screen-space window is too small to justify the downstream CPU and GPU work.
+Avoid constructing and consuming work behind any portal whose exact inherited screen-space window
+is too small to justify the downstream CPU and GPU work.
 
 This deliberately permits a fidelity/performance deviation from the retail client. The cutover is
-narrowly owned by outdoor-to-indoor transition policy; indoor traversal, indoor exits, same-domain
-boundaries, and near-plane crossings retain exact behavior.
+owned by one recursive portal-footprint policy across indoor traversal, indoor exits, same-domain
+boundaries, and exterior transitions. Near-plane crossings retain exact behavior.
 
 ### Structural Boundary
 
@@ -1180,16 +1180,16 @@ independent crossings and can still admit the same target scope.
 
 ### Task Checklist
 
-- [x] Add one explicit, typed minimum outdoor-transition pixel-area policy with zero meaning
+- [x] Add one explicit, typed minimum portal-footprint pixel-area policy with zero meaning
       disabled; do not infer a threshold from camera distance.
 - [x] Compute footprint from the already-normalized exact portal window without adding bounds or
       distance approximations.
-- [x] Reject only authored outdoor-to-indoor, non-near-plane transitions after exact projection and
-      before any target-domain work.
+- [x] Reject every non-near-plane crossing below the threshold after exact projection and before
+      any target-domain work.
 - [x] Retain one diagnostic count whose concrete scenario is a projected transition below the
       active threshold.
-- [x] Add focused planner coverage for disabled policy, threshold equality, rejection, near-plane
-      exemption, unaffected crossing directions, and alternate routes.
+- [x] Add focused planner coverage for disabled policy, threshold equality, same-domain descendant
+      rejection, indoor-exit rejection, near-plane exemption, and alternate routes.
 - [x] Expose an explicit threshold override through the browser harness and record the effective
       value in the existing frame-settings snapshot.
 - [x] Measure DA55 at `0`, `1`, `4`, `16`, and `64` drawing-buffer pixels squared while preserving
@@ -1200,10 +1200,10 @@ independent crossings and can still admit the same target scope.
 ### Acceptance Criteria
 
 - A zero threshold produces the exact pre-phase graph and metrics.
-- A visible outdoor-to-indoor crossing below a positive threshold contributes no target scope,
-  mask edge, render node, or descendant work and increments the rejection count once.
+- A visible crossing below a positive threshold contributes no target scope, mask edge, render
+  node, or descendant work and increments the rejection count once.
 - Equality is retained; only footprints strictly below the configured threshold are rejected.
-- Near-plane-straddling transitions and every non-outdoor-to-indoor crossing ignore the cutoff.
+- Near-plane-straddling transitions ignore the cutoff regardless of crossing class.
 - Invalid thresholds or drawing-buffer extents fail at the planner boundary.
 - Type checking, lint, dead-code analysis, Rust clippy, the full TypeScript suite, and the canonical
   browser harness pass. Touched files satisfy Prettier; the repository-wide formatting check still
@@ -1217,9 +1217,21 @@ independent crossings and can still admit the same target scope.
   edge, target node, scene query, contribution preparation, submission, or descendant traversal.
 - Kept near-plane crossings exact and exempt. A portal intersecting the camera near volume can own
   the current transition even when its projected polygon is numerically small.
-- Selected `16px²`, the first measured cutoff that removes a complete subtree. Rejected `64px²`:
-  it retained the same nine-node graph and removed only five additional static draws while
-  quadrupling the fidelity cutoff.
+- Generalized the original entry-only predicate without adding topology branches: the lasting
+  predicate consumes only near-plane status, final inherited-window area, and the threshold.
+- Selected one universal `16px²` cutoff. On the current DA55 baseline it reduces portal nodes from
+  11 to 8, static draws from 887 to 816, and mean profiled renderer CPU from `4.994ms` to `4.416ms`
+  (`11.6%`). The indoor-root and hybrid acceptance cameras reject zero crossings.
+- `64px²` removed nine crossings and 117 static draws, but its `4.382ms` SwiftShader mean was
+  effectively equal to `16px²`. Target-native Explorer motion showed only very-far-distance portal
+  pop, which the user accepted as the intended fidelity/performance concession. It is therefore the
+  selected universal production default.
+- A DA55 sky-to-scene transition reduced the settled graph from 16 to 12 nodes and static draws from
+  1,154 to 1,068. Matched final captures were visually indistinguishable under inspection with
+  normalized pixel RMSE `0.00393`.
+- Anecdotal target-native use at `16px²` improved Explorer performance without portal pop,
+  disappearing content, or flicker. The subsequent accepted `64px²` motion check exposed only the
+  explicitly accepted very-far-distance pop.
 - Removed the temporary in-process sweep after capturing the threshold matrix. The permanent
   harness retains only the explicit single-threshold override.
 
@@ -1342,14 +1354,17 @@ The one-process DA55 sweep produced:
   sampled CPU from `14.1ms` to `2.0ms`, and left exterior rendering unchanged at `14.7ms`.
 - Stopped the buffer-streaming line rather than adding an unmeasured ring-buffer or synchronization
   design.
-- Added outdoor-to-indoor projected-window rejection after exact intersection and before target
-  scope selection, with near-plane, reverse-direction, and alternate-route guarantees.
-- Swept `0/1/4/16/64px²` within one settled DA55 process and selected `16px²`, which removed two
-  portal nodes and `31` static draws; rejected `64px²` as a dominated fidelity tradeoff.
+- Added entry-only projected-window rejection after exact intersection and before target scope
+  selection, with near-plane, reverse-direction, and alternate-route guarantees.
+- The original entry-only `0/1/4/16/64px²` sweep selected `16px²`, which removed two portal nodes
+  and `31` static draws. Recursive generalization and target-native motion validation later promoted
+  `64px²` rather than retaining the original classification-specific conclusion.
 - Added the effective cutoff and rejected-transition count to portable frame diagnostics and kept
   an explicit browser-harness override after removing the temporary sweep.
 - Bumped the Explorer frame diagnostic schema to version `2` because the portable settings and
   selection-metric contract gained the cutoff and rejection count.
+- Bumped the Explorer frame diagnostic schema to version `3` when the generic recursive cutover
+  renamed that setting and rejection metric in the exported JSON contract.
 
 ## Definition of Done
 

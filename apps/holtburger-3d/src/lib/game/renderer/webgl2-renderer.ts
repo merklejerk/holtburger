@@ -254,7 +254,7 @@ interface MutableFrameSelectionMetrics {
 	portalMaskEdgeCount: number;
 	portalNearPlaneSeedCount: number;
 	portalRejectedFacingCrossingCount: number;
-	portalRejectedOutdoorTransitionFootprintCount: number;
+	portalRejectedFootprintCount: number;
 	portalSameDomainBoundaryCrossingCount: number;
 	portalAdmittedScopeWindowStateCount: number;
 	portalRenderLayerCount: number;
@@ -332,8 +332,8 @@ export class WebGL2Renderer implements Renderer {
 	/** Requested quality captured at frame entry and consumed by every nested draw path. */
 	#frameTextureFiltering: TextureFilteringPolicy =
 		DEFAULT_TEXTURE_FILTERING_POLICY;
-	/** Requested outdoor transition footprint cutoff captured once at frame entry. */
-	#minimumOutdoorTransitionPixelArea = 0;
+	/** Requested portal footprint cutoff captured once at frame entry. */
+	#minimumPortalFootprintPixelArea = 0;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
@@ -355,7 +355,7 @@ export class WebGL2Renderer implements Renderer {
 		portalMaskEdgeCount: 0,
 		portalNearPlaneSeedCount: 0,
 		portalRejectedFacingCrossingCount: 0,
-		portalRejectedOutdoorTransitionFootprintCount: 0,
+		portalRejectedFootprintCount: 0,
 		portalSameDomainBoundaryCrossingCount: 0,
 		portalAdmittedScopeWindowStateCount: 0,
 		portalRenderLayerCount: 0,
@@ -491,8 +491,8 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const setupStartedAt = profile?.beginCpuPhase();
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
-		this.#minimumOutdoorTransitionPixelArea =
-			input.frameSettings.quality.minimumOutdoorTransitionPixelArea;
+		this.#minimumPortalFootprintPixelArea =
+			input.frameSettings.quality.minimumPortalFootprintPixelArea;
 		this.#resizeCanvasForDpr();
 		this.#resetFrameSelectionMetrics(
 			input.views.length,
@@ -649,8 +649,8 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalNearPlaneSeedCount += diagnostics.nearPlaneSeedCount;
 		metrics.portalRejectedFacingCrossingCount +=
 			diagnostics.rejectedFacingCrossingCount;
-		metrics.portalRejectedOutdoorTransitionFootprintCount +=
-			diagnostics.rejectedOutdoorTransitionFootprintCount;
+		metrics.portalRejectedFootprintCount +=
+			diagnostics.rejectedPortalFootprintCount;
 		metrics.portalSameDomainBoundaryCrossingCount +=
 			diagnostics.sameDomainBoundaryCrossingCount;
 		metrics.portalAdmittedScopeWindowStateCount +=
@@ -886,12 +886,12 @@ export class WebGL2Renderer implements Renderer {
 				...prepared,
 				maximumStencilValue: MAXIMUM_PORTAL_RENDER_LAYER,
 				nearClipVolume,
-				outdoorTransitionFootprint: {
+				portalFootprint: {
 					drawingBuffer: {
 						height: this.#frameHeight,
 						width: this.#frameWidth,
 					},
-					minimumPixelArea: this.#minimumOutdoorTransitionPixelArea,
+					minimumPixelArea: this.#minimumPortalFootprintPixelArea,
 				},
 				rootScope,
 				safetyWorkItemLimit,
@@ -1357,7 +1357,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalMaskEdgeCount = 0;
 		metrics.portalNearPlaneSeedCount = 0;
 		metrics.portalRejectedFacingCrossingCount = 0;
-		metrics.portalRejectedOutdoorTransitionFootprintCount = 0;
+		metrics.portalRejectedFootprintCount = 0;
 		metrics.portalSameDomainBoundaryCrossingCount = 0;
 		metrics.portalAdmittedScopeWindowStateCount = 0;
 		metrics.portalRenderLayerCount = 0;

@@ -9,13 +9,13 @@ import {
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
 
-/** First measured physical-pixel cutoff that removes a complete DA55 interior subtree. */
-export const DEFAULT_MINIMUM_OUTDOOR_TRANSITION_PIXEL_AREA = 16;
+/** Current physical-pixel cutoff for omitting negligible recursive portal subtrees. */
+export const DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA = 64;
 
 /** Dynamic renderer quality choices independent from content and resource identity. */
 interface RenderQualitySettings {
-	/** Outdoor-to-indoor transition windows smaller than this physical pixel area are omitted. */
-	readonly minimumOutdoorTransitionPixelArea: number;
+	/** Non-near-plane portal windows smaller than this physical pixel area are omitted. */
+	readonly minimumPortalFootprintPixelArea: number;
 	/** Global draw-time policy for filterable normalized textures. */
 	readonly textureFiltering: TextureFilteringPolicy;
 }
@@ -35,8 +35,8 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 	distanceFogEnabled: true,
 	envCellRenderMode: "portal",
 	quality: {
-		minimumOutdoorTransitionPixelArea:
-			DEFAULT_MINIMUM_OUTDOOR_TRANSITION_PIXEL_AREA,
+		minimumPortalFootprintPixelArea:
+			DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
 		textureFiltering: DEFAULT_TEXTURE_FILTERING_POLICY,
 	},
 };
@@ -90,8 +90,8 @@ export interface FrameSelectionMetrics {
 	readonly portalMaskEdgeCount: number;
 	readonly portalNearPlaneSeedCount: number;
 	readonly portalRejectedFacingCrossingCount: number;
-	/** Outdoor-to-indoor crossings omitted below the configured projected footprint. */
-	readonly portalRejectedOutdoorTransitionFootprintCount: number;
+	/** Non-near-plane crossings omitted below the configured projected footprint. */
+	readonly portalRejectedFootprintCount: number;
 	/** Mask boundaries omitted because both endpoints share one render domain. */
 	readonly portalSameDomainBoundaryCrossingCount: number;
 	/** Novel scope-local portal windows admitted by the bounded planner. */

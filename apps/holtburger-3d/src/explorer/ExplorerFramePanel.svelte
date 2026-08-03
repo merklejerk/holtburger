@@ -391,6 +391,12 @@
 					>
 				</div>
 				<div class="ac-param-row">
+					<span class="ac-param-key">Facing / footprint rejects</span>
+					<code
+						>{metrics.portalRejectedFacingCrossingCount} / {metrics.portalRejectedOutdoorTransitionFootprintCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
 					<span class="ac-param-key">Retained targets / bytes</span>
 					<code
 						>{metrics.sceneDomainTargetCount} / {metrics.sceneDomainTargetBytes}</code

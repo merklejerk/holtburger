@@ -12,7 +12,11 @@ import type {
 	AuthoredDynamicSource,
 	ResolvedOutdoorStaticLayerSource,
 } from "../resolution/landblock-layer";
-import type { FrameSelectionMetrics, Renderer } from "../renderer/renderer";
+import {
+	DEFAULT_MINIMUM_OUTDOOR_TRANSITION_PIXEL_AREA,
+	type FrameSelectionMetrics,
+	type Renderer,
+} from "../renderer/renderer";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
@@ -55,6 +59,7 @@ describe("GameRuntime view and interest control", () => {
 			portalMaskEdgeCount: 0,
 			portalNearPlaneSeedCount: 0,
 			portalRejectedFacingCrossingCount: 0,
+			portalRejectedOutdoorTransitionFootprintCount: 0,
 			portalRenderLayerCount: 0,
 			portalRenderNodeCount: 0,
 			portalSameDomainBoundaryCrossingCount: 0,
@@ -171,6 +176,8 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: true,
 			envCellRenderMode: "portal",
 			quality: {
+				minimumOutdoorTransitionPixelArea:
+					DEFAULT_MINIMUM_OUTDOOR_TRANSITION_PIXEL_AREA,
 				textureFiltering: "anisotropic-2x",
 			},
 		});
@@ -178,6 +185,7 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
+				minimumOutdoorTransitionPixelArea: 4,
 				textureFiltering: "nearest",
 			},
 		});
@@ -186,6 +194,7 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
+				minimumOutdoorTransitionPixelArea: 4,
 				textureFiltering: "nearest",
 			},
 		});

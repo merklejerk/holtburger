@@ -68,6 +68,7 @@ try {
 						relocateLandblockId: options.relocateLandblockId,
 						portalTrace: result.portalTrace,
 						frameMode: options.frameMode,
+						frameSettings: result.state.frameSettings,
 						frameProfile: result.state.frameProfile,
 						textureFiltering: options.textureFiltering,
 						filteringCycleStates: result.filteringCycleStates,
@@ -158,6 +159,7 @@ function parseArgs(args) {
 		envCellCameraId: null,
 		envCellCameraPosition: null,
 		portalWorkLimit: DEFAULT_PORTAL_GRAPH_WORK_LIMIT,
+		minimumOutdoorTransitionPixelArea: null,
 		probePortalGraph: false,
 		executePortal: false,
 		frameMode: null,
@@ -314,6 +316,19 @@ function parseArgs(args) {
 					parsed.portalWorkLimit <= 0
 				) {
 					throw new Error("--portal-work-limit must be a positive integer.");
+				}
+				break;
+			case "--minimum-outdoor-transition-pixel-area":
+				parsed.minimumOutdoorTransitionPixelArea = Number(
+					requireValue(args, ++index, arg),
+				);
+				if (
+					!Number.isFinite(parsed.minimumOutdoorTransitionPixelArea) ||
+					parsed.minimumOutdoorTransitionPixelArea < 0
+				) {
+					throw new Error(
+						"--minimum-outdoor-transition-pixel-area must be a non-negative number.",
+					);
 				}
 				break;
 			case "--probe-portal-graph":
@@ -529,6 +544,8 @@ Options:
                          Canonical position for the EnvCell camera.
   --portal-work-limit <n>
                          Explicit planner safety bound. Default: ${DEFAULT_PORTAL_GRAPH_WORK_LIMIT}
+  --minimum-outdoor-transition-pixel-area <px2>
+                         Override the production outdoor-to-indoor footprint cutoff.
   --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
   --execute-portal
                          Execute the complete planned graph through production GPU passes.
@@ -655,6 +672,7 @@ function briefHarnessReport(result) {
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
 		frameProfile: result.state.frameProfile,
+		frameSettings: result.state.frameSettings,
 		initialMetrics: result.initialState.metrics,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
 		filteringCycle: result.filteringCycleStates.map(
@@ -751,6 +769,7 @@ function assertModeCycle(initialState, states) {
 				"portalRenderLayerCount",
 				"portalRenderNodeCount",
 				"portalRejectedFacingCrossingCount",
+				"portalRejectedOutdoorTransitionFootprintCount",
 				"portalSameDomainBoundaryCrossingCount",
 				"portalSubmittedRenderNodeCount",
 				"submittedPortalApertureDrawCount",
@@ -1111,6 +1130,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				options.cameraPitchDegrees,
 			],
 		);
+		if (options.minimumOutdoorTransitionPixelArea !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumOutdoorTransitionPixelArea",
+				[options.minimumOutdoorTransitionPixelArea],
+			);
+		}
 		if (options.filteringCycle || options.textureFiltering !== null) {
 			await evaluate(
 				client,

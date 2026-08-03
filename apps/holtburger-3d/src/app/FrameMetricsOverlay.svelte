@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { untrack } from "svelte";
-
-	const DEFAULT_EMA_WINDOW_MS = 1000;
-	const MAX_DISPLAY_FPS = 1000;
+	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 	export interface FrameMetrics {
 		/** Total milliseconds spent in the runtime tick phase. */
@@ -20,7 +18,10 @@
 		emaWindowMs?: number;
 	}
 
-	let { metrics, emaWindowMs = DEFAULT_EMA_WINDOW_MS }: Props = $props();
+	let {
+		metrics,
+		emaWindowMs = FRONTEND_TUNING.diagnostics.frameMetricsEmaWindowMs,
+	}: Props = $props();
 	let smoothedMetrics: FrameMetrics | null = $state(null);
 	let lastSampleAt: number | null = null;
 
@@ -65,7 +66,9 @@
 		value === null ? 0 : 1000 / Math.max(value.frameMs, 0.001);
 	const fps = $derived(calculateFramesPerSecond(smoothedMetrics));
 	const displayFps = $derived(
-		fps > MAX_DISPLAY_FPS ? `${MAX_DISPLAY_FPS}+` : fps.toFixed(0),
+		fps > FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond
+			? `${FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond}+`
+			: fps.toFixed(0),
 	);
 </script>
 

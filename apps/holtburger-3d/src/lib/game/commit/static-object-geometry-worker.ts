@@ -36,11 +36,12 @@ import { FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES } from "./artifacts";
 import { resolveObjectTriangleMaterial } from "./object-material-binding";
 import { composeObjectPartTransform } from "../resolution/object-part-transform";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 
-/** Two deterministic buckets per axis balance scenery rejection against extra draw submissions. */
-const GENERATED_SCENERY_CLUSTER_GRID_SIZE = 2;
+/** Configured deterministic buckets balance scenery rejection against extra draw submissions. */
 const GENERATED_SCENERY_CLUSTER_WORLD_SIZE =
-	OUTDOOR_LANDBLOCK_WORLD_SIZE / GENERATED_SCENERY_CLUSTER_GRID_SIZE;
+	OUTDOOR_LANDBLOCK_WORLD_SIZE /
+	FRONTEND_TUNING.workloads.generatedSceneryClusterGridSize;
 
 /** One closed geometry job containing no runtime, device, or atlas callbacks. */
 export interface StaticObjectGeometryPreparationJob {
@@ -400,7 +401,7 @@ function sceneryClusterIndex(coordinate: number): number {
 	return Math.max(
 		0,
 		Math.min(
-			GENERATED_SCENERY_CLUSTER_GRID_SIZE - 1,
+			FRONTEND_TUNING.workloads.generatedSceneryClusterGridSize - 1,
 			Math.floor(coordinate / GENERATED_SCENERY_CLUSTER_WORLD_SIZE),
 		),
 	);

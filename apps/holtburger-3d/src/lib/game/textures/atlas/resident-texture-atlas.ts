@@ -13,7 +13,6 @@ import type { TexturePreparer } from "../texture-preparer";
 import {
 	assetTextureKeyMatchesSource,
 	isPackedObjectTexturePurpose,
-	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
 	texturePixelFormatByteLength,
 	texturePurposePolicy,
 	type AssetTextureFact,
@@ -30,6 +29,7 @@ import {
 	AtlasPagePublication,
 	type AtlasPagePublicationDiagnostics,
 } from "./page-publication";
+import { FRONTEND_TUNING } from "../../../frontend-tuning";
 
 /** Exact owner/revision requirement handle; callers retain it for activation or stale cleanup. */
 export interface AtlasRequirementHandle<TOwner extends string> {
@@ -123,9 +123,6 @@ interface PurposeRebuildPlans {
 	readonly stableNewPageCount: number;
 }
 
-/** Maximum complete replacement pages an optional compaction may materialize in one mutation. */
-const MAX_COMPACTION_REBUILD_PAGES = 2;
-
 /**
  * Sole authority for revision-scoped object-atlas claims and retained prepared sources.
  *
@@ -179,7 +176,8 @@ export class ResidentTextureAtlas<TOwner extends string> {
 				? null
 				: new AtlasPagePublication(
 						physical.renderResources,
-						physical.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+						physical.pageSize ??
+							FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
 					);
 	}
 
@@ -560,7 +558,8 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			shouldAcceptCompaction(
 				plans.stable,
 				plans.compact,
-				MAX_COMPACTION_REBUILD_PAGES,
+				FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+					.maximumCompactionRebuildPages,
 			) &&
 			(await this.#tryPublishCompaction(purpose, plans))
 		) {
@@ -692,7 +691,11 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		});
 		const builtPages = await Promise.all(
 			pagesToBuild.map((page) =>
-				this.#buildPage(page, pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE),
+				this.#buildPage(
+					page,
+					pageSize ??
+						FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+				),
 			),
 		);
 		const existingPageIds = new Set(

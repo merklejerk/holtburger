@@ -18,10 +18,6 @@ export function isTextureFilteringPolicy(
 	return (TEXTURE_FILTERING_POLICIES as readonly string[]).includes(value);
 }
 
-/** Default requested filtering quality before device capability resolution. */
-export const DEFAULT_TEXTURE_FILTERING_POLICY: TextureFilteringPolicy =
-	"anisotropic-2x";
-
 /** Device-independent texture filtering limits reported to renderer and frontend consumers. */
 export interface TextureFilteringCapabilities {
 	/** Maximum supported anisotropy, where one means anisotropic filtering is unavailable. */

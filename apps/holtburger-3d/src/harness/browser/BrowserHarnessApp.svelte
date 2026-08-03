@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import {
-		EXPLORER_CAMERA_FRAMING,
-		resolveExplorerOutdoorFocusPose,
-	} from "../../explorer/explorer-camera-framing";
+	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
+	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import type { HttpLandblockSourceBatchDiagnostic } from "../../lib/assets/http-landblock-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
@@ -436,7 +434,7 @@
 			);
 		}
 		runtime.setPrimaryCamera({
-			...EXPLORER_CAMERA_FRAMING,
+			...FRONTEND_TUNING.explorer.camera.framing,
 			placement: {
 				envCellId: null,
 				landblockId,
@@ -448,7 +446,7 @@
 			},
 		});
 		cameraEvidence = {
-			...EXPLORER_CAMERA_FRAMING,
+			...FRONTEND_TUNING.explorer.camera.framing,
 			envCellId: null,
 			landblockId,
 			pitchDegrees: (pose.pitchRadians * 180) / Math.PI,

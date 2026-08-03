@@ -12,12 +12,8 @@ import type {
 	AuthoredDynamicSource,
 	ResolvedOutdoorStaticLayerSource,
 } from "../resolution/landblock-layer";
-import {
-	DEFAULT_MINIMUM_OBJECT_FOOTPRINT_PIXEL_AREA,
-	DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
-	type FrameSelectionMetrics,
-	type Renderer,
-} from "../renderer/renderer";
+import type { FrameSelectionMetrics, Renderer } from "../renderer/renderer";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
@@ -187,10 +183,13 @@ describe("GameRuntime view and interest control", () => {
 			envCellRenderMode: "portal",
 			quality: {
 				minimumObjectFootprintPixelArea:
-					DEFAULT_MINIMUM_OBJECT_FOOTPRINT_PIXEL_AREA,
+					FRONTEND_TUNING.rendering.frameDefaults
+						.minimumObjectFootprintPixelArea,
 				minimumPortalFootprintPixelArea:
-					DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
-				textureFiltering: "anisotropic-2x",
+					FRONTEND_TUNING.rendering.frameDefaults
+						.minimumPortalFootprintPixelArea,
+				textureFiltering:
+					FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
 			},
 		});
 		runtime.setFrameSettings({

@@ -96,29 +96,18 @@ import {
 } from "./webgl2-portal-executor";
 import type { ResolvedPortalMask } from "./webgl2-portal-mask";
 import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	WebGL2TextureSamplerCatalog,
 	type TextureSamplingClass,
 } from "./webgl2-texture-sampler-catalog";
-import {
-	DEFAULT_TEXTURE_FILTERING_POLICY,
-	type TextureFilteringPolicy,
-} from "./texture-filtering-policy";
+import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import { WebGL2ObjectStateApplicator } from "./webgl2-object-state-applicator";
 import {
 	WebGL2FrameProfiler,
 	type WebGL2FrameProfileCapture,
 } from "./webgl2-gpu-frame-profiler";
 
-const CLEAR_COLOR = {
-	red: 0.15,
-	green: 0.05,
-	blue: 0.05,
-	alpha: 1,
-} as const;
-
-const DETAIL_FADE_NEAR = 10;
-const DETAIL_FADE_FAR = 50;
 /** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
 const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 /** Corruption guard only; fixed-point convergence, not this number, terminates valid planning. */
@@ -344,7 +333,7 @@ export class WebGL2Renderer implements Renderer {
 	>;
 	/** Requested quality captured at frame entry and consumed by every nested draw path. */
 	#frameTextureFiltering: TextureFilteringPolicy =
-		DEFAULT_TEXTURE_FILTERING_POLICY;
+		FRONTEND_TUNING.rendering.frameDefaults.textureFiltering;
 	/** Requested portal footprint cutoff captured once at frame entry. */
 	#minimumPortalFootprintPixelArea = 0;
 	/** Requested object-presentation footprint cutoff captured once at frame entry. */
@@ -473,7 +462,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#objectFallbackBinding = {
 			sampler: this.#textureSamplers.getSampler({
 				mipLevels: 1,
-				policy: DEFAULT_TEXTURE_FILTERING_POLICY,
+				policy: FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
 				samplingClass: "exact",
 				wrap: TextureWrapMode.Clamp,
 			}),
@@ -488,10 +477,10 @@ export class WebGL2Renderer implements Renderer {
 			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
 		};
 		gl.clearColor(
-			CLEAR_COLOR.red,
-			CLEAR_COLOR.green,
-			CLEAR_COLOR.blue,
-			CLEAR_COLOR.alpha,
+			FRONTEND_TUNING.rendering.clearColor.red,
+			FRONTEND_TUNING.rendering.clearColor.green,
+			FRONTEND_TUNING.rendering.clearColor.blue,
+			FRONTEND_TUNING.rendering.clearColor.alpha,
 		);
 		gl.enable(gl.DEPTH_TEST);
 	}
@@ -758,10 +747,10 @@ export class WebGL2Renderer implements Renderer {
 		);
 		const diagnostics = executePortalGraph(this.#portalSubstrate, {
 			clearColor: [
-				CLEAR_COLOR.red,
-				CLEAR_COLOR.green,
-				CLEAR_COLOR.blue,
-				CLEAR_COLOR.alpha,
+				FRONTEND_TUNING.rendering.clearColor.red,
+				FRONTEND_TUNING.rendering.clearColor.green,
+				FRONTEND_TUNING.rendering.clearColor.blue,
+				FRONTEND_TUNING.rendering.clearColor.alpha,
 			],
 			destination: null,
 			extent: { height: this.#frameHeight, width: this.#frameWidth },
@@ -1559,9 +1548,12 @@ export class WebGL2Renderer implements Renderer {
 		);
 		gl.uniform1f(
 			this.#terrainProgram.uniforms.detailFadeNear,
-			DETAIL_FADE_NEAR,
+			FRONTEND_TUNING.rendering.terrainDetailFade.near,
 		);
-		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeFar, DETAIL_FADE_FAR);
+		gl.uniform1f(
+			this.#terrainProgram.uniforms.detailFadeFar,
+			FRONTEND_TUNING.rendering.terrainDetailFade.far,
+		);
 		bindWebGL2DistanceFog(gl, this.#terrainProgram.uniforms, fog);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(

@@ -1,10 +1,8 @@
-/** Retail-proven radius within which transparent ranges retain coarse camera-depth ordering. */
-export const OBJECT_TRANSPARENT_NEAR_DISTANCE = 16;
+import { FRONTEND_TUNING } from "../../frontend-tuning";
+
 /** Squared near-policy boundary used before assigning the bounded physical-depth bands. */
-export const OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED =
-	OBJECT_TRANSPARENT_NEAR_DISTANCE * OBJECT_TRANSPARENT_NEAR_DISTANCE;
-/** Coarse near-camera depth partitions limiting transparency ordering work and precision. */
-export const OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT = 8;
+const TRANSPARENT_NEAR_DISTANCE_SQUARED =
+	FRONTEND_TUNING.rendering.transparentObjects.nearDistance ** 2;
 
 /** One transparent range paired with its current-frame camera distance. */
 export interface TransparentObjectRange<T> {
@@ -154,19 +152,20 @@ export function orderTransparentObjectRanges<T>(
 ): OrderedTransparentObjectRanges<T> {
 	const far: TransparentObjectRange<T>[] = [];
 	const nearBuckets = Array.from(
-		{ length: OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT },
+		{ length: FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount },
 		() => [] as TransparentObjectRange<T>[],
 	);
 	for (const range of ranges) {
-		if (range.distanceSquared > OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED) {
+		if (range.distanceSquared > TRANSPARENT_NEAR_DISTANCE_SQUARED) {
 			far.push(range);
 			continue;
 		}
 		const bucket = Math.min(
-			OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT - 1,
+			FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount - 1,
 			Math.floor(
-				(Math.sqrt(range.distanceSquared) / OBJECT_TRANSPARENT_NEAR_DISTANCE) *
-					OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT,
+				(Math.sqrt(range.distanceSquared) /
+					FRONTEND_TUNING.rendering.transparentObjects.nearDistance) *
+					FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount,
 			),
 		);
 		const bucketRanges = nearBuckets[bucket];

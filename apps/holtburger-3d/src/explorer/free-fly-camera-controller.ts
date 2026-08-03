@@ -1,6 +1,7 @@
 import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
 import { Vec3 } from "../lib/game/math/types";
 import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
+import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 type DragMode = "pan" | "rotate";
 type MovementKey =
@@ -42,21 +43,11 @@ export interface FreeFlyCameraControllerOptions {
 
 const DEFAULT_STATE: FreeFlyCameraState = {
 	hasManualControl: false,
-	pitchRadians: -0.45,
+	pitchRadians: FRONTEND_TUNING.explorer.camera.initialOrientation.pitchRadians,
 	position: Vec3.zero(),
-	yawRadians: 0,
+	yawRadians: FRONTEND_TUNING.explorer.camera.initialOrientation.yawRadians,
 };
-const MOVE_SPEED = 150;
-const INITIAL_KEYBOARD_SPEED_MULTIPLIER = 0.125;
-const KEYBOARD_ACCELERATION_SECONDS = 2;
-const KEYBOARD_YAW_RADIANS_PER_SECOND = 1.8;
-const MAX_PITCH_RADIANS = 1.38;
-const POINTER_PITCH_RADIANS_PER_PIXEL = 0.005;
-const POINTER_YAW_RADIANS_PER_PIXEL = 0.006;
-const SHIFT_SLOW_MULTIPLIER = 0.05;
-const WHEEL_LOCAL_UP_UNITS_PER_DELTA = -0.025;
-const WHEEL_DELTA_CLAMP = 900;
-const PAN_SCALE_PER_PIXEL = 0.18;
+const CAMERA_CONTROL_TUNING = FRONTEND_TUNING.explorer.camera.controls;
 
 /**
  * Explorer-local port of the legacy fly controls: left drag rotates, middle/right drag pans,
@@ -150,21 +141,27 @@ export class FreeFlyCameraController {
 				...this.#state,
 				pitchRadians: clamp(
 					this.#state.pitchRadians +
-						deltaY * POINTER_PITCH_RADIANS_PER_PIXEL * speed,
-					-MAX_PITCH_RADIANS,
-					MAX_PITCH_RADIANS,
+						deltaY * CAMERA_CONTROL_TUNING.pointerPitchRadiansPerPixel * speed,
+					-CAMERA_CONTROL_TUNING.maximumPitchRadians,
+					CAMERA_CONTROL_TUNING.maximumPitchRadians,
 				),
 				yawRadians:
 					this.#state.yawRadians -
-					deltaX * POINTER_YAW_RADIANS_PER_PIXEL * speed,
+					deltaX * CAMERA_CONTROL_TUNING.pointerYawRadiansPerPixel * speed,
 			});
 		} else {
 			const { right, up } = cameraAxes(this.#state);
 			this.#setManualState({
 				...this.#state,
 				position: this.#state.position.add(
-					scaleVec3(right, -deltaX * PAN_SCALE_PER_PIXEL * speed).add(
-						scaleVec3(up, deltaY * PAN_SCALE_PER_PIXEL * speed),
+					scaleVec3(
+						right,
+						-deltaX * CAMERA_CONTROL_TUNING.panUnitsPerPixel * speed,
+					).add(
+						scaleVec3(
+							up,
+							deltaY * CAMERA_CONTROL_TUNING.panUnitsPerPixel * speed,
+						),
 					),
 				),
 			});
@@ -185,8 +182,12 @@ export class FreeFlyCameraController {
 		const { up } = cameraAxes(this.#state);
 		const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
 		const distance =
-			-clamp(delta, -WHEEL_DELTA_CLAMP, WHEEL_DELTA_CLAMP) *
-			WHEEL_LOCAL_UP_UNITS_PER_DELTA *
+			-clamp(
+				delta,
+				-CAMERA_CONTROL_TUNING.wheelDeltaClamp,
+				CAMERA_CONTROL_TUNING.wheelDeltaClamp,
+			) *
+			CAMERA_CONTROL_TUNING.wheelLocalUpUnitsPerDelta *
 			this.#speedMultiplier(event.shiftKey);
 		this.#setManualState({
 			...this.#state,
@@ -249,7 +250,10 @@ export class FreeFlyCameraController {
 		const deltaSeconds =
 			this.#lastMovementAt === null
 				? 0
-				: Math.min((frameAt - this.#lastMovementAt) / 1_000, 0.05);
+				: Math.min(
+						(frameAt - this.#lastMovementAt) / 1_000,
+						CAMERA_CONTROL_TUNING.maximumFrameDeltaSeconds,
+					);
 		this.#lastMovementAt = frameAt;
 		if (deltaSeconds === 0) return;
 
@@ -259,7 +263,7 @@ export class FreeFlyCameraController {
 			this.#linearMovementStartedAt ??= frameAt;
 			const direction = localMovementDirection(this.#state, movement);
 			const speed =
-				MOVE_SPEED *
+				CAMERA_CONTROL_TUNING.moveSpeed *
 				this.#speedMultiplier(this.#shiftActive) *
 				keyboardAcceleration((frameAt - this.#linearMovementStartedAt) / 1_000);
 			next = {
@@ -278,7 +282,7 @@ export class FreeFlyCameraController {
 				yawRadians:
 					next.yawRadians +
 					yawDirection *
-						KEYBOARD_YAW_RADIANS_PER_SECOND *
+						CAMERA_CONTROL_TUNING.keyboardYawRadiansPerSecond *
 						deltaSeconds *
 						this.#speedMultiplier(this.#shiftActive),
 			};
@@ -306,7 +310,7 @@ export class FreeFlyCameraController {
 	}
 
 	#speedMultiplier(isShiftActive: boolean): number {
-		return isShiftActive ? SHIFT_SLOW_MULTIPLIER : 1;
+		return isShiftActive ? CAMERA_CONTROL_TUNING.shiftSlowMultiplier : 1;
 	}
 
 	#setManualState(state: FreeFlyCameraPose): void {
@@ -354,8 +358,12 @@ function localMovementDirection(
 
 function keyboardAcceleration(elapsedSeconds: number): number {
 	return (
-		INITIAL_KEYBOARD_SPEED_MULTIPLIER +
-		(1 - INITIAL_KEYBOARD_SPEED_MULTIPLIER) *
-			clamp(elapsedSeconds / KEYBOARD_ACCELERATION_SECONDS, 0, 1)
+		CAMERA_CONTROL_TUNING.keyboardInitialSpeedMultiplier +
+		(1 - CAMERA_CONTROL_TUNING.keyboardInitialSpeedMultiplier) *
+			clamp(
+				elapsedSeconds / CAMERA_CONTROL_TUNING.keyboardAccelerationSeconds,
+				0,
+				1,
+			)
 	);
 }

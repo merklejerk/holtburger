@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { FRONTEND_TUNING } from "../../../frontend-tuning";
 import {
 	createAssetTextureKey,
 	packedObjectTexturePreparation,
-	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
 	TexturePurpose,
 } from "../types";
 import { createAtlasPageId, type AtlasPageLayout } from "./layout";
@@ -26,16 +26,20 @@ describe("buildAtlasPage", () => {
 				1,
 				1,
 			),
-			pageSize: STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+			pageSize: FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
 			sources: [
 				{ height: 1, key, pixels: Uint8Array.of(1, 2, 3, 4), width: 1 },
 			],
 		});
 
-		expect(result.width).toBe(STATIC_OBJECT_TEXTURE_PAGE_SIZE);
-		expect(result.height).toBe(STATIC_OBJECT_TEXTURE_PAGE_SIZE);
+		expect(result.width).toBe(
+			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+		);
+		expect(result.height).toBe(
+			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+		);
 		expect(result.pageBits.byteLength).toBe(
-			STATIC_OBJECT_TEXTURE_PAGE_SIZE ** 2 * 4,
+			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize ** 2 * 4,
 		);
 	});
 

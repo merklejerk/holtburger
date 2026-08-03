@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import {
-	OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT,
-	OBJECT_TRANSPARENT_NEAR_DISTANCE,
-	OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED,
 	areStaticObjectDrawsCompatible,
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
@@ -15,14 +13,16 @@ import {
 	createObjectVertexShader,
 } from "./webgl2-object-program";
 
+const TRANSPARENT_TUNING = FRONTEND_TUNING.rendering.transparentObjects;
+
 describe("orderTransparentObjectRanges", () => {
 	it("orders near depth buckets back-to-front while preserving order inside a bucket", () => {
 		const nearBucketWidth =
-			OBJECT_TRANSPARENT_NEAR_DISTANCE / OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT;
+			TRANSPARENT_TUNING.nearDistance / TRANSPARENT_TUNING.depthBucketCount;
 		const ordered = orderTransparentObjectRanges(
 			[
 				entry("near-a", nearBucketWidth / 4),
-				entry("far", OBJECT_TRANSPARENT_NEAR_DISTANCE - 1),
+				entry("far", TRANSPARENT_TUNING.nearDistance - 1),
 				entry("near-b", nearBucketWidth / 2),
 			],
 			() => null,
@@ -52,16 +52,13 @@ describe("orderTransparentObjectRanges", () => {
 			"b-1",
 		]);
 		expect(ordered.near).toEqual([]);
-		expect(OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED).toBe(
-			OBJECT_TRANSPARENT_NEAR_DISTANCE * OBJECT_TRANSPARENT_NEAR_DISTANCE,
-		);
 	});
 
 	it("separates far candidates from the near camera-sorted phase", () => {
 		const ordered = orderTransparentObjectRanges(
 			[
-				entry("near-first", OBJECT_TRANSPARENT_NEAR_DISTANCE - 1),
-				entry("far-second", OBJECT_TRANSPARENT_NEAR_DISTANCE + 1),
+				entry("near-first", TRANSPARENT_TUNING.nearDistance - 1),
+				entry("far-second", TRANSPARENT_TUNING.nearDistance + 1),
 			],
 			() => null,
 		);
@@ -72,8 +69,8 @@ describe("orderTransparentObjectRanges", () => {
 
 	it("groups cohorts within each near bucket without crossing depth bands", () => {
 		const bucketWidth =
-			OBJECT_TRANSPARENT_NEAR_DISTANCE / OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT;
-		const farBucketStart = OBJECT_TRANSPARENT_NEAR_DISTANCE - bucketWidth;
+			TRANSPARENT_TUNING.nearDistance / TRANSPARENT_TUNING.depthBucketCount;
+		const farBucketStart = TRANSPARENT_TUNING.nearDistance - bucketWidth;
 		const sourceOrder = [
 			{
 				distanceSquared: (farBucketStart + bucketWidth / 4) ** 2,
@@ -104,7 +101,7 @@ describe("orderTransparentObjectRanges", () => {
 			sourceOrder.map((entry) => ({
 				...entry,
 				distanceSquared:
-					entry.distanceSquared + OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED * 4,
+					entry.distanceSquared + TRANSPARENT_TUNING.nearDistance ** 2 * 4,
 			})),
 			batchKey,
 		).far;

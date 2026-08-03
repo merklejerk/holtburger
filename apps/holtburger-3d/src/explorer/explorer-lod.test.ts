@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
 	countExplorerLodLandblocks,
-	DEFAULT_EXPLORER_LOD_CONFIG,
 	updateExplorerLodRadius,
 } from "./explorer-lod";
 
@@ -26,7 +26,7 @@ describe("Explorer LoD controls", () => {
 
 	it("keeps detail layers beneath buildings and disables them with buildings", () => {
 		let config = updateExplorerLodRadius(
-			DEFAULT_EXPLORER_LOD_CONFIG,
+			FRONTEND_TUNING.explorer.lod.defaultRadii,
 			"buildings",
 			2,
 		);

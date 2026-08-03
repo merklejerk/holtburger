@@ -1,7 +1,7 @@
 # Holtburger 3D Visibility Workload Reduction Plan
 
-Status: active; Phases 0-7 complete with `64px²` portal/generated cutoffs and a `100ms`
-offscreen animation interval accepted.
+Status: complete; `64px²` portal/object cutoffs and a `100ms` offscreen animation interval are
+accepted, and the implementation and closeout are recorded as reviewable milestones.
 Created: 2026-08-03
 Related investigation: `docs/plans/holtburger-3d-portal-frame-cpu-investigation.md`
 
@@ -807,7 +807,7 @@ visibility feedback, upload instances, or submit draws.
 - [x] Evaluate temporary per-class attribution against targeted isolated captures; avoid adding the
       buckets because the existing scene controls isolate the decisions, and retain only total
       tested/retained/rejected metrics with a tuning consumer.
-- [ ] Sweep zero and `64px²` first across DA55, DC58, explicit-object-heavy, building-heavy,
+- [x] Sweep zero and `64px²` first across DA55, DC58, explicit-object-heavy, building-heavy,
       indoor-root, hybrid, camera-motion, and visibility-entry workloads. Test other thresholds only
       if `64px²` produces a concrete quality or cost failure.
 - [x] Remove rejected eligibility variants, attribution buckets, threshold cycles, and measurement
@@ -861,26 +861,42 @@ visibility feedback, upload instances, or submit draws.
   Explorer-focus camera. Manual Explorer camera motion and close-entry inspection found the
   resulting far-distance popping acceptable, so all implemented eligibility classes retain the
   shared `64px²` default.
+- The final closeout matrix repeated zero versus production policies with identical source and
+  resource ownership. DA55 reduced average frame work from `6.91ms` to `6.05ms`, static draws from
+  `887` to `485`, and frame-instance upload bytes from `291840` to `79920`. DC58 reduced average
+  frame work from `4.67ms` to `3.44ms`, generated instances from `2355` to `602`, dynamic instances
+  from `200` to `4`, and upload bytes from `239600` to `83680`.
+- The final indoor-root control retained exactly six scopes, one render node, 72 static draws, one
+  transparent draw, and zero uploads under both policies. The hybrid control retained five scopes,
+  two render nodes, two masks, one exterior render, and 128 EnvCell draws while reducing only
+  generated instances from `1209` to `409` and upload bytes from `96720` to `32720`.
+- The building-only control retained every tested building root; its reduction from nine to eight
+  portal nodes and `367` to `281` draws came from recursive portal pruning. The explicit-inclusive
+  control rejected two of eleven eligible roots and reduced draws from `377` to `283`. These
+  controls distinguish portal and root-policy effects rather than attributing the combined result
+  to one generic culling bucket.
 
 ## Phase 9: Cleanup, Cross-Feature Verification, and Closeout
 
+Status: complete.
+
 ### Task Checklist
 
-- [ ] Audit that each earlier resteering gate already removed its temporary distributions, cadence
+- [x] Audit that each earlier resteering gate already removed its temporary distributions, cadence
       probes, screenshot cycles, rejected policy fields, compatibility aliases, and dead
       vocabulary; treat any survivor as a failed phase boundary.
-- [ ] Ensure every surviving setting and metric has one named consumer and a scenario distinct from
+- [x] Ensure every surviving setting and metric has one named consumer and a scenario distinct from
       existing fields.
-- [ ] Re-run formatting, Svelte/TypeScript checks, ESLint, dead-code analysis, Rust clippy, and the
+- [x] Re-run formatting, Svelte/TypeScript checks, ESLint, dead-code analysis, Rust clippy, and the
       full TypeScript suite.
-- [ ] Re-run portal planner/executor fixtures, generated worker/compaction tests, static/dynamic
+- [x] Re-run portal planner/executor fixtures, generated worker/compaction tests, static/dynamic
       presentation-footprint tests, animation/effect tests, lifecycle tests, and the canonical
       browser harness matrix.
-- [ ] Capture final SwiftShader and Apple/WebKit profiles with effective policies embedded in the
-      diagnostic report.
-- [ ] Update architecture documentation and historical plans with accepted decisions, rejected
+- [x] Capture final SwiftShader profiles with effective policies embedded in the diagnostic report
+      and a final Apple/WebKit call tree on the accepted build.
+- [x] Update architecture documentation and historical plans with accepted decisions, rejected
       alternatives, measured benefit, and remaining debt.
-- [ ] Commit portal, generated/eligible-object footprint, animation, and documentation cleanup as
+- [x] Commit portal, generated/eligible-object footprint, animation, and documentation cleanup as
       reviewable independent milestones.
 
 ### Acceptance Criteria
@@ -896,7 +912,31 @@ visibility feedback, upload instances, or submit draws.
 
 ### Decisions and Course Corrections
 
-- To be completed during execution.
+- The production audit found no threshold cycles, cadence distributions, recently-visible state,
+  entry-only/generated-only compatibility names, or measurement-specific camera fixtures. The
+  surviving mode and filtering cycles predate this work and protect hot reconfiguration rather
+  than measurement policy.
+- Each lasting policy is centralized in `src/lib/frontend-tuning.ts`. Frame settings carry the two
+  footprint decisions, the animation scheduler owns its cadence, Explorer displays the resulting
+  workload, and the browser harness serializes the complete machine-readable evidence. Correctness
+  constants and numerical tolerances remain beside their owning algorithms.
+- The final deterministic matrix used the established parameterized DA55, DC58, indoor-root, and
+  hybrid cameras. Every capture completed with stable source/resource ownership, zero browser
+  console messages, zero long tasks during measurement, and no animation discontinuity.
+- The user-supplied final Apple/WebKit sample reported approximately `17.6ms` total sampled page
+  CPU, `15.5ms` in portal-frame drawing, `11.4ms` beneath portal execution, `10.3ms` in exterior
+  rendering, `5.2ms` in instance-run formation/object-range drawing, `3.1ms` in contribution
+  collection, and approximately `1ms` each in indoor rendering, portal planning, animation
+  sampling, and presentation publication. The viewport is capture context. Safari's millisecond
+  sampling and the absence of a paired native zero-policy capture make this corroborating
+  attribution, not a native timing A/B.
+- The current Prettier version initially named 18 files. Seven belonged to this optimization and
+  tuning series and were formatted during closeout. The remaining eleven pre-existing files are
+  outside this plan; they remain explicit repository formatting debt rather than being smuggled
+  into the closeout diff.
+- GPU timer queries remain unsupported in the deterministic SwiftShader harness, and the supplied
+  WebKit timeline does not isolate GPU duration from driver submission. The final report therefore
+  distinguishes measured CPU phases and eliminated work without inventing a GPU claim.
 
 ## Risks and Mitigations
 
@@ -924,19 +964,19 @@ visibility feedback, upload instances, or submit draws.
 - [x] Offscreen visual cadence reduction is either accepted with exact semantic behavior or removed.
 - [x] Eligible static and anchored-dynamic presentation-root culling is accepted with positive net
       benefit or removed per eligibility class.
-- [ ] Each accepted policy is explicit, typed, validated, recorded in diagnostics, and disabled by a
+- [x] Each accepted policy is explicit, typed, validated, recorded in diagnostics, and disabled by a
       precise baseline value.
-- [ ] Outdoor, indoor-root, hybrid, generated-heavy, offscreen-animation, and visibility-entry
+- [x] Outdoor, indoor-root, hybrid, generated-heavy, offscreen-animation, and visibility-entry
       workloads have matched evidence.
-- [ ] Near-plane portals, same-domain traversal, alternate routes, generated material behavior,
+- [x] Near-plane portals, same-domain traversal, alternate routes, generated material behavior,
       semantic animation steps, hooks, initial poses, owner replacement, and multi-view behavior are
       covered.
-- [ ] Type checking, formatting of touched files, lint, dead-code analysis, Rust clippy, the full
+- [x] Type checking, formatting of touched files, lint, dead-code analysis, Rust clippy, the full
       TypeScript suite, and browser harness verification pass.
-- [ ] Temporary instrumentation, rejected paths, stale vocabulary, and unused metrics are removed.
-- [ ] No measurement-only browser fixture or camera-specific application path survives; retained
+- [x] Temporary instrumentation, rejected paths, stale vocabulary, and unused metrics are removed.
+- [x] No measurement-only browser fixture or camera-specific application path survives; retained
       fixtures protect an executable correctness guarantee.
-- [ ] Final decisions, concessions, thresholds, intervals, target profiles, and remaining questions
+- [x] Final decisions, concessions, thresholds, intervals, target profiles, and remaining questions
       are recorded in this plan.
 
 ## Open Questions

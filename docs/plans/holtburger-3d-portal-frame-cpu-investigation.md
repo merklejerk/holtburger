@@ -1,9 +1,10 @@
 # Holtburger 3D Portal Frame CPU Investigation
 
 Date: 2026-08-02
-Status: active target-native reprofile validation; a universal `64px²` recursive portal-footprint
-cutoff is accepted, and empty frame-instance storage work and comparison sorting are accepted as
-removed on the target Apple/WebKit renderer.
+Status: complete; a universal `64px²` recursive portal-footprint cutoff is accepted, and empty
+frame-instance storage work and comparison sorting are accepted as removed on the target
+Apple/WebKit renderer. Residual questions below require new evidence rather than extending this
+investigation speculatively.
 
 ## Context and Boundaries
 
@@ -70,8 +71,11 @@ renderer isolation guarantees.
   - Owns frame-instance capacity, CPU encoding storage, complete-storage orphaning, range uploads,
     and instanced attribute bindings.
 - `apps/holtburger-3d/src/explorer/explorer-camera-framing.ts`
-  - Owns the Explorer's outdoor focus pose and projection constants shared by the interactive app
-    and diagnostic harness.
+  - Owns the Explorer's terrain-relative outdoor focus pose shared by the interactive app and
+    diagnostic harness.
+- `apps/holtburger-3d/src/lib/frontend-tuning.ts`
+  - Owns app-level camera, portal/object footprint, animation cadence, rendering, diagnostics, and
+    bounded-workload tuning in one discoverable policy module.
 
 ### Diagnostic Surfaces
 
@@ -1259,6 +1263,17 @@ The one-process DA55 sweep produced:
   Rust clippy pass. Focused planner coverage proves threshold equality, strict rejection,
   near-plane exemption, indoor-to-outdoor exemption, invalid-input failure, and larger-route
   admission after a smaller route is rejected.
+- The final Phase 9 visibility closeout repeated the deterministic zero-versus-production matrix.
+  DA55 reduced portal nodes from 11 to 8, static draws from 887 to 485, upload bytes from `291840`
+  to `79920`, and average frame work from `6.91ms` to `6.05ms`. The indoor-root control retained
+  exactly six scopes, one render node, 72 static draws, and no instance upload under both policies;
+  the hybrid control retained its five scopes, two render nodes, two masks, and one exterior render.
+- The user-supplied final Apple/WebKit sample attributed approximately `17.6ms` total sampled page
+  CPU, `15.5ms` to portal-frame drawing, `11.4ms` beneath portal execution, `10.3ms` to exterior
+  rendering, `5.2ms` to instance-run formation/object-range drawing, `3.1ms` to contribution
+  collection, and approximately `1ms` each to indoor rendering and portal planning. This is final
+  target attribution on the accepted build, not a native timing A/B; the deterministic matrix owns
+  the matched policy comparison.
 
 ## Risks and Mitigations
 
@@ -1372,7 +1387,7 @@ The one-process DA55 sweep produced:
       browser harness; viewport size remains capture-local.
 - [x] A five-sample SwiftShader baseline and target-native attribution/workload evidence exist for
       resteering.
-- [ ] Planning, contribution collection, merging, instance preparation, submission, driver, and GPU
+- [x] Planning, contribution collection, merging, instance preparation, submission, driver, and GPU
       costs are independently attributed as far as platform support allows.
 - [x] The dominant repeated work has a proven lifetime/ownership cause.
 - [x] The selected structural cutover names replacements for every deleted guarantee.

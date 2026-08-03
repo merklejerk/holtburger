@@ -70,8 +70,8 @@ export class AtlasPagePublication {
 
 	constructor(
 		renderResources: RendererResourceManager,
-		pageSize: number =
-			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+		pageSize: number = FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+			.pageSize,
 	) {
 		this.#renderResources = renderResources;
 		this.#pageSize = pageSize;

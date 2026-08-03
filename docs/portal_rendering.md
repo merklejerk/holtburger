@@ -249,6 +249,25 @@ The target is allocated lazily, reused at the same extent, replaced transactiona
 and destroyed with the renderer. Flat mode performs no target or portal work, although an already
 allocated target remains cached for cheap mode switching.
 
+## Recursive Footprint Policy
+
+Portal traversal carries the exact inherited screen-space window through every crossing. After
+homogeneous projection and exact intersection with that parent window, the planner may reject a
+crossing whose final drawing-buffer footprint is strictly smaller than the configured pixel-area
+threshold. The production default is 64 physical pixels squared; zero is the exact disabled
+baseline, and equality is retained.
+
+The decision occurs before target-scope selection, mask admission, coverage admission, render-node
+construction, or descendant traversal. A rejected crossing therefore creates no downstream scene
+query, contribution preparation, stencil work, draw submission, or recursive portal work. The
+policy measures the actual projected opportunity rather than camera distance, hop count, or an
+approximate bounding rectangle. Alternate routes remain independent and can still admit the same
+scope through a larger inherited window.
+
+Near-plane-straddling crossings are exempt. Their projected area is unstable at the camera plane,
+and they may own the camera's current domain transition; the exact near-clip path below remains
+authoritative for them.
+
 ## Near-Plane Straddles
 
 The unstable case is not the camera point touching a portal plane. It is the finite aperture

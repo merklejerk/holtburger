@@ -128,3 +128,5 @@ contracts merely because the legacy app did.
   still absent.
 - Pair automated checks with browser-harness verification whenever the changed
   behavior depends on a real browser or GPU execution path.
+- Be mindful of hot path operations that can cause GC churn in the renderer. Use reusable buffers, in-place, or output-to-target semantics where appropriate.
+- Don't hide magic numbers and constants that are likely to need tweaking. Put them in places that can be easily found and accessed.

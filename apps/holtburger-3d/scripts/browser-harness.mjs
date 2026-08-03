@@ -12,6 +12,9 @@ const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
 const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 const DEFAULT_SETTLE_MS = 10_000;
 const DEFAULT_PORTAL_GRAPH_WORK_LIMIT = 100_000;
+const DEFAULT_VIEWPORT_WIDTH = 1_280;
+const DEFAULT_VIEWPORT_HEIGHT = 720;
+const DEFAULT_DEVICE_SCALE_FACTOR = 1;
 /** Harness-local mirror of the browser policy contract, including capability admission. */
 const TEXTURE_FILTERING_OPTIONS = [
 	{ minimumAnisotropy: 1, policy: "nearest" },
@@ -55,6 +58,7 @@ try {
 				? briefHarnessReport(result)
 				: {
 						buildingRadius: options.buildingRadius,
+						camera: result.state.camera,
 						envCellRadius: options.envCellRadius,
 						cameraPitchDegrees: options.cameraPitchDegrees,
 						cameraYawDegrees: options.cameraYawDegrees,
@@ -90,6 +94,7 @@ try {
 						excludeAuthoredDynamics: options.excludeAuthoredDynamics,
 						measureMs: options.measureMs,
 						settleMs: options.settleMs,
+						viewport: result.state.viewport,
 					},
 			null,
 			2,
@@ -139,6 +144,7 @@ function parseArgs(args) {
 		cameraPitchDegrees: -45,
 		cameraYawDegrees: 0,
 		cameraHeight: 600,
+		explorerFocus: false,
 		explicitObjectRadius: null,
 		generatedObjectRadius: null,
 		disableGeneratedBeforeCapture: false,
@@ -164,6 +170,9 @@ function parseArgs(args) {
 		screenshotPath: null,
 		measureMs: 0,
 		settleMs: DEFAULT_SETTLE_MS,
+		viewportWidth: DEFAULT_VIEWPORT_WIDTH,
+		viewportHeight: DEFAULT_VIEWPORT_HEIGHT,
+		deviceScaleFactor: DEFAULT_DEVICE_SCALE_FACTOR,
 	};
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
@@ -248,6 +257,30 @@ function parseArgs(args) {
 				parsed.cameraHeight = Number(requireValue(args, ++index, arg));
 				if (!Number.isFinite(parsed.cameraHeight)) {
 					throw new Error("--camera-height must be finite.");
+				}
+				break;
+			case "--explorer-focus":
+				parsed.explorerFocus = true;
+				break;
+			case "--viewport-width":
+				parsed.viewportWidth = parsePositiveInteger(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				break;
+			case "--viewport-height":
+				parsed.viewportHeight = parsePositiveInteger(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				break;
+			case "--device-scale-factor":
+				parsed.deviceScaleFactor = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isFinite(parsed.deviceScaleFactor) ||
+					parsed.deviceScaleFactor <= 0
+				) {
+					throw new Error("--device-scale-factor must be a positive number.");
 				}
 				break;
 			case "--lifecycle":
@@ -395,6 +428,16 @@ function parseArgs(args) {
 			"--camera-landblock and --relocate-landblock cannot be combined.",
 		);
 	}
+	if (
+		parsed.explorerFocus &&
+		(parsed.cameraLandblockId ||
+			parsed.relocateLandblockId ||
+			parsed.envCellCameraId)
+	) {
+		throw new Error(
+			"--explorer-focus cannot be combined with another camera or relocation option.",
+		);
+	}
 	const traceOptionCount = [
 		parsed.traceAnchorCellId,
 		parsed.traceStart,
@@ -436,6 +479,14 @@ function parsePoint(value, label) {
 	return coordinates;
 }
 
+function parsePositiveInteger(value, label) {
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new Error(`${label} must be a positive integer.`);
+	}
+	return parsed;
+}
+
 function requireValue(args, index, label) {
 	const value = args[index];
 	if (!value) throw new Error(`${label} requires a value.`);
@@ -461,6 +512,10 @@ Options:
                          Keep outdoor statics but strip promoted dynamics.
   --camera-yaw <degrees>    Initial and relocation camera yaw. Default: 0
   --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
+  --explorer-focus      Apply the Explorer's automatic outdoor camera pose after loading.
+  --viewport-width <px> CSS render width. Default: ${DEFAULT_VIEWPORT_WIDTH}
+  --viewport-height <px> CSS render height. Default: ${DEFAULT_VIEWPORT_HEIGHT}
+  --device-scale-factor <n> Browser device scale factor. Default: ${DEFAULT_DEVICE_SCALE_FACTOR}
   --camera-landblock <hex>  Move only the camera after the initial request.
   --relocate-landblock <hex> Replace scene interest and camera at a new landblock.
   --lifecycle           Clear and reload the requested neighborhood before capture.
@@ -597,7 +652,7 @@ function briefHarnessReport(result) {
 		consoleMessages: result.consoleMessages.filter(
 			({ level }) => level === "error" || level === "exception",
 		),
-		envCellLayers: staticObjects?.envCellLayers ?? [],
+		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
 		frameProfile: result.state.frameProfile,
 		initialMetrics: result.initialState.metrics,
@@ -606,14 +661,10 @@ function briefHarnessReport(result) {
 			({ frameSettings }) => frameSettings.quality.textureFiltering,
 		),
 		filteringCapabilities: result.state.textureFilteringCapabilities,
+		camera: result.state.camera,
+		viewport: result.state.viewport,
 		ready: result.state.ready,
-		sourceBatches: result.state.sourceBatches.map(
-			({ landblockId, layers, responseBytes }) => ({
-				landblockId,
-				layers,
-				responseBytes,
-			}),
-		),
+		sourceBatches: summarizeSourceBatches(result.state.sourceBatches),
 		staticResourceCounts:
 			staticObjects === null
 				? null
@@ -626,6 +677,42 @@ function briefHarnessReport(result) {
 							staticObjects.texture.residentSourceCount,
 					},
 		timing: result.state.timing,
+	};
+}
+
+function summarizeEnvCellLayers(envCellLayers) {
+	return envCellLayers.reduce(
+		(summary, layer) => ({
+			apertureCount: summary.apertureCount + layer.apertureCount,
+			expectedCellCount: summary.expectedCellCount + layer.expectedCellCount,
+			landblockCount: summary.landblockCount + 1,
+			plannedStaticResidentCount:
+				summary.plannedStaticResidentCount + layer.plannedStaticResidentCount,
+			shellCount: summary.shellCount + layer.shellCount,
+		}),
+		{
+			apertureCount: 0,
+			expectedCellCount: 0,
+			landblockCount: 0,
+			plannedStaticResidentCount: 0,
+			shellCount: 0,
+		},
+	);
+}
+
+function summarizeSourceBatches(sourceBatches) {
+	const layerCounts = {};
+	let responseBytes = 0;
+	for (const batch of sourceBatches) {
+		responseBytes += batch.responseBytes;
+		for (const layer of batch.layers) {
+			layerCounts[layer] = (layerCounts[layer] ?? 0) + 1;
+		}
+	}
+	return {
+		batchCount: sourceBatches.length,
+		layerCounts,
+		responseBytes,
 	};
 }
 
@@ -970,7 +1057,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const dynamicExclusion = options.excludeAuthoredDynamics
 		? "&excludeAuthoredDynamics=true"
 		: "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -980,8 +1067,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		"--use-angle=swiftshader",
 		"--enable-unsafe-swiftshader",
 		"--headless=new",
-		"--window-size=1280,720",
-		"--force-device-scale-factor=1",
+		`--window-size=${options.viewportWidth},${options.viewportHeight}`,
+		`--force-device-scale-factor=${options.deviceScaleFactor}`,
 		pageUrl,
 	]);
 	const browserWebSocketUrl = await waitForChromeDevToolsUrl(chrome);
@@ -1035,6 +1122,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await waitForEnvCellPublication(client, options.landblockId);
 		}
 		await delay(options.settleMs);
+		if (options.explorerFocus) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.focusExplorerOutdoor",
+				[options.landblockId],
+			);
+			await delay(250);
+		}
 		const initialState = await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",

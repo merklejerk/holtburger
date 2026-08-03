@@ -155,6 +155,7 @@ describe("RenderWorld", () => {
 		const staticRenderable = {
 			drawUnits: [
 				{
+					cohortKey: "fixture-partition",
 					geometry: "static-source-geometry:fixture" as StaticGeometryKey,
 					indexCount: 3,
 					indexStart: 0,

@@ -31,9 +31,9 @@ import { TextureWrapMode } from "../textures/types";
 import type {
 	FrameInput,
 	FrameSelectionMetrics,
+	RendererFrameDiagnostics,
 	FrameViewInput,
 	Renderer,
-	RendererFrameProfile,
 } from "./renderer";
 import { RenderWorld } from "./render-world";
 import type {
@@ -70,8 +70,8 @@ import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
 import {
 	formAdjacentObjectInstanceRuns,
+	formGroupedObjectInstanceRuns,
 	areStaticObjectDrawsCompatible,
-	comparePreparedObjectDrawState,
 	objectBlendPolicy,
 	orderTransparentObjectRanges,
 	type PreparedObjectAtlasBinding,
@@ -140,8 +140,7 @@ interface ObjectFrameInput {
 	/** Scene/portal residency boundary that must never be crossed by an instance run. */
 	readonly renderDomainKey: string;
 	readonly cullFaceOverride:
-		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
-		| null;
+		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -149,6 +148,7 @@ interface ObjectFrameInput {
 	readonly instances:
 		| null
 		| {
+				readonly cohortKey: string;
 				readonly data: StaticInstanceStreamData;
 				readonly kind: "static-fragment";
 		  }
@@ -292,6 +292,8 @@ interface MutableFrameSelectionMetrics {
 }
 
 export class WebGL2Renderer implements Renderer {
+	/** Explicit diagnostic capability, separated from the production draw methods. */
+	readonly frameDiagnostics: RendererFrameDiagnostics;
 	static readonly #identityMatrix = Mat4.identity();
 
 	readonly #matrixScratch = new Float32Array(16);
@@ -313,9 +315,6 @@ export class WebGL2Renderer implements Renderer {
 	readonly #portalRenderGraphPlanner = new PortalRenderGraphPlanner();
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
-	/** Renderer-local stable order for opaque WebGL identities that have no comparable value. */
-	readonly #objectDeviceIdentityOrders = new WeakMap<object, number>();
-	#nextObjectDeviceIdentityOrder = 0;
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
@@ -455,6 +454,14 @@ export class WebGL2Renderer implements Renderer {
 			}),
 			texture: createObjectFallbackTexture(gl),
 		};
+		this.frameDiagnostics = {
+			snapshot: () => ({
+				profile: this.#frameProfiler?.getProfile() ?? null,
+				profilingEnabled: this.#frameProfiler !== null,
+				selectionMetrics: { ...this.#frameSelectionMetrics },
+			}),
+			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
+		};
 		gl.clearColor(
 			CLEAR_COLOR.red,
 			CLEAR_COLOR.green,
@@ -552,15 +559,7 @@ export class WebGL2Renderer implements Renderer {
 		void input.timeSeconds;
 	}
 
-	getFrameSelectionMetrics(): FrameSelectionMetrics {
-		return { ...this.#frameSelectionMetrics };
-	}
-
-	getFrameProfile(): RendererFrameProfile | null {
-		return this.#frameProfiler?.getProfile() ?? null;
-	}
-
-	setFrameProfilingEnabled(enabled: boolean): void {
+	#setFrameProfilingEnabled(enabled: boolean): void {
 		this.#assertDeviceReady();
 		if (enabled) {
 			this.#frameProfiler ??= new WebGL2FrameProfiler(this.#gl);
@@ -606,35 +605,21 @@ export class WebGL2Renderer implements Renderer {
 			extent: { height: this.#frameHeight, width: this.#frameWidth },
 			plan: result.plan,
 			renderExterior: (_target, outdoorNodeId) => {
-				const contributionStartedAt = profile?.beginCpuPhase();
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
-					(left, right) => this.#comparePreparedObjectState(left, right),
+					profile,
 				);
-				if (profile && contributionStartedAt !== undefined) {
-					profile.finishCpuPhase(
-						"contributionPreparation",
-						contributionStartedAt,
-					);
-				}
 				const view = { ...prepared, ...contributions };
 				if (profile) this.#drawProfiledView(view, fog, profile);
 				else this.#drawView(view, fog);
 			},
 			renderIndoorNodes: (_target, renderNodeIds) => {
-				const contributionStartedAt = profile?.beginCpuPhase();
 				const contributions = mergePortalNodeContributions(
 					renderNodeIds,
 					contributionsByNode,
-					(left, right) => this.#comparePreparedObjectState(left, right),
+					profile,
 				);
-				if (profile && contributionStartedAt !== undefined) {
-					profile.finishCpuPhase(
-						"contributionPreparation",
-						contributionStartedAt,
-					);
-				}
 				const view = { ...prepared, ...contributions };
 				if (profile) this.#drawProfiledView(view, fog, profile);
 				else this.#drawView(view, fog);
@@ -754,7 +739,7 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
-					(left, right) => this.#comparePreparedObjectState(left, right),
+					null,
 				);
 				this.#drawView({ ...prepared, ...contributions }, null);
 			},
@@ -762,7 +747,7 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					renderNodeIds,
 					contributionsByNode,
-					(left, right) => this.#comparePreparedObjectState(left, right),
+					null,
 				);
 				this.#drawView({ ...prepared, ...contributions }, null);
 			},
@@ -780,7 +765,7 @@ export class WebGL2Renderer implements Renderer {
 			diagnostics,
 			planningDurationMs,
 			result,
-			selectionMetrics: this.getFrameSelectionMetrics(),
+			selectionMetrics: { ...this.#frameSelectionMetrics },
 		};
 	}
 
@@ -917,7 +902,6 @@ export class WebGL2Renderer implements Renderer {
 			if (profile && queryStartedAt !== undefined) {
 				profile.finishCpuPhase("sceneQuery", queryStartedAt);
 			}
-			const contributionStartedAt = profile?.beginCpuPhase();
 			for (const sceneNodeId of visible.entries) {
 				if (!claimedSceneNodes.add(sceneNodeId)) {
 					throw new Error(
@@ -931,14 +915,10 @@ export class WebGL2Renderer implements Renderer {
 					prepared.anchorLandblockId,
 					visible.entries,
 					"portal",
+					profile,
 				),
 			);
-			if (profile && contributionStartedAt !== undefined) {
-				profile.finishCpuPhase(
-					"contributionPreparation",
-					contributionStartedAt,
-				);
-			}
+			profile?.recordPortalNodePreparation();
 		}
 		if (contributionsByNode.size !== plan.nodes.length) {
 			throw new Error("Portal contribution collection lost a render node.");
@@ -990,15 +970,12 @@ export class WebGL2Renderer implements Renderer {
 		if (profile && queryStartedAt !== undefined) {
 			profile.finishCpuPhase("sceneQuery", queryStartedAt);
 		}
-		const contributionStartedAt = profile?.beginCpuPhase();
 		const contributions = this.#resolveSceneContributions(
 			anchorLandblockId,
 			visible.entries,
 			envCellRenderMode,
+			profile,
 		);
-		if (profile && contributionStartedAt !== undefined) {
-			profile.finishCpuPhase("contributionPreparation", contributionStartedAt);
-		}
 		return contributions;
 	}
 
@@ -1011,7 +988,9 @@ export class WebGL2Renderer implements Renderer {
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		visibleEntries: readonly SceneNodeId[],
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+		profile: WebGL2FrameProfileCapture | null,
 	): PreparedSceneContributions {
+		const resolutionStartedAt = profile?.beginCpuPhase();
 		const terrain: TerrainFrameInput[] = [];
 		const objects: ObjectFrameInput[] = [];
 		this.#frameSelectionMetrics.visibleSceneEntries += visibleEntries.length;
@@ -1059,16 +1038,17 @@ export class WebGL2Renderer implements Renderer {
 							"Transparent static instance draw requires a frame-streamed template.",
 						);
 					}
+					const instances = resolveStaticFragmentInstanceInput(
+						drawUnit,
+						resolved.instances,
+					);
 					objects.push({
 						cullFaceOverride: null,
 						drawKind: drawUnit.kind,
 						geometry: resolved.geometry,
 						indexCount: drawUnit.indexCount,
 						indexStart: drawUnit.indexStart,
-						instances:
-							resolved.instances === null
-								? null
-								: { data: resolved.instances, kind: "static-fragment" },
+						instances,
 						landblockId: node.placement.landblockId,
 						localToLandblock: node.placement.localToLandblock,
 						material: drawUnit.material,
@@ -1188,12 +1168,26 @@ export class WebGL2Renderer implements Renderer {
 			});
 			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
+		if (profile && resolutionStartedAt !== undefined) {
+			profile.finishCpuPhase(
+				"sceneContributionResolution",
+				resolutionStartedAt,
+			);
+		}
+		const preparationStartedAt = profile?.beginCpuPhase();
 		const preparedObjects = objects.map((object) =>
 			this.#prepareObjectFrameInput(object, anchorLandblockId),
 		);
-		sortObjectFrameInputs(preparedObjects, (left, right) =>
-			this.#comparePreparedObjectState(left, right),
-		);
+		if (profile && preparationStartedAt !== undefined) {
+			profile.finishCpuPhase("objectPreparation", preparationStartedAt);
+			const dynamicObjectCount = objects.filter(
+				(object) => object.source === "dynamic",
+			).length;
+			profile.recordObjectPreparation(
+				objects.length - dynamicObjectCount,
+				dynamicObjectCount,
+			);
+		}
 		return { objects: preparedObjects, terrain };
 	}
 
@@ -1326,26 +1320,6 @@ export class WebGL2Renderer implements Renderer {
 		};
 	}
 
-	#comparePreparedObjectState(
-		left: PreparedObjectFrameInput,
-		right: PreparedObjectFrameInput,
-	): number {
-		return comparePreparedObjectDrawState(
-			left.compatibility,
-			right.compatibility,
-			(identity) => this.#objectDeviceIdentityOrder(identity),
-		);
-	}
-
-	#objectDeviceIdentityOrder(identity: object): number {
-		const existing = this.#objectDeviceIdentityOrders.get(identity);
-		if (existing !== undefined) return existing;
-		const assigned = this.#nextObjectDeviceIdentityOrder;
-		this.#nextObjectDeviceIdentityOrder += 1;
-		this.#objectDeviceIdentityOrders.set(identity, assigned);
-		return assigned;
-	}
-
 	#resetFrameSelectionMetrics(
 		viewCount: number,
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
@@ -1428,8 +1402,8 @@ export class WebGL2Renderer implements Renderer {
 		fog: FrameInput["environment"]["distanceFog"],
 	): void {
 		this.#drawTerrain(view, fog);
-		this.#drawOpaqueObjects(view, fog);
-		this.#drawBlendedObjects(view);
+		this.#drawOpaqueObjects(view, fog, null);
+		this.#drawBlendedObjects(view, null);
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
 	}
@@ -1450,20 +1424,16 @@ export class WebGL2Renderer implements Renderer {
 		}
 
 		const opaqueGpu = profile.beginGpuPhase("opaque");
-		const opaqueStartedAt = profile.beginCpuPhase();
 		try {
-			this.#drawOpaqueObjects(view, fog);
+			this.#drawOpaqueObjects(view, fog, profile);
 		} finally {
-			profile.finishCpuPhase("opaqueSubmission", opaqueStartedAt);
 			opaqueGpu?.finish();
 		}
 
 		const blendedGpu = profile.beginGpuPhase("blended");
-		const blendedStartedAt = profile.beginCpuPhase();
 		try {
-			this.#drawBlendedObjects(view);
+			this.#drawBlendedObjects(view, profile);
 		} finally {
-			profile.finishCpuPhase("blendedSubmission", blendedStartedAt);
 			blendedGpu?.finish();
 		}
 
@@ -1655,29 +1625,43 @@ export class WebGL2Renderer implements Renderer {
 	#drawOpaqueObjects(
 		view: PreparedView,
 		fog: FrameInput["environment"]["distanceFog"],
+		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const candidates = view.objects.filter(
 			({ ordering }) => ordering === "opaque" || ordering === "alpha-test",
 		);
 		if (candidates.length === 0) return;
-		const objects = this.#prepareFrameInstanceRuns([candidates]).objects;
+		const objects = this.#prepareFrameInstanceRuns([candidates], profile, [
+			"grouped",
+		]).objects;
+		const submissionStartedAt = profile?.beginCpuPhase();
 		const gl = this.#gl;
-		this.#beginObjectPhase();
-		gl.depthMask(true);
-		this.#objectState.applyBlend(null);
-		for (const object of objects) {
-			const program =
-				object.drawKind === "instanced"
-					? this.#instancedObjectProgram
-					: this.#objectProgram;
-			if (this.#objectState.applyProgram(program.program)) {
-				this.#activateObjectProgram(program, view, fog);
+		try {
+			this.#beginObjectPhase();
+			gl.depthMask(true);
+			this.#objectState.applyBlend(null);
+			for (const object of objects) {
+				const program =
+					object.drawKind === "instanced"
+						? this.#instancedObjectProgram
+						: this.#objectProgram;
+				if (this.#objectState.applyProgram(program.program)) {
+					this.#activateObjectProgram(program, view, fog);
+				}
+				this.#drawObjectRange(program, object);
 			}
-			this.#drawObjectRange(program, object);
+		} finally {
+			if (profile && submissionStartedAt !== undefined) {
+				profile.finishCpuPhase("opaqueSubmission", submissionStartedAt);
+			}
 		}
 	}
 
-	#drawBlendedObjects(view: PreparedView): void {
+	#drawBlendedObjects(
+		view: PreparedView,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
+		const orderingStartedAt = profile?.beginCpuPhase();
 		const transparent: TransparentObjectRange<PreparedObjectFrameInput>[] = [];
 		const additive: PreparedObjectFrameInput[] = [];
 		for (const object of view.objects) {
@@ -1720,11 +1704,6 @@ export class WebGL2Renderer implements Renderer {
 				range: object,
 			});
 		}
-		additive.sort((left, right) =>
-			compareObjectFrameBatchOrder(left, right, (first, second) =>
-				this.#comparePreparedObjectState(first, second),
-			),
-		);
 		const orderedTransparent = orderTransparentObjectRanges(
 			transparent,
 			(object) =>
@@ -1738,41 +1717,57 @@ export class WebGL2Renderer implements Renderer {
 			orderedTransparent.far.length;
 		this.#frameSelectionMetrics.nearTransparentObjectCandidateCount +=
 			orderedTransparent.near.length;
-		const sortedBlended = this.#prepareFrameBlendedRuns({
-			additive,
-			far: orderedTransparent.far.map(({ range }) => range),
-			near: orderedTransparent.near.map(({ range }) => range),
-		});
+		if (profile && orderingStartedAt !== undefined) {
+			profile.finishCpuPhase("blendedOrdering", orderingStartedAt);
+		}
+		const sortedBlended = this.#prepareFrameBlendedRuns(
+			{
+				additive,
+				far: orderedTransparent.far.map(({ range }) => range),
+				near: orderedTransparent.near.map(({ range }) => range),
+			},
+			profile,
+		);
 		if (sortedBlended.length === 0) return;
+		const submissionStartedAt = profile?.beginCpuPhase();
 		const gl = this.#gl;
-		this.#objectState.invalidate();
-		gl.depthMask(false);
-		for (const object of sortedBlended) {
-			const program =
-				object.drawKind === "instanced"
-					? this.#blendedInstancedObjectProgram
-					: this.#blendedObjectProgram;
-			if (this.#objectState.applyProgram(program.program)) {
-				this.#activateObjectProgram(program, view, null);
+		try {
+			this.#objectState.invalidate();
+			gl.depthMask(false);
+			for (const object of sortedBlended) {
+				const program =
+					object.drawKind === "instanced"
+						? this.#blendedInstancedObjectProgram
+						: this.#blendedObjectProgram;
+				if (this.#objectState.applyProgram(program.program)) {
+					this.#activateObjectProgram(program, view, null);
+				}
+				this.#objectState.applyBlend(object.blendPolicy);
+				this.#drawObjectRange(program, object);
 			}
-			this.#objectState.applyBlend(object.blendPolicy);
-			this.#drawObjectRange(program, object);
+		} finally {
+			if (profile && submissionStartedAt !== undefined) {
+				profile.finishCpuPhase("blendedSubmission", submissionStartedAt);
+			}
 		}
 	}
 
 	/**
 	 * Upload both transparent phases once while keeping their independent run boundaries.
 	 */
-	#prepareFrameBlendedRuns(ordered: {
-		readonly additive: readonly PreparedObjectFrameInput[];
-		readonly far: readonly PreparedObjectFrameInput[];
-		readonly near: readonly PreparedObjectFrameInput[];
-	}): readonly PreparedObjectFrameInput[] {
-		const prepared = this.#prepareFrameInstanceRuns([
-			ordered.far,
-			ordered.near,
-			ordered.additive,
-		]);
+	#prepareFrameBlendedRuns(
+		ordered: {
+			readonly additive: readonly PreparedObjectFrameInput[];
+			readonly far: readonly PreparedObjectFrameInput[];
+			readonly near: readonly PreparedObjectFrameInput[];
+		},
+		profile: WebGL2FrameProfileCapture | null,
+	): readonly PreparedObjectFrameInput[] {
+		const prepared = this.#prepareFrameInstanceRuns(
+			[ordered.far, ordered.near, ordered.additive],
+			profile,
+			["adjacent", "adjacent", "grouped"],
+		);
 		const [farRunCount = 0, nearRunCount = 0] = prepared.runCounts;
 		this.#frameSelectionMetrics.transparentFrameRunCount +=
 			farRunCount + nearRunCount;
@@ -1784,6 +1779,8 @@ export class WebGL2Renderer implements Renderer {
 	/** Form phase-local compatible runs and upload their complete sequential instance population. */
 	#prepareFrameInstanceRuns(
 		phases: readonly (readonly PreparedObjectFrameInput[])[],
+		profile: WebGL2FrameProfileCapture | null,
+		groupings: readonly ("adjacent" | "grouped")[],
 	): {
 		readonly objects: readonly PreparedObjectFrameInput[];
 		readonly runCounts: readonly number[];
@@ -1791,7 +1788,14 @@ export class WebGL2Renderer implements Renderer {
 		const orderedInstances: ObjectInstanceData[] = [];
 		const objects: PreparedObjectFrameInput[] = [];
 		const runCounts: number[] = [];
-		for (const phase of phases) {
+		const preparationStartedAt = profile?.beginCpuPhase();
+		for (const [phaseIndex, phase] of phases.entries()) {
+			const grouping = groupings[phaseIndex];
+			if (!grouping) {
+				throw new Error(
+					`Object instance phase ${phaseIndex} has no grouping policy.`,
+				);
+			}
 			for (const object of phase) {
 				if (object.instances?.kind !== "static-fragment") continue;
 				if (object.source !== "generated") {
@@ -1803,33 +1807,46 @@ export class WebGL2Renderer implements Renderer {
 				this.#frameSelectionMetrics.selectedGeneratedInstanceCount +=
 					object.instances.data.instances.length;
 			}
-			const scheduled = formAdjacentObjectInstanceRuns(
-				phase,
-				(object) =>
-					object.instances?.kind === "frame-template" ||
-					object.instances?.kind === "static-fragment",
-				(left, right) => {
-					if (
-						!areStaticObjectDrawsCompatible(
-							left.compatibility,
-							right.compatibility,
+			const isFrameInstance = (object: PreparedObjectFrameInput): boolean =>
+				object.instances?.kind === "frame-template" ||
+				object.instances?.kind === "static-fragment";
+			const isCompatible = (
+				left: PreparedObjectFrameInput,
+				right: PreparedObjectFrameInput,
+			): boolean => {
+				if (
+					!areStaticObjectDrawsCompatible(
+						left.compatibility,
+						right.compatibility,
+					)
+				) {
+					return false;
+				}
+				if (
+					left.instances?.kind === "static-fragment" &&
+					right.instances?.kind === "static-fragment"
+				) {
+					return true;
+				}
+				return (
+					left.instances?.kind === "frame-template" &&
+					right.instances?.kind === "frame-template" &&
+					frameTemplateBatchIdentityEquals(left, right)
+				);
+			};
+			const scheduled =
+				grouping === "grouped"
+					? formGroupedObjectInstanceRuns(
+							phase,
+							isFrameInstance,
+							opaqueObjectInstanceBatchKey,
+							isCompatible,
 						)
-					) {
-						return false;
-					}
-					if (
-						left.instances?.kind === "static-fragment" &&
-						right.instances?.kind === "static-fragment"
-					) {
-						return true;
-					}
-					return (
-						left.instances?.kind === "frame-template" &&
-						right.instances?.kind === "frame-template" &&
-						compareFrameTemplateBatchIdentity(left, right) === 0
-					);
-				},
-			);
+					: formAdjacentObjectInstanceRuns(
+							phase,
+							isFrameInstance,
+							isCompatible,
+						);
 			runCounts.push(
 				scheduled.filter(
 					(submission) => submission.kind === "frame-instance-run",
@@ -1866,7 +1883,14 @@ export class WebGL2Renderer implements Renderer {
 				});
 			}
 		}
+		if (profile && preparationStartedAt !== undefined) {
+			profile.finishCpuPhase("instanceRunPreparation", preparationStartedAt);
+		}
+		const uploadStartedAt = profile?.beginCpuPhase();
 		this.#frameInstances.prepareView(orderedInstances);
+		if (profile && uploadStartedAt !== undefined) {
+			profile.finishCpuPhase("instanceUpload", uploadStartedAt);
+		}
 		if (orderedInstances.length > 0) {
 			this.#frameSelectionMetrics.frameInstanceUploadCount += 1;
 			this.#frameSelectionMetrics.frameInstanceUploadBytes +=
@@ -2120,20 +2144,30 @@ function validateDrawRange(
 	}
 }
 
+/** Pair generated instance data with the semantic partition that owns exact run grouping. */
+function resolveStaticFragmentInstanceInput(
+	drawUnit: StaticObjectDrawUnit,
+	data: StaticInstanceStreamData | null,
+): ObjectFrameInput["instances"] {
+	if (data === null) return null;
+	if (drawUnit.kind !== "instanced") {
+		throw new Error("Baked static object unexpectedly resolved instance data.");
+	}
+	return { cohortKey: drawUnit.cohortKey, data, kind: "static-fragment" };
+}
+
 /**
  * Combine every unique render node assigned to one stencil layer before drawing its passes.
  *
- * Merging first preserves the renderer's global material and transparency ordering instead of
- * accidentally treating each environment cell as an independent miniature scene.
+ * Merging first presents one complete contribution to instance grouping and transparency policy
+ * instead of accidentally treating each environment cell as an independent miniature scene.
  */
 function mergePortalNodeContributions(
 	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
 	contributionsByNode: ReadonlyMap<string, PreparedSceneContributions>,
-	comparePreparedState: (
-		left: PreparedObjectFrameInput,
-		right: PreparedObjectFrameInput,
-	) => number,
+	profile: WebGL2FrameProfileCapture | null,
 ): PreparedSceneContributions {
+	profile?.recordPortalContributionUse(renderNodeIds);
 	if (renderNodeIds.length === 1) {
 		const renderNodeId = renderNodeIds[0];
 		if (renderNodeId === undefined) {
@@ -2152,6 +2186,7 @@ function mergePortalNodeContributions(
 	const objects: PreparedObjectFrameInput[] = [];
 	const terrain: TerrainFrameInput[] = [];
 	const consumedNodeIds = new Set<string>();
+	const mergeStartedAt = profile?.beginCpuPhase();
 	for (const renderNodeId of renderNodeIds) {
 		if (!consumedNodeIds.add(renderNodeId)) {
 			throw new Error(
@@ -2167,51 +2202,11 @@ function mergePortalNodeContributions(
 		objects.push(...contributions.objects);
 		terrain.push(...contributions.terrain);
 	}
-	sortObjectFrameInputs(objects, comparePreparedState);
-	return { objects, terrain };
-}
-
-/** Cluster opaque state without disturbing transparent ranges before distance ordering. */
-function sortObjectFrameInputs(
-	objects: PreparedObjectFrameInput[],
-	comparePreparedState: (
-		left: PreparedObjectFrameInput,
-		right: PreparedObjectFrameInput,
-	) => number,
-): void {
-	objects.sort((left, right) => {
-		if (left.ordering === "transparent" && right.ordering === "transparent") {
-			return 0;
-		}
-		const ordering = left.ordering.localeCompare(right.ordering);
-		if (ordering !== 0) return ordering;
-		return compareObjectFrameBatchOrder(left, right, comparePreparedState);
-	});
-}
-
-/** Cluster transform source, then exact desired state, without granting merge permission. */
-function compareObjectFrameBatchOrder(
-	left: PreparedObjectFrameInput,
-	right: PreparedObjectFrameInput,
-	comparePreparedState: (
-		left: PreparedObjectFrameInput,
-		right: PreparedObjectFrameInput,
-	) => number,
-): number {
-	const transformSource = left.drawKind.localeCompare(right.drawKind);
-	if (transformSource !== 0) return transformSource;
-	if (
-		left.instances?.kind === "frame-template" &&
-		right.instances?.kind === "frame-template"
-	) {
-		// Cohort/domain identity is the existing semantic ordering contract. Exact state is
-		// rechecked by run formation, so a stale cohort safely fragments without paying to sort
-		// the normal path by facts that valid cohort construction already holds constant.
-		return compareFrameTemplateBatchIdentity(left, right);
+	if (profile && mergeStartedAt !== undefined) {
+		profile.finishCpuPhase("contributionMerge", mergeStartedAt);
+		profile.recordContributionMerge();
 	}
-	const preparedState = comparePreparedState(left, right);
-	if (preparedState !== 0) return preparedState;
-	return compareStableObjectFrameIdentity(left, right);
+	return { objects, terrain };
 }
 
 /** Retail sources encode translucency as either a unit float or a legacy byte-scale value. */
@@ -2221,11 +2216,11 @@ function sourceOpacity(translucency: number): number {
 	return Math.max(0, Math.min(1, normalized));
 }
 
-/** Compare the complete compatibility identity shared by sorting and adjacent run formation. */
-function compareFrameTemplateBatchIdentity(
+/** Check the semantic frame-template identity required in addition to prepared compatibility. */
+function frameTemplateBatchIdentityEquals(
 	left: PreparedObjectFrameInput,
 	right: PreparedObjectFrameInput,
-): number {
+): boolean {
 	const leftInstances = left.instances;
 	const rightInstances = right.instances;
 	if (
@@ -2233,36 +2228,34 @@ function compareFrameTemplateBatchIdentity(
 		rightInstances?.kind !== "frame-template"
 	) {
 		throw new Error(
-			"Transparent frame-template batch comparison requires two templates.",
+			"Frame-template batch identity requires two frame templates.",
 		);
 	}
 	return (
-		leftInstances.cohortKey.localeCompare(rightInstances.cohortKey) ||
-		left.source.localeCompare(right.source) ||
-		left.renderDomainKey.localeCompare(right.renderDomainKey) ||
-		left.geometry.localeCompare(right.geometry) ||
-		left.landblockId.localeCompare(right.landblockId) ||
-		left.indexStart - right.indexStart ||
-		left.indexCount - right.indexCount
+		leftInstances.cohortKey === rightInstances.cohortKey &&
+		left.source === right.source &&
+		left.renderDomainKey === right.renderDomainKey &&
+		left.geometry === right.geometry &&
+		left.landblockId === right.landblockId &&
+		left.indexStart === right.indexStart &&
+		left.indexCount === right.indexCount
 	);
 }
 
-/** Stable provenance order used only after every state-oriented comparison ties. */
-function compareStableObjectFrameIdentity(
-	left: PreparedObjectFrameInput,
-	right: PreparedObjectFrameInput,
-): number {
-	return (
-		left.source.localeCompare(right.source) ||
-		left.renderDomainKey.localeCompare(right.renderDomainKey) ||
-		left.geometry.localeCompare(right.geometry) ||
-		left.landblockId.localeCompare(right.landblockId) ||
-		left.indexStart - right.indexStart ||
-		left.indexCount - right.indexCount ||
-		(left.transparentSort?.stableId ?? "").localeCompare(
-			right.transparentSort?.stableId ?? "",
-		)
-	);
+/** Stable semantic partition used to narrow exact opaque instance compatibility checks. */
+function opaqueObjectInstanceBatchKey(
+	object: PreparedObjectFrameInput,
+): string {
+	const instances = object.instances;
+	if (
+		instances?.kind !== "frame-template" &&
+		instances?.kind !== "static-fragment"
+	) {
+		throw new Error(
+			"Opaque instance grouping received a non-frame instance input.",
+		);
+	}
+	return `${object.ordering}\0${object.source}\0${object.renderDomainKey}\0${object.landblockId}\0${instances.cohortKey}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`;
 }
 
 function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {

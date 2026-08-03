@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import {
+		EXPLORER_CAMERA_FRAMING,
+		resolveExplorerOutdoorFocusPose,
+	} from "../../explorer/explorer-camera-framing";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import type { HttpLandblockSourceBatchDiagnostic } from "../../lib/assets/http-landblock-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
@@ -14,7 +18,8 @@
 		createLandblockWorldOrigin,
 		OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	} from "../../lib/game/landblocks";
-	import { Quat, Vec3 } from "../../lib/game/math/types";
+	import { createCameraRotationRadians } from "../../lib/game/math/camera-orientation";
+	import { Vec3 } from "../../lib/game/math/types";
 	import {
 		WebGL2Device,
 		type WebGL2ContextLossPolicyProbe,
@@ -50,20 +55,25 @@
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
 	const CAMERA_FAR = 2_000;
+	const query = new URLSearchParams(window.location.search);
 	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
-	const cameraHeightSource = new URLSearchParams(window.location.search).get(
-		"cameraHeight",
-	);
+	const cameraHeightSource = query.get("cameraHeight");
 	const CAMERA_HEIGHT =
 		cameraHeightSource === null ? 600 : Number(cameraHeightSource);
+	const VIEWPORT_WIDTH = parsePositiveIntegerQuery(
+		query,
+		"viewportWidth",
+		1_280,
+	);
+	const VIEWPORT_HEIGHT = parsePositiveIntegerQuery(
+		query,
+		"viewportHeight",
+		720,
+	);
 	const ISOLATE_AUTHORED_DYNAMICS =
-		new URLSearchParams(window.location.search).get(
-			"isolateAuthoredDynamics",
-		) === "true";
+		query.get("isolateAuthoredDynamics") === "true";
 	const EXCLUDE_AUTHORED_DYNAMICS =
-		new URLSearchParams(window.location.search).get(
-			"excludeAuthoredDynamics",
-		) === "true";
+		query.get("excludeAuthoredDynamics") === "true";
 	if (!Number.isFinite(CAMERA_HEIGHT)) {
 		throw new Error("Browser harness camera height must be finite.");
 	}
@@ -85,6 +95,10 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => void;
+		/** Apply the Explorer's automatic outdoor focus policy after terrain becomes queryable. */
+		readonly focusExplorerOutdoor: (
+			landblockId: string,
+		) => BrowserHarnessCameraEvidence;
 		/** Place the continuous camera at one authoritative EnvCell pose. */
 		readonly setEnvCellCamera: (
 			envCellId: string,
@@ -131,6 +145,8 @@
 	}
 
 	interface BrowserHarnessState {
+		/** Last harness-authored camera pose, retained to prove benchmark parity. */
+		readonly camera: BrowserHarnessCameraEvidence | null;
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
@@ -163,6 +179,27 @@
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
 		readonly ready: boolean;
+		/** CSS and physical viewport dimensions that determine visible work. */
+		readonly viewport: BrowserHarnessViewportEvidence;
+	}
+
+	interface BrowserHarnessCameraEvidence {
+		readonly far: number;
+		readonly fov: number;
+		readonly landblockId: LandblockId;
+		readonly near: number;
+		readonly pitchDegrees: number;
+		readonly policy: "explicit-outdoor" | "explorer-outdoor-focus";
+		readonly position: readonly [number, number, number];
+		readonly yawDegrees: number;
+	}
+
+	interface BrowserHarnessViewportEvidence {
+		readonly cssHeight: number;
+		readonly cssWidth: number;
+		readonly devicePixelRatio: number;
+		readonly pixelHeight: number;
+		readonly pixelWidth: number;
 	}
 
 	interface BrowserHarnessTiming {
@@ -216,6 +253,7 @@
 	let runtime: GameRuntime | undefined;
 	let renderer: WebGL2Renderer | undefined;
 	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
+	let cameraEvidence: BrowserHarnessCameraEvidence | null = null;
 	let frameSettings: FrameSettings = {
 		...DEFAULT_FRAME_SETTINGS,
 		envCellRenderMode: "flat",
@@ -228,7 +266,7 @@
 	let internalPortalExecution: WebGL2InternalPortalExecutionFixtureResult | null =
 		null;
 	let ready = false;
-	const fixture = new URLSearchParams(window.location.search).get("fixture");
+	const fixture = query.get("fixture");
 
 	function parseOutdoorLandblockId(value: string): LandblockId {
 		const match = /^(?:0x)?([0-9a-f]{4})(?:[0-9a-f]{4})?$/i.exec(value.trim());
@@ -313,6 +351,11 @@
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const origin = createLandblockWorldOrigin(landblockId);
+		const position = new Vec3(
+			origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+			CAMERA_HEIGHT,
+			origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+		);
 		runtime.setPrimaryCamera({
 			far: CAMERA_FAR,
 			fov: CAMERA_FOV_DEGREES,
@@ -320,14 +363,54 @@
 			placement: {
 				envCellId: null,
 				landblockId,
-				position: new Vec3(
-					origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
-					CAMERA_HEIGHT,
-					origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
-				),
+				position,
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 			},
 		});
+		cameraEvidence = {
+			far: CAMERA_FAR,
+			fov: CAMERA_FOV_DEGREES,
+			landblockId,
+			near: CAMERA_NEAR,
+			pitchDegrees: cameraPitchDegrees,
+			policy: "explicit-outdoor",
+			position: [position.x, position.y, position.z],
+			yawDegrees: cameraYawDegrees,
+		};
+	}
+
+	function focusExplorerOutdoor(
+		rawLandblockId: string,
+	): BrowserHarnessCameraEvidence {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const landblockId = parseOutdoorLandblockId(rawLandblockId);
+		const pose = resolveExplorerOutdoorFocusPose(runtime, landblockId);
+		if (!pose) {
+			throw new Error(
+				`Browser harness cannot apply Explorer focus before terrain ${landblockId} is queryable.`,
+			);
+		}
+		runtime.setPrimaryCamera({
+			...EXPLORER_CAMERA_FRAMING,
+			placement: {
+				envCellId: null,
+				landblockId,
+				position: pose.position,
+				rotation: createCameraRotationRadians(
+					pose.yawRadians,
+					pose.pitchRadians,
+				),
+			},
+		});
+		cameraEvidence = {
+			...EXPLORER_CAMERA_FRAMING,
+			landblockId,
+			pitchDegrees: (pose.pitchRadians * 180) / Math.PI,
+			policy: "explorer-outdoor-focus",
+			position: [pose.position.x, pose.position.y, pose.position.z],
+			yawDegrees: (pose.yawRadians * 180) / Math.PI,
+		};
+		return cameraEvidence;
 	}
 
 	function setEnvCellCamera(
@@ -539,17 +622,24 @@
 		return `0x${match[1]!.toLowerCase()}`;
 	}
 
-	function cameraRotation(yawDegrees: number, pitchDegrees: number): Quat {
+	function cameraRotation(yawDegrees: number, pitchDegrees: number) {
 		const yaw = (yawDegrees * Math.PI) / 180;
 		const pitch = (pitchDegrees * Math.PI) / 180;
-		const halfYaw = yaw / 2;
-		const halfPitch = pitch / 2;
-		return new Quat(
-			Math.cos(halfYaw) * Math.cos(halfPitch),
-			Math.cos(halfYaw) * Math.sin(halfPitch),
-			Math.sin(halfYaw) * Math.cos(halfPitch),
-			-Math.sin(halfYaw) * Math.sin(halfPitch),
-		);
+		return createCameraRotationRadians(yaw, pitch);
+	}
+
+	function parsePositiveIntegerQuery(
+		parameters: URLSearchParams,
+		name: string,
+		fallback: number,
+	): number {
+		const rawValue = parameters.get(name);
+		if (rawValue === null) return fallback;
+		const value = Number(rawValue);
+		if (!Number.isInteger(value) || value <= 0) {
+			throw new Error(`Browser harness ${name} must be a positive integer.`);
+		}
+		return value;
 	}
 
 	onMount(() => {
@@ -557,9 +647,7 @@
 			error = "Browser harness canvas was not mounted.";
 			return;
 		}
-		const hostUrl = new URLSearchParams(window.location.search).get(
-			"contentHost",
-		);
+		const hostUrl = query.get("contentHost");
 		if (!hostUrl) {
 			error = "Browser harness requires a contentHost query parameter.";
 			return;
@@ -642,6 +730,7 @@
 				}
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
 					clearSceneInterest,
+					focusExplorerOutdoor,
 					probePortalExecution,
 					probePortalRenderGraph,
 					requestSceneInterest,
@@ -655,16 +744,19 @@
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;
+						const frameDiagnostics =
+							runtime?.getRendererFrameDiagnostics() ?? null;
 						return {
 							authoredDynamics:
 								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
+							camera: cameraEvidence,
 							error,
 							frameSettings,
-							frameProfile: runtime?.getRendererFrameProfile() ?? null,
+							frameProfile: frameDiagnostics?.profile ?? null,
 							hybridPortalExecution,
 							frames,
 							internalPortalExecution,
-							metrics: runtime?.getFrameSelectionMetrics() ?? null,
+							metrics: frameDiagnostics?.selectionMetrics ?? null,
 							portalContextLossPolicy,
 							portalSubstrate,
 							portalTargetCapabilities,
@@ -688,6 +780,13 @@
 								contentSource?.getLandblockSourceBatchDiagnostics() ?? [],
 							timing: timingSnapshot(),
 							textureFilteringCapabilities,
+							viewport: {
+								cssHeight: canvasElement!.clientHeight,
+								cssWidth: canvasElement!.clientWidth,
+								devicePixelRatio: window.devicePixelRatio,
+								pixelHeight: canvasElement!.height,
+								pixelWidth: canvasElement!.width,
+							},
 						};
 					},
 				};
@@ -747,7 +846,11 @@
 	});
 </script>
 
-<canvas bind:this={canvasElement} aria-label="Browser harness render viewport"
+<canvas
+	bind:this={canvasElement}
+	aria-label="Browser harness render viewport"
+	style:height={`${VIEWPORT_HEIGHT}px`}
+	style:width={`${VIEWPORT_WIDTH}px`}
 ></canvas>
 
 <style>
@@ -758,7 +861,5 @@
 
 	canvas {
 		display: block;
-		height: 720px;
-		width: 1280px;
 	}
 </style>

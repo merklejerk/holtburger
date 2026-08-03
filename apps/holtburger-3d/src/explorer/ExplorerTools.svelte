@@ -10,20 +10,15 @@
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type {
 		EnvCellRenderMode,
-		FrameSelectionMetrics,
-		RendererFrameProfile,
+		RendererFrameDiagnosticsSnapshot,
 	} from "../lib/game/renderer/renderer";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 	import type { TextureFilteringPolicy } from "../lib/game/renderer/texture-filtering-policy";
+	import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
 
 	type ExplorerTabId =
-		| "world"
-		| "frame"
-		| "textures"
-		| "assets"
-		| "entities"
-		| "logs";
+		"world" | "frame" | "textures" | "assets" | "entities" | "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -61,14 +56,12 @@
 		/** Raw device maximum shown beside the client-capped choices. */
 		readonly maximumTextureAnisotropy: number | null;
 		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
-		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
-		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
-		/** Latest explicit renderer profile; null while disabled or before the first sample. */
-		readonly rendererFrameProfile: RendererFrameProfile | null;
-		/** Whether the active renderer currently owns profiling resources. */
-		readonly rendererFrameProfilingEnabled: boolean;
+		/** Latest atomic read of renderer selection and explicit profiling state. */
+		readonly rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null;
 		/** Explicitly create or tear down the renderer profiling session. */
 		readonly updateRendererFrameProfiling: (enabled: boolean) => void;
+		/** Compose current renderer and Explorer context into one exportable report. */
+		readonly captureFrameDiagnosticReport: () => ExplorerFrameDiagnosticReport | null;
 		readonly authoredDynamicRuntimeDiagnostics: ReturnType<
 			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
@@ -93,10 +86,9 @@
 		textureFilteringOptions,
 		maximumTextureAnisotropy,
 		updateTextureFiltering,
-		frameSelectionMetrics,
-		rendererFrameProfile,
-		rendererFrameProfilingEnabled,
+		rendererFrameDiagnostics,
 		updateRendererFrameProfiling,
+		captureFrameDiagnosticReport,
 		authoredDynamicRuntimeDiagnostics,
 		readStaticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
@@ -213,11 +205,10 @@
 							/>
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel
-								metrics={frameSelectionMetrics}
+								diagnostics={rendererFrameDiagnostics}
 								dynamics={authoredDynamicRuntimeDiagnostics}
-								profile={rendererFrameProfile}
-								profilingEnabled={rendererFrameProfilingEnabled}
 								setProfilingEnabled={updateRendererFrameProfiling}
+								captureReport={captureFrameDiagnosticReport}
 							/>
 						{:else if activeTab.id === "textures"}
 							<ExplorerTexturesPanel

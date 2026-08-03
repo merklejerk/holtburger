@@ -43,6 +43,24 @@ playground. It can exercise production content and synthetic fixtures while
 collecting machine-readable state, browser errors, timings, portal evidence,
 and screenshots. It is not limited to terrain.
 
+### Renderer Profiling
+
+The Explorer Frame panel exposes explicit renderer CPU/GPU profiling. The
+browser-harness equivalent is `npm run harness:browser -- --profile-renderer
+...`. Use either to locate the responsible renderer boundary before changing a
+performance-sensitive path.
+
+Profiling is intentionally opt-in. When disabled, renderer hot paths must not
+perform profiling clocks, GPU-query work, or retain profiling samples. Enabling
+it may add CPU clocks and asynchronous GPU timestamp queries; disabling it must
+tear down those resources again.
+
+Treat the profile as attribution evidence, not a final diagnosis. GPU timestamp
+results can be delayed or unsupported, and the SwiftShader browser harness is
+useful for controlled before/after evidence but not for matching hardware
+timings. Corroborate surprising results with a browser-native profile and the
+underlying code path before optimizing.
+
 The browser harness is agent-owned diagnostic infrastructure:
 
 - Modify it freely to investigate and verify the current task.

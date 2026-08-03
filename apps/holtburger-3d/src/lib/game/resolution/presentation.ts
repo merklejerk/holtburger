@@ -14,7 +14,9 @@ export type ResolvedMaterialId = `material:${string}`;
 
 /** Selected source encoding that determines object texture preparation. */
 export type ResolvedObjectTextureEncoding =
-	"direct-color" | "index8" | "index16";
+	| "direct-color"
+	| "index8"
+	| "index16";
 
 /** Geometry buffers shared by object parts and embedded structures. */
 export interface ResolvedGeometry {

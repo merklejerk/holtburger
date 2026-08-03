@@ -498,7 +498,8 @@ class DeferredAtlas implements ObjectVisualTemplateAtlas<FixtureAtlasClaim> {
 	readonly #claims = new Set<FixtureAtlasClaim>();
 	readonly #resolvePrepared: () => void;
 	#resolveCompletion:
-		((completion: AtlasRequirementCompletion) => void) | null = null;
+		| ((completion: AtlasRequirementCompletion) => void)
+		| null = null;
 	readonly prepared: Promise<void>;
 	activationCount = 0;
 	withdrawalCount = 0;

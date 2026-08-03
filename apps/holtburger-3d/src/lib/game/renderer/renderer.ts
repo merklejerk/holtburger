@@ -2,18 +2,11 @@ import type { LandblockId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
-import {
-	DEFAULT_TEXTURE_FILTERING_POLICY,
-	type TextureFilteringPolicy,
-} from "./texture-filtering-policy";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
+import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
-
-/** Current physical-pixel cutoff for omitting negligible recursive portal subtrees. */
-export const DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA = 64;
-/** Conservative physical-pixel cutoff for independently optional object presentations. */
-export const DEFAULT_MINIMUM_OBJECT_FOOTPRINT_PIXEL_AREA = 64;
 
 /** Dynamic renderer quality choices independent from content and resource identity. */
 interface RenderQualitySettings {
@@ -37,14 +30,15 @@ export interface FrameSettings {
 
 /** Default dynamic display choices matching the region-authored presentation. */
 export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
-	distanceFogEnabled: true,
-	envCellRenderMode: "portal",
+	distanceFogEnabled:
+		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
+	envCellRenderMode: FRONTEND_TUNING.rendering.frameDefaults.envCellRenderMode,
 	quality: {
 		minimumObjectFootprintPixelArea:
-			DEFAULT_MINIMUM_OBJECT_FOOTPRINT_PIXEL_AREA,
+			FRONTEND_TUNING.rendering.frameDefaults.minimumObjectFootprintPixelArea,
 		minimumPortalFootprintPixelArea:
-			DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
-		textureFiltering: DEFAULT_TEXTURE_FILTERING_POLICY,
+			FRONTEND_TUNING.rendering.frameDefaults.minimumPortalFootprintPixelArea,
+		textureFiltering: FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
 	},
 };
 

@@ -29,8 +29,6 @@ export enum TexturePurpose {
 	ObjectDetail = "object-detail",
 }
 
-/** Initial fixed dimensions for every resident static-object texture page. */
-export const STATIC_OBJECT_TEXTURE_PAGE_SIZE = 2048;
 /** Evidence-backed filterable gutter for packed static-object direct-color textures. */
 const STATIC_OBJECT_TEXTURE_GUTTER_PIXELS: TextureGutterPixels = 8;
 

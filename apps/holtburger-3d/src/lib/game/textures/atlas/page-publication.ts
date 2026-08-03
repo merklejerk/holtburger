@@ -9,13 +9,13 @@ import type {
 } from "../texture-manager";
 import {
 	packedObjectTexturePreparation,
-	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
 	textureMipChainByteLength,
 	texturePurposeMipLevelCount,
 	texturePurposePolicy,
 	type AssetTextureKey,
 	type PackedObjectTexturePurpose,
 } from "../types";
+import { FRONTEND_TUNING } from "../../../frontend-tuning";
 import {
 	allocationBoundsForPlacement,
 	reconstructFreeRectangles,
@@ -70,7 +70,8 @@ export class AtlasPagePublication {
 
 	constructor(
 		renderResources: RendererResourceManager,
-		pageSize = STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+		pageSize: number =
+			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
 	) {
 		this.#renderResources = renderResources;
 		this.#pageSize = pageSize;

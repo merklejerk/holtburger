@@ -4,10 +4,8 @@ import { AnimationSystem } from "../systems/animation-system";
 import { EffectSystem } from "../systems/effect-system";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import { Mat4 } from "../math/types";
-import {
-	AnimationPresentationScheduler,
-	DEFAULT_OFFSCREEN_ANIMATION_SAMPLE_INTERVAL_SECONDS,
-} from "./animation-presentation-scheduler";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
 
 describe("AnimationPresentationScheduler", () => {
 	it("uses the product offscreen cadence by default", () => {
@@ -18,13 +16,14 @@ describe("AnimationPresentationScheduler", () => {
 		expect(
 			scheduler.select(
 				frame,
-				DEFAULT_OFFSCREEN_ANIMATION_SAMPLE_INTERVAL_SECONDS / 2,
+				FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds /
+					2,
 			).selectedNodeIds,
 		).toEqual([]);
 		expect(
 			scheduler.select(
 				frame,
-				DEFAULT_OFFSCREEN_ANIMATION_SAMPLE_INTERVAL_SECONDS,
+				FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds,
 			).selectedNodeIds,
 		).toEqual(["scene-node:1"]);
 	});

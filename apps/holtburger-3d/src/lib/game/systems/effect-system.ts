@@ -13,8 +13,8 @@ import { createRotationMat4 } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import type { PartRenderState } from "./components";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 
-const MAX_RECENT_EFFECT_OBSERVATIONS = 256;
 /** Retail schedules an `FPHook` only at or above this duration. */
 const MINIMUM_TIMED_EFFECT_SECONDS = 0.0002;
 
@@ -247,7 +247,10 @@ export class EffectSystem {
 			nodeId,
 			outcome,
 		});
-		if (this.#observations.length > MAX_RECENT_EFFECT_OBSERVATIONS)
+		if (
+			this.#observations.length >
+			FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations
+		)
 			this.#observations.shift();
 	}
 

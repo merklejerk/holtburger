@@ -1,12 +1,10 @@
 <script lang="ts">
 	import type { SceneResidency } from "../lib/game/scene";
 	import type { LoDConfig } from "../lib/game/runtime/types";
+	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import {
-		DEFAULT_EXPLORER_LOD_CONFIG,
 		formatExplorerLodRadius,
-		MAX_EXPLORER_LOD_RADIUS,
-		MIN_EXPLORER_LOD_RADIUS,
 		updateExplorerLodRadius,
 		type ExplorerLodRadius,
 	} from "./explorer-lod";
@@ -67,7 +65,7 @@
 
 	let interestInput = $state("0000");
 	let interestStatus = $state("No scene interest requested.");
-	let lod = $state<LoDConfig>({ ...DEFAULT_EXPLORER_LOD_CONFIG });
+	let lod = $state<LoDConfig>({ ...FRONTEND_TUNING.explorer.lod.defaultRadii });
 
 	const parsedInterest = $derived(parseResidenceInput(interestInput));
 
@@ -142,8 +140,8 @@
 					<span>Terrain</span>
 					<strong>{formatExplorerLodRadius(lod.terrainRadius)}</strong>
 					<input
-						max={MAX_EXPLORER_LOD_RADIUS}
-						min={MIN_EXPLORER_LOD_RADIUS}
+						max={FRONTEND_TUNING.explorer.lod.maximumRadius}
+						min={FRONTEND_TUNING.explorer.lod.minimumRadius}
 						step="1"
 						type="range"
 						value={lod.terrainRadius}

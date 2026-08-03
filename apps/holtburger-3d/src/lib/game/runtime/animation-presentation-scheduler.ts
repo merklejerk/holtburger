@@ -1,9 +1,7 @@
 import type { AdvancedAnimationFrame } from "../systems/animation-system";
 import type { RendererFrameFeedback } from "../renderer/renderer";
 import type { SceneNodeId } from "../scene";
-
-/** Product cadence for offscreen visual sampling; zero remains the full-cadence baseline. */
-export const DEFAULT_OFFSCREEN_ANIMATION_SAMPLE_INTERVAL_SECONDS = 0.1;
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 const TIME_EPSILON_SECONDS = 1e-9;
 
@@ -41,8 +39,8 @@ export interface AnimationPresentationSchedulerDiagnostics {
 export class AnimationPresentationScheduler {
 	readonly #lastSampleTimeSeconds = new Map<SceneNodeId, number>();
 	#activeNodeIds = new Set<SceneNodeId>();
-	#offscreenSampleIntervalSeconds =
-		DEFAULT_OFFSCREEN_ANIMATION_SAMPLE_INTERVAL_SECONDS;
+	#offscreenSampleIntervalSeconds: number =
+		FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds;
 	#previousVisibleNodeIds = new Set<SceneNodeId>();
 	#diagnostics: AnimationPresentationSchedulerDiagnostics = {
 		lastMaximumVisiblePresentationAgeSeconds: 0,
@@ -51,7 +49,7 @@ export class AnimationPresentationScheduler {
 		lastSkippedSampleCount: 0,
 		lastVisibleSampleCount: 0,
 		offscreenSampleIntervalSeconds:
-			DEFAULT_OFFSCREEN_ANIMATION_SAMPLE_INTERVAL_SECONDS,
+			FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds,
 		previousFrameVisibleCount: 0,
 		trackedPlaybackCount: 0,
 	};

@@ -1,18 +1,5 @@
 import type { LoDConfig } from "../lib/game/runtime/types";
-
-/** Smallest selectable outdoor scene-interest radius. */
-export const MIN_EXPLORER_LOD_RADIUS = 0;
-/** Largest Explorer radius, matching the legacy outdoor streaming control. */
-export const MAX_EXPLORER_LOD_RADIUS = 8;
-
-/** Explorer's initial full outdoor scene-interest policy. */
-export const DEFAULT_EXPLORER_LOD_CONFIG: LoDConfig = {
-	buildingRadius: 8,
-	envCellRadius: 2,
-	explicitObjectRadius: 2,
-	generatedObjectRadius: 2,
-	terrainRadius: 8,
-};
+import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 export type ExplorerLodRadius =
 	| "buildings"
@@ -92,10 +79,10 @@ export function formatExplorerLodRadius(radius: number | null): string {
 
 function clampRadius(radius: number | null): number {
 	if (radius === null || !Number.isFinite(radius))
-		return MIN_EXPLORER_LOD_RADIUS;
+		return FRONTEND_TUNING.explorer.lod.minimumRadius;
 	return Math.min(
-		MAX_EXPLORER_LOD_RADIUS,
-		Math.max(MIN_EXPLORER_LOD_RADIUS, Math.trunc(radius)),
+		FRONTEND_TUNING.explorer.lod.maximumRadius,
+		Math.max(FRONTEND_TUNING.explorer.lod.minimumRadius, Math.trunc(radius)),
 	);
 }
 

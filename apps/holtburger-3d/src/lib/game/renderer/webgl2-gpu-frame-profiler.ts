@@ -6,6 +6,7 @@ import type {
 	RendererFrameProfile,
 	RendererGpuFrameProfile,
 } from "./renderer";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** GPU phases whose timestamp intervals are aggregated across every view in one frame. */
 export type WebGL2GpuFramePhase = "terrain" | "opaque" | "blended";
@@ -49,8 +50,6 @@ interface PendingFrame {
 	readonly start: WebGLQuery;
 }
 
-const MAX_PENDING_GPU_FRAMES = 4;
-const MAX_RETAINED_CPU_FRAMES = 60;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 const CPU_TIMING_KEYS = [
 	"blendedOrderingMs",
@@ -214,7 +213,11 @@ export class WebGL2GpuFrameProfiler {
 	beginFrame(frameNumber: number): WebGL2GpuFrameCapture | null {
 		this.#assertAlive();
 		this.poll();
-		if (!this.#extension || this.#pending.length >= MAX_PENDING_GPU_FRAMES) {
+		if (
+			!this.#extension ||
+			this.#pending.length >=
+				FRONTEND_TUNING.diagnostics.maximumPendingGpuFrames
+		) {
 			return null;
 		}
 		return new WebGL2GpuFrameCapture(this, frameNumber, this.createTimestamp());
@@ -509,7 +512,10 @@ export class WebGL2FrameProfiler {
 
 	finishFrame(cpu: RendererCpuFrameProfile): void {
 		this.#cpuFrames.push(cpu);
-		if (this.#cpuFrames.length > MAX_RETAINED_CPU_FRAMES) {
+		if (
+			this.#cpuFrames.length >
+			FRONTEND_TUNING.diagnostics.maximumRetainedCpuFrames
+		) {
 			this.#cpuFrames.shift();
 		}
 	}

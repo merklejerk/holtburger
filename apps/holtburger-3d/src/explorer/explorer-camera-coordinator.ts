@@ -8,6 +8,7 @@ import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { Camera } from "../lib/game/runtime/types";
 import type { LoDConfig } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
+import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
 	FreeFlyCameraController,
 	type FreeFlyCameraPose,
@@ -19,10 +20,7 @@ import {
 	type ExplorerResidencyResolution,
 } from "./explorer-residency";
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
-import {
-	EXPLORER_CAMERA_FRAMING,
-	resolveExplorerOutdoorFocusPose,
-} from "./explorer-camera-framing";
+import { resolveExplorerOutdoorFocusPose } from "./explorer-camera-framing";
 
 type InteriorResidency = SceneResidency & {
 	readonly envCellId: NonNullable<SceneResidency["envCellId"]>;
@@ -325,7 +323,7 @@ function createCamera(
 	state: FreeFlyCameraState,
 ): Camera {
 	return {
-		...EXPLORER_CAMERA_FRAMING,
+		...FRONTEND_TUNING.explorer.camera.framing,
 		placement: {
 			...residency,
 			position: state.position,

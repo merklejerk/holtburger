@@ -244,6 +244,15 @@ describe("DynamicEntitySystem authored ownership", () => {
 			instance: { color: { a: 0.5 } },
 		});
 		expect(first?.drawUnit.batchKey).toBe(second?.drawUnit.batchKey);
+		const firstOpaque = presentationSample(firstPrepared, 0);
+		expect(() =>
+			system.publishPresentation([firstOpaque, firstOpaque]),
+		).toThrow(`repeats entity ${firstPrepared.nodeId}`);
+		expect(() =>
+			system.publishPresentation([
+				{ ...firstOpaque, nodeId: "scene-node:999" },
+			]),
+		).toThrow("scene-node:999 does not exist");
 
 		system.publishPresentation([presentationSample(firstPrepared, 1)]);
 		expect(system.getVisibleContributions(firstNodeId)).toEqual([]);

@@ -428,9 +428,13 @@
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Animation sample / publish ms</span>
+					<span class="ac-param-key"
+						>Animation advance / sample / publish ms</span
+					>
 					<code
-						>{dynamics.animation.lastSamplingDurationMs.toFixed(2)} / {dynamics.dynamics.lastPresentationPublicationDurationMs.toFixed(
+						>{dynamics.animation.lastAdvancementDurationMs.toFixed(2)} / {dynamics.animation.lastSamplingDurationMs.toFixed(
+							2,
+						)} / {dynamics.dynamics.lastPresentationPublicationDurationMs.toFixed(
 							2,
 						)}</code
 					>
@@ -441,6 +445,28 @@
 						>{dynamics.effects.executedHookCount} / {dynamics.effects
 							.deferredHookCount} / {dynamics.dynamics
 							.staticFallbackEntityCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Visible / offscreen / skipped samples</span
+					>
+					<code
+						>{dynamics.presentationCadence.lastVisibleSampleCount} / {dynamics
+							.presentationCadence.lastOffscreenSampleCount} / {dynamics
+							.presentationCadence.lastSkippedSampleCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key"
+						>Offscreen interval / visible pose age ms</span
+					>
+					<code
+						>{(
+							dynamics.presentationCadence.offscreenSampleIntervalSeconds * 1000
+						).toFixed(0)} / {(
+							dynamics.presentationCadence
+								.lastMaximumVisiblePresentationAgeSeconds * 1000
+						).toFixed(1)}</code
 					>
 				</div>
 			</div>

@@ -116,6 +116,7 @@ import type {
 	SceneInterestRevision,
 } from "./scene-availability";
 import { SceneInterestCommitCoordinator } from "./scene-interest-commit-coordinator";
+import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
 import type { TerrainSurfaceSample } from "../terrain/terrain-surface";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import {
@@ -291,6 +292,8 @@ export class GameRuntime {
 	readonly #envCells: EnvCellSystem<OwnerId, ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
+	/** Binary previous-frame-visible versus timed-offscreen presentation policy. */
+	readonly #animationPresentation = new AnimationPresentationScheduler();
 	/** Persistent visual-effect state advanced only by the authored behavior clock. */
 	readonly #effects: EffectSystem;
 	/** Active authored-dynamic residents grouped by their source owner. */
@@ -660,6 +663,13 @@ export class GameRuntime {
 		this.#frameSettings = settings;
 	}
 
+	/** Set offscreen visual sampling cadence; zero preserves full render cadence. */
+	setOffscreenAnimationSampleIntervalSeconds(intervalSeconds: number): void {
+		this.#animationPresentation.setOffscreenSampleIntervalSeconds(
+			intervalSeconds,
+		);
+	}
+
 	/** Return one consistent read of the active renderer's optional diagnostics capability. */
 	getRendererFrameDiagnostics(): RendererFrameDiagnosticsSnapshot | null {
 		return this.#renderer?.frameDiagnostics?.snapshot() ?? null;
@@ -686,6 +696,7 @@ export class GameRuntime {
 			animation: this.#animation.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
 			effects: this.#effects.getDiagnostics(),
+			presentationCadence: this.#animationPresentation.getDiagnostics(),
 			residents: this.getAuthoredDynamicResidentDiagnostics(),
 		};
 	}
@@ -813,9 +824,19 @@ export class GameRuntime {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
-		this.#dynamics.publishPresentation(this.#animation.update(timeSeconds));
+		const animationFrame = this.#animation.advance(timeSeconds);
+		const presentationSelection = this.#animationPresentation.select(
+			animationFrame,
+			timeSeconds,
+		);
+		this.#dynamics.publishPresentation(
+			this.#animation.sample(
+				animationFrame,
+				presentationSelection.selectedNodeIds,
+			),
+		);
 		const anchorLandblockId = this.#camera.placement.landblockId;
-		renderer.drawFrame({
+		const feedback = renderer.drawFrame({
 			anchorLandblockId,
 			environment: {
 				...this.#environment,
@@ -828,6 +849,7 @@ export class GameRuntime {
 			timeSeconds,
 			views: [{ camera: this.#camera }],
 		});
+		this.#animationPresentation.completeFrame(feedback, timeSeconds);
 	}
 
 	updateDynamicEntityPlacement(
@@ -852,6 +874,7 @@ export class GameRuntime {
 		await Promise.allSettled([...this.#realizationContinuations]);
 		await this.#renderer?.destroy();
 		this.#renderer = null;
+		this.#animationPresentation.clear();
 		this.#animation.destroy();
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();

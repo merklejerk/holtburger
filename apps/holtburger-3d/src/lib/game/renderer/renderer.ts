@@ -1,4 +1,5 @@
 import type { LandblockId } from "../game-types";
+import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import {
@@ -313,9 +314,15 @@ export interface RendererFrameDiagnostics {
 	setProfilingEnabled(enabled: boolean): void;
 }
 
+/** Production control feedback from one fully completed renderer frame. */
+export interface RendererFrameFeedback {
+	/** Dynamic roots selected in at least one view, deduplicated across the frame. */
+	readonly selectedDynamicNodeIds: readonly SceneNodeId[];
+}
+
 export interface Renderer {
 	/** Backend-specific diagnostics; absent renderers remain valid production implementations. */
 	readonly frameDiagnostics?: RendererFrameDiagnostics;
-	drawFrame(input: FrameInput): void;
+	drawFrame(input: FrameInput): RendererFrameFeedback;
 	destroy(): Promise<void>;
 }

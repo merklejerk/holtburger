@@ -164,6 +164,7 @@ function parseArgs(args) {
 		portalWorkLimit: DEFAULT_PORTAL_GRAPH_WORK_LIMIT,
 		minimumPortalFootprintPixelArea: null,
 		minimumGeneratedInstancePixelArea: null,
+		offscreenAnimationSampleIntervalMs: null,
 		probePortalGraph: false,
 		executePortal: false,
 		frameMode: null,
@@ -363,6 +364,19 @@ function parseArgs(args) {
 				) {
 					throw new Error(
 						"--minimum-generated-instance-pixel-area must be a non-negative number.",
+					);
+				}
+				break;
+			case "--offscreen-animation-sample-interval-ms":
+				parsed.offscreenAnimationSampleIntervalMs = Number(
+					requireValue(args, ++index, arg),
+				);
+				if (
+					!Number.isFinite(parsed.offscreenAnimationSampleIntervalMs) ||
+					parsed.offscreenAnimationSampleIntervalMs < 0
+				) {
+					throw new Error(
+						"--offscreen-animation-sample-interval-ms must be a non-negative number.",
 					);
 				}
 				break;
@@ -613,6 +627,8 @@ Options:
                          Override the production recursive portal-footprint cutoff.
   --minimum-generated-instance-pixel-area <px2>
                          Override generated opaque/alpha-test footprint culling.
+  --offscreen-animation-sample-interval-ms <ms>
+                         Override offscreen visual animation sampling; zero is full cadence.
   --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
   --execute-portal
                          Execute the complete planned graph through production GPU passes.
@@ -723,6 +739,7 @@ function briefHarnessReport(result) {
 				: {
 						animation: authoredDynamics.animation,
 						dynamics: authoredDynamics.dynamics,
+						presentationCadence: authoredDynamics.presentationCadence,
 						effects: {
 							residentEffectStateCount:
 								authoredDynamics.effects.residentEffectStateCount,
@@ -1210,6 +1227,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumGeneratedInstancePixelArea",
 				[options.minimumGeneratedInstancePixelArea],
+			);
+		}
+		if (options.offscreenAnimationSampleIntervalMs !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setOffscreenAnimationSampleIntervalSeconds",
+				[options.offscreenAnimationSampleIntervalMs / 1000],
 			);
 		}
 		if (options.filteringCycle || options.textureFiltering !== null) {

@@ -351,13 +351,22 @@ export class DynamicEntitySystem<
 		};
 	}
 
-	/** Publish complete render-cadence samples to entity-owned state before the frame is selected. */
+	/** Publish sparse current samples to entity-owned state before the frame is selected. */
 	publishPresentation(samples: readonly DynamicPresentationSample[]): void {
 		const startedAt = performance.now();
-		for (const sample of samples) {
+		const publishedNodeIds = new Set<SceneNodeId>();
+		const publications = samples.map((sample) => {
+			if (publishedNodeIds.has(sample.nodeId))
+				throw new Error(
+					`Dynamic presentation repeats entity ${sample.nodeId}.`,
+				);
+			publishedNodeIds.add(sample.nodeId);
 			const entity = this.#entities.get(sample.nodeId);
 			if (!entity)
 				throw new Error(`Dynamic entity ${sample.nodeId} does not exist.`);
+			return { entity, sample };
+		});
+		for (const { entity, sample } of publications) {
 			this.#applySample(entity, sample);
 		}
 		this.#lastPresentationPublicationDurationMs = performance.now() - startedAt;
@@ -468,6 +477,10 @@ export class DynamicEntitySystem<
 		const samples = new Map(
 			initialSamples.map((sample) => [sample.nodeId, sample] as const),
 		);
+		if (samples.size !== initialSamples.length)
+			throw new Error(
+				"Initial pose samples contain a duplicate dynamic entity.",
+			);
 		for (const entity of entities) {
 			const animation = entity.preparedAnimation;
 			if (!animation)

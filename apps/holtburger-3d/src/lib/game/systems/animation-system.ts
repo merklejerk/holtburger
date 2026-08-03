@@ -11,6 +11,9 @@ const BEHAVIOR_STEP_SECONDS = 1 / 30;
 const DISCONTINUITY_SECONDS = 2;
 /** Absorbs timestamp subtraction noise without admitting a materially early behavior step. */
 const CLOCK_EPSILON_SECONDS = 1e-9;
+const advancedAnimationFrameBrand: unique symbol = Symbol(
+	"advanced-animation-frame",
+);
 
 interface AnimationRecord {
 	readonly animation: PreparedAnimation;
@@ -22,8 +25,19 @@ interface AnimationRecord {
 export interface AnimationRuntimeDiagnostics {
 	readonly activePlaybackCount: number;
 	readonly discontinuityCount: number;
+	/** Wall time spent advancing clocks and semantic behavior during the latest frame. */
+	readonly lastAdvancementDurationMs: number;
+	/** Number of selected presentations visually sampled during the latest sample call. */
+	readonly lastSampledPresentationCount: number;
 	readonly lastSamplingDurationMs: number;
 	readonly lastSemanticStepCount: number;
+}
+
+/** Opaque proof that every active playback reached one specific runtime time. */
+export interface AdvancedAnimationFrame {
+	/** Stable active playback selection captured after semantic advancement. */
+	readonly activeNodeIds: readonly SceneNodeId[];
+	readonly [advancedAnimationFrameBrand]: true;
 }
 
 /** Complete render-cadence presentation produced without mutating entity or scene state. */
@@ -47,9 +61,13 @@ export class AnimationSystem<TOwnerId extends string> {
 	readonly #owners = new Map<TOwnerId, Set<SceneNodeId>>();
 	readonly #stagedNodeIds = new Set<SceneNodeId>();
 	#destroyed = false;
+	/** Latest semantic advancement proof, invalidated whenever active ownership changes. */
+	#latestAdvancedFrame: AdvancedAnimationFrame | null = null;
 	#diagnostics: AnimationRuntimeDiagnostics = {
 		activePlaybackCount: 0,
 		discontinuityCount: 0,
+		lastAdvancementDurationMs: 0,
+		lastSampledPresentationCount: 0,
 		lastSamplingDurationMs: 0,
 		lastSemanticStepCount: 0,
 	};
@@ -76,27 +94,59 @@ export class AnimationSystem<TOwnerId extends string> {
 			this.#owners.set(ownerId, nodes);
 		}
 		nodes.add(nodeId);
+		this.#latestAdvancedFrame = null;
 		return this.#sample(nodeId, record);
 	}
 
-	/** Advance semantic state at 30 Hz and sample smooth visual state at the supplied render time. */
-	update(timeSeconds: number): readonly DynamicPresentationSample[] {
+	/** Advance every active playback's semantic state at the fixed 30 Hz behavior cadence. */
+	advance(timeSeconds: number): AdvancedAnimationFrame {
 		if (this.#destroyed)
-			throw new Error("Cannot update destroyed animation playback.");
+			throw new Error("Cannot advance destroyed animation playback.");
 		if (!Number.isFinite(timeSeconds))
 			throw new Error("Animation time must be finite.");
 		const startedAt = performance.now();
-		const samples: DynamicPresentationSample[] = [];
 		let semanticStepCount = 0;
 		for (const [nodeId, record] of this.#records) {
 			semanticStepCount += this.#advanceRecord(nodeId, record, timeSeconds);
-			samples.push(this.#sample(nodeId, record));
 		}
+		const frame: AdvancedAnimationFrame = Object.freeze({
+			activeNodeIds: Object.freeze([...this.#records.keys()]),
+			[advancedAnimationFrameBrand]: true as const,
+		});
+		this.#latestAdvancedFrame = frame;
 		this.#diagnostics = {
 			...this.#diagnostics,
 			activePlaybackCount: this.#records.size,
-			lastSamplingDurationMs: performance.now() - startedAt,
+			lastAdvancementDurationMs: performance.now() - startedAt,
 			lastSemanticStepCount: semanticStepCount,
+		};
+		return frame;
+	}
+
+	/** Sample selected presentations only after all playback semantics have advanced. */
+	sample(
+		frame: AdvancedAnimationFrame,
+		nodeIds: readonly SceneNodeId[],
+	): readonly DynamicPresentationSample[] {
+		if (this.#destroyed)
+			throw new Error("Cannot sample destroyed animation playback.");
+		if (frame !== this.#latestAdvancedFrame)
+			throw new Error("Animation samples require the latest advanced frame.");
+		const startedAt = performance.now();
+		const requested = new Set<SceneNodeId>();
+		const samples = nodeIds.map((nodeId) => {
+			if (requested.has(nodeId))
+				throw new Error(`Animation sample request repeats ${nodeId}.`);
+			requested.add(nodeId);
+			const record = this.#records.get(nodeId);
+			if (!record)
+				throw new Error(`Animation sample request contains unknown ${nodeId}.`);
+			return this.#sample(nodeId, record);
+		});
+		this.#diagnostics = {
+			...this.#diagnostics,
+			lastSampledPresentationCount: samples.length,
+			lastSamplingDurationMs: performance.now() - startedAt,
 		};
 		return samples;
 	}
@@ -157,6 +207,7 @@ export class AnimationSystem<TOwnerId extends string> {
 					this.#stagedNodeIds.delete(nodeId);
 				}
 				this.#owners.set(ownerId, new Set(records.keys()));
+				this.#latestAdvancedFrame = null;
 				state = "committed";
 			},
 			release: () => {
@@ -173,6 +224,7 @@ export class AnimationSystem<TOwnerId extends string> {
 
 	removeOwner(ownerId: TOwnerId): void {
 		this.#removeOwnerRecords(ownerId);
+		this.#latestAdvancedFrame = null;
 	}
 
 	destroy(): void {
@@ -183,6 +235,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		this.#records.clear();
 		this.#owners.clear();
 		this.#stagedNodeIds.clear();
+		this.#latestAdvancedFrame = null;
 	}
 
 	#removeOwnerRecords(ownerId: TOwnerId): void {

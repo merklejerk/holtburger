@@ -123,6 +123,10 @@
 		readonly setMinimumPortalFootprintPixelArea: (pixelArea: number) => void;
 		/** Change generated-instance footprint policy without rebuilding content. */
 		readonly setMinimumGeneratedInstancePixelArea: (pixelArea: number) => void;
+		/** Change offscreen visual animation cadence without changing semantic advancement. */
+		readonly setOffscreenAnimationSampleIntervalSeconds: (
+			intervalSeconds: number,
+		) => void;
 		/** Reset steady-state frame timing after asynchronous content publication settles. */
 		readonly resetTiming: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
@@ -550,6 +554,13 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setOffscreenAnimationSampleIntervalSeconds(
+		intervalSeconds: number,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		runtime.setOffscreenAnimationSampleIntervalSeconds(intervalSeconds);
+	}
+
 	function setFrameProfiling(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.setRendererFrameProfilingEnabled(enabled);
@@ -828,6 +839,7 @@
 					setFrameProfiling,
 					setMinimumGeneratedInstancePixelArea,
 					setMinimumPortalFootprintPixelArea,
+					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,
 					resetTiming,
 					tracePortalSegment,

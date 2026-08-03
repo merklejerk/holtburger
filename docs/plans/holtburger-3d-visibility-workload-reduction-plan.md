@@ -1,6 +1,7 @@
 # Holtburger 3D Visibility Workload Reduction Plan
 
-Status: active; Phases 0-4 complete with a `64px²` generated-instance cutoff accepted.
+Status: active; Phases 0-7 complete with `64px²` portal/generated cutoffs and a `100ms`
+offscreen animation interval accepted.
 Created: 2026-08-03
 Related investigation: `docs/plans/holtburger-3d-portal-frame-cpu-investigation.md`
 
@@ -9,8 +10,9 @@ Related investigation: `docs/plans/holtburger-3d-portal-frame-cpu-investigation.
 ### Goal
 
 Reduce frame work before preparation and submission by recursively pruning negligible portal
-subtrees, removing subpixel generated-scenery instances, and sampling offscreen visual animation at
-a lower cadence without weakening semantic animation progression.
+subtrees, rejecting negligible independently drawable object presentations, removing subpixel
+generated-scenery instances, and sampling offscreen visual animation at a lower cadence without
+weakening semantic animation progression.
 
 ### Starting State
 
@@ -44,6 +46,13 @@ a lower cadence without weakening semantic animation progression.
 - Separate exact animation semantic advancement from visual pose/effect sampling.
 - Use renderer-authored dynamic visibility feedback to schedule visible and offscreen presentation
   cadence across all active views.
+- Generalize the accepted generated-instance cutoff into one object-footprint fidelity policy while
+  retaining specialized per-instance and per-presentation-root selection algorithms.
+- Cull independently drawable building, explicit-object, EnvCell-resident, and anchored authored
+  dynamic roots from their current published presentation bounds after coarse scene selection and
+  before contribution expansion.
+- Preserve the scene graph's one conservative spatial-bounds concept; current presentation bounds
+  remain renderer-facing state and never churn spatial membership.
 - Add harness controls, temporary attribution, permanent workload diagnostics, representative
   screenshots, and motion checks required to select each production policy.
 - Remove every temporary probe, threshold cycle, and measurement-only harness path at the
@@ -59,10 +68,13 @@ a lower cadence without weakening semantic animation progression.
   portal windows with bounding rectangles.
 - Hardware occlusion queries, Hi-Z occlusion, GPU-driven culling, indirect drawing, or compute
   compaction.
-- Screen-size culling for explicit objects, buildings, EnvCell residents, dynamics, transparent
-  generated instances, or additive generated instances in the first cutover.
+- Footprint culling of terrain, EnvCell shells, generated transparent/additive instance streams, or
+  any container whose bound does not describe one independently optional presentation unit.
 - Skipping, coalescing, or reordering animation semantic steps and hooks.
-- Changing animation-wide conservative bounds to pose-dependent bounds.
+- Replacing animation-wide scene bounds with pose-dependent bounds or updating scene spatial
+  membership at animation cadence.
+- Applying anchored-authored dynamic bounds policy to future runtime actors before authoritative
+  root motion and replaceable appearance/clip envelope ownership are defined.
 - Scissor optimization, dynamic resolution, portal-target resolution scaling, or renderer-wide
   temporal caches.
 - New long-lived browser fixtures or camera-specific application code whose only consumer is a
@@ -129,6 +141,30 @@ a lower cadence without weakening semantic animation progression.
   - `CSequence::update_internal`, `CSequence::execute_hooks`, and
     `CPhysicsObj::animate_static_object` remain the authoritative client-behavior references.
 
+### Object Presentation Footprints
+
+- `apps/holtburger-3d/src/lib/game/scene/scene-graph.ts`
+  - owns the single conservative local-bounds contract used for spatial indexing, scope queries,
+    and broad-phase frustum selection; it must not acquire a second presentation-bounds concept.
+- `apps/holtburger-3d/src/lib/game/renderer/render-world.ts`
+  - currently identifies a selected node and eagerly expands dynamic contributions through
+    `DynamicEntitySystem.getVisibleContributions()`; Phase 8 must split lightweight presentation
+    identity/bounds lookup from retained contribution expansion.
+- `apps/holtburger-3d/src/lib/game/systems/dynamic-entity-system.ts`
+  - owns the last published articulated pose, effect root rotation, part transforms, render states,
+    and authored scale, making it the owner of a bound for the presentation that will actually draw.
+- `apps/holtburger-3d/src/lib/game/systems/object-visual-template-repository.ts`
+  - prepares each rigid part's geometry-local bounds with its default scale and draw units; the
+    active dynamic-part contract currently drops the local bound during installation.
+- `apps/holtburger-3d/src/lib/game/commit/artifacts.ts`
+  - carries each immutable static object's root-local bound into scene publication. Because the
+    presentation never changes, the existing scene-node bound is also its exact presentation bound
+    and must be reused rather than duplicated.
+- `apps/holtburger-3d/src/lib/game/renderer/generated-instance-selection.ts`
+  - owns the accepted conservative physical-pixel AABB projection semantics for generated
+    instances, including zero-disabled behavior and near-plane retention; Phase 8 should extract or
+    reuse the projection primitive without forcing all object classes through instance-stream code.
+
 ### Measurement Surfaces
 
 - `apps/holtburger-3d/scripts/browser-harness.mjs`
@@ -140,12 +176,13 @@ a lower cadence without weakening semantic animation progression.
 
 1. Remove work before object preparation, instance upload, and draw submission.
 2. Keep semantic animation time and hook execution exact; reduce only visual sampling work.
-3. Compute each culling envelope once at the worker or planner boundary that owns its source facts.
+3. Compute each culling envelope once at the worker, planner, or presentation-publication boundary
+   that owns every source fact it requires.
 4. Express fidelity policy in physical pixels and record the effective policy with every profile.
 5. Preserve exact zero-threshold/full-cadence modes as diagnostic baselines, not parallel legacy
    architectures.
-6. Reuse existing scope traversal, generated compaction, and animation ownership instead of adding
-   competing schedulers.
+6. Keep scene bounds conservative and stable; presentation fidelity belongs after broad-phase
+   selection and before contribution expansion.
 7. Measure candidate elimination and net frame cost; a culling pass that costs more than it removes
    is rejected.
 8. Promote the smallest threshold or lowest cadence that produces material savings without visible
@@ -165,8 +202,10 @@ renderer identity, frame settings, and settled work counts.
 | Representative indoor-root camera                   | Recursive interior traversal, doorway approach, and near-plane behavior |
 | Hybrid indoor/exterior camera                       | Indoor-to-outdoor rejection and exterior subtree preservation           |
 | DC58 generated-heavy outdoor focus                  | Generated-instance elimination and compaction payoff                    |
+| Explicit-object/building-heavy outdoor views        | Independently drawable static-root footprint elimination                |
+| Indoor view with resident objects                   | EnvCell scope admission followed by per-resident footprint filtering    |
 | DA55 with camera turned away from authored dynamics | Offscreen animation cadence and publication reduction                   |
-| DA55 with animated entities entering view           | First-visible-frame and recently-visible behavior                       |
+| DA55 with animated entities entering view           | Dynamic published-footprint and first-visible-frame behavior            |
 
 SwiftShader provides deterministic regression evidence. Apple/WebKit target captures decide whether
 a policy improves the intended client. Threshold comparisons must run inside one settled process
@@ -187,7 +226,7 @@ where practical so content, atlas state, camera, and viewport remain identical.
 - [x] Add temporary generated-instance footprint buckets after scene-fragment selection but before
       compaction.
 - [x] Add temporary animation counts for semantically advanced, visually sampled, published,
-      visible, recently visible, and offscreen entities.
+      visible, and offscreen entities.
 - [x] Measure instrumentation overhead and remove any probe that materially perturbs its target.
 
 ### Acceptance Criteria
@@ -296,9 +335,8 @@ no duplicate temporary animation metric was added. In the matched one-process DA
 - semantic fixed-step counts and hook observations continued across both states with no
   discontinuity.
 
-“Recently visible” has no honest nonzero baseline because no grace-window policy exists yet.
-Inventing that state in Phase 0 would let diagnostics define the Phase 7 design. Phase 7 must add
-the recency state as part of the scheduler contract, then count its named consumers.
+No recency or grace-window axis was added. Phase 7 uses the renderer's previous completed frame as
+the only visibility feedback and measures the bounded first-visible-frame staleness directly.
 
 #### Probe Overhead and Cleanup
 
@@ -523,13 +561,34 @@ The renderer consumes it without re-deriving asset facts.
 
 ## Phase 5: Generated Resteering Gate
 
-- [ ] Compare net CPU/GPU benefit, rejected-instance distribution, upload reduction, image behavior,
+- [x] Compare net CPU/GPU benefit, rejected-instance distribution, upload reduction, image behavior,
       and camera-motion stability.
-- [ ] Decide whether transparent or additive generated instances justify a later extension; do not
+- [x] Decide whether transparent or additive generated instances justify a later extension; do not
       widen this plan without evidence.
-- [ ] Rebaseline animation measurements after generated work settles.
-- [ ] Remove all rejected envelope shapes, threshold variants, probes, and harness cycles.
-- [ ] Commit the generated phase independently before animation scheduling changes.
+- [x] Rebaseline animation measurements after generated work settles.
+- [x] Remove all rejected envelope shapes, threshold variants, probes, and harness cycles.
+- [x] Commit the generated phase independently before animation scheduling changes.
+
+### Decisions and Course Corrections
+
+- The accepted generated implementation remains limited to opaque and alpha-tested instance
+  streams. Transparent candidates already enter ordering-sensitive frame runs, and the measured
+  workloads contained no additive submissions. Neither path has evidence sufficient to justify
+  widening the culling contract.
+- The single-value harness override remains as a durable reproducibility control; rejected sweep
+  cycles, alternative envelope shapes, and temporary distributions do not remain in runtime or UI
+  code.
+- With the settled `64px²` product default, DA55 retained `1,625/3,860` unique generated instances,
+  submitted `2,935` partition-expanded instances in `549` draws, and uploaded `363,200` bytes.
+  DC58 retained `771/4,034`, submitted `1,641` in `374` draws, and uploaded `308,560` bytes.
+- The post-generated animation baseline still samples every active playback. DA55 had `171` active
+  playbacks versus `61` visible dynamic roots, with roughly `0.5ms` combined animation advancement
+  and sampling plus `0.3ms` publication. DC58 had `472` active versus `210` visible, with roughly
+  `1.0ms` combined animation work plus `0.7ms` publication. GPU timestamps remain unsupported in
+  the browser harness, so Phase 7 must judge cadence scheduling from exact workload counts and
+  aggregate CPU rather than invented GPU precision.
+- Generated culling was committed independently as `a4ce669b` before the animation contract
+  changed.
 
 ## Phase 6: Split Animation Semantics from Visual Sampling
 
@@ -554,17 +613,17 @@ envelope. Never union every possible runtime animation into one lifetime AABB.
 
 ### Task Checklist
 
-- [ ] Introduce explicit `advance(timeSeconds)` and `sample(nodeIds)` operations with types that make
-      semantic progression impossible to skip accidentally.
-- [ ] Preserve install/stage atomicity and mandatory initial samples.
-- [ ] Preserve 30 Hz departed-frame traversal, authored hook order, cyclic seams, two-second
+- [x] Introduce explicit `advance(timeSeconds)` and `sample(frame, nodeIds)` operations with types
+      that make semantic progression impossible to skip accidentally.
+- [x] Preserve install/stage atomicity and mandatory initial samples.
+- [x] Preserve 30 Hz departed-frame traversal, authored hook order, cyclic seams, two-second
       discontinuity behavior, omega integration, and translucency completion.
-- [ ] Make duplicate or unknown sample requests fail loudly.
-- [ ] Change `DynamicEntitySystem.publishPresentation()` to accept sparse current samples while
+- [x] Make duplicate or unknown sample requests fail loudly.
+- [x] Change `DynamicEntitySystem.publishPresentation()` to accept sparse current samples while
       retaining exact entity ownership validation.
-- [ ] Keep the existing swept-bound policy explicitly scoped to anchored authored dynamics; do not
+- [x] Keep the existing swept-bound policy explicitly scoped to anchored authored dynamics; do not
       introduce a speculative runtime-actor fallback or generic lifetime-bound contract.
-- [ ] Add deterministic tests proving full-cadence and sparse-cadence runs reach identical semantic
+- [x] Add deterministic tests proving full-cadence and sparse-cadence runs reach identical semantic
       state and produce the same pose/effect presentation when sampled at the same final time.
 
 ### Acceptance Criteria
@@ -577,7 +636,29 @@ envelope. Never union every possible runtime animation into one lifetime AABB.
 
 ### Decisions and Course Corrections
 
-- To be completed during execution.
+- `advance(timeSeconds)` returns an opaque, frozen frame token containing the active node IDs.
+  `sample(frame, nodeIds)` accepts only the latest token, so presentation cannot be sampled against
+  playback state that has not reached that frame. Owner mutations invalidate the token.
+- Sampling accepts a sparse selection but rejects duplicate and unknown animation nodes.
+  `DynamicEntitySystem.publishPresentation()` independently preflights duplicate and unknown
+  entity ownership before applying any sample; unsampled entities retain their last published
+  presentation.
+- Initial install and staged-owner paths still sample complete presentations directly before scene
+  publication. The cadence seam does not weaken the atomic initial-pose guarantee.
+- Advancement and visual sampling now have separate duration diagnostics, and sampled presentation
+  count is distinct from semantic step count and publication count. The Explorer exposes the three
+  advance/sample/publish durations without adding a scheduling policy or temporary fixture.
+- Full-cadence and sparse-cadence deterministic tests produce identical hook observations, pose,
+  omega-derived root rotation, and translucency at the same final time. Stale frame tokens,
+  duplicate requests, unknown animation nodes, duplicate publications, and unknown dynamic owners
+  fail loudly.
+- The runtime intentionally continues to sample and publish every active node. DA55 browser
+  verification reported `171` advanced/sampled/published with `61` visible; DC58 reported
+  `472` advanced/sampled/published with `210` visible. Both completed without console errors or
+  discontinuities. This preserves a behavior-identical baseline for Phase 7.
+- Conservative swept bounds remain constructed from `AuthoredDynamicSource` during authored
+  preparation. No runtime-authored actor type, root-motion fallback, or generic lifetime envelope
+  was introduced.
 
 ## Phase 7: Schedule Visible and Offscreen Presentation Cadence
 
@@ -587,51 +668,180 @@ The renderer owns the actual portal/frustum visibility decision. Publish typed f
 feedback containing the union of selected dynamic root IDs across all views; do not repurpose
 diagnostic counters as control input.
 
-Dry-run two scheduling shapes before choosing the cutover:
-
-1. Previous-frame visibility plus a recently-visible grace window. This preserves the current
-   renderer API shape but permits one first-visible frame to use an offscreen-cadence pose.
-2. Split renderer selection from execution so the current frame's selected dynamics are sampled
-   before contribution preparation. Select this only if target motion proves the bounded stale
-   first-visible frame unacceptable; do not introduce a general render graph as collateral damage.
+Use one binary scheduling decision: roots selected in the previous completed frame sample at render
+cadence; every other active root samples at the configured offscreen interval. This permits one
+first-visible frame to use an offscreen-cadence pose. Measure that bounded staleness directly. Split
+renderer selection from execution only if target motion proves the one-frame contract unacceptable;
+do not add recency, grace-window, or general render-graph state as collateral damage.
 
 ### Task Checklist
 
-- [ ] Add typed renderer frame feedback for selected dynamic root IDs, unioned across views and
+- [x] Add typed renderer frame feedback for selected dynamic root IDs, unioned across views and
       independent from optional profiling diagnostics.
-- [ ] Add one runtime-owned visual cadence scheduler tracking last sampled and recently visible
-      times by authoritative dynamic node identity.
-- [ ] Sample visible/recently-visible entities every rendered frame and offscreen entities at an
-      explicit harness-controlled interval.
-- [ ] Clean scheduler state immediately when an entity owner is replaced, evicted, or destroyed.
-- [ ] Preserve full-cadence mode as the zero/disabled baseline.
-- [ ] Exercise camera cuts, portal transitions, visibility flapping, multiple views, owner
-      replacement, long frame gaps, and context loss.
-- [ ] Sweep offscreen intervals on DA55 and the larger DC58 authored-animation workload.
-- [ ] Measure semantic advancement, visual sampling, publication, renderer selection, total frame
+- [x] Add one runtime-owned visual cadence scheduler tracking only last-sampled time by
+      authoritative dynamic node identity.
+- [x] Sample roots visible in the previous completed frame every rendered frame and offscreen roots
+      at an explicit harness-controlled interval.
+- [x] Reconcile scheduler state against active animation ownership every frame so replacement,
+      eviction, and destruction leave no stale identity state.
+- [x] Preserve full-cadence mode as the zero/disabled baseline.
+- [x] Exercise camera cuts, portal transitions, multiple views, owner replacement, long frame gaps,
+      and context loss.
+- [x] Sweep offscreen intervals on DA55 and the larger DC58 authored-animation workload.
+- [x] Measure semantic advancement, visual sampling, publication, renderer selection, total frame
       CPU, and first-visible pose age.
-- [ ] Select previous-frame feedback or split selection/execution from motion evidence, then delete
-      the rejected path.
-- [ ] Promote a production interval only if animation sampling/publication savings remain material
+- [x] Escalate to split selection/execution only if previous-frame feedback fails the motion gate;
+      otherwise do not implement the more complex path.
+- [x] Promote a production interval only if animation sampling/publication savings remain material
       after scheduler overhead.
-- [ ] Remove visibility/cadence distributions, measurement cycles, and rejected scheduler controls
+- [x] Remove visibility/cadence distributions, measurement cycles, and rejected scheduler controls
       before the animation implementation commit.
 
 ### Acceptance Criteria
 
 - All active animations advance semantics every frame call regardless of visual cadence.
-- Visible and recently-visible entities sample at render cadence.
+- Roots visible in the previous completed frame sample at render cadence.
 - Offscreen sampled/published counts decrease with the accepted policy.
-- An entity returning to view presents a current pose within the accepted first-visible-frame
-  contract and exhibits no sustained slow animation, clock reset, or missed visual state.
+- An entity returning to view exhibits at most the accepted one-frame stale presentation and no
+  sustained slow animation, clock reset, or missed visual state.
 - Multi-view feedback samples the union once; no entity is sampled twice per frame.
 - Owner replacement and eviction leave no stale cadence state.
 
 ### Decisions and Course Corrections
 
+- The scheduler has exactly two inputs beyond the advanced animation frame: the previous completed
+  renderer frame's visible-root union and each active playback's last visual sample time. No
+  recently-visible category, grace duration, or visibility-flapping state exists.
+- `Renderer.drawFrame()` now returns typed production feedback containing dynamic root IDs selected
+  in at least one view. The WebGL renderer deduplicates them in a frame-local set across flat and
+  portal contribution resolution; optional profiling diagnostics remain uninvolved.
+- Active roots absent from scheduler history sample immediately. Each selection reconciles retained
+  timestamps against the advanced frame's authoritative active IDs, so owner replacement and
+  eviction cannot preserve stale cadence state. Destruction clears both timestamps and feedback.
+- Zero seconds remains the exact full-cadence override. The browser harness exposes the single
+  `--offscreen-animation-sample-interval-ms` tuning control; no interval cycle or app-specific
+  camera fixture was retained.
+- On the animation-isolated DC58 workload, `0ms`, `100ms`, and `250ms` averaged `4.575ms`,
+  `3.873ms`, and `3.725ms` of total frame work over matched two-second captures. `100ms` reduced
+  isolated frame work by about 15% while bounding offscreen pose age much more tightly; the extra
+  `150ms` at `250ms` bought only about three additional percentage points.
+- DA55 is dominated by SwiftShader EnvCell shell submission in this harness, but the matched
+  `100ms` policy still reduced non-due-frame presentation work from all `171` playbacks to `61`
+  visible roots while skipping `110` offscreen roots. Its average frame work moved from `72.34ms`
+  to roughly `71ms`; aggregate timing is correctly treated as secondary to the exact workload
+  reduction.
+- The accepted product default is `100ms`. Visible roots return to a current pose on the frame after
+  their first selection. Scheduler diagnostics record newly visible playback count and maximum
+  visible presentation age for the first-selection frame; deterministic tests prove the following
+  frame samples them regardless of the offscreen timer.
+- The DA55 sky-to-scene camera cut completed at the product default with all `61` newly selected
+  roots sampling at render cadence thereafter, no clock discontinuity, and no browser console
+  errors. A portal-mode DA55 smoke retained the same `61`-root feedback through the recursive
+  contribution path without errors. The evidence did not justify splitting renderer selection from
+  execution.
+
+## Phase 8: Cull Eligible Object Presentation Roots by Published Footprint
+
+### Design
+
+Keep `SceneGraph` local bounds as the one stable, conservative spatial envelope. After scope and
+frustum selection, apply a second renderer-owned fidelity decision to an eligible atomic
+presentation root. Reject roots whose conservative current published-presentation AABB projects to
+strictly less than the configured physical-pixel area. Near-plane-straddling roots remain retained.
+
+Generalize `minimumGeneratedInstancePixelArea` into one
+`minimumObjectFootprintPixelArea` product setting. The accepted `64px²` default and zero-disabled
+baseline remain unchanged. This setting drives two deliberately different algorithms:
+
+1. Generated opaque/alpha-tested streams retain their existing per-instance selector because one
+   scene node contains many independently optional instances.
+2. Buildings, explicit objects, EnvCell residents, and anchored authored dynamics use one
+   independently drawable presentation root after scene selection.
+
+Do not route portals through this policy: their aperture cutoff prunes topology and remains a
+separate setting. Do not admit terrain, EnvCell shells, generated transparent/additive streams, or
+container bounds that combine independently visible presentations.
+
+For anchored authored dynamics, `DynamicEntitySystem` owns a `publishedPresentationBounds` fact
+computed atomically from the same prepared part geometry, articulated transforms, authored scale,
+effect root rotation, and render states applied by `publishPresentation()`. It describes the pose
+that will actually draw, not the semantic animation's current unsampled pose and not the inflated
+animation-wide swept scene bound. When offscreen sampling is skipped, both the published pose and
+its bound intentionally remain unchanged.
+
+Split renderer contribution lookup into a cheap presentation descriptor and retained expansion.
+The descriptor identifies eligibility and provides a local presentation envelope plus resolved root
+placement. Immutable static descriptors reuse their selected scene node's existing local bound;
+anchored dynamics use their separately owned published-presentation bound. Only a root retained by
+footprint policy may expand dynamic parts, resolve static draw units, bind resources, enter
+visibility feedback, upload instances, or submit draws.
+
+### Task Checklist
+
+- [ ] Cleanly rename the generated-specific object setting, default constant, harness flag,
+      diagnostic presentation, tests, and documentation to
+      `minimumObjectFootprintPixelArea`; retain no compatibility alias.
+- [ ] Extract or reuse one conservative physical-pixel AABB projection predicate shared by
+      generated-instance and presentation-root selectors, including strict-less-than equality,
+      zero-disabled identity, multi-view independence, and near-plane retention.
+- [ ] Introduce a discriminated renderer-facing presentation-footprint descriptor whose eligible
+      variants are building, explicit object, EnvCell resident, and anchored authored dynamic.
+- [ ] Keep terrain, EnvCell shells, generated stream containers, generated transparent/additive
+      streams, and future runtime-authored actors explicitly ineligible rather than silently
+      falling back through missing bounds.
+- [ ] Split `RenderWorld` dynamic identification and bounds lookup from
+      `getVisibleContributions()` so rejected roots perform no articulated-part or material
+      expansion.
+- [ ] Reuse each eligible immutable static root's existing scene-node local bound in the renderer
+      descriptor; do not duplicate it in `StaticObjectRenderable` or traverse geometry resources at
+      frame time.
+- [ ] Retain each prepared dynamic part's geometry-local bound through activation so publication
+      can derive the complete pose envelope without renderer resource lookup.
+- [ ] Compute and store each anchored dynamic's complete published-presentation envelope as part of
+      initial staging and every sparse presentation publication; fail before scene mutation if the
+      envelope cannot cover every applied part.
+- [ ] Prove dynamic envelopes include articulated transforms, nonuniform authored/default scale,
+      `SetOmega` root rotation, mixed part geometry, and cyclic/interpolated poses.
+- [ ] Reject eligible roots before contribution expansion and omit rejected dynamics from renderer
+      visibility feedback so the existing offscreen cadence policy follows the same decision.
+- [ ] Add temporary per-class tested/rejected/area attribution only long enough to decide whether
+      every eligible class benefits; retain only metrics with distinct operational consumers.
+- [ ] Sweep zero and `64px²` first across DA55, DC58, explicit-object-heavy, building-heavy,
+      indoor-root, hybrid, camera-motion, and visibility-entry workloads. Test other thresholds only
+      if `64px²` produces a concrete quality or cost failure.
+- [ ] Remove rejected eligibility variants, attribution buckets, threshold cycles, and measurement
+      paths before the implementation commit.
+
+### Acceptance Criteria
+
+- Threshold zero reproduces identical scene selections, expanded contributions, dynamic feedback,
+  uploads, draw ordering, and submissions for all eligible and exempt classes.
+- A footprint-rejected presentation root performs no part/draw-unit expansion, resource selection,
+  frame-instance allocation, visibility feedback, or submission.
+- Dynamic footprint bounds describe the exact last published presentation conservatively; sparse
+  cadence never pairs a stale drawn pose with a newer incompatible bound.
+- Mandatory initial publication establishes a valid dynamic presentation bound before the root can
+  enter renderer selection.
+- Eligible immutable static roots use the exact same bound fact for spatial and presentation
+  decisions; no duplicate static envelope can drift from scene publication.
+- The animation-wide swept scene bound and spatial membership never change at presentation cadence.
+- Terrain and EnvCell shells never develop holes, and portal reachability remains governed only by
+  portal traversal policy.
+- Multi-view rendering tests each eligible root independently per view but unions retained dynamic
+  feedback once by authoritative root ID.
+- The shared `64px²` object policy produces material preparation/submission savings without
+  objectionable static or animated popping; otherwise failing eligibility classes are removed from
+  the accepted policy rather than patched with implicit fallbacks.
+
+### Decisions and Course Corrections
+
+- Planned from the Phase 7 resteer: scene bounds and current published-presentation bounds remain
+  separate owner facts with separate consumers. No second bounds field enters `SceneGraph`.
+- The shared setting expresses one object-fidelity choice, while generated instances and selected
+  presentation roots retain algorithms matched to their actual atomic draw units.
 - To be completed during execution.
 
-## Phase 8: Cleanup, Cross-Feature Verification, and Closeout
+## Phase 9: Cleanup, Cross-Feature Verification, and Closeout
 
 ### Task Checklist
 
@@ -642,21 +852,23 @@ Dry-run two scheduling shapes before choosing the cutover:
       existing fields.
 - [ ] Re-run formatting, Svelte/TypeScript checks, ESLint, dead-code analysis, Rust clippy, and the
       full TypeScript suite.
-- [ ] Re-run portal planner/executor fixtures, generated worker/compaction tests, animation/effect
-      tests, lifecycle tests, and the canonical browser harness matrix.
+- [ ] Re-run portal planner/executor fixtures, generated worker/compaction tests, static/dynamic
+      presentation-footprint tests, animation/effect tests, lifecycle tests, and the canonical
+      browser harness matrix.
 - [ ] Capture final SwiftShader and Apple/WebKit profiles with effective policies embedded in the
       diagnostic report.
 - [ ] Update architecture documentation and historical plans with accepted decisions, rejected
       alternatives, measured benefit, and remaining debt.
-- [ ] Commit portal, generated, animation, and documentation cleanup as reviewable independent
-      milestones.
+- [ ] Commit portal, generated/eligible-object footprint, animation, and documentation cleanup as
+      reviewable independent milestones.
 
 ### Acceptance Criteria
 
 - Each accepted optimization independently reduces its owned workload and remains individually
   attributable in the final evidence.
 - Portal visibility, near-plane ownership, alternate routes, generated material behavior,
-  animation semantics, hooks, lifecycle, and multi-view behavior pass their complete regressions.
+  eligible-root and exemption behavior, animation semantics, hooks, lifecycle, and multi-view
+  behavior pass their complete regressions.
 - No temporary instrumentation or rejected architecture remains.
 - The final report distinguishes CPU culling cost, work eliminated, submission reduction, driver
   time, and GPU time where supported.
@@ -675,16 +887,22 @@ Dry-run two scheduling shapes before choosing the cutover:
 | Thin alpha-tested scenery sparkles or disappears too early.                           | Use conservative envelopes, retain threshold equality, begin with small physical-pixel candidates, and require motion captures.                                          |
 | Shared streams contain heterogeneous culling bounds.                                  | Prove stream homogeneity before choosing the contract; use colocated per-instance envelopes if the invariant is false.                                                   |
 | Sparse visual sampling skips hooks or persistent effects.                             | Split semantic advancement from sampling structurally and compare semantic observations under full and sparse cadence.                                                   |
-| Newly visible dynamics show a stale pose for one frame.                               | Measure pose age and motion; use recent-visibility grace or split current-frame selection from execution only if the simple feedback contract fails.                     |
+| Newly visible dynamics show a stale pose for one frame.                               | Measure pose age and motion; split current-frame selection from execution only if the simple feedback contract fails.                                                    |
 | Visibility feedback becomes a renderer diagnostic dependency.                         | Return typed control feedback from the renderer independently of optional diagnostics and profiling.                                                                     |
 | Multi-view rendering samples or publishes entities repeatedly.                        | Union authoritative node IDs at the renderer boundary and sample each selected entity once.                                                                              |
+| Published dynamic footprint bounds drift from the pose that actually draws.           | Compute pose and bound atomically from the same prepared geometry, transforms, scale, root effect, and render state; fail before mutation on incomplete coverage.        |
+| A second presentation bound contaminates scene spatial ownership.                     | Keep the scene graph's conservative bound unchanged; expose published presentation bounds only through renderer-facing contribution descriptors after broad-phase query. |
+| A universal cutoff treats containers or continuous surfaces as optional objects.      | Use explicit eligibility variants; exempt terrain, EnvCell shells, generated containers, and unsupported generated blend streams.                                        |
+| Root footprint filtering costs more than contribution work it removes.                | Reject before expansion, reuse owner-computed bounds, profile the projection pass separately, and drop any eligibility class without positive net benefit.               |
 | Threshold and cadence controls accumulate into permanent debug policy.                | Keep candidates uncommitted or harness-owned, promote only selected single-value overrides, and remove every temporary cycle at its owning resteering gate.              |
 
 ## Definition of Done
 
 - [x] Recursive portal footprint rejection is either accepted with measured thresholds or removed.
-- [ ] Generated screen-size culling is either accepted with positive net benefit or removed.
-- [ ] Offscreen visual cadence reduction is either accepted with exact semantic behavior or removed.
+- [x] Generated screen-size culling is either accepted with positive net benefit or removed.
+- [x] Offscreen visual cadence reduction is either accepted with exact semantic behavior or removed.
+- [ ] Eligible static and anchored-dynamic presentation-root culling is accepted with positive net
+      benefit or removed per eligibility class.
 - [ ] Each accepted policy is explicit, typed, validated, recorded in diagnostics, and disabled by a
       precise baseline value.
 - [ ] Outdoor, indoor-root, hybrid, generated-heavy, offscreen-animation, and visibility-entry
@@ -702,11 +920,11 @@ Dry-run two scheduling shapes before choosing the cutover:
 
 ## Open Questions
 
-1. Does the indoor/hybrid matrix support one universal recursive portal threshold, or does a
-   concrete crossing class require a separate value?
-2. Are generated instance-stream cohorts homogeneous enough for one source-local culling envelope,
-   or must bounds remain one-to-one with instance records?
-3. Does previous-frame visibility plus a grace window meet the first-visible-frame quality bar, or
-   must renderer selection be split from execution?
-4. What generated pixel threshold and offscreen presentation interval produce positive target
-   benefit without visible motion instability?
+1. What read-only scene-query contract exposes each already-selected immutable root's local bound
+   and placement without cloning unrelated node state or duplicating the bound in renderables?
+2. Should prepared geometry-local bounds remain on each `ActiveDynamicPart`, or should activation
+   collapse them into a separate immutable bounds input colocated with publication?
+3. Does the shared `64px²` object cutoff benefit every proposed root eligibility class, or should a
+   measured class remain explicitly exempt?
+4. Do mixed transparent/opaque independently drawable roots remain visually stable under whole-root
+   rejection, while generated transparent/additive streams stay on their existing ordered path?

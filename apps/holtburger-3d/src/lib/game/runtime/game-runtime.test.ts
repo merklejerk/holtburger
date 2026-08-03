@@ -49,6 +49,8 @@ const TEST_RESOURCES = {
 	uploadTextureArrayLayer() {},
 } as RendererResourceManager;
 
+const EMPTY_RENDERER_FRAME_FEEDBACK = { selectedDynamicNodeIds: [] } as const;
+
 describe("GameRuntime view and interest control", () => {
 	it("keeps frontend scene interest independent from the primary camera", async () => {
 		const requestedLayers: LandblockIdLayer[] = [];
@@ -119,6 +121,7 @@ describe("GameRuntime view and interest control", () => {
 			async destroy() {},
 			drawFrame(input) {
 				frames.push(input);
+				return EMPTY_RENDERER_FRAME_FEEDBACK;
 			},
 			frameDiagnostics: {
 				setProfilingEnabled: setFrameProfilingEnabled,
@@ -243,7 +246,10 @@ describe("GameRuntime view and interest control", () => {
 	it("discards a terrain commit whose scene interest was withdrawn while loading", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
-			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			buildRenderer: async () => ({
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			}),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
@@ -265,7 +271,10 @@ describe("GameRuntime view and interest control", () => {
 	it("keeps an in-flight layer current across an unchanged interest refresh", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
-			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			buildRenderer: async () => ({
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			}),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
@@ -300,7 +309,10 @@ describe("GameRuntime view and interest control", () => {
 	it("rejects an old completion after withdrawal and same-layer re-request", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
-			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			buildRenderer: async () => ({
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			}),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
@@ -332,7 +344,10 @@ describe("GameRuntime view and interest control", () => {
 	it("rejects a queued completion after withdrawal and same-layer re-request", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
-			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			buildRenderer: async () => ({
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			}),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
@@ -356,7 +371,10 @@ describe("GameRuntime view and interest control", () => {
 	it("activates a promoted building owner set with shared playback", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
-			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			buildRenderer: async () => ({
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			}),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
@@ -400,7 +418,10 @@ describe("GameRuntime view and interest control", () => {
 	it("routes a synthetic explicit-object source through static realization", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
-			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			buildRenderer: async () => ({
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			}),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(
@@ -436,7 +457,10 @@ describe("GameRuntime view and interest control", () => {
 	it("routes generated source through independent static realization", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
-			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			buildRenderer: async () => ({
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			}),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await GameRuntime.build(

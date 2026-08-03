@@ -43,9 +43,9 @@ describe("AnimationSystem", () => {
 			{ frameIndex: 0, outcome: "folded-initial-state" },
 		]);
 
-		first.update(10);
+		advanceAndSample(first, 10);
 		const observationCount = firstEffects.getObservations().length;
-		const halfStep = requiredAt(first.update(10 + 1 / 60), 0);
+		const halfStep = requiredAt(advanceAndSample(first, 10 + 1 / 60), 0);
 		expect(halfStep.articulatedPose).not.toEqual(firstInitial.articulatedPose);
 		expect(halfStep.effects.rootRotationModifier).not.toEqual(Mat4.identity());
 		expect(firstEffects.getObservations()).toHaveLength(observationCount);
@@ -57,14 +57,14 @@ describe("AnimationSystem", () => {
 		system.install("owner", "scene-node:1", "resident:a", clip());
 		const foldedCount = effects.getObservations().length;
 
-		system.update(0);
-		system.update(3);
+		advanceAndSample(system, 0);
+		advanceAndSample(system, 3);
 		expect(effects.getObservations()).toHaveLength(foldedCount);
-		system.update(3 + 1 / 30);
+		advanceAndSample(system, 3 + 1 / 30);
 		expect(effects.getObservations()).toHaveLength(foldedCount);
-		system.update(3 + 2 / 30);
+		advanceAndSample(system, 3 + 2 / 30);
 		expect(effects.getObservations()).toHaveLength(foldedCount);
-		system.update(3 + 3 / 30);
+		advanceAndSample(system, 3 + 3 / 30);
 		expect(effects.getObservations()).toHaveLength(foldedCount + 2);
 		expect(effects.getObservations().at(-1)).toMatchObject({
 			command: "ethereal",
@@ -86,8 +86,8 @@ describe("AnimationSystem", () => {
 			new Vec3(1, 0, 0),
 		);
 
-		system.update(0);
-		const afterOneSecond = requiredAt(system.update(1), 0);
+		advanceAndSample(system, 0);
+		const afterOneSecond = requiredAt(advanceAndSample(system, 1), 0);
 		const point = transformPoint3(
 			afterOneSecond.effects.rootRotationModifier,
 			new Vec3(1, 0, 0),
@@ -111,11 +111,11 @@ describe("AnimationSystem", () => {
 		]);
 
 		expect(system.getDiagnostics().activePlaybackCount).toBe(0);
-		expect(system.update(0).map((sample) => sample.nodeId)).toEqual([
+		expect(advanceAndSample(system, 0).map((sample) => sample.nodeId)).toEqual([
 			"scene-node:10",
 		]);
 		staged.commit();
-		expect(system.update(0).map((sample) => sample.nodeId)).toEqual([
+		expect(advanceAndSample(system, 0).map((sample) => sample.nodeId)).toEqual([
 			"scene-node:11",
 		]);
 		expect(effects.getDiagnostics().residentEffectStateCount).toBe(1);
@@ -138,7 +138,7 @@ describe("AnimationSystem", () => {
 		expect(effects.getDiagnostics().residentEffectStateCount).toBe(1);
 		system.destroy();
 		expect(effects.getDiagnostics().residentEffectStateCount).toBe(0);
-		expect(() => system.update(0)).toThrow("destroyed animation playback");
+		expect(() => system.advance(0)).toThrow("destroyed animation playback");
 		expect(() => staged.commit()).toThrow("state released");
 	});
 
@@ -174,15 +174,15 @@ describe("AnimationSystem", () => {
 		const animation = clipWithTransparency();
 		large.install("owner", "scene-node:1", "resident:a", animation);
 		small.install("owner", "scene-node:1", "resident:a", animation);
-		large.update(0);
-		small.update(0);
+		advanceAndSample(large, 0);
+		advanceAndSample(small, 0);
 		const largeBaseline = largeEffects.getObservations().length;
 		const smallBaseline = smallEffects.getObservations().length;
 
-		const largeSample = large.update(0.1)[0];
-		small.update(1 / 30);
-		small.update(2 / 30);
-		const smallSample = small.update(3 / 30)[0];
+		const largeSample = advanceAndSample(large, 0.1)[0];
+		advanceAndSample(small, 1 / 30);
+		advanceAndSample(small, 2 / 30);
+		const smallSample = advanceAndSample(small, 3 / 30)[0];
 		if (!largeSample || !smallSample)
 			throw new Error("Playback comparison did not produce a sample.");
 
@@ -209,7 +209,67 @@ describe("AnimationSystem", () => {
 			12,
 		);
 	});
+
+	it("keeps semantic state exact while visual sampling is sparse", () => {
+		const fullEffects = new EffectSystem();
+		const sparseEffects = new EffectSystem();
+		const full = new AnimationSystem<string>(fullEffects);
+		const sparse = new AnimationSystem<string>(sparseEffects);
+		const animation = clipWithTransparency();
+		full.install("owner", "scene-node:1", "resident:a", animation);
+		sparse.install("owner", "scene-node:1", "resident:a", animation);
+
+		advanceAndSample(full, 0);
+		advanceAndSample(sparse, 0);
+		for (const time of [1 / 30, 2 / 30]) {
+			advanceAndSample(full, time);
+			sparse.advance(time);
+		}
+		const fullFinal = requiredAt(advanceAndSample(full, 0.1), 0);
+		const sparseFrame = sparse.advance(0.1);
+		const sparseFinal = requiredAt(
+			sparse.sample(sparseFrame, ["scene-node:1"]),
+			0,
+		);
+
+		expect(sparseEffects.getObservations()).toEqual(
+			fullEffects.getObservations(),
+		);
+		expect(sparseFinal.articulatedPose).toEqual(fullFinal.articulatedPose);
+		expect(sparseFinal.effects.partRenderStates).toEqual(
+			fullFinal.effects.partRenderStates,
+		);
+		expect(sparseFinal.effects.rootRotationModifier).toEqual(
+			fullFinal.effects.rootRotationModifier,
+		);
+		expect(sparse.getDiagnostics().lastSampledPresentationCount).toBe(1);
+	});
+
+	it("rejects stale, duplicate, and unknown sampling requests", () => {
+		const system = new AnimationSystem<string>(new EffectSystem());
+		system.install("owner", "scene-node:1", "resident:a", clip());
+		const staleFrame = system.advance(0);
+		const currentFrame = system.advance(1 / 60);
+
+		expect(() => system.sample(staleFrame, ["scene-node:1"])).toThrow(
+			"latest advanced frame",
+		);
+		expect(() =>
+			system.sample(currentFrame, ["scene-node:1", "scene-node:1"]),
+		).toThrow("repeats scene-node:1");
+		expect(() => system.sample(currentFrame, ["scene-node:999"])).toThrow(
+			"unknown scene-node:999",
+		);
+	});
 });
+
+function advanceAndSample(
+	system: AnimationSystem<string>,
+	timeSeconds: number,
+) {
+	const frame = system.advance(timeSeconds);
+	return system.sample(frame, frame.activeNodeIds);
+}
 
 function clip(omega = new Vec3(0, 0, 1)): PreparedAnimation {
 	return {

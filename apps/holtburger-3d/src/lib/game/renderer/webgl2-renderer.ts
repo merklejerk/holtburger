@@ -32,6 +32,7 @@ import type {
 	FrameInput,
 	FrameSelectionMetrics,
 	RendererFrameDiagnostics,
+	RendererFrameFeedback,
 	FrameViewInput,
 	Renderer,
 } from "./renderer";
@@ -322,6 +323,8 @@ export class WebGL2Renderer implements Renderer {
 	readonly #portalRenderGraphPlanner = new PortalRenderGraphPlanner();
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
+	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
+	readonly #selectedDynamicNodeIds = new Set<SceneNodeId>();
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
@@ -486,11 +489,16 @@ export class WebGL2Renderer implements Renderer {
 		gl.enable(gl.DEPTH_TEST);
 	}
 
-	drawFrame(input: FrameInput): void {
+	drawFrame(input: FrameInput): RendererFrameFeedback {
 		this.#assertDeviceReady();
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
 			this.#drawFrameContent(input, profile);
+			return Object.freeze({
+				selectedDynamicNodeIds: Object.freeze([
+					...this.#selectedDynamicNodeIds,
+				]),
+			});
 		} finally {
 			profile?.finish();
 		}
@@ -1111,6 +1119,7 @@ export class WebGL2Renderer implements Renderer {
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
+				this.#selectedDynamicNodeIds.add(nodeId);
 				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
 				this.#frameSelectionMetrics.visibleDynamicPartCount +=
 					contribution.contributions.length;
@@ -1382,6 +1391,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
 		this.#visibleEnvCellScopes.clear();
+		this.#selectedDynamicNodeIds.clear();
 		metrics.visibleStaticLayerCount = 0;
 		metrics.visibleStaticNodeCount = 0;
 		metrics.submittedStaticObjectDrawCount = 0;

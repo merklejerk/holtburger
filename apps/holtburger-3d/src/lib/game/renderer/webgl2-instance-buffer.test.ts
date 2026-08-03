@@ -26,7 +26,7 @@ describe("WebGL2InstanceBuffer", () => {
 		]);
 	});
 
-	it("reuses geometric frame capacity and orphans once per sequential view", () => {
+	it("reuses geometric capacity and orphans once per non-empty sequential view", () => {
 		const fixture = fakeGl();
 		const arena = new FrameInstanceStreamArena(fixture.gl);
 		const instances = [
@@ -46,6 +46,19 @@ describe("WebGL2InstanceBuffer", () => {
 			firstInstance: 1,
 			instanceCount: 2,
 		});
+
+		arena.prepareView([]);
+		expect(arena.getDiagnostics()).toEqual({
+			capacity: 4,
+			growthCount: 1,
+			populatedInstanceCount: 0,
+			viewHighWaterMark: 3,
+		});
+		expect(() => arena.getRange(0, 1)).toThrow(
+			"Frame instance range 0+1 exceeds populated count 0.",
+		);
+		expect(fixture.bufferData).toHaveLength(1);
+		expect(fixture.bufferSubData).toHaveLength(1);
 
 		arena.prepareView(instances.slice(0, 2));
 		expect(arena.getDiagnostics()).toEqual({

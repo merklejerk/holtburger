@@ -40,7 +40,7 @@ export class WebGL2InstanceBuffer {
 	}
 
 	/**
-	 * Reset one frame/view allocation, growing geometrically and orphaning its complete storage.
+	 * Reset one frame/view allocation, orphaning storage only for a non-empty population.
 	 */
 	resetFrame(requiredInstanceCount: number): boolean {
 		this.#requireAlive();
@@ -54,14 +54,16 @@ export class WebGL2InstanceBuffer {
 				this.#capacity * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
 			);
 		}
-		this.#withBoundBuffer(() => {
-			this.#gl.bufferData(
-				this.#gl.ARRAY_BUFFER,
-				this.#capacity * OBJECT_INSTANCE_STRIDE_BYTES,
-				this.#gl.STREAM_DRAW,
-			);
-		});
 		this.#populatedInstanceCount = 0;
+		if (requiredInstanceCount > 0) {
+			this.#withBoundBuffer(() => {
+				this.#gl.bufferData(
+					this.#gl.ARRAY_BUFFER,
+					this.#capacity * OBJECT_INSTANCE_STRIDE_BYTES,
+					this.#gl.STREAM_DRAW,
+				);
+			});
+		}
 		return this.#capacity !== previousCapacity;
 	}
 

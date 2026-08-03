@@ -14,9 +14,7 @@ const COPLANAR_PORTAL_MASK_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 
 /** Resident-depth comparison selected by the planner-owned mask source. */
 export type PortalMaskDepthCompare =
-	| "always"
-	| "less-or-equal"
-	| "less-or-equal-offset";
+	"always" | "less-or-equal" | "less-or-equal-offset";
 /** Positive drawing-buffer extent owned by one scene-domain target generation. */
 export interface PortalRenderExtent {
 	readonly height: number;

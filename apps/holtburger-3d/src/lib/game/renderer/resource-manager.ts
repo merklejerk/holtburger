@@ -21,9 +21,7 @@ export type Texture2DFormat = TexturePixelFormat | IntegerTexture2DFormat;
 
 /** Renderer resource identity leased by runtime owners. */
 export type RenderResourceKey =
-	| GeometryResourceKey
-	| Texture2DResourceKey
-	| TextureArrayResourceKey;
+	GeometryResourceKey | Texture2DResourceKey | TextureArrayResourceKey;
 
 /** Complete texture upload with dimensions required by graphics APIs. */
 export interface Texture2DUpload {

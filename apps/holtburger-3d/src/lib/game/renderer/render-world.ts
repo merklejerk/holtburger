@@ -3,11 +3,13 @@ import type { GeometryKey } from "../geometry/types";
 import type { Frustum } from "../math/frustum";
 import type {
 	ResolvedScenePlacement,
+	ResolvedSceneBounds,
 	SceneNodeId,
 	SceneScope,
 	SceneTopologyView,
 	VisibleScene,
 } from "../scene";
+import type { AABB3 } from "../math/types";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { VisibleRigidPartContribution } from "../systems/components";
 import type {
@@ -33,6 +35,7 @@ import type {
 import type { StaticInstanceStreamData } from "../systems/static-resources";
 import type { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 import type { StaticDetailRole } from "../resolution/static-detail-role";
+import { LandblockLayerKind } from "../runtime/scene-interest";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
@@ -43,6 +46,7 @@ interface RenderWorldSystems {
 	};
 	readonly scene: {
 		getCullingGroup(nodeId: SceneNodeId): string | null;
+		getResolvedBounds(nodeId: SceneNodeId): ResolvedSceneBounds | null;
 		getResolvedPlacement(
 			nodeId: SceneNodeId,
 		): ResolvedScenePlacement | undefined;
@@ -67,6 +71,7 @@ interface RenderWorldSystems {
 		getRenderable(nodeId: SceneNodeId): StaticObjectRenderable | null;
 	};
 	readonly dynamics: {
+		getPublishedPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
 		getVisibleContributions(
 			nodeId: SceneNodeId,
 		): readonly VisibleRigidPartContribution[] | null;
@@ -96,16 +101,37 @@ export interface ActiveRegionStaticDetailRenderBinding {
 	readonly tiling: number;
 }
 
+/** Cheap renderer-facing fidelity facts available before contribution expansion. */
+export type ObjectPresentationFootprint =
+	| {
+			readonly kind: "eligible";
+			readonly objectClass:
+				| "building"
+				| "explicit-object"
+				| "env-cell-resident"
+				| "authored-dynamic";
+			readonly localBounds: AABB3;
+			readonly placement: ResolvedScenePlacement;
+	  }
+	| {
+			readonly kind: "ineligible";
+			readonly reason: "generated-instance-container";
+	  };
+
 /** One typed logical render contribution selected from a visible scene node. */
 export type RenderContribution =
 	| {
 			readonly cullingGroup: string;
 			readonly kind: "static-object";
+			readonly footprint: ObjectPresentationFootprint;
 			readonly renderable: StaticObjectRenderable;
 	  }
 	| {
 			readonly kind: "dynamic";
-			readonly contributions: readonly VisibleRigidPartContribution[];
+			readonly footprint: Extract<
+				ObjectPresentationFootprint,
+				{ readonly kind: "eligible" }
+			>;
 	  }
 	| { readonly kind: "env-cell"; readonly renderable: EnvCellRenderable }
 	| { readonly kind: "terrain"; readonly drawUnit: TerrainDrawUnit };
@@ -171,7 +197,7 @@ export class RenderWorld {
 		return this.#systems.terrain.getDrawUnit(nodeId, anchorLandblockId);
 	}
 
-	getRenderContribution(
+	getRenderContributionDescriptor(
 		nodeId: SceneNodeId,
 		anchorLandblockId: LandblockId,
 	): RenderContribution | null {
@@ -181,14 +207,41 @@ export class RenderWorld {
 			if (cullingGroup === null) {
 				throw new Error(`Static object node ${nodeId} has no culling group.`);
 			}
-			return { cullingGroup, kind: "static-object", renderable: staticObject };
+			return {
+				cullingGroup,
+				footprint: this.#staticObjectFootprint(nodeId, cullingGroup),
+				kind: "static-object",
+				renderable: staticObject,
+			};
 		}
-		const dynamic = this.#systems.dynamics.getVisibleContributions(nodeId);
-		if (dynamic) return { contributions: dynamic, kind: "dynamic" };
+		const dynamicBounds =
+			this.#systems.dynamics.getPublishedPresentationBounds(nodeId);
+		if (dynamicBounds) {
+			return {
+				footprint: {
+					kind: "eligible",
+					localBounds: dynamicBounds,
+					objectClass: "authored-dynamic",
+					placement: this.#requiredPlacement(nodeId, "Dynamic entity"),
+				},
+				kind: "dynamic",
+			};
+		}
 		const cell = this.#systems.envCells.getCellRenderable(nodeId);
 		if (cell) return { kind: "env-cell", renderable: cell };
 		const terrain = this.resolveTerrainDrawUnit(nodeId, anchorLandblockId);
 		return terrain ? { drawUnit: terrain, kind: "terrain" } : null;
+	}
+
+	/** Expand a retained dynamic root only after renderer fidelity policy accepts it. */
+	expandDynamicContributions(
+		nodeId: SceneNodeId,
+	): readonly VisibleRigidPartContribution[] {
+		const contributions =
+			this.#systems.dynamics.getVisibleContributions(nodeId);
+		if (!contributions)
+			throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
+		return contributions;
 	}
 
 	getPortalDrawUnit(
@@ -214,10 +267,12 @@ export class RenderWorld {
 	resolveStaticObjectNode(
 		nodeId: SceneNodeId,
 		renderable: StaticObjectRenderable,
+		footprint: ObjectPresentationFootprint,
 	): ResolvedStaticObjectNode {
-		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
-		if (!placement)
-			throw new Error(`Static object node ${nodeId} no longer exists.`);
+		const placement =
+			footprint.kind === "eligible"
+				? footprint.placement
+				: this.#requiredPlacement(nodeId, "Static object");
 		return {
 			drawUnits: this.resolveStaticObjectRenderable(renderable),
 			frameStreamedInstances: renderable.frameStreamedInstances.map(
@@ -228,6 +283,47 @@ export class RenderWorld {
 			),
 			placement,
 		};
+	}
+
+	#staticObjectFootprint(
+		nodeId: SceneNodeId,
+		cullingGroup: string,
+	): ObjectPresentationFootprint {
+		if (cullingGroup === LandblockLayerKind.Generated) {
+			return { kind: "ineligible", reason: "generated-instance-container" };
+		}
+		const objectClass =
+			cullingGroup === LandblockLayerKind.Buildings
+				? "building"
+				: cullingGroup === LandblockLayerKind.Objects
+					? "explicit-object"
+					: cullingGroup === "env-cell-static-residents"
+						? "env-cell-resident"
+						: null;
+		if (objectClass === null) {
+			throw new Error(
+				`Static object node ${nodeId} has unsupported culling group ${cullingGroup}.`,
+			);
+		}
+		const resolvedBounds = this.#systems.scene.getResolvedBounds(nodeId);
+		if (!resolvedBounds)
+			throw new Error(`Static object node ${nodeId} has no resolved bounds.`);
+		return {
+			kind: "eligible",
+			localBounds: resolvedBounds.localBounds,
+			objectClass,
+			placement: resolvedBounds.placement,
+		};
+	}
+
+	#requiredPlacement(
+		nodeId: SceneNodeId,
+		label: "Dynamic entity" | "Static object",
+	): ResolvedScenePlacement {
+		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
+		if (!placement)
+			throw new Error(`${label} node ${nodeId} no longer exists.`);
+		return placement;
 	}
 
 	resolveDynamicContributions(

@@ -13,7 +13,7 @@ import type {
 	ResolvedOutdoorStaticLayerSource,
 } from "../resolution/landblock-layer";
 import {
-	DEFAULT_MINIMUM_GENERATED_INSTANCE_PIXEL_AREA,
+	DEFAULT_MINIMUM_OBJECT_FOOTPRINT_PIXEL_AREA,
 	DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
 	type FrameSelectionMetrics,
 	type Renderer,
@@ -79,6 +79,9 @@ describe("GameRuntime view and interest control", () => {
 			viewCount: 1,
 			visibleDynamicEntityCount: 3,
 			visibleDynamicPartCount: 0,
+			testedObjectPresentationCount: 0,
+			retainedObjectPresentationCount: 0,
+			rejectedObjectPresentationCount: 0,
 			visibleEnvCellResidentNodes: 0,
 			visibleEnvCellScopeCount: 0,
 			visibleEnvCellShells: 5,
@@ -183,8 +186,8 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: true,
 			envCellRenderMode: "portal",
 			quality: {
-				minimumGeneratedInstancePixelArea:
-					DEFAULT_MINIMUM_GENERATED_INSTANCE_PIXEL_AREA,
+				minimumObjectFootprintPixelArea:
+					DEFAULT_MINIMUM_OBJECT_FOOTPRINT_PIXEL_AREA,
 				minimumPortalFootprintPixelArea:
 					DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
 				textureFiltering: "anisotropic-2x",
@@ -194,7 +197,7 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
-				minimumGeneratedInstancePixelArea: 8,
+				minimumObjectFootprintPixelArea: 8,
 				minimumPortalFootprintPixelArea: 4,
 				textureFiltering: "nearest",
 			},
@@ -204,7 +207,7 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
-				minimumGeneratedInstancePixelArea: 8,
+				minimumObjectFootprintPixelArea: 8,
 				minimumPortalFootprintPixelArea: 4,
 				textureFiltering: "nearest",
 			},

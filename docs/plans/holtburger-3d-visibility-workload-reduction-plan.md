@@ -492,7 +492,7 @@ The renderer consumes it without re-deriving asset facts.
   frames fails loudly because the projected result would not be equivalent.
 - Projection is conservative: near-plane intersections and non-finite intermediates are retained;
   threshold equality is retained; only proven-small visible or proven-outside envelopes are omitted.
-- Phase 3 left `minimumGeneratedInstancePixelArea` at zero. This bypassed classification and
+- Phase 3 left the object-footprint cutoff at zero. This bypassed classification and
   preserved the complete ordered upload population while establishing the lasting contract. The
   DA55 browser smoke retained identical initial/final generated counts (`10,199`) and upload bytes
   (`961,120`) with no browser console errors. Phase 4 then owned harness controls and threshold
@@ -749,8 +749,8 @@ frustum selection, apply a second renderer-owned fidelity decision to an eligibl
 presentation root. Reject roots whose conservative current published-presentation AABB projects to
 strictly less than the configured physical-pixel area. Near-plane-straddling roots remain retained.
 
-Generalize `minimumGeneratedInstancePixelArea` into one
-`minimumObjectFootprintPixelArea` product setting. The accepted `64px²` default and zero-disabled
+Use one `minimumObjectFootprintPixelArea` product setting for generated instances and eligible
+presentation roots. The accepted `64px²` default and zero-disabled
 baseline remain unchanged. This setting drives two deliberately different algorithms:
 
 1. Generated opaque/alpha-tested streams retain their existing per-instance selector because one
@@ -778,38 +778,39 @@ visibility feedback, upload instances, or submit draws.
 
 ### Task Checklist
 
-- [ ] Cleanly rename the generated-specific object setting, default constant, harness flag,
+- [x] Cleanly rename the generated-specific object setting, default constant, harness flag,
       diagnostic presentation, tests, and documentation to
       `minimumObjectFootprintPixelArea`; retain no compatibility alias.
-- [ ] Extract or reuse one conservative physical-pixel AABB projection predicate shared by
+- [x] Extract or reuse one conservative physical-pixel AABB projection predicate shared by
       generated-instance and presentation-root selectors, including strict-less-than equality,
       zero-disabled identity, multi-view independence, and near-plane retention.
-- [ ] Introduce a discriminated renderer-facing presentation-footprint descriptor whose eligible
+- [x] Introduce a discriminated renderer-facing presentation-footprint descriptor whose eligible
       variants are building, explicit object, EnvCell resident, and anchored authored dynamic.
-- [ ] Keep terrain, EnvCell shells, generated stream containers, generated transparent/additive
+- [x] Keep terrain, EnvCell shells, generated stream containers, generated transparent/additive
       streams, and future runtime-authored actors explicitly ineligible rather than silently
       falling back through missing bounds.
-- [ ] Split `RenderWorld` dynamic identification and bounds lookup from
+- [x] Split `RenderWorld` dynamic identification and bounds lookup from
       `getVisibleContributions()` so rejected roots perform no articulated-part or material
       expansion.
-- [ ] Reuse each eligible immutable static root's existing scene-node local bound in the renderer
+- [x] Reuse each eligible immutable static root's existing scene-node local bound in the renderer
       descriptor; do not duplicate it in `StaticObjectRenderable` or traverse geometry resources at
       frame time.
-- [ ] Retain each prepared dynamic part's geometry-local bound through activation so publication
+- [x] Retain each prepared dynamic part's geometry-local bound through activation so publication
       can derive the complete pose envelope without renderer resource lookup.
-- [ ] Compute and store each anchored dynamic's complete published-presentation envelope as part of
+- [x] Compute and store each anchored dynamic's complete published-presentation envelope as part of
       initial staging and every sparse presentation publication; fail before scene mutation if the
       envelope cannot cover every applied part.
-- [ ] Prove dynamic envelopes include articulated transforms, nonuniform authored/default scale,
+- [x] Prove dynamic envelopes include articulated transforms, nonuniform authored/default scale,
       `SetOmega` root rotation, mixed part geometry, and cyclic/interpolated poses.
-- [ ] Reject eligible roots before contribution expansion and omit rejected dynamics from renderer
+- [x] Reject eligible roots before contribution expansion and omit rejected dynamics from renderer
       visibility feedback so the existing offscreen cadence policy follows the same decision.
-- [ ] Add temporary per-class tested/rejected/area attribution only long enough to decide whether
-      every eligible class benefits; retain only metrics with distinct operational consumers.
+- [x] Evaluate temporary per-class attribution against targeted isolated captures; avoid adding the
+      buckets because the existing scene controls isolate the decisions, and retain only total
+      tested/retained/rejected metrics with a tuning consumer.
 - [ ] Sweep zero and `64px²` first across DA55, DC58, explicit-object-heavy, building-heavy,
       indoor-root, hybrid, camera-motion, and visibility-entry workloads. Test other thresholds only
       if `64px²` produces a concrete quality or cost failure.
-- [ ] Remove rejected eligibility variants, attribution buckets, threshold cycles, and measurement
+- [x] Remove rejected eligibility variants, attribution buckets, threshold cycles, and measurement
       paths before the implementation commit.
 
 ### Acceptance Criteria
@@ -839,7 +840,27 @@ visibility feedback, upload instances, or submit draws.
   separate owner facts with separate consumers. No second bounds field enters `SceneGraph`.
 - The shared setting expresses one object-fidelity choice, while generated instances and selected
   presentation roots retain algorithms matched to their actual atomic draw units.
-- To be completed during execution.
+- `SceneGraph.getResolvedBounds()` now returns one copied composite of the selected node's existing
+  local bound and resolved placement. Static descriptors therefore perform one owner-side query and
+  do not clone unrelated node state or duplicate bounds in `StaticObjectRenderable`.
+- `RenderWorld.getRenderContributionDescriptor()` performs only identity, eligibility, bounds, and
+  placement lookup. Dynamic part/material expansion moved behind
+  `expandDynamicContributions()` and runs only after the renderer accepts the root footprint.
+- `DynamicEntitySystem` retains prepared geometry-local bounds on each active part and computes the
+  published-presentation envelope before applying the same sample's part transforms and root effect
+  transform. Sparse cadence leaves both pose and envelope unchanged; SceneGraph's swept bound is
+  never updated at publication cadence.
+- Lasting diagnostics retain only total presentation roots tested, retained, and rejected. No
+  per-class attribution buckets, threshold cycles, or dedicated scene fixtures were added.
+- On matched DA55 portal captures, `64px²` rejected `42/54` eligible roots, reduced static draws
+  from `992` to `720`, reduced frame-instance upload bytes from `590,560` to `197,600`, and produced
+  no console errors. EnvCell shell counts and portal topology work were unchanged.
+- On the animation-isolated DC58 capture, `64px²` rejected `126/127` selected animated roots,
+  reduced dynamic instances from roughly `512` to `4–12`, and reduced average frame work from
+  `4.38ms` to `3.07ms`. Matched zero/64 screenshots were visually indistinguishable at the
+  Explorer-focus camera. Manual Explorer camera motion and close-entry inspection found the
+  resulting far-distance popping acceptable, so all implemented eligibility classes retain the
+  shared `64px²` default.
 
 ## Phase 9: Cleanup, Cross-Feature Verification, and Closeout
 
@@ -901,7 +922,7 @@ visibility feedback, upload instances, or submit draws.
 - [x] Recursive portal footprint rejection is either accepted with measured thresholds or removed.
 - [x] Generated screen-size culling is either accepted with positive net benefit or removed.
 - [x] Offscreen visual cadence reduction is either accepted with exact semantic behavior or removed.
-- [ ] Eligible static and anchored-dynamic presentation-root culling is accepted with positive net
+- [x] Eligible static and anchored-dynamic presentation-root culling is accepted with positive net
       benefit or removed per eligibility class.
 - [ ] Each accepted policy is explicit, typed, validated, recorded in diagnostics, and disabled by a
       precise baseline value.
@@ -920,11 +941,5 @@ visibility feedback, upload instances, or submit draws.
 
 ## Open Questions
 
-1. What read-only scene-query contract exposes each already-selected immutable root's local bound
-   and placement without cloning unrelated node state or duplicating the bound in renderables?
-2. Should prepared geometry-local bounds remain on each `ActiveDynamicPart`, or should activation
-   collapse them into a separate immutable bounds input colocated with publication?
-3. Does the shared `64px²` object cutoff benefit every proposed root eligibility class, or should a
-   measured class remain explicitly exempt?
-4. Do mixed transparent/opaque independently drawable roots remain visually stable under whole-root
+1. Do mixed transparent/opaque independently drawable roots remain visually stable under whole-root
    rejection, while generated transparent/additive streams stay on their existing ordered path?

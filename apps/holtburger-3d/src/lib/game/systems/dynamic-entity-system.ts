@@ -1,5 +1,6 @@
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
-import { Mat4, Vec3, type AABB3 } from "../math/types";
+import { AABB3, Mat4, Vec3 } from "../math/types";
+import { multiplyMat4, transformAABB3 } from "../math/matrices";
 import type { SceneGraph, SceneNodeId } from "../scene";
 import { scopeKey } from "../scene/scope";
 import {
@@ -38,6 +39,8 @@ interface DynamicEntityRecord {
 	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
 	preparedAnimation: PreparedDynamicAnimation | null;
+	/** Conservative object-local envelope matching the exact pose currently published to draw. */
+	publishedPresentationBounds: AABB3;
 }
 
 interface DynamicOwnerRecord<TTemplateOwnerId extends string> {
@@ -256,6 +259,7 @@ export class DynamicEntitySystem<
 			rootNodeId,
 			source: resident,
 			preparedAnimation: null,
+			publishedPresentationBounds: staticPresentationBounds(resident),
 			visualRootNodeId,
 		};
 		return record;
@@ -273,6 +277,11 @@ export class DynamicEntitySystem<
 
 	getRenderable(nodeId: SceneNodeId): DynamicEntityRenderable | null {
 		return this.#entities.get(nodeId)?.renderable ?? null;
+	}
+
+	/** Return the current drawn-pose envelope without expanding rigid-part contributions. */
+	getPublishedPresentationBounds(nodeId: SceneNodeId): AABB3 | null {
+		return this.#entities.get(nodeId)?.publishedPresentationBounds ?? null;
 	}
 
 	/** Resolve every active rigid part into the selected entity's current render domain. */
@@ -545,6 +554,11 @@ export class DynamicEntitySystem<
 				);
 			return { part, renderState, transform };
 		});
+		const publishedPresentationBounds = presentationBoundsForSample(
+			updatedParts,
+			entity.source.scale,
+			sample.effects.rootRotationModifier,
+		);
 		this.#scene.updateLocalTransform(
 			entity.visualRootNodeId,
 			sample.effects.rootRotationModifier,
@@ -566,6 +580,7 @@ export class DynamicEntitySystem<
 			})),
 		};
 		entity.articulatedPose = sample.articulatedPose;
+		entity.publishedPresentationBounds = publishedPresentationBounds;
 	}
 
 	#releaseStagedOwner(
@@ -640,6 +655,7 @@ function createActiveParts(
 			parts.push({
 				defaultScale: part.defaultScale,
 				drawUnits: [],
+				localBounds: requiredPartBounds(part.geometry.bounds, partIndex),
 				nodeId: scene.createNode({
 					localBounds: null,
 					localTransform: composeObjectPartTransform(
@@ -673,18 +689,58 @@ function mergePreparedParts(
 			throw new Error(
 				`Prepared template has no active part ${template.partIndex}.`,
 			);
+		const localBounds = requiredPartBounds(
+			template.localBounds,
+			template.partIndex,
+		);
 		return {
 			...active,
 			defaultScale: template.defaultScale,
+			localBounds,
 			drawUnits: template.drawUnits.map((drawUnit) => ({
 				drawUnit,
 				transparentSortCenter: requiredBoundsCenter(
-					template.localBounds,
+					localBounds,
 					template.partIndex,
 				),
 			})),
 		};
 	});
+}
+
+function presentationBoundsForSample(
+	parts: readonly {
+		readonly part: ActiveDynamicPart;
+		readonly transform: Mat4;
+	}[],
+	sourceScale: Vec3,
+	rootTransform: Mat4,
+): AABB3 {
+	let bounds: AABB3 | null = null;
+	for (const { part, transform } of parts) {
+		const partToObject = composeObjectPartTransform(
+			transform,
+			sourceScale,
+			part.defaultScale,
+		);
+		const partBounds = transformAABB3(
+			multiplyMat4(rootTransform, partToObject),
+			part.localBounds,
+		);
+		if (bounds === null) bounds = partBounds;
+		else bounds.union(partBounds);
+	}
+	if (bounds === null)
+		throw new Error("Dynamic presentation has no bounded active parts.");
+	return bounds;
+}
+
+function requiredPartBounds(bounds: AABB3 | null, partIndex: number): AABB3 {
+	if (!bounds)
+		throw new Error(
+			`Renderable dynamic part ${partIndex} has no local bounds.`,
+		);
+	return bounds.clone();
 }
 
 function requiredBoundsCenter(bounds: AABB3 | null, partIndex: number): Vec3 {

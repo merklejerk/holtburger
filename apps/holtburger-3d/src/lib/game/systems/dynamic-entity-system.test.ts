@@ -7,7 +7,8 @@ import {
 	createObjectGeometryKey,
 	type GeometrySource,
 } from "../geometry/types";
-import { AABB3, Mat4, Vec3 } from "../math/types";
+import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
+import { createRotationMat4 } from "../math/matrices";
 import type {
 	ResolvedGeometry,
 	ResolvedMaterial,
@@ -266,6 +267,71 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(system.getDiagnostics().lastPublishedPresentationCount).toBe(1);
 	});
 
+	it("publishes pose-local bounds without changing swept scene bounds", async () => {
+		const { scene, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			new FixtureAnimationSource(2),
+		);
+		const base = source("published-bounds", [0, 1]);
+		const firstPart = requiredAt(base.presentation.parts, 0);
+		const secondPart = requiredAt(base.presentation.parts, 1);
+		const boundedSource: AuthoredDynamicSource = {
+			...base,
+			presentation: {
+				...base.presentation,
+				parts: [
+					{
+						...firstPart,
+						geometry: {
+							...firstPart.geometry,
+							bounds: new AABB3(new Vec3(5, 0, -1), new Vec3(6, 1, 1)),
+						},
+					},
+					{
+						...secondPart,
+						defaultScale: new Vec3(1, 0.5, 2),
+						geometry: {
+							...secondPart.geometry,
+							bounds: new AABB3(Vec3.zero(), new Vec3(1, 1, 1)),
+						},
+					},
+				],
+			},
+			scale: new Vec3(2, 3, 4),
+		};
+		const installation = system.replaceOwner("layer", [boundedSource]);
+		expect(await installation.ready).toBe("ready");
+		const preparedEntity = requiredAt(installation.getPreparedEntities(), 0);
+		const sample = presentationSample(preparedEntity, 0);
+		const firstPartTransform = Mat4.identity();
+		firstPartTransform.m41 = 1;
+		const secondPartTransform = Mat4.identity();
+		secondPartTransform.m41 = -5;
+		const halfSqrt = Math.sqrt(0.5);
+		const rootRotation = createRotationMat4(new Quat(halfSqrt, 0, 0, halfSqrt));
+		const rotatedSample: DynamicPresentationSample = {
+			...sample,
+			articulatedPose: {
+				partToObjectTransforms: [firstPartTransform, secondPartTransform],
+			},
+			effects: { ...sample.effects, rootRotationModifier: rootRotation },
+		};
+		installation.prepareCommit([rotatedSample]);
+		installation.commit();
+		const nodeId = requiredAt(installation.nodeIds, 0);
+
+		expectBounds(
+			system.getPublishedPresentationBounds(nodeId),
+			new AABB3(new Vec3(-3, -10, -4), new Vec3(0, 14, 8)),
+		);
+		const sweptBounds = scene.getNode(nodeId)?.localBounds;
+		system.publishPresentation([sample]);
+		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
+			new AABB3(new Vec3(0, 0, -4), new Vec3(12, 3, 8)),
+		);
+		expect(scene.getNode(nodeId)?.localBounds).toEqual(sweptBounds);
+	});
+
 	it("activates a blocked visual clip as valid static presentation", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -301,6 +367,16 @@ function commit(
 			),
 	);
 	installation.commit();
+}
+
+function expectBounds(actual: AABB3 | null, expected: AABB3): void {
+	if (!actual) throw new Error("Expected published presentation bounds.");
+	expect(actual.min.x).toBeCloseTo(expected.min.x);
+	expect(actual.min.y).toBeCloseTo(expected.min.y);
+	expect(actual.min.z).toBeCloseTo(expected.min.z);
+	expect(actual.max.x).toBeCloseTo(expected.max.x);
+	expect(actual.max.y).toBeCloseTo(expected.max.y);
+	expect(actual.max.z).toBeCloseTo(expected.max.z);
 }
 
 function presentationSample(
@@ -535,6 +611,8 @@ class ReadyTemplateAtlas implements ObjectVisualTemplateAtlas<ReadyTemplateAtlas
 }
 
 class FixtureAnimationSource implements AnimationAssetSource {
+	constructor(readonly partCount = 1) {}
+
 	async loadAnimation(
 		animationId: "0x03000001",
 	): Promise<DecodedAnimationAsset> {
@@ -542,8 +620,8 @@ class FixtureAnimationSource implements AnimationAssetSource {
 			frameCount: 1,
 			hooks: [],
 			id: animationId,
-			partCount: 1,
-			partFrames: [Mat4.identity()],
+			partCount: this.partCount,
+			partFrames: Array.from({ length: this.partCount }, () => Mat4.identity()),
 			positionFrames: [],
 		};
 	}

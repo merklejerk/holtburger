@@ -23,6 +23,7 @@ import type {
 	SceneTopologyView,
 	PortalCrossingId,
 	ResolvedScenePlacement,
+	ResolvedSceneBounds,
 	ScenePointResidencyCandidates,
 	VisibleScene,
 } from ".";
@@ -161,6 +162,16 @@ export class SceneGraph {
 	): ResolvedScenePlacement | undefined {
 		if (!this.#nodes.has(nodeId)) return undefined;
 		return copyResolvedPlacement(this.#resolvePlacement(nodeId));
+	}
+
+	/** Return one bounded node's colocated local envelope and resolved placement. */
+	getResolvedBounds(nodeId: SceneNodeId): ResolvedSceneBounds | null {
+		const node = this.#nodes.get(nodeId);
+		if (!node?.localBounds) return null;
+		return {
+			localBounds: node.localBounds.clone(),
+			placement: copyResolvedPlacement(this.#resolvePlacement(nodeId)),
+		};
 	}
 
 	updateRootPlacement(nodeId: SceneNodeId, placement: ScenePlacement): void {

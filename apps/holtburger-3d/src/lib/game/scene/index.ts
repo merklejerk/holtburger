@@ -118,6 +118,14 @@ export interface ResolvedScenePlacement extends SceneResidency {
 	readonly localToLandblock: Mat4;
 }
 
+/** One bounded scene node's colocated local envelope and resolved render placement. */
+export interface ResolvedSceneBounds {
+	/** Bounds retained in the selected node's own local coordinate frame. */
+	readonly localBounds: AABB3;
+	/** Flattened placement that transforms the local envelope into its landblock frame. */
+	readonly placement: ResolvedScenePlacement;
+}
+
 interface SceneNodeFields {
 	/** Opaque broad-phase grouping supplied by the owning system. */
 	readonly cullingGroup?: string;

@@ -117,6 +117,10 @@ describe("SceneGraph", () => {
 		node.localTransform.m42 = 100;
 		const placement = visiblePlacement(scene, nodeId);
 		placement.localToLandblock.m43 = 100;
+		const resolvedBounds = scene.getResolvedBounds(nodeId);
+		if (!resolvedBounds) throw new Error("Expected resolved scene bounds.");
+		resolvedBounds.localBounds.min.y = -100;
+		resolvedBounds.placement.localToLandblock.m41 = 100;
 
 		expect(scene.getNode(nodeId)).toMatchObject({
 			localBounds: new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6)),
@@ -125,6 +129,12 @@ describe("SceneGraph", () => {
 		expect(
 			getMat4Translation(visiblePlacement(scene, nodeId).localToLandblock),
 		).toEqual(new Vec3(10, 20, 30));
+		expect(scene.getResolvedBounds(nodeId)).toMatchObject({
+			localBounds: new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6)),
+			placement: {
+				localToLandblock: createTranslationMat4(new Vec3(10, 20, 30)),
+			},
+		});
 	});
 
 	it("indexes bounded nodes but permits empty transform nodes", () => {

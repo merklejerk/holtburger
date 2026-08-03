@@ -95,6 +95,13 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => void;
+		/** Place the continuous camera at one explicit outdoor world-space pose. */
+		readonly setOutdoorCamera: (
+			landblockId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => void;
 		/** Apply the Explorer's automatic outdoor focus policy after terrain becomes queryable. */
 		readonly focusExplorerOutdoor: (
 			landblockId: string,
@@ -186,12 +193,15 @@
 	}
 
 	interface BrowserHarnessCameraEvidence {
+		/** Authoritative indoor residency, or null for an outdoor camera. */
+		readonly envCellId: EnvCellId | null;
 		readonly far: number;
 		readonly fov: number;
 		readonly landblockId: LandblockId;
 		readonly near: number;
 		readonly pitchDegrees: number;
-		readonly policy: "explicit-outdoor" | "explorer-outdoor-focus";
+		readonly policy:
+			"explicit-env-cell" | "explicit-outdoor" | "explorer-outdoor-focus";
 		readonly position: readonly [number, number, number];
 		readonly yawDegrees: number;
 	}
@@ -358,6 +368,32 @@
 			CAMERA_HEIGHT,
 			origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
 		);
+		setOutdoorCamera(
+			landblockId,
+			[position.x, position.y, position.z],
+			cameraYawDegrees,
+			cameraPitchDegrees,
+		);
+	}
+
+	function setOutdoorCamera(
+		rawLandblockId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
+		) {
+			throw new Error(
+				"Browser harness outdoor camera requires a finite position and orientation.",
+			);
+		}
+		const landblockId = parseOutdoorLandblockId(rawLandblockId);
+		const cameraPosition = new Vec3(...position);
 		runtime.setPrimaryCamera({
 			far: CAMERA_FAR,
 			fov: CAMERA_FOV_DEGREES,
@@ -365,18 +401,19 @@
 			placement: {
 				envCellId: null,
 				landblockId,
-				position,
+				position: cameraPosition,
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 			},
 		});
 		cameraEvidence = {
+			envCellId: null,
 			far: CAMERA_FAR,
 			fov: CAMERA_FOV_DEGREES,
 			landblockId,
 			near: CAMERA_NEAR,
 			pitchDegrees: cameraPitchDegrees,
 			policy: "explicit-outdoor",
-			position: [position.x, position.y, position.z],
+			position,
 			yawDegrees: cameraYawDegrees,
 		};
 	}
@@ -406,6 +443,7 @@
 		});
 		cameraEvidence = {
 			...EXPLORER_CAMERA_FRAMING,
+			envCellId: null,
 			landblockId,
 			pitchDegrees: (pose.pitchRadians * 180) / Math.PI,
 			policy: "explorer-outdoor-focus",
@@ -444,6 +482,17 @@
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 			},
 		});
+		cameraEvidence = {
+			envCellId,
+			far: CAMERA_FAR,
+			fov: CAMERA_FOV_DEGREES,
+			landblockId,
+			near: CAMERA_NEAR,
+			pitchDegrees: cameraPitchDegrees,
+			policy: "explicit-env-cell",
+			position,
+			yawDegrees: cameraYawDegrees,
+		};
 	}
 
 	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
@@ -756,6 +805,7 @@
 					setCameraLandblock,
 					setEnvCellCamera,
 					setEnvCellRenderMode,
+					setOutdoorCamera,
 					setFrameProfiling,
 					setMinimumOutdoorTransitionPixelArea,
 					setTextureFiltering,

@@ -176,19 +176,19 @@ where practical so content, atlas state, camera, and viewport remain identical.
 
 ### Task Checklist
 
-- [ ] Commit or otherwise isolate the accepted outdoor-transition cutoff before changing its
+- [x] Commit or otherwise isolate the accepted outdoor-transition cutoff before changing its
       vocabulary or behavior.
-- [ ] Express the indoor-root and hybrid cameras through existing harness controls; add only the
+- [x] Express the indoor-root and hybrid cameras through existing harness controls; add only the
       missing parameterized placement control required for reproducibility, not a camera-specific
       fixture.
-- [ ] Capture the benchmark matrix with every optimization explicitly disabled.
-- [ ] Add temporary portal crossing-class counts and projected-area distributions sufficient to
+- [x] Capture the benchmark matrix with every optimization explicitly disabled.
+- [x] Add temporary portal crossing-class counts and projected-area distributions sufficient to
       distinguish outdoor-to-indoor, indoor-to-indoor, same-domain, and indoor-to-outdoor pruning.
-- [ ] Add temporary generated-instance footprint buckets after scene-fragment selection but before
+- [x] Add temporary generated-instance footprint buckets after scene-fragment selection but before
       compaction.
-- [ ] Add temporary animation counts for semantically advanced, visually sampled, published,
+- [x] Add temporary animation counts for semantically advanced, visually sampled, published,
       visible, recently visible, and offscreen entities.
-- [ ] Measure instrumentation overhead and remove any probe that materially perturbs its target.
+- [x] Measure instrumentation overhead and remove any probe that materially perturbs its target.
 
 ### Acceptance Criteria
 
@@ -201,7 +201,113 @@ where practical so content, atlas state, camera, and viewport remain identical.
 
 ### Decisions and Course Corrections
 
-- To be completed during execution.
+- The accepted outdoor-transition cutoff and this plan were isolated as commits `921ba1a8` and
+  `4e01b23d` before Phase 0 measurement began. The pre-existing `ACE`, `ACViewer`, and app-local
+  `AGENTS.md` worktree changes were excluded.
+- Existing EnvCell position and orientation controls were sufficient for indoor and hybrid roots.
+  The harness did not, however, report the applied EnvCell camera and could not preserve an exact
+  outdoor position while changing orientation. The durable harness contract now reports EnvCell
+  residency, accepts a generic explicit outdoor position, and optionally applies a second settled
+  orientation. No camera-specific fixture was added.
+- Archive projection established the indoor camera without guessing: EnvCell `0x7d64010e` has
+  render-bounds center `[24089.25, 13.6, -19337.75]`. At yaw `180`, the zero-cutoff plan reaches six
+  same-domain scopes through five projected windows, emits one render node and no mask or exterior
+  contribution, and submits 72 static draws. The established hybrid camera remains EnvCell
+  `0x7d640113`, position `[24078.5, 13.7, -19328.25]`, yaw/pitch `0`; it emits two nodes, two masks,
+  one exterior render, 349 static draws, and 1,748 generated instance-fragment occurrences.
+- Every measurement explicitly set `--minimum-outdoor-transition-pixel-area 0`; generated
+  footprint rejection and visual animation cadence do not yet exist, so their baseline modes are
+  structurally exact/full cadence.
+
+#### Reproducible Phase 0 Cameras
+
+All commands run from `apps/holtburger-3d`. Shared quality flags are physical viewport `690x852`,
+device scale `1`, anisotropic 2x filtering, portal frame mode, and a zero outdoor-transition cutoff.
+
+| Workload                 | Parameterized camera                                                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| DA55 Explorer outdoor    | `--landblock 0xda55ffff --explorer-focus`                                                                                           |
+| Indoor root              | `--landblock 0x7d64ffff --env-cell-camera 0x7d64010e --env-cell-position 24089.25,13.6,-19337.75 --camera-yaw 180 --camera-pitch 0` |
+| Hybrid                   | `--landblock 0x7d64ffff --env-cell-camera 0x7d640113 --env-cell-position 24078.5,13.7,-19328.25 --camera-yaw 0 --camera-pitch 0`    |
+| DC58 generated-heavy     | `--landblock 0xdc58ffff --explorer-focus`                                                                                           |
+| DA55 offscreen animation | `--landblock 0xda55ffff --camera-position 42000,68,-16368 --camera-yaw -45 --camera-pitch 45`                                       |
+| DA55 visibility entry    | The preceding placement plus `--camera-end-yaw -45 --camera-end-pitch -35.264389682754654`                                          |
+
+The DA55 heavy baseline used radii `8/2/2/2` for buildings, EnvCells, explicit objects, and generated
+scenery. The indoor and hybrid runs used radius one for all four populations. DC58 used building and
+generated radii one with EnvCell and explicit radii zero. The matched animation transition used
+radius two for all populations so both orientations shared one settled resident set.
+
+#### Disabled-Policy Baseline
+
+The probe-free DA55 heavy capture preserved the known accepted workload: 11 portal nodes, 16 mask
+edges, 98 visible entries, 887 static draws, 779 generated fragments containing 3,174 instance
+occurrences, 425 compacted generated draws, 20 visible dynamic entities/80 parts, and 171 active
+animation playbacks. SwiftShader renderer CPU measured `5.056ms` mean and `6.6ms` p95 over 54
+profiled frames. The Explorer report and harness therefore agree on the workload shape; the smaller
+physical viewport is measurement context, not a canonical policy input beyond pixel thresholds.
+
+#### Temporary Portal Attribution
+
+The temporary probe bucketed final inherited-window area after successful projection and before
+footprint rejection. Buckets are exclusive physical-pixel areas `<1`, `1-4`, `4-16`, `16-64`, and
+`>=64`. No measured crossing straddled the near plane.
+
+| Camera / crossing class                      |  <1 | 1-4 | 4-16 | 16-64 | >=64 |
+| -------------------------------------------- | --: | --: | ---: | ----: | ---: |
+| DA55 outdoor / indoor-to-indoor cross-domain |   0 |   2 |    0 |     0 |    1 |
+| DA55 outdoor / outdoor-to-indoor             |   0 |   0 |    1 |     1 |   11 |
+| DA55 outdoor / same-domain                   |   1 |   0 |    2 |    10 |    9 |
+| Indoor root / same-domain                    |   0 |   0 |    0 |     0 |    5 |
+| Hybrid / indoor-to-outdoor                   |   0 |   0 |    0 |     0 |    1 |
+| Hybrid / outdoor-to-indoor                   |   0 |   0 |    0 |     0 |    1 |
+| Hybrid / same-domain                         |   0 |   0 |    0 |     0 |    3 |
+
+This supports Phase 1: DA55 contains small recursive same-domain and indoor cross-domain work, while
+the hybrid acceptance pose keeps every transition above 64 pixels squared. It does not select a
+threshold; moving-camera gates still own that decision.
+
+#### Temporary Generated Attribution
+
+The generated probe ran after scene-fragment selection and before compaction. It projected each
+instance occurrence with the complete source-geometry AABB. That envelope is intentionally
+conservative and can overstate a sub-draw's footprint; it is evidence for building the worker-owned
+envelope in Phase 3, not the final culling algorithm.
+
+| Workload              |    <1 | 1-4 | 4-16 | 16-64 |  >=64 | Total |
+| --------------------- | ----: | --: | ---: | ----: | ----: | ----: |
+| DA55 Explorer outdoor | 2,028 | 200 |  165 |   185 |   596 | 3,174 |
+| DC58 generated-heavy  |   990 | 252 |  316 |   255 |   542 | 2,355 |
+| Hybrid                |   151 |   1 |   27 |   151 | 1,418 | 1,748 |
+
+DA55 has 2,393 occurrences (`75.4%`) below 16 pixels squared and DC58 has 1,558 (`66.2%`). Even the
+conservative envelope exposes a large candidate cohort, so Phase 3 remains justified.
+
+#### Animation Attribution and Transition
+
+Existing animation/runtime/frame diagnostics already answer the baseline ownership questions, so
+no duplicate temporary animation metric was added. In the matched one-process DA55 transition:
+
+- the settled sky-facing state had 171 active playbacks, 171 visually sampled/published
+  presentations, zero visible dynamic entities, and therefore 171 offscreen presentations;
+- after the parameterized orientation change, the same resident set retained 171 active and 171
+  sampled/published presentations while 42 entities/228 parts became visible, leaving 129 offscreen
+  presentations; and
+- semantic fixed-step counts and hook observations continued across both states with no
+  discontinuity.
+
+“Recently visible” has no honest nonzero baseline because no grace-window policy exists yet.
+Inventing that state in Phase 0 would let diagnostics define the Phase 7 design. Phase 7 must add
+the recency state as part of the scheduler contract, then count its named consumers.
+
+#### Probe Overhead and Cleanup
+
+The temporary portal histogram plus generated AABB projection raised the matched DA55 heavy profile
+from `5.056ms` mean / `6.6ms` p95 to `5.961ms` mean / `8.4ms` p95 over 54 frames: approximately
+`0.906ms` (`17.9%`) mean overhead. This materially perturbed the target. All temporary fields,
+geometry bounds, projection loops, planner buckets, executor plumbing, and frame metrics were
+removed immediately after capture. Only the parameterized camera/reporting controls and this
+evidence remain.
 
 ## Phase 1: Generalize Footprint Rejection Across Portal Traversal
 

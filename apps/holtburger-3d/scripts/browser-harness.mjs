@@ -145,6 +145,9 @@ function parseArgs(args) {
 		cameraPitchDegrees: -45,
 		cameraYawDegrees: 0,
 		cameraHeight: 600,
+		cameraPosition: null,
+		cameraEndPitchDegrees: null,
+		cameraEndYawDegrees: null,
 		explorerFocus: false,
 		explicitObjectRadius: null,
 		generatedObjectRadius: null,
@@ -259,6 +262,24 @@ function parseArgs(args) {
 				parsed.cameraHeight = Number(requireValue(args, ++index, arg));
 				if (!Number.isFinite(parsed.cameraHeight)) {
 					throw new Error("--camera-height must be finite.");
+				}
+				break;
+			case "--camera-position":
+				parsed.cameraPosition = parsePoint(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				break;
+			case "--camera-end-yaw":
+				parsed.cameraEndYawDegrees = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.cameraEndYawDegrees)) {
+					throw new Error("--camera-end-yaw must be finite.");
+				}
+				break;
+			case "--camera-end-pitch":
+				parsed.cameraEndPitchDegrees = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.cameraEndPitchDegrees)) {
+					throw new Error("--camera-end-pitch must be finite.");
 				}
 				break;
 			case "--explorer-focus":
@@ -447,10 +468,35 @@ function parseArgs(args) {
 		parsed.explorerFocus &&
 		(parsed.cameraLandblockId ||
 			parsed.relocateLandblockId ||
-			parsed.envCellCameraId)
+			parsed.envCellCameraId ||
+			parsed.cameraPosition)
 	) {
 		throw new Error(
 			"--explorer-focus cannot be combined with another camera or relocation option.",
+		);
+	}
+	if (
+		parsed.cameraPosition &&
+		(parsed.cameraLandblockId ||
+			parsed.relocateLandblockId ||
+			parsed.envCellCameraId)
+	) {
+		throw new Error(
+			"--camera-position cannot be combined with another camera or relocation option.",
+		);
+	}
+	const cameraEndOptionCount = [
+		parsed.cameraEndYawDegrees,
+		parsed.cameraEndPitchDegrees,
+	].filter((value) => value !== null).length;
+	if (cameraEndOptionCount !== 0 && cameraEndOptionCount !== 2) {
+		throw new Error(
+			"--camera-end-yaw and --camera-end-pitch must be supplied together.",
+		);
+	}
+	if (cameraEndOptionCount !== 0 && parsed.cameraPosition === null) {
+		throw new Error(
+			"--camera-end-yaw and --camera-end-pitch require --camera-position.",
 		);
 	}
 	const traceOptionCount = [
@@ -527,6 +573,11 @@ Options:
                          Keep outdoor statics but strip promoted dynamics.
   --camera-yaw <degrees>    Initial and relocation camera yaw. Default: 0
   --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
+  --camera-position <x,y,z>
+                         Explicit canonical outdoor camera position.
+  --camera-end-yaw <degrees>
+  --camera-end-pitch <degrees>
+                         Apply a second orientation after settlement; requires --camera-position.
   --explorer-focus      Apply the Explorer's automatic outdoor camera pose after loading.
   --viewport-width <px> CSS render width. Default: ${DEFAULT_VIEWPORT_WIDTH}
   --viewport-height <px> CSS render height. Default: ${DEFAULT_VIEWPORT_HEIGHT}
@@ -674,6 +725,7 @@ function briefHarnessReport(result) {
 		frameProfile: result.state.frameProfile,
 		frameSettings: result.state.frameSettings,
 		initialMetrics: result.initialState.metrics,
+		initialCamera: result.initialState.camera,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
 		filteringCycle: result.filteringCycleStates.map(
 			({ frameSettings }) => frameSettings.quality.textureFiltering,
@@ -1147,6 +1199,18 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.envCellRadius !== null) {
 			await waitForEnvCellPublication(client, options.landblockId);
 		}
+		if (options.cameraPosition !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setOutdoorCamera",
+				[
+					options.landblockId,
+					options.cameraPosition,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
+			);
+		}
 		await delay(options.settleMs);
 		if (options.explorerFocus) {
 			await evaluate(
@@ -1161,6 +1225,19 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
+		if (options.cameraEndYawDegrees !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setOutdoorCamera",
+				[
+					options.landblockId,
+					options.cameraPosition,
+					options.cameraEndYawDegrees,
+					options.cameraEndPitchDegrees,
+				],
+			);
+			await delay(250);
+		}
 		if (
 			(options.frameMode !== null || options.modeCycle) &&
 			options.envCellCameraId !== null

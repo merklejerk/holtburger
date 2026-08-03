@@ -21,7 +21,7 @@ export class FrameInstanceStreamArena {
 		this.#buffer = new WebGL2InstanceBuffer(gl);
 	}
 
-	/** Orphan and upload the complete ordered population for one sequentially rendered view. */
+	/** Prepare one ordered view population without allocating backend storage for an empty view. */
 	prepareView(instances: readonly ObjectInstanceData[]): void {
 		if (this.#buffer.resetFrame(instances.length)) this.#growthCount += 1;
 		this.#buffer.updateRange(0, instances);

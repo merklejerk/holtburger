@@ -1,7 +1,8 @@
 # Holtburger 3D Portal Frame CPU Investigation
 
 Date: 2026-08-02
-Status: active target-renderer follow-up; linear opaque instance grouping accepted under SwiftShader.
+Status: active residual contribution/submission attribution; empty frame-instance storage work and
+comparison sorting are accepted as removed on the target Apple/WebKit renderer.
 
 ## Context and Boundaries
 
@@ -61,6 +62,12 @@ renderer isolation guarantees.
     formation.
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-portal-executor.ts`
   - Owns mechanical execution of a completed portal work plan.
+- `apps/holtburger-3d/src/lib/game/renderer/frame-instance-stream-arena.ts`
+  - Owns the renderer's reusable sequential-view instance stream and delegates each prepared view
+    to the WebGL2 instance buffer.
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-instance-buffer.ts`
+  - Owns frame-instance capacity, CPU encoding storage, complete-storage orphaning, range uploads,
+    and instanced attribute bindings.
 - `apps/holtburger-3d/src/explorer/explorer-camera-framing.ts`
   - Owns the Explorer's outdoor focus pose and projection constants shared by the interactive app
     and diagnostic harness.
@@ -451,8 +458,65 @@ screenshot was visually unchanged.
 
 The concession is increased baked-draw state churn: accepted texture binds ranged from `221` to
 `279` (median `261`) and program changes ranged from `31` to `32`. Despite that increase, opaque
-submission did not regress in the matched SwiftShader captures. Target-hardware profiling remains
-required because driver costs can weight this trade differently.
+submission did not regress in the matched SwiftShader captures. Probe 7 subsequently found `257`
+binds without a dominant target-native state-application branch.
+
+### Probe 7: Target Apple/WebKit Native Profile
+
+Status: complete for resteering; this native sample is attribution evidence rather than a matched
+five-sample timing baseline.
+
+The user supplied a settled Safari/WebKit Timeline capture and a versioned Explorer diagnostic
+snapshot for the accepted renderer. The snapshot identified:
+
+- WebKit's WebGL 2 implementation on an Apple GPU;
+- the exact Explorer outdoor focus pose for `0xda55ffff`;
+- all five requested interest radii, portal EnvCell rendering, and anisotropic 2x filtering;
+- `17` submitted portal nodes across `4` layers and `47` admitted scope/window states;
+- `145` visible scene entries and `1160` submitted static-object draws;
+- `1327` generated fragments compacted into `572` draws containing `6219` instances;
+- `64` dynamic draws containing `232` instances;
+- `2` reported frame-instance uploads totaling `588960` bytes; and
+- `257` object texture binds.
+
+The application was resized to accommodate the Timeline UI. Its captured viewport is therefore a
+fact about this sample, not a canonical benchmark size or an explanation to generalize across
+captures.
+
+The principal native call-tree branches accumulated:
+
+| Branch                               | Capture total | Capture share |
+| ------------------------------------ | ------------: | ------------: |
+| `#drawPortalView`                    |      `45.3ms` |       `89.7%` |
+| `executePortalGraph`                 |      `29.7ms` |       `58.8%` |
+| `#collectPortalNodeContributions`    |      `11.4ms` |       `22.6%` |
+| `PortalPlanningContext.plan`         |       `4.2ms` |        `8.3%` |
+| `#prepareObjectFrameInput`           |       `8.3ms` |       `16.4%` |
+| `#prepareFrameInstanceRuns`          |      `16.2ms` |       `32.1%` |
+| `formGroupedObjectInstanceRuns`      |       `3.1ms` |        `6.1%` |
+| `formGroupedObjectInstanceRuns` self |       `2.1ms` |        `4.2%` |
+| `bufferData` beneath instance reset  |      `11.0ms` |       `21.8%` |
+
+The capture contains no comparison-sort branch. Linear cohort grouping is present but bounded,
+while execution and particularly complete instance-buffer orphaning are now the clearest target
+renderer costs. The `257` texture binds do not appear as a dominant state-application branch in
+this sample, so the increased bind count is no longer the first target-hardware concern.
+
+Code inspection before the Phase 9 cutover supplied the structural discriminator behind the native
+samples:
+
+- every `#prepareFrameInstanceRuns()` call invoked `FrameInstanceStreamArena.prepareView()`, even
+  when it formed no frame-instance ranges;
+- every `prepareView()` invoked `WebGL2InstanceBuffer.resetFrame()`;
+- every `resetFrame()` called `bufferData()` for the arena's complete capacity, whether the requested
+  population is empty or non-empty; and
+- `frameInstanceUploadCount` and `frameInstanceUploadBytes` incremented only for a non-empty ordered
+  population, so the permanent diagnostics omitted empty full-capacity orphan operations.
+
+The native profile places the `11ms` `bufferData` branch primarily beneath indoor-node rendering,
+where nodes can contain baked contributions but no frame-streamed instances. This supports a
+bounded first cutover: delete empty arena preparations before considering persistent mapping,
+buffer rotation, or another broader streaming strategy.
 
 ## Current Findings
 
@@ -511,34 +575,49 @@ device compilation profitable. The A/B proved that physical material/device reco
 cheaper than the proposed cache lookup, validation, copying, and indirection on this JavaScript hot
 path.
 
-Node-local ordering remains the largest contribution subphase at a median `1.378ms` and
-approximately `11350` comparisons. Object preparation is smaller at `0.667ms`; attempting to retain
-its stable-looking inputs regressed total renderer CPU by at least `1.344ms`. Any next structural
-cutover must reduce the number of frame envelopes or ordering operations, not merely retain a
-different representation of every draw.
+Before Probe 6, node-local ordering was the largest contribution subphase at a median `1.378ms` and
+approximately `11350` comparisons. Object preparation was smaller at `0.667ms`; attempting to
+retain its stable-looking inputs regressed total renderer CPU by at least `1.344ms`. Probe 6 deleted
+that ordering work rather than retaining a different representation of every draw.
+
+### Finding 6: Empty Portal Contributions Were Orphaning the Full Instance Arena
+
+The target native profile attributes `11ms` of self time to `bufferData` beneath
+`#prepareFrameInstanceRuns`. Before Phase 9, the renderer reset and orphaned the complete instance
+arena for every opaque or blended preparation call, including calls that emitted no frame-instance
+range. Indoor portal nodes with baked-only contributions therefore paid a driver-facing buffer
+operation whose storage could not be consumed by that call.
+
+The selection report's `2` uploads described only non-empty logical populations and did not count
+empty full-capacity orphans. Phase 9 restored a one-to-one relationship by making an empty logical
+reset clear the populated range without touching GL storage. Buffer rotation or another general
+streaming redesign remains premature until the target reprofile establishes the residual cost.
 
 ## Hypothesis Register
 
-| Hypothesis                                                                                  | Current state                                                      | Required discriminator                                              |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| Portal graph planning is the primary interactive bottleneck.                                | Weakened. Planning is approximately `12%` of the supplied capture. | Matched built-in phase profile over the exact reference workload.   |
-| Immutable aperture preprocessing is incorrectly paid per frame.                             | Supported by code and Chrome samples.                              | A/B with topology/anchor preparation and unchanged traversal facts. |
-| Per-node prepared object reconstruction and sorting dominate contribution collection.       | Proven; comparison sorting was deleted after a `28.1%` total A/B.  | Recheck the trade on target hardware.                               |
-| Retaining stable draw/device facts removes most per-frame object preparation cost.          | Rejected: all measured retained variants regressed total CPU.      | Reconsider only if physical compilation itself becomes costly.      |
-| Multi-node contribution merging redundantly re-sorts ordered inputs.                        | Proven and resolved by deleting both ordering layers.              | Recheck contribution identity on other portal cameras.              |
-| The same render-node set is prepared more than once during portal execution.                | Rejected for the matched workload: `4` sets, `4` uses, no repeats. | Recheck other cameras before generalizing the result.               |
-| Exterior or indoor scene work is submitted more often than stencil semantics require.       | Rejected for the matched workload: `11` nodes prepared/used once.  | Recheck hybrid and interior-root workloads.                         |
-| WebGL submission/driver time, rather than JavaScript preparation, owns most execution cost. | Rejected under SwiftShader; state churn rose while total fell.     | Target-hardware GPU timestamps and native profile remain required.  |
+| Hypothesis                                                                                  | Current state                                                       | Required discriminator                                                  |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Portal graph planning is the primary interactive bottleneck.                                | Weakened. Planning is approximately `12%` of the supplied capture.  | Matched built-in phase profile over the exact reference workload.       |
+| Immutable aperture preprocessing is incorrectly paid per frame.                             | Supported by code and Chrome samples.                               | A/B with topology/anchor preparation and unchanged traversal facts.     |
+| Per-node prepared object reconstruction and sorting dominate contribution collection.       | Proven; comparison sorting was deleted after a `28.1%` total A/B.   | Recheck the trade on target hardware.                                   |
+| Retaining stable draw/device facts removes most per-frame object preparation cost.          | Rejected: all measured retained variants regressed total CPU.       | Reconsider only if physical compilation itself becomes costly.          |
+| Multi-node contribution merging redundantly re-sorts ordered inputs.                        | Proven and resolved by deleting both ordering layers.               | Recheck contribution identity on other portal cameras.                  |
+| The same render-node set is prepared more than once during portal execution.                | Rejected for the matched workload: `4` sets, `4` uses, no repeats.  | Recheck other cameras before generalizing the result.                   |
+| Exterior or indoor scene work is submitted more often than stencil semantics require.       | Rejected for the matched workload: `11` nodes prepared/used once.   | Recheck hybrid and interior-root workloads.                             |
+| WebGL submission/driver time, rather than JavaScript preparation, owns most execution cost. | Backend-dependent: rejected under SwiftShader, supported on target. | Delete empty buffer resets, then reattribute residual target execution. |
+| Empty portal-node instance populations orphan the complete frame arena unnecessarily.       | Proven and resolved at the buffer owner with unchanged draw facts.  | Reprofile the target native branch after the cutover.                   |
+| Non-empty `bufferData` orphaning stalls on an in-flight Apple/WebKit buffer.                | Unproven; empty resets confound the current `11ms` native branch.   | Reprofile after deleting empty resets before testing buffer rotation.   |
 
 ## Phase 1: Reproduce the Interactive Workload
 
-Status: in progress; SwiftShader capture complete, interactive parity and resource-settlement proof
-pending.
+Status: complete for workload reproduction and target-native branch attribution; strict cross-
+backend timing parity is neither expected nor required.
 
 ### Deliverables
 
 - A harness command and camera pose matching the interactive reference workload.
-- Five settled SwiftShader harness captures and five interactive target-renderer captures.
+- Five settled SwiftShader harness captures plus target-renderer native attribution and workload
+  evidence sufficient to choose the next branch.
 - A baseline table containing renderer phase timings, frame timing, portal graph metrics, visible
   object counts, draw counts, upload bytes, viewport, filtering, and device facts.
 
@@ -547,18 +626,19 @@ pending.
 - [x] Express the Explorer's automatic outdoor camera pose in the browser harness.
 - [x] Confirm all five interest radii and settled source batches match the requested Explorer
       workload.
-- [ ] Record portal nodes, layers, masks, admitted window states, visible entries, static draws,
+- [x] Record portal nodes, layers, masks, admitted window states, visible entries, static draws,
       generated fragments/instances, program changes, texture binds, and frame uploads.
 - [x] Capture five five-second SwiftShader renderer profiles.
-- [ ] Capture five five-second interactive target-renderer profiles.
+- [x] Capture an interactive target-renderer native profile and portable workload snapshot.
 - [x] Compare SwiftShader medians; raw output was retained in the investigation transcript rather
       than committed.
-- [ ] Reject captures containing loading, texture placement, lifecycle churn, camera movement, or
+- [x] Reject captures containing loading, texture placement, lifecycle churn, camera movement, or
       profiler startup.
 
 ### Acceptance Criteria
 
-- Harness and Explorer submit identical visible-work counts or every difference has a named cause.
+- Accepted before/after captures submit identical visible work; cross-backend samples retain their
+  own workload facts and are not treated as timing-equivalent when those facts differ.
 - CPU phases account for renderer total without overlapping categories.
 - The workload reproduces the interactive frame-cost class closely enough to rank CPU branches;
   absolute SwiftShader and target-renderer timings remain separately labeled.
@@ -571,15 +651,16 @@ pending.
 - The first full-radius pilot used the harness's default `1280 x 720` viewport and was rejected from
   the five-sample baseline. Explicit viewport and device-scale controls were added before accepted
   captures.
-- The `690 x 852` viewport is a screenshot-derived estimate. Interactive application evidence is
-  still required before claiming exact viewport parity.
+- The `690 x 852` viewport is a screenshot-derived harness setting used for those five captures.
+  Probe 7 established that the interactive viewport is routinely resized around profiling tools,
+  so no single size is canonical; comparisons must instead hold their chosen viewport stable.
 - The five SwiftShader captures are accepted for branch ranking. Resource-state variance prevents
   using them as strict optimization acceptance evidence without another readiness discriminator.
 
 ## Phase 2: Attribute Contribution Preparation and Execution
 
-Status: complete for the matched SwiftShader workload; target-renderer corroboration remains part
-of Phase 1.
+Status: complete; matched SwiftShader attribution is corroborated by the Probe 7 target-native
+profile.
 
 ### Deliverables
 
@@ -595,7 +676,7 @@ of Phase 1.
 - [x] Identify each unique render-node set requested by executor callbacks and count repeated uses.
 - [x] Pair each planned contribution with actual exterior/indoor callback and draw counts.
 - [x] Record instance-run preparation, encoding, upload, and object submission separately.
-- [ ] Use a browser-native saved profile to corroborate the explicit counters and spans.
+- [x] Use a browser-native saved profile to corroborate the explicit counters and spans.
 
 ### Acceptance Criteria
 
@@ -830,8 +911,7 @@ Implementation sequence:
 
 ## Phase 5: Resteer Against Matched Evidence
 
-Status: complete for the retained-static-draw experiment; broader target-renderer resteering remains
-pending.
+Status: complete; Probe 7 subsequently resteered target-renderer work to the frame-instance arena.
 
 ### Task Checklist
 
@@ -854,6 +934,9 @@ pending.
   and comparison sorting across node-local contribution arrays, not physical device compilation.
 - Do not proceed directly to retained sorted node arrays. First prove which layer owns a stable,
   already-ordered logical contribution stream without adding per-draw cache lookup or copying.
+- Probe 6 resolved the comparison-sorting target with linear grouping. Probe 7 then found that
+  baked-only portal-node draws still orphan the full instance arena despite producing no range that
+  can consume it; Phase 9 owns that distinct lifetime defect.
 
 ## Phase 6: Cleanup and Verification
 
@@ -874,7 +957,7 @@ intentionally available behind explicit profiling activation.
 - [x] Run focused portal graph, executor, scene, object-policy, and renderer tests through the full
       TypeScript suite.
 - [x] Run the canonical browser harness and matched reference workload.
-- [ ] Verify the interactive target-renderer profile and record its GPU/driver.
+- [x] Verify an interactive target-renderer native profile and record its GPU/driver identity.
 - [x] Sweep deleted mechanism vocabulary from touched symbols, metrics, UI, docs, and tests.
 
 ### Acceptance Criteria
@@ -893,7 +976,7 @@ intentionally available behind explicit profiling activation.
 
 ## Phase 7: Replace Global State Sorting with Linear Instance Grouping
 
-Status: complete for SwiftShader; target-renderer validation remains pending.
+Status: complete; target-native corroboration accepted for resteering.
 
 ### Task Checklist
 
@@ -905,7 +988,8 @@ Status: complete for SwiftShader; target-renderer validation remains pending.
 - [x] Delete node-local/merged sorts, prepared-state comparators, device identity ranking, profiler
       metrics, UI vocabulary, and temporary harness controls.
 - [x] Capture five matched clean production samples and verify work-count/screenshot parity.
-- [ ] Repeat the accepted A/B on the target Safari/WebKit renderer and record driver/GPU facts.
+- [x] Confirm on target Safari/WebKit that comparison sorting is absent, linear grouping is bounded,
+      and record driver/GPU facts.
 
 ### Decisions and Course Corrections
 
@@ -915,8 +999,10 @@ Status: complete for SwiftShader; target-renderer validation remains pending.
   spent `0.866ms` ordering `859` inputs in its pilot.
 - Selected linear first-seen semantic cohorts with exact compatibility fallback. It restores the
   original draw/run counts and improves median renderer CPU by `28.1%`.
-- Accepted increased baked state churn provisionally because matched opaque submission and total
-  CPU both improved. Target hardware remains the final authority for this trade.
+- Accepted increased baked state churn because matched opaque submission and total CPU improved,
+  and the target Apple/WebKit profile reported `257` binds without a dominant state-application
+  branch. Reopen bounded baked grouping only if later target evidence attributes material cost to
+  those binds.
 
 ## Phase 8: Make Permanent Frame Diagnostics Portable and Bounded
 
@@ -932,7 +1018,8 @@ Status: implemented; interactive export verification remains pending.
 - [x] Separate performance, workload, object, portal/EnvCell, and runtime-lifetime presentation.
 - [x] Put dense diagnostic groups behind disclosure controls while retaining every fact in JSON.
 - [x] Compare one matched profiling-disabled and profiling-enabled harness run.
-- [ ] Verify clipboard and file export in the interactive Tauri/WebKit application.
+- [x] Verify clipboard export in the interactive Tauri/WebKit application.
+- [ ] Verify JSON-file export in the interactive Tauri/WebKit application.
 
 ### Decisions and Course Corrections
 
@@ -950,19 +1037,136 @@ Status: implemented; interactive export verification remains pending.
 - The automated harness pair was captured from stdout because the current CLI has no file-output
   option. Adding one is unrelated to the interactive Explorer export cutover.
 
+## Phase 9: Delete Empty Frame-Instance Storage Resets
+
+Status: complete and accepted under SwiftShader and target Apple/WebKit.
+
+### Goal
+
+Make backend instance-buffer work correspond exactly to a non-empty frame-instance population,
+then use the residual Apple/WebKit profile to decide whether non-empty streaming needs a broader
+redesign.
+
+### Structural Cause
+
+`#prepareFrameInstanceRuns()` schedules baked and frame-instanced objects together. A baked-only
+opaque or blended contribution produces no `frame-instance-run`, but the function still calls
+`FrameInstanceStreamArena.prepareView([])`. Before this phase, that call reached
+`WebGL2InstanceBuffer.resetFrame(0)`, which retained the existing capacity and nevertheless called
+`bufferData(capacityBytes, STREAM_DRAW)`.
+
+The reset's previous guarantees and their replacements are:
+
+| Existing guarantee                                     | Replacement when the population is empty                                      |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| Old frame ranges cannot be consumed after reset.       | Reset the populated count to zero without replacing backend storage.          |
+| Capacity can grow to fit the prepared population.      | An empty population requires no growth; retain the existing capacity.         |
+| Populated count describes the newly uploaded stream.   | `getRange()` observes zero and rejects every stale non-empty range.           |
+| Each non-empty sequential view receives fresh storage. | Non-empty populations retain the exact reset, encode, upload, and range path. |
+
+### Task Checklist
+
+- [x] Make `WebGL2InstanceBuffer.resetFrame(0)` clear its logical population without calling
+      `bufferData`.
+- [x] Keep non-empty capacity growth, full-storage orphaning, encoding, `bufferSubData`, and range
+      validation unchanged in the first cutover.
+- [x] Preserve empty arena preparation as a valid logical reset so stale ranges still fail loudly.
+- [x] Add focused coverage proving an empty population performs no `bufferData` or `bufferSubData`
+      operation, while consecutive non-empty populations still orphan once each and reuse CPU
+      staging storage.
+- [x] Confirm `frameInstanceUploadCount` now has a one-to-one relationship with actual backend
+      preparation calls; do not add a permanent empty-reset metric for a mechanism being deleted.
+- [x] Run formatting, type checking, lint, dead-code analysis, and the full TypeScript suite.
+- [x] Capture the canonical SwiftShader workload and verify all portal, object, run, instance,
+      triangle, and logical upload facts remain unchanged.
+- [x] Reprofile the target Apple/WebKit workload and determine whether `bufferData` remains a
+      material branch after empty resets are gone.
+
+### Acceptance Criteria
+
+- A baked-only opaque or blended contribution performs no frame-instance buffer operation.
+- Every emitted `frame-range` still refers to the immediately prepared non-empty population.
+- All visibility, ordering, compaction, draw, instance, triangle, and upload-byte facts remain
+  unchanged.
+- The target native call tree removes the indoor baked-only `bufferData` branch or falsifies the
+  current attribution with a named cause.
+- No ring buffer, fence, persistent mapping abstraction, or alternate streaming mode is introduced
+  by this phase.
+
+### Resteering Gate
+
+After the empty-reset A/B:
+
+- stop if `bufferData` is no longer material;
+- if non-empty reset remains material, distinguish orphan allocation from `bufferSubData` transfer
+  before selecting a buffer-rotation or synchronization design; and
+- if contribution preparation becomes dominant again, attribute its surviving atlas binding and
+  frame-envelope work rather than reviving the rejected retained-draw cache.
+
+### Decisions and Course Corrections
+
+- Selected deletion of empty arena storage operations as the smallest coherent cutover supported
+  by both code lifetime and the target native profile.
+- Moved the cut from a renderer-side conditional into `WebGL2InstanceBuffer.resetFrame()`. Clearing
+  the logical population while retaining storage preserves stale-range rejection and keeps the
+  empty-view contract structurally correct without teaching the renderer about backend allocation.
+- Rejected adding permanent counters before the cutover. The existing logical upload count now
+  matches backend storage preparation because an empty logical reset performs no GL operation.
+- Deferred buffer rotation. The current native `bufferData` samples combine provably redundant
+  empty resets with potentially necessary non-empty orphaning, so a broader device strategy has no
+  clean benefit estimate yet.
+- Stopped the buffer-streaming line after the target reprofile removed `bufferData` from the sampled
+  call tree. Non-empty exterior preparation remained effectively unchanged, so neither buffer
+  rotation nor synchronization machinery has a measured target.
+
+### Implementation Evidence
+
+- The focused buffer suite passes `4` tests, including non-empty → empty → non-empty reuse and
+  stale-range rejection after the empty reset.
+- Svelte and TypeScript checks, ESLint, dead-code analysis, Rust clippy, and all `539` TypeScript
+  tests pass.
+- The canonical DA55 harness preserved `11` portal nodes, `98` visible entries, `887` static draws,
+  `425` generated runs, `3174` generated instances, `32` dynamic draws, `80` dynamic instances, and
+  `291840` logical upload bytes with no browser console messages.
+- That single scar check measured `4.655ms` mean renderer CPU, `6.7ms` p95, and `0.138ms` instance
+  upload. It is directionally below the accepted Phase 7 medians but is not promoted to a matched
+  A/B without target-native evidence.
+- The matched target-native call trees changed as follows:
+
+  | Branch                           |   Before |       After |    Change |
+  | -------------------------------- | -------: | ----------: | --------: |
+  | Total sampled page CPU           | `50.5ms` |    `35.9ms` |  `-28.9%` |
+  | `#drawPortalView`                | `45.3ms` |    `31.7ms` |  `-30.0%` |
+  | `executePortalGraph`             | `29.7ms` |    `17.9ms` |  `-39.7%` |
+  | Exterior rendering               | `14.7ms` |    `14.7ms` | unchanged |
+  | Indoor rendering                 | `14.1ms` |     `2.0ms` |  `-85.8%` |
+  | `#prepareFrameInstanceRuns`      | `16.2ms` |     `5.3ms` |  `-67.3%` |
+  | `bufferData` beneath arena reset | `11.0ms` | not sampled |   removed |
+  | Contribution collection          | `11.4ms` |     `9.6ms` |  `-15.8%` |
+  | Portal planning                  |  `4.2ms` |     `4.2ms` | unchanged |
+
+- The unchanged exterior and planning branches are internal controls for the attribution. The
+  necessary exterior instance preparation remains, while the indoor baked-only reset branch and
+  its `bufferData` self time disappear.
+- The frame overlay read approximately `9.0ms` before and `9.7ms` after. Native sampled CPU improved,
+  but this pair does not establish a user-visible wall-frame improvement; GPU work, presentation,
+  sampling granularity, and ordinary frame variance remain outside this cutover's claim.
+
 ## Risks and Mitigations
 
-| Risk                                                                     | Mitigation                                                                                                                                                                                |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Safari sampling/inlining misattributes wrapper functions.                | Use the renderer's non-overlapping explicit phases and treat native profiles as internal attribution evidence.                                                                            |
-| Harness and Explorer profiles compare different scene workloads.         | Match radii, camera, viewport, filtering, visible-work metrics, and settled state before comparing timings.                                                                               |
-| Retained prepared state becomes stale after resource or quality changes. | Name every invalidation owner in the contract and test each reachable invalidation event.                                                                                                 |
-| Linear grouping changes transparency or merges incompatible draws.       | Keep camera-ordered transparent phases adjacent-only and recheck exact prepared compatibility inside every semantic cohort.                                                               |
-| Contribution concatenation hides duplicate node ownership.               | Keep explicit duplicate-node and duplicate-scene-node validation before merging.                                                                                                          |
-| Portal execution redraws are mistaken for duplication.                   | Pair executor callbacks with planner-authored contribution identities and stencil semantics before removing work.                                                                         |
-| Instrumentation materially changes the hot path.                         | Keep it opt-in, use aggregate counters, compare instrumented and uninstrumented frame timing, and remove temporary probes.                                                                |
-| SwiftShader and the interactive target renderer disagree.                | Report both regimes, record whether the target renderer is hardware-backed, use SwiftShader for deterministic regression evidence, and use the target renderer for client prioritization. |
-| The investigation duplicates the completed object-state plan.            | Reuse its prepared-draw and compatibility contracts; extend only the newly measured portal lifetime/ordering seam.                                                                        |
+| Risk                                                                       | Mitigation                                                                                                                                                                                |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Safari sampling/inlining misattributes wrapper functions.                  | Use the renderer's non-overlapping explicit phases and treat native profiles as internal attribution evidence.                                                                            |
+| Harness and Explorer profiles compare different scene workloads.           | Match radii, camera, filtering, visible-work metrics, and settled state; keep the viewport stable within a timing comparison without treating one size as canonical.                      |
+| Retained prepared state becomes stale after resource or quality changes.   | Name every invalidation owner in the contract and test each reachable invalidation event.                                                                                                 |
+| Linear grouping changes transparency or merges incompatible draws.         | Keep camera-ordered transparent phases adjacent-only and recheck exact prepared compatibility inside every semantic cohort.                                                               |
+| Contribution concatenation hides duplicate node ownership.                 | Keep explicit duplicate-node and duplicate-scene-node validation before merging.                                                                                                          |
+| Portal execution redraws are mistaken for duplication.                     | Pair executor callbacks with planner-authored contribution identities and stencil semantics before removing work.                                                                         |
+| Instrumentation materially changes the hot path.                           | Keep it opt-in, use aggregate counters, compare instrumented and uninstrumented frame timing, and remove temporary probes.                                                                |
+| SwiftShader and the interactive target renderer disagree.                  | Report both regimes, record whether the target renderer is hardware-backed, use SwiftShader for deterministic regression evidence, and use the target renderer for client prioritization. |
+| The investigation duplicates the completed object-state plan.              | Reuse its prepared-draw and compatibility contracts; extend only the newly measured portal lifetime/ordering seam.                                                                        |
+| Skipping empty backend work exposes a stale range from a prior population. | Clear the logical populated count on every empty reset and retain range bounds checks for every submitted instanced draw.                                                                 |
+| A larger buffer redesign hides the proven empty-work defect.               | Delete empty resets first and reprofile before considering rotation, synchronization, or allocation-policy changes.                                                                       |
 
 ## Change Log
 
@@ -1028,11 +1232,26 @@ Status: implemented; interactive export verification remains pending.
   contribution, phase, and runtime-lifetime detail disclosed on demand.
 - Recorded a directional profiling-on/off pair showing approximately `0.194ms` (`3.6%`) opt-in
   overhead on the matched SwiftShader workload.
+- Recorded the target Safari/WebKit native profile and versioned Explorer snapshot on an Apple
+  GPU. Comparison sorting was absent, linear grouping was bounded, and execution became dominant.
+- Reclassified the resized interactive viewport as sample context rather than a canonical benchmark
+  contract.
+- Traced `11ms` of native `bufferData` samples to the frame-instance reset path and proved that
+  baked-only portal contributions orphaned the complete arena without emitting a consuming frame
+  range.
+- Made empty resets clear their logical population without touching backend storage, preserving
+  stale-range rejection and all non-empty behavior.
+- Accepted Phase 9 after the target profile removed the `11ms` `bufferData` branch, reduced indoor
+  sampled CPU from `14.1ms` to `2.0ms`, and left exterior rendering unchanged at `14.7ms`.
+- Stopped the buffer-streaming line rather than adding an unmeasured ring-buffer or synchronization
+  design.
 
 ## Definition of Done
 
-- [ ] The interactive reference workload is reproducible by the browser harness.
-- [ ] Five-sample matched baselines exist for SwiftShader and the interactive target renderer.
+- [x] The interactive reference camera, interest, frame mode, and filtering are reproducible by the
+      browser harness; viewport size remains capture-local.
+- [x] A five-sample SwiftShader baseline and target-native attribution/workload evidence exist for
+      resteering.
 - [ ] Planning, contribution collection, merging, instance preparation, submission, driver, and GPU
       costs are independently attributed as far as platform support allows.
 - [x] The dominant repeated work has a proven lifetime/ownership cause.
@@ -1047,17 +1266,13 @@ Status: implemented; interactive export verification remains pending.
 
 ## Open Questions
 
-1. Can the interactive application report its exact viewport, device pixel ratio, browser build,
-   and GPU/driver for the supplied profile? The camera policy is now shared, while `690 x 852` at
-   DPR `1` remains screenshot-derived.
-2. Does the interactive application report the same `39` admitted states, `11` portal nodes, `98`
-   visible entries, and `887` static draws for this pose and viewport?
-3. Do interior-root and hybrid cameras preserve exact draw/run counts under linear opaque instance
+1. Do interior-root and hybrid cameras preserve exact draw/run counts under linear opaque instance
    grouping, including additive instance cohorts absent from the DA55 view?
-4. Does the target Safari/WebKit driver tolerate the increase from approximately `59` to median
-   `261` texture binds as cheaply as SwiftShader, or should baked draws receive a separate bounded
-   linear state bucket?
-5. How much of `executePortalGraph` is JavaScript work versus WebGL driver/GPU synchronization on the
+2. Which stable ownership boundary, if any, explains the residual `9.6ms` contribution-collection
+   branch without reviving the rejected retained-draw cache?
+3. How much of exterior opaque submission is JavaScript work versus WebGL driver/GPU synchronization on the
    target hardware?
-6. Why can a settled workload with `291` resident texture sources report either `4` or `5` atlas
+4. Why can a settled workload with `291` resident texture sources report either `4` or `5` atlas
    pages, and does that difference explain the small texture-bind variance?
+5. Does JSON-file download succeed in the interactive Tauri/WebKit application as clipboard export
+   already does?

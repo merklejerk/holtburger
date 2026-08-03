@@ -27,6 +27,17 @@ export interface PortalViewWindow {
 	readonly fragments: readonly PortalViewWindowFragment[];
 }
 
+/**
+ * Total normalized-device-coordinate fragment area. Any surviving overlap is counted twice,
+ * conservatively retaining rather than incorrectly rejecting that window.
+ */
+export function portalViewWindowNdcArea(window: PortalViewWindow): number {
+	return window.fragments.reduce(
+		(total, fragment) => total + Math.abs(polygonSignedArea(fragment.vertices)),
+		0,
+	);
+}
+
 /** Prepared renderer facts shared by frustum extraction and portal projection. */
 export interface PreparedPortalProjection {
 	/** Landblock origin used by the anchor-relative clip transform. */
@@ -200,7 +211,7 @@ function mergeAdjacentConvexFragments(
 		vertices: fragment.vertices,
 	}));
 	for (let leftIndex = 0; leftIndex < merged.length; leftIndex += 1) {
-		for (let rightIndex = leftIndex + 1; rightIndex < merged.length; ) {
+		for (let rightIndex = leftIndex + 1; rightIndex < merged.length;) {
 			const vertices = mergeAdjacentConvexPolygons(
 				merged[leftIndex]!.vertices,
 				merged[rightIndex]!.vertices,
@@ -489,7 +500,7 @@ function convexApertureVertexLoops(
 		]);
 	}
 	for (let leftIndex = 0; leftIndex < loops.length; leftIndex += 1) {
-		for (let rightIndex = leftIndex + 1; rightIndex < loops.length; ) {
+		for (let rightIndex = leftIndex + 1; rightIndex < loops.length;) {
 			const merged = mergeAdjacentApertureLoops(
 				loops[leftIndex]!,
 				loops[rightIndex]!,

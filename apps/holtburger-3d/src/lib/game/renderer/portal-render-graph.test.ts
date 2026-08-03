@@ -34,6 +34,34 @@ const DEFAULT_MAXIMUM_STENCIL_VALUE = 0xff;
 const DEFAULT_SAFETY_WORK_ITEM_LIMIT = 10_000;
 
 describe("portal render graph planning", () => {
+	it("rejects invalid outdoor-transition footprint policies at the planner boundary", () => {
+		const topologyView = topology([topologyScope(OUTDOOR_SCOPE, null)], []);
+		const planner = new PortalRenderGraphPlanner();
+
+		expect(() =>
+			planner.plan(
+				topologyView,
+				planInput(OUTDOOR_SCOPE, {
+					outdoorTransitionFootprint: {
+						drawingBuffer: { height: 1, width: 1 },
+						minimumPixelArea: Number.NaN,
+					},
+				}),
+			),
+		).toThrow("minimum must be a non-negative finite number");
+		expect(() =>
+			planner.plan(
+				topologyView,
+				planInput(OUTDOOR_SCOPE, {
+					outdoorTransitionFootprint: {
+						drawingBuffer: { height: 0, width: 1 },
+						minimumPixelArea: 0,
+					},
+				}),
+			),
+		).toThrow("drawing buffer must have positive integer dimensions");
+	});
+
 	it("does not allocate ceremonial labels for an unmasked outdoor root", () => {
 		const plan = requirePlan(
 			topology([topologyScope(OUTDOOR_SCOPE, null)], []),
@@ -489,6 +517,144 @@ describe("portal render graph planning", () => {
 		expect(plan.nodes).toHaveLength(1);
 		expect(plan.maskEdges).toEqual([]);
 		expect(plan.diagnostics.rejectedFacingCrossingCount).toBe(1);
+	});
+
+	it("rejects only outdoor-to-indoor windows strictly below the pixel-area cutoff", () => {
+		const interior = envCellScope("tiny-interior");
+		const tinyTransition = crossing(
+			"tiny-transition",
+			OUTDOOR_SCOPE,
+			interior,
+			{
+				aperture: rectangle(-0.125, -0.125, 0.125, 0.125),
+				spatialRelationship: {
+					exteriorLandblockId: LANDBLOCK_ID,
+					kind: "exterior-transition",
+				},
+			},
+		);
+		const topologyView = topology(
+			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(interior, "tiny")],
+			[tinyTransition],
+		);
+		const drawingBuffer = { height: 8, width: 8 };
+
+		const retainedAtEquality = requirePlan(
+			topologyView,
+			planInput(OUTDOOR_SCOPE, {
+				outdoorTransitionFootprint: {
+					drawingBuffer,
+					minimumPixelArea: 1,
+				},
+			}),
+		);
+		const rejected = requirePlan(
+			topologyView,
+			planInput(OUTDOOR_SCOPE, {
+				outdoorTransitionFootprint: {
+					drawingBuffer,
+					minimumPixelArea: 2,
+				},
+			}),
+		);
+
+		expect(retainedAtEquality.nodes).toHaveLength(2);
+		expect(
+			retainedAtEquality.diagnostics.rejectedOutdoorTransitionFootprintCount,
+		).toBe(0);
+		expect(rejected.nodes).toHaveLength(1);
+		expect(rejected.maskEdges).toEqual([]);
+		expect(rejected.selectedScopes).toEqual([OUTDOOR_SCOPE]);
+		expect(rejected.diagnostics.rejectedOutdoorTransitionFootprintCount).toBe(
+			1,
+		);
+	});
+
+	it("exempts near-plane and indoor-to-outdoor crossings from footprint rejection", () => {
+		const interior = envCellScope("interior");
+		const relationship = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const tinyAperture = rectangle(-0.125, -0.125, 0.125, 0.125);
+		const footprint = {
+			drawingBuffer: { height: 8, width: 8 },
+			minimumPixelArea: 2,
+		};
+		const nearPlanePlan = requirePlan(
+			topology(
+				[topologyScope(OUTDOOR_SCOPE, null), topologyScope(interior, "inside")],
+				[
+					crossing("near-transition", OUTDOOR_SCOPE, interior, {
+						aperture: tinyAperture,
+						spatialRelationship: relationship,
+					}),
+				],
+			),
+			planInput(OUTDOOR_SCOPE, {
+				nearClipVolume: testNearClipVolume(1),
+				outdoorTransitionFootprint: footprint,
+			}),
+		);
+		const exitPlan = requirePlan(
+			topology(
+				[topologyScope(interior, "inside"), topologyScope(OUTDOOR_SCOPE, null)],
+				[
+					crossing("tiny-exit", interior, OUTDOOR_SCOPE, {
+						aperture: tinyAperture,
+						spatialRelationship: relationship,
+					}),
+				],
+			),
+			planInput(interior, { outdoorTransitionFootprint: footprint }),
+		);
+
+		expect(nearPlanePlan.nodes).toHaveLength(2);
+		expect(nearPlanePlan.maskEdges[0]?.maskSource.kind).toBe(
+			"near-clip-window",
+		);
+		expect(exitPlan.nodes).toHaveLength(2);
+		expect(
+			nearPlanePlan.diagnostics.rejectedOutdoorTransitionFootprintCount,
+		).toBe(0);
+		expect(exitPlan.diagnostics.rejectedOutdoorTransitionFootprintCount).toBe(
+			0,
+		);
+	});
+
+	it("admits an interior through a larger route after rejecting its smaller route", () => {
+		const interior = envCellScope("alternate-route-interior");
+		const relationship = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const plan = requirePlan(
+			topology(
+				[topologyScope(OUTDOOR_SCOPE, null), topologyScope(interior, "inside")],
+				[
+					crossing("small-route", OUTDOOR_SCOPE, interior, {
+						aperture: rectangle(-0.125, -0.125, 0.125, 0.125),
+						spatialRelationship: relationship,
+					}),
+					crossing("large-route", OUTDOOR_SCOPE, interior, {
+						aperture: rectangle(-0.5, -0.5, 0.5, 0.5),
+						spatialRelationship: relationship,
+					}),
+				],
+			),
+			planInput(OUTDOOR_SCOPE, {
+				outdoorTransitionFootprint: {
+					drawingBuffer: { height: 8, width: 8 },
+					minimumPixelArea: 2,
+				},
+			}),
+		);
+
+		expect(plan.nodes).toHaveLength(2);
+		expect(plan.maskEdges.map((edge) => edge.crossingId)).toEqual([
+			"portal-crossing:large-route",
+		]);
+		expect(plan.diagnostics.rejectedOutdoorTransitionFootprintCount).toBe(1);
 	});
 
 	it("seeds both sides when the finite near plane straddles a wrong-facing aperture", () => {
@@ -1072,6 +1238,10 @@ function planInput(
 		clipFromAnchor: Mat4.identity(),
 		maximumStencilValue: DEFAULT_MAXIMUM_STENCIL_VALUE,
 		nearClipVolume: testNearClipVolume(0.5),
+		outdoorTransitionFootprint: {
+			drawingBuffer: { height: 1, width: 1 },
+			minimumPixelArea: 0,
+		},
 		rootScope,
 		safetyWorkItemLimit: DEFAULT_SAFETY_WORK_ITEM_LIMIT,
 		...overrides,

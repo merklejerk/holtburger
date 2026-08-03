@@ -111,6 +111,7 @@ export interface PortalFrameDiagnostics {
 	readonly maskEdgeCount: number;
 	readonly nearPlaneSeedCount: number;
 	readonly rejectedFacingCrossingCount: number;
+	readonly rejectedOutdoorTransitionFootprintCount: number;
 	readonly sameDomainBoundaryCrossingCount: number;
 	readonly renderLayerCount: number;
 	readonly renderNodeCount: number;
@@ -248,6 +249,8 @@ export function executePortalGraph(
 		).length,
 		rejectedFacingCrossingCount:
 			prepared.plan.diagnostics.rejectedFacingCrossingCount,
+		rejectedOutdoorTransitionFootprintCount:
+			prepared.plan.diagnostics.rejectedOutdoorTransitionFootprintCount,
 		sameDomainBoundaryCrossingCount:
 			prepared.plan.diagnostics.sameDomainBoundaryCrossingCount,
 		renderLayerCount: prepared.layers.length,

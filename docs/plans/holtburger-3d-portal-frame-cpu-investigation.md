@@ -1,8 +1,9 @@
 # Holtburger 3D Portal Frame CPU Investigation
 
 Date: 2026-08-02
-Status: active residual contribution/submission attribution; empty frame-instance storage work and
-comparison sorting are accepted as removed on the target Apple/WebKit renderer.
+Status: active target-native motion and reprofile validation; a `16px²` outdoor-transition cutoff
+is accepted under the deterministic harness, and empty frame-instance storage work and comparison
+sorting are accepted as removed on the target Apple/WebKit renderer.
 
 ## Context and Boundaries
 
@@ -1152,6 +1153,101 @@ After the empty-reset A/B:
   but this pair does not establish a user-visible wall-frame improvement; GPU work, presentation,
   sampling granularity, and ordinary frame variance remain outside this cutover's claim.
 
+## Phase 10: Cull Subpixel Outdoor-to-Indoor Portal Footprints
+
+Status: implemented and accepted at a `16px²` production cutoff under the deterministic harness;
+target Apple/WebKit motion validation remains follow-up evidence.
+
+### Goal
+
+Avoid constructing and consuming an interior render subtree when its outdoor transition portal's
+exact inherited screen-space window is too small to justify the downstream CPU and GPU work.
+
+This deliberately permits a fidelity/performance deviation from the retail client. The cutover is
+narrowly owned by outdoor-to-indoor transition policy; indoor traversal, indoor exits, same-domain
+boundaries, and near-plane crossings retain exact behavior.
+
+### Structural Boundary
+
+The planner applies the policy after homogeneous projection and exact intersection with the
+inherited portal window, but before target-scope selection, mask-edge admission, scope-coverage
+admission, or descendant traversal. The projected footprint is measured in drawing-buffer pixels,
+not world distance or CSS size.
+
+Near-plane-straddling apertures are exempt because their projected area is unstable at the camera
+plane and they can represent the camera's current transition. Alternate larger routes remain
+independent crossings and can still admit the same target scope.
+
+### Task Checklist
+
+- [x] Add one explicit, typed minimum outdoor-transition pixel-area policy with zero meaning
+      disabled; do not infer a threshold from camera distance.
+- [x] Compute footprint from the already-normalized exact portal window without adding bounds or
+      distance approximations.
+- [x] Reject only authored outdoor-to-indoor, non-near-plane transitions after exact projection and
+      before any target-domain work.
+- [x] Retain one diagnostic count whose concrete scenario is a projected transition below the
+      active threshold.
+- [x] Add focused planner coverage for disabled policy, threshold equality, rejection, near-plane
+      exemption, unaffected crossing directions, and alternate routes.
+- [x] Expose an explicit threshold override through the browser harness and record the effective
+      value in the existing frame-settings snapshot.
+- [x] Measure DA55 at `0`, `1`, `4`, `16`, and `64` drawing-buffer pixels squared while preserving
+      camera, scene interest, filtering, viewport, and resident content within one process.
+- [x] Promote the first threshold that rejects a complete subtree without a visible static-frame
+      difference; reject larger thresholds without commensurate structural savings.
+
+### Acceptance Criteria
+
+- A zero threshold produces the exact pre-phase graph and metrics.
+- A visible outdoor-to-indoor crossing below a positive threshold contributes no target scope,
+  mask edge, render node, or descendant work and increments the rejection count once.
+- Equality is retained; only footprints strictly below the configured threshold are rejected.
+- Near-plane-straddling transitions and every non-outdoor-to-indoor crossing ignore the cutoff.
+- Invalid thresholds or drawing-buffer extents fail at the planner boundary.
+- Type checking, lint, dead-code analysis, Rust clippy, the full TypeScript suite, and the canonical
+  browser harness pass. Touched files satisfy Prettier; the repository-wide formatting check still
+  names `16` unrelated pre-existing files.
+
+### Decisions and Course Corrections
+
+- Selected projected inherited-window area instead of world distance. This measures the actual
+  rendering opportunity after parent-window intersection and naturally adapts to resolution.
+- Applied the decision before `#selectScope()`. A rejected transition therefore creates no mask
+  edge, target node, scene query, contribution preparation, submission, or descendant traversal.
+- Kept near-plane crossings exact and exempt. A portal intersecting the camera near volume can own
+  the current transition even when its projected polygon is numerically small.
+- Selected `16px²`, the first measured cutoff that removes a complete subtree. Rejected `64px²`:
+  it retained the same nine-node graph and removed only five additional static draws while
+  quadrupling the fidelity cutoff.
+- Removed the temporary in-process sweep after capturing the threshold matrix. The permanent
+  harness retains only the explicit single-threshold override.
+
+### Implementation Evidence
+
+The one-process DA55 sweep produced:
+
+| Minimum area | Rejected transitions | Portal nodes | Mask edges | Static draws |
+| -----------: | -------------------: | -----------: | ---------: | -----------: |
+|       `0px²` |                  `0` |         `11` |       `16` |        `887` |
+|       `1px²` |                  `0` |         `11` |       `16` |        `887` |
+|       `4px²` |                  `0` |         `11` |       `16` |        `887` |
+|      `16px²` |                  `1` |          `9` |       `14` |        `856` |
+|      `64px²` |                  `2` |          `9` |       `13` |        `851` |
+
+- The accepted `16px²` run retained all `3174` generated instances and `80` dynamic instances,
+  reduced visible EnvCell scopes from `32` to `30`, and emitted no browser console error.
+- The accepted run measured `4.498ms` mean renderer CPU and `5.3ms` p95 over `54` profiled frames on
+  SwiftShader. This single run is directional evidence, not a performance A/B claim.
+- Separate settled `0px²` and `16px²` captures at the same camera, scene interest, filtering, and
+  `690×852` drawing buffer were visually indistinguishable and measured `47.6dB` PSNR. Because they
+  came from separate live runs, the comparison is a smoke test rather than proof of zero temporal
+  difference.
+- The full `543`-test TypeScript suite, Svelte/TypeScript checks, ESLint, dead-code analysis, and
+  Rust clippy pass. Focused planner coverage proves threshold equality, strict rejection,
+  near-plane exemption, indoor-to-outdoor exemption, invalid-input failure, and larger-route
+  admission after a smaller route is rejected.
+
 ## Risks and Mitigations
 
 | Risk                                                                       | Mitigation                                                                                                                                                                                |
@@ -1167,6 +1263,7 @@ After the empty-reset A/B:
 | The investigation duplicates the completed object-state plan.              | Reuse its prepared-draw and compatibility contracts; extend only the newly measured portal lifetime/ordering seam.                                                                        |
 | Skipping empty backend work exposes a stale range from a prior population. | Clear the logical populated count on every empty reset and retain range bounds checks for every submitted instanced draw.                                                                 |
 | A larger buffer redesign hides the proven empty-work defect.               | Delete empty resets first and reprofile before considering rotation, synchronization, or allocation-policy changes.                                                                       |
+| A projected-area cutoff causes transition pop while approaching a door.    | Exempt near-plane crossings, keep the cutoff at the first measured subtree-removing threshold, and validate motion on the target client before raising it.                                |
 
 ## Change Log
 
@@ -1245,6 +1342,14 @@ After the empty-reset A/B:
   sampled CPU from `14.1ms` to `2.0ms`, and left exterior rendering unchanged at `14.7ms`.
 - Stopped the buffer-streaming line rather than adding an unmeasured ring-buffer or synchronization
   design.
+- Added outdoor-to-indoor projected-window rejection after exact intersection and before target
+  scope selection, with near-plane, reverse-direction, and alternate-route guarantees.
+- Swept `0/1/4/16/64px²` within one settled DA55 process and selected `16px²`, which removed two
+  portal nodes and `31` static draws; rejected `64px²` as a dominated fidelity tradeoff.
+- Added the effective cutoff and rejected-transition count to portable frame diagnostics and kept
+  an explicit browser-harness override after removing the temporary sweep.
+- Bumped the Explorer frame diagnostic schema to version `2` because the portable settings and
+  selection-metric contract gained the cutoff and rejection count.
 
 ## Definition of Done
 

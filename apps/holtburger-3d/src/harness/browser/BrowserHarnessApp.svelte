@@ -112,6 +112,8 @@
 		) => void;
 		/** Change filterable texture quality without changing content or resources. */
 		readonly setTextureFiltering: (policy: string) => void;
+		/** Change the outdoor-transition footprint cutoff without rebuilding content. */
+		readonly setMinimumOutdoorTransitionPixelArea: (pixelArea: number) => void;
 		/** Reset steady-state frame timing after asynchronous content publication settles. */
 		readonly resetTiming: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
@@ -463,6 +465,23 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setMinimumOutdoorTransitionPixelArea(pixelArea: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!Number.isFinite(pixelArea) || pixelArea < 0) {
+			throw new Error(
+				"Minimum outdoor transition pixel area must be non-negative and finite.",
+			);
+		}
+		frameSettings = {
+			...frameSettings,
+			quality: {
+				...frameSettings.quality,
+				minimumOutdoorTransitionPixelArea: pixelArea,
+			},
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function setFrameProfiling(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.setRendererFrameProfilingEnabled(enabled);
@@ -738,6 +757,7 @@
 					setEnvCellCamera,
 					setEnvCellRenderMode,
 					setFrameProfiling,
+					setMinimumOutdoorTransitionPixelArea,
 					setTextureFiltering,
 					resetTiming,
 					tracePortalSegment,

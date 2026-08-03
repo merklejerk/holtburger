@@ -47,7 +47,10 @@ export interface EffectObservation {
 	readonly authoredOrder: number;
 	readonly command: string;
 	readonly outcome:
-		"executed" | "deferred" | "semantic" | "folded-initial-state";
+		| "executed"
+		| "deferred"
+		| "semantic"
+		| "folded-initial-state";
 }
 
 /** Owns persistent visual-effect state while animation retains clocks and traversal. */

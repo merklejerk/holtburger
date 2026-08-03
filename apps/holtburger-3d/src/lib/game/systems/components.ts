@@ -1,6 +1,6 @@
 import type { EnvCellId, LandblockId } from "../game-types";
 import type { ObjectGeometryKey } from "../geometry/types";
-import type { Mat4, Vec3 } from "../math/types";
+import type { AABB3, Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId, SceneScope } from "../scene";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
@@ -68,6 +68,8 @@ export interface ActiveDynamicPart {
 	readonly defaultScale: Vec3;
 	/** Material, geometry, and ordering facts selected once by reusable visual preparation. */
 	readonly drawUnits: readonly ActiveDynamicDrawUnit[];
+	/** Geometry-local envelope retained for publication-time pose bounds. */
+	readonly localBounds: AABB3;
 	/** Transform-only scene node carrying the current rigid-part pose. */
 	readonly nodeId: SceneNodeId;
 	/** Authored setup part addressed by animation frame tables. */

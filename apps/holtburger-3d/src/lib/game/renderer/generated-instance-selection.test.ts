@@ -2,23 +2,24 @@ import { describe, expect, it } from "vitest";
 import { createPerspectiveMat4, createTranslationMat4 } from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { StaticInstanceStreamData } from "../systems/static-resources";
+import { GeneratedInstanceSelector } from "./generated-instance-selection";
 import {
-	classifyGeneratedInstanceEnvelope,
-	GeneratedInstanceSelector,
-} from "./generated-instance-selection";
+	classifyObjectFootprint,
+	retainsProjectedObjectFootprint,
+} from "./object-footprint";
 
 const UNIT_ENVELOPE = new AABB3(
 	new Vec3(-0.5, -0.5, -0.5),
 	new Vec3(0.5, 0.5, 0.5),
 );
 
-describe("classifyGeneratedInstanceEnvelope", () => {
+describe("classifyObjectFootprint", () => {
 	it("retains large and threshold-equal visible envelopes", () => {
 		const input = projectionInput({ minimumPixelArea: 2_500 });
 
-		expect(classifyGeneratedInstanceEnvelope(input)).toBe("visible");
+		expect(classifyObjectFootprint(input)).toBe("visible");
 		expect(
-			classifyGeneratedInstanceEnvelope({
+			classifyObjectFootprint({
 				...input,
 				minimumPixelArea: 2_501,
 			}),
@@ -27,17 +28,17 @@ describe("classifyGeneratedInstanceEnvelope", () => {
 
 	it("separates proven outside envelopes from near-plane ambiguity", () => {
 		expect(
-			classifyGeneratedInstanceEnvelope(
+			classifyObjectFootprint(
 				projectionInput({
-					sourceToLandblock: createTranslationMat4(new Vec3(3, 0, 0)),
+					localToLandblock: createTranslationMat4(new Vec3(3, 0, 0)),
 				}),
 			),
 		).toBe("outside-view");
 		expect(
-			classifyGeneratedInstanceEnvelope(
+			classifyObjectFootprint(
 				projectionInput({
 					clipFromAnchor: createPerspectiveMat4(90, 1, 1, 100),
-					sourceToLandblock: createTranslationMat4(new Vec3(0, 0, -0.5)),
+					localToLandblock: createTranslationMat4(new Vec3(0, 0, -0.5)),
 				}),
 			),
 		).toBe("near-plane-or-ambiguous");
@@ -47,10 +48,19 @@ describe("classifyGeneratedInstanceEnvelope", () => {
 		const invalid = Mat4.identity();
 		invalid.m11 = Number.NaN;
 		expect(
-			classifyGeneratedInstanceEnvelope(
-				projectionInput({ clipFromAnchor: invalid }),
-			),
+			classifyObjectFootprint(projectionInput({ clipFromAnchor: invalid })),
 		).toBe("near-plane-or-ambiguous");
+	});
+
+	it("preserves exact zero-disabled and explicitly exempt behavior", () => {
+		const invalidEnvelope = projectionInput({
+			viewportWidth: 0,
+		});
+		expect(retainsProjectedObjectFootprint(invalidEnvelope, 0)).toBe(true);
+		expect(retainsProjectedObjectFootprint(null, 64)).toBe(true);
+		expect(() => retainsProjectedObjectFootprint(null, -1)).toThrow(
+			"pixel area is invalid",
+		);
 	});
 });
 
@@ -110,18 +120,16 @@ describe("GeneratedInstanceSelector", () => {
 });
 
 function projectionInput(
-	overrides: Partial<
-		Parameters<typeof classifyGeneratedInstanceEnvelope>[0]
-	> = {},
-): Parameters<typeof classifyGeneratedInstanceEnvelope>[0] {
+	overrides: Partial<Parameters<typeof classifyObjectFootprint>[0]> = {},
+): Parameters<typeof classifyObjectFootprint>[0] {
 	return {
+		bounds: UNIT_ENVELOPE,
 		clipFromAnchor: Mat4.identity(),
 		landblockOffsetX: 0,
 		landblockOffsetY: 0,
 		landblockOffsetZ: 0,
 		minimumPixelArea: 1,
-		sourceEnvelope: UNIT_ENVELOPE,
-		sourceToLandblock: Mat4.identity(),
+		localToLandblock: Mat4.identity(),
 		viewportHeight: 100,
 		viewportWidth: 100,
 		...overrides,

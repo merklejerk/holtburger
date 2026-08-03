@@ -121,8 +121,8 @@
 		readonly setTextureFiltering: (policy: string) => void;
 		/** Change the generic portal-footprint cutoff without rebuilding content. */
 		readonly setMinimumPortalFootprintPixelArea: (pixelArea: number) => void;
-		/** Change generated-instance footprint policy without rebuilding content. */
-		readonly setMinimumGeneratedInstancePixelArea: (pixelArea: number) => void;
+		/** Change shared object-footprint policy without rebuilding content. */
+		readonly setMinimumObjectFootprintPixelArea: (pixelArea: number) => void;
 		/** Change offscreen visual animation cadence without changing semantic advancement. */
 		readonly setOffscreenAnimationSampleIntervalSeconds: (
 			intervalSeconds: number,
@@ -537,18 +537,18 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
-	function setMinimumGeneratedInstancePixelArea(pixelArea: number): void {
+	function setMinimumObjectFootprintPixelArea(pixelArea: number): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (!Number.isFinite(pixelArea) || pixelArea < 0) {
 			throw new Error(
-				"Minimum generated-instance pixel area must be non-negative and finite.",
+				"Minimum object-footprint pixel area must be non-negative and finite.",
 			);
 		}
 		frameSettings = {
 			...frameSettings,
 			quality: {
 				...frameSettings.quality,
-				minimumGeneratedInstancePixelArea: pixelArea,
+				minimumObjectFootprintPixelArea: pixelArea,
 			},
 		};
 		runtime.setFrameSettings(frameSettings);
@@ -837,7 +837,7 @@
 					setEnvCellRenderMode,
 					setOutdoorCamera,
 					setFrameProfiling,
-					setMinimumGeneratedInstancePixelArea,
+					setMinimumObjectFootprintPixelArea,
 					setMinimumPortalFootprintPixelArea,
 					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,

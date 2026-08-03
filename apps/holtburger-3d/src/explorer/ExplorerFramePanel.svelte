@@ -331,6 +331,15 @@
 					>
 				</div>
 				<div class="ac-param-row">
+					<span class="ac-param-key"
+						>Object roots tested / retained / rejected</span
+					>
+					<code
+						>{metrics.testedObjectPresentationCount} / {metrics.retainedObjectPresentationCount}
+						/ {metrics.rejectedObjectPresentationCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
 					<span class="ac-param-key">Programs / texture binds</span>
 					<code
 						>{metrics.objectProgramChanges} / {metrics.objectTextureBinds}</code

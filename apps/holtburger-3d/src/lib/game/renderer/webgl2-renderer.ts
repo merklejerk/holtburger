@@ -36,7 +36,8 @@ import type {
 	FrameViewInput,
 	Renderer,
 } from "./renderer";
-import { RenderWorld } from "./render-world";
+import { RenderWorld, type ObjectPresentationFootprint } from "./render-world";
+import { retainsProjectedObjectFootprint } from "./object-footprint";
 import type {
 	GeometryResourceKey,
 	Texture2DResourceKey,
@@ -244,6 +245,9 @@ interface MutableFrameSelectionMetrics {
 	visibleStaticNodeCount: number;
 	visibleDynamicEntityCount: number;
 	visibleDynamicPartCount: number;
+	testedObjectPresentationCount: number;
+	retainedObjectPresentationCount: number;
+	rejectedObjectPresentationCount: number;
 	visibleEnvCellShells: number;
 	visibleEnvCellScopeCount: number;
 	visibleEnvCellResidentNodes: number;
@@ -343,8 +347,8 @@ export class WebGL2Renderer implements Renderer {
 		DEFAULT_TEXTURE_FILTERING_POLICY;
 	/** Requested portal footprint cutoff captured once at frame entry. */
 	#minimumPortalFootprintPixelArea = 0;
-	/** Requested generated-instance footprint cutoff captured once at frame entry. */
-	#minimumGeneratedInstancePixelArea = 0;
+	/** Requested object-presentation footprint cutoff captured once at frame entry. */
+	#minimumObjectFootprintPixelArea = 0;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
@@ -354,6 +358,9 @@ export class WebGL2Renderer implements Renderer {
 		viewCount: 0,
 		visibleDynamicEntityCount: 0,
 		visibleDynamicPartCount: 0,
+		testedObjectPresentationCount: 0,
+		retainedObjectPresentationCount: 0,
+		rejectedObjectPresentationCount: 0,
 		visibleEnvCellShells: 0,
 		visibleEnvCellScopeCount: 0,
 		visibleEnvCellResidentNodes: 0,
@@ -512,8 +519,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		this.#minimumPortalFootprintPixelArea =
 			input.frameSettings.quality.minimumPortalFootprintPixelArea;
-		this.#minimumGeneratedInstancePixelArea =
-			input.frameSettings.quality.minimumGeneratedInstancePixelArea;
+		this.#minimumObjectFootprintPixelArea =
+			input.frameSettings.quality.minimumObjectFootprintPixelArea;
 		this.#resizeCanvasForDpr();
 		this.#resetFrameSelectionMetrics(
 			input.views.length,
@@ -535,12 +542,7 @@ export class WebGL2Renderer implements Renderer {
 						view,
 					);
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
-					const contributions = this.#collectScene(
-						input.anchorLandblockId,
-						geometry.frustum,
-						"flat",
-						profile,
-					);
+					const contributions = this.#collectScene(geometry, "flat", profile);
 					this.#drawProfiledView(
 						{ ...geometry, ...contributions },
 						fog,
@@ -837,12 +839,7 @@ export class WebGL2Renderer implements Renderer {
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
 	): PreparedView {
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, input);
-		const collected = this.#collectScene(
-			anchorLandblockId,
-			prepared.frustum,
-			envCellRenderMode,
-			null,
-		);
+		const collected = this.#collectScene(prepared, envCellRenderMode, null);
 		return {
 			...prepared,
 			objects: collected.objects,
@@ -948,7 +945,7 @@ export class WebGL2Renderer implements Renderer {
 			contributionsByNode.set(
 				node.id,
 				this.#resolveSceneContributions(
-					prepared.anchorLandblockId,
+					prepared,
 					visible.entries,
 					"portal",
 					profile,
@@ -996,18 +993,20 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#collectScene(
-		anchorLandblockId: FrameInput["anchorLandblockId"],
-		frustum: Frustum,
+		prepared: PreparedViewGeometry,
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
 		profile: WebGL2FrameProfileCapture | null,
 	): PreparedSceneContributions {
 		const queryStartedAt = profile?.beginCpuPhase();
-		const visible = this.#world.queryFlatScene(frustum, anchorLandblockId);
+		const visible = this.#world.queryFlatScene(
+			prepared.frustum,
+			prepared.anchorLandblockId,
+		);
 		if (profile && queryStartedAt !== undefined) {
 			profile.finishCpuPhase("sceneQuery", queryStartedAt);
 		}
 		const contributions = this.#resolveSceneContributions(
-			anchorLandblockId,
+			prepared,
 			visible.entries,
 			envCellRenderMode,
 			profile,
@@ -1021,7 +1020,7 @@ export class WebGL2Renderer implements Renderer {
 	 * Callers must consume a SceneGraph query's reused entry buffer before issuing another query.
 	 */
 	#resolveSceneContributions(
-		anchorLandblockId: FrameInput["anchorLandblockId"],
+		prepared: PreparedViewGeometry,
 		visibleEntries: readonly SceneNodeId[],
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
 		profile: WebGL2FrameProfileCapture | null,
@@ -1031,12 +1030,15 @@ export class WebGL2Renderer implements Renderer {
 		const objects: ObjectFrameInput[] = [];
 		this.#frameSelectionMetrics.visibleSceneEntries += visibleEntries.length;
 		for (const nodeId of visibleEntries) {
-			const contribution = this.#world.getRenderContribution(
+			const contribution = this.#world.getRenderContributionDescriptor(
 				nodeId,
-				anchorLandblockId,
+				prepared.anchorLandblockId,
 			);
 			if (!contribution) continue;
 			if (contribution.kind === "static-object") {
+				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
+					continue;
+				}
 				this.#frameSelectionMetrics.visibleStaticNodeCount += 1;
 				const source =
 					contribution.cullingGroup === "env-cell-static-residents"
@@ -1050,6 +1052,7 @@ export class WebGL2Renderer implements Renderer {
 				const node = this.#world.resolveStaticObjectNode(
 					nodeId,
 					contribution.renderable,
+					contribution.footprint,
 				);
 				this.#visibleStaticLayers.add(
 					`${node.placement.scope.kind === "outdoor" ? "outdoor" : `${node.placement.scope.landblockId}/${node.placement.scope.envCellId}`}/${contribution.cullingGroup}`,
@@ -1119,12 +1122,17 @@ export class WebGL2Renderer implements Renderer {
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
+				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
+					continue;
+				}
+				const dynamicContributions =
+					this.#world.expandDynamicContributions(nodeId);
 				this.#selectedDynamicNodeIds.add(nodeId);
 				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
 				this.#frameSelectionMetrics.visibleDynamicPartCount +=
-					contribution.contributions.length;
+					dynamicContributions.length;
 				for (const resolved of this.#world.resolveDynamicContributions(
-					contribution.contributions,
+					dynamicContributions,
 				)) {
 					const { domain, drawUnit, instance, transparentSort } =
 						resolved.drawUnit;
@@ -1213,7 +1221,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		const preparationStartedAt = profile?.beginCpuPhase();
 		const preparedObjects = objects.map((object) =>
-			this.#prepareObjectFrameInput(object, anchorLandblockId),
+			this.#prepareObjectFrameInput(object, prepared.anchorLandblockId),
 		);
 		if (profile && preparationStartedAt !== undefined) {
 			profile.finishCpuPhase("objectPreparation", preparationStartedAt);
@@ -1226,6 +1234,41 @@ export class WebGL2Renderer implements Renderer {
 			);
 		}
 		return { objects: preparedObjects, terrain };
+	}
+
+	#retainsObjectFootprint(
+		footprint: ObjectPresentationFootprint,
+		prepared: PreparedViewGeometry,
+	): boolean {
+		if (footprint.kind === "ineligible")
+			return retainsProjectedObjectFootprint(
+				null,
+				this.#minimumObjectFootprintPixelArea,
+			);
+		const landblockOffset = createLandblockOffset(
+			getLandblockCoordinates(footprint.placement.landblockId),
+			prepared.anchorCoordinates,
+		);
+		const retained = retainsProjectedObjectFootprint(
+			{
+				bounds: footprint.localBounds,
+				clipFromAnchor: prepared.clipFromAnchor,
+				landblockOffsetX: landblockOffset.x,
+				landblockOffsetY: landblockOffset.y,
+				landblockOffsetZ: landblockOffset.z,
+				localToLandblock: footprint.placement.localToLandblock,
+				viewportHeight: this.#frameHeight,
+				viewportWidth: this.#frameWidth,
+			},
+			this.#minimumObjectFootprintPixelArea,
+		);
+		if (this.#minimumObjectFootprintPixelArea > 0) {
+			this.#frameSelectionMetrics.testedObjectPresentationCount += 1;
+			if (retained)
+				this.#frameSelectionMetrics.retainedObjectPresentationCount += 1;
+			else this.#frameSelectionMetrics.rejectedObjectPresentationCount += 1;
+		}
+		return retained;
 	}
 
 	/** Compile every draw-consumed constant once before ordering, grouping, or submission. */
@@ -1367,6 +1410,9 @@ export class WebGL2Renderer implements Renderer {
 		metrics.viewCount = viewCount;
 		metrics.visibleDynamicEntityCount = 0;
 		metrics.visibleDynamicPartCount = 0;
+		metrics.testedObjectPresentationCount = 0;
+		metrics.retainedObjectPresentationCount = 0;
+		metrics.rejectedObjectPresentationCount = 0;
 		metrics.visibleEnvCellShells = 0;
 		metrics.visibleEnvCellScopeCount = 0;
 		metrics.visibleEnvCellResidentNodes = 0;
@@ -1840,7 +1886,7 @@ export class WebGL2Renderer implements Renderer {
 				generatedCullView.clipFromAnchor,
 				this.#frameWidth,
 				this.#frameHeight,
-				this.#minimumGeneratedInstancePixelArea,
+				this.#minimumObjectFootprintPixelArea,
 			);
 		}
 		const cullingStartedAt = generatedCullView

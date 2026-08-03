@@ -163,7 +163,7 @@ function parseArgs(args) {
 		envCellCameraPosition: null,
 		portalWorkLimit: DEFAULT_PORTAL_GRAPH_WORK_LIMIT,
 		minimumPortalFootprintPixelArea: null,
-		minimumGeneratedInstancePixelArea: null,
+		minimumObjectFootprintPixelArea: null,
 		offscreenAnimationSampleIntervalMs: null,
 		probePortalGraph: false,
 		executePortal: false,
@@ -354,16 +354,16 @@ function parseArgs(args) {
 					);
 				}
 				break;
-			case "--minimum-generated-instance-pixel-area":
-				parsed.minimumGeneratedInstancePixelArea = Number(
+			case "--minimum-object-footprint-pixel-area":
+				parsed.minimumObjectFootprintPixelArea = Number(
 					requireValue(args, ++index, arg),
 				);
 				if (
-					!Number.isFinite(parsed.minimumGeneratedInstancePixelArea) ||
-					parsed.minimumGeneratedInstancePixelArea < 0
+					!Number.isFinite(parsed.minimumObjectFootprintPixelArea) ||
+					parsed.minimumObjectFootprintPixelArea < 0
 				) {
 					throw new Error(
-						"--minimum-generated-instance-pixel-area must be a non-negative number.",
+						"--minimum-object-footprint-pixel-area must be a non-negative number.",
 					);
 				}
 				break;
@@ -625,8 +625,8 @@ Options:
                          Explicit planner safety bound. Default: ${DEFAULT_PORTAL_GRAPH_WORK_LIMIT}
   --minimum-portal-footprint-pixel-area <px2>
                          Override the production recursive portal-footprint cutoff.
-  --minimum-generated-instance-pixel-area <px2>
-                         Override generated opaque/alpha-test footprint culling.
+  --minimum-object-footprint-pixel-area <px2>
+                         Override independently optional object footprint culling.
   --offscreen-animation-sample-interval-ms <ms>
                          Override offscreen visual animation sampling; zero is full cadence.
   --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
@@ -1222,11 +1222,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[options.minimumPortalFootprintPixelArea],
 			);
 		}
-		if (options.minimumGeneratedInstancePixelArea !== null) {
+		if (options.minimumObjectFootprintPixelArea !== null) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumGeneratedInstancePixelArea",
-				[options.minimumGeneratedInstancePixelArea],
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumObjectFootprintPixelArea",
+				[options.minimumObjectFootprintPixelArea],
 			);
 		}
 		if (options.offscreenAnimationSampleIntervalMs !== null) {

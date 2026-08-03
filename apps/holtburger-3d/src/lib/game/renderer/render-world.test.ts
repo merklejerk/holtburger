@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Frustum } from "../math/frustum";
 import { AABB3, Mat4, Vec3 } from "../math/types";
-import type { SceneTopologyView, VisibleScene } from "../scene";
+import type {
+	ResolvedScenePlacement,
+	SceneTopologyView,
+	VisibleScene,
+} from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { TextureArrayBinding } from "../textures/texture-manager";
 import type {
@@ -40,6 +44,12 @@ const FRUSTUM = {
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
 const INSTANCE_DATA = { instances: [], sourceEnvelope: AABB3.zero() } as const;
+const PLACEMENT = {
+	envCellId: null,
+	landblockId: "0x0001ffff",
+	localToLandblock: Mat4.identity(),
+	scope: { kind: "outdoor" },
+} as const satisfies ResolvedScenePlacement;
 const TEXTURE_2D = "texture-2d-resource:1" as Texture2DResourceKey;
 const ARRAY = {
 	layersByAssetId: new Map(),
@@ -50,6 +60,8 @@ describe("RenderWorld", () => {
 	it("exposes only renderer queries over live runtime systems", () => {
 		const calls: string[] = [];
 		const dynamic = dynamicContribution();
+		let selectedStaticRenderable: StaticObjectRenderable | null = null;
+		let staticCullingGroup = "buildings";
 		const world = new RenderWorld({
 			geometry: {
 				getResource: () => {
@@ -69,8 +81,18 @@ describe("RenderWorld", () => {
 					calls.push("topology");
 					return TOPOLOGY;
 				},
-				getCullingGroup: () => "fixture",
-				getResolvedPlacement: () => undefined,
+				getCullingGroup: () => staticCullingGroup,
+				getResolvedBounds: (nodeId) =>
+					nodeId === "scene-node:8"
+						? {
+								localBounds: AABB3.zero(),
+								placement: PLACEMENT,
+							}
+						: null,
+				getResolvedPlacement: (nodeId) =>
+					nodeId === "scene-node:8" || nodeId === "scene-node:9"
+						? PLACEMENT
+						: undefined,
 				queryScopesFrustum: () => {
 					calls.push("scene-scopes");
 					return VISIBLE_SCENE;
@@ -86,10 +108,17 @@ describe("RenderWorld", () => {
 					return TERRAIN;
 				},
 			},
-			staticObjects: { getRenderable: () => null },
+			staticObjects: {
+				getRenderable: (nodeId) =>
+					nodeId === "scene-node:8" ? selectedStaticRenderable : null,
+			},
 			dynamics: {
-				getVisibleContributions: (nodeId) =>
-					nodeId === "scene-node:9" ? [dynamic] : null,
+				getPublishedPresentationBounds: (nodeId) =>
+					nodeId === "scene-node:9" ? AABB3.zero() : null,
+				getVisibleContributions: (nodeId) => {
+					calls.push("dynamic-expand");
+					return nodeId === "scene-node:9" ? [dynamic] : null;
+				},
 			},
 			envCells: {
 				getCellRenderable: () => null,
@@ -116,10 +145,19 @@ describe("RenderWorld", () => {
 		expect(world.queryFlatScene(FRUSTUM, "0001")).toBe(VISIBLE_SCENE);
 		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
 		expect(world.resolveTerrainDrawUnit("scene-node:1", "0002")).toBe(TERRAIN);
-		expect(world.getRenderContribution("scene-node:9", "0002")).toEqual({
-			contributions: [dynamic],
+		expect(
+			world.getRenderContributionDescriptor("scene-node:9", "0002"),
+		).toEqual({
+			footprint: {
+				kind: "eligible",
+				localBounds: AABB3.zero(),
+				objectClass: "authored-dynamic",
+				placement: PLACEMENT,
+			},
 			kind: "dynamic",
 		});
+		expect(calls).not.toContain("dynamic-expand");
+		expect(world.expandDynamicContributions("scene-node:9")).toEqual([dynamic]);
 		expect(world.resolveDynamicContributions([dynamic])).toEqual([
 			{ drawUnit: dynamic, geometry: GEOMETRY },
 		]);
@@ -168,6 +206,29 @@ describe("RenderWorld", () => {
 			],
 			frameStreamedInstances: [],
 		} satisfies StaticObjectRenderable;
+		selectedStaticRenderable = staticRenderable;
+		expect(
+			world.getRenderContributionDescriptor("scene-node:8", "0002"),
+		).toMatchObject({
+			cullingGroup: "buildings",
+			footprint: {
+				kind: "eligible",
+				localBounds: AABB3.zero(),
+				objectClass: "building",
+				placement: PLACEMENT,
+			},
+			kind: "static-object",
+			renderable: staticRenderable,
+		});
+		staticCullingGroup = "generated";
+		expect(
+			world.getRenderContributionDescriptor("scene-node:8", "0002"),
+		).toMatchObject({
+			footprint: {
+				kind: "ineligible",
+				reason: "generated-instance-container",
+			},
+		});
 		expect(world.resolveStaticObjectRenderable(staticRenderable)).toEqual([
 			{
 				drawUnit: staticRenderable.drawUnits[0],
@@ -180,6 +241,7 @@ describe("RenderWorld", () => {
 			"scene-flat",
 			"topology",
 			"terrain",
+			"dynamic-expand",
 			"geometry",
 			"geometry",
 			"geometry",

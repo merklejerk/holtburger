@@ -67,6 +67,8 @@ export class WebGL2TextureSamplerCatalog {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #support: WebGL2TextureFilteringSupport;
 	readonly #samplers = new Map<string, WebGLSampler>();
+	/** Finite semantic-request table avoiding description and string-key work at frame time. */
+	readonly #samplersByRequest: Array<WebGLSampler | undefined> = [];
 	#destroyed = false;
 
 	constructor(
@@ -84,6 +86,19 @@ export class WebGL2TextureSamplerCatalog {
 					this.#createSampler(description),
 				);
 			}
+			for (const request of admittedSamplerRequests()) {
+				const description = resolveTextureSamplerDescription(
+					request,
+					support.capabilities,
+				);
+				const sampler = this.#samplers.get(samplerDescriptionKey(description));
+				if (!sampler) {
+					throw new Error(
+						"Admitted sampler request has no constructed sampler.",
+					);
+				}
+				this.#samplersByRequest[samplerRequestIndex(request)] = sampler;
+			}
 		} catch (cause) {
 			this.destroy();
 			throw cause;
@@ -95,15 +110,9 @@ export class WebGL2TextureSamplerCatalog {
 		if (this.#destroyed) {
 			throw new Error("Texture sampler catalog is destroyed.");
 		}
-		const description = resolveTextureSamplerDescription(
-			request,
-			this.#support.capabilities,
-		);
-		const sampler = this.#samplers.get(samplerDescriptionKey(description));
+		const sampler = this.#samplersByRequest[samplerRequestIndex(request)];
 		if (!sampler) {
-			throw new Error(
-				`Texture sampler catalog lacks ${samplerDescriptionKey(description)}.`,
-			);
+			throw new Error("Texture sampler catalog lacks an admitted request.");
 		}
 		return sampler;
 	}
@@ -121,6 +130,7 @@ export class WebGL2TextureSamplerCatalog {
 			this.#gl.deleteSampler(sampler);
 		}
 		this.#samplers.clear();
+		this.#samplersByRequest.length = 0;
 	}
 
 	#createSampler(description: TextureSamplerDescription): WebGLSampler {
@@ -169,37 +179,40 @@ function admittedSamplerDescriptions(
 	capabilities: TextureFilteringCapabilities,
 ): readonly TextureSamplerDescription[] {
 	const descriptions = new Map<string, TextureSamplerDescription>();
-	for (const wrap of [TextureWrapMode.Clamp, TextureWrapMode.Repeat]) {
-		for (const request of [
-			{
-				mipLevels: 1,
-				policy: "nearest",
-				samplingClass: "exact",
-				wrap,
-			},
-			...TEXTURE_FILTERING_POLICIES.flatMap((policy) => [
-				{
-					mipLevels: 1,
-					policy,
-					samplingClass: "filterable" as const,
-					wrap,
-				},
-				{
-					mipLevels: 2,
-					policy,
-					samplingClass: "filterable" as const,
-					wrap,
-				},
-			]),
-		] satisfies readonly TextureSamplerRequest[]) {
-			const description = resolveTextureSamplerDescription(
-				request,
-				capabilities,
-			);
-			descriptions.set(samplerDescriptionKey(description), description);
-		}
+	for (const request of admittedSamplerRequests()) {
+		const description = resolveTextureSamplerDescription(request, capabilities);
+		descriptions.set(samplerDescriptionKey(description), description);
 	}
 	return [...descriptions.values()];
+}
+
+/** Enumerate the closed request space once while constructing a context-owned catalog. */
+function admittedSamplerRequests(): readonly TextureSamplerRequest[] {
+	return [TextureWrapMode.Clamp, TextureWrapMode.Repeat].flatMap((wrap) =>
+		TEXTURE_FILTERING_POLICIES.flatMap((policy) =>
+			(["exact", "filterable"] as const).flatMap((samplingClass) => [
+				{ mipLevels: 1, policy, samplingClass, wrap },
+				{ mipLevels: 2, policy, samplingClass, wrap },
+			]),
+		),
+	);
+}
+
+/** Encode the closed semantic request axes into one dense array position. */
+function samplerRequestIndex(request: TextureSamplerRequest): number {
+	if (!Number.isInteger(request.mipLevels) || request.mipLevels <= 0) {
+		throw new Error(
+			`Texture sampler mip level count must be a positive integer; got ${request.mipLevels}.`,
+		);
+	}
+	const policy = TEXTURE_FILTERING_POLICIES.indexOf(request.policy);
+	if (policy < 0) {
+		throw new Error(`Unknown texture filtering policy ${request.policy}.`);
+	}
+	const samplingClass = request.samplingClass === "exact" ? 0 : 1;
+	const mipmapped = request.mipLevels > 1 ? 1 : 0;
+	const wrap = request.wrap === TextureWrapMode.Clamp ? 0 : 1;
+	return ((policy * 2 + samplingClass) * 2 + mipmapped) * 2 + wrap;
 }
 
 function samplerDescriptionKey(description: TextureSamplerDescription): string {

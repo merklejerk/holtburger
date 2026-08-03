@@ -1581,7 +1581,6 @@ export class WebGL2Renderer implements Renderer {
 			transparent.push({
 				distanceSquared: x * x + y * y + z * z,
 				range: object,
-				stableId: facts.stableId,
 			});
 		}
 		additive.sort((left, right) =>
@@ -1591,10 +1590,10 @@ export class WebGL2Renderer implements Renderer {
 		);
 		const orderedTransparent = orderTransparentObjectRanges(
 			transparent,
-			(left, right) =>
-				compareFarTransparentBatchOrder(left, right, (first, second) =>
-					this.#comparePreparedObjectState(first, second),
-				),
+			(object) =>
+				object.instances?.kind === "frame-template"
+					? object.instances.cohortKey
+					: null,
 		);
 		this.#frameSelectionMetrics.transparentObjectCandidateCount +=
 			transparent.length;
@@ -1998,6 +1997,21 @@ function mergePortalNodeContributions(
 		right: PreparedObjectFrameInput,
 	) => number,
 ): PreparedSceneContributions {
+	if (renderNodeIds.length === 1) {
+		const renderNodeId = renderNodeIds[0];
+		if (renderNodeId === undefined) {
+			throw new Error(
+				"Single-node portal merge lost its render node identity.",
+			);
+		}
+		const contributions = contributionsByNode.get(renderNodeId);
+		if (!contributions) {
+			throw new Error(
+				`Portal render layer cannot resolve contributions for ${renderNodeId}.`,
+			);
+		}
+		return contributions;
+	}
 	const objects: PreparedObjectFrameInput[] = [];
 	const terrain: TerrainFrameInput[] = [];
 	const consumedNodeIds = new Set<string>();
@@ -2068,21 +2082,6 @@ function sourceOpacity(translucency: number): number {
 	const normalized =
 		translucency > 1 ? 1 - Math.min(translucency, 255) / 255 : 1 - translucency;
 	return Math.max(0, Math.min(1, normalized));
-}
-
-/** Cluster far transparency by the exact fields used to form frame-instance runs. */
-function compareFarTransparentBatchOrder(
-	left: PreparedObjectFrameInput,
-	right: PreparedObjectFrameInput,
-	comparePreparedState: (
-		left: PreparedObjectFrameInput,
-		right: PreparedObjectFrameInput,
-	) => number,
-): number {
-	const leftFrame = left.instances?.kind === "frame-template";
-	const rightFrame = right.instances?.kind === "frame-template";
-	if (leftFrame !== rightFrame) return leftFrame ? -1 : 1;
-	return compareObjectFrameBatchOrder(left, right, comparePreparedState);
 }
 
 /** Compare the complete compatibility identity shared by sorting and adjacent run formation. */

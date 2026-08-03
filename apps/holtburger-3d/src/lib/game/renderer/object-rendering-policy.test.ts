@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-	OBJECT_TRANSPARENT_SORT_DISTANCE,
-	OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED,
+	OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT,
+	OBJECT_TRANSPARENT_NEAR_DISTANCE,
+	OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED,
 	areStaticObjectDrawsCompatible,
 	comparePreparedObjectDrawState,
 	formAdjacentObjectInstanceRuns,
@@ -15,94 +16,104 @@ import {
 } from "./webgl2-object-program";
 
 describe("orderTransparentObjectRanges", () => {
-	it("sorts nearby ranges back-to-front with stable equal-distance ties", () => {
+	it("orders near depth buckets back-to-front while preserving order inside a bucket", () => {
+		const nearBucketWidth =
+			OBJECT_TRANSPARENT_NEAR_DISTANCE / OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT;
 		const ordered = orderTransparentObjectRanges(
-			[entry("tie-b", 4), entry("near", 2), entry("far", 8), entry("tie-a", 4)],
-			() => 0,
+			[
+				entry("near-a", nearBucketWidth / 4),
+				entry("far", OBJECT_TRANSPARENT_NEAR_DISTANCE - 1),
+				entry("near-b", nearBucketWidth / 2),
+			],
+			() => null,
 		);
 
-		expect(ordered.near.map(({ stableId }) => stableId)).toEqual([
+		expect(ordered.near.map(({ range }) => range)).toEqual([
 			"far",
-			"tie-a",
-			"tie-b",
-			"near",
+			"near-a",
+			"near-b",
 		]);
 		expect(ordered.far).toEqual([]);
 	});
 
-	it("orders far ranges by deterministic batching compatibility", () => {
+	it("groups far ranges by first-seen batching cohort", () => {
 		const ordered = orderTransparentObjectRanges(
 			[
 				{ ...entry("a-2", 40), range: { cohort: "a", id: "a-2" } },
 				{ ...entry("b-1", 20), range: { cohort: "b", id: "b-1" } },
 				{ ...entry("a-1", 30), range: { cohort: "a", id: "a-1" } },
 			],
-			(left, right) => left.cohort.localeCompare(right.cohort),
+			({ cohort }) => cohort,
 		);
 
 		expect(ordered.far.map(({ range }) => range.id)).toEqual([
-			"a-1",
 			"a-2",
+			"a-1",
 			"b-1",
 		]);
 		expect(ordered.near).toEqual([]);
-		expect(OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED).toBe(
-			OBJECT_TRANSPARENT_SORT_DISTANCE * OBJECT_TRANSPARENT_SORT_DISTANCE,
+		expect(OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED).toBe(
+			OBJECT_TRANSPARENT_NEAR_DISTANCE * OBJECT_TRANSPARENT_NEAR_DISTANCE,
 		);
 	});
 
 	it("separates far candidates from the near camera-sorted phase", () => {
 		const ordered = orderTransparentObjectRanges(
 			[
-				entry("near-first", OBJECT_TRANSPARENT_SORT_DISTANCE - 1),
-				entry("far-second", OBJECT_TRANSPARENT_SORT_DISTANCE + 1),
+				entry("near-first", OBJECT_TRANSPARENT_NEAR_DISTANCE - 1),
+				entry("far-second", OBJECT_TRANSPARENT_NEAR_DISTANCE + 1),
 			],
-			() => 0,
+			() => null,
 		);
 
-		expect(ordered.far.map(({ stableId }) => stableId)).toEqual(["far-second"]);
-		expect(ordered.near.map(({ stableId }) => stableId)).toEqual([
-			"near-first",
-		]);
+		expect(ordered.far.map(({ range }) => range)).toEqual(["far-second"]);
+		expect(ordered.near.map(({ range }) => range)).toEqual(["near-first"]);
 	});
 
-	it("changes near instance order with camera distance but batches far instances by cohort", () => {
+	it("groups cohorts within each near bucket without crossing depth bands", () => {
+		const bucketWidth =
+			OBJECT_TRANSPARENT_NEAR_DISTANCE / OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT;
+		const farBucketStart = OBJECT_TRANSPARENT_NEAR_DISTANCE - bucketWidth;
 		const sourceOrder = [
 			{
-				distanceSquared: 152,
-				range: { cohort: "a", id: "yellow" },
-				stableId: "yellow",
+				distanceSquared: (farBucketStart + bucketWidth / 4) ** 2,
+				range: { cohort: "a", id: "far-a-1" },
 			},
 			{
-				distanceSquared: 164,
-				range: { cohort: "b", id: "blue" },
-				stableId: "blue",
+				distanceSquared: 1,
+				range: { cohort: "a", id: "near-a" },
 			},
 			{
-				distanceSquared: 240,
-				range: { cohort: "a", id: "red" },
-				stableId: "red",
+				distanceSquared: (farBucketStart + bucketWidth / 2) ** 2,
+				range: { cohort: "b", id: "far-b" },
+			},
+			{
+				distanceSquared: (farBucketStart + (bucketWidth * 3) / 4) ** 2,
+				range: { cohort: "a", id: "far-a-2" },
 			},
 		];
-		const compareCohorts = (
-			left: (typeof sourceOrder)[number]["range"],
-			right: (typeof sourceOrder)[number]["range"],
-		) => left.cohort.localeCompare(right.cohort);
+		const batchKey = ({ cohort }: (typeof sourceOrder)[number]["range"]) =>
+			cohort;
 
 		expect(
-			orderTransparentObjectRanges(sourceOrder, compareCohorts).near.map(
+			orderTransparentObjectRanges(sourceOrder, batchKey).near.map(
 				({ range }) => range.id,
 			),
-		).toEqual(["red", "blue", "yellow"]);
+		).toEqual(["far-a-1", "far-a-2", "far-b", "near-a"]);
 		const far = orderTransparentObjectRanges(
 			sourceOrder.map((entry) => ({
 				...entry,
 				distanceSquared:
-					entry.distanceSquared + OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED * 4,
+					entry.distanceSquared + OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED * 4,
 			})),
-			compareCohorts,
+			batchKey,
 		).far;
-		expect(far.map(({ range }) => range.id)).toEqual(["red", "yellow", "blue"]);
+		expect(far.map(({ range }) => range.id)).toEqual([
+			"far-a-1",
+			"near-a",
+			"far-a-2",
+			"far-b",
+		]);
 	});
 });
 
@@ -476,7 +487,7 @@ describe("objectBlendPolicy", () => {
 });
 
 function entry(stableId: string, x: number) {
-	return { distanceSquared: x * x, range: stableId, stableId };
+	return { distanceSquared: x * x, range: stableId };
 }
 
 interface TestIdentity {

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { AABB3 } from "../math/types";
 import type { StaticInstanceStreamSource } from "./static-resources";
 import { StaticInstanceStreamManager } from "./static-instance-stream-manager";
 
 const SOURCE = {
-	data: { instances: [] },
+	data: { instances: [], sourceEnvelope: AABB3.zero() },
 	key: "static-instance-stream:static-install:fixture/cohort",
 } as const satisfies StaticInstanceStreamSource;
 
@@ -27,7 +28,7 @@ describe("StaticInstanceStreamManager", () => {
 
 	it("does not replace live immutable data but permits key reuse after final release", () => {
 		const manager = new StaticInstanceStreamManager<"first" | "replacement">();
-		const replacement = { instances: [] };
+		const replacement = { instances: [], sourceEnvelope: AABB3.zero() };
 
 		manager.reserveKeys("first", [SOURCE.key]);
 		manager.publish(SOURCE);

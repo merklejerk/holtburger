@@ -121,6 +121,8 @@
 		readonly setTextureFiltering: (policy: string) => void;
 		/** Change the generic portal-footprint cutoff without rebuilding content. */
 		readonly setMinimumPortalFootprintPixelArea: (pixelArea: number) => void;
+		/** Change generated-instance footprint policy without rebuilding content. */
+		readonly setMinimumGeneratedInstancePixelArea: (pixelArea: number) => void;
 		/** Reset steady-state frame timing after asynchronous content publication settles. */
 		readonly resetTiming: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
@@ -531,6 +533,23 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setMinimumGeneratedInstancePixelArea(pixelArea: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!Number.isFinite(pixelArea) || pixelArea < 0) {
+			throw new Error(
+				"Minimum generated-instance pixel area must be non-negative and finite.",
+			);
+		}
+		frameSettings = {
+			...frameSettings,
+			quality: {
+				...frameSettings.quality,
+				minimumGeneratedInstancePixelArea: pixelArea,
+			},
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function setFrameProfiling(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.setRendererFrameProfilingEnabled(enabled);
@@ -807,6 +826,7 @@
 					setEnvCellRenderMode,
 					setOutdoorCamera,
 					setFrameProfiling,
+					setMinimumGeneratedInstancePixelArea,
 					setMinimumPortalFootprintPixelArea,
 					setTextureFiltering,
 					resetTiming,

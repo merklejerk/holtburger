@@ -163,6 +163,7 @@ function parseArgs(args) {
 		envCellCameraPosition: null,
 		portalWorkLimit: DEFAULT_PORTAL_GRAPH_WORK_LIMIT,
 		minimumPortalFootprintPixelArea: null,
+		minimumGeneratedInstancePixelArea: null,
 		probePortalGraph: false,
 		executePortal: false,
 		frameMode: null,
@@ -349,6 +350,19 @@ function parseArgs(args) {
 				) {
 					throw new Error(
 						"--minimum-portal-footprint-pixel-area must be a non-negative number.",
+					);
+				}
+				break;
+			case "--minimum-generated-instance-pixel-area":
+				parsed.minimumGeneratedInstancePixelArea = Number(
+					requireValue(args, ++index, arg),
+				);
+				if (
+					!Number.isFinite(parsed.minimumGeneratedInstancePixelArea) ||
+					parsed.minimumGeneratedInstancePixelArea < 0
+				) {
+					throw new Error(
+						"--minimum-generated-instance-pixel-area must be a non-negative number.",
 					);
 				}
 				break;
@@ -597,6 +611,8 @@ Options:
                          Explicit planner safety bound. Default: ${DEFAULT_PORTAL_GRAPH_WORK_LIMIT}
   --minimum-portal-footprint-pixel-area <px2>
                          Override the production recursive portal-footprint cutoff.
+  --minimum-generated-instance-pixel-area <px2>
+                         Override generated opaque/alpha-test footprint culling.
   --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
   --execute-portal
                          Execute the complete planned graph through production GPU passes.
@@ -1187,6 +1203,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumPortalFootprintPixelArea",
 				[options.minimumPortalFootprintPixelArea],
+			);
+		}
+		if (options.minimumGeneratedInstancePixelArea !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumGeneratedInstancePixelArea",
+				[options.minimumGeneratedInstancePixelArea],
 			);
 		}
 		if (options.filteringCycle || options.textureFiltering !== null) {

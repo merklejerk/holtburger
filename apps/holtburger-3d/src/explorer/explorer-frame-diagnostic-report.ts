@@ -9,7 +9,7 @@ import type { LoDConfig } from "../lib/game/runtime/types";
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
 import type { FreeFlyCameraState } from "./free-fly-camera-controller";
 
-const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 3;
+const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 4;
 
 /** Scene request that owns the content population represented by an exported frame report. */
 export interface ExplorerSceneInterestSnapshot {

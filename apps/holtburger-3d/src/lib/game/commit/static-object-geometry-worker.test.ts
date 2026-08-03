@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Mat4, Vec3 } from "../math/types";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
 	ResolvedEnvCellStaticObjectSource,
@@ -270,6 +270,28 @@ describe("prepareStaticObjectGeometry", () => {
 		worker.destroy();
 	});
 
+	it("hydrates generated stream envelopes across the worker boundary", async () => {
+		const worker = new StaticObjectGeometryWorker({
+			createGeometryWorker: () => new TransferWorkerPort(),
+		});
+
+		const result = await worker.prepare({
+			layer: LandblockLayerKind.Generated,
+			resourceNamespace: "static-install:generated-envelope-transfer" as const,
+			source: generatedSource([
+				resident("generated-transfer", Mat4.identity(), new Vec3(1, 1, 1)),
+			]),
+		});
+
+		expect(result?.instanceStreams[0]?.data.sourceEnvelope).toBeInstanceOf(
+			AABB3,
+		);
+		expect(result?.instanceStreams[0]?.data.sourceEnvelope).toEqual(
+			new AABB3(Vec3.zero(), new Vec3(1, 1, 0)),
+		);
+		worker.destroy();
+	});
+
 	it("preserves geometry buffers shared with a runtime-owned dynamic resident", async () => {
 		const staticResident = resident(
 			"shared-definition",
@@ -330,6 +352,9 @@ describe("prepareStaticObjectGeometry", () => {
 		);
 		expect(result?.instanceStreams).toHaveLength(1);
 		expect(result?.instanceStreams[0]?.data.instances).toHaveLength(2);
+		expect(result?.instanceStreams[0]?.data.sourceEnvelope).toEqual(
+			new AABB3(Vec3.zero(), new Vec3(1, 1, 0)),
+		);
 		expect(result?.objects[0]?.drawUnits).toHaveLength(1);
 		expect(result?.objects[0]?.drawUnits[0]?.kind).toBe("instanced");
 		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 11, y: 1, z: 0 });

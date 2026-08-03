@@ -58,6 +58,7 @@ import {
 	type WebGL2TerrainProgram,
 } from "./webgl2-terrain-program";
 import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
+import { GeneratedInstanceSelector } from "./generated-instance-selection";
 import {
 	createWebGL2ObjectProgram,
 	OBJECT_TEXTURE_UNITS,
@@ -269,6 +270,9 @@ interface MutableFrameSelectionMetrics {
 	submittedBakedStaticObjectTriangleCount: number;
 	selectedGeneratedInstanceFragmentCount: number;
 	selectedGeneratedInstanceCount: number;
+	testedGeneratedInstanceCount: number;
+	retainedGeneratedInstanceCount: number;
+	rejectedGeneratedInstanceCount: number;
 	submittedCompactedGeneratedDrawCount: number;
 	submittedCompactedGeneratedInstanceCount: number;
 	submittedInstancedSourceTriangleCount: number;
@@ -308,6 +312,8 @@ export class WebGL2Renderer implements Renderer {
 	/** Device-wide guard preventing draws through any stale handle after context loss. */
 	readonly #assertDeviceReady: () => void;
 	readonly #frameInstances: FrameInstanceStreamArena;
+	/** Reuses one generated-stream selection across all material partitions in a view. */
+	readonly #generatedInstanceSelector = new GeneratedInstanceSelector();
 	/** Exact state mirror scoped to independently invalidated object phases. */
 	readonly #objectState: WebGL2ObjectStateApplicator;
 	/** Lazy portal mechanics; construction allocates no GPU target or shader resource. */
@@ -334,6 +340,8 @@ export class WebGL2Renderer implements Renderer {
 		DEFAULT_TEXTURE_FILTERING_POLICY;
 	/** Requested portal footprint cutoff captured once at frame entry. */
 	#minimumPortalFootprintPixelArea = 0;
+	/** Requested generated-instance footprint cutoff captured once at frame entry. */
+	#minimumGeneratedInstancePixelArea = 0;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
@@ -373,6 +381,9 @@ export class WebGL2Renderer implements Renderer {
 		submittedBakedStaticObjectTriangleCount: 0,
 		selectedGeneratedInstanceFragmentCount: 0,
 		selectedGeneratedInstanceCount: 0,
+		testedGeneratedInstanceCount: 0,
+		retainedGeneratedInstanceCount: 0,
+		rejectedGeneratedInstanceCount: 0,
 		submittedCompactedGeneratedDrawCount: 0,
 		submittedCompactedGeneratedInstanceCount: 0,
 		submittedInstancedSourceTriangleCount: 0,
@@ -493,6 +504,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		this.#minimumPortalFootprintPixelArea =
 			input.frameSettings.quality.minimumPortalFootprintPixelArea;
+		this.#minimumGeneratedInstancePixelArea =
+			input.frameSettings.quality.minimumGeneratedInstancePixelArea;
 		this.#resizeCanvasForDpr();
 		this.#resetFrameSelectionMetrics(
 			input.views.length,
@@ -1377,6 +1390,9 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedBakedStaticObjectTriangleCount = 0;
 		metrics.selectedGeneratedInstanceFragmentCount = 0;
 		metrics.selectedGeneratedInstanceCount = 0;
+		metrics.testedGeneratedInstanceCount = 0;
+		metrics.retainedGeneratedInstanceCount = 0;
+		metrics.rejectedGeneratedInstanceCount = 0;
 		metrics.submittedCompactedGeneratedDrawCount = 0;
 		metrics.submittedCompactedGeneratedInstanceCount = 0;
 		metrics.submittedInstancedSourceTriangleCount = 0;
@@ -1647,9 +1663,12 @@ export class WebGL2Renderer implements Renderer {
 			({ ordering }) => ordering === "opaque" || ordering === "alpha-test",
 		);
 		if (candidates.length === 0) return;
-		const objects = this.#prepareFrameInstanceRuns([candidates], profile, [
-			"grouped",
-		]).objects;
+		const objects = this.#prepareFrameInstanceRuns(
+			[candidates],
+			profile,
+			["grouped"],
+			view,
+		).objects;
 		const submissionStartedAt = profile?.beginCpuPhase();
 		const gl = this.#gl;
 		try {
@@ -1783,6 +1802,7 @@ export class WebGL2Renderer implements Renderer {
 			[ordered.far, ordered.near, ordered.additive],
 			profile,
 			["adjacent", "adjacent", "grouped"],
+			null,
 		);
 		const [farRunCount = 0, nearRunCount = 0] = prepared.runCounts;
 		this.#frameSelectionMetrics.transparentFrameRunCount +=
@@ -1797,6 +1817,7 @@ export class WebGL2Renderer implements Renderer {
 		phases: readonly (readonly PreparedObjectFrameInput[])[],
 		profile: WebGL2FrameProfileCapture | null,
 		groupings: readonly ("adjacent" | "grouped")[],
+		generatedCullView: PreparedView | null,
 	): {
 		readonly objects: readonly PreparedObjectFrameInput[];
 		readonly runCounts: readonly number[];
@@ -1804,6 +1825,49 @@ export class WebGL2Renderer implements Renderer {
 		const orderedInstances: ObjectInstanceData[] = [];
 		const objects: PreparedObjectFrameInput[] = [];
 		const runCounts: number[] = [];
+		if (generatedCullView) {
+			this.#generatedInstanceSelector.beginView(
+				generatedCullView.clipFromAnchor,
+				this.#frameWidth,
+				this.#frameHeight,
+				this.#minimumGeneratedInstancePixelArea,
+			);
+		}
+		const cullingStartedAt = generatedCullView
+			? profile?.beginCpuPhase()
+			: undefined;
+		for (const phase of phases) {
+			for (const object of phase) {
+				if (object.instances?.kind !== "static-fragment") continue;
+				if (!generatedCullView || object.source !== "generated") {
+					throw new Error(
+						`${object.source} object unexpectedly entered generated-scenery compaction.`,
+					);
+				}
+				this.#frameSelectionMetrics.selectedGeneratedInstanceFragmentCount += 1;
+				const [offsetX, offsetY, offsetZ] =
+					object.compatibility.landblockOffset;
+				const selectedIndices = this.#generatedInstanceSelector.select(
+					object.instances.data,
+					offsetX,
+					offsetY,
+					offsetZ,
+				);
+				this.#frameSelectionMetrics.selectedGeneratedInstanceCount +=
+					selectedIndices.length;
+			}
+		}
+		if (generatedCullView) {
+			this.#frameSelectionMetrics.testedGeneratedInstanceCount +=
+				this.#generatedInstanceSelector.testedCount;
+			this.#frameSelectionMetrics.retainedGeneratedInstanceCount +=
+				this.#generatedInstanceSelector.retainedCount;
+			this.#frameSelectionMetrics.rejectedGeneratedInstanceCount +=
+				this.#generatedInstanceSelector.rejectedCount;
+		}
+		if (profile && cullingStartedAt !== undefined) {
+			profile.finishCpuPhase("generatedInstanceCulling", cullingStartedAt);
+		}
 		const preparationStartedAt = profile?.beginCpuPhase();
 		for (const [phaseIndex, phase] of phases.entries()) {
 			const grouping = groupings[phaseIndex];
@@ -1811,17 +1875,6 @@ export class WebGL2Renderer implements Renderer {
 				throw new Error(
 					`Object instance phase ${phaseIndex} has no grouping policy.`,
 				);
-			}
-			for (const object of phase) {
-				if (object.instances?.kind !== "static-fragment") continue;
-				if (object.source !== "generated") {
-					throw new Error(
-						`${object.source} object unexpectedly entered generated-scenery compaction.`,
-					);
-				}
-				this.#frameSelectionMetrics.selectedGeneratedInstanceFragmentCount += 1;
-				this.#frameSelectionMetrics.selectedGeneratedInstanceCount +=
-					object.instances.data.instances.length;
 			}
 			const isFrameInstance = (object: PreparedObjectFrameInput): boolean =>
 				object.instances?.kind === "frame-template" ||
@@ -1879,7 +1932,23 @@ export class WebGL2Renderer implements Renderer {
 					if (adjacent.instances?.kind === "frame-template") {
 						orderedInstances.push(adjacent.instances.instance);
 					} else if (adjacent.instances?.kind === "static-fragment") {
-						orderedInstances.push(...adjacent.instances.data.instances);
+						const [offsetX, offsetY, offsetZ] =
+							adjacent.compatibility.landblockOffset;
+						const selectedIndices = this.#generatedInstanceSelector.select(
+							adjacent.instances.data,
+							offsetX,
+							offsetY,
+							offsetZ,
+						);
+						for (const index of selectedIndices) {
+							const instance = adjacent.instances.data.instances[index];
+							if (!instance) {
+								throw new Error(
+									"Generated-instance selection referenced a missing instance.",
+								);
+							}
+							orderedInstances.push(instance);
+						}
 					} else {
 						throw new Error(
 							"Object instance run contains prepared range state.",
@@ -1887,8 +1956,7 @@ export class WebGL2Renderer implements Renderer {
 					}
 				}
 				const instanceCount = orderedInstances.length - firstInstance;
-				if (instanceCount === 0)
-					throw new Error("Object instance run is empty.");
+				if (instanceCount === 0) continue;
 				objects.push({
 					...object,
 					instances: {

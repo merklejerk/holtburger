@@ -13,6 +13,7 @@ import type {
 	ResolvedOutdoorStaticLayerSource,
 } from "../resolution/landblock-layer";
 import {
+	DEFAULT_MINIMUM_GENERATED_INSTANCE_PIXEL_AREA,
 	DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
 	type FrameSelectionMetrics,
 	type Renderer,
@@ -88,6 +89,9 @@ describe("GameRuntime view and interest control", () => {
 			submittedBakedStaticObjectTriangleCount: 0,
 			selectedGeneratedInstanceFragmentCount: 0,
 			selectedGeneratedInstanceCount: 0,
+			testedGeneratedInstanceCount: 0,
+			retainedGeneratedInstanceCount: 0,
+			rejectedGeneratedInstanceCount: 0,
 			submittedCompactedGeneratedDrawCount: 0,
 			submittedCompactedGeneratedInstanceCount: 0,
 			submittedInstancedSourceTriangleCount: 0,
@@ -176,6 +180,8 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: true,
 			envCellRenderMode: "portal",
 			quality: {
+				minimumGeneratedInstancePixelArea:
+					DEFAULT_MINIMUM_GENERATED_INSTANCE_PIXEL_AREA,
 				minimumPortalFootprintPixelArea:
 					DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
 				textureFiltering: "anisotropic-2x",
@@ -185,6 +191,7 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
+				minimumGeneratedInstancePixelArea: 8,
 				minimumPortalFootprintPixelArea: 4,
 				textureFiltering: "nearest",
 			},
@@ -194,6 +201,7 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
+				minimumGeneratedInstancePixelArea: 8,
 				minimumPortalFootprintPixelArea: 4,
 				textureFiltering: "nearest",
 			},

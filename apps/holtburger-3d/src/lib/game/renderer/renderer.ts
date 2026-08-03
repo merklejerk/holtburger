@@ -11,9 +11,13 @@ export type EnvCellRenderMode = "flat" | "portal";
 
 /** Current physical-pixel cutoff for omitting negligible recursive portal subtrees. */
 export const DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA = 64;
+/** Conservative physical-pixel cutoff for generated opaque/alpha-test instances. */
+export const DEFAULT_MINIMUM_GENERATED_INSTANCE_PIXEL_AREA = 64;
 
 /** Dynamic renderer quality choices independent from content and resource identity. */
 interface RenderQualitySettings {
+	/** Generated opaque/alpha-test instances smaller than this physical pixel area are omitted. */
+	readonly minimumGeneratedInstancePixelArea: number;
 	/** Non-near-plane portal windows smaller than this physical pixel area are omitted. */
 	readonly minimumPortalFootprintPixelArea: number;
 	/** Global draw-time policy for filterable normalized textures. */
@@ -35,6 +39,8 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 	distanceFogEnabled: true,
 	envCellRenderMode: "portal",
 	quality: {
+		minimumGeneratedInstancePixelArea:
+			DEFAULT_MINIMUM_GENERATED_INSTANCE_PIXEL_AREA,
 		minimumPortalFootprintPixelArea:
 			DEFAULT_MINIMUM_PORTAL_FOOTPRINT_PIXEL_AREA,
 		textureFiltering: DEFAULT_TEXTURE_FILTERING_POLICY,
@@ -115,6 +121,12 @@ export interface FrameSelectionMetrics {
 	readonly selectedGeneratedInstanceFragmentCount: number;
 	/** Generated-scenery instances selected before post-culling compaction. */
 	readonly selectedGeneratedInstanceCount: number;
+	/** Generated candidates projected once per immutable stream in each rendered view. */
+	readonly testedGeneratedInstanceCount: number;
+	/** Stream-unique, per-view projected candidates retained across material partitions. */
+	readonly retainedGeneratedInstanceCount: number;
+	/** Stream-unique, per-view candidates omitted as proven-small or outside the view. */
+	readonly rejectedGeneratedInstanceCount: number;
 	/** Compacted generated-scenery draw calls submitted this frame. */
 	readonly submittedCompactedGeneratedDrawCount: number;
 	/** Generated-scenery instances submitted through compacted frame ranges. */
@@ -169,6 +181,8 @@ export interface RendererCpuFrameTimings {
 	readonly contributionMergeMs: number;
 	/** CPU wall time spent finalizing renderer diagnostics. */
 	readonly finalizationMs: number;
+	/** CPU wall time spent projecting and selecting generated-instance envelopes. */
+	readonly generatedInstanceCullingMs: number;
 	/** CPU wall time spent encoding and uploading frame-local object instances. */
 	readonly instanceUploadMs: number;
 	/** CPU wall time spent forming compatible frame-instance submission runs. */

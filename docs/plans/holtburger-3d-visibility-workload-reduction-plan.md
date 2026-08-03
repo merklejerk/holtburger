@@ -1,6 +1,6 @@
 # Holtburger 3D Visibility Workload Reduction Plan
 
-Status: active; Phases 0-2 complete with a `64px²` recursive portal-footprint cutoff accepted.
+Status: active; Phases 0-4 complete with a `64px²` generated-instance cutoff accepted.
 Created: 2026-08-03
 Related investigation: `docs/plans/holtburger-3d-portal-frame-cpu-investigation.md`
 
@@ -416,20 +416,20 @@ The renderer consumes it without re-deriving asset facts.
 
 ### Task Checklist
 
-- [ ] Audit cohort formation for heterogeneous geometry, setup transforms, scale, and shared
+- [x] Audit cohort formation for heterogeneous geometry, setup transforms, scale, and shared
       material partitions; record the chosen stream-level or per-instance envelope shape.
-- [ ] Add the minimum renderer-neutral envelope data to worker output, transfer validation,
+- [x] Add the minimum renderer-neutral envelope data to worker output, transfer validation,
       artifacts, and static instance resources.
-- [ ] Implement a small pure projection helper that conservatively classifies an envelope as
+- [x] Implement a small pure projection helper that conservatively classifies an envelope as
       near-plane/visible, below threshold, or outside the view.
-- [ ] Keep near-plane or numerically ambiguous instances; screen-size policy must only remove
+- [x] Keep near-plane or numerically ambiguous instances; screen-size policy must only remove
       proven-small visible instances.
-- [ ] Add output-to-target filtering with reusable scratch storage so the culling pass does not
+- [x] Add output-to-target filtering with reusable scratch storage so the culling pass does not
       replace GPU work with per-frame allocation churn.
-- [ ] Compute selected instance indices once per immutable stream and reuse them for every
+- [x] Compute selected instance indices once per immutable stream and reuse them for every
       compatible material partition.
-- [ ] Restrict the first cutover to generated opaque and alpha-tested instances.
-- [ ] Keep zero-threshold behavior byte-for-byte equivalent at frame-instance upload boundaries.
+- [x] Restrict the first cutover to generated opaque and alpha-tested instances.
+- [x] Keep zero-threshold behavior byte-for-byte equivalent at frame-instance upload boundaries.
 
 ### Acceptance Criteria
 
@@ -442,24 +442,40 @@ The renderer consumes it without re-deriving asset facts.
 
 ### Decisions and Course Corrections
 
-- To be completed during execution.
+- Cohort formation proves a homogeneous stream-level envelope: partition identity includes source
+  geometry identity, material/order contract, and exact triangle membership. Every stream member
+  therefore shares one union of its source partitions. Per-instance setup transforms, authored
+  scale, and placement remain flattened into the existing `sourceToLandblock` matrix, so duplicating
+  an envelope beside every instance would add bytes without adding information.
+- The static geometry worker is the sole envelope producer. It unions the already-resolved source
+  partition positions before transfer; the renderer never queries or reconstructs device geometry.
+- `GeneratedInstanceSelector` owns reusable per-view index arrays and caches by immutable stream.
+  Repeated material partitions reuse the same result, while reuse across different landblock render
+  frames fails loudly because the projected result would not be equivalent.
+- Projection is conservative: near-plane intersections and non-finite intermediates are retained;
+  threshold equality is retained; only proven-small visible or proven-outside envelopes are omitted.
+- Phase 3 left `minimumGeneratedInstancePixelArea` at zero. This bypassed classification and
+  preserved the complete ordered upload population while establishing the lasting contract. The
+  DA55 browser smoke retained identical initial/final generated counts (`10,199`) and upload bytes
+  (`961,120`) with no browser console errors. Phase 4 then owned harness controls and threshold
+  selection.
 
 ## Phase 4: Select and Promote Generated Screen-Size Policy
 
 ### Task Checklist
 
-- [ ] Expose a harness-only minimum generated-instance pixel-footprint override with zero disabled.
-- [ ] Sweep conservative candidate thresholds on DA55 and DC58 without changing scene radius or
+- [x] Expose a harness-only minimum generated-instance pixel-footprint override with zero disabled.
+- [x] Sweep conservative candidate thresholds on DA55 and DC58 without changing scene radius or
       fragment culling.
-- [ ] Record tested, retained, rejected, uploaded, and submitted generated instance counts plus
+- [x] Record tested, retained, rejected, uploaded, and submitted generated instance counts plus
       culling CPU, compaction CPU, upload bytes, draw counts, frame CPU, and GPU timing where
       supported.
-- [ ] Capture static and moving-camera comparisons for thin, alpha-tested, silhouette-heavy, and
+- [x] Capture static and moving-camera comparisons for thin, alpha-tested, silhouette-heavy, and
       repeated scenery.
-- [ ] Promote the smallest threshold with material net savings and no unacceptable sparkle or pop.
-- [ ] If no candidate pays for its CPU test, remove the culling contract and temporary diagnostics
+- [x] Promote the smallest threshold with material net savings and no unacceptable sparkle or pop.
+- [x] If no candidate pays for its CPU test, remove the culling contract and temporary diagnostics
       rather than retaining a dormant abstraction.
-- [ ] Record the effective policy in frame settings and the versioned diagnostic report.
+- [x] Record the effective policy in frame settings and the versioned diagnostic report.
 
 ### Acceptance Criteria
 
@@ -473,7 +489,37 @@ The renderer consumes it without re-deriving asset facts.
 
 ### Decisions and Course Corrections
 
-- To be completed during execution.
+- Accepted `4px²` as the generated opaque/alpha-test product cutoff. Zero remains the explicit
+  disabled baseline through the harness override. All matched runs used a `1280×720` physical
+  viewport, building radius 8, generated/explicit/EnvCell radius 2, and the same relative camera
+  placement and orientation in each landblock.
+- DA55 results were: disabled `8,333` submitted generated instances, `795,040` upload bytes, and
+  `925` generated draws; `1px²` retained `2,990/3,860` unique candidates and produced `6,216`
+  submissions, `625,680` bytes, and `784` draws; `4px²` retained `2,469/3,860` and produced `4,725`
+  submissions, `506,400` bytes, and `723` draws. Mean profiled frame CPU moved from `203.94ms` to
+  `190.33ms` and `179.94ms`, respectively, while culling itself cost `0.95-1.20ms`.
+- DC58 results were: disabled `9,334` submissions, `924,000` bytes, and `706` draws; `1px²`
+  retained `2,884/4,034` and produced `6,749` submissions, `717,200` bytes, and `650` draws;
+  `4px²` retained `2,134/4,034` and produced `4,894` submissions, `568,800` bytes, and `591` draws.
+  Mean profiled frame CPU was `8.71ms`, `9.32ms`, and `9.08ms`. The `0.36ms` `4px²` regression is
+  accepted as a small SwiftShader CPU-side concession against 47% unique-instance rejection, 38%
+  lower upload bytes, 16% fewer generated draws, and 32% fewer submitted static triangles.
+- GPU timestamp queries were unsupported in the harness. Submission-phase attribution also moved
+  between phase labels on DA55, so the decision uses aggregate frame CPU and exact workload counts
+  rather than overstating phase-local timing precision.
+- Static DA55 and DC58 screenshots exercised repeated trees/shrubs, thin and alpha-tested foliage,
+  and distant silhouettes at disabled, `1px²`, and `4px²`. No objectionable loss was visible at
+  `4px²`. A DC58 camera rotation from `-45°` to `-35°` recomputed stable per-view populations with
+  no browser errors or stale frame ranges.
+- Added unique tested/retained/rejected metrics because shared material partitions make each differ
+  from existing partition-expanded selected/submitted counts. Added an opt-in culling CPU phase and
+  surfaced it beside compaction/upload. The diagnostic report schema advances from version 3 to 4
+  because frame settings and renderer diagnostics gained lasting fields.
+- After reviewing the differing portal and object semantics, the product default was deliberately
+  raised from `4px²` to `64px²` and accepted after direct Explorer evaluation. The default DA55
+  smoke retained `1,625/3,860` stream-unique candidates, produced `2,935` partition-expanded
+  submissions and `549` generated draws, and reduced frame uploads to `363,200` bytes without
+  browser errors. The earlier `4px²` measurements remain recorded as the conservative comparison.
 
 ## Phase 5: Generated Resteering Gate
 

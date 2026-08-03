@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-03_
 
 ## Tech Lead North Stars
 
@@ -141,13 +141,19 @@ complete.
 Structural or unknown visual hooks keep a valid resting presentation with provenance rather than
 activating partial behavior.
 
-`AnimationSystem` advances semantic playback and hooks at 30 Hz, rebases gaps above two seconds,
-and samples fractional rigid poses at render cadence. `EffectSystem` consumes typed behavior commands
-directly and integrates retail axis-angle visual-root rotation plus per-part translucency on that
-semantic clock. A dispatch-only hook system and pass-through pose system do not exist.
-`DynamicEntitySystem` publishes each complete articulated-pose-plus-effect sample; the scene graph
-then composes it under the unchanged authored root. Static-default position frames remain prepared but
-unused, matching retail's null-root-offset path.
+`AnimationSystem` advances semantic playback and hooks at 30 Hz and rebases gaps above two seconds.
+Visual sampling is a separate explicit operation over authoritative node IDs. The runtime samples
+roots selected by the previous completed renderer frame at render cadence and samples other active
+roots at a 100 ms product interval; zero remains the exact full-cadence baseline. `EffectSystem`
+consumes typed behavior commands directly and integrates retail axis-angle visual-root rotation plus
+per-part translucency on the semantic clock. A dispatch-only hook system and pass-through pose system
+do not exist.
+
+`DynamicEntitySystem` publishes each complete articulated-pose-plus-effect sample together with a
+conservative bound for that exact published presentation. The stable scene-graph bound remains the
+animation-wide envelope used for spatial membership; the presentation bound is renderer-facing and
+changes only when the pose changes. Static-default position frames remain prepared but unused,
+matching retail's null-root-offset path.
 
 Full part translucency suppresses the draw. Partial translucency reclassifies that part into
 transparent submission, carries instance alpha without widening the persistent instance record, and
@@ -177,6 +183,13 @@ The spatial index is organized by:
 Environment shells use `env-cell-shell`; static residents use the EnvCells layer group. A query
 first rejects an aggregate group AABB and then tests each member AABB. Flat and portal modes share
 this exact spatial selection; only their chosen scope sets differ.
+
+After this stable broad phase, the renderer may reject an independently optional presentation whose
+conservative projected drawing-buffer footprint is below the configured object threshold. Generated
+opaque and cutout streams apply the same fidelity setting per instance; buildings, explicit objects,
+EnvCell residents, and anchored authored dynamics apply it per atomic presentation root before
+contribution expansion. Terrain, EnvCell shells, generated transparent/additive streams, and future
+runtime-authored actors are explicitly ineligible. Near-plane-straddling bounds remain retained.
 
 The runtime exposes three distinct query contracts:
 

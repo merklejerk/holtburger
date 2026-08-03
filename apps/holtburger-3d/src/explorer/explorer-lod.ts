@@ -2,11 +2,7 @@ import type { LoDConfig } from "../lib/game/runtime/types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 export type ExplorerLodRadius =
-	| "buildings"
-	| "envCells"
-	| "explicitObjects"
-	| "generatedObjects"
-	| "terrain";
+	"buildings" | "envCells" | "explicitObjects" | "generatedObjects" | "terrain";
 
 /** Apply one Explorer LoD control while preserving the outdoor radius hierarchy. */
 export function updateExplorerLodRadius(

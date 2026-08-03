@@ -108,7 +108,8 @@ export function allocationBoundsForPlacement(
 /** Reconstruct canonical free rectangles from a fixed page's locked content placements. */
 export function reconstructFreeRectangles(
 	page: AtlasPageLayout,
-	pageSize: number = FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+	pageSize: number = FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+		.pageSize,
 ): readonly AtlasBounds[] {
 	validatePageSize(pageSize);
 	validatePageLayout(page, pageSize);

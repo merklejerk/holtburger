@@ -36,8 +36,7 @@ describe("Explorer camera framing", () => {
 		const verticalDelta = focus.clearance + 12 - 8;
 		expect(pose?.pitchRadians).toBeCloseTo(
 			Math.asin(
-				-verticalDelta /
-					Math.hypot(focus.offset, verticalDelta, focus.offset),
+				-verticalDelta / Math.hypot(focus.offset, verticalDelta, focus.offset),
 			),
 		);
 		expect(queriedPoints).toEqual([

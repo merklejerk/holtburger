@@ -64,6 +64,7 @@ try {
 						relocateLandblockId: options.relocateLandblockId,
 						portalTrace: result.portalTrace,
 						frameMode: options.frameMode,
+						frameProfile: result.state.frameProfile,
 						textureFiltering: options.textureFiltering,
 						filteringCycleStates: result.filteringCycleStates,
 						modeCycleStates: result.modeCycleStates,
@@ -156,6 +157,7 @@ function parseArgs(args) {
 		frameMode: null,
 		modeCycle: false,
 		filteringCycle: false,
+		profileRenderer: false,
 		textureFiltering: null,
 		lifecycle: false,
 		fixture: null,
@@ -298,6 +300,9 @@ function parseArgs(args) {
 				break;
 			case "--filtering-cycle":
 				parsed.filteringCycle = true;
+				break;
+			case "--profile-renderer":
+				parsed.profileRenderer = true;
 				break;
 			case "--texture-filtering":
 				parsed.textureFiltering = requireValue(args, ++index, arg);
@@ -476,6 +481,7 @@ Options:
                          Change continuous rendering policy without reloading content.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
   --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
+  --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
   --texture-filtering <mode>
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
   --fixture <name>      Use the blended, instanced, portal-hybrid-execution,
@@ -593,6 +599,7 @@ function briefHarnessReport(result) {
 		),
 		envCellLayers: staticObjects?.envCellLayers ?? [],
 		finalMetrics: result.state.metrics,
+		frameProfile: result.state.frameProfile,
 		initialMetrics: result.initialState.metrics,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
 		filteringCycle: result.filteringCycleStates.map(
@@ -651,11 +658,9 @@ function assertModeCycle(initialState, states) {
 		}
 		if (expectedMode === "flat") {
 			for (const key of [
-				"portalExecutionDurationMs",
 				"portalExteriorRenderCount",
 				"portalMaskEdgeCount",
 				"portalNearPlaneSeedCount",
-				"portalPlanningDurationMs",
 				"portalRenderLayerCount",
 				"portalRenderNodeCount",
 				"portalRejectedFacingCrossingCount",
@@ -1223,6 +1228,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			await delay(50);
 		}
+		if (options.profileRenderer) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setFrameProfiling",
+				[true],
+			);
+		}
 		if (options.measureMs > 0) {
 			await evaluate(
 				client,
@@ -1230,6 +1242,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[],
 			);
 			await delay(options.measureMs);
+		} else if (options.profileRenderer) {
+			await delay(250);
 		}
 		const state = await evaluate(
 			client,

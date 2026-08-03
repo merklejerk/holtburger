@@ -11,13 +11,19 @@
 	import type {
 		EnvCellRenderMode,
 		FrameSelectionMetrics,
+		RendererFrameProfile,
 	} from "../lib/game/renderer/renderer";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 	import type { TextureFilteringPolicy } from "../lib/game/renderer/texture-filtering-policy";
 
 	type ExplorerTabId =
-		"world" | "frame" | "textures" | "assets" | "entities" | "logs";
+		| "world"
+		| "frame"
+		| "textures"
+		| "assets"
+		| "entities"
+		| "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -57,6 +63,12 @@
 		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
 		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
 		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
+		/** Latest explicit renderer profile; null while disabled or before the first sample. */
+		readonly rendererFrameProfile: RendererFrameProfile | null;
+		/** Whether the active renderer currently owns profiling resources. */
+		readonly rendererFrameProfilingEnabled: boolean;
+		/** Explicitly create or tear down the renderer profiling session. */
+		readonly updateRendererFrameProfiling: (enabled: boolean) => void;
 		readonly authoredDynamicRuntimeDiagnostics: ReturnType<
 			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
@@ -82,6 +94,9 @@
 		maximumTextureAnisotropy,
 		updateTextureFiltering,
 		frameSelectionMetrics,
+		rendererFrameProfile,
+		rendererFrameProfilingEnabled,
+		updateRendererFrameProfiling,
 		authoredDynamicRuntimeDiagnostics,
 		readStaticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
@@ -200,6 +215,9 @@
 							<ExplorerFramePanel
 								metrics={frameSelectionMetrics}
 								dynamics={authoredDynamicRuntimeDiagnostics}
+								profile={rendererFrameProfile}
+								profilingEnabled={rendererFrameProfilingEnabled}
+								setProfilingEnabled={updateRendererFrameProfiling}
 							/>
 						{:else if activeTab.id === "textures"}
 							<ExplorerTexturesPanel

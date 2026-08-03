@@ -8,13 +8,15 @@ import type { PortalViewWindow } from "./portal-view-window";
 const COLOR_BYTES_PER_PIXEL = 4;
 const DEPTH_STENCIL_BYTES_PER_PIXEL = 4;
 /** Maximum render-layer label supported by the WebGL stencil attachment. */
-const MAXIMUM_PORTAL_RENDER_LAYER = 0xff;
+export const MAXIMUM_PORTAL_RENDER_LAYER = 0xff;
 /** Depth offset used only when an authored visible surface shares the portal aperture plane. */
 const COPLANAR_PORTAL_MASK_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 
 /** Resident-depth comparison selected by the planner-owned mask source. */
 export type PortalMaskDepthCompare =
-	"always" | "less-or-equal" | "less-or-equal-offset";
+	| "always"
+	| "less-or-equal"
+	| "less-or-equal-offset";
 /** Positive drawing-buffer extent owned by one scene-domain target generation. */
 export interface PortalRenderExtent {
 	readonly height: number;

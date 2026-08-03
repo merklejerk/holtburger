@@ -34,6 +34,7 @@
 		DEFAULT_FRAME_SETTINGS,
 		type FrameSelectionMetrics,
 		type FrameSettings,
+		type RendererFrameProfile,
 	} from "../../lib/game/renderer/renderer";
 	import type {
 		PortalExecutionProbeResult,
@@ -99,6 +100,8 @@
 		readonly setTextureFiltering: (policy: string) => void;
 		/** Reset steady-state frame timing after asynchronous content publication settles. */
 		readonly resetTiming: () => void;
+		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
+		readonly setFrameProfiling: (enabled: boolean) => void;
 		/** Withdraw every requested scene layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
 		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
@@ -131,6 +134,8 @@
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
+		/** Latest explicit renderer profile, or null while profiling is disabled. */
+		readonly frameProfile: RendererFrameProfile | null;
 		readonly authoredDynamics: ReturnType<
 			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
@@ -373,6 +378,11 @@
 			quality: { ...frameSettings.quality, textureFiltering: policy },
 		};
 		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setFrameProfiling(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		runtime.setRendererFrameProfilingEnabled(enabled);
 	}
 
 	function clearSceneInterest(): void {
@@ -638,6 +648,7 @@
 					setCameraLandblock,
 					setEnvCellCamera,
 					setEnvCellRenderMode,
+					setFrameProfiling,
 					setTextureFiltering,
 					resetTiming,
 					tracePortalSegment,
@@ -649,6 +660,7 @@
 								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
 							error,
 							frameSettings,
+							frameProfile: runtime?.getRendererFrameProfile() ?? null,
 							hybridPortalExecution,
 							frames,
 							internalPortalExecution,

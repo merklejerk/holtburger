@@ -33,6 +33,7 @@ import type {
 	FrameSelectionMetrics,
 	FrameViewInput,
 	Renderer,
+	RendererFrameProfile,
 } from "./renderer";
 import { RenderWorld } from "./render-world";
 import type {
@@ -81,7 +82,10 @@ import {
 	type TransparentObjectRange,
 } from "./object-rendering-policy";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
-import { WebGL2PortalSubstrate } from "./webgl2-portal-substrate";
+import {
+	MAXIMUM_PORTAL_RENDER_LAYER,
+	WebGL2PortalSubstrate,
+} from "./webgl2-portal-substrate";
 import type { PreparedPortalProjection } from "./portal-view-window";
 import {
 	executePortalGraph,
@@ -98,6 +102,10 @@ import {
 	type TextureFilteringPolicy,
 } from "./texture-filtering-policy";
 import { WebGL2ObjectStateApplicator } from "./webgl2-object-state-applicator";
+import {
+	WebGL2FrameProfiler,
+	type WebGL2FrameProfileCapture,
+} from "./webgl2-gpu-frame-profiler";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -252,8 +260,6 @@ interface MutableFrameSelectionMetrics {
 	portalRenderNodeCount: number;
 	portalSubmittedRenderNodeCount: number;
 	portalExteriorRenderCount: number;
-	portalPlanningDurationMs: number;
-	portalExecutionDurationMs: number;
 	sceneDomainTargetCount: number;
 	sceneDomainTargetBytes: number;
 	submittedStaticObjectDrawCount: number;
@@ -326,6 +332,8 @@ export class WebGL2Renderer implements Renderer {
 	/** Requested quality captured at frame entry and consumed by every nested draw path. */
 	#frameTextureFiltering: TextureFilteringPolicy =
 		DEFAULT_TEXTURE_FILTERING_POLICY;
+	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
+	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
 	readonly #frameSelectionMetrics: MutableFrameSelectionMetrics = {
 		envCellRenderMode: "flat",
@@ -351,8 +359,6 @@ export class WebGL2Renderer implements Renderer {
 		portalRenderNodeCount: 0,
 		portalSubmittedRenderNodeCount: 0,
 		portalExteriorRenderCount: 0,
-		portalPlanningDurationMs: 0,
-		portalExecutionDurationMs: 0,
 		sceneDomainTargetCount: 0,
 		sceneDomainTargetBytes: 0,
 		visibleSceneEntries: 0,
@@ -460,6 +466,19 @@ export class WebGL2Renderer implements Renderer {
 
 	drawFrame(input: FrameInput): void {
 		this.#assertDeviceReady();
+		const profile = this.#frameProfiler?.beginFrame() ?? null;
+		try {
+			this.#drawFrameContent(input, profile);
+		} finally {
+			profile?.finish();
+		}
+	}
+
+	#drawFrameContent(
+		input: FrameInput,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
+		const setupStartedAt = profile?.beginCpuPhase();
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		this.#resizeCanvasForDpr();
 		this.#resetFrameSelectionMetrics(
@@ -470,12 +489,35 @@ export class WebGL2Renderer implements Renderer {
 			? input.environment.distanceFog
 			: null;
 		this.#beginFrame(input.environment, fog);
+		if (profile && setupStartedAt !== undefined) {
+			profile.finishCpuPhase("setup", setupStartedAt);
+		}
 		if (input.frameSettings.envCellRenderMode === "flat") {
 			for (const view of input.views) {
-				this.#drawView(
-					this.#prepareView(input.anchorLandblockId, view, "flat"),
-					fog,
-				);
+				if (profile) {
+					const preparationStartedAt = profile.beginCpuPhase();
+					const geometry = this.#prepareViewGeometry(
+						input.anchorLandblockId,
+						view,
+					);
+					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
+					const contributions = this.#collectScene(
+						input.anchorLandblockId,
+						geometry.frustum,
+						"flat",
+						profile,
+					);
+					this.#drawProfiledView(
+						{ ...geometry, ...contributions },
+						fog,
+						profile,
+					);
+				} else {
+					this.#drawView(
+						this.#prepareView(input.anchorLandblockId, view, "flat"),
+						fog,
+					);
+				}
 			}
 		} else {
 			const clear = fog?.color ?? input.environment.backgroundColor;
@@ -486,25 +528,46 @@ export class WebGL2Renderer implements Renderer {
 				clear.alpha,
 			] as const;
 			for (const view of input.views) {
-				this.#drawPortalView(
-					this.#prepareViewGeometry(input.anchorLandblockId, view),
+				const preparationStartedAt = profile?.beginCpuPhase();
+				const prepared = this.#prepareViewGeometry(
+					input.anchorLandblockId,
 					view,
-					clearColor,
-					fog,
 				);
+				if (profile && preparationStartedAt !== undefined) {
+					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
+				}
+				this.#drawPortalView(prepared, view, clearColor, fog, profile);
 			}
 		}
+		const finalizationStartedAt = profile?.beginCpuPhase();
 		const portalTargets = this.#portalSubstrate.getDiagnostics();
 		this.#frameSelectionMetrics.sceneDomainTargetCount =
 			portalTargets.activeTargetCount;
 		this.#frameSelectionMetrics.sceneDomainTargetBytes =
 			portalTargets.activeBytes;
 		this.#finishFrameSelectionMetrics();
+		if (profile && finalizationStartedAt !== undefined) {
+			profile.finishCpuPhase("finalization", finalizationStartedAt);
+		}
 		void input.timeSeconds;
 	}
 
 	getFrameSelectionMetrics(): FrameSelectionMetrics {
 		return { ...this.#frameSelectionMetrics };
+	}
+
+	getFrameProfile(): RendererFrameProfile | null {
+		return this.#frameProfiler?.getProfile() ?? null;
+	}
+
+	setFrameProfilingEnabled(enabled: boolean): void {
+		this.#assertDeviceReady();
+		if (enabled) {
+			this.#frameProfiler ??= new WebGL2FrameProfiler(this.#gl);
+			return;
+		}
+		this.#frameProfiler?.destroy();
+		this.#frameProfiler = null;
 	}
 
 	/** Plan and execute one production portal view from its authoritative camera residency. */
@@ -513,16 +576,20 @@ export class WebGL2Renderer implements Renderer {
 		viewInput: FrameViewInput,
 		clearColor: readonly [number, number, number, number],
 		fog: FrameInput["environment"]["distanceFog"],
+		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const placement = viewInput.camera.placement;
 		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
-		const { planningDurationMs, result } = this.#planPortalRenderGraph(
+		const planningStartedAt = profile?.beginCpuPhase();
+		const result = this.#planPortalRenderGraph(
 			prepared,
 			viewInput,
 			rootScope,
 			PORTAL_PLANNING_WORK_ITEM_LIMIT,
 		);
-		this.#frameSelectionMetrics.portalPlanningDurationMs += planningDurationMs;
+		if (profile && planningStartedAt !== undefined) {
+			profile.finishCpuPhase("portalGraphPlanning", planningStartedAt);
+		}
 		if (result.kind !== "planned") {
 			throw new Error(
 				`Portal frame planning failed ${result.reason}: required stencil ${result.requiredMaximumStencilValue}, work items ${result.workItemCount}.`,
@@ -531,34 +598,50 @@ export class WebGL2Renderer implements Renderer {
 		const contributionsByNode = this.#collectPortalNodeContributions(
 			prepared,
 			result.plan,
+			profile,
 		);
-		const startedAt = performance.now();
 		const diagnostics = executePortalGraph(this.#portalSubstrate, {
 			clearColor,
 			destination: null,
 			extent: { height: this.#frameHeight, width: this.#frameWidth },
 			plan: result.plan,
 			renderExterior: (_target, outdoorNodeId) => {
+				const contributionStartedAt = profile?.beginCpuPhase();
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
 					(left, right) => this.#comparePreparedObjectState(left, right),
 				);
-				this.#drawView({ ...prepared, ...contributions }, fog);
+				if (profile && contributionStartedAt !== undefined) {
+					profile.finishCpuPhase(
+						"contributionPreparation",
+						contributionStartedAt,
+					);
+				}
+				const view = { ...prepared, ...contributions };
+				if (profile) this.#drawProfiledView(view, fog, profile);
+				else this.#drawView(view, fog);
 			},
 			renderIndoorNodes: (_target, renderNodeIds) => {
+				const contributionStartedAt = profile?.beginCpuPhase();
 				const contributions = mergePortalNodeContributions(
 					renderNodeIds,
 					contributionsByNode,
 					(left, right) => this.#comparePreparedObjectState(left, right),
 				);
-				this.#drawView({ ...prepared, ...contributions }, fog);
+				if (profile && contributionStartedAt !== undefined) {
+					profile.finishCpuPhase(
+						"contributionPreparation",
+						contributionStartedAt,
+					);
+				}
+				const view = { ...prepared, ...contributions };
+				if (profile) this.#drawProfiledView(view, fog, profile);
+				else this.#drawView(view, fog);
 			},
 			resolveVisibilityAperture: (apertureId, crossingId) =>
 				this.#resolvePortalMask(prepared, apertureId, crossingId),
 		});
-		this.#frameSelectionMetrics.portalExecutionDurationMs +=
-			performance.now() - startedAt;
 		this.#accumulatePortalDiagnostics(diagnostics);
 		const portalTargets = this.#portalSubstrate.getDiagnostics();
 		this.#frameSelectionMetrics.sceneDomainTargetCount =
@@ -601,12 +684,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#assertDeviceReady();
 		this.#resizeCanvasForDpr();
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
-		const { planningDurationMs, result } = this.#planPortalRenderGraph(
+		const planningStartedAt = performance.now();
+		const result = this.#planPortalRenderGraph(
 			prepared,
 			viewInput,
 			rootScope,
 			safetyWorkItemLimit,
 		);
+		const planningDurationMs = performance.now() - planningStartedAt;
 		const selectedSceneEntryCount =
 			result.kind === "planned"
 				? this.#world.queryScopesScene(
@@ -633,12 +718,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#assertDeviceReady();
 		this.#resizeCanvasForDpr();
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
-		const { planningDurationMs, result } = this.#planPortalRenderGraph(
+		const planningStartedAt = performance.now();
+		const result = this.#planPortalRenderGraph(
 			prepared,
 			viewInput,
 			rootScope,
 			safetyWorkItemLimit,
 		);
+		const planningDurationMs = performance.now() - planningStartedAt;
 		if (result.kind !== "planned") {
 			return {
 				diagnostics: null,
@@ -651,6 +738,7 @@ export class WebGL2Renderer implements Renderer {
 		const contributionsByNode = this.#collectPortalNodeContributions(
 			prepared,
 			result.plan,
+			null,
 		);
 		const diagnostics = executePortalGraph(this.#portalSubstrate, {
 			clearColor: [
@@ -687,7 +775,6 @@ export class WebGL2Renderer implements Renderer {
 			portalTargets.activeTargetCount;
 		this.#frameSelectionMetrics.sceneDomainTargetBytes =
 			portalTargets.activeBytes;
-		this.#frameSelectionMetrics.portalPlanningDurationMs = planningDurationMs;
 		this.#finishFrameSelectionMetrics();
 		return {
 			diagnostics,
@@ -698,6 +785,8 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	async destroy(): Promise<void> {
+		this.#frameProfiler?.destroy();
+		this.#frameProfiler = null;
 		this.#textureSamplers.destroy();
 		this.#portalSubstrate.destroy();
 		this.#gl.deleteProgram(this.#terrainProgram.program);
@@ -738,6 +827,7 @@ export class WebGL2Renderer implements Renderer {
 			anchorLandblockId,
 			prepared.frustum,
 			envCellRenderMode,
+			null,
 		);
 		return {
 			...prepared,
@@ -784,10 +874,7 @@ export class WebGL2Renderer implements Renderer {
 		viewInput: FrameViewInput,
 		rootScope: SceneScope,
 		safetyWorkItemLimit: number,
-	): {
-		readonly planningDurationMs: number;
-		readonly result: PortalRenderGraphPlanResult;
-	} {
+	): PortalRenderGraphPlanResult {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		const nearClipVolume = createCameraNearClipVolume(
 			{
@@ -800,38 +887,37 @@ export class WebGL2Renderer implements Renderer {
 			},
 			aspectRatio,
 		);
-		const stencilBits = this.#gl.getParameter(this.#gl.STENCIL_BITS) as number;
-		const maximumStencilValue = Math.min(0xff, 2 ** stencilBits - 1);
-		const startedAt = performance.now();
-		const result = this.#portalRenderGraphPlanner.plan(
+		return this.#portalRenderGraphPlanner.plan(
 			this.#world.getPortalTopologyView(),
 			{
 				...prepared,
-				maximumStencilValue,
+				maximumStencilValue: MAXIMUM_PORTAL_RENDER_LAYER,
 				nearClipVolume,
 				rootScope,
 				safetyWorkItemLimit,
 			},
 		);
-		return {
-			planningDurationMs: performance.now() - startedAt,
-			result,
-		};
 	}
 
 	/** Resolve each unique graph node through the shared explicit-scope scene query exactly once. */
 	#collectPortalNodeContributions(
 		prepared: PreparedViewGeometry,
 		plan: PortalRenderWorkPlan,
+		profile: WebGL2FrameProfileCapture | null,
 	): ReadonlyMap<string, PreparedSceneContributions> {
 		const contributionsByNode = new Map<string, PreparedSceneContributions>();
 		const claimedSceneNodes = new Set<SceneNodeId>();
 		for (const node of plan.nodes) {
+			const queryStartedAt = profile?.beginCpuPhase();
 			const visible = this.#world.queryScopesScene(
 				prepared.frustum,
 				prepared.anchorLandblockId,
 				node.scopes,
 			);
+			if (profile && queryStartedAt !== undefined) {
+				profile.finishCpuPhase("sceneQuery", queryStartedAt);
+			}
+			const contributionStartedAt = profile?.beginCpuPhase();
 			for (const sceneNodeId of visible.entries) {
 				if (!claimedSceneNodes.add(sceneNodeId)) {
 					throw new Error(
@@ -847,6 +933,12 @@ export class WebGL2Renderer implements Renderer {
 					"portal",
 				),
 			);
+			if (profile && contributionStartedAt !== undefined) {
+				profile.finishCpuPhase(
+					"contributionPreparation",
+					contributionStartedAt,
+				);
+			}
 		}
 		if (contributionsByNode.size !== plan.nodes.length) {
 			throw new Error("Portal contribution collection lost a render node.");
@@ -891,13 +983,23 @@ export class WebGL2Renderer implements Renderer {
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		frustum: Frustum,
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+		profile: WebGL2FrameProfileCapture | null,
 	): PreparedSceneContributions {
+		const queryStartedAt = profile?.beginCpuPhase();
 		const visible = this.#world.queryFlatScene(frustum, anchorLandblockId);
-		return this.#resolveSceneContributions(
+		if (profile && queryStartedAt !== undefined) {
+			profile.finishCpuPhase("sceneQuery", queryStartedAt);
+		}
+		const contributionStartedAt = profile?.beginCpuPhase();
+		const contributions = this.#resolveSceneContributions(
 			anchorLandblockId,
 			visible.entries,
 			envCellRenderMode,
 		);
+		if (profile && contributionStartedAt !== undefined) {
+			profile.finishCpuPhase("contributionPreparation", contributionStartedAt);
+		}
+		return contributions;
 	}
 
 	/**
@@ -1272,8 +1374,6 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalRenderNodeCount = 0;
 		metrics.portalSubmittedRenderNodeCount = 0;
 		metrics.portalExteriorRenderCount = 0;
-		metrics.portalPlanningDurationMs = 0;
-		metrics.portalExecutionDurationMs = 0;
 		metrics.sceneDomainTargetCount = 0;
 		metrics.sceneDomainTargetBytes = 0;
 		metrics.visibleSceneEntries = 0;
@@ -1330,6 +1430,43 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawTerrain(view, fog);
 		this.#drawOpaqueObjects(view, fog);
 		this.#drawBlendedObjects(view);
+		this.#gl.bindVertexArray(null);
+		this.#beginObjectPhase();
+	}
+
+	/** Draw one view through opt-in CPU spans and non-blocking GPU timestamp intervals. */
+	#drawProfiledView(
+		view: PreparedView,
+		fog: FrameInput["environment"]["distanceFog"],
+		profile: WebGL2FrameProfileCapture,
+	): void {
+		const terrainGpu = profile.beginGpuPhase("terrain");
+		const terrainStartedAt = profile.beginCpuPhase();
+		try {
+			this.#drawTerrain(view, fog);
+		} finally {
+			profile.finishCpuPhase("terrainSubmission", terrainStartedAt);
+			terrainGpu?.finish();
+		}
+
+		const opaqueGpu = profile.beginGpuPhase("opaque");
+		const opaqueStartedAt = profile.beginCpuPhase();
+		try {
+			this.#drawOpaqueObjects(view, fog);
+		} finally {
+			profile.finishCpuPhase("opaqueSubmission", opaqueStartedAt);
+			opaqueGpu?.finish();
+		}
+
+		const blendedGpu = profile.beginGpuPhase("blended");
+		const blendedStartedAt = profile.beginCpuPhase();
+		try {
+			this.#drawBlendedObjects(view);
+		} finally {
+			profile.finishCpuPhase("blendedSubmission", blendedStartedAt);
+			blendedGpu?.finish();
+		}
+
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
 	}

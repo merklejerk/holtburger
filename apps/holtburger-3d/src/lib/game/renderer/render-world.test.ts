@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Frustum } from "../math/frustum";
-import { Mat4, Vec3 } from "../math/types";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { SceneTopologyView, VisibleScene } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { TextureArrayBinding } from "../textures/texture-manager";
@@ -39,7 +39,7 @@ const FRUSTUM = {
 } as const satisfies Frustum;
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
-const INSTANCE_DATA = { instances: [] } as const;
+const INSTANCE_DATA = { instances: [], sourceEnvelope: AABB3.zero() } as const;
 const TEXTURE_2D = "texture-2d-resource:1" as Texture2DResourceKey;
 const ARRAY = {
 	layersByAssetId: new Map(),

@@ -169,11 +169,11 @@
 							>
 						</div>
 						<div class="ac-param-row">
-							<span class="ac-param-key">Instance runs / upload</span>
+							<span class="ac-param-key">Generated cull / runs / upload</span>
 							<code
-								>{profile.cpu.mean.instanceRunPreparationMs.toFixed(2)} / {profile.cpu.mean.instanceUploadMs.toFixed(
+								>{profile.cpu.mean.generatedInstanceCullingMs.toFixed(2)} / {profile.cpu.mean.instanceRunPreparationMs.toFixed(
 									2,
-								)} ms</code
+								)} / {profile.cpu.mean.instanceUploadMs.toFixed(2)} ms</code
 							>
 						</div>
 						<div class="ac-param-row">
@@ -301,6 +301,15 @@
 					<span class="ac-param-key">Generated fragments / selected</span>
 					<code
 						>{metrics.selectedGeneratedInstanceFragmentCount} / {metrics.selectedGeneratedInstanceCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key"
+						>Generated tested / retained / rejected</span
+					>
+					<code
+						>{metrics.testedGeneratedInstanceCount} / {metrics.retainedGeneratedInstanceCount}
+						/ {metrics.rejectedGeneratedInstanceCount}</code
 					>
 				</div>
 				<div class="ac-param-row">

@@ -122,7 +122,12 @@ function geometryResult(
 		geometry: [],
 		instanceStreams:
 			strategy === "instanced"
-				? [{ data: { instances: [instance()] }, key: STREAM_KEY }]
+				? [
+						{
+							data: { instances: [instance()], sourceEnvelope: AABB3.zero() },
+							key: STREAM_KEY,
+						},
+					]
 				: [],
 		objects: [{ bounds: AABB3.zero(), drawUnits, frameStreamedInstances }],
 		metrics: {

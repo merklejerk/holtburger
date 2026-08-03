@@ -685,8 +685,19 @@ function prepareInstancedStaticObjectGeometry(
 		.entries()) {
 		const streamKey =
 			`static-instance-stream:${job.resourceNamespace}/cohort:${index}` as StaticInstanceStreamKey;
+		const sourceEnvelope = emptyBounds();
+		for (const partitionIdentity of cohort.partitionIdentities) {
+			const geometryData = partitionGeometry.get(partitionIdentity);
+			if (!geometryData) {
+				throw new Error(
+					`Static fragment cohort ${cohortIdentity} lost partition ${partitionIdentity}.`,
+				);
+			}
+			expandSourceGeometryBounds(sourceEnvelope, geometryData.positions);
+		}
+		assertFiniteBounds(sourceEnvelope);
 		instanceStreams.push({
-			data: { instances: cohort.instances },
+			data: { instances: cohort.instances, sourceEnvelope },
 			key: streamKey,
 		});
 		staticFragmentInstanceCount += cohort.instances.length;
@@ -851,6 +862,21 @@ function expandTransformedContributionBounds(
 			assertFiniteComponents(point.x, point.y, point.z, "instanced position");
 			expandBounds(bounds, point.x, point.y, point.z);
 		}
+	}
+}
+
+/** Expand a cohort envelope from worker-owned source geometry without device reconstruction. */
+function expandSourceGeometryBounds(
+	bounds: AABB3,
+	positions: Float32Array,
+): void {
+	for (let offset = 0; offset < positions.length; offset += 3) {
+		expandBounds(
+			bounds,
+			positions[offset]!,
+			positions[offset + 1]!,
+			positions[offset + 2]!,
+		);
 	}
 }
 

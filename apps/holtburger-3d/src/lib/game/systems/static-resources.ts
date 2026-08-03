@@ -1,5 +1,5 @@
 import type { ColorF } from "../pixels/types";
-import type { Mat4 } from "../math/types";
+import type { AABB3, Mat4 } from "../math/types";
 
 /** Matrix plus RGBA modulation values retained for every object instance. */
 export const OBJECT_INSTANCE_RECORD_FLOAT_COUNT = 20;
@@ -20,8 +20,7 @@ export type InstallStaticGeometryKey =
 
 /** Logical identity for either reusable or installation-specific static geometry. */
 export type StaticGeometryKey =
-	| ReusableStaticGeometryKey
-	| InstallStaticGeometryKey;
+	ReusableStaticGeometryKey | InstallStaticGeometryKey;
 
 /** Immutable cohort identity qualified by the installation that produced it. */
 export type StaticInstanceStreamKey =
@@ -37,6 +36,8 @@ export interface ObjectInstanceData {
 
 /** Complete immutable payload for one static instance cohort. */
 export interface StaticInstanceStreamData {
+	/** Source-geometry bounds shared by every transformed instance in this cohort. */
+	readonly sourceEnvelope: AABB3;
 	/** Instances drawn together by every draw unit referencing this stream. */
 	readonly instances: readonly ObjectInstanceData[];
 }

@@ -116,15 +116,15 @@ export interface FrameSelectionMetrics {
 	readonly submittedInstancedSourceTriangleCount: number;
 	/** Transparent baked ranges and instance templates classified for view submission. */
 	readonly transparentObjectCandidateCount: number;
-	/** Transparent candidates outside the near-sort radius and eligible for cohort batching. */
+	/** Transparent candidates outside the near-policy radius and eligible for cohort batching. */
 	readonly farTransparentObjectCandidateCount: number;
-	/** Transparent candidates inside the near-sort radius and ordered back-to-front. */
+	/** Transparent candidates inside the near-policy radius and ordered by coarse depth bands. */
 	readonly nearTransparentObjectCandidateCount: number;
 	/** Adjacent compatible transparent instance runs emitted after global ordering. */
 	readonly transparentFrameRunCount: number;
-	/** Cohort-batched transparent instance runs emitted outside the near-sort radius. */
+	/** Cohort-batched transparent instance runs emitted outside the near-policy radius. */
 	readonly farTransparentFrameRunCount: number;
-	/** Adjacent transparent instance runs emitted after near back-to-front ordering. */
+	/** Adjacent transparent instance runs emitted after near depth-band ordering. */
 	readonly nearTransparentFrameRunCount: number;
 	/** Per-view object-instance uploads with a non-empty population. */
 	readonly frameInstanceUploadCount: number;

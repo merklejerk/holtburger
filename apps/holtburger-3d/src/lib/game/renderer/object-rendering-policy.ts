@@ -1,22 +1,23 @@
-/** Retail-proven radius within which transparent object ranges sort back-to-front every frame. */
-export const OBJECT_TRANSPARENT_SORT_DISTANCE = 16;
-/** Squared form used by the frame-time sorter; derived to avoid a duplicated threshold literal. */
-export const OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED =
-	OBJECT_TRANSPARENT_SORT_DISTANCE * OBJECT_TRANSPARENT_SORT_DISTANCE;
+/** Retail-proven radius within which transparent ranges retain coarse camera-depth ordering. */
+export const OBJECT_TRANSPARENT_NEAR_DISTANCE = 16;
+/** Squared near-policy boundary used before assigning the bounded physical-depth bands. */
+export const OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED =
+	OBJECT_TRANSPARENT_NEAR_DISTANCE * OBJECT_TRANSPARENT_NEAR_DISTANCE;
+/** Coarse near-camera depth partitions limiting transparency ordering work and precision. */
+export const OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT = 8;
 
-/** One transparent baked range paired with its current-frame camera distance. */
+/** One transparent range paired with its current-frame camera distance. */
 export interface TransparentObjectRange<T> {
 	/** Precomputed squared camera distance; avoids per-comparison coordinate work and allocations. */
 	readonly distanceSquared: number;
 	readonly range: T;
-	readonly stableId: string;
 }
 
-/** Far batchable and near distance-ordered transparent phases for one view. */
+/** Far batchable and coarsely depth-ordered near transparent phases for one view. */
 export interface OrderedTransparentObjectRanges<T> {
-	/** Candidates outside the near-sort radius, ordered for deterministic draw compatibility. */
+	/** Candidates outside the near-policy radius, grouped by stable batching cohort. */
 	readonly far: readonly TransparentObjectRange<T>[];
-	/** Candidates inside the near-sort radius, ordered back-to-front. */
+	/** Candidates inside the near-policy radius, ordered by coarse back-to-front bands. */
 	readonly near: readonly TransparentObjectRange<T>[];
 }
 
@@ -173,32 +174,75 @@ export function objectBlendPolicy(rawSurfaceFlags: number): ObjectBlendPolicy {
 		: { destination: "one-minus-src-alpha", source: "src-alpha" };
 }
 
-/** Partition one view's transparency and independently order its batchable far and sorted near phases. */
+/** Partition transparency into bounded depth bands and stable owner-provided batching cohorts. */
 export function orderTransparentObjectRanges<T>(
 	ranges: readonly TransparentObjectRange<T>[],
-	compareFarForBatching: (left: T, right: T) => number,
+	batchKey: (range: T) => string | null,
 ): OrderedTransparentObjectRanges<T> {
 	const far: TransparentObjectRange<T>[] = [];
-	const near: TransparentObjectRange<T>[] = [];
+	const nearBuckets = Array.from(
+		{ length: OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT },
+		() => [] as TransparentObjectRange<T>[],
+	);
 	for (const range of ranges) {
-		(range.distanceSquared <= OBJECT_TRANSPARENT_SORT_DISTANCE_SQUARED
-			? near
-			: far
-		).push(range);
+		if (range.distanceSquared > OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED) {
+			far.push(range);
+			continue;
+		}
+		const bucket = Math.min(
+			OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT - 1,
+			Math.floor(
+				(Math.sqrt(range.distanceSquared) / OBJECT_TRANSPARENT_NEAR_DISTANCE) *
+					OBJECT_TRANSPARENT_DEPTH_BUCKET_COUNT,
+			),
+		);
+		const bucketRanges = nearBuckets[bucket];
+		if (!bucketRanges) {
+			throw new Error(
+				`Transparent range produced invalid depth bucket ${bucket}.`,
+			);
+		}
+		bucketRanges.push(range);
 	}
-	far.sort((left, right) => {
-		const batchingOrder = compareFarForBatching(left.range, right.range);
-		return batchingOrder !== 0
-			? batchingOrder
-			: left.stableId.localeCompare(right.stableId);
-	});
-	near.sort((left, right) => {
-		const distanceOrder = right.distanceSquared - left.distanceSquared;
-		return distanceOrder !== 0
-			? distanceOrder
-			: left.stableId.localeCompare(right.stableId);
-	});
-	return { far, near };
+	const near: TransparentObjectRange<T>[] = [];
+	for (let index = nearBuckets.length - 1; index >= 0; index -= 1) {
+		const bucketRanges = nearBuckets[index];
+		if (!bucketRanges) {
+			throw new Error(`Transparent depth bucket ${index} is missing.`);
+		}
+		for (const range of groupTransparentRanges(bucketRanges, batchKey)) {
+			near.push(range);
+		}
+	}
+	return { far: groupTransparentRanges(far, batchKey), near };
+}
+
+/** Group repeated cohorts in first-seen order; null keys remain singleton submissions. */
+function groupTransparentRanges<T>(
+	ranges: readonly TransparentObjectRange<T>[],
+	batchKey: (range: T) => string | null,
+): readonly TransparentObjectRange<T>[] {
+	const groups: TransparentObjectRange<T>[][] = [];
+	const groupByKey = new Map<string, TransparentObjectRange<T>[]>();
+	for (const range of ranges) {
+		const key = batchKey(range.range);
+		if (key === null) {
+			groups.push([range]);
+			continue;
+		}
+		let group = groupByKey.get(key);
+		if (!group) {
+			group = [];
+			groupByKey.set(key, group);
+			groups.push(group);
+		}
+		group.push(range);
+	}
+	const ordered: TransparentObjectRange<T>[] = [];
+	for (const group of groups) {
+		for (const range of group) ordered.push(range);
+	}
+	return ordered;
 }
 
 /**

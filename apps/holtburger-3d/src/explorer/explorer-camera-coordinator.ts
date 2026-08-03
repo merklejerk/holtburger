@@ -1,8 +1,4 @@
 import type { LandblockId } from "../lib/game/game-types";
-import {
-	createLandblockWorldOrigin,
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
-} from "../lib/game/landblocks";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
@@ -23,13 +19,10 @@ import {
 	type ExplorerResidencyResolution,
 } from "./explorer-residency";
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
-
-const CAMERA_FAR = 2_000;
-// Legacy used a 60-degree vertical FOV. Keeping it preserves both perceived movement and framing.
-const CAMERA_FOV_DEGREES = 60;
-const CAMERA_NEAR = 0.5;
-const OUTDOOR_FOCUS_CLEARANCE = 48;
-const OUTDOOR_FOCUS_OFFSET = 48;
+import {
+	EXPLORER_CAMERA_FRAMING,
+	resolveExplorerOutdoorFocusPose,
+} from "./explorer-camera-framing";
 
 type InteriorResidency = SceneResidency & {
 	readonly envCellId: NonNullable<SceneResidency["envCellId"]>;
@@ -236,23 +229,12 @@ export class ExplorerCameraCoordinator {
 		pending: Extract<PendingFocus, { readonly kind: "outdoor" }>,
 	): void {
 		if (this.#pending !== pending) return;
-		const origin = createLandblockWorldOrigin(pending.landblockId);
-		const center = new Vec3(
-			origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
-			0,
-			origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+		const pose = resolveExplorerOutdoorFocusPose(
+			this.#runtime,
+			pending.landblockId,
 		);
-		const position = new Vec3(
-			center.x + OUTDOOR_FOCUS_OFFSET,
-			0,
-			center.z + OUTDOOR_FOCUS_OFFSET,
-		);
-		const surface = this.#runtime.queryOutdoorTerrainSurface(position);
-		if (!surface || surface.landblockId !== pending.landblockId) return;
-		const centerSurface = this.#runtime.queryOutdoorTerrainSurface(center);
-		position.y = surface.height + OUTDOOR_FOCUS_CLEARANCE;
-		center.y = centerSurface?.height ?? surface.height;
-		this.#applyAutomaticPose(createLookAtPose(position, center));
+		if (!pose) return;
+		this.#applyAutomaticPose(pose);
 	}
 
 	#tryFocusInterior(
@@ -343,9 +325,7 @@ function createCamera(
 	state: FreeFlyCameraState,
 ): Camera {
 	return {
-		far: CAMERA_FAR,
-		fov: CAMERA_FOV_DEGREES,
-		near: CAMERA_NEAR,
+		...EXPLORER_CAMERA_FRAMING,
 		placement: {
 			...residency,
 			position: state.position,
@@ -354,20 +334,6 @@ function createCamera(
 				state.pitchRadians,
 			),
 		},
-	};
-}
-
-function createLookAtPose(position: Vec3, target: Vec3): FreeFlyCameraPose {
-	const lookX = target.x - position.x;
-	const lookY = target.y - position.y;
-	const lookZ = target.z - position.z;
-	const length = Math.hypot(lookX, lookY, lookZ);
-	if (length === 0)
-		throw new Error("Automatic camera focus target matches its position.");
-	return {
-		pitchRadians: Math.asin(lookY / length),
-		position,
-		yawRadians: Math.atan2(lookX, -lookZ),
 	};
 }
 

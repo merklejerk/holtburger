@@ -700,6 +700,7 @@ function prepareInstancedStaticObjectGeometry(
 				);
 			}
 			drawUnits.push({
+				cohortKey: partitionIdentity,
 				geometry: geometryKey,
 				indexCount: geometryData.indices.length,
 				indexStart: 0,

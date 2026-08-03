@@ -44,6 +44,22 @@ export interface PortalTargetCapabilityProbe {
 	readonly stencilBits: number;
 }
 
+/** Cold context identity captured only for an explicitly exported diagnostic report. */
+export interface WebGL2DeviceDiagnosticIdentity {
+	readonly renderer: string;
+	readonly shadingLanguageVersion: string;
+	readonly unmaskedRenderer: string | null;
+	readonly unmaskedVendor: string | null;
+	readonly vendor: string;
+	readonly version: string;
+}
+
+/** Privacy-gated constants exposed by WEBGL_debug_renderer_info when the browser permits it. */
+interface WebGLDebugRendererInfo {
+	readonly UNMASKED_RENDERER_WEBGL: GLenum;
+	readonly UNMASKED_VENDOR_WEBGL: GLenum;
+}
+
 /** Whole-device lifecycle state; a lost context requires rebuilding the complete runtime. */
 export type WebGL2DeviceStatus =
 	| { readonly kind: "ready" }
@@ -201,6 +217,29 @@ export class WebGL2Device {
 	getTextureFilteringCapabilities(): TextureFilteringCapabilities {
 		this.#assertReady();
 		return { ...this.#textureFilteringSupport.capabilities };
+	}
+
+	/** Read browser and driver identity only when the Explorer creates a diagnostic report. */
+	getDiagnosticIdentity(): WebGL2DeviceDiagnosticIdentity {
+		this.#assertReady();
+		const gl = this.#gl;
+		const debug = gl.getExtension(
+			"WEBGL_debug_renderer_info",
+		) as WebGLDebugRendererInfo | null;
+		return {
+			renderer: gl.getParameter(gl.RENDERER) as string,
+			shadingLanguageVersion: gl.getParameter(
+				gl.SHADING_LANGUAGE_VERSION,
+			) as string,
+			unmaskedRenderer: debug
+				? (gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) as string)
+				: null,
+			unmaskedVendor: debug
+				? (gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) as string)
+				: null,
+			vendor: gl.getParameter(gl.VENDOR) as string,
+			version: gl.getParameter(gl.VERSION) as string,
+		};
 	}
 
 	/**

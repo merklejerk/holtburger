@@ -92,13 +92,19 @@ describe("WebGL2FrameProfiler", () => {
 		const profiler = new WebGL2FrameProfiler(harness.gl);
 		for (let frameNumber = 1; frameNumber <= 61; frameNumber += 1) {
 			profiler.finishFrame({
+				blendedOrderingMs: 0,
 				blendedSubmissionMs: 0,
-				contributionPreparationMs: frameNumber * 2,
+				contribution: contributionMetrics(frameNumber),
+				contributionMergeMs: 0,
 				finalizationMs: 0,
 				frameNumber,
+				instanceRunPreparationMs: 0,
+				instanceUploadMs: 0,
+				objectPreparationMs: frameNumber * 2,
 				opaqueSubmissionMs: 0,
 				otherMs: 0,
 				portalGraphPlanningMs: 0,
+				sceneContributionResolutionMs: 0,
 				sceneQueryMs: 0,
 				setupMs: 0,
 				terrainSubmissionMs: 0,
@@ -115,9 +121,55 @@ describe("WebGL2FrameProfiler", () => {
 			sampleCount: 60,
 		});
 		expect(profile?.cpu.mean.totalMs).toBe(31.5);
-		expect(profile?.cpu.mean.contributionPreparationMs).toBe(63);
+		expect(profile?.cpu.mean.objectPreparationMs).toBe(63);
+		expect(profile?.cpu.contribution.latest.staticObjectPreparationCount).toBe(
+			61,
+		);
+		expect(profile?.cpu.contribution.mean.staticObjectPreparationCount).toBe(
+			31.5,
+		);
+	});
+
+	it("records portal contribution reuse and preparation work", () => {
+		const harness = createGpuHarness(false);
+		const profiler = new WebGL2FrameProfiler(harness.gl);
+		const frame = profiler.beginFrame();
+		frame.recordPortalNodePreparation();
+		frame.recordPortalNodePreparation();
+		frame.recordPortalContributionUse(["node-b", "node-a"]);
+		frame.recordPortalContributionUse(["node-a", "node-b"]);
+		frame.recordObjectPreparation(5, 2);
+		frame.recordContributionMerge();
+		frame.finish();
+
+		expect(profiler.getProfile()?.cpu.contribution.latest).toEqual({
+			...contributionMetrics(0),
+			multiNodeMergeCount: 1,
+			dynamicObjectPreparationCount: 2,
+			staticObjectPreparationCount: 5,
+			portalContributionSetCount: 1,
+			portalContributionSetUseCount: 2,
+			portalNodePreparationCount: 2,
+			portalNodeUseCount: 4,
+			repeatedPortalContributionSetUseCount: 1,
+			repeatedPortalNodeUseCount: 2,
+		});
 	});
 });
+
+function contributionMetrics(staticObjectPreparationCount: number) {
+	return {
+		multiNodeMergeCount: 0,
+		dynamicObjectPreparationCount: 0,
+		staticObjectPreparationCount,
+		portalContributionSetCount: 0,
+		portalContributionSetUseCount: 0,
+		portalNodePreparationCount: 0,
+		portalNodeUseCount: 0,
+		repeatedPortalContributionSetUseCount: 0,
+		repeatedPortalNodeUseCount: 0,
+	};
+}
 
 function createGpuHarness(
 	supported: boolean,

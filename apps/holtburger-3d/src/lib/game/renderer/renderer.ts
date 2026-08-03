@@ -152,12 +152,20 @@ export interface FrameSelectionMetrics {
 
 /** Non-overlapping renderer CPU wall-time phases aggregated from profiled frames. */
 export interface RendererCpuFrameTimings {
+	/** CPU wall time spent deriving distance and phase order for blended objects. */
+	readonly blendedOrderingMs: number;
 	/** CPU wall time spent submitting blended object work. */
 	readonly blendedSubmissionMs: number;
-	/** CPU wall time spent resolving and ordering selected scene contributions. */
-	readonly contributionPreparationMs: number;
+	/** CPU wall time spent concatenating multi-node portal contribution arrays. */
+	readonly contributionMergeMs: number;
 	/** CPU wall time spent finalizing renderer diagnostics. */
 	readonly finalizationMs: number;
+	/** CPU wall time spent encoding and uploading frame-local object instances. */
+	readonly instanceUploadMs: number;
+	/** CPU wall time spent forming compatible frame-instance submission runs. */
+	readonly instanceRunPreparationMs: number;
+	/** CPU wall time spent compiling draw-consumed object state. */
+	readonly objectPreparationMs: number;
 	/** CPU wall time spent submitting opaque object work. */
 	readonly opaqueSubmissionMs: number;
 	/** Renderer work outside the named spans, including portal masks and orchestration. */
@@ -166,6 +174,8 @@ export interface RendererCpuFrameTimings {
 	readonly portalGraphPlanningMs: number;
 	/** CPU wall time spent querying visible scene identities. */
 	readonly sceneQueryMs: number;
+	/** CPU wall time spent resolving selected scene identities into raw frame inputs. */
+	readonly sceneContributionResolutionMs: number;
 	/** CPU wall time spent preparing frame-global renderer state. */
 	readonly setupMs: number;
 	/** CPU wall time spent submitting terrain work. */
@@ -176,14 +186,43 @@ export interface RendererCpuFrameTimings {
 	readonly viewPreparationMs: number;
 }
 
+/** Per-frame contribution work recorded only by an explicitly active renderer profile. */
+export interface RendererContributionFrameMetrics {
+	/** Portal contribution callbacks that combined more than one prepared node. */
+	readonly multiNodeMergeCount: number;
+	/** Dynamic object inputs compiled into frame-current draw state. */
+	readonly dynamicObjectPreparationCount: number;
+	/** Non-dynamic object inputs compiled from retained scene contributions. */
+	readonly staticObjectPreparationCount: number;
+	/** Unique portal contribution node sets consumed by executor callbacks. */
+	readonly portalContributionSetCount: number;
+	/** Portal contribution node-set callback invocations. */
+	readonly portalContributionSetUseCount: number;
+	/** Portal nodes prepared before executor callbacks begin. */
+	readonly portalNodePreparationCount: number;
+	/** Prepared portal-node uses after the first use in the same frame. */
+	readonly repeatedPortalNodeUseCount: number;
+	/** Portal contribution node-set uses after the first identical set use. */
+	readonly repeatedPortalContributionSetUseCount: number;
+	/** Prepared portal nodes consumed by executor callbacks. */
+	readonly portalNodeUseCount: number;
+}
+
 /** Renderer CPU timings for one explicitly profiled frame. */
 export interface RendererCpuFrameProfile extends RendererCpuFrameTimings {
+	/** Contribution work counters for this profiled frame. */
+	readonly contribution: RendererContributionFrameMetrics;
 	/** Monotonic renderer-local frame identifier. */
 	readonly frameNumber: number;
 }
 
 /** Short rolling CPU profile that exposes both attribution and frame-time variance. */
 export interface RendererCpuFrameProfileWindow {
+	/** Latest and arithmetic-mean contribution work across this profile window. */
+	readonly contribution: {
+		readonly latest: RendererContributionFrameMetrics;
+		readonly mean: RendererContributionFrameMetrics;
+	};
 	/** Frame identifier of the most recently captured sample. */
 	readonly latestFrameNumber: number;
 	/** Total CPU wall time of the most recently captured sample. */
@@ -235,13 +274,25 @@ export interface RendererFrameProfile {
 	readonly gpu: RendererGpuFrameProfile;
 }
 
+/** One cold read of the renderer diagnostics that must describe the same session state. */
+export interface RendererFrameDiagnosticsSnapshot {
+	/** Latest completed profile, or null before the first sample and while profiling is disabled. */
+	readonly profile: RendererFrameProfile | null;
+	readonly profilingEnabled: boolean;
+	readonly selectionMetrics: FrameSelectionMetrics;
+}
+
+/** Optional diagnostic capability kept separate from the renderer's production draw contract. */
+export interface RendererFrameDiagnostics {
+	/** Read all interdependent frame facts through one consistent snapshot. */
+	snapshot(): RendererFrameDiagnosticsSnapshot;
+	/** Create or tear down the explicit timing session and its GPU query resources. */
+	setProfilingEnabled(enabled: boolean): void;
+}
+
 export interface Renderer {
+	/** Backend-specific diagnostics; absent renderers remain valid production implementations. */
+	readonly frameDiagnostics?: RendererFrameDiagnostics;
 	drawFrame(input: FrameInput): void;
 	destroy(): Promise<void>;
-	/** Return a cold diagnostic snapshot when this backend exposes frame selection metrics. */
-	getFrameSelectionMetrics?(): FrameSelectionMetrics;
-	/** Return the latest explicit profiling result, or null while profiling is disabled. */
-	getFrameProfile?(): RendererFrameProfile | null;
-	/** Opt into or fully tear down renderer profiling resources. */
-	setFrameProfilingEnabled?(enabled: boolean): void;
 }

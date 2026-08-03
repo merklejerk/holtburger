@@ -560,7 +560,68 @@ h1 {
 	gap: 12px;
 }
 
+.explorer-frame-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.explorer-frame-profile-toggle {
+	grid-column: 1 / -1;
+}
+
+.explorer-frame-summary {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.explorer-frame-summary > div {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+	padding: 8px;
+	border: 1px solid rgb(200 148 42 / 0.36);
+	background: rgb(22 17 8 / 0.55);
+}
+
+.explorer-frame-summary span {
+	color: var(--ac-ink-muted);
+	font-size: 0.76rem;
+}
+
+.explorer-frame-summary strong {
+	color: var(--ac-parchment);
+	font-family: var(--ac-font-mono);
+	font-size: 0.94rem;
+	font-weight: 400;
+}
+
+.explorer-frame-details {
+	border: 1px solid rgb(200 148 42 / 0.4);
+	background: rgb(22 17 8 / 0.38);
+}
+
+.explorer-frame-details summary {
+	padding: 8px 10px;
+	color: var(--ac-gold-bright);
+	cursor: pointer;
+	font-family: var(--ac-font-serif);
+}
+
+.explorer-frame-details[open] summary {
+	border-bottom: 1px solid rgb(200 148 42 / 0.36);
+}
+
+.explorer-frame-status {
+	margin: 0;
+	color: var(--ac-ink-muted);
+	font-size: 0.82rem;
+	overflow-wrap: anywhere;
+}
+
 .explorer-frame-note {
+	margin-bottom: 0;
 	color: var(--ac-ink-muted);
 	font-size: 0.82rem;
 }

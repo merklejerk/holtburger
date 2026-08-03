@@ -111,9 +111,14 @@ describe("GameRuntime view and interest control", () => {
 			drawFrame(input) {
 				frames.push(input);
 			},
-			getFrameSelectionMetrics: () => frameSelectionMetrics,
-			getFrameProfile: () => null,
-			setFrameProfilingEnabled,
+			frameDiagnostics: {
+				setProfilingEnabled: setFrameProfilingEnabled,
+				snapshot: () => ({
+					profile: null,
+					profilingEnabled: false,
+					selectionMetrics: frameSelectionMetrics,
+				}),
+			},
 		};
 		const pipeline: CommitPipeline = {
 			async prepareLandblockLayers(
@@ -184,8 +189,11 @@ describe("GameRuntime view and interest control", () => {
 				textureFiltering: "nearest",
 			},
 		});
-		expect(runtime.getFrameSelectionMetrics()).toEqual(frameSelectionMetrics);
-		expect(runtime.getRendererFrameProfile()).toBeNull();
+		expect(runtime.getRendererFrameDiagnostics()).toEqual({
+			profile: null,
+			profilingEnabled: false,
+			selectionMetrics: frameSelectionMetrics,
+		});
 		runtime.setRendererFrameProfilingEnabled(true);
 		expect(setFrameProfilingEnabled).toHaveBeenCalledWith(true);
 		const queriedPoint = createLandblockWorldOrigin("0x0102ffff").add(

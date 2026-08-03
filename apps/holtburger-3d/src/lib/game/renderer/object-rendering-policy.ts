@@ -123,33 +123,6 @@ export function areStaticObjectDrawsCompatible<TGeometry, TTexture, TSampler>(
 	);
 }
 
-/**
- * Order prepared state for reuse and deterministic compaction without implying draw compatibility.
- */
-export function comparePreparedObjectDrawState<TGeometry, TTexture, TSampler>(
-	left: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
-	right: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
-	identityOrder: (identity: TGeometry | TTexture | TSampler) => number,
-): number {
-	return (
-		left.cullFace.localeCompare(right.cullFace) ||
-		comparePreparedObjectMaterial(
-			left.material,
-			right.material,
-			identityOrder,
-		) ||
-		comparePreparedObjectDetail(left.detail, right.detail, identityOrder) ||
-		compareBoolean(left.wrapRepeat, right.wrapRepeat) ||
-		compareBoolean(left.palettedClipMap, right.palettedClipMap) ||
-		left.alphaTest - right.alphaTest ||
-		left.luminosity - right.luminosity ||
-		identityOrder(left.geometry) - identityOrder(right.geometry) ||
-		left.indexStart - right.indexStart ||
-		left.indexCount - right.indexCount ||
-		compareVector3(left.landblockOffset, right.landblockOffset)
-	);
-}
-
 const SURFACE_ALPHA = 0x100;
 const SURFACE_INVERSE_ALPHA = 0x200;
 const SURFACE_ADDITIVE = 0x10000;
@@ -277,6 +250,44 @@ export function formAdjacentObjectInstanceRuns<T>(
 	return submissions;
 }
 
+/**
+ * Group compatible opaque frame instances by an owner-provided semantic cohort in first-seen
+ * order. Exact compatibility remains authoritative when a cohort key is stale or collides.
+ */
+export function formGroupedObjectInstanceRuns<T>(
+	ordered: readonly T[],
+	isFrameInstance: (value: T) => boolean,
+	batchKey: (value: T) => string,
+	isCompatible: (left: T, right: T) => boolean,
+): readonly ObjectFrameSubmission<T>[] {
+	type MutableRun = { kind: "frame-instance-run"; values: [T, ...T[]] };
+	const submissions: Array<
+		{ readonly kind: "single"; readonly value: T } | MutableRun
+	> = [];
+	const runsByBatchKey = new Map<string, MutableRun[]>();
+	for (const value of ordered) {
+		if (!isFrameInstance(value)) {
+			submissions.push({ kind: "single", value });
+			continue;
+		}
+		const key = batchKey(value);
+		let runs = runsByBatchKey.get(key);
+		if (!runs) {
+			runs = [];
+			runsByBatchKey.set(key, runs);
+		}
+		const compatible = runs.find((run) => isCompatible(run.values[0], value));
+		if (compatible) {
+			compatible.values.push(value);
+			continue;
+		}
+		const created: MutableRun = { kind: "frame-instance-run", values: [value] };
+		runs.push(created);
+		submissions.push(created);
+	}
+	return submissions;
+}
+
 function preparedObjectMaterialEquals<TTexture, TSampler>(
 	left: PreparedObjectMaterial<TTexture, TSampler>,
 	right: PreparedObjectMaterial<TTexture, TSampler>,
@@ -292,99 +303,6 @@ function preparedObjectMaterialEquals<TTexture, TSampler>(
 		return left.kind === right.kind;
 	}
 	return preparedObjectAtlasBindingEquals(left.palette, right.palette);
-}
-
-function comparePreparedObjectMaterial<TGeometry, TTexture, TSampler>(
-	left: PreparedObjectMaterial<TTexture, TSampler>,
-	right: PreparedObjectMaterial<TTexture, TSampler>,
-	identityOrder: (identity: TGeometry | TTexture | TSampler) => number,
-): number {
-	const kind = materialKindOrder(left.kind) - materialKindOrder(right.kind);
-	if (kind !== 0) return kind;
-	const color = compareVector4(left.color, right.color);
-	if (color !== 0) return color;
-	if (left.kind === "solid-color" || right.kind === "solid-color") return 0;
-	const base = comparePreparedObjectAtlasBinding(
-		left.base,
-		right.base,
-		identityOrder,
-	);
-	if (base !== 0) return base;
-	if (left.kind === "direct-color" || right.kind === "direct-color") return 0;
-	return comparePreparedObjectAtlasBinding(
-		left.palette,
-		right.palette,
-		identityOrder,
-	);
-}
-
-function comparePreparedObjectDetail<TGeometry, TTexture, TSampler>(
-	left: PreparedObjectDetail<TTexture, TSampler> | null,
-	right: PreparedObjectDetail<TTexture, TSampler> | null,
-	identityOrder: (identity: TGeometry | TTexture | TSampler) => number,
-): number {
-	if (left === null || right === null) {
-		return left === right ? 0 : left === null ? -1 : 1;
-	}
-	return (
-		comparePreparedObjectTextureBinding(left, right, identityOrder) ||
-		compareVector4(left.rect, right.rect) ||
-		left.tiling - right.tiling
-	);
-}
-
-function comparePreparedObjectAtlasBinding<TGeometry, TTexture, TSampler>(
-	left: PreparedObjectAtlasBinding<TTexture, TSampler>,
-	right: PreparedObjectAtlasBinding<TTexture, TSampler>,
-	identityOrder: (identity: TGeometry | TTexture | TSampler) => number,
-): number {
-	return (
-		comparePreparedObjectTextureBinding(left, right, identityOrder) ||
-		compareVector4(left.rect, right.rect)
-	);
-}
-
-function comparePreparedObjectTextureBinding<TGeometry, TTexture, TSampler>(
-	left: PreparedObjectTextureBinding<TTexture, TSampler>,
-	right: PreparedObjectTextureBinding<TTexture, TSampler>,
-	identityOrder: (identity: TGeometry | TTexture | TSampler) => number,
-): number {
-	return (
-		identityOrder(left.texture) - identityOrder(right.texture) ||
-		identityOrder(left.sampler) - identityOrder(right.sampler)
-	);
-}
-
-function materialKindOrder(
-	kind: PreparedObjectMaterial<never, never>["kind"],
-): number {
-	if (kind === "solid-color") return 0;
-	if (kind === "direct-color") return 1;
-	if (kind === "index8") return 2;
-	return 3;
-}
-
-function compareBoolean(left: boolean, right: boolean): number {
-	return Number(left) - Number(right);
-}
-
-function compareVector3(
-	left: readonly [number, number, number],
-	right: readonly [number, number, number],
-): number {
-	return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
-}
-
-function compareVector4(
-	left: PreparedObjectVector4,
-	right: PreparedObjectVector4,
-): number {
-	return (
-		left[0] - right[0] ||
-		left[1] - right[1] ||
-		left[2] - right[2] ||
-		left[3] - right[3]
-	);
 }
 
 function preparedObjectDetailEquals<TTexture, TSampler>(

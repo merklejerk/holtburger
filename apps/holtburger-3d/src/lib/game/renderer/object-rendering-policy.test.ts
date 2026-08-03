@@ -4,8 +4,8 @@ import {
 	OBJECT_TRANSPARENT_NEAR_DISTANCE,
 	OBJECT_TRANSPARENT_NEAR_DISTANCE_SQUARED,
 	areStaticObjectDrawsCompatible,
-	comparePreparedObjectDrawState,
 	formAdjacentObjectInstanceRuns,
+	formGroupedObjectInstanceRuns,
 	objectBlendPolicy,
 	orderTransparentObjectRanges,
 	type PreparedStaticObjectDrawCompatibility,
@@ -185,6 +185,52 @@ describe("formAdjacentObjectInstanceRuns", () => {
 	});
 });
 
+describe("formGroupedObjectInstanceRuns", () => {
+	it("coalesces separated compatible cohorts in first-seen group order", () => {
+		const ordered = [
+			{ cohort: "a", compatible: "red", frame: true, id: "a1" },
+			{ cohort: null, compatible: "baked", frame: false, id: "baked" },
+			{ cohort: "b", compatible: "blue", frame: true, id: "b1" },
+			{ cohort: "a", compatible: "red", frame: true, id: "a2" },
+		];
+
+		const submissions = formGroupedObjectInstanceRuns(
+			ordered,
+			(value) => value.frame,
+			(value) => value.cohort ?? "",
+			(left, right) => left.compatible === right.compatible,
+		);
+
+		expect(
+			submissions.map((submission) =>
+				submission.kind === "single"
+					? submission.value.id
+					: submission.values.map(({ id }) => id),
+			),
+		).toEqual([["a1", "a2"], "baked", ["b1"]]);
+	});
+
+	it("splits a semantic cohort when exact compatibility differs", () => {
+		const ordered = [
+			{ cohort: "a", state: "red", id: "red-1" },
+			{ cohort: "a", state: "blue", id: "blue" },
+			{ cohort: "a", state: "red", id: "red-2" },
+		];
+
+		expect(
+			formGroupedObjectInstanceRuns(
+				ordered,
+				() => true,
+				(value) => value.cohort,
+				(left, right) => left.state === right.state,
+			),
+		).toEqual([
+			{ kind: "frame-instance-run", values: [ordered[0], ordered[2]] },
+			{ kind: "frame-instance-run", values: [ordered[1]] },
+		]);
+	});
+});
+
 describe("areStaticObjectDrawsCompatible", () => {
 	it("accepts equal consumed state despite unrelated fragment provenance", () => {
 		const compatibility = staticCompatibility();
@@ -197,13 +243,6 @@ describe("areStaticObjectDrawsCompatible", () => {
 		expect(
 			areStaticObjectDrawsCompatible(left.compatibility, right.compatibility),
 		).toBe(true);
-		expect(
-			comparePreparedObjectDrawState(
-				left.compatibility,
-				right.compatibility,
-				compareIdentity,
-			),
-		).toBe(0);
 	});
 
 	it("rejects every changed draw-consumed compatibility field", () => {
@@ -289,9 +328,6 @@ describe("areStaticObjectDrawsCompatible", () => {
 
 		for (const candidate of incompatible) {
 			expect(areStaticObjectDrawsCompatible(baseline, candidate)).toBe(false);
-			expect(
-				comparePreparedObjectDrawState(baseline, candidate, compareIdentity),
-			).not.toBe(0);
 		}
 	});
 
@@ -513,12 +549,6 @@ type StaticCompatibility = Omit<
 
 function identity(name: string): TestIdentity {
 	return { name };
-}
-
-function compareIdentity(left: TestIdentity): number {
-	let hash = 0;
-	for (const character of left.name) hash = hash * 31 + character.charCodeAt(0);
-	return hash;
 }
 
 function staticCompatibility(): StaticCompatibility {

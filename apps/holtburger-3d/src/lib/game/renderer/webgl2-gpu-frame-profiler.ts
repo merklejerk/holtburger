@@ -2,6 +2,7 @@ import type {
 	RendererCpuFrameProfile,
 	RendererCpuFrameProfileWindow,
 	RendererCpuFrameTimings,
+	RendererContributionFrameMetrics,
 	RendererFrameProfile,
 	RendererGpuFrameProfile,
 } from "./renderer";
@@ -14,7 +15,12 @@ export type WebGL2CpuFramePhase =
 	| "setup"
 	| "viewPreparation"
 	| "sceneQuery"
-	| "contributionPreparation"
+	| "sceneContributionResolution"
+	| "objectPreparation"
+	| "contributionMerge"
+	| "blendedOrdering"
+	| "instanceRunPreparation"
+	| "instanceUpload"
 	| "portalGraphPlanning"
 	| "terrainSubmission"
 	| "opaqueSubmission"
@@ -46,18 +52,53 @@ const MAX_PENDING_GPU_FRAMES = 4;
 const MAX_RETAINED_CPU_FRAMES = 60;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 const CPU_TIMING_KEYS = [
+	"blendedOrderingMs",
 	"blendedSubmissionMs",
-	"contributionPreparationMs",
+	"contributionMergeMs",
 	"finalizationMs",
+	"instanceRunPreparationMs",
+	"instanceUploadMs",
+	"objectPreparationMs",
 	"opaqueSubmissionMs",
 	"otherMs",
 	"portalGraphPlanningMs",
 	"sceneQueryMs",
+	"sceneContributionResolutionMs",
 	"setupMs",
 	"terrainSubmissionMs",
 	"totalMs",
 	"viewPreparationMs",
 ] as const satisfies readonly (keyof RendererCpuFrameTimings)[];
+
+const CONTRIBUTION_METRIC_KEYS = [
+	"multiNodeMergeCount",
+	"dynamicObjectPreparationCount",
+	"staticObjectPreparationCount",
+	"portalContributionSetCount",
+	"portalContributionSetUseCount",
+	"portalNodePreparationCount",
+	"repeatedPortalNodeUseCount",
+	"repeatedPortalContributionSetUseCount",
+	"portalNodeUseCount",
+] as const satisfies readonly (keyof RendererContributionFrameMetrics)[];
+
+type MutableContributionFrameMetrics = {
+	-readonly [Key in keyof RendererContributionFrameMetrics]: number;
+};
+
+function createEmptyContributionMetrics(): MutableContributionFrameMetrics {
+	return {
+		multiNodeMergeCount: 0,
+		dynamicObjectPreparationCount: 0,
+		staticObjectPreparationCount: 0,
+		portalContributionSetCount: 0,
+		portalContributionSetUseCount: 0,
+		portalNodePreparationCount: 0,
+		repeatedPortalNodeUseCount: 0,
+		repeatedPortalContributionSetUseCount: 0,
+		portalNodeUseCount: 0,
+	};
+}
 
 /** One active frame capture; timestamps never nest and results are consumed by its owner later. */
 export class WebGL2GpuFrameCapture {
@@ -298,16 +339,24 @@ export class WebGL2FrameProfileCapture {
 	readonly #gpu: WebGL2GpuFrameCapture | null;
 	readonly #startedAt: number;
 	readonly #cpu = {
+		blendedOrderingMs: 0,
 		blendedSubmissionMs: 0,
-		contributionPreparationMs: 0,
+		contributionMergeMs: 0,
 		finalizationMs: 0,
+		instanceRunPreparationMs: 0,
+		instanceUploadMs: 0,
+		objectPreparationMs: 0,
 		opaqueSubmissionMs: 0,
 		portalGraphPlanningMs: 0,
 		sceneQueryMs: 0,
+		sceneContributionResolutionMs: 0,
 		setupMs: 0,
 		terrainSubmissionMs: 0,
 		viewPreparationMs: 0,
 	};
+	readonly #contribution = createEmptyContributionMetrics();
+	readonly #portalContributionSetUses = new Map<string, number>();
+	readonly #portalNodeUses = new Map<string, number>();
 	#finished = false;
 
 	constructor(
@@ -342,6 +391,41 @@ export class WebGL2FrameProfileCapture {
 		this.#cpu[`${phase}Ms`] += performance.now() - startedAt;
 	}
 
+	/** Record one independently prepared scene contribution. */
+	recordObjectPreparation(staticCount: number, dynamicCount: number): void {
+		this.#contribution.staticObjectPreparationCount += staticCount;
+		this.#contribution.dynamicObjectPreparationCount += dynamicCount;
+	}
+
+	/** Record one portal node prepared exactly once before graph execution. */
+	recordPortalNodePreparation(): void {
+		this.#contribution.portalNodePreparationCount += 1;
+	}
+
+	/** Record the exact prepared-node set consumed by one executor callback. */
+	recordPortalContributionUse(renderNodeIds: readonly string[]): void {
+		const setIdentity = renderNodeIds.toSorted().join("\u0000");
+		const priorSetUses = this.#portalContributionSetUses.get(setIdentity) ?? 0;
+		this.#portalContributionSetUses.set(setIdentity, priorSetUses + 1);
+		this.#contribution.portalContributionSetUseCount += 1;
+		if (priorSetUses > 0) {
+			this.#contribution.repeatedPortalContributionSetUseCount += 1;
+		}
+		for (const renderNodeId of renderNodeIds) {
+			const priorNodeUses = this.#portalNodeUses.get(renderNodeId) ?? 0;
+			this.#portalNodeUses.set(renderNodeId, priorNodeUses + 1);
+			this.#contribution.portalNodeUseCount += 1;
+			if (priorNodeUses > 0) {
+				this.#contribution.repeatedPortalNodeUseCount += 1;
+			}
+		}
+	}
+
+	/** Record one multi-node contribution concatenation. */
+	recordContributionMerge(): void {
+		this.#contribution.multiNodeMergeCount += 1;
+	}
+
 	/** Begin one GPU phase interval when timestamp queries are supported and admitted. */
 	beginGpuPhase(phase: WebGL2GpuFramePhase): WebGL2GpuFramePhaseCapture | null {
 		return this.#gpu?.beginPhase(phase) ?? null;
@@ -358,7 +442,12 @@ export class WebGL2FrameProfileCapture {
 			this.#cpu.setupMs +
 			this.#cpu.viewPreparationMs +
 			this.#cpu.sceneQueryMs +
-			this.#cpu.contributionPreparationMs +
+			this.#cpu.sceneContributionResolutionMs +
+			this.#cpu.objectPreparationMs +
+			this.#cpu.contributionMergeMs +
+			this.#cpu.blendedOrderingMs +
+			this.#cpu.instanceRunPreparationMs +
+			this.#cpu.instanceUploadMs +
 			this.#cpu.portalGraphPlanningMs +
 			this.#cpu.terrainSubmissionMs +
 			this.#cpu.opaqueSubmissionMs +
@@ -366,6 +455,10 @@ export class WebGL2FrameProfileCapture {
 			this.#cpu.finalizationMs;
 		this.#owner.finishFrame({
 			...this.#cpu,
+			contribution: {
+				...this.#contribution,
+				portalContributionSetCount: this.#portalContributionSetUses.size,
+			},
 			frameNumber: this.#frameNumber,
 			otherMs: Math.max(0, totalMs - namedMs),
 			totalMs,
@@ -425,30 +518,45 @@ function summarizeCpuFrames(
 	const latest = frames.at(-1);
 	if (!latest) throw new Error("Cannot summarize an empty CPU profile window.");
 	const totals: Record<keyof RendererCpuFrameTimings, number> = {
+		blendedOrderingMs: 0,
 		blendedSubmissionMs: 0,
-		contributionPreparationMs: 0,
+		contributionMergeMs: 0,
 		finalizationMs: 0,
+		instanceRunPreparationMs: 0,
+		instanceUploadMs: 0,
+		objectPreparationMs: 0,
 		opaqueSubmissionMs: 0,
 		otherMs: 0,
 		portalGraphPlanningMs: 0,
 		sceneQueryMs: 0,
+		sceneContributionResolutionMs: 0,
 		setupMs: 0,
 		terrainSubmissionMs: 0,
 		totalMs: 0,
 		viewPreparationMs: 0,
 	};
+	const contributionTotals = createEmptyContributionMetrics();
 	for (const frame of frames) {
 		for (const key of CPU_TIMING_KEYS) totals[key] += frame[key];
+		for (const key of CONTRIBUTION_METRIC_KEYS) {
+			contributionTotals[key] += frame.contribution[key];
+		}
 	}
 	const sampleCount = frames.length;
 	const mean: RendererCpuFrameTimings = {
+		blendedOrderingMs: totals.blendedOrderingMs / sampleCount,
 		blendedSubmissionMs: totals.blendedSubmissionMs / sampleCount,
-		contributionPreparationMs: totals.contributionPreparationMs / sampleCount,
+		contributionMergeMs: totals.contributionMergeMs / sampleCount,
 		finalizationMs: totals.finalizationMs / sampleCount,
+		instanceRunPreparationMs: totals.instanceRunPreparationMs / sampleCount,
+		instanceUploadMs: totals.instanceUploadMs / sampleCount,
+		objectPreparationMs: totals.objectPreparationMs / sampleCount,
 		opaqueSubmissionMs: totals.opaqueSubmissionMs / sampleCount,
 		otherMs: totals.otherMs / sampleCount,
 		portalGraphPlanningMs: totals.portalGraphPlanningMs / sampleCount,
 		sceneQueryMs: totals.sceneQueryMs / sampleCount,
+		sceneContributionResolutionMs:
+			totals.sceneContributionResolutionMs / sampleCount,
 		setupMs: totals.setupMs / sampleCount,
 		terrainSubmissionMs: totals.terrainSubmissionMs / sampleCount,
 		totalMs: totals.totalMs / sampleCount,
@@ -462,10 +570,35 @@ function summarizeCpuFrames(
 		throw new Error("CPU profile percentile selection lost its sample.");
 	}
 	return {
+		contribution: {
+			latest: latest.contribution,
+			mean: averageContributionMetrics(contributionTotals, sampleCount),
+		},
 		latestFrameNumber: latest.frameNumber,
 		latestTotalMs: latest.totalMs,
 		mean,
 		p95TotalMs,
 		sampleCount,
+	};
+}
+
+function averageContributionMetrics(
+	totals: RendererContributionFrameMetrics,
+	sampleCount: number,
+): RendererContributionFrameMetrics {
+	return {
+		multiNodeMergeCount: totals.multiNodeMergeCount / sampleCount,
+		dynamicObjectPreparationCount:
+			totals.dynamicObjectPreparationCount / sampleCount,
+		staticObjectPreparationCount:
+			totals.staticObjectPreparationCount / sampleCount,
+		portalContributionSetCount: totals.portalContributionSetCount / sampleCount,
+		portalContributionSetUseCount:
+			totals.portalContributionSetUseCount / sampleCount,
+		portalNodePreparationCount: totals.portalNodePreparationCount / sampleCount,
+		repeatedPortalNodeUseCount: totals.repeatedPortalNodeUseCount / sampleCount,
+		repeatedPortalContributionSetUseCount:
+			totals.repeatedPortalContributionSetUseCount / sampleCount,
+		portalNodeUseCount: totals.portalNodeUseCount / sampleCount,
 	};
 }

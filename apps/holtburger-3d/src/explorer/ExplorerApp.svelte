@@ -20,9 +20,8 @@
 	import {
 		DEFAULT_FRAME_SETTINGS,
 		type FrameSettings,
-		type FrameSelectionMetrics,
 		type EnvCellRenderMode,
-		type RendererFrameProfile,
+		type RendererFrameDiagnosticsSnapshot,
 	} from "../lib/game/renderer/renderer";
 	import {
 		ExplorerCameraCoordinator,
@@ -44,6 +43,11 @@
 		type TextureFilteringCapabilities,
 		type TextureFilteringPolicy,
 	} from "../lib/game/renderer/texture-filtering-policy";
+	import {
+		createExplorerFrameDiagnosticReport,
+		type ExplorerFrameDiagnosticReport,
+		type ExplorerSceneInterestSnapshot,
+	} from "./explorer-frame-diagnostic-report";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -55,9 +59,9 @@
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
-	let frameSelectionMetrics: FrameSelectionMetrics | null = $state(null);
-	let rendererFrameProfile: RendererFrameProfile | null = $state(null);
-	let rendererFrameProfilingEnabled = $state(false);
+	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
+		$state(null);
+	let sceneInterest: ExplorerSceneInterestSnapshot | null = null;
 	let authoredDynamicRuntimeDiagnostics: ReturnType<
 		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 	> | null = $state(null);
@@ -125,10 +129,35 @@
 		if (!gameRuntime)
 			throw new Error("Renderer profiling requires an active runtime.");
 		gameRuntime.setRendererFrameProfilingEnabled(enabled);
-		rendererFrameProfilingEnabled = enabled;
-		rendererFrameProfile = enabled
-			? gameRuntime.getRendererFrameProfile()
-			: null;
+		rendererFrameDiagnostics = gameRuntime.getRendererFrameDiagnostics();
+	}
+
+	function captureFrameDiagnosticReport(): ExplorerFrameDiagnosticReport | null {
+		if (!gameRuntime || !webglDevice || !canvasElement) return null;
+		const frame = gameRuntime.getRendererFrameDiagnostics();
+		if (!frame) return null;
+		const viewport = canvasElement.getBoundingClientRect();
+		return createExplorerFrameDiagnosticReport({
+			applicationFrame: frameMetrics,
+			browser: {
+				userAgent: navigator.userAgent,
+				webgl: webglDevice.getDiagnosticIdentity(),
+			},
+			camera: cameraController?.snapshotState() ?? null,
+			cameraLocation,
+			capturedAt: new Date().toISOString(),
+			environment: environmentSelection,
+			frame,
+			frameSettings,
+			sceneInterest,
+			viewport: {
+				cssHeight: viewport.height,
+				cssWidth: viewport.width,
+				devicePixelRatio: window.devicePixelRatio,
+				drawingBufferHeight: canvasElement.height,
+				drawingBufferWidth: canvasElement.width,
+			},
+		});
 	}
 
 	function applyEnvironment(): void {
@@ -150,6 +179,10 @@
 		lod: LoDConfig,
 	): void {
 		cameraCoordinator?.requestSceneInterest(residency, lod);
+		sceneInterest = {
+			lod: { ...lod },
+			residency: { ...residency },
+		};
 	}
 
 	function readTextureAtlasPage(pageId: TexturePageId): Texture2DReadback {
@@ -190,9 +223,8 @@
 			gameRuntime = undefined;
 			runtimeReady = false;
 			cameraLocation = null;
-			frameSelectionMetrics = null;
-			rendererFrameProfile = null;
-			rendererFrameProfilingEnabled = false;
+			rendererFrameDiagnostics = null;
+			sceneInterest = null;
 			authoredDynamicRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
@@ -274,7 +306,7 @@
 				const step = (): void => {
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
-						frameSelectionMetrics = null;
+						rendererFrameDiagnostics = null;
 						authoredDynamicRuntimeDiagnostics = null;
 						frameHandle = window.requestAnimationFrame(step);
 						return;
@@ -301,8 +333,8 @@
 						frameMs: frameFinishedAt - tickStartedAt,
 					};
 					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {
-						frameSelectionMetrics = gameRuntime.getFrameSelectionMetrics();
-						rendererFrameProfile = gameRuntime.getRendererFrameProfile();
+						rendererFrameDiagnostics =
+							gameRuntime.getRendererFrameDiagnostics();
 						authoredDynamicRuntimeDiagnostics =
 							gameRuntime.getAuthoredDynamicRuntimeDiagnostics();
 						lastFrameSelectionSampleAt = frameFinishedAt;
@@ -370,10 +402,9 @@
 			maximumTextureAnisotropy={textureFilteringCapabilities?.maximumAnisotropy ??
 				null}
 			{updateTextureFiltering}
-			{frameSelectionMetrics}
-			{rendererFrameProfile}
-			{rendererFrameProfilingEnabled}
+			{rendererFrameDiagnostics}
 			{updateRendererFrameProfiling}
+			{captureFrameDiagnosticReport}
 			{authoredDynamicRuntimeDiagnostics}
 			{readStaticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}

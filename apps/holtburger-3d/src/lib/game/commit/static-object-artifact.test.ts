@@ -157,7 +157,12 @@ function drawUnit(strategy: "baked" | "instanced"): StaticObjectDrawUnit {
 	};
 	return strategy === "baked"
 		? { ...common, kind: "baked" }
-		: { ...common, instances: STREAM_KEY, kind: "instanced" };
+		: {
+				...common,
+				cohortKey: "fixture-partition",
+				instances: STREAM_KEY,
+				kind: "instanced",
+			};
 }
 
 function material(): ObjectMaterialBinding {

@@ -143,6 +143,39 @@ relitigate them by accident.
    gating it by role. The cost is that outdoor draws iterate the dynamic array; an empty set
    early-outs on a count check, so North Star 4 still holds whenever nothing dynamic is lit.
 
+## Spatial Scope
+
+**The landblock grid is our spatial index, and we add nothing on top of it.** Content residency
+already partitions the world, so static light gathering is "iterate this landblock's Objects-layer
+residents", and neighbour spill is a fixed nine-landblock fan-out performed once per residency
+change. There is no tree, no light grid, and no spatial query anywhere in the static path. This is
+recorded explicitly because its absence looks like an oversight otherwise: the acceleration
+structure exists, we just inherited it from content residency instead of building one.
+
+**The cost of that choice is coarseness.** A landblock is 192 units, while a light reaches
+`falloff * 1.5` — about 22.5 units at the maximum authored falloff of 15, assuming the outdoor
+falloff distribution matches the indoor one, which Phase 0 confirms. A landblock's set therefore
+contains lights that cannot reach most of its geometry, and the shader iterates all of them per
+vertex regardless. At the measured average of 3.6 lights per lit landblock this is irrelevant. At
+the archive's worst landblock of 51, a vertex genuinely reached by one or two lights still
+iterates 51, roughly 25x wasted iteration.
+
+**The escalation, if Phase 3 shows that matters, is culling the landblock set against each draw
+unit's bounds at bind time** — an AABB-versus-sphere test per light, reusing bounds already carried
+for footprint culling. It decouples gathering from binding: gathering and its residency cache stay
+per landblock, while binding tightens to per draw unit. That is a trade rather than a free win,
+because it pushes bind granularity down and feeds the bind-frequency risk below. Do not build it
+speculatively.
+
+**Clustered or tiled forward rendering is explicitly out of scope, and here is the threshold.**
+That technique earns its complexity at hundreds of lights per view. Our hard content ceiling is 51
+in the worst landblock in the entire archive, with single digits typical. Reaching for it should
+require arguing against that number.
+
+**Dynamic lights need no index at all.** The set is small by construction and selection is a linear
+pass over active producers. An index there would be guarding against a content problem rather than
+a performance one.
+
 ## North Stars
 
 1. One evaluation path for every runtime light. A second bespoke light uniform is a design
@@ -268,6 +301,8 @@ Decisions and course corrections: _(fill during execution)_
   for unlit landblocks and for frames where nothing moves.
 - Read the static bind-frequency metric. If binds track draw calls rather than landblocks, decide
   between sorting draws by landblock and escalating to a uniform buffer (see Risks).
+- Decide whether the per-vertex loop cost in a dense landblock justifies draw-unit bounds culling,
+  weighing it against the bind-frequency cost that culling introduces (see Spatial Scope).
 - Confirm the producer interface is genuinely additive by sketching, without building, how entity
   lights attach to the dynamic set. If it needs changes, make them now while the only dynamic
   producer is the headlamp.
@@ -291,7 +326,9 @@ Decisions and course corrections: _(fill during execution)_
   material batching, then move the static sets into a uniform buffer and bind with
   `bindBufferRange`, which turns a bind into a pointer change with no upload — cheap to reach for
   because the data is immutable per landblock.
-- **Per-vertex loop cost.** A light loop runs per vertex on every receiver. Terrain is _not_ the
+- **Per-vertex loop cost.** A light loop runs per vertex on every receiver, over the whole
+  landblock set rather than the lights that actually reach the vertex — see Spatial Scope for the
+  coarseness figure and the draw-unit culling escalation. Terrain is _not_ the
   worry: a landblock is 9x9 = 81 vertices, so fifty resident landblocks total roughly 4,000
   vertices, less than one building. Buildings and objects carry the vertex count. Mitigation:
   unlit landblocks bind an empty static set and take no loop; the Phase 3 resteer measures a dense

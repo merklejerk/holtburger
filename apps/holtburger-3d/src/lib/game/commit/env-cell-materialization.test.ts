@@ -33,8 +33,11 @@ describe("planEnvCellMaterialization", () => {
 		]);
 		const plan = planEnvCellMaterialization(layer([structure, overlapping]));
 
-		expect(plan.shellGeometries).toHaveLength(1);
+		// Shell geometry is per cell, not shared by CellStruct identity, because each cell
+		// bakes its own authored static lighting into its vertices.
+		expect(plan.shellGeometries).toHaveLength(2);
 		expect(plan.shells).toHaveLength(2);
+		expect(new Set(plan.shells.map((shell) => shell.geometry)).size).toBe(2);
 		expect(plan.residentJobs).toHaveLength(2);
 		expect(
 			plan.residentJobs.map((job) => ({
@@ -81,6 +84,7 @@ describe("planEnvCellMaterialization", () => {
 				resourceNamespace:
 					`static-install:${index}` as import("../systems/static-resources").StaticInstallResourceNamespace,
 				source: job.source,
+				staticLights: job.staticLights,
 			}),
 		);
 		expect(
@@ -141,6 +145,7 @@ describe("planEnvCellMaterialization", () => {
 						layer: options.layer,
 						resourceNamespace,
 						source: options.source,
+						staticLights: options.staticLights ?? [],
 					}),
 					resourceNamespace,
 					source: options.source,
@@ -322,6 +327,7 @@ function presentation(): ResolvedObjectPresentation {
 				materials: [SHARED_MATERIAL],
 			},
 		],
+		lights: [],
 		holdingLocations: new Map(),
 		placementPoses: new Map([
 			[0, { placementId: 0, partTransforms: [Mat4.identity()] }],

@@ -29,9 +29,13 @@ vec3 safeNormal(vec3 normal) {
 	return lengthSquared > 0.0 ? normal * inversesqrt(lengthSquared) : vec3(0.0);
 }
 
-vec3 evaluateSceneLighting(vec3 normal) {
+// Retail's fixed-function vertex color sums emissive, ambient and the diffuse light terms
+// before clamping once; burned-in interior lighting arrives through the emissive slot
+// (FFEmissiveColorSource = FromVertex, acclient.c:434243), so it adds here rather than
+// replacing the ambient term.
+vec3 evaluateSceneLighting(vec3 normal, vec3 bakedLight) {
 	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
-	return min(uAmbientLevel * uAmbientColor + sun * uSunColor, vec3(1.0));
+	return min(uAmbientLevel * uAmbientColor + sun * uSunColor + bakedLight, vec3(1.0));
 }
 `;
 

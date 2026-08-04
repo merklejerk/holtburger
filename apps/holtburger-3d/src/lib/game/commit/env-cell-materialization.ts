@@ -19,6 +19,11 @@ import type {
 import { qualifyPortalApertureId } from "../resolution/portal-scene-identity";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import type { ResolvedGeometry } from "../resolution/presentation";
+import {
+	bakeStaticLight,
+	placeObjectLights,
+	type PlacedStaticLight,
+} from "./interior-static-lighting";
 import type {
 	ObjectGeometryData,
 	PortalGeometryData,
@@ -65,6 +70,8 @@ interface EnvCellResidentMaterializationJob {
 	readonly id: `env-cell-resident-job:${string}`;
 	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;
 	readonly source: ResolvedEnvCellStaticObjectSource;
+	/** Landblock-space authored lights this cell's residents bake against. */
+	readonly staticLights: readonly PlacedStaticLight[];
 	readonly textureRequirements: readonly AssetTextureFact[];
 }
 
@@ -115,7 +122,6 @@ export function planEnvCellMaterialization(
 			readonly geometry: ObjectGeometryData;
 		}
 	>();
-	const shellGeometrySources = new Map<ObjectGeometryKey, ResolvedGeometry>();
 	const shellTextureRequirements = new Map<AssetTextureKey, AssetTextureFact>();
 	const shellMaterialIds = new Set<string>();
 	const shells: EnvCellShellMaterializationPlan[] = [];
@@ -126,6 +132,20 @@ export function planEnvCellMaterialization(
 	let expectedResidentCount = 0;
 	let plannedStaticResidentCount = 0;
 	let shellMaterialRangeCount = 0;
+
+	// Retail bakes with the union of nearby visible cells' lights, not just the owning cell's,
+	// which is how light reaches through doorways. Every light in the landblock is gathered once
+	// and the authored range cutoff decides which cells each one actually reaches.
+	const landblockLights: PlacedStaticLight[] = [];
+	for (const cell of source.cells) {
+		for (const resident of cell.residents) {
+			placeObjectLights(
+				resident.presentation.lights,
+				resident.placement.localTransform,
+				landblockLights,
+			);
+		}
+	}
 
 	for (const cell of source.cells) {
 		assertCellIdentity(source.landblockId, cell);
@@ -139,18 +159,23 @@ export function planEnvCellMaterialization(
 				`EnvCell ${cell.id} material count does not match its structure slots.`,
 			);
 		}
-		const geometryKey = createObjectGeometryKey(cell.structure.geometry.id);
-		const existingGeometry = shellGeometrySources.get(geometryKey);
-		if (existingGeometry && existingGeometry !== cell.structure.geometry) {
-			throw new Error(
-				`Shared CellStruct geometry ${cell.structure.geometry.id} has divergent buffers.`,
-			);
-		}
-		if (!existingGeometry) {
-			shellGeometrySources.set(geometryKey, cell.structure.geometry);
+		// Baked lighting is per cell, so shell geometry is keyed per cell rather than shared by
+		// CellStruct identity. Structures are tiny (median 10 vertices, max 113 across the whole
+		// archive), so the duplication is far cheaper than splicing per-cell color streams onto
+		// shared buffers.
+		const bakedLight = bakeStaticLight(
+			cell.structure.geometry.positions,
+			cell.structure.geometry.normals,
+			cell.structureToLandblock.localTransform,
+			landblockLights,
+		);
+		const geometryKey = createObjectGeometryKey(
+			`${cell.structure.geometry.id}/cell:${cell.id}`,
+		);
+		if (!shellGeometries.has(geometryKey)) {
 			shellGeometries.set(geometryKey, {
 				key: geometryKey,
-				geometry: objectGeometry(cell.structure.geometry),
+				geometry: objectGeometry(cell.structure.geometry, bakedLight),
 			});
 		}
 		const materialRanges = planShellMaterialRanges(
@@ -199,6 +224,7 @@ export function planEnvCellMaterialization(
 				envCellId: cell.id,
 			},
 			source: residentSource,
+			staticLights: landblockLights,
 			textureRequirements:
 				collectStaticObjectTextureDependencies(residentSource),
 		});
@@ -344,13 +370,17 @@ function assertCellIdentity(
 	}
 }
 
-function objectGeometry(geometry: ResolvedGeometry): ObjectGeometryData {
+function objectGeometry(
+	geometry: ResolvedGeometry,
+	bakedLight: Float32Array | null,
+): ObjectGeometryData {
 	return {
 		kind: "object",
 		positions: geometry.positions,
 		normals: geometry.normals,
 		textureCoordinates: geometry.textureCoordinates,
 		indices: geometry.indices,
+		bakedLight,
 	};
 }
 

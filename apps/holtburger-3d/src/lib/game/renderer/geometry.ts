@@ -14,6 +14,16 @@ export interface ObjectGeometryData {
 	readonly normals: Float32Array;
 	readonly textureCoordinates: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
+	/**
+	 * Interleaved RGB static light burned into each vertex, or null when a geometry receives
+	 * no authored static lighting.
+	 *
+	 * Retail bakes interior static lights into the mesh's vertex diffuse at construction
+	 * (`D3DPolyRender::SetStaticLightingVertexColors`, acclient.c:434570) and the fixed-function
+	 * pipeline adds it as the emissive term. Absent here means the shader's default zero
+	 * attribute, which contributes nothing.
+	 */
+	readonly bakedLight: Float32Array | null;
 }
 
 /** Position-only geometry used for portal masking and clipping. */

@@ -213,6 +213,27 @@ fn census_residents(content: &ContentRepository, cache: &ContentDecodeCache) -> 
         "note: stab placements are rigid frames (origin + quaternion, env_cell.rs Stab); \
          instance eligibility depends only on setup part transforms"
     );
+
+    // Shell geometry is shared per (environment, cell-struct) across cells, so this ratio is
+    // the memory multiplier a per-cell vertex-color bake would cost.
+    let mut structure_uses: BTreeMap<(u16, u16), usize> = BTreeMap::new();
+    for &cell_id in &cell_ids {
+        let Ok(cell) = cache.env_cell(content, cell_id) else {
+            continue;
+        };
+        *structure_uses
+            .entry((cell.environment_id, cell.cell_structure))
+            .or_default() += 1;
+    }
+    let total_uses: usize = structure_uses.values().sum();
+    let mut reuse: Vec<usize> = structure_uses.values().copied().collect();
+    reuse.sort_unstable();
+    println!(
+        "distinct shell structures: {} across {total_uses} cells (mean reuse {:.1}x, max {})",
+        structure_uses.len(),
+        total_uses as f64 / structure_uses.len().max(1) as f64,
+        reuse.last().copied().unwrap_or(0)
+    );
     Ok(())
 }
 

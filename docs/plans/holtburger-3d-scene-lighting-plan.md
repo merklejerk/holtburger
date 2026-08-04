@@ -1,6 +1,6 @@
 # Holtburger 3D Scene Lighting Plan
 
-Status: Draft — not yet executing.
+Status: Executing. Phases 0-3 complete; Phase 4 resteer done and awaiting one design decision.
 Created: 2026-08-03
 
 ## Goal
@@ -13,11 +13,9 @@ lighting, and authored static interior lights — in the currently unlit holtbur
 **In scope**
 
 - Region-driven sun + ambient resolution with time-of-day interpolation (`SkyTimeOfDay` brackets).
-- Terrain lighting (`ambient + N·L` per vertex) and the per-terrain-type vertex color variation
-  already packed into the composition table but never sampled.
+- Terrain lighting (`ambient + N·L` per vertex).
 - Object/building lighting outdoors via the retail fixed-function equation.
-- Per-draw-unit lighting context so portal-visible interiors and sunlit outdoors coexist in one
-  frame.
+- Per-draw lighting roles so portal-visible interiors and sunlit outdoors coexist in one frame.
 - Setup `LightInfo` plumbing from `holtburger-dat` through `holtburger-content` to the frontend.
 - Interior lighting: burned-in static lights for all interior static geometry (shells and
   residents), forced interior ambient, and the viewer headlamp.
@@ -456,6 +454,44 @@ Reassess before the interior phase, which carries the plan's structural risk:
   (interior ambient state and cell identity for bake association), or adjust its shape now.
 - Review accumulated debt and shader/tuning knobs introduced so far; fold corrections into the
   remaining phases.
+
+Progress: Dry run complete (2026-08-04); **blocked on one design decision** before Phase 5 can
+execute.
+
+Findings:
+
+- **`seen_outside` needs no plumbing.** The host already serializes a `cellFlags` u32 section
+  (`env_cell_source.rs:173`), the frontend already decodes it into each cell's `flags`
+  (`decode-env-cell-record.ts:724`), and `seen_outside` is bit `0x01`. Phase 5's forced interior
+  ambient only needs the camera cell's flags at frame time, not a new content field. Phase 5's
+  first task shrinks to `LightInfo` alone.
+- **Phase 3's lighting roles are sufficient.** Cell draws already select `interior-object`; Phase 5
+  swaps in the forced 0.2-white ambient for the camera-inside case. No contract reshaping needed.
+- **Shell geometry sharing is far heavier than assumed, which reopens the bake decision.** The host
+  deduplicates shell geometry by `(environment_id, local_selector)`
+  (`env_cell_source.rs:99-149`), and the frontend does the same by geometry id
+  (`env-cell-materialization.ts:142-151`). Census over the full archive: **3,145 distinct shell
+  structures serve 734,976 cells — mean reuse 234x, maximum 29,314x.** Retail could bake because
+  it constructed one mesh per cell; we deliberately do not.
+
+**Open decision (needs a call before Phase 5):** how interior static lights reach shell and
+resident geometry.
+
+- _Option A — per-cell vertex-color bake_ (current plan). Retail's exact mechanism. Requires
+  un-sharing shell geometry per cell or adding a per-cell color stream plus a per-cell VAO and
+  geometry resource entry, new materialization and resource-manager machinery, and a CPU/GPU
+  parity fixture because residents bake on the CPU while the headlamp evaluates in the shader.
+- _Option B — per-cell light uniform array_ (the approach dropped pre-execution when interior
+  instancing turned out not to exist). Shell and resident geometry both stay shared and unmodified;
+  EnvCell draws are already per cell, so each binds its own light array. One evaluation path for
+  every light in the plan, which deletes the parity-fixture risk entirely, and no worker,
+  materialization, or resource-manager changes. Costs a bounded vertex-stage loop (census: p50 1,
+  p99 5, max 26 lights per cell) and is the same shader-instead-of-bake departure already blessed
+  for terrain and objects.
+
+Recommendation: Option B. It is strictly less machinery, removes the plan's largest stated risk,
+and produces identical per-vertex output. It does reverse the earlier steer that shell geometry
+could simply be un-deduplicated, which was made before the 234x sharing factor was measured.
 
 ### Phase 5: Interior lighting — authored static lights
 

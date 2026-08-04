@@ -77,6 +77,7 @@ function artifact(id: string): EnvCellLayerArtifact {
 			landblockId: "0x0001ffff",
 		},
 		structureToLandblock: Mat4.identity(),
+		seenOutside: false,
 		visibilityIslandId: `env-cell-island:${id}`,
 	};
 	return {

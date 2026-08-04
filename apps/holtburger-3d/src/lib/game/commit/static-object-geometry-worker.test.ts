@@ -45,7 +45,6 @@ describe("prepareStaticObjectGeometry", () => {
 		});
 		const generated = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:object-detail" as const,
 			source: generatedSource([
 				resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
@@ -53,7 +52,6 @@ describe("prepareStaticObjectGeometry", () => {
 		});
 		const indoorResident = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.EnvCells,
-			staticLights: [],
 			resourceNamespace: "static-install:env-cell-resident-detail" as const,
 			source: envCellResidentSource([
 				resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
@@ -165,6 +163,7 @@ describe("prepareStaticObjectGeometry", () => {
 						partIndex: 1,
 					},
 				],
+				lights: [],
 				holdingLocations: new Map(),
 				placementPoses: new Map([
 					[
@@ -228,13 +227,11 @@ describe("prepareStaticObjectGeometry", () => {
 		} satisfies ResolvedOutdoorStaticLayerSource;
 		const buildings = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Buildings,
-			staticLights: [],
 			resourceNamespace: "static-install:shared" as const,
 			source: buildingsSource,
 		});
 		const objects = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Objects,
-			staticLights: [],
 			resourceNamespace: "static-install:shared" as const,
 			source: objectsSource,
 		});
@@ -266,7 +263,6 @@ describe("prepareStaticObjectGeometry", () => {
 
 		const result = await worker.prepare({
 			layer: LandblockLayerKind.Buildings,
-			staticLights: [],
 			resourceNamespace: "static-install:transfer" as const,
 			source: input,
 		});
@@ -285,7 +281,6 @@ describe("prepareStaticObjectGeometry", () => {
 
 		const result = await worker.prepare({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:generated-envelope-transfer" as const,
 			source: generatedSource([
 				resident("generated-transfer", Mat4.identity(), new Vec3(1, 1, 1)),
@@ -319,7 +314,6 @@ describe("prepareStaticObjectGeometry", () => {
 
 		const result = await worker.prepare({
 			layer: LandblockLayerKind.Buildings,
-			staticLights: [],
 			resourceNamespace: "static-install:shared-dynamic" as const,
 			source: input,
 		});
@@ -352,7 +346,6 @@ describe("prepareStaticObjectGeometry", () => {
 		};
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:generated-repeated" as const,
 			source: generatedSource([first, second]),
 		});
@@ -411,7 +404,6 @@ describe("prepareStaticObjectGeometry", () => {
 
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:generated-clustered" as const,
 			source: generatedSource([first, second, third]),
 		});
@@ -447,7 +439,6 @@ describe("prepareStaticObjectGeometry", () => {
 
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:generated-mixed" as const,
 			source: generatedSource(residents),
 		});
@@ -522,7 +513,6 @@ describe("prepareStaticObjectGeometry", () => {
 
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:partition-membership" as const,
 			source: generatedSource([
 				{ ...first, presentation: firstPresentation },
@@ -575,7 +565,6 @@ describe("prepareStaticObjectGeometry", () => {
 
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:generated-setup" as const,
 			source: generatedSource([setupResident]),
 		});
@@ -592,7 +581,6 @@ describe("prepareStaticObjectGeometry", () => {
 	it("falls back explicitly for unsupported generated transforms", () => {
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:generated-fallback" as const,
 			source: generatedSource([
 				resident("non-uniform", Mat4.identity(), new Vec3(2, 3, 2)),
@@ -610,7 +598,6 @@ describe("prepareStaticObjectGeometry", () => {
 	it("merges an explicit baked fallback with eligible generated cohorts", () => {
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			staticLights: [],
 			resourceNamespace: "static-install:generated-mixed-fallback" as const,
 			source: generatedSource([
 				resident("eligible", Mat4.identity(), new Vec3(1, 1, 1)),
@@ -664,12 +651,8 @@ class TransferWorkerPort implements ClosedWorkerPort {
 	terminate(): void {}
 }
 
-function bake(
-	job: Omit<StaticObjectGeometryPreparationJob, "layer" | "staticLights"> &
-		Partial<Pick<StaticObjectGeometryPreparationJob, "staticLights">>,
-) {
+function bake(job: Omit<StaticObjectGeometryPreparationJob, "layer">) {
 	return prepareStaticObjectGeometry({
-		staticLights: [],
 		...job,
 		layer: LandblockLayerKind.Buildings,
 	});
@@ -702,6 +685,7 @@ function envCellResidentSource(
 		dynamicSources: [],
 		envCellId: "0xda550101",
 		kind: LandblockLayerKind.EnvCells,
+		staticLights: [],
 		landblockId: "0xda55ffff",
 		staticResidents,
 	};
@@ -744,6 +728,7 @@ function resident(
 		presentation: {
 			appearanceKey: `appearance:${id}`,
 			id: `presentation:${id}` as const,
+			lights: [],
 			parts: [
 				{
 					defaultScale: new Vec3(1, 1, 1),

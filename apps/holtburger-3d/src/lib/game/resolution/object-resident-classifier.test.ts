@@ -95,6 +95,7 @@ function resident(
 		},
 		presentation: {
 			appearanceKey: `appearance:${id}`,
+			lights: [],
 			holdingLocations: new Map(),
 			id: `presentation:${id}`,
 			parts: [],

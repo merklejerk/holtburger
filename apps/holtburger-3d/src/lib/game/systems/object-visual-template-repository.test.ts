@@ -297,6 +297,7 @@ function source(id: string, appearanceKey: string): AuthoredDynamicSource {
 		},
 		presentation: {
 			appearanceKey,
+			lights: [],
 			holdingLocations: new Map(),
 			id: `presentation:${appearanceKey}`,
 			parts: [

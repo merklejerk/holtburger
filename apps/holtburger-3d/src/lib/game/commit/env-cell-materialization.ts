@@ -75,8 +75,6 @@ interface EnvCellResidentMaterializationJob {
 	readonly id: `env-cell-resident-job:${string}`;
 	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;
 	readonly source: ResolvedEnvCellStaticObjectSource;
-	/** Landblock-space authored lights this cell's residents bake against. */
-	readonly staticLights: readonly PlacedStaticLight[];
 	readonly textureRequirements: readonly AssetTextureFact[];
 }
 
@@ -221,6 +219,7 @@ export function planEnvCellMaterialization(
 			envCellId: cell.id,
 			staticResidents: classified.staticResidents,
 			dynamicSources: classified.dynamicSources,
+			staticLights: landblockLights,
 		};
 		residentJobs.push({
 			id: `env-cell-resident-job:${source.landblockId}/${cell.id}`,
@@ -230,7 +229,6 @@ export function planEnvCellMaterialization(
 				envCellId: cell.id,
 			},
 			source: residentSource,
-			staticLights: landblockLights,
 			textureRequirements:
 				collectStaticObjectTextureDependencies(residentSource),
 		});

@@ -300,6 +300,7 @@ describe("SceneGraph", () => {
 				landblockId: envCellPlacement.landblockId,
 			},
 			structureToLandblock: Mat4.identity(),
+			seenOutside: false,
 			visibilityIslandId: `env-cell-island:${envCellPlacement.envCellId}`,
 		});
 
@@ -360,6 +361,7 @@ describe("SceneGraph", () => {
 					landblockId: "0x0102ffff",
 				},
 				structureToLandblock: Mat4.identity(),
+				seenOutside: false,
 				visibilityIslandId: `env-cell-island:${envCellId}`,
 			});
 		}
@@ -402,6 +404,7 @@ describe("SceneGraph", () => {
 				landblockId: "0x0102ffff",
 			},
 			structureToLandblock: createTranslationMat4(new Vec3(200, 0, -20)),
+			seenOutside: false,
 			visibilityIslandId: "env-cell-island:0x01020001",
 		});
 		const point = createLandblockWorldOrigin("0x0102ffff").add(
@@ -426,6 +429,7 @@ describe("SceneGraph", () => {
 				landblockId: "0x0102ffff",
 			},
 			structureToLandblock: Mat4.identity(),
+			seenOutside: false,
 			visibilityIslandId: "env-cell-island:0x01020001",
 		});
 		const point = createLandblockWorldOrigin("0x0202ffff").add(
@@ -586,6 +590,7 @@ function createBoundedRoot(
 			potentiallyVisibleEnvCellIds: new Set(),
 			scope: envCellScope(landblockId, envCellId),
 			structureToLandblock: Mat4.identity(),
+			seenOutside: false,
 			visibilityIslandId: `env-cell-island:${envCellId}`,
 		});
 	}
@@ -624,6 +629,7 @@ function createEnvCellGroupedRoot(
 		potentiallyVisibleEnvCellIds: new Set(),
 		scope,
 		structureToLandblock: Mat4.identity(),
+		seenOutside: false,
 		visibilityIslandId: `env-cell-island:${scope.envCellId}`,
 	});
 	return scene.createNode({

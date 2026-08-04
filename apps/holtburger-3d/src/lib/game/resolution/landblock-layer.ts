@@ -1,3 +1,4 @@
+import type { PlacedStaticLight } from "./presentation";
 import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
 import type { ScenePlacement, SceneScope } from "../scene";
@@ -257,6 +258,15 @@ export interface ResolvedEnvCellStaticObjectSource {
 	readonly staticResidents: readonly ResolvedObjectResident[];
 	/** Animation sources retained so worker transfer cannot detach their shared visual buffers. */
 	readonly dynamicSources: readonly AuthoredDynamicSource[];
+	/**
+	 * Authored lights to bake into this cell's residents, in landblock space.
+	 *
+	 * Carried on the source rather than passed beside it so the lights travel with the geometry
+	 * they light: a resident job cannot be prepared without them and silently render unlit.
+	 * Outdoor sources have no equivalent field, because retail lights outdoor geometry with the
+	 * sun and global ambient only.
+	 */
+	readonly staticLights: readonly PlacedStaticLight[];
 }
 
 /** Static-object source shape shared by outdoor layers and one exact EnvCell scope. */

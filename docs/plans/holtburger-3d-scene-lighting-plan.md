@@ -33,6 +33,11 @@ lighting, and authored static interior lights — in the currently unlit holtbur
   [holtburger-3d-dynamic-entity-runtime-plan.md](holtburger-3d-dynamic-entity-runtime-plan.md).
   Known interim consequence: dynamic entities in interiors render at the flat forced interior
   ambient.
+- Outdoor authored point lights: split into
+  [holtburger-3d-runtime-light-system-plan.md](holtburger-3d-runtime-light-system-plan.md), which
+  generalizes this plan's viewer headlamp into a producer-driven runtime light system. Outdoor
+  emitters and receivers live in independently streaming layers, so they are evaluated rather than
+  baked; interior baking is retained deliberately.
 - Spell/quest environment overrides (`LScape::m_override_*`) — requires a network client.
 - Screen brightness/gamma preference.
 - Specular — retail disables it globally; there is nothing to implement.

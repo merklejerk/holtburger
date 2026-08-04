@@ -117,6 +117,9 @@ describe("prepareStaticObjectGeometry", () => {
 		).toBeNull();
 	});
 
+	// Retail never normalizes, validates, or derives a face normal for an authored GfxObj
+	// normal, and 2.6% of retail vertices author exactly zero. Its software sun term yields
+	// nothing for them because max(0, N.L) is zero, which the object shader reproduces.
 	it("preserves zero authored normals without inventing face-lighting data", () => {
 		const base = resident("opaque", Mat4.identity(), new Vec3(1, 1, 1));
 		const zeroNormals = {

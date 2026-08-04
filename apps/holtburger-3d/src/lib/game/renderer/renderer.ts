@@ -166,6 +166,8 @@ export interface FrameSelectionMetrics {
 	readonly frameInstanceGrowthCount: number;
 	/** Lifetime largest per-view object instance population. */
 	readonly frameInstanceViewHighWaterMark: number;
+	/** Lighting-uniform binds caused by a draw changing its retail lighting role. */
+	readonly objectLightingBinds: number;
 	/** Object-program activation count across every rendered view. */
 	readonly objectProgramChanges: number;
 	/** Physical two-dimensional object texture binds performed across every rendered view. */

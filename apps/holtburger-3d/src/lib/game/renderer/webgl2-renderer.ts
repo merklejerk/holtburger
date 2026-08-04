@@ -71,6 +71,11 @@ import {
 } from "./webgl2-object-program";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import { UNAUTHORED_SCENE_LIGHTING } from "../environment/scene-environment";
+import {
+	objectLightingRole,
+	resolveSceneLightingByRole,
+	type SceneLightingByRole,
+} from "../environment/scene-lighting";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
 import { bindWebGL2SceneLighting } from "./webgl2-lighting";
 import {
@@ -126,7 +131,8 @@ const PORTAL_PLANNING_WORK_ITEM_LIMIT = 100_000;
  */
 interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
-	readonly lighting: FrameInput["environment"]["lighting"];
+	/** Lighting per draw role, derived once per frame so draw loops stay allocation-free. */
+	readonly lighting: SceneLightingByRole;
 }
 
 /**
@@ -135,7 +141,7 @@ interface SceneShading {
  */
 const PROBE_SHADING: SceneShading = {
 	fog: null,
-	lighting: UNAUTHORED_SCENE_LIGHTING,
+	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
 };
 
 interface TerrainFrameInput {
@@ -310,6 +316,7 @@ interface MutableFrameSelectionMetrics {
 	frameInstanceCapacity: number;
 	frameInstanceGrowthCount: number;
 	frameInstanceViewHighWaterMark: number;
+	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
 }
@@ -426,6 +433,7 @@ export class WebGL2Renderer implements Renderer {
 		frameInstanceCapacity: 0,
 		frameInstanceGrowthCount: 0,
 		frameInstanceViewHighWaterMark: 0,
+		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
 	};
@@ -544,7 +552,7 @@ export class WebGL2Renderer implements Renderer {
 			: null;
 		const shading: SceneShading = {
 			fog,
-			lighting: input.environment.lighting,
+			lighting: resolveSceneLightingByRole(input.environment.lighting),
 		};
 		this.#beginFrame(input.environment, shading);
 		if (profile && setupStartedAt !== undefined) {
@@ -1485,6 +1493,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.frameInstanceCapacity = 0;
 		metrics.frameInstanceGrowthCount = 0;
 		metrics.frameInstanceViewHighWaterMark = 0;
+		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
 	}
@@ -1580,7 +1589,7 @@ export class WebGL2Renderer implements Renderer {
 		bindWebGL2SceneLighting(
 			gl,
 			this.#terrainProgram.uniforms,
-			shading.lighting,
+			shading.lighting.terrain,
 		);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
@@ -1758,6 +1767,7 @@ export class WebGL2Renderer implements Renderer {
 				if (this.#objectState.applyProgram(program.program)) {
 					this.#activateObjectProgram(program, view, shading);
 				}
+				this.#applyObjectLighting(program, object, shading);
 				this.#drawObjectRange(program, object);
 			}
 		} finally {
@@ -1853,6 +1863,7 @@ export class WebGL2Renderer implements Renderer {
 				if (this.#objectState.applyProgram(program.program)) {
 					this.#activateObjectProgram(program, view, shading);
 				}
+				this.#applyObjectLighting(program, object, shading);
 				this.#objectState.applyBlend(object.blendPolicy);
 				this.#drawObjectRange(program, object);
 			}
@@ -2253,6 +2264,23 @@ export class WebGL2Renderer implements Renderer {
 			);
 			bindWebGL2DistanceFog(gl, program.fogUniforms, shading.fog);
 		}
+	}
+
+	/**
+	 * Bind the lighting this contribution's retail role requires.
+	 *
+	 * Interior and outdoor contributions interleave within one pass, so lighting is per draw
+	 * rather than per program activation; the state applicator suppresses redundant binds.
+	 */
+	#applyObjectLighting(
+		program: AnyObjectProgram,
+		object: ObjectFrameInput,
+		shading: SceneShading,
+	): void {
+		const role = objectLightingRole(object.source);
+		if (!this.#objectState.applyLightingRole(role)) return;
+		bindWebGL2SceneLighting(this.#gl, program.uniforms, shading.lighting[role]);
+		this.#frameSelectionMetrics.objectLightingBinds += 1;
 	}
 
 	/** Start one object-owned phase with complete bindings for every active sampler. */

@@ -392,20 +392,59 @@ Deliverables:
 Acceptance criteria:
 
 - Buildings and statics respond to the slider consistently with terrain (same sun, same ambient).
-- A scene with no lighting context renders byte-identical to pre-phase output (neutral-uniform
-  regression fixture).
-- Portal render graph carries per-node lighting context; unit tests cover outdoor vs interior
-  context selection.
+- Draws carry per-contribution lighting roles; unit tests cover outdoor vs interior selection.
 - Zero-normal decision recorded with decompile evidence; worker test updated, not deleted-and-lost.
 
 Tasks:
 
-- [ ] Zero-normals investigation and policy decision.
-- [ ] Normal transform + lighting in both object vertex variants.
-- [ ] Lighting context type on draw units / render-graph nodes; renderer binds per draw.
-- [ ] Neutral-uniform regression fixture.
+- [x] Zero-normals investigation and policy decision.
+- [x] Normal transform + lighting in both object vertex variants.
+- [x] Lighting context type on draw units / render-graph nodes; renderer binds per draw.
+- [x] ~~Neutral-uniform regression fixture~~ — dropped; see the luminosity decision below.
 
-Decisions and course corrections: _(fill during execution)_
+Progress: Complete (2026-08-03). `npm run check`, `npm run lint`, `check:terrain-shader`,
+577 frontend tests, and browser-harness renders (outdoor day/night, plus an EnvCell-bearing
+neighborhood) are green.
+
+Decisions and course corrections:
+
+- **Luminosity became multiplicative, which retires the byte-identical acceptance criterion.**
+  The unlit-era shader did `albedo + luminosity`. Retail's fixed-function pipeline builds one
+  clamped vertex color from `emissive + ambient + Σ diffuse·light·max(0, N·L)` and then modulates
+  the texture by it (`CMaterial::SetLuminositySimple` sets `Emissive.rgb`, acclient.c:345688), so
+  the faithful form is `albedo * min(lighting + luminosity, 1)`. These cannot both hold: under
+  neutral lighting the multiplicative form yields plain albedo, so a luminous surface would not
+  match the old additive output. Retail fidelity wins; the neutral-uniform fixture was dropped
+  rather than kept as a test asserting the wrong equation. Non-luminous surfaces under neutral
+  lighting are unchanged, which is the property that fixture actually existed to protect.
+- **Lighting roles, not a per-node context object.** `ObjectFrameInput.source` already
+  distinguishes `outdoor | generated | env-cell-shell | env-cell-resident | dynamic`, which is
+  exactly retail's per-pass distinction (`useSunlightSet(1)` outdoors, `(0)` for the cell pass).
+  Rather than add a lighting field to draw units or render-graph nodes, `objectLightingRole`
+  derives the policy from that existing fact and `SceneShading.lighting` carries one
+  `SceneLightingByRole` record built once per frame. Nothing new is plumbed through commit, and
+  draw loops stay allocation-free.
+- **Terrain and objects use different ambient, per retail.** Terrain reads `ambient_level`
+  directly (`calc_lighting`); meshes read the boosted world ambient
+  `|sunlight| * 0.2 + ambient_level` (`LScape::calc_object_light`, acclient.c:140248). Both are
+  derived once in `resolveSceneLightingByRole`, so no consumer re-derives either.
+- **Interior policy is partially delivered, by necessity.** Cell draws now disable the sun (zero
+  sun vector — no branch, no second shader), matching retail's cell pass. The _forced_ 0.2-white
+  interior ambient depends on the camera cell's `seen_outside`, which exists in
+  `holtburger-content` (`interior.rs:244`) but is not serialized to the frontend. That plumbing is
+  already Phase 5's first task, so the forced ambient lands there. Recorded so the gap is not
+  mistaken for an oversight.
+- **Redundant-bind suppression added to the state applicator.** Interior and outdoor contributions
+  interleave within a pass, so lighting binds per draw; `applyLightingRole` collapses repeats and
+  is reset on program change because uniform state is per program. Measured: 1 bind for an
+  outdoor-only neighborhood, 3 when EnvCells are present. New `objectLightingBinds` frame metric
+  makes this observable rather than assumed.
+- **Zero normals**: `safeNormal` in the shared GLSL returns zero for a zero-length normal instead
+  of letting `normalize` produce NaN, which reproduces retail's software behavior (no sun term)
+  without inventing data. The worker test keeps its behavior and gains the decompile rationale.
+- **Runtime evidence**: buildings now shade with orientation and darken into the authored night
+  ambient alongside terrain; the scene reads as one lighting environment rather than lit ground
+  under unlit props.
 
 ### Phase 4: Resteer
 

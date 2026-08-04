@@ -3,6 +3,7 @@ import {
 	requireWebGL2Uniform,
 } from "./webgl2-shader-utils";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
+import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
 
 /** Object transform source selected at shader compilation rather than through nullable uniforms. */
 export type ObjectVertexTransformSource = "baked" | "instanced";
@@ -50,14 +51,20 @@ uniform vec3 uLandblockOffset;
 ${transformDeclarations}
 ${fogDeclarations}
 
+${WEBGL2_SCENE_LIGHTING_GLSL}
+
 out vec2 vTextureCoordinate;
 out vec4 vInstanceColor;
+out vec3 vLighting;
 
 void main() {
 	vec3 landblockPosition = (${transform} * vec4(aPosition, 1.0)).xyz;
 	vec3 anchoredPosition = landblockPosition + uLandblockOffset;
 	vTextureCoordinate = aTextureCoordinate;
 	vInstanceColor = ${instanceColor};
+	// Retail's fixed-function pipeline lights meshes per vertex; the emissive term is added
+	// in the fragment stage where the per-draw surface luminosity lives.
+	vLighting = evaluateSceneLighting(mat3(${transform}) * aNormal);
 	${fogCalculation}
 	gl_Position = uProjection * uView * vec4(anchoredPosition, 1.0);
 }
@@ -102,6 +109,7 @@ ${fogDeclarations}
 
 in vec2 vTextureCoordinate;
 in vec4 vInstanceColor;
+in vec3 vLighting;
 ${distanceFog ? "in float vHorizontalDistance;" : ""}
 out vec4 fragmentColor;
 
@@ -221,7 +229,10 @@ vec4 sampleMaterial() {
 
 void main() {
 	vec4 color = sampleMaterial() * vInstanceColor;
-	color.rgb += vec3(max(uLuminosity, 0.0));
+	// Retail builds one clamped vertex color from emissive plus the lit terms, then the
+	// texture stage modulates it (acclient.c:345688 sets Emissive = surface luminosity).
+	// Luminosity therefore scales the surface rather than washing it out additively.
+	color.rgb *= min(vLighting + vec3(max(uLuminosity, 0.0)), vec3(1.0));
 	if (uUseDetail != 0) {
 		vec4 detail = sampleRepeatingAtlasRect(
 			uDetail,
@@ -247,6 +258,8 @@ interface WebGL2ObjectProgramBase {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
+		readonly ambientColor: WebGLUniformLocation;
+		readonly ambientLevel: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
 		readonly baseRect: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
@@ -260,6 +273,8 @@ interface WebGL2ObjectProgramBase {
 		readonly paletteRect: WebGLUniformLocation;
 		readonly palettedClipMap: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
+		readonly sunColor: WebGLUniformLocation;
+		readonly sunVector: WebGLUniformLocation;
 		readonly useDetail: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 		readonly wrapRepeat: WebGLUniformLocation;
@@ -361,6 +376,8 @@ export function createWebGL2ObjectProgram(
 		}
 		const uniforms: WebGL2ObjectProgramBase["uniforms"] = {
 			alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
+			ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
+			ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 			base: requireWebGL2Uniform(gl, program, "uBase"),
 			baseRect: requireWebGL2Uniform(gl, program, "uBaseRect"),
 			detail: requireWebGL2Uniform(gl, program, "uDetail"),
@@ -374,6 +391,8 @@ export function createWebGL2ObjectProgram(
 			paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
 			palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 			projection: requireWebGL2Uniform(gl, program, "uProjection"),
+			sunColor: requireWebGL2Uniform(gl, program, "uSunColor"),
+			sunVector: requireWebGL2Uniform(gl, program, "uSunVector"),
 			useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),
 			view: requireWebGL2Uniform(gl, program, "uView"),
 			wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),

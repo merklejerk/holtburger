@@ -70,7 +70,9 @@ import {
 	type WebGL2ObjectProgram,
 } from "./webgl2-object-program";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
+import { UNAUTHORED_SCENE_LIGHTING } from "../environment/scene-environment";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
+import { bindWebGL2SceneLighting } from "./webgl2-lighting";
 import {
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
@@ -114,6 +116,28 @@ const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 const PORTAL_PLANNING_WORK_ITEM_LIMIT = 100_000;
 
 /** One visible landblock terrain source paired with selected renderer resources. */
+/**
+ * Shading state threaded through every draw pass.
+ *
+ * Fog and lighting travel together because both are resolved from the same regional
+ * keyframes and both must agree for a given draw. Phase 3 of the scene lighting plan
+ * varies this per draw unit so portal-visible interiors can drop the sun while the
+ * outdoor pass keeps it.
+ */
+interface SceneShading {
+	readonly fog: FrameInput["environment"]["distanceFog"];
+	readonly lighting: FrameInput["environment"]["lighting"];
+}
+
+/**
+ * Shading for the browser-harness portal execution probe, which renders outside any
+ * resolved frame environment. Fog stays disabled exactly as this probe path always had it.
+ */
+const PROBE_SHADING: SceneShading = {
+	fog: null,
+	lighting: UNAUTHORED_SCENE_LIGHTING,
+};
+
 interface TerrainFrameInput {
 	/** Selected LOD, transition range, and logical texture identities. */
 	readonly drawUnit: TerrainDrawUnit;
@@ -518,7 +542,11 @@ export class WebGL2Renderer implements Renderer {
 		const fog = input.frameSettings.distanceFogEnabled
 			? input.environment.distanceFog
 			: null;
-		this.#beginFrame(input.environment, fog);
+		const shading: SceneShading = {
+			fog,
+			lighting: input.environment.lighting,
+		};
+		this.#beginFrame(input.environment, shading);
 		if (profile && setupStartedAt !== undefined) {
 			profile.finishCpuPhase("setup", setupStartedAt);
 		}
@@ -534,13 +562,13 @@ export class WebGL2Renderer implements Renderer {
 					const contributions = this.#collectScene(geometry, "flat", profile);
 					this.#drawProfiledView(
 						{ ...geometry, ...contributions },
-						fog,
+						shading,
 						profile,
 					);
 				} else {
 					this.#drawView(
 						this.#prepareView(input.anchorLandblockId, view, "flat"),
-						fog,
+						shading,
 					);
 				}
 			}
@@ -561,7 +589,7 @@ export class WebGL2Renderer implements Renderer {
 				if (profile && preparationStartedAt !== undefined) {
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
 				}
-				this.#drawPortalView(prepared, view, clearColor, fog, profile);
+				this.#drawPortalView(prepared, view, clearColor, shading, profile);
 			}
 		}
 		const finalizationStartedAt = profile?.beginCpuPhase();
@@ -592,7 +620,7 @@ export class WebGL2Renderer implements Renderer {
 		prepared: PreparedViewGeometry,
 		viewInput: FrameViewInput,
 		clearColor: readonly [number, number, number, number],
-		fog: FrameInput["environment"]["distanceFog"],
+		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const placement = viewInput.camera.placement;
@@ -629,8 +657,8 @@ export class WebGL2Renderer implements Renderer {
 					profile,
 				);
 				const view = { ...prepared, ...contributions };
-				if (profile) this.#drawProfiledView(view, fog, profile);
-				else this.#drawView(view, fog);
+				if (profile) this.#drawProfiledView(view, shading, profile);
+				else this.#drawView(view, shading);
 			},
 			renderIndoorNodes: (_target, renderNodeIds) => {
 				const contributions = mergePortalNodeContributions(
@@ -639,8 +667,8 @@ export class WebGL2Renderer implements Renderer {
 					profile,
 				);
 				const view = { ...prepared, ...contributions };
-				if (profile) this.#drawProfiledView(view, fog, profile);
-				else this.#drawView(view, fog);
+				if (profile) this.#drawProfiledView(view, shading, profile);
+				else this.#drawView(view, shading);
 			},
 			resolveVisibilityAperture: (apertureId, crossingId) =>
 				this.#resolvePortalMask(prepared, apertureId, crossingId),
@@ -761,7 +789,7 @@ export class WebGL2Renderer implements Renderer {
 					contributionsByNode,
 					null,
 				);
-				this.#drawView({ ...prepared, ...contributions }, null);
+				this.#drawView({ ...prepared, ...contributions }, PROBE_SHADING);
 			},
 			renderIndoorNodes: (_target, renderNodeIds) => {
 				const contributions = mergePortalNodeContributions(
@@ -769,7 +797,7 @@ export class WebGL2Renderer implements Renderer {
 					contributionsByNode,
 					null,
 				);
-				this.#drawView({ ...prepared, ...contributions }, null);
+				this.#drawView({ ...prepared, ...contributions }, PROBE_SHADING);
 			},
 			resolveVisibilityAperture: (apertureId, crossingId) =>
 				this.#resolvePortalMask(prepared, apertureId, crossingId),
@@ -805,10 +833,10 @@ export class WebGL2Renderer implements Renderer {
 
 	#beginFrame(
 		environment: FrameInput["environment"],
-		fog: FrameInput["environment"]["distanceFog"],
+		shading: SceneShading,
 	): void {
 		const gl = this.#gl;
-		const clearColor = fog?.color ?? environment.backgroundColor;
+		const clearColor = shading.fog?.color ?? environment.backgroundColor;
 		gl.clearColor(
 			clearColor.red,
 			clearColor.green,
@@ -1474,13 +1502,10 @@ export class WebGL2Renderer implements Renderer {
 			arena.viewHighWaterMark;
 	}
 
-	#drawView(
-		view: PreparedView,
-		fog: FrameInput["environment"]["distanceFog"],
-	): void {
-		this.#drawTerrain(view, fog);
-		this.#drawOpaqueObjects(view, fog, null);
-		this.#drawBlendedObjects(view, null);
+	#drawView(view: PreparedView, shading: SceneShading): void {
+		this.#drawTerrain(view, shading);
+		this.#drawOpaqueObjects(view, shading, null);
+		this.#drawBlendedObjects(view, shading, null);
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
 	}
@@ -1488,13 +1513,13 @@ export class WebGL2Renderer implements Renderer {
 	/** Draw one view through opt-in CPU spans and non-blocking GPU timestamp intervals. */
 	#drawProfiledView(
 		view: PreparedView,
-		fog: FrameInput["environment"]["distanceFog"],
+		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture,
 	): void {
 		const terrainGpu = profile.beginGpuPhase("terrain");
 		const terrainStartedAt = profile.beginCpuPhase();
 		try {
-			this.#drawTerrain(view, fog);
+			this.#drawTerrain(view, shading);
 		} finally {
 			profile.finishCpuPhase("terrainSubmission", terrainStartedAt);
 			terrainGpu?.finish();
@@ -1502,14 +1527,14 @@ export class WebGL2Renderer implements Renderer {
 
 		const opaqueGpu = profile.beginGpuPhase("opaque");
 		try {
-			this.#drawOpaqueObjects(view, fog, profile);
+			this.#drawOpaqueObjects(view, shading, profile);
 		} finally {
 			opaqueGpu?.finish();
 		}
 
 		const blendedGpu = profile.beginGpuPhase("blended");
 		try {
-			this.#drawBlendedObjects(view, profile);
+			this.#drawBlendedObjects(view, shading, profile);
 		} finally {
 			blendedGpu?.finish();
 		}
@@ -1518,10 +1543,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#beginObjectPhase();
 	}
 
-	#drawTerrain(
-		view: PreparedView,
-		fog: FrameInput["environment"]["distanceFog"],
-	): void {
+	#drawTerrain(view: PreparedView, shading: SceneShading): void {
 		if (view.terrain.length === 0) return;
 		const gl = this.#gl;
 		gl.depthMask(true);
@@ -1554,7 +1576,12 @@ export class WebGL2Renderer implements Renderer {
 			this.#terrainProgram.uniforms.detailFadeFar,
 			FRONTEND_TUNING.rendering.terrainDetailFade.far,
 		);
-		bindWebGL2DistanceFog(gl, this.#terrainProgram.uniforms, fog);
+		bindWebGL2DistanceFog(gl, this.#terrainProgram.uniforms, shading.fog);
+		bindWebGL2SceneLighting(
+			gl,
+			this.#terrainProgram.uniforms,
+			shading.lighting,
+		);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.coordinates,
@@ -1704,7 +1731,7 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawOpaqueObjects(
 		view: PreparedView,
-		fog: FrameInput["environment"]["distanceFog"],
+		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const candidates = view.objects.filter(
@@ -1729,7 +1756,7 @@ export class WebGL2Renderer implements Renderer {
 						? this.#instancedObjectProgram
 						: this.#objectProgram;
 				if (this.#objectState.applyProgram(program.program)) {
-					this.#activateObjectProgram(program, view, fog);
+					this.#activateObjectProgram(program, view, shading);
 				}
 				this.#drawObjectRange(program, object);
 			}
@@ -1742,6 +1769,7 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawBlendedObjects(
 		view: PreparedView,
+		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const orderingStartedAt = profile?.beginCpuPhase();
@@ -1823,7 +1851,7 @@ export class WebGL2Renderer implements Renderer {
 						? this.#blendedInstancedObjectProgram
 						: this.#blendedObjectProgram;
 				if (this.#objectState.applyProgram(program.program)) {
-					this.#activateObjectProgram(program, view, null);
+					this.#activateObjectProgram(program, view, shading);
 				}
 				this.#objectState.applyBlend(object.blendPolicy);
 				this.#drawObjectRange(program, object);
@@ -2203,7 +2231,7 @@ export class WebGL2Renderer implements Renderer {
 	#activateObjectProgram(
 		program: AnyObjectProgram,
 		view: PreparedView,
-		fog: FrameInput["environment"]["distanceFog"],
+		shading: SceneShading,
 	): void {
 		const gl = this.#gl;
 		this.#frameSelectionMetrics.objectProgramChanges += 1;
@@ -2223,7 +2251,7 @@ export class WebGL2Renderer implements Renderer {
 				view.cameraPosition.x,
 				view.cameraPosition.z,
 			);
-			bindWebGL2DistanceFog(gl, program.fogUniforms, fog);
+			bindWebGL2DistanceFog(gl, program.fogUniforms, shading.fog);
 		}
 	}
 

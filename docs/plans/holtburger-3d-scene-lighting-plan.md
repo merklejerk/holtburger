@@ -259,17 +259,45 @@ Acceptance criteria:
 
 Tasks:
 
-- [ ] Resolve full lighting facts in `resolveSceneEnvironment` from already-decoded region fields.
-- [ ] Unify fog onto the shared bracket interpolation.
-- [ ] Add the day-fraction slider and thread it through environment resolution.
-- [ ] Unit tests for the resolver.
+- [x] Resolve full lighting facts in `resolveSceneEnvironment` from already-decoded region fields.
+- [x] Unify fog onto the shared bracket interpolation.
+- [x] Add the day-fraction slider and thread it through environment resolution.
+- [x] Unit tests for the resolver.
 
-Decisions and course corrections: _(fill during execution)_
+Progress: Complete (2026-08-03). `npm run check`, `npm run lint`, and the environment suite
+(12 tests) are green.
+
+Decisions and course corrections:
+
+- **Two deliverables were already satisfied.** The explorer day-fraction slider, day index, and
+  day-group select already existed (`ExplorerWorldPanel.svelte:225-247`,
+  `ExplorerApp.svelte:79-81`, default `timeOfDay` 0.5), and fog already resolved from a single
+  `bracketKeyframes` call shared with the background color — so light and fog could not drift.
+  Phase 1 reduced to the lighting facts themselves.
+- **`lighting` is no longer nullable.** Retail's `GetLighting` returns fallback values (ambient
+  0.3, white, sun `(0.5, 0, 0.8)`) rather than "no lighting" when a region or day group authors no
+  keyframes, so the contract now always carries lighting. Exported as
+  `UNAUTHORED_SCENE_LIGHTING` and reused for the runtime's `DEFAULT_ENVIRONMENT`, which removes a
+  null case from every future consumer instead of propagating it into Phases 2, 3, and 5.
+- **Sun vector is stored in render axes, unnormalized.** `renderVector` was added to
+  `ac-frame.ts` beside the existing `acFrameTransform`/`renderScale` so the AC→render axis mapping
+  (`render = (x, z, -y)`) has exactly one owner. Retail's Z-up sun formula is applied first, then
+  converted; brightness stays in the magnitude per the north star. Tests assert a due-north sun
+  lands on render −Z and an east/overhead sun on +X/+Y, which pins the convention against future
+  axis drift.
+- **Ambient floor applied at resolution time**, not at consumption, so no consumer can forget it
+  (`MINIMUM_AMBIENT_LEVEL`, exported for tests; no magic numbers in assertions).
+- **Deliberately not resolved here**: the outdoor object ambient (`|sun| * 0.2 + ambientLevel`)
+  and the interior ambient override. Both are per-draw policy owned by the Phase 3 lighting
+  context, not regional facts; putting them in this contract would have meant two layers claiming
+  the same decision. `ResolvedSceneLighting`'s doc comment states that boundary.
+- Debt: none introduced. `ambientBrightness` (the old, unfloored field name) is gone rather than
+  aliased, and the old `backgroundColor`-as-ambient aliasing is replaced by a properly interpolated
+  `ambientColor`.
 
 ### Phase 2: Terrain lighting
 
-Retail behavior: per-vertex `min(1, ambient + N·L)` with FF lighting off; per-terrain-type vertex
-color variation.
+Retail behavior: per-vertex `min(1, ambient + N·L)` with FF lighting off.
 
 Deliverables:
 
@@ -277,26 +305,70 @@ Deliverables:
   evaluate the retail terrain formula per vertex and modulate the composed albedo.
   (Design departure from retail, blessed: shader evaluation instead of CPU bake — identical math,
   free re-ticking. Recorded here so nobody "fixes" it back.)
-- Sample `TERRAIN_TYPE_VARIATION_ROW` from the composition table and apply the per-vertex
-  brightness/saturation/hue variation currently packed and ignored.
 - Renderer plumbing: lighting uniforms bound from the frame environment.
 
 Acceptance criteria:
 
 - Terrain shading visibly responds to the time-of-day slider (dawn/dusk sun angle and color).
 - Terrain slopes facing the sun are brighter than back slopes; night scenes floor at ambient.
-- Vertex variation produces visible non-uniformity on homogeneous terrain types, matching the
-  variation bounds in the region data.
-- Existing terrain tests pass; new tests cover uniform packing/binding of lighting facts.
+- Existing terrain tests pass; GLSL validation covers the shared lighting block.
 
 Tasks:
 
-- [ ] Add lighting uniforms to the terrain program and bind from frame input.
-- [ ] Evaluate the retail terrain formula on `aNormal`.
-- [ ] Sample and apply composition-table variation row.
-- [ ] Verify terrain normal generation against retail's accumulation (degenerate → up-vector).
+- [x] Add lighting uniforms to the terrain program and bind from frame input.
+- [x] Evaluate the retail terrain formula on `aNormal`.
+- [x] ~~Sample and apply composition-table variation row~~ — dropped; proven dead in retail.
+- [x] Verify terrain normal generation against retail's accumulation (degenerate → up-vector).
 
-Decisions and course corrections: _(fill during execution)_
+Progress: Complete (2026-08-03). `npm run check`, `npm run lint`, `npm run check:terrain-shader`,
+571 frontend tests, and browser-harness renders at three day fractions are all green.
+
+Decisions and course corrections:
+
+- **Terrain vertex color variation is dead data in retail — sub-task dropped.** A decompile sweep
+  enumerated every consumer of a `TerrainTex*` (allocation at acclient.c:294827; accessors
+  `GetDetailTiling` 293090, `GetTerrainTex` 293995, `GetSubDataIDs` 294298, `GetTerrain` 294403+,
+  `CopyAndTile` 293773, `Merge` 293948, `InitEnd` 293737): the six min/max vertex
+  brightness/saturation/hue fields at struct offsets 16–36 are read **only** by
+  `TerrainTex::Pack` (294081-294111) and written **only** by `TerrainTex::UnPack` (294167-294197).
+  There is no HSV code anywhere in the binary, and `CLandBlockStruct` has exactly one per-vertex
+  color array (`vertex_lighting`), written solely by `calc_lighting` and consumed at
+  acclient.c:684395 as the D3D vertex diffuse. Implementing the variation would have made us
+  diverge from retail, not match it. Supporting evidence that the feature was cut pre-EoR:
+  `min_slope` at offset 8 is likewise never read and is not even serialized, and
+  `TMTerrainDesc::UnPack` (294811) unpacks exactly one `TerrainTex` into what is declared as a
+  `SmartArray`, with every accessor hardcoding index 0.
+  - Debt created: `composition-table.ts` still packs those six values into GPU table row 1 and
+    row 0's z/w, which no shader reads. Retained for the Phase 7 cleanup target list. Parsing and
+    decoding them remains correct (lossless DAT round-trip); only the GPU packing is dead.
+- **Fog and lighting now travel together as one `SceneShading` parameter.** Fog was threaded
+  through seven renderer method signatures; adding lighting beside it would have meant threading
+  twice, since Phase 3 must vary lighting per draw anyway. Introducing the bundle now made this
+  one mechanical diff instead of two, and `SceneShading` is exactly the value Phase 3 extends with
+  interior/outdoor selection. `#drawBlendedObjects` gained the parameter for the same reason.
+- **Shared lighting GLSL lives in `webgl2-lighting.ts`**, mirroring `webgl2-fog.ts`, so terrain and
+  the Phase 3 object program compile the identical `evaluateSceneLighting`. Departure from the fog
+  precedent: the uniform declarations live inside the shared block rather than being redeclared per
+  program, giving the lighting uniform names one owner.
+- **Normals are transformed by `mat3(uLocalToLandblock)`** even though terrain currently passes
+  identity, so a future non-identity terrain root cannot silently break shading.
+- **Lighting modulates the fully composed albedo (base + overlays + roads + detail), then fog
+  applies.** Fog-last is certain (raster stage after texturing). Applying lighting after the detail
+  blend rather than to the base only is an interpretation of retail's multi-stage setup; both
+  layers are surface color, so modulating the combined result is the defensible reading.
+- **No hollow binding test written.** `bindWebGL2SceneLighting` is pure uniform forwarding with no
+  branching; asserting the calls would restate the implementation. Real coverage comes from the
+  resolver unit tests (Phase 1), `check:terrain-shader` GLSL validation, and browser-harness
+  renders.
+- **Tooling**: `scripts/validate-terrain-shader.mjs` was generalized from a hardcoded fog
+  substitution to a map of shared GLSL modules, so future shared blocks validate automatically.
+  `browser-harness.mjs` gained `--time-of-day <0..1>`; the harness previously never resolved a
+  scene environment at all and rendered with the runtime default, so time-of-day behavior was
+  unverifiable there.
+- **Runtime evidence**: harness renders at day fractions 0.05, 0.22, and 0.5 show night terrain
+  dropping to the authored purple-tinted ambient (0xFFC864FF), dawn dim with warm fog, and noon
+  clamping flat ground to full brightness while sloped terrain shades — matching retail's
+  `min(c, 1.0)` clamp. Buildings correctly remain unlit pending Phase 3.
 
 ### Phase 3: Object lighting and per-draw lighting context
 
@@ -413,8 +485,8 @@ Decisions and course corrections:
 
 ### Phase 6: Time drive and fog parity
 
-Retail behavior: lighting re-resolved every 20 s of game time on the 3 s sky tick grid; fog is
-radial 3D distance.
+Retail behavior: lighting re-resolved on the region's authored light tick (EoR Dereth: 15 s, on a
+0.8 s sky tick grid — read from region data, not the code defaults); fog is radial 3D distance.
 
 Deliverables:
 

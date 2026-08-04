@@ -3,6 +3,7 @@ import {
 	requireWebGL2Uniform,
 } from "./webgl2-shader-utils";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
+import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
 
 const TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 aPosition;
@@ -15,9 +16,12 @@ uniform mat4 uLocalToLandblock;
 uniform vec3 uLandblockOffset;
 uniform vec2 uCameraHorizontalPosition;
 
+${WEBGL2_SCENE_LIGHTING_GLSL}
+
 out vec2 vGridUv;
 out float vViewDepth;
 out float vHorizontalDistance;
+out vec3 vLighting;
 
 void main() {
 	vec3 landblockPosition = (uLocalToLandblock * vec4(aPosition, 1.0)).xyz;
@@ -28,6 +32,9 @@ void main() {
 	// camera-forward depth rather than radial distance from the camera.
 	vViewDepth = -viewPosition.z;
 	vHorizontalDistance = length(anchoredPosition.xz - uCameraHorizontalPosition);
+	// Retail bakes landscape lighting into vertex colors; evaluating the identical formula
+	// here keeps time-of-day changes a uniform update instead of a landblock re-bake.
+	vLighting = evaluateSceneLighting(normalize(mat3(uLocalToLandblock) * aNormal));
 	gl_Position = uProjection * viewPosition;
 }
 `;
@@ -57,6 +64,7 @@ ${WEBGL2_DISTANCE_FOG_GLSL}
 in vec2 vGridUv;
 in float vViewDepth;
 in float vHorizontalDistance;
+in vec3 vLighting;
 out vec4 fragmentColor;
 
 const uint ROAD_TERRAIN_TYPE = 32u;
@@ -226,6 +234,8 @@ void main() {
 	vec4 detail = texture(uDetail, fract(cellUv * float(metadata.w)));
 	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
+	// Lighting modulates the complete surface albedo, then fog applies as a raster stage.
+	color *= vLighting;
 	color = applyDistanceFog(color, vHorizontalDistance);
 	fragmentColor = vec4(color, 1.0);
 }
@@ -235,6 +245,8 @@ void main() {
 export interface WebGL2TerrainProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
+		readonly ambientColor: WebGLUniformLocation;
+		readonly ambientLevel: WebGLUniformLocation;
 		readonly blendMasks: WebGLUniformLocation;
 		readonly cameraHorizontalPosition: WebGLUniformLocation;
 		readonly colors: WebGLUniformLocation;
@@ -250,6 +262,8 @@ export interface WebGL2TerrainProgram {
 		readonly localToLandblock: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
 		readonly roadMasks: WebGLUniformLocation;
+		readonly sunColor: WebGLUniformLocation;
+		readonly sunVector: WebGLUniformLocation;
 		readonly surfaceField: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 	};
@@ -287,6 +301,8 @@ export function createWebGL2TerrainProgram(
 		return {
 			program,
 			uniforms: {
+				ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
+				ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 				blendMasks: requireWebGL2Uniform(gl, program, "uBlendMasks"),
 				cameraHorizontalPosition: requireWebGL2Uniform(
 					gl,
@@ -310,6 +326,8 @@ export function createWebGL2TerrainProgram(
 				),
 				projection: requireWebGL2Uniform(gl, program, "uProjection"),
 				roadMasks: requireWebGL2Uniform(gl, program, "uRoadMasks"),
+				sunColor: requireWebGL2Uniform(gl, program, "uSunColor"),
+				sunVector: requireWebGL2Uniform(gl, program, "uSunVector"),
 				surfaceField: requireWebGL2Uniform(gl, program, "uSurfaceField"),
 				view: requireWebGL2Uniform(gl, program, "uView"),
 			},

@@ -168,6 +168,7 @@ function parseArgs(args) {
 		probePortalGraph: false,
 		executePortal: false,
 		frameMode: null,
+		timeOfDay: null,
 		modeCycle: false,
 		filteringCycle: false,
 		profileRenderer: false,
@@ -386,6 +387,14 @@ function parseArgs(args) {
 			case "--execute-portal":
 				parsed.executePortal = true;
 				break;
+			case "--time-of-day": {
+				const value = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(value) || value < 0 || value >= 1) {
+					throw new Error("--time-of-day must be in [0, 1).");
+				}
+				parsed.timeOfDay = value;
+				break;
+			}
 			case "--frame-mode":
 				parsed.frameMode = requireValue(args, ++index, arg);
 				if (!["flat", "portal"].includes(parsed.frameMode)) {
@@ -632,6 +641,7 @@ Options:
   --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
   --execute-portal
                          Execute the complete planned graph through production GPU passes.
+  --time-of-day <0..1>  Resolve region lighting and fog at this day fraction.
   --frame-mode <flat|portal>
                          Change continuous rendering policy without reloading content.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
@@ -1161,7 +1171,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const dynamicExclusion = options.excludeAuthoredDynamics
 		? "&excludeAuthoredDynamics=true"
 		: "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}`;
+	const timeOfDay =
+		options.timeOfDay === null
+			? ""
+			: `&timeOfDay=${encodeURIComponent(options.timeOfDay)}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,

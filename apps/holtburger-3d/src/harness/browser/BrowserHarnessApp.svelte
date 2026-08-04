@@ -49,6 +49,7 @@
 		type TextureFilteringCapabilities,
 		type TextureFilteringPolicy,
 	} from "../../lib/game/renderer/texture-filtering-policy";
+	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -68,6 +69,11 @@
 		"viewportHeight",
 		720,
 	);
+	/**
+	 * Regional day fraction used to resolve lighting and fog. Absent means the harness keeps
+	 * the runtime's unauthored-lighting default instead of resolving the active region.
+	 */
+	const TIME_OF_DAY = query.get("timeOfDay");
 	const ISOLATE_AUTHORED_DYNAMICS =
 		query.get("isolateAuthoredDynamics") === "true";
 	const EXCLUDE_AUTHORED_DYNAMICS =
@@ -807,6 +813,19 @@
 				runtime.installActiveRegionStaticDetails(
 					await staticDetailOwner.install(contentSource.activeRegion),
 				);
+				if (TIME_OF_DAY !== null) {
+					const timeOfDay = Number(TIME_OF_DAY);
+					if (!Number.isFinite(timeOfDay) || timeOfDay < 0 || timeOfDay >= 1) {
+						throw new Error("timeOfDay must be normalized to [0, 1).");
+					}
+					runtime.setSceneEnvironment(
+						resolveSceneEnvironment(contentSource.activeRegion, {
+							dayIndex: 0,
+							dayGroupOverride: 0,
+							timeOfDay,
+						}),
+					);
+				}
 				if (destroyed) return;
 				ready = true;
 				if ("PerformanceObserver" in window) {

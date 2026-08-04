@@ -1,4 +1,21 @@
+import { renderVector } from "../../assets/ac-frame";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
+import type { Vec3 } from "../math/types";
+
+/**
+ * Retail's ambient floor (`LScape::min_ambient`, acclient.c:747815). Applied after keyframe
+ * interpolation so authored night values never drive the world fully black.
+ */
+export const MINIMUM_AMBIENT_LEVEL = 0.2;
+
+/**
+ * Retail's lighting when a day group authors no keyframes (`SkyDesc::GetLighting`,
+ * acclient.c:290949): mid ambient, white light, and a fixed low sun.
+ */
+export const UNAUTHORED_LIGHTING = {
+	ambientLevel: 0.3,
+	sunDirection: { x: 0.5, y: 0, z: 0.8 },
+} as const;
 
 /** Explorer-owned inputs selecting one static regional presentation state. */
 export interface ExplorerEnvironmentSelection {
@@ -9,6 +26,11 @@ export interface ExplorerEnvironmentSelection {
 	/** Explicit static sky-day-group index, or retail-compatible automatic selection. */
 	readonly dayGroupOverride: number | null;
 }
+
+/** One authored sky keyframe from the active region's selected day group. */
+type SkyKeyframe = NonNullable<
+	ActiveRegionSource["data"]["sky"]
+>["dayGroups"][number]["skyTimes"][number];
 
 /** RGBA color normalized for renderer frame input. */
 interface SceneColor {
@@ -25,6 +47,26 @@ export interface ResolvedDistanceFog {
 	readonly color: SceneColor;
 }
 
+/**
+ * Regional sun and ambient resolved from authored sky keyframes.
+ *
+ * These are the raw regional facts. Per-draw policy — the interior ambient override, the
+ * outdoor object ambient formula, and which draws see the sun at all — belongs to the
+ * renderer's lighting context, not here.
+ */
+export interface ResolvedSceneLighting {
+	/** Interpolated ambient level, floored at `MINIMUM_AMBIENT_LEVEL`. */
+	readonly ambientLevel: number;
+	readonly ambientColor: SceneColor;
+	/**
+	 * Sun direction in render axes, deliberately left unnormalized: its magnitude carries the
+	 * authored directional brightness, exactly as retail's `SkyDesc::GetLighting` builds it
+	 * (acclient.c:290949). Consumers multiply by it rather than applying brightness separately.
+	 */
+	readonly sunVector: Vec3;
+	readonly sunColor: SceneColor;
+}
+
 /** Renderer-ready regional state resolved entirely in the frontend. */
 export interface ResolvedSceneEnvironment {
 	readonly backgroundColor: SceneColor;
@@ -34,11 +76,11 @@ export interface ResolvedSceneEnvironment {
 		readonly dayGroupIndex: number;
 		readonly dayGroupName: string;
 	} | null;
-	/** Stable lighting facts retained for future terrain/object lighting. */
-	readonly lighting: {
-		readonly ambientColor: SceneColor;
-		readonly ambientBrightness: number;
-	} | null;
+	/**
+	 * Always present: a region without authored sky keyframes still lights the world, using
+	 * retail's unauthored-lighting fallback rather than going dark.
+	 */
+	readonly lighting: ResolvedSceneLighting;
 }
 
 /** Resolve Explorer-selected static sky state using retail's cyclic keyframe rules. */
@@ -62,22 +104,12 @@ export function resolveSceneEnvironment(
 	}
 	const sky = activeRegion.data.sky;
 	if (sky === null || sky.dayGroups.length === 0) {
-		return {
-			backgroundColor: BLACK,
-			distanceFog: null,
-			sky: null,
-			lighting: null,
-		};
+		return UNAUTHORED_ENVIRONMENT;
 	}
 	const dayGroupIndex = resolveDayGroupIndex(activeRegion, selection);
 	const dayGroup = sky.dayGroups[dayGroupIndex];
 	if (dayGroup === undefined || dayGroup.skyTimes.length === 0) {
-		return {
-			backgroundColor: BLACK,
-			distanceFog: null,
-			sky: null,
-			lighting: null,
-		};
+		return UNAUTHORED_ENVIRONMENT;
 	}
 	const keyframes = bracketKeyframes(dayGroup.skyTimes, selection.timeOfDay);
 	const backgroundColor = lerpColor(
@@ -109,14 +141,51 @@ export function resolveSceneEnvironment(
 		backgroundColor,
 		distanceFog,
 		sky: { dayGroupIndex, dayGroupName: dayGroup.dayName },
-		lighting: {
-			ambientColor: backgroundColor,
-			ambientBrightness: lerp(
-				keyframes.before.ambientBrightness,
-				keyframes.after.ambientBrightness,
-				keyframes.ratio,
-			),
-		},
+		lighting: resolveLighting(keyframes),
+	};
+}
+
+/**
+ * Reproduce retail's `SkyDesc::GetLighting` (acclient.c:290949): interpolate the bracketing
+ * keyframes, then fold the directional brightness into the sun vector's length.
+ */
+function resolveLighting(keyframes: {
+	readonly before: SkyKeyframe;
+	readonly after: SkyKeyframe;
+	readonly ratio: number;
+}): ResolvedSceneLighting {
+	const { before, after, ratio } = keyframes;
+	const brightness = lerp(
+		before.directionalBrightness,
+		after.directionalBrightness,
+		ratio,
+	);
+	const heading = degreesToRadians(
+		lerp(before.directionalHeading, after.directionalHeading, ratio),
+	);
+	const pitch = degreesToRadians(
+		lerp(before.directionalPitch, after.directionalPitch, ratio),
+	);
+	return {
+		ambientLevel: Math.max(
+			lerp(before.ambientBrightness, after.ambientBrightness, ratio),
+			MINIMUM_AMBIENT_LEVEL,
+		),
+		ambientColor: lerpColor(
+			unpackColor(before.ambientColor),
+			unpackColor(after.ambientColor),
+			ratio,
+		),
+		sunVector: renderVector(
+			Math.sin(heading) * Math.cos(pitch) * brightness,
+			Math.cos(heading) * Math.cos(pitch) * brightness,
+			Math.sin(pitch) * brightness,
+		),
+		sunColor: lerpColor(
+			unpackColor(before.directionalColor),
+			unpackColor(after.directionalColor),
+			ratio,
+		),
 	};
 }
 
@@ -177,6 +246,10 @@ function bracketKeyframes<T extends { readonly begin: number }>(
 	};
 }
 
+function degreesToRadians(degrees: number): number {
+	return (degrees * Math.PI) / 180;
+}
+
 function unpackColor(color: number): SceneColor {
 	return {
 		red: (color & 0xff) / 0xff,
@@ -204,3 +277,23 @@ function lerpColor(
 }
 
 const BLACK: SceneColor = { red: 0, green: 0, blue: 0, alpha: 1 };
+const WHITE: SceneColor = { red: 1, green: 1, blue: 1, alpha: 1 };
+
+/** Retail's lighting for a region or day group that authors no usable sky keyframes. */
+export const UNAUTHORED_SCENE_LIGHTING: ResolvedSceneLighting = {
+	ambientLevel: UNAUTHORED_LIGHTING.ambientLevel,
+	ambientColor: WHITE,
+	sunVector: renderVector(
+		UNAUTHORED_LIGHTING.sunDirection.x,
+		UNAUTHORED_LIGHTING.sunDirection.y,
+		UNAUTHORED_LIGHTING.sunDirection.z,
+	),
+	sunColor: WHITE,
+};
+
+const UNAUTHORED_ENVIRONMENT: ResolvedSceneEnvironment = {
+	backgroundColor: BLACK,
+	distanceFog: null,
+	sky: null,
+	lighting: UNAUTHORED_SCENE_LIGHTING,
+};

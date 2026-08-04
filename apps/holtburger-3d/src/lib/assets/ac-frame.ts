@@ -44,3 +44,14 @@ export function acFrameTransform(
 export function renderScale(scale: readonly [number, number, number]): Vec3 {
 	return new Vec3(scale[0], scale[2], scale[1]);
 }
+
+/**
+ * Convert one AC-authored direction or position into render axes.
+ *
+ * AC authors Z-up with +Y north; the app renders Y-up with -Z north. This is the same
+ * axis mapping `acFrameTransform` applies to a frame origin, exposed for callers that
+ * carry a bare vector rather than a full frame.
+ */
+export function renderVector(x: number, y: number, z: number): Vec3 {
+	return new Vec3(x, z, -y);
+}

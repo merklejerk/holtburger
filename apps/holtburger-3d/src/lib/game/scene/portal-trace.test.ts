@@ -330,6 +330,7 @@ function installScope(
 		potentiallyVisibleEnvCellIds: new Set(),
 		scope,
 		structureToLandblock: Mat4.identity(),
+		seenOutside: false,
 		visibilityIslandId: `env-cell-island:${scope.envCellId}`,
 	});
 }

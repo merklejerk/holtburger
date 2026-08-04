@@ -100,6 +100,7 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 							partIndex: 0,
 						},
 					],
+					lights: [],
 					holdingLocations: new Map(),
 					placementPoses: new Map(),
 					selectionBounds: null,

@@ -1,6 +1,11 @@
 import { transformPoint3 } from "../math/matrices";
 import { type Mat4, Vec3 } from "../math/types";
-import type { ResolvedObjectLight } from "../resolution/presentation";
+import type {
+	PlacedStaticLight,
+	ResolvedObjectLight,
+} from "../resolution/presentation";
+
+export type { PlacedStaticLight };
 
 /**
  * Retail scales an authored light's falloff by this before using it as the burn-in cutoff
@@ -16,27 +21,6 @@ export const STATIC_LIGHT_RANGE_SCALE = 1.3;
  */
 const WRAP_DISTANCE_SCALE = 0.5;
 const WRAP_DIVISOR = 1.5;
-
-/** One authored light placed in landblock space, ready to light any cell in that landblock. */
-export interface PlacedStaticLight {
-	/**
-	 * Landblock-space position as plain components: these cross a worker boundary, where
-	 * structured clone drops class prototypes.
-	 */
-	readonly position: {
-		readonly x: number;
-		readonly y: number;
-		readonly z: number;
-	};
-	readonly color: {
-		readonly red: number;
-		readonly green: number;
-		readonly blue: number;
-	};
-	readonly intensity: number;
-	/** Authored falloff; the effective cutoff is this times `STATIC_LIGHT_RANGE_SCALE`. */
-	readonly falloff: number;
-}
 
 /** Compose one object's authored lights with its placement into landblock space. */
 export function placeObjectLights(

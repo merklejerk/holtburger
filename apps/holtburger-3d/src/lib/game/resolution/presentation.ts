@@ -164,6 +164,28 @@ export interface ResolvedObjectLight {
 	readonly falloff: number;
 }
 
+/**
+ * One authored light composed into landblock space, ready to light any geometry near it.
+ *
+ * Positions are plain components because these cross a worker boundary, where structured clone
+ * drops class prototypes.
+ */
+export interface PlacedStaticLight {
+	readonly position: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
+	readonly color: {
+		readonly red: number;
+		readonly green: number;
+		readonly blue: number;
+	};
+	readonly intensity: number;
+	/** Authored radius; retail scales it by `static_light_factor` when baking. */
+	readonly falloff: number;
+}
+
 /** Immutable shared definition for a setup- or gfx-backed resident. */
 export interface ResolvedObjectPresentation {
 	readonly id: ResolvedPresentationId;

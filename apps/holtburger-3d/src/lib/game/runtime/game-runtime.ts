@@ -126,7 +126,6 @@ import {
 	resolveTerrainCoverageFog,
 	type TerrainFogCoverage,
 } from "../environment/terrain-fog";
-import type { PlacedStaticLight } from "../commit/interior-static-lighting";
 
 const DEFAULT_CAMERA: Camera = {
 	near: 0.5,
@@ -1332,8 +1331,6 @@ class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer
 		readonly owner: OwnerId;
 		readonly revision: SceneInterestRevision;
 		readonly source: ResolvedStaticObjectLayerSource;
-		/** Interior jobs supply authored lights to bake; outdoor layers pass none. */
-		readonly staticLights?: readonly PlacedStaticLight[];
 		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
 	}): Promise<StaticObjectLayerArtifact | null> {
 		const geometry = await this.#worker.prepare({
@@ -1344,7 +1341,6 @@ class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer
 				options.partition,
 			),
 			source: options.source,
-			staticLights: options.staticLights ?? [],
 		});
 		return assembleStaticObjectArtifact({
 			geometry,

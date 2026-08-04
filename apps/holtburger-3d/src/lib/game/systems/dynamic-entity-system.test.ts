@@ -434,6 +434,7 @@ function source(
 ): AuthoredDynamicSource {
 	const presentation: ResolvedObjectPresentation = {
 		appearanceKey: `appearance:${id}`,
+		lights: [],
 		holdingLocations: new Map(),
 		id: `presentation:${id}`,
 		parts: partIndices.map((partIndex) => ({
@@ -513,6 +514,7 @@ function prepared(id: string): ObjectVisualTemplate {
 	const geometrySource: GeometrySource = {
 		geometry: {
 			indices: new Uint32Array([0, 1, 2]),
+			bakedLight: null,
 			kind: "object",
 			normals: new Float32Array(9),
 			positions: new Float32Array(9),

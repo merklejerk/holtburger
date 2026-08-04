@@ -113,6 +113,7 @@ describe("GameRuntime view and interest control", () => {
 			frameInstanceGrowthCount: 0,
 			frameInstanceViewHighWaterMark: 0,
 			objectProgramChanges: 0,
+			objectLightingBinds: 0,
 			objectTextureBinds: 0,
 		};
 		const setFrameProfilingEnabled = vi.fn();
@@ -196,6 +197,7 @@ describe("GameRuntime view and interest control", () => {
 		});
 		runtime.setFrameSettings({
 			distanceFogEnabled: false,
+			viewerLightEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
 				minimumObjectFootprintPixelArea: 8,
@@ -206,6 +208,7 @@ describe("GameRuntime view and interest control", () => {
 		runtime.render(2);
 		expect(frames[1]?.frameSettings).toEqual({
 			distanceFogEnabled: false,
+			viewerLightEnabled: false,
 			envCellRenderMode: "flat",
 			quality: {
 				minimumObjectFootprintPixelArea: 8,
@@ -637,6 +640,7 @@ function promotedStaticArtifact(
 					partIndex: 0,
 				},
 			],
+			lights: [],
 			holdingLocations: new Map(),
 			placementPoses: new Map([
 				[0, { partTransforms: [Mat4.identity()], placementId: 0 }],

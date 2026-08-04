@@ -27,6 +27,7 @@ function source(
 				...common,
 				envCellId: "0xda550101",
 				kind,
+				staticLights: [],
 			}
 		: { ...common, kind };
 }

@@ -84,7 +84,6 @@ describe("planEnvCellMaterialization", () => {
 				resourceNamespace:
 					`static-install:${index}` as import("../systems/static-resources").StaticInstallResourceNamespace,
 				source: job.source,
-				staticLights: job.staticLights,
 			}),
 		);
 		expect(
@@ -145,7 +144,6 @@ describe("planEnvCellMaterialization", () => {
 						layer: options.layer,
 						resourceNamespace,
 						source: options.source,
-						staticLights: options.staticLights ?? [],
 					}),
 					resourceNamespace,
 					source: options.source,

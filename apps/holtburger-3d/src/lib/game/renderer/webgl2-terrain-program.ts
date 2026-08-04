@@ -21,7 +21,9 @@ ${WEBGL2_SCENE_LIGHTING_GLSL}
 out vec2 vGridUv;
 out float vViewDepth;
 out float vViewerDistance;
-out vec3 vLighting;
+out vec3 vAmbientSun;
+out vec3 vAnchoredPosition;
+out vec3 vSurfaceNormal;
 
 void main() {
 	vec3 landblockPosition = (uLocalToLandblock * vec4(aPosition, 1.0)).xyz;
@@ -33,13 +35,16 @@ void main() {
 	vViewDepth = -viewPosition.z;
 	vViewerDistance = length(anchoredPosition - uCameraPosition);
 	// Retail bakes landscape lighting into vertex colors; evaluating the identical formula
-	// here keeps time-of-day changes a uniform update instead of a landblock re-bake. Landscape
-	// receives no burned-in static light, so the baked term is zero.
-	vLighting = evaluateSceneLighting(
-		anchoredPosition,
-		mat3(uLocalToLandblock) * aNormal,
-		vec3(0.0)
-	);
+	// here keeps time-of-day changes a uniform update instead of a landblock re-bake.
+	//
+	// Only the directional terms stay per vertex. Landscape vertices sit 24 units apart while a
+	// typical authored lamp reaches 9, so a per-vertex point light would touch at most one corner
+	// of a quad and smear a gradient across it instead of producing a pool. Point lights are
+	// therefore evaluated per pixel in the fragment stage, which needs the surface position and
+	// normal interpolated across the triangle.
+	vAmbientSun = evaluateAmbientAndSun(mat3(uLocalToLandblock) * aNormal);
+	vAnchoredPosition = anchoredPosition;
+	vSurfaceNormal = mat3(uLocalToLandblock) * aNormal;
 	gl_Position = uProjection * viewPosition;
 }
 `;
@@ -65,11 +70,14 @@ uniform float uFogFar;
 uniform vec3 uFogColor;
 
 ${WEBGL2_DISTANCE_FOG_GLSL}
+${WEBGL2_SCENE_LIGHTING_GLSL}
 
 in vec2 vGridUv;
 in float vViewDepth;
 in float vViewerDistance;
-in vec3 vLighting;
+in vec3 vAmbientSun;
+in vec3 vAnchoredPosition;
+in vec3 vSurfaceNormal;
 out vec4 fragmentColor;
 
 const uint ROAD_TERRAIN_TYPE = 32u;
@@ -239,8 +247,14 @@ void main() {
 	vec4 detail = texture(uDetail, fract(cellUv * float(metadata.w)));
 	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
-	// Lighting modulates the complete surface albedo, then fog applies as a raster stage.
-	color *= vLighting;
+	// Lighting modulates the complete surface albedo, then fog applies as a raster stage. The
+	// directional terms arrive interpolated; point lights evaluate here so a lamp produces a pool
+	// rather than a whole-quad gradient.
+	color *= min(
+		vAmbientSun
+			+ evaluateRuntimeLights(vAnchoredPosition, safeNormal(vSurfaceNormal)),
+		vec3(1.0)
+	);
 	color = applyDistanceFog(color, vViewerDistance);
 	fragmentColor = vec4(color, 1.0);
 }

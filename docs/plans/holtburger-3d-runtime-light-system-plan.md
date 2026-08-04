@@ -329,23 +329,27 @@ Tasks:
 - [x] Per-landblock outdoor light gathering with residency-scoped caching.
 - [x] Neighbour spill inclusion.
 - [x] Per-landblock binding across all four outdoor receivers, with a bind-frequency metric.
-- [ ] Browser verification at night, including the late-arriving-layer case.
+- [x] Browser verification at night, including the late-arriving-layer case.
+- [x] Terrain point lights moved to the fragment stage.
 
-Progress: **Blocked** on a design decision. Gathering, indexing, selection, binding, and the
-shader path are implemented and green (`npm run check` by exit code, 627 frontend tests, GLSL
-validation). Lamps demonstrably light objects and buildings at night. They do **not** meaningfully
-light terrain, and that cannot be fixed by tuning — see below.
+Progress: Complete (2026-08-04). Lamps light objects, buildings, and the ground at night, with
+visible pools on terrain.
 
 Decisions and course corrections:
 
-- **Terrain is too coarsely tessellated for per-vertex point lighting.** A landblock's terrain is
-  9x9 vertices over 192 units, so vertices sit **24 units apart**, while a typical lamp reaches
-  `6 * 1.5 = 9` units and even the archive's largest reaches 22.5. A lamp therefore touches at most
-  one terrain vertex and usually none. When it does touch one, the result is a 24-unit gradient
-  across the whole quad rather than a pool — arguably worse than no light at all. The Phase 2
-  acceptance criterion "lamps visibly illuminate the ground" is unreachable through the planned
-  per-vertex path. Options are recorded in Open Questions; this needs a decision before the phase
-  can close.
+- **Terrain point lights moved to the fragment stage, because terrain is too coarse for
+  per-vertex evaluation.** A landblock's terrain is 9x9 vertices over 192 units, so vertices sit
+  **24 units apart**, while the lamps actually placed in a town reach only 4.5 to 7.5 units. A lamp
+  therefore touches at most one terrain vertex and usually none; when it does touch one, the result
+  is a 24-unit gradient smeared across the quad rather than a pool. Sun and ambient stay per vertex
+  because they are directional and interpolate correctly across any triangle; only the point-light
+  loop is per pixel. Objects deliberately keep per-vertex evaluation, because their meshes are
+  finely tessellated and do not have this problem. Verified: pools are clearly visible on the
+  ground beside lit buildings at night.
+- **Authored lamps are much shorter-range than the archive-wide median suggested.** The lamps in
+  the verification landblock have falloffs of 3 to 5, so they reach 4.5 to 7.5 units, and their
+  light offsets are effectively zero — the emitter sits at the object's own origin, at ground
+  level. Pools are consequently small and tight rather than broad.
 - **Lights are gathered at artifact assembly, not in the worker.** `assembleStaticObjectArtifact`
   composes each resident's authored lights with its placement using the existing
   `placeObjectLights`, so the set is resolved once per residency change. The landblock comes from
@@ -434,17 +438,6 @@ Decisions and course corrections:
 - [ ] `docs/lighting.md` updated; entity-light attachment point recorded.
 
 ## Open Questions
-
-- **How should terrain receive point lights, given 24-unit vertex spacing?** Phase 2 found the
-  planned per-vertex path cannot produce a visible pool. Three options:
-  1. **Accept objects-only.** Lamps light buildings, objects, and scenery; terrain stays sun and
-     ambient. This is exactly what retail does, costs nothing, and avoids the one-vertex gradient
-     artifact — but the ground under a lamp stays dark, which is the thing the phase set out to fix.
-  2. **Evaluate terrain lighting per pixel.** The terrain fragment shader already composes
-     textures per pixel, so adding the light loop there produces true pools at any tessellation.
-     Cost is a per-pixel light loop over the landblock's set, on the largest screen area in view.
-  3. **Tessellate terrain more.** Rejected: it inflates the cost of everything else to fix
-     lighting.
 
 - Does the detail slider eventually scale the caps, as retail's degrade level does? Not needed now,
   but the dynamic selection layer is where it would live.

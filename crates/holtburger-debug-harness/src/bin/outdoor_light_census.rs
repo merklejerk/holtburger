@@ -122,5 +122,58 @@ fn main() -> Result<()> {
          templates across {scenes_with_lights} scenes",
         scene_ids.len()
     );
+
+    // A bare zero is only trustworthy if the ids being checked are the kind that can carry
+    // lights at all. Break every reference down by DAT family: 0x01 GfxObj cannot hold lights
+    // by construction, 0x02 Setup can.
+    let mut family = |label: &str, ids: &[u32]| {
+        let mut counts: BTreeMap<u32, usize> = BTreeMap::new();
+        for id in ids {
+            *counts.entry(id >> 24).or_default() += 1;
+        }
+        println!("  {label} id families: {counts:?}");
+    };
+    let mut object_ids = Vec::new();
+    let mut building_ids = Vec::new();
+    for &id in &landblock_ids {
+        let Ok(info) = cache.landblock_info(&content, id) else {
+            continue;
+        };
+        object_ids.extend(info.objects.iter().map(|stab| stab.id));
+        building_ids.extend(info.buildings.iter().map(|building| building.model_id));
+    }
+    let mut template_ids = Vec::new();
+    for &scene_id in &scene_ids {
+        if let Ok(scene) = cache.scene(&content, scene_id) {
+            template_ids.extend(
+                scene
+                    .object_templates
+                    .iter()
+                    .map(|template| template.object_id),
+            );
+        }
+    }
+    println!("reference breakdown (0x01 = GfxObj, 0x02 = Setup):");
+    family("explicit objects", &object_ids);
+    family("buildings", &building_ids);
+    family("scenery templates", &template_ids);
+
+    // Which setups actually carry lights, and are any of them referenced outdoors at all?
+    let mut lit_setups_outdoors: BTreeMap<u32, usize> = BTreeMap::new();
+    for id in object_ids.iter().chain(&building_ids).chain(&template_ids) {
+        if light_count(*id) > 0 {
+            *lit_setups_outdoors.entry(*id).or_default() += 1;
+        }
+    }
+    println!(
+        "distinct light-bearing setups referenced outdoors: {}",
+        lit_setups_outdoors.len()
+    );
+    let mut ranked: Vec<_> = lit_setups_outdoors.into_iter().collect();
+    ranked.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    for (setup, count) in ranked.iter().take(8) {
+        let lights = light_count(*setup);
+        println!("  setup 0x{setup:08X} placed {count}x, {lights} light(s) each");
+    }
     Ok(())
 }

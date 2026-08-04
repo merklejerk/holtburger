@@ -118,7 +118,10 @@ import type {
 import { SceneInterestCommitCoordinator } from "./scene-interest-commit-coordinator";
 import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
 import type { TerrainSurfaceSample } from "../terrain/terrain-surface";
-import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
+import {
+	type ResolvedSceneEnvironment,
+	UNAUTHORED_SCENE_LIGHTING,
+} from "../environment/scene-environment";
 import {
 	resolveTerrainCoverageFog,
 	type TerrainFogCoverage,
@@ -139,7 +142,7 @@ const DEFAULT_ENVIRONMENT: ResolvedSceneEnvironment = {
 	backgroundColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },
 	distanceFog: null,
 	sky: null,
-	lighting: null,
+	lighting: UNAUTHORED_SCENE_LIGHTING,
 };
 
 /** Conservative fixed terrain root bound including retail transition lowering. */

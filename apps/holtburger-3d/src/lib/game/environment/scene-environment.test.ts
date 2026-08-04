@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
-import { resolveSceneEnvironment } from "./scene-environment";
+import {
+	MINIMUM_AMBIENT_LEVEL,
+	resolveSceneEnvironment,
+	UNAUTHORED_LIGHTING,
+	UNAUTHORED_SCENE_LIGHTING,
+} from "./scene-environment";
 
 describe("resolveSceneEnvironment", () => {
 	it("uses cyclic keyframes and interpolates fog only when both endpoints enable it", () => {
@@ -24,6 +29,149 @@ describe("resolveSceneEnvironment", () => {
 		).toBeNull();
 	});
 });
+
+describe("resolveSceneEnvironment lighting", () => {
+	/** Sun length carries authored brightness, so a lit region must not normalize it away. */
+	it("folds directional brightness into the sun vector length", () => {
+		const lighting = lightingAt(0, [
+			lit({ begin: 0, directionalBrightness: 0.8, directionalPitch: 90 }),
+		]);
+		expect(Math.hypot(...sunAxes(lighting))).toBeCloseTo(0.8);
+	});
+
+	/** AC authors Z-up with +Y north; render space is Y-up with -Z north. */
+	it("maps a due-north sun onto the render -Z axis", () => {
+		const lighting = lightingAt(0, [
+			lit({
+				begin: 0,
+				directionalBrightness: 1,
+				directionalHeading: 0,
+				directionalPitch: 0,
+			}),
+		]);
+		expect(lighting.sunVector.x).toBeCloseTo(0);
+		expect(lighting.sunVector.y).toBeCloseTo(0);
+		expect(lighting.sunVector.z).toBeCloseTo(-1);
+	});
+
+	/** A 90-degree heading is due east, and pitch lifts the sun along render +Y. */
+	it("maps heading and pitch onto render east and up", () => {
+		const lighting = lightingAt(0, [
+			lit({
+				begin: 0,
+				directionalBrightness: 1,
+				directionalHeading: 90,
+				directionalPitch: 90,
+			}),
+		]);
+		expect(lighting.sunVector.y).toBeCloseTo(1);
+		const horizontal = lightingAt(0, [
+			lit({ begin: 0, directionalBrightness: 1, directionalHeading: 90 }),
+		]);
+		expect(horizontal.sunVector.x).toBeCloseTo(1);
+	});
+
+	it("interpolates sun and ambient between bracketing keyframes", () => {
+		const lighting = lightingAt(0.5, [
+			lit({ begin: 0, directionalBrightness: 0, ambientBrightness: 0.4 }),
+			lit({
+				begin: 1 - 1e-6,
+				directionalBrightness: 1,
+				ambientBrightness: 0.8,
+			}),
+		]);
+		expect(lighting.ambientLevel).toBeGreaterThan(0.4);
+		expect(lighting.ambientLevel).toBeLessThan(0.8);
+		expect(Math.hypot(...sunAxes(lighting))).toBeGreaterThan(0);
+	});
+
+	it("floors authored night ambient at the retail minimum", () => {
+		const lighting = lightingAt(0, [
+			lit({ begin: 0, ambientBrightness: MINIMUM_AMBIENT_LEVEL / 4 }),
+		]);
+		expect(lighting.ambientLevel).toBe(MINIMUM_AMBIENT_LEVEL);
+	});
+
+	it("wraps the final keyframe back to the first across midnight", () => {
+		const before = lightingAt(0.9, [
+			lit({ begin: 0, ambientBrightness: 1 }),
+			lit({ begin: 0.8, ambientBrightness: 0.5 }),
+		]);
+		expect(before.ambientLevel).toBeGreaterThan(0.5);
+		expect(before.ambientLevel).toBeLessThan(1);
+	});
+
+	it("falls back to retail unauthored lighting when a region has no sky", () => {
+		const source = activeRegion();
+		const environment = resolveSceneEnvironment(
+			{ ...source, data: { ...source.data, sky: null } },
+			{ dayIndex: 0, timeOfDay: 0.5, dayGroupOverride: null },
+		);
+		expect(environment.lighting).toEqual(UNAUTHORED_SCENE_LIGHTING);
+		expect(environment.lighting.ambientLevel).toBe(
+			UNAUTHORED_LIGHTING.ambientLevel,
+		);
+	});
+});
+
+function sunAxes(lighting: {
+	readonly sunVector: { x: number; y: number; z: number };
+}): [number, number, number] {
+	return [lighting.sunVector.x, lighting.sunVector.y, lighting.sunVector.z];
+}
+
+/** Resolve lighting for one synthetic day group at the given day fraction. */
+function lightingAt(
+	timeOfDay: number,
+	skyTimes: readonly ReturnType<typeof lit>[],
+) {
+	const source = activeRegion();
+	return resolveSceneEnvironment(
+		{
+			...source,
+			data: {
+				...source.data,
+				sky: {
+					tickSize: 1,
+					lightTickSize: 1,
+					dayGroups: [
+						{
+							chanceOfOccur: 0,
+							dayName: "Test",
+							skyObjects: [],
+							skyTimes: [...skyTimes],
+						},
+					],
+				},
+			},
+		},
+		{ dayIndex: 0, timeOfDay, dayGroupOverride: 0 },
+	).lighting;
+}
+
+/** One lighting-focused sky keyframe; fog fields stay inert. */
+function lit(overrides: {
+	readonly begin: number;
+	readonly directionalBrightness?: number;
+	readonly directionalHeading?: number;
+	readonly directionalPitch?: number;
+	readonly ambientBrightness?: number;
+}) {
+	return {
+		begin: overrides.begin,
+		directionalBrightness: overrides.directionalBrightness ?? 0,
+		directionalHeading: overrides.directionalHeading ?? 0,
+		directionalPitch: overrides.directionalPitch ?? 0,
+		directionalColor: 0xffffff,
+		ambientBrightness: overrides.ambientBrightness ?? 1,
+		ambientColor: 0xffffff,
+		minWorldFog: 0,
+		maxWorldFog: 0,
+		worldFogColor: 0,
+		worldFog: 0,
+		skyObjectReplacements: [],
+	};
+}
 
 function activeRegion(enableSecondFog = true): ActiveRegionSource {
 	return {

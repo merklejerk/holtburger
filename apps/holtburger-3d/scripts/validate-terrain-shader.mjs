@@ -10,12 +10,27 @@ const shaderSourcePath = join(
 	scriptDirectory,
 	"../src/lib/game/renderer/webgl2-terrain-program.ts",
 );
-const fogSourcePath = join(
-	scriptDirectory,
-	"../src/lib/game/renderer/webgl2-fog.ts",
-);
+/** Shared GLSL blocks the terrain shaders interpolate, by exported constant name. */
+const sharedGlslModules = {
+	WEBGL2_DISTANCE_FOG_GLSL: "../src/lib/game/renderer/webgl2-fog.ts",
+	WEBGL2_SCENE_LIGHTING_GLSL: "../src/lib/game/renderer/webgl2-lighting.ts",
+};
 const source = await readFile(shaderSourcePath, "utf8");
-const fogSource = await readFile(fogSourcePath, "utf8");
+const sharedGlsl = new Map(
+	await Promise.all(
+		Object.entries(sharedGlslModules).map(async ([name, relativePath]) => {
+			const modulePath = join(scriptDirectory, relativePath);
+			return /** @type {const} */ ([
+				name,
+				extractTemplateLiteral(
+					await readFile(modulePath, "utf8"),
+					name,
+					modulePath,
+				),
+			]);
+		}),
+	),
+);
 const temporaryDirectory = await mkdtemp(
 	join(tmpdir(), "holtburger-terrain-shader-"),
 );
@@ -40,13 +55,9 @@ function extractShader(sourceText, name) {
 	if (match?.[1] === undefined) {
 		throw new Error(`Could not find ${name} in ${shaderSourcePath}.`);
 	}
-	return match[1].replace(
-		"${WEBGL2_DISTANCE_FOG_GLSL}",
-		extractTemplateLiteral(
-			fogSource,
-			"WEBGL2_DISTANCE_FOG_GLSL",
-			fogSourcePath,
-		),
+	return [...sharedGlsl].reduce(
+		(shader, [name, glsl]) => shader.replaceAll("${" + name + "}", glsl),
+		match[1],
 	);
 }
 

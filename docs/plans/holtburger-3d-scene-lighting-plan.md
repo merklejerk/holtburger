@@ -732,6 +732,20 @@ Decisions and course corrections:
     hardware path — `Diffuse = color * intensity`, pure `1/d` attenuation, hard cutoff at
     `falloff * 1.5` (`acclient.c:432845-432906`). The contract now carries the derived range
     rather than raw falloff.
+  - _Bake input moved onto the source contract._ `staticLights` was a parameter passed beside the
+    source through two generic preparer interfaces, defaulted with `?? []` at the runtime
+    boundary — so an interior job that stopped passing its lights would have baked nothing and
+    rendered unlit with no error. Making it required did not work, because the same generic
+    interface serves both the per-layer and per-resident boundaries and the cell-level preparer
+    has no lights of its own to supply. It is now a required field on
+    `ResolvedEnvCellStaticObjectSource`, so the lights travel with the geometry they light and the
+    worker reads them off the discriminated source kind. Outdoor sources have no such field, which
+    states "sun and ambient only" in the type rather than through a silent default.
+  - _Process failure worth recording: `npm run check` was being read by grepping its output for a
+    pattern that only matches `svelte-check`, so `tsc` errors in test files went unseen for
+    several phases._ Roughly two dozen test fixtures had drifted out of type compliance with the
+    contract fields added across earlier phases. All are fixed, and the command is now verified by
+    exit code rather than by pattern.
   - _Known deviation: indoor residents are baked, where retail hardware-lights them._ Retail burns
     static light into the cell **shell** only; indoor furniture is a `CGfxObj` and receives the
     same lights through `minimize_object_lighting` instead, using `max(0, N·L)` with `1/d` rather

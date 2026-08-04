@@ -275,8 +275,14 @@ These are deliberate, and each produces output equivalent to retail:
   being baked per landblock. The formula is identical; evaluating it live makes a time-of-day
   change a uniform update instead of a re-bake of every loaded landblock.
 - **Interior static lights are still baked**, matching retail, but the bake gathers every light in
-  the landblock and relies on the authored range cutoff instead of consulting a live visibility
-  set. For static content that is equivalent to retail's nearby-visible-cells union.
+  the landblock and relies on the authored range cutoff instead of consulting a visibility set.
+  This is _not_ equivalent to retail: `visible_cell_table` is occlusion-aware, so retail will
+  sometimes exclude a light that ours admits, and we can bleed light through a solid wall. In
+  exchange the bake is stable and camera-independent, where retail re-bakes as its visible set
+  changes. Distant bleed is negligible under the attenuation, but a light on a wall shared by two
+  rooms will reach both. The knob if that ever matters is per-cell PVS — already decoded as
+  `potentiallyVisibleEnvCellIds` — not the depth-continuous visibility islands, which would be too
+  tight and would stop light passing through doorways.
 - **Cell shell geometry is duplicated per cell** so each cell can carry its own bake. Retail could
   share less carefully because it constructed one mesh per cell. Shell structures are tiny — median
   10 vertices, maximum 113, 45,320 vertices across all 3,145 structures in the archive — so the

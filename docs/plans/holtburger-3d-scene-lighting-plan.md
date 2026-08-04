@@ -751,6 +751,11 @@ Decisions and course corrections:
     several phases._ Roughly two dozen test fixtures had drifted out of type compliance with the
     contract fields added across earlier phases. All are fixed, and the command is now verified by
     exit code rather than by pattern.
+  - _Correction to an earlier claim: landblock-wide light gathering is an approximation of
+    retail's visible-cell union, not an equivalent._ Retail gathers from `visible_cell_table`,
+    which is occlusion-aware; range culling alone is not. Adjoining cells correctly light each
+    other through doorways, but light can also bleed through a wall. Recorded rather than silently
+    left as "equivalent".
   - _Known deviation: indoor residents are baked, where retail hardware-lights them._ Retail burns
     static light into the cell **shell** only; indoor furniture is a `CGfxObj` and receives the
     same lights through `minimize_object_lighting` instead, using `max(0, N·L)` with `1/d` rather

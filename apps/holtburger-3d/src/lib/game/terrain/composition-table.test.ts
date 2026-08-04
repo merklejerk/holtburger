@@ -52,14 +52,15 @@ describe("compileTerrainCompositionTable", () => {
 
 		expect(table.width).toBe(33);
 		expect(table.texels.length).toBe(33 * TERRAIN_COMPOSITION_TABLE_HEIGHT * 4);
-		expect(record(table, 0, 0)).toEqual([0, 2, 11, 12]);
-		expect(record(table, 0, 1)).toEqual([13, 14, 15, 16]);
-		expect(record(table, 2, 0)).toEqual([1, 3, 11, 12]);
-		expect(record(table, 32, 0)).toEqual([0, 2, 11, 12]);
-		expect(record(table, 0, 2)).toEqual([0, 1, 0, 0]);
-		expect(record(table, 0, 3)).toEqual([1, 9, 0, 0]);
-		expect(record(table, 0, 4)).toEqual([0, 3, 0, 0]);
-		expect(record(table, 0, 5)).toEqual([1, 1, 1, 7]);
+		// Terrain-type rows carry only the color layer and tiling: retail's authored vertex
+		// colour variation is dead data, so it is never uploaded.
+		expect(record(table, 0, 0)).toEqual([0, 2, 0, 0]);
+		expect(record(table, 2, 0)).toEqual([1, 3, 0, 0]);
+		expect(record(table, 32, 0)).toEqual([0, 2, 0, 0]);
+		expect(record(table, 0, 1)).toEqual([0, 1, 0, 0]);
+		expect(record(table, 0, 2)).toEqual([1, 9, 0, 0]);
+		expect(record(table, 0, 3)).toEqual([0, 3, 0, 0]);
+		expect(record(table, 0, 4)).toEqual([1, 1, 1, 7]);
 	});
 });
 

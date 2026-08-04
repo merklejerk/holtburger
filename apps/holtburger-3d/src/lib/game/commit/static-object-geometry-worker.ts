@@ -264,7 +264,9 @@ function prepareBakedStaticObjectGeometry(
 			mergedPositions,
 			mergedNormals,
 			Mat4.identity(),
-			// Only EnvCell sources carry lights; outdoor geometry is sun-and-ambient only.
+			// Only EnvCell sources bake. Outdoor geometry receives its authored lights through
+			// the runtime set instead, because emitters and receivers sit in layers with
+			// independent residency radii and cannot be resolved together here.
 			job.source.kind === LandblockLayerKind.EnvCells
 				? job.source.staticLights
 				: [],

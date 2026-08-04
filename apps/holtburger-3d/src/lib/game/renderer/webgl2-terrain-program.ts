@@ -251,7 +251,7 @@ export interface WebGL2TerrainProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly ambientColor: WebGLUniformLocation;
-		readonly viewerLightFalloffIntensity: WebGLUniformLocation;
+		readonly viewerLightRangeIntensity: WebGLUniformLocation;
 		readonly viewerLightPosition: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly blendMasks: WebGLUniformLocation;
@@ -309,10 +309,10 @@ export function createWebGL2TerrainProgram(
 			program,
 			uniforms: {
 				ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
-				viewerLightFalloffIntensity: requireWebGL2Uniform(
+				viewerLightRangeIntensity: requireWebGL2Uniform(
 					gl,
 					program,
-					"uViewerLightFalloffIntensity",
+					"uViewerLightRangeIntensity",
 				),
 				viewerLightPosition: requireWebGL2Uniform(
 					gl,

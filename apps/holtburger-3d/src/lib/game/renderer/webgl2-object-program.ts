@@ -273,7 +273,7 @@ interface WebGL2ObjectProgramBase {
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
 		readonly ambientColor: WebGLUniformLocation;
-		readonly viewerLightFalloffIntensity: WebGLUniformLocation;
+		readonly viewerLightRangeIntensity: WebGLUniformLocation;
 		readonly viewerLightPosition: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
@@ -393,10 +393,10 @@ export function createWebGL2ObjectProgram(
 		const uniforms: WebGL2ObjectProgramBase["uniforms"] = {
 			alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
 			ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
-			viewerLightFalloffIntensity: requireWebGL2Uniform(
+			viewerLightRangeIntensity: requireWebGL2Uniform(
 				gl,
 				program,
-				"uViewerLightFalloffIntensity",
+				"uViewerLightRangeIntensity",
 			),
 			viewerLightPosition: requireWebGL2Uniform(
 				gl,

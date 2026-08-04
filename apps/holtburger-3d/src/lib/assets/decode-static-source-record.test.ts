@@ -101,6 +101,57 @@ describe("decodeOutdoorStaticRecord", () => {
 		).toThrow("out-of-range index");
 	});
 
+	it("resolves authored setup lights into object-local render axes", () => {
+		const source = decodeOutdoorStaticRecord(
+			buildResponse({
+				lights: [
+					{
+						lightType: 0,
+						// AC authors Z-up with +Y north; render space is Y-up with -Z north.
+						offset: { origin: [1, 2, 3], orientation: [1, 0, 0, 0] },
+						color: 0x0080ff,
+						intensity: 75,
+						falloff: 4,
+						coneAngle: -1,
+					},
+				],
+			}),
+			LANDBLOCK_ID,
+			LandblockLayerKind.Buildings,
+		);
+		const [light] = source.dynamicSources[0]!.presentation.lights;
+		expect(light).toBeDefined();
+		expect([light!.offset.x, light!.offset.y, light!.offset.z]).toEqual([
+			1, 3, -2,
+		]);
+		expect(light!.color.red).toBeCloseTo(1);
+		expect(light!.color.green).toBeCloseTo(0x80 / 0xff);
+		expect(light!.color.blue).toBe(0);
+		expect(light!.intensity).toBe(75);
+		expect(light!.falloff).toBe(4);
+	});
+
+	it("rejects a setup light whose type is not a point light", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({
+					lights: [
+						{
+							lightType: 2,
+							offset: { origin: [0, 0, 0], orientation: [1, 0, 0, 0] },
+							color: 0,
+							intensity: 1,
+							falloff: 1,
+							coneAngle: 1,
+						},
+					],
+				}),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("unsupported light type");
+	});
+
 	it("indexes every attach point a setup offers by its named location", () => {
 		const source = decodeOutdoorStaticRecord(
 			buildResponse({
@@ -179,6 +230,7 @@ function buildResponse(
 		readonly indices?: readonly number[];
 		readonly layer?: "buildings" | "objects" | "generated";
 		readonly holdingLocations?: readonly Record<string, unknown>[];
+		readonly lights?: readonly Record<string, unknown>[];
 	} = {},
 ): Uint8Array {
 	const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -262,6 +314,7 @@ function buildResponse(
 						materialIds: ["surface/08000001"],
 					},
 				],
+				lights: options.lights ?? [],
 				holdingLocations: options.holdingLocations ?? [],
 				defaultAnimationId: "0x030005cf",
 				defaultMotionTableId: null,

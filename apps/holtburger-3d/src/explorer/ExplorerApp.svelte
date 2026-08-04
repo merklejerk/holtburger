@@ -106,6 +106,11 @@
 		applyFrameSettings();
 	}
 
+	function updateViewerLight(enabled: boolean): void {
+		frameSettings = { ...frameSettings, viewerLightEnabled: enabled };
+		applyFrameSettings();
+	}
+
 	function updateEnvCellRenderMode(mode: EnvCellRenderMode): void {
 		frameSettings = { ...frameSettings, envCellRenderMode: mode };
 		applyFrameSettings();
@@ -395,6 +400,8 @@
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			{updateDistanceFog}
+			{updateViewerLight}
+			viewerLightEnabled={frameSettings.viewerLightEnabled}
 			envCellRenderMode={frameSettings.envCellRenderMode}
 			{updateEnvCellRenderMode}
 			textureFiltering={effectiveTextureFiltering}

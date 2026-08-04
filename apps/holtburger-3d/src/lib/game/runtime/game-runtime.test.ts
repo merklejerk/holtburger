@@ -180,6 +180,8 @@ describe("GameRuntime view and interest control", () => {
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
 		expect(frames[0]?.frameSettings).toEqual({
 			distanceFogEnabled: true,
+			viewerLightEnabled:
+				FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
 			envCellRenderMode: "portal",
 			quality: {
 				minimumObjectFootprintPixelArea:

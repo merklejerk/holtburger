@@ -33,8 +33,10 @@
 		) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
+		readonly viewerLightEnabled: boolean;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
+		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		/** Effective filterable texture quality selected for the next frame. */
@@ -54,7 +56,9 @@
 		dayGroupNames,
 		updateEnvironment,
 		distanceFogEnabled,
+		viewerLightEnabled,
 		updateDistanceFog,
+		updateViewerLight,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
 		textureFiltering,
@@ -104,6 +108,10 @@
 
 	function handleDistanceFogChange(event: Event): void {
 		updateDistanceFog((event.currentTarget as HTMLInputElement).checked);
+	}
+
+	function handleViewerLightChange(event: Event): void {
+		updateViewerLight((event.currentTarget as HTMLInputElement).checked);
 	}
 
 	const requestStatus = $derived(
@@ -259,6 +267,15 @@
 				/>
 				<span>Distance fog</span>
 				<strong>{distanceFogEnabled ? "On" : "Off"}</strong>
+			</label>
+			<label class="explorer-toggle">
+				<input
+					checked={viewerLightEnabled}
+					type="checkbox"
+					onchange={handleViewerLightChange}
+				/>
+				<span>Viewer light</span>
+				<strong>{viewerLightEnabled ? "On" : "Off"}</strong>
 			</label>
 			<label class="explorer-environment-field">
 				<span>EnvCell renderer</span>

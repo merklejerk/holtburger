@@ -81,6 +81,7 @@ export const FRONTEND_TUNING = {
 		frameDefaults: {
 			/** Whether region-authored distance fog is enabled initially. */
 			distanceFogEnabled: true,
+			viewerLightEnabled: true,
 			/** Environment-cell visibility policy selected initially. */
 			envCellRenderMode: "portal",
 			/** Physical-pixel cutoff for independently optional object presentations. */

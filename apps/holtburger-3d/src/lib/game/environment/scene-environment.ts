@@ -54,10 +54,32 @@ export interface ResolvedDistanceFog {
  * outdoor object ambient formula, and which draws see the sun at all — belongs to the
  * renderer's lighting context, not here.
  */
+/**
+ * Retail's viewer headlamp (`SmartBox::set_viewer`, acclient.c:137873).
+ *
+ * A free camera attaches it at the camera with no offset; the `(0, 0, 2)` offset applies only
+ * once a character carries it. Zero intensity means the headlamp is off.
+ */
+export interface ResolvedViewerLight {
+	/** Landblock-anchored position, matching the space shaders compute vertices in. */
+	readonly position: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
+	readonly falloff: number;
+	readonly intensity: number;
+}
+
+/** Retail's authored viewer-light constants (acclient.c:43910, 728925). */
+export const VIEWER_LIGHT = { falloff: 10, intensity: 0.5 * 4.5 } as const;
+
 export interface ResolvedSceneLighting {
 	/** Interpolated ambient level, floored at `MINIMUM_AMBIENT_LEVEL`. */
 	readonly ambientLevel: number;
 	readonly ambientColor: SceneColor;
+	/** Headlamp state; disabled by default until a frame supplies the camera position. */
+	readonly viewerLight: ResolvedViewerLight;
 	/**
 	 * Sun direction in render axes, deliberately left unnormalized: its magnitude carries the
 	 * authored directional brightness, exactly as retail's `SkyDesc::GetLighting` builds it
@@ -167,6 +189,7 @@ function resolveLighting(keyframes: {
 		lerp(before.directionalPitch, after.directionalPitch, ratio),
 	);
 	return {
+		viewerLight: DISABLED_VIEWER_LIGHT,
 		ambientLevel: Math.max(
 			lerp(before.ambientBrightness, after.ambientBrightness, ratio),
 			MINIMUM_AMBIENT_LEVEL,
@@ -280,7 +303,15 @@ const BLACK: SceneColor = { red: 0, green: 0, blue: 0, alpha: 1 };
 const WHITE: SceneColor = { red: 1, green: 1, blue: 1, alpha: 1 };
 
 /** Retail's lighting for a region or day group that authors no usable sky keyframes. */
+/** Off until the renderer substitutes the live camera position each frame. */
+export const DISABLED_VIEWER_LIGHT: ResolvedViewerLight = {
+	position: { x: 0, y: 0, z: 0 },
+	falloff: VIEWER_LIGHT.falloff,
+	intensity: 0,
+};
+
 export const UNAUTHORED_SCENE_LIGHTING: ResolvedSceneLighting = {
+	viewerLight: DISABLED_VIEWER_LIGHT,
 	ambientLevel: UNAUTHORED_LIGHTING.ambientLevel,
 	ambientColor: WHITE,
 	sunVector: renderVector(

@@ -35,7 +35,11 @@ void main() {
 	// Retail bakes landscape lighting into vertex colors; evaluating the identical formula
 	// here keeps time-of-day changes a uniform update instead of a landblock re-bake. Landscape
 	// receives no burned-in static light, so the baked term is zero.
-	vLighting = evaluateSceneLighting(mat3(uLocalToLandblock) * aNormal, vec3(0.0));
+	vLighting = evaluateSceneLighting(
+		anchoredPosition,
+		mat3(uLocalToLandblock) * aNormal,
+		vec3(0.0)
+	);
 	gl_Position = uProjection * viewPosition;
 }
 `;
@@ -247,6 +251,8 @@ export interface WebGL2TerrainProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly ambientColor: WebGLUniformLocation;
+		readonly viewerLightFalloffIntensity: WebGLUniformLocation;
+		readonly viewerLightPosition: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly blendMasks: WebGLUniformLocation;
 		readonly cameraHorizontalPosition: WebGLUniformLocation;
@@ -303,6 +309,16 @@ export function createWebGL2TerrainProgram(
 			program,
 			uniforms: {
 				ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
+				viewerLightFalloffIntensity: requireWebGL2Uniform(
+					gl,
+					program,
+					"uViewerLightFalloffIntensity",
+				),
+				viewerLightPosition: requireWebGL2Uniform(
+					gl,
+					program,
+					"uViewerLightPosition",
+				),
 				ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 				blendMasks: requireWebGL2Uniform(gl, program, "uBlendMasks"),
 				cameraHorizontalPosition: requireWebGL2Uniform(

@@ -148,6 +148,7 @@ describe("StaticObjectSystem", () => {
 
 function artifact(id: string): StaticObjectLayerArtifact {
 	return {
+		staticLights: [],
 		geometryDiagnostics: {
 			bakedFallbackRangeCount: 0,
 			bakedGeometryBytes: 0,

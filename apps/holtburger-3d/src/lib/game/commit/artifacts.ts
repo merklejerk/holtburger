@@ -1,3 +1,4 @@
+import type { RuntimeLight } from "../environment/runtime-lights";
 import type {
 	GeometrySource,
 	ObjectGeometryKey,
@@ -186,6 +187,14 @@ export interface StaticObjectLayerArtifact {
 	readonly textureRequirements: readonly AssetTextureFact[];
 	/** Exact closed-worker facts for this materialized geometry. */
 	readonly geometryDiagnostics: StaticObjectGeometryDiagnostics;
+	/**
+	 * Authored lights this layer emits, in landblock space.
+	 *
+	 * Only the Objects layer ever populates this: buildings reference GfxObjs, which cannot carry
+	 * lights, and no generated-scenery template authors one. Gathered here so the set is resolved
+	 * once per residency change rather than per frame.
+	 */
+	readonly staticLights: readonly RuntimeLight[];
 }
 
 /** Persistent shell render contribution attached to one env-cell root node. */

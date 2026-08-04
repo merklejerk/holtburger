@@ -293,6 +293,8 @@ function mergeResidentArtifacts(
 		);
 	}
 	return {
+		// Interior residents are lit by their bake, not by the runtime set.
+		staticLights: [],
 		resourceNamespace: staticRevisionToInstallNamespace(
 			owner,
 			revision,

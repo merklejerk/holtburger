@@ -122,6 +122,8 @@ import {
 	type ResolvedSceneEnvironment,
 	UNAUTHORED_SCENE_LIGHTING,
 } from "../environment/scene-environment";
+import { OutdoorLightIndex } from "../environment/outdoor-light-index";
+import type { OutdoorLightLookup } from "../renderer/renderer";
 import {
 	resolveTerrainCoverageFog,
 	type TerrainFogCoverage,
@@ -274,6 +276,9 @@ export class GameRuntime {
 	readonly #residentAtlas: ResidentTextureAtlas<ResourceOwnerId>;
 	/** Immutable-object nodes, components, and resource publication. */
 	readonly #staticObjects: StaticObjectSystem<OwnerId, ResourceOwnerId>;
+	/** Landblock-scoped authored outdoor lights, rebuilt only when layer residency changes. */
+	readonly #outdoorLights: OutdoorLightLookup & OutdoorLightIndex =
+		new OutdoorLightIndex();
 	/** Source-to-static publication sequencing for independent outdoor static layers. */
 	readonly #staticLayerRealizer: StaticLayerRealizer<
 		ResolvedOutdoorStaticLayerSource,
@@ -450,6 +455,12 @@ export class GameRuntime {
 						throw new Error(`Outdoor static publisher received ${layer}.`);
 					}
 					this.#staticObjects.replaceObjects(owner, revision, geometry, layer);
+					// Only the Objects layer emits; the others always install an empty set,
+					// which removes any stale entry when a layer is withdrawn.
+					this.#outdoorLights.install(
+						parseLandblockLayerOwnerId(owner).landblockId,
+						geometry?.staticLights ?? [],
+					);
 				},
 			},
 		});
@@ -849,6 +860,7 @@ export class GameRuntime {
 				),
 			},
 			frameSettings: this.#frameSettings,
+			outdoorLights: this.#outdoorLights,
 			timeSeconds,
 			views: [
 				{

@@ -1,3 +1,4 @@
+import type { LandblockId } from "../game-types";
 import type { SceneLightingRole } from "../environment/scene-lighting";
 import type {
 	ObjectBlendPolicy,
@@ -20,6 +21,7 @@ export class WebGL2ObjectStateApplicator {
 	#blendPolicy: ObjectBlendPolicy | UnknownState = UNKNOWN_STATE;
 	#cullFace: "back" | "front" | UnknownState = UNKNOWN_STATE;
 	#lightingRole: SceneLightingRole | UnknownState = UNKNOWN_STATE;
+	#staticLightScope: LandblockId | null | UnknownState = UNKNOWN_STATE;
 	#program: WebGLProgram | UnknownState = UNKNOWN_STATE;
 	readonly #textureUnits = new Map<
 		number,
@@ -38,6 +40,7 @@ export class WebGL2ObjectStateApplicator {
 		this.#blendPolicy = UNKNOWN_STATE;
 		this.#cullFace = UNKNOWN_STATE;
 		this.#lightingRole = UNKNOWN_STATE;
+		this.#staticLightScope = UNKNOWN_STATE;
 		this.#program = UNKNOWN_STATE;
 		this.#textureUnits.clear();
 		this.#vertexArray = UNKNOWN_STATE;
@@ -50,6 +53,7 @@ export class WebGL2ObjectStateApplicator {
 		this.#program = program;
 		// Uniform state belongs to the program object, so a switch always re-binds lighting.
 		this.#lightingRole = UNKNOWN_STATE;
+		this.#staticLightScope = UNKNOWN_STATE;
 		return true;
 	}
 
@@ -57,6 +61,18 @@ export class WebGL2ObjectStateApplicator {
 	applyLightingRole(role: SceneLightingRole): boolean {
 		if (this.#lightingRole === role) return false;
 		this.#lightingRole = role;
+		return true;
+	}
+
+	/**
+	 * Report whether this draw needs its static light array rebound.
+	 *
+	 * Keyed by landblock rather than by role, because two draws sharing a role can sit in
+	 * different landblocks and therefore need different sets.
+	 */
+	applyStaticLightScope(landblockId: LandblockId | null): boolean {
+		if (this.#staticLightScope === landblockId) return false;
+		this.#staticLightScope = landblockId;
 		return true;
 	}
 

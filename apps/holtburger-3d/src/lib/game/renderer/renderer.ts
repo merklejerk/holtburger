@@ -2,6 +2,13 @@ import type { LandblockId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
+import type { RuntimeLight } from "../environment/runtime-lights";
+
+/** Minimal read side of the outdoor light index the renderer depends on. */
+export interface OutdoorLightLookup {
+	readonly isEmpty: boolean;
+	resolve(landblockId: LandblockId): readonly RuntimeLight[];
+}
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 
@@ -66,6 +73,13 @@ export interface FrameInput {
 	readonly timeSeconds: number;
 	/** Effective regional presentation shared by all renderer passes. */
 	readonly environment: ResolvedSceneEnvironment;
+	/**
+	 * Resolves the authored outdoor lights reaching a landblock.
+	 *
+	 * Supplied as a lookup rather than a materialized list because the renderer only needs the
+	 * landblocks it actually draws, and the index memoizes across frames.
+	 */
+	readonly outdoorLights: OutdoorLightLookup;
 	/** Dynamic display choices applied to this frame. */
 	readonly frameSettings: FrameSettings;
 	readonly views: readonly FrameViewInput[];
@@ -184,6 +198,11 @@ export interface FrameSelectionMetrics {
 	 * observable across a frame.
 	 */
 	readonly droppedLights: number;
+	/**
+	 * Static light array binds. Compared against visible lit landblocks this shows whether draw
+	 * order is landblock-coherent enough for per-landblock binding.
+	 */
+	readonly staticLightBinds: number;
 	/** Lighting-uniform binds caused by a draw changing its retail lighting role. */
 	readonly objectLightingBinds: number;
 	/** Object-program activation count across every rendered view. */

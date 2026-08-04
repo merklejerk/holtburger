@@ -2,6 +2,7 @@ import type { ResolvedSceneLighting } from "../environment/scene-environment";
 import { POINT_LIGHT_FALLOFF_GLSL } from "../environment/point-light-falloff";
 import {
 	MAX_DYNAMIC_LIGHTS,
+	MAX_STATIC_LIGHTS,
 	type RuntimeLight,
 } from "../environment/runtime-lights";
 
@@ -29,6 +30,11 @@ uniform float uAmbientLevel;
 uniform int uDynamicLightCount;
 uniform vec4 uDynamicLightPositionRange[${MAX_DYNAMIC_LIGHTS}];
 uniform vec4 uDynamicLightColorIntensity[${MAX_DYNAMIC_LIGHTS}];
+// Authored outdoor lights for the landblock being drawn, packed identically. Interior draws
+// bind a count of zero, because their static lighting is already baked into vertex colours.
+uniform int uStaticLightCount;
+uniform vec4 uStaticLightPositionRange[${MAX_STATIC_LIGHTS}];
+uniform vec4 uStaticLightColorIntensity[${MAX_STATIC_LIGHTS}];
 
 // Authored GfxObj normals may be exactly zero (2.6% of retail vertices). Retail never
 // normalizes, validates, or derives a face normal for them, and its software sun term
@@ -45,19 +51,34 @@ ${POINT_LIGHT_FALLOFF_GLSL}
 // authored falloff the interior bake uses, including its per-channel clamp to the light's
 // own colour. That clamp is what keeps an authored intensity of 100 from washing the
 // surface to white instead of to lamp colour.
-vec3 evaluateDynamicLights(vec3 position, vec3 unitNormal) {
+vec3 accumulateLight(vec3 position, vec3 unitNormal, vec4 positionRange, vec4 colorIntensity) {
+	float scale = pointLightFalloff(
+		positionRange.xyz - position,
+		unitNormal,
+		positionRange.w,
+		colorIntensity.a
+	);
+	if (scale <= 0.0) return vec3(0.0);
+	return min(scale * colorIntensity.rgb, colorIntensity.rgb);
+}
+
+vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {
 	vec3 total = vec3(0.0);
 	for (int index = 0; index < uDynamicLightCount; index += 1) {
-		vec4 positionRange = uDynamicLightPositionRange[index];
-		vec4 colorIntensity = uDynamicLightColorIntensity[index];
-		float scale = pointLightFalloff(
-			positionRange.xyz - position,
+		total += accumulateLight(
+			position,
 			unitNormal,
-			positionRange.w,
-			colorIntensity.a
+			uDynamicLightPositionRange[index],
+			uDynamicLightColorIntensity[index]
 		);
-		if (scale <= 0.0) continue;
-		total += min(scale * colorIntensity.rgb, colorIntensity.rgb);
+	}
+	for (int index = 0; index < uStaticLightCount; index += 1) {
+		total += accumulateLight(
+			position,
+			unitNormal,
+			uStaticLightPositionRange[index],
+			uStaticLightColorIntensity[index]
+		);
 	}
 	return total;
 }
@@ -73,7 +94,7 @@ vec3 evaluateSceneLighting(vec3 position, vec3 normal, vec3 bakedLight) {
 		uAmbientLevel * uAmbientColor
 			+ sun * uSunColor
 			+ bakedLight
-			+ evaluateDynamicLights(position, unitNormal),
+			+ evaluateRuntimeLights(position, unitNormal),
 		vec3(1.0)
 	);
 }
@@ -88,6 +109,15 @@ export interface WebGL2LightingUniforms {
 	readonly dynamicLightCount: WebGLUniformLocation;
 	readonly dynamicLightPositionRange: WebGLUniformLocation;
 	readonly dynamicLightColorIntensity: WebGLUniformLocation;
+	readonly staticLightCount: WebGLUniformLocation;
+	readonly staticLightPositionRange: WebGLUniformLocation;
+	readonly staticLightColorIntensity: WebGLUniformLocation;
+}
+
+/** Reusable upload staging shared by both light arrays. */
+export interface DynamicLightScratch {
+	readonly positionRange: Float32Array;
+	readonly colorIntensity: Float32Array;
 }
 
 /** Bind one draw's resolved lighting for its retail role. */
@@ -127,13 +157,48 @@ export function bindWebGL2DynamicLights(
 	gl: WebGL2RenderingContext,
 	uniforms: WebGL2LightingUniforms,
 	lights: readonly RuntimeLight[],
-	scratch: {
-		readonly positionRange: Float32Array;
-		readonly colorIntensity: Float32Array;
-	},
+	scratch: DynamicLightScratch,
 ): void {
-	const count = Math.min(lights.length, MAX_DYNAMIC_LIGHTS);
-	gl.uniform1i(uniforms.dynamicLightCount, count);
+	bindLightArray(
+		gl,
+		uniforms.dynamicLightCount,
+		uniforms.dynamicLightPositionRange,
+		uniforms.dynamicLightColorIntensity,
+		lights,
+		MAX_DYNAMIC_LIGHTS,
+		scratch,
+	);
+}
+
+/** Bind one landblock's authored static lights; an empty list costs a single count upload. */
+export function bindWebGL2StaticLights(
+	gl: WebGL2RenderingContext,
+	uniforms: WebGL2LightingUniforms,
+	lights: readonly RuntimeLight[],
+	scratch: DynamicLightScratch,
+): void {
+	bindLightArray(
+		gl,
+		uniforms.staticLightCount,
+		uniforms.staticLightPositionRange,
+		uniforms.staticLightColorIntensity,
+		lights,
+		MAX_STATIC_LIGHTS,
+		scratch,
+	);
+}
+
+function bindLightArray(
+	gl: WebGL2RenderingContext,
+	countUniform: WebGLUniformLocation,
+	positionRangeUniform: WebGLUniformLocation,
+	colorIntensityUniform: WebGLUniformLocation,
+	lights: readonly RuntimeLight[],
+	cap: number,
+	scratch: DynamicLightScratch,
+): void {
+	const count = Math.min(lights.length, cap);
+	gl.uniform1i(countUniform, count);
 	if (count === 0) return;
 	for (let index = 0; index < count; index += 1) {
 		const light = lights[index]!;
@@ -147,27 +212,15 @@ export function bindWebGL2DynamicLights(
 		scratch.colorIntensity[offset + 2] = light.color.blue;
 		scratch.colorIntensity[offset + 3] = light.intensity;
 	}
-	gl.uniform4fv(
-		uniforms.dynamicLightPositionRange,
-		scratch.positionRange,
-		0,
-		count * 4,
-	);
-	gl.uniform4fv(
-		uniforms.dynamicLightColorIntensity,
-		scratch.colorIntensity,
-		0,
-		count * 4,
-	);
+	gl.uniform4fv(positionRangeUniform, scratch.positionRange, 0, count * 4);
+	gl.uniform4fv(colorIntensityUniform, scratch.colorIntensity, 0, count * 4);
 }
 
 /** Reusable upload staging sized to the dynamic cap; the renderer owns one instance. */
-export function createDynamicLightScratch(): {
-	readonly positionRange: Float32Array;
-	readonly colorIntensity: Float32Array;
-} {
+export function createDynamicLightScratch(): DynamicLightScratch {
+	const capacity = Math.max(MAX_DYNAMIC_LIGHTS, MAX_STATIC_LIGHTS) * 4;
 	return {
-		positionRange: new Float32Array(MAX_DYNAMIC_LIGHTS * 4),
-		colorIntensity: new Float32Array(MAX_DYNAMIC_LIGHTS * 4),
+		positionRange: new Float32Array(capacity),
+		colorIntensity: new Float32Array(capacity),
 	};
 }

@@ -77,6 +77,7 @@ import {
 } from "../environment/scene-environment";
 import {
 	MAX_DYNAMIC_LIGHTS,
+	MAX_STATIC_LIGHTS,
 	type RuntimeLight,
 	selectNearestLights,
 } from "../environment/runtime-lights";
@@ -89,6 +90,7 @@ import { bindWebGL2DistanceFog } from "./webgl2-fog";
 import {
 	bindWebGL2DynamicLights,
 	bindWebGL2SceneLighting,
+	bindWebGL2StaticLights,
 	createDynamicLightScratch,
 } from "./webgl2-lighting";
 import {
@@ -165,6 +167,8 @@ interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
 	/** Frame-global dynamic lights; they reach every draw regardless of role. */
 	readonly dynamicLights: readonly RuntimeLight[];
+	/** Authored outdoor lights reaching one landblock, memoized across frames by the index. */
+	readonly staticLights: (landblockId: LandblockId) => readonly RuntimeLight[];
 	/** Lighting per draw role, derived once per frame so draw loops stay allocation-free. */
 	readonly lighting: SceneLightingByRole;
 }
@@ -176,10 +180,12 @@ interface SceneShading {
 const PROBE_SHADING: SceneShading = {
 	fog: null,
 	dynamicLights: [],
+	staticLights: () => [],
 	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
 };
 
 const ORIGIN = { x: 0, y: 0, z: 0 } as const;
+const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
 
 interface TerrainFrameInput {
 	/** Selected LOD, transition range, and logical texture identities. */
@@ -354,6 +360,7 @@ interface MutableFrameSelectionMetrics {
 	frameInstanceGrowthCount: number;
 	frameInstanceViewHighWaterMark: number;
 	droppedLights: number;
+	staticLightBinds: number;
 	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
@@ -474,6 +481,7 @@ export class WebGL2Renderer implements Renderer {
 		frameInstanceGrowthCount: 0,
 		frameInstanceViewHighWaterMark: 0,
 		droppedLights: 0,
+		staticLightBinds: 0,
 		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
@@ -619,6 +627,8 @@ export class WebGL2Renderer implements Renderer {
 		const shading: SceneShading = {
 			fog,
 			dynamicLights: selectedDynamic.lights,
+			staticLights: (landblockId) =>
+				this.#resolveStaticLights(input, landblockId, anchoredCamera ?? ORIGIN),
 			lighting: resolveSceneLightingByRole(
 				input.environment.lighting,
 				input.views.some((view) => view.cameraInsideSealedCell),
@@ -1561,6 +1571,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.frameInstanceGrowthCount = 0;
 		metrics.frameInstanceViewHighWaterMark = 0;
 		metrics.droppedLights = 0;
+		metrics.staticLightBinds = 0;
 		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
@@ -1673,6 +1684,13 @@ export class WebGL2Renderer implements Renderer {
 				this.#offsetScratch,
 			);
 			this.#bindTerrainResources(terrain);
+			bindWebGL2StaticLights(
+				gl,
+				this.#terrainProgram.uniforms,
+				shading.staticLights(terrain.drawUnit.landblockId),
+				this.#dynamicLightScratch,
+			);
+			this.#frameSelectionMetrics.staticLightBinds += 1;
 			this.#drawTerrainGeometry(
 				terrain.program.geometry,
 				terrain.drawUnit.indexStart,
@@ -2360,9 +2378,48 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 	): void {
 		const role = objectLightingRole(object.source);
-		if (!this.#objectState.applyLightingRole(role)) return;
-		bindWebGL2SceneLighting(this.#gl, program.uniforms, shading.lighting[role]);
-		this.#frameSelectionMetrics.objectLightingBinds += 1;
+		if (this.#objectState.applyLightingRole(role)) {
+			bindWebGL2SceneLighting(
+				this.#gl,
+				program.uniforms,
+				shading.lighting[role],
+			);
+			this.#frameSelectionMetrics.objectLightingBinds += 1;
+		}
+		// Interior geometry already carries its static lighting in baked vertex colours, so it
+		// binds an empty set rather than the landblock's outdoor lamps.
+		const scope = role === "interior-object" ? null : object.landblockId;
+		if (!this.#objectState.applyStaticLightScope(scope)) return;
+		bindWebGL2StaticLights(
+			this.#gl,
+			program.uniforms,
+			scope === null ? EMPTY_LIGHTS : shading.staticLights(scope),
+			this.#dynamicLightScratch,
+		);
+		this.#frameSelectionMetrics.staticLightBinds += 1;
+	}
+
+	/**
+	 * Resolve and budget one landblock's authored lights.
+	 *
+	 * The index memoizes the gather across frames, so the per-frame cost is a map read plus a
+	 * selection pass that is a pass-through whenever the set fits, which it almost always does.
+	 */
+	#resolveStaticLights(
+		input: FrameInput,
+		landblockId: LandblockId,
+		viewpoint: { readonly x: number; readonly y: number; readonly z: number },
+	): readonly RuntimeLight[] {
+		if (input.outdoorLights.isEmpty) return EMPTY_LIGHTS;
+		const reaching = input.outdoorLights.resolve(landblockId);
+		if (reaching.length <= MAX_STATIC_LIGHTS) return reaching;
+		const selected = selectNearestLights(
+			reaching,
+			viewpoint,
+			MAX_STATIC_LIGHTS,
+		);
+		this.#frameSelectionMetrics.droppedLights += selected.dropped;
+		return selected.lights;
 	}
 
 	/** Start one object-owned phase with complete bindings for every active sampler. */

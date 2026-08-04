@@ -4,8 +4,49 @@ import type { StaticObjectLayerArtifact } from "./artifacts";
 import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
+import {
+	placeObjectLights,
+	type PlacedStaticLight,
+} from "./interior-static-lighting";
+import {
+	RUNTIME_LIGHT_RANGE_SCALE,
+	type RuntimeLight,
+} from "../environment/runtime-lights";
 
 /** Assemble a logical static-object artifact after geometry and texture-requirement validation. */
+/**
+ * Gather the authored lights a layer's residents emit, in landblock space.
+ *
+ * Composing offsets with placements is the same operation the interior bake performs, so it
+ * reuses `placeObjectLights`; only the falloff-to-range conversion differs, because runtime
+ * lights take retail's hardware `rangeAdjust` rather than the burn-in's `static_light_factor`.
+ */
+function gatherLayerLights(
+	source: ResolvedStaticObjectLayerSource,
+): readonly RuntimeLight[] {
+	const placed: PlacedStaticLight[] = [];
+	for (const resident of source.staticResidents) {
+		placeObjectLights(
+			resident.presentation.lights,
+			resident.placement.localTransform,
+			placed,
+		);
+	}
+	for (const dynamic of source.dynamicSources) {
+		placeObjectLights(
+			dynamic.presentation.lights,
+			dynamic.placement.localTransform,
+			placed,
+		);
+	}
+	return placed.map((light) => ({
+		position: light.position,
+		color: light.color,
+		range: light.falloff * RUNTIME_LIGHT_RANGE_SCALE,
+		intensity: light.intensity,
+	}));
+}
+
 export function assembleStaticObjectArtifact(options: {
 	readonly source: ResolvedStaticObjectLayerSource;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
@@ -16,6 +57,7 @@ export function assembleStaticObjectArtifact(options: {
 	if (geometry === null) {
 		return null;
 	}
+	const staticLights = gatherLayerLights(options.source);
 	const requiredTextures = new Set<AssetTextureKey>(
 		options.textureRequirements.map(({ key }) => key),
 	);
@@ -39,6 +81,7 @@ export function assembleStaticObjectArtifact(options: {
 		geometry.metrics.staticFragmentDrawUnitCount > 0 ||
 		geometry.metrics.transparentTemplateInstanceCount > 0;
 	return {
+		staticLights,
 		geometryDiagnostics: {
 			bakedFallbackRangeCount: geometry.metrics.bakedDrawUnitCount,
 			bakedGeometryBytes: geometry.metrics.bakedGeometryBytes,

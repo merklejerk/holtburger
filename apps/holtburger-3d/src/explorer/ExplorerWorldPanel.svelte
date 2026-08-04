@@ -34,9 +34,11 @@
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
 		readonly viewerLightEnabled: boolean;
+		readonly clockFollowing: boolean;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
+		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		/** Effective filterable texture quality selected for the next frame. */
@@ -57,8 +59,10 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		viewerLightEnabled,
+		clockFollowing,
 		updateDistanceFog,
 		updateViewerLight,
+		updateClockFollowing,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
 		textureFiltering,
@@ -112,6 +116,10 @@
 
 	function handleViewerLightChange(event: Event): void {
 		updateViewerLight((event.currentTarget as HTMLInputElement).checked);
+	}
+
+	function handleClockFollowingChange(event: Event): void {
+		updateClockFollowing((event.currentTarget as HTMLInputElement).checked);
 	}
 
 	const requestStatus = $derived(
@@ -276,6 +284,15 @@
 				/>
 				<span>Viewer light</span>
 				<strong>{viewerLightEnabled ? "On" : "Off"}</strong>
+			</label>
+			<label class="explorer-toggle">
+				<input
+					checked={clockFollowing}
+					type="checkbox"
+					onchange={handleClockFollowingChange}
+				/>
+				<span>Follow clock</span>
+				<strong>{clockFollowing ? "On" : "Off"}</strong>
 			</label>
 			<label class="explorer-environment-field">
 				<span>EnvCell renderer</span>

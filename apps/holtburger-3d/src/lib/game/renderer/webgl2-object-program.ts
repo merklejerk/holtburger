@@ -31,11 +31,11 @@ export function createObjectVertexShader(
 ): string {
 	const fogDeclarations = distanceFog
 		? `
-uniform vec2 uCameraHorizontalPosition;
-out float vHorizontalDistance;`
+uniform vec3 uCameraPosition;
+out float vViewerDistance;`
 		: "";
 	const fogCalculation = distanceFog
-		? "vHorizontalDistance = length(anchoredPosition.xz - uCameraHorizontalPosition);"
+		? "vViewerDistance = length(anchoredPosition - uCameraPosition);"
 		: "";
 	const transformDeclarations =
 		transformSource === "instanced"
@@ -97,7 +97,7 @@ uniform vec3 uFogColor;
 ${WEBGL2_DISTANCE_FOG_GLSL}`
 		: "";
 	const fogApplication = distanceFog
-		? "color.rgb = applyDistanceFog(color.rgb, vHorizontalDistance);"
+		? "color.rgb = applyDistanceFog(color.rgb, vViewerDistance);"
 		: "";
 	return `#version 300 es
 precision highp float;
@@ -124,7 +124,7 @@ ${fogDeclarations}
 in vec2 vTextureCoordinate;
 in vec4 vInstanceColor;
 in vec3 vLighting;
-${distanceFog ? "in float vHorizontalDistance;" : ""}
+${distanceFog ? "in float vViewerDistance;" : ""}
 out vec4 fragmentColor;
 
 vec2 sourceUv() {
@@ -313,7 +313,7 @@ export interface WebGL2InstancedObjectProgram extends WebGL2ObjectProgramBase {
 /** Opaque-only program carrying the shared distance-fog uniform contract. */
 export interface WebGL2FogObjectProgram extends WebGL2ObjectProgram {
 	readonly fogUniforms: {
-		readonly cameraHorizontalPosition: WebGLUniformLocation;
+		readonly cameraPosition: WebGLUniformLocation;
 		readonly fogColor: WebGLUniformLocation;
 		readonly fogEnabled: WebGLUniformLocation;
 		readonly fogFar: WebGLUniformLocation;
@@ -452,11 +452,7 @@ export function createWebGL2ObjectProgram(
 		return {
 			...objectProgram,
 			fogUniforms: {
-				cameraHorizontalPosition: requireWebGL2Uniform(
-					gl,
-					program,
-					"uCameraHorizontalPosition",
-				),
+				cameraPosition: requireWebGL2Uniform(gl, program, "uCameraPosition"),
 				fogColor: requireWebGL2Uniform(gl, program, "uFogColor"),
 				fogEnabled: requireWebGL2Uniform(gl, program, "uFogEnabled"),
 				fogFar: requireWebGL2Uniform(gl, program, "uFogFar"),

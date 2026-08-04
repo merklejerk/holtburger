@@ -2,10 +2,11 @@ import type { ResolvedDistanceFog } from "../environment/scene-environment";
 
 /** Shared GLSL function for terrain and opaque object distance fog. */
 export const WEBGL2_DISTANCE_FOG_GLSL = `
-vec3 applyDistanceFog(vec3 color, float horizontalDistance) {
+// Retail runs D3DFOG_LINEAR with D3DRS_RANGEFOGENABLE (acclient.c:440257, 440357): a straight
+// ramp over true radial distance to the eye, not a smoothstep over horizontal distance.
+vec3 applyDistanceFog(vec3 color, float viewerDistance) {
 	if (uFogEnabled == 0) return color;
-	float linear = clamp((horizontalDistance - uFogNear) / max(uFogFar - uFogNear, 0.0001), 0.0, 1.0);
-	float fog = linear * linear * (3.0 - 2.0 * linear);
+	float fog = clamp((viewerDistance - uFogNear) / max(uFogFar - uFogNear, 0.0001), 0.0, 1.0);
 	return mix(color, uFogColor, fog);
 }
 `;

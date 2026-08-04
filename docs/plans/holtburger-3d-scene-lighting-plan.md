@@ -634,9 +634,38 @@ Acceptance criteria:
 
 Tasks:
 
-- [ ] Clock → day fraction → environment re-resolution on light ticks.
-- [ ] Slider becomes override; single resolution path.
-- [ ] Radial fog distance.
+- [x] Clock → day fraction → environment re-resolution on light ticks.
+- [x] Slider becomes override; single resolution path.
+- [x] Radial fog distance.
+
+Progress: Complete (2026-08-04). All checks, 601 frontend tests, and a browser-harness render
+are green.
+
+Decisions and course corrections:
+
+- **The clock is a pure function, not a ticking state machine.** `resolveClockDayFraction`
+  quantizes elapsed seconds to the region's authored light tick _before_ converting to a day
+  fraction, which reproduces retail resolving lighting only on the tick
+  (`LScape::UseTime`, acclient.c:296190) while staying stateless, drift-free, and trivially
+  testable. The explorer samples it on a short interval; extra samples are free because they
+  resolve to an identical environment between ticks.
+- **Tick and day length come from region data**, not the retail code defaults — Phase 0 found EoR
+  Dereth authors 15 s / 0.8 s against code defaults of 20 s / 3 s. The default is used only when a
+  region authors no sky at all.
+- **Fog gained a second parity fix beyond the planned one.** The shader applied a smoothstep ramp;
+  retail runs `D3DFOG_LINEAR`, a straight ramp (acclient.c:440357). Both the horizontal→radial
+  distance change and the smoothstep→linear change were needed for parity, and both landed.
+- **Bug found and fixed by browser verification, then converted into a test.** Renaming the fog
+  distance uniform and varying left two stale declarations in the object program; because that
+  shader is assembled by functions rather than a file-level constant, `check:terrain-shader`
+  could not see it, and the only symptom was a renderer that refused to construct.
+  `shader-uniform-consistency.test.ts` now asserts every `u*`/`v*` identifier used by all four
+  object variants is declared, and was verified to fail against both original defects. The browser
+  harness also now records startup exceptions so a timeout reports the real cause instead of an
+  empty page.
+- Debt: the terrain program is validated by glslangValidator while the object program gets the
+  lighter static check. Unifying them would need the validator to execute the shader-builder
+  functions; recorded as a Phase 7 target rather than solved here.
 
 Decisions and course corrections: _(fill during execution)_
 

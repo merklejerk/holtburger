@@ -14,13 +14,13 @@ uniform mat4 uProjection;
 uniform mat4 uView;
 uniform mat4 uLocalToLandblock;
 uniform vec3 uLandblockOffset;
-uniform vec2 uCameraHorizontalPosition;
+uniform vec3 uCameraPosition;
 
 ${WEBGL2_SCENE_LIGHTING_GLSL}
 
 out vec2 vGridUv;
 out float vViewDepth;
-out float vHorizontalDistance;
+out float vViewerDistance;
 out vec3 vLighting;
 
 void main() {
@@ -31,7 +31,7 @@ void main() {
 	// This renderer looks down camera-local -Z. Retail's detail fade uses positive
 	// camera-forward depth rather than radial distance from the camera.
 	vViewDepth = -viewPosition.z;
-	vHorizontalDistance = length(anchoredPosition.xz - uCameraHorizontalPosition);
+	vViewerDistance = length(anchoredPosition - uCameraPosition);
 	// Retail bakes landscape lighting into vertex colors; evaluating the identical formula
 	// here keeps time-of-day changes a uniform update instead of a landblock re-bake. Landscape
 	// receives no burned-in static light, so the baked term is zero.
@@ -68,7 +68,7 @@ ${WEBGL2_DISTANCE_FOG_GLSL}
 
 in vec2 vGridUv;
 in float vViewDepth;
-in float vHorizontalDistance;
+in float vViewerDistance;
 in vec3 vLighting;
 out vec4 fragmentColor;
 
@@ -241,7 +241,7 @@ void main() {
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
 	// Lighting modulates the complete surface albedo, then fog applies as a raster stage.
 	color *= vLighting;
-	color = applyDistanceFog(color, vHorizontalDistance);
+	color = applyDistanceFog(color, vViewerDistance);
 	fragmentColor = vec4(color, 1.0);
 }
 `;
@@ -255,7 +255,7 @@ export interface WebGL2TerrainProgram {
 		readonly viewerLightPosition: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly blendMasks: WebGLUniformLocation;
-		readonly cameraHorizontalPosition: WebGLUniformLocation;
+		readonly cameraPosition: WebGLUniformLocation;
 		readonly colors: WebGLUniformLocation;
 		readonly composition: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
@@ -321,11 +321,7 @@ export function createWebGL2TerrainProgram(
 				),
 				ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 				blendMasks: requireWebGL2Uniform(gl, program, "uBlendMasks"),
-				cameraHorizontalPosition: requireWebGL2Uniform(
-					gl,
-					program,
-					"uCameraHorizontalPosition",
-				),
+				cameraPosition: requireWebGL2Uniform(gl, program, "uCameraPosition"),
 				colors: requireWebGL2Uniform(gl, program, "uColors"),
 				composition: requireWebGL2Uniform(gl, program, "uComposition"),
 				detail: requireWebGL2Uniform(gl, program, "uDetail"),

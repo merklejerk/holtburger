@@ -949,6 +949,11 @@
 				frameHandle = window.requestAnimationFrame(frame);
 			} catch (cause) {
 				error = cause instanceof Error ? cause.message : String(cause);
+				// The harness API is never published when startup throws, so record the reason
+				// somewhere the driving script can read after it gives up waiting.
+				(
+					globalThis as { __HOLTBURGER_3D_HARNESS_STARTUP_ERROR__?: string }
+				).__HOLTBURGER_3D_HARNESS_STARTUP_ERROR__ = error;
 			}
 		};
 		void start();

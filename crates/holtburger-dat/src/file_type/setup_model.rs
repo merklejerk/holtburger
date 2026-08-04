@@ -43,10 +43,16 @@ pub struct LocationType {
 #[br(little)]
 #[bw(little)]
 pub struct LightInfo {
+    /// Retail `LIGHTINFO::LightType`: 0 = point, 1 = distant, 2 = spot. Every observed
+    /// EoR asset authors 0; retail `CSetup::UnPack` reads this dword into the type field
+    /// (acclient.c:322738), so it is not a dictionary key.
+    pub light_type: i32,
     pub viewer_space_location: Frame,
     pub color: u32,
     pub intensity: f32,
     pub falloff: f32,
+    /// Uninitialized in every observed EoR asset (0xCDCDCDCD bit pattern); only
+    /// meaningful for spot lights, which no asset authors.
     pub cone_angle: f32,
 }
 
@@ -330,7 +336,7 @@ pub struct SetupModel {
     pub step_down: f32,
     pub sorting_sphere: Sphere,
     pub selection_sphere: Sphere,
-    pub lights: HashMap<i32, LightInfo>,
+    pub lights: Vec<LightInfo>,
     pub default_animation: Option<u32>,
     pub default_script: Option<u32>,
     pub default_motion_table: Option<u32>,
@@ -445,12 +451,10 @@ impl SetupModel {
         let sorting_sphere = Sphere::read_le(reader)?;
         let selection_sphere = Sphere::read_le(reader)?;
 
-        // Lights (Dict)
         let num_lights = u32::read_le(reader)?;
-        let mut lights = HashMap::new();
+        let mut lights = Vec::with_capacity(num_lights as usize);
         for _ in 0..num_lights {
-            let key = i32::read_le(reader)?;
-            lights.insert(key, LightInfo::read_le(reader)?);
+            lights.push(LightInfo::read_le(reader)?);
         }
 
         let default_animation = Self::decode_optional_resource_id(u32::read_le(reader)?);
@@ -549,11 +553,8 @@ impl SetupModel {
         self.selection_sphere.write_le(writer)?;
 
         (self.lights.len() as u32).write_le(writer)?;
-        let mut light_keys: Vec<_> = self.lights.keys().collect();
-        light_keys.sort();
-        for &k in light_keys {
-            k.write_le(writer)?;
-            self.lights.get(&k).unwrap().write_le(writer)?;
+        for light in &self.lights {
+            light.write_le(writer)?;
         }
 
         let trailer = [
@@ -606,7 +607,7 @@ mod tests {
                 center: Vector3::zero(),
                 radius: 1.0,
             },
-            lights: HashMap::new(),
+            lights: Vec::new(),
             default_animation: None,
             default_script: None,
             default_motion_table: None,
@@ -614,16 +615,14 @@ mod tests {
             default_script_table: None,
         };
 
-        setup.lights.insert(
-            1,
-            LightInfo {
-                viewer_space_location: Frame::default(),
-                color: 0xFFFFFFFF,
-                intensity: 1.0,
-                falloff: 1.0,
-                cone_angle: 1.0,
-            },
-        );
+        setup.lights.push(LightInfo {
+            light_type: 0,
+            viewer_space_location: Frame::default(),
+            color: 0xFFFFFFFF,
+            intensity: 1.0,
+            falloff: 1.0,
+            cone_angle: 1.0,
+        });
 
         assert_eq!(setup.lights.len(), 1);
         setup.prune();
@@ -664,7 +663,7 @@ mod tests {
                 center: Vector3::zero(),
                 radius: 1.0,
             },
-            lights: HashMap::new(),
+            lights: Vec::new(),
             default_animation: None,
             default_script: None,
             default_motion_table: None,

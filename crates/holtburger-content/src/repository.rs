@@ -204,6 +204,11 @@ impl ContentRepository {
         Err(missing_asset_error(key, self.source_description.as_deref()))
     }
 
+    /// Every mounted resource's namespace and file id, for archive-wide enumeration.
+    pub fn resource_index(&self) -> &[RepositoryResourceIndexEntry] {
+        &self.resource_index
+    }
+
     pub fn source_description(&self) -> Option<&str> {
         self.source_description.as_deref()
     }

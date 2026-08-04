@@ -24,6 +24,9 @@ import {
 	placeObjectLights,
 	type PlacedStaticLight,
 } from "./interior-static-lighting";
+
+/** Authored EnvCell flag marking a cell that can see the outdoors. */
+const ENV_CELL_SEEN_OUTSIDE_FLAG = 0x01;
 import type {
 	ObjectGeometryData,
 	PortalGeometryData,
@@ -63,6 +66,8 @@ interface EnvCellScopeMaterializationPlan {
 	readonly structureToLandblock: ScenePlacement["localTransform"];
 	readonly containmentPlanes: Float32Array;
 	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
+	/** Authored SeenOutside flag, which decides whether a camera inside forces interior ambient. */
+	readonly seenOutside: boolean;
 }
 
 /** One worker-ready resident source partition that cannot span EnvCell scopes. */
@@ -202,6 +207,7 @@ export function planEnvCellMaterialization(
 			structureToLandblock: cell.structureToLandblock.localTransform,
 			containmentPlanes: cell.structure.containmentPlanes,
 			potentiallyVisibleEnvCellIds: cell.potentiallyVisibleEnvCellIds,
+			seenOutside: (cell.flags & ENV_CELL_SEEN_OUTSIDE_FLAG) !== 0,
 		});
 
 		const residents = cell.residents.map(resolveResident);

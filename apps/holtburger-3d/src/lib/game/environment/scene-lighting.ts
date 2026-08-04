@@ -10,6 +10,15 @@ import { type ResolvedSceneLighting } from "./scene-environment";
 export const OBJECT_AMBIENT_SUN_SCALE = 0.2;
 
 /**
+ * Ambient retail forces while the camera occupies a cell that cannot see outdoors
+ * (acclient.c:140521). Flat, white, and independent of time of day.
+ */
+export const SEALED_INTERIOR_AMBIENT = {
+	level: 0.2,
+	color: { red: 1, green: 1, blue: 1, alpha: 1 },
+} as const;
+
+/**
  * Which retail lighting policy a draw follows.
  *
  * Retail expresses this as per-pass state rather than per-object data: landscape draws with
@@ -36,6 +45,7 @@ export type SceneLightingByRole = Readonly<
 export function resolveSceneLightingByRole(
 	lighting: ResolvedSceneLighting,
 	viewerLight: ResolvedSceneLighting["viewerLight"] = lighting.viewerLight,
+	cameraInsideSealedCell = false,
 ): SceneLightingByRole {
 	const objectAmbientLevel =
 		Math.hypot(
@@ -55,7 +65,12 @@ export function resolveSceneLightingByRole(
 		},
 		"interior-object": {
 			...lighting,
-			ambientLevel: objectAmbientLevel,
+			ambientLevel: cameraInsideSealedCell
+				? SEALED_INTERIOR_AMBIENT.level
+				: objectAmbientLevel,
+			ambientColor: cameraInsideSealedCell
+				? SEALED_INTERIOR_AMBIENT.color
+				: lighting.ambientColor,
 			viewerLight,
 			// Retail's cell pass runs with the sun disabled; a zero vector removes the
 			// diffuse term without needing a second shader or a branch.

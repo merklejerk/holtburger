@@ -37,6 +37,13 @@ export interface SceneEnvCellScopeInput {
 	readonly visibilityIslandId: SceneVisibilityIslandId;
 	/** Source-provided coarse visibility set used to prune later portal traversal. */
 	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
+	/**
+	 * Authored SeenOutside flag (EnvCell flag 0x01).
+	 *
+	 * Retail forces a flat interior ambient whenever the camera occupies a cell without it
+	 * (cell transition, acclient.c:140480).
+	 */
+	readonly seenOutside: boolean;
 }
 
 /** One AABB-selected EnvCell plus its exact retail containment verdict. */

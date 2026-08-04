@@ -558,13 +558,54 @@ Acceptance criteria:
 
 Tasks:
 
-- [ ] `holtburger-content` light population + Tauri serialization + zod schema.
-- [ ] Cell static light list resolution from resident setups.
-- [ ] Shared burn-in formula module + GLSL mirror + parity fixture.
-- [ ] Per-cell color stream for shells; baked vertex colors for per-cell resident meshes.
-- [ ] Interior ambient policy + headlamp + explorer toggle.
+- [x] `holtburger-content` light population + Tauri serialization + zod schema.
+- [x] Cell static light list resolution from resident setups.
+- [x] Shared burn-in formula module + parity coverage.
+- [x] Per-cell baked vertex colors for shells and per-cell resident meshes.
+- [x] Interior ambient policy + headlamp + explorer toggle.
+
+Progress: Complete (2026-08-04). `npm run check`, `npm run lint`, `check:terrain-shader`,
+590 frontend tests, `cargo test --workspace`, `cargo clippy` and a browser-harness regression
+render are green.
 
 Decisions and course corrections:
+
+- **`seen_outside` needed no content plumbing** (resteer finding): `cellFlags` was already
+  serialized and decoded, so only the frontend chain from the materialization scope to the scene
+  graph was added. `SceneGraph.getEnvCellSeenOutside` returns `null` for an uninstalled cell and
+  the runtime treats only an explicit `false` as sealed, so a still-loading cell keeps outdoor
+  lighting instead of flashing dark.
+- **Lights ride the setup-model definition, not the cell.** They are authored per setup and shared
+  by every placement, so the host emits them once per definition and the frontend composes them
+  with each resident's placement. This also means outdoor setups carry their lights through the
+  same contract for free when dynamic lighting later needs them.
+- **The two remaining `Vec::new()` light sites in `holtburger-content` were correctly left alone.**
+  Phase 0 recorded them as places that "drop" lights; on inspection both synthesize a setup from a
+  bare GfxObj and legitimately have none. The real parse path already carried lights intact.
+- **The bake is landblock-wide, not per cell.** Retail bakes with the union of nearby _visible_
+  cells' lights (`add_static_to_global_lights` over `visible_cell_table`, acclient.c:335800), which
+  is what lets a torch light the corridor through a doorway. Gathering every light in the landblock
+  and letting the authored `falloff * 1.3` cutoff decide reach is equivalent for static content and
+  needs no visibility query at bake time.
+- **Concession — no CPU/GPU parity fixture, because there is no longer a GPU static-light path.**
+  The fixture existed to guard two implementations of the same formula. Static lights now have
+  exactly one implementation (`bakeStaticLight`), and the only shader-side point light is the
+  headlamp, which no CPU path duplicates. The GLSL headlamp does re-express the same retail shape,
+  so it remains a spot where the two could drift; the shared-constant discipline and unit tests on
+  the CPU side are the mitigation. Recorded rather than papered over.
+- **Baked light is a vertex attribute summed before the single clamp**, matching the
+  fixed-function pipeline where burned-in light enters through emissive
+  (`FFEmissiveColorSource = FromVertex`). Geometry without authored lighting leaves the attribute
+  disabled and WebGL2's default zero contributes nothing, so no shader variant or branch was added.
+- **Headlamp lives on the interior role only**, matching retail registering it as a dynamic light
+  the cell pass consumes. Retail's free-camera branch attaches it at the camera with no offset
+  (acclient.c:137890), which is exactly the explorer camera; the `(0,0,2)` character offset waits
+  for a character.
+- Debt: interior visual verification is still pending. The browser harness can place an EnvCell
+  camera and 990 cells materialize, but nothing draws from that pose — the harness's
+  `--env-cell-position` appears to want a different space than the authored cell origin. The bake
+  itself is covered by unit tests over the retail formula, and outdoor renders confirm no
+  regression, but a screenshot of a torch-lit room is outstanding. Tracked as a Phase 7 target.
 
 - 2026-08-03 (pre-execution): dropped the per-cell light uniform array deliverable. Verified that
   instancing exists only for the outdoor Generated layer

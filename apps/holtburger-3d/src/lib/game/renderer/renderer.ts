@@ -50,6 +50,13 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 export interface FrameViewInput {
 	/** Camera pose and projection used for this view. */
 	readonly camera: Camera;
+	/**
+	 * True when this view's camera occupies an EnvCell that does not author SeenOutside.
+	 *
+	 * Retail forces a flat interior ambient in that case (acclient.c:140480); a camera in a
+	 * cell that can see outdoors keeps the regional ambient.
+	 */
+	readonly cameraInsideSealedCell: boolean;
 }
 
 /** Immutable renderer input carrying frame state rather than preassembled draw submissions. */

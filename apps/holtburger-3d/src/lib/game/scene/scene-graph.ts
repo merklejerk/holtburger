@@ -276,6 +276,7 @@ export class SceneGraph {
 			landblockBounds: input.landblockBounds?.clone() ?? null,
 			potentiallyVisibleEnvCellIds: new Set(input.potentiallyVisibleEnvCellIds),
 			scope: { ...input.scope },
+			seenOutside: input.seenOutside,
 			structureToLandblock: input.structureToLandblock.clone(),
 			visibilityIslandId: input.visibilityIslandId,
 		});
@@ -553,6 +554,16 @@ export class SceneGraph {
 		envCellId: EnvCellId,
 	): SceneEnvCellScopeInput["visibilityIslandId"] | null {
 		return this.#envCellScopes.get(envCellId)?.visibilityIslandId ?? null;
+	}
+
+	/**
+	 * Report whether one installed EnvCell authored SeenOutside.
+	 *
+	 * Null means the cell is not installed, which callers must not conflate with an interior
+	 * cell: an unknown cell should keep outdoor lighting rather than force the interior ambient.
+	 */
+	getEnvCellSeenOutside(envCellId: EnvCellId): boolean | null {
+		return this.#envCellScopes.get(envCellId)?.seenOutside ?? null;
 	}
 
 	/** Resolve inherited residency and flatten one node transform into landblock-local coordinates. */

@@ -851,9 +851,26 @@ export class GameRuntime {
 			},
 			frameSettings: this.#frameSettings,
 			timeSeconds,
-			views: [{ camera: this.#camera }],
+			views: [
+				{
+					camera: this.#camera,
+					cameraInsideSealedCell: this.#cameraInsideSealedCell(),
+				},
+			],
 		});
 		this.#animationPresentation.completeFrame(feedback, timeSeconds);
+	}
+
+	/**
+	 * Resolve whether the camera sits in a cell that cannot see outdoors.
+	 *
+	 * An uninstalled cell keeps outdoor lighting: absence of scope data is not evidence that a
+	 * cell is sealed, and forcing interior ambient on it would darken the world during loading.
+	 */
+	#cameraInsideSealedCell(): boolean {
+		const envCellId = this.#camera.placement.envCellId;
+		if (envCellId === null) return false;
+		return this.#scene.getEnvCellSeenOutside(envCellId) === false;
 	}
 
 	updateDynamicEntityPlacement(

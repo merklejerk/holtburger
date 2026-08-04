@@ -4,6 +4,7 @@ import type { ResolvedSceneLighting } from "./scene-environment";
 import {
 	OBJECT_AMBIENT_SUN_SCALE,
 	objectLightingRole,
+	resolveAuthoredLightResponse,
 	resolveSceneLightingByRole,
 	SEALED_INTERIOR_AMBIENT,
 } from "./scene-lighting";
@@ -88,5 +89,40 @@ describe("sealed interior ambient", () => {
 		const roles = resolveSceneLightingByRole(LIGHTING, true);
 		expect(roles["outdoor-object"].ambientColor).toBe(LIGHTING.ambientColor);
 		expect(roles.terrain.ambientLevel).toBe(LIGHTING.ambientLevel);
+	});
+});
+
+describe("resolveAuthoredLightResponse", () => {
+	// Retail's outdoor pass never rendered authored lamps at all, so the daytime half of this
+	// policy is ours: a lamp must not pin midday ground to full white.
+	it("passes authored lamps through in the dark and suppresses them at noon", () => {
+		const night = resolveAuthoredLightResponse({
+			ambientLevel: 0.4,
+			ambientColor: { red: 1, green: 0.39, blue: 0.78, alpha: 1 },
+			sunVector: new Vec3(0.25, 0, 0),
+			sunColor: { red: 0.86, green: 0.86, blue: 0.86, alpha: 1 },
+		});
+		const noon = resolveAuthoredLightResponse({
+			ambientLevel: 0.35,
+			ambientColor: { red: 1, green: 0.9, blue: 0.9, alpha: 1 },
+			sunVector: new Vec3(0.3, 0.71, 0),
+			sunColor: { red: 0.59, green: 0.84, blue: 0.98, alpha: 1 },
+		});
+		expect(night).toBe(1);
+		expect(noon).toBe(0);
+	});
+
+	it("ramps monotonically as the sun climbs", () => {
+		const responses = [0, 0.2, 0.45, 0.71].map((height) =>
+			resolveAuthoredLightResponse({
+				ambientLevel: 0.35,
+				ambientColor: { red: 1, green: 0.9, blue: 0.9, alpha: 1 },
+				sunVector: new Vec3(0.3, height, 0),
+				sunColor: { red: 0.59, green: 0.84, blue: 0.98, alpha: 1 },
+			}),
+		);
+		for (let index = 1; index < responses.length; index += 1) {
+			expect(responses[index]!).toBeLessThan(responses[index - 1]!);
+		}
 	});
 });

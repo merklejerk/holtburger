@@ -287,8 +287,23 @@ These are deliberate, and each produces output equivalent to retail:
   share less carefully because it constructed one mesh per cell. Shell structures are tiny — median
   10 vertices, maximum 113, 45,320 vertices across all 3,145 structures in the archive — so the
   duplication is cheaper than splicing per-cell color streams onto shared buffers.
-- **The viewer headlamp evaluates in the shader** rather than occupying a hardware light slot,
-  since it moves with the camera and cannot be baked.
+- **A runtime light system evaluates every non-baked light in the shader**, rather than occupying
+  hardware slots. Two sets share one evaluation but differ in update cadence: authored outdoor
+  lights are scoped per landblock and cached against content residency, while dynamic lights —
+  currently just the viewer light — form one small camera-selected set rebuilt each frame. The
+  viewer light is not a special case; it is simply the first entry in the dynamic set.
+- **Outdoor geometry receives authored point lights, which retail never did.** Retail's outdoor
+  pass binds only the sun, so its lamps cast nothing; ours light terrain, buildings, objects, and
+  generated scenery. Emitters come from the Objects layer while receivers live in layers with
+  independent residency radii, so these are evaluated rather than baked: a landblock can hold
+  buildings while its Objects layer is never resident, which a bake could not survive.
+- **Every authored light uses the burn-in falloff, baked or evaluated.** Retail's hardware `1/d`
+  cannot carry authored magnitudes — at the median intensity of 100 it saturates across a lamp's
+  whole reach and then stops dead. The burn-in shape tapers smoothly instead. The viewer light's
+  intensity is consequently recalibrated from retail's 2.25, which was tuned against `1/d`.
+- **Terrain evaluates point lights per pixel.** Terrain vertices sit 24 units apart while authored
+  lamps reach 4.5 to 7.5, so per-vertex evaluation smears a gradient across a quad instead of
+  producing a pool. Objects keep per-vertex evaluation, being finely tessellated.
 - **Retail's gamma-naive 8-bit color math is preserved.** No sRGB conversion or tone mapping is
   applied anywhere; adding either would diverge from the retail look.
 

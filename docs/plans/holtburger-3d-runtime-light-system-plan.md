@@ -372,25 +372,58 @@ Decisions and course corrections:
 
 ### Phase 3: Resteer
 
-- Re-measure frame cost with lights active in a dense town, and confirm the cost north stars hold
-  for unlit landblocks and for frames where nothing moves.
-- Read the static bind-frequency metric. If binds track draw calls rather than landblocks, decide
-  between sorting draws by landblock and escalating to a uniform buffer (see Risks).
-- Decide whether the per-vertex loop cost in a dense landblock justifies draw-unit bounds culling,
-  weighing it against the bind-frequency cost that culling introduces (see Spatial Scope).
-- Confirm the producer interface is genuinely additive by sketching, without building, how entity
-  lights attach to the dynamic set. If it needs changes, make them now while the only dynamic
-  producer is the headlamp.
-- Review accumulated debt and fold corrections into the remaining phases.
+Progress: Complete (2026-08-04).
+
+Findings:
+
+- **Bind frequency is a non-issue; no escalation needed.** A lit town neighbourhood binds static
+  lights 13 times per frame, and a wider two-landblock building radius binds 22. Both track visible
+  landblocks rather than draw-call count, so `view.objects` is landblock-coherent enough in
+  practice. Neither draw sorting nor the uniform-buffer escalation is warranted, and both stay
+  recorded in Risks should that change.
+- **Frame cost is not a concern at this scale.** The lit town renders at 0.57 ms average against a
+  0.19 ms unlit landblock. Caveat: these are different scenes on SwiftShader, so the delta is not a
+  clean attribution and the absolute numbers do not transfer to hardware. The actionable point is
+  that the lit case sits far under a 16.7 ms budget even in software rendering. A clean A/B would
+  need a static-light toggle, which does not exist and was not worth adding for this.
+- **Draw-unit bounds culling is not justified.** Spatial Scope's 25x waste figure assumed the
+  archive's worst landblock of 51 lights; the measured average is 3.6, so the loop is over a
+  handful of lights. It stays recorded as the escalation, now with the caveat that terrain
+  evaluates per pixel, which raises the cost of a genuinely dense landblock more than the original
+  per-vertex analysis assumed.
+- **The producer interface is additive, confirmed by inspection.** Dynamic lights are assembled by
+  pushing candidates into a list before one selection call, so an entity-light producer adds
+  entries and changes nothing about selection, binding, or shader code. The only contract change
+  needed is carrying the entity set on `FrameInput`, exactly as `outdoorLights` already is.
+  Design Rule 5 holds.
 
 ### Phase 4: Cleanup and wrap-up
 
-- Update [docs/lighting.md](../lighting.md) with the runtime system, the bake-versus-evaluate rule,
-  and the outdoor census.
-- Record the entity-light attachment point for the dynamic-entity runtime plan.
-- Remove or deliberately promote the outdoor light census harness, whose findings are recorded in
-  this plan's Ground Truth.
-- Sweep vocabulary: nothing should describe the headlamp as a special case once it is a producer.
+Progress: Complete (2026-08-04).
+
+- [x] [docs/lighting.md](../lighting.md) records the runtime system, the cadence split, outdoor
+      point lights as a deliberate deviation, the falloff decision, and per-pixel terrain.
+- [x] Entity-light attachment point recorded below.
+- [x] Outdoor light census harness removed, along with the `ContentRepository::resource_index`
+      accessor added solely for it. Its findings live in this plan's Ground Truth.
+- [x] Vocabulary swept: no symbol or comment treats the viewer light as a special case; it is one
+      entry in the dynamic set.
+
+### Entity-light attachment point
+
+Recorded so the dynamic-entity runtime plan does not have to rediscover it:
+
+1. Produce `RuntimeLight[]` from lit entities. `ResolvedObjectPresentation.lights` already carries
+   authored lights for every setup, and `placeObjectLights` already composes them with a placement,
+   so this is a transform of data that exists — no content plumbing.
+2. Convert falloff to range with `RUNTIME_LIGHT_RANGE_SCALE`, matching how outdoor statics and the
+   viewer light are built.
+3. Carry the set on `FrameInput`, exactly as `outdoorLights` is today.
+4. Push the entries into the candidate list beside the viewer light in `WebGL2Renderer.renderFrame`
+   before the single `selectNearestLights` call.
+
+Nothing in selection, binding, or the shader changes. `MAX_DYNAMIC_LIGHTS` is 8; entity lights are
+the first producer likely to exercise the drop path, which the `droppedLights` metric reports.
 
 ## Risks & Mitigations
 

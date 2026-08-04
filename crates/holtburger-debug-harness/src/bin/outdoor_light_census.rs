@@ -175,5 +175,52 @@ fn main() -> Result<()> {
         let lights = light_count(*setup);
         println!("  setup 0x{setup:08X} placed {count}x, {lights} light(s) each");
     }
+    // What will these actually look like? The hardware path is diffuse = color * intensity with
+    // 1/d attenuation and no per-channel clamp, so the authored intensity scale decides whether an
+    // outdoor lamp reads as a gentle pool or a saturated blob.
+    let mut intensities: Vec<f32> = Vec::new();
+    let mut falloffs: Vec<f32> = Vec::new();
+    let mut colors: BTreeMap<u32, usize> = BTreeMap::new();
+    for id in object_ids.iter().chain(&building_ids).chain(&template_ids) {
+        if !is_setup(*id) {
+            continue;
+        }
+        let Ok(setup) = cache.setup_model(&content, *id) else {
+            continue;
+        };
+        for light in &setup.lights {
+            intensities.push(light.intensity);
+            falloffs.push(light.falloff);
+            *colors.entry(light.color).or_default() += 1;
+        }
+    }
+    intensities.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    falloffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let pick = |v: &[f32], f: f64| -> f32 {
+        if v.is_empty() {
+            return 0.0;
+        }
+        v[(((v.len() - 1) as f64) * f).round() as usize]
+    };
+    println!(
+        "outdoor intensity: n={} min={:.1} p50={:.1} p90={:.1} max={:.1}",
+        intensities.len(),
+        pick(&intensities, 0.0),
+        pick(&intensities, 0.5),
+        pick(&intensities, 0.9),
+        pick(&intensities, 1.0)
+    );
+    println!(
+        "outdoor falloff: min={:.1} p50={:.1} p90={:.1} max={:.1} (reach = falloff * 1.5)",
+        pick(&falloffs, 0.0),
+        pick(&falloffs, 0.5),
+        pick(&falloffs, 0.9),
+        pick(&falloffs, 1.0)
+    );
+    let mut ranked_colors: Vec<_> = colors.into_iter().collect();
+    ranked_colors.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
+    for (color, n) in ranked_colors.iter().take(5) {
+        println!("  outdoor color 0x{color:08X} x{n}");
+    }
     Ok(())
 }

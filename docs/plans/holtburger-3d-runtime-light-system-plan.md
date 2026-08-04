@@ -54,7 +54,8 @@ static light burned into vertex colors as an optimization (`acclient.c:434570`).
 Relevant caps: `max_static_lights = 40`, `max_dynamic_lights = 7`, both scaled by the detail
 slider in `Render::SetDegradeLevelInternal` (`acclient.c:44527`, `363340`); eight hardware slots
 (`acclient.c:437231`); attenuation `Att0/1/2 = 0/1/0`, i.e. pure `1/d`, with
-`Range = falloff * 1.5` (`acclient.c:432899`, `44671`).
+`Range = falloff * 1.5` (`acclient.c:432899`, `44671`). We keep retail's range but not its `1/d`
+attenuation — see Design Rule 3 for why authored magnitudes make it unusable.
 
 Full model and constants: [docs/lighting.md](../lighting.md).
 
@@ -71,13 +72,19 @@ Censused over the whole retail archive (`crates/holtburger-debug-harness/src/bin
 629 of 5,346 landblocks contain any outdoor light, averaging ~3.6 each; the archive maximum is 51
 in one landblock. The most-placed emitter, setup `0x020005D8`, appears 451 times.
 
+Their authored magnitudes matter as much as their count: **intensity is 100 at the median** (min 20,
+p90 100) and **falloff is 6 at the median** (p90 7, max 15), so a typical lamp reaches
+`6 * 1.5 = 9` units. Authored lights are therefore on a completely different intensity scale from
+retail's viewer light, which is authored at `0.5 * 4.5 = 2.25`. Design Rule 3 depends on this.
+
 **Every outdoor light comes from the Objects layer. Everything else is purely a receiver.**
 
 ### Existing patterns and touch points
 
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-lighting.ts` — shared GLSL. `evaluateViewerLight`
-  is already retail's hardware point light (`1/d`, hard range cutoff) for exactly one light;
-  generalizing it to an array is the core shader change.
+  is currently retail's hardware point light (`1/d`, hard range cutoff) for exactly one light.
+  Generalizing it to an array _and_ swapping its falloff for the burn-in shape is the core shader
+  change.
 - `apps/holtburger-3d/src/lib/game/environment/scene-lighting.ts` — `SceneLightingByRole` and
   `resolveSceneLightingByRole`, where per-frame lighting is derived once. The headlamp already
   enters here as a renderer-supplied value.
@@ -105,17 +112,24 @@ relitigate them by accident.
      nearest-to-camera selection is worst — and costs zero per-vertex work for the densest
      geometry in view.
    - Outdoors does not satisfy it: emitters live in the Objects layer while receivers live in
-     Terrain, Buildings, and Generated, all streaming independently. Anything frozen at
-     materialization is wrong by construction, since a building realized before the Objects layer
-     arrives would bake dark permanently. Terrain additionally exists as several LOD, stride, and
-     transition variants, and generated scenery is instanced.
+     Terrain, Buildings, and Generated. These are not merely streamed independently — they carry
+     **independent interest radii** (`buildingRadius`, `explicitObjectRadius`,
+     `generatedObjectRadius`, resolved per landblock in `scene-interest.ts`), so a landblock can
+     hold buildings while its Objects layer is _never resident at all_. A bake there is not a
+     late-arrival race that eventually settles; it is permanently and unfixably dark. Terrain
+     additionally exists as several LOD, stride, and transition variants, and generated scenery is
+     instanced.
 2. **Retail parity is a guide, not a contract.** Where retail's structure is the natural fit we
    follow it; where our architecture suggests otherwise we diverge deliberately and record why.
-3. **Two falloff shapes coexist, and that is fine.** Baked interior light uses retail's
-   half-Lambert wrap; runtime lights use hardware `1/d`. No surface is lit twice by the same light
-   through both paths, so this is an aesthetic difference, not a divergence risk. Retail does
-   exactly the same thing, and an interior surface already receives both — its baked torchlight
-   plus the evaluated headlamp.
+3. **Authored lights use retail's burn-in falloff, whether baked or evaluated.** Plain hardware
+   `1/d` cannot carry authored magnitudes: at the median intensity of 100 and falloff of 6, the
+   term is 20 at five units and still 11 at the nine-unit edge, so a lamp saturates to full colour
+   across its whole range and then stops dead — a hard-edged disc, not a pool. The burn-in shape
+   (`calc_point_light`'s half-Lambert wrap, the `(1 - d/range)` taper, and the per-channel clamp to
+   the light's own colour) saturates the same core but falls smoothly to zero at the boundary, and
+   it degrades correctly for small intensities too. So the falloff shape follows the light's
+   **authorship**, not whether it is baked or evaluated. The viewer light, authored by us at 2.25,
+   runs through the same function and simply never reaches the clamp.
 4. **Producers share evaluation, not storage or cadence.** Static and dynamic lights differ in
    lifetime, and lifetime determines how often the set changes, which determines how it is stored
    and bound. Forcing both through one array would collapse the static path's residency cache into
@@ -216,15 +230,21 @@ Deliverables:
   this same function; there is no separate static selection.
 - The dynamic set applies to every draw role, indoor and outdoor, per Design Rule 7. The headlamp
   therefore becomes visible outdoors, where it previously was not.
-- Shared GLSL: generalize `evaluateViewerLight` into a loop over the bound array, preserving its
-  per-light math exactly. Uploads are sized to the live count, never to the cap.
+- Shared GLSL: generalize `evaluateViewerLight` into a loop over the bound array, replacing its
+  plain `1/d` with the burn-in falloff per Design Rule 3 — the viewer light's appearance is
+  unchanged at intensity 2.25, but authored lights then behave correctly too. This is the one place
+  Phase 1 is not purely mechanical, so it carries its own before/after check. Uploads are sized to
+  the live count, never to the cap.
+- A single point-light function shared by the CPU baker and the shader, so the interior bake and
+  the runtime path cannot drift.
 - The viewer headlamp stops being a bespoke uniform pair and becomes simply the first entry in the
   dynamic set.
 
 Acceptance criteria:
 
-- Interiors render identically to before: the headlamp is the only dynamic producer and its math is
-  unchanged.
+- Interiors render identically to before: the headlamp is the only dynamic producer, and swapping
+  it onto the burn-in falloff is visually indistinguishable at its authored intensity of 2.25.
+  Verify with a before/after capture rather than by assertion.
 - Outdoors, the headlamp now lights nearby ground and objects at night and is invisible at midday,
   where sun and ambient already saturate.
 - Unit tests cover selection: ordering, cap behaviour, drop counting, and the empty case. Overflow

@@ -141,6 +141,7 @@ function environmentArtifact(
 			landblockBounds: scope.landblockBounds,
 			containmentPlanes: scope.containmentPlanes,
 			potentiallyVisibleEnvCellIds: scope.potentiallyVisibleEnvCellIds,
+			seenOutside: scope.seenOutside,
 			structureToLandblock: scope.structureToLandblock,
 			visibilityIslandId:
 				visibilityIslands.get(scope.scope.envCellId) ??

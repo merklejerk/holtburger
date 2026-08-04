@@ -656,6 +656,7 @@
 		return renderer.probePortalRenderGraph(
 			landblockId,
 			{
+				cameraInsideSealedCell: false,
 				camera: {
 					far: CAMERA_FAR,
 					fov: CAMERA_FOV_DEGREES,
@@ -697,6 +698,7 @@
 		return renderer.probePortalExecution(
 			landblockId,
 			{
+				cameraInsideSealedCell: false,
 				camera: {
 					far: CAMERA_FAR,
 					fov: CAMERA_FOV_DEGREES,

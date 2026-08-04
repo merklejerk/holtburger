@@ -568,6 +568,7 @@ export class WebGL2Renderer implements Renderer {
 							intensity: VIEWER_LIGHT.intensity,
 						}
 					: DISABLED_VIEWER_LIGHT,
+				input.views.some((view) => view.cameraInsideSealedCell),
 			),
 		};
 		this.#beginFrame(input.environment, shading);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LandblockId } from "../game-types";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
+import { LandblockLayerKind } from "../runtime/scene-interest";
 import { OutdoorLightIndex } from "./outdoor-light-index";
 import type { RuntimeLight } from "./runtime-lights";
 
@@ -34,56 +35,76 @@ describe("OutdoorLightIndex", () => {
 		const index = new OutdoorLightIndex();
 		expect(index.isEmpty).toBe(true);
 		expect(index.resolve(landblock(1, 1))).toHaveLength(0);
-		index.install(landblock(1, 1), [lightIn(1, 1, 96, -96)]);
+		index.install(landblock(1, 1), LandblockLayerKind.Objects, [
+			lightIn(1, 1, 96, -96),
+		]);
 		expect(index.isEmpty).toBe(false);
 	});
 
 	it("returns a landblock's own lights regardless of where they sit inside it", () => {
 		const index = new OutdoorLightIndex();
 		// Deep in the interior, far from every boundary.
-		index.install(landblock(2, 2), [lightIn(2, 2, 96, -96, 1)]);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
+			lightIn(2, 2, 96, -96, 1),
+		]);
 		expect(index.resolve(landblock(2, 2))).toHaveLength(1);
 	});
 
 	it("includes a neighbour's light whose reach crosses the shared boundary", () => {
 		const index = new OutdoorLightIndex();
 		// Two units inside its owner, against the boundary with the landblock to its east.
-		index.install(landblock(2, 2), [lightIn(2, 2, 190, -96, 20)]);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
+			lightIn(2, 2, 190, -96, 20),
+		]);
 		expect(index.resolve(landblock(3, 2))).toHaveLength(1);
 	});
 
 	it("excludes a neighbour's light that stops short of the boundary", () => {
 		const index = new OutdoorLightIndex();
-		index.install(landblock(2, 2), [lightIn(2, 2, 96, -96, 20)]);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
+			lightIn(2, 2, 96, -96, 20),
+		]);
 		expect(index.resolve(landblock(3, 2))).toHaveLength(0);
 	});
 
 	it("ignores landblocks beyond the immediate neighbourhood", () => {
 		const index = new OutdoorLightIndex();
-		index.install(landblock(2, 2), [lightIn(2, 2, 190, -96, 20)]);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
+			lightIn(2, 2, 190, -96, 20),
+		]);
 		expect(index.resolve(landblock(5, 2))).toHaveLength(0);
 	});
 
-	it("drops a landblock's contribution when its layer is withdrawn", () => {
+	// All three outdoor static layers publish per landblock, and only Objects ever emits. A
+	// landblock-only key let a Buildings or Generated publish erase the lamps, which showed up as
+	// outdoor lighting that came and went with streaming order.
+	it("keeps a landblock's lights when another of its layers publishes empty", () => {
 		const index = new OutdoorLightIndex();
-		index.install(landblock(2, 2), [lightIn(2, 2, 96, -96)]);
-		index.remove(landblock(2, 2));
-		expect(index.resolve(landblock(2, 2))).toHaveLength(0);
-		expect(index.isEmpty).toBe(true);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
+			lightIn(2, 2, 96, -96),
+		]);
+		index.install(landblock(2, 2), LandblockLayerKind.Buildings, []);
+		index.install(landblock(2, 2), LandblockLayerKind.Generated, []);
+		expect(index.resolve(landblock(2, 2))).toHaveLength(1);
+		expect(index.isEmpty).toBe(false);
 	});
 
 	/** A layer arriving later must not be masked by a memoized empty result. */
 	it("invalidates memoized sets when a neighbour installs afterwards", () => {
 		const index = new OutdoorLightIndex();
 		expect(index.resolve(landblock(3, 2))).toHaveLength(0);
-		index.install(landblock(2, 2), [lightIn(2, 2, 190, -96, 20)]);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
+			lightIn(2, 2, 190, -96, 20),
+		]);
 		expect(index.resolve(landblock(3, 2))).toHaveLength(1);
 	});
 
 	it("treats an empty install as a removal", () => {
 		const index = new OutdoorLightIndex();
-		index.install(landblock(2, 2), [lightIn(2, 2, 96, -96)]);
-		index.install(landblock(2, 2), []);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
+			lightIn(2, 2, 96, -96),
+		]);
+		index.install(landblock(2, 2), LandblockLayerKind.Objects, []);
 		expect(index.isEmpty).toBe(true);
 	});
 });

@@ -455,10 +455,11 @@ export class GameRuntime {
 						throw new Error(`Outdoor static publisher received ${layer}.`);
 					}
 					this.#staticObjects.replaceObjects(owner, revision, geometry, layer);
-					// Only the Objects layer emits; the others always install an empty set,
-					// which removes any stale entry when a layer is withdrawn.
+					// Only the Objects layer emits, but every outdoor layer publishes here: an
+					// empty set is how a withdrawn layer clears its own entry.
 					this.#outdoorLights.install(
 						parseLandblockLayerOwnerId(owner).landblockId,
+						layer,
 						geometry?.staticLights ?? [],
 					);
 				},

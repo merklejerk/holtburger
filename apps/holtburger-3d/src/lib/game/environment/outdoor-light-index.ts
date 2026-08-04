@@ -1,4 +1,5 @@
 import type { LandblockId } from "../game-types";
+import type { OutdoorStaticLayerKind } from "../runtime/scene-interest";
 import {
 	getLandblockCoordinates,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -13,29 +14,33 @@ import type { RuntimeLight } from "./runtime-lights";
  * lookup is a map read and neighbour spill is a fixed nine-cell fan-out. There is deliberately no
  * tree or light grid — see the plan's Spatial Scope section.
  *
- * Effective sets are memoized and invalidated wholesale whenever any landblock's owned lights
- * change, because a single landblock's lights can reach into eight others and residency changes
- * are rare relative to frames.
+ * Effective sets are memoized and invalidated wholesale whenever any owned set changes, because
+ * a single landblock's lights can reach into eight others and residency changes are rare relative
+ * to frames.
  */
 export class OutdoorLightIndex {
-	readonly #owned = new Map<LandblockId, readonly RuntimeLight[]>();
+	readonly #owned = new Map<OwnedLightScope, OwnedLights>();
 	readonly #effective = new Map<LandblockId, readonly RuntimeLight[]>();
 
-	/** Replace one landblock's emitted lights. Passing an empty list removes its entry. */
-	install(landblockId: LandblockId, lights: readonly RuntimeLight[]): void {
-		const existing = this.#owned.get(landblockId);
+	/**
+	 * Replace one landblock layer's emitted lights. Passing an empty list removes its entry.
+	 *
+	 * Keyed by layer as well as landblock because all three outdoor static layers publish here
+	 * independently. Only the Objects layer ever emits, but Buildings and Generated still publish
+	 * empty sets for the same landblock, and a landblock-only key let whichever published last
+	 * erase the lamps.
+	 */
+	install(
+		landblockId: LandblockId,
+		layer: OutdoorStaticLayerKind,
+		lights: readonly RuntimeLight[],
+	): void {
+		const scope: OwnedLightScope = `${landblockId}/${layer}`;
 		if (lights.length === 0) {
-			if (existing === undefined) return;
-			this.#owned.delete(landblockId);
+			if (!this.#owned.delete(scope)) return;
 		} else {
-			this.#owned.set(landblockId, lights);
+			this.#owned.set(scope, { landblockId, lights });
 		}
-		this.#effective.clear();
-	}
-
-	/** Drop one landblock's contribution when its layer is withdrawn. */
-	remove(landblockId: LandblockId): void {
-		if (!this.#owned.delete(landblockId)) return;
 		this.#effective.clear();
 	}
 
@@ -65,8 +70,8 @@ export class OutdoorLightIndex {
 		const minimumZ = maximumZ - OUTDOOR_LANDBLOCK_WORLD_SIZE;
 		const maximumX = minimumX + OUTDOOR_LANDBLOCK_WORLD_SIZE;
 		const gathered: RuntimeLight[] = [];
-		for (const [ownerId, lights] of this.#owned) {
-			const owner = getLandblockCoordinates(ownerId);
+		for (const owned of this.#owned.values()) {
+			const owner = getLandblockCoordinates(owned.landblockId);
 			// Only the eight neighbours can reach in: a light's range is a small fraction of a
 			// landblock edge, so anything further cannot cross two boundaries.
 			if (
@@ -75,9 +80,9 @@ export class OutdoorLightIndex {
 			) {
 				continue;
 			}
-			for (const light of lights) {
+			for (const light of owned.lights) {
 				if (
-					ownerId === landblockId ||
+					owned.landblockId === landblockId ||
 					reachesBounds(light, minimumX, maximumX, minimumZ, maximumZ)
 				) {
 					gathered.push(light);
@@ -103,6 +108,15 @@ function reachesBounds(
 	// Vertical extent is deliberately ignored: terrain height is unbounded in the index, and a
 	// light that is horizontally in range but vertically distant is culled by the shader anyway.
 	return dx * dx + dz * dz < light.range * light.range;
+}
+
+/** One publishing layer's key: outdoor static layers publish per landblock, independently. */
+type OwnedLightScope = `${LandblockId}/${OutdoorStaticLayerKind}`;
+
+/** Owned lights alongside their landblock, so gathering never re-parses the scope key. */
+interface OwnedLights {
+	readonly landblockId: LandblockId;
+	readonly lights: readonly RuntimeLight[];
 }
 
 const EMPTY: readonly RuntimeLight[] = [];

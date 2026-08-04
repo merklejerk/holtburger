@@ -61,18 +61,30 @@ export interface ResolvedDistanceFog {
  * once a character carries it. Zero intensity means the headlamp is off.
  */
 export interface ResolvedViewerLight {
-	/** Landblock-anchored position, matching the space shaders compute vertices in. */
+	/**
+	 * Anchor-relative position, matching the space shaders compute vertex positions in.
+	 *
+	 * The renderer supplies this, because only it knows the frame's landblock anchor.
+	 */
 	readonly position: {
 		readonly x: number;
 		readonly y: number;
 		readonly z: number;
 	};
-	readonly falloff: number;
+	/** Effective reach: retail scales a hardware light's falloff by `rangeAdjust`. */
+	readonly range: number;
 	readonly intensity: number;
 }
 
-/** Retail's authored viewer-light constants (acclient.c:43910, 728925). */
-export const VIEWER_LIGHT = { falloff: 10, intensity: 0.5 * 4.5 } as const;
+/**
+ * Retail's authored viewer-light constants (acclient.c:43910, 728925), with `rangeAdjust`
+ * (acclient.c:44671) already folded in: a hardware light reaches `falloff * 1.5`
+ * (`config_hardware_light`, acclient.c:432899).
+ */
+export const VIEWER_LIGHT = {
+	range: 10 * 1.5,
+	intensity: 0.5 * 4.5,
+} as const;
 
 export interface ResolvedSceneLighting {
 	/** Interpolated ambient level, floored at `MINIMUM_AMBIENT_LEVEL`. */
@@ -306,7 +318,7 @@ const WHITE: SceneColor = { red: 1, green: 1, blue: 1, alpha: 1 };
 /** Off until the renderer substitutes the live camera position each frame. */
 export const DISABLED_VIEWER_LIGHT: ResolvedViewerLight = {
 	position: { x: 0, y: 0, z: 0 },
-	falloff: VIEWER_LIGHT.falloff,
+	range: VIEWER_LIGHT.range,
 	intensity: 0,
 };
 

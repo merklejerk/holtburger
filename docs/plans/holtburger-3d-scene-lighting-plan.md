@@ -715,6 +715,30 @@ Decisions and course corrections:
 - **`docs/lighting.md` written and indexed** from `docs/README.md`. It carries the retail model,
   the constants table, the archive censuses, and an explicit list of where this client diverges
   from retail and why — so the reverse-engineering survives this plan's retirement.
+- **Post-completion review findings (2026-08-04).**
+  - _Outdoor statics carrying no baked light is correct, not an omission._ A follow-up decompile
+    pass proved retail lights outdoor terrain, buildings, and objects with the sun and global
+    ambient only. `Render::useSunlight` is a pass flag, not a sun-visibility flag, and
+    `DrawMeshInternal` programs local lights only when it is clear (`acclient.c:436516`);
+    `useSunlightSet(1)` leaves exactly one slot live, the sun (`acclient.c:364152`). Outdoor
+    objects do register lights on their land cell, but nothing ever harvests a land cell into the
+    global light set, and `CGfxObj` meshes are constructed with `burn_in_static_lights = 0`
+    (`acclient.c:436061`). Recorded in `docs/lighting.md` because it is genuinely surprising.
+  - _Headlamp was bound in the wrong coordinate space and used the wrong falloff — fixed._ It was
+    positioned from the raw canonical camera placement while shaders compute anchor-relative
+    vertex positions, putting it tens of thousands of units away and therefore invisible. Both
+    call sites now share one `anchorRelativePosition` helper. It was also evaluating the burn-in
+    half-Lambert wrap; retail registers the viewer light as a _dynamic_ light, which takes the
+    hardware path — `Diffuse = color * intensity`, pure `1/d` attenuation, hard cutoff at
+    `falloff * 1.5` (`acclient.c:432845-432906`). The contract now carries the derived range
+    rather than raw falloff.
+  - _Known deviation: indoor residents are baked, where retail hardware-lights them._ Retail burns
+    static light into the cell **shell** only; indoor furniture is a `CGfxObj` and receives the
+    same lights through `minimize_object_lighting` instead, using `max(0, N·L)` with `1/d` rather
+    than the burn-in's half-Lambert wrap and linear range cutoff. Both are point-light falloffs and
+    the difference is subtle — the wrap lights surfaces angled away from a torch slightly more —
+    but it is a real divergence. Matching retail would need per-cell light uniforms for resident
+    draws, which is the machinery this plan deliberately avoided. Left as a deliberate concession.
 - Remaining debt, carried forward deliberately:
   - Interior visual verification is still outstanding. The browser harness accepts an EnvCell
     camera and materializes cells, but nothing draws from that pose; `--env-cell-position` appears

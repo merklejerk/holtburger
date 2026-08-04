@@ -12,7 +12,7 @@ const WHITE = { red: 1, green: 1, blue: 1, alpha: 1 };
 
 /** Sun length is the authored brightness, so this fixture's magnitude is exactly 2. */
 const LIGHTING: ResolvedSceneLighting = {
-	viewerLight: { position: { x: 0, y: 0, z: 0 }, falloff: 10, intensity: 0 },
+	viewerLight: { position: { x: 0, y: 0, z: 0 }, range: 15, intensity: 0 },
 	ambientLevel: 0.4,
 	ambientColor: WHITE,
 	sunVector: new Vec3(0, 2, 0),

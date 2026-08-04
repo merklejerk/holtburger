@@ -120,6 +120,45 @@ because `max(0, N·L)` is zero; its point-light term still contributes, because 
 uses the unnormalized light delta. A faithful client preserves authored zeros rather than
 inventing data.
 
+## Outdoor Geometry Receives No Point Lights
+
+This is the single most surprising rule in the model, so it is worth stating plainly: **in retail,
+outdoor terrain, buildings, and objects are lit by the sun and the global ambient only.** A lamp
+post standing in a landblock casts no light on the ground, on nearby objects, or on itself.
+
+`Render::useSunlight` is a _render-pass_ flag, not a time-of-day or sun-visibility flag. It is
+written only by `Render::useSunlightSet` (`acclient.c:364145`): `1` when `PView::DrawCells` begins
+the outdoor pass (`acclient.c:441094`, restored at `441234`) and `0` for the EnvCell pass
+(`441170`). The entire lighting logic of `RenderDeviceD3D::DrawMeshInternal` is one line
+(`acclient.c:436516`):
+
+```c
+if ( !Render::useSunlight )
+    Render::minimize_object_lighting();
+```
+
+So local lights are programmed into hardware slots **only during the indoor pass**.
+`useSunlightSet(1)` resets all eight slots and adds exactly one entry — the sun
+(`acclient.c:364152`) — leaving the other seven explicitly disabled. The player's own viewer light
+is therefore invisible outdoors too, because it is a dynamic light and dynamic entries never enter
+the table while `useSunlight == 1`.
+
+Outdoor lights are not merely unused at draw time; they never reach the global light set at all.
+Outdoor objects _do_ register their lights on their containing cell
+(`CPhysicsObj::enter_cell` → `CPartArray::AddLightsToCell` → `CObjCell::add_light`,
+`acclient.c:306571`, `313079`, `332796`), so a `CLandCell` genuinely holds a populated
+`light_list`. But every caller of `add_static_to_global_lights` / `add_dynamic_to_global_lights`
+walks `CEnvCell::visible_cell_table` (`acclient.c:335800`, `334987`) or the dressing-room cell
+(`137839`). There is no outdoor equivalent of that loop, so the list is collected and dropped.
+
+Burn-in is likewise indoor-only: `CEnvCell::UnPack` constructs its mesh with
+`burn_in_static_lights = 1` (`acclient.c:335258`), while every `CGfxObj` mesh — objects and
+buildings alike — passes `0` (`acclient.c:436061`). `SetStaticLightingVertexColors` has exactly
+one call site, inside `DrawEnvCell` (`acclient.c:436444`).
+
+Point lights in Asheron's Call are an **indoor-only feature**. Outdoors the budget is one
+directional sun plus a global ambient, and that is all.
+
 ## Interior Static Lights
 
 Authored lights live on object **Setups**, not on EnvCells — `CEnvCell::light_array` is allocated
@@ -131,6 +170,14 @@ Measured over the whole retail archive: **198,334 placed lights across 146,307 l
 distinct light-bearing setups. Every one is type 0 (point)**, and `cone_angle` is uninitialized
 memory (`0xCDCDCDCD`) in every asset. Intensity ranges 20–100 and falloff 1–15. Lights per lit
 cell: median 1, p99 5, maximum 26.
+
+Retail delivers these two different ways depending on what is being drawn. The **cell shell** gets
+them burned into its vertex colors (below). **Indoor residents** — the furniture and props inside a
+cell — are `CGfxObj` meshes, so they are never burned in; they receive the same lights as _hardware_
+lights instead, via `Render::minimize_object_lighting` (`acclient.c:364212`), which fills up to
+eight slots with dynamic lights first and then static ones. The two paths use different falloff
+shapes: the burn-in applies the half-Lambert wrap below, while the hardware path applies standard
+`max(0, N·L)` with `1/d` attenuation.
 
 Retail additionally _skips_ spot lights structurally in the burn-in path: the type dispatch has no
 spot branch (`acclient.c:434632-434651`), and `LIGHTINFO::convert_to_local` (`acclient.c:433979`)

@@ -70,6 +70,7 @@ import {
 	type WebGL2ObjectProgram,
 } from "./webgl2-object-program";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
+import type { LandblockId } from "../game-types";
 import {
 	DISABLED_VIEWER_LIGHT,
 	UNAUTHORED_SCENE_LIGHTING,
@@ -133,6 +134,25 @@ const PORTAL_PLANNING_WORK_ITEM_LIMIT = 100_000;
  * varies this per draw unit so portal-visible interiors can drop the sun while the
  * outdoor pass keeps it.
  */
+/**
+ * Convert a canonical world position into the frame's anchor-relative render frame.
+ *
+ * Shaders receive landblock-local positions offset by `uLandblockOffset`, which is relative to
+ * the frame anchor rather than the world origin. Anything compared against a vertex position —
+ * fog distance, the headlamp — must be converted the same way.
+ */
+function anchorRelativePosition(
+	position: Vec3,
+	anchorLandblockId: LandblockId,
+): Vec3 {
+	const anchor = getLandblockCoordinates(anchorLandblockId);
+	return new Vec3(
+		position.x - anchor.x * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		position.y,
+		position.z + anchor.y * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+}
+
 interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
 	/** Lighting per draw role, derived once per frame so draw loops stay allocation-free. */
@@ -555,7 +575,8 @@ export class WebGL2Renderer implements Renderer {
 			? input.environment.distanceFog
 			: null;
 		// The headlamp tracks the live camera, so the renderer supplies it rather than the
-		// resolved environment. Retail attaches it to the viewer on every viewer move.
+		// resolved environment. Retail attaches it to the viewer on every viewer move. It must
+		// be anchor-relative because that is the space shaders compute vertex positions in.
 		const headlampCamera = input.views[0]?.camera.placement.position ?? null;
 		const shading: SceneShading = {
 			fog,
@@ -563,8 +584,11 @@ export class WebGL2Renderer implements Renderer {
 				input.environment.lighting,
 				headlampCamera && input.frameSettings.viewerLightEnabled
 					? {
-							position: headlampCamera,
-							falloff: VIEWER_LIGHT.falloff,
+							position: anchorRelativePosition(
+								headlampCamera,
+								input.anchorLandblockId,
+							),
+							range: VIEWER_LIGHT.range,
 							intensity: VIEWER_LIGHT.intensity,
 						}
 					: DISABLED_VIEWER_LIGHT,
@@ -895,12 +919,9 @@ export class WebGL2Renderer implements Renderer {
 	): PreparedViewGeometry {
 		const camera = input.camera;
 		const anchorCoordinates = getLandblockCoordinates(anchorLandblockId);
-		const anchorOriginX = anchorCoordinates.x * OUTDOOR_LANDBLOCK_WORLD_SIZE;
-		const anchorOriginZ = -anchorCoordinates.y * OUTDOOR_LANDBLOCK_WORLD_SIZE;
-		const cameraPosition = new Vec3(
-			camera.placement.position.x - anchorOriginX,
-			camera.placement.position.y,
-			camera.placement.position.z - anchorOriginZ,
+		const cameraPosition = anchorRelativePosition(
+			camera.placement.position,
+			anchorLandblockId,
 		);
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		const projection = createPerspectiveMat4(

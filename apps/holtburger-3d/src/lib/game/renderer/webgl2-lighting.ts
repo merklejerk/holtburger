@@ -19,10 +19,10 @@ uniform vec3 uSunVector;
 uniform vec3 uSunColor;
 uniform vec3 uAmbientColor;
 uniform float uAmbientLevel;
-// Viewer headlamp: landblock-anchored position, then falloff and intensity. Intensity is
-// zero when the headlamp is off, which removes its contribution without a branch.
+// Viewer headlamp in anchor-relative space, then its effective range and intensity. Zero
+// intensity means the headlamp is off.
 uniform vec3 uViewerLightPosition;
-uniform vec2 uViewerLightFalloffIntensity;
+uniform vec2 uViewerLightRangeIntensity;
 
 // Authored GfxObj normals may be exactly zero (2.6% of retail vertices). Retail never
 // normalizes, validates, or derives a face normal for them, and its software sun term
@@ -37,34 +37,28 @@ vec3 safeNormal(vec3 normal) {
 // before clamping once; burned-in interior lighting arrives through the emissive slot
 // (FFEmissiveColorSource = FromVertex, acclient.c:434243), so it adds here rather than
 // replacing the ambient term.
-// The moving viewer light cannot be baked, so it evaluates here using the same retail
-// point-light shape the static bake uses: a half-Lambert wrap on the unnormalized delta,
-// a linear cutoff at the scaled falloff, and per-channel saturation.
-float evaluateViewerLight(vec3 position, vec3 normal) {
-	float range = uViewerLightFalloffIntensity.x;
-	if (uViewerLightFalloffIntensity.y <= 0.0) return 0.0;
+// The headlamp moves with the camera, so it cannot be baked. Retail registers it as a
+// *dynamic* light, which takes the fixed-function hardware path rather than the burn-in:
+// Diffuse = color * intensity, Att0/1/2 = 0/1/0 giving pure 1/d, and a hard cutoff at
+// Range (acclient.c:432845-432906). That is a different shape from calc_point_light's
+// half-Lambert wrap, which applies only to burned-in static light.
+float evaluateViewerLight(vec3 position, vec3 unitNormal) {
+	float intensity = uViewerLightRangeIntensity.y;
+	if (intensity <= 0.0) return 0.0;
 	vec3 delta = uViewerLightPosition - position;
-	float distanceSquared = dot(delta, delta);
-	float distance = sqrt(distanceSquared);
-	if (distance >= range) return 0.0;
-	float wrapped = (0.5 * distance + dot(normal, delta)) / 1.5;
-	if (wrapped <= 0.0) return 0.0;
-	float attenuation = distanceSquared <= 1.0
-		? wrapped / distance
-		: wrapped / (distanceSquared * distance);
-	return min(
-		attenuation * (1.0 - distance / range) * uViewerLightFalloffIntensity.y,
-		1.0
-	);
+	float distance = length(delta);
+	if (distance >= uViewerLightRangeIntensity.x || distance <= 0.0) return 0.0;
+	return max(dot(unitNormal, delta / distance), 0.0) * intensity / distance;
 }
 
 vec3 evaluateSceneLighting(vec3 position, vec3 normal, vec3 bakedLight) {
-	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
+	vec3 unitNormal = safeNormal(normal);
+	float sun = max(dot(unitNormal, uSunVector), 0.0);
 	return min(
 		uAmbientLevel * uAmbientColor
 			+ sun * uSunColor
 			+ bakedLight
-			+ vec3(evaluateViewerLight(position, normal)),
+			+ vec3(evaluateViewerLight(position, unitNormal)),
 		vec3(1.0)
 	);
 }
@@ -76,7 +70,7 @@ export interface WebGL2LightingUniforms {
 	readonly ambientLevel: WebGLUniformLocation;
 	readonly sunColor: WebGLUniformLocation;
 	readonly sunVector: WebGLUniformLocation;
-	readonly viewerLightFalloffIntensity: WebGLUniformLocation;
+	readonly viewerLightRangeIntensity: WebGLUniformLocation;
 	readonly viewerLightPosition: WebGLUniformLocation;
 }
 
@@ -112,8 +106,8 @@ export function bindWebGL2SceneLighting(
 		lighting.viewerLight.position.z,
 	);
 	gl.uniform2f(
-		uniforms.viewerLightFalloffIntensity,
-		lighting.viewerLight.falloff,
+		uniforms.viewerLightRangeIntensity,
+		lighting.viewerLight.range,
 		lighting.viewerLight.intensity,
 	);
 }

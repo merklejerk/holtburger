@@ -16,6 +16,19 @@ export const RUNTIME_LIGHT_RANGE_SCALE = 1.5;
  */
 export const MAX_DYNAMIC_LIGHTS = 8;
 
+/**
+ * Cap on simultaneously evaluated static lights for one landblock.
+ *
+ * The largest set any landblock owns in the archive is 51, and neighbour spill is bounded by a
+ * roughly 22.5-unit band on a 192-unit edge, so 64 has real headroom. Overflow drops the farthest
+ * light rather than failing.
+ *
+ * Uniform budget: the two arrays declare `2 * 64` vec4 slots, which together with the dynamic
+ * arrays and the matrices leaves the object vertex shader near 163 of WebGL2's guaranteed 256
+ * vertex uniform vectors.
+ */
+export const MAX_STATIC_LIGHTS = 64;
+
 /** One point light evaluated at draw time, in anchor-relative space with its reach resolved. */
 export interface RuntimeLight {
 	readonly position: {

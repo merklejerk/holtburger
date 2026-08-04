@@ -326,12 +326,45 @@ Acceptance criteria:
 
 Tasks:
 
-- [ ] Per-landblock outdoor light gathering with residency-scoped caching.
-- [ ] Neighbour spill inclusion.
-- [ ] Per-landblock binding across all four outdoor receivers, with a bind-frequency metric.
+- [x] Per-landblock outdoor light gathering with residency-scoped caching.
+- [x] Neighbour spill inclusion.
+- [x] Per-landblock binding across all four outdoor receivers, with a bind-frequency metric.
 - [ ] Browser verification at night, including the late-arriving-layer case.
 
-Decisions and course corrections: _(fill during execution)_
+Progress: **Blocked** on a design decision. Gathering, indexing, selection, binding, and the
+shader path are implemented and green (`npm run check` by exit code, 627 frontend tests, GLSL
+validation). Lamps demonstrably light objects and buildings at night. They do **not** meaningfully
+light terrain, and that cannot be fixed by tuning — see below.
+
+Decisions and course corrections:
+
+- **Terrain is too coarsely tessellated for per-vertex point lighting.** A landblock's terrain is
+  9x9 vertices over 192 units, so vertices sit **24 units apart**, while a typical lamp reaches
+  `6 * 1.5 = 9` units and even the archive's largest reaches 22.5. A lamp therefore touches at most
+  one terrain vertex and usually none. When it does touch one, the result is a 24-unit gradient
+  across the whole quad rather than a pool — arguably worse than no light at all. The Phase 2
+  acceptance criterion "lamps visibly illuminate the ground" is unreachable through the planned
+  per-vertex path. Options are recorded in Open Questions; this needs a decision before the phase
+  can close.
+- **Lights are gathered at artifact assembly, not in the worker.** `assembleStaticObjectArtifact`
+  composes each resident's authored lights with its placement using the existing
+  `placeObjectLights`, so the set is resolved once per residency change. The landblock comes from
+  the layer owner id, which already encodes it, so no new plumbing crossed the commit boundary.
+- **`OutdoorLightIndex` owns neighbour spill and memoization.** It keys owned lights by landblock,
+  resolves an effective set by testing each neighbour light's sphere against the target landblock's
+  horizontal extent, and clears memoized sets wholesale on any residency change — since one
+  landblock's lights can reach eight others, and residency changes are rare relative to frames. A
+  test covers the late-arriving-neighbour case that would otherwise be masked by a memoized empty
+  result.
+- **Static binds are keyed by landblock, not role.** Two draws sharing a role can sit in different
+  landblocks, so `applyStaticLightScope` extends the existing dedupe. Interior draws bind an empty
+  set, since their static lighting is baked. Measured on a lit town neighbourhood: 13 static binds
+  per frame, tracking visible landblocks rather than draw-call count, so per-landblock binding
+  holds and the uniform-buffer escalation is not needed.
+- Concession: vertical extent is ignored when testing whether a neighbour's light reaches a
+  landblock. Terrain height is unbounded in the index, and a light that is horizontally in range
+  but vertically distant is culled by the shader's range check anyway, so the only cost is a
+  slightly larger candidate set.
 
 ### Phase 3: Resteer
 
@@ -401,6 +434,17 @@ Decisions and course corrections: _(fill during execution)_
 - [ ] `docs/lighting.md` updated; entity-light attachment point recorded.
 
 ## Open Questions
+
+- **How should terrain receive point lights, given 24-unit vertex spacing?** Phase 2 found the
+  planned per-vertex path cannot produce a visible pool. Three options:
+  1. **Accept objects-only.** Lamps light buildings, objects, and scenery; terrain stays sun and
+     ambient. This is exactly what retail does, costs nothing, and avoids the one-vertex gradient
+     artifact — but the ground under a lamp stays dark, which is the thing the phase set out to fix.
+  2. **Evaluate terrain lighting per pixel.** The terrain fragment shader already composes
+     textures per pixel, so adding the light loop there produces true pools at any tessellation.
+     Cost is a per-pixel light loop over the landblock's set, on the largest screen area in view.
+  3. **Tessellate terrain more.** Rejected: it inflates the cost of everything else to fix
+     lighting.
 
 - Does the detail slider eventually scale the caps, as retail's degrade level does? Not needed now,
   but the dynamic selection layer is where it would live.

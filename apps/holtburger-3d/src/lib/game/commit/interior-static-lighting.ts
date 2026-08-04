@@ -63,7 +63,7 @@ export function placeObjectLights(
  *
  * Reproduces retail's `SetStaticLightingVertexColors` / `calc_point_light` exactly, including
  * its per-channel clamp to the light's own color and its use of unnormalized vectors. Returns
- * null when no light reaches the geometry, so unlit geometry carries no attribute at all.
+ * null when no light reaches the geometry, which then carries no baked attribute at all.
  *
  * Retail bakes with the union of nearby visible cells' lights rather than only the owning
  * cell's (`add_static_to_global_lights` over `visible_cell_table`, acclient.c:335800), which is

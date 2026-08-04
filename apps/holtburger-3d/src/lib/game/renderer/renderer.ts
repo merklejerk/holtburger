@@ -22,7 +22,7 @@ interface RenderQualitySettings {
 export interface FrameSettings {
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
-	/** Retail's viewer headlamp, which makes unlit interiors navigable. */
+	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
 	readonly viewerLightEnabled: boolean;
 	/** Environment-cell visibility and presentation policy for this frame. */
 	readonly envCellRenderMode: EnvCellRenderMode;

@@ -80,7 +80,7 @@ export interface WebGL2LightingUniforms {
 	readonly viewerLightPosition: WebGLUniformLocation;
 }
 
-/** Bind one draw's resolved lighting. Neutral values reproduce unlit output exactly. */
+/** Bind one draw's resolved lighting for its retail role. */
 export function bindWebGL2SceneLighting(
 	gl: WebGL2RenderingContext,
 	uniforms: WebGL2LightingUniforms,

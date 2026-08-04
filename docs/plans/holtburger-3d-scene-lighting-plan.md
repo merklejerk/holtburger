@@ -1,6 +1,6 @@
 # Holtburger 3D Scene Lighting Plan
 
-Status: Executing. Phases 0-3 complete; Phase 4 resteer done and awaiting one design decision.
+Status: Complete (2026-08-04). All phases landed; remaining debt is itemized in Phase 7.
 Created: 2026-08-03
 
 ## Goal
@@ -683,6 +683,64 @@ Decisions and course corrections: _(fill during execution)_
   without reshaping the Phase 3/5 contracts; record the intended attachment points.
 - Remove or deliberately promote the Phase 0 harness programs.
 
+Progress: Complete (2026-08-04). All checks, 601 frontend tests, `cargo clippy`, and a
+browser-harness render are green.
+
+Decisions and course corrections:
+
+- **Pre-existing test flakiness observed, not introduced.** `cargo test --workspace`
+  intermittently fails a block of `holtburger-cli` chat/log-panel tests (counts vary run to run:
+  52, 44, 41, then clean). They pass consistently when that crate is tested alone, even forced to
+  32 threads, and the same intermittency reproduces at `HEAD` with this plan's work stashed. This
+  plan never touches `holtburger-cli`, so the flakiness is recorded here rather than fixed here —
+  chasing it would be unrelated scope. It does mean "workspace tests clean" cannot be asserted
+  unconditionally for this repository today.
+- **Vocabulary swept**: the "future terrain/object lighting" and unlit-era comments are gone. The
+  one surviving mention of "unlit" now describes an interior with no _authored lights_, which is a
+  real content state rather than a renderer limitation.
+- **Dead GPU packing removed.** The composition table no longer uploads the six authored terrain
+  colour-variation values (Phase 2 proved them dead in retail). The variation row was deleted
+  outright and rows 2-5 renumbered to 1-4, shrinking `TERRAIN_COMPOSITION_TABLE_HEIGHT` from 6 to
+  5; the terrain shader's row indices moved with it. Terrain composition was re-verified in the
+  browser afterwards. Decoding the fields from region data is retained: that is a lossless DAT
+  round-trip, and only the upload implied a consumer that must not exist.
+- **Tests that enshrined superseded behavior were updated rather than deleted**, since each still
+  covers live behavior: the env-cell materialization pair now asserts per-cell shell geometry
+  instead of shared, and the zero-normals worker test keeps its assertion and gained the decompile
+  rationale for why preserving zeros is correct.
+- **Phase 0 census harness deleted**, per the harness crate's own convention that a harness retires
+  once its investigation concludes. Every number it produced is recorded in this plan and in
+  `docs/lighting.md`. `ContentRepository::resource_index`, added solely for it, was removed with it
+  rather than left as an unused accessor.
+- **`docs/lighting.md` written and indexed** from `docs/README.md`. It carries the retail model,
+  the constants table, the archive censuses, and an explicit list of where this client diverges
+  from retail and why — so the reverse-engineering survives this plan's retirement.
+- Remaining debt, carried forward deliberately:
+  - Interior visual verification is still outstanding. The browser harness accepts an EnvCell
+    camera and materializes cells, but nothing draws from that pose; `--env-cell-position` appears
+    to want a different space than the authored cell origin. The bake is covered by unit tests over
+    the retail formula and outdoor renders confirm no regression, but a screenshot of a torch-lit
+    room has not been captured. Fixing the harness camera is the prerequisite.
+  - The terrain program is validated by glslangValidator while the object program gets a lighter
+    static uniform/varying check, because the latter is assembled by functions the file-based
+    validator cannot execute. Unifying them would need the validator to run the builders.
+
+### Deferred-work attachment points
+
+Recorded so the deferred plans do not have to rediscover them:
+
+- **Entity-carried dynamic lights and `SetLight`**: `ResolvedObjectPresentation.lights` already
+  carries authored lights for every setup, outdoor and indoor alike, so a dynamic entity's lights
+  need no new content plumbing. The shader-side shape exists too — `evaluateViewerLight` in
+  `webgl2-lighting.ts` is retail's point-light evaluation and generalizes to an array; the Phase 0
+  census fixes the bound at 32 (observed maximum 26 per cell). Nearest-N selection would slot in
+  where `SceneShading.lighting` is built, once per frame.
+- **Timed `SetLuminosity`/`SetDiffusion`**: `uLuminosity` is already a per-draw material uniform
+  consumed as retail's emissive term; animating it needs an effect-system producer, not a renderer
+  change.
+- **Sky pass**: consumes `resolveClockDayFraction` and `resolveSceneEnvironment` unchanged. See
+  [holtburger-3d-sky-pass-plan.md](holtburger-3d-sky-pass-plan.md).
+
 ## Risks & Mitigations
 
 - **CPU bake vs GPU uniform divergence** (Phase 5): same room, two evaluation paths. Mitigation:
@@ -704,16 +762,20 @@ Decisions and course corrections: _(fill during execution)_
 
 ## Definition of Done
 
-- [ ] All phases complete with per-phase acceptance criteria met.
-- [ ] `cargo test`, `cargo clippy` (warnings as errors), frontend unit tests, lint, and formatting
-      all clean.
-- [ ] Outdoor scenes: terrain, buildings, and statics lit consistently by time-of-day sun and
-      ambient; fog synchronized.
-- [ ] Interior scenes: authored static lights visible with retail falloff; forced interior ambient;
-      headlamp functional.
-- [ ] No unlit-era vocabulary or placeholder comments survive.
-- [ ] Retail lighting constants and model documented outside this plan (protocol/format docs).
-- [ ] Deferred dynamic-light attachment points recorded for the dynamic-entity runtime plan.
+- [x] All phases complete with per-phase acceptance criteria met.
+- [x] `cargo clippy` (warnings as errors), frontend unit tests, lint, and formatting all clean.
+      `cargo test --workspace` passes except for pre-existing intermittent `holtburger-cli`
+      chat/log failures that also reproduce at `HEAD` without this work (see Phase 7).
+- [x] Outdoor scenes: terrain, buildings, and statics lit consistently by time-of-day sun and
+      ambient; fog synchronized. Verified in the browser at several day fractions.
+- [~] Interior scenes: authored static lights bake with retail falloff, the sealed-cell ambient
+  override applies, and the headlamp evaluates. Covered by unit tests over the retail formula
+  and by contract tests, but **not yet confirmed by an interior screenshot** — the harness
+  EnvCell camera does not currently produce a drawing pose. Carried as Phase 7 debt.
+- [x] No unlit-era vocabulary or placeholder comments survive.
+- [x] Retail lighting constants and model documented outside this plan
+      ([docs/lighting.md](../lighting.md)).
+- [x] Deferred dynamic-light attachment points recorded for the dynamic-entity runtime plan.
 
 ## Open Questions
 

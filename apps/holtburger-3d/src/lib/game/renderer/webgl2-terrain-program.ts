@@ -134,8 +134,8 @@ vec4 sampleTerrainColor(uint terrainCode, vec2 cellUv) {
 
 ivec2 findTerrainMap(uint pcode, uint shapeCode) {
 	bool cornerShape = shapeCode == 1u || shapeCode == 2u || shapeCode == 4u || shapeCode == 8u;
-	int row = cornerShape ? 2 : 3;
-	uint count = compositionRecord(0, 5)[cornerShape ? 0 : 1];
+	int row = cornerShape ? 1 : 2;
+	uint count = compositionRecord(0, 4)[cornerShape ? 0 : 1];
 	if (count == 0u) return ivec2(-1, 0);
 	uvec4 map = compositionRecord(int(variationIndex(pcode, count)), row);
 	int rotations = rotationsToMatch(map.y, shapeCode);
@@ -143,11 +143,11 @@ ivec2 findTerrainMap(uint pcode, uint shapeCode) {
 }
 
 ivec2 findRoadMap(uint pcode, uint roadCode) {
-	uint count = compositionRecord(0, 5).z;
+	uint count = compositionRecord(0, 4).z;
 	if (count == 0u) return ivec2(-1, 0);
 	uint first = variationIndex(pcode, count);
 	for (uint offset = 0u; offset < count; offset += 1u) {
-		uvec4 map = compositionRecord(int((first + offset) % count), 4);
+		uvec4 map = compositionRecord(int((first + offset) % count), 3);
 		int rotations = rotationsToMatch(map.y, roadCode);
 		if (rotations >= 0) return ivec2(int(map.x), rotations);
 	}
@@ -235,7 +235,7 @@ void main() {
 	uint pcode = texelFetch(uSurfaceField, cell, 0).r;
 	vec2 cellUv = fract(vGridUv * vec2(fieldSize));
 	vec3 color = applyRoads(composeTerrain(pcode, cellUv), pcode, cellUv);
-	uvec4 metadata = compositionRecord(0, 5);
+	uvec4 metadata = compositionRecord(0, 4);
 	vec4 detail = texture(uDetail, fract(cellUv * float(metadata.w)));
 	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));

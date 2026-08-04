@@ -6,15 +6,14 @@ import type {
 } from "./types";
 
 /** Fixed number of RGBA32UI rows in one compiled terrain composition lookup texture. */
-export const TERRAIN_COMPOSITION_TABLE_HEIGHT = 6;
+export const TERRAIN_COMPOSITION_TABLE_HEIGHT = 5;
 
 const TERRAIN_COMPOSITION_TABLE_COMPONENTS = 4;
 const TERRAIN_TYPE_COLOR_ROW = 0;
-const TERRAIN_TYPE_VARIATION_ROW = 1;
-const CORNER_ALPHA_ROW = 2;
-const SIDE_ALPHA_ROW = 3;
-const ROAD_ALPHA_ROW = 4;
-const METADATA_ROW = 5;
+const CORNER_ALPHA_ROW = 1;
+const SIDE_ALPHA_ROW = 2;
+const ROAD_ALPHA_ROW = 3;
+const METADATA_ROW = 4;
 
 /** CPU upload payload for one stable regional RGBA32UI terrain lookup texture. */
 export interface TerrainCompositionTable {
@@ -119,17 +118,13 @@ function writeTerrainType(
 	terrain: TerrainMaterialType,
 	colorLayers: ReadonlyMap<string, number>,
 ): void {
+	// Authored per-terrain vertex color variation is deliberately absent: the six min/max
+	// brightness, saturation, and hue fields are read only by `TerrainTex::Pack` and written
+	// only by `TerrainTex::UnPack` in the retail client (acclient.c:294081-294197), with no HSV
+	// code anywhere in the binary. Uploading them would imply a consumer that must not exist.
 	writeRecord(texels, width, TERRAIN_TYPE_COLOR_ROW, column, [
 		requireLayer(colorLayers, terrain.colorTextureId, "terrain color"),
 		terrain.tiling,
-		terrain.colorVariation.minVertexBrightness,
-		terrain.colorVariation.maxVertexBrightness,
-	]);
-	writeRecord(texels, width, TERRAIN_TYPE_VARIATION_ROW, column, [
-		terrain.colorVariation.minVertexSaturation,
-		terrain.colorVariation.maxVertexSaturation,
-		terrain.colorVariation.minVertexHue,
-		terrain.colorVariation.maxVertexHue,
 	]);
 }
 

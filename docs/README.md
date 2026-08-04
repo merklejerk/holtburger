@@ -17,6 +17,7 @@ The protocol is structured in layers, operating over **UDP**:
 5.  **Application (Message) Layer:** The top level where game logic resides. This layer uses **Opcodes** to identify message types (e.g., `CharacterList`, `Movement`) and further specializes into **GameActions** (client-to-server) and **GameEvents** (server-to-client). See [stats.md](stats.md) for character data, [properties.md](properties.md) for object traits, and [inventory.md](inventory.md) for ownership state.
 6.  **Physics & Collision Layer:** Handles environment traversal using BSP trees, slope validation, and portal transitions. See [physics.md](physics.md) for concepts and [bsp_format.md](bsp_format.md) for the binary format.
 7.  **Data Layer (Assets):** The client stores static game data in B-Tree indexed database files (DATs). See [dat_format.md](dat_format.md) for details on parsing and categorization.
+8.  **Rendering:** See [lighting.md](lighting.md) for the retail sun, ambient, interior static light, and fog model, and [portal_rendering.md](portal_rendering.md) for EnvCell portal traversal.
 
 ---
 

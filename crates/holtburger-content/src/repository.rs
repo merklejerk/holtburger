@@ -208,11 +208,6 @@ impl ContentRepository {
         self.source_description.as_deref()
     }
 
-    /// Every mounted resource's namespace and file id, for archive-wide enumeration.
-    pub fn resource_index(&self) -> &[RepositoryResourceIndexEntry] {
-        &self.resource_index
-    }
-
     pub fn resource_metadata(&self, key: ResourceKey<'_>) -> Option<holtburger_dat::FileMetadata> {
         let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
         resources.get_metadata_by_key(key)

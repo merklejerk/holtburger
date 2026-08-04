@@ -20,8 +20,17 @@ uniform vec3 uSunColor;
 uniform vec3 uAmbientColor;
 uniform float uAmbientLevel;
 
+// Authored GfxObj normals may be exactly zero (2.6% of retail vertices). Retail never
+// normalizes, validates, or derives a face normal for them, and its software sun term
+// yields nothing because max(0, N.L) is zero. Returning zero reproduces that without
+// letting a zero-length normalize poison the result with NaN.
+vec3 safeNormal(vec3 normal) {
+	float lengthSquared = dot(normal, normal);
+	return lengthSquared > 0.0 ? normal * inversesqrt(lengthSquared) : vec3(0.0);
+}
+
 vec3 evaluateSceneLighting(vec3 normal) {
-	float sun = max(dot(normal, uSunVector), 0.0);
+	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
 	return min(uAmbientLevel * uAmbientColor + sun * uSunColor, vec3(1.0));
 }
 `;

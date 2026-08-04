@@ -145,6 +145,25 @@ export interface ResolvedPlacementPose {
 	readonly partTransforms: readonly Mat4[];
 }
 
+/**
+ * One authored light emitted by an object, in that object's local space.
+ *
+ * Only point lights occur in EoR content, so no light type is retained here; the decoder
+ * rejects anything else rather than silently treating it as a point light.
+ */
+export interface ResolvedObjectLight {
+	/** Light position in object-local render axes. */
+	readonly offset: Vec3;
+	readonly color: {
+		readonly red: number;
+		readonly green: number;
+		readonly blue: number;
+	};
+	readonly intensity: number;
+	/** Authored radius; retail scales it by `static_light_factor` when baking. */
+	readonly falloff: number;
+}
+
 /** Immutable shared definition for a setup- or gfx-backed resident. */
 export interface ResolvedObjectPresentation {
 	readonly id: ResolvedPresentationId;
@@ -152,6 +171,13 @@ export interface ResolvedObjectPresentation {
 	readonly appearanceKey: string;
 	readonly sourceAssetId: DatAssetId;
 	readonly parts: readonly ResolvedObjectPart[];
+	/**
+	 * Authored lights this object emits, in its own local space, empty for most setups.
+	 *
+	 * Retail registers these into the containing cell (`CPartArray::AddLightsToCell`); interior
+	 * materialization composes them with each resident's placement to bake cell lighting.
+	 */
+	readonly lights: readonly ResolvedObjectLight[];
 	/** Attach points this object offers to children, empty when its setup authors none. */
 	readonly holdingLocations: ReadonlyMap<ParentLocation, ResolvedAttachPoint>;
 	readonly placementPoses: ReadonlyMap<number, ResolvedPlacementPose>;

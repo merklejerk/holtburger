@@ -11,6 +11,7 @@ import type {
 	ResolvedAttachPoint,
 	ResolvedGeometry,
 	ResolvedMaterial,
+	ResolvedObjectLight,
 	ResolvedObjectPart,
 	ResolvedObjectPresentation,
 } from "../game/resolution/presentation";
@@ -25,7 +26,7 @@ import {
 	readBinarySectionSlice,
 	validateBinarySections,
 } from "./binary-source-record";
-import { acFrameTransform, renderScale } from "./ac-frame";
+import { acFrameTransform, renderScale, renderVector } from "./ac-frame";
 
 const HEADER_LENGTH = 12;
 const MAGIC = "HBSO";
@@ -146,6 +147,21 @@ const holdingLocation = z.object({
 	partIndex: z.number().int().nonnegative(),
 	frame,
 });
+/**
+ * One authored setup light in setup-local space.
+ *
+ * `lightType` and `coneAngle` are carried losslessly but unread: every EoR asset authors type 0
+ * (point) and leaves `coneAngle` as uninitialized memory.
+ */
+const setupLight = z.object({
+	lightType: z.number().int(),
+	offset: frame,
+	/** Packed authored BGR; the low byte is red, matching every other DAT color field. */
+	color: z.number().int().nonnegative(),
+	intensity: finiteNumber,
+	falloff: finiteNumber,
+	coneAngle: finiteNumber,
+});
 const setupDefinition = z.object({
 	id: z.string().min(1),
 	kind: z.literal("setup-model"),
@@ -153,6 +169,7 @@ const setupDefinition = z.object({
 	setupId: datId,
 	sourceAssetId: z.string().min(1),
 	parts: z.array(setupPart),
+	lights: z.array(setupLight),
 	holdingLocations: z.array(holdingLocation),
 	defaultAnimationId: datId.nullable(),
 	defaultMotionTableId: datId.nullable(),
@@ -684,11 +701,38 @@ export function decodeStaticPresentation(
 			id: `presentation:${definition.id}`,
 			sourceAssetId: definition.sourceAssetId,
 			parts,
+			lights:
+				definition.kind === "setup-model"
+					? definition.lights.map(decodeSetupLight)
+					: [],
 			holdingLocations: decodeHoldingLocations(definition, parts.length),
 			placementPoses: new Map([[0, { placementId: 0, partTransforms }]]),
 			selectionBounds: null,
 			sortingBounds: null,
 		},
+	};
+}
+
+/** Point lights are the only authored kind; anything else is a source contract violation. */
+const POINT_LIGHT_TYPE = 0;
+
+function decodeSetupLight(
+	light: z.infer<typeof setupLight>,
+): ResolvedObjectLight {
+	if (light.lightType !== POINT_LIGHT_TYPE) {
+		throw new Error(
+			`Setup light declares unsupported light type ${light.lightType}.`,
+		);
+	}
+	return {
+		offset: renderVector(...light.offset.origin),
+		color: {
+			red: (light.color & 0xff) / 0xff,
+			green: ((light.color >>> 8) & 0xff) / 0xff,
+			blue: ((light.color >>> 16) & 0xff) / 0xff,
+		},
+		intensity: light.intensity,
+		falloff: light.falloff,
 	};
 }
 

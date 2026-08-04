@@ -234,6 +234,28 @@ fn census_residents(content: &ContentRepository, cache: &ContentDecodeCache) -> 
         total_uses as f64 / structure_uses.len().max(1) as f64,
         reuse.last().copied().unwrap_or(0)
     );
+
+    // Vertex counts decide what a per-cell color stream actually costs.
+    let mut shell_vertices = Vec::new();
+    for &(environment_id, cell_structure) in structure_uses.keys() {
+        let Ok(environment) = cache.environment(content, 0x0d00_0000 | u32::from(environment_id))
+        else {
+            continue;
+        };
+        let Some(structure) = environment.cells.get(&u32::from(cell_structure)) else {
+            continue;
+        };
+        shell_vertices.push(structure.vertex_array.vertices.len());
+    }
+    shell_vertices.sort_unstable();
+    let total_vertices: usize = shell_vertices.iter().sum();
+    println!(
+        "shell vertices per structure: n={} total={total_vertices} p50={:?} p99={:?} max={:?}",
+        shell_vertices.len(),
+        percentile(&shell_vertices, 0.50),
+        percentile(&shell_vertices, 0.99),
+        shell_vertices.last()
+    );
     Ok(())
 }
 

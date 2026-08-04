@@ -493,6 +493,21 @@ Recommendation: Option B. It is strictly less machinery, removes the plan's larg
 and produces identical per-vertex output. It does reverse the earlier steer that shell geometry
 could simply be un-deduplicated, which was made before the 234x sharing factor was measured.
 
+**Decision: Option A — per-cell geometry with baked vertex colors** (2026-08-04). The 234x reuse
+figure was misleading on its own: shell structures are tiny. Census over every structure:
+**median 10 vertices, p99 58, max 113, 45,320 vertices total across all 3,145 structures.** A
+205-cell dungeon landblock therefore duplicates on the order of 3,000 vertices, so per-cell copies
+cost nothing meaningful and the retail mechanism is kept intact. Phase 5 proceeds with baking, and
+duplicates whole geometries per cell rather than splicing a per-cell color stream onto shared
+buffers — at this vertex count the simpler shape wins over the memory-optimal one.
+
+Additional retail semantics confirmed during the resteer, which the bake must honor: retail does
+**not** bake with only the owning cell's lights. `CObjCell::add_static_to_global_lights` is called
+across `CEnvCell::visible_cell_table` (acclient.c:335800), so the burn-in uses the union of nearby
+visible cells' lights transformed into the mesh's frame — which is what makes light spill through
+doorways. Our bake gathers all lights in the landblock and lets the authored range
+(`falloff * 1.3`) cull them, which is equivalent for static content and needs no visibility query.
+
 ### Phase 5: Interior lighting — authored static lights
 
 Retail behavior: Setup `LIGHTINFO` registered to containing cells; static lights burned into cell

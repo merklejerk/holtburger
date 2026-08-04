@@ -134,6 +134,7 @@ impl OutdoorStaticSourceClosure {
             "setupId": dat_id(setup_model_id),
             "sourceAssetId": id,
             "parts": parts,
+            "lights": setup_lights(&setup_model),
             "holdingLocations": setup_holding_locations(&setup_model)?,
             "defaultAnimationId": setup_model.default_animation.map(dat_id),
             "defaultMotionTableId": setup_model.default_motion_table.map(dat_id),
@@ -502,6 +503,28 @@ fn select_setup_default_frames(
                 .map(|(_, placement)| placement)
         })
         .map(|placement| placement.anim_frame.frames.as_slice())
+}
+
+/// Authored setup lights in setup-local space; consumers compose them with a placement frame.
+///
+/// `lightType` and `coneAngle` ride through unread: every EoR asset authors type 0 (point) and
+/// leaves `coneAngle` uninitialized, but the contract stays lossless for a future consumer.
+fn setup_lights(setup_model: &holtburger_dat::file_type::SetupModel) -> Value {
+    setup_model
+        .lights
+        .iter()
+        .map(|light| {
+            json!({
+                "lightType": light.light_type,
+                "offset": frame_json(&light.viewer_space_location),
+                "color": light.color,
+                "intensity": light.intensity,
+                "falloff": light.falloff,
+                "coneAngle": light.cone_angle,
+            })
+        })
+        .collect::<Vec<_>>()
+        .into()
 }
 
 pub(crate) fn frame_json(frame: &holtburger_dat::graphics::Frame) -> Value {

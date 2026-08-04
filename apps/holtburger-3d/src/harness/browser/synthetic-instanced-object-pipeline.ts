@@ -116,6 +116,7 @@ function presentation(
 				partIndex: 0,
 			},
 		],
+		lights: [],
 		holdingLocations: new Map(),
 		placementPoses: new Map([
 			[0, { partTransforms: [Mat4.identity()], placementId: 0 }],

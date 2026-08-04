@@ -13,7 +13,7 @@ world with its authored lamps and braziers.
 **In scope**
 
 - Two light sets with different update cadences — static per landblock, dynamic per frame — sharing
-  one shader evaluation.
+  one shader evaluation, both applying to indoor and outdoor draws alike.
 - Shader evaluation generalized from the existing single-light viewer headlamp to bounded arrays.
 - Outdoor authored static lights as the first bulk producer, reaching terrain, buildings,
   explicit objects, and instanced generated scenery alike.
@@ -127,6 +127,19 @@ relitigate them by accident.
      `dynamic_lights[10]` as separate arrays: not a hardware artifact, the same cadence argument.
 5. **Adding a producer must not change selection, binding, or shader code.** Entity lights should
    land as data feeding the dynamic set, nothing more.
+6. **Lights are selected by distance, never by screen visibility.** A light behind the camera still
+   illuminates what is in front of it, and a light just outside the frame lights geometry inside
+   it, so frustum-culling lights makes objects pop dark as the camera turns. Retail agrees:
+   `insert_light` (`acclient.c:364013`) ranks by `distancesq` from the player position and applies
+   no visibility test at all.
+7. **Dynamic lights apply outdoors, deviating from retail deliberately.** Retail's outdoor pass
+   binds only the sun (`useSunlightSet(1)`, `acclient.c:441094`), so dynamic lights never reach
+   outdoor geometry there — which is why its viewer light is invisible outdoors. That restriction
+   stops making sense once we light the outdoors with static lamps, since a torch-carrying creature
+   walking between lit lamp posts would cast nothing. Applying the dynamic set to every draw is
+   also strictly less code than gating it by role. The cost is that outdoor draws iterate the
+   dynamic array; an empty set early-outs on a count check, so North Star 4 still holds whenever
+   nothing dynamic is lit.
 
 ## North Stars
 
@@ -183,9 +196,11 @@ Deliverables:
 
 - A `DynamicLightSet` contract: a small bounded array of runtime point lights in anchor-relative
   space, rebuilt each frame from dynamic producers and bound **once per frame**.
-- Nearest-first selection with an explicit cap, mirroring `Render::insert_light`'s policy — sort by
+- Nearest-first selection with an explicit cap, mirroring `Render::insert_light`'s policy — rank by
   squared distance from the camera, keep the nearest, drop the rest — and a frame metric counting
-  drops.
+  drops. Distance only; no frustum test, per Design Rule 6.
+- The dynamic set applies to every draw role, indoor and outdoor, per Design Rule 7. The headlamp
+  therefore becomes visible outdoors, where it previously was not.
 - Shared GLSL: generalize `evaluateViewerLight` into a loop over the bound array, preserving its
   per-light math exactly. Uploads are sized to the live count, never to the cap.
 - The viewer headlamp stops being a bespoke uniform pair and becomes simply the first entry in the
@@ -195,6 +210,8 @@ Acceptance criteria:
 
 - Interiors render identically to before: the headlamp is the only dynamic producer and its math is
   unchanged.
+- Outdoors, the headlamp now lights nearby ground and objects at night and is invisible at midday,
+  where sun and ambient already saturate.
 - Unit tests cover selection: ordering, cap behaviour, drop counting, and the empty case.
 - The shader uniform/varying consistency test covers the new array declarations.
 - A frame with no dynamic lights uploads nothing and takes no per-light branch.
@@ -303,6 +320,12 @@ Decisions and course corrections: _(fill during execution)_
 - [ ] `docs/lighting.md` updated; entity-light attachment point recorded.
 
 ## Open Questions
+
+- Should the viewer headlamp remain permanently on outdoors? It is an explorer convenience today,
+  defaulting on behind a frame-settings toggle. Retail deliberately left players dark outdoors,
+  which is what made lightstones and light spells matter, so promoting it to always-on gameplay
+  lighting is a feel decision rather than a technical one. Entity-carried lights are unaffected
+  either way and are the real target of Design Rule 7.
 
 - Does the detail slider eventually scale the caps, as retail's degrade level does? Not needed now,
   but the dynamic selection layer is where it would live.

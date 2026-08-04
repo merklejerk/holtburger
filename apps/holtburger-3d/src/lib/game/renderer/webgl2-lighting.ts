@@ -162,6 +162,7 @@ export function bindWebGL2DynamicLights(
 	gl: WebGL2RenderingContext,
 	uniforms: WebGL2LightingUniforms,
 	lights: readonly RuntimeLight[],
+	anchorOrigin: LightAnchorOrigin,
 	scratch: DynamicLightScratch,
 ): void {
 	bindLightArray(
@@ -170,6 +171,7 @@ export function bindWebGL2DynamicLights(
 		uniforms.dynamicLightPositionRange,
 		uniforms.dynamicLightColorIntensity,
 		lights,
+		anchorOrigin,
 		MAX_DYNAMIC_LIGHTS,
 		scratch,
 	);
@@ -180,6 +182,7 @@ export function bindWebGL2StaticLights(
 	gl: WebGL2RenderingContext,
 	uniforms: WebGL2LightingUniforms,
 	lights: readonly RuntimeLight[],
+	anchorOrigin: LightAnchorOrigin,
 	scratch: DynamicLightScratch,
 ): void {
 	bindLightArray(
@@ -188,9 +191,21 @@ export function bindWebGL2StaticLights(
 		uniforms.staticLightPositionRange,
 		uniforms.staticLightColorIntensity,
 		lights,
+		anchorOrigin,
 		MAX_STATIC_LIGHTS,
 		scratch,
 	);
+}
+
+/**
+ * Scene-space origin of the frame's anchor landblock.
+ *
+ * Shaders compute vertex positions relative to this, so every light position is rebased by it on
+ * the way to the GPU. Only the horizontal components differ, since landblock origins share y.
+ */
+export interface LightAnchorOrigin {
+	readonly x: number;
+	readonly z: number;
 }
 
 function bindLightArray(
@@ -199,6 +214,7 @@ function bindLightArray(
 	positionRangeUniform: WebGLUniformLocation,
 	colorIntensityUniform: WebGLUniformLocation,
 	lights: readonly RuntimeLight[],
+	anchorOrigin: LightAnchorOrigin,
 	cap: number,
 	scratch: DynamicLightScratch,
 ): void {
@@ -208,9 +224,9 @@ function bindLightArray(
 	for (let index = 0; index < count; index += 1) {
 		const light = lights[index]!;
 		const offset = index * 4;
-		scratch.positionRange[offset] = light.position.x;
+		scratch.positionRange[offset] = light.position.x - anchorOrigin.x;
 		scratch.positionRange[offset + 1] = light.position.y;
-		scratch.positionRange[offset + 2] = light.position.z;
+		scratch.positionRange[offset + 2] = light.position.z - anchorOrigin.z;
 		scratch.positionRange[offset + 3] = light.range;
 		scratch.colorIntensity[offset] = light.color.red;
 		scratch.colorIntensity[offset + 1] = light.color.green;

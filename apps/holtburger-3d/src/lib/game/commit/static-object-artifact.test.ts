@@ -7,6 +7,8 @@ import {
 	TexturePurpose,
 	TextureWrapMode,
 } from "../textures/types";
+import { createLandblockWorldOrigin } from "../landblocks";
+import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { assembleStaticObjectArtifact } from "./static-object-artifact";
 import type {
 	FrameStreamedObjectInstanceTemplate,
@@ -206,6 +208,49 @@ function instance() {
 	};
 }
 
+/** One resident emitting a single authored light, placed at a landblock-local point. */
+function litResident(x: number, y: number, z: number) {
+	return {
+		identity: { instanceId: 1, sourceAssetId: "setup-model/02000337" },
+		setupId: "0x02000337",
+		presentation: {
+			appearanceKey: "test",
+			id: "presentation:test",
+			sourceAssetId: "setup-model/02000337",
+			parts: [],
+			lights: [
+				{
+					offset: new Vec3(0, 0, 0),
+					color: { red: 1, green: 1, blue: 1 },
+					intensity: 100,
+					falloff: 4,
+				},
+			],
+			holdingLocations: new Map(),
+			placementPoses: new Map(),
+			selectionBounds: null,
+			sortingBounds: null,
+		},
+		behavior: {
+			animationId: null,
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
+		placement: {
+			landblockId: "0xda55ffff",
+			envCellId: null,
+			localTransform: Object.assign(Mat4.identity(), {
+				m41: x,
+				m42: y,
+				m43: z,
+			}),
+		},
+		scale: new Vec3(1, 1, 1),
+		localBounds: null,
+	} as unknown as ResolvedOutdoorStaticLayerSource["staticResidents"][number];
+}
+
 function source(): ResolvedOutdoorStaticLayerSource {
 	return {
 		dynamicSources: [],
@@ -214,3 +259,32 @@ function source(): ResolvedOutdoorStaticLayerSource {
 		staticResidents: [],
 	};
 }
+
+describe("outdoor static light gathering", () => {
+	// Placements are landblock-local, but runtime lights are compared against anchor-relative
+	// vertices in landblocks other than their own, so they must leave here in scene space.
+	it("lifts gathered lights out of landblock-local space", () => {
+		const artifact = assembleStaticObjectArtifact({
+			source: { ...source(), staticResidents: [litResident(10, 20, -30)] },
+			resourceNamespace: INSTALL_NAMESPACE,
+			geometry: geometryResult("baked"),
+			textureRequirements: [
+				{
+					key: BASE_TEXTURE,
+					kind: "asset",
+					purpose: TexturePurpose.ObjectDirectColor,
+					sourceAssetId: "0x05000001",
+				},
+			],
+		});
+		const origin = createLandblockWorldOrigin("0xda55ffff");
+		expect(artifact?.staticLights).toEqual([
+			{
+				position: { x: origin.x + 10, y: 20, z: origin.z - 30 },
+				color: { red: 1, green: 1, blue: 1 },
+				range: 4 * RUNTIME_LIGHT_RANGE_SCALE,
+				intensity: 100,
+			},
+		]);
+	});
+});

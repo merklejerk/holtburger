@@ -126,7 +126,7 @@ fn main() -> Result<()> {
     // A bare zero is only trustworthy if the ids being checked are the kind that can carry
     // lights at all. Break every reference down by DAT family: 0x01 GfxObj cannot hold lights
     // by construction, 0x02 Setup can.
-    let mut family = |label: &str, ids: &[u32]| {
+    let family = |label: &str, ids: &[u32]| {
         let mut counts: BTreeMap<u32, usize> = BTreeMap::new();
         for id in ids {
             *counts.entry(id >> 24).or_default() += 1;

@@ -29,7 +29,13 @@ export const MAX_DYNAMIC_LIGHTS = 8;
  */
 export const MAX_STATIC_LIGHTS = 64;
 
-/** One point light evaluated at draw time, in anchor-relative space with its reach resolved. */
+/**
+ * One point light evaluated at draw time, with its reach already resolved.
+ *
+ * Positions are canonical scene space, the same frame landblock world origins live in. Shaders
+ * work in anchor-relative space, so the bind subtracts the frame anchor's origin — one conversion
+ * at one place, rather than each producer having to know the frame anchor.
+ */
 export interface RuntimeLight {
 	readonly position: {
 		readonly x: number;

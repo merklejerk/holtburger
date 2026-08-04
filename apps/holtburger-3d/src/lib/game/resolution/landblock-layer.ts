@@ -263,8 +263,9 @@ export interface ResolvedEnvCellStaticObjectSource {
 	 *
 	 * Carried on the source rather than passed beside it so the lights travel with the geometry
 	 * they light: a resident job cannot be prepared without them and silently render unlit.
-	 * Outdoor sources have no equivalent field, because retail lights outdoor geometry with the
-	 * sun and global ambient only.
+	 * Outdoor sources have no equivalent field: their authored lights are evaluated at draw time
+	 * rather than baked, so they are gathered from the residents themselves instead of riding
+	 * along with the geometry.
 	 */
 	readonly staticLights: readonly PlacedStaticLight[];
 }

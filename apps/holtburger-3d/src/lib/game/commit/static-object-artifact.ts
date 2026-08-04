@@ -12,18 +12,25 @@ import {
 	RUNTIME_LIGHT_RANGE_SCALE,
 	type RuntimeLight,
 } from "../environment/runtime-lights";
+import { createLandblockWorldOrigin } from "../landblocks";
 
 /** Assemble a logical static-object artifact after geometry and texture-requirement validation. */
 /**
- * Gather the authored lights a layer's residents emit, in landblock space.
+ * Gather the authored lights a layer's residents emit, in canonical scene space.
  *
  * Composing offsets with placements is the same operation the interior bake performs, so it
  * reuses `placeObjectLights`; only the falloff-to-range conversion differs, because runtime
  * lights take retail's hardware `rangeAdjust` rather than the burn-in's `static_light_factor`.
+ *
+ * Placements are landblock-local, which the bake consumes directly because its vertices are
+ * landblock-local too. Runtime lights instead cross landblock boundaries and are compared against
+ * anchor-relative vertices, so they are lifted to scene space here — at the one point that knows
+ * which landblock the placements belong to.
  */
 function gatherLayerLights(
 	source: ResolvedStaticObjectLayerSource,
 ): readonly RuntimeLight[] {
+	const origin = createLandblockWorldOrigin(source.landblockId);
 	const placed: PlacedStaticLight[] = [];
 	for (const resident of source.staticResidents) {
 		placeObjectLights(
@@ -40,7 +47,11 @@ function gatherLayerLights(
 		);
 	}
 	return placed.map((light) => ({
-		position: light.position,
+		position: {
+			x: light.position.x + origin.x,
+			y: light.position.y,
+			z: light.position.z + origin.z,
+		},
 		color: light.color,
 		range: light.falloff * RUNTIME_LIGHT_RANGE_SCALE,
 		intensity: light.intensity,

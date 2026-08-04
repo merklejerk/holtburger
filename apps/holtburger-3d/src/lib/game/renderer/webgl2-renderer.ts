@@ -1,7 +1,7 @@
 import {
 	createLandblockOffset,
+	createLandblockWorldOrigin,
 	getLandblockCoordinates,
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 import {
 	createPerspectiveMat4,
@@ -91,6 +91,7 @@ import {
 	bindWebGL2DynamicLights,
 	bindWebGL2SceneLighting,
 	bindWebGL2StaticLights,
+	type LightAnchorOrigin,
 	createDynamicLightScratch,
 } from "./webgl2-lighting";
 import {
@@ -145,26 +146,24 @@ const PORTAL_PLANNING_WORK_ITEM_LIMIT = 100_000;
  * outdoor pass keeps it.
  */
 /**
- * Convert a canonical world position into the frame's anchor-relative render frame.
+ * Convert a canonical scene position into the frame's anchor-relative render frame.
  *
  * Shaders receive landblock-local positions offset by `uLandblockOffset`, which is relative to
- * the frame anchor rather than the world origin. Anything compared against a vertex position —
- * fog distance, the headlamp — must be converted the same way.
+ * the frame anchor rather than the scene origin. Anything compared against a vertex position must
+ * be converted the same way.
  */
 function anchorRelativePosition(
 	position: Vec3,
 	anchorLandblockId: LandblockId,
 ): Vec3 {
-	const anchor = getLandblockCoordinates(anchorLandblockId);
-	return new Vec3(
-		position.x - anchor.x * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		position.y,
-		position.z + anchor.y * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	);
+	const origin = createLandblockWorldOrigin(anchorLandblockId);
+	return new Vec3(position.x - origin.x, position.y, position.z - origin.z);
 }
 
 interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
+	/** Scene-space origin of the frame anchor, subtracted from every light position at bind. */
+	readonly anchorOrigin: LightAnchorOrigin;
 	/** Frame-global dynamic lights; they reach every draw regardless of role. */
 	readonly dynamicLights: readonly RuntimeLight[];
 	/** Authored outdoor lights reaching one landblock, memoized across frames by the index. */
@@ -179,6 +178,8 @@ interface SceneShading {
  */
 const PROBE_SHADING: SceneShading = {
 	fog: null,
+	// No lights, so the rebasing origin is unobservable.
+	anchorOrigin: { x: 0, z: 0 },
 	dynamicLights: [],
 	staticLights: () => [],
 	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
@@ -601,18 +602,14 @@ export class WebGL2Renderer implements Renderer {
 			? input.environment.distanceFog
 			: null;
 		// Dynamic lights are frame-global and reach every draw, so they are assembled once here
-		// rather than per role. Positions must be anchor-relative, because that is the space
-		// shaders compute vertex positions in.
+		// rather than per role. Positions stay in canonical scene space; the bind rebases them.
 		const camera = input.views[0]?.camera.placement.position ?? null;
-		const anchoredCamera = camera
-			? anchorRelativePosition(camera, input.anchorLandblockId)
-			: null;
 		const dynamicCandidates: RuntimeLight[] = [];
-		if (anchoredCamera && input.frameSettings.viewerLightEnabled) {
+		if (camera && input.frameSettings.viewerLightEnabled) {
 			// Retail attaches the viewer light at the camera itself when no character carries it
 			// (`SmartBox::set_viewer`, acclient.c:137890).
 			dynamicCandidates.push({
-				position: anchoredCamera,
+				position: camera,
 				color: VIEWER_LIGHT.color,
 				range: VIEWER_LIGHT.range,
 				intensity: VIEWER_LIGHT.intensity,
@@ -620,15 +617,16 @@ export class WebGL2Renderer implements Renderer {
 		}
 		const selectedDynamic = selectNearestLights(
 			dynamicCandidates,
-			anchoredCamera ?? ORIGIN,
+			camera ?? ORIGIN,
 			MAX_DYNAMIC_LIGHTS,
 		);
 		this.#frameSelectionMetrics.droppedLights += selectedDynamic.dropped;
 		const shading: SceneShading = {
 			fog,
+			anchorOrigin: createLandblockWorldOrigin(input.anchorLandblockId),
 			dynamicLights: selectedDynamic.lights,
 			staticLights: (landblockId) =>
-				this.#resolveStaticLights(input, landblockId, anchoredCamera ?? ORIGIN),
+				this.#resolveStaticLights(input, landblockId, camera ?? ORIGIN),
 			lighting: resolveSceneLightingByRole(
 				input.environment.lighting,
 				input.views.some((view) => view.cameraInsideSealedCell),
@@ -1675,6 +1673,7 @@ export class WebGL2Renderer implements Renderer {
 			gl,
 			this.#terrainProgram.uniforms,
 			shading.dynamicLights,
+			shading.anchorOrigin,
 			this.#dynamicLightScratch,
 		);
 		for (const terrain of view.terrain) {
@@ -1688,6 +1687,7 @@ export class WebGL2Renderer implements Renderer {
 				gl,
 				this.#terrainProgram.uniforms,
 				shading.staticLights(terrain.drawUnit.landblockId),
+				shading.anchorOrigin,
 				this.#dynamicLightScratch,
 			);
 			this.#frameSelectionMetrics.staticLightBinds += 1;
@@ -2353,6 +2353,7 @@ export class WebGL2Renderer implements Renderer {
 			gl,
 			program.uniforms,
 			shading.dynamicLights,
+			shading.anchorOrigin,
 			this.#dynamicLightScratch,
 		);
 		if ("fogUniforms" in program) {
@@ -2394,6 +2395,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#gl,
 			program.uniforms,
 			scope === null ? EMPTY_LIGHTS : shading.staticLights(scope),
+			shading.anchorOrigin,
 			this.#dynamicLightScratch,
 		);
 		this.#frameSelectionMetrics.staticLightBinds += 1;

@@ -10,13 +10,20 @@ const shaderSourcePath = join(
 	scriptDirectory,
 	"../src/lib/game/renderer/webgl2-terrain-program.ts",
 );
-/** Shared GLSL blocks the terrain shaders interpolate, by exported constant name. */
+/** Shared GLSL blocks the shaders interpolate, by exported constant name. */
 const sharedGlslModules = {
 	WEBGL2_DISTANCE_FOG_GLSL: "../src/lib/game/renderer/webgl2-fog.ts",
 	WEBGL2_SCENE_LIGHTING_GLSL: "../src/lib/game/renderer/webgl2-lighting.ts",
+	POINT_LIGHT_FALLOFF_GLSL:
+		"../src/lib/game/environment/point-light-falloff.ts",
 };
+/** Numeric constants those blocks interpolate, so the GLSL and TypeScript cannot drift. */
+const sharedConstantModules = [
+	"../src/lib/game/environment/point-light-falloff.ts",
+	"../src/lib/game/environment/runtime-lights.ts",
+];
 const source = await readFile(shaderSourcePath, "utf8");
-const sharedGlsl = new Map(
+const substitutions = new Map(
 	await Promise.all(
 		Object.entries(sharedGlslModules).map(async ([name, relativePath]) => {
 			const modulePath = join(scriptDirectory, relativePath);
@@ -31,6 +38,17 @@ const sharedGlsl = new Map(
 		}),
 	),
 );
+for (const relativePath of sharedConstantModules) {
+	const moduleSource = await readFile(
+		join(scriptDirectory, relativePath),
+		"utf8",
+	);
+	for (const match of moduleSource.matchAll(
+		/export const ([A-Z][A-Z0-9_]*) = ([-0-9.]+);/g,
+	)) {
+		substitutions.set(match[1], match[2]);
+	}
+}
 const temporaryDirectory = await mkdtemp(
 	join(tmpdir(), "holtburger-terrain-shader-"),
 );
@@ -55,10 +73,27 @@ function extractShader(sourceText, name) {
 	if (match?.[1] === undefined) {
 		throw new Error(`Could not find ${name} in ${shaderSourcePath}.`);
 	}
-	return [...sharedGlsl].reduce(
-		(shader, [name, glsl]) => shader.replaceAll("${" + name + "}", glsl),
-		match[1],
-	);
+	return resolveInterpolations(match[1]);
+}
+
+/**
+ * Resolve `${NAME}` placeholders repeatedly, because a shared GLSL block may itself interpolate
+ * constants or another block. Stops when nothing remains, and fails loudly on an unknown name so
+ * a renamed export cannot silently leave a literal `${...}` in validated source.
+ */
+function resolveInterpolations(shader) {
+	let resolved = shader;
+	for (let pass = 0; pass < 8; pass += 1) {
+		if (!resolved.includes("${")) return resolved;
+		resolved = resolved.replaceAll(/\$\{([A-Za-z0-9_]+)\}/g, (whole, name) => {
+			const value = substitutions.get(name);
+			if (value === undefined) {
+				throw new Error(`Shader interpolates unknown ${name}.`);
+			}
+			return value;
+		});
+	}
+	throw new Error("Shader interpolations did not converge.");
 }
 
 function extractTemplateLiteral(sourceText, name, sourcePath) {

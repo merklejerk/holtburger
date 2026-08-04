@@ -255,12 +255,42 @@ Acceptance criteria:
 
 Tasks:
 
-- [ ] `DynamicLightSet` type and per-frame assembly.
-- [ ] Nearest-first bounded selection with a drop metric.
-- [ ] Shader array evaluation replacing the single-light path.
-- [ ] Migrate the headlamp into the dynamic set; delete the bespoke uniforms.
+- [x] `DynamicLightSet` type and per-frame assembly.
+- [x] Nearest-first bounded selection with a drop metric.
+- [x] Shader array evaluation replacing the single-light path.
+- [x] Migrate the headlamp into the dynamic set; delete the bespoke uniforms.
 
-Decisions and course corrections: _(fill during execution)_
+Progress: Complete (2026-08-04). `npm run check` by exit code, 618 frontend tests, GLSL
+validation, lint, and a browser-harness render are green.
+
+Decisions and course corrections:
+
+- **Concession: the acceptance criterion claiming the headlamp would be visually
+  indistinguishable was wrong, and the viewer light was retuned.** The authored falloff is
+  effectively inverse-square while retail's hardware path is inverse-linear, so at retail's
+  authored intensity of 2.25 the headlamp came out roughly thirty times dimmer at ten units and
+  useless past two — measured, not estimated. Since the falloff shape is our choice, its intensity
+  is ours to calibrate: `VIEWER_LIGHT.intensity` is now 34, derived to reproduce retail's
+  contribution at the midpoint of the light's range, giving a saturated core to about five units
+  tapering to nothing at fifteen. A test pins that derivation so the value cannot drift silently.
+- **Constants cross the language boundary; structure does not.** `point-light-falloff.ts` owns the
+  wrap constants and exports both the TypeScript implementation and a GLSL mirror that interpolates
+  those same constants, so the baker and the shader cannot disagree on a number. The duplicated
+  control flow is covered by a test asserting the mirror keeps the same early-outs.
+- **Selection passes through untouched when under budget**, so the common case pays no sort. Tests
+  assert the overflow case drops the farthest and retains the nearest, which is the property that
+  makes a cap safe rather than arbitrary.
+- **`viewerLight` left `ResolvedSceneLighting` entirely.** Dynamic lights are frame-global rather
+  than per-role, so they live on `SceneShading` and bind alongside the role-derived sun and ambient.
+  `resolveSceneLightingByRole` lost a parameter as a result.
+- **Tooling**: the terrain GLSL validator now resolves nested `${...}` interpolations and numeric
+  constants from TypeScript modules, since the shared lighting block interpolates both a GLSL
+  module and a cap. It fails loudly on an unknown name so a renamed export cannot leave a literal
+  placeholder in validated source.
+- Debt: the headlamp retune is verified numerically and by test, but the capture that demonstrates
+  it is inconclusive — the geometry near enough to photograph saturates at either intensity, and
+  the difference lives at seven to fifteen units. Worth a better framing when interior verification
+  is unblocked.
 
 ### Phase 2: Outdoor static light producer
 

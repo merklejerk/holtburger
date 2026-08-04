@@ -37,14 +37,11 @@ export type SceneLightingByRole = Readonly<
 /**
  * Derive every draw role's lighting from one frame's resolved regional lighting.
  *
- * `viewerLight` is supplied by the renderer rather than the environment because it tracks the
- * live camera. Retail likewise attaches it to the viewer every time the viewer moves
- * (`SmartBox::set_viewer`, acclient.c:137873) and only ever registers it as a dynamic light,
- * which is why it evaluates in the shader instead of being baked.
+ * This covers only the sun and ambient terms. Dynamic lights are frame-global rather than
+ * per-role, so the renderer binds them separately and they reach every draw.
  */
 export function resolveSceneLightingByRole(
 	lighting: ResolvedSceneLighting,
-	viewerLight: ResolvedSceneLighting["viewerLight"] = lighting.viewerLight,
 	cameraInsideSealedCell = false,
 ): SceneLightingByRole {
 	const objectAmbientLevel =
@@ -56,13 +53,8 @@ export function resolveSceneLightingByRole(
 			OBJECT_AMBIENT_SUN_SCALE +
 		lighting.ambientLevel;
 	return {
-		// Landscape is outdoors by definition and never receives the headlamp.
-		terrain: { ...lighting, viewerLight: lighting.viewerLight },
-		"outdoor-object": {
-			...lighting,
-			ambientLevel: objectAmbientLevel,
-			viewerLight: lighting.viewerLight,
-		},
+		terrain: lighting,
+		"outdoor-object": { ...lighting, ambientLevel: objectAmbientLevel },
 		"interior-object": {
 			...lighting,
 			ambientLevel: cameraInsideSealedCell
@@ -71,7 +63,6 @@ export function resolveSceneLightingByRole(
 			ambientColor: cameraInsideSealedCell
 				? SEALED_INTERIOR_AMBIENT.color
 				: lighting.ambientColor,
-			viewerLight,
 			// Retail's cell pass runs with the sun disabled; a zero vector removes the
 			// diffuse term without needing a second shader or a branch.
 			sunVector: ZERO_SUN,

@@ -251,8 +251,9 @@ export interface WebGL2TerrainProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly ambientColor: WebGLUniformLocation;
-		readonly viewerLightRangeIntensity: WebGLUniformLocation;
-		readonly viewerLightPosition: WebGLUniformLocation;
+		readonly dynamicLightCount: WebGLUniformLocation;
+		readonly dynamicLightPositionRange: WebGLUniformLocation;
+		readonly dynamicLightColorIntensity: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly blendMasks: WebGLUniformLocation;
 		readonly cameraPosition: WebGLUniformLocation;
@@ -309,15 +310,20 @@ export function createWebGL2TerrainProgram(
 			program,
 			uniforms: {
 				ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
-				viewerLightRangeIntensity: requireWebGL2Uniform(
+				dynamicLightCount: requireWebGL2Uniform(
 					gl,
 					program,
-					"uViewerLightRangeIntensity",
+					"uDynamicLightCount",
 				),
-				viewerLightPosition: requireWebGL2Uniform(
+				dynamicLightPositionRange: requireWebGL2Uniform(
 					gl,
 					program,
-					"uViewerLightPosition",
+					"uDynamicLightPositionRange[0]",
+				),
+				dynamicLightColorIntensity: requireWebGL2Uniform(
+					gl,
+					program,
+					"uDynamicLightColorIntensity[0]",
 				),
 				ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 				blendMasks: requireWebGL2Uniform(gl, program, "uBlendMasks"),

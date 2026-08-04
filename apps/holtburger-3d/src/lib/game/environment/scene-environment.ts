@@ -1,4 +1,5 @@
 import { renderVector } from "../../assets/ac-frame";
+import { RUNTIME_LIGHT_RANGE_SCALE } from "./runtime-lights";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { Vec3 } from "../math/types";
 
@@ -55,43 +56,31 @@ export interface ResolvedDistanceFog {
  * renderer's lighting context, not here.
  */
 /**
- * Retail's viewer headlamp (`SmartBox::set_viewer`, acclient.c:137873).
- *
- * A free camera attaches it at the camera with no offset; the `(0, 0, 2)` offset applies only
- * once a character carries it. Zero intensity means the headlamp is off.
- */
-export interface ResolvedViewerLight {
-	/**
-	 * Anchor-relative position, matching the space shaders compute vertex positions in.
-	 *
-	 * The renderer supplies this, because only it knows the frame's landblock anchor.
-	 */
-	readonly position: {
-		readonly x: number;
-		readonly y: number;
-		readonly z: number;
-	};
-	/** Effective reach: retail scales a hardware light's falloff by `rangeAdjust`. */
-	readonly range: number;
-	readonly intensity: number;
-}
-
-/**
  * Retail's authored viewer-light constants (acclient.c:43910, 728925), with `rangeAdjust`
  * (acclient.c:44671) already folded in: a hardware light reaches `falloff * 1.5`
  * (`config_hardware_light`, acclient.c:432899).
  */
 export const VIEWER_LIGHT = {
-	range: 10 * 1.5,
-	intensity: 0.5 * 4.5,
+	/** Retail's authored falloff of 10, scaled by `rangeAdjust` like any hardware light. */
+	range: 10 * RUNTIME_LIGHT_RANGE_SCALE,
+	/**
+	 * Recalibrated for the authored falloff, not retail's `0.5 * 4.5 = 2.25`.
+	 *
+	 * Retail's value was tuned against hardware `1/d`. The authored falloff we now use for every
+	 * light is effectively inverse-square, so 2.25 would leave the headlamp roughly thirty times
+	 * dimmer at ten units and useless past two. This value reproduces retail's contribution at the
+	 * midpoint of the light's range, giving a saturated core out to about five units that tapers
+	 * to nothing at fifteen.
+	 */
+	intensity: 34,
+	/** `RGBColor::SetColor32(&viewer_light.color, 0xFFFFFFFF)`, acclient.c:139346. */
+	color: { red: 1, green: 1, blue: 1 },
 } as const;
 
 export interface ResolvedSceneLighting {
 	/** Interpolated ambient level, floored at `MINIMUM_AMBIENT_LEVEL`. */
 	readonly ambientLevel: number;
 	readonly ambientColor: SceneColor;
-	/** Headlamp state; disabled by default until a frame supplies the camera position. */
-	readonly viewerLight: ResolvedViewerLight;
 	/**
 	 * Sun direction in render axes, deliberately left unnormalized: its magnitude carries the
 	 * authored directional brightness, exactly as retail's `SkyDesc::GetLighting` builds it
@@ -201,7 +190,6 @@ function resolveLighting(keyframes: {
 		lerp(before.directionalPitch, after.directionalPitch, ratio),
 	);
 	return {
-		viewerLight: DISABLED_VIEWER_LIGHT,
 		ambientLevel: Math.max(
 			lerp(before.ambientBrightness, after.ambientBrightness, ratio),
 			MINIMUM_AMBIENT_LEVEL,
@@ -315,15 +303,7 @@ const BLACK: SceneColor = { red: 0, green: 0, blue: 0, alpha: 1 };
 const WHITE: SceneColor = { red: 1, green: 1, blue: 1, alpha: 1 };
 
 /** Retail's lighting for a region or day group that authors no usable sky keyframes. */
-/** Off until the renderer substitutes the live camera position each frame. */
-export const DISABLED_VIEWER_LIGHT: ResolvedViewerLight = {
-	position: { x: 0, y: 0, z: 0 },
-	range: VIEWER_LIGHT.range,
-	intensity: 0,
-};
-
 export const UNAUTHORED_SCENE_LIGHTING: ResolvedSceneLighting = {
-	viewerLight: DISABLED_VIEWER_LIGHT,
 	ambientLevel: UNAUTHORED_LIGHTING.ambientLevel,
 	ambientColor: WHITE,
 	sunVector: renderVector(

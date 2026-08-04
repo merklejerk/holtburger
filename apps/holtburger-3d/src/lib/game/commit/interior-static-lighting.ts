@@ -4,6 +4,7 @@ import type {
 	PlacedStaticLight,
 	ResolvedObjectLight,
 } from "../resolution/presentation";
+import { pointLightFalloff } from "../environment/point-light-falloff";
 
 export type { PlacedStaticLight };
 
@@ -12,15 +13,6 @@ export type { PlacedStaticLight };
  * radius (`static_light_factor`, acclient.c:44703).
  */
 export const STATIC_LIGHT_RANGE_SCALE = 1.3;
-
-/**
- * Half-Lambert wrap constants from `calc_point_light` (acclient.c:434220).
- *
- * Retail computes `(0.5 * distance + dot(normal, delta)) / 1.5` using the *unnormalized*
- * light delta, which is why a zero normal still yields a direction-independent glow.
- */
-const WRAP_DISTANCE_SCALE = 0.5;
-const WRAP_DIVISOR = 1.5;
 
 /** Compose one object's authored lights with its placement into landblock space. */
 export function placeObjectLights(
@@ -89,24 +81,17 @@ export function bakeStaticLight(
 		let green = 0;
 		let blue = 0;
 		for (const light of lights) {
-			const deltaX = light.position.x - landblockVertex.x;
-			const deltaY = light.position.y - landblockVertex.y;
-			const deltaZ = light.position.z - landblockVertex.z;
-			const distanceSquared =
-				deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
-			const distance = Math.sqrt(distanceSquared);
-			const range = light.falloff * STATIC_LIGHT_RANGE_SCALE;
-			if (distance >= range) continue;
-			const wrapped =
-				(WRAP_DISTANCE_SCALE * distance +
-					(normalX * deltaX + normalY * deltaY + normalZ * deltaZ)) /
-				WRAP_DIVISOR;
-			if (wrapped <= 0) continue;
-			const attenuation =
-				distanceSquared <= 1
-					? wrapped / distance
-					: wrapped / (distanceSquared * distance);
-			const scale = attenuation * (1 - distance / range) * light.intensity;
+			const scale = pointLightFalloff(
+				light.position.x - landblockVertex.x,
+				light.position.y - landblockVertex.y,
+				light.position.z - landblockVertex.z,
+				normalX,
+				normalY,
+				normalZ,
+				light.falloff * STATIC_LIGHT_RANGE_SCALE,
+				light.intensity,
+			);
+			if (scale <= 0) continue;
 			red += Math.min(scale * light.color.red, light.color.red);
 			green += Math.min(scale * light.color.green, light.color.green);
 			blue += Math.min(scale * light.color.blue, light.color.blue);

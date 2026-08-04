@@ -72,17 +72,25 @@ import {
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import type { LandblockId } from "../game-types";
 import {
-	DISABLED_VIEWER_LIGHT,
 	UNAUTHORED_SCENE_LIGHTING,
 	VIEWER_LIGHT,
 } from "../environment/scene-environment";
+import {
+	MAX_DYNAMIC_LIGHTS,
+	type RuntimeLight,
+	selectNearestLights,
+} from "../environment/runtime-lights";
 import {
 	objectLightingRole,
 	resolveSceneLightingByRole,
 	type SceneLightingByRole,
 } from "../environment/scene-lighting";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
-import { bindWebGL2SceneLighting } from "./webgl2-lighting";
+import {
+	bindWebGL2DynamicLights,
+	bindWebGL2SceneLighting,
+	createDynamicLightScratch,
+} from "./webgl2-lighting";
 import {
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
@@ -155,6 +163,8 @@ function anchorRelativePosition(
 
 interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
+	/** Frame-global dynamic lights; they reach every draw regardless of role. */
+	readonly dynamicLights: readonly RuntimeLight[];
 	/** Lighting per draw role, derived once per frame so draw loops stay allocation-free. */
 	readonly lighting: SceneLightingByRole;
 }
@@ -165,8 +175,11 @@ interface SceneShading {
  */
 const PROBE_SHADING: SceneShading = {
 	fog: null,
+	dynamicLights: [],
 	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
 };
+
+const ORIGIN = { x: 0, y: 0, z: 0 } as const;
 
 interface TerrainFrameInput {
 	/** Selected LOD, transition range, and logical texture identities. */
@@ -340,6 +353,7 @@ interface MutableFrameSelectionMetrics {
 	frameInstanceCapacity: number;
 	frameInstanceGrowthCount: number;
 	frameInstanceViewHighWaterMark: number;
+	droppedLights: number;
 	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
@@ -361,6 +375,8 @@ export class WebGL2Renderer implements Renderer {
 	/** Device-wide guard preventing draws through any stale handle after context loss. */
 	readonly #assertDeviceReady: () => void;
 	readonly #frameInstances: FrameInstanceStreamArena;
+	/** Reusable dynamic-light upload staging; renderer-owned to keep draw loops allocation-free. */
+	readonly #dynamicLightScratch: ReturnType<typeof createDynamicLightScratch>;
 	/** Reuses one generated-stream selection across all material partitions in a view. */
 	readonly #generatedInstanceSelector = new GeneratedInstanceSelector();
 	/** Exact state mirror scoped to independently invalidated object phases. */
@@ -457,6 +473,7 @@ export class WebGL2Renderer implements Renderer {
 		frameInstanceCapacity: 0,
 		frameInstanceGrowthCount: 0,
 		frameInstanceViewHighWaterMark: 0,
+		droppedLights: 0,
 		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
@@ -499,6 +516,7 @@ export class WebGL2Renderer implements Renderer {
 			textureFilteringSupport,
 		);
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
+		this.#dynamicLightScratch = createDynamicLightScratch();
 		this.#objectState = new WebGL2ObjectStateApplicator(gl);
 		this.#portalSubstrate = new WebGL2PortalSubstrate(gl);
 		this.#world = world;
@@ -574,24 +592,35 @@ export class WebGL2Renderer implements Renderer {
 		const fog = input.frameSettings.distanceFogEnabled
 			? input.environment.distanceFog
 			: null;
-		// The headlamp tracks the live camera, so the renderer supplies it rather than the
-		// resolved environment. Retail attaches it to the viewer on every viewer move. It must
-		// be anchor-relative because that is the space shaders compute vertex positions in.
-		const headlampCamera = input.views[0]?.camera.placement.position ?? null;
+		// Dynamic lights are frame-global and reach every draw, so they are assembled once here
+		// rather than per role. Positions must be anchor-relative, because that is the space
+		// shaders compute vertex positions in.
+		const camera = input.views[0]?.camera.placement.position ?? null;
+		const anchoredCamera = camera
+			? anchorRelativePosition(camera, input.anchorLandblockId)
+			: null;
+		const dynamicCandidates: RuntimeLight[] = [];
+		if (anchoredCamera && input.frameSettings.viewerLightEnabled) {
+			// Retail attaches the viewer light at the camera itself when no character carries it
+			// (`SmartBox::set_viewer`, acclient.c:137890).
+			dynamicCandidates.push({
+				position: anchoredCamera,
+				color: VIEWER_LIGHT.color,
+				range: VIEWER_LIGHT.range,
+				intensity: VIEWER_LIGHT.intensity,
+			});
+		}
+		const selectedDynamic = selectNearestLights(
+			dynamicCandidates,
+			anchoredCamera ?? ORIGIN,
+			MAX_DYNAMIC_LIGHTS,
+		);
+		this.#frameSelectionMetrics.droppedLights += selectedDynamic.dropped;
 		const shading: SceneShading = {
 			fog,
+			dynamicLights: selectedDynamic.lights,
 			lighting: resolveSceneLightingByRole(
 				input.environment.lighting,
-				headlampCamera && input.frameSettings.viewerLightEnabled
-					? {
-							position: anchorRelativePosition(
-								headlampCamera,
-								input.anchorLandblockId,
-							),
-							range: VIEWER_LIGHT.range,
-							intensity: VIEWER_LIGHT.intensity,
-						}
-					: DISABLED_VIEWER_LIGHT,
 				input.views.some((view) => view.cameraInsideSealedCell),
 			),
 		};
@@ -1531,6 +1560,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.frameInstanceCapacity = 0;
 		metrics.frameInstanceGrowthCount = 0;
 		metrics.frameInstanceViewHighWaterMark = 0;
+		metrics.droppedLights = 0;
 		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
@@ -1629,6 +1659,12 @@ export class WebGL2Renderer implements Renderer {
 			gl,
 			this.#terrainProgram.uniforms,
 			shading.lighting.terrain,
+		);
+		bindWebGL2DynamicLights(
+			gl,
+			this.#terrainProgram.uniforms,
+			shading.dynamicLights,
+			this.#dynamicLightScratch,
 		);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
@@ -2294,6 +2330,12 @@ export class WebGL2Renderer implements Renderer {
 			program.uniforms.view,
 			false,
 			mat4ToFloat32Array(view.view, this.#matrixScratch),
+		);
+		bindWebGL2DynamicLights(
+			gl,
+			program.uniforms,
+			shading.dynamicLights,
+			this.#dynamicLightScratch,
 		);
 		if ("fogUniforms" in program) {
 			gl.uniform3f(

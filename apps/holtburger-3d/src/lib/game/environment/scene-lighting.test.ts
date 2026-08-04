@@ -12,7 +12,6 @@ const WHITE = { red: 1, green: 1, blue: 1, alpha: 1 };
 
 /** Sun length is the authored brightness, so this fixture's magnitude is exactly 2. */
 const LIGHTING: ResolvedSceneLighting = {
-	viewerLight: { position: { x: 0, y: 0, z: 0 }, range: 15, intensity: 0 },
 	ambientLevel: 0.4,
 	ambientColor: WHITE,
 	sunVector: new Vec3(0, 2, 0),
@@ -70,31 +69,23 @@ describe("objectLightingRole", () => {
 
 describe("sealed interior ambient", () => {
 	it("forces retail's flat white ambient when the camera cannot see outdoors", () => {
-		const interior = resolveSceneLightingByRole(
-			LIGHTING,
-			LIGHTING.viewerLight,
-			true,
-		)["interior-object"];
+		const interior = resolveSceneLightingByRole(LIGHTING, true)[
+			"interior-object"
+		];
 		expect(interior.ambientLevel).toBe(SEALED_INTERIOR_AMBIENT.level);
 		expect(interior.ambientColor).toEqual(SEALED_INTERIOR_AMBIENT.color);
 	});
 
 	it("keeps the regional ambient for a cell that can see outdoors", () => {
-		const interior = resolveSceneLightingByRole(
-			LIGHTING,
-			LIGHTING.viewerLight,
-			false,
-		)["interior-object"];
+		const interior = resolveSceneLightingByRole(LIGHTING, false)[
+			"interior-object"
+		];
 		expect(interior.ambientLevel).not.toBe(SEALED_INTERIOR_AMBIENT.level);
 		expect(interior.ambientColor).toBe(LIGHTING.ambientColor);
 	});
 
 	it("never applies the interior override to outdoor draws", () => {
-		const roles = resolveSceneLightingByRole(
-			LIGHTING,
-			LIGHTING.viewerLight,
-			true,
-		);
+		const roles = resolveSceneLightingByRole(LIGHTING, true);
 		expect(roles["outdoor-object"].ambientColor).toBe(LIGHTING.ambientColor);
 		expect(roles.terrain.ambientLevel).toBe(LIGHTING.ambientLevel);
 	});

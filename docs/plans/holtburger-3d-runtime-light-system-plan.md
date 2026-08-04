@@ -134,12 +134,14 @@ relitigate them by accident.
    no visibility test at all.
 7. **Dynamic lights apply outdoors, deviating from retail deliberately.** Retail's outdoor pass
    binds only the sun (`useSunlightSet(1)`, `acclient.c:441094`), so dynamic lights never reach
-   outdoor geometry there — which is why its viewer light is invisible outdoors. That restriction
-   stops making sense once we light the outdoors with static lamps, since a torch-carrying creature
-   walking between lit lamp posts would cast nothing. Applying the dynamic set to every draw is
-   also strictly less code than gating it by role. The cost is that outdoor draws iterate the
-   dynamic array; an empty set early-outs on a count check, so North Star 4 still holds whenever
-   nothing dynamic is lit.
+   outdoor geometry there, and its viewer light is invisible outdoors. Whether that was a design
+   choice or a consequence of budgeting eight hardware slots is not something the decompile
+   answers, and it does not change our decision either way: the restriction stops making sense once
+   we light the outdoors with static lamps, since a torch-carrying creature walking between lit
+   lamp posts would cast nothing. The viewer light is **gameplay lighting outdoors**, not an
+   explorer-only affordance. Applying the dynamic set to every draw is also strictly less code than
+   gating it by role. The cost is that outdoor draws iterate the dynamic array; an empty set
+   early-outs on a count check, so North Star 4 still holds whenever nothing dynamic is lit.
 
 ## North Stars
 
@@ -320,12 +322,6 @@ Decisions and course corrections: _(fill during execution)_
 - [ ] `docs/lighting.md` updated; entity-light attachment point recorded.
 
 ## Open Questions
-
-- Should the viewer headlamp remain permanently on outdoors? It is an explorer convenience today,
-  defaulting on behind a frame-settings toggle. Retail deliberately left players dark outdoors,
-  which is what made lightstones and light spells matter, so promoting it to always-on gameplay
-  lighting is a feel decision rather than a technical one. Entity-carried lights are unaffected
-  either way and are the real target of Design Rule 7.
 
 - Does the detail slider eventually scale the caps, as retail's degrade level does? Not needed now,
   but the dynamic selection layer is where it would live.

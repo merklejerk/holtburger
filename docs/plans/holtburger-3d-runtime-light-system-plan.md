@@ -456,27 +456,32 @@ the first producer likely to exercise the drop path, which the `droppedLights` m
 
 ## Definition of Done
 
-- [ ] One shader path evaluates every runtime light; no bespoke single-light uniforms remain.
-- [ ] Bind frequency is measured, and its cost is either accepted or mitigated by a recorded
+- [x] One shader path evaluates every runtime light; no bespoke single-light uniforms remain.
+- [x] Bind frequency is measured, and its cost is either accepted or mitigated by a recorded
       decision — not left unexamined. A deliberate move to draw-unit culling raises bind counts on
       purpose, so the gate is the decision, not a particular number.
-- [ ] Outdoor lamps illuminate terrain, buildings, objects, and generated scenery at night.
-- [ ] Interiors are visually unchanged and still baked.
-- [ ] Caps documented with their reasoning, and drops observable in a frame metric rather than
+- [x] Outdoor lamps illuminate terrain, buildings, objects, and generated scenery at night.
+- [x] Interiors are visually unchanged and still baked. Caveat: proven structurally rather than
+      visually — interior draws bind an empty static set and the bake path is untouched — because
+      the harness EnvCell camera still produces no drawing pose. That gap predates this plan.
+- [x] Caps documented with their reasoning, and drops observable in a frame metric rather than
       asserted.
-- [ ] `npm run check` (by exit code), frontend tests, GLSL validation, lint, formatting, and
+- [x] `npm run check` (by exit code), frontend tests, GLSL validation, lint, formatting, and
       `cargo clippy` all clean.
-- [ ] Browser-harness verification at night in a lit landblock, including the late-arriving-layer
+- [x] Browser-harness verification at night in a lit landblock, including the late-arriving-layer
       case.
-- [ ] `docs/lighting.md` updated; entity-light attachment point recorded.
+- [x] `docs/lighting.md` updated; entity-light attachment point recorded.
 
 ## Open Questions
 
 - Does the detail slider eventually scale the caps, as retail's degrade level does? Not needed now,
-  but the dynamic selection layer is where it would live.
+  but the dynamic selection layer is where it would live. **Still open**, deliberately.
 - Should interior draws also receive the per-landblock static set for lights authored _outside_
   the cell, or is the bake plus the dynamic set sufficient? Retail's cell pass takes only dynamics
-  alongside the burn-in, which suggests sufficient.
+  alongside the burn-in, which suggests sufficient. **Resolved as sufficient**: interiors bind an
+  empty static set, and nothing in verification showed a missing contribution.
 - Do outdoor lights belong to a landblock or to a scene scope once portal-visible outdoor cells
   are considered? Phase 2 assumes landblock; the resteer should confirm nothing about portal views
-  contradicts that.
+  contradicts that. **Resolved: landblock.** The static scope is taken from each draw's own
+  `landblockId`, not from the view being executed, so a portal-visible outdoor draw resolves its
+  own landblock's lights exactly as it would in the main view.

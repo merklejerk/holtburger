@@ -13,7 +13,8 @@ world with its authored lamps and braziers.
 **In scope**
 
 - Two light sets with different update cadences — static per landblock, dynamic per frame — sharing
-  one shader evaluation, both applying to indoor and outdoor draws alike.
+  one shader evaluation. The dynamic set applies to every draw; the static set is outdoor-only,
+  because interior statics are already baked.
 - Shader evaluation generalized from the existing single-light viewer headlamp to bounded arrays.
 - Outdoor authored static lights as the first bulk producer, reaching terrain, buildings,
   explicit objects, and instanced generated scenery alike.
@@ -44,9 +45,11 @@ slot when the array is full. Both are programmed by the same
 `Render::minimize_object_lighting` (`acclient.c:364212`) simply fills those slots with dynamic
 lights first and static ones after.
 
-Static versus dynamic is therefore a **lifetime** distinction in retail, not a lighting one. The
-only place the two genuinely diverge is that EnvCell meshes can have static light burned into
-vertex colors as an optimization (`acclient.c:434570`).
+Static versus dynamic is therefore a **lifetime** distinction in retail rather than a difference in
+how a light is evaluated. That does not make it free of design consequence: lifetime is exactly
+what sets update cadence, which is why retail still keeps the two in separate arrays and why we do
+too (Design Rule 4). The only place their _evaluation_ diverges is that EnvCell meshes can have
+static light burned into vertex colors as an optimization (`acclient.c:434570`).
 
 Relevant caps: `max_static_lights = 40`, `max_dynamic_lights = 7`, both scaled by the detail
 slider in `Render::SetDegradeLevelInternal` (`acclient.c:44527`, `363340`); eight hardware slots
@@ -118,8 +121,8 @@ relitigate them by accident.
    and bound. Forcing both through one array would collapse the static path's residency cache into
    a per-frame rebuild the moment a lit entity moves. So:
    - **Static lights are scoped per landblock**, cached against content residency, and never
-     rebuilt per frame. No selection is required, because the cap exceeds any single landblock's
-     set.
+     rebuilt per frame. They run through the same selection routine as dynamics, but a generous cap
+     means it is expected to be a pass-through in practice.
    - **Dynamic lights are one small global set**, rebuilt each frame, camera-selected nearest-first,
      and bound once per frame rather than per landblock. A light straddling a landblock boundary is
      then not a special case, because every draw sees the whole dynamic array.
@@ -154,9 +157,8 @@ structure exists, we just inherited it from content residency instead of buildin
 
 **The cost of that choice is coarseness.** A landblock is 192 units, while a light reaches
 `falloff * 1.5` — about 22.5 units at the maximum authored falloff of 15 observed in the indoor
-census. A landblock's set therefore
-contains lights that cannot reach most of its geometry, and the shader iterates all of them per
-vertex regardless. At the measured average of 3.6 lights per lit landblock this is irrelevant. At
+census. A landblock's set therefore contains lights that cannot reach most of its geometry, and the
+shader iterates all of them per vertex regardless. At the measured average of 3.6 lights per lit landblock this is irrelevant. At
 the archive's worst landblock of 51, a vertex genuinely reached by one or two lights still
 iterates 51, roughly 25x wasted iteration.
 
@@ -184,8 +186,10 @@ a performance one.
    producer that happens to land first.
 3. Per-frame work scales with what moves, not with what exists. Static lights are gathered once
    per residency change; a frame that moves no light should re-upload nothing.
-4. Cost scales with what is lit, not with what exists. A landblock with no lamps should pay
-   nothing, and uploads are sized to the actual light count rather than the cap.
+4. Cost scales with what is lit, not with what exists. A landblock with no lamps binds an empty
+   static set and runs no static iteration, and uploads are sized to the actual light count rather
+   than the cap. The dynamic set is a separate matter: with the viewer light on by default it is
+   rarely empty, so every draw should expect at least one dynamic iteration.
 5. Dropping lights is normal operation, not an error. A budget overflow is a resource limit doing
    its job, exactly as retail's `insert_light` discards anything farther than every occupied slot.
    Selection is what makes it graceful: without it a cap drops whatever was gathered last, which
@@ -253,8 +257,11 @@ Deliverables:
   with content residency, never per frame.
 - Include neighbouring landblocks' lights whose reach crosses the boundary.
 - Bind the resulting set for every outdoor draw of that landblock — terrain, buildings, objects,
-  and instanced generated scenery — reusing the existing per-draw lighting-role dedupe.
-- Lights must not apply to interior draws, whose static lighting is already baked.
+  and instanced generated scenery. This extends the existing lighting-role dedupe rather than
+  reusing it unchanged: the key becomes role plus landblock, since two draws sharing a role may
+  need different static sets.
+- The static set must not apply to interior draws, whose static lighting is already baked. The
+  dynamic set still does, per Design Rule 7.
 
 Acceptance criteria:
 
@@ -313,8 +320,8 @@ Decisions and course corrections: _(fill during execution)_
   coarseness figure and the draw-unit culling escalation. Terrain is _not_ the
   worry: a landblock is 9x9 = 81 vertices, so fifty resident landblocks total roughly 4,000
   vertices, less than one building. Buildings and objects carry the vertex count. Mitigation:
-  unlit landblocks bind an empty static set and take no loop; the Phase 3 resteer measures a dense
-  town.
+  unlit landblocks bind an empty static set and run no static iteration, though the dynamic loop
+  still runs while the viewer light is on; the Phase 3 resteer measures a dense town.
 - **Selection error at range.** Nearest-to-camera selection can pick the wrong lights for distant
   geometry. Mitigation: this is why interiors stay baked, and why static lights are scoped per
   landblock rather than pooled globally — a distant lamp cannot be culled by nearer ones, because
@@ -330,10 +337,13 @@ Decisions and course corrections: _(fill during execution)_
 ## Definition of Done
 
 - [ ] One shader path evaluates every runtime light; no bespoke single-light uniforms remain.
-- [ ] Static binds track visible lit landblocks, not draw-call count.
+- [ ] Bind frequency is measured, and its cost is either accepted or mitigated by a recorded
+      decision — not left unexamined. A deliberate move to draw-unit culling raises bind counts on
+      purpose, so the gate is the decision, not a particular number.
 - [ ] Outdoor lamps illuminate terrain, buildings, objects, and generated scenery at night.
 - [ ] Interiors are visually unchanged and still baked.
-- [ ] Selection cap chosen from measurement, with drops observable in a frame metric.
+- [ ] Caps documented with their reasoning, and drops observable in a frame metric rather than
+      asserted.
 - [ ] `npm run check` (by exit code), frontend tests, GLSL validation, lint, formatting, and
       `cargo clippy` all clean.
 - [ ] Browser-harness verification at night in a lit landblock, including the late-arriving-layer

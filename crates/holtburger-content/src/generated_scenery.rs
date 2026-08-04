@@ -765,7 +765,7 @@ mod tests {
                 center: Vector3::zero(),
                 radius: 3.0,
             },
-            lights: HashMap::new(),
+            lights: Vec::new(),
             default_animation: None,
             default_script: None,
             default_motion_table: None,

@@ -113,6 +113,7 @@ describe("GameRuntime view and interest control", () => {
 			frameInstanceGrowthCount: 0,
 			frameInstanceViewHighWaterMark: 0,
 			objectProgramChanges: 0,
+			droppedLights: 0,
 			objectLightingBinds: 0,
 			objectTextureBinds: 0,
 		};

@@ -177,6 +177,13 @@ export interface FrameSelectionMetrics {
 	readonly frameInstanceGrowthCount: number;
 	/** Lifetime largest per-view object instance population. */
 	readonly frameInstanceViewHighWaterMark: number;
+	/**
+	 * Lights that did not fit their budget and were dropped.
+	 *
+	 * Dropping is normal operation rather than an error, so this exists to make the budget
+	 * observable across a frame.
+	 */
+	readonly droppedLights: number;
 	/** Lighting-uniform binds caused by a draw changing its retail lighting role. */
 	readonly objectLightingBinds: number;
 	/** Object-program activation count across every rendered view. */

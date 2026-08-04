@@ -12,12 +12,12 @@ world with its authored lamps and braziers.
 
 **In scope**
 
-- A per-frame light set assembled from independent producers, with bounded nearest-first
-  selection.
-- Shader evaluation of that set, generalized from the existing single-light viewer headlamp.
+- Two light sets with different update cadences — static per landblock, dynamic per frame — sharing
+  one shader evaluation.
+- Shader evaluation generalized from the existing single-light viewer headlamp to bounded arrays.
 - Outdoor authored static lights as the first bulk producer, reaching terrain, buildings,
   explicit objects, and instanced generated scenery alike.
-- The viewer headlamp migrated onto the same system rather than remaining a bespoke uniform.
+- The viewer headlamp migrated into the dynamic set rather than remaining a bespoke uniform.
 
 **Out of scope**
 
@@ -113,8 +113,20 @@ relitigate them by accident.
    through both paths, so this is an aesthetic difference, not a divergence risk. Retail does
    exactly the same thing, and an interior surface already receives both — its baked torchlight
    plus the evaluated headlamp.
-4. **Producers are independent and additive.** Adding entity lights later must require no change
-   to selection, binding, or shader code.
+4. **Producers share evaluation, not storage or cadence.** Static and dynamic lights differ in
+   lifetime, and lifetime determines how often the set changes, which determines how it is stored
+   and bound. Forcing both through one array would collapse the static path's residency cache into
+   a per-frame rebuild the moment a lit entity moves. So:
+   - **Static lights are scoped per landblock**, cached against content residency, and never
+     rebuilt per frame. No selection is required, because the cap exceeds any single landblock's
+     set.
+   - **Dynamic lights are one small global set**, rebuilt each frame, camera-selected nearest-first,
+     and bound once per frame rather than per landblock. A light straddling a landblock boundary is
+     then not a special case, because every draw sees the whole dynamic array.
+   - The shader loops over both. This is also why retail keeps `static_lights[60]` and
+     `dynamic_lights[10]` as separate arrays: not a hardware artifact, the same cadence argument.
+5. **Adding a producer must not change selection, binding, or shader code.** Entity lights should
+   land as data feeding the dynamic set, nothing more.
 
 ## North Stars
 
@@ -122,71 +134,77 @@ relitigate them by accident.
    failure.
 2. The system is defined by its producers, not by its first caller. Outdoor statics are one
    producer that happens to land first.
-3. Selection is explicit and observable. When lights are dropped, say so in a metric rather than
-   silently dimming the world.
+3. Per-frame work scales with what moves, not with what exists. Static lights are gathered once
+   per residency change; a frame that moves no light should re-upload nothing.
 4. Cost scales with what is lit, not with what exists. A landblock with no lamps should pay
-   nothing.
-5. Anything compared against a vertex position lives in anchor-relative space. This has already
+   nothing, and uploads are sized to the actual light count rather than the cap.
+5. Selection is explicit and observable. When lights are dropped, say so in a metric rather than
+   silently dimming the world.
+6. Anything compared against a vertex position lives in anchor-relative space. This has already
    caused one invisible-light bug.
 
 ## Phased Implementation
 
 ### Phase 0: Evidence
 
-The archive maximum of 51 lights in one landblock is for a landblock in isolation. Selection is
-per draw scope, and lights near a boundary reach into the neighbour, so the number that matters is
-the worst case _reaching_ set.
+The archive maximum of 51 lights in one landblock is for a landblock in isolation. Lights near a
+boundary reach into the neighbour, so the number that sizes the static array is the worst case
+_reaching_ set.
 
 Deliverables:
 
 - Extend the outdoor census to compute, for every landblock, the set of lights whose authored
   reach (`falloff * rangeAdjust`) intersects that landblock's bounds, including lights owned by
   the eight neighbours. Report the distribution and the maximum.
-- Report how many landblocks exceed candidate caps (16, 32, 64) so the cap is chosen from data.
+- Report how many landblocks exceed candidate caps (16, 32, 64) so the static cap is chosen from
+  data.
 - Confirm the authored falloff distribution outdoors matches the indoor census (1–15), since the
   reach calculation depends on it.
 
 Acceptance criteria:
 
-- A cap is chosen with the number of affected landblocks stated, or overflow is shown to be
-  impossible.
+- A static cap is chosen with the number of affected landblocks stated, or overflow is shown to be
+  impossible. If no landblock can overflow, the static path ships without selection at all.
 
 Tasks:
 
 - [ ] Neighbour-inclusive reaching-set census.
-- [ ] Cap decision recorded here with its evidence.
+- [ ] Static cap decision recorded here with its evidence.
 
 Decisions and course corrections: _(fill during execution)_
 
-### Phase 1: Light set, selection, and shader array
+### Phase 1: Dynamic light set and shader array
 
 Build the mechanism and prove it by migrating something that already works, so this phase changes
-no pixels.
+no pixels. The dynamic path comes first because it is the one that genuinely needs selection, and
+because the headlamp already exercises it end to end.
 
 Deliverables:
 
-- A `SceneLightSet` contract: a bounded, ordered array of runtime point lights in anchor-relative
-  space, assembled per frame from producers.
-- Nearest-first selection with an explicit cap, mirroring `Render::insert_light`'s policy — sort
-  by squared distance from the camera, keep the nearest, drop the rest — and a frame metric
-  counting dropped lights.
+- A `DynamicLightSet` contract: a small bounded array of runtime point lights in anchor-relative
+  space, rebuilt each frame from dynamic producers and bound **once per frame**.
+- Nearest-first selection with an explicit cap, mirroring `Render::insert_light`'s policy — sort by
+  squared distance from the camera, keep the nearest, drop the rest — and a frame metric counting
+  drops.
 - Shared GLSL: generalize `evaluateViewerLight` into a loop over the bound array, preserving its
-  current per-light math exactly.
-- The viewer headlamp becomes the system's first producer rather than a dedicated uniform pair.
+  per-light math exactly. Uploads are sized to the live count, never to the cap.
+- The viewer headlamp stops being a bespoke uniform pair and becomes simply the first entry in the
+  dynamic set.
 
 Acceptance criteria:
 
-- Interiors render identically to before, since the headlamp is the only producer and its math is
+- Interiors render identically to before: the headlamp is the only dynamic producer and its math is
   unchanged.
 - Unit tests cover selection: ordering, cap behaviour, drop counting, and the empty case.
 - The shader uniform/varying consistency test covers the new array declarations.
+- A frame with no dynamic lights uploads nothing and takes no per-light branch.
 
 Tasks:
 
-- [ ] `SceneLightSet` type and per-frame assembly.
+- [ ] `DynamicLightSet` type and per-frame assembly.
 - [ ] Nearest-first bounded selection with a drop metric.
 - [ ] Shader array evaluation replacing the single-light path.
-- [ ] Migrate the headlamp onto it; delete the bespoke uniforms.
+- [ ] Migrate the headlamp into the dynamic set; delete the bespoke uniforms.
 
 Decisions and course corrections: _(fill during execution)_
 
@@ -194,6 +212,8 @@ Decisions and course corrections: _(fill during execution)_
 
 Deliverables:
 
+- A per-landblock static light array, bound alongside the dynamic set, with its own cap from
+  Phase 0. Selection is omitted unless Phase 0 proved overflow is possible.
 - Gather authored lights from the Objects layer per landblock, composing each with its resident
   placement through the existing `placeObjectLights`. Cache per landblock; the set changes only
   with content residency, never per frame.
@@ -211,22 +231,27 @@ Acceptance criteria:
 - Interiors are visually unchanged.
 - A landblock whose Objects layer arrives after its Buildings layer ends up correctly lit, proving
   the streaming-order problem that motivated evaluation over baking is actually solved.
+- A static-light bind metric shows binds tracking visible lit landblocks rather than draw-call
+  count, confirming draw order is landblock-coherent enough for per-landblock binding.
 
 Tasks:
 
 - [ ] Per-landblock outdoor light gathering with residency-scoped caching.
 - [ ] Neighbour spill inclusion.
-- [ ] Per-draw binding across all four outdoor receivers.
+- [ ] Per-landblock binding across all four outdoor receivers, with a bind-frequency metric.
 - [ ] Browser verification at night, including the late-arriving-layer case.
 
 Decisions and course corrections: _(fill during execution)_
 
 ### Phase 3: Resteer
 
-- Re-measure frame cost with lights active in a dense town, and confirm North Star 4 holds for
-  unlit landblocks.
+- Re-measure frame cost with lights active in a dense town, and confirm the cost north stars hold
+  for unlit landblocks and for frames where nothing moves.
+- Read the static bind-frequency metric. If binds track draw calls rather than landblocks, decide
+  between sorting draws by landblock and escalating to a uniform buffer (see Risks).
 - Confirm the producer interface is genuinely additive by sketching, without building, how entity
-  lights would attach. If it needs changes, make them now while there is one producer.
+  lights attach to the dynamic set. If it needs changes, make them now while the only dynamic
+  producer is the headlamp.
 - Review accumulated debt and fold corrections into the remaining phases.
 
 ### Phase 4: Cleanup and wrap-up
@@ -239,14 +264,24 @@ Decisions and course corrections: _(fill during execution)_
 
 ## Risks & Mitigations
 
-- **Per-vertex cost on terrain.** Terrain is the highest vertex count in view, and a light loop
-  runs per vertex. Mitigation: unlit landblocks bind an empty set and skip the loop entirely; the
-  Phase 3 resteer measures a dense town before the design is locked. If it bites, the fallback is
-  restricting the loop to object draws and leaving terrain on sun and ambient, which is strictly
-  better than today.
+- **Bind frequency, not gather cost, is the CPU risk.** Gathering is residency-cached, so the
+  per-frame work is binding. `view.objects` is populated in scene-traversal order and is not sorted
+  by landblock, so interleaved landblocks would make static binds scale with draw-call count
+  instead of visible-landblock count. Mitigation: measure it in Phase 2 with a dedicated metric
+  before optimizing. Escalation path, in order: sort draws by landblock where it does not fight
+  material batching, then move the static sets into a uniform buffer and bind with
+  `bindBufferRange`, which turns a bind into a pointer change with no upload — cheap to reach for
+  because the data is immutable per landblock.
+- **Per-vertex loop cost.** A light loop runs per vertex on every receiver. Terrain is _not_ the
+  worry: a landblock is 9x9 = 81 vertices, so fifty resident landblocks total roughly 4,000
+  vertices, less than one building. Buildings and objects carry the vertex count. Mitigation:
+  unlit landblocks bind an empty static set and take no loop; the Phase 3 resteer measures a dense
+  town.
 - **Selection error at range.** Nearest-to-camera selection can pick the wrong lights for distant
-  geometry. Mitigation: this is why interiors stay baked. Outdoors the emitter count per landblock
-  is small (~3.6 average) and the cap is chosen in Phase 0 to make dropping rare.
+  geometry. Mitigation: this is why interiors stay baked, and why static lights are scoped per
+  landblock rather than pooled globally — a distant lamp cannot be culled by nearer ones, because
+  it is only ever selected against its own landblock. Only the dynamic set, which is small, uses
+  camera-relative selection.
 - **Anchor-space mistakes.** Light positions compared against vertex positions must be
   anchor-relative; this has already produced one invisible light. Mitigation: `anchorRelativePosition`
   is the single owner of that conversion and every producer routes through it.
@@ -257,6 +292,7 @@ Decisions and course corrections: _(fill during execution)_
 ## Definition of Done
 
 - [ ] One shader path evaluates every runtime light; no bespoke single-light uniforms remain.
+- [ ] Static binds track visible lit landblocks, not draw-call count.
 - [ ] Outdoor lamps illuminate terrain, buildings, objects, and generated scenery at night.
 - [ ] Interiors are visually unchanged and still baked.
 - [ ] Selection cap chosen from measurement, with drops observable in a frame metric.
@@ -268,11 +304,11 @@ Decisions and course corrections: _(fill during execution)_
 
 ## Open Questions
 
-- Should the cap be per landblock or per draw scope? Per landblock is simpler and matches how
-  gathering is cached; per draw would be more precise for large landblocks but needs a selection
-  pass per draw unit.
-- Does the detail slider eventually scale the cap, as retail's degrade level does? Not needed now,
-  but the selection layer is where it would live.
+- Does the detail slider eventually scale the caps, as retail's degrade level does? Not needed now,
+  but the dynamic selection layer is where it would live.
+- Should interior draws also receive the per-landblock static set for lights authored _outside_
+  the cell, or is the bake plus the dynamic set sufficient? Retail's cell pass takes only dynamics
+  alongside the burn-in, which suggests sufficient.
 - Do outdoor lights belong to a landblock or to a scene scope once portal-visible outdoor cells
   are considered? Phase 2 assumes landblock; the resteer should confirm nothing about portal views
   contradicts that.

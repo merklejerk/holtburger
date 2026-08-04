@@ -91,6 +91,36 @@ export const FRONTEND_TUNING = {
 			/** Requested normalized-texture filtering before device capability resolution. */
 			textureFiltering: "anisotropic-2x",
 		},
+		/**
+		 * Authored outdoor lamps, which retail never rendered at all.
+		 *
+		 * Retail's outdoor pass binds only the sun, so its lamps cast nothing at any hour. We
+		 * light outdoor geometry with them deliberately, which makes both the magnitude and the
+		 * time-of-day half of that policy ours to define rather than inherit.
+		 */
+		outdoorAuthoredLights: {
+			/**
+			 * Applied to the authored intensity before falloff, so it shrinks the saturated core
+			 * rather than merely dimming it.
+			 *
+			 * Every lamp in the archive authors intensity 100, which retail only ever fed to its
+			 * hardware lights and its interior bake. Through the falloff we evaluate, 100 peaks
+			 * around eleven times the level where the per-channel clamp takes over, leaving a
+			 * flat blown-out disc across the inner half of every lamp's radius. This lands the
+			 * peak near twice the clamp instead, which keeps a bright core while shrinking the
+			 * clipped plateau to roughly a quarter of the radius.
+			 */
+			intensityScale: 0.17,
+			/**
+			 * Up-facing terrain brightness at or below which lamps contribute in full.
+			 *
+			 * Measured against region-authored sky keyframes, an up-facing terrain surface sits
+			 * near 0.24 at midnight and 0.90 at noon.
+			 */
+			fullResponseBrightness: 0.3,
+			/** Up-facing terrain brightness at or above which lamps contribute nothing. */
+			noResponseBrightness: 0.8,
+		},
 		terrainDetailFade: {
 			/** World distance where terrain detail-texture fading begins. */
 			near: 10,

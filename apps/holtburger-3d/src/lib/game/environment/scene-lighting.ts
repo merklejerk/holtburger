@@ -1,4 +1,5 @@
 import { Vec3 } from "../math/types";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { type ResolvedSceneLighting } from "./scene-environment";
 
 /**
@@ -68,6 +69,50 @@ export function resolveSceneLightingByRole(
 			sunVector: ZERO_SUN,
 		},
 	};
+}
+
+/**
+ * How much of an authored outdoor lamp survives the current daylight, in [0, 1].
+ *
+ * Retail never had to answer this: its outdoor pass binds only the sun, so authored lamps cast
+ * nothing at any hour. Lighting outdoor geometry with them is our deliberate deviation, which
+ * makes the daytime half of the policy ours to define — and a lamp that pins midday ground to
+ * full white is what happens without one.
+ *
+ * The signal is what an up-facing terrain surface already receives, since that is the surface the
+ * artifact appears on. Applies to authored lamps only: the viewer light is gameplay lighting and
+ * keeps working at any hour.
+ */
+export function resolveAuthoredLightResponse(
+	lighting: ResolvedSceneLighting,
+): number {
+	// Terrain normals point up, so the sun's own up component is its diffuse term there.
+	const sun = Math.max(lighting.sunVector.y, 0);
+	const brightness = relativeLuminance(
+		lighting.ambientLevel * lighting.ambientColor.red +
+			sun * lighting.sunColor.red,
+		lighting.ambientLevel * lighting.ambientColor.green +
+			sun * lighting.sunColor.green,
+		lighting.ambientLevel * lighting.ambientColor.blue +
+			sun * lighting.sunColor.blue,
+	);
+	const { fullResponseBrightness, noResponseBrightness } =
+		FRONTEND_TUNING.rendering.outdoorAuthoredLights;
+	const ramp = Math.min(
+		1,
+		Math.max(
+			0,
+			(brightness - fullResponseBrightness) /
+				(noResponseBrightness - fullResponseBrightness),
+		),
+	);
+	// Smoothstep rather than linear, so lamps neither pop out at dusk nor linger flat at noon.
+	return 1 - ramp * ramp * (3 - 2 * ramp);
+}
+
+/** Rec. 601 luma, matching how the eye weights the channels this lighting is judged by. */
+function relativeLuminance(red: number, green: number, blue: number): number {
+	return 0.299 * red + 0.587 * green + 0.114 * blue;
 }
 
 /** Map one object contribution's source onto its retail lighting policy. */

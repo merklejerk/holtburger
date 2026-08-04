@@ -83,6 +83,7 @@ import {
 } from "../environment/runtime-lights";
 import {
 	objectLightingRole,
+	resolveAuthoredLightResponse,
 	resolveSceneLightingByRole,
 	type SceneLightingByRole,
 } from "../environment/scene-lighting";
@@ -164,6 +165,8 @@ interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
 	/** Scene-space origin of the frame anchor, subtracted from every light position at bind. */
 	readonly anchorOrigin: LightAnchorOrigin;
+	/** How much of an authored outdoor lamp survives the frame's daylight, in [0, 1]. */
+	readonly authoredLightResponse: number;
 	/** Frame-global dynamic lights; they reach every draw regardless of role. */
 	readonly dynamicLights: readonly RuntimeLight[];
 	/** Authored outdoor lights reaching one landblock, memoized across frames by the index. */
@@ -178,8 +181,9 @@ interface SceneShading {
  */
 const PROBE_SHADING: SceneShading = {
 	fog: null,
-	// No lights, so the rebasing origin is unobservable.
+	// No lights, so neither the rebasing origin nor the daylight response is observable.
 	anchorOrigin: { x: 0, z: 0 },
+	authoredLightResponse: 0,
 	dynamicLights: [],
 	staticLights: () => [],
 	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
@@ -624,6 +628,9 @@ export class WebGL2Renderer implements Renderer {
 		const shading: SceneShading = {
 			fog,
 			anchorOrigin: createLandblockWorldOrigin(input.anchorLandblockId),
+			authoredLightResponse: resolveAuthoredLightResponse(
+				input.environment.lighting,
+			),
 			dynamicLights: selectedDynamic.lights,
 			staticLights: (landblockId) =>
 				this.#resolveStaticLights(input, landblockId, camera ?? ORIGIN),
@@ -1688,6 +1695,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#terrainProgram.uniforms,
 				shading.staticLights(terrain.drawUnit.landblockId),
 				shading.anchorOrigin,
+				shading.authoredLightResponse,
 				this.#dynamicLightScratch,
 			);
 			this.#frameSelectionMetrics.staticLightBinds += 1;
@@ -2396,6 +2404,7 @@ export class WebGL2Renderer implements Renderer {
 			program.uniforms,
 			scope === null ? EMPTY_LIGHTS : shading.staticLights(scope),
 			shading.anchorOrigin,
+			shading.authoredLightResponse,
 			this.#dynamicLightScratch,
 		);
 		this.#frameSelectionMetrics.staticLightBinds += 1;

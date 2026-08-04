@@ -297,6 +297,21 @@ These are deliberate, and each produces output equivalent to retail:
   generated scenery. Emitters come from the Objects layer while receivers live in layers with
   independent residency radii, so these are evaluated rather than baked: a landblock can hold
   buildings while its Objects layer is never resident, which a bake could not survive.
+- **Authored outdoor lamps fade out as daylight rises.** This is the other half of the deviation
+  above: retail never had to decide what a lamp does at noon, because its lamps cast nothing at
+  any hour. Ours would otherwise pin midday ground to full white, since an authored intensity of
+  100 clamps hard against a daytime surface already near 0.9. A single response scalar, derived
+  once per frame from what an up-facing terrain surface already receives, ramps from full in the
+  dark to nothing at noon. It scales the lamp's colour rather than gating the shader, because the
+  per-channel clamp reads that same colour — dimming the colour dims both the contribution and its
+  ceiling. The viewer light is deliberately exempt: it is gameplay lighting, not scenery.
+- **Authored intensities are recalibrated for the evaluated path.** Every lamp in the archive
+  authors intensity 100, a number retail only ever fed to hardware lights and to the interior
+  bake. Through the falloff we evaluate, 100 peaks near eleven times the level where the clamp
+  takes over, leaving a flat blown-out disc across the inner half of a lamp's radius. Outdoor
+  lamps scale it before falloff so the saturated core shrinks rather than merely dimming. The
+  interior bake keeps the raw authored value, because retail's burn-in saturates there too and
+  that is genuinely how AC interiors look.
 - **Every authored light uses the burn-in falloff, baked or evaluated.** Retail's hardware `1/d`
   cannot carry authored magnitudes — at the median intensity of 100 it saturates across a lamp's
   whole reach and then stops dead. The burn-in shape tapers smoothly instead. The viewer light's

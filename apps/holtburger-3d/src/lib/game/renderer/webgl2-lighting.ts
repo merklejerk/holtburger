@@ -173,17 +173,26 @@ export function bindWebGL2DynamicLights(
 		uniforms.dynamicLightColorIntensity,
 		lights,
 		anchorOrigin,
+		// Gameplay lighting, not authored scenery: the viewer light works at any hour.
+		1,
 		MAX_DYNAMIC_LIGHTS,
 		scratch,
 	);
 }
 
-/** Bind one landblock's authored static lights; an empty list costs a single count upload. */
+/**
+ * Bind one landblock's authored static lights; an empty list costs a single count upload.
+ *
+ * `response` fades authored lamps out as daylight rises. Dimming a lamp is exactly dimming its
+ * colour: the shader clamps each channel to that same colour, so scaling it here scales both the
+ * contribution and its ceiling, and needs no shader branch of its own.
+ */
 export function bindWebGL2StaticLights(
 	gl: WebGL2RenderingContext,
 	uniforms: WebGL2LightingUniforms,
 	lights: readonly RuntimeLight[],
 	anchorOrigin: LightAnchorOrigin,
+	response: number,
 	scratch: DynamicLightScratch,
 ): void {
 	bindLightArray(
@@ -193,6 +202,7 @@ export function bindWebGL2StaticLights(
 		uniforms.staticLightColorIntensity,
 		lights,
 		anchorOrigin,
+		response,
 		MAX_STATIC_LIGHTS,
 		scratch,
 	);
@@ -216,6 +226,7 @@ function bindLightArray(
 	colorIntensityUniform: WebGLUniformLocation,
 	lights: readonly RuntimeLight[],
 	anchorOrigin: LightAnchorOrigin,
+	colorScale: number,
 	cap: number,
 	scratch: DynamicLightScratch,
 ): void {
@@ -229,9 +240,9 @@ function bindLightArray(
 		scratch.positionRange[offset + 1] = light.position.y;
 		scratch.positionRange[offset + 2] = light.position.z - anchorOrigin.z;
 		scratch.positionRange[offset + 3] = light.range;
-		scratch.colorIntensity[offset] = light.color.red;
-		scratch.colorIntensity[offset + 1] = light.color.green;
-		scratch.colorIntensity[offset + 2] = light.color.blue;
+		scratch.colorIntensity[offset] = light.color.red * colorScale;
+		scratch.colorIntensity[offset + 1] = light.color.green * colorScale;
+		scratch.colorIntensity[offset + 2] = light.color.blue * colorScale;
 		scratch.colorIntensity[offset + 3] = light.intensity;
 	}
 	gl.uniform4fv(positionRangeUniform, scratch.positionRange, 0, count * 4);

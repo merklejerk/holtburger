@@ -13,6 +13,7 @@ import {
 	type RuntimeLight,
 } from "../environment/runtime-lights";
 import { createLandblockWorldOrigin } from "../landblocks";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** Assemble a logical static-object artifact after geometry and texture-requirement validation. */
 /**
@@ -54,7 +55,11 @@ function gatherLayerLights(
 		},
 		color: light.color,
 		range: light.falloff * RUNTIME_LIGHT_RANGE_SCALE,
-		intensity: light.intensity,
+		// Scaled before falloff, so an authored 100 stops blowing out the inner half of the
+		// lamp's radius instead of merely being clamped there.
+		intensity:
+			light.intensity *
+			FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
 	}));
 }
 

@@ -45,8 +45,10 @@
 		) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
+		readonly viewerLightEnabled: boolean;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
+		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		/** Effective filterable texture quality selected for the next frame. */
@@ -79,7 +81,9 @@
 		dayGroupNames,
 		updateEnvironment,
 		distanceFogEnabled,
+		viewerLightEnabled,
 		updateDistanceFog,
+		updateViewerLight,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
 		textureFiltering,
@@ -195,7 +199,9 @@
 								{dayGroupNames}
 								{updateEnvironment}
 								{distanceFogEnabled}
+								{viewerLightEnabled}
 								{updateDistanceFog}
+								{updateViewerLight}
 								{envCellRenderMode}
 								{updateEnvCellRenderMode}
 								{textureFiltering}

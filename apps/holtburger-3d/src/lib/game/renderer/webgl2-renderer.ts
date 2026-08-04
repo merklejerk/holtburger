@@ -70,7 +70,11 @@ import {
 	type WebGL2ObjectProgram,
 } from "./webgl2-object-program";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
-import { UNAUTHORED_SCENE_LIGHTING } from "../environment/scene-environment";
+import {
+	DISABLED_VIEWER_LIGHT,
+	UNAUTHORED_SCENE_LIGHTING,
+	VIEWER_LIGHT,
+} from "../environment/scene-environment";
 import {
 	objectLightingRole,
 	resolveSceneLightingByRole,
@@ -550,9 +554,21 @@ export class WebGL2Renderer implements Renderer {
 		const fog = input.frameSettings.distanceFogEnabled
 			? input.environment.distanceFog
 			: null;
+		// The headlamp tracks the live camera, so the renderer supplies it rather than the
+		// resolved environment. Retail attaches it to the viewer on every viewer move.
+		const headlampCamera = input.views[0]?.camera.placement.position ?? null;
 		const shading: SceneShading = {
 			fog,
-			lighting: resolveSceneLightingByRole(input.environment.lighting),
+			lighting: resolveSceneLightingByRole(
+				input.environment.lighting,
+				headlampCamera && input.frameSettings.viewerLightEnabled
+					? {
+							position: headlampCamera,
+							falloff: VIEWER_LIGHT.falloff,
+							intensity: VIEWER_LIGHT.intensity,
+						}
+					: DISABLED_VIEWER_LIGHT,
+			),
 		};
 		this.#beginFrame(input.environment, shading);
 		if (profile && setupStartedAt !== undefined) {

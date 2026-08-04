@@ -74,7 +74,11 @@ void main() {
 	vInstanceColor = ${instanceColor};
 	// Retail's fixed-function pipeline lights meshes per vertex; the emissive term is added
 	// in the fragment stage where the per-draw surface luminosity lives.
-	vLighting = evaluateSceneLighting(mat3(${transform}) * aNormal, aBakedLight);
+	vLighting = evaluateSceneLighting(
+		anchoredPosition,
+		mat3(${transform}) * aNormal,
+		aBakedLight
+	);
 	${fogCalculation}
 	gl_Position = uProjection * uView * vec4(anchoredPosition, 1.0);
 }
@@ -269,6 +273,8 @@ interface WebGL2ObjectProgramBase {
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
 		readonly ambientColor: WebGLUniformLocation;
+		readonly viewerLightFalloffIntensity: WebGLUniformLocation;
+		readonly viewerLightPosition: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
 		readonly baseRect: WebGLUniformLocation;
@@ -387,6 +393,16 @@ export function createWebGL2ObjectProgram(
 		const uniforms: WebGL2ObjectProgramBase["uniforms"] = {
 			alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
 			ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
+			viewerLightFalloffIntensity: requireWebGL2Uniform(
+				gl,
+				program,
+				"uViewerLightFalloffIntensity",
+			),
+			viewerLightPosition: requireWebGL2Uniform(
+				gl,
+				program,
+				"uViewerLightPosition",
+			),
 			ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 			base: requireWebGL2Uniform(gl, program, "uBase"),
 			baseRect: requireWebGL2Uniform(gl, program, "uBaseRect"),

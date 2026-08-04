@@ -22,6 +22,8 @@ interface RenderQualitySettings {
 export interface FrameSettings {
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
+	/** Retail's viewer headlamp, which makes unlit interiors navigable. */
+	readonly viewerLightEnabled: boolean;
 	/** Environment-cell visibility and presentation policy for this frame. */
 	readonly envCellRenderMode: EnvCellRenderMode;
 	/** Quality policy snapshotted once for every rendered frame. */
@@ -32,6 +34,8 @@ export interface FrameSettings {
 export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 	distanceFogEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
+	viewerLightEnabled:
+		FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
 	envCellRenderMode: FRONTEND_TUNING.rendering.frameDefaults.envCellRenderMode,
 	quality: {
 		minimumObjectFootprintPixelArea:

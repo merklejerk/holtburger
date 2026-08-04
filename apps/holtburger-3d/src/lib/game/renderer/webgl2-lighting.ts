@@ -86,13 +86,18 @@ vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {
 // Retail's fixed-function vertex color sums emissive, ambient and the diffuse light terms
 // before clamping once; burned-in interior lighting arrives through the emissive slot
 // (FFEmissiveColorSource = FromVertex), so it adds here rather than replacing the ambient
-// term.
+// term. Ambient and the sun are directional, so they interpolate correctly across even a very
+// large triangle and stay in the vertex stage. Deliberately unclamped: callers that evaluate
+// point lights separately must clamp the total once, not each part.
+vec3 evaluateAmbientAndSun(vec3 normal) {
+	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
+	return uAmbientLevel * uAmbientColor + sun * uSunColor;
+}
+
 vec3 evaluateSceneLighting(vec3 position, vec3 normal, vec3 bakedLight) {
 	vec3 unitNormal = safeNormal(normal);
-	float sun = max(dot(unitNormal, uSunVector), 0.0);
 	return min(
-		uAmbientLevel * uAmbientColor
-			+ sun * uSunColor
+		evaluateAmbientAndSun(normal)
 			+ bakedLight
 			+ evaluateRuntimeLights(position, unitNormal),
 		vec3(1.0)

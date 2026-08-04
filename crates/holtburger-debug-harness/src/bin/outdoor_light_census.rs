@@ -222,5 +222,44 @@ fn main() -> Result<()> {
     for (color, n) in ranked_colors.iter().take(5) {
         println!("  outdoor color 0x{color:08X} x{n}");
     }
+    // Exact placements in one landblock, to aim a camera at a real lamp.
+    if let Ok(target) = std::env::var("CENSUS_LANDBLOCK") {
+        let requested = u32::from_str_radix(target.trim_start_matches("0x"), 16)?;
+        // LandblockInfo records live at 0xXXXXFFFE, not the 0xXXXXFFFF cell id.
+        let landblock = (requested & 0xffff_0000) | 0xfffe;
+        let info = cache.landblock_info(&content, landblock)?;
+        let coords = ((landblock >> 24) & 0xff, (landblock >> 16) & 0xff);
+        let origin_x = coords.0 as f32 * 192.0;
+        let origin_z = -(coords.1 as f32) * 192.0;
+        println!(
+            "\nlandblock 0x{landblock:08X} world origin x={origin_x} z={origin_z}"
+        );
+        for stab in &info.objects {
+            if !is_setup(stab.id) {
+                continue;
+            }
+            let Ok(setup) = cache.setup_model(&content, stab.id) else {
+                continue;
+            };
+            for light in &setup.lights {
+                // AC authors Z-up; render space is Y-up with -Z north.
+                let o = stab.frame.origin;
+                let l = light.viewer_space_location.origin;
+                println!(
+                    "  lamp 0x{:08X} world=({:.1}, {:.1}, {:.1}) offset=({:.1}, {:.1}, {:.1}) \
+                     falloff={:.1} reach={:.1}",
+                    stab.id,
+                    origin_x + o.x + l.x,
+                    o.z + l.z,
+                    origin_z - o.y - l.y,
+                    l.x,
+                    l.z,
+                    -l.y,
+                    light.falloff,
+                    light.falloff * 1.5
+                );
+            }
+        }
+    }
     Ok(())
 }

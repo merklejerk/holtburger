@@ -12,6 +12,7 @@ import {
 } from "./resource-manager";
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
+import { OBJECT_BAKED_LIGHT_ATTRIBUTE } from "./webgl2-object-program";
 
 /** WebGL draw binding retained for one semantic geometry resource. */
 export interface WebGL2GeometryBinding {
@@ -237,6 +238,16 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				buffers.push(uploadFloatAttribute(gl, 1, 3, geometry.normals));
 				buffers.push(
 					uploadFloatAttribute(gl, 2, 2, geometry.textureCoordinates),
+				);
+			}
+			if (geometry.kind === "object" && geometry.bakedLight) {
+				buffers.push(
+					uploadFloatAttribute(
+						gl,
+						OBJECT_BAKED_LIGHT_ATTRIBUTE,
+						3,
+						geometry.bakedLight,
+					),
 				);
 			}
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);

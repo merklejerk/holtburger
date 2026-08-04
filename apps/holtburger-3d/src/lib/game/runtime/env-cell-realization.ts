@@ -58,6 +58,7 @@ export class EnvCellGeometryPreparer {
 					partition: `cell-${job.source.envCellId}`,
 					revision: options.revision,
 					source: job.source,
+					staticLights: job.staticLights,
 					textureRequirements: job.textureRequirements,
 				}),
 			),

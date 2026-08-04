@@ -162,6 +162,52 @@ fn census_lights(content: &ContentRepository, cache: &ContentDecodeCache) -> Res
         println!("  color 0x{color:08X} x{count}");
     }
     println!("light_type values (0=point 1=distant 2=spot): {key_counts:?}");
+
+    // Concrete targets for browser-harness interior verification.
+    /// Running light total for one landblock plus a sample cell to aim a harness camera at.
+    struct LitLandblock {
+        lights: usize,
+        sample: Option<(u32, [f32; 3])>,
+    }
+    let mut by_landblock: BTreeMap<u32, LitLandblock> = BTreeMap::new();
+    for &cell_id in &cell_ids {
+        let Ok(cell) = cache.env_cell(content, cell_id) else {
+            continue;
+        };
+        let mut cell_lights = 0usize;
+        for stab in &cell.static_objects {
+            if !is_setup_id(stab.stab_id) {
+                continue;
+            }
+            if let Ok(setup) = cache.setup_model(content, stab.stab_id) {
+                cell_lights += setup.lights.len();
+            }
+        }
+        if cell_lights == 0 {
+            continue;
+        }
+        let entry = by_landblock.entry(cell_id >> 16).or_insert(LitLandblock {
+            lights: 0,
+            sample: None,
+        });
+        entry.lights += cell_lights;
+        if entry.sample.is_none() {
+            let origin = cell.position.origin;
+            entry.sample = Some((cell_id, [origin.x, origin.y, origin.z]));
+        }
+    }
+    let mut ranked: Vec<_> = by_landblock.into_iter().collect();
+    ranked.sort_by_key(|(_, entry)| std::cmp::Reverse(entry.lights));
+    println!("top lit landblocks (landblock, lights, sample cell + authored origin):");
+    for (landblock, entry) in ranked.iter().take(8) {
+        let count = entry.lights;
+        if let Some((cell_id, origin)) = &entry.sample {
+            println!(
+                "  0x{landblock:04X}FFFF lights={count} cell=0x{cell_id:08X} origin=({:.1}, {:.1}, {:.1})",
+                origin[0], origin[1], origin[2]
+            );
+        }
+    }
     Ok(())
 }
 

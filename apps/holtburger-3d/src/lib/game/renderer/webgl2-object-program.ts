@@ -8,6 +8,15 @@ import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
 /** Object transform source selected at shader compilation rather than through nullable uniforms. */
 export type ObjectVertexTransformSource = "baked" | "instanced";
 
+/**
+ * Vertex attribute carrying burned-in interior static light.
+ *
+ * Locations 0-2 are geometry and 3-7 are the instanced transform and color, so this follows
+ * them. Geometry without authored static lighting simply leaves the attribute disabled, and
+ * WebGL2's default generic value contributes nothing.
+ */
+export const OBJECT_BAKED_LIGHT_ATTRIBUTE = 8;
+
 /** Fixed sampler units shared by every linked object-program variant. */
 export const OBJECT_TEXTURE_UNITS = {
 	base: 0,
@@ -44,6 +53,7 @@ layout(location = 7) in vec4 aInstanceColor;`
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTextureCoordinate;
+layout(location = ${OBJECT_BAKED_LIGHT_ATTRIBUTE}) in vec3 aBakedLight;
 
 uniform mat4 uProjection;
 uniform mat4 uView;
@@ -64,7 +74,7 @@ void main() {
 	vInstanceColor = ${instanceColor};
 	// Retail's fixed-function pipeline lights meshes per vertex; the emissive term is added
 	// in the fragment stage where the per-draw surface luminosity lives.
-	vLighting = evaluateSceneLighting(mat3(${transform}) * aNormal);
+	vLighting = evaluateSceneLighting(mat3(${transform}) * aNormal, aBakedLight);
 	${fogCalculation}
 	gl_Position = uProjection * uView * vec4(anchoredPosition, 1.0);
 }

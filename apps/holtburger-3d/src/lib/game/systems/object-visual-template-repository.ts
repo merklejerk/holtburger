@@ -634,6 +634,9 @@ function materialPartitions(
 
 function objectGeometryData(part: ResolvedObjectPart): ObjectGeometryData {
 	return {
+		// Dynamic entities are lit at draw time, never baked; retail likewise lights them
+		// through hardware light slots rather than burning them into their meshes.
+		bakedLight: null,
 		indices: part.geometry.indices,
 		kind: "object",
 		normals: part.geometry.normals,

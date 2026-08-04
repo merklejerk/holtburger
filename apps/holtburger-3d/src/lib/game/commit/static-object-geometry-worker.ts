@@ -18,6 +18,10 @@ import {
 } from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { ObjectGeometryData } from "../renderer/geometry";
+import {
+	bakeStaticLight,
+	type PlacedStaticLight,
+} from "./interior-static-lighting";
 import type { StaticGeometryKey } from "../geometry/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
@@ -49,6 +53,12 @@ export interface StaticObjectGeometryPreparationJob {
 	readonly layer: ResolvedStaticObjectLayerSource["kind"];
 	readonly resourceNamespace: StaticInstallResourceNamespace;
 	readonly source: ResolvedStaticObjectLayerSource;
+	/**
+	 * Landblock-space authored lights burned into this job's merged geometry.
+	 *
+	 * Only interior jobs supply them; outdoor statics are lit by the sun and receive none.
+	 */
+	readonly staticLights: readonly PlacedStaticLight[];
 }
 
 /** Immutable material range emitted by the geometry worker. */
@@ -254,11 +264,21 @@ function prepareBakedStaticObjectGeometry(
 		});
 	}
 	assertBounds(bounds, positions);
+	const mergedPositions = Float32Array.from(positions);
+	const mergedNormals = Float32Array.from(normals);
 	const geometry: ObjectGeometryData = {
+		// Merged contributions are already in landblock space, which is the space the lights
+		// were placed in, so the bake needs no further transform.
+		bakedLight: bakeStaticLight(
+			mergedPositions,
+			mergedNormals,
+			Mat4.identity(),
+			job.staticLights,
+		),
 		indices: Uint32Array.from(indices),
 		kind: "object",
-		normals: Float32Array.from(normals),
-		positions: Float32Array.from(positions),
+		normals: mergedNormals,
+		positions: mergedPositions,
 		textureCoordinates: Float32Array.from(textureCoordinates),
 	};
 	const geometryKey =
@@ -839,6 +859,8 @@ function createSourcePartitionGeometry(
 		}
 	}
 	return {
+		// Instanced partitions are outdoor generated scenery, which authors no static lights.
+		bakedLight: null,
 		indices: Uint32Array.from(indices),
 		kind: "object",
 		normals: Float32Array.from(normals),

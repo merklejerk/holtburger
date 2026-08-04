@@ -1,6 +1,7 @@
 import type { AtlasRequirementHandle } from "../textures/atlas/resident-texture-atlas";
 import type { AssetTextureFact } from "../textures/types";
 import type { SceneInterestRevision } from "./scene-availability";
+import type { PlacedStaticLight } from "../commit/interior-static-lighting";
 import type { StaticLayerKind } from "./scene-interest";
 
 /** Exact currentness query retained at the scene-interest boundary. */
@@ -49,6 +50,8 @@ export interface StaticLayerGeometryPreparer<
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 		readonly source: TSource;
+		/** Interior jobs supply authored lights to bake into merged geometry; outdoor pass none. */
+		readonly staticLights?: readonly PlacedStaticLight[];
 		readonly textureRequirements: readonly AssetTextureFact[];
 	}): Promise<TGeometry>;
 	/** Terminate the private geometry worker after all pending outputs are made stale. */

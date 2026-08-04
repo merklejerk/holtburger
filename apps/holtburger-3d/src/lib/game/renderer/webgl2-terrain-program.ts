@@ -33,8 +33,9 @@ void main() {
 	vViewDepth = -viewPosition.z;
 	vHorizontalDistance = length(anchoredPosition.xz - uCameraHorizontalPosition);
 	// Retail bakes landscape lighting into vertex colors; evaluating the identical formula
-	// here keeps time-of-day changes a uniform update instead of a landblock re-bake.
-	vLighting = evaluateSceneLighting(mat3(uLocalToLandblock) * aNormal);
+	// here keeps time-of-day changes a uniform update instead of a landblock re-bake. Landscape
+	// receives no burned-in static light, so the baked term is zero.
+	vLighting = evaluateSceneLighting(mat3(uLocalToLandblock) * aNormal, vec3(0.0));
 	gl_Position = uProjection * viewPosition;
 }
 `;

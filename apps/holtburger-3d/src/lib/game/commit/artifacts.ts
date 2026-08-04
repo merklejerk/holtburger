@@ -190,9 +190,10 @@ export interface StaticObjectLayerArtifact {
 	/**
 	 * Authored lights this layer emits, in landblock space.
 	 *
-	 * Only the Objects layer ever populates this: buildings reference GfxObjs, which cannot carry
-	 * lights, and no generated-scenery template authors one. Gathered here so the set is resolved
-	 * once per residency change rather than per frame.
+	 * Only the outdoor Objects layer ever populates this: buildings reference GfxObjs, which
+	 * cannot carry lights, no generated-scenery template authors one, and interior residents are
+	 * lit by their bake instead. Gathered here so the set is resolved once per residency change
+	 * rather than per frame.
 	 */
 	readonly staticLights: readonly RuntimeLight[];
 }

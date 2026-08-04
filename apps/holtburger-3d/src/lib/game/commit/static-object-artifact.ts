@@ -1,5 +1,9 @@
 import { Mat4 } from "../math/types";
-import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
+import type {
+	ResolvedOutdoorStaticLayerSource,
+	ResolvedStaticObjectLayerSource,
+} from "../resolution/landblock-layer";
+import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { StaticObjectLayerArtifact } from "./artifacts";
 import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
@@ -15,9 +19,8 @@ import {
 import { createLandblockWorldOrigin } from "../landblocks";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 
-/** Assemble a logical static-object artifact after geometry and texture-requirement validation. */
 /**
- * Gather the authored lights a layer's residents emit, in canonical scene space.
+ * Gather the authored lights an outdoor layer's residents emit, in canonical scene space.
  *
  * Composing offsets with placements is the same operation the interior bake performs, so it
  * reuses `placeObjectLights`; only the falloff-to-range conversion differs, because runtime
@@ -29,7 +32,7 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
  * which landblock the placements belong to.
  */
 function gatherLayerLights(
-	source: ResolvedStaticObjectLayerSource,
+	source: ResolvedOutdoorStaticLayerSource,
 ): readonly RuntimeLight[] {
 	const origin = createLandblockWorldOrigin(source.landblockId);
 	const placed: PlacedStaticLight[] = [];
@@ -63,6 +66,7 @@ function gatherLayerLights(
 	}));
 }
 
+/** Assemble a logical static-object artifact after geometry and texture-requirement validation. */
 export function assembleStaticObjectArtifact(options: {
 	readonly source: ResolvedStaticObjectLayerSource;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
@@ -73,7 +77,12 @@ export function assembleStaticObjectArtifact(options: {
 	if (geometry === null) {
 		return null;
 	}
-	const staticLights = gatherLayerLights(options.source);
+	// Interior residents carry their static lighting in baked vertex colours and bind an empty
+	// runtime set, so gathering their emitters would produce a set nobody reads.
+	const staticLights =
+		options.source.kind === LandblockLayerKind.EnvCells
+			? NO_STATIC_LIGHTS
+			: gatherLayerLights(options.source);
 	const requiredTextures = new Set<AssetTextureKey>(
 		options.textureRequirements.map(({ key }) => key),
 	);
@@ -143,3 +152,6 @@ export function assembleStaticObjectArtifact(options: {
 		textureRequirements: options.textureRequirements,
 	};
 }
+
+/** Shared empty set, so interior artifacts allocate nothing for lights they never receive. */
+const NO_STATIC_LIGHTS: readonly RuntimeLight[] = [];

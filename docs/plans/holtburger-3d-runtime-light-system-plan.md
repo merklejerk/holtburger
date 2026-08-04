@@ -153,8 +153,8 @@ recorded explicitly because its absence looks like an oversight otherwise: the a
 structure exists, we just inherited it from content residency instead of building one.
 
 **The cost of that choice is coarseness.** A landblock is 192 units, while a light reaches
-`falloff * 1.5` — about 22.5 units at the maximum authored falloff of 15, assuming the outdoor
-falloff distribution matches the indoor one, which Phase 0 confirms. A landblock's set therefore
+`falloff * 1.5` — about 22.5 units at the maximum authored falloff of 15 observed in the indoor
+census. A landblock's set therefore
 contains lights that cannot reach most of its geometry, and the shader iterates all of them per
 vertex regardless. At the measured average of 3.6 lights per lit landblock this is irrelevant. At
 the archive's worst landblock of 51, a vertex genuinely reached by one or two lights still
@@ -186,40 +186,15 @@ a performance one.
    per residency change; a frame that moves no light should re-upload nothing.
 4. Cost scales with what is lit, not with what exists. A landblock with no lamps should pay
    nothing, and uploads are sized to the actual light count rather than the cap.
-5. Selection is explicit and observable. When lights are dropped, say so in a metric rather than
-   silently dimming the world.
+5. Dropping lights is normal operation, not an error. A budget overflow is a resource limit doing
+   its job, exactly as retail's `insert_light` discards anything farther than every occupied slot.
+   Selection is what makes it graceful: without it a cap drops whatever was gathered last, which
+   could kill the nearest lamp. Report drops in a metric so they are observable; never assert on
+   them.
 6. Anything compared against a vertex position lives in anchor-relative space. This has already
    caused one invisible-light bug.
 
 ## Phased Implementation
-
-### Phase 0: Evidence
-
-The archive maximum of 51 lights in one landblock is for a landblock in isolation. Lights near a
-boundary reach into the neighbour, so the number that sizes the static array is the worst case
-_reaching_ set.
-
-Deliverables:
-
-- Extend the outdoor census to compute, for every landblock, the set of lights whose authored
-  reach (`falloff * rangeAdjust`) intersects that landblock's bounds, including lights owned by
-  the eight neighbours. Report the distribution and the maximum.
-- Report how many landblocks exceed candidate caps (16, 32, 64) so the static cap is chosen from
-  data.
-- Confirm the authored falloff distribution outdoors matches the indoor census (1–15), since the
-  reach calculation depends on it.
-
-Acceptance criteria:
-
-- A static cap is chosen with the number of affected landblocks stated, or overflow is shown to be
-  impossible. If no landblock can overflow, the static path ships without selection at all.
-
-Tasks:
-
-- [ ] Neighbour-inclusive reaching-set census.
-- [ ] Static cap decision recorded here with its evidence.
-
-Decisions and course corrections: _(fill during execution)_
 
 ### Phase 1: Dynamic light set and shader array
 
@@ -231,9 +206,10 @@ Deliverables:
 
 - A `DynamicLightSet` contract: a small bounded array of runtime point lights in anchor-relative
   space, rebuilt each frame from dynamic producers and bound **once per frame**.
-- Nearest-first selection with an explicit cap, mirroring `Render::insert_light`'s policy — rank by
-  squared distance from the camera, keep the nearest, drop the rest — and a frame metric counting
-  drops. Distance only; no frustum test, per Design Rule 6.
+- One selection routine, shared by both light sets, mirroring `Render::insert_light`'s policy —
+  rank by squared distance from the camera, keep the nearest, drop the rest — with a frame metric
+  counting drops. Distance only; no frustum test, per Design Rule 6. Phase 2's static set calls
+  this same function; there is no separate static selection.
 - The dynamic set applies to every draw role, indoor and outdoor, per Design Rule 7. The headlamp
   therefore becomes visible outdoors, where it previously was not.
 - Shared GLSL: generalize `evaluateViewerLight` into a loop over the bound array, preserving its
@@ -247,7 +223,9 @@ Acceptance criteria:
   unchanged.
 - Outdoors, the headlamp now lights nearby ground and objects at night and is invisible at midday,
   where sun and ambient already saturate.
-- Unit tests cover selection: ordering, cap behaviour, drop counting, and the empty case.
+- Unit tests cover selection: ordering, cap behaviour, drop counting, and the empty case. Overflow
+  is asserted to drop the farthest light and retain the nearest, since that is the property making
+  a cap safe.
 - The shader uniform/varying consistency test covers the new array declarations.
 - A frame with no dynamic lights uploads nothing and takes no per-light branch.
 
@@ -264,13 +242,16 @@ Decisions and course corrections: _(fill during execution)_
 
 Deliverables:
 
-- A per-landblock static light array, bound alongside the dynamic set, with its own cap from
-  Phase 0. Selection is omitted unless Phase 0 proved overflow is possible.
+- A per-landblock static light array, bound alongside the dynamic set, capped at 64 and run through
+  the Phase 1 selection routine. The cap needs no census: 51 is the largest set any single
+  landblock owns in the archive, neighbour spill is bounded by a roughly 22.5-unit band on a
+  192-unit edge, and overflow degrades gracefully by dropping the farthest light. Gathering uses
+  the maximum authored falloff rather than a measured distribution, since over-gathering is free —
+  the shader's range check culls anyway.
 - Gather authored lights from the Objects layer per landblock, composing each with its resident
   placement through the existing `placeObjectLights`. Cache per landblock; the set changes only
   with content residency, never per frame.
-- Include neighbouring landblocks' lights whose reach crosses the boundary, per the Phase 0
-  finding.
+- Include neighbouring landblocks' lights whose reach crosses the boundary.
 - Bind the resulting set for every outdoor draw of that landblock — terrain, buildings, objects,
   and instanced generated scenery — reusing the existing per-draw lighting-role dedupe.
 - Lights must not apply to interior draws, whose static lighting is already baked.
@@ -313,7 +294,8 @@ Decisions and course corrections: _(fill during execution)_
 - Update [docs/lighting.md](../lighting.md) with the runtime system, the bake-versus-evaluate rule,
   and the outdoor census.
 - Record the entity-light attachment point for the dynamic-entity runtime plan.
-- Remove or deliberately promote the Phase 0 census harness.
+- Remove or deliberately promote the outdoor light census harness, whose findings are recorded in
+  this plan's Ground Truth.
 - Sweep vocabulary: nothing should describe the headlamp as a special case once it is a producer.
 
 ## Risks & Mitigations

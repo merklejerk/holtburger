@@ -46,9 +46,11 @@
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
 		readonly viewerLightEnabled: boolean;
+		readonly clockFollowing: boolean;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
+		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		/** Effective filterable texture quality selected for the next frame. */
@@ -82,8 +84,10 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		viewerLightEnabled,
+		clockFollowing,
 		updateDistanceFog,
 		updateViewerLight,
+		updateClockFollowing,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
 		textureFiltering,
@@ -200,8 +204,10 @@
 								{updateEnvironment}
 								{distanceFogEnabled}
 								{viewerLightEnabled}
+								{clockFollowing}
 								{updateDistanceFog}
 								{updateViewerLight}
+								{updateClockFollowing}
 								{envCellRenderMode}
 								{updateEnvCellRenderMode}
 								{textureFiltering}

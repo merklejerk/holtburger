@@ -1584,9 +1584,10 @@ export class WebGL2Renderer implements Renderer {
 			false,
 			mat4ToFloat32Array(view.projection, this.#matrixScratch),
 		);
-		gl.uniform2f(
-			this.#terrainProgram.uniforms.cameraHorizontalPosition,
+		gl.uniform3f(
+			this.#terrainProgram.uniforms.cameraPosition,
 			view.cameraPosition.x,
+			view.cameraPosition.y,
 			view.cameraPosition.z,
 		);
 		gl.uniformMatrix4fv(
@@ -2274,9 +2275,10 @@ export class WebGL2Renderer implements Renderer {
 			mat4ToFloat32Array(view.view, this.#matrixScratch),
 		);
 		if ("fogUniforms" in program) {
-			gl.uniform2f(
-				program.fogUniforms.cameraHorizontalPosition,
+			gl.uniform3f(
+				program.fogUniforms.cameraPosition,
 				view.cameraPosition.x,
+				view.cameraPosition.y,
 				view.cameraPosition.z,
 			);
 			bindWebGL2DistanceFog(gl, program.fogUniforms, shading.fog);

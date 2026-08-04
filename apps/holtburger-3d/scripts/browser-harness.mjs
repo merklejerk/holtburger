@@ -1715,8 +1715,10 @@ async function waitForHarnessApi(client) {
 		)
 			return;
 		if (Date.now() - startedAt >= 60_000) {
+			// A startup exception leaves the API unset, so surface whatever the page recorded
+			// instead of reporting only that the wait expired.
 			throw new Error(
-				`Timed out waiting for browser harness API: ${JSON.stringify(await evaluateExpression(client, "({ text: document.body.innerText, title: document.title })"))}`,
+				`Timed out waiting for browser harness API: ${JSON.stringify(await evaluateExpression(client, "({ text: document.body.innerText, title: document.title, startupError: globalThis.__HOLTBURGER_3D_HARNESS_STARTUP_ERROR__ ?? null })"))}`,
 			);
 		}
 		await delay(250);

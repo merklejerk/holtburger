@@ -82,6 +82,9 @@ export function resolveSceneLightingByRole(
  * The signal is what an up-facing terrain surface already receives, since that is the surface the
  * artifact appears on. Applies to authored lamps only: the viewer light is gameplay lighting and
  * keeps working at any hour.
+ *
+ * Bottoms out at `minimumResponse` rather than zero: lamps that fade to nothing read as being
+ * switched off at dawn.
  */
 export function resolveAuthoredLightResponse(
 	lighting: ResolvedSceneLighting,
@@ -96,18 +99,19 @@ export function resolveAuthoredLightResponse(
 		lighting.ambientLevel * lighting.ambientColor.blue +
 			sun * lighting.sunColor.blue,
 	);
-	const { fullResponseBrightness, noResponseBrightness } =
+	const { fullResponseBrightness, minimumResponseBrightness, minimumResponse } =
 		FRONTEND_TUNING.rendering.outdoorAuthoredLights;
 	const ramp = Math.min(
 		1,
 		Math.max(
 			0,
 			(brightness - fullResponseBrightness) /
-				(noResponseBrightness - fullResponseBrightness),
+				(minimumResponseBrightness - fullResponseBrightness),
 		),
 	);
 	// Smoothstep rather than linear, so lamps neither pop out at dusk nor linger flat at noon.
-	return 1 - ramp * ramp * (3 - 2 * ramp);
+	const faded = 1 - ramp * ramp * (3 - 2 * ramp);
+	return minimumResponse + (1 - minimumResponse) * faded;
 }
 
 /** Rec. 601 luma, matching how the eye weights the channels this lighting is judged by. */

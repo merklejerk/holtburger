@@ -307,7 +307,8 @@ These are deliberate, and each produces output equivalent to retail:
   any hour. Ours would otherwise pin midday ground to full white, since an authored intensity of
   100 clamps hard against a daytime surface already near 0.9. A single response scalar, derived
   once per frame from what an up-facing terrain surface already receives, ramps from full in the
-  dark to nothing at noon. It scales the lamp's colour rather than gating the shader, since the
+  dark down to `minimumResponse` at noon — a floor rather than zero, since lamps that fade to
+  nothing read as being switched off. It scales the lamp's colour rather than gating the shader, since the
   contribution is a multiple of that colour either way. The viewer light is deliberately exempt: it
   is gameplay lighting, not scenery.
 - **Evaluated lights roll off smoothly; only the bake clamps.** Retail's `calc_point_light` ends

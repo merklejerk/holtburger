@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_CHROME_PATH = "/opt/google/chrome/chrome";
-const DEFAULT_VITE_URL = "http://127.0.0.1:1420";
+const DEFAULT_VITE_PORT = 1420;
 const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
 const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 const DEFAULT_SETTLE_MS = 10_000;
@@ -41,7 +41,7 @@ const tempDirectories = [];
 
 try {
 	const contentHostUrl = await startContentHost();
-	const viteUrl = await startViteServer();
+	const viteUrl = await startViteServer(options.vitePort);
 	const result = await runHarness({ contentHostUrl, viteUrl });
 	const browserErrors = result.consoleMessages.filter(
 		({ level }) => level === "error" || level === "exception",
@@ -173,6 +173,7 @@ function parseArgs(args) {
 		modeCycle: false,
 		filteringCycle: false,
 		gpu: false,
+		vitePort: DEFAULT_VITE_PORT,
 		staticLights: true,
 		profileRenderer: false,
 		textureFiltering: null,
@@ -412,6 +413,9 @@ function parseArgs(args) {
 				break;
 			case "--gpu":
 				parsed.gpu = true;
+				break;
+			case "--vite-port":
+				parsed.vitePort = Number(requireValue(args, ++index, arg));
 				break;
 			case "--no-static-lights":
 				parsed.staticLights = false;
@@ -657,6 +661,8 @@ Options:
   --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
   --gpu                  Render on the real GPU adapter instead of SwiftShader. Required for
                          any timing used as performance evidence.
+  --vite-port <port>     Vite port to start or reuse. Change it when another worktree is running
+                         a harness, or its server will silently serve that worktree's build.
   --no-static-lights     Disable authored outdoor lamps, for same-scene A/B of their cost.
   --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
   --texture-filtering <mode>
@@ -1160,14 +1166,33 @@ async function startContentHost() {
 	});
 }
 
-async function startViteServer() {
-	if (await isUrlReady(`${DEFAULT_VITE_URL}/harness/browser/`)) {
-		process.stderr.write(`Reusing Vite server at ${DEFAULT_VITE_URL}.\n`);
-		return DEFAULT_VITE_URL;
+/**
+ * Start, or reuse, a Vite server for this harness run.
+ *
+ * Reuse is keyed on the port, and a server on the default port may belong to a *different
+ * worktree* — which silently serves that worktree's code and its content host, producing
+ * results that look like flaky decoding rather than like the wrong build. Pass --vite-port to
+ * isolate a run when more than one checkout is active.
+ */
+async function startViteServer(port) {
+	const viteUrl = `http://127.0.0.1:${port}`;
+	if (await isUrlReady(`${viteUrl}/harness/browser/`)) {
+		process.stderr.write(
+			`Reusing Vite server at ${viteUrl}. Pass --vite-port to isolate this run from ` +
+				`another worktree.\n`,
+		);
+		return viteUrl;
 	}
-	startChild("npm", ["run", "dev:vite"]);
-	await waitForUrl(`${DEFAULT_VITE_URL}/harness/browser/`, 60_000);
-	return DEFAULT_VITE_URL;
+	startChild("npx", [
+		"vite",
+		"--host",
+		"127.0.0.1",
+		"--port",
+		String(port),
+		"--strictPort",
+	]);
+	await waitForUrl(`${viteUrl}/harness/browser/`, 60_000);
+	return viteUrl;
 }
 
 async function runHarness({ contentHostUrl, viteUrl }) {

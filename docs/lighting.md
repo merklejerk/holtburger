@@ -307,16 +307,24 @@ These are deliberate, and each produces output equivalent to retail:
   any hour. Ours would otherwise pin midday ground to full white, since an authored intensity of
   100 clamps hard against a daytime surface already near 0.9. A single response scalar, derived
   once per frame from what an up-facing terrain surface already receives, ramps from full in the
-  dark to nothing at noon. It scales the lamp's colour rather than gating the shader, because the
-  per-channel clamp reads that same colour — dimming the colour dims both the contribution and its
-  ceiling. The viewer light is deliberately exempt: it is gameplay lighting, not scenery.
+  dark to nothing at noon. It scales the lamp's colour rather than gating the shader, since the
+  contribution is a multiple of that colour either way. The viewer light is deliberately exempt: it
+  is gameplay lighting, not scenery.
+- **Evaluated lights roll off smoothly; only the bake clamps.** Retail's `calc_point_light` ends
+  in a per-channel clamp to the light's own colour, so everywhere the falloff exceeds 1 is flat
+  full-colour. That is invisible in retail because it bakes into dense EnvCell vertices, where a
+  vertex rarely lands on the peak and interpolation hides the plateau. Terrain evaluates per pixel
+  and cannot hide it: the plateau becomes a literal flat disc with a hard shoulder behind it.
+  Evaluated lights therefore use `x / (1 + x)`, which approaches the lamp's colour without ever
+  reaching it, so no radius is flat and the tail is nearly unchanged. The bake keeps retail's clamp
+  exactly. This is not a second falloff curve — the distance function is still shared — and it has
+  no retail grounding because retail has none to give: its outdoor pass binds only the sun and it
+  never lit terrain with an authored lamp.
 - **Authored intensities are recalibrated for the evaluated path.** Every lamp in the archive
   authors intensity 100, a number retail only ever fed to hardware lights and to the interior
-  bake. Through the falloff we evaluate, 100 peaks near eleven times the level where the clamp
-  takes over, leaving a flat blown-out disc across the inner half of a lamp's radius. Outdoor
-  lamps scale it before falloff so the saturated core shrinks rather than merely dimming. The
-  interior bake keeps the raw authored value, because retail's burn-in saturates there too and
-  that is genuinely how AC interiors look.
+  bake. Through the falloff we evaluate that peaks around eleven times full lamp colour. Outdoor
+  lamps scale it before falloff. The interior bake keeps the raw authored value, because retail's
+  burn-in saturates there too and that is genuinely how AC interiors look.
 - **Every authored light uses the burn-in falloff, baked or evaluated.** Retail's hardware `1/d`
   cannot carry authored magnitudes — at the median intensity of 100 it saturates across a lamp's
   whole reach and then stops dead. The burn-in shape tapers smoothly instead. The viewer light's

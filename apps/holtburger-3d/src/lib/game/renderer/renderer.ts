@@ -2,12 +2,12 @@ import type { LandblockId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
-import type { RuntimeLight } from "../environment/runtime-lights";
+import type { LandblockLights } from "../environment/outdoor-light-index";
 
 /** Minimal read side of the outdoor light index the renderer depends on. */
 export interface OutdoorLightLookup {
 	readonly isEmpty: boolean;
-	resolve(landblockId: LandblockId): readonly RuntimeLight[];
+	resolve(landblockId: LandblockId): LandblockLights;
 }
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";

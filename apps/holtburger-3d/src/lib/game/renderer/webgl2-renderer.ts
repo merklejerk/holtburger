@@ -81,6 +81,23 @@ import {
 	type RuntimeLight,
 	selectNearestLights,
 } from "../environment/runtime-lights";
+import type { LandblockLights } from "../environment/outdoor-light-index";
+import {
+	TERRAIN_LIGHT_MASK_ALL,
+	TERRAIN_LIGHT_MASK_LENGTH,
+} from "../environment/terrain-light-mask";
+import {
+	createWebGL2TerrainLightMaskTexture,
+	destroyWebGL2TerrainLightMaskTexture,
+	uploadWebGL2TerrainLightMask,
+	type WebGL2TerrainLightMaskTexture,
+} from "./webgl2-terrain-light-mask";
+
+/**
+ * Texture unit for the terrain light mask, after the six `#bindTerrainResources` occupies.
+ * Object programs bind only units 0-2, so nothing contends for it.
+ */
+const TERRAIN_LIGHT_MASK_TEXTURE_UNIT = 6;
 import {
 	objectLightingRole,
 	resolveAuthoredLightResponse,
@@ -169,8 +186,11 @@ interface SceneShading {
 	readonly authoredLightResponse: number;
 	/** Frame-global dynamic lights; they reach every draw regardless of role. */
 	readonly dynamicLights: readonly RuntimeLight[];
-	/** Authored outdoor lights reaching one landblock, memoized across frames by the index. */
-	readonly staticLights: (landblockId: LandblockId) => readonly RuntimeLight[];
+	/**
+	 * Authored outdoor lights reaching one landblock with their terrain cell masks, memoized
+	 * across frames by the index. Objects consume only the lights; terrain also uploads the masks.
+	 */
+	readonly staticLights: (landblockId: LandblockId) => LandblockLights;
 	/** Lighting per draw role, derived once per frame so draw loops stay allocation-free. */
 	readonly lighting: SceneLightingByRole;
 }
@@ -185,12 +205,17 @@ const PROBE_SHADING: SceneShading = {
 	anchorOrigin: { x: 0, z: 0 },
 	authoredLightResponse: 0,
 	dynamicLights: [],
-	staticLights: () => [],
+	staticLights: () => EMPTY_LANDBLOCK_LIGHTS,
 	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
 };
 
 const ORIGIN = { x: 0, y: 0, z: 0 } as const;
 const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
+/** Unlit result for draws that resolve no landblock lights at all. */
+const EMPTY_LANDBLOCK_LIGHTS: LandblockLights = {
+	lights: EMPTY_LIGHTS,
+	cellMasks: new Uint32Array(TERRAIN_LIGHT_MASK_LENGTH),
+};
 
 interface TerrainFrameInput {
 	/** Selected LOD, transition range, and logical texture identities. */
@@ -366,6 +391,8 @@ interface MutableFrameSelectionMetrics {
 	frameInstanceViewHighWaterMark: number;
 	droppedLights: number;
 	staticLightBinds: number;
+	/** Per-landblock terrain mask uploads; unlit landblocks skip theirs entirely. */
+	terrainLightMaskUploads: number;
 	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
@@ -389,6 +416,7 @@ export class WebGL2Renderer implements Renderer {
 	readonly #frameInstances: FrameInstanceStreamArena;
 	/** Reusable dynamic-light upload staging; renderer-owned to keep draw loops allocation-free. */
 	readonly #dynamicLightScratch: ReturnType<typeof createDynamicLightScratch>;
+	readonly #terrainLightMask: WebGL2TerrainLightMaskTexture;
 	/** Reuses one generated-stream selection across all material partitions in a view. */
 	readonly #generatedInstanceSelector = new GeneratedInstanceSelector();
 	/** Exact state mirror scoped to independently invalidated object phases. */
@@ -487,6 +515,7 @@ export class WebGL2Renderer implements Renderer {
 		frameInstanceViewHighWaterMark: 0,
 		droppedLights: 0,
 		staticLightBinds: 0,
+		terrainLightMaskUploads: 0,
 		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
@@ -530,6 +559,7 @@ export class WebGL2Renderer implements Renderer {
 		);
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
 		this.#dynamicLightScratch = createDynamicLightScratch();
+		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
 		this.#objectState = new WebGL2ObjectStateApplicator(gl);
 		this.#portalSubstrate = new WebGL2PortalSubstrate(gl);
 		this.#world = world;
@@ -914,6 +944,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameProfiler?.destroy();
 		this.#frameProfiler = null;
 		this.#textureSamplers.destroy();
+		destroyWebGL2TerrainLightMaskTexture(this.#gl, this.#terrainLightMask);
 		this.#portalSubstrate.destroy();
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
@@ -1577,6 +1608,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.frameInstanceViewHighWaterMark = 0;
 		metrics.droppedLights = 0;
 		metrics.staticLightBinds = 0;
+		metrics.terrainLightMaskUploads = 0;
 		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
@@ -1683,6 +1715,7 @@ export class WebGL2Renderer implements Renderer {
 			shading.anchorOrigin,
 			this.#dynamicLightScratch,
 		);
+		this.#beginTerrainLightMasks();
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.coordinates,
@@ -1690,14 +1723,18 @@ export class WebGL2Renderer implements Renderer {
 				this.#offsetScratch,
 			);
 			this.#bindTerrainResources(terrain);
+			const landblockLights = shading.staticLights(
+				terrain.drawUnit.landblockId,
+			);
 			bindWebGL2StaticLights(
 				gl,
 				this.#terrainProgram.uniforms,
-				shading.staticLights(terrain.drawUnit.landblockId),
+				landblockLights.lights,
 				shading.anchorOrigin,
 				shading.authoredLightResponse,
 				this.#dynamicLightScratch,
 			);
+			this.#uploadTerrainLightMask(landblockLights);
 			this.#frameSelectionMetrics.staticLightBinds += 1;
 			this.#drawTerrainGeometry(
 				terrain.program.geometry,
@@ -1769,6 +1806,46 @@ export class WebGL2Renderer implements Renderer {
 			TextureWrapMode.Repeat,
 		);
 		gl.activeTexture(gl.TEXTURE0);
+	}
+
+	/**
+	 * Bind the shared mask texture for the terrain pass.
+	 *
+	 * Uses an `exact` sampler because integer textures are not filterable. Bound once per pass so
+	 * each landblock pays only its table upload, and only when it has lights to name.
+	 */
+	#beginTerrainLightMasks(): void {
+		const gl = this.#gl;
+		gl.activeTexture(gl.TEXTURE0 + TERRAIN_LIGHT_MASK_TEXTURE_UNIT);
+		gl.bindTexture(gl.TEXTURE_2D, this.#terrainLightMask.texture);
+		this.#textureSamplers.bind(TERRAIN_LIGHT_MASK_TEXTURE_UNIT, {
+			mipLevels: 1,
+			policy: this.#frameTextureFiltering,
+			samplingClass: "exact",
+			wrap: TextureWrapMode.Clamp,
+		});
+		gl.uniform1i(
+			this.#terrainProgram.uniforms.staticLightMask,
+			TERRAIN_LIGHT_MASK_TEXTURE_UNIT,
+		);
+		gl.activeTexture(gl.TEXTURE0);
+	}
+
+	/**
+	 * Upload one landblock's mask table, unless it has no lights for the mask to name.
+	 *
+	 * An unlit landblock leaves whatever the previous one uploaded in place. That cannot leak
+	 * light: the masked loop bounds every index by the live light count, which is zero here, so it
+	 * exits before reading any light slot. Skipping the upload is what keeps tiling free on the
+	 * majority of landblocks, only 629 of 5346 of which carry an authored light at all.
+	 */
+	#uploadTerrainLightMask(landblockLights: LandblockLights): void {
+		if (landblockLights.lights.length === 0) return;
+		const gl = this.#gl;
+		gl.activeTexture(gl.TEXTURE0 + TERRAIN_LIGHT_MASK_TEXTURE_UNIT);
+		uploadWebGL2TerrainLightMask(gl, landblockLights.cellMasks);
+		gl.activeTexture(gl.TEXTURE0);
+		this.#frameSelectionMetrics.terrainLightMaskUploads += 1;
 	}
 
 	#bindTexture2D(
@@ -2402,7 +2479,7 @@ export class WebGL2Renderer implements Renderer {
 		bindWebGL2StaticLights(
 			this.#gl,
 			program.uniforms,
-			scope === null ? EMPTY_LIGHTS : shading.staticLights(scope),
+			scope === null ? EMPTY_LIGHTS : shading.staticLights(scope).lights,
 			shading.anchorOrigin,
 			shading.authoredLightResponse,
 			this.#dynamicLightScratch,
@@ -2420,18 +2497,25 @@ export class WebGL2Renderer implements Renderer {
 		input: FrameInput,
 		landblockId: LandblockId,
 		viewpoint: { readonly x: number; readonly y: number; readonly z: number },
-	): readonly RuntimeLight[] {
-		if (!input.frameSettings.staticLightsEnabled) return EMPTY_LIGHTS;
-		if (input.outdoorLights.isEmpty) return EMPTY_LIGHTS;
+	): LandblockLights {
+		if (!input.frameSettings.staticLightsEnabled) {
+			return EMPTY_LANDBLOCK_LIGHTS;
+		}
+		if (input.outdoorLights.isEmpty) return EMPTY_LANDBLOCK_LIGHTS;
 		const reaching = input.outdoorLights.resolve(landblockId);
-		if (reaching.length <= MAX_STATIC_LIGHTS) return reaching;
+		if (reaching.lights.length <= MAX_STATIC_LIGHTS) return reaching;
 		const selected = selectNearestLights(
-			reaching,
+			reaching.lights,
 			viewpoint,
 			MAX_STATIC_LIGHTS,
 		);
 		this.#frameSelectionMetrics.droppedLights += selected.dropped;
-		return selected.lights;
+		// Selection reorders by distance from the camera, so the memoized masks no longer name
+		// these slots. Fall back to admitting every light rather than binding a stale table; the
+		// shader still bounds iteration by the live count, so the result is identical and only
+		// the tiling saving is lost. Unreachable on retail content, whose worst landblock carries
+		// 51 lights against a cap of 64.
+		return { lights: selected.lights, cellMasks: TERRAIN_LIGHT_MASK_ALL };
 	}
 
 	/** Start one object-owned phase with complete bindings for every active sampler. */

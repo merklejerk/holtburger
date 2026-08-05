@@ -5,6 +5,25 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 import type { RuntimeLight } from "./runtime-lights";
+import {
+	buildTerrainLightMasks,
+	TERRAIN_LIGHT_MASK_LENGTH,
+} from "./terrain-light-mask";
+
+/**
+ * One landblock's authored lights together with the terrain cell masks that index them.
+ *
+ * The two travel as one value because a mask is meaningless without the exact array whose slots
+ * its bits name. Anything that reorders the lights must replace the masks in the same step.
+ */
+export interface LandblockLights {
+	readonly lights: readonly RuntimeLight[];
+	/**
+	 * Row-major 8x8 grid of `TERRAIN_LIGHT_MASK_WORDS`-word masks, uploaded verbatim as the
+	 * terrain light mask texture.
+	 */
+	readonly cellMasks: Uint32Array;
+}
 
 /**
  * Per-landblock outdoor light sets, including lights owned by neighbours that reach across the
@@ -20,7 +39,7 @@ import type { RuntimeLight } from "./runtime-lights";
  */
 export class OutdoorLightIndex {
 	readonly #owned = new Map<OwnedLightScope, OwnedLights>();
-	readonly #effective = new Map<LandblockId, readonly RuntimeLight[]>();
+	readonly #effective = new Map<LandblockId, LandblockLights>();
 
 	/**
 	 * Replace one landblock layer's emitted lights. Passing an empty list removes its entry.
@@ -50,11 +69,14 @@ export class OutdoorLightIndex {
 	}
 
 	/**
-	 * Every light reaching the given landblock, its own plus any neighbour's that crosses in.
+	 * Every light reaching the given landblock, its own plus any neighbour's that crosses in,
+	 * with the terrain cell masks that index them.
 	 *
-	 * Returns a shared empty array for unlit landblocks so the common case allocates nothing.
+	 * Returns a shared empty value for unlit landblocks so the common case allocates nothing.
+	 * Masks are built here, under this same memoization, so tiling costs nothing per frame: they
+	 * are recomputed only when residency invalidates the gather that produced them.
 	 */
-	resolve(landblockId: LandblockId): readonly RuntimeLight[] {
+	resolve(landblockId: LandblockId): LandblockLights {
 		const memoized = this.#effective.get(landblockId);
 		if (memoized !== undefined) return memoized;
 		if (this.#owned.size === 0) return EMPTY;
@@ -63,7 +85,7 @@ export class OutdoorLightIndex {
 		return resolved;
 	}
 
-	#gather(landblockId: LandblockId): readonly RuntimeLight[] {
+	#gather(landblockId: LandblockId): LandblockLights {
 		const coordinates = getLandblockCoordinates(landblockId);
 		const minimumX = coordinates.x * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 		const maximumZ = -coordinates.y * OUTDOOR_LANDBLOCK_WORLD_SIZE;
@@ -89,7 +111,14 @@ export class OutdoorLightIndex {
 				}
 			}
 		}
-		return gathered.length === 0 ? EMPTY : gathered;
+		if (gathered.length === 0) return EMPTY;
+		return {
+			lights: gathered,
+			cellMasks: buildTerrainLightMasks(gathered, {
+				x: minimumX,
+				z: maximumZ,
+			}),
+		};
 	}
 }
 
@@ -119,4 +148,8 @@ interface OwnedLights {
 	readonly lights: readonly RuntimeLight[];
 }
 
-const EMPTY: readonly RuntimeLight[] = [];
+/** Shared unlit result: no lights, and a mask table that admits none. */
+const EMPTY: LandblockLights = {
+	lights: [],
+	cellMasks: new Uint32Array(TERRAIN_LIGHT_MASK_LENGTH),
+};

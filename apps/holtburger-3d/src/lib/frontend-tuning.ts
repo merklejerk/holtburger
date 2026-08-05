@@ -102,17 +102,18 @@ export const FRONTEND_TUNING = {
 		 */
 		outdoorAuthoredLights: {
 			/**
-			 * Applied to the authored intensity before falloff, so it shrinks the saturated core
-			 * rather than merely dimming it.
+			 * Applied to the authored intensity before falloff.
 			 *
-			 * Every lamp in the archive authors intensity 100, which retail only ever fed to its
-			 * hardware lights and its interior bake. Through the falloff we evaluate, 100 peaks
-			 * around eleven times the level where the per-channel clamp takes over, leaving a
-			 * flat blown-out disc across the inner half of every lamp's radius. This lands the
-			 * peak near twice the clamp instead, which keeps a bright core while shrinking the
-			 * clipped plateau to roughly a quarter of the radius.
+			 * Every lamp in the archive authors intensity 100, a value retail only ever fed to
+			 * its hardware lights and its interior bake. Through the falloff we evaluate it is
+			 * far too hot: unscaled it peaks around eleven times full lamp colour.
+			 *
+			 * Raised from the 0.17 that suited the old hard clamp. Evaluated lights now roll off
+			 * smoothly and never saturate, so a scale tuned to keep the clipped plateau small
+			 * reads dim instead. At 0.3 a median lamp peaks near 0.78 of its colour and decays
+			 * continuously to nothing.
 			 */
-			intensityScale: 0.17,
+			intensityScale: 0.3,
 			/**
 			 * Up-facing terrain brightness at or below which lamps contribute in full.
 			 *

@@ -47,10 +47,17 @@ vec3 safeNormal(vec3 normal) {
 
 ${POINT_LIGHT_FALLOFF_GLSL}
 
-// Dynamic lights cannot be baked because they move, so they evaluate here using the same
-// authored falloff the interior bake uses, including its per-channel clamp to the light's
-// own colour. That clamp is what keeps an authored intensity of 100 from washing the
-// surface to white instead of to lamp colour.
+// Evaluated lights share the authored falloff with the interior bake, but deliberately not its
+// per-channel clamp. Retail clamps because it bakes into dense EnvCell vertices, where a vertex
+// rarely lands on the peak and interpolation hides the resulting plateau. Terrain evaluates per
+// pixel -- it must, since its vertices sit 24 units apart against lamps reaching 6 -- so that
+// plateau becomes a literal flat disc on screen with a hard shoulder behind it.
+//
+// The roll-off x / (1 + x) is smooth instead: it approaches the lamp's colour without ever
+// reaching it, so there is no flat region at any radius, and it leaves the tail almost
+// unchanged. Deliberately not retail behaviour, because retail has none here -- its outdoor
+// pass binds only the sun and never lit terrain with an authored lamp at all. The bake keeps
+// retail's clamp exactly, since that path is genuinely grounded.
 vec3 accumulateLight(vec3 position, vec3 unitNormal, vec4 positionRange, vec4 colorIntensity) {
 	float scale = pointLightFalloff(
 		positionRange.xyz - position,
@@ -59,7 +66,7 @@ vec3 accumulateLight(vec3 position, vec3 unitNormal, vec4 positionRange, vec4 co
 		colorIntensity.a
 	);
 	if (scale <= 0.0) return vec3(0.0);
-	return min(scale * colorIntensity.rgb, colorIntensity.rgb);
+	return colorIntensity.rgb * (scale / (1.0 + scale));
 }
 
 vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {

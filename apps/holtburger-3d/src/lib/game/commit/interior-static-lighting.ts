@@ -41,10 +41,13 @@ export function placeObjectLights(
  * its per-channel clamp to the light's own color and its use of unnormalized vectors. Returns
  * null when no light reaches the geometry, which then carries no baked attribute at all.
  *
- * Retail bakes with the union of nearby visible cells' lights rather than only the owning
- * cell's (`add_static_to_global_lights` over `visible_cell_table`, acclient.c:335800), which is
- * what lets light spill through doorways. Callers pass every light in the landblock and rely on
- * the range cutoff, which is equivalent for static content.
+ * Retail's burn applies no per-cell visibility filter: it iterates the whole global static light
+ * list against every vertex (acclient.c:434617), and that list transitively accumulates every
+ * loaded cell's lights (`flush_cells` over `visible_cell_table`, acclient.c:335730), capped at
+ * the 40 nearest the viewer (acclient.c:44527). Callers here pass every light in the landblock
+ * and rely on the range cutoff, which matches retail in a connected interior — including light
+ * reaching through solid walls — while staying uncapped and camera-independent. See
+ * docs/lighting.md "The burn-in".
  */
 export function bakeStaticLight(
 	positions: Float32Array,

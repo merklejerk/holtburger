@@ -209,9 +209,24 @@ Two quirks worth knowing before matching retail exactly: with zero static lights
 is written **black**, not left alone (`acclient.c:434617-434684`), and the final write forces
 alpha to `0xFF`, discarding the per-vertex translucency alpha written at build time.
 
-Crucially, the bake uses the union of **nearby visible cells'** lights, not only the owning cell's:
-`CObjCell::add_static_to_global_lights` is called across `CEnvCell::visible_cell_table`
-(`acclient.c:335800`). That is what lets a torch light the corridor through a doorway.
+Crucially, the bake applies **no per-cell visibility filter at all**. The burn loop iterates every
+entry in the global `Render::world_lights.sorted_static_lights` against every vertex
+(`acclient.c:434617`); each light carries the id of the cell that registered it, and the burn never
+reads it. The stab lists gate only which cells _feed_ that global list: each loaded cell adds
+itself and its `stab_list` to `CEnvCell::visible_cell_table` (`grab_visible_cells`,
+`acclient.c:335978`), landblocks add their outdoor stablists (`acclient.c:337265`), and
+`flush_cells` (`acclient.c:335730`) re-grabs from every cell already in the table, so the set
+closes transitively over everything loaded. `CObjCell::add_static_to_global_lights`
+(`acclient.c:332891`) then pours each table cell's static lights into the global array through
+`Render::insert_light`, capped at `max_static_lights = 40` (`acclient.c:44527`) ranked nearest to
+the viewer.
+
+Two consequences follow. In a connected dungeon the global set converges on _every static light in
+the loaded interior_, with `calc_point_light`'s range test as the only spatial filter — so retail
+light does pass through solid walls whenever a lamp is within falloff range of the far side. And
+the result is viewer-dependent: the global list is zeroed and rebuilt on cell transitions
+(`acclient.c:140491`), and each mesh re-burns whenever the global light count changes — the cache
+key is a 7-bit count (`acclient.c:434596`).
 
 At draw time the burned-in color enters through the emissive slot
 (`FFEmissiveColorSource = FromVertex`, `acclient.c:434243`), so it **adds** to the ambient term
@@ -274,15 +289,17 @@ These are deliberate, and each produces output equivalent to retail:
 - **Sun and ambient evaluate in the vertex shader** for both landscape and meshes, rather than
   being baked per landblock. The formula is identical; evaluating it live makes a time-of-day
   change a uniform update instead of a re-bake of every loaded landblock.
-- **Interior static lights are still baked**, matching retail, but the bake gathers every light in
-  the landblock and relies on the authored range cutoff instead of consulting a visibility set.
-  This is _not_ equivalent to retail: `visible_cell_table` is occlusion-aware, so retail will
-  sometimes exclude a light that ours admits, and we can bleed light through a solid wall. In
-  exchange the bake is stable and camera-independent, where retail re-bakes as its visible set
-  changes. Distant bleed is negligible under the attenuation, but a light on a wall shared by two
-  rooms will reach both. The knob if that ever matters is per-cell PVS — already decoded as
-  `potentiallyVisibleEnvCellIds` — not the depth-continuous visibility islands, which would be too
-  tight and would stop light passing through doorways.
+- **Interior static lights are still baked**, matching retail, and the bake gathers every light in
+  the landblock with the authored range cutoff as the only spatial filter. That matches retail more
+  closely than it might appear: retail's burn also applies no per-cell visibility filter (see "The
+  burn-in" above), and in a connected dungeon its transitively-grabbed global set converges on the
+  same "everything loaded, range-filtered" input — including light bleeding through solid walls.
+  The genuine divergences are narrower. Retail caps the global set at the 40 lights nearest the
+  viewer and re-burns as that set churns; ours is uncapped, baked once, and camera-independent. And
+  a landblock holding two disconnected interiors cross-lights in our scheme where retail's
+  stab-list closure might not bridge them. Filtering the bake by per-cell PVS (decoded as
+  `visibleCellIds`) would be a deviation _from_ retail, not a parity fix — it is stricter than any
+  filter retail applies.
 - **Cell shell geometry is duplicated per cell** so each cell can carry its own bake. Retail could
   share less carefully because it constructed one mesh per cell. Shell structures are tiny — median
   10 vertices, maximum 113, 45,320 vertices across all 3,145 structures in the archive — so the

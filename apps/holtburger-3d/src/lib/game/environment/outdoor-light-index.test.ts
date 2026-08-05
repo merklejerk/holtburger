@@ -34,7 +34,7 @@ describe("OutdoorLightIndex", () => {
 	it("reports empty until a landblock installs a light", () => {
 		const index = new OutdoorLightIndex();
 		expect(index.isEmpty).toBe(true);
-		expect(index.resolve(landblock(1, 1))).toHaveLength(0);
+		expect(index.resolve(landblock(1, 1)).lights).toHaveLength(0);
 		index.install(landblock(1, 1), LandblockLayerKind.Objects, [
 			lightIn(1, 1, 96, -96),
 		]);
@@ -47,7 +47,7 @@ describe("OutdoorLightIndex", () => {
 		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
 			lightIn(2, 2, 96, -96, 1),
 		]);
-		expect(index.resolve(landblock(2, 2))).toHaveLength(1);
+		expect(index.resolve(landblock(2, 2)).lights).toHaveLength(1);
 	});
 
 	it("includes a neighbour's light whose reach crosses the shared boundary", () => {
@@ -56,7 +56,7 @@ describe("OutdoorLightIndex", () => {
 		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
 			lightIn(2, 2, 190, -96, 20),
 		]);
-		expect(index.resolve(landblock(3, 2))).toHaveLength(1);
+		expect(index.resolve(landblock(3, 2)).lights).toHaveLength(1);
 	});
 
 	it("excludes a neighbour's light that stops short of the boundary", () => {
@@ -64,7 +64,7 @@ describe("OutdoorLightIndex", () => {
 		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
 			lightIn(2, 2, 96, -96, 20),
 		]);
-		expect(index.resolve(landblock(3, 2))).toHaveLength(0);
+		expect(index.resolve(landblock(3, 2)).lights).toHaveLength(0);
 	});
 
 	it("ignores landblocks beyond the immediate neighbourhood", () => {
@@ -72,7 +72,7 @@ describe("OutdoorLightIndex", () => {
 		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
 			lightIn(2, 2, 190, -96, 20),
 		]);
-		expect(index.resolve(landblock(5, 2))).toHaveLength(0);
+		expect(index.resolve(landblock(5, 2)).lights).toHaveLength(0);
 	});
 
 	// All three outdoor static layers publish per landblock, and only Objects ever emits. A
@@ -85,18 +85,18 @@ describe("OutdoorLightIndex", () => {
 		]);
 		index.install(landblock(2, 2), LandblockLayerKind.Buildings, []);
 		index.install(landblock(2, 2), LandblockLayerKind.Generated, []);
-		expect(index.resolve(landblock(2, 2))).toHaveLength(1);
+		expect(index.resolve(landblock(2, 2)).lights).toHaveLength(1);
 		expect(index.isEmpty).toBe(false);
 	});
 
 	/** A layer arriving later must not be masked by a memoized empty result. */
 	it("invalidates memoized sets when a neighbour installs afterwards", () => {
 		const index = new OutdoorLightIndex();
-		expect(index.resolve(landblock(3, 2))).toHaveLength(0);
+		expect(index.resolve(landblock(3, 2)).lights).toHaveLength(0);
 		index.install(landblock(2, 2), LandblockLayerKind.Objects, [
 			lightIn(2, 2, 190, -96, 20),
 		]);
-		expect(index.resolve(landblock(3, 2))).toHaveLength(1);
+		expect(index.resolve(landblock(3, 2)).lights).toHaveLength(1);
 	});
 
 	it("treats an empty install as a removal", () => {

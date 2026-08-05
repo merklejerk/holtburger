@@ -21,6 +21,7 @@ const sharedGlslModules = {
 const sharedConstantModules = [
 	"../src/lib/game/environment/point-light-falloff.ts",
 	"../src/lib/game/environment/runtime-lights.ts",
+	"../src/lib/game/landblocks.ts",
 	"../src/lib/game/renderer/webgl2-lighting.ts",
 ];
 const source = await readFile(shaderSourcePath, "utf8");

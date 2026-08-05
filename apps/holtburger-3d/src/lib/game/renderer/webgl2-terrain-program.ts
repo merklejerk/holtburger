@@ -1,3 +1,4 @@
+import { OUTDOOR_TERRAIN_GRID_CELLS } from "../landblocks";
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
@@ -58,6 +59,9 @@ precision highp usampler2D;
 
 uniform usampler2D uSurfaceField;
 uniform usampler2D uComposition;
+// Per-cell static light masks, one RG32UI texel per terrain cell. Bit n of the pair names slot n
+// of the static light uniform array.
+uniform usampler2D uStaticLightMask;
 uniform sampler2DArray uColors;
 uniform sampler2DArray uBlendMasks;
 uniform sampler2DArray uRoadMasks;
@@ -81,6 +85,21 @@ in vec3 vSurfaceNormal;
 out vec4 fragmentColor;
 
 const uint ROAD_TERRAIN_TYPE = 32u;
+const int LIGHT_GRID_CELLS = ${OUTDOOR_TERRAIN_GRID_CELLS};
+
+// The light grid is always the landblock's authored 8x8, deliberately independent of the surface
+// field: that field's resolution drops with the LOD stride (8x8, 4x4, 2x2), so reusing its cell
+// would make a lamp's reach coarsen with distance and shift the lit area between LODs.
+vec3 evaluateMaskedStaticLights(vec3 position, vec3 unitNormal) {
+	ivec2 cell = clamp(
+		ivec2(vGridUv * float(LIGHT_GRID_CELLS)),
+		ivec2(0),
+		ivec2(LIGHT_GRID_CELLS - 1)
+	);
+	uvec2 mask = texelFetch(uStaticLightMask, cell, 0).rg;
+	return accumulateMaskedWord(position, unitNormal, mask.x, 0)
+		+ accumulateMaskedWord(position, unitNormal, mask.y, 32);
+}
 
 uvec4 compositionRecord(int column, int row) {
 	return texelFetch(uComposition, ivec2(column, row), 0);
@@ -250,9 +269,11 @@ void main() {
 	// Lighting modulates the complete surface albedo, then fog applies as a raster stage. The
 	// directional terms arrive interpolated; point lights evaluate here so a lamp produces a pool
 	// rather than a whole-quad gradient.
+	vec3 surfaceNormal = safeNormal(vSurfaceNormal);
 	color *= min(
 		vAmbientSun
-			+ evaluateRuntimeLights(vAnchoredPosition, safeNormal(vSurfaceNormal)),
+			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
+			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
 		vec3(1.0)
 	);
 	color = applyDistanceFog(color, vViewerDistance);
@@ -289,6 +310,7 @@ export interface WebGL2TerrainProgram {
 		readonly roadMasks: WebGLUniformLocation;
 		readonly sunColor: WebGLUniformLocation;
 		readonly sunVector: WebGLUniformLocation;
+		readonly staticLightMask: WebGLUniformLocation;
 		readonly surfaceField: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 	};
@@ -379,6 +401,7 @@ export function createWebGL2TerrainProgram(
 				roadMasks: requireWebGL2Uniform(gl, program, "uRoadMasks"),
 				sunColor: requireWebGL2Uniform(gl, program, "uSunColor"),
 				sunVector: requireWebGL2Uniform(gl, program, "uSunVector"),
+				staticLightMask: requireWebGL2Uniform(gl, program, "uStaticLightMask"),
 				surfaceField: requireWebGL2Uniform(gl, program, "uSurfaceField"),
 				view: requireWebGL2Uniform(gl, program, "uView"),
 			},

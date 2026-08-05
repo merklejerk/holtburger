@@ -90,7 +90,7 @@ vec3 accumulateLight(vec3 position, vec3 unitNormal, vec4 positionRange, vec4 co
 	return colorIntensity.rgb * (ceiling * scale / (ceiling + scale));
 }
 
-vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {
+vec3 evaluateDynamicLights(vec3 position, vec3 unitNormal) {
 	vec3 total = vec3(0.0);
 	for (int index = 0; index < uDynamicLightCount; index += 1) {
 		total += accumulateLight(
@@ -100,6 +100,38 @@ vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {
 			uDynamicLightColorIntensity[index]
 		);
 	}
+	return total;
+}
+
+// Iterate one 32-light mask word, visiting only the slots whose bits are set. Terrain owns the
+// only caller; objects evaluate their whole set and never pay this.
+//
+// findLSB is GLSL ES 3.10 and so unavailable here. Isolating the lowest set bit as
+// bits & -bits leaves a power of two, whose base-2 logarithm is exactly its float exponent --
+// lossless for every power of two through 2^31, which is the whole word.
+//
+// Bits ascend, so the first index at or past the live count ends the word: every later bit
+// names a higher slot.
+vec3 accumulateMaskedWord(vec3 position, vec3 unitNormal, uint bits, int base) {
+	vec3 total = vec3(0.0);
+	for (int iteration = 0; iteration < 32; iteration += 1) {
+		if (bits == 0u) break;
+		uint lowest = bits & (0u - bits);
+		bits ^= lowest;
+		int index = base + int((floatBitsToUint(float(lowest)) >> 23u) - 127u);
+		if (index >= uStaticLightCount) break;
+		total += accumulateLight(
+			position,
+			unitNormal,
+			uStaticLightPositionRange[index],
+			uStaticLightColorIntensity[index]
+		);
+	}
+	return total;
+}
+
+vec3 evaluateStaticLights(vec3 position, vec3 unitNormal) {
+	vec3 total = vec3(0.0);
 	for (int index = 0; index < uStaticLightCount; index += 1) {
 		total += accumulateLight(
 			position,
@@ -109,6 +141,11 @@ vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {
 		);
 	}
 	return total;
+}
+
+vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {
+	return evaluateDynamicLights(position, unitNormal)
+		+ evaluateStaticLights(position, unitNormal);
 }
 
 // Retail's fixed-function vertex color sums emissive, ambient and the diffuse light terms

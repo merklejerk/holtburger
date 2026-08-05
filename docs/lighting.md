@@ -309,6 +309,15 @@ These are deliberate, and each produces output equivalent to retail:
   lights are scoped per landblock and cached against content residency, while dynamic lights —
   currently just the viewer light — form one small camera-selected set rebuilt each frame. The
   viewer light is not a special case; it is simply the first entry in the dynamic set.
+- **Terrain iterates only the static lights that reach the cell being shaded.** Each landblock
+  carries an 8x8 grid of two-word bit masks, one bit per slot of its uploaded light array, built
+  alongside the light set under the same residency-scoped memoization and uploaded as an `RG32UI`
+  texture for landblocks that have any lights. The terrain fragment reads its cell's mask and
+  walks only the set bits. This changes iteration, never output: the mask admits every light whose
+  sphere reaches the cell, so the sum is identical to evaluating the whole set, and it was verified
+  pixel-identical against the untiled path. Objects are deliberately excluded — they evaluate per
+  vertex over the whole set — and dynamic lights stay untiled, since bucketing a moving light would
+  mean rebuilding grids every frame.
 - **Outdoor geometry receives authored point lights, which retail never did.** Retail's outdoor
   pass binds only the sun, so its lamps cast nothing; ours light terrain, buildings, objects, and
   generated scenery. Emitters come from the Objects layer while receivers live in layers with

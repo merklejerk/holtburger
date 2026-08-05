@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Vec3 } from "../math/types";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { ResolvedSceneLighting } from "./scene-environment";
 import {
 	OBJECT_AMBIENT_SUN_SCALE,
@@ -95,7 +96,7 @@ describe("sealed interior ambient", () => {
 describe("resolveAuthoredLightResponse", () => {
 	// Retail's outdoor pass never rendered authored lamps at all, so the daytime half of this
 	// policy is ours: a lamp must not pin midday ground to full white.
-	it("passes authored lamps through in the dark and suppresses them at noon", () => {
+	it("passes authored lamps through in the dark and floors them at noon", () => {
 		const night = resolveAuthoredLightResponse({
 			ambientLevel: 0.4,
 			ambientColor: { red: 1, green: 0.39, blue: 0.78, alpha: 1 },
@@ -109,7 +110,10 @@ describe("resolveAuthoredLightResponse", () => {
 			sunColor: { red: 0.59, green: 0.84, blue: 0.98, alpha: 1 },
 		});
 		expect(night).toBe(1);
-		expect(noon).toBe(0);
+		// Not zero: lamps that fade to nothing read as switching off.
+		expect(noon).toBe(
+			FRONTEND_TUNING.rendering.outdoorAuthoredLights.minimumResponse,
+		);
 	});
 
 	it("ramps monotonically as the sun climbs", () => {

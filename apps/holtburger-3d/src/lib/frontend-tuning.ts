@@ -126,8 +126,18 @@ export const FRONTEND_TUNING = {
 			 * near 0.24 at midnight and 0.90 at noon.
 			 */
 			fullResponseBrightness: 0.3,
-			/** Up-facing terrain brightness at or above which lamps contribute nothing. */
-			noResponseBrightness: 0.8,
+			/** Up-facing terrain brightness at or above which lamps sit at `minimumResponse`. */
+			minimumResponseBrightness: 0.8,
+			/**
+			 * Fraction of a lamp that survives full daylight.
+			 *
+			 * Fading to exactly zero reads as lamps switching off. A small floor keeps them
+			 * faintly present instead. Daytime terrain already sits near 0.9 and the shader
+			 * clamps at 1, so a floor this size reads as a subtle brightening in the pool core
+			 * rather than a visible pool; raise it toward 0.3 to make lamps genuinely readable
+			 * at midday, at the cost of looking lit in daylight.
+			 */
+			minimumResponse: 0.15,
 		},
 		terrainDetailFade: {
 			/** World distance where terrain detail-texture fading begins. */

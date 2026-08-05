@@ -41,7 +41,10 @@ Static checks alone are not sufficient evidence for those changes.
 Use `npm run harness:browser -- ...` as the canonical non-interactive browser
 playground. It can exercise production content and synthetic fixtures while
 collecting machine-readable state, browser errors, timings, portal evidence,
-and screenshots. It is not limited to terrain.
+and screenshots. It is not limited to terrain. Always run the harness using
+a deterministic port based on your current branch, because another agent may
+be working on the same machine under a different worktree and running their
+own harness instance.
 
 ### Renderer Profiling
 

@@ -185,6 +185,8 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: true,
 			viewerLightEnabled:
 				FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
+			staticLightsEnabled:
+				FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
 			envCellRenderMode: "portal",
 			quality: {
 				minimumObjectFootprintPixelArea:
@@ -200,6 +202,7 @@ describe("GameRuntime view and interest control", () => {
 		runtime.setFrameSettings({
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
+			staticLightsEnabled: true,
 			envCellRenderMode: "flat",
 			quality: {
 				minimumObjectFootprintPixelArea: 8,
@@ -211,6 +214,7 @@ describe("GameRuntime view and interest control", () => {
 		expect(frames[1]?.frameSettings).toEqual({
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
+			staticLightsEnabled: true,
 			envCellRenderMode: "flat",
 			quality: {
 				minimumObjectFootprintPixelArea: 8,

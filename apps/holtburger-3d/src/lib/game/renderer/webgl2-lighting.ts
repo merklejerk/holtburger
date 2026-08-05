@@ -7,6 +7,23 @@ import {
 } from "../environment/runtime-lights";
 
 /**
+ * Ceiling on one evaluated light's contribution, as a fraction of its own colour.
+ *
+ * The roll-off approaches this asymptotically without reaching it, so it caps peak brightness
+ * independently of `intensityScale`, which instead governs how quickly a lamp climbs toward the
+ * cap and therefore how large its bright region looks. Lower to dim the hottest point without
+ * shrinking the pool; 1 is the plain `x / (1 + x)` curve.
+ *
+ * Lives here rather than in `FRONTEND_TUNING` because it crosses into GLSL: the shader validator
+ * pins shader-facing numbers by reading them out of a module as literals, which it cannot do
+ * through a nested object. Same reason the wrap constants sit in `point-light-falloff.ts`.
+ *
+ * Module-private: the only consumers are the GLSL below and the validator, which reads source
+ * text rather than importing.
+ */
+const EVALUATED_LIGHT_ROLL_OFF_CEILING = 1;
+
+/**
  * Shared vertex-stage lighting for terrain and objects.
  *
  * Retail evaluates the same shape in two places: `CLandBlockStruct::calc_lighting`
@@ -53,11 +70,14 @@ ${POINT_LIGHT_FALLOFF_GLSL}
 // pixel -- it must, since its vertices sit 24 units apart against lamps reaching 6 -- so that
 // plateau becomes a literal flat disc on screen with a hard shoulder behind it.
 //
-// The roll-off x / (1 + x) is smooth instead: it approaches the lamp's colour without ever
-// reaching it, so there is no flat region at any radius, and it leaves the tail almost
-// unchanged. Deliberately not retail behaviour, because retail has none here -- its outdoor
-// pass binds only the sun and never lit terrain with an authored lamp at all. The bake keeps
-// retail's clamp exactly, since that path is genuinely grounded.
+// The roll-off k*x / (k + x) is smooth instead: it approaches k without ever reaching it, so
+// there is no flat region at any radius, and it leaves the tail almost unchanged. Deliberately
+// not retail behaviour, because retail has none here -- its outdoor pass binds only the sun and
+// never lit terrain with an authored lamp at all. The bake keeps retail's clamp exactly, since
+// that path is genuinely grounded.
+//
+// float() wraps the interpolated ceiling so the expression stays float-typed whether the value
+// stringifies with a decimal point or without one.
 vec3 accumulateLight(vec3 position, vec3 unitNormal, vec4 positionRange, vec4 colorIntensity) {
 	float scale = pointLightFalloff(
 		positionRange.xyz - position,
@@ -66,7 +86,8 @@ vec3 accumulateLight(vec3 position, vec3 unitNormal, vec4 positionRange, vec4 co
 		colorIntensity.a
 	);
 	if (scale <= 0.0) return vec3(0.0);
-	return colorIntensity.rgb * (scale / (1.0 + scale));
+	float ceiling = float(${EVALUATED_LIGHT_ROLL_OFF_CEILING});
+	return colorIntensity.rgb * (ceiling * scale / (ceiling + scale));
 }
 
 vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {

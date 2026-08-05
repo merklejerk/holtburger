@@ -315,8 +315,11 @@ These are deliberate, and each produces output equivalent to retail:
   full-colour. That is invisible in retail because it bakes into dense EnvCell vertices, where a
   vertex rarely lands on the peak and interpolation hides the plateau. Terrain evaluates per pixel
   and cannot hide it: the plateau becomes a literal flat disc with a hard shoulder behind it.
-  Evaluated lights therefore use `x / (1 + x)`, which approaches the lamp's colour without ever
-  reaching it, so no radius is flat and the tail is nearly unchanged. The bake keeps retail's clamp
+  Evaluated lights therefore use `k·x / (k + x)`, which approaches `k` without ever reaching it,
+  so no radius is flat and the tail is nearly unchanged. `k` is
+  `EVALUATED_LIGHT_ROLL_OFF_CEILING`, capping peak brightness as a fraction of lamp colour
+  independently of `intensityScale`, which instead governs how fast a lamp climbs toward that cap
+  and so how large its bright region reads. The bake keeps retail's clamp
   exactly. This is not a second falloff curve — the distance function is still shared — and it has
   no retail grounding because retail has none to give: its outdoor pass binds only the sun and it
   never lit terrain with an authored lamp.

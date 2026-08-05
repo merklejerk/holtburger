@@ -21,6 +21,7 @@ const sharedGlslModules = {
 const sharedConstantModules = [
 	"../src/lib/game/environment/point-light-falloff.ts",
 	"../src/lib/game/environment/runtime-lights.ts",
+	"../src/lib/game/renderer/webgl2-lighting.ts",
 ];
 const source = await readFile(shaderSourcePath, "utf8");
 const substitutions = new Map(
@@ -44,7 +45,9 @@ for (const relativePath of sharedConstantModules) {
 		"utf8",
 	);
 	for (const match of moduleSource.matchAll(
-		/export const ([A-Z][A-Z0-9_]*) = ([-0-9.]+);/g,
+		// Shader-facing constants need not be exported: some are consumed only by the GLSL in
+		// their own module, and exporting them purely to be validated would read as dead code.
+		/(?:export )?const ([A-Z][A-Z0-9_]*) = ([-0-9.]+);/g,
 	)) {
 		substitutions.set(match[1], match[2]);
 	}

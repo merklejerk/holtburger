@@ -99,6 +99,11 @@ export const FRONTEND_TUNING = {
 		 * Retail's outdoor pass binds only the sun, so its lamps cast nothing at any hour. We
 		 * light outdoor geometry with them deliberately, which makes both the magnitude and the
 		 * time-of-day half of that policy ours to define rather than inherit.
+		 *
+		 * One further knob lives outside this file: `EVALUATED_LIGHT_ROLL_OFF_CEILING` in
+		 * `game/renderer/webgl2-lighting.ts` caps an evaluated light's peak as a fraction of its
+		 * colour. Shader-facing numbers stay beside their GLSL so the shader validator can pin
+		 * them as literals, which it cannot do through this nested object.
 		 */
 		outdoorAuthoredLights: {
 			/**

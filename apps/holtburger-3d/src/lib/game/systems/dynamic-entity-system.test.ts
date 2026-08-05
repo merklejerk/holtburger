@@ -14,7 +14,7 @@ import type {
 	ResolvedMaterial,
 	ResolvedObjectPresentation,
 } from "../resolution/presentation";
-import { SceneGraph } from "../scene";
+import { INCLUDE_ALL_SCENE_CULLING_GROUPS, SceneGraph } from "../scene";
 import type { DynamicPresentationSample } from "./animation-system";
 import { DynamicEntitySystem } from "./dynamic-entity-system";
 import {
@@ -208,6 +208,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			scene.queryFlatFrustum(
 				{ cameraPosition: Vec3.zero(), planes: [] },
 				"0x0001ffff",
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
 			).entries,
 		).toContain(installation.nodeIds[0]);
 	});
@@ -349,6 +350,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			scene.queryFlatFrustum(
 				{ cameraPosition: Vec3.zero(), planes: [] },
 				"0x0001ffff",
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
 			).entries,
 		).toContain(nodeId);
 	});

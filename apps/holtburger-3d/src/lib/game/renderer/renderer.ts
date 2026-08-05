@@ -3,6 +3,7 @@ import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import type { LandblockLights } from "../environment/outdoor-light-index";
+import { LandblockLayerKind } from "../runtime/scene-interest";
 
 /** Minimal read side of the outdoor light index the renderer depends on. */
 export interface OutdoorLightLookup {
@@ -14,6 +15,11 @@ import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
+
+/** Per-layer draw selection, independent from scene interest and resident resources. */
+export type RenderLayerVisibility = Readonly<
+	Record<LandblockLayerKind, boolean>
+>;
 
 /** Dynamic renderer quality choices independent from content and resource identity. */
 interface RenderQualitySettings {
@@ -27,6 +33,8 @@ interface RenderQualitySettings {
 
 /** Dynamic display choices applied to a frame without changing world data or GPU setup. */
 export interface FrameSettings {
+	/** Materialized landblock layers that may contribute work and draws to this frame. */
+	readonly layerVisibility: RenderLayerVisibility;
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
@@ -46,6 +54,13 @@ export interface FrameSettings {
 
 /** Default dynamic display choices matching the region-authored presentation. */
 export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
+	layerVisibility: {
+		[LandblockLayerKind.Terrain]: true,
+		[LandblockLayerKind.Buildings]: true,
+		[LandblockLayerKind.Objects]: true,
+		[LandblockLayerKind.Generated]: true,
+		[LandblockLayerKind.EnvCells]: true,
+	},
 	distanceFogEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
 	viewerLightEnabled:

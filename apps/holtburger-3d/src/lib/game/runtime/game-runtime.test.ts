@@ -12,7 +12,11 @@ import type {
 	AuthoredDynamicSource,
 	ResolvedOutdoorStaticLayerSource,
 } from "../resolution/landblock-layer";
-import type { FrameSelectionMetrics, Renderer } from "../renderer/renderer";
+import {
+	DEFAULT_FRAME_SETTINGS,
+	type FrameSelectionMetrics,
+	type Renderer,
+} from "../renderer/renderer";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
@@ -182,6 +186,7 @@ describe("GameRuntime view and interest control", () => {
 		expect(requestedLayers).toEqual([{ id: "0x1010ffff", layer: "terrain" }]);
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
 		expect(frames[0]?.frameSettings).toEqual({
+			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			distanceFogEnabled: true,
 			viewerLightEnabled:
 				FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
@@ -200,6 +205,7 @@ describe("GameRuntime view and interest control", () => {
 			},
 		});
 		runtime.setFrameSettings({
+			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			staticLightsEnabled: true,
@@ -212,6 +218,7 @@ describe("GameRuntime view and interest control", () => {
 		});
 		runtime.render(2);
 		expect(frames[1]?.frameSettings).toEqual({
+			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			staticLightsEnabled: true,

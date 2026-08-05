@@ -681,12 +681,12 @@ h1 {
 
 .explorer-lod-control {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
+	grid-template-columns: auto minmax(0, 1fr) auto;
 	gap: 3px 8px;
 	align-items: center;
 }
 
-.explorer-lod-control > span {
+.explorer-lod-control > label {
 	color: var(--ac-ink);
 	font-size: 0.76rem;
 }
@@ -703,6 +703,42 @@ h1 {
 	grid-column: 1 / -1;
 	width: 100%;
 	padding: 0;
+}
+
+.explorer-layer-visibility {
+	display: grid;
+	width: 18px;
+	height: 18px;
+	padding: 2px;
+	border: 1px solid rgb(119 91 44 / 0.8);
+	background: rgb(25 16 10 / 0.7);
+	color: var(--ac-ink-muted);
+	cursor: pointer;
+	place-items: center;
+}
+
+.explorer-layer-visibility:hover:not(:disabled),
+.explorer-layer-visibility:focus-visible {
+	border-color: var(--ac-gold);
+	color: var(--ac-ink);
+}
+
+.explorer-layer-visibility.layer-hidden {
+	color: rgb(139 111 94 / 0.72);
+}
+
+.explorer-layer-visibility svg {
+	width: 13px;
+	height: 13px;
+	fill: none;
+	stroke: currentColor;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 1.8;
+}
+
+.explorer-layer-visibility .visibility-slash {
+	stroke-width: 2.4;
 }
 
 .explorer-world-panel input[type="range"] {

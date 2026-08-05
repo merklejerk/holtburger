@@ -26,6 +26,7 @@ import type {
 	ResolvedSceneBounds,
 	ScenePointResidencyCandidates,
 	VisibleScene,
+	SceneCullingGroupFilter,
 } from ".";
 import { cellContainsLandblockPoint } from "./cell-containment";
 import {
@@ -358,13 +359,14 @@ export class SceneGraph {
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
 		scopes: readonly SceneScope[],
+		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
 		this.#selectedScopeKeys.clear();
 		for (const scope of scopes) {
 			this.#requireResidentScope(scope);
 			this.#selectedScopeKeys.add(scopeKey(scope));
 		}
-		this.#selectEntries(frustum, anchorLandblockId);
+		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter);
 		return this.#visibleScene;
 	}
 
@@ -372,13 +374,14 @@ export class SceneGraph {
 	queryFlatFrustum(
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
+		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
 		this.#selectedScopeKeys.clear();
 		this.#selectedScopeKeys.add(scopeKey({ kind: "outdoor" }));
 		for (const { scope } of this.#envCellScopes.values()) {
 			this.#selectedScopeKeys.add(scopeKey(scope));
 		}
-		this.#selectEntries(frustum, anchorLandblockId);
+		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter);
 		return this.#visibleScene;
 	}
 
@@ -431,13 +434,15 @@ export class SceneGraph {
 	#selectEntries(
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
+		cullingGroupFilter: SceneCullingGroupFilter,
 	): void {
 		this.#visibleEntries.length = 0;
 		for (const scope of this.#selectedScopeKeys) {
 			const landblockGroups = this.#cullingGroups.get(scope);
 			if (!landblockGroups) continue;
 			for (const groups of landblockGroups.values()) {
-				for (const group of groups.values()) {
+				for (const [cullingGroup, group] of groups) {
+					if (!cullingGroupFilter(cullingGroup)) continue;
 					const bounds = this.#resolveCullingGroupBounds(group);
 					if (
 						!bounds ||

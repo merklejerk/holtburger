@@ -15,10 +15,17 @@
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 	import type { TextureFilteringPolicy } from "../lib/game/renderer/texture-filtering-policy";
+	import type { RenderLayerVisibility } from "../lib/game/renderer/renderer";
+	import type { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
 
 	type ExplorerTabId =
-		"world" | "frame" | "textures" | "assets" | "entities" | "logs";
+		| "world"
+		| "frame"
+		| "textures"
+		| "assets"
+		| "entities"
+		| "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -53,6 +60,11 @@
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
+		readonly layerVisibility: RenderLayerVisibility;
+		readonly updateLayerVisibility: (
+			layer: LandblockLayerKind,
+			visible: boolean,
+		) => void;
 		/** Effective filterable texture quality selected for the next frame. */
 		readonly textureFiltering: TextureFilteringPolicy;
 		/** Device-supported texture filtering choices in display order. */
@@ -90,6 +102,8 @@
 		updateClockFollowing,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
+		layerVisibility,
+		updateLayerVisibility,
 		textureFiltering,
 		textureFilteringOptions,
 		maximumTextureAnisotropy,
@@ -210,6 +224,8 @@
 								{updateClockFollowing}
 								{envCellRenderMode}
 								{updateEnvCellRenderMode}
+								{layerVisibility}
+								{updateLayerVisibility}
 								{textureFiltering}
 								{textureFilteringOptions}
 								{maximumTextureAnisotropy}

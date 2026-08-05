@@ -6,6 +6,7 @@ import type {
 	SceneTopologyView,
 	VisibleScene,
 } from "../scene";
+import { INCLUDE_ALL_SCENE_CULLING_GROUPS } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { TextureArrayBinding } from "../textures/texture-manager";
 import type {
@@ -139,10 +140,17 @@ describe("RenderWorld", () => {
 			},
 		});
 
-		expect(world.queryScopesScene(FRUSTUM, "0001", [{ kind: "outdoor" }])).toBe(
-			VISIBLE_SCENE,
-		);
-		expect(world.queryFlatScene(FRUSTUM, "0001")).toBe(VISIBLE_SCENE);
+		expect(
+			world.queryScopesScene(
+				FRUSTUM,
+				"0001",
+				[{ kind: "outdoor" }],
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			),
+		).toBe(VISIBLE_SCENE);
+		expect(
+			world.queryFlatScene(FRUSTUM, "0001", INCLUDE_ALL_SCENE_CULLING_GROUPS),
+		).toBe(VISIBLE_SCENE);
 		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
 		expect(world.resolveTerrainDrawUnit("scene-node:1", "0002")).toBe(TERRAIN);
 		expect(

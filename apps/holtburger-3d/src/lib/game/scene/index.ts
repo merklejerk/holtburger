@@ -169,6 +169,13 @@ export interface VisibleScene {
 	readonly entries: readonly SceneNodeId[];
 }
 
+/** Frame-scoped producer-group predicate applied before broad-phase bounds work. */
+export type SceneCullingGroupFilter = (cullingGroup: string) => boolean;
+
+/** Explicit unfiltered selection policy for callers outside renderer presentation. */
+export const INCLUDE_ALL_SCENE_CULLING_GROUPS: SceneCullingGroupFilter = () =>
+	true;
+
 /** One scope retained by the renderer-facing topology view. */
 export interface SceneTopologyScope {
 	readonly scope: SceneScope;

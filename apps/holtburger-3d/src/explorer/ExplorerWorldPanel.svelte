@@ -10,7 +10,12 @@
 	} from "./explorer-lod";
 	import { parseResidenceInput } from "./world-input";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
-	import type { EnvCellRenderMode } from "../lib/game/renderer/renderer";
+	import type {
+		EnvCellRenderMode,
+		RenderLayerVisibility,
+	} from "../lib/game/renderer/renderer";
+	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
+	import ExplorerLayerVisibilityButton from "./ExplorerLayerVisibilityButton.svelte";
 	import {
 		textureFilteringPolicyLabel,
 		type TextureFilteringPolicy,
@@ -41,6 +46,12 @@
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
+		/** Renderer-only layer switches; these do not alter requested scene interest. */
+		readonly layerVisibility: RenderLayerVisibility;
+		readonly updateLayerVisibility: (
+			layer: LandblockLayerKind,
+			visible: boolean,
+		) => void;
 		/** Effective filterable texture quality selected for the next frame. */
 		readonly textureFiltering: TextureFilteringPolicy;
 		/** Device-supported texture filtering choices in display order. */
@@ -65,6 +76,8 @@
 		updateClockFollowing,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
+		layerVisibility,
+		updateLayerVisibility,
 		textureFiltering,
 		textureFilteringOptions,
 		maximumTextureAnisotropy,
@@ -152,10 +165,17 @@
 				aria-label="Scene interest level of detail"
 			>
 				<p class="ac-section-label">Outdoor LoD</p>
-				<label class="explorer-lod-control">
-					<span>Terrain</span>
+				<div class="explorer-lod-control">
+					<ExplorerLayerVisibilityButton
+						label="terrain"
+						visible={layerVisibility[LandblockLayerKind.Terrain]}
+						updateVisible={(visible) =>
+							updateLayerVisibility(LandblockLayerKind.Terrain, visible)}
+					/>
+					<label for="explorer-lod-terrain">Terrain</label>
 					<strong>{formatExplorerLodRadius(lod.terrainRadius)}</strong>
 					<input
+						id="explorer-lod-terrain"
 						max={FRONTEND_TUNING.explorer.lod.maximumRadius}
 						min={FRONTEND_TUNING.explorer.lod.minimumRadius}
 						step="1"
@@ -163,11 +183,18 @@
 						value={lod.terrainRadius}
 						oninput={(event) => updateRadius("terrain", event)}
 					/>
-				</label>
-				<label class="explorer-lod-control">
-					<span>Buildings</span>
+				</div>
+				<div class="explorer-lod-control">
+					<ExplorerLayerVisibilityButton
+						label="building"
+						visible={layerVisibility[LandblockLayerKind.Buildings]}
+						updateVisible={(visible) =>
+							updateLayerVisibility(LandblockLayerKind.Buildings, visible)}
+					/>
+					<label for="explorer-lod-buildings">Buildings</label>
 					<strong>{formatExplorerLodRadius(lod.buildingRadius)}</strong>
 					<input
+						id="explorer-lod-buildings"
 						max={lod.terrainRadius}
 						min="-1"
 						step="1"
@@ -175,11 +202,18 @@
 						value={lod.buildingRadius ?? -1}
 						oninput={(event) => updateRadius("buildings", event)}
 					/>
-				</label>
-				<label class="explorer-lod-control">
-					<span>Explicit objects</span>
+				</div>
+				<div class="explorer-lod-control">
+					<ExplorerLayerVisibilityButton
+						label="explicit object"
+						visible={layerVisibility[LandblockLayerKind.Objects]}
+						updateVisible={(visible) =>
+							updateLayerVisibility(LandblockLayerKind.Objects, visible)}
+					/>
+					<label for="explorer-lod-objects">Explicit objects</label>
 					<strong>{formatExplorerLodRadius(lod.explicitObjectRadius)}</strong>
 					<input
+						id="explorer-lod-objects"
 						disabled={lod.buildingRadius === null}
 						max={lod.buildingRadius ?? -1}
 						min="-1"
@@ -188,11 +222,18 @@
 						value={lod.explicitObjectRadius ?? -1}
 						oninput={(event) => updateRadius("explicitObjects", event)}
 					/>
-				</label>
-				<label class="explorer-lod-control">
-					<span>Generated scenery</span>
+				</div>
+				<div class="explorer-lod-control">
+					<ExplorerLayerVisibilityButton
+						label="generated scenery"
+						visible={layerVisibility[LandblockLayerKind.Generated]}
+						updateVisible={(visible) =>
+							updateLayerVisibility(LandblockLayerKind.Generated, visible)}
+					/>
+					<label for="explorer-lod-generated">Generated scenery</label>
 					<strong>{formatExplorerLodRadius(lod.generatedObjectRadius)}</strong>
 					<input
+						id="explorer-lod-generated"
 						disabled={lod.buildingRadius === null}
 						max={lod.buildingRadius ?? -1}
 						min="-1"
@@ -201,11 +242,18 @@
 						value={lod.generatedObjectRadius ?? -1}
 						oninput={(event) => updateRadius("generatedObjects", event)}
 					/>
-				</label>
-				<label class="explorer-lod-control">
-					<span>Env cells</span>
+				</div>
+				<div class="explorer-lod-control">
+					<ExplorerLayerVisibilityButton
+						label="environment cell"
+						visible={layerVisibility[LandblockLayerKind.EnvCells]}
+						updateVisible={(visible) =>
+							updateLayerVisibility(LandblockLayerKind.EnvCells, visible)}
+					/>
+					<label for="explorer-lod-env-cells">Env cells</label>
 					<strong>{formatExplorerLodRadius(lod.envCellRadius)}</strong>
 					<input
+						id="explorer-lod-env-cells"
 						max={lod.terrainRadius}
 						min="-1"
 						step="1"
@@ -213,7 +261,7 @@
 						value={lod.envCellRadius ?? -1}
 						oninput={(event) => updateRadius("envCells", event)}
 					/>
-				</label>
+				</div>
 			</div>
 			<button
 				type="submit"

@@ -3,7 +3,10 @@ import type { LandblockId } from "../game/game-types";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 import type { ActiveRegionSource } from "./active-region-source";
 import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
-import { decodeOutdoorStaticRecord } from "./decode-static-source-record";
+import {
+	decodeOutdoorStaticRecord,
+	unpackArgbColor,
+} from "./decode-static-source-record";
 
 const LANDBLOCK_ID = "0xda55ffff" as LandblockId;
 
@@ -109,7 +112,7 @@ describe("decodeOutdoorStaticRecord", () => {
 						lightType: 0,
 						// AC authors Z-up with +Y north; render space is Y-up with -Z north.
 						offset: { origin: [1, 2, 3], orientation: [1, 0, 0, 0] },
-						color: 0x0080ff,
+						color: 0xffff8000,
 						intensity: 75,
 						falloff: 4,
 						coneAngle: -1,
@@ -421,3 +424,22 @@ function batchResponse(
 	response.set(record, headerLength + manifestLength);
 	return response;
 }
+
+describe("unpackArgbColor", () => {
+	// Retail unpacks red from bits 16-23 and blue from bits 0-7
+	// (RGBColor::SetColor32, acclient.c:136902). Reading it the other way round renders warm
+	// authored lamps as cool ones, which is how this was originally found.
+	it("reads red from the high bytes and blue from the low", () => {
+		expect(unpackArgbColor(0xff_ff_80_00)).toEqual({
+			red: 1,
+			green: 128 / 255,
+			blue: 0,
+			alpha: 1,
+		});
+	});
+
+	it("reads alpha from the top byte", () => {
+		expect(unpackArgbColor(0x00_00_00_00).alpha).toBe(0);
+		expect(unpackArgbColor(0x80_00_00_00).alpha).toBe(128 / 255);
+	});
+});

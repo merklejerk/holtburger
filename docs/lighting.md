@@ -297,6 +297,11 @@ These are deliberate, and each produces output equivalent to retail:
   generated scenery. Emitters come from the Objects layer while receivers live in layers with
   independent residency radii, so these are evaluated rather than baked: a landblock can hold
   buildings while its Objects layer is never resident, which a bake could not survive.
+- **Packed authored colours are ARGB.** Retail unpacks red from bits 16-23 and blue from bits 0-7
+  (`RGBColor::SetColor32`, acclient.c:136902; `RGBAColor::SetColor32`, acclient.c:105741, which
+  differs only by keeping alpha). Reading it the other way round renders warm authored lamps as
+  cool ones, and it applies to the interior bake as much as to evaluated lights, since both consume
+  the same resolved colour.
 - **Authored outdoor lamps fade out as daylight rises.** This is the other half of the deviation
   above: retail never had to decide what a lamp does at noon, because its lamps cast nothing at
   any hour. Ours would otherwise pin midday ground to full white, since an authored intensity of

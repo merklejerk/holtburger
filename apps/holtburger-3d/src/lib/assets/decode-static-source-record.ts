@@ -156,7 +156,7 @@ const holdingLocation = z.object({
 const setupLight = z.object({
 	lightType: z.number().int(),
 	offset: frame,
-	/** Packed authored BGR; the low byte is red, matching every other DAT color field. */
+	/** Packed authored ARGB, unpacked by `unpackArgbColor`. */
 	color: z.number().int().nonnegative(),
 	intensity: finiteNumber,
 	falloff: finiteNumber,
@@ -597,16 +597,11 @@ export function decodeStaticMaterial(
 		id: `material:${entry.id}` as const,
 	};
 	if (entry.source.kind === "solid-color") {
-		const color = entry.source.color;
+		const { red, green, blue, alpha } = unpackArgbColor(entry.source.color);
 		return {
 			...facts,
 			kind: "solid-color",
-			color: [
-				(color & 0xff) / 0xff,
-				((color >>> 8) & 0xff) / 0xff,
-				((color >>> 16) & 0xff) / 0xff,
-				((color >>> 24) & 0xff) / 0xff,
-			],
+			color: [red, green, blue, alpha],
 		};
 	}
 	return {
@@ -713,6 +708,28 @@ export function decodeStaticPresentation(
 	};
 }
 
+/**
+ * Unpack a DAT-packed 32-bit colour, which is ARGB: red occupies bits 16-23 and blue bits 0-7.
+ *
+ * Both retail unpackers agree and differ only in whether they keep alpha —
+ * `RGBAColor::SetColor32` reads `a = HIBYTE, r = BYTE2, g = BYTE1, b = (byte)color`
+ * (acclient.c:105741), and `RGBColor::SetColor32` drops the alpha line (acclient.c:136902).
+ * Shared so the two callers cannot disagree about the byte order again.
+ */
+export function unpackArgbColor(packed: number): {
+	readonly red: number;
+	readonly green: number;
+	readonly blue: number;
+	readonly alpha: number;
+} {
+	return {
+		red: ((packed >>> 16) & 0xff) / 0xff,
+		green: ((packed >>> 8) & 0xff) / 0xff,
+		blue: (packed & 0xff) / 0xff,
+		alpha: ((packed >>> 24) & 0xff) / 0xff,
+	};
+}
+
 /** Point lights are the only authored kind; anything else is a source contract violation. */
 const POINT_LIGHT_TYPE = 0;
 
@@ -724,13 +741,10 @@ function decodeSetupLight(
 			`Setup light declares unsupported light type ${light.lightType}.`,
 		);
 	}
+	const { red, green, blue } = unpackArgbColor(light.color);
 	return {
 		offset: renderVector(...light.offset.origin),
-		color: {
-			red: (light.color & 0xff) / 0xff,
-			green: ((light.color >>> 8) & 0xff) / 0xff,
-			blue: ((light.color >>> 16) & 0xff) / 0xff,
-		},
+		color: { red, green, blue },
 		intensity: light.intensity,
 		falloff: light.falloff,
 	};

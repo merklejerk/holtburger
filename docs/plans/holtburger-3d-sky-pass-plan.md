@@ -1,9 +1,53 @@
 # Holtburger 3D Sky Pass Plan
 
-Status: Draft — queued behind
-[holtburger-3d-scene-lighting-plan.md](holtburger-3d-scene-lighting-plan.md) Phase 1 (shared
-time source and environment resolution). Not yet executing.
+Status: Unblocked — the prerequisite
+[holtburger-3d-scene-lighting-plan.md](holtburger-3d-scene-lighting-plan.md) completed
+2026-08-04, and the Phase 0 evidence pass completed 2026-08-03. Phases 1-3 are ready to
+execute when authorized.
 Created: 2026-08-03
+
+## Sequencing
+
+This plan is independent of the dynamic-entity roadmap's authored-effects plan
+([holtburger-3d-static-authored-effects-runtime-plan.md](holtburger-3d-static-authored-effects-runtime-plan.md));
+neither blocks the other. The Phase 0 evidence pass proved the full celestial deliverable needs no
+hook, particle, or physics-script machinery:
+
+- Sky brightness is an instant per-tick material write (`delta = 0.0` never spawns an `FPHook`,
+  acclient.c:307121), not timed interpolation.
+- `tex_velocity` scrolling is a plain per-frame UV accumulator (`CPhysics::UpdateTexVelocity`,
+  acclient.c:299999, driven from the frame update at acclient.c:300119, applied as a mesh UV delta
+  in `CGfxObj::TexVelocity`, acclient.c:341519) — a third mechanism separate from both hooks and
+  physics scripts.
+- Physics-script sky effects (`default_pes_object_id`) and weather objects (`properties` bits 4/8)
+  are carried losslessly but not executed here.
+
+Weather is deliberately not part of this plan's deliverable. A future weather feature sits on top
+of both this plan (object placement, sky-pass draw policy, the `properties` contract) and the
+authored-effects runtime (PES execution, particles), and requires its own concrete plan. Building
+weather consumers before the effects machinery exists would violate the roadmap's
+no-dormant-infrastructure contract.
+
+### Authored sky-object census (2026-08-05)
+
+A census over the production region's 20 day groups (232 sky objects total) settled what authored
+weather and sky-script content actually exists:
+
+- Non-rainy day groups ("Sunny"/"Clear"/"Cloudy", 12 groups) each author 7 sky objects; the 8
+  "Rainy" groups author 17-19. The surplus is the weather set: 92 objects with `properties & 4`,
+  all confined to Rainy groups.
+- Weather content is two kinds: viewer-pinned scrolling rain sheets (GfxObjs `0x01004C42`/
+  `0x01004C44` with `tex_velocity` up to `(0.02, -2.0)`, no PES) and Setup-backed emitters
+  (`0x02000588`, `0x02000589`, `0x02000BA6` carrying physics scripts `0x33000428`/`0x3300042C`/
+  `0x33000453`, properties bits 1+4+8).
+- 96 objects carry a `default_pes_object_id`. Notably, one is not weather: `0x02000714` (PES
+  `0x330007DB`, properties 0, always-visible window `0..0`) appears in **every** day group,
+  including clear skies — the effects runtime gains a celestial script consumer, not just a
+  weather one.
+- **Scope finding for Phase 2:** `default_gfx_object_id` is not always a GfxObj — `0x02000714`
+  and the weather emitters are Setup-family (`0x02`) ids. The always-visible `0x02000714` is in
+  celestial scope, so Phase 2 must load Setup-backed sky objects (or Phase 2 execution must pin
+  how `GameSky::MakeObject` treats a Setup id) rather than assuming "ordinary `GfxObj`s".
 
 ## Goal
 
@@ -30,6 +74,9 @@ clouds, stars) positioned, brightened, and swapped by day group and time of day.
   ticking). This plan consumes that time source and environment resolution; it does not own them.
 - Physics-script sky effects (`default_pes_object_id`): recorded lossless in the contract, not
   executed — physics-script execution belongs to the authored-effects/dynamic-entity roadmap.
+- Weather objects (`properties` bits 4/8): the census found 92 authored across the Rainy day
+  groups, but they are viewer-pinned effects requiring the future weather plan (see Sequencing);
+  this plan renders celestial objects only.
 - Weather beyond authored day groups (retail has none; day-group chance selection already exists).
 
 ## Ground Truth
@@ -45,17 +92,19 @@ clouds, stars) positioned, brightened, and swapped by day group and time of day.
 - `SkyDesc::GetSky` (acclient.c:292328): builds the `CelestialPosition` array (acclient.h:17241),
   interpolating each object's angle between `begin_angle`/`end_angle` over
   `begin_time`..`end_time`, then applying `sky_obj_replace` for the current `SkyTimeOfDay`
-  (replacement by `object_index`: gfx object, rotate, transparent, luminosity, max_bright).
+  (replaced values: gfx object, rotate, transparent, luminosity, max_bright; matched by list
+  index per the Phase 0 findings, not by the authored `object_index` field).
 - `GameSky::Draw` (acclient.c:297381): fog forced off (except during environment overrides),
   `zfar * 4`, `DEPTHTEST_ALWAYS`.
 - Authored brightness units are 0–100, applied × 0.01; `luminosity` maps to emissive,
   `max_bright` to diffuse, `transparent` to translucency (alpha `1 - t`).
 - `GameSky::MakeObject` consumes `default_gfx_object_id`, `tex_velocity`, and `properties` bits
-  (`& 1`, `& 4` observed at the call site, acclient.c:297707-297714; `& 4` anchors the object's
-  origin to the first sky object's position — exact semantics to be pinned in Phase 0).
+  (call site acclient.c:297707-297714). Full bit semantics are pinned in the Phase 0 findings:
+  bit 4 marks a weather object (viewer-pinned, not celestial).
 - Sky objects live in a dedicated sky cell (`before_sky_cell` handling in
-  `GameSky::CreateDeletePhysicsObjects`); frame math in `GameSky::CalcFrame` — exact camera
-  relation and `sky_height` usage to be pinned in Phase 0.
+  `GameSky::CreateDeletePhysicsObjects`); frame math in `GameSky::CalcFrame`. Camera relation and
+  `sky_height` are pinned in the Phase 0 findings: CalcFrame is orientation-only and `sky_height`
+  is write-only in retail.
 
 ### Existing code touch points
 
@@ -72,8 +121,8 @@ clouds, stars) positioned, brightened, and swapped by day group and time of day.
   `ExplorerWorldPanel.svelte:240-252`. `ResolvedSceneEnvironment.sky` currently carries only a
   name/index — this plan grows it into resolved celestial state.
 - Renderer: no sky pass exists; background is the clear color
-  (`webgl2-renderer.ts:548`, `:811`). The object program's material kinds and luminosity uniform
-  are reusable for sky object drawing.
+  (`webgl2-renderer.ts:548`, `:811`). Sky draws get a dedicated program (see Phase 2); the
+  existing object/surface resource path is reused for geometry and texture residency.
 - Corroboration: ACE server sources under `ACE/`. ACViewer has no sky (`GameSky` commented out,
   `ACViewer/Physics/Common/LScape.cs:28`) — not a reference.
 
@@ -94,7 +143,8 @@ clouds, stars) positioned, brightened, and swapped by day group and time of day.
 
 ### Phase 0: Decompile evidence
 
-Pin the facts this plan currently marks "to be pinned," recording each in this plan:
+Pin the facts the initial draft could not assert from the decompile, recording each in this plan
+(complete — findings below; Ground Truth has been reconciled against them):
 
 - `GameSky::CalcFrame`: exact frame construction from heading/rotation, camera relation, and
   where `sky_height` (and `sky_object_replacements` rotate) enter.
@@ -153,8 +203,21 @@ Decisions and course corrections (decompile pass executed 2026-08-03):
   pass; **fog is ON during the sky pass only under an environment override**, otherwise off.
 - **tex_velocity is a global per-GfxObj-DataID UV offset** accumulated per frame
   (`CPhysics::UpdateTexVelocity`, acclient.c:299999) and applied as a whole-mesh UV delta — the z
-  component is never used, and scrolling is shared by every instance of the same GfxObj (retail
-  quirk; acceptable to reproduce or scope per-object, decide in Phase 2).
+  component is never used, and scrolling is shared by every instance of the same GfxObj DataID.
+  Registration dedupes by DataID with last-writer-wins rates (`CPhysics::AddGfxVelocity`,
+  acclient.c:300196); the sky registers directly from `GameSky::MakeObject` via
+  `CPhysicsObj::SetTextureVelocity` (acclient.c:305404), which registers every part's GfxObj, so
+  Setup-backed sky objects are covered. A `TextureVelocityHook` animation-hook type elsewhere in
+  the engine can also feed this registry — the mechanism has a hook client, but the sky's path
+  involves no hooks. In shipped sky data each scrolling DataID appears once per active day group,
+  so the global-shared quirk is unobservable; our sky module derives phase from the shared clock
+  instead of accumulating at all (see Phase 2's state note). A 2026-08-05 archive census confirmed the registry's
+  non-sky writers are real: zero `TextureVelocity`/`TextureVelocityPart` hooks in all 2,066
+  portal animations, but 11 physics scripts author whole-object `TextureVelocity` hooks
+  (flowing-surface rates such as `(0.03, 0.03)`). Those consumers — and retail's
+  shared-by-DataID phase semantics that keep tiled instances scrolling in lockstep — belong to
+  the authored-effects plan, which adopts the same derived-phase model; the sky module's
+  derivation is unaffected.
 
 Follow-on adjustments to later phases: Phase 1's resolver keys replacements by day-group object
 index; Phase 2's pass draws celestial objects camera-centered with its own far-extended
@@ -169,7 +232,9 @@ Deliverables:
 - `scene-environment.ts`: resolve the active day group's sky objects at the current day fraction
   into a `ResolvedSkyState` — per visible object: gfx id, frame (from Phase 0 math), UV scroll
   velocity, luminosity/diffuse/translucency (0–100 × 0.01), with `SkyTimeOfDay` replacements
-  applied by `object_index`. Objects outside their begin/end window resolve absent.
+  matched by day-group list index (the loader-order equivalent of retail's pointer-identity
+  matching; the authored `object_index` field is not the key). Objects outside their begin/end
+  window resolve absent.
 - Contract carries `default_pes_object_id` and raw `properties` untouched (North Star 4).
 - Resolution re-runs on the lighting plan's tick cadence (3 s sky tick vs 20 s light tick as per
   retail; both derive from the same clock).
@@ -191,15 +256,42 @@ Decisions and course corrections: _(fill during execution)_
 
 ### Phase 2: Sky render pass
 
+Architecture: a dedicated sky module (retail-shaped, mirroring `GameSky`) sitting between
+environment resolution and the raw renderer. The environment layer resolves; the sky module owns
+every piece of sky-specific runtime state; a dedicated program draws. Concretely, the module
+owns:
+
+- The sky's GPU resources, loaded eagerly at region load. The census proves the resource set is
+  closed and tiny (~21 unique gfx ids across all 20 day groups), so on-demand machinery is
+  unwarranted and eager residency eliminates pop-in on day-group rollover or slider scrubbing.
+  Decode and atlas residency still go through the existing object/surface resource path — only
+  the load policy (everything, up front) is sky-specific.
+- Pass submission under retail policy: own far-extended projection, depth test always /
+  depth-write off, no fog.
+
+The module owns no mutable per-frame state: UV scroll phase is derived, not accumulated —
+`phase = fract(tex_velocity × sharedClock)`, computed in f64 CPU-side before reaching f32
+uniforms. Retail accumulates instead (`total += rate × dt`, wrap at 1.0), but for constant
+authored rates the two are identical up to an unobservable phase origin, and every authored sky
+rate is constant. This is the same derived-phase model the authored-effects plan adopts for
+script-driven scroll (recorded in its Measured Workload section), so the two consumers share the
+clock and the arithmetic rather than any state.
+
 Deliverables:
 
-- Sky pass in `webgl2-renderer.ts` drawing resolved sky objects before the world with retail
-  policy: fog uniforms neutralized, extended projection far plane, depth test always /
-  depth-write off.
-- Sky object geometry/material loading through the existing object resource path (gfx objects are
-  ordinary `GfxObj`s); luminosity via the existing `uLuminosity`, translucency via material
-  alpha, diffuse scaling per Phase 0 findings.
-- UV scrolling from `tex_velocity` driven by the shared clock.
+- The sky module as above, consuming `ResolvedSkyState` and invoked by `webgl2-renderer.ts`
+  before the world pass.
+- A dedicated sky shader program: transform, texture sample plus UV offset, luminosity/diffuse
+  scalars, alpha from translucency. The object program is not reused for sky draws — it is built
+  around lighting roles, fog, and per-material depth state that the sky must neutralize (retail
+  suppresses the same machinery with its `m_currentlyDrawingSky` device flag), and threading
+  ignore-yourself flags through the general path would raise complexity in both programs.
+- Sky object geometry/material loading through the existing object resource path. Most sky
+  objects are ordinary `GfxObj`s, but the census found Setup-family ids in celestial scope
+  (`0x02000714` in every day group) — pin how `GameSky::MakeObject` consumes a Setup id before
+  implementing, and load whichever part set that implies.
+- UV scrolling from `tex_velocity` as derived phase from the shared clock (see the module's
+  state note above).
 
 Acceptance criteria:
 
@@ -211,9 +303,12 @@ Acceptance criteria:
 
 Tasks:
 
+- [ ] Sky module skeleton: resource ownership, eager region-load policy, `ResolvedSkyState`
+      consumption.
+- [ ] Dedicated sky shader program.
 - [ ] Pass ordering, depth/fog policy, far-plane handling.
-- [ ] Sky object resource loading and draw submission.
-- [ ] UV scroll.
+- [ ] Setup-family sky object handling (pin `MakeObject` semantics first).
+- [ ] UV scroll derived phase.
 - [ ] Visual verification across day groups and day fractions.
 
 Decisions and course corrections: _(fill during execution)_
@@ -222,8 +317,8 @@ Decisions and course corrections: _(fill during execution)_
 
 - Retire the "future sky pass" placeholder comment in `scene-environment.ts` and any remaining
   clear-color-horizon vocabulary.
-- Confirm `skyHeight` is either consumed by the Phase 0 frame math or removed from the decode
-  schema — no decoded-and-dropped fields survive this plan in the sky domain.
+- Remove `skyHeight` from the decode schema — Phase 0 proved it write-only in retail. No
+  decoded-and-dropped fields survive this plan in the sky domain.
 - Record the physics-script attachment seam (`default_pes_object_id`) for the effects roadmap.
 - Update architecture/protocol docs with the sky model and Phase 0 findings.
 
@@ -244,13 +339,15 @@ Decisions and course corrections: _(fill during execution)_
 - [ ] All phases complete; acceptance criteria met.
 - [ ] Frontend unit tests, lint, formatting clean; no clippy impact (Rust untouched unless the
       contract needs a field, in which case tests cover it).
-- [ ] Sky visually verified against retail expectations across at least two regions and several
-      day fractions per day group.
+- [ ] Sky visually verified against retail expectations across several day groups (including at
+      least one from each authored weather name) and several day fractions per group. (The
+      production content ships one RegionDesc, so multi-region verification is not possible.)
 - [ ] No decoded-but-unconsumed sky fields remain; deferred seams documented.
 
 ## Open Questions
 
-- Whether sky objects should render through the existing object program or a minimal dedicated
-  sky program (depends on Phase 0 material findings; default is reuse per North Star 2).
+- ~~Whether sky objects should render through the existing object program or a minimal dedicated
+  sky program.~~ Resolved 2026-08-05: dedicated sky program — the object program's lighting
+  roles, fog, and per-material depth state are all machinery the sky must neutralize (Phase 2).
 - Whether the environment-override fog interaction needs a hook point now or lands entirely with
   the (network-gated) override work.

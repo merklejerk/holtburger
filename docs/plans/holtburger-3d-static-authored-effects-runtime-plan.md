@@ -156,6 +156,36 @@ The complete animation census found only two `ReplaceObjectHook` records, both o
 with `0x01000BB5`. This is now the selected structural fixture. Replacement remains an explicit
 product requirement even though it is not in the setup-default animation subset.
 
+A 2026-08-05 census pinned the `TextureVelocity` mechanism's retail semantics before Phase 4
+designs its state: retail keeps one global accumulator per GfxObj DataID
+(`CPhysics::texture_velocity_gids`; registration dedupes by DataID with last-writer-wins rates in
+`CPhysics::AddGfxVelocity`, acclient.c:300196), advances it per frame
+(`CPhysics::UpdateTexVelocity`, acclient.c:299999), and writes the accumulated offset onto the
+shared cached `CGfxObj` mesh — so every rendered instance of a DataID scrolls in phase,
+regardless of when each object's script activated. `TextureVelocityHook::Execute` and the sky's
+direct `GameSky::MakeObject` path are the registry's two writer kinds; the census found the hook
+writers are exclusively physics scripts (11 scripts, whole-object, rates such as `(0.03, 0.03)`)
+with zero occurrences in all 2,066 portal animations and zero `TextureVelocityPart` hooks
+anywhere. The phase-sharing is plausibly deliberate seam synchronization for tiled flowing
+surfaces (waterfalls): per-entity scroll clocks started at different script-activation times
+would visibly tear at seams between instances of the same GfxObj.
+
+Our model reproduces that seam synchronization without retail's mutable registry: scroll phase is
+derived, not accumulated — `phase = fract(rate × sharedClock)`. Any two draws with the same rate
+are in lockstep by arithmetic identity, which covers all instances of a GfxObj because they share
+one authored rate; the rate itself is a static material fact carried by content identity, so no
+GfxObj threading and no per-frame mutable state exist anywhere. Absolute phase origin differs
+from retail (accumulators start at first hook activation) but is unobservable for a looping
+scroll — only relative phase between same-texture instances is visible, and that is identical.
+The model's one precondition: derivation assumes each scrolling texture's rate is constant for
+the session (`fract(r × t)` equals `fract(∫r dt)` only for constant `r`; a mid-session rate
+change would retroactively rescale all elapsed time and visibly snap the texture). Phase 1
+verifies this against the 11 scripts. If a rate change is ever proven, the escape hatch is a
+lazily written phase bias at the change event (`phase = fract(newRate × (t − T) + phaseAtT)`) —
+still no per-frame mutation — and it is not built until then. Derive `fract` in f64 CPU-side (or
+wrap the clock) before values reach f32 uniforms; `rate × t` degrades in f32 over multi-hour
+sessions. The sky pass plan derives from the same shared clock and owns no scroll state either.
+
 No setup-default script closure or setup-default animation emits a lighting hook. Lighting is
 therefore removed from this executable roadmap instead of receiving a speculative state field,
 system, or phase. The archive-wide animation vocabulary contains other gameplay-oriented hooks, but
@@ -235,6 +265,9 @@ Progress: Not started — archive census complete; retail timing/selection evide
   consumers; the convergence search found no existing app-local runtime for those families.
 - Prove the exact payload, dependency, coordinate/target, and lifetime semantics for the six unmet
   hook types in the measured table above plus the selected `ReplaceObjectHook` example.
+- Verify the derived-phase precondition: map the 11 `TextureVelocity` scripts to their referencing
+  setups and confirm no GfxObj DataID is authored two different scroll rates. A single
+  counterexample activates the phase-bias escape hatch in Phase 4; none is expected.
 - Decide from retail whether commands crossed during deterministic initial-phase replay are folded as
   persistent state, emitted as ephemeral effects, or deliberately skipped per command family.
 
@@ -321,6 +354,12 @@ Progress: Not started
 
 - Implement measured `Scale` and `TextureVelocity` commands through narrow generation-safe ports.
   Preserve landed `SetOmega` and `TransparentPart` behavior while adapting their dispatch boundary.
+- `TextureVelocity` uses the derived-phase model recorded in Measured Workload: the hook sets a
+  static scroll rate on the content-identity material fact, and the renderer derives
+  `phase = fract(rate × sharedClock)` at draw time. No scroll registry, no accumulator, and no
+  per-entity scroll clock exist; seam synchronization across instances follows from shared rates
+  and the shared clock. The phase-bias escape hatch is built only if Phase 1's constant-rate
+  verification fails.
 - Widen `EffectState`, `EffectPresentationSample`, and `PartRenderState` only with the exact scale or
   UV facts consumed in this phase; do not add luminosity, diffuse, lighting, or generic property bags.
 - Implement `ReplaceObjectHook` as a named structural visual command. Prepare and lease every

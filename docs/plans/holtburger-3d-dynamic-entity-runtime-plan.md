@@ -223,6 +223,25 @@ They enter only after authored presentation systems are proven and drive the sam
 mutations and projected events as a future network client. A narrow app-local composition adapter may
 own scenario policy and deterministic controls; it may not become a second authoritative entity model.
 
+### The Sky Pass Is a Parallel Track; Weather Comes After Effects
+
+The sky pass plan ([holtburger-3d-sky-pass-plan.md](holtburger-3d-sky-pass-plan.md)) is not part
+of this roadmap and has no dependency in either direction: its Phase 0 evidence proved the
+celestial deliverable uses instant material writes and a plain UV accumulator, never hooks,
+particles, or physics scripts. It does hand this roadmap a seam: sky objects carry
+`default_pes_object_id` and weather `properties` bits losslessly, so once the authored-effects
+plan lands PES execution and particles, sky physics scripts become an additional authored-script
+consumer with no schema change. A weather feature depends on both the sky pass and the effects
+runtime and requires its own concrete plan; neither existing plan may pre-build weather
+infrastructure for it.
+
+The 2026-08-05 sky-object census (recorded in the sky pass plan) confirmed the weather plan will
+have real content: 92 authored weather objects across the Rainy day groups (scrolling rain sheets
+plus Setup-backed emitters carrying physics scripts), and 96 sky objects with
+`default_pes_object_id` overall — including one always-visible celestial script consumer present
+in every day group. Author the weather plan at the effects-plan boundary, when PES execution
+contracts exist to dry-run against.
+
 ### No Universal Runtime Base Class
 
 Explorer and network-client composition remain local. Shared motion, spatial, world, and projection

@@ -9,7 +9,7 @@ import {
 import { createFrustum, type Frustum } from "../math/frustum";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId, ScenePortalCrossingInput, SceneScope } from ".";
-import { SceneGraph } from ".";
+import { INCLUDE_ALL_SCENE_CULLING_GROUPS, SceneGraph } from ".";
 
 const rootPlacement = {
 	envCellId: null,
@@ -181,33 +181,54 @@ describe("SceneGraph", () => {
 		});
 
 		expect(
-			scene.queryScopesFrustum(TEST_FRUSTUM, "0x0001ffff", [outdoorScope()])
-				.entries,
+			scene.queryScopesFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				[outdoorScope()],
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
 		).toEqual([visible]);
 		scene.updateBounds(
 			hidden,
 			new AABB3(new Vec3(-1, -1, -8), new Vec3(1, 1, -6)),
 		);
 		expect(
-			scene.queryScopesFrustum(TEST_FRUSTUM, "0x0001ffff", [outdoorScope()])
-				.entries,
+			scene.queryScopesFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				[outdoorScope()],
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
 		).toEqual([visible, hidden]);
 		scene.destroyNode(hidden);
 		expect(
-			scene.queryScopesFrustum(TEST_FRUSTUM, "0x0001ffff", [outdoorScope()])
-				.entries,
+			scene.queryScopesFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				[outdoorScope()],
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
 		).toEqual([visible]);
 	});
 
 	it("keeps culling groups independent within one landblock", () => {
 		const scene = new SceneGraph();
 		const terrain = createGroupedRoot(scene, "terrain");
-		const staticNode = createGroupedRoot(scene, "static");
+		createGroupedRoot(scene, "static");
+		const visitedGroups: string[] = [];
 
 		expect(
-			scene.queryScopesFrustum(TEST_FRUSTUM, "0x0001ffff", [outdoorScope()])
-				.entries,
-		).toEqual([terrain, staticNode]);
+			scene.queryScopesFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				[outdoorScope()],
+				(cullingGroup) => {
+					visitedGroups.push(cullingGroup);
+					return cullingGroup === "terrain";
+				},
+			).entries,
+		).toEqual([terrain]);
+		expect(visitedGroups).toEqual(["terrain", "static"]);
 	});
 
 	it("keeps identical producer groups independent across EnvCell scopes", () => {
@@ -237,9 +258,12 @@ describe("SceneGraph", () => {
 			new AABB3(new Vec3(-1, -1, -5), new Vec3(1, 1, -3)),
 		);
 
-		const visible = scene.queryScopesFrustum(TEST_FRUSTUM, "0x0001ffff", [
-			scope,
-		]).entries;
+		const visible = scene.queryScopesFrustum(
+			TEST_FRUSTUM,
+			"0x0001ffff",
+			[scope],
+			INCLUDE_ALL_SCENE_CULLING_GROUPS,
+		).entries;
 		expect(visible).toEqual([resident]);
 		expect(visible).not.toContain(shell);
 	});
@@ -525,7 +549,11 @@ describe("SceneGraph", () => {
 			envCellScope("0x0001ffff", "cell-2"),
 		);
 
-		const visible = scene.queryFlatFrustum(TOPOLOGY_FRUSTUM, "0x0001ffff");
+		const visible = scene.queryFlatFrustum(
+			TOPOLOGY_FRUSTUM,
+			"0x0001ffff",
+			INCLUDE_ALL_SCENE_CULLING_GROUPS,
+		);
 
 		expect(visible.entries).toEqual([outdoor, first, second]);
 	});
@@ -542,11 +570,19 @@ describe("SceneGraph", () => {
 		];
 
 		const flat = [
-			...scene.queryFlatFrustum(TOPOLOGY_FRUSTUM, "0x0001ffff").entries,
+			...scene.queryFlatFrustum(
+				TOPOLOGY_FRUSTUM,
+				"0x0001ffff",
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
 		];
 		const selected = [
-			...scene.queryScopesFrustum(TOPOLOGY_FRUSTUM, "0x0001ffff", scopes)
-				.entries,
+			...scene.queryScopesFrustum(
+				TOPOLOGY_FRUSTUM,
+				"0x0001ffff",
+				scopes,
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
 		];
 
 		expect(selected).toEqual(flat);
@@ -575,7 +611,12 @@ function visiblePlacement(scene: SceneGraph, nodeId: SceneNodeId) {
 }
 
 function queryScopes(scene: SceneGraph, ...scopes: readonly SceneScope[]) {
-	return scene.queryScopesFrustum(TOPOLOGY_FRUSTUM, "0x0001ffff", scopes);
+	return scene.queryScopesFrustum(
+		TOPOLOGY_FRUSTUM,
+		"0x0001ffff",
+		scopes,
+		INCLUDE_ALL_SCENE_CULLING_GROUPS,
+	);
 }
 
 function createBoundedRoot(

@@ -16,6 +16,7 @@
 	import { TauriLandblockSourceBatch } from "../lib/assets/tauri-landblock-source-batch";
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
 	import type { LoDConfig } from "../lib/game/runtime/types";
+	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { SceneResidency } from "../lib/game/scene";
 	import {
 		DEFAULT_FRAME_SETTINGS,
@@ -145,6 +146,17 @@
 
 	function updateEnvCellRenderMode(mode: EnvCellRenderMode): void {
 		frameSettings = { ...frameSettings, envCellRenderMode: mode };
+		applyFrameSettings();
+	}
+
+	function updateLayerVisibility(
+		layer: LandblockLayerKind,
+		visible: boolean,
+	): void {
+		frameSettings = {
+			...frameSettings,
+			layerVisibility: { ...frameSettings.layerVisibility, [layer]: visible },
+		};
 		applyFrameSettings();
 	}
 
@@ -445,6 +457,8 @@
 			viewerLightEnabled={frameSettings.viewerLightEnabled}
 			envCellRenderMode={frameSettings.envCellRenderMode}
 			{updateEnvCellRenderMode}
+			layerVisibility={frameSettings.layerVisibility}
+			{updateLayerVisibility}
 			textureFiltering={effectiveTextureFiltering}
 			textureFilteringOptions={supportedTextureFiltering}
 			maximumTextureAnisotropy={textureFilteringCapabilities?.maximumAnisotropy ??

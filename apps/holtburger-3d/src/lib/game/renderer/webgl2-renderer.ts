@@ -13,7 +13,11 @@ import {
 } from "../math/matrices";
 import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
-import type { SceneNodeId, SceneScope } from "../scene";
+import {
+	INCLUDE_ALL_SCENE_CULLING_GROUPS,
+	type SceneNodeId,
+	type SceneScope,
+} from "../scene";
 import { scopeFor, scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import {
@@ -28,14 +32,17 @@ import type {
 } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import { TextureWrapMode } from "../textures/types";
-import type {
-	FrameInput,
-	FrameSelectionMetrics,
-	RendererFrameDiagnostics,
-	RendererFrameFeedback,
-	FrameViewInput,
-	Renderer,
+import {
+	DEFAULT_FRAME_SETTINGS,
+	type FrameInput,
+	type FrameSelectionMetrics,
+	type FrameSettings,
+	type RendererFrameDiagnostics,
+	type RendererFrameFeedback,
+	type FrameViewInput,
+	type Renderer,
 } from "./renderer";
+import { renderCullingGroupFilter } from "./render-layer-visibility";
 import { RenderWorld, type ObjectPresentationFootprint } from "./render-world";
 import { retainsProjectedObjectFootprint } from "./object-footprint";
 import type {
@@ -235,7 +242,8 @@ interface ObjectFrameInput {
 	/** Scene/portal residency boundary that must never be crossed by an instance run. */
 	readonly renderDomainKey: string;
 	readonly cullFaceOverride:
-		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
+		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
+		| null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -682,7 +690,11 @@ export class WebGL2Renderer implements Renderer {
 						view,
 					);
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
-					const contributions = this.#collectScene(geometry, "flat", profile);
+					const contributions = this.#collectScene(
+						geometry,
+						input.frameSettings,
+						profile,
+					);
 					this.#drawProfiledView(
 						{ ...geometry, ...contributions },
 						shading,
@@ -690,7 +702,11 @@ export class WebGL2Renderer implements Renderer {
 					);
 				} else {
 					this.#drawView(
-						this.#prepareView(input.anchorLandblockId, view, "flat"),
+						this.#prepareView(
+							input.anchorLandblockId,
+							view,
+							input.frameSettings,
+						),
 						shading,
 					);
 				}
@@ -712,7 +728,14 @@ export class WebGL2Renderer implements Renderer {
 				if (profile && preparationStartedAt !== undefined) {
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
 				}
-				this.#drawPortalView(prepared, view, clearColor, shading, profile);
+				this.#drawPortalView(
+					prepared,
+					view,
+					clearColor,
+					shading,
+					input.frameSettings,
+					profile,
+				);
 			}
 		}
 		const finalizationStartedAt = profile?.beginCpuPhase();
@@ -744,6 +767,7 @@ export class WebGL2Renderer implements Renderer {
 		viewInput: FrameViewInput,
 		clearColor: readonly [number, number, number, number],
 		shading: SceneShading,
+		frameSettings: FrameSettings,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const placement = viewInput.camera.placement;
@@ -766,6 +790,7 @@ export class WebGL2Renderer implements Renderer {
 		const contributionsByNode = this.#collectPortalNodeContributions(
 			prepared,
 			result.plan,
+			frameSettings,
 			profile,
 		);
 		const diagnostics = executePortalGraph(this.#portalSubstrate, {
@@ -854,6 +879,7 @@ export class WebGL2Renderer implements Renderer {
 						prepared.frustum,
 						anchorLandblockId,
 						result.plan.selectedScopes,
+						INCLUDE_ALL_SCENE_CULLING_GROUPS,
 					).entries.length
 				: null;
 		return { planningDurationMs, result, selectedSceneEntryCount };
@@ -894,6 +920,7 @@ export class WebGL2Renderer implements Renderer {
 		const contributionsByNode = this.#collectPortalNodeContributions(
 			prepared,
 			result.plan,
+			DEFAULT_FRAME_SETTINGS,
 			null,
 		);
 		const diagnostics = executePortalGraph(this.#portalSubstrate, {
@@ -977,10 +1004,10 @@ export class WebGL2Renderer implements Renderer {
 	#prepareView(
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		input: FrameViewInput,
-		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+		frameSettings: FrameSettings,
 	): PreparedView {
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, input);
-		const collected = this.#collectScene(prepared, envCellRenderMode, null);
+		const collected = this.#collectScene(prepared, frameSettings, null);
 		return {
 			...prepared,
 			objects: collected.objects,
@@ -1059,16 +1086,21 @@ export class WebGL2Renderer implements Renderer {
 	#collectPortalNodeContributions(
 		prepared: PreparedViewGeometry,
 		plan: PortalRenderWorkPlan,
+		frameSettings: FrameSettings,
 		profile: WebGL2FrameProfileCapture | null,
 	): ReadonlyMap<string, PreparedSceneContributions> {
 		const contributionsByNode = new Map<string, PreparedSceneContributions>();
 		const claimedSceneNodes = new Set<SceneNodeId>();
+		const cullingGroupFilter = renderCullingGroupFilter(
+			frameSettings.layerVisibility,
+		);
 		for (const node of plan.nodes) {
 			const queryStartedAt = profile?.beginCpuPhase();
 			const visible = this.#world.queryScopesScene(
 				prepared.frustum,
 				prepared.anchorLandblockId,
 				node.scopes,
+				cullingGroupFilter,
 			);
 			if (profile && queryStartedAt !== undefined) {
 				profile.finishCpuPhase("sceneQuery", queryStartedAt);
@@ -1085,7 +1117,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#resolveSceneContributions(
 					prepared,
 					visible.entries,
-					"portal",
+					frameSettings,
 					profile,
 				),
 			);
@@ -1132,13 +1164,14 @@ export class WebGL2Renderer implements Renderer {
 
 	#collectScene(
 		prepared: PreparedViewGeometry,
-		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+		frameSettings: FrameSettings,
 		profile: WebGL2FrameProfileCapture | null,
 	): PreparedSceneContributions {
 		const queryStartedAt = profile?.beginCpuPhase();
 		const visible = this.#world.queryFlatScene(
 			prepared.frustum,
 			prepared.anchorLandblockId,
+			renderCullingGroupFilter(frameSettings.layerVisibility),
 		);
 		if (profile && queryStartedAt !== undefined) {
 			profile.finishCpuPhase("sceneQuery", queryStartedAt);
@@ -1146,7 +1179,7 @@ export class WebGL2Renderer implements Renderer {
 		const contributions = this.#resolveSceneContributions(
 			prepared,
 			visible.entries,
-			envCellRenderMode,
+			frameSettings,
 			profile,
 		);
 		return contributions;
@@ -1160,7 +1193,7 @@ export class WebGL2Renderer implements Renderer {
 	#resolveSceneContributions(
 		prepared: PreparedViewGeometry,
 		visibleEntries: readonly SceneNodeId[],
-		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+		frameSettings: FrameSettings,
 		profile: WebGL2FrameProfileCapture | null,
 	): PreparedSceneContributions {
 		const resolutionStartedAt = profile?.beginCpuPhase();
@@ -1313,7 +1346,8 @@ export class WebGL2Renderer implements Renderer {
 				);
 				for (const resolved of node.drawUnits) {
 					objects.push({
-						cullFaceOverride: envCellRenderMode === "flat" ? "back" : null,
+						cullFaceOverride:
+							frameSettings.envCellRenderMode === "flat" ? "back" : null,
 						drawKind: "baked",
 						geometry: resolved.geometry,
 						indexCount: resolved.drawUnit.indexCount,

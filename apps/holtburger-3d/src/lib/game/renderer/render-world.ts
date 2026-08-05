@@ -8,6 +8,7 @@ import type {
 	SceneScope,
 	SceneTopologyView,
 	VisibleScene,
+	SceneCullingGroupFilter,
 } from "../scene";
 import type { AABB3 } from "../math/types";
 import type { TerrainDrawUnit } from "../terrain/types";
@@ -55,10 +56,12 @@ interface RenderWorldSystems {
 			frustum: Frustum,
 			anchorLandblockId: LandblockId,
 			scopes: readonly SceneScope[],
+			cullingGroupFilter: SceneCullingGroupFilter,
 		): VisibleScene;
 		queryFlatFrustum(
 			frustum: Frustum,
 			anchorLandblockId: LandblockId,
+			cullingGroupFilter: SceneCullingGroupFilter,
 		): VisibleScene;
 	};
 	readonly terrain: {
@@ -170,19 +173,26 @@ export class RenderWorld {
 	queryFlatScene(
 		frustum: Frustum,
 		anchorLandblockId: LandblockId,
+		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
-		return this.#systems.scene.queryFlatFrustum(frustum, anchorLandblockId);
+		return this.#systems.scene.queryFlatFrustum(
+			frustum,
+			anchorLandblockId,
+			cullingGroupFilter,
+		);
 	}
 
 	queryScopesScene(
 		frustum: Frustum,
 		anchorLandblockId: LandblockId,
 		scopes: readonly SceneScope[],
+		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
 		return this.#systems.scene.queryScopesFrustum(
 			frustum,
 			anchorLandblockId,
 			scopes,
+			cullingGroupFilter,
 		);
 	}
 

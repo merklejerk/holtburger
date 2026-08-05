@@ -23,9 +23,11 @@ export const MAX_DYNAMIC_LIGHTS = 8;
  * roughly 22.5-unit band on a 192-unit edge, so 64 has real headroom. Overflow drops the farthest
  * light rather than failing.
  *
- * Uniform budget: the two arrays declare `2 * 64` vec4 slots, which together with the dynamic
- * arrays and the matrices leaves the object vertex shader near 163 of WebGL2's guaranteed 256
- * vertex uniform vectors.
+ * Uniform budget: both light arrays together declare `2 * 64 + 2 * 8 = 144` vec4 slots. The
+ * binding constraint is the *fragment* stage, not the vertex stage, because terrain evaluates
+ * point lights per pixel and so includes these declarations in its fragment shader. WebGL2
+ * guarantees only 224 fragment uniform vectors against 256 vertex ones, so raising this cap eats
+ * the tighter budget first.
  */
 export const MAX_STATIC_LIGHTS = 64;
 

@@ -31,6 +31,13 @@ export interface FrameSettings {
 	readonly distanceFogEnabled: boolean;
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
 	readonly viewerLightEnabled: boolean;
+	/**
+	 * Authored outdoor lamps evaluated at draw time.
+	 *
+	 * Exists so their cost can be measured against the same scene and camera with them absent.
+	 * Attributing a shader loop by comparing two different scenes is not attribution.
+	 */
+	readonly staticLightsEnabled: boolean;
 	/** Environment-cell visibility and presentation policy for this frame. */
 	readonly envCellRenderMode: EnvCellRenderMode;
 	/** Quality policy snapshotted once for every rendered frame. */
@@ -43,6 +50,8 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
 	viewerLightEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
+	staticLightsEnabled:
+		FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
 	envCellRenderMode: FRONTEND_TUNING.rendering.frameDefaults.envCellRenderMode,
 	quality: {
 		minimumObjectFootprintPixelArea:

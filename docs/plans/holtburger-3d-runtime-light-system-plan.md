@@ -381,11 +381,14 @@ Findings:
   landblocks rather than draw-call count, so `view.objects` is landblock-coherent enough in
   practice. Neither draw sorting nor the uniform-buffer escalation is warranted, and both stay
   recorded in Risks should that change.
-- **Frame cost is not a concern at this scale.** The lit town renders at 0.57 ms average against a
-  0.19 ms unlit landblock. Caveat: these are different scenes on SwiftShader, so the delta is not a
-  clean attribution and the absolute numbers do not transfer to hardware. The actionable point is
-  that the lit case sits far under a 16.7 ms budget even in software rendering. A clean A/B would
-  need a static-light toggle, which does not exist and was not worth adding for this.
+- **Frame cost is not a concern at this scale.** ~~The lit town renders at 0.57 ms average against
+  a 0.19 ms unlit landblock.~~ **Corrected 2026-08-04: those figures were invalid.** They were
+  measured on SwiftShader _and_ under a Chrome frame-rate limiter the harness did not disable, so
+  they recorded pacing rather than rendering — frame time barely moved across a nine-fold change in
+  pixel count. The conclusion survives on better evidence gathered by the terrain light tiling
+  plan: on an RX 7900 XT, with the archive's worst landblock of 51 lights filling the screen at
+  3840x2160, authored lights cost about 0.045 ms per frame, or 0.27% of a 16.7 ms budget. The
+  static-light toggle that a clean A/B needed now exists.
 - **Draw-unit bounds culling is not justified.** Spatial Scope's 25x waste figure assumed the
   archive's worst landblock of 51 lights; the measured average is 3.6, so the loop is over a
   handful of lights. It stays recorded as the escalation, now with the caveat that terrain

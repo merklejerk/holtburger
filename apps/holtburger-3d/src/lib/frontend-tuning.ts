@@ -82,6 +82,8 @@ export const FRONTEND_TUNING = {
 			/** Whether region-authored distance fog is enabled initially. */
 			distanceFogEnabled: true,
 			viewerLightEnabled: true,
+			/** Authored outdoor lamps; disabled only to measure their cost. */
+			staticLightsEnabled: true,
 			/** Environment-cell visibility policy selected initially. */
 			envCellRenderMode: "portal",
 			/** Physical-pixel cutoff for independently optional object presentations. */

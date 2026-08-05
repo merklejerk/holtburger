@@ -135,6 +135,8 @@
 		readonly resetTiming: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
 		readonly setFrameProfiling: (enabled: boolean) => void;
+		/** Toggle authored outdoor lamps, to measure their cost against an identical scene. */
+		readonly setStaticLights: (enabled: boolean) => void;
 		/** Withdraw every requested scene layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
 		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
@@ -570,6 +572,12 @@
 		runtime.setRendererFrameProfilingEnabled(enabled);
 	}
 
+	function setStaticLights(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = { ...frameSettings, staticLightsEnabled: enabled };
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function clearSceneInterest(): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.clearSceneInterest();
@@ -856,6 +864,7 @@
 					setEnvCellRenderMode,
 					setOutdoorCamera,
 					setFrameProfiling,
+					setStaticLights,
 					setMinimumObjectFootprintPixelArea,
 					setMinimumPortalFootprintPixelArea,
 					setOffscreenAnimationSampleIntervalSeconds,

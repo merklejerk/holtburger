@@ -57,6 +57,7 @@ try {
 			options.brief
 				? briefHarnessReport(result)
 				: {
+						glRenderer: result.glRenderer,
 						buildingRadius: options.buildingRadius,
 						camera: result.state.camera,
 						envCellRadius: options.envCellRadius,
@@ -171,6 +172,8 @@ function parseArgs(args) {
 		timeOfDay: null,
 		modeCycle: false,
 		filteringCycle: false,
+		gpu: false,
+		staticLights: true,
 		profileRenderer: false,
 		textureFiltering: null,
 		lifecycle: false,
@@ -406,6 +409,12 @@ function parseArgs(args) {
 				break;
 			case "--filtering-cycle":
 				parsed.filteringCycle = true;
+				break;
+			case "--gpu":
+				parsed.gpu = true;
+				break;
+			case "--no-static-lights":
+				parsed.staticLights = false;
 				break;
 			case "--profile-renderer":
 				parsed.profileRenderer = true;
@@ -646,6 +655,9 @@ Options:
                          Change continuous rendering policy without reloading content.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
   --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
+  --gpu                  Render on the real GPU adapter instead of SwiftShader. Required for
+                         any timing used as performance evidence.
+  --no-static-lights     Disable authored outdoor lamps, for same-scene A/B of their cost.
   --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
   --texture-filtering <mode>
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
@@ -760,6 +772,7 @@ function briefHarnessReport(result) {
 						},
 						residentCount: authoredDynamics.residents.length,
 					},
+		glRenderer: result.glRenderer,
 		consoleMessages: result.consoleMessages.filter(
 			({ level }) => level === "error" || level === "exception",
 		),
@@ -1181,9 +1194,23 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		`--user-data-dir=${userDataDirectory}`,
 		"--no-first-run",
 		"--disable-background-networking",
-		"--use-gl=angle",
-		"--use-angle=swiftshader",
-		"--enable-unsafe-swiftshader",
+		// SwiftShader is the default because it is deterministic and available everywhere, but it
+		// is useless for performance attribution. --gpu swaps in the real adapter.
+		...(options.gpu
+			? [
+					"--use-gl=angle",
+					"--use-angle=vulkan",
+					"--ignore-gpu-blocklist",
+					// Without these the loop paces at a fixed rate and frame time stops
+					// responding to rendering cost, which makes timing worthless.
+					"--disable-gpu-vsync",
+					"--disable-frame-rate-limit",
+				]
+			: [
+					"--use-gl=angle",
+					"--use-angle=swiftshader",
+					"--enable-unsafe-swiftshader",
+				]),
 		"--headless=new",
 		`--window-size=${options.viewportWidth},${options.viewportHeight}`,
 		`--force-device-scale-factor=${options.deviceScaleFactor}`,
@@ -1487,6 +1514,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			await delay(50);
 		}
+		if (!options.staticLights) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setStaticLights",
+				[false],
+			);
+			await delay(50);
+		}
 		if (options.profileRenderer) {
 			await evaluate(
 				client,
@@ -1504,6 +1539,20 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		} else if (options.profileRenderer) {
 			await delay(250);
 		}
+		// Recorded so any timing carries proof of which adapter produced it. SwiftShader numbers
+		// are not performance evidence.
+		const glRenderer = await evaluateExpression(
+			client,
+			`(() => {
+				const canvas = document.createElement("canvas");
+				const gl = canvas.getContext("webgl2");
+				if (gl === null) return "no-webgl2";
+				const info = gl.getExtension("WEBGL_debug_renderer_info");
+				return info === null
+					? gl.getParameter(gl.RENDERER)
+					: gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
+			})()`,
+		);
 		const state = await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
@@ -1514,6 +1563,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			format: "png",
 		});
 		return {
+			glRenderer,
 			consoleMessages,
 			generatedDisabledState,
 			initialState,

@@ -2421,6 +2421,7 @@ export class WebGL2Renderer implements Renderer {
 		landblockId: LandblockId,
 		viewpoint: { readonly x: number; readonly y: number; readonly z: number },
 	): readonly RuntimeLight[] {
+		if (!input.frameSettings.staticLightsEnabled) return EMPTY_LIGHTS;
 		if (input.outdoorLights.isEmpty) return EMPTY_LIGHTS;
 		const reaching = input.outdoorLights.resolve(landblockId);
 		if (reaching.length <= MAX_STATIC_LIGHTS) return reaching;

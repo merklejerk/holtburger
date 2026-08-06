@@ -965,13 +965,26 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
   `ObjectInstanceData` would store the same value N times and would break the seam invariant the
   moment two copies diverged. An earlier draft of this section proposed exactly that and was wrong.
 
-  The one open question is **when** the rate becomes visible. Retail registers it at hook execution.
-  Because rate is deduped by DataID and the archive authors exactly one rate per DataID, the rate
-  could instead be resolved at preparation time and carried as a material fact — removing runtime
-  mutation entirely — but only if the authored hooks fire at `t = 0`. A hook authored later is
-  observably not-yet-scrolling before it fires. Cheap evidence question to settle first: dump the
-  record times of the 11 `TextureVelocity` scripts. If all are `t = 0`, prefer preparation-time
-  resolution; otherwise apply at dispatch, still keyed by DataID.
+  **Resolved at preparation time, not at dispatch (ratified 2026-08-06).** Retail registers the rate
+  when the hook executes, so a hook authored at `t > 0` is observably not-yet-scrolling until then.
+  That start-time divergence was ruled immaterial: these are ambient looping flowing surfaces whose
+  absolute phase origin already differs from retail by an accepted, unobservable margin, and a
+  late-starting scroll is a visible "kick" that pre-resolving avoids rather than causes.
+
+  Taking that ruling, the rate stops being a runtime discovery. Preparation walks the staged script
+  closure, extracts each `TextureVelocity` rate against its owner's GfxObj DataIDs, and carries it
+  as a prepared material fact. Nothing mutates during a frame: no rate map written mid-dispatch, no
+  accumulator, no per-entity scroll clock — which is the state this plan asked for and could not
+  have reached by applying at dispatch, since that needs a write-once DataID→rate map that mutates
+  while the frame runs. The runtime command records a distinct outcome saying its effect is already
+  reflected in prepared state, so it reads as a decision rather than as a dropped command.
+
+  **Recorded consequence, deliberately accepted:** preparation resolves rates for every script in
+  the closure, including one reached only through a random-pause `CallPES` chain that may not have
+  fired yet. Such a surface scrolls slightly earlier than retail would start it. All 11 authored
+  `TextureVelocity` hooks sit in setup-default closures that always play, so no shipped case is
+  expected to differ at all; if one ever does, the fix is to resolve rates per activated script
+  rather than per staged closure, which does not change the storage model.
 
 ### Phase 5: Add Authored Particle Fidelity
 

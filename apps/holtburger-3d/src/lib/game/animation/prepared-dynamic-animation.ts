@@ -12,6 +12,16 @@ import type { PreparedAnimation } from "./animation-asset-repository";
 /** Complete animation preparation outcome consumed by the later atomic activation gate. */
 export type PreparedDynamicAnimation =
 	| {
+			/**
+			 * The resident owns no default animation, so its parts keep their authored pose.
+			 *
+			 * Distinct from `retain-static-presentation`: nothing is being withheld. A script-only
+			 * resident is fully activated, it simply has no playback to run.
+			 */
+			readonly kind: "none";
+			readonly localBounds: AABB3;
+	  }
+	| {
 			readonly kind: "activatable";
 			readonly animation: PreparedAnimation;
 			readonly localBounds: AABB3;

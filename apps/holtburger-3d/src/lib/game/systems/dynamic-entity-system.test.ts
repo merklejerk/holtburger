@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
+import { AUTHORED_SCRIPT_FIXTURES } from "../behavior/authored-script-fixtures";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { EffectSystem } from "./effect-system";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
@@ -49,6 +50,33 @@ describe("DynamicEntitySystem authored ownership", () => {
 		for (const nodeId of installation.nodeIds) {
 			expect(system.getRenderable(nodeId)).toBeNull();
 		}
+	});
+
+	it("promotes a script-only resident and stages its behavior closure", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		// 0x330003d8 leads into the self-cycling 0x330003cc, so the closure spans two scripts.
+		const scriptOnly: AuthoredDynamicSource = {
+			...source("script-only"),
+			behavior: {
+				animationId: null,
+				kind: "script-only",
+				physicsScriptId: "0x330003d8",
+				physicsScriptTableId: null,
+				soundTableId: null,
+			},
+		};
+
+		const installation = system.replaceOwner("layer", [scriptOnly]);
+
+		expect(await installation.ready).toBe("ready");
+		const prepared = installation.getPreparedEntities();
+		commit(installation);
+		// A resident with no animation is still fully activated; it simply has no playback.
+		expect(prepared[0]!.animation.kind).toBe("none");
+		expect([...prepared[0]!.scriptClosure!.scripts.keys()].sort()).toEqual([
+			"0x330003cc",
+			"0x330003d8",
+		]);
 	});
 
 	it("keeps the previous owner generation when replacement construction fails", async () => {
@@ -432,7 +460,9 @@ function createSystem(
 		new PhysicsScriptRepository({
 			destroy: () => {},
 			loadPhysicsScript: async (scriptId) => {
-				throw new Error(`No script fixture for ${scriptId}.`);
+				const fixture = AUTHORED_SCRIPT_FIXTURES[scriptId.toLowerCase()];
+				if (!fixture) throw new Error(`No script fixture for ${scriptId}.`);
+				return fixture;
 			},
 		}),
 		new ParticleEmitterRepository({

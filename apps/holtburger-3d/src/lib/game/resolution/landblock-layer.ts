@@ -91,10 +91,18 @@ export interface AuthoredDynamicSource {
 	readonly scale: Vec3;
 	readonly placement: ScenePlacement;
 	readonly localBounds: AABB3 | null;
-	/** Animation-capable default behavior; decoded payloads are deliberately absent. */
+	/**
+	 * Setup-default behavior that warrants promotion; decoded payloads are deliberately absent.
+	 *
+	 * Includes `script-only`: a resident whose setup owns a physics script but no animation is
+	 * still dynamic, because its script can emit particles, play sounds, and chain further scripts.
+	 * Its parts simply keep their authored pose.
+	 */
 	readonly behavior: Extract<
 		ResolvedObjectBehavior,
-		{ readonly kind: "animation-only" | "animation-and-script" }
+		{
+			readonly kind: "animation-only" | "animation-and-script" | "script-only";
+		}
 	>;
 }
 

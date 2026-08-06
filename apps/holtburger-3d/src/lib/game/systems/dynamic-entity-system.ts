@@ -202,7 +202,10 @@ export class DynamicEntitySystem<
 			templatePreparation,
 			templateOwnerId,
 			entities.map((entity) =>
-				this.#animations.acquire(entity.source.behavior.animationId),
+				// A script-only resident has no playback to prepare, only behavior.
+				entity.source.behavior.animationId === null
+					? Promise.resolve(null)
+					: this.#animations.acquire(entity.source.behavior.animationId),
 			),
 			// Transitive `CallPES` and emitter staging happens here, before activation, so nothing
 			// reached mid-playback can trigger a load at frame time.
@@ -488,7 +491,7 @@ export class DynamicEntitySystem<
 		entities: readonly DynamicEntityRecord[],
 		preparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>,
 		templateOwnerId: TTemplateOwnerId,
-		animationPreparations: readonly Promise<PreparedAnimationHandle>[],
+		animationPreparations: readonly Promise<PreparedAnimationHandle | null>[],
 		scriptPreparations: readonly Promise<StagedBehaviorAssets | null>[],
 	): Promise<"ready" | "superseded"> {
 		// Settled separately rather than in one array so each lane keeps its own result type; a
@@ -506,7 +509,9 @@ export class DynamicEntitySystem<
 		// Everything acquired must be releasable on any failure path, including a closure whose
 		// sibling animation rejected.
 		const acquiredHandles = animationResults.flatMap((result) =>
-			result.status === "fulfilled" ? [result.value] : [],
+			result.status === "fulfilled" && result.value !== null
+				? [result.value]
+				: [],
 		);
 		const acquiredBehaviorAssets = scriptResults.flatMap((result) =>
 			result.status === "fulfilled" && result.value !== null
@@ -553,7 +558,7 @@ export class DynamicEntitySystem<
 				const animationResult = animationResults[index];
 				if (animationResult?.status !== "fulfilled") {
 					throw new Error(
-						`Animation for ${entity.source.identity.sourceId} settled without a handle.`,
+						`Animation for ${entity.source.identity.sourceId} settled without a result.`,
 					);
 				}
 				const scriptResult = scriptResults[index];
@@ -563,13 +568,20 @@ export class DynamicEntitySystem<
 					);
 				}
 
+				const staticBounds = staticPresentationBounds(entity.source);
 				return {
-					animation: prepareDynamicAnimation(
-						animationResult.value.asset,
-						template,
-						entity.source.scale,
-						staticPresentationBounds(entity.source),
-					),
+					animation:
+						animationResult.value === null
+							? ({
+									kind: "none",
+									localBounds: staticBounds,
+								} as const)
+							: prepareDynamicAnimation(
+									animationResult.value.asset,
+									template,
+									entity.source.scale,
+									staticBounds,
+								),
 					handle: animationResult.value,
 					parts: mergePreparedParts(entity.renderable.parts, template.parts),
 					effectPartCount: template.parts.length,

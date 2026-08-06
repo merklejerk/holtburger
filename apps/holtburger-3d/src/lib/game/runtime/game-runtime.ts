@@ -38,6 +38,8 @@ import {
 } from "../systems/object-visual-template-repository";
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
+import type { PhysicsScriptSource } from "../../assets/physics-script-source";
+import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { BehaviorEventRouter } from "../behavior/behavior-event-router";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
@@ -180,6 +182,7 @@ const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics 
 /** Runtime-owned collaborators that tests may replace with focused fakes. */
 export interface GameRuntimeDependencies {
 	readonly animationSource: AnimationAssetSource;
+	readonly physicsScriptSource: PhysicsScriptSource;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -307,6 +310,7 @@ export class GameRuntime {
 	/** Persistent visual-effect state advanced only by the authored behavior clock. */
 	readonly #effects: EffectSystem;
 	readonly #behaviorRouter: BehaviorEventRouter;
+	readonly #physicsScripts: PhysicsScriptRepository;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
@@ -525,6 +529,9 @@ export class GameRuntime {
 				},
 			},
 		});
+		this.#physicsScripts = new PhysicsScriptRepository(
+			dependencies.physicsScriptSource,
+		);
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
 			new ObjectVisualTemplateRepository<
@@ -536,6 +543,7 @@ export class GameRuntime {
 				new InlineObjectVisualTemplatePreparer(),
 			),
 			new AnimationAssetRepository(dependencies.animationSource),
+			this.#physicsScripts,
 			dynamicGenerationToResourceOwnerId,
 		);
 		this.#effects = new EffectSystem();
@@ -615,6 +623,7 @@ export class GameRuntime {
 		commitPipeline: CommitPipeline,
 		texturePixelSource: TexturePixelSource,
 		animationSource: AnimationAssetSource,
+		physicsScriptSource: PhysicsScriptSource,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
@@ -622,6 +631,7 @@ export class GameRuntime {
 		]);
 		const runtime = new GameRuntime(device.resources, commitPipeline, {
 			animationSource,
+			physicsScriptSource,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
 					? new InlineStaticObjectGeometryPreparer()

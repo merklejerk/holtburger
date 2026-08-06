@@ -2,6 +2,8 @@ import type { LandblockId } from "../game/game-types";
 import type { DatAssetId } from "../game/game-types";
 import type { AnimationAssetSource } from "./animation-asset-source";
 import { decodeAnimationRecord } from "./decode-animation-record";
+import { decodePhysicsScriptRecord } from "./decode-physics-script-record";
+import type { PhysicsScriptSource } from "./physics-script-source";
 import type {
 	TexturePreparationServiceRequest,
 	TexturePreparationServiceResponse,
@@ -42,6 +44,7 @@ export class HttpLandblockContentSource
 		LandblockSourceBatchSource,
 		TexturePixelSource,
 		AnimationAssetSource,
+		PhysicsScriptSource,
 		SkySourceLoader
 {
 	readonly #baseUrl: URL;
@@ -120,6 +123,13 @@ export class HttpLandblockContentSource
 		return decodeAnimationRecord(
 			await this.#postBinary("animation", { animationId }),
 			animationId,
+		);
+	}
+
+	async loadPhysicsScript(scriptId: DatAssetId) {
+		return decodePhysicsScriptRecord(
+			await this.#postBinary("physics-script", { scriptId }),
+			scriptId,
 		);
 	}
 

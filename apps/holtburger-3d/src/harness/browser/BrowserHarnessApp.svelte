@@ -817,6 +817,7 @@
 					pipeline,
 					contentSource,
 					contentSource,
+					contentSource,
 				);
 				// Harness comparisons select their render policy explicitly and start from flat.
 				runtime.setFrameSettings(frameSettings);

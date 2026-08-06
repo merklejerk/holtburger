@@ -21,7 +21,6 @@ const ACTIVE_REGION: ActiveRegionSource = {
 			landblockLength: 192,
 			verticesPerCell: 8,
 			maxObjectHeight: 64,
-			skyHeight: 500,
 			roadWidth: 1,
 		},
 		calendar: {

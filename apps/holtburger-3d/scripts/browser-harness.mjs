@@ -170,6 +170,7 @@ function parseArgs(args) {
 		executePortal: false,
 		frameMode: null,
 		timeOfDay: null,
+		dayGroup: null,
 		modeCycle: false,
 		filteringCycle: false,
 		gpu: false,
@@ -397,6 +398,14 @@ function parseArgs(args) {
 					throw new Error("--time-of-day must be in [0, 1).");
 				}
 				parsed.timeOfDay = value;
+				break;
+			}
+			case "--day-group": {
+				const value = Number(requireValue(args, ++index, arg));
+				if (!Number.isInteger(value) || value < 0) {
+					throw new Error("--day-group must be a non-negative integer.");
+				}
+				parsed.dayGroup = value;
 				break;
 			}
 			case "--frame-mode":
@@ -655,6 +664,9 @@ Options:
   --execute-portal
                          Execute the complete planned graph through production GPU passes.
   --time-of-day <0..1>  Resolve region lighting and fog at this day fraction.
+  --day-group <index>   Resolve the sky and lighting with an explicit day group instead of the
+                         harness default of group 0. Shipped groups run 0-19; 3, 7, 9 and 15-19
+                         are Rainy and 12-14 Cloudy.
   --frame-mode <flat|portal>
                          Change continuous rendering policy without reloading content.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
@@ -1213,7 +1225,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		options.timeOfDay === null
 			? ""
 			: `&timeOfDay=${encodeURIComponent(options.timeOfDay)}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}`;
+	const dayGroup =
+		options.dayGroup === null
+			? ""
+			: `&dayGroup=${encodeURIComponent(options.dayGroup)}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}${dayGroup}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,

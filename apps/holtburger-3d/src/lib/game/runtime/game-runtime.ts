@@ -1,5 +1,6 @@
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
+import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import { animationHookCommand } from "../../assets/decode-animation-record";
 import { log, LogLevel } from "../../logs";
 import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
@@ -671,6 +672,17 @@ export class GameRuntime {
 	/** Replace the frontend-resolved environment without changing scene residency or interest. */
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void {
 		this.#environment = environment;
+	}
+
+	/**
+	 * Make the active region's celestial sky resident.
+	 *
+	 * Region-scoped like terrain and landblock layers, so the runtime owns it: it already holds the
+	 * texture-preparation port and the renderer the sky needs. A backend without a sky capability
+	 * simply resolves without one rather than failing the region load.
+	 */
+	async installSky(source: SkySourcePresentations): Promise<void> {
+		await this.#renderer?.sky?.install(source, this.#texturePreparer);
 	}
 
 	/** Replace frontend-selected dynamic display choices without altering world data. */

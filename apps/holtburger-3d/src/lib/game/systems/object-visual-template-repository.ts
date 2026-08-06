@@ -4,12 +4,11 @@ import {
 	type GeometrySource,
 	type ObjectGeometryKey,
 } from "../geometry/types";
-import { resolveObjectTriangleMaterial } from "../commit/object-material-binding";
+import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
 import type { ResolvedObjectPart } from "../resolution/presentation";
 import type { ObjectGeometryData } from "../renderer/geometry";
 import type { AABB3, Vec3 } from "../math/types";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
-import { addAssetTextureFacts } from "../textures/texture-facts";
 import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
 import type { PartVisualTemplateKey, RigidPartDrawUnit } from "./components";
 
@@ -573,62 +572,19 @@ function materialPartitions(
 	templatePartKey: PartVisualTemplateKey,
 	textureRequirements: Map<AssetTextureKey, AssetTextureFact>,
 ): readonly RigidPartDrawUnit[] {
-	if (part.geometry.indices.length % 3 !== 0) {
-		throw new Error(`Object part ${part.partIndex} indices are not triangles.`);
-	}
-	const triangleCount = part.geometry.indices.length / 3;
-	if (part.geometry.materialSlotIndices.length !== triangleCount) {
-		throw new Error(
-			`Object part ${part.partIndex} material slots do not cover its triangles.`,
-		);
-	}
-	const ranges: Array<
-		Omit<RigidPartDrawUnit, "batchKey"> & { readonly bindingId: string }
-	> = [];
-	for (let triangle = 0; triangle < triangleCount; triangle += 1) {
-		const resolved = resolveObjectTriangleMaterial({
-			detailRole: null,
-			geometry: part.geometry,
-			materials: part.materials,
-			sourceLabel: `Object part ${part.partIndex}`,
-			triangle,
-		});
-		addAssetTextureFacts(
-			textureRequirements,
-			resolved.textureRequirements,
-			`Object part ${part.partIndex}`,
-		);
-		const previous = ranges.at(-1);
-		if (
-			previous?.bindingId === resolved.bindingId &&
-			previous.indexStart + previous.indexCount === triangle * 3
-		) {
-			ranges[ranges.length - 1] = {
-				...previous,
-				indexCount: previous.indexCount + 3,
-			};
-			continue;
-		}
-		ranges.push({
-			bindingId: resolved.bindingId,
-			geometry,
-			indexCount: 3,
-			indexStart: triangle * 3,
-			material: resolved.binding,
-			ordering: resolved.ordering,
-			partIndex: part.partIndex,
-			templatePartKey,
-		});
-	}
-	return ranges.map((range) => ({
-		batchKey: `${range.templatePartKey}/${range.bindingId}/${range.indexStart}/${range.indexCount}`,
-		geometry: range.geometry,
+	return resolveObjectMaterialRanges(
+		part,
+		`Object part ${part.partIndex}`,
+		textureRequirements,
+	).map((range) => ({
+		batchKey: `${templatePartKey}/${range.bindingId}/${range.indexStart}/${range.indexCount}`,
+		geometry,
 		indexCount: range.indexCount,
 		indexStart: range.indexStart,
 		material: range.material,
 		ordering: range.ordering,
-		partIndex: range.partIndex,
-		templatePartKey: range.templatePartKey,
+		partIndex: part.partIndex,
+		templatePartKey,
 	}));
 }
 

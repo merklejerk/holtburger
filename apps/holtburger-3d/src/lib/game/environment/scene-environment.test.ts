@@ -7,6 +7,13 @@ import {
 	UNAUTHORED_SCENE_LIGHTING,
 } from "./scene-environment";
 
+/**
+ * A day long enough, and ticks short enough, that tick quantization is invisible to the
+ * interpolation these tests exercise. The cadence itself is covered separately.
+ */
+const TEST_DAY_LENGTH_SECONDS = 1_000;
+const TEST_TICK_SECONDS = 1e-6;
+
 describe("resolveSceneEnvironment", () => {
 	it("uses cyclic keyframes and interpolates fog only when both endpoints enable it", () => {
 		const environment = resolveSceneEnvironment(activeRegion(), {
@@ -14,7 +21,8 @@ describe("resolveSceneEnvironment", () => {
 			timeOfDay: 0.75,
 			dayGroupOverride: 0,
 		});
-		expect(environment.distanceFog).toMatchObject({ near: 15, far: 150 });
+		expect(environment.distanceFog?.near).toBeCloseTo(15);
+		expect(environment.distanceFog?.far).toBeCloseTo(150);
 		expect(environment.distanceFog?.color.red).toBeCloseTo(0.5);
 	});
 
@@ -26,6 +34,68 @@ describe("resolveSceneEnvironment", () => {
 				timeOfDay: 0.75,
 				dayGroupOverride: 0,
 			}).distanceFog,
+		).toBeNull();
+	});
+
+	/**
+	 * The shipped region authors a 0.8 s sky tick against a 15 s light tick, so the sky must resolve
+	 * on its own cadence rather than inheriting the lighting quantization.
+	 */
+	it("samples the sky on its own tick while lighting holds at the coarser one", () => {
+		const source = activeRegion();
+		const region = {
+			...source,
+			data: {
+				...source.data,
+				sky: {
+					tickSize: 125,
+					lightTickSize: 500,
+					dayGroups: [
+						{
+							chanceOfOccur: 0,
+							dayName: "Clear",
+							// One object sweeping the whole day, so any change in the sampled fraction
+							// shows up as a changed orientation.
+							skyObjects: [
+								{
+									beginTime: 0,
+									endTime: 1,
+									beginAngle: 0,
+									endAngle: 360,
+									textureVelocityX: 0,
+									textureVelocityY: 0,
+									defaultGfxObjectId: "0x01000001",
+									defaultParticleEffectId: "0x00000000",
+									properties: 0,
+								},
+							],
+							skyTimes: [skyTime(0, 10, 100, 0x000000)],
+						},
+					],
+				},
+			},
+		};
+		const sampled = [0.3, 0.4].map(
+			(timeOfDay) =>
+				resolveSceneEnvironment(region, {
+					dayIndex: 0,
+					timeOfDay,
+					dayGroupOverride: 0,
+				}).sky,
+		);
+		// Both fractions quantize to the same 500 s lighting sample but to different 125 s sky ones.
+		expect(sampled[0]?.objects[0]?.orientation).not.toEqual(
+			sampled[1]?.objects[0]?.orientation,
+		);
+	});
+
+	it("resolves no sky at all for a region that authors none", () => {
+		const source = activeRegion();
+		expect(
+			resolveSceneEnvironment(
+				{ ...source, data: { ...source.data, sky: null } },
+				{ dayIndex: 0, timeOfDay: 0.5, dayGroupOverride: null },
+			).sky,
 		).toBeNull();
 	});
 });
@@ -132,8 +202,8 @@ function lightingAt(
 			data: {
 				...source.data,
 				sky: {
-					tickSize: 1,
-					lightTickSize: 1,
+					tickSize: TEST_TICK_SECONDS,
+					lightTickSize: TEST_TICK_SECONDS,
 					dayGroups: [
 						{
 							chanceOfOccur: 0,
@@ -191,13 +261,12 @@ function activeRegion(enableSecondFog = true): ActiveRegionSource {
 				landblockLength: 192,
 				verticesPerCell: 8,
 				maxObjectHeight: 1,
-				skyHeight: 1,
 				roadWidth: 1,
 			},
 			calendar: {
 				zeroTimeOfYear: 0,
 				zeroYear: 0,
-				dayLength: 1,
+				dayLength: TEST_DAY_LENGTH_SECONDS,
 				daysPerYear: 365,
 				yearSpec: "year",
 				timesOfDay: [],
@@ -209,8 +278,8 @@ function activeRegion(enableSecondFog = true): ActiveRegionSource {
 			scenes: null,
 			misc: null,
 			sky: {
-				tickSize: 1,
-				lightTickSize: 1,
+				tickSize: TEST_TICK_SECONDS,
+				lightTickSize: TEST_TICK_SECONDS,
 				dayGroups: [
 					{
 						chanceOfOccur: 0,

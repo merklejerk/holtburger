@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub use landblock_source_batch::LandblockSourceLayer;
+pub use sky_source::load_sky_source_bytes;
 
 mod animation_source;
 mod binary_source_record;
@@ -21,11 +22,13 @@ mod env_cell_source;
 pub mod gfx_obj_geometry;
 pub mod interior_seam;
 mod landblock_source_batch;
+mod object_resource_closure;
 mod object_texture;
 mod outdoor_static_source;
 pub mod polygon_geometry;
 pub mod portal_geometry;
 pub mod portal_visibility;
+mod sky_source;
 mod source_projection;
 
 use animation_source::serialize_animation_record_binary;
@@ -36,12 +39,12 @@ use landblock_source_batch::{
     load_landblock_source_batch as load_landblock_source_batch_asset,
     serialize_landblock_source_batch,
 };
+use object_resource_closure::ObjectResourceClosure;
 use object_texture::{
     ObjectTexturePurpose, PreparedObjectTexture, prepare_object_palette, prepare_object_surface,
 };
 use outdoor_static_source::{
-    OutdoorStaticSourceClosure, OutdoorStaticSourceRecordManifest,
-    serialize_outdoor_static_record_binary,
+    OutdoorStaticSourceRecordManifest, serialize_outdoor_static_record_binary,
 };
 use source_projection::dat_id;
 
@@ -137,6 +140,17 @@ async fn load_landblock_source_batch(
         load_landblock_source_batch_bytes(&state.runtime, &request.landblock_id, request.layers)
             .await
             .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Loads the active region's closed celestial sky resource set as one binary record.
+#[tauri::command]
+async fn load_sky_source(
+    state: tauri::State<'_, HostContentState>,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_sky_source_bytes(&state.runtime)
+        .await
+        .map_err(format_error)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -280,7 +294,7 @@ async fn serialize_outdoor_static_source_record(
         }
     };
 
-    let mut closure = OutdoorStaticSourceClosure::default();
+    let mut closure = ObjectResourceClosure::default();
     let mut residents = Vec::with_capacity(statics.len());
     for member in statics {
         let source = closure.add_resident(runtime, member.source_did).await?;
@@ -563,7 +577,6 @@ fn active_region_manifest(active_region: &ActiveRegionData) -> ActiveRegionManif
                 "landblockLength": region.land_defs.lblock_length,
                 "verticesPerCell": region.land_defs.vertex_per_cell,
                 "maxObjectHeight": region.land_defs.max_obj_height,
-                "skyHeight": region.land_defs.sky_height,
                 "roadWidth": region.land_defs.road_width,
             },
             "calendar": {
@@ -913,6 +926,7 @@ pub fn run() {
             load_active_region_data,
             load_animation,
             load_landblock_source_batch,
+            load_sky_source,
             load_texture_pixels
         ])
         .run(tauri::generate_context!())
@@ -923,7 +937,8 @@ pub fn run() {
 mod tests {
     use super::*;
     use crate::landblock_source_batch::LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC;
-    use crate::outdoor_static_source::{OUTDOOR_STATIC_RECORD_BINARY_MAGIC, StaticGeometryBuffers};
+    use crate::object_resource_closure::StaticGeometryBuffers;
+    use crate::outdoor_static_source::OUTDOOR_STATIC_RECORD_BINARY_MAGIC;
     use holtburger_dat::file_type::PixelFormatId;
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
     use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaWriter};

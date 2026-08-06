@@ -74,6 +74,7 @@
 	 * the runtime's unauthored-lighting default instead of resolving the active region.
 	 */
 	const TIME_OF_DAY = query.get("timeOfDay");
+	const DAY_GROUP = query.get("dayGroup");
 	const ISOLATE_AUTHORED_DYNAMICS =
 		query.get("isolateAuthoredDynamics") === "true";
 	const EXCLUDE_AUTHORED_DYNAMICS =
@@ -823,6 +824,7 @@
 				runtime.installActiveRegionStaticDetails(
 					await staticDetailOwner.install(contentSource.activeRegion),
 				);
+				await runtime.installSky(await contentSource.loadSkySource());
 				if (TIME_OF_DAY !== null) {
 					const timeOfDay = Number(TIME_OF_DAY);
 					if (!Number.isFinite(timeOfDay) || timeOfDay < 0 || timeOfDay >= 1) {
@@ -831,7 +833,7 @@
 					runtime.setSceneEnvironment(
 						resolveSceneEnvironment(contentSource.activeRegion, {
 							dayIndex: 0,
-							dayGroupOverride: 0,
+							dayGroupOverride: DAY_GROUP === null ? 0 : Number(DAY_GROUP),
 							timeOfDay,
 						}),
 					);

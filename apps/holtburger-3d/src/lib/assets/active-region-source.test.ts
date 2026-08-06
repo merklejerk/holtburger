@@ -40,7 +40,6 @@ function activeRegionResponse(section = { byteLength: 1024 }): Uint8Array {
 					landblockLength: 192,
 					verticesPerCell: 8,
 					maxObjectHeight: 64,
-					skyHeight: 500,
 					roadWidth: 1,
 				},
 				calendar: {

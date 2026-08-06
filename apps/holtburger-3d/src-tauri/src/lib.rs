@@ -28,6 +28,7 @@ mod object_resource_closure;
 mod object_texture;
 mod outdoor_static_source;
 mod particle_emitter_source;
+mod particle_mesh_source;
 mod physics_script_source;
 pub mod polygon_geometry;
 pub mod portal_geometry;
@@ -53,6 +54,7 @@ use outdoor_static_source::{
     OutdoorStaticSourceRecordManifest, serialize_outdoor_static_record_binary,
 };
 use particle_emitter_source::serialize_particle_emitter_record_binary;
+use particle_mesh_source::load_particle_mesh_bytes;
 use physics_script_source::serialize_physics_script_record_binary;
 use sound_table_source::serialize_sound_table_record_binary;
 use source_projection::dat_id;
@@ -133,6 +135,12 @@ struct LoadAudioRequest {
 #[serde(rename_all = "camelCase")]
 struct LoadSoundTableRequest {
     sound_table_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadParticleMeshesRequest {
+    hw_gfx_obj_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -264,6 +272,18 @@ async fn load_sound_table(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Loads the geometry and material closure for one batch of particle meshes.
+#[tauri::command]
+async fn load_particle_meshes(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadParticleMeshesRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_particle_meshes_bytes(&state.runtime, &request.hw_gfx_obj_ids)
+        .await
+        .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Builds the canonical landblock source batch used by Tauri and the headless browser harness.
 pub async fn load_landblock_source_batch_bytes(
     runtime: &ContentAssetRuntime,
@@ -383,6 +403,18 @@ pub async fn load_sound_table_bytes(
         unreachable!("SoundTable request must return a SoundTable")
     };
     serialize_sound_table_record_binary(&table)
+}
+
+/// Build the canonical typed particle-mesh response used by Tauri and focused host tests.
+pub async fn load_particle_meshes_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_hw_gfx_obj_ids: &[String],
+) -> Result<Vec<u8>> {
+    let gfx_obj_ids = raw_hw_gfx_obj_ids
+        .iter()
+        .map(|raw| parse_typed_dat_id(raw, 0x01))
+        .collect::<Result<Vec<_>>>()?;
+    load_particle_mesh_bytes(runtime, &gfx_obj_ids).await
 }
 
 async fn build_landblock_source_batch_response(
@@ -1073,6 +1105,7 @@ pub fn run() {
             load_audio,
             load_sound_table,
             load_particle_emitter,
+            load_particle_meshes,
             load_physics_script,
             load_landblock_source_batch,
             load_sky_source,

@@ -88,6 +88,18 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 		};
 	}
 
+	/**
+	 * Read an already-prepared asset without acquiring a handle.
+	 *
+	 * For consumers that run inside a frame and must never trigger a load: an id that is not ready
+	 * returns `null` rather than starting one. Safe because whoever staged the asset still holds a
+	 * handle for as long as it can be reached, so a ready entry cannot vanish mid-frame.
+	 */
+	getReady(id: DatAssetId): TPrepared | null {
+		const state = this.#entries.get(id)?.state;
+		return state?.kind === "ready" ? state.asset : null;
+	}
+
 	getState(id: DatAssetId): EntryState<TPrepared>["kind"] | null {
 		return this.#entries.get(id)?.state.kind ?? null;
 	}

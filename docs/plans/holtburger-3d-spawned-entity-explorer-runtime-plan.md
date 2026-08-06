@@ -69,6 +69,20 @@ a spawned mutation bus and must not be stretched into one.
 - Shared frontend template, animation, script, effect, renderer, and resource-lifetime systems.
 - Host-resolved motion selection and frontend smooth presentation between sparse authoritative samples.
 - Animated parent-part attachment following with ancestor-derived authoritative residency.
+- `PhysicsScriptTable` decode, transport, and intensity selection — inherited from the effects
+  plan by its 2026-08-06 scope ratification. Retail proved the mechanism is exclusively
+  gameplay-driven (network `play_script`, collisions, hide/unhide), so its first honest consumer
+  is the spawned/network event path. The effects plan's Retail Execution Evidence records the
+  table census (six shipped tables, single referencing setups, `0x340000BA` as the smallest
+  modifier-selection fixture) and the proven ceiling-match selection rule; ACE/ACViewer
+  `GetScript` are stubs and must not be used as references.
+- Despawn policy for live particle effects — a deliberate choice this plan makes when wiring the
+  spawned lifecycle to the effects runtime's emitter teardown. Retail vanishes an owner's live
+  particles instantly on destruction (`CPhysicsObj::Destroy` → per-emitter `Destroy`), and
+  servers author around it by delaying removal; the effects runtime's stopped-state machinery
+  also supports drain-then-reap (halt emission, let live particles finish, self-reap), so
+  letting a despawned projectile's burst complete is a one-line policy option here. Decide
+  against concrete scenarios, not in advance.
 
 ### Out of Scope
 

@@ -14,14 +14,14 @@ by explorer scenarios or a future network client.
 
 ## Convergence Provenance
 
-| Concern                           | Status                    | Evidence or owner                                                      |
-| --------------------------------- | ------------------------- | ---------------------------------------------------------------------- |
-| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                             |
-| Donor first slice                 | Complete on `claude` only | `c938a438`                                                             |
-| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`        |
-| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                          |
-| Effects execution                 | Queued                    | Resteered by convergence Phase 5; execute after convergence closes     |
-| Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; execute after effects |
+| Concern                           | Status                    | Evidence or owner                                                             |
+| --------------------------------- | ------------------------- | ----------------------------------------------------------------------------- |
+| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                                    |
+| Donor first slice                 | Complete on `claude` only | `c938a438`                                                                    |
+| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`               |
+| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                                 |
+| Effects execution                 | Queued                    | Resteered 2026-08-06 against the landed sky pass; executable on authorization |
+| Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; execute after effects        |
 
 ## Why This Roadmap Is Split
 
@@ -83,7 +83,7 @@ entity or motion-table scaffolding.
 
 Plan: [holtburger-3d-static-authored-effects-runtime-plan.md](holtburger-3d-static-authored-effects-runtime-plan.md)
 
-Progress: Queued with a convergence-audited executable sequence (2026-08-01).
+Progress: Queued; resteered against the landed sky pass with an executable Phase 1 (2026-08-06).
 
 Outcome:
 
@@ -225,10 +225,10 @@ own scenario policy and deterministic controls; it may not become a second autho
 
 ### The Sky Pass Is a Parallel Track; Weather Comes After Effects
 
-The sky pass plan ([holtburger-3d-sky-pass-plan.md](holtburger-3d-sky-pass-plan.md)) is not part
-of this roadmap and has no dependency in either direction: its Phase 0 evidence proved the
-celestial deliverable uses instant material writes and a plain UV accumulator, never hooks,
-particles, or physics scripts. It does hand this roadmap a seam: sky objects carry
+The sky pass plan ([holtburger-3d-sky-pass-plan.md](holtburger-3d-sky-pass-plan.md)) completed
+2026-08-06. It is not part of this roadmap and had no dependency in either direction: its Phase 0
+evidence proved the celestial deliverable uses instant material writes and a plain UV accumulator,
+never hooks, particles, or physics scripts. It does hand this roadmap a seam: sky objects carry
 `default_pes_object_id` and weather `properties` bits losslessly, so once the authored-effects
 plan lands PES execution and particles, sky physics scripts become an additional authored-script
 consumer with no schema change. A weather feature depends on both the sky pass and the effects
@@ -239,8 +239,22 @@ The 2026-08-05 sky-object census (recorded in the sky pass plan) confirmed the w
 have real content: 92 authored weather objects across the Rainy day groups (scrolling rain sheets
 plus Setup-backed emitters carrying physics scripts), and 96 sky objects with
 `default_pes_object_id` overall — including one always-visible celestial script consumer present
-in every day group. Author the weather plan at the effects-plan boundary, when PES execution
-contracts exist to dry-run against.
+in every day group.
+
+That plan now exists:
+[holtburger-3d-weather-sky-script-runtime-plan.md](holtburger-3d-weather-sky-script-runtime-plan.md)
+(authored 2026-08-06, ahead of the original effects-boundary schedule, so the effects plan's
+sky-script deferral has a named owner). Its schedule: Phase 0 evidence is executable at any time
+against DAT content and the decompile; every implementation phase is gated behind a mandatory
+boundary dry-run (its Phase R) when the effects plan completes. It runs as a parallel track after
+the effects plan, alongside — not ahead of, and not blocking — the spawned-entity plan, which has
+no dependency on weather in either direction.
+
+Beyond the seam, the completed sky pass landed shared code the effects plan now reuses instead of
+rebuilding: the unit-tested derived-phase scroll arithmetic (`skyTextureOffset`), the corrected
+staged blend selection in the shared `objectBlendPolicy`, standalone `TEXTURE_2D` residency, and
+the `resolveObjectMaterialRanges` span primitive. The effects plan's 2026-08-06 resteer records
+each with its consuming phase.
 
 ### No Universal Runtime Base Class
 

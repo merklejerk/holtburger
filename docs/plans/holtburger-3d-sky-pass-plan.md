@@ -359,13 +359,13 @@ owns:
 The object path is five stages, and the sky's answer differs by stage. Naming them separately
 prevents "reuse the object pipeline" from meaning two incompatible things:
 
-| # | Stage                                                                       | Owner                                             | Sky        |
-| - | --------------------------------------------------------------------------- | ------------------------------------------------- | ---------- |
-| 1 | Host projection: DAT id to definitions, geometry, materials, texture deps    | `ObjectResourceClosure` (Rust)                    | reuses     |
-| 2 | Record decode to `ResolvedObjectPresentation`                                | `decodeStaticGeometry` / `Material` / `Presentation` | reuses  |
-| 3 | Template prep to `RigidPartDrawUnit` plus `ObjectMaterialBinding`            | `prepareObjectVisualTemplate`                     | **skips**  |
-| 4 | Residency: geometry upload plus atlas claims                                 | `ObjectVisualTemplateRepository`                  | **owns**   |
-| 5 | Draw: `AssetTextureKey` to atlas page and pixel rect, object program         | `webgl2-renderer` object path                     | **owns**   |
+| #   | Stage                                                                     | Owner                                                | Sky       |
+| --- | ------------------------------------------------------------------------- | ---------------------------------------------------- | --------- |
+| 1   | Host projection: DAT id to definitions, geometry, materials, texture deps | `ObjectResourceClosure` (Rust)                       | reuses    |
+| 2   | Record decode to `ResolvedObjectPresentation`                             | `decodeStaticGeometry` / `Material` / `Presentation` | reuses    |
+| 3   | Template prep to `RigidPartDrawUnit` plus `ObjectMaterialBinding`         | `prepareObjectVisualTemplate`                        | **skips** |
+| 4   | Residency: geometry upload plus atlas claims                              | `ObjectVisualTemplateRepository`                     | **owns**  |
+| 5   | Draw: `AssetTextureKey` to atlas page and pixel rect, object program      | `webgl2-renderer` object path                        | **owns**  |
 
 Stages 1-2 are resource decoding, not layer machinery, and reusing them is what retail does: a sky
 object is a `CPhysicsObj` built by the same `makeObject` / `InitPartArrayObject` as every other
@@ -428,12 +428,12 @@ Acceptance criteria:
 
 ### Verification record (2026-08-06, production content, landblock `0xda55ffff`, yaw 90)
 
-| Day fraction | Observed                                                                    |
-| ------------ | --------------------------------------------------------------------------- |
-| 0.02         | Night: dark sky, star field, cloud layers, **moon low at the horizon**       |
-| 0.20         | Dawn: **sun near the horizon**, stars fading, sky brightening                |
-| 0.50         | Midday: full blue gradient, horizon glow, lit clouds, no stars              |
-| 0.85         | Evening: bright sky, sun set and absent, faint stars returning              |
+| Day fraction | Observed                                                               |
+| ------------ | ---------------------------------------------------------------------- |
+| 0.02         | Night: dark sky, star field, cloud layers, **moon low at the horizon** |
+| 0.20         | Dawn: **sun near the horizon**, stars fading, sky brightening          |
+| 0.50         | Midday: full blue gradient, horizon glow, lit clouds, no stars         |
+| 0.85         | Evening: bright sky, sun set and absent, faint stars returning         |
 
 That sequence exercises every criterion. Different celestial objects appear at different fractions,
 which is authored-window selection working; the moon and sun occupy different positions, which is
@@ -665,6 +665,7 @@ neither occludes world geometry nor is occluded by it.
    **Method note:** the harness previously hardcoded `dayGroupOverride: 0`, so every sky capture
    before this point was the Sunny group and no rainy or cloudy content was ever exercised. A
    `--day-group` option now exists, which also closes the Definition of Done's multi-day-group gap.
+
 2. **Additive surfaces blended as alpha (fixed).** The sun sprite composited its black backing
    square over the sky. The pass applied one blend mode to every range while
    `ObjectMaterialRange.ordering` already carried the class; blending is now per range, with
@@ -673,7 +674,7 @@ neither occludes world geometry nor is occluded by it.
 **Ruled out by experiment: the far plane, and geometry coverage.** Both were the obvious suspects
 and both were wrong, which is why they are recorded rather than quietly dropped:
 
-- The pass originally scaled the *active camera's* 2000-unit far plane by retail's fourfold
+- The pass originally scaled the _active camera's_ 2000-unit far plane by retail's fourfold
   extension, giving 8000 — short of the authored cloud sheets, whose far corners sit about 14285
   out. A real bug, fixed below. But captures before and after were pixel-identical, re-verified on
   a fresh Vite port to exclude a stale dev server, so clipping was never the visible cause.
@@ -704,18 +705,18 @@ meaning the same flat wall panels seen at the frame edges from other angles.
 **Open: pale wedges where the opaque backdrop shows through.** Three hypotheses were tested and
 **all three disproved**, which is worth recording so nobody re-runs them:
 
-- *Missing geometry.* Per-object ray casts show the cloud pyramid `0x01004C36` covers **every**
+- _Missing geometry._ Per-object ray casts show the cloud pyramid `0x01004C36` covers **every**
   sampled direction including the zenith. Nothing is uncovered.
-- *Far-plane clipping.* Real bug, fixed (see `SKY_FAR_PLANE` below), but before/after captures were
+- _Far-plane clipping._ Real bug, fixed (see `SKY_FAR_PLANE` below), but before/after captures were
   pixel-identical on a fresh Vite port.
-- *Texture wrap not reaching the sampler.* Forcing `Repeat` appeared to change exactly the wedges,
+- _Texture wrap not reaching the sampler._ Forcing `Repeat` appeared to change exactly the wedges,
   which looked decisive. It was not: an offline probe that decoded the shipped record and ran
   `resolveObjectMaterialRanges` over it printed `repeat` for both tiling layers and `clamp` for the
   backdrop, exactly as authored. The apparent change was **cloud scroll phase**, since
   `tex_velocity` advances with the shared clock and each harness run captures at a different
   elapsed time. A screenshot diff across runs is not a controlled experiment for anything that
   animates.
-- *Face culling.* Enabling authored `polygon.cullFace` changed nothing measurable, and the authored
+- _Face culling._ Enabling authored `polygon.cullFace` changed nothing measurable, and the authored
   value is derived for objects viewed from **outside** while the camera sits inside every sky mesh.
   Reverted rather than kept: it had no demonstrated benefit and carries a real risk of rejecting
   the faces the viewer needs.
@@ -742,7 +743,7 @@ So the wedges show the backdrop, the backdrop's authored textures are blue, and 
 pale yellow. That is a rendering error in this pass, not authored content and not a missing layer.
 
 **Narrowed to bad texture coordinates.** A UV visualization pass — fragment output replaced with
-`fract(vTextureCoordinate)` — shows smooth, well-formed UV gradients across the whole sky *except*
+`fract(vTextureCoordinate)` — shows smooth, well-formed UV gradients across the whole sky _except_
 the defect region, which renders as dense black-and-yellow speckle. That is the signature of
 texture coordinates large enough that `fract` cycles many times within a single pixel. Every
 authored UV range in the record is small (`0x010015EE` spans 0..1; the two tiling layers span 0.4
@@ -751,7 +752,7 @@ stage for those triangles are not the authored ones. Sampling garbage UVs agains
 heavily aliased texture is exactly what produces a flat pale fill.
 
 **Correction: that reading was contaminated, and the UV theory is now also disproved.** The debug
-shader forced alpha to one, so objects that are *normally invisible* rendered opaque in that
+shader forced alpha to one, so objects that are _normally invisible_ rendered opaque in that
 capture — including `0x010015EF`, whose authored `transparent` resolves to translucency 1.0 at
 midday. The speckled region belongs to such a layer and is a debug artifact. The regions that
 actually show the defect in production rendering displayed **smooth, well-formed UV gradients**, so
@@ -817,11 +818,11 @@ wrong as well.
 composited frames, the sky pass was disabled and re-enabled with everything else held fixed — same
 camera, same day fraction — and the two captures differenced:
 
-| Sample      | Sky disabled    | Sky enabled     |
-| ----------- | --------------- | --------------- |
-| wedge left  | (220, 200, 195) | (253, 250, 217) |
-| wedge right | (220, 200, 195) | (251, 252, 206) |
-| sky centre  | (220, 200, 195) | (92, 109, 153)  |
+| Sample        | Sky disabled    | Sky enabled     |
+| ------------- | --------------- | --------------- |
+| wedge left    | (220, 200, 195) | (253, 250, 217) |
+| wedge right   | (220, 200, 195) | (251, 252, 206) |
+| sky centre    | (220, 200, 195) | (92, 109, 153)  |
 | below horizon | (220, 200, 195) | (220, 200, 195) |
 
 The wedges change when the sky pass runs, so **the sky pass draws them**. The region below the
@@ -834,7 +835,7 @@ not sound, because the reference sample's identity was never established.
 Assigning each backdrop range a distinct flat colour keyed by its draw ordinal — carried in
 `uPalettedClipMap`, which the direct-colour path does not read, so alpha, depth, blend, and object
 selection were all untouched — shows the frustum fully tiled by distinct ranges. The centre wall
-and the two wedges are *different ranges of the same object*, each rendering its own key colour,
+and the two wedges are _different ranges of the same object_, each rendering its own key colour,
 with the upper and lower ranges of each wall clearly separated at the horizon.
 
 That closes the coverage question for good: there is no gap, no missing object, and no unrasterized
@@ -844,11 +845,11 @@ region. Every pixel of the sky is drawn by an identifiable range.
 range-to-texture mapping — the correctly rendering centre wall is `0x050016AE`, the two wedges are
 `0x050016B1` and `0x050016AD`. Reading those decoded surfaces row by row:
 
-| Texture      | Drawn by      | Brightest row (127) |
-| ------------ | ------------- | ------------------- |
-| `0x050016AE` | centre wall   | (158, 167, 132)     |
-| `0x050016B1` | right wedge   | (205, 215, 169)     |
-| `0x050016AD` | left wedge    | (246, 250, 189)     |
+| Texture      | Drawn by    | Brightest row (127) |
+| ------------ | ----------- | ------------------- |
+| `0x050016AE` | centre wall | (158, 167, 132)     |
+| `0x050016B1` | right wedge | (205, 215, 169)     |
+| `0x050016AD` | left wedge  | (246, 250, 189)     |
 
 The rendered wedge measures (253, 253, 208). That is `0x050016AD`'s **final row**, so those ranges
 are sampling v ≈ 1.0 uniformly rather than traversing their gradient — every one of these textures
@@ -856,7 +857,7 @@ runs dark blue at row 0 to bright at row 127, and the wedges show only the brigh
 wall reads correctly not because it is sampled differently but because its texture's final row is
 far dimmer, which would make the same fault much harder to notice there.
 
-That fully explains the symptom. What it does not yet settle is *why* v pins to one: either those
+That fully explains the symptom. What it does not yet settle is _why_ v pins to one: either those
 ranges receive a degenerate interpolated v despite their authored span being 0..1, or the geometry
 they belong to is a near-horizontal cap of the backdrop box seen edge-on, where a narrow v band
 legitimately fills a large screen area. The box spans y −500.8 to 1050.8 at radius 1050.8, so it has
@@ -866,17 +867,17 @@ produce exactly this silhouette.
 That check has run, and it removes the benign explanation. Reading decoded vertex positions
 alongside texture coordinates for all nine backdrop ranges:
 
-| Range | Indices | y-span | v span    | Shape           |
-| ----- | ------- | ------ | --------- | --------------- |
-| 0     | 0+12    | 500.8  | 0.52-1.00 | vertical wall   |
-| 1     | 12+12   | 500.8  | 0.52-1.00 | vertical wall   |
-| 2     | 24+12   | 500.8  | 0.52-1.00 | vertical wall   |
-| 3     | 36+6    | 0.0    | 0.00-1.00 | horizontal cap  |
-| 4     | 42+12   | 1050.8 | 0.00-1.00 | vertical wall   |
-| 5     | 54+12   | 1050.8 | 0.00-1.00 | vertical wall   |
-| 6     | 66+6    | 1050.8 | 0.00-1.00 | vertical wall   |
-| 7     | 72+6    | 0.0    | 0.00-1.00 | horizontal cap  |
-| 8     | 78+6    | 1050.8 | 0.00-1.00 | vertical wall   |
+| Range | Indices | y-span | v span    | Shape          |
+| ----- | ------- | ------ | --------- | -------------- |
+| 0     | 0+12    | 500.8  | 0.52-1.00 | vertical wall  |
+| 1     | 12+12   | 500.8  | 0.52-1.00 | vertical wall  |
+| 2     | 24+12   | 500.8  | 0.52-1.00 | vertical wall  |
+| 3     | 36+6    | 0.0    | 0.00-1.00 | horizontal cap |
+| 4     | 42+12   | 1050.8 | 0.00-1.00 | vertical wall  |
+| 5     | 54+12   | 1050.8 | 0.00-1.00 | vertical wall  |
+| 6     | 66+6    | 1050.8 | 0.00-1.00 | vertical wall  |
+| 7     | 72+6    | 0.0    | 0.00-1.00 | horizontal cap |
+| 8     | 78+6    | 1050.8 | 0.00-1.00 | vertical wall  |
 
 The wedge ranges are 0, 1, 4 and 5 — all **vertical walls** spanning 500 to 1050 units of height
 with a full or half v range. A vertical wall whose v traverses its height cannot legitimately render
@@ -923,12 +924,12 @@ rasterized result, for some walls but not others, in unmodified production rende
 **Yaw sweep result: the defect is view-angle dependent, and the pass renders perfectly at some
 angles.** Unmodified production captures at day fraction 0.5, pitch −10:
 
-| Camera yaw | Result                                                     |
-| ---------- | ---------------------------------------------------------- |
-| 0          | wedges at both frustum edges                               |
-| 45         | one wall flat, the adjoining wall a correct gradient       |
+| Camera yaw | Result                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| 0          | wedges at both frustum edges                                                               |
+| 45         | one wall flat, the adjoining wall a correct gradient                                       |
 | **90**     | **flawless — correct gradient, horizon glow and clouds across the whole frame, no wedges** |
-| 180        | wedges, as at yaw 0                                        |
+| 180        | wedges, as at yaw 0                                                                        |
 
 This is the single most useful result in the investigation. It establishes that the sky pass is
 fundamentally correct — resolution, residency, materials, brightness, blending, depth policy and
@@ -959,8 +960,7 @@ identically structured texture coordinates.
 **Where this ends.** Every input to those draws has now been verified correct against the shipped
 record: geometry, per-triangle texture coordinates, texture content, texture keys and resource
 mapping, wrap mode, material kind, brightness inputs, blend class, mip generation, buffer offsets,
-array lengths, and the shell's centring on the viewer. The pass renders a fully correct sky at yaw
-90. The artifact is view-angle dependent on walls seen away from face-on, and nothing in the data
+array lengths, and the shell's centring on the viewer. The pass renders a fully correct sky at yaw 90. The artifact is view-angle dependent on walls seen away from face-on, and nothing in the data
 distinguishes an affected wall from an unaffected one.
 
 That exhausts what can be established without stepping into the GPU itself. The honest next move is
@@ -1053,6 +1053,13 @@ groups and day fractions, then Phase 3.
 - The sky is not a named renderer profiling phase, so its cost is only visible inside `otherMs`
   (measured at 0.082 ms/frame). Add a `sky` CPU/GPU phase when the pass next needs attention.
 - The backdrop flat-wall artifact is accepted-not-fixed; reproduction recorded in Phase 2.
+- Correction from the 2026-08-06 effects-evidence probe: "every authored sky rate is constant" is
+  true per day group but not across groups — the overcast sheet `0x01004C35` authors
+  `(0.005, −0.0073)` in Cloudy groups and `(0.013, −0.013)` in Rainy groups. Day groups are
+  exclusive, so the derived-phase model stays sound while a group is active; the divergence from
+  retail is a one-frame phase-origin snap on that sheet at day-group rollover (retail's
+  accumulator is continuous across the rate swap). Accepted; recorded in the effects plan's
+  Measured Workload alongside the script-rate audit.
 
 ## Open Questions
 
@@ -1082,17 +1089,18 @@ groups and day fractions, then Phase 3.
     and the renderer consumes only the resolved value through `setSceneEnvironment`, so it is
     already indifferent to where the environment came from. Overridden ambient and fog resolve
     through the existing `lighting`, `backgroundColor` and `distanceFog` fields with no new shape.
-  - **One field short.** Nothing on the contract records *that an override is active*, which the sky
-    needs independently of the resolved colours: `properties` bit 2 means *hide this object while an
-    override is active with fog on*, and twenty shipped objects set it, one per day group. The bit
+  - **One field short.** Nothing on the contract records _that an override is active_, which the sky
+    needs independently of the resolved colours: `properties` bit 2 means _hide this object while an
+    override is active with fog on_, and twenty shipped objects set it, one per day group. The bit
     itself already rides through `ResolvedSkyObject.properties`; only the active-override fact is
     missing.
   - **A real cost, and it is this plan's doing.** The sky program was deliberately built without fog
     — no uniforms, no fog chunk — because `GameSky::Draw` forces fog off. But it forces fog off
-    *except* under an override (acclient.c:297398), which is exactly the case that will need it. So
+    _except_ under an override (acclient.c:297398), which is exactly the case that will need it. So
     enabling override fog is not a uniform flip; it means adding fog to the sky program. That was a
     reasonable simplification for a pass that could not otherwise reach the case, but it is deferred
     work rather than free.
+
 - ~~**Blocking Phase 2: does the sky program share the object program's material sampler?**~~
   Resolved 2026-08-06: **no sharing, and no extraction.** The question rested on an unverified
   premise — that the sky needed the object fragment shader's full sampler. It does not. Two of the
@@ -1110,8 +1118,8 @@ groups and day fractions, then Phase 3.
   <details><summary>Superseded framing</summary>
 
   The
-  2026-08-05 resolution ("dedicated sky program") was argued against the object program's *lighting
-  roles, fog, and per-material depth state* — all correctly unwanted. But the object fragment shader
+  2026-08-05 resolution ("dedicated sky program") was argued against the object program's _lighting
+  roles, fog, and per-material depth state_ — all correctly unwanted. But the object fragment shader
   also carries ~150 lines of material sampling the sky genuinely needs: atlas pixel-rect
   addressing, repeat-vs-clamp source UVs, indexed-palette decode with clip-map handling, detail
   tiling, and alpha test. Three ways forward:

@@ -1,8 +1,10 @@
 # Holtburger 3D Static-Authored Effects Runtime Plan
 
-Status: Queued — convergence Phase 5 resteered; ready for evidence-phase execution after convergence
+Status: Queued — resteered 2026-08-06 against the landed sky pass; Phase 1 is executable on
+authorization
 Created: 2026-07-31
 Convergence review: 2026-08-01
+Sky-pass resteer: 2026-08-06
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Prerequisites:
 
@@ -21,8 +23,41 @@ Prerequisites:
 
 No checkbox or phase in this document is complete merely because a donor implementation exists.
 Convergence has now removed completed translucency scope and replaced the speculative router with a
-measured producer/consumer sequence. This plan remains queued only because the convergence plan is
-still active; its Phase 1 is otherwise executable without a new architecture decision.
+measured producer/consumer sequence. Convergence closed 2026-08-01, so no prerequisite plan remains
+active; Phase 1 is executable without a new architecture decision and awaits only authorization.
+
+## Sky-Pass Resteer (2026-08-06)
+
+The sky pass plan ([holtburger-3d-sky-pass-plan.md](holtburger-3d-sky-pass-plan.md)) completed
+2026-08-06. It runs on a parallel track with no dependency in either direction, but it landed code
+and evidence this plan's dry-run must acknowledge:
+
+- **The derived-phase scroll model is now landed, tested code, not a shared intention.**
+  `skyTextureOffset` (`apps/holtburger-3d/src/lib/game/renderer/webgl2-sky-pass.ts`) derives
+  `phase = fract(rate × sharedClock)` in f64 with unit tests covering the negative authored rates.
+  Phase 4's `TextureVelocity` consumer hoists or mirrors that arithmetic; it does not design a
+  second derivation.
+- **Retail's staged blend selection is now fully implemented in the shared `objectBlendPolicy`**
+  (`apps/holtburger-3d/src/lib/game/renderer/object-rendering-policy.ts`), including the
+  `SURFACE_TRANSLUCENT` final override (`D3DPolyRender`, acclient.c:434096-434160) the sky pass
+  proved and blast-radius-audited. Phase 5's particle blend/depth policy consumes this shared
+  policy rather than deriving a fresh mapping.
+- **New reusable residency primitives exist for Phase 1's inventory:** standalone `TEXTURE_2D`
+  residency via the exported `createTexture2DUpload` (native `GL_REPEAT`, no atlas), and the
+  extracted `resolveObjectMaterialRanges` span primitive. The shared host resource projection was
+  renamed from `OutdoorStaticSourceClosure` to `ObjectResourceClosure`
+  (`apps/holtburger-3d/src-tauri/src/object_resource_closure.rs`).
+- **A new script consumer is waiting at this plan's boundary, not inside it.** The sky census
+  found 96 sky objects carrying `default_pes_object_id`, including the always-visible celestial
+  `0x02000714` (PES `0x330007DB`) present in every day group. Sky objects are sky-module-owned and
+  viewer-centered, not authored residents, so executing their scripts is out of scope here (see
+  Out of Scope) and belongs to the scheduled follow-up plan
+  ([holtburger-3d-weather-sky-script-runtime-plan.md](holtburger-3d-weather-sky-script-runtime-plan.md)),
+  whose boundary dry-run runs when this plan completes. The 2026-08-06 evidence probe proved the
+  sky attachment is authoring redundancy: every sky `default_pes_object_id` equals the referenced
+  Setup's own `default_script`, so all four sky scripts already sit inside this plan's
+  2,161-setup default-script census and their vocabulary (`CreateParticle`, `SoundTweaked`,
+  `CallPES` only) is covered by this plan's committed consumers.
 
 ## Context and Boundaries
 
@@ -46,15 +81,13 @@ spawned-entity infrastructure forward.
 
 ### In Scope
 
-- Typed `PhysicsScript` and `PhysicsScriptTable` DAT decoding and compact content transport.
-- Shared prepared script/table repositories and transitive dependency closure.
-- Deterministic per-entity physics-script clocks, type/intensity table selection, and `CallPES`.
+- Typed `PhysicsScript` DAT decoding and compact content transport.
+- Shared prepared script repositories and transitive dependency closure.
+- Deterministic per-entity physics-script clocks and `CallPES`.
 - Safe preparation and runtime execution of intentional cyclic script graphs.
 - Expansion of one prepared behavior-command union only for static-authored behavior proven by
   archive and reference evidence.
 - Concrete visual mutation consumers required by authored scripts.
-- Animation-time `ReplaceObjectHook` execution with pre-staged shared replacement-part resources,
-  atomic per-entity part selection, and replacement-aware conservative bounds.
 - Concrete particle playback/rendering for the proven `CreateParticle` workload.
 - Concrete sound asset/playback behavior for the proven `SoundTweaked` workload.
 - Atomic promotion of script-only authored residents after their complete behavior closure is ready.
@@ -74,6 +107,25 @@ spawned-entity infrastructure forward.
 - Moving script, audio, or particle resource ownership into `EffectSystem`, or embedding decoded
   timelines in entity source records.
 - Network-triggered physics scripts, combat effects, projectiles, or gameplay authority.
+- `PhysicsScriptTable` decode, transport, and intensity selection — ratified out 2026-08-06.
+  Retail evidence proves every table key is a gameplay `PScriptType` and every lookup consumer is
+  network-, collision-, or hide-state-driven; a static authored resident structurally never
+  reaches a table. The mechanism moves to the spawned-entity/explorer plan (roadmap stage 3),
+  which inherits the 2026-08-06 table census and selection semantics recorded here as evidence.
+- `ReplaceObjectHook` execution — ratified out 2026-08-06. Retail defines no
+  `Execute` for hook type 5; the shipped client parses and preloads it, then does nothing, and
+  the archive contains exactly two records. Our runtime decodes the hook and reports it
+  intentionally-inert with provenance; no replacement resources are staged, no atomic swap is
+  built, and the hook's presence no longer blocks animated activation. Appearance-time part
+  selection via `ObjDesc.anim_part_changes` is unaffected (it remains in the animation plan's
+  landed scope).
+- Sky-object physics scripts (`default_pes_object_id`), including the always-visible celestial
+  `0x02000714` / `0x330007DB` and the Rainy-group weather emitters. Sky objects are owned by the
+  sky module and are viewer-centered rather than authored residents, so wiring the script runtime
+  to a second target ownership is real scope this plan can finish honestly without. They become
+  consumers of the systems landed here through the scheduled
+  [weather/sky-script plan](holtburger-3d-weather-sky-script-runtime-plan.md); the sky schema
+  already carries their ids losslessly.
 - Entity-to-entity attachment mutation and animated parent-part following; those enter with the
   spawned lifecycle consumer in the spawned-entity plan. Particle/effect attachment to an authored
   root or part remains in scope here.
@@ -105,9 +157,35 @@ spawned-entity infrastructure forward.
 - `apps/holtburger-3d/src-tauri/src/lib.rs` compact binary content adapter patterns.
 - Existing texture, geometry, transparent ordering, and frame-stream infrastructure for particle
   rendering where their contracts are genuinely reusable.
-- No app-local particle or audio runtime currently exists. Phase 1 must inventory reusable
-  renderer/content primitives, then later phases add focused owners instead of pretending a dormant
-  facility is available.
+- Landed by the sky pass (2026-08-06): the shared `objectBlendPolicy` with retail's complete staged
+  blend selection, standalone `TEXTURE_2D` residency via `createTexture2DUpload`, the
+  `resolveObjectMaterialRanges` span primitive, the `skyTextureOffset` derived-phase scroll
+  arithmetic, and the renamed host-side `ObjectResourceClosure`.
+- The Phase 1 reuse inventory completed 2026-08-06 (working tree at `5ace1768`):
+  - **Audio: greenfield in all three layers.** No Web Audio usage, no 0x0A decoder, no 0x20
+    `SoundTable` mapping anywhere; the only prior art is an untested ad-hoc RIFF re-wrapper in
+    `apps/holtburger-tools/src/bin/dat-tool.rs:518-537`.
+  - **Particles: no runtime, but the instancing substrate fits almost verbatim.** A particle
+    cohort is structurally a `VisibleRigidPartContribution` stream: one `RigidPartDrawUnit` per
+    unique GfxObj/material plus N 20-float `ObjectInstanceData` records (matrix + RGBA, alpha
+    already consumed as `1 − translucency`) through the existing `FrameInstanceStreamArena` /
+    `WebGL2InstanceBuffer` path. Missing pieces are only the emitter/particle simulation owner
+    and 0x32 asset decode.
+  - **Transport is a clone of the animation lane:** `animation_source.rs` (typed hook-payload
+    manifest + raw escape hatches) is the record template, `object_resource_closure.rs` the
+    dependency-closure template, and `animation-asset-repository.ts` is verbatim the "shared
+    in-flight preparation, ready/failed state, acquired handles, deterministic release" shape
+    Phase 2 specifies.
+  - **DAT decode:** `DatFileType` variants for 0x33/0x34 exist with no decoders; 0x32, 0x20, and
+    0x0A have no variants at all. New modules follow the manual-`binrw`-sequential-read idiom of
+    `file_type/animation.rs`.
+  - **No unified clock exists.** The renderer's `input.timeSeconds` and
+    `AnimationSystem.advance(timeSeconds)` both originate in the runtime frame loop but are not
+    expressed as one named source; `game-clock.ts` is day-fraction only. Script clocks require a
+    small clock unification, and `skyTextureOffset` (already exported) hoists cleanly.
+  - The sky contract already transports `0x330007DB` to the frontend today (as
+    `sky-state.ts`'s dead-ending `particleEffectId`), confirming the sky seam needs no schema
+    change.
 
 ### Measured Workload
 
@@ -123,7 +201,12 @@ The recorded representative scans contain 66 and 52 setup default-script owners 
 Transitive `CallPES` traversal reaches 17 scripts total. Four shipped scripts
 (`0x330003CC`, `0x33000711`, `0x3300072C`, and `0x33000863`) call themselves. Preparation traversal
 must terminate without rejecting these graphs, while runtime scheduling must not recurse
-synchronously forever.
+synchronously forever. Shipped cycles are not only self-loops: the 2026-08-06 evidence probe found
+mutual two-script cycles (`0x33000428` ↔ `0x33000429` and `0x3300042C` ↔ `0x3300042D`, each side
+re-calling the other after 2.8 s), so cycle handling must be graph-general, not
+self-reference-special-cased. The probe also observed `CallPES` `pause` in the wild:
+`0x33000453` re-calls itself at `t=0` with `pause=30`, making pause semantics load-bearing for
+authored repetition rates.
 
 The representative setup appearances do not use default physics-script tables. Table selection is
 therefore an evidence gate for broader shipped content rather than something to infer from the
@@ -151,10 +234,33 @@ self-cycles. Six setup default-script tables are present (`0x34000005`, `0x34000
 `0x340000BF`, `0x340000C7`, and `0x340000CE`), so table decoding remains real broader-content work
 despite its absence from DA55/DC58.
 
+The 2026-08-06 evidence probe decoded all six tables (format proven from ACE
+`PhysicsScriptTable.Unpack`: plain u32-count dictionary of key → `(mod f32, script u32)` list) and
+found each is referenced by exactly one shipped setup:
+
+| Table        | Keys | Script refs | Closure | Referencing setup |
+| ------------ | ---: | ----------: | ------: | ----------------- |
+| `0x34000005` |    3 |           7 |       7 | `0x02000271`      |
+| `0x340000A5` |  112 |         302 |     241 | `0x02000177`      |
+| `0x340000BA` |    2 |           4 |       5 | `0x0200167F`      |
+| `0x340000BF` |  108 |         298 |     257 | `0x020014E1`      |
+| `0x340000C7` |    3 |           3 |       3 | `0x02001807`      |
+| `0x340000CE` |    2 |           2 |       2 | `0x02001A46`      |
+
+Observed keys are script-type values (4, 5, 6-90 ranges); mods author 0 / 0.5 / 1 triplets where a
+key has intensity variants and a single `mod=1` entry where it does not. Script `0x33000109`
+(key 90) is shared by three tables, giving a shared-preparation dedup fixture for free. This
+answers Open Question 1: `0x340000BA` is the smallest fixture that still proves keys, modifier
+selection (key 81 authors a 0 / 0.5 / 1 triplet), single-entry fallback (key 89), and nontrivial
+closure (5 scripts); `0x340000CE` is smaller but authors only `mod=1` entries and cannot exercise
+modifier selection. Following the 2026-08-06 scope ratification, this census and the fixture
+answer are inherited by the spawned-entity plan along with the table mechanism itself.
+
 The complete animation census found only two `ReplaceObjectHook` records, both on animation
 `0x0300055B` frame 0: forward replaces part 1 with GfxObj `0x01000BB4`, and backward replaces part 1
-with `0x01000BB5`. This is now the selected structural fixture. Replacement remains an explicit
-product requirement even though it is not in the setup-default animation subset.
+with `0x01000BB5`. The 2026-08-06 retail evidence (see ReplaceObject below) proved the shipped
+client never executes this hook type, and its execution was ratified out of scope; the two records
+now serve only as decode/inert-reporting fixtures.
 
 A 2026-08-05 census pinned the `TextureVelocity` mechanism's retail semantics before Phase 4
 designs its state: retail keeps one global accumulator per GfxObj DataID
@@ -179,17 +285,246 @@ from retail (accumulators start at first hook activation) but is unobservable fo
 scroll — only relative phase between same-texture instances is visible, and that is identical.
 The model's one precondition: derivation assumes each scrolling texture's rate is constant for
 the session (`fract(r × t)` equals `fract(∫r dt)` only for constant `r`; a mid-session rate
-change would retroactively rescale all elapsed time and visibly snap the texture). Phase 1
-verifies this against the 11 scripts. If a rate change is ever proven, the escape hatch is a
-lazily written phase bias at the change event (`phase = fract(newRate × (t − T) + phaseAtT)`) —
-still no per-frame mutation — and it is not built until then. Derive `fract` in f64 CPU-side (or
+change would retroactively rescale all elapsed time and visibly snap the texture). **Verified
+2026-08-06 by the evidence probe:** all 11 `TextureVelocity` scripts are whole-object with one
+rate each, and walking every setup default-script/table closure in the archive assigns no GfxObj
+DataID two distinct script-driven rates. The phase-bias escape hatch is not needed. The audit's
+one conflict is sky-authored, not script-authored: the overcast cloud sheet `0x01004C35` carries
+rate `(0.005, −0.0073)` in the Cloudy day groups but `(0.013, −0.013)` in the Rainy groups. The
+two rates never coexist — day groups are exclusive — so within any active group the precondition
+holds; the only divergence from retail is a phase-origin snap on that sheet at day-group
+rollover, where retail's accumulator is continuous. Bounded, once per rollover, on an overcast
+texture; accepted. If a same-session rate change is ever proven, the escape hatch is a lazily
+written phase bias at the change event (`phase = fract(newRate × (t − T) + phaseAtT)`) — still no
+per-frame mutation — and it is not built until then. Derive `fract` in f64 CPU-side (or
 wrap the clock) before values reach f32 uniforms; `rate × t` degrades in f32 over multi-hour
-sessions. The sky pass plan derives from the same shared clock and owns no scroll state either.
+sessions. The sky pass landed exactly this derivation 2026-08-06 as the unit-tested
+`skyTextureOffset` (`webgl2-sky-pass.ts`); Phase 4 shares that arithmetic and clock rather than
+building a parallel one.
 
 No setup-default script closure or setup-default animation emits a lighting hook. Lighting is
 therefore removed from this executable roadmap instead of receiving a speculative state field,
 system, or phase. The archive-wide animation vocabulary contains other gameplay-oriented hooks, but
 those remain outside this static-authored scope until a selected producer needs them.
+
+## Retail Execution Evidence (2026-08-06)
+
+Phase 1's retail-behavior evidence, gathered by targeted decompile reads. Every claim cites
+acclient.c; ACE/ACViewer are noted where they corroborate or are stubs.
+
+### Script Execution and Timing
+
+- **Runtime shape** (`ScriptManager`, acclient.c:316321-316475): one lazily created manager per
+  `CPhysicsObj` holding a FIFO queue of `ScriptData { start_time: f64 absolute seconds, script }`.
+  Record times are f64 offsets from the owning script's absolute start; the clock is the wall
+  clock (`Timer::cur_time`), never the sub-stepped physics clock — scripts are not sub-stepped.
+- **Scripts play once; there is no auto-repeat** (completion path acclient.c:316445-316470). The
+  only repetition mechanism is a `CallPES` cycle. A finished script's node is released; the
+  manager persists empty on the object.
+- **Queued scripts concatenate seamlessly:** `AddScriptInternal` (acclient.c:316331-316355)
+  starts a new script at `last.start_time + last.script.length` when the queue is non-empty
+  (`length` = the max record time, computed at unpack), and at `Timer::cur_time` only when the
+  queue is empty. A self-`CallPES` loop therefore repeats at exactly the script's authored
+  length with **zero drift** — and the calling script is never terminated by `CallPES`.
+- **`CallPES` `pause` is a uniform random delay bound, not a fixed delay**
+  (`CPhysicsObj::CallPES`, acclient.c:307316-307345): `pause >= 0.0002` rolls
+  `RollDice(0, pause)` and defers activation through an FPHook that fires the script only at
+  interpolation completion and only if the object is in a cell; `pause < 0.0002` starts the
+  script synchronously inside the update loop. The weather rain loops (`pause=0`) are the
+  synchronous case; `0x33000453`'s `pause=30` re-arms at a random point within 30 s, not at 30 s.
+- **Records are sorted by time at unpack; equal-time order is undefined in retail.**
+  `PhysicsScript::UnPack` runs `qsort` with a comparator that never returns 0 and is not a
+  strict weak ordering (acclient.c:322940-322948, 323160), so authored file order is not
+  execution order, and equal-timestamp order is implementation-defined even in retail. Our
+  runtime sorts by time with a **stable** tiebreak on authored order and records that as a
+  deliberate, documented divergence retail itself cannot contradict.
+- **Producer order within a frame differs by object class** (`CPhysics::UseTime`,
+  acclient.c:300072-300118): active objects run animation hooks _before_ script hooks
+  (`UpdatePositionInternal` → `process_hooks` → `UpdateScripts`); **static animating objects run
+  script hooks _before_ this frame's animation hooks** (`animate_static_object`,
+  acclient.c:309368-309409: part update queues anim hooks → `UpdateScripts` → `process_hooks`).
+  All active objects update before any static object. Statics are this plan's population, so the
+  runtime tick order is scripts-then-animation.
+- **Initial phase: none.** Scripts start at phase 0 at `Timer::cur_time` when added
+  (`InitDefaults` plays the setup script before enrolling the static object,
+  acclient.c:309089-309138); `RollDice` appears exactly once in the entire script path (the
+  `CallPES` pause). Retail's apparent desynchronization among identical residents comes purely
+  from differing creation instants. (Our `AnimationSystem`'s per-entity FNV phase offsets serve
+  the same purpose for animation; script clocks get their spread the same way or none.)
+- **Catch-up: crossed hooks execute, never fold or skip — up to a 2-second cliff.**
+  `UpdateScripts` drains every overdue hook in a burst; but `animate_static_object` and
+  `update_object` discard deltas above 2.0 s wholesale (reset `update_time`, run nothing that
+  frame; acclient.c:309381-309416, 311183-311211). So retail's answer to Open Question 5 is:
+  within 2 s, replay everything; beyond 2 s, drop the elapsed time entirely. Deterministic
+  initial-state folding as this plan defines it has no retail counterpart to contradict.
+- **No runaway protection exists in retail.** No iteration cap, no budget, no recursion guard.
+  A zero-length script that self-calls with `pause=0` infinite-loops the retail client with
+  unbounded allocation (acclient.c:316331-316471 has no guard). Our bounded-dispatch requirement
+  is a deliberate, necessary improvement, not a parity deviation.
+- **Script-sourced hooks ignore direction filtering:** `UnPackHook` stamps `direction = -2` and
+  `ScriptManager` executes hooks unconditionally (acclient.c:316443), unlike animation-frame
+  hooks, which filter by playback direction in `CSequence::execute_hooks`.
+
+### Script-Table Selection
+
+- **Selection rule** (`PhysicsScriptTableData::GetScript`, acclient.c:323183): linear scan in
+  authored file order, picking the **first entry whose `mod >= requested`** (ceiling match; the
+  comparison promotes to f64). No sorting, no nearest-match, and **no top clamp**: a requested mod
+  above every authored mod falls off the end and yields the invalid DID. A `0 / 0.5 / 1` triplet
+  therefore buckets as `(−∞,0] → entry0, (0,0.5] → entry1, (0.5,1] → entry2, (1,∞) → nothing`.
+- **Missing key** (`PhysicsScriptTable::GetScript`, acclient.c:323537-323558): hash-chain miss
+  returns the invalid DID; there is no fallback key, and callers do not check — the invalid DID
+  no-ops inside `play_script_internal` (`if (!a2) return 0`, acclient.c:306395). Silent no-op is
+  retail's authored miss behavior, which our provenance-first reporting deliberately improves on.
+- **Two independent default-script slots, never competing.** The _setup's_ `default_script` is a
+  raw script DID played once, unconditionally, at `CPhysicsObj::InitDefaults`
+  (acclient.c:309101) — the table is never consulted for it. The _object-level_ `default_script`
+  is a `PScriptType` **key** plus `default_script_intensity`, populated only from the network
+  `PhysicsDesc` (acclient.c:319092-319106, 310514-310516), and consumed only by
+  `play_default_script` → table lookup (acclient.c:308602-308619). The setup's
+  `default_script_table` merely installs `physics_script_table` (acclient.c:309126); loading it
+  plays nothing.
+- **Intensity (`mod`) is a per-event float sent by the server** (`SmartBox::HandlePlayScriptType`,
+  acclient.c:137238; ACE `GameMessageScript` and emote `Extent`); observed values are exactly
+  0.0 / 0.5 / 1.0. The clearest retail use: `PS_PortalStorm` played at 0.0 ("subsided",
+  acclient.c:385069) versus 1.0 ("imminent", acclient.c:385100).
+- **The six shipped tables are gameplay-event tables, not ambient behavior.** Their keys decode to
+  `PScriptType` values `PS_Launch` (4), `PS_Explode` (5), `PS_Fizzle` (81), `PS_Destroy` (89),
+  and `PS_ProjectileCollision` (90) (acclient.h:2937-3115; ACE `PlayScript` matches). Every
+  runtime consumer of table selection is network- or collision-driven (`play_script` from the
+  wire, `set_hidden`, `DoCollision`, the `DefaultScript` anim hook reading the network-populated
+  key). **A static authored resident never performs a table lookup.** Scope consequence recorded
+  in Phase 2's decisions.
+- **ACE and ACViewer `PhysicsScriptTable.GetScript` are stubs returning 0** (ACE
+  `Physics/Scripts/PhysicsScriptTable.cs:15-18`; ACViewer identical) — do not use them as
+  selection-semantics references. ACE's DatLoader unpack is real and matches our proven format.
+- `InitDefaults` also registers static animating state: setup `default_anim_id` sets state bit
+  `0x40000`, `default_script_id` sets `0x80000`, either enrolls the object via
+  `CPhysics::AddStaticAnimatingObject` (acclient.c:309131-309138).
+
+### Sound
+
+- **`SoundTable` resolution** (`SoundTableHook::Execute` → `SoundManager::PlaySoundA`,
+  acclient.c:328534-328537, 366969-366990): the table is the **object's** `sound_table`,
+  installed from the setup's `default_sound_table` (0x20 `STable`, acclient.c:309104-309115) or
+  overridden by the network `PhysicsDesc`. Lookup hashes the sound-type key; multiple candidates
+  pick uniformly at random — with a genuine retail bug: the index is `floor((n−1) × roll)`, so
+  **the last candidate in a list is never selected** (acclient.c:366752-366756). The chosen
+  entry's `probability` gates a play-chance roll; `volume` is linear gain; `priority` is used
+  only for voice stealing across the 16 global voices.
+- **`SoundTweaked` field-order trap, proven from offsets** (acclient.c:329412-329431,
+  328517-328525, 366790-366812): retail's `Execute` uses the **first float after the sound id as
+  the probability roll and discards the second entirely** — ACE's `Priority, Probability` field
+  naming is inverted relative to actual use, and the "priority" retail applies is the
+  `SoundData` default 0.0, so hook sounds lose every voice-steal contest. Our decode must name
+  the fields by proven behavior (`probability`, `unused`, `volume`), not by ACE's labels.
+- **Spatialization** (acclient.c:366427-366519): position sampled once at trigger time from the
+  emitting object; gain flat within 5 m then `25 × volume / d²`, a hard −50 dB cutoff (~89 m at
+  full volume — below it the sound is not played at all), heading-based stereo pan beyond 5 m.
+  No 3D buffers; no looping in the hook path (repeating ambience is retail's separate `Ambient`
+  scheduler, out of scope). Sixteen global voices with priority stealing.
+- **0x0A assets** are `WAVEFORMATEX` header + payload (DB type 15); format tag `0x55` means MP3,
+  which retail decodes through ACM to PCM 11025 Hz/16-bit/mono. Our audio runtime needs a wave
+  _and_ MP3-capable decode path or an explicit unsupported-format report.
+- **Teardown:** playing voices are fire-and-forget copies with no back-pointer — a sound
+  triggered by an object **finishes playing after the object is destroyed**
+  (acclient.c:366405-366407; `CPhysicsObj::Destroy` never touches voices). Owner removal
+  releases the table/template refcounts only.
+
+### Scale
+
+- Payload is `end f32, time f32` (in that order, acclient.c:328805-328816). `SetScale`
+  (acclient.c:328862-328903) interpolates **linearly from the object's current scale** to `end`
+  over `time` seconds via the same self-removing FPHook mechanism as luminosity, with the
+  familiar `0.0002` instant threshold. It writes one uniform scalar to the whole part array;
+  per-part setup `default_scale` composes multiplicatively (acclient.c:313786-313797). Scale
+  also feeds retail collision/selection spheres — presentation-only consumers can ignore that,
+  but conservative bounds must track it.
+
+### ReplaceObject
+
+- **Retail has no `ReplaceObjectHook::Execute`.** Every other hook family defines one; type 5
+  defines only ctor/pack/unpack/`GetSubDataIDs` (which preloads the replacement GfxObj,
+  acclient.c:329556-329563). Exhaustive call-site search shows the part-mutation entry point
+  (`CPartArray::SetPart`, acclient.c:313502-313527) is reached **only** from the
+  ObjDesc/appearance paths, never from a hook. Firing the hook in retail does nothing visible.
+  Faithful behavior is parse + preload + no-op; the _designed_ mutation (were it wired) would be
+  `SetPart` → `SetGfxObjArray`, which swaps geometry/surfaces permanently, preserves scale and
+  placement, and recomputes **no** bounds (retail's sorting/selection spheres come from the
+  setup, not parts). Scope consequence recorded in Phase 4's decisions.
+- Payload: **1-byte** part index + compressed 0x01-namespace DataID
+  (`AnimPartChange::UnPack`, acclient.c:450404-450415). ACE's u16 read is suspect (recorded
+  unknown; verify against real bytes before writing our decoder).
+
+### Particles
+
+- **Layout source:** ACE `ParticleEmitterInfo.cs:45-93` is the authoritative 0x32 stream order —
+  retail's `UnPack` decompile is provably mis-based (acclient.c:312956) and must not be used for
+  field order. `sorting_sphere` is not in the file; it is derived in `InitEnd` as
+  `radius = max(max_offset, max_a × lifespan)` (acclient.c:312431-312445). `hw_gfxobj_id` is the
+  particle mesh; `gfxobj_id` is parsed but never read anywhere in the particle path.
+- **Emission:** `emitter_type` is a bitmask (`&1` per-second, `&2` per-meter). Per-second
+  `birthrate` is a **minimum interval between emissions**, not a rate, and at most one particle
+  emits per update tick — no catch-up (acclient.c:312447-312476, 318289). The per-meter predicate
+  is unrecoverable from the decompile (IDA-flagged undefined operands, acclient.c:312468) and is
+  a recorded unknown; ACViewer's guess is annotated `// verify` and is not evidence.
+- **Randomization** (acclient.c:312311-312603): every rolled field is `RollDice(−1,1) × rand +
+base` (addition, never multiplication); scale clamps to [0.1, 10.0], translucency to [0, 1];
+  offset is a random unit vector projected perpendicular to `offset_dir`. The RNG roll order in
+  `EmitParticle` is recorded (lifespan, finalTrans, startTrans, finalScale, startScale, C, B, A,
+  offset) for bit-exact replication if ever wanted.
+- **Coordinate space** (`Particle::Init`, acclient.c:317743-317915): the spawn frame is a copy of
+  the parent's global frame (`part_index == -1` → object frame, else that part's frame). The hook
+  `Frame`'s origin contributes to the offset; **its quaternion is never applied**. "Local" motion
+  vectors (`LV`/`LA`/`LR` type names) are rotated into world space by the spawn frame; "global"
+  vectors are raw. All particle state is world-space after Init. The 13 `ParticleType` motion
+  formulas are pinned with line cites (acclient.c:317446-317664), including Explode's authored
+  quirks (`c.y × a.x` on y, an extra `+ a.z` on z).
+- **Following:** `is_parent_local != 0` re-reads the live parent frame every tick (particles
+  rigidly follow); `is_parent_local == 0` uses each particle's spawn-time snapshot (particles are
+  left behind) (acclient.c:318262-318273).
+- **Lifecycle** (acclient.c:316606-316730, 317417-317444, 317935-317988): per-object
+  `ParticleManager`; each emitter owns a hidden particle `CPhysicsObj` parented to the source.
+  `emitter_id` semantics: 0 → auto-id (from 0xFFFF0000 up); nonzero → **replaces** any existing
+  same-id emitter; the blocking variant instead refuses to create on collision; `DestroyParticle`
+  / `StopParticle` hooks target by this id. "Persistent" means `total_particles == 0 &&
+total_seconds == 0`. Stop (auto or hook) halts emission while live particles finish their
+  lifespans, then the emitter self-reaps; `Destroy` and owner destruction vanish live particles
+  instantly. Particles die **only** by lifespan; parts are pooled and reused.
+- **Degrade** (acclient.c:305645-305662, 318189-318306): beyond the part's degrade distance
+  (default 100.0) the emitter stops drawing and simulating; finite emitters still advance
+  bookkeeping so bursts complete off-screen, persistent emitters freeze particle ages so nothing
+  expires. This is presentation policy our renderer may re-express, but the
+  finite-completes/persistent-freezes distinction is behavior to keep.
+- **Billboarding exists — in the degrade layer, not the particle system (correction
+  2026-08-06).** An earlier draft claimed retail has no billboarding; that was wrong. Every
+  `CGfxObj` may carry a `DegradeInfo` id (0x11 family, DBObj type 26) authoring distance bands of
+  `{LOD gfxobj, degrade_mode, distances}` (`CPhysicsPart::LoadGfxObjArray`,
+  acclient.c:303404-303470). At draw time `CPhysicsPart::calc_draw_frame`
+  (acclient.c:319260-319290 region) orients the part by the active band's mode: 1 = authored
+  frame, **2 = full viewer-facing billboard** (`Frame::set_vector_heading` to the viewer
+  heading), 3/4/5 = axis-locked viewer alignment about x/y/z (cylindrical billboarding). Because
+  the draw frame is recomputed from the authored frame and then re-headed, **mode 2 overrides
+  any `GR`/`LR` spin at draw time**. Particles are ordinary parts, so a particle whose
+  `hw_gfxobj` authors mode 2 is a true camera-facing sprite — which matches observed retail
+  footage. Consequences: the particle resource closure must include each `hw_gfxobj`'s 0x11
+  dependency and its per-band LOD meshes, and the Phase 5 vertex stage needs the viewer-facing
+  and axis-locked orientation branches, not only authored-frame transforms. (World objects use
+  the same mechanism; our renderer ignores degrade info there **deliberately** — ratified
+  2026-08-06: retail's LOD system is not being adopted, and a future custom LOD design owns that
+  space. Particles are the one consumer where degrade _orientation_ is load-bearing.)
+- **All 13 motion types are closed-form in elapsed time.** Every formula is
+  `position = f(t, spawn constants, parent frame)` with no per-frame integration state — the
+  same derive-don't-accumulate shape as the texture-scroll model. A particle's mutable state
+  reduces to its spawn constants plus birth time; per-frame work is evaluation, not simulation.
+  (The one accumulator is persistent-emitter lifetime under degrade, which is bookkeeping, not
+  motion.)
+- **ACViewer has a substantial C# port** (`ACViewer/Physics/Particles/*`,
+  `Render/ParticleBatchDraw.cs`) — useful structurally, but **not faithful**: verified deviations
+  include `InitEnd` emitting `total_particles` instead of `initial_particles`, inverted degrade
+  logic, missing `GetRandom*` rolls, wrong A/B/C transforms for three parabolic types, and a
+  self-recursive `CreateBlockingParticleEmitter`. Every borrowed detail must be re-checked
+  against the retail cites above.
 
 ## North Stars
 
@@ -214,17 +549,16 @@ those remain outside this static-authored scope until a selected producer needs 
 ## Target Runtime Shape
 
 ```text
-setup default script/table IDs
+setup default script IDs
   -> typed content load
-  -> prepared script/table repositories
+  -> prepared script repositories
   -> transitive hook/effect dependency closure
   -> per-entity PhysicsScriptSystem clock
   -> prepared behavior commands
   -> BehaviorEventRouter (introduced with the second producer and real consumers)
        |- persistent visual/material commands -> EffectSystem
-       |- ReplaceObject -> per-entity part selection + conservative bound
        |- CreateParticle -> particle runtime -> renderer
-       |- SoundTable / SoundTweaked -> audio runtime
+       |- SoundTable / SoundTweaked -> AudioSystem
        `- CallPES -> scheduled script activation
 ```
 
@@ -240,7 +574,7 @@ records one exhaustive outcome per command; it owns no clocks, queues, effect st
 | ----------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `EffectSystem.executeDepartedFrames` accepts animation-specific records | Animation is still the only live producer                      | Phase 2 compiles one prepared command union; Phase 3 introduces the router and adapts animation |
 | `PartRenderState` contains only translucency                            | It has one real consumer and no speculative fields             | Phase 4 widens it only for proven scale/UV presentation facts                                   |
-| `ReplaceObjectHook` blocks animated activation                          | No replacement resources or bounds are prepared                | Phase 4 stages the two selected GfxObj variants and adds atomic structural dispatch             |
+| `ReplaceObjectHook` blocks animated activation                          | No replacement resources or bounds are prepared                | Phase 4 unblocks activation: the hook decodes and reports intentionally-inert (retail-faithful) |
 | Script-only authored residents retain static presentation               | No script clock or effect closure exists                       | Phase 7 promotes them only after complete staged readiness                                      |
 | Particle and audio consumers are absent                                 | The app has no existing focused runtimes to reuse              | Phases 5 and 6 add named owners after Phase 1 evidence                                          |
 | Repository-wide Prettier has untouched baseline failures                | Convergence formats every touched file without unrelated churn | Convergence Phase 8, before this plan executes implementation                                   |
@@ -253,21 +587,30 @@ behavior systems.
 
 ### Phase 1: Complete the Authored Script and Hook Evidence
 
-Progress: Not started — archive census complete; retail timing/selection evidence remains
+Progress: Substantially complete 2026-08-06 (archive probe + five-track retail evidence sweep,
+recorded in Measured Workload and Retail Execution Evidence). Remaining: authoring the
+checked-in source-first fixtures. Both scope questions were ratified 2026-08-06 (script tables in Phase 2,
+`ReplaceObjectHook` in Phase 4).
 
 #### Deliverables
 
 - Reproduce the recorded DA55/DC58 root IDs and transitive dependencies as checked-in, source-first
   fixtures; the archive-wide counts above are evidence, not runtime-asset test dependencies.
-- Prove record timing units, table keys/intensity selection, `CallPES` delay/repetition behavior, and
-  equal-time command ordering from retail/ACE.
-- Inventory reusable audio, particle, material-animation, and asset-decoding code before designing
-  consumers; the convergence search found no existing app-local runtime for those families.
-- Prove the exact payload, dependency, coordinate/target, and lifetime semantics for the six unmet
-  hook types in the measured table above plus the selected `ReplaceObjectHook` example.
-- Verify the derived-phase precondition: map the 11 `TextureVelocity` scripts to their referencing
-  setups and confirm no GfxObj DataID is authored two different scroll rates. A single
-  counterexample activates the phase-bias escape hatch in Phase 4; none is expected.
+- ~~Prove record timing units, table keys/intensity selection, `CallPES` delay/repetition
+  behavior, and equal-time command ordering from retail/ACE.~~ Done 2026-08-06; recorded in
+  Retail Execution Evidence.
+- ~~Inventory reusable audio, particle, material-animation, and asset-decoding code before
+  designing consumers.~~ Done 2026-08-06; recorded in Existing Code to Extend. Audio is
+  greenfield, particles reuse the instancing substrate, transport clones the animation lane, and
+  a small clock unification is a new prerequisite for script clocks.
+- ~~Prove the exact payload, dependency, coordinate/target, and lifetime semantics for the six
+  unmet hook types in the measured table above plus the selected `ReplaceObjectHook` example.~~
+  Done 2026-08-06; recorded in Retail Execution Evidence (including the `SoundTweaked`
+  field-order trap and retail's missing `ReplaceObjectHook::Execute`).
+- ~~Verify the derived-phase precondition: map the 11 `TextureVelocity` scripts to their
+  referencing setups and confirm no GfxObj DataID is authored two different scroll rates.~~
+  Done 2026-08-06 by the evidence probe; recorded in Measured Workload. No script-driven
+  conflicts; the escape hatch stays unbuilt.
 - Decide from retail whether commands crossed during deterministic initial-phase replay are folded as
   persistent state, emitted as ephemeral effects, or deliberately skipped per command family.
 
@@ -287,17 +630,31 @@ Progress: Not started — archive census complete; retail timing/selection evide
 - **Scope correction:** Lighting is absent from the measured setup-default producer closure and is
   removed. `SoundTable`, `Scale`, and `TextureVelocity` are now explicit because the wider census
   proves they are real; the old representative-only summary hid them.
+- **2026-08-06 evidence probe (temporary `effects_script_evidence` harness bin, removed after
+  recording):** proved the 0x33/0x34 wire formats against ACE (`f64` start time + closed-vocabulary
+  hook per script record; plain u32-count table dictionary), completed the constant-rate
+  verification, decoded all six tables and their single referencing setups, surfaced mutual
+  two-script `CallPES` cycles and in-the-wild `pause` usage, and confirmed sky
+  `default_pes_object_id`s duplicate setup `default_script`s. Remaining Phase 1 work is the
+  retail timing/selection/ordering evidence, the six unmet hook payload semantics, and the
+  particle/audio/reuse inventory.
 
 ### Phase 2: Decode, Transport, and Prepare Script Resources
 
 Progress: Not started
 
+**Ratified 2026-08-06: script tables move to the spawned-entity plan.** Retail proves static
+authored residents never perform a table lookup — the setup's `default_script` DID plays
+directly, and every table-selection consumer is network-, collision-, or hidden-state-driven.
+This phase is script-DID-only; the spawned plan inherits table decode, transport, and intensity
+selection together with the recorded census and selection semantics.
+
 #### Deliverables
 
-- Add typed `PhysicsScript` and `PhysicsScriptTable` models in `holtburger-dat` using proven layouts.
+- Add a typed `PhysicsScript` model in `holtburger-dat` using the proven layout.
 - Expose typed content requests through `holtburger-content`/`holtburger-core` and compact Tauri
   transfer payloads.
-- Add typed script and table repositories with shared in-flight preparation, ready/failed state,
+- Add a typed script repository with shared in-flight preparation, ready/failed state,
   acquired handles, and deterministic release.
 - Compile script and animation records into one immutable `PreparedBehaviorCommand` semantic union
   carrying target-relative values and source provenance, not producer-specific transport wrappers.
@@ -306,8 +663,8 @@ Progress: Not started
 
 #### Acceptance Criteria
 
-- Many owners referencing one script/table perform one transfer and preparation per unique asset.
-- Entity sources retain IDs/selection facts rather than decoded timelines or table maps.
+- Many owners referencing one script perform one transfer and preparation per unique asset.
+- Entity sources retain script IDs rather than decoded timelines.
 - Prepared script execution requires no DAT decoding, asset discovery, or frame-time I/O.
 - Missing dependencies fail staging with full root/script/hook provenance.
 
@@ -321,8 +678,8 @@ Progress: Not started
 
 #### Deliverables
 
-- Add `PhysicsScriptSystem` with independent per-entity clocks, selected intensity/state,
-  generation-safe targets, and deterministic command crossing.
+- Add `PhysicsScriptSystem` with independent per-entity clocks, generation-safe targets, and
+  deterministic command crossing.
 - Introduce `BehaviorEventRouter` at the first real multi-producer/multi-consumer cut. Adapt animation
   dispatch and script dispatch to its generation-safe synchronous command port without moving either
   producer's clock into the router.
@@ -350,6 +707,12 @@ Progress: Not started
 
 Progress: Not started
 
+**Ratified 2026-08-06: `ReplaceObjectHook` execution is dropped.** Retail has no `Execute` for
+hook type 5 — the shipped client parses and preloads it, then does nothing, and the archive
+contains exactly two records. Our runtime decodes the hook and reports it intentionally-inert
+with provenance; no replacement resources are staged and the hook no longer blocks animated
+activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
+
 #### Deliverables
 
 - Implement measured `Scale` and `TextureVelocity` commands through narrow generation-safe ports.
@@ -358,22 +721,23 @@ Progress: Not started
   static scroll rate on the content-identity material fact, and the renderer derives
   `phase = fract(rate × sharedClock)` at draw time. No scroll registry, no accumulator, and no
   per-entity scroll clock exist; seam synchronization across instances follows from shared rates
-  and the shared clock. The phase-bias escape hatch is built only if Phase 1's constant-rate
-  verification fails.
+  and the shared clock. The sky pass already ships this derivation as `skyTextureOffset`
+  (`webgl2-sky-pass.ts`) with unit coverage; hoist it to a shared helper both consumers call
+  rather than duplicating the arithmetic. The phase-bias escape hatch is built only if Phase 1's
+  constant-rate verification fails.
 - Widen `EffectState`, `EffectPresentationSample`, and `PartRenderState` only with the exact scale or
   UV facts consumed in this phase; do not add luminosity, diffuse, lighting, or generic property bags.
-- Implement `ReplaceObjectHook` as a named structural visual command. Prepare and lease every
-  referenced replacement part before activation, switch one entity's part selection atomically at
-  dispatch, and update its conservative bound without mutating shared base templates.
+- Decode `ReplaceObjectHook` records and report them intentionally-inert with provenance
+  (retail-faithful; see the ratification above), unblocking animated activation for the two
+  affected animations.
 - Compose visual state through existing animation/template/dynamic-publication/render contracts.
 
 #### Acceptance Criteria
 
 - Every proven visual command changes its named runtime consumer and is observable in a fixture.
 - Commands perform no resource preparation during dispatch.
-- Repeated replacement parts share immutable geometry/material resources while each entity retains
-  independent current part selection.
-- Replacement cannot expose missing geometry, stale bounds, or a partially switched material set.
+- `ReplaceObjectHook` records surface as intentionally-inert observations with full provenance,
+  and animations carrying them activate normally.
 - `BehaviorEventRouter` owns neither visual state nor template/resource lifetime; `EffectSystem` retains
   implemented visual state behind a narrow consumer port.
 - Unsupported visual commands report source asset, record time, and target identity.
@@ -388,14 +752,80 @@ Progress: Not started
 
 #### Deliverables
 
-- Prove particle-emitter asset interpretation, spawn timing, attachment/root selection, coordinate
-  space, lifetime, material, blend/depth policy, and deterministic cleanup from retail/ACE.
+- ~~Prove particle-emitter asset interpretation, spawn timing, attachment/root selection,
+  coordinate space, lifetime, material, blend/depth policy, and deterministic cleanup from
+  retail/ACE.~~ Done 2026-08-06 (see Particles in Retail Execution Evidence); the sole residual
+  unknown is the per-meter emission predicate, blocked on the decompile with no authored
+  consumer identified. For blend selection, consume the shared `objectBlendPolicy`: retail
+  particles are ordinary
+  `CPhysicsPart`s in a particle `CPartArray` (`CPhysicsObj::makeParticleObject`,
+  acclient.c:307921, via `CSetup::makeParticleSetup` and `CPartArray::InitParts`), so they draw
+  through the same surface-flag blend staging as every other part — verified 2026-08-06, not
+  inferred. Particle translucency animation (`Particle::Init` start/final translucency) modulates
+  alpha on top of that surface-derived blend and remains this phase's own state.
+- Handle root-relative emission: shipped `CreateParticle` events author `part=-1` (whole
+  object/root) — the celestial script `0x330007DB` uses it exclusively — alongside part-indexed
+  emission (`0x33000453` authors `part=0`).
 - Add a focused particle asset repository if existing shared content primitives cannot represent the
   required immutable data.
 - Add an app-local particle runtime whose mutable emitters/particles follow current entity or part
   transforms without entering `DynamicEntitySystem` ownership.
-- Integrate particle visibility and rendering into existing renderer ordering/batching where
-  compatible.
+- **Visibility/culling strategy (ratified 2026-08-06), improving on retail's per-emitter model:**
+  1. Cull at emitter granularity using a **preparation-time conservative bound** computed from
+     the closed-form motion envelope — maximize `|offset + t·A + ½·B·t² (+ C terms)|` over
+     `t ∈ [0, lifespan]` with the max rolls — once per unique emitter info. Retail's own derived
+     sphere (`max(max_offset, max_a × lifespan)`, acclient.c:312431-312445) is velocity-only and
+     provably under-bounds the parabolic types; ours is exact where retail guessed.
+  2. The emitter bound composes into the owner's conservative presentation bounds exactly as
+     animation bounds already do, feeding the existing visibility path; a culled emitter writes
+     no instance records that frame. Transparent ordering uses the emitter bound center as the
+     cohort sort key. No parallel culling system is built.
+  3. **Never cull per-particle.** GPU evaluation means the CPU does not know per-particle
+     positions; off-frustum particles of a visible emitter cost vertex-shader invocations and
+     hardware clipping only. Per-particle CPU culling would reintroduce the ratified-out CPU
+     ceiling.
+  4. **Hidden emitters cost zero per tick.** Retail ticks hidden emitters every frame for
+     bookkeeping (acclient.c:318219-318252); closed-form state replaces that with reconciliation
+     at the visibility transition: persistent emitters shift live birth times by the suspension
+     duration (retail's age-freeze, computed once), finite emitters compute hidden-interval
+     emissions analytically (`elapsed / birthrate`, budget-capped) and their auto-stop, and a
+     finite emitter's self-reap time is scheduled in advance rather than polled.
+  5. Honor the authored degrade distance (from the same 0x11 info fetched for orientation) as
+     the retail-parity distance cutoff in the per-emitter test; any future draw-distance quality
+     knob scales it rather than replacing the mechanism.
+- **Retail's draw mechanism is evidence, not prescription.** Retail renders every live particle as
+  its own `CPhysicsPart` through the general per-part path; that fact pins the semantics (surface
+  flags drive blend state, particles are GfxObj meshes, translucency animates per particle) but is
+  a 2002 performance ceiling we deliberately do not inherit. Rendering uses renderer-owned
+  batching/instancing — the natural shape is instanced cohorts per unique GfxObj/material, the
+  same idea as the landed rigid-part instance cohorts — per contract 10 (renderer batching is
+  renderer policy). The parity bar is visual output, never draw-call topology.
+- **GPU evaluation is the design of record (ratified 2026-08-06).** The closed-form motion
+  evidence reduces particle state to spawn constants plus birth time, so the instance record
+  carries spawn constants and a dedicated particle _vertex_ stage evaluates
+  `f(t, constants, parent frame)` on the GPU; per-particle CPU work is emission/kill bookkeeping
+  only. Rationale: the static-authored workload alone is small, but this runtime is inherited by
+  the spawned plan, whose script-table consumers (`Launch`/`Explode`/`Fizzle`) are combat spell
+  effects — the architecture must not bake in a per-particle CPU ceiling. A CPU-evaluated path
+  may serve as bring-up scaffolding but is not the landed end state.
+- **Shader strategy: dedicated particle vertex stage, shared fragment chunks.** Particles are
+  arbitrary in-world GfxObj meshes drawn with fog, depth, alpha test, and surface-derived
+  blend — so the fragment side composes the existing object material chunks rather than growing
+  a parallel "simple" particle shader back toward them. The vertex stage is particle-specific
+  and covers both motion (spawn constants → `f(t)`, including `GR`/`LR` axis-angle spin) and
+  orientation policy from the mesh's authored degrade mode: authored frame, full viewer-facing
+  billboard (retail is eye-facing — basis from `normalize(cameraPos − particlePos)` — not
+  screen-aligned), or axis-locked viewer alignment (see the billboarding correction in
+  Particles; billboard modes suppress `GR`/`LR` spin exactly as retail's draw-time override
+  does). Orientation mode is a per-mesh fact and cohorts are keyed by mesh, so it binds as a
+  per-cohort constant, never a per-instance attribute. If the census confirms particle meshes
+  author a single degrade band (expected), band selection is skipped and the base band's mode
+  applies at all distances — consistent with the deliberate non-adoption of retail LOD
+  elsewhere.
+- Census the emitter-info `hw_gfxobj_id` population early in this phase — mesh, surface, and
+  palette complexity **plus each mesh's 0x11 degrade info** (orientation modes and LOD bands
+  actually authored) — to pin exactly which fragment chunks and orientation branches particles
+  reach, the same evidence-first move the sky pass used to right-size its program.
 
 #### Acceptance Criteria
 
@@ -416,12 +846,21 @@ Progress: Not started
 
 #### Deliverables
 
-- Prove `SoundTable` selection and `SoundTweaked` asset lookup,
-  priority/probability/volume, spatial origin, attenuation, repetition, and teardown behavior from
-  retail/ACE.
+- ~~Prove `SoundTable` selection and `SoundTweaked` asset lookup, priority/probability/volume,
+  spatial origin, attenuation, repetition, and teardown behavior from retail/ACE.~~ Done
+  2026-08-06 (see Sound in Retail Execution Evidence), including the `SoundTweaked` field-order
+  correction against ACE's naming.
 - Add typed sound content decoding/transport and shared immutable audio asset preparation using
-  existing facilities where available.
-- Add an app-local audio runtime that consumes prepared sound commands and current source transforms.
+  existing facilities where available. Decode covers WAV and MP3 payloads (retail 0x0A carries
+  both); an unsupported format is an explicit report, not a guess.
+- Add **`AudioSystem`** (named per the frontend system convention alongside `EffectSystem` and
+  `PhysicsScriptSystem`) consuming prepared sound commands and source transforms. The
+  evidence-backed scope is deliberately minimal: one-shot fire-and-forget voices only — no
+  looping, no streaming, no stop API, no mixing graph — with the probability gate and spatial
+  parameters (flat-then-inverse-square gain with cutoff, heading pan) computed once at trigger
+  and never updated. Voices deliberately outlive their emitting owner, matching retail.
+  Retail's 16-voice priority steal is near-moot (hook sounds carry priority 0 and lose every
+  contest), so a plain voice cap with oldest-steal is adopted as a recorded simplification.
 - Make unsupported device/format/runtime failures explicit without blocking unrelated visual state.
 
 #### Acceptance Criteria
@@ -442,7 +881,7 @@ Progress: Not started
 
 #### Deliverables
 
-- Stage complete script/table/effect closures before replacing retained static presentation.
+- Stage complete script/effect closures before replacing retained static presentation.
 - Atomically promote script-only residents into the shared authored dynamic aggregate.
 - Activate animation and scripts independently for combined residents.
 - Preserve authored placement, source ownership, template sharing, and conservative bounds.
@@ -473,6 +912,10 @@ Progress: Not started
       temporary duplicate effect representation.
 - [ ] Update architecture documentation and hand the complete authored behavior model to the spawned-
       entity plan.
+- [ ] Trigger the weather/sky-script plan's Phase R boundary dry-run
+      ([holtburger-3d-weather-sky-script-runtime-plan.md](holtburger-3d-weather-sky-script-runtime-plan.md))
+      against the landed PES execution and particle contracts; do not pre-build sky-target support
+      here.
 
 #### Acceptance Criteria
 
@@ -537,11 +980,12 @@ swap atomically. Failure leaves the valid static presentation visible with diagn
 
 ## Definition of Done
 
-- [ ] Every supported setup default physics script/table is decoded, prepared, and scheduled.
+- [ ] Every supported setup default physics script is decoded, prepared, and scheduled.
 - [ ] Intentional script cycles prepare finitely and execute through bounded scheduled repetition.
 - [ ] All measured visual, particle, audio, and chained-script commands have real consumers.
-- [ ] Animation-time `ReplaceObjectHook` has an atomic, replacement-bound-aware consumer distinct
-      from appearance-time `ObjDesc.anim_part_changes`.
+- [ ] `ReplaceObjectHook` records decode and report intentionally-inert with provenance, and
+      animations carrying them activate normally (execution ratified out 2026-08-06;
+      appearance-time `ObjDesc.anim_part_changes` is unaffected).
 - [ ] Script and animation clocks remain independent and deterministic.
 - [ ] Script-only and combined authored residents execute without duplicate presentation resources.
 - [ ] Effects follow current authored entity/part transforms and clean up with their owners.
@@ -556,13 +1000,24 @@ swap atomically. Failure leaves the valid static presentation visible with diagn
 
 ## Open Questions
 
-1. Which of the six censused physics-script tables is the smallest fixture that still proves keys,
-   modifier selection, fallback, and dependency closure?
-2. What exact equal-time ordering does retail use across animation hooks, physics-script records, and
-   chained `CallPES` activation?
-3. Which particle asset fields and coordinate-space rules are required by every authored
-   `CreateParticle` event?
-4. What sound-table/asset path, priority, probability, volume, attenuation, and lifetime semantics
-   does retail use for `SoundTable` and `SoundTweaked`?
-5. Which persistent commands fold into deterministic initial state, and which ephemeral audio or
-   particle commands retail suppresses or emits when a static object starts at an independent phase?
+1. ~~Which of the six censused physics-script tables is the smallest fixture that still proves
+   keys, modifier selection, fallback, and dependency closure?~~ Answered 2026-08-06:
+   `0x340000BA` (see the table census in Measured Workload).
+2. ~~What exact equal-time ordering does retail use across animation hooks, physics-script
+   records, and chained `CallPES` activation?~~ Answered 2026-08-06 (see Script Execution and
+   Timing): retail equal-time record order is undefined (broken qsort comparator); statics run
+   scripts before this frame's animation hooks; `CallPES` never preempts the caller.
+3. ~~Which particle asset fields and coordinate-space rules are required by every authored
+   `CreateParticle` event?~~ Answered 2026-08-06 (see Particles): full 0x32 layout via ACE,
+   world-space-after-Init rule, per-type local/global vector table, and emitter-id semantics.
+   Remaining sub-unknown: the per-meter emission predicate (no authored consumer identified yet;
+   blocked on the decompile, not on us).
+4. ~~What sound-table/asset path, priority, probability, volume, attenuation, and lifetime
+   semantics does retail use for `SoundTable` and `SoundTweaked`?~~ Answered 2026-08-06 (see
+   Sound), including the field-order correction against ACE's naming.
+5. ~~Which persistent commands fold into deterministic initial state, and which ephemeral audio
+   or particle commands retail suppresses or emits when a static object starts at an independent
+   phase?~~ Retail side answered 2026-08-06: scripts always start at phase 0 with no folding
+   mechanism — retail replays overdue hooks in bursts up to a 2 s cliff and discards time beyond
+   it. Initial-state folding is therefore purely our design decision, made in Phase 3 with no
+   retail behavior to contradict.

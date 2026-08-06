@@ -337,7 +337,9 @@ is equivalent to deriving `fract(rate * clock)` directly, with no accumulator st
 `0x02000714` (script `0x330007DB`, `properties` 0, always visible) appears in **every** day group
 including clear skies, so the sky is a celestial consumer of authored physics scripts and not only
 a weather one. `holtburger-3d` carries the id through its resolved sky contract unexecuted; the
-authored-effects runtime is its eventual consumer and needs no schema change to claim it.
+scheduled weather/sky-script plan
+(`docs/plans/holtburger-3d-weather-sky-script-runtime-plan.md`) executes these scripts on the
+authored-effects runtime's systems and needs no schema change to claim them.
 
 ## Constants
 

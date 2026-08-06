@@ -118,12 +118,31 @@ interface ParticleCommandPort {
 	): "created" | "unprepared";
 }
 
+/**
+ * Authored one-shot sound playback.
+ *
+ * Takes the sound's DID and its authored parameters; resolving the asset and placing the voice are
+ * the consumer's job. `unprepared` covers both a missing asset and a sound retail would not have
+ * played, so the router records the difference between "no consumer" and "deliberately silent".
+ */
+interface AudioCommandPort {
+	playSound(
+		target: BehaviorTarget,
+		sound: {
+			readonly soundId: DatAssetId;
+			readonly probability: number;
+			readonly volume: number;
+		},
+	): "played" | "suppressed" | "unprepared";
+}
+
 /** Decides whether a target still exists at the generation a command was queued against. */
 interface BehaviorTargetRegistry {
 	isLive(target: BehaviorTarget): boolean;
 }
 
 export interface BehaviorConsumers {
+	readonly audio: AudioCommandPort;
 	readonly effects: EffectCommandPort;
 	readonly particles: ParticleCommandPort;
 	readonly scheduler: ScriptActivationPort;
@@ -205,10 +224,20 @@ export class BehaviorEventRouter {
 				this.#consumers.scheduler.scheduleActivation(target, command);
 				return "scheduled";
 
-			case "sound-table":
-			case "sound-tweaked":
+			case "sound-tweaked": {
 				// Ephemeral by nature. Replaying elapsed audio would emit a burst of sounds for time
 				// the viewer never experienced, which is exactly what retail's catch-up cliff avoids.
+				if (mode === "initial-state") return "suppressed-initial-state";
+				const outcome = this.#consumers.audio.playSound(target, command);
+				if (outcome === "unprepared") return "no-consumer";
+				// A sound that lost its probability roll or fell below the audible floor executed
+				// correctly by not being heard; that is not a missing consumer.
+				return "executed";
+			}
+
+			case "sound-table":
+				// Resolving a SoundType key needs the owning object's installed sound table, which
+				// arrives with authored residents in Phase 7.
 				if (mode === "initial-state") return "suppressed-initial-state";
 				return "no-consumer";
 

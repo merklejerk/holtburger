@@ -26,6 +26,11 @@ function build(isLive = true) {
 		applySetOmega: vi.fn(),
 		applyTransparentPart: vi.fn(),
 	};
+	const audio = {
+		playSound: vi.fn<
+			(...args: never[]) => "played" | "suppressed" | "unprepared"
+		>(() => "unprepared"),
+	};
 	const particles = {
 		createEmitter: vi.fn<(...args: never[]) => "created" | "unprepared">(
 			() => "unprepared",
@@ -33,10 +38,10 @@ function build(isLive = true) {
 	};
 	const scheduler = { scheduleActivation: vi.fn() };
 	const router = new BehaviorEventRouter(
-		{ effects, particles, scheduler, targets: { isLive: () => isLive } },
+		{ audio, effects, particles, scheduler, targets: { isLive: () => isLive } },
 		4,
 	);
-	return { effects, particles, router, scheduler };
+	return { audio, effects, particles, router, scheduler };
 }
 
 const SET_OMEGA: PreparedBehaviorCommand = {
@@ -131,6 +136,44 @@ describe("BehaviorEventRouter", () => {
 				"live",
 			),
 		).toBe("no-consumer");
+	});
+
+	it("plays a live sound but suppresses a replayed one", () => {
+		const { audio, router } = build();
+		const sound: PreparedBehaviorCommand = {
+			kind: "sound-tweaked",
+			probability: 1,
+			soundId: "0x0a000207",
+			volume: 0.3,
+		};
+		audio.playSound.mockReturnValue("played");
+
+		expect(router.dispatch(sound, TARGET, PROVENANCE, "live")).toBe("executed");
+		expect(router.dispatch(sound, TARGET, PROVENANCE, "initial-state")).toBe(
+			"suppressed-initial-state",
+		);
+		// Replay never reaches the device at all: elapsed audio the viewer never heard.
+		expect(audio.playSound).toHaveBeenCalledTimes(1);
+	});
+
+	it("counts a deliberately silent sound as executed, not as unconsumed", () => {
+		const { audio, router } = build();
+		audio.playSound.mockReturnValue("suppressed");
+
+		// Losing a probability roll or falling below the audible floor is correct behavior.
+		expect(
+			router.dispatch(
+				{
+					kind: "sound-tweaked",
+					probability: 0.1,
+					soundId: "0x0a000207",
+					volume: 0.3,
+				},
+				TARGET,
+				PROVENANCE,
+				"live",
+			),
+		).toBe("executed");
 	});
 
 	it("rejects a stale target without touching any consumer", () => {

@@ -47,6 +47,7 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 					system.scheduleActivation(target, activation);
 				},
 			},
+			audio: { playSound: () => "unprepared" as const },
 			particles: { createEmitter: () => "unprepared" as const },
 			targets: { isLive: () => options.liveTargets ?? true },
 		},

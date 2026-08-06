@@ -1,6 +1,7 @@
 pub mod animation;
 pub mod char_gen;
 pub mod chat_pose_table;
+pub mod degrade_info;
 pub mod env_cell;
 pub mod environment;
 pub mod gfx_obj;
@@ -21,6 +22,7 @@ pub mod xp_table;
 pub use animation::Animation;
 pub use char_gen::CharGen;
 pub use chat_pose_table::{ChatEmoteData, ChatPoseTable};
+pub use degrade_info::{DegradeBand, DegradeOrientation, GfxObjDegradeInfo};
 pub use env_cell::EnvCell;
 pub use environment::{CellStruct, Environment};
 pub use gfx_obj::GfxObj;

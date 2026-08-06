@@ -14,8 +14,8 @@ use holtburger_content::{
     TexturePixelFormat,
 };
 use holtburger_dat::file_type::{
-    Animation, GfxObj, Palette, ParticleEmitterInfo, PhysicsScript, RenderSurface, SetupModel,
-    SoundTable, Wave,
+    Animation, GfxObj, GfxObjDegradeInfo, Palette, ParticleEmitterInfo, PhysicsScript,
+    RenderSurface, SetupModel, SoundTable, Wave,
 };
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex as TokioMutex, Semaphore};
@@ -36,6 +36,7 @@ pub enum ContentAssetRequest {
     ParticleEmitterInfo(u32),
     Wave(u32),
     SoundTable(u32),
+    DegradeInfo(u32),
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
@@ -83,6 +84,7 @@ pub enum ContentAsset {
     ParticleEmitterInfo(Box<ParticleEmitterInfo>),
     Wave(Box<Wave>),
     SoundTable(Box<SoundTable>),
+    DegradeInfo(Box<GfxObjDegradeInfo>),
     GfxObj(Arc<GfxObj>),
     SetupModel(Arc<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
@@ -334,6 +336,17 @@ impl ContentAssetService {
                     SoundTable::read(&mut Cursor::new(resource.bytes)).with_context(|| {
                         format!("Could not parse SoundTable 0x{sound_table_id:08X}")
                     })?,
+                )))
+            }
+            ContentAssetRequest::DegradeInfo(degrade_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, degrade_id))
+                    .with_context(|| format!("Could not load DegradeInfo 0x{degrade_id:08X}"))?;
+                Ok(ContentAsset::DegradeInfo(Box::new(
+                    GfxObjDegradeInfo::read(&mut Cursor::new(resource.bytes)).with_context(
+                        || format!("Could not parse DegradeInfo 0x{degrade_id:08X}"),
+                    )?,
                 )))
             }
             ContentAssetRequest::GfxObj(gfx_obj_id) => Ok(ContentAsset::GfxObj(

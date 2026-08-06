@@ -10,7 +10,8 @@
 //! emitters, and batching them lets shared geometry and materials dedupe inside a single closure.
 
 use anyhow::{Context, Result, ensure};
-use holtburger_core::ContentAssetRuntime;
+use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
+use holtburger_dat::file_type::DegradeOrientation;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -37,6 +38,36 @@ struct ParticleMeshRecordManifest {
     sections: Vec<BinarySectionManifest>,
 }
 
+/// Orientation the mesh draws with at ordinary viewing distance.
+///
+/// Read from the mesh's authored 0x11 degrade info, which is where retail declares a mesh a
+/// camera-facing sprite. The **near** band is used rather than a distance lookup, because retail's
+/// LOD system is deliberately not adopted; the far bands exist only to degrade the near appearance.
+/// A mesh with no degrade info keeps its authored frame.
+async fn mesh_orientation(runtime: &ContentAssetRuntime, gfx_obj_id: u32) -> Result<&'static str> {
+    let asset = runtime
+        .load(ContentAssetRequest::GfxObj(gfx_obj_id))
+        .await?;
+    let ContentAsset::GfxObj(gfx_obj) = asset else {
+        unreachable!("GfxObj request must return a GfxObj")
+    };
+    let Some(degrade_id) = gfx_obj.did_degrade else {
+        return Ok("authored");
+    };
+    let asset = runtime
+        .load(ContentAssetRequest::DegradeInfo(degrade_id))
+        .await?;
+    let ContentAsset::DegradeInfo(info) = asset else {
+        unreachable!("DegradeInfo request must return degrade info")
+    };
+    Ok(match info.near_orientation() {
+        Some(DegradeOrientation::ViewerFacing) => "viewer-facing",
+        Some(DegradeOrientation::AxisLocked(_)) => "axis-locked",
+        // Authored, unknown, or an empty band list all keep the authored frame.
+        _ => "authored",
+    })
+}
+
 /// Build the resource closure for one batch of particle meshes.
 pub(crate) async fn load_particle_mesh_bytes(
     runtime: &ContentAssetRuntime,
@@ -60,6 +91,7 @@ pub(crate) async fn load_particle_mesh_bytes(
         meshes.push(json!({
             "hwGfxObjId": dat_id(*gfx_obj_id),
             "source": definition,
+            "orientation": mesh_orientation(runtime, *gfx_obj_id).await?,
         }));
     }
     closure.validate()?;

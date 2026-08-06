@@ -18,8 +18,7 @@ export const PARTICLE_TEXTURE_UNITS = {
  * fact, and cohorts are keyed by mesh, so it binds as a per-cohort constant and never as a
  * per-instance attribute.
  */
-/* Not exported until the draw path sets this uniform, which lands with Phase 7 activation. */
-const PARTICLE_ORIENTATION = {
+export const PARTICLE_ORIENTATION = {
 	/** Band mode 1: keep the authored spawn frame, including any `GR`/`LR` spin. */
 	authored: 0,
 	/** Band mode 2: full viewer-facing billboard. Retail re-heads the draw frame to the viewer. */

@@ -1,3 +1,7 @@
+import {
+	createLandblockOffset,
+	getLandblockCoordinates,
+} from "../landblocks";
 import { getMat4Translation } from "../math/matrices";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -383,7 +387,13 @@ export class GameRuntime {
 		const placement = this.#scene.getResolvedPlacement(target.nodeId);
 		if (!placement) return null;
 		const origin = getMat4Translation(placement.localToLandblock);
-		return [origin.x, origin.y, origin.z];
+		// Anchor-relative, not landblock-local: the particle pass draws with the view matrix alone,
+		// so an origin left in its own landblock's frame lands wherever the anchor happens to be.
+		const offset = createLandblockOffset(
+			getLandblockCoordinates(placement.landblockId),
+			getLandblockCoordinates(this.#camera.placement.landblockId),
+		);
+		return [origin.x + offset.x, origin.y + offset.y, origin.z + offset.z];
 	}
 
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */

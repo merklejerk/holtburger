@@ -981,9 +981,11 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
 
 ### Phase 5: Add Authored Particle Fidelity
 
-Progress: **Started 2026-08-06.** Landed: typed 0x32 `ParticleEmitterInfo` decoding in
-`holtburger-dat`, with offsets verified against real archive records. Remaining: content/transport
-plumbing, the emitter runtime, the GPU vertex stage, and the culling strategy.
+Progress: **In progress 2026-08-06.** Landed: typed 0x32 decoding with offsets verified against real
+archive records, the content/transport/command lane, the frontend decode, and
+`ParticleEmitterRepository` with its exact preparation-time motion envelope. Remaining: the emitter
+runtime (emission, lifetime, attachment), the GPU vertex stage, and wiring the envelope into the
+existing visibility path.
 
 #### Deliverables
 
@@ -1114,6 +1116,17 @@ plumbing, the emitter runtime, the GPU vertex stage, and the culling strategy.
   `InitEnd` as `max(max_offset, max_a * lifespan)`, which under-bounds every parabolic motion type.
   Keeping retail's value would only invite a consumer to use a bound this phase already plans to
   compute exactly.
+- **The exact envelope landed with the repository, not with the culling work.** `emitterEnvelopeRadius`
+  bounds the A/B/C terms unconditionally rather than switching on motion type: bounding all three is
+  conservative for every shipped type including those using only a subset, and a per-type bound table
+  would have to be kept in step with the motion formulas forever. Randomized lifespan and scale
+  contribute their maximum roll, matching retail's additive `RollDice(-1,1) * rand + base`.
+- **Derived facts are computed host-side, once.** Persistence, both trigger bits, and whether the
+  motion type is one shipped content authors are resolved during projection, so no frontend consumer
+  re-implements retail's tests.
+- **A trigger-less emitter fails decode.** With neither bit set an emitter can never release a
+  particle; that is a decode fault rather than authored content, and a silently dead emitter would
+  be far harder to notice than a loud failure.
 
 ### Phase 6: Add Authored Sound Fidelity
 

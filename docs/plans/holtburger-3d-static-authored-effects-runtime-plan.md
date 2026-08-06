@@ -1244,7 +1244,32 @@ see the decision below.
 
 ### Phase 6: Add Authored Sound Fidelity
 
-Progress: Not started
+Progress: **In progress 2026-08-06.** Landed: typed 0x0A `Wave` and 0x20 `SoundTable` decoding,
+both verified against every record in the archive. Remaining: content/transport plumbing and
+`AudioSystem` itself.
+
+**Archive verification 2026-08-06** (temporary `sound_table_probe`, removed after recording): all
+190 sound tables and all 786 waves decode with zero failures. Two findings change the shape of the
+remaining work:
+
+| Measure                    | Result             |
+| -------------------------- | ------------------ |
+| Sound tables decoded       | 190 / 190          |
+| Waves decoded              | 786 / 786          |
+| Keys with **1** candidate  | 4,183              |
+| Keys with **2** candidates | **1**              |
+| Wave formats               | 785 PCM, **1 MP3** |
+
+- **Retail's never-select-the-last-candidate bug is very nearly moot.** Exactly one key in the
+  entire archive authors more than one candidate, and with two candidates `floor(1 × roll)` is
+  always 0 — so that single key always plays its first sound and its second is unreachable. The
+  behavior is still reproduced (a one-key divergence is still a divergence), but no
+  selection-strategy work is warranted beyond it, and the random-selection path is effectively
+  decorative.
+- **MP3 support is a one-asset problem.** 785 of 786 waves are PCM. That does not justify dropping
+  MP3 — browsers decode it natively through `decodeAudioData`, so supporting both costs nothing —
+  but it does mean the format branch needs no optimization and an unsupported-format report is
+  genuinely an edge case rather than a likely path.
 
 #### Deliverables
 
@@ -1275,7 +1300,16 @@ Progress: Not started
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **A `Wave` record is not a `.wav` file.** It is a bare `WAVEFORMATEX` header plus payload, so
+  handing it to a decoder unwrapped produces garbage. `to_riff` builds the container for PCM,
+  truncating the AC header tail to RIFF's fixed 16-byte `fmt ` chunk exactly as retail's export
+  path does; MP3 payloads are self-describing and bypass it, so callers branch on format rather
+  than wrapping unconditionally.
+- **An unknown format tag reports rather than assuming PCM.** Guessing would play noise instead of
+  failing, which is much harder to notice than a missing sound.
+- **Retail's selection bug is reproduced deliberately, and the census says why it barely matters.**
+  See the archive verification above. Authored content was balanced against the bug, so "fixing" it
+  would make a sound audible that no player has ever heard — but it reaches exactly one key.
 
 ### Phase 7: Activate Script-Only and Combined Authored Residents
 

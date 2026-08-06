@@ -606,9 +606,25 @@ total_seconds == 0`. Stop (auto or hook) halts emission while live particles fin
 
   Consequence for the GPU vertex stage: it implements **seven** position formulas and one
   orientation branch set, not thirteen, and `ParabolicGVGA_PT` (10) is unreachable in shipped
-  content even though its formula is shared with two types that are reachable. The `Swarm`,
-  `Explode`, and `Implode` arms still need their exact expressions transcribed from
-  acclient.c:317600-317664 before implementation; the three families above are transcribed.
+  content even though its formula is shared with two types that are reachable.
+
+  The remaining three arms, transcribed 2026-08-06 from acclient.c:317601-317648. All are
+  `parent + offset + f(t)`; only `f` differs:
+
+  - **`Swarm` (5):** `x += cos(b.x·t)·c.x + a.x·t`, `y += sin(b.y·t)·c.y + a.y·t`,
+    `z += cos(b.z·t)·c.z + a.z·t`. Note **`sin` on y but `cos` on x and z** — not a uniform
+    circular sweep, and easy to "tidy" into one that would be wrong.
+  - **`Explode` (6):** `x += (b.x·t + c.x·a.x)·t`, `y += (b.y·t + c.y·a.x)·t`,
+    `z += (b.z·t + c.z·a.x + a.z)·t`. Both authored quirks confirmed: every axis multiplies by
+    **`a.x`**, not its own component, and z carries an extra **`+ a.z`** inside the parenthesis.
+    These read as bugs and must be reproduced exactly — authored content was tuned against them.
+  - **`Implode` (7):** `pos += cos(a.x·t)·c + b·t²`, with the **same scalar `cos(a.x·t)` applied to
+    all three axes**.
+
+  Also transcribed from the same function's tail (acclient.c:317650-317664): scale and translucency
+  both interpolate on `min(lifetime / lifespan, 1)` as `start + (final − start) · progress`, and the
+  scale is written uniformly to all three axes. That is the per-particle animation the vertex stage
+  owes alongside position, and it needs no extra state.
 
 - **All 13 motion types are closed-form in elapsed time.** Every formula is
   `position = f(t, spawn constants, parent frame)` with no per-frame integration state — the

@@ -45,9 +45,15 @@ import {
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
-import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
+import {
+	PhysicsScriptRepository,
+	type PreparedPhysicsScriptClosure,
+} from "../behavior/physics-script-repository";
+import type { DatAssetId } from "../game-types";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
 import { SoundTableRepository } from "../behavior/sound-table-repository";
+import { ParticleMeshCache } from "../behavior/particle-mesh-cache";
+import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
@@ -201,6 +207,7 @@ export interface GameRuntimeDependencies {
 	readonly audioDevice: AudioDevice;
 	readonly particleEmitterSource: ParticleEmitterSource;
 	readonly soundTableSource: SoundTableSource;
+	readonly particleMeshSource: ParticleMeshSource;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -332,10 +339,43 @@ export class GameRuntime {
 	readonly #particleEmitters: ParticleEmitterRepository;
 	readonly #particles: ParticleEmitterRuntime;
 	readonly #soundTables: SoundTableRepository;
+	readonly #particleMeshes: ParticleMeshCache;
 	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
 	readonly #targetSoundTables = new Map<SceneNodeId, DecodedSoundTable>();
 	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId>;
 	readonly #audio: AudioSystem;
+	/**
+	 * Make every mesh this generation's emitters can name resident.
+	 *
+	 * Deliberately fire-and-forget: a resident activates immediately and its first particles may
+	 * miss a frame or two while meshes land, which the draw pass counts as unresolved cohorts.
+	 * Blocking activation on mesh residency would hold back correct script, audio, and animation
+	 * behavior for a purely visual dependency.
+	 */
+	async #stageParticleMeshes(
+		prepared: readonly {
+			readonly scriptClosure: PreparedPhysicsScriptClosure | null;
+		}[],
+	): Promise<void> {
+		const emitterInfoIds = new Set<DatAssetId>();
+		for (const entity of prepared) {
+			if (entity.scriptClosure === null) continue;
+			for (const script of entity.scriptClosure.scripts.values()) {
+				for (const id of script.dependencies.emitterInfoIds)
+					emitterInfoIds.add(id);
+			}
+		}
+		if (emitterInfoIds.size === 0) return;
+		const meshIds = [...emitterInfoIds]
+			.map((id) => this.#particleEmitters.getReady(id)?.info.hwGfxObjId ?? null)
+			.filter((id): id is DatAssetId => id !== null);
+		if (meshIds.length === 0) return;
+		const batch = await this.#particleMeshes.prepare(meshIds);
+		// Only a newly loaded batch reaches residency; already-known meshes never re-upload.
+		if (batch !== null)
+			await this.#renderer?.particles?.install(batch, this.#texturePreparer);
+	}
+
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
 	#sceneOriginOf(target: {
 		readonly nodeId: SceneNodeId;
@@ -568,6 +608,7 @@ export class GameRuntime {
 		});
 		this.#effects = new EffectSystem();
 		this.#soundTables = new SoundTableRepository(dependencies.soundTableSource);
+		this.#particleMeshes = new ParticleMeshCache(dependencies.particleMeshSource);
 		this.#physicsScripts = new PhysicsScriptRepository(
 			dependencies.physicsScriptSource,
 		);
@@ -735,6 +776,7 @@ export class GameRuntime {
 		audioDevice: AudioDevice,
 		particleEmitterSource: ParticleEmitterSource,
 		soundTableSource: SoundTableSource,
+		particleMeshSource: ParticleMeshSource,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
@@ -745,6 +787,7 @@ export class GameRuntime {
 			audioDevice,
 			particleEmitterSource,
 			physicsScriptSource,
+			particleMeshSource,
 			soundTableSource,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
@@ -1019,6 +1062,9 @@ export class GameRuntime {
 				presentationSelection.selectedNodeIds,
 			),
 		);
+		// Cohorts are rebuilt every frame from live emitters rather than retained, and cull at
+		// emitter granularity before any instance record is written.
+		renderer.particles?.submit(this.#particles.collectCohorts());
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
@@ -1082,6 +1128,7 @@ export class GameRuntime {
 		this.#audio.destroy();
 		this.#particleEmitters.destroy();
 		this.#soundTables.destroy();
+		this.#particleMeshes.destroy();
 		this.#targetSoundTables.clear();
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();
@@ -1437,6 +1484,9 @@ export class GameRuntime {
 					animationStage.commit();
 					// Script clocks start only after the generation publishes, so a resident cannot
 					// dispatch a command against a node that is not yet in the scene.
+					// Mesh residency is requested here, once a generation commits, so a
+					// `CreateParticle` reached later finds its mesh already staged.
+					void this.#stageParticleMeshes(prepared);
 					for (const entity of prepared) {
 						if (entity.soundTable !== null)
 							this.#targetSoundTables.set(entity.nodeId, entity.soundTable);

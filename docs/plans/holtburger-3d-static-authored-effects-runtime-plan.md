@@ -1032,9 +1032,9 @@ closed-form motion evaluator with a unit fixture per formula family, and `Partic
 (emission cadence, lifetime, stop/destroy, emitter-id replacement, follow vs leave-behind, and
 zero-cost hidden emitters with transition-time reconciliation), the router's particle port, the
 emitter bounds contribution, and the GPU particle program with its closed-form vertex stage.
-and the instance packing and cohort grouping the draw path consumes. Remaining: binding those
-cohorts through the renderer, and real-GPU verification of the shader against the CPU evaluator
-through the browser harness.
+and the instance packing and cohort grouping the draw path consumes. **Effects-side work is
+complete;** the renderer binding and its real-GPU verification move to Phase 7 with their producer —
+see the decision below.
 
 #### Deliverables
 
@@ -1187,6 +1187,13 @@ through the browser harness.
   no catch-up** (bursting to fill a slow frame would change authored density), particles die only
   by lifespan, `stop` drains while `destroy` vanishes, and a nonzero `emitter_id` replaces a live
   same-id emitter while auto-id emitters stay independent.
+- **The renderer binding and harness verification move to Phase 7, on the same contract that moved
+  the `TextureVelocity` uniform.** Both need a live `ParticleEmitterRuntime` producing cohorts, and
+  `game-runtime` instantiates none until Phase 7 activates authored scripts — authored particles
+  arrive only from physics scripts, so there is nothing to draw before then. Building the executor
+  now would mean a draw path provably reached zero times, and verifying a shader against an empty
+  scene proves nothing. Phase 5 owns the emitter semantics, the evaluator, the program, and the
+  instance contract; Phase 7 owns making them visible.
 - **Cohorts key on mesh _and_ motion type.** Motion type is a vertex-stage constant, so two
   emitters sharing a mesh but not a motion law cannot share a draw; keying on both makes that
   structural rather than a rule someone has to remember.
@@ -1276,6 +1283,11 @@ Progress: Not started
 
 #### Deliverables
 
+- Bind particle draw cohorts through the renderer, inherited from Phase 5 with their producer:
+  instantiate `ParticleEmitterRuntime` in `game-runtime`, feed `collectCohorts` into an instanced
+  draw using `webgl2-particle-program`, and compose `envelopeRadiusFor` into presentation bounds.
+- Verify the particle vertex stage against `particle-motion.ts` on real WebGL through the browser
+  harness. `fakeGl` proves the program links and branches; only the harness proves the arithmetic.
 - Bind the `TextureVelocity` scroll rate through the object draw path, inherited from Phase 4 with
   its producer: `uTextureOffset` on the object program, `textureScrollRate` on
   `PreparedStaticObjectDrawCompatibility` so differing rates split cohorts through the existing

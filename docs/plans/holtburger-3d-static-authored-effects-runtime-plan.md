@@ -1568,23 +1568,29 @@ swap atomically. Failure leaves the valid static presentation visible with diagn
 
 ## Definition of Done
 
-- [ ] Every supported setup default physics script is decoded, prepared, and scheduled.
-- [ ] Intentional script cycles prepare finitely and execute through bounded scheduled repetition.
-- [ ] All measured visual, particle, audio, and chained-script commands have real consumers.
-- [ ] `ReplaceObjectHook` records decode and report intentionally-inert with provenance, and
+- [x] Every supported setup default physics script is decoded, prepared, and scheduled.
+- [x] Intentional script cycles prepare finitely and execute through bounded scheduled repetition.
+- [x] All measured visual, particle, audio, and chained-script commands have real consumers.
+      `Scale`, `CreateParticle`, `SoundTweaked`, `SoundTable`, and `CallPES` all reach one.
+      `TextureVelocity` resolves at preparation but its renderer binding is deferred — see the
+      render-contract finding in Phase 7; it has **zero occurrences in the measured workload**.
+- [x] `ReplaceObjectHook` records decode and report intentionally-inert with provenance, and
       animations carrying them activate normally (execution ratified out 2026-08-06;
       appearance-time `ObjDesc.anim_part_changes` is unaffected).
-- [ ] Script and animation clocks remain independent and deterministic.
-- [ ] Script-only and combined authored residents execute without duplicate presentation resources.
-- [ ] Effects follow current authored entity/part transforms and clean up with their owners.
-- [ ] Immutable behavior/effect assets are shared; mutable runtime state remains per activation.
-- [ ] No frame-time DAT decoding, dependency discovery, or asset preparation occurs.
-- [ ] Diagnostics distinguish prepared resources, active scripts, queued activations, particles,
+- [x] Script and animation clocks remain independent and deterministic.
+- [x] Script-only and combined authored residents execute without duplicate presentation resources.
+- [x] Effects follow current authored entity/part transforms and clean up with their owners.
+- [x] Immutable behavior/effect assets are shared; mutable runtime state remains per activation.
+- [x] No frame-time DAT decoding, dependency discovery, or asset preparation occurs. Enforced
+      structurally: `getReady`, `ParticleMeshCache.get`, and `ParticleMeshResidency.resolve` all
+      return `null` for an unstaged asset rather than starting a load.
+- [x] Diagnostics distinguish prepared resources, active scripts, queued activations, particles,
       sounds, unsupported commands, and failures.
-- [ ] No spawned feed, motion-table resolver, or Explorer host is introduced as scaffolding.
-- [ ] All touched code passes repository formatting, linting, tests, Rust checks, and Clippy with
+- [x] No spawned feed, motion-table resolver, or Explorer host is introduced as scaffolding.
+- [x] All touched code passes repository formatting, linting, tests, Rust checks, and Clippy with
       warnings denied.
-- [ ] Architecture documentation describes the authored effects ownership and timing model.
+- [x] Architecture documentation describes the authored effects ownership and timing model
+      (`apps/holtburger-3d/ARCHITECTURE_AUDIT.md` section 4).
 
 ## Open Questions
 

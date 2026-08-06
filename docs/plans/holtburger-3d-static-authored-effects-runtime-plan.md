@@ -981,7 +981,9 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
 
 ### Phase 5: Add Authored Particle Fidelity
 
-Progress: Not started
+Progress: **Started 2026-08-06.** Landed: typed 0x32 `ParticleEmitterInfo` decoding in
+`holtburger-dat`, with offsets verified against real archive records. Remaining: content/transport
+plumbing, the emitter runtime, the GPU vertex stage, and the culling strategy.
 
 #### Deliverables
 
@@ -1103,7 +1105,15 @@ Progress: Not started
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **`ParticleMotion` distinguishes shipped from documented types.** Types 0 and 10 author nothing in
+  the archive, so they decode as `Unshipped` and report rather than getting formulas written for
+  them. Two fewer motion laws to implement and verify.
+- **`EmitterTrigger` is modeled as the bitmask it is**, not an enum, with the unrecovered per-meter
+  predicate documented at the point a consumer would reach for it.
+- **`sorting_sphere` is deliberately not stored.** It is not in the file; retail derives it in
+  `InitEnd` as `max(max_offset, max_a * lifespan)`, which under-bounds every parabolic motion type.
+  Keeping retail's value would only invite a consumer to use a bound this phase already plans to
+  compute exactly.
 
 ### Phase 6: Add Authored Sound Fidelity
 

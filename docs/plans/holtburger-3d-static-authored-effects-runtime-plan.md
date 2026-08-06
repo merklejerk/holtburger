@@ -954,10 +954,24 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
   existing `EffectPresentationSample.rootRotationModifier`, which should widen into a
   `rootTransformModifier` carrying rotation and scale together rather than gaining a parallel field.
   Conservative presentation bounds must track the ramp's **maximum** extent, not its current one.
-- `TextureVelocity`: the consumer stores the authored rate and the renderer derives phase through
-  `textureScrollPhase` at draw time. This is the one item that needs a renderer change — per-instance
-  UV offset is not in the current 20-float `ObjectInstanceData` layout — so it should be scoped
-  against the instancing path before implementation rather than bolted onto the effect sample.
+- `TextureVelocity`: the consumer records the authored rate against **GfxObj DataID**, and the
+  renderer derives phase through `textureScrollPhase` and binds it as a whole-mesh UV delta once per
+  draw, exactly as the sky pass already does.
+
+  **The offset is never per-instance.** Retail's scroll is a global per-DataID whole-mesh delta
+  (`CPhysics::UpdateTexVelocity`, acclient.c:299999; recorded in the sky pass plan's Phase 0
+  findings), which is precisely what keeps tiled instances of one flowing surface in lockstep at
+  their seams. Every instance of a DataID shares one offset by construction, so widening
+  `ObjectInstanceData` would store the same value N times and would break the seam invariant the
+  moment two copies diverged. An earlier draft of this section proposed exactly that and was wrong.
+
+  The one open question is **when** the rate becomes visible. Retail registers it at hook execution.
+  Because rate is deduped by DataID and the archive authors exactly one rate per DataID, the rate
+  could instead be resolved at preparation time and carried as a material fact — removing runtime
+  mutation entirely — but only if the authored hooks fire at `t = 0`. A hook authored later is
+  observably not-yet-scrolling before it fires. Cheap evidence question to settle first: dump the
+  record times of the 11 `TextureVelocity` scripts. If all are `t = 0`, prefer preparation-time
+  resolution; otherwise apply at dispatch, still keyed by DataID.
 
 ### Phase 5: Add Authored Particle Fidelity
 

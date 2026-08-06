@@ -72,6 +72,80 @@ pub enum AnimationHookPayload {
     TransparentPart(TransparentPartHookPayload),
     TextureVelocity(TextureVelocityHookPayload),
     TextureVelocityPart(TextureVelocityPartHookPayload),
+    SoundTable(SoundTableHookPayload),
+    Scale(ScaleHookPayload),
+    CreateParticle(CreateParticleHookPayload),
+    CallPes(CallPesHookPayload),
+    SoundTweaked(SoundTweakedHookPayload),
+}
+
+/// Sound-type key resolved against the owning object's installed `SoundTable`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoundTableHookPayload {
+    /// Retail `SoundType` key; selection semantics live in the sound table, not here.
+    pub sound_type: u32,
+}
+
+/// Whole-object uniform scale target and the authored time to reach it.
+///
+/// Field order is `end` then `time`, proven from retail `ScaleHook::UnPack`
+/// (acclient.c:328805-328816); retail interpolates linearly from the object's current scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScaleHookPayload {
+    /// Uniform scale the object reaches when the ramp completes.
+    pub end: f32,
+    /// Ramp duration in seconds; retail treats very small values as immediate.
+    pub duration_seconds: f32,
+}
+
+/// One authored particle-emitter creation request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateParticleHookPayload {
+    /// 0x32 `ParticleEmitterInfo` DID describing the emitter to instantiate.
+    pub emitter_info_id: u32,
+    /// Owning part index, or `-1` for the whole object's frame.
+    ///
+    /// Signed deliberately: retail branches on `part_index == -1` and the archive authors it.
+    /// ACE reads this as unsigned, which hides the sentinel.
+    pub part_index: i32,
+    /// Spawn offset applied to the parent frame's origin.
+    ///
+    /// Retail never applies this frame's rotation, so the quaternion is retained for losslessness
+    /// but has no consumer.
+    pub offset: Frame,
+    /// Emitter identity; `0` requests an auto-assigned id, nonzero replaces any same-id emitter.
+    pub emitter_id: u32,
+}
+
+/// A chained physics-script activation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CallPesHookPayload {
+    /// 0x33 `PhysicsScript` DID to activate.
+    pub script_id: u32,
+    /// Upper bound of a uniform random activation delay, not a fixed delay.
+    ///
+    /// Retail rolls `RollDice(0, pause)` and defers; values below `0.0002` start synchronously
+    /// (`CPhysicsObj::CallPES`, acclient.c:307316-307345).
+    pub pause_seconds: f32,
+}
+
+/// A directly addressed sound with authored playback parameters.
+///
+/// Field names follow retail's proven use, not ACE's labels: retail's `Execute` rolls against the
+/// **first** float after the sound id and discards the second entirely
+/// (acclient.c:329412-329431, 366790-366812). The archive corroborates this — every representative
+/// record authors `probability = 1.0, unused = 0.0`, which under ACE's naming would give every
+/// authored ambient sound a zero chance of ever playing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoundTweakedHookPayload {
+    /// 0x0A `Wave` DID played directly, bypassing the object's sound table.
+    pub sound_id: u32,
+    /// Play chance in [0, 1] rolled at trigger time.
+    pub probability: f32,
+    /// Parsed for losslessness; retail reads and discards it.
+    pub unused: f32,
+    /// Linear gain applied before distance attenuation.
+    pub volume: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -117,9 +191,11 @@ impl AnimationHook {
         let payload = match hook_type {
             0 => AnimationHookPayload::NoPayload, // NoOp
             1 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // Sound (Id)
-            2 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // SoundTable (SoundType)
+            2 => AnimationHookPayload::SoundTable(SoundTableHookPayload {
+                sound_type: u32::read_le(reader)?,
+            }),
             3 => AnimationHookPayload::Raw(read_exact_payload(reader, 28)?), // Attack (AttackCone)
-            4 => AnimationHookPayload::NoPayload,                           // AnimationDone
+            4 => AnimationHookPayload::NoPayload,                            // AnimationDone
             5 => AnimationHookPayload::ReplaceObject(read_replace_object_payload(reader)?),
             6 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // Ethereal (Ethereal: i32)
             7 => AnimationHookPayload::TransparentPart(read_transparent_part_payload(reader)?),
@@ -127,16 +203,16 @@ impl AnimationHook {
             9 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // LuminousPart
             10 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Diffuse
             11 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // DiffusePart
-            12 => AnimationHookPayload::Raw(read_exact_payload(reader, 8)?), // Scale
-            13 => AnimationHookPayload::Raw(read_exact_payload(reader, 40)?), // CreateParticle
+            12 => AnimationHookPayload::Scale(read_scale_payload(reader)?),
+            13 => AnimationHookPayload::CreateParticle(read_create_particle_payload(reader)?),
             14 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DestroyParticle
             15 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // StopParticle
             16 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // NoDraw
             17 => AnimationHookPayload::NoPayload,                           // DefaultScript
             18 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DefaultScriptPart
-            19 => AnimationHookPayload::Raw(read_exact_payload(reader, 8)?), // CallPES
+            19 => AnimationHookPayload::CallPes(read_call_pes_payload(reader)?),
             20 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Transparent
-            21 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // SoundTweaked
+            21 => AnimationHookPayload::SoundTweaked(read_sound_tweaked_payload(reader)?),
             22 => AnimationHookPayload::SetOmega(read_set_omega_payload(reader)?),
             23 => AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload {
                 u_speed: f32::read_le(reader)?,
@@ -203,6 +279,27 @@ impl AnimationHookPayload {
                 payload.u_speed.write_le(writer)?;
                 payload.v_speed.write_le(writer)
             }
+            Self::SoundTable(payload) => payload.sound_type.write_le(writer),
+            Self::Scale(payload) => {
+                payload.end.write_le(writer)?;
+                payload.duration_seconds.write_le(writer)
+            }
+            Self::CreateParticle(payload) => {
+                payload.emitter_info_id.write_le(writer)?;
+                payload.part_index.write_le(writer)?;
+                payload.offset.write_le(writer)?;
+                payload.emitter_id.write_le(writer)
+            }
+            Self::CallPes(payload) => {
+                payload.script_id.write_le(writer)?;
+                payload.pause_seconds.write_le(writer)
+            }
+            Self::SoundTweaked(payload) => {
+                payload.sound_id.write_le(writer)?;
+                payload.probability.write_le(writer)?;
+                payload.unused.write_le(writer)?;
+                payload.volume.write_le(writer)
+            }
         }
     }
 }
@@ -241,6 +338,76 @@ fn read_transparent_part_payload<R: Read + Seek>(
         return Err(decode_error(
             reader,
             "TransparentPart payload contains a non-finite value".to_owned(),
+        ));
+    }
+    Ok(payload)
+}
+
+fn read_scale_payload<R: Read + Seek>(reader: &mut R) -> BinResult<ScaleHookPayload> {
+    let payload = ScaleHookPayload {
+        end: f32::read_le(reader)?,
+        duration_seconds: f32::read_le(reader)?,
+    };
+    if !payload.end.is_finite() || !payload.duration_seconds.is_finite() {
+        return Err(decode_error(
+            reader,
+            "Scale payload contains a non-finite value".to_owned(),
+        ));
+    }
+    Ok(payload)
+}
+
+fn read_create_particle_payload<R: Read + Seek>(
+    reader: &mut R,
+) -> BinResult<CreateParticleHookPayload> {
+    let payload = CreateParticleHookPayload {
+        emitter_info_id: u32::read_le(reader)?,
+        part_index: i32::read_le(reader)?,
+        offset: Frame::read_le(reader)?,
+        emitter_id: u32::read_le(reader)?,
+    };
+    if payload.part_index < -1 {
+        return Err(decode_error(
+            reader,
+            format!(
+                "CreateParticle part index {} is neither a part nor the -1 whole-object sentinel",
+                payload.part_index
+            ),
+        ));
+    }
+    Ok(payload)
+}
+
+fn read_call_pes_payload<R: Read + Seek>(reader: &mut R) -> BinResult<CallPesHookPayload> {
+    let payload = CallPesHookPayload {
+        script_id: u32::read_le(reader)?,
+        pause_seconds: f32::read_le(reader)?,
+    };
+    if !payload.pause_seconds.is_finite() || payload.pause_seconds < 0.0 {
+        return Err(decode_error(
+            reader,
+            format!(
+                "CallPES pause {} is not a usable random-delay bound",
+                payload.pause_seconds
+            ),
+        ));
+    }
+    Ok(payload)
+}
+
+fn read_sound_tweaked_payload<R: Read + Seek>(
+    reader: &mut R,
+) -> BinResult<SoundTweakedHookPayload> {
+    let payload = SoundTweakedHookPayload {
+        sound_id: u32::read_le(reader)?,
+        probability: f32::read_le(reader)?,
+        unused: f32::read_le(reader)?,
+        volume: f32::read_le(reader)?,
+    };
+    if !payload.probability.is_finite() || !payload.volume.is_finite() {
+        return Err(decode_error(
+            reader,
+            "SoundTweaked payload contains a non-finite value".to_owned(),
         ));
     }
     Ok(payload)

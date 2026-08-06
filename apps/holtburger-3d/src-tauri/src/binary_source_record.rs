@@ -1,6 +1,32 @@
 use anyhow::{Result, ensure};
 use serde::Serialize;
 
+/// `magic` + manifest length + total length, ahead of every app-host binary source record.
+pub(crate) const BINARY_HEADER_LENGTH: usize = 12;
+
+/// Wrap a JSON manifest and its typed section bytes in the shared binary envelope.
+///
+/// The manifest is space-padded so the section data stays 4-byte aligned, which is what lets the
+/// frontend read `Float32Array`/`Uint32Array` views directly over the response buffer.
+pub(crate) fn serialize_binary_envelope<T: Serialize>(
+    magic: &[u8; 4],
+    manifest: &T,
+    section_bytes: &[u8],
+) -> Result<Vec<u8>> {
+    let mut manifest_bytes = serde_json::to_vec(manifest)?;
+    while !(BINARY_HEADER_LENGTH + manifest_bytes.len()).is_multiple_of(4) {
+        manifest_bytes.push(b' ');
+    }
+    let total_length = BINARY_HEADER_LENGTH + manifest_bytes.len() + section_bytes.len();
+    let mut bytes = Vec::with_capacity(total_length);
+    bytes.extend(magic);
+    bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
+    bytes.extend(u32::try_from(total_length)?.to_le_bytes());
+    bytes.extend(manifest_bytes);
+    bytes.extend(section_bytes);
+    Ok(bytes)
+}
+
 /// One typed, aligned scalar section in an app-host binary source record.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

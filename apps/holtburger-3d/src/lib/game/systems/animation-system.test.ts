@@ -300,7 +300,8 @@ function deferredEffectHook(): DecodedAnimationHook {
 		command: "ethereal",
 		direction: "both",
 		frameIndex: 0,
-		kind: "deferred-effect",
+		blocksActivation: false,
+		kind: "unimplemented",
 		payload: { kind: "no-payload" },
 		sourceType: 6,
 	};

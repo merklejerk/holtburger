@@ -208,6 +208,75 @@ self-reference-special-cased. The probe also observed `CallPES` `pause` in the w
 `0x33000453` re-calls itself at `t=0` with `pause=30`, making pause semantics load-bearing for
 authored repetition rates.
 
+**Corrected 2026-08-06 by a re-measurement (temporary `effects_script_fixture_probe`, removed after
+recording).** The 66/52/14-root/25-event/17-script figures above are inherited from a pre-convergence
+scan whose owner-discovery path was never recorded, and they do not reproduce. Re-walking the two
+landblocks through the same owner families the app actually realizes — `explicit_objects`,
+`buildings`, `GeneratedSceneryAssetAssembler` output, and `LandblockInteriorSystemAssembler` cell
+`static_objects` — yields:
+
+| Measure                                | Inherited | Measured 2026-08-06 |
+| -------------------------------------- | --------: | ------------------: |
+| `0xDA55FFFF` default-script placements |        66 |                  22 |
+| `0xDC58FFFF` default-script placements |        52 |                  38 |
+| Unique default-script roots            |        14 |                   9 |
+| Scripts in `CallPES` closure           |        17 |                  11 |
+| Authored `CreateParticle` events       |        17 |                   8 |
+| Authored `SoundTweaked` events         |         3 |                   5 |
+| Authored `CallPES` events              |         5 |                   6 |
+
+The measured figures are authoritative going forward because their discovery path is written down
+and matches the realizer; the inherited ones are retained above only as provenance. Acceptance
+criteria that quoted the old counts are restated against the measured closure. Distinct assets
+behind those events — 7 emitter infos and 3 sounds across 19 records — give the shared-preparation
+dedup fixtures for free.
+
+The complete measured representative closure, recorded here as the source of the checked-in
+fixtures:
+
+| Script       | Root | t   | Event            | Payload                                                      |
+| ------------ | ---- | --- | ---------------- | ------------------------------------------------------------ |
+| `0x33000253` | yes  | 0   | `CreateParticle` | info `0x3200020C`, part 0, offset (0,0,0), emitter 0         |
+| `0x33000253` |      | 0   | `SoundTweaked`   | sound `0x0A00038A`, probability 1.0, unused 0.0, volume 0.01 |
+| `0x33000253` |      | 2   | `CallPES`        | `0x330003CC`, pause 0                                        |
+| `0x330003CC` | no   | 0   | `SoundTweaked`   | sound `0x0A00038A`, probability 1.0, unused 0.0, volume 0.01 |
+| `0x330003CC` |      | 2   | `CallPES`        | `0x330003CC` (self), pause 0                                 |
+| `0x330003D8` | yes  | 0   | `SoundTweaked`   | sound `0x0A00038A`, probability 1.0, unused 0.0, volume 0.01 |
+| `0x330003D8` |      | 2   | `CallPES`        | `0x330003CC`, pause 0                                        |
+| `0x330003EC` | yes  | 0   | `CreateParticle` | info `0x320002A5`, part 0, offset (0,0,10), emitter 0        |
+| `0x330003EC` |      | 0   | `CreateParticle` | info `0x320002A5`, part 0, offset (0,0,6), emitter 0         |
+| `0x330006EF` | yes  | 0   | `CreateParticle` | info `0x320003A6`, part −1, offset (0,0,0), emitter 0        |
+| `0x33000711` | yes  | 0   | `SoundTweaked`   | sound `0x0A000341`, probability 1.0, unused 0.0, volume 0.1  |
+| `0x33000711` |      | 3   | `CallPES`        | `0x33000711` (self), pause 0                                 |
+| `0x330007DF` | yes  | 0   | `CreateParticle` | info `0x32000829`, part −1, offset (0,0,1.2), emitter 0      |
+| `0x33000862` | yes  | 0   | `CreateParticle` | info `0x32000478`, part −1, offset (0,0,1), emitter 0        |
+| `0x33000862` |      | 0   | `CallPES`        | `0x33000863`, pause 0                                        |
+| `0x33000863` | no   | 0   | `SoundTweaked`   | sound `0x0A000207`, probability 1.0, unused 0.0, volume 0.3  |
+| `0x33000863` |      | 2   | `CallPES`        | `0x33000863` (self), **pause 1.0**                           |
+| `0x33000BA5` | yes  | 0   | `CreateParticle` | info `0x3200061F`, part −1, offset (0,0,0.5), emitter 0      |
+| `0x33001013` | yes  | 0   | `CreateParticle` | info `0x32000894`, part −1, offset (0,0,0), emitter 0        |
+
+Three findings fall out of that table and change downstream work:
+
+- **The `SoundTweaked` field-order correction is independently corroborated by the content.** Every
+  representative record authors `f1 = 1.0` and `f2 = 0.0`. Under ACE's `Priority, Probability`
+  naming the second float is the probability, so every one of these ambient sounds would roll a
+  0.0 chance and never play. Under retail's proven order (first float is the probability roll,
+  second is discarded) they all play. The archive only makes sense read retail's way, so the decode
+  names the fields `probability`, `unused`, `volume` as Phase 6 already specifies.
+- **The random `CallPES` pause is representative, not sky-only.** `0x33000863` self-calls with
+  `pause = 1.0`, so the `RollDice(0, pause)` deferral path is exercised by the measured workload and
+  is not a weather-plan-only concern. Phase 3 must implement it, not stub it.
+- **Both attachment forms are present**: `part = −1` (whole object) in six events and `part = 0`
+  (part-indexed) in three, which is the split Phase 5 already anticipated. Every offset is a pure
+  translation with an identity quaternion, consistent with retail never applying the hook frame's
+  rotation.
+
+Three of the four recorded self-cycles (`0x330003CC`, `0x33000711`, `0x33000863`) are inside the
+measured closure; `0x3300072C` is reached only by the archive-wide census. Two roots enter a cycle
+rather than being one (`0x330003D8` → self-cycling `0x330003CC`; `0x33000862` → self-cycling
+`0x33000863`), so the runtime must handle "root leads into a cycle" and not only "root is a cycle".
+
 The representative setup appearances do not use default physics-script tables. Table selection is
 therefore an evidence gate for broader shipped content rather than something to infer from the
 representative regions.
@@ -587,10 +656,11 @@ behavior systems.
 
 ### Phase 1: Complete the Authored Script and Hook Evidence
 
-Progress: Substantially complete 2026-08-06 (archive probe + five-track retail evidence sweep,
-recorded in Measured Workload and Retail Execution Evidence). Remaining: authoring the
-checked-in source-first fixtures. Both scope questions were ratified 2026-08-06 (script tables in Phase 2,
-`ReplaceObjectHook` in Phase 4).
+Progress: **Complete 2026-08-06.** Archive probe, five-track retail evidence sweep, representative
+re-measurement, and the initial-phase replay decision are all recorded in Measured Workload,
+Retail Execution Evidence, and Decisions below. Both scope questions were ratified 2026-08-06
+(script tables move to the spawned plan, `ReplaceObjectHook` execution dropped). The fixture module
+itself lands at the head of Phase 2 with the type it constructs; its contents are recorded here.
 
 #### Deliverables
 
@@ -611,15 +681,16 @@ checked-in source-first fixtures. Both scope questions were ratified 2026-08-06 
   referencing setups and confirm no GfxObj DataID is authored two different scroll rates.~~
   Done 2026-08-06 by the evidence probe; recorded in Measured Workload. No script-driven
   conflicts; the escape hatch stays unbuilt.
-- Decide from retail whether commands crossed during deterministic initial-phase replay are folded as
-  persistent state, emitted as ephemeral effects, or deliberately skipped per command family.
+- ~~Decide from retail whether commands crossed during deterministic initial-phase replay are folded as
+  persistent state, emitted as ephemeral effects, or deliberately skipped per command family.~~
+  Decided 2026-08-06; see the replay policy in Decisions and Course Corrections below.
 
 #### Acceptance Criteria
 
 - Every implementation phase is backed by exact asset IDs, record shapes, and reference paths; the
   selected replacement fixture is `0x0300055B` part 1 / GfxObjs `0x01000BB4` and `0x01000BB5`.
-- The four known self-cycles and any additional cycles are recorded without being treated as corrupt
-  content.
+- The three self-cycles inside the measured closure, the two roots that lead into a cycle rather
+  than being one, and any additional cycles are recorded without being treated as corrupt content.
 - Unknown payload boundaries or selection rules remain explicit blockers rather than guesses.
 
 #### Decisions and Course Corrections
@@ -638,10 +709,42 @@ checked-in source-first fixtures. Both scope questions were ratified 2026-08-06 
   `default_pes_object_id`s duplicate setup `default_script`s. Remaining Phase 1 work is the
   retail timing/selection/ordering evidence, the six unmet hook payload semantics, and the
   particle/audio/reuse inventory.
+- **2026-08-06 representative re-measurement (temporary `effects_script_fixture_probe`, removed
+  after recording):** the inherited 66/52 owner counts and their derived root/event/closure figures
+  did not reproduce; the corrected census, the complete decoded closure, and the three findings it
+  produced are recorded in Measured Workload. The correction is a scope _reduction_, not a gap: the
+  same command vocabulary, cycle shapes, and attachment forms are all still present, in a smaller
+  and now-reproducible set.
+- **Fixture artifact deferred one phase, deliberately.** Phase 1 owns the fixture _contents_, which
+  are now recorded above in full. The fixture _module_ lands at the head of Phase 2 alongside the
+  `PhysicsScript` type it must construct, because there is nothing to compile against before then.
+  No archive dependency survives either way.
+- **Initial-phase replay policy (answers the last Phase 1 question; implemented in Phase 3).**
+  Retail has no folding mechanism to copy — it replays overdue hooks in a burst and discards
+  elapsed time above 2 s — so this is our design decision, constrained only by not contradicting
+  observable retail behavior. Replay is per-family and exhaustive, with one outcome recorded per
+  crossed command:
+
+  | Family                                                                       | Replay behavior                                                                                                                                                                                   | Outcome                                              |
+  | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+  | Persistent state (`Scale`, `TextureVelocity`, `SetOmega`, `TransparentPart`) | Applied with elapsed time accounted for: a ramp advances to its position at replay end rather than restarting                                                                                     | `folded-initial-state`                               |
+  | Chained activation (`CallPES`)                                               | Executed, with the activation placed on the derived clock so the chain's phase is correct                                                                                                         | `executed`                                           |
+  | Ephemeral (`SoundTweaked`, `SoundTable`)                                     | Suppressed                                                                                                                                                                                        | `suppressed-initial-state`                           |
+  | Emitters (`CreateParticle`)                                                  | Delegated to the particle consumer, which owns the 0x32 asset and therefore the persistent/finite distinction: persistent emitters are back-dated, already-completed finite bursts are suppressed | `folded-initial-state` or `suppressed-initial-state` |
+
+  Rationale for suppressing ephemeral commands: retail's 2 s cliff exists precisely to avoid an
+  audible burst when a static object catches up, so suppression matches retail's intent while being
+  exact where retail was accidentally correct. Rationale for delegating emitters: persistence is a
+  property of the emitter asset, not the hook, so the router would have to re-derive a fact the
+  particle consumer already owns — the same compute-once rule the texture-scroll model follows.
+  **We deliberately do not adopt retail's 2-second cliff.** Our clocks are derived rather than
+  accumulated, so replay cost is O(records) regardless of elapsed time; the cliff mitigates an
+  accumulating loop we do not have, and inheriting it would silently drop authored behavior.
 
 ### Phase 2: Decode, Transport, and Prepare Script Resources
 
-Progress: Not started
+Progress: **Complete 2026-08-06.** Type check, lint, knip, Clippy, and all 678 frontend + 80 DAT
+tests pass.
 
 **Ratified 2026-08-06: script tables move to the spawned-entity plan.** Retail proves static
 authored residents never perform a table lookup — the setup's `default_script` DID plays
@@ -670,7 +773,48 @@ selection together with the recorded census and selection semantics.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **Five hook payloads were typed in the DAT layer, not just the script ones.** `SoundTable` (2),
+  `Scale` (12), `CreateParticle` (13), `CallPES` (19), and `SoundTweaked` (21) moved from
+  `AnimationHookPayload::Raw` to typed variants. Animations and scripts share one hook vocabulary,
+  so typing them once serves both producers and is what makes the single command union possible.
+  `CreateParticle.part_index` is read as **`i32`**, not ACE's `u32`: retail branches on the `-1`
+  whole-object sentinel and the archive authors it, so an unsigned read hides the only case that
+  matters.
+- **The transport is shared, not duplicated.** `behavior_hook_source.rs` owns one hook-payload
+  manifest that both `animation_source.rs` and the new `physics_script_source.rs` project through,
+  and the binary envelope writer was hoisted into `binary_source_record.rs` now that it has two
+  callers. Net effect on the animation lane is a deletion.
+- **Part-index validation is scoped explicitly, not defaulted.** `PartIndexScope` distinguishes
+  `Known(count)` (animations, authored against one setup) from `DeferredToBinding` (scripts, which
+  are authored independently of whichever object runs them). An implicit "skip if unknown" would
+  have silently weakened the animation lane's existing check.
+- **One `PreparedAssetRepository<TSource, TPrepared>` now backs both asset families.** The animation
+  repository's 170-line lifecycle was becoming a second copy for scripts; it is now generic over
+  load/prepare/label, and `AnimationAssetRepository` is a ~15-line subclass. Handle field
+  `handle.animation` became `handle.asset` and the diagnostics keys lost their `animation` prefix;
+  both were swept across every consumer.
+- **`deferred-effect` and `unsupported-visual` collapsed into one `unimplemented` arm carrying
+  `blocksActivation` as data.** The two arms only ever differed by whether they gated activation,
+  which is a decision the decode layer can make once and record — the compute-once rule — rather
+  than something consumers re-derive from the arm name. The blocking set is now one commented list
+  of hook types whose absence costs an ambient effect rather than a correct drawing.
+- **The redundant `hookType`/`payload.kind` agreement check was preserved deliberately.** Collapsing
+  the payload switch initially dropped it and let a mismatched hook silently downgrade to
+  `unimplemented`; a test caught it, and the check is now an explicit typed-hook table. Redundant
+  transport facts exist to be cross-checked.
+- **Script dependencies are derived, not transported.** A manifest-side dependency list could
+  disagree with the records it describes, so `PhysicsScriptRepository` computes each script's direct
+  `CallPES`/emitter/sound references from its own records.
+- **Closure acquisition is all-or-nothing.** `acquireClosure` releases every handle taken so far if
+  any dependency fails, so a half-staged closure can never reach activation. Traversal terminates on
+  a visited set while the cyclic _runtime_ edges survive untouched in the records — proven by tests
+  over the checked-in self-cycles and the two root-into-cycle chains.
+- **Fixtures landed here as promised.** `authored-script-fixtures.ts` carries the measured
+  representative closure as checked-in source with no archive dependency.
+- **Deferred deliberately:** `tauri-physics-script-source.ts` was written and then removed. Nothing
+  activates scripts until Phase 7, and an unwired adapter is dormant infrastructure that knip
+  correctly flags. The host command (`load_physics_script`) exists and is exercised; the frontend
+  adapter returns in the phase that consumes it.
 
 ### Phase 3: Execute Physics Scripts and Chained Scheduling
 
@@ -829,8 +973,8 @@ Progress: Not started
 
 #### Acceptance Criteria
 
-- All 17 representative `CreateParticle` events produce attributable visible effects at the correct
-  authored roots/parts and times.
+- All eight measured representative `CreateParticle` events produce attributable visible effects at
+  the correct authored roots/parts and times, covering both `part = -1` and `part = 0` attachment.
 - Removing the source owner deterministically removes its emitters and particles according to proven
   lifetime semantics.
 - Repeated emitters share immutable assets without sharing mutable particle state.
@@ -932,8 +1076,10 @@ Progress: Not started
 ## Verification Strategy
 
 - Exact representative default-script root fixtures and complete transitive closures.
-- Four self-calling scripts proving finite preparation and scheduled runtime repetition.
-- All 17 `CreateParticle`, five `CallPES`, and three `SoundTweaked` representative events, plus
+- Self-calling scripts and root-into-cycle chains proving finite preparation and scheduled runtime
+  repetition.
+- All eight `CreateParticle`, six `CallPES`, and five `SoundTweaked` measured representative events
+  (see the closure table in Measured Workload), plus
   selected `SoundTable`, `Scale`, and `TextureVelocity` fixtures from the wider census.
 - Independent animation/script clocks targeting one entity.
 - Equal-time hook ordering and large-delta catch-up.

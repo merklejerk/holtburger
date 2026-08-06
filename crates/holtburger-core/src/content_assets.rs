@@ -13,7 +13,9 @@ use holtburger_content::{
     ResolvedSurfaceTexture, ResolvedSurfaceTexturePixels, ResolvedTerrainMaterialTable,
     TexturePixelFormat,
 };
-use holtburger_dat::file_type::{Animation, GfxObj, Palette, RenderSurface, SetupModel};
+use holtburger_dat::file_type::{
+    Animation, GfxObj, Palette, PhysicsScript, RenderSurface, SetupModel,
+};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex as TokioMutex, Semaphore};
 
@@ -29,6 +31,7 @@ pub enum ContentAssetRequest {
     TerrainMaterial(u32),
     RegionRenderProfile(u32),
     Animation(u32),
+    PhysicsScript(u32),
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
@@ -72,6 +75,7 @@ pub enum ContentAsset {
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     RegionRenderProfile(Box<ResolvedRegionRenderProfile>),
     Animation(Box<Animation>),
+    PhysicsScript(Box<PhysicsScript>),
     GfxObj(Arc<GfxObj>),
     SetupModel(Arc<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
@@ -273,6 +277,19 @@ impl ContentAssetService {
                 Ok(ContentAsset::Animation(Box::new(
                     Animation::read(&mut Cursor::new(resource.bytes)).with_context(|| {
                         format!("Could not parse Animation 0x{animation_id:08X}")
+                    })?,
+                )))
+            }
+            ContentAssetRequest::PhysicsScript(script_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, script_id))
+                    .with_context(|| {
+                        format!("Could not load PhysicsScript 0x{script_id:08X}")
+                    })?;
+                Ok(ContentAsset::PhysicsScript(Box::new(
+                    PhysicsScript::read(&mut Cursor::new(resource.bytes)).with_context(|| {
+                        format!("Could not parse PhysicsScript 0x{script_id:08X}")
                     })?,
                 )))
             }

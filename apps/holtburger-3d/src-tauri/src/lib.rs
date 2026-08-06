@@ -16,6 +16,7 @@ pub use landblock_source_batch::LandblockSourceLayer;
 pub use sky_source::load_sky_source_bytes;
 
 mod animation_source;
+mod behavior_hook_source;
 mod binary_source_record;
 pub mod cell_struct_projection;
 mod env_cell_source;
@@ -25,6 +26,7 @@ mod landblock_source_batch;
 mod object_resource_closure;
 mod object_texture;
 mod outdoor_static_source;
+mod physics_script_source;
 pub mod polygon_geometry;
 pub mod portal_geometry;
 pub mod portal_visibility;
@@ -46,6 +48,7 @@ use object_texture::{
 use outdoor_static_source::{
     OutdoorStaticSourceRecordManifest, serialize_outdoor_static_record_binary,
 };
+use physics_script_source::serialize_physics_script_record_binary;
 use source_projection::dat_id;
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
@@ -100,6 +103,12 @@ struct LoadTexturePixelsRequest {
 #[serde(rename_all = "camelCase")]
 struct LoadAnimationRequest {
     animation_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadPhysicsScriptRequest {
+    script_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -183,6 +192,18 @@ async fn load_animation(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Loads one immutable DAT physics script as a compact typed binary record.
+#[tauri::command]
+async fn load_physics_script(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadPhysicsScriptRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_physics_script_bytes(&state.runtime, &request.script_id)
+        .await
+        .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Builds the canonical landblock source batch used by Tauri and the headless browser harness.
 pub async fn load_landblock_source_batch_bytes(
     runtime: &ContentAssetRuntime,
@@ -238,6 +259,22 @@ pub async fn load_animation_bytes(
         unreachable!("Animation request must return an Animation")
     };
     serialize_animation_record_binary(&animation)
+}
+
+/// Build the canonical typed physics-script response used by Tauri and focused host tests.
+pub async fn load_physics_script_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_script_id: &str,
+) -> Result<Vec<u8>> {
+    let script_id = parse_typed_dat_id(raw_script_id, 0x33)?;
+    let asset = runtime
+        .load(ContentAssetRequest::PhysicsScript(script_id))
+        .await
+        .with_context(|| format!("Could not load PhysicsScript 0x{script_id:08X}"))?;
+    let ContentAsset::PhysicsScript(script) = asset else {
+        unreachable!("PhysicsScript request must return a PhysicsScript")
+    };
+    serialize_physics_script_record_binary(&script)
 }
 
 async fn build_landblock_source_batch_response(
@@ -925,6 +962,7 @@ pub fn run() {
             host_status,
             load_active_region_data,
             load_animation,
+            load_physics_script,
             load_landblock_source_batch,
             load_sky_source,
             load_texture_pixels

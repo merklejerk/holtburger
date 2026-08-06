@@ -1,4 +1,7 @@
-import type { BlockingAnimationHook } from "../../assets/decode-animation-record";
+import {
+	animationHookBlocksActivation,
+	type BlockingAnimationHook,
+} from "../../assets/decode-animation-record";
 import { AABB3, Vec3 } from "../math/types";
 import type {
 	ObjectVisualTemplate,
@@ -28,10 +31,7 @@ export function prepareDynamicAnimation(
 	sourceScale: Vec3,
 	staticBounds: AABB3,
 ): PreparedDynamicAnimation {
-	const blockingHooks = animation.hooks.filter(
-		(hook): hook is BlockingAnimationHook =>
-			hook.kind === "replace-object" || hook.kind === "unsupported-visual",
-	);
+	const blockingHooks = animation.hooks.filter(animationHookBlocksActivation);
 	if (blockingHooks.length > 0) {
 		return {
 			animation,

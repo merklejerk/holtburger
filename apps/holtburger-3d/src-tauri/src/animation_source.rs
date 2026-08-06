@@ -1,16 +1,16 @@
 use anyhow::{Result, ensure};
 use holtburger_dat::file_type::Animation;
-use holtburger_dat::file_type::setup_model::{
-    AnimationHook, AnimationHookPayload, TextureVelocityHookPayload,
-    TextureVelocityPartHookPayload, TransparentPartHookPayload,
-};
 use serde::Serialize;
 
-use crate::binary_source_record::{BinarySectionManifest, BinarySectionWriter};
+use crate::behavior_hook_source::{
+    BehaviorHookPayloadManifest, PartIndexScope, behavior_hook_payload, hook_direction, hook_name,
+};
+use crate::binary_source_record::{
+    BinarySectionManifest, BinarySectionWriter, serialize_binary_envelope,
+};
 use crate::source_projection::dat_id;
 
 pub(crate) const ANIMATION_RECORD_BINARY_MAGIC: &[u8; 4] = b"HBAN";
-const BINARY_HEADER_LENGTH: usize = 12;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,43 +35,7 @@ struct AnimationHookManifest {
     hook_name: &'static str,
     direction: &'static str,
     raw_direction: i32,
-    payload: AnimationHookPayloadManifest,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
-enum AnimationHookPayloadManifest {
-    NoPayload,
-    Raw {
-        byte_offset: usize,
-        byte_length: usize,
-    },
-    ReplaceObject {
-        byte_offset: usize,
-        byte_length: usize,
-    },
-    SetOmega {
-        omega: [f32; 3],
-    },
-    TransparentPart {
-        part_index: u32,
-        start: f32,
-        end: f32,
-        duration_seconds: f32,
-    },
-    TextureVelocity {
-        u_speed: f32,
-        v_speed: f32,
-    },
-    TextureVelocityPart {
-        part_index: u32,
-        u_speed: f32,
-        v_speed: f32,
-    },
+    payload: BehaviorHookPayloadManifest,
 }
 
 /// Serialize one decoded DAT animation into a compact typed frontend record.
@@ -121,7 +85,11 @@ pub(crate) fn serialize_animation_record_binary(animation: &Animation) -> Result
                 hook_name: hook_name(hook.hook_type),
                 direction: hook_direction(hook.direction),
                 raw_direction: hook.direction,
-                payload: hook_payload(hook, part_count, &mut hook_payload_bytes)?,
+                payload: behavior_hook_payload(
+                    hook,
+                    PartIndexScope::Known(part_count),
+                    &mut hook_payload_bytes,
+                )?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -138,7 +106,7 @@ pub(crate) fn serialize_animation_record_binary(animation: &Animation) -> Result
         hooks,
         sections,
     };
-    serialize_binary_envelope(&manifest, &section_bytes)
+    serialize_binary_envelope(ANIMATION_RECORD_BINARY_MAGIC, &manifest, &section_bytes)
 }
 
 fn frame_values(frame: &holtburger_dat::graphics::Frame) -> [f32; 7] {
@@ -153,168 +121,15 @@ fn frame_values(frame: &holtburger_dat::graphics::Frame) -> [f32; 7] {
     ]
 }
 
-fn hook_payload(
-    hook: &AnimationHook,
-    part_count: usize,
-    raw_payloads: &mut Vec<u8>,
-) -> Result<AnimationHookPayloadManifest> {
-    let payload = match &hook.payload {
-        AnimationHookPayload::NoPayload => AnimationHookPayloadManifest::NoPayload,
-        AnimationHookPayload::Raw(bytes) => {
-            let (byte_offset, byte_length) = append_payload(raw_payloads, bytes);
-            AnimationHookPayloadManifest::Raw {
-                byte_offset,
-                byte_length,
-            }
-        }
-        AnimationHookPayload::ReplaceObject(bytes) => {
-            let (byte_offset, byte_length) = append_payload(raw_payloads, bytes);
-            AnimationHookPayloadManifest::ReplaceObject {
-                byte_offset,
-                byte_length,
-            }
-        }
-        AnimationHookPayload::SetOmega(payload) => {
-            ensure!(
-                payload.omega.x.is_finite()
-                    && payload.omega.y.is_finite()
-                    && payload.omega.z.is_finite(),
-                "SetOmega payload contains a non-finite component"
-            );
-            AnimationHookPayloadManifest::SetOmega {
-                omega: [payload.omega.x, payload.omega.y, payload.omega.z],
-            }
-        }
-        AnimationHookPayload::TransparentPart(TransparentPartHookPayload {
-            part_index,
-            start,
-            end,
-            duration_seconds,
-        }) => {
-            ensure_part_index("TransparentPart", *part_index, part_count)?;
-            ensure!(
-                start.is_finite() && end.is_finite() && duration_seconds.is_finite(),
-                "TransparentPart payload contains a non-finite value"
-            );
-            AnimationHookPayloadManifest::TransparentPart {
-                part_index: *part_index,
-                start: *start,
-                end: *end,
-                duration_seconds: *duration_seconds,
-            }
-        }
-        AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload { u_speed, v_speed }) => {
-            ensure!(
-                u_speed.is_finite() && v_speed.is_finite(),
-                "TextureVelocity payload contains a non-finite value"
-            );
-            AnimationHookPayloadManifest::TextureVelocity {
-                u_speed: *u_speed,
-                v_speed: *v_speed,
-            }
-        }
-        AnimationHookPayload::TextureVelocityPart(TextureVelocityPartHookPayload {
-            part_index,
-            u_speed,
-            v_speed,
-        }) => {
-            ensure_part_index("TextureVelocityPart", *part_index, part_count)?;
-            ensure!(
-                u_speed.is_finite() && v_speed.is_finite(),
-                "TextureVelocityPart payload contains a non-finite value"
-            );
-            AnimationHookPayloadManifest::TextureVelocityPart {
-                part_index: *part_index,
-                u_speed: *u_speed,
-                v_speed: *v_speed,
-            }
-        }
-    };
-    Ok(payload)
-}
-
-fn ensure_part_index(hook_name: &str, part_index: u32, part_count: usize) -> Result<()> {
-    ensure!(
-        usize::try_from(part_index)? < part_count,
-        "{hook_name} part index {part_index} is out of range for {part_count} parts"
-    );
-    Ok(())
-}
-
-fn append_payload(target: &mut Vec<u8>, payload: &[u8]) -> (usize, usize) {
-    let byte_offset = target.len();
-    target.extend(payload);
-    (byte_offset, payload.len())
-}
-
-fn hook_direction(direction: i32) -> &'static str {
-    match direction {
-        -2 => "unknown",
-        -1 => "backward",
-        0 => "both",
-        1 => "forward",
-        _ => "invalid",
-    }
-}
-
-fn hook_name(hook_type: u32) -> &'static str {
-    match hook_type {
-        0 => "no-op",
-        1 => "sound",
-        2 => "sound-table",
-        3 => "attack",
-        4 => "animation-done",
-        5 => "replace-object",
-        6 => "ethereal",
-        7 => "transparent-part",
-        8 => "luminous",
-        9 => "luminous-part",
-        10 => "diffuse",
-        11 => "diffuse-part",
-        12 => "scale",
-        13 => "create-particle",
-        14 => "destroy-particle",
-        15 => "stop-particle",
-        16 => "no-draw",
-        17 => "default-script",
-        18 => "default-script-part",
-        19 => "call-pes",
-        20 => "transparent",
-        21 => "sound-tweaked",
-        22 => "set-omega",
-        23 => "texture-velocity",
-        24 => "texture-velocity-part",
-        25 => "set-light",
-        26 => "create-blocking-particle",
-        _ => "unsupported",
-    }
-}
-
-fn serialize_binary_envelope(
-    manifest: &AnimationRecordManifest,
-    section_bytes: &[u8],
-) -> Result<Vec<u8>> {
-    let mut manifest_bytes = serde_json::to_vec(manifest)?;
-    while !(BINARY_HEADER_LENGTH + manifest_bytes.len()).is_multiple_of(4) {
-        manifest_bytes.push(b' ');
-    }
-    let total_length = BINARY_HEADER_LENGTH + manifest_bytes.len() + section_bytes.len();
-    let mut bytes = Vec::with_capacity(total_length);
-    bytes.extend(ANIMATION_RECORD_BINARY_MAGIC);
-    bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
-    bytes.extend(u32::try_from(total_length)?.to_le_bytes());
-    bytes.extend(manifest_bytes);
-    bytes.extend(section_bytes);
-    Ok(bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::binary_source_record::BINARY_HEADER_LENGTH;
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_dat::file_type::animation::AnimationFlags;
     use holtburger_dat::file_type::setup_model::{
-        AnimationFrame, SetOmegaHookPayload, TransparentPartHookPayload,
+        AnimationFrame, AnimationHook, AnimationHookPayload, SetOmegaHookPayload,
+        TransparentPartHookPayload,
     };
     use holtburger_dat::graphics::Frame;
 

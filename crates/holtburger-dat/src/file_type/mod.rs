@@ -14,6 +14,7 @@ pub mod scene;
 pub mod setup_model;
 pub mod skill_table;
 pub mod spell_table;
+pub mod wave;
 pub mod xp_table;
 
 pub use animation::Animation;
@@ -37,6 +38,7 @@ pub use scene::{Scene, SceneObjectTemplate};
 pub use setup_model::SetupModel;
 pub use skill_table::SkillTable;
 pub use spell_table::SpellTable;
+pub use wave::{Wave, WaveFormat, WaveHeader};
 pub use xp_table::XpTable;
 
 use std::fmt;

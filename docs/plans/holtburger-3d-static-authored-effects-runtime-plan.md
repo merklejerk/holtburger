@@ -1332,7 +1332,10 @@ remaining work:
 
 ### Phase 7: Activate Script-Only and Combined Authored Residents
 
-Progress: Not started
+Progress: **In progress 2026-08-06.** Landed: script-closure and emitter staging through the entity
+lifecycle, script clocks installed and advancing, the Web Audio device, the particle runtime, the
+effect-state ownership move, and script-only promotion. Remaining: the `TextureVelocity` uniform
+binding, `SoundTable` key resolution, and the particle draw path with its harness verification.
 
 #### Deliverables
 
@@ -1363,7 +1366,40 @@ Progress: Not started
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **Effect-state lifetime moved from `AnimationSystem` to the entity owner, and had to.** A
+  script-only resident has effect state and no playback, so installation could not stay coupled to
+  animation without leaving that whole population unreachable. Two tests asserting the old ownership
+  were replaced rather than propped up.
+- **Promotion follows retail's own rule.** `InitDefaults` enrols a static object as animating for a
+  default animation **or** a default script (state bits `0x40000` / `0x80000`,
+  acclient.c:309131-309138), so only a resident with neither stays static. `PreparedDynamicAnimation`
+  gained a `none` arm for "fully activated, nothing to play" — deliberately distinct from
+  `retain-static-presentation`, where something _is_ being withheld.
+- **The script system borrows its closure; the entity owns it.** Both released it at first, which
+  double-releases on teardown. The acquirer must release it when preparation fails or is superseded —
+  before any clock exists — so it cannot hand ownership away.
+- **Emitter staging shares the closure's lane.** The emitter set is only knowable once the closure
+  resolves, so a parallel lane could not express it; a partial failure releases what it already took.
+- **Emitters need no removal path.** Destroying an owner's nodes stops them publishing a transform,
+  which the runtime already treats as the emitter going away — behavior that was tested in Phase 5
+  before it had a caller.
+- **Audio playback is best-effort.** An undecoded sound is skipped rather than queued: these are
+  ambient one-shots tied to a moment, and playing one late is worse than not playing it.
+
+#### Remaining Work
+
+- Bind the `TextureVelocity` scroll rate and the particle draw cohorts through the renderer, and
+  resolve `SoundTable` keys against the owning resident's installed table.
+- Verify the particle vertex stage against `particle-motion.ts` on real WebGL through the browser
+  harness.
+
+#### Recorded Debt
+
+- A script-only resident publishes no presentation sample, so a script that authors `Scale`,
+  `SetOmega`, or `TransparentPart` on one would mutate effect state nothing reads. No measured
+  script does — the representative closure authors only `CreateParticle`, `SoundTweaked`, and
+  `CallPES` — but 43 `Scale` hooks exist archive-wide, so this needs an effect-only sampling path
+  before broader content activates.
 
 ### Phase 8: Resteer, Measure, and Clean Up
 

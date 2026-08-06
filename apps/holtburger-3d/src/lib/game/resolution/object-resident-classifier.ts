@@ -76,9 +76,12 @@ function resolveScriptIds(ids: ObjectBehaviorIds) {
 }
 
 /**
- * Preserve the retail setup-default-animation promotion rule without reducing either resident
- * branch to a diagnostic projection. Direct GfxObj presentations have no default animation and
- * therefore remain static.
+ * Promote every resident whose setup owns timed default behavior.
+ *
+ * Retail enrolls a static object as animating when its setup carries **either** a default animation
+ * or a default script (`CPhysicsObj::InitDefaults` sets state bit `0x40000` or `0x80000` and calls
+ * `AddStaticAnimatingObject`, acclient.c:309131-309138), so a script-only resident is promoted for
+ * the same reason an animated one is. Direct GfxObj presentations own neither and remain static.
  */
 export function classifyObjectResidents(
 	residents: readonly ResolvedObjectResident[],
@@ -86,15 +89,12 @@ export function classifyObjectResidents(
 	const staticResidents: ResolvedObjectResident[] = [];
 	const dynamicSources: AuthoredDynamicSource[] = [];
 	for (const resident of residents) {
-		if (
-			resident.behavior.kind === "none" ||
-			resident.behavior.kind === "script-only"
-		) {
+		if (resident.behavior.kind === "none") {
 			staticResidents.push(resident);
 		} else {
 			if (resident.setupId === null) {
 				throw new Error(
-					`Animated authored resident ${resident.identity.sourceId} has no setup identity.`,
+					`Authored dynamic resident ${resident.identity.sourceId} has no setup identity.`,
 				);
 			}
 			dynamicSources.push({

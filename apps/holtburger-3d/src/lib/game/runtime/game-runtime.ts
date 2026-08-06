@@ -975,7 +975,9 @@ export class GameRuntime {
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
 		this.#physicsScriptSystem.advance(timeSeconds);
-		this.#particles.advance(timeSeconds, (target) => this.#sceneOriginOf(target));
+		this.#particles.advance(timeSeconds, (target) =>
+			this.#sceneOriginOf(target),
+		);
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
 			animationFrame,

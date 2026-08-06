@@ -32,7 +32,7 @@ describe("resolveObjectBehavior", () => {
 });
 
 describe("classifyObjectResidents", () => {
-	it("keeps none and script-only residents static while promoting both animation classes", () => {
+	it("promotes every resident with timed default behavior, including script-only", () => {
 		const none = resident("none", behavior("none"));
 		const script = resident("script", behavior("script-only"));
 		const animation = resident("animation", behavior("animation-only"));
@@ -45,13 +45,15 @@ describe("classifyObjectResidents", () => {
 			combined,
 		]);
 
-		expect(classified.staticResidents).toEqual([none, script]);
+		// Retail enrolls a static object as animating for a default animation *or* a default
+		// script, so only a resident with neither stays static.
+		expect(classified.staticResidents).toEqual([none]);
 		expect(
 			classified.dynamicSources.map(({ identity }) => identity.sourceId),
-		).toEqual(["animation", "combined"]);
+		).toEqual(["script", "animation", "combined"]);
 		expect(
 			classified.dynamicSources.map(({ behavior }) => behavior.kind),
-		).toEqual(["animation-only", "animation-and-script"]);
+		).toEqual(["script-only", "animation-only", "animation-and-script"]);
 	});
 
 	it("rejects an impossible animated direct-GfxObj resident", () => {

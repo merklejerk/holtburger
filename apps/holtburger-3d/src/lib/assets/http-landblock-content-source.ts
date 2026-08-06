@@ -4,6 +4,8 @@ import type { AnimationAssetSource } from "./animation-asset-source";
 import { decodeAnimationRecord } from "./decode-animation-record";
 import { decodePhysicsScriptRecord } from "./decode-physics-script-record";
 import type { PhysicsScriptSource } from "./physics-script-source";
+import { decodeParticleEmitterRecord } from "./decode-particle-emitter-record";
+import type { ParticleEmitterSource } from "./particle-emitter-source";
 import type {
 	TexturePreparationServiceRequest,
 	TexturePreparationServiceResponse,
@@ -45,6 +47,7 @@ export class HttpLandblockContentSource
 		TexturePixelSource,
 		AnimationAssetSource,
 		PhysicsScriptSource,
+		ParticleEmitterSource,
 		SkySourceLoader
 {
 	readonly #baseUrl: URL;
@@ -123,6 +126,13 @@ export class HttpLandblockContentSource
 		return decodeAnimationRecord(
 			await this.#postBinary("animation", { animationId }),
 			animationId,
+		);
+	}
+
+	async loadParticleEmitter(emitterInfoId: DatAssetId) {
+		return decodeParticleEmitterRecord(
+			await this.#postBinary("particle-emitter", { emitterInfoId }),
+			emitterInfoId,
 		);
 	}
 

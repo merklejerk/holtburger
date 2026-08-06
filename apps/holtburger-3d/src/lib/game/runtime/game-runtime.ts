@@ -25,7 +25,12 @@ import {
 } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
-import { SceneGraph, type ScenePlacement, type SceneResidency } from "../scene";
+import {
+	SceneGraph,
+	type ScenePlacement,
+	type SceneNodeId,
+	type SceneResidency,
+} from "../scene";
 import {
 	InlineTerrainGenerator,
 	type TerrainGenerator,
@@ -41,6 +46,9 @@ import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
+import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
+import { ParticleEmitterRuntime } from "../systems/particle-emitter-runtime";
+import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
 import { AudioSystem, type AudioDevice } from "../systems/audio-system";
 import { BehaviorEventRouter } from "../behavior/behavior-event-router";
@@ -187,6 +195,7 @@ export interface GameRuntimeDependencies {
 	readonly animationSource: AnimationAssetSource;
 	readonly physicsScriptSource: PhysicsScriptSource;
 	readonly audioDevice: AudioDevice;
+	readonly particleEmitterSource: ParticleEmitterSource;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -315,8 +324,20 @@ export class GameRuntime {
 	readonly #effects: EffectSystem;
 	readonly #behaviorRouter: BehaviorEventRouter;
 	readonly #physicsScripts: PhysicsScriptRepository;
+	readonly #particleEmitters: ParticleEmitterRepository;
+	readonly #particles: ParticleEmitterRuntime;
 	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId>;
 	readonly #audio: AudioSystem;
+	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
+	#sceneOriginOf(target: {
+		readonly nodeId: SceneNodeId;
+	}): [number, number, number] | null {
+		const placement = this.#scene.getResolvedPlacement(target.nodeId);
+		if (!placement) return null;
+		const origin = getMat4Translation(placement.localToLandblock);
+		return [origin.x, origin.y, origin.z];
+	}
+
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
 	#lastFrameTimeSeconds = 0;
 	/** Active authored-dynamic residents grouped by their source owner. */
@@ -540,6 +561,18 @@ export class GameRuntime {
 		this.#physicsScripts = new PhysicsScriptRepository(
 			dependencies.physicsScriptSource,
 		);
+		this.#particleEmitters = new ParticleEmitterRepository(
+			dependencies.particleEmitterSource,
+		);
+		this.#particles = new ParticleEmitterRuntime({
+			clock: () => this.#lastFrameTimeSeconds,
+			// Reads an already-staged definition; an unstaged id returns null rather than starting
+			// a load inside the frame.
+			resolveEmitter: (emitterInfoId) =>
+				this.#particleEmitters.getReady(emitterInfoId),
+			originOf: (target) => this.#sceneOriginOf(target),
+			roll: Math.random,
+		});
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
 			new ObjectVisualTemplateRepository<
@@ -552,6 +585,7 @@ export class GameRuntime {
 			),
 			new AnimationAssetRepository(dependencies.animationSource),
 			this.#physicsScripts,
+			this.#particleEmitters,
 			dynamicGenerationToResourceOwnerId,
 		);
 		this.#audio = new AudioSystem(
@@ -569,11 +603,10 @@ export class GameRuntime {
 					playSound: (target, sound) => {
 						// A sound is placed at its emitting node's world position, resolved once at
 						// trigger time exactly as retail samples it.
-						const placement = this.#scene.getResolvedPlacement(target.nodeId);
-						if (!placement) return "unprepared";
-						const origin = getMat4Translation(placement.localToLandblock);
+						const origin = this.#sceneOriginOf(target);
+						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
-							position: [origin.x, origin.y, origin.z],
+							position: origin,
 							probability: sound.probability,
 							soundId: sound.soundId,
 							volume: sound.volume,
@@ -585,7 +618,10 @@ export class GameRuntime {
 				// Authored particles arrive only from physics scripts, and no resident runs one
 				// until Phase 7 activates them. Reporting unprepared keeps the outcome honest
 				// instead of pretending an emitter was created.
-				particles: { createEmitter: () => "unprepared" },
+				particles: {
+					createEmitter: (target, command) =>
+						this.#particles.createEmitter(target, command),
+				},
 				// Chained script activation lands with the script clock in Phase 7; until an authored
 				// script runs, no `CallPES` can reach this port.
 				scheduler: {
@@ -668,6 +704,7 @@ export class GameRuntime {
 		animationSource: AnimationAssetSource,
 		physicsScriptSource: PhysicsScriptSource,
 		audioDevice: AudioDevice,
+		particleEmitterSource: ParticleEmitterSource,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
@@ -676,6 +713,7 @@ export class GameRuntime {
 		const runtime = new GameRuntime(device.resources, commitPipeline, {
 			animationSource,
 			audioDevice,
+			particleEmitterSource,
 			physicsScriptSource,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
@@ -936,6 +974,7 @@ export class GameRuntime {
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
 		this.#physicsScriptSystem.advance(timeSeconds);
+		this.#particles.advance(timeSeconds, (target) => this.#sceneOriginOf(target));
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
 			animationFrame,
@@ -1008,6 +1047,7 @@ export class GameRuntime {
 		this.#animation.destroy();
 		this.#physicsScriptSystem.destroy();
 		this.#audio.destroy();
+		this.#particleEmitters.destroy();
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();
@@ -1416,6 +1456,8 @@ export class GameRuntime {
 		this.#envCellLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#physicsScriptSystem.removeOwner(ownerId);
+		// Emitters need no explicit removal: `#dynamics.removeOwner` destroys their nodes, and the
+		// particle runtime drops any emitter whose target stops publishing a transform.
 		this.#dynamics.removeOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);
 		if (layer === LandblockLayerKind.Terrain) {

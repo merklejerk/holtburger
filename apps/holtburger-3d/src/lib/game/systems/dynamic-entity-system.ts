@@ -2,6 +2,11 @@ import type {
 	PhysicsScriptRepository,
 	PreparedPhysicsScriptClosure,
 } from "../behavior/physics-script-repository";
+import type {
+	ParticleEmitterRepository,
+	PreparedParticleEmitter,
+} from "../behavior/particle-emitter-repository";
+import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
@@ -49,6 +54,13 @@ interface DynamicEntityRecord {
 	 * every other per-entity resource, and so a superseded generation cannot leak one.
 	 */
 	scriptClosure: PreparedPhysicsScriptClosure | null;
+	/**
+	 * Emitter definitions named by this resident's script closure.
+	 *
+	 * Staged with the closure so a `CreateParticle` reached mid-playback resolves from memory; the
+	 * particle runtime reads them through the repository rather than holding them itself.
+	 */
+	emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[];
 	preparedAnimation: PreparedDynamicAnimation | null;
 	/** Conservative object-local envelope matching the exact pose currently published to draw. */
 	publishedPresentationBounds: AABB3;
@@ -84,6 +96,12 @@ export interface DynamicOwnerInstallation {
 }
 
 /** Runtime activation facts for one fully prepared but unpublished dynamic entity. */
+/** One resident's complete behavior staging: its script closure and every emitter it can reach. */
+interface StagedBehaviorAssets {
+	readonly closure: PreparedPhysicsScriptClosure;
+	readonly emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[];
+}
+
 interface PreparedDynamicEntity {
 	readonly animation: PreparedDynamicAnimation;
 	readonly nodeId: SceneNodeId;
@@ -101,6 +119,7 @@ export class DynamicEntitySystem<
 	readonly #templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>;
 	readonly #animations: AnimationAssetRepository;
 	readonly #scripts: PhysicsScriptRepository;
+	readonly #emitters: ParticleEmitterRepository;
 	readonly #templateOwnerId: (
 		ownerId: TOwnerId,
 		generation: number,
@@ -124,6 +143,7 @@ export class DynamicEntitySystem<
 		templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>,
 		animations: AnimationAssetRepository,
 		scripts: PhysicsScriptRepository,
+		emitters: ParticleEmitterRepository,
 		templateOwnerId: (
 			ownerId: TOwnerId,
 			generation: number,
@@ -133,6 +153,7 @@ export class DynamicEntitySystem<
 		this.#templates = templates;
 		this.#animations = animations;
 		this.#scripts = scripts;
+		this.#emitters = emitters;
 		this.#templateOwnerId = templateOwnerId;
 	}
 
@@ -178,15 +199,9 @@ export class DynamicEntitySystem<
 			entities.map((entity) =>
 				this.#animations.acquire(entity.source.behavior.animationId),
 			),
-			entities.map((entity) =>
-				// Transitive `CallPES` staging happens here, before activation, so no chained script
-				// can trigger a load at frame time.
-				entity.source.behavior.physicsScriptId === null
-					? Promise.resolve(null)
-					: this.#scripts.acquireClosure(
-							entity.source.behavior.physicsScriptId,
-						),
-			),
+			// Transitive `CallPES` and emitter staging happens here, before activation, so nothing
+			// reached mid-playback can trigger a load at frame time.
+			entities.map((entity) => this.#stageBehaviorAssets(entity)),
 		);
 		this.#pendingPreparations.add(preparationPromise);
 		const ready = preparationPromise
@@ -288,6 +303,7 @@ export class DynamicEntitySystem<
 		}
 		const record: DynamicEntityRecord = {
 			animationHandle: null,
+			emitterHandles: [],
 			scriptClosure: null,
 			articulatedPose: pose,
 			renderable: { parts },
@@ -430,6 +446,37 @@ export class DynamicEntitySystem<
 		this.#animations.destroy();
 	}
 
+	/**
+	 * Stage one resident's script closure and every emitter definition it can reach.
+	 *
+	 * Emitters are staged in the same lane as the closure rather than a parallel one, because the
+	 * emitter set is only knowable once the closure has resolved. A failure part-way releases what
+	 * was already taken, so this either yields a complete behavior staging or nothing.
+	 */
+	async #stageBehaviorAssets(
+		entity: DynamicEntityRecord,
+	): Promise<StagedBehaviorAssets | null> {
+		const scriptId = entity.source.behavior.physicsScriptId;
+		if (scriptId === null) return null;
+		const closure = await this.#scripts.acquireClosure(scriptId);
+		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
+		try {
+			const emitterIds = new Set(
+				[...closure.scripts.values()].flatMap(
+					(script) => script.dependencies.emitterInfoIds,
+				),
+			);
+			for (const emitterInfoId of emitterIds) {
+				emitterHandles.push(await this.#emitters.acquire(emitterInfoId));
+			}
+		} catch (cause) {
+			for (const handle of emitterHandles) handle.release();
+			closure.release();
+			throw cause;
+		}
+		return { closure, emitterHandles };
+	}
+
 	async #prepareOwner(
 		ownerId: TOwnerId,
 		generation: number,
@@ -437,7 +484,7 @@ export class DynamicEntitySystem<
 		preparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>,
 		templateOwnerId: TTemplateOwnerId,
 		animationPreparations: readonly Promise<PreparedAnimationHandle>[],
-		scriptPreparations: readonly Promise<PreparedPhysicsScriptClosure | null>[],
+		scriptPreparations: readonly Promise<StagedBehaviorAssets | null>[],
 	): Promise<"ready" | "superseded"> {
 		// Settled separately rather than in one array so each lane keeps its own result type; a
 		// single `allSettled` would widen them into a union the release paths cannot discriminate.
@@ -456,16 +503,22 @@ export class DynamicEntitySystem<
 		const acquiredHandles = animationResults.flatMap((result) =>
 			result.status === "fulfilled" ? [result.value] : [],
 		);
-		const acquiredClosures = scriptResults.flatMap((result) =>
+		const acquiredBehaviorAssets = scriptResults.flatMap((result) =>
 			result.status === "fulfilled" && result.value !== null
 				? [result.value]
 				: [],
 		);
+		const releaseBehaviorAssets = () => {
+			for (const staged of acquiredBehaviorAssets) {
+				staged.closure.release();
+				for (const handle of staged.emitterHandles) handle.release();
+			}
+		};
 		const current =
 			!this.#destroyed && this.#ownerGenerations.get(ownerId) === generation;
 		if (!current) {
 			for (const handle of acquiredHandles) handle.release();
-			for (const closure of acquiredClosures) closure.release();
+			releaseBehaviorAssets();
 			preparation.release();
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			return "superseded";
@@ -473,7 +526,7 @@ export class DynamicEntitySystem<
 		const failure = settled.find((result) => result.status === "rejected");
 		if (failure?.status === "rejected") {
 			for (const handle of acquiredHandles) handle.release();
-			for (const closure of acquiredClosures) closure.release();
+			releaseBehaviorAssets();
 			preparation.release();
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			throw failure.reason;
@@ -504,6 +557,7 @@ export class DynamicEntitySystem<
 						`Script closure for ${entity.source.identity.sourceId} settled without a result.`,
 					);
 				}
+
 				return {
 					animation: prepareDynamicAnimation(
 						animationResult.value.asset,
@@ -513,7 +567,8 @@ export class DynamicEntitySystem<
 					),
 					handle: animationResult.value,
 					parts: mergePreparedParts(entity.renderable.parts, template.parts),
-					scriptClosure: scriptResult.value,
+					emitterHandles: scriptResult.value?.emitterHandles ?? [],
+					scriptClosure: scriptResult.value?.closure ?? null,
 				};
 			});
 			preparation.commit(templateOwnerId);
@@ -522,12 +577,13 @@ export class DynamicEntitySystem<
 				const result = prepared[index]!;
 				entity.animationHandle = result.handle;
 				entity.scriptClosure = result.scriptClosure;
+				entity.emitterHandles = result.emitterHandles;
 				entity.preparedAnimation = result.animation;
 				entity.renderable = { parts: result.parts };
 			}
 		} catch (cause) {
 			for (const handle of acquiredHandles) handle.release();
-			for (const closure of acquiredClosures) closure.release();
+			releaseBehaviorAssets();
 			preparation.release();
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			throw cause;
@@ -668,6 +724,8 @@ export class DynamicEntitySystem<
 		entity.animationHandle = null;
 		entity.scriptClosure?.release();
 		entity.scriptClosure = null;
+		for (const handle of entity.emitterHandles) handle.release();
+		entity.emitterHandles = [];
 		for (const part of entity.renderable.parts) {
 			this.#scene.destroyNode(part.nodeId);
 		}

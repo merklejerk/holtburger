@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
+import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
@@ -430,6 +431,12 @@ function createSystem(
 			destroy: () => {},
 			loadPhysicsScript: async (scriptId) => {
 				throw new Error(`No script fixture for ${scriptId}.`);
+			},
+		}),
+		new ParticleEmitterRepository({
+			destroy: () => {},
+			loadParticleEmitter: async (emitterInfoId) => {
+				throw new Error(`No emitter fixture for ${emitterInfoId}.`);
 			},
 		}),
 		(ownerId, generation) => `${ownerId}:generation:${generation}`,

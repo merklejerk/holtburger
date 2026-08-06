@@ -4,6 +4,7 @@
 	import { TauriPhysicsScriptSource } from "../lib/assets/tauri-physics-script-source";
 	import { TauriAudioSource } from "../lib/assets/tauri-audio-source";
 	import { WebAudioDevice } from "../lib/assets/web-audio-device";
+	import { TauriParticleEmitterSource } from "../lib/assets/tauri-particle-emitter-source";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -343,6 +344,7 @@
 					TauriAnimationAssetSource.build(),
 					TauriPhysicsScriptSource.build(),
 					new WebAudioDevice(new AudioContext(), TauriAudioSource.build()),
+					TauriParticleEmitterSource.build(),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
 				skySource = new TauriSkySource();

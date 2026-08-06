@@ -121,12 +121,31 @@ export function areStaticObjectDrawsCompatible<TGeometry, TTexture, TSampler>(
 	);
 }
 
+const SURFACE_CLIP_MAP = 0x4;
+const SURFACE_TRANSLUCENT = 0x10;
 const SURFACE_ALPHA = 0x100;
 const SURFACE_INVERSE_ALPHA = 0x200;
 const SURFACE_ADDITIVE = 0x10000;
 
-/** Compile transparent and additive source flags without leaking WebGL constants upstream. */
+/**
+ * Compile transparent and additive source flags without leaking WebGL constants upstream.
+ *
+ * Reproduces retail's blend selection (`D3DPolyRender`, acclient.c:434096-434160), including its
+ * final override: a `SURFACE_TRANSLUCENT` surface falls back to ordinary alpha blending, discarding
+ * an additive destination, whenever the clip-map path has run or no blend was selected at all
+ * (`skipChk || !v9 || singlePassDetailing`). Without that override an additive-plus-clip-map
+ * surface blends additively and saturates — which is what turned the authored overcast cloud sheet
+ * (`0x01004C35`, flags `0x10114`) into a white-out instead of a grey overcast.
+ */
 export function objectBlendPolicy(rawSurfaceFlags: number): ObjectBlendPolicy {
+	// Retail's translucent override runs last and discards whatever blend the earlier stages chose,
+	// so it returns before them rather than qualifying `additive`.
+	if (
+		(rawSurfaceFlags & SURFACE_TRANSLUCENT) !== 0 &&
+		(rawSurfaceFlags & SURFACE_CLIP_MAP) !== 0
+	) {
+		return { destination: "one-minus-src-alpha", source: "src-alpha" };
+	}
 	const additive = (rawSurfaceFlags & SURFACE_ADDITIVE) !== 0;
 	const alpha = (rawSurfaceFlags & SURFACE_ALPHA) !== 0;
 	const inverseAlpha = (rawSurfaceFlags & SURFACE_INVERSE_ALPHA) !== 0;
@@ -143,6 +162,13 @@ export function objectBlendPolicy(rawSurfaceFlags: number): ObjectBlendPolicy {
 	return additive
 		? { destination: "one", source: "one" }
 		: { destination: "one-minus-src-alpha", source: "src-alpha" };
+}
+
+/** Retail sources encode translucency as either a unit float or a legacy byte-scale value. */
+export function sourceOpacity(translucency: number): number {
+	const normalized =
+		translucency > 1 ? 1 - Math.min(translucency, 255) / 255 : 1 - translucency;
+	return Math.max(0, Math.min(1, normalized));
 }
 
 /** Partition transparency into bounded depth bands and stable owner-provided batching cohorts. */

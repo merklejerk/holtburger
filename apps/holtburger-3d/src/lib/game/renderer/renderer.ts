@@ -12,6 +12,8 @@ export interface OutdoorLightLookup {
 }
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
+import type { SkySourcePresentations } from "../../assets/decode-sky-record";
+import type { TexturePreparer } from "../textures/texture-preparer";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -383,9 +385,28 @@ export interface RendererFrameFeedback {
 	readonly selectedDynamicNodeIds: readonly SceneNodeId[];
 }
 
+/**
+ * Optional celestial-sky residency, kept off the draw contract because a backend without one is
+ * still a valid renderer.
+ *
+ * Neutral by construction: the resource set and the pixel-preparation port are frontend types, so
+ * a backend's private pass representation never reaches this boundary.
+ */
+export interface RendererSkyCapability {
+	/** Make one region's celestial resource set resident, replacing any previous one. */
+	install(
+		source: SkySourcePresentations,
+		preparer: TexturePreparer,
+	): Promise<void>;
+	/** Release the resident sky, for a region change that authors none. */
+	clear(): void;
+}
+
 export interface Renderer {
 	/** Backend-specific diagnostics; absent renderers remain valid production implementations. */
 	readonly frameDiagnostics?: RendererFrameDiagnostics;
+	/** Celestial-sky residency, absent on backends that cannot draw one. */
+	readonly sky?: RendererSkyCapability;
 	drawFrame(input: FrameInput): RendererFrameFeedback;
 	destroy(): Promise<void>;
 }

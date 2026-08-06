@@ -1,6 +1,10 @@
 import { renderVector } from "../../assets/ac-frame";
+import { bracketKeyframes } from "./keyframe-bracket";
+import { quantizeDayFraction } from "./game-clock";
+import { resolveSkyState } from "./sky-state";
 import { RUNTIME_LIGHT_RANGE_SCALE } from "./runtime-lights";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
+import type { ResolvedSkyState } from "./sky-state";
 import type { Vec3 } from "../math/types";
 
 /**
@@ -94,11 +98,30 @@ export interface ResolvedSceneLighting {
 export interface ResolvedSceneEnvironment {
 	readonly backgroundColor: SceneColor;
 	readonly distanceFog: ResolvedDistanceFog | null;
-	/** Stable sky selection retained for a future sky pass. */
-	readonly sky: {
-		readonly dayGroupIndex: number;
-		readonly dayGroupName: string;
-	} | null;
+	/**
+	 * The active day group's celestial objects, resolved on the authored sky tick. Null only when
+	 * the region authors no usable sky at all.
+	 */
+	readonly sky: ResolvedSkyState | null;
+	/*
+	 * SEAM: environment override (`AdminEnvirons`).
+	 *
+	 * Retail lets the server replace regional ambient and fog wholesale — the graveyard near
+	 * `0x482E` and similar areas look distinct because of it. `LScape::m_override_enabled` and its
+	 * ambient/fog companions are written from exactly one place,
+	 * `CPlayerSystem::Handle_Admin__Environs` (acclient.c:379135), driven by a one-`uint` message:
+	 * 0x00 clear, 0x01-0x06 fog presets, 0x65+ ambient sounds. It is landblock-scoped server-side
+	 * (ACE's `LandblockManager.SetGlobalFogColor` plus `Landblock.SendCurrentEnviron`), so a world
+	 * runtime can hold it as ordinary landblock state.
+	 *
+	 * Overridden ambient and fog need no new shape here — they resolve through `lighting`,
+	 * `backgroundColor` and `distanceFog` as they already do. What this type will need is one more
+	 * fact: **whether an override is currently active**, which the sky consumes independently of the
+	 * resolved colours. Sky objects with `properties` bit 2 hide while an override is active with
+	 * fog on (twenty shipped objects, one per day group), and the sky pass must stop forcing fog off
+	 * in that case. The bit already rides through `ResolvedSkyObject.properties`; only the
+	 * active-override fact is missing, and it is deliberately absent until something can set it.
+	 */
 	/**
 	 * Always present: a region without authored sky keyframes still lights the world, using
 	 * retail's unauthored-lighting fallback rather than going dark.
@@ -134,7 +157,14 @@ export function resolveSceneEnvironment(
 	if (dayGroup === undefined || dayGroup.skyTimes.length === 0) {
 		return UNAUTHORED_ENVIRONMENT;
 	}
-	const keyframes = bracketKeyframes(dayGroup.skyTimes, selection.timeOfDay);
+	// Lighting and the sky sample the same clock at their own authored cadences: 15 s and 0.8 s in
+	// the shipped region. Sampling the sky at the lighting tick would step the fastest authored sun
+	// sweep in visible ~1.8 degree jumps.
+	const dayLength = activeRegion.data.calendar.dayLength;
+	const keyframes = bracketKeyframes(
+		dayGroup.skyTimes,
+		quantizeDayFraction(selection.timeOfDay, sky.lightTickSize, dayLength),
+	);
 	const backgroundColor = lerpColor(
 		unpackColor(keyframes.before.ambientColor),
 		unpackColor(keyframes.after.ambientColor),
@@ -163,7 +193,11 @@ export function resolveSceneEnvironment(
 	return {
 		backgroundColor,
 		distanceFog,
-		sky: { dayGroupIndex, dayGroupName: dayGroup.dayName },
+		sky: resolveSkyState(
+			dayGroup,
+			dayGroupIndex,
+			quantizeDayFraction(selection.timeOfDay, sky.tickSize, dayLength),
+		),
 		lighting: resolveLighting(keyframes),
 	};
 }
@@ -239,34 +273,6 @@ function resolveDayGroupIndex(
 	const seed = (day + year * daysPerYear) >>> 0;
 	const hash = (Math.imul(1_782_775_218, seed) - 1_967_253_934) >>> 0;
 	return Math.floor((hash / 0x1_0000_0000) * count);
-}
-
-function bracketKeyframes<T extends { readonly begin: number }>(
-	keyframes: readonly T[],
-	timeOfDay: number,
-): { readonly before: T; readonly after: T; readonly ratio: number } {
-	const ordered = [...keyframes].sort(
-		(left, right) => left.begin - right.begin,
-	);
-	let before = ordered.at(-1);
-	let after = ordered[0];
-	if (before === undefined || after === undefined)
-		throw new Error("Sky day group has no keyframes.");
-	for (const keyframe of ordered) {
-		if (keyframe.begin <= timeOfDay) before = keyframe;
-		if (keyframe.begin > timeOfDay) {
-			after = keyframe;
-			break;
-		}
-	}
-	const beforeTime = before.begin;
-	const afterTime = after.begin <= beforeTime ? after.begin + 1 : after.begin;
-	const currentTime = timeOfDay < beforeTime ? timeOfDay + 1 : timeOfDay;
-	return {
-		before,
-		after,
-		ratio: (currentTime - beforeTime) / (afterTime - beforeTime),
-	};
 }
 
 function degreesToRadians(degrees: number): number {

@@ -155,7 +155,6 @@ const activeRegionDataSchema = z.object({
 		landblockLength: z.number().int(),
 		verticesPerCell: z.number().int(),
 		maxObjectHeight: finiteNumber,
-		skyHeight: finiteNumber,
 		roadWidth: finiteNumber,
 	}),
 	calendar: z.object({

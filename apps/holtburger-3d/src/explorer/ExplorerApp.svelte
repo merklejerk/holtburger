@@ -13,6 +13,7 @@
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
 	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
+	import { TauriSkySource } from "../lib/assets/tauri-sky-source";
 	import { TauriLandblockSourceBatch } from "../lib/assets/tauri-landblock-source-batch";
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
 	import type { LoDConfig } from "../lib/game/runtime/types";
@@ -33,7 +34,7 @@
 		resolveSceneEnvironment,
 		type ExplorerEnvironmentSelection,
 	} from "../lib/game/environment/scene-environment";
-	import { resolveClockDayFraction } from "../lib/game/environment/game-clock";
+	import { resolveDayFraction } from "../lib/game/environment/game-clock";
 	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 	import { ActiveRegionStaticDetailOwner } from "../lib/game/resolution/active-region-static-detail";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
@@ -57,6 +58,7 @@
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
 	let activeRegionSource: TauriActiveRegionSource | undefined;
+	let skySource: TauriSkySource | undefined;
 	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
@@ -77,8 +79,6 @@
 	let activeRegion = $state<ActiveRegionSource | undefined>(undefined);
 	/** Fast enough that a tick boundary is never visibly late; resolution is tick-quantized. */
 	const CLOCK_SAMPLE_INTERVAL_MS = 250;
-	/** Retail's `SkyDesc` default, used only when a region authors no sky (acclient.c:290941). */
-	const DEFAULT_LIGHT_TICK_SECONDS = 20;
 
 	let textureFilteringCapabilities =
 		$state<TextureFilteringCapabilities | null>(null);
@@ -129,8 +129,8 @@
 		}
 		clockStartedAtMs = performance.now();
 		applyEnvironment();
-		// Sampling faster than the authored light tick costs nothing: the resolved fraction is
-		// tick-quantized, so extra samples resolve to the identical environment.
+		// Sampling faster than the authored ticks costs nothing: the environment layer quantizes
+		// each domain's fraction, so extra samples resolve to the identical environment.
 		clockTimer = setInterval(applyEnvironment, CLOCK_SAMPLE_INTERVAL_MS);
 	}
 
@@ -214,10 +214,9 @@
 		const environment = resolveSceneEnvironment(activeRegion, {
 			...environmentSelection,
 			timeOfDay: clockFollowing
-				? resolveClockDayFraction(
+				? resolveDayFraction(
 						(performance.now() - clockStartedAtMs) / 1_000,
 						activeRegion.data.calendar.dayLength,
-						activeRegion.data.sky?.lightTickSize ?? DEFAULT_LIGHT_TICK_SECONDS,
 					)
 				: environmentSelection.timeOfDay,
 		});
@@ -284,6 +283,8 @@
 			webglDevice = undefined;
 			textureFilteringCapabilities = null;
 			activeRegionSource = undefined;
+			skySource?.destroy();
+			skySource = undefined;
 			staticDetailOwner = undefined;
 			activeRegion = undefined;
 			cameraCoordinator = undefined;
@@ -339,6 +340,9 @@
 					TauriAnimationAssetSource.build(),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
+				skySource = new TauriSkySource();
+				await gameRuntime.installSky(await skySource.loadSkySource());
+				if (destroyed) return;
 				applyEnvironment();
 				applyFrameSettings();
 				if (destroyed) return;

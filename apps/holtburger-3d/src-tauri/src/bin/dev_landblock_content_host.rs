@@ -1,7 +1,8 @@
 use anyhow::Context;
 use holtburger_3d::{
     LandblockSourceLayer, discover_content_runtime, load_active_region_data_bytes,
-    load_animation_bytes, load_landblock_source_batch_bytes, load_texture_pixels_bytes,
+    load_animation_bytes, load_landblock_source_batch_bytes, load_sky_source_bytes,
+    load_texture_pixels_bytes,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -80,6 +81,10 @@ async fn handle_connection(
             write_response(&mut stream, 200, "application/json", br#"{"ok":true}"#).await
         }
         ("POST", "/active-region-data") => match load_active_region_data_bytes(runtime).await {
+            Ok(bytes) => write_response(&mut stream, 200, "application/octet-stream", &bytes).await,
+            Err(error) => write_error(&mut stream, error).await,
+        },
+        ("POST", "/sky-source") => match load_sky_source_bytes(runtime).await {
             Ok(bytes) => write_response(&mut stream, 200, "application/octet-stream", &bytes).await,
             Err(error) => write_error(&mut stream, error).await,
         },

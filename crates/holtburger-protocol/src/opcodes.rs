@@ -188,7 +188,14 @@ pub enum GameOpcode {
     /// C2S: Wrapper for various game actions.
     /// High-level container for client-initiated actions such as using items, talking, or moving.
     GameAction = 0xF7B1,
-    // /// S2C: Admin environs (legacy admin tool).
+    // /// S2C: Environment override. Payload is one `u32` `EnvironChangeType`: 0x00 clears,
+    // /// 0x01-0x06 select fog presets (red, blue, white, green, black, black2), and 0x65+ select
+    // /// ambient sounds. Server-side it is landblock-scoped rather than per-player scripting (ACE's
+    // /// `LandblockManager.SetGlobalFogColor` plus `Landblock.SendCurrentEnviron`), so world state
+    // /// can hold it per landblock. Client-side it is the sole writer of `LScape::m_override_*`
+    // /// (`CPlayerSystem::Handle_Admin__Environs`, acclient.c:379135) and is what makes areas such
+    // /// as the graveyard near `0x482E` render a distinct sky. Decoding it also requires the
+    // /// frontend override seam noted on `ResolvedSceneEnvironment`.
     // AdminEnvirons = 0xEA60,
 
     // --- Data Download (DDD) ---

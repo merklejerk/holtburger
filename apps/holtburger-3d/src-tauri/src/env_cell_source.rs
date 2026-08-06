@@ -21,8 +21,8 @@ use crate::interior_seam::{
     classify_indoor_seam,
 };
 use crate::landblock_source_batch::LoadedLandblockSourceBatch;
-use crate::outdoor_static_source::{
-    OutdoorStaticSourceClosure, StaticGeometryBuffers, append_static_geometry,
+use crate::object_resource_closure::{
+    ObjectResourceClosure, StaticGeometryBuffers, append_static_geometry,
 };
 use crate::polygon_geometry::RenderAabb;
 use crate::portal_geometry::{
@@ -61,7 +61,7 @@ pub(crate) async fn serialize_env_cell_source_record(
     );
 
     let mut shell_buffers = StaticGeometryBuffers::default();
-    let mut object_closure = OutdoorStaticSourceClosure::default();
+    let mut object_closure = ObjectResourceClosure::default();
     let mut structures = Vec::<Value>::new();
     let mut structure_indices = BTreeMap::<(u32, u32), (usize, usize)>::new();
     let mut prepared_cells = Vec::with_capacity(interior.cells.len());

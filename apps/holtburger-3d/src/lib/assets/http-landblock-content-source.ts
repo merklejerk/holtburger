@@ -13,6 +13,11 @@ import {
 import { decodeTexturePixels } from "./decode-texture-pixels";
 import type { TexturePixelSource } from "./texture-pixel-source";
 import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
+import {
+	decodeSkySourceRecord,
+	type SkySourcePresentations,
+} from "./decode-sky-record";
+import type { SkySourceLoader } from "./sky-source";
 import type {
 	LandblockSourceBatch,
 	LandblockSourceBatchSource,
@@ -36,7 +41,8 @@ export class HttpLandblockContentSource
 	implements
 		LandblockSourceBatchSource,
 		TexturePixelSource,
-		AnimationAssetSource
+		AnimationAssetSource,
+		SkySourceLoader
 {
 	readonly #baseUrl: URL;
 	readonly #activeRegion: ActiveRegionSource;
@@ -97,6 +103,10 @@ export class HttpLandblockContentSource
 			layers,
 			this.#activeRegion,
 		);
+	}
+
+	async loadSkySource(): Promise<SkySourcePresentations> {
+		return decodeSkySourceRecord(await this.#postBinary("sky-source", {}));
 	}
 
 	async loadTexturePixels(

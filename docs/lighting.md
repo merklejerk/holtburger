@@ -258,6 +258,87 @@ eye, and a **straight ramp** — no smoothstep.
 
 Additive surfaces are excluded from fog per draw (`acclient.c:434175`).
 
+## The Sky
+
+The sky is drawn by `GameSky`, a subsystem beside `LScape`'s landblock machinery rather than a
+layer within it. It is regional, permanently resident, camera-centred, and drawn in its own pass —
+it takes part in no scene interest, streaming residency, frustum culling, or portal traversal.
+
+A sky object is an ordinary `CPhysicsObj`, built by the same `makeObject` and
+`InitPartArrayObject` as any other object (acclient.c:307951), taking its part array from a
+`GfxObj` (`MasterDBMap::DivineType` 6) or a Setup model (type 7). There is no sky mesh or material
+format. `GameSky` owns placement, orientation, and draw policy; never geometry or surfaces.
+
+### Position and orientation
+
+`SkyDesc::GetSky` (acclient.c:292328) rebuilds a `CelestialPosition` array each sky tick. An object
+is visible when `begin_time == end_time` (always) or `begin_time < t < end_time`; hidden objects
+receive an invalid gfx id, and `GameSky::MakeObject` then builds nothing for them. The authored
+begin/end angle lerp lands in **rotation** (pitch); heading is zero unless a replacement overrides
+it.
+
+`GameSky::CalcFrame` (acclient.c:297365) is orientation-only and never writes an origin. Celestial
+objects sit at the viewer cell's origin every tick, made distant purely by the pass's extended far
+plane. Heading resolves to a rotation of `-heading` about AC's up axis (+Z), via
+`set_vector_heading`'s single Euler term (acclient.c:342873, 342796); `Frame::grotate` then applies
+`-rotation` about AC's north axis (+Y) as a **global**-axis rotation — `Frame::rotate`
+(acclient.c:137544) is the local variant that maps its axis through the frame first.
+
+Weather objects (`properties` bit 4) instead pin to the viewer's xy with z forced to −120 unless
+bit 8 is set (`GameSky::UpdatePosition`, acclient.c:297298).
+
+### Replacements
+
+Each `SkyTimeOfDay` may carry `SkyObjectReplace` entries. They are keyed by the authored
+`object_index`: retail matches by pointer identity, but binds that pointer from the index at load
+(`DayGroup::UnPack`, acclient.c:292183). In the shipped region 433 replacements sit at a list
+position differing from their `object_index`, so the distinction is load-bearing.
+
+A gfx replacement applies unconditionally and can therefore revive an object outside its own
+window. `rotate` applies only when non-zero. Luminosity, `max_bright`, and `transparent`
+interpolate between the bracketing keyframes only when both sides author a usable value for the
+same object — strictly positive for the brightness pair, `>= 0` for transparency — and otherwise
+stay at their −1 sentinels, which means "do not write" rather than "zero".
+
+### Brightness
+
+Authored brightness is 0–100, applied at hundredths (`GameSky::UseTime`, acclient.c:297760).
+`luminosity` maps to material emissive, `max_bright` to diffuse, `transparent` to translucency.
+Every write uses `delta = 0.0`, which never spawns an interpolating `FPHook`
+(acclient.c:307121) — sky brightness is an instant per-tick material write, not animation.
+
+Every shipped keyframe authors `max_bright` equal to `luminosity`, so the two terms must combine
+into one **clamped** brightness rather than summing; an unclamped sum doubles every surface to
+white at midday.
+
+### Draw policy
+
+`GameSky::Draw` (acclient.c:297381) forces fog off (except under an environment override), extends
+the far plane to `Render::zfar * 4` — an absolute 16000, since `Render::zfar` is 4000
+(acclient.c:44524) — and draws with `DEPTHTEST_ALWAYS` and depth writes off. The sky therefore
+lands in an untouched depth buffer and the world pass simply paints over it, which is why the sky
+needs no visibility test of its own indoors or out, and can never occlude world geometry.
+
+`properties` bits, complete: bit 1 draws in the after-landscape cell pass, bit 2 hides the object
+under a fogged environment override, bit 4 marks a weather object, and bit 8 with bit 4 suppresses
+the z clamp. In shipped content bit 1 never appears without bit 4, so the after-cell pass is purely
+weather.
+
+### Texture velocity
+
+`tex_velocity` scrolls a mesh's UVs. Retail accumulates `rate * dt` per frame and wraps at one
+(`CPhysics::UpdateTexVelocity`, acclient.c:299999), registering by GfxObj DataID so every instance
+of one mesh shares a phase. For constant authored rates — which is all shipped sky content — this
+is equivalent to deriving `fract(rate * clock)` directly, with no accumulator state.
+
+### Physics-script seam
+
+96 shipped sky objects carry a `default_pes_object_id`. Most are the weather emitters, but
+`0x02000714` (script `0x330007DB`, `properties` 0, always visible) appears in **every** day group
+including clear skies, so the sky is a celestial consumer of authored physics scripts and not only
+a weather one. `holtburger-3d` carries the id through its resolved sky contract unexecuted; the
+authored-effects runtime is its eventual consumer and needs no schema change to claim it.
+
 ## Constants
 
 | Symbol                               | Value                                                           | Location                 |

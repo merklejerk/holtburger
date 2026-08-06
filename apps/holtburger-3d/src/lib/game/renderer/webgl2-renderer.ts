@@ -150,7 +150,15 @@ import {
 	type TextureSamplingClass,
 } from "./webgl2-texture-sampler-catalog";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
+import type { Camera } from "../runtime/types";
+import type { RendererSkyCapability } from "./renderer";
+import { SKY_FAR_PLANE, skyViewMatrix, WebGL2SkyPass } from "./webgl2-sky-pass";
+import {
+	createWebGL2SkyProgram,
+	type WebGL2SkyProgram,
+} from "./webgl2-sky-program";
 import { WebGL2ObjectStateApplicator } from "./webgl2-object-state-applicator";
+import { sourceOpacity } from "./object-rendering-policy";
 import {
 	WebGL2FrameProfiler,
 	type WebGL2FrameProfileCapture,
@@ -187,6 +195,8 @@ function anchorRelativePosition(
 
 interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
+	/** Resolved celestial sky for this frame, or null when the region authors none. */
+	readonly sky: FrameInput["environment"]["sky"];
 	/** Scene-space origin of the frame anchor, subtracted from every light position at bind. */
 	readonly anchorOrigin: LightAnchorOrigin;
 	/** How much of an authored outdoor lamp survives the frame's daylight, in [0, 1]. */
@@ -208,6 +218,8 @@ interface SceneShading {
  */
 const PROBE_SHADING: SceneShading = {
 	fog: null,
+	// Probe views measure world draws only; the sky contributes no depth and no selection.
+	sky: null,
 	// No lights, so neither the rebasing origin nor the daylight response is observable.
 	anchorOrigin: { x: 0, z: 0 },
 	authoredLightResponse: 0,
@@ -242,8 +254,7 @@ interface ObjectFrameInput {
 	/** Scene/portal residency boundary that must never be crossed by an instance run. */
 	readonly renderDomainKey: string;
 	readonly cullFaceOverride:
-		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
-		| null;
+		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -297,6 +308,8 @@ type AnyObjectProgram =
 interface PreparedViewGeometry extends PreparedPortalProjection {
 	/** Camera position expressed in the view's anchor-relative render frame. */
 	readonly cameraPosition: Vec3;
+	/** Camera whose projection this view derives, retained so the sky can extend its far plane. */
+	readonly camera: Camera;
 	/** Projection matrix derived from the current drawing-buffer aspect ratio. */
 	readonly projection: Mat4;
 	/** Original camera frustum retained for topology and selected-scope culling. */
@@ -412,6 +425,14 @@ export class WebGL2Renderer implements Renderer {
 	static readonly #identityMatrix = Mat4.identity();
 
 	readonly #matrixScratch = new Float32Array(16);
+	/** Reusable sky matrices; the pass runs every frame and must not allocate in it. */
+	readonly #skyMatrixScratch = new Float32Array(16);
+	readonly #skyProjectionScratch = new Float32Array(16);
+	readonly #skyViewScratch = new Float32Array(16);
+	#skyPass: WebGL2SkyPass | null = null;
+	#skyProgram: WebGL2SkyProgram | null = null;
+	/** Shared clock seconds for the current frame, driving derived texture-velocity phase. */
+	#skyClockSeconds = 0;
 	readonly #offsetScratch = new Vec3(0, 0, 0);
 	/** Reused while deriving transparent range distances before sorting a view. */
 	readonly #transparentCenterScratch = new Vec3(0, 0, 0);
@@ -631,6 +652,7 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const setupStartedAt = profile?.beginCpuPhase();
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
+		this.#skyClockSeconds = input.timeSeconds;
 		this.#minimumPortalFootprintPixelArea =
 			input.frameSettings.quality.minimumPortalFootprintPixelArea;
 		this.#minimumObjectFootprintPixelArea =
@@ -665,6 +687,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameSelectionMetrics.droppedLights += selectedDynamic.dropped;
 		const shading: SceneShading = {
 			fog,
+			sky: input.environment.sky,
 			anchorOrigin: createLandblockWorldOrigin(input.anchorLandblockId),
 			authoredLightResponse: resolveAuthoredLightResponse(
 				input.environment.lighting,
@@ -973,6 +996,10 @@ export class WebGL2Renderer implements Renderer {
 		this.#textureSamplers.destroy();
 		destroyWebGL2TerrainLightMaskTexture(this.#gl, this.#terrainLightMask);
 		this.#portalSubstrate.destroy();
+		this.#skyPass?.destroy();
+		this.#skyPass = null;
+		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
+		this.#skyProgram = null;
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
 		this.#gl.deleteProgram(this.#instancedObjectProgram.program);
@@ -1037,6 +1064,7 @@ export class WebGL2Renderer implements Renderer {
 		return {
 			anchorCoordinates,
 			anchorLandblockId,
+			camera,
 			cameraPosition,
 			clipFromAnchor,
 			frustum: createFrustumFromClipMatrix(clipFromAnchor, cameraPosition),
@@ -1661,7 +1689,68 @@ export class WebGL2Renderer implements Renderer {
 			arena.viewHighWaterMark;
 	}
 
+	/**
+	 * Region-scoped celestial sky residency.
+	 *
+	 * Installed once per region load; the resource set is fixed for that region's lifetime, so
+	 * there is no incremental path and no per-frame residency work.
+	 */
+	readonly sky: RendererSkyCapability = {
+		clear: () => {
+			this.#skyPass?.destroy();
+			this.#skyPass = null;
+		},
+		install: async (source, preparer) => {
+			const pass = await WebGL2SkyPass.prepare(
+				this.#resources,
+				preparer,
+				source,
+			);
+			this.#skyPass?.destroy();
+			this.#skyPass = pass;
+			// Linked on first use rather than at construction: a region without authored sky
+			// objects never pays for a program it cannot draw with.
+			this.#skyProgram ??= createWebGL2SkyProgram(this.#gl);
+		},
+	};
+
+	/**
+	 * Draw the celestial sky before anything else in the view.
+	 *
+	 * Retail draws it into an untouched depth buffer with depth-always and depth writes off, so the
+	 * world pass that follows simply paints over it wherever geometry exists. That ordering is why
+	 * the sky needs no visibility test of its own, indoors or out.
+	 */
+	#drawSky(view: PreparedView, sky: SceneShading["sky"]): void {
+		const pass = this.#skyPass;
+		if (!pass || !sky || !this.#skyProgram) return;
+		pass.draw(
+			{
+				clockSeconds: this.#skyClockSeconds,
+				gl: this.#gl,
+				matrixScratch: this.#skyMatrixScratch,
+				program: this.#skyProgram,
+				// Retail rebuilds the projection with `zfar * 4` for the pass and restores it after
+				// (`GameSky::Draw`, acclient.c:297399); the world pass never sees this matrix.
+				projection: mat4ToFloat32Array(
+					createPerspectiveMat4(
+						view.camera.fov,
+						this.#frameWidth / Math.max(1, this.#frameHeight),
+						view.camera.near,
+						SKY_FAR_PLANE,
+					),
+					this.#skyProjectionScratch,
+				),
+				samplers: this.#textureSamplers,
+				textureFiltering: this.#frameTextureFiltering,
+				view: skyViewMatrix(view.view, this.#skyViewScratch),
+			},
+			sky,
+		);
+	}
+
 	#drawView(view: PreparedView, shading: SceneShading): void {
+		this.#drawSky(view, shading.sky);
 		this.#drawTerrain(view, shading);
 		this.#drawOpaqueObjects(view, shading, null);
 		this.#drawBlendedObjects(view, shading, null);
@@ -1675,6 +1764,7 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture,
 	): void {
+		this.#drawSky(view, shading.sky);
 		const terrainGpu = profile.beginGpuPhase("terrain");
 		const terrainStartedAt = profile.beginCpuPhase();
 		try {
@@ -2664,13 +2754,6 @@ function mergePortalNodeContributions(
 		profile.recordContributionMerge();
 	}
 	return { objects, terrain };
-}
-
-/** Retail sources encode translucency as either a unit float or a legacy byte-scale value. */
-function sourceOpacity(translucency: number): number {
-	const normalized =
-		translucency > 1 ? 1 - Math.min(translucency, 255) / 255 : 1 - translucency;
-	return Math.max(0, Math.min(1, normalized));
 }
 
 /** Check the semantic frame-template identity required in addition to prepared compatibility. */

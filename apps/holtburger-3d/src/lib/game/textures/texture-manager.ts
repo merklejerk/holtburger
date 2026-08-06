@@ -543,7 +543,17 @@ function createTextureArrayResourceDescription(
 	};
 }
 
-function createTexture2DUpload(source: AssetTextureSource): Texture2DUpload {
+/**
+ * Map one prepared standalone texture onto its device upload, choosing format and mip range from
+ * the texture's purpose.
+ *
+ * Exported because owners outside this manager materialize their own standalone textures: the sky
+ * keeps a fixed per-region set with no leases and no atlas delegate, so it needs the purpose-to-
+ * device mapping without the sharing machinery around it.
+ */
+export function createTexture2DUpload(
+	source: AssetTextureSource,
+): Texture2DUpload {
 	const purposePolicy = texturePurposePolicy(source.purpose);
 	return {
 		data: source.pixels,

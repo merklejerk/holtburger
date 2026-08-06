@@ -129,10 +129,15 @@ export class WebGL2ParticlePass {
 			gl.uniform1f(program.uniforms.alphaTest, geometry.alphaTest);
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, geometry.baseTexture);
-			if (geometry.paletteTexture !== null) {
-				gl.activeTexture(gl.TEXTURE1);
-				gl.bindTexture(gl.TEXTURE_2D, geometry.paletteTexture);
-			}
+			// Unit 1 is bound unconditionally, falling back to the base texture for an unpaletted
+			// mesh. WebGL validates every *active* sampler against its bound texture at draw time,
+			// even when the shader branches away from it, so leaving unit 1 to whatever a previous
+			// pass left there fails the draw with a format/sampler mismatch.
+			gl.activeTexture(gl.TEXTURE1);
+			gl.bindTexture(
+				gl.TEXTURE_2D,
+				geometry.paletteTexture ?? geometry.baseTexture,
+			);
 			gl.drawElementsInstanced(
 				gl.TRIANGLES,
 				geometry.indexCount,

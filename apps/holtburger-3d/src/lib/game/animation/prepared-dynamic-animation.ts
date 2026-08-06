@@ -1,6 +1,6 @@
 import {
 	animationHookBlocksActivation,
-	type BlockingAnimationHook,
+	type DecodedAnimationHook,
 } from "../../assets/decode-animation-record";
 import { AABB3, Vec3 } from "../math/types";
 import type {
@@ -30,7 +30,8 @@ export type PreparedDynamicAnimation =
 	| {
 			readonly kind: "retain-static-presentation";
 			readonly animation: PreparedAnimation;
-			readonly blockingHooks: readonly BlockingAnimationHook[];
+			/** Hooks that would misrender this owner, so it keeps its static presentation. */
+			readonly blockingHooks: readonly DecodedAnimationHook[];
 			readonly localBounds: AABB3;
 	  };
 

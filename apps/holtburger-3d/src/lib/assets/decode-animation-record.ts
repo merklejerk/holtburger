@@ -68,9 +68,6 @@ interface AnimationHookProvenance {
 export type DecodedAnimationHook = AnimationHookProvenance &
 	PreparedBehaviorCommand;
 
-/** Hooks that prevent animated activation until their behavior receives an execution owner. */
-export type BlockingAnimationHook = DecodedAnimationHook;
-
 export function animationHookBlocksActivation(
 	hook: DecodedAnimationHook,
 ): boolean {

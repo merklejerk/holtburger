@@ -639,14 +639,15 @@ records one exhaustive outcome per command; it owns no clocks, queues, effect st
 
 ### Convergence Debt Ledger
 
-| Landed seam or debt                                                     | Why it is honest now                                           | Scheduled replacement                                                                           |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `EffectSystem.executeDepartedFrames` accepts animation-specific records | Animation is still the only live producer                      | Phase 2 compiles one prepared command union; Phase 3 introduces the router and adapts animation |
-| `PartRenderState` contains only translucency                            | It has one real consumer and no speculative fields             | Phase 4 widens it only for proven scale/UV presentation facts                                   |
-| `ReplaceObjectHook` blocks animated activation                          | No replacement resources or bounds are prepared                | Phase 4 unblocks activation: the hook decodes and reports intentionally-inert (retail-faithful) |
-| Script-only authored residents retain static presentation               | No script clock or effect closure exists                       | Phase 7 promotes them only after complete staged readiness                                      |
-| Particle and audio consumers are absent                                 | The app has no existing focused runtimes to reuse              | Phases 5 and 6 add named owners after Phase 1 evidence                                          |
-| Repository-wide Prettier has untouched baseline failures                | Convergence formats every touched file without unrelated churn | Convergence Phase 8, before this plan executes implementation                                   |
+| Landed seam or debt                                                          | Why it is honest now                                                                                           | Scheduled replacement                                                                                                                                                              |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EffectSystem.executeDepartedFrames` accepts animation-specific records      | Animation is still the only live producer                                                                      | Phase 2 compiles one prepared command union; Phase 3 introduces the router and adapts animation                                                                                    |
+| `PartRenderState` contains only translucency                                 | It has one real consumer and no speculative fields                                                             | Phase 4 widens it only for proven scale/UV presentation facts                                                                                                                      |
+| `ReplaceObjectHook` blocks animated activation                               | No replacement resources or bounds are prepared                                                                | Phase 4 unblocks activation: the hook decodes and reports intentionally-inert (retail-faithful)                                                                                    |
+| Script-only authored residents retain static presentation                    | No script clock or effect closure exists                                                                       | Phase 7 promotes them only after complete staged readiness                                                                                                                         |
+| Particle and audio consumers are absent                                      | The app has no existing focused runtimes to reuse                                                              | Phases 5 and 6 add named owners after Phase 1 evidence                                                                                                                             |
+| Repository-wide Prettier has untouched baseline failures                     | Convergence formats every touched file without unrelated churn                                                 | Convergence Phase 8, before this plan executes implementation                                                                                                                      |
+| `TextureVelocity` rates resolve per staged closure, not per activated script | All 11 authored hooks sit in setup-default closures that always play, so no shipped case is expected to differ | Phase 8 verifies the expectation against the landed workload; if any surface scrolls behind an unfired `CallPES` chain, resolve per activated script (storage model is unaffected) |
 
 None of these debts requires a second entity runtime or blocks the spawned architecture design. The
 first four are explicit implementation prerequisites before spawned entities may consume authored
@@ -1150,6 +1151,9 @@ Progress: Not started
 - [ ] Confirm cyclic scheduling remains bounded in work per tick and observable in diagnostics.
 - [ ] Delete script-only deferral, placeholder effect ports, hollow unsupported-success tests, and any
       temporary duplicate effect representation.
+- [ ] Confirm no authored `TextureVelocity` surface scrolls behind an unfired `CallPES` chain (see
+      the debt ledger); the accepted early-scroll consequence is expected to be unreachable in
+      shipped content, and this is where that expectation gets checked rather than assumed.
 - [ ] Update architecture documentation and hand the complete authored behavior model to the spawned-
       entity plan.
 - [ ] Trigger the weather/sky-script plan's Phase R boundary dry-run

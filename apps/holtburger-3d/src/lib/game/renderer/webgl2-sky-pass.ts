@@ -1,3 +1,4 @@
+import { textureScrollPhase } from "./texture-scroll-phase";
 import { acFrameTransform } from "../../assets/ac-frame";
 import { composeObjectPartTransform } from "../resolution/object-part-transform";
 import { mat4ToFloat32Array, multiplyMat4 } from "../math/matrices";
@@ -251,7 +252,7 @@ export class WebGL2SkyPass {
 				{ origin: ORIGIN, orientation: object.orientation },
 				UNIT_SCALE_TUPLE,
 			);
-			const offset = skyTextureOffset(
+			const offset = textureScrollPhase(
 				object.textureVelocity,
 				context.clockSeconds,
 			);
@@ -405,28 +406,4 @@ function materialKind(material: ObjectMaterialBinding, label: string): number {
 		case "index16":
 			return SKY_MATERIAL_KIND.index16;
 	}
-}
-
-/**
- * Derive the UV scroll phase for one authored rate.
- *
- * Retail accumulates instead (`CPhysics::UpdateTexVelocity`, acclient.c:299999, adds
- * `rate * dt` per frame and wraps at 1), but every authored sky rate is constant, so deriving
- * from the shared clock is identical up to an unobservable phase origin and keeps the pass free of
- * mutable per-frame state. Computed in f64 before it reaches an f32 uniform so a long session
- * cannot lose precision in the fractional part.
- */
-export function skyTextureOffset(
-	velocity: readonly [number, number],
-	clockSeconds: number,
-): [number, number] {
-	return [
-		wrapUnit(velocity[0] * clockSeconds),
-		wrapUnit(velocity[1] * clockSeconds),
-	];
-}
-
-function wrapUnit(value: number): number {
-	const wrapped = value % 1;
-	return wrapped < 0 ? wrapped + 1 : wrapped;
 }

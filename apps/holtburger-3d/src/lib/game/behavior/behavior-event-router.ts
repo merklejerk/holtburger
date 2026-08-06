@@ -48,6 +48,8 @@ export type BehaviorDispatchOutcome =
 	| "semantic"
 	/** Decoded and understood, but its consumer arrives in a later phase. */
 	| "no-consumer"
+	/** Faithfully reproduced by doing nothing, because retail does nothing either. */
+	| "intentionally-inert"
 	/** The target was removed or replaced before the command could run. */
 	| "rejected-stale-target";
 
@@ -193,6 +195,11 @@ export class BehaviorEventRouter {
 				return "no-consumer";
 
 			case "replace-object":
+				// Intentionally inert, not merely unimplemented: retail has no `Execute` for hook
+				// type 5, so doing nothing *is* the faithful behavior. Recorded with provenance so
+				// the decision stays visible rather than looking like a gap.
+				return "intentionally-inert";
+
 			case "unimplemented":
 				return "no-consumer";
 

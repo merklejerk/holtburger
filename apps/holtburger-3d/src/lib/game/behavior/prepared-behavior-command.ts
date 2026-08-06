@@ -115,12 +115,14 @@ export function behaviorCommandLabel(command: PreparedBehaviorCommand): string {
 /**
  * Whether an owner carrying this command must keep its static presentation.
  *
- * `replace-object` blocks today because no owner stages replacement parts; Phase 4 of the effects
- * plan makes it intentionally inert and stops it blocking.
+ * `replace-object` deliberately does **not** block. Retail defines no `Execute` for hook type 5 —
+ * the shipped client parses it, preloads the replacement GfxObj through `GetSubDataIDs`, and then
+ * does nothing — so an owner carrying one renders identically whether we run it or not. Reporting
+ * it inert is the faithful behavior, and blocking activation over it would withhold correct
+ * animation for a hook that changes nothing (ratified 2026-08-06).
  */
 export function behaviorCommandBlocksActivation(
 	command: PreparedBehaviorCommand,
 ): boolean {
-	if (command.kind === "replace-object") return true;
 	return command.kind === "unimplemented" && command.blocksActivation;
 }

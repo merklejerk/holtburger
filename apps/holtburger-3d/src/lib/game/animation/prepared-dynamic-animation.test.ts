@@ -31,7 +31,9 @@ describe("prepareDynamicAnimation", () => {
 		);
 	});
 
-	it("retains static presentation when a deferred structural hook is present", () => {
+	it("activates despite a ReplaceObject hook, which retail never executes", () => {
+		// Retail defines no `Execute` for hook type 5, so an owner carrying one draws identically
+		// whether we run it or not. Blocking activation over it would withhold correct animation.
 		const replacement: DecodedAnimationHook = {
 			authoredOrder: 0,
 			direction: "forward",
@@ -47,8 +49,30 @@ describe("prepareDynamicAnimation", () => {
 				new Vec3(1, 1, 1),
 				AABB3.zero(),
 			),
+		).toMatchObject({ kind: "activatable" });
+	});
+
+	it("retains static presentation for a hook that would misrender the object", () => {
+		const unsupported: DecodedAnimationHook = {
+			authoredOrder: 0,
+			blocksActivation: true,
+			command: "no-draw",
+			direction: "forward",
+			frameIndex: 0,
+			kind: "unimplemented",
+			payload: { bytes: new Uint8Array([1]), kind: "raw" },
+			sourceType: 16,
+		};
+
+		expect(
+			prepareDynamicAnimation(
+				animation([Mat4.identity()], [unsupported]),
+				template(),
+				new Vec3(1, 1, 1),
+				AABB3.zero(),
+			),
 		).toMatchObject({
-			blockingHooks: [replacement],
+			blockingHooks: [unsupported],
 			kind: "retain-static-presentation",
 		});
 	});

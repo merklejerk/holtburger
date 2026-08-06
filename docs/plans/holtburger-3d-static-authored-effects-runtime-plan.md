@@ -737,9 +737,18 @@ itself lands at the head of Phase 2 with the type it constructs; its contents ar
   exact where retail was accidentally correct. Rationale for delegating emitters: persistence is a
   property of the emitter asset, not the hook, so the router would have to re-derive a fact the
   particle consumer already owns — the same compute-once rule the texture-scroll model follows.
-  **We deliberately do not adopt retail's 2-second cliff.** Our clocks are derived rather than
-  accumulated, so replay cost is O(records) regardless of elapsed time; the cliff mitigates an
-  accumulating loop we do not have, and inheriting it would silently drop authored behavior.
+  **We deliberately do not adopt retail's 2-second cliff**, but not for the reason first written
+  here. The original claim — that replay is O(records) regardless of elapsed time — holds for a
+  single activation and is **false for chained scripts**: catching up a 2 s self-cycle across ten
+  idle minutes is 300 sequential activations, not one. Corrected during Phase 3: catch-up is
+  bounded by an explicit per-entity dispatch budget, and exhausting it **resynchronizes the entity's
+  scripts to the current time and records a `resynchronized` observation with provenance**. That
+  keeps retail's intent (do not replay unbounded history) while improving on its behavior in two
+  ways: the drop is reported rather than silent, and the threshold is a work budget rather than a
+  wall-clock cliff, so a cheap script survives a long stall that an expensive one does not. Folding
+  whole cycles arithmetically would make even that budget unnecessary; it is a recognized
+  optimization, deliberately not built, because the measured workload's shortest loop is 2 s and the
+  budget already covers minutes of catch-up.
 
 ### Phase 2: Decode, Transport, and Prepare Script Resources
 
@@ -818,7 +827,7 @@ selection together with the recorded census and selection semantics.
 
 ### Phase 3: Execute Physics Scripts and Chained Scheduling
 
-Progress: Not started
+Progress: **Complete 2026-08-06.** Type check, lint, knip, Clippy, and all 696 frontend tests pass.
 
 #### Deliverables
 
@@ -845,7 +854,43 @@ Progress: Not started
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **Script clocks are wall-clock, not frame-cadence.** Retail anchors record times to
+  `Timer::cur_time` and never sub-steps scripts, so `PhysicsScriptSystem` does not borrow the
+  animation lane's fixed 30 Hz behavior step. The two systems share no clock in either direction.
+- **Chained activation reproduces retail's drift-free concatenation.** An immediate `CallPES`
+  starts the target at `caller.startTime + caller.lengthSeconds` rather than at the current clock,
+  which is what makes a self-calling script repeat at exactly its authored length no matter how
+  ragged the frame cadence is — proven by a test that advances on deliberately uneven steps.
+  A nonzero pause instead rolls `roll() × pause`, with the roll injected so the runtime's randomness
+  is explicit and tests are deterministic.
+- **Activations and record dispatches interleave by time rather than draining in separate passes.**
+  A chained script that begins mid-interval must run its own `t=0` records in the correct order
+  relative to the caller's remaining records; two drain passes would have reordered them.
+- **The catch-up claim from Phase 1 was wrong and is corrected in Measured Workload.** Replay is
+  O(records) only for a single activation; chained scripts are inherently sequential. Catch-up and
+  runaway are now bounded by one shared per-entity dispatch budget, and exhausting it resynchronizes
+  the entity and reports it rather than silently discarding time.
+- **`EffectSystem` became a pure consumer.** It no longer walks animation frames, filters hook
+  direction, or records dispatch provenance; it implements `EffectCommandPort` and owns only the
+  state commands mutate. Direction filtering moved to `AnimationSystem`, where it belongs: it is a
+  property of animation playback with no counterpart in the script lane.
+- **Consumers deliberately do not branch on dispatch mode.** An initial attempt made replayed
+  translucency ramps snap to their endpoint; a pre-existing test caught it. A ramp is persistent
+  state, so replay applies it normally and the remaining elapsed steps advance it to where it should
+  be _now_ — which is not its endpoint if it was still in flight when the owner became observable.
+  Only the recorded outcome distinguishes replay from live execution.
+- **Targets are `(nodeId, generation)` pairs everywhere.** `DynamicOwnerInstallation` now exposes its
+  generation so producers can stamp it, because node ids are recycled across generations and a
+  queued command must never land on a successor. Liveness is checked before _every_ dispatch rather
+  than once per batch, since a consumer reached earlier in the same batch may already have removed
+  the target.
+- **The router/script-system construction cycle is real, not accidental.** The script system both
+  produces and consumes `CallPES`. Rather than make the router mutable or assert past an unset
+  field, wiring goes through a holder; the runtime's own wiring throws until Phase 7 installs a
+  script clock, so an unreachable path stays loud instead of silently no-op.
+- **Diagnostics moved with the mechanism.** The Explorer's "hooks executed / deferred" row now reads
+  the router's outcome counts as "commands executed / unconsumed"; `EffectSystem` diagnostics shrank
+  to what it still owns.
 
 ### Phase 4: Implement Proven Visual Effect Commands
 

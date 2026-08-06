@@ -53,6 +53,13 @@ interface DynamicOwnerRecord<TTemplateOwnerId extends string> {
 
 /** Atomic authored-owner installation and its complete visual-staging outcome. */
 export interface DynamicOwnerInstallation {
+	/**
+	 * Monotonic owner generation this installation belongs to.
+	 *
+	 * Exposed so behavior producers can stamp it onto their dispatch targets: a node id alone is
+	 * recycled across generations, and a command must never land on a successor.
+	 */
+	readonly generation: number;
 	readonly nodeIds: readonly SceneNodeId[];
 	readonly ready: Promise<"ready" | "superseded">;
 	/** Read complete staged animation facts after `ready` resolves successfully. */
@@ -214,6 +221,7 @@ export class DynamicEntitySystem<
 					};
 				});
 			},
+			generation,
 			nodeIds: entities.map(({ rootNodeId }) => rootNodeId),
 			ready,
 			release: () => {

@@ -1,19 +1,16 @@
-import {
-	animationHookCommand,
-	type DecodedAnimationHook,
-} from "../../assets/decode-animation-record";
-import type { PreparedAnimation } from "../animation/animation-asset-repository";
+import type {
+	BehaviorTarget,
+	EffectCommandPort,
+} from "../behavior/behavior-event-router";
 import {
 	multiplyQuaternion,
 	rotationVectorQuaternion,
 	retailRotationVectorQuaternion,
-	type PlaybackDirection,
 } from "../animation/animation-playback";
 import { createRotationMat4 } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import type { PartRenderState } from "./components";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** Retail schedules an `FPHook` only at or above this duration. */
 const MINIMUM_TIMED_EFFECT_SECONDS = 0.0002;
@@ -39,23 +36,15 @@ export interface EffectPresentationSample {
 	readonly rootRotationModifier: Mat4;
 }
 
-/** Provenance for one semantic hook decision, retained independently from interpolation. */
-export interface EffectObservation {
-	readonly nodeId: SceneNodeId;
-	readonly animationId: string;
-	readonly frameIndex: number;
-	readonly authoredOrder: number;
-	readonly command: string;
-	readonly outcome:
-		"executed" | "deferred" | "semantic" | "folded-initial-state";
-}
-
-/** Owns persistent visual-effect state while animation retains clocks and traversal. */
-export class EffectSystem {
+/**
+ * Owns persistent visual-effect state and nothing else.
+ *
+ * A pure consumer since Phase 3: producers own clocks and traversal, the router owns dispatch
+ * decisions and their provenance, and this system owns only the state those decisions mutate.
+ */
+export class EffectSystem implements EffectCommandPort {
 	readonly #states = new Map<SceneNodeId, EffectState>();
-	readonly #observations: EffectObservation[] = [];
-	#deferredHookCount = 0;
-	#executedHookCount = 0;
+	#appliedCommandCount = 0;
 
 	install(nodeId: SceneNodeId, partCount: number): void {
 		if (this.#states.has(nodeId))
@@ -100,30 +89,47 @@ export class EffectSystem {
 		}
 	}
 
-	executeDepartedFrames(
-		nodeId: SceneNodeId,
-		animation: PreparedAnimation,
-		departedFrames: readonly number[],
-		direction: PlaybackDirection,
-		mode: "initial-state" | "live",
+	applySetOmega(target: BehaviorTarget, omega: Vec3): void {
+		const state = this.#requiredState(target.nodeId);
+		state.omega = new Vec3(omega.x, omega.y, omega.z);
+		this.#appliedCommandCount += 1;
+	}
+
+	/**
+	 * Start or immediately settle one part's translucency ramp.
+	 *
+	 * Deliberately identical during replay and live execution. A ramp is persistent state, so
+	 * replaying it and then advancing the remaining elapsed steps lands on exactly the translucency
+	 * the part should show now — which is not the same as its endpoint, and jumping there would
+	 * discard a ramp still in flight when the owner became observable.
+	 */
+	applyTransparentPart(
+		target: BehaviorTarget,
+		values: {
+			readonly partIndex: number;
+			readonly start: number;
+			readonly end: number;
+			readonly durationSeconds: number;
+		},
 	): void {
-		const state = this.#requiredState(nodeId);
-		for (const frameIndex of departedFrames) {
-			for (const hook of animation.hooks) {
-				if (
-					hook.frameIndex !== frameIndex ||
-					!acceptsDirection(hook, direction)
-				)
-					continue;
-				if (
-					mode === "initial-state" &&
-					hook.kind !== "set-omega" &&
-					hook.kind !== "transparent-part"
-				)
-					continue;
-				this.#applyHook(nodeId, animation, hook, state, mode);
-			}
+		const state = this.#requiredState(target.nodeId);
+		if (values.partIndex >= state.partTranslucencies.length)
+			throw new Error(
+				`TransparentPart index ${values.partIndex} is out of range for active effect state.`,
+			);
+		this.#appliedCommandCount += 1;
+		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
+			state.partTranslucencies[values.partIndex] = values.end;
+			state.translucencyRamps[values.partIndex] = null;
+			return;
 		}
+		state.partTranslucencies[values.partIndex] = values.start;
+		state.translucencyRamps[values.partIndex] = {
+			durationSeconds: values.durationSeconds,
+			elapsedSeconds: 0,
+			end: values.end,
+			start: values.start,
+		};
 	}
 
 	/** Sample fractional visual state without committing time or emitting semantic hooks. */
@@ -171,84 +177,11 @@ export class EffectSystem {
 		this.#states.delete(nodeId);
 	}
 
-	getObservations(): readonly EffectObservation[] {
-		return [...this.#observations];
-	}
-
 	getDiagnostics() {
 		return {
+			appliedCommandCount: this.#appliedCommandCount,
 			residentEffectStateCount: this.#states.size,
-			deferredHookCount: this.#deferredHookCount,
-			executedHookCount: this.#executedHookCount,
-			observations: this.getObservations(),
 		};
-	}
-
-	#applyHook(
-		nodeId: SceneNodeId,
-		animation: PreparedAnimation,
-		hook: DecodedAnimationHook,
-		state: EffectState,
-		mode: "initial-state" | "live",
-	): void {
-		const executedOutcome =
-			mode === "initial-state" ? "folded-initial-state" : "executed";
-		if (hook.kind === "set-omega") {
-			state.omega = hook.omega.clone();
-			this.#observe(nodeId, animation, hook, executedOutcome);
-			return;
-		}
-		if (hook.kind === "transparent-part") {
-			const partIndex = hook.partIndex;
-			if (partIndex >= state.partTranslucencies.length)
-				throw new Error(
-					`TransparentPart index ${partIndex} is out of range for active effect state.`,
-				);
-			if (hook.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
-				state.partTranslucencies[partIndex] = hook.end;
-				state.translucencyRamps[partIndex] = null;
-			} else {
-				state.partTranslucencies[partIndex] = hook.start;
-				state.translucencyRamps[partIndex] = {
-					durationSeconds: hook.durationSeconds,
-					elapsedSeconds: 0,
-					end: hook.end,
-					start: hook.start,
-				};
-			}
-			this.#observe(nodeId, animation, hook, executedOutcome);
-			return;
-		}
-		this.#observe(
-			nodeId,
-			animation,
-			hook,
-			hook.kind === "semantic" ? "semantic" : "deferred",
-		);
-	}
-
-	#observe(
-		nodeId: SceneNodeId,
-		animation: PreparedAnimation,
-		hook: DecodedAnimationHook,
-		outcome: EffectObservation["outcome"],
-	): void {
-		if (outcome === "deferred") this.#deferredHookCount += 1;
-		if (outcome === "executed" || outcome === "folded-initial-state")
-			this.#executedHookCount += 1;
-		this.#observations.push({
-			animationId: animation.id,
-			authoredOrder: hook.authoredOrder,
-			command: animationHookCommand(hook),
-			frameIndex: hook.frameIndex,
-			nodeId,
-			outcome,
-		});
-		if (
-			this.#observations.length >
-			FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations
-		)
-			this.#observations.shift();
 	}
 
 	#requiredState(nodeId: SceneNodeId): EffectState {
@@ -264,11 +197,4 @@ function sampleRamp(ramp: TranslucencyRamp, elapsedSeconds: number): number {
 		ramp.start +
 		(ramp.end - ramp.start) * (elapsedSeconds / ramp.durationSeconds)
 	);
-}
-
-function acceptsDirection(
-	hook: DecodedAnimationHook,
-	direction: PlaybackDirection,
-): boolean {
-	return hook.direction === "both" || hook.direction === direction;
 }

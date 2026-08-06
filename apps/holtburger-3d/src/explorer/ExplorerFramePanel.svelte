@@ -449,10 +449,12 @@
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Hooks executed / deferred / fallback</span>
+					<span class="ac-param-key"
+						>Commands executed / unconsumed / fallback</span
+					>
 					<code
-						>{dynamics.effects.executedHookCount} / {dynamics.effects
-							.deferredHookCount} / {dynamics.dynamics
+						>{dynamics.behavior.outcomeCounts.executed ?? 0} / {dynamics
+							.behavior.outcomeCounts["no-consumer"] ?? 0} / {dynamics.dynamics
 							.staticFallbackEntityCount}</code
 					>
 				</div>

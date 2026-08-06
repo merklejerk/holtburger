@@ -1245,8 +1245,10 @@ see the decision below.
 ### Phase 6: Add Authored Sound Fidelity
 
 Progress: **In progress 2026-08-06.** Landed: typed 0x0A `Wave` and 0x20 `SoundTable` decoding,
-both verified against every record in the archive. Remaining: content/transport plumbing and
-`AudioSystem` itself.
+both verified against every record in the archive; the decoder-ready content/transport lane; the
+spatialization math; `AudioSystem`; and the router's audio port. **Effects-side work is complete;**
+the Web Audio device adapter and the `SoundTable` key resolution move to Phase 7 with their
+producer — see the decisions below.
 
 **Archive verification 2026-08-06** (temporary `sound_table_probe`, removed after recording): all
 190 sound tables and all 786 waves decode with zero failures. Two findings change the shape of the
@@ -1307,6 +1309,23 @@ remaining work:
   than wrapping unconditionally.
 - **An unknown format tag reports rather than assuming PCM.** Guessing would play noise instead of
   failing, which is much harder to notice than a missing sound.
+- **Payloads are delivered decoder-ready.** PCM arrives RIFF-wrapped, MP3 untouched, so the
+  frontend never learns what `WAVEFORMATEX` is. Container assembly is a fact of the source format,
+  computed once at the host.
+- **Spatial parameters are computed once at trigger time and never updated.** That is retail's
+  behavior — a moving source does not re-pan — and it is also why audio needs no per-frame work.
+  Panning is the source's projection onto the listener's right-hand vector, which is retail's
+  heading-based pan without needing a heading angle.
+- **Voices deliberately outlive their owners.** Retail's voices are fire-and-forget copies with no
+  back-pointer, so a sound finishes after its emitting object is destroyed
+  (acclient.c:366405-366407). `destroy()` exists for runtime shutdown only; calling it on owner
+  removal would be a divergence rather than a cleanup, and the class docstring says so.
+- **A plain oldest-steal replaces retail's priority stealing.** Retail runs 16 voices with
+  priority-based stealing, but every hook sound carries priority 0 and loses every contest, so the
+  priority machinery would be dead weight producing identical behavior.
+- **A deliberately silent sound is `executed`, not `no-consumer`.** Losing a probability roll or
+  falling below the audible floor is the system working correctly; conflating that with a missing
+  consumer would hide real gaps behind expected silence.
 - **Retail's selection bug is reproduced deliberately, and the census says why it barely matters.**
   See the archive verification above. Authored content was balanced against the bug, so "fixing" it
   would make a sound audible that no player has ever heard — but it reaches exactly one key.
@@ -1317,6 +1336,10 @@ Progress: Not started
 
 #### Deliverables
 
+- Add the Web Audio device adapter implementing `AudioDevice`, and resolve `SoundTable` keys against
+  the owning resident's installed table. Both are inherited from Phase 6 with their producer:
+  authored sounds arrive only from physics scripts, and a `SoundType` key cannot be resolved without
+  a resident that has a sound table installed.
 - Bind particle draw cohorts through the renderer, inherited from Phase 5 with their producer:
   instantiate `ParticleEmitterRuntime` in `game-runtime`, feed `collectCohorts` into an instanced
   draw using `webgl2-particle-program`, and compose `envelopeRadiusFor` into presentation bounds.

@@ -541,6 +541,9 @@ export class GameRuntime {
 		this.#effects = new EffectSystem();
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
+				// Authored sounds arrive only from physics scripts; no resident runs one until
+				// Phase 7 activates them.
+				audio: { playSound: () => "unprepared" },
 				effects: this.#effects,
 				// Authored particles arrive only from physics scripts, and no resident runs one
 				// until Phase 7 activates them. Reporting unprepared keeps the outcome honest

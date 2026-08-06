@@ -1402,9 +1402,23 @@ binding, `SoundTable` key resolution, and the particle draw path with its harnes
   by this plan's own contract. Recorded because the mistake is instructive, not because the code was
   interesting.
 
-  What actually remains: a host command returning a closure for one particle mesh, frontend decode
-  and template preparation keyed by mesh, and a renderer executor that binds
-  `webgl2-particle-program` and streams `collectCohorts` through an instance buffer.
+  **Landed since:** the host command and closure, the frontend decode, `ParticleMeshCache`,
+  `WebGL2ParticleInstanceBuffer`, and `WebGL2ParticlePass` — one instanced call per cohort, with
+  motion type and orientation bound as per-cohort constants and geometry resolution injected.
+
+  **What remains is renderer residency plus the frame hookup**, and the pattern is exactly the sky
+  pass's: `WebGL2Renderer` installs the sky's decoded closure once (uploading geometry and
+  materials, `#skyPass` at webgl2-renderer.ts:1700-1712) and then resolves each object against it at
+  draw time. Particles need the same three steps:
+
+  1. An install path that uploads a `ParticleMeshPresentations` batch into renderer-owned geometry
+     and material residency, keyed by `hw_gfxobj_id`.
+  2. `ParticleDrawCohort[]` carried on the frame input, produced by `ParticleEmitterRuntime.collectCohorts`.
+  3. A `#drawParticles` call in `#drawView`, after `#drawBlendedObjects` — particles are transparent
+     and must not occlude the blended pass they sort against.
+
+  The pass itself needs no further change: it already takes a `resolveGeometry` callback, which is
+  what step 1 supplies.
 
   Everything upstream of the draw is done: emitters stage, emit, expire, cull, and produce packed
   instance records with their motion type; the vertex stage exists and its formulas are pinned by

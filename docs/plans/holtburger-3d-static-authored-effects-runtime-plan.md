@@ -1378,6 +1378,11 @@ Progress: Not started
 - [ ] Confirm cyclic scheduling remains bounded in work per tick and observable in diagnostics.
 - [ ] Delete script-only deferral, placeholder effect ports, hollow unsupported-success tests, and any
       temporary duplicate effect representation.
+- [ ] Rename `ParticleEmitterRuntime` to `ParticleSystem`. It is the one frontend system that does
+      not follow the `<Concern>System` convention shared by `EffectSystem`, `AnimationSystem`,
+      `PhysicsScriptSystem`, and `AudioSystem`, and the `Runtime` suffix now reads as a different
+      kind of thing than it is. Sweep `ParticleRuntimeDependencies` and
+      `ParticleRuntimeDiagnostics` with it.
 - [ ] Confirm no authored `TextureVelocity` surface scrolls behind an unfired `CallPES` chain (see
       the debt ledger); the accepted early-scroll consequence is expected to be unreachable in
       shipped content, and this is where that expectation gets checked rather than assumed.

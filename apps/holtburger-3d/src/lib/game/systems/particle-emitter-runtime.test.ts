@@ -384,6 +384,27 @@ describe("ParticleEmitterRuntime", () => {
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
 	});
 
+	it("contributes a conservative bound covering its hook offset and envelope", () => {
+		const particles = runtime();
+		particles.create(TARGET, prepared(), [0, 0, 4], 0, 0, ORIGIN);
+
+		// envelopeRadius is 10 in the fixture, displaced 4 by the hook offset.
+		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(14);
+	});
+
+	it("contributes nothing for a target with no live emitters", () => {
+		// Zero rather than null, so a caller adds it to presentation bounds unconditionally.
+		expect(runtime().envelopeRadiusFor(TARGET)).toBe(0);
+	});
+
+	it("takes the widest emitter when a target runs several", () => {
+		const particles = runtime();
+		particles.create(TARGET, prepared(), [0, 0, 0], 0, 0, ORIGIN);
+		particles.create(TARGET, prepared(), [0, 0, 20], 0, 0, ORIGIN);
+
+		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(30);
+	});
+
 	it("refuses to invent a cadence for a purely per-meter emitter", () => {
 		const particles = runtime();
 		particles.create(

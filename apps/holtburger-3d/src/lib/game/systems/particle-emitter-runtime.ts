@@ -279,6 +279,31 @@ export class ParticleEmitterRuntime {
 		return samples;
 	}
 
+	/**
+	 * Conservative radius, around the target's origin, containing every particle it currently emits.
+	 *
+	 * Returns `0` for a target with no live emitters, so a caller can add it to presentation bounds
+	 * unconditionally. This is what lets emitters ride the existing visibility path instead of
+	 * needing a parallel culling system: an owner's bounds simply grow to cover what it emits.
+	 *
+	 * Deliberately per-emitter, never per-particle. GPU evaluation means the CPU does not know
+	 * individual particle positions, and re-deriving them to cull would reintroduce exactly the
+	 * per-particle CPU ceiling this design exists to avoid.
+	 */
+	envelopeRadiusFor(target: BehaviorTarget): number {
+		let radius = 0;
+		for (const instance of this.#instances) {
+			if (instance.target.nodeId !== target.nodeId) continue;
+			// The hook offset displaces the whole emitter, so it extends the owner's bound too.
+			const offsetLength = Math.hypot(...instance.hookOffset);
+			radius = Math.max(
+				radius,
+				offsetLength + instance.emitter.envelopeRadius,
+			);
+		}
+		return radius;
+	}
+
 	getDiagnostics(): ParticleRuntimeDiagnostics {
 		return {
 			emittedTotal: this.#emittedTotal,

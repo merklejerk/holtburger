@@ -3,6 +3,7 @@ import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
+import { EffectSystem } from "./effect-system";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import {
@@ -417,6 +418,7 @@ function createSystem(
 	animationSource: AnimationAssetSource = new FixtureAnimationSource(),
 ) {
 	const scene = new SceneGraph();
+	const effects = new EffectSystem();
 	const geometry = new FixtureGeometry();
 	const templates = new ObjectVisualTemplateRepository(
 		geometry,
@@ -439,9 +441,11 @@ function createSystem(
 				throw new Error(`No emitter fixture for ${emitterInfoId}.`);
 			},
 		}),
-		(ownerId, generation) => `${ownerId}:generation:${generation}`,
+		effects,
+		(ownerId: string, generation: number) =>
+			`${ownerId}:generation:${generation}`,
 	);
-	return { geometry, scene, system };
+	return { effects, geometry, scene, system };
 }
 
 function source(

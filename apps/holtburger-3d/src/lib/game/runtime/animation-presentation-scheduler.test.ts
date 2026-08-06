@@ -1,5 +1,6 @@
 import {
 	buildEffectRouter,
+	installEffectState,
 	testTarget,
 } from "../behavior/behavior-test-harness";
 import { describe, expect, it } from "vitest";
@@ -11,9 +12,21 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
 
 /** An animation system over a throwaway effect system and its router. */
+/**
+ * An animation system that stands in for the entity owner's effect-state installation.
+ *
+ * Effect state belongs to the entity rather than to playback, so a test driving `AnimationSystem`
+ * directly has to install it the way `DynamicEntitySystem` does in production.
+ */
 function buildAnimationSystem() {
 	const { effects, router } = buildEffectRouter();
-	return new AnimationSystem<string>(effects, router);
+	const system = new AnimationSystem<string>(effects, router);
+	const install = system.install.bind(system);
+	system.install = (ownerId, target, identity, animation) => {
+		installEffectState(effects, target.nodeId, animation.partCount);
+		return install(ownerId, target, identity, animation);
+	};
+	return system;
 }
 
 describe("AnimationPresentationScheduler", () => {

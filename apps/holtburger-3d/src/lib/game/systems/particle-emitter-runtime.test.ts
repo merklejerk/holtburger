@@ -62,14 +62,28 @@ describe("ParticleEmitterRuntime", () => {
 	it("releases initial particles immediately, before any interval applies", () => {
 		const particles = runtime();
 
-		particles.create(TARGET, prepared({ initialParticles: 3 }), ORIGIN, 0, 0, ORIGIN);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 3 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
 
 		expect(particles.getDiagnostics().particleCount).toBe(3);
 	});
 
 	it("treats birthrate as a minimum interval and never bursts to catch up", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared({ birthrateSeconds: 1 }), ORIGIN, 0, 0, ORIGIN);
+		particles.create(
+			TARGET,
+			prepared({ birthrateSeconds: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
 
 		particles.advance(0, at);
 		expect(particles.getDiagnostics().particleCount).toBe(1);
@@ -144,22 +158,50 @@ describe("ParticleEmitterRuntime", () => {
 
 	it("drains on stop but vanishes on destroy", () => {
 		const drained = runtime();
-		drained.create(TARGET, prepared({ initialParticles: 2, lifespan: 5 }), ORIGIN, 0, 0, ORIGIN);
+		drained.create(
+			TARGET,
+			prepared({ initialParticles: 2, lifespan: 5 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
 		drained.stop(TARGET, 0);
 		drained.advance(1, at);
 		// Stopped emitters keep their live particles until each finishes its own lifespan.
 		expect(drained.getDiagnostics().particleCount).toBe(2);
 
 		const destroyed = runtime();
-		destroyed.create(TARGET, prepared({ initialParticles: 2 }), ORIGIN, 0, 0, ORIGIN);
+		destroyed.create(
+			TARGET,
+			prepared({ initialParticles: 2 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
 		destroyed.destroy(TARGET, 0);
 		expect(destroyed.getDiagnostics().particleCount).toBe(0);
 	});
 
 	it("replaces a live emitter that shares a nonzero authored id", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared({ initialParticles: 2 }), ORIGIN, 7, 0, ORIGIN);
-		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 7, 0, ORIGIN);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 2 }),
+			ORIGIN,
+			7,
+			0,
+			ORIGIN,
+		);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			ORIGIN,
+			7,
+			0,
+			ORIGIN,
+		);
 
 		expect(particles.getDiagnostics().emitterCount).toBe(1);
 		expect(particles.getDiagnostics().particleCount).toBe(1);
@@ -167,15 +209,36 @@ describe("ParticleEmitterRuntime", () => {
 
 	it("keeps auto-id emitters independent of one another", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
-		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
 
 		expect(particles.getDiagnostics().emitterCount).toBe(2);
 	});
 
 	it("leaves particles behind unless the emitter follows its parent", () => {
 		const left = runtime();
-		left.create(TARGET, prepared({ a: [0, 0, 0], initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
+		left.create(
+			TARGET,
+			prepared({ a: [0, 0, 0], initialParticles: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
 		const moved = (): Vector3 => [100, 0, 0];
 		// The parent moved, but a leave-behind particle stays at its spawn snapshot.
 		expect(left.sample(0, moved)[0]!.position[0]).toBeCloseTo(0);
@@ -194,7 +257,14 @@ describe("ParticleEmitterRuntime", () => {
 
 	it("drops emitters whose target stops publishing a transform", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
 
 		particles.advance(1, () => null);
 

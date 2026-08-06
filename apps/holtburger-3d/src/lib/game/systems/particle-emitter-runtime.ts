@@ -296,7 +296,11 @@ export class ParticleEmitterRuntime {
 				finalScale: info.finalScale,
 				finalTranslucency: info.finalTrans,
 				lifespan: Math.max(0, rolled(roll, info.lifespan, info.lifespanRand)),
-				offset: this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
+				offset: this.#spawnOffset(
+					info.offsetDir,
+					info.minOffset,
+					info.maxOffset,
+				),
 				startScale: info.startScale,
 				startTranslucency: info.startTrans,
 			},
@@ -320,11 +324,7 @@ export class ParticleEmitterRuntime {
 		maxOffset: number,
 	): Vector3 {
 		const roll = this.#roll;
-		const random: Vector3 = [
-			roll() * 2 - 1,
-			roll() * 2 - 1,
-			roll() * 2 - 1,
-		];
+		const random: Vector3 = [roll() * 2 - 1, roll() * 2 - 1, roll() * 2 - 1];
 		const dirLength = Math.hypot(...offsetDir);
 		let perpendicular = random;
 		if (dirLength > 0) {

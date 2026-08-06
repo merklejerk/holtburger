@@ -1,0 +1,353 @@
+import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
+import type { BehaviorTarget } from "../behavior/behavior-event-router";
+import {
+	particleLifeProgress,
+	particlePosition,
+	particleScale,
+	particleTranslucency,
+	type ParticleSpawnConstants,
+	type Vector3,
+} from "../behavior/particle-motion";
+
+/** Uniform [0, 1) source; injected so emission randomness is explicit and tests are exact. */
+export type UniformRoll = () => number;
+
+/** Retail's roll shape: `RollDice(-1, 1) * rand + base` — additive, never multiplicative. */
+function rolled(roll: UniformRoll, base: number, rand: number): number {
+	return base + (roll() * 2 - 1) * rand;
+}
+
+/** One live particle: spawn constants plus a birth time, and nothing else. */
+interface LiveParticle {
+	readonly birthTime: number;
+	readonly spawn: ParticleSpawnConstants;
+	/**
+	 * Parent origin captured at spawn, used when the emitter leaves particles behind.
+	 *
+	 * `null` means the emitter follows its parent, so the live origin is read each frame instead
+	 * (`is_parent_local != 0`, acclient.c:318262-318273).
+	 */
+	readonly parentOriginSnapshot: Vector3 | null;
+}
+
+interface EmitterInstance {
+	readonly emitter: PreparedParticleEmitter;
+	readonly target: BehaviorTarget;
+	/** Authored id: nonzero replaces any same-id emitter on the same target. */
+	readonly emitterId: number;
+	/** Spawn offset authored by the `CreateParticle` hook, added to the parent origin. */
+	readonly hookOffset: Vector3;
+	readonly startTime: number;
+	lastEmissionTime: number | null;
+	emittedCount: number;
+	/** Stopped emitters release no further particles but let live ones finish their lifespans. */
+	stopped: boolean;
+	particles: LiveParticle[];
+}
+
+/** One particle ready to draw, in world space. */
+export interface ParticleSample {
+	readonly position: Vector3;
+	readonly scale: number;
+	readonly translucency: number;
+}
+
+export interface ParticleRuntimeDiagnostics {
+	readonly emitterCount: number;
+	readonly particleCount: number;
+	readonly emittedTotal: number;
+	readonly reapedEmitterCount: number;
+}
+
+/**
+ * Owns live emitters and particles for authored `CreateParticle` events.
+ *
+ * Deliberately app-local and separate from `DynamicEntitySystem`: emitters follow entity transforms
+ * but are not entities, and their particles outlive nothing but their own lifespans. Mutable state
+ * is spawn constants plus birth times, because motion is closed form — this runtime schedules and
+ * reaps, it does not integrate.
+ */
+export class ParticleEmitterRuntime {
+	readonly #roll: UniformRoll;
+	readonly #instances: EmitterInstance[] = [];
+	#emittedTotal = 0;
+	#reapedEmitterCount = 0;
+
+	constructor(roll: UniformRoll) {
+		this.#roll = roll;
+	}
+
+	/**
+	 * Create one emitter, replacing any live emitter sharing its nonzero authored id.
+	 *
+	 * `emitterId === 0` requests an auto-assigned identity, so those never replace each other
+	 * (acclient.c:316606-316730).
+	 */
+	create(
+		target: BehaviorTarget,
+		emitter: PreparedParticleEmitter,
+		hookOffset: Vector3,
+		emitterId: number,
+		timeSeconds: number,
+		parentOrigin: Vector3,
+	): void {
+		if (emitterId !== 0) {
+			const existing = this.#instances.findIndex(
+				(instance) =>
+					instance.emitterId === emitterId &&
+					instance.target.nodeId === target.nodeId,
+			);
+			if (existing >= 0) this.#instances.splice(existing, 1);
+		}
+		const instance: EmitterInstance = {
+			emittedCount: 0,
+			emitter,
+			emitterId,
+			hookOffset,
+			lastEmissionTime: null,
+			particles: [],
+			startTime: timeSeconds,
+			stopped: false,
+			target,
+		};
+		this.#instances.push(instance);
+		// Retail releases `initial_particles` immediately at Init, before any interval applies.
+		for (let index = 0; index < emitter.info.initialParticles; index += 1) {
+			this.#emit(instance, timeSeconds, parentOrigin);
+		}
+	}
+
+	/** Halt emission while live particles finish, then let the emitter reap itself. */
+	stop(target: BehaviorTarget, emitterId: number): void {
+		for (const instance of this.#instances) {
+			if (
+				instance.target.nodeId === target.nodeId &&
+				(emitterId === 0 || instance.emitterId === emitterId)
+			) {
+				instance.stopped = true;
+			}
+		}
+	}
+
+	/** Remove emitters and their live particles at once, as retail's `Destroy` does. */
+	destroy(target: BehaviorTarget, emitterId: number): void {
+		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
+			const instance = this.#instances[index]!;
+			if (
+				instance.target.nodeId === target.nodeId &&
+				(emitterId === 0 || instance.emitterId === emitterId)
+			) {
+				this.#instances.splice(index, 1);
+			}
+		}
+	}
+
+	/** Owner removal vanishes live particles instantly; retail never drains them. */
+	removeTarget(nodeId: BehaviorTarget["nodeId"]): void {
+		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
+			if (this.#instances[index]!.target.nodeId === nodeId)
+				this.#instances.splice(index, 1);
+		}
+	}
+
+	/**
+	 * Advance every emitter to `timeSeconds`.
+	 *
+	 * `parentOriginOf` supplies the current origin for a target, so this runtime follows published
+	 * entity transforms without holding a reference to the entity itself.
+	 */
+	advance(
+		timeSeconds: number,
+		parentOriginOf: (target: BehaviorTarget) => Vector3 | null,
+	): void {
+		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
+			const instance = this.#instances[index]!;
+			const parentOrigin = parentOriginOf(instance.target);
+			// A target that no longer publishes a transform has gone away underneath us.
+			if (parentOrigin === null) {
+				this.#instances.splice(index, 1);
+				continue;
+			}
+			this.#reapExpired(instance, timeSeconds);
+			this.#applyAutoStop(instance, timeSeconds);
+			if (!instance.stopped) this.#emitDue(instance, timeSeconds, parentOrigin);
+			// A stopped emitter with nothing left alive has finished its whole job.
+			if (instance.stopped && instance.particles.length === 0) {
+				this.#instances.splice(index, 1);
+				this.#reapedEmitterCount += 1;
+			}
+		}
+	}
+
+	/** Sample every live particle for drawing, in world space. */
+	sample(
+		timeSeconds: number,
+		parentOriginOf: (target: BehaviorTarget) => Vector3 | null,
+	): ParticleSample[] {
+		const samples: ParticleSample[] = [];
+		for (const instance of this.#instances) {
+			const liveOrigin = parentOriginOf(instance.target);
+			if (liveOrigin === null) continue;
+			const motionType = instance.emitter.info.motionType;
+			if (motionType === null) continue;
+			for (const particle of instance.particles) {
+				const origin = particle.parentOriginSnapshot ?? liveOrigin;
+				const elapsed = timeSeconds - particle.birthTime;
+				const position = particlePosition(
+					motionType,
+					particle.spawn,
+					origin,
+					elapsed,
+				);
+				if (position === null) continue;
+				samples.push({
+					position,
+					scale: particleScale(particle.spawn, elapsed),
+					translucency: particleTranslucency(particle.spawn, elapsed),
+				});
+			}
+		}
+		return samples;
+	}
+
+	getDiagnostics(): ParticleRuntimeDiagnostics {
+		return {
+			emittedTotal: this.#emittedTotal,
+			emitterCount: this.#instances.length,
+			particleCount: this.#instances.reduce(
+				(total, instance) => total + instance.particles.length,
+				0,
+			),
+			reapedEmitterCount: this.#reapedEmitterCount,
+		};
+	}
+
+	/** Particles die only by lifespan; retail never kills them any other way. */
+	#reapExpired(instance: EmitterInstance, timeSeconds: number): void {
+		instance.particles = instance.particles.filter(
+			(particle) =>
+				particleLifeProgress(particle.spawn, timeSeconds - particle.birthTime) <
+				1,
+		);
+	}
+
+	/** A finite emitter stops once it exhausts its particle budget or its authored duration. */
+	#applyAutoStop(instance: EmitterInstance, timeSeconds: number): void {
+		const info = instance.emitter.info;
+		if (info.isPersistent) return;
+		if (info.totalParticles > 0 && instance.emittedCount >= info.totalParticles)
+			instance.stopped = true;
+		if (
+			info.totalSeconds > 0 &&
+			timeSeconds - instance.startTime >= info.totalSeconds
+		) {
+			instance.stopped = true;
+		}
+	}
+
+	/**
+	 * Release at most one particle, and only once the minimum interval has elapsed.
+	 *
+	 * `birthrate` is a **minimum interval**, not a rate, and retail emits at most one particle per
+	 * update with no catch-up (acclient.c:312447-312476, 318289). Reproduced deliberately: emitting
+	 * a burst to "catch up" a slow frame would change authored density.
+	 */
+	#emitDue(
+		instance: EmitterInstance,
+		timeSeconds: number,
+		parentOrigin: Vector3,
+	): void {
+		const info = instance.emitter.info;
+		// The per-meter predicate is unrecovered from the decompile, so a purely per-meter emitter
+		// must report rather than guess an emission cadence.
+		if (!info.emitsPerSecond) return;
+		if (instance.particles.length >= info.maxParticles) return;
+		if (
+			instance.lastEmissionTime !== null &&
+			timeSeconds - instance.lastEmissionTime < info.birthrateSeconds
+		) {
+			return;
+		}
+		this.#emit(instance, timeSeconds, parentOrigin);
+	}
+
+	#emit(
+		instance: EmitterInstance,
+		timeSeconds: number,
+		parentOrigin: Vector3,
+	): void {
+		const info = instance.emitter.info;
+		if (instance.particles.length >= info.maxParticles) return;
+		const roll = this.#roll;
+		const spawnOrigin: Vector3 = [
+			parentOrigin[0] + instance.hookOffset[0],
+			parentOrigin[1] + instance.hookOffset[1],
+			parentOrigin[2] + instance.hookOffset[2],
+		];
+		instance.particles.push({
+			birthTime: timeSeconds,
+			// A following emitter re-reads the live origin every frame, so it stores no snapshot at
+			// all rather than storing one it would ignore.
+			parentOriginSnapshot: info.followsParent ? null : spawnOrigin,
+			spawn: {
+				a: scaledVector(info.a, rolled(roll, info.minA, info.maxA - info.minA)),
+				b: scaledVector(info.b, rolled(roll, info.minB, info.maxB - info.minB)),
+				c: scaledVector(info.c, rolled(roll, info.minC, info.maxC - info.minC)),
+				finalScale: info.finalScale,
+				finalTranslucency: info.finalTrans,
+				lifespan: Math.max(0, rolled(roll, info.lifespan, info.lifespanRand)),
+				offset: this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
+				startScale: info.startScale,
+				startTranslucency: info.startTrans,
+			},
+		});
+		instance.emittedCount += 1;
+		this.#emittedTotal += 1;
+		instance.lastEmissionTime = timeSeconds;
+	}
+
+	/**
+	 * A random offset perpendicular to the authored `offset_dir`, scaled into [min, max].
+	 *
+	 * Retail builds a random unit vector and projects out the `offset_dir` component
+	 * (acclient.c:312311-312603), so particles spread across the disc normal to that axis rather
+	 * than along it. A degenerate roll that lands parallel to `offset_dir` falls back to no offset,
+	 * which is the same particle retail would produce from a zero-length projection.
+	 */
+	#spawnOffset(
+		offsetDir: Vector3,
+		minOffset: number,
+		maxOffset: number,
+	): Vector3 {
+		const roll = this.#roll;
+		const random: Vector3 = [
+			roll() * 2 - 1,
+			roll() * 2 - 1,
+			roll() * 2 - 1,
+		];
+		const dirLength = Math.hypot(...offsetDir);
+		let perpendicular = random;
+		if (dirLength > 0) {
+			const unit: Vector3 = [
+				offsetDir[0] / dirLength,
+				offsetDir[1] / dirLength,
+				offsetDir[2] / dirLength,
+			];
+			const along =
+				random[0] * unit[0] + random[1] * unit[1] + random[2] * unit[2];
+			perpendicular = [
+				random[0] - along * unit[0],
+				random[1] - along * unit[1],
+				random[2] - along * unit[2],
+			];
+		}
+		const length = Math.hypot(...perpendicular);
+		if (length === 0) return [0, 0, 0];
+		const magnitude = minOffset + roll() * (maxOffset - minOffset);
+		return scaledVector(perpendicular, magnitude / length);
+	}
+}
+
+function scaledVector(vector: Vector3, scale: number): Vector3 {
+	return [vector[0] * scale, vector[1] * scale, vector[2] * scale];
+}

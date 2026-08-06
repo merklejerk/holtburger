@@ -1027,10 +1027,10 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
 
 Progress: **In progress 2026-08-06.** Landed: typed 0x32 decoding with offsets verified against real
 archive records, the content/transport/command lane, the frontend decode,
-`ParticleEmitterRepository` with its exact preparation-time motion envelope, and the complete
-closed-form motion evaluator with a unit fixture per formula family. Remaining: the emitter runtime
-(emission, lifetime, attachment), the GPU vertex stage, and wiring the envelope into the existing
-visibility path.
+`ParticleEmitterRepository` with its exact preparation-time motion envelope, the complete
+closed-form motion evaluator with a unit fixture per formula family, and `ParticleEmitterRuntime`
+(emission cadence, lifetime, stop/destroy, emitter-id replacement, follow vs leave-behind).
+Remaining: the GPU vertex stage and wiring the envelope into the existing visibility path.
 
 #### Deliverables
 
@@ -1176,6 +1176,16 @@ visibility path.
   to be checked against rather than eyeballed. The two authored `Explode` quirks and `Swarm`'s
   `sin`-on-y asymmetry each have a test whose stated purpose is to stop a later reader from
   "correcting" them.
+- **`ParticleEmitterRuntime` schedules and reaps; it never integrates.** Because motion is closed
+  form, a live particle is spawn constants plus a birth time, so the runtime's whole job is
+  emission cadence, expiry, and emitter lifetime. Retail's quirks are reproduced deliberately and
+  each has a test: `birthrate` is a **minimum interval** with **at most one particle per tick and
+  no catch-up** (bursting to fill a slow frame would change authored density), particles die only
+  by lifespan, `stop` drains while `destroy` vanishes, and a nonzero `emitter_id` replaces a live
+  same-id emitter while auto-id emitters stay independent.
+- **A purely per-meter emitter emits nothing and says so.** The retail per-meter predicate is
+  unrecovered from the decompile, so inventing a cadence would silently produce wrong density;
+  emitting nothing is the visible failure.
 - **Unshipped motion types return `null`, not a zero vector.** A zero vector would silently render
   particles at the world origin; `null` forces the caller to report.
 - **A trigger-less emitter fails decode.** With neither bit set an emitter can never release a

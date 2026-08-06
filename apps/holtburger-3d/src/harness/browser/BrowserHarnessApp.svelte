@@ -822,6 +822,7 @@
 					// so a device that refuses playback keeps the runtime honest without a context.
 					{ playOneShot: () => null },
 					contentSource,
+					contentSource,
 				);
 				// Harness comparisons select their render policy explicitly and start from flat.
 				runtime.setFrameSettings(frameSettings);

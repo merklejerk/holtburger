@@ -33,6 +33,7 @@ pub mod polygon_geometry;
 pub mod portal_geometry;
 pub mod portal_visibility;
 mod sky_source;
+mod sound_table_source;
 mod source_projection;
 
 use animation_source::serialize_animation_record_binary;
@@ -53,6 +54,7 @@ use outdoor_static_source::{
 };
 use particle_emitter_source::serialize_particle_emitter_record_binary;
 use physics_script_source::serialize_physics_script_record_binary;
+use sound_table_source::serialize_sound_table_record_binary;
 use source_projection::dat_id;
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
@@ -125,6 +127,12 @@ struct LoadParticleEmitterRequest {
 #[serde(rename_all = "camelCase")]
 struct LoadAudioRequest {
     sound_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadSoundTableRequest {
+    sound_table_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -244,6 +252,18 @@ async fn load_audio(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Loads one immutable DAT sound table as a compact typed binary record.
+#[tauri::command]
+async fn load_sound_table(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadSoundTableRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_sound_table_bytes(&state.runtime, &request.sound_table_id)
+        .await
+        .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Builds the canonical landblock source batch used by Tauri and the headless browser harness.
 pub async fn load_landblock_source_batch_bytes(
     runtime: &ContentAssetRuntime,
@@ -347,6 +367,22 @@ pub async fn load_audio_bytes(
         unreachable!("Wave request must return a Wave")
     };
     serialize_audio_record_binary(&wave)
+}
+
+/// Build the canonical typed sound-table response used by Tauri and focused host tests.
+pub async fn load_sound_table_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_sound_table_id: &str,
+) -> Result<Vec<u8>> {
+    let sound_table_id = parse_typed_dat_id(raw_sound_table_id, 0x20)?;
+    let asset = runtime
+        .load(ContentAssetRequest::SoundTable(sound_table_id))
+        .await
+        .with_context(|| format!("Could not load SoundTable 0x{sound_table_id:08X}"))?;
+    let ContentAsset::SoundTable(table) = asset else {
+        unreachable!("SoundTable request must return a SoundTable")
+    };
+    serialize_sound_table_record_binary(&table)
 }
 
 async fn build_landblock_source_batch_response(
@@ -1035,6 +1071,7 @@ pub fn run() {
             load_active_region_data,
             load_animation,
             load_audio,
+            load_sound_table,
             load_particle_emitter,
             load_physics_script,
             load_landblock_source_batch,

@@ -14,7 +14,8 @@ use holtburger_content::{
     TexturePixelFormat,
 };
 use holtburger_dat::file_type::{
-    Animation, GfxObj, Palette, ParticleEmitterInfo, PhysicsScript, RenderSurface, SetupModel, Wave,
+    Animation, GfxObj, Palette, ParticleEmitterInfo, PhysicsScript, RenderSurface, SetupModel,
+    SoundTable, Wave,
 };
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex as TokioMutex, Semaphore};
@@ -34,6 +35,7 @@ pub enum ContentAssetRequest {
     PhysicsScript(u32),
     ParticleEmitterInfo(u32),
     Wave(u32),
+    SoundTable(u32),
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
@@ -80,6 +82,7 @@ pub enum ContentAsset {
     PhysicsScript(Box<PhysicsScript>),
     ParticleEmitterInfo(Box<ParticleEmitterInfo>),
     Wave(Box<Wave>),
+    SoundTable(Box<SoundTable>),
     GfxObj(Arc<GfxObj>),
     SetupModel(Arc<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
@@ -318,6 +321,19 @@ impl ContentAssetService {
                 Ok(ContentAsset::Wave(Box::new(
                     Wave::read(&mut Cursor::new(resource.bytes))
                         .with_context(|| format!("Could not parse Wave 0x{wave_id:08X}"))?,
+                )))
+            }
+            ContentAssetRequest::SoundTable(sound_table_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, sound_table_id))
+                    .with_context(|| {
+                        format!("Could not load SoundTable 0x{sound_table_id:08X}")
+                    })?;
+                Ok(ContentAsset::SoundTable(Box::new(
+                    SoundTable::read(&mut Cursor::new(resource.bytes)).with_context(|| {
+                        format!("Could not parse SoundTable 0x{sound_table_id:08X}")
+                    })?,
                 )))
             }
             ContentAssetRequest::GfxObj(gfx_obj_id) => Ok(ContentAsset::GfxObj(

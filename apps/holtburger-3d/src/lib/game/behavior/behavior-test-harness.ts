@@ -17,7 +17,10 @@ export function buildEffectRouter(effects: EffectSystem = new EffectSystem()): {
 } {
 	const router = new BehaviorEventRouter(
 		{
-			audio: { playSound: () => "unprepared" },
+			audio: {
+				playSound: () => "unprepared",
+				playSoundTableKey: () => "unprepared",
+			},
 			effects,
 			particles: { createEmitter: () => "unprepared" },
 			scheduler: {

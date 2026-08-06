@@ -1452,6 +1452,10 @@ Progress: Not started
 - [ ] Confirm cyclic scheduling remains bounded in work per tick and observable in diagnostics.
 - [ ] Delete script-only deferral, placeholder effect ports, hollow unsupported-success tests, and any
       temporary duplicate effect representation.
+- [ ] Collapse `WebGL2InstanceBuffer` and `WebGL2ParticleInstanceBuffer`. They share capacity
+      growth, orphaning, and upload; they differ in record layout and encoder. A generic buffer
+      parameterized by float count and an `encodeInto` callback would carry both, but genericizing
+      a tested class mid-phase was not worth the risk, so the duplication was taken deliberately.
 - [ ] Rename `ParticleEmitterRuntime` to `ParticleSystem`. It is the one frontend system that does
       not follow the `<Concern>System` convention shared by `EffectSystem`, `AnimationSystem`,
       `PhysicsScriptSystem`, and `AudioSystem`, and the `Runtime` suffix now reads as a different

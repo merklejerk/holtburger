@@ -1,6 +1,6 @@
 # Holtburger 3D Weather and Sky-Script Runtime Plan
 
-Status: Queued — blocked on the authored-effects plan; a boundary dry-run against its landed PES
+Status: Queued — Phase R boundary dry-run complete 2026-08-06; implementation phases unblocked — blocked on the authored-effects plan; a boundary dry-run against its landed PES
 and particle contracts is mandatory before any phase executes
 Created: 2026-08-06
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md` (parallel track)
@@ -167,17 +167,59 @@ pass-ordering evidence remains.
 
 ### Phase R: Boundary Dry-Run (mandatory gate)
 
-Progress: Blocked until the effects plan completes.
+Progress: **Run 2026-08-06**, when the effects plan completed. Verdict: **the landed shape hosts sky
+targets as an extension, not a redesign** — with exactly one identity decision to make first.
 
-Rewrite Phases 1-4 against the effects plan's landed contracts: the real script-target port shape,
-scheduling and clock semantics, particle/audio consumer interfaces, and whatever course
-corrections its execution recorded. Confirm the second-target-ownership extension is still an
-extension and not a redesign; if the landed shape cannot host sky targets without forking, stop
-and renegotiate at the roadmap level before implementing.
+#### What landed, and what it means for this plan
+
+| Contract          | Landed shape                                                                            | Fit for sky targets |
+| ----------------- | --------------------------------------------------------------------------------------- | ------------------- |
+| Command union     | `PreparedBehaviorCommand`, producer-agnostic, provenance carried beside it              | Direct reuse        |
+| Script clock      | `PhysicsScriptSystem`, wall-clock, per-target, drift-free chaining                      | Direct reuse        |
+| Dispatch          | `BehaviorEventRouter`, owns nothing, one recorded outcome per command                   | Direct reuse        |
+| Particle consumer | `ParticleSystem`, **all dependencies injected** (`originOf`, `resolveEmitter`, `clock`) | Direct reuse        |
+| Audio consumer    | `AudioSystem`, position supplied per trigger                                            | Direct reuse        |
+| Staging           | Closure + emitters + sound table + meshes, all before activation                        | Direct reuse        |
+
+The consumers are injection-shaped, which is what makes this an extension: sky objects supply their
+own origin resolver and liveness predicate without any consumer learning what a sky object is.
+
+#### The one open decision: what a sky `BehaviorTarget` is
+
+`BehaviorTarget` is `{ nodeId: SceneNodeId; generation: number }`. Sky objects are viewer-centered
+and sky-module-owned; they are **not scene-graph residents today**. Two ways to close that, and this
+plan must pick one before Phase 1:
+
+1. **Give sky script owners real scene nodes.** Sky objects gain nodes whose placement is
+   viewer-pinned. Everything else works unchanged, including `#sceneOriginOf` and generation-based
+   liveness. Cost: the sky module acquires scene residency it currently, deliberately, does not have.
+2. **Widen `BehaviorTarget` to a tagged identity** (`{ kind: "scene" | "sky"; ... }`) and inject a
+   resolver per kind. Cost: every consumer's origin lookup becomes a branch, and the target type
+   stops being a single obvious thing.
+
+**Recommendation: option 1.** The consumers already resolve origin through an injected callback, so
+option 2's branch buys nothing the injection does not already provide, while making the most-used
+type in the behavior runtime polymorphic. The sky pass's viewer-centering is a _rendering_ fact; a
+node with a viewer-pinned placement expresses the same thing without special-casing dispatch.
+
+#### Course corrections for the implementation phases
+
+- **`CallPES` pause is load-bearing, not incidental.** The measured evidence found nonzero pauses in
+  shipped content, and the landed system implements retail's uniform roll. Sky scripts that repeat
+  will not be in lockstep across objects, which is correct and should not be "fixed" if observed.
+- **Particle meshes are already batched and cached.** Sky emitters name `hw_gfxobj_id`s exactly as
+  authored residents do, so Phase 3 needs no new mesh path — only to stage its ids.
+- **Do not rebuild scroll-phase arithmetic.** `textureScrollPhase` is shared and unit-tested; the
+  rain sheets consume it directly.
+- **The effects plan's `TextureVelocity` renderer gap does not block this plan.** Weather sheets
+  scroll through the _sky_ path, which already binds `uTextureOffset`; the deferred item is the
+  object-path binding.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- Phase R executed at the effects-plan boundary as scheduled. No contract required renegotiation;
+  the single identity question above is recorded as this plan's first decision rather than a
+  roadmap-level escalation.
 
 ### Phase 1: Weather Placement and Rendering
 

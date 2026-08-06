@@ -1,8 +1,9 @@
 use anyhow::Context;
 use holtburger_3d::{
     LandblockSourceLayer, discover_content_runtime, load_active_region_data_bytes,
-    load_animation_bytes, load_landblock_source_batch_bytes, load_sky_source_bytes,
-    load_texture_pixels_bytes,
+    load_animation_bytes, load_landblock_source_batch_bytes, load_particle_emitter_bytes,
+    load_particle_meshes_bytes, load_physics_script_bytes, load_sky_source_bytes,
+    load_sound_table_bytes, load_texture_pixels_bytes,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -43,6 +44,30 @@ struct TexturePixelsRequest {
 #[serde(rename_all = "camelCase")]
 struct AnimationRequest {
     animation_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhysicsScriptRequest {
+    script_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParticleEmitterRequest {
+    emitter_info_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParticleMeshesRequest {
+    hw_gfx_obj_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SoundTableRequest {
+    sound_table_id: String,
 }
 
 #[tokio::main]
@@ -129,6 +154,42 @@ async fn handle_connection(
         ("POST", "/animation") => {
             let request = serde_json::from_slice::<AnimationRequest>(&request.body)?;
             match load_animation_bytes(runtime, &request.animation_id).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/physics-script") => {
+            let request = serde_json::from_slice::<PhysicsScriptRequest>(&request.body)?;
+            match load_physics_script_bytes(runtime, &request.script_id).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/particle-emitter") => {
+            let request = serde_json::from_slice::<ParticleEmitterRequest>(&request.body)?;
+            match load_particle_emitter_bytes(runtime, &request.emitter_info_id).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/particle-meshes") => {
+            let request = serde_json::from_slice::<ParticleMeshesRequest>(&request.body)?;
+            match load_particle_meshes_bytes(runtime, &request.hw_gfx_obj_ids).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/sound-table") => {
+            let request = serde_json::from_slice::<SoundTableRequest>(&request.body)?;
+            match load_sound_table_bytes(runtime, &request.sound_table_id).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
                 }

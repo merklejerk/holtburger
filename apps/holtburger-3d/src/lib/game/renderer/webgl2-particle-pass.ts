@@ -1,4 +1,4 @@
-import type { ParticleDrawCohort } from "../systems/particle-emitter-runtime";
+import type { ParticleDrawCohort } from "../systems/particle-system";
 import type { DatAssetId } from "../game-types";
 import {
 	createWebGL2ParticleProgram,

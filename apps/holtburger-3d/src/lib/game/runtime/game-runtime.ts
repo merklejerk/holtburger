@@ -57,7 +57,7 @@ import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
-import { ParticleEmitterRuntime } from "../systems/particle-emitter-runtime";
+import { ParticleSystem } from "../systems/particle-system";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
 import { AudioSystem, type AudioDevice } from "../systems/audio-system";
@@ -337,7 +337,7 @@ export class GameRuntime {
 	readonly #behaviorRouter: BehaviorEventRouter;
 	readonly #physicsScripts: PhysicsScriptRepository;
 	readonly #particleEmitters: ParticleEmitterRepository;
-	readonly #particles: ParticleEmitterRuntime;
+	readonly #particles: ParticleSystem;
 	readonly #soundTables: SoundTableRepository;
 	readonly #particleMeshes: ParticleMeshCache;
 	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
@@ -615,7 +615,7 @@ export class GameRuntime {
 		this.#particleEmitters = new ParticleEmitterRepository(
 			dependencies.particleEmitterSource,
 		);
-		this.#particles = new ParticleEmitterRuntime({
+		this.#particles = new ParticleSystem({
 			clock: () => this.#lastFrameTimeSeconds,
 			// Reads an already-staged definition; an unstaged id returns null rather than starting
 			// a load inside the frame.

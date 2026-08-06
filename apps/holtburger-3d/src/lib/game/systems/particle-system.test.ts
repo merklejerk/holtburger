@@ -5,7 +5,7 @@ import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repos
 import type { Vector3 } from "../behavior/particle-motion";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
-import { ParticleEmitterRuntime } from "./particle-emitter-runtime";
+import { ParticleSystem } from "./particle-system";
 
 const TARGET: BehaviorTarget = {
 	generation: 1,
@@ -63,10 +63,10 @@ function prepared(
  */
 const runtime = (
 	overrides: Partial<
-		ConstructorParameters<typeof ParticleEmitterRuntime>[0]
+		ConstructorParameters<typeof ParticleSystem>[0]
 	> = {},
 ) =>
-	new ParticleEmitterRuntime({
+	new ParticleSystem({
 		clock: () => 0,
 		originOf: () => ORIGIN,
 		resolveEmitter: () => null,
@@ -74,7 +74,7 @@ const runtime = (
 		...overrides,
 	});
 
-describe("ParticleEmitterRuntime", () => {
+describe("ParticleSystem", () => {
 	it("releases initial particles immediately, before any interval applies", () => {
 		const particles = runtime();
 

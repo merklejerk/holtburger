@@ -14,7 +14,7 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
-import type { ParticleDrawCohort } from "../systems/particle-emitter-runtime";
+import type { ParticleDrawCohort } from "../systems/particle-system";
 import type { TexturePreparer } from "../textures/texture-preparer";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */

@@ -38,6 +38,8 @@ import {
 } from "../systems/object-visual-template-repository";
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
+import { BehaviorEventRouter } from "../behavior/behavior-event-router";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
@@ -305,6 +307,7 @@ export class GameRuntime {
 	readonly #animationPresentation = new AnimationPresentationScheduler();
 	/** Persistent visual-effect state advanced only by the authored behavior clock. */
 	readonly #effects: EffectSystem;
+	readonly #behaviorRouter: BehaviorEventRouter;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
@@ -537,7 +540,23 @@ export class GameRuntime {
 			dynamicGenerationToResourceOwnerId,
 		);
 		this.#effects = new EffectSystem();
-		this.#animation = new AnimationSystem(this.#effects);
+		this.#behaviorRouter = new BehaviorEventRouter(
+			{
+				effects: this.#effects,
+				// Chained script activation lands with the script clock in Phase 7; until an authored
+				// script runs, no `CallPES` can reach this port.
+				scheduler: {
+					scheduleActivation: () => {
+						throw new Error(
+							"Chained script activation has no owner until physics scripts are installed.",
+						);
+					},
+				},
+				targets: { isLive: (target) => this.#animation.holds(target) },
+			},
+			FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
+		);
+		this.#animation = new AnimationSystem(this.#effects, this.#behaviorRouter);
 		this.#terrain = new TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>(
 			this.#scene,
 			dependencies.terrainGenerator,
@@ -722,6 +741,7 @@ export class GameRuntime {
 		return {
 			animation: this.#animation.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
+			behavior: this.#behaviorRouter.getDiagnostics(),
 			effects: this.#effects.getDiagnostics(),
 			presentationCadence: this.#animationPresentation.getDiagnostics(),
 			residents: this.getAuthoredDynamicResidentDiagnostics(),
@@ -1225,8 +1245,8 @@ export class GameRuntime {
 						? [
 								{
 									animation: animation.animation,
-									nodeId,
 									residentIdentity: residentKey(source.identity),
+									target: { generation: installation.generation, nodeId },
 								},
 							]
 						: [],

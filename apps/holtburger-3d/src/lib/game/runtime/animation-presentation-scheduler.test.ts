@@ -1,11 +1,20 @@
+import {
+	buildEffectRouter,
+	testTarget,
+} from "../behavior/behavior-test-harness";
 import { describe, expect, it } from "vitest";
 import type { AdvancedAnimationFrame } from "../systems/animation-system";
 import { AnimationSystem } from "../systems/animation-system";
-import { EffectSystem } from "../systems/effect-system";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import { Mat4 } from "../math/types";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
+
+/** An animation system over a throwaway effect system and its router. */
+function buildAnimationSystem() {
+	const { effects, router } = buildEffectRouter();
+	return new AnimationSystem<string>(effects, router);
+}
 
 describe("AnimationPresentationScheduler", () => {
 	it("uses the product offscreen cadence by default", () => {
@@ -45,9 +54,9 @@ describe("AnimationPresentationScheduler", () => {
 	});
 
 	it("samples previous-frame visibility every frame and offscreen roots on interval", () => {
-		const system = new AnimationSystem<string>(new EffectSystem());
-		system.install("owner", "scene-node:1", "resident:1", clip());
-		system.install("owner", "scene-node:2", "resident:2", clip());
+		const system = buildAnimationSystem();
+		system.install("owner", testTarget("scene-node:1"), "resident:1", clip());
+		system.install("owner", testTarget("scene-node:2"), "resident:2", clip());
 		const scheduler = new AnimationPresentationScheduler();
 		scheduler.setOffscreenSampleIntervalSeconds(0.1);
 
@@ -68,8 +77,8 @@ describe("AnimationPresentationScheduler", () => {
 	});
 
 	it("bounds first-visible staleness to one completed feedback frame", () => {
-		const system = new AnimationSystem<string>(new EffectSystem());
-		system.install("owner", "scene-node:1", "resident:1", clip());
+		const system = buildAnimationSystem();
+		system.install("owner", testTarget("scene-node:1"), "resident:1", clip());
 		const scheduler = new AnimationPresentationScheduler();
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(0), 0);
@@ -88,13 +97,13 @@ describe("AnimationPresentationScheduler", () => {
 	});
 
 	it("drops retired identities and treats replacements as immediately due", () => {
-		const system = new AnimationSystem<string>(new EffectSystem());
-		system.install("owner", "scene-node:1", "resident:1", clip());
+		const system = buildAnimationSystem();
+		system.install("owner", testTarget("scene-node:1"), "resident:1", clip());
 		const scheduler = new AnimationPresentationScheduler();
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(0), 0);
 		system.removeOwner("owner");
-		system.install("owner", "scene-node:2", "resident:2", clip());
+		system.install("owner", testTarget("scene-node:2"), "resident:2", clip());
 
 		expect(scheduler.select(system.advance(0.1), 0.1).selectedNodeIds).toEqual([
 			"scene-node:2",
@@ -103,9 +112,9 @@ describe("AnimationPresentationScheduler", () => {
 	});
 
 	it("samples a multi-view visibility union once and resets lifecycle state", () => {
-		const system = new AnimationSystem<string>(new EffectSystem());
-		system.install("owner", "scene-node:1", "resident:1", clip());
-		system.install("owner", "scene-node:2", "resident:2", clip());
+		const system = buildAnimationSystem();
+		system.install("owner", testTarget("scene-node:1"), "resident:1", clip());
+		system.install("owner", testTarget("scene-node:2"), "resident:2", clip());
 		const scheduler = new AnimationPresentationScheduler();
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(0), 0);
@@ -137,8 +146,8 @@ describe("AnimationPresentationScheduler", () => {
 	});
 
 	it("samples offscreen roots immediately after a long frame gap or clock regression", () => {
-		const system = new AnimationSystem<string>(new EffectSystem());
-		system.install("owner", "scene-node:1", "resident:1", clip());
+		const system = buildAnimationSystem();
+		system.install("owner", testTarget("scene-node:1"), "resident:1", clip());
 		const scheduler = new AnimationPresentationScheduler();
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(10), 10);
@@ -170,9 +179,9 @@ function advancedFrame(
 	nodeIds: readonly `scene-node:${number}`[],
 	timeSeconds: number,
 ): { readonly frame: AdvancedAnimationFrame } {
-	const system = new AnimationSystem<string>(new EffectSystem());
+	const system = buildAnimationSystem();
 	for (const [index, nodeId] of nodeIds.entries()) {
-		system.install("owner", nodeId, `resident:${index}`, clip());
+		system.install("owner", testTarget(nodeId), `resident:${index}`, clip());
 	}
 	return { frame: system.advance(timeSeconds) };
 }

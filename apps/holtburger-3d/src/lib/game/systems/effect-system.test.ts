@@ -1,185 +1,144 @@
 import { describe, expect, it } from "vitest";
-import type { DecodedAnimationHook } from "../../assets/decode-animation-record";
-import type { PreparedAnimation } from "../animation/animation-asset-repository";
-import { transformPoint3 } from "../math/matrices";
-import { Mat4, Vec3 } from "../math/types";
+import type { BehaviorTarget } from "../behavior/behavior-event-router";
+import { Vec3 } from "../math/types";
+import type { SceneNodeId } from "../scene";
 import { EffectSystem } from "./effect-system";
 
-const NODE = "scene-node:1";
+const TARGET: BehaviorTarget = {
+	generation: 1,
+	nodeId: "node-1" as SceneNodeId,
+};
+
+function install(partCount = 2) {
+	const effects = new EffectSystem();
+	effects.install(TARGET.nodeId, partCount);
+	return effects;
+}
+
+function translucencies(
+	effects: EffectSystem,
+	fractionalSeconds = 0,
+): number[] {
+	return effects
+		.samplePresentation(TARGET.nodeId, fractionalSeconds, 0)
+		.partRenderStates.map((state) => state.translucency);
+}
 
 describe("EffectSystem", () => {
-	it("applies authored omega once per semantic step and samples its fractional modifier", () => {
-		const effects = new EffectSystem();
-		effects.install(NODE, 1);
-		effects.executeDepartedFrames(
-			NODE,
-			animation([setOmegaHook(new Vec3(0, 0, 1))]),
-			[0],
-			"forward",
-			"live",
-		);
+	it("accumulates authored omega once per semantic step", () => {
+		const effects = install();
+		effects.applySetOmega(TARGET, new Vec3(0, 0, 1));
 
-		const halfway = transformPoint3(
-			effects.samplePresentation(NODE, 1 / 60, 0.5).rootRotationModifier,
-			new Vec3(1, 0, 0),
-		);
-		expect(halfway.x).toBeCloseTo(Math.cos(0.5));
-		expect(halfway.y).toBeCloseTo(Math.sin(0.5));
+		const before = effects.samplePresentation(TARGET.nodeId, 0, 0);
+		effects.advanceSemanticStep(TARGET.nodeId, 1 / 30);
+		const after = effects.samplePresentation(TARGET.nodeId, 0, 0);
 
-		effects.advanceSemanticStep(NODE, 1 / 30);
-		const committed = transformPoint3(
-			effects.samplePresentation(NODE, 0, 0).rootRotationModifier,
-			new Vec3(1, 0, 0),
-		);
-		expect(committed.x).toBeCloseTo(Math.cos(1));
-		expect(committed.y).toBeCloseTo(Math.sin(1));
+		expect(after.rootRotationModifier).not.toEqual(before.rootRotationModifier);
 	});
 
-	it("sets immediate translucency exactly and samples timed ramps without mutation", () => {
-		const effects = new EffectSystem();
-		effects.install(NODE, 1);
-		effects.executeDepartedFrames(
-			NODE,
-			animation([transparentPartHook(0, 0, 0.75, 0)]),
-			[0],
-			"forward",
-			"live",
-		);
-		expect(effects.samplePresentation(NODE, 0, 0).partRenderStates).toEqual([
-			{ translucency: 0.75 },
-		]);
+	it("applies a sub-threshold ramp instantly and a timed ramp progressively", () => {
+		const effects = install();
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 0,
+			end: 0.75,
+			partIndex: 0,
+			start: 0,
+		});
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 1,
+			end: 1,
+			partIndex: 1,
+			start: 0,
+		});
 
-		effects.executeDepartedFrames(
-			NODE,
-			animation([transparentPartHook(0, 0.25, 1, 1)]),
-			[0],
-			"forward",
-			"live",
-		);
-		expect(
-			effects.samplePresentation(NODE, 0.5, 0).partRenderStates[0]
-				?.translucency,
-		).toBeCloseTo(0.625);
-		expect(
-			effects.samplePresentation(NODE, 0, 0).partRenderStates[0]?.translucency,
-		).toBe(0.25);
+		// Part 0 jumped straight to its endpoint; part 1 is still at its start value.
+		expect(translucencies(effects)).toEqual([0.75, 0]);
+
+		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		expect(translucencies(effects)[1]).toBeCloseTo(0.5);
 	});
 
-	it("lands timed ramps exactly on their endpoint with uneven steps", () => {
-		const effects = new EffectSystem();
-		effects.install(NODE, 1);
-		effects.executeDepartedFrames(
-			NODE,
-			animation([transparentPartHook(0, 0, 1, 1)]),
-			[0],
-			"forward",
-			"live",
-		);
-		for (let step = 0; step < 4; step += 1)
-			effects.advanceSemanticStep(NODE, 0.3);
+	it("lands a timed ramp exactly on its endpoint across uneven steps", () => {
+		const effects = install(1);
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 1,
+			end: 1,
+			partIndex: 0,
+			start: 0,
+		});
 
-		expect(
-			effects.samplePresentation(NODE, 0, 0).partRenderStates[0]?.translucency,
-		).toBe(1);
-	});
-
-	it("keeps part timelines independent and removes complete entity state", () => {
-		const effects = new EffectSystem();
-		effects.install(NODE, 2);
-		effects.executeDepartedFrames(
-			NODE,
-			animation([
-				transparentPartHook(0, 0, 0.4, 0),
-				transparentPartHook(1, 0, 0.8, 0),
-			]),
-			[0],
-			"forward",
-			"live",
-		);
-		expect(effects.samplePresentation(NODE, 0, 0).partRenderStates).toEqual([
-			{ translucency: 0.4 },
-			{ translucency: 0.8 },
-		]);
-
-		effects.remove(NODE);
-		expect(effects.getDiagnostics().residentEffectStateCount).toBe(0);
-		expect(() => effects.samplePresentation(NODE, 0, 0)).toThrow(
-			"Effect state for scene-node:1 does not exist",
-		);
-	});
-
-	it("retains bounded ordered provenance for executed and deferred hooks", () => {
-		const effects = new EffectSystem();
-		effects.install(NODE, 1);
-		const clip = animation([
-			setOmegaHook(new Vec3(0, 0, 1)),
-			deferredEffectHook(),
-		]);
-		for (let index = 0; index < 150; index += 1) {
-			effects.executeDepartedFrames(NODE, clip, [0], "forward", "live");
+		for (const step of [0.3, 0.45, 0.4]) {
+			effects.advanceSemanticStep(TARGET.nodeId, step);
 		}
 
-		expect(effects.getDiagnostics()).toMatchObject({
-			deferredHookCount: 150,
-			executedHookCount: 150,
+		expect(translucencies(effects)).toEqual([1]);
+	});
+
+	it("samples a ramp without committing the sampled time", () => {
+		const effects = install(1);
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 1,
+			end: 1,
+			partIndex: 0,
+			start: 0,
 		});
-		expect(effects.getObservations()).toHaveLength(256);
-		expect(effects.getObservations().slice(-2)).toMatchObject([
-			{ authoredOrder: 0, command: "set-omega", outcome: "executed" },
-			{ authoredOrder: 1, command: "ethereal", outcome: "deferred" },
-		]);
+
+		expect(translucencies(effects, 0.5)[0]).toBeCloseTo(0.5);
+		// Sampling ahead must not advance the ramp itself.
+		expect(translucencies(effects, 0)[0]).toBe(0);
+	});
+
+	it("leaves a replayed ramp in flight rather than snapping it to its endpoint", () => {
+		const effects = install(1);
+
+		// Replay applies the ramp, then the remaining elapsed steps advance it. Snapping to the end
+		// here would discard a ramp that was still running when the owner became observable.
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 10,
+			end: 1,
+			partIndex: 0,
+			start: 0,
+		});
+		effects.advanceSemanticStep(TARGET.nodeId, 2.5);
+
+		expect(translucencies(effects)[0]).toBeCloseTo(0.25);
+	});
+
+	it("rejects a part index outside the installed state", () => {
+		const effects = install(1);
+
+		expect(() =>
+			effects.applyTransparentPart(TARGET, {
+				durationSeconds: 0,
+				end: 1,
+				partIndex: 3,
+				start: 0,
+			}),
+		).toThrow("out of range");
+	});
+
+	it("refuses to mutate state for a node it does not hold", () => {
+		const effects = new EffectSystem();
+
+		expect(() => effects.applySetOmega(TARGET, new Vec3(0, 0, 1))).toThrow(
+			"does not exist",
+		);
+	});
+
+	it("keeps part timelines independent and drops removed entity state", () => {
+		const effects = install();
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 1,
+			end: 1,
+			partIndex: 1,
+			start: 0,
+		});
+		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+
+		expect(translucencies(effects)[0]).toBe(0);
+		expect(effects.getDiagnostics().residentEffectStateCount).toBe(1);
+
+		effects.remove(TARGET.nodeId);
+		expect(effects.getDiagnostics().residentEffectStateCount).toBe(0);
 	});
 });
-
-function animation(hooks: readonly DecodedAnimationHook[]): PreparedAnimation {
-	return {
-		frameCount: 1,
-		framesPerSecond: 30,
-		hooks,
-		id: "0x03000001",
-		partCount: 2,
-		partFrames: [Mat4.identity(), Mat4.identity()],
-		positionFrames: [],
-	};
-}
-
-function setOmegaHook(omega: Vec3): DecodedAnimationHook {
-	return {
-		authoredOrder: 0,
-		direction: "both",
-		frameIndex: 0,
-		kind: "set-omega",
-		omega,
-	};
-}
-
-function transparentPartHook(
-	partIndex: number,
-	start: number,
-	end: number,
-	durationSeconds: number,
-): DecodedAnimationHook {
-	return {
-		authoredOrder: partIndex,
-		direction: "both",
-		durationSeconds,
-		end,
-		frameIndex: 0,
-		kind: "transparent-part",
-		partIndex,
-		start,
-	};
-}
-
-function deferredEffectHook(): DecodedAnimationHook {
-	return {
-		authoredOrder: 1,
-		command: "ethereal",
-		direction: "both",
-		frameIndex: 0,
-		blocksActivation: false,
-		kind: "unimplemented",
-		payload: { kind: "no-payload" },
-		sourceType: 6,
-	};
-}

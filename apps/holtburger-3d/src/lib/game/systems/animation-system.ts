@@ -3,6 +3,10 @@ import {
 	advanceCyclicFrame,
 	sampleAnimationPose,
 } from "../animation/animation-playback";
+import type {
+	BehaviorEventRouter,
+	BehaviorTarget,
+} from "../behavior/behavior-event-router";
 import type { SceneNodeId } from "../scene";
 import type { ArticulatedPose } from "./components";
 import { EffectSystem, type EffectPresentationSample } from "./effect-system";
@@ -17,6 +21,8 @@ const advancedAnimationFrameBrand: unique symbol = Symbol(
 
 interface AnimationRecord {
 	readonly animation: PreparedAnimation;
+	/** Dispatch identity, carried so a recycled node id cannot receive this record's commands. */
+	readonly target: BehaviorTarget;
 	framePosition: number;
 	lastTimeSeconds: number | null;
 	fractionalSeconds: number;
@@ -57,6 +63,7 @@ export interface StagedAnimationOwner {
 /** Owns independent playback clocks and semantic traversal, but no scene or resource mutation. */
 export class AnimationSystem<TOwnerId extends string> {
 	readonly #effects: EffectSystem;
+	readonly #router: BehaviorEventRouter;
 	readonly #records = new Map<SceneNodeId, AnimationRecord>();
 	readonly #owners = new Map<TOwnerId, Set<SceneNodeId>>();
 	readonly #stagedNodeIds = new Set<SceneNodeId>();
@@ -72,21 +79,29 @@ export class AnimationSystem<TOwnerId extends string> {
 		lastSemanticStepCount: 0,
 	};
 
-	constructor(effects: EffectSystem) {
+	constructor(effects: EffectSystem, router: BehaviorEventRouter) {
 		this.#effects = effects;
+		this.#router = router;
+	}
+
+	/** Whether this system still holds the exact node and generation a command targets. */
+	holds(target: BehaviorTarget): boolean {
+		const record = this.#records.get(target.nodeId);
+		return record?.target.generation === target.generation;
 	}
 
 	install(
 		ownerId: TOwnerId,
-		nodeId: SceneNodeId,
+		target: BehaviorTarget,
 		residentIdentity: string,
 		animation: PreparedAnimation,
 	): DynamicPresentationSample {
 		if (this.#destroyed)
 			throw new Error("Cannot install destroyed animation playback.");
+		const nodeId = target.nodeId;
 		if (this.#records.has(nodeId))
 			throw new Error(`Animation state for ${nodeId} already exists.`);
-		const record = this.#createRecord(nodeId, residentIdentity, animation);
+		const record = this.#createRecord(target, residentIdentity, animation);
 		this.#records.set(nodeId, record);
 		let nodes = this.#owners.get(ownerId);
 		if (!nodes) {
@@ -160,7 +175,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		ownerId: TOwnerId,
 		installations: readonly {
 			readonly animation: PreparedAnimation;
-			readonly nodeId: SceneNodeId;
+			readonly target: BehaviorTarget;
 			readonly residentIdentity: string;
 		}[],
 	): StagedAnimationOwner {
@@ -170,22 +185,18 @@ export class AnimationSystem<TOwnerId extends string> {
 		const samples: DynamicPresentationSample[] = [];
 		try {
 			for (const installation of installations) {
-				if (
-					records.has(installation.nodeId) ||
-					this.#records.has(installation.nodeId)
-				) {
-					throw new Error(
-						`Animation state for ${installation.nodeId} already exists.`,
-					);
+				const nodeId = installation.target.nodeId;
+				if (records.has(nodeId) || this.#records.has(nodeId)) {
+					throw new Error(`Animation state for ${nodeId} already exists.`);
 				}
 				const record = this.#createRecord(
-					installation.nodeId,
+					installation.target,
 					installation.residentIdentity,
 					installation.animation,
 				);
-				records.set(installation.nodeId, record);
-				this.#stagedNodeIds.add(installation.nodeId);
-				samples.push(this.#sample(installation.nodeId, record));
+				records.set(nodeId, record);
+				this.#stagedNodeIds.add(nodeId);
+				samples.push(this.#sample(nodeId, record));
 			}
 		} catch (cause) {
 			for (const nodeId of records.keys()) {
@@ -308,16 +319,18 @@ export class AnimationSystem<TOwnerId extends string> {
 	}
 
 	#createRecord(
-		nodeId: SceneNodeId,
+		target: BehaviorTarget,
 		residentIdentity: string,
 		animation: PreparedAnimation,
 	): AnimationRecord {
+		const nodeId = target.nodeId;
 		this.#effects.install(nodeId, animation.partCount);
 		const record: AnimationRecord = {
 			animation,
 			fractionalSeconds: 0,
 			framePosition: 0,
 			lastTimeSeconds: null,
+			target,
 		};
 		try {
 			let remainingSeconds =
@@ -354,13 +367,38 @@ export class AnimationSystem<TOwnerId extends string> {
 			"forward",
 		);
 		record.framePosition = advance.framePosition;
-		this.#effects.executeDepartedFrames(
-			nodeId,
-			record.animation,
-			advance.departedFrames,
-			"forward",
-			mode,
-		);
+		this.#dispatchDepartedFrames(record, advance.departedFrames, mode);
+	}
+
+	/**
+	 * Route every hook the crossed frames authored, in authored order.
+	 *
+	 * Direction filtering stays here rather than in the router: it is a property of animation
+	 * playback (`CSequence::execute_hooks`) with no counterpart in the script lane, where retail
+	 * stamps every hook `-2` and executes it unconditionally.
+	 */
+	#dispatchDepartedFrames(
+		record: AnimationRecord,
+		departedFrames: readonly number[],
+		mode: "initial-state" | "live",
+	): void {
+		for (const frameIndex of departedFrames) {
+			for (const hook of record.animation.hooks) {
+				if (hook.frameIndex !== frameIndex) continue;
+				if (hook.direction !== "both" && hook.direction !== "forward") continue;
+				this.#router.dispatch(
+					hook,
+					record.target,
+					{
+						assetId: record.animation.id,
+						authoredOrder: hook.authoredOrder,
+						authoredPosition: hook.frameIndex,
+						producer: "animation",
+					},
+					mode,
+				);
+			}
+		}
 	}
 }
 

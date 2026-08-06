@@ -1,0 +1,220 @@
+import { describe, expect, it } from "vitest";
+import type { BehaviorTarget } from "../behavior/behavior-event-router";
+import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
+import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
+import type { Vector3 } from "../behavior/particle-motion";
+import type { DatAssetId } from "../game-types";
+import type { SceneNodeId } from "../scene";
+import { ParticleEmitterRuntime } from "./particle-emitter-runtime";
+
+const TARGET: BehaviorTarget = {
+	generation: 1,
+	nodeId: "node-1" as SceneNodeId,
+};
+const ORIGIN: Vector3 = [0, 0, 0];
+const at = (): Vector3 => ORIGIN;
+
+function prepared(
+	overrides: Partial<DecodedParticleEmitterInfo> = {},
+): PreparedParticleEmitter {
+	const info: DecodedParticleEmitterInfo = {
+		a: [1, 0, 0],
+		b: [0, 0, 0],
+		birthrateSeconds: 1,
+		c: [0, 0, 0],
+		emitsPerMeter: false,
+		emitsPerSecond: true,
+		finalScale: 1,
+		finalTrans: 1,
+		followsParent: false,
+		hwGfxObjId: "0x01000ff4" as DatAssetId,
+		id: "0x3200020c" as DatAssetId,
+		initialParticles: 0,
+		isPersistent: true,
+		lifespan: 10,
+		lifespanRand: 0,
+		maxA: 1,
+		maxB: 1,
+		maxC: 1,
+		maxOffset: 0,
+		maxParticles: 100,
+		minA: 1,
+		minB: 1,
+		minC: 1,
+		minOffset: 0,
+		motionType: 2,
+		offsetDir: [0, 0, 1],
+		scaleRand: 0,
+		startScale: 1,
+		startTrans: 0,
+		totalParticles: 0,
+		totalSeconds: 0,
+		transRand: 0,
+		...overrides,
+	};
+	return { envelopeRadius: 10, id: info.id, info };
+}
+
+/** Mid-range roll keeps every randomized term at its authored base. */
+const runtime = () => new ParticleEmitterRuntime(() => 0.5);
+
+describe("ParticleEmitterRuntime", () => {
+	it("releases initial particles immediately, before any interval applies", () => {
+		const particles = runtime();
+
+		particles.create(TARGET, prepared({ initialParticles: 3 }), ORIGIN, 0, 0, ORIGIN);
+
+		expect(particles.getDiagnostics().particleCount).toBe(3);
+	});
+
+	it("treats birthrate as a minimum interval and never bursts to catch up", () => {
+		const particles = runtime();
+		particles.create(TARGET, prepared({ birthrateSeconds: 1 }), ORIGIN, 0, 0, ORIGIN);
+
+		particles.advance(0, at);
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+
+		// Half an interval later: still one.
+		particles.advance(0.5, at);
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+
+		// Five intervals in one step releases exactly one more, not five.
+		particles.advance(5, at);
+		expect(particles.getDiagnostics().particleCount).toBe(2);
+	});
+
+	it("caps live particles at the authored maximum", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ birthrateSeconds: 0, maxParticles: 3 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		for (let step = 0; step < 20; step += 1) particles.advance(step, at);
+
+		expect(particles.getDiagnostics().particleCount).toBe(3);
+	});
+
+	it("expires particles by lifespan and only by lifespan", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		particles.advance(1, at);
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+		particles.advance(2.5, at);
+		expect(particles.getDiagnostics().particleCount).toBe(0);
+	});
+
+	it("reaps a finite emitter once its budget is spent and its particles finish", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({
+				birthrateSeconds: 0,
+				isPersistent: false,
+				lifespan: 1,
+				totalParticles: 2,
+			}),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		particles.advance(0, at);
+		particles.advance(0.1, at);
+		expect(particles.getDiagnostics().emitterCount).toBe(1);
+
+		// Budget spent, then the last particle ages out: the emitter reaps itself.
+		particles.advance(5, at);
+		expect(particles.getDiagnostics().emitterCount).toBe(0);
+		expect(particles.getDiagnostics().reapedEmitterCount).toBe(1);
+	});
+
+	it("drains on stop but vanishes on destroy", () => {
+		const drained = runtime();
+		drained.create(TARGET, prepared({ initialParticles: 2, lifespan: 5 }), ORIGIN, 0, 0, ORIGIN);
+		drained.stop(TARGET, 0);
+		drained.advance(1, at);
+		// Stopped emitters keep their live particles until each finishes its own lifespan.
+		expect(drained.getDiagnostics().particleCount).toBe(2);
+
+		const destroyed = runtime();
+		destroyed.create(TARGET, prepared({ initialParticles: 2 }), ORIGIN, 0, 0, ORIGIN);
+		destroyed.destroy(TARGET, 0);
+		expect(destroyed.getDiagnostics().particleCount).toBe(0);
+	});
+
+	it("replaces a live emitter that shares a nonzero authored id", () => {
+		const particles = runtime();
+		particles.create(TARGET, prepared({ initialParticles: 2 }), ORIGIN, 7, 0, ORIGIN);
+		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 7, 0, ORIGIN);
+
+		expect(particles.getDiagnostics().emitterCount).toBe(1);
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+	});
+
+	it("keeps auto-id emitters independent of one another", () => {
+		const particles = runtime();
+		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
+		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
+
+		expect(particles.getDiagnostics().emitterCount).toBe(2);
+	});
+
+	it("leaves particles behind unless the emitter follows its parent", () => {
+		const left = runtime();
+		left.create(TARGET, prepared({ a: [0, 0, 0], initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
+		const moved = (): Vector3 => [100, 0, 0];
+		// The parent moved, but a leave-behind particle stays at its spawn snapshot.
+		expect(left.sample(0, moved)[0]!.position[0]).toBeCloseTo(0);
+
+		const following = runtime();
+		following.create(
+			TARGET,
+			prepared({ a: [0, 0, 0], followsParent: true, initialParticles: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+		expect(following.sample(0, moved)[0]!.position[0]).toBeCloseTo(100);
+	});
+
+	it("drops emitters whose target stops publishing a transform", () => {
+		const particles = runtime();
+		particles.create(TARGET, prepared({ initialParticles: 1 }), ORIGIN, 0, 0, ORIGIN);
+
+		particles.advance(1, () => null);
+
+		expect(particles.getDiagnostics().emitterCount).toBe(0);
+	});
+
+	it("refuses to invent a cadence for a purely per-meter emitter", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ emitsPerMeter: true, emitsPerSecond: false }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		particles.advance(100, at);
+
+		// The retail per-meter predicate is unrecovered, so emitting anything would be a guess.
+		expect(particles.getDiagnostics().particleCount).toBe(0);
+	});
+});

@@ -639,15 +639,16 @@ records one exhaustive outcome per command; it owns no clocks, queues, effect st
 
 ### Convergence Debt Ledger
 
-| Landed seam or debt                                                          | Why it is honest now                                                                                           | Scheduled replacement                                                                                                                                                              |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EffectSystem.executeDepartedFrames` accepts animation-specific records      | Animation is still the only live producer                                                                      | Phase 2 compiles one prepared command union; Phase 3 introduces the router and adapts animation                                                                                    |
-| `PartRenderState` contains only translucency                                 | It has one real consumer and no speculative fields                                                             | Phase 4 widens it only for proven scale/UV presentation facts                                                                                                                      |
-| `ReplaceObjectHook` blocks animated activation                               | No replacement resources or bounds are prepared                                                                | Phase 4 unblocks activation: the hook decodes and reports intentionally-inert (retail-faithful)                                                                                    |
-| Script-only authored residents retain static presentation                    | No script clock or effect closure exists                                                                       | Phase 7 promotes them only after complete staged readiness                                                                                                                         |
-| Particle and audio consumers are absent                                      | The app has no existing focused runtimes to reuse                                                              | Phases 5 and 6 add named owners after Phase 1 evidence                                                                                                                             |
-| Repository-wide Prettier has untouched baseline failures                     | Convergence formats every touched file without unrelated churn                                                 | Convergence Phase 8, before this plan executes implementation                                                                                                                      |
-| `TextureVelocity` rates resolve per staged closure, not per activated script | All 11 authored hooks sit in setup-default closures that always play, so no shipped case is expected to differ | Phase 8 verifies the expectation against the landed workload; if any surface scrolls behind an unfired `CallPES` chain, resolve per activated script (storage model is unaffected) |
+| Landed seam or debt                                                          | Why it is honest now                                                                                                            | Scheduled replacement                                                                                                                                                              |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EffectSystem.executeDepartedFrames` accepts animation-specific records      | Animation is still the only live producer                                                                                       | Phase 2 compiles one prepared command union; Phase 3 introduces the router and adapts animation                                                                                    |
+| `PartRenderState` contains only translucency                                 | It has one real consumer and no speculative fields                                                                              | Phase 4 widens it only for proven scale/UV presentation facts                                                                                                                      |
+| `ReplaceObjectHook` blocks animated activation                               | No replacement resources or bounds are prepared                                                                                 | Phase 4 unblocks activation: the hook decodes and reports intentionally-inert (retail-faithful)                                                                                    |
+| Script-only authored residents retain static presentation                    | No script clock or effect closure exists                                                                                        | Phase 7 promotes them only after complete staged readiness                                                                                                                         |
+| Particle and audio consumers are absent                                      | The app has no existing focused runtimes to reuse                                                                               | Phases 5 and 6 add named owners after Phase 1 evidence                                                                                                                             |
+| Repository-wide Prettier has untouched baseline failures                     | Convergence formats every touched file without unrelated churn                                                                  | Convergence Phase 8, before this plan executes implementation                                                                                                                      |
+| Activation-time `localBounds` do not account for a later `Scale` ramp        | No authored setup-default producer reaches a `Scale` hook in the measured slice, and published bounds are recomputed per sample | Phase 8 widens staged bounds by the maximum authored scale in the owner's script closure, which is knowable at preparation                                                         |
+| `TextureVelocity` rates resolve per staged closure, not per activated script | All 11 authored hooks sit in setup-default closures that always play, so no shipped case is expected to differ                  | Phase 8 verifies the expectation against the landed workload; if any surface scrolls behind an unfired `CallPES` chain, resolve per activated script (storage model is unaffected) |
 
 None of these debts requires a second entity runtime or blocks the spawned architecture design. The
 first four are explicit implementation prerequisites before spawned entities may consume authored
@@ -895,9 +896,10 @@ Progress: **Complete 2026-08-06.** Type check, lint, knip, Clippy, and all 696 f
 
 ### Phase 4: Implement Proven Visual Effect Commands
 
-Progress: **Partially complete 2026-08-06.** Landed: the shared `textureScrollPhase` helper and the
-`ReplaceObjectHook` ratification. Remaining: the `Scale` and `TextureVelocity` consumers and the
-render-state widening they need.
+Progress: **Substantially complete 2026-08-06.** Landed: the shared `textureScrollPhase` helper,
+the `ReplaceObjectHook` ratification, the `Scale` consumer with its render-state widening, and the
+preparation-time `TextureVelocity` rate resolution. Remaining: binding the resolved scroll rate
+through the object draw path, which is renderer wiring rather than effects design.
 
 **Ratified 2026-08-06: `ReplaceObjectHook` execution is dropped.** Retail has no `Execute` for
 hook type 5 — the shipped client parses and preloads it, then does nothing, and the archive
@@ -949,43 +951,28 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
   removed rather than left as a constant. The test asserting the old blocking behavior was replaced
   by one proving activation proceeds, plus one covering a hook that genuinely would misrender.
 
+- **`Scale` landed on the existing root-modifier seam.** `rootRotationModifier` widened into
+  `rootTransformModifier` carrying rotation and uniform scale in one matrix, rather than gaining a
+  parallel field: both are whole-object modifiers applied at the same seam, and a consumer needing
+  them apart would only have to recombine them. Retail's "interpolate from the object's _current_
+  scale" is reproduced, so a second command mid-ramp continues from wherever the first reached.
+- **`TextureVelocity` resolves at preparation and reports `applied-at-preparation` at dispatch.**
+  `resolveAuthoredTextureScroll` walks a staged closure once and returns its single whole-object
+  rate. Conflicting rates within one closure **fail loudly** rather than taking retail's
+  last-writer-wins: a derived phase cannot honor two rates, and the archive contains no such case,
+  so a conflict is a content defect worth surfacing. `texture-velocity-part` is deliberately
+  unhandled — the complete census found zero part-scoped scroll hooks anywhere — so that arm has no
+  planned consumer rather than a deferred one.
+
 #### Remaining Work
 
-- `Scale`: a whole-object uniform ramp from the object's current scale. The natural seam is the
-  existing `EffectPresentationSample.rootRotationModifier`, which should widen into a
-  `rootTransformModifier` carrying rotation and scale together rather than gaining a parallel field.
-  Conservative presentation bounds must track the ramp's **maximum** extent, not its current one.
-- `TextureVelocity`: the consumer records the authored rate against **GfxObj DataID**, and the
-  renderer derives phase through `textureScrollPhase` and binds it as a whole-mesh UV delta once per
-  draw, exactly as the sky pass already does.
-
-  **The offset is never per-instance.** Retail's scroll is a global per-DataID whole-mesh delta
-  (`CPhysics::UpdateTexVelocity`, acclient.c:299999; recorded in the sky pass plan's Phase 0
-  findings), which is precisely what keeps tiled instances of one flowing surface in lockstep at
-  their seams. Every instance of a DataID shares one offset by construction, so widening
-  `ObjectInstanceData` would store the same value N times and would break the seam invariant the
-  moment two copies diverged. An earlier draft of this section proposed exactly that and was wrong.
-
-  **Resolved at preparation time, not at dispatch (ratified 2026-08-06).** Retail registers the rate
-  when the hook executes, so a hook authored at `t > 0` is observably not-yet-scrolling until then.
-  That start-time divergence was ruled immaterial: these are ambient looping flowing surfaces whose
-  absolute phase origin already differs from retail by an accepted, unobservable margin, and a
-  late-starting scroll is a visible "kick" that pre-resolving avoids rather than causes.
-
-  Taking that ruling, the rate stops being a runtime discovery. Preparation walks the staged script
-  closure, extracts each `TextureVelocity` rate against its owner's GfxObj DataIDs, and carries it
-  as a prepared material fact. Nothing mutates during a frame: no rate map written mid-dispatch, no
-  accumulator, no per-entity scroll clock — which is the state this plan asked for and could not
-  have reached by applying at dispatch, since that needs a write-once DataID→rate map that mutates
-  while the frame runs. The runtime command records a distinct outcome saying its effect is already
-  reflected in prepared state, so it reads as a decision rather than as a dropped command.
-
-  **Recorded consequence, deliberately accepted:** preparation resolves rates for every script in
-  the closure, including one reached only through a random-pause `CallPES` chain that may not have
-  fired yet. Such a surface scrolls slightly earlier than retail would start it. All 11 authored
-  `TextureVelocity` hooks sit in setup-default closures that always play, so no shipped case is
-  expected to differ at all; if one ever does, the fix is to resolve rates per activated script
-  rather than per staged closure, which does not change the storage model.
+- Bind the resolved scroll rate through the object draw path: carry it to the visual template as a
+  material fact and set the per-draw UV offset from `textureScrollPhase`, exactly as the sky pass
+  already does. This is the only remaining Phase 4 item and is renderer wiring, not effects design.
+- Conservative presentation bounds must track a `Scale` ramp's **maximum** extent. Published bounds
+  are recomputed per sample so they already follow the current scale, but the activation-time
+  `localBounds` staged by `prepareDynamicAnimation` predate any scale command and would under-bound
+  a scaling object. Recorded as debt below.
 
 ### Phase 5: Add Authored Particle Fidelity
 

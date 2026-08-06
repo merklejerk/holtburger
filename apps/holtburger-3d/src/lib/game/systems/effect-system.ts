@@ -7,13 +7,25 @@ import {
 	rotationVectorQuaternion,
 	retailRotationVectorQuaternion,
 } from "../animation/animation-playback";
-import { createRotationMat4 } from "../math/matrices";
+import {
+	createRotationMat4,
+	createScaleMat4,
+	multiplyMat4,
+} from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import type { PartRenderState } from "./components";
 
 /** Retail schedules an `FPHook` only at or above this duration. */
 const MINIMUM_TIMED_EFFECT_SECONDS = 0.0002;
+
+/** A linear ramp toward a whole-object uniform scale, as retail's `SetScale` interpolates. */
+interface ScaleRamp {
+	readonly durationSeconds: number;
+	readonly end: number;
+	readonly start: number;
+	elapsedSeconds: number;
+}
 
 interface TranslucencyRamp {
 	readonly durationSeconds: number;
@@ -25,6 +37,15 @@ interface TranslucencyRamp {
 interface EffectState {
 	committedOrientation: Quat;
 	omega: Vec3;
+	/**
+	 * Whole-object uniform scale multiplier applied on top of the source and per-part scales.
+	 *
+	 * Retail writes one scalar across the entire part array and composes it multiplicatively with
+	 * each part's setup `default_scale` (acclient.c:313786-313797), so this is a modifier, not a
+	 * replacement.
+	 */
+	scale: number;
+	scaleRamp: ScaleRamp | null;
 	readonly partTranslucencies: number[];
 	readonly translucencyRamps: Array<TranslucencyRamp | null>;
 }
@@ -32,8 +53,13 @@ interface EffectState {
 /** Render-cadence effect facts computed without exposing mutable effect state. */
 export interface EffectPresentationSample {
 	readonly partRenderStates: readonly PartRenderState[];
-	/** Object-local rotation accumulated from authored `SetOmega` hooks. */
-	readonly rootRotationModifier: Mat4;
+	/**
+	 * Object-local root modifier: `SetOmega` rotation composed with `Scale`'s uniform factor.
+	 *
+	 * One matrix rather than two fields, because both are whole-object modifiers applied at the
+	 * same seam and a consumer that needed them apart would have to recombine them anyway.
+	 */
+	readonly rootTransformModifier: Mat4;
 }
 
 /**
@@ -54,6 +80,8 @@ export class EffectSystem implements EffectCommandPort {
 		this.#states.set(nodeId, {
 			committedOrientation: Quat.identity(),
 			omega: Vec3.zero(),
+			scale: 1,
+			scaleRamp: null,
 			partTranslucencies: Array.from({ length: partCount }, () => 0),
 			translucencyRamps: Array.from({ length: partCount }, () => null),
 		});
@@ -64,6 +92,18 @@ export class EffectSystem implements EffectCommandPort {
 		if (!Number.isFinite(stepSeconds) || stepSeconds <= 0)
 			throw new Error("Effect behavior step must be finite and positive.");
 		const state = this.#requiredState(nodeId);
+		if (state.scaleRamp) {
+			state.scaleRamp.elapsedSeconds += stepSeconds;
+			if (state.scaleRamp.elapsedSeconds >= state.scaleRamp.durationSeconds) {
+				state.scale = state.scaleRamp.end;
+				state.scaleRamp = null;
+			} else {
+				state.scale = sampleScaleRamp(
+					state.scaleRamp,
+					state.scaleRamp.elapsedSeconds,
+				);
+			}
+		}
 		const delta = retailRotationVectorQuaternion(state.omega);
 		state.committedOrientation = multiplyQuaternion(
 			delta,
@@ -87,6 +127,32 @@ export class EffectSystem implements EffectCommandPort {
 				ramp.elapsedSeconds,
 			);
 		}
+	}
+
+	/**
+	 * Ramp the whole-object scale toward `end`.
+	 *
+	 * Retail interpolates linearly **from the object's current scale**, not from a fixed base, so a
+	 * second command mid-ramp continues from wherever the first one had reached
+	 * (`SetScale`, acclient.c:328862-328903).
+	 */
+	applyScale(
+		target: BehaviorTarget,
+		values: { readonly end: number; readonly durationSeconds: number },
+	): void {
+		const state = this.#requiredState(target.nodeId);
+		this.#appliedCommandCount += 1;
+		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
+			state.scale = values.end;
+			state.scaleRamp = null;
+			return;
+		}
+		state.scaleRamp = {
+			durationSeconds: values.durationSeconds,
+			elapsedSeconds: 0,
+			end: values.end,
+			start: state.scale,
+		};
 	}
 
 	applySetOmega(target: BehaviorTarget, omega: Vec3): void {
@@ -167,8 +233,11 @@ export class EffectSystem implements EffectCommandPort {
 					};
 				},
 			),
-			rootRotationModifier: createRotationMat4(
-				multiplyQuaternion(delta, state.committedOrientation),
+			rootTransformModifier: multiplyMat4(
+				createRotationMat4(
+					multiplyQuaternion(delta, state.committedOrientation),
+				),
+				createScaleMat4(sampledScale(state, fractionalSeconds)),
 			),
 		};
 	}
@@ -189,6 +258,25 @@ export class EffectSystem implements EffectCommandPort {
 		if (!state) throw new Error(`Effect state for ${nodeId} does not exist.`);
 		return state;
 	}
+}
+
+/** Scale at a fractional instant, without committing that time to the ramp. */
+function sampledScale(state: EffectState, fractionalSeconds: number): Vec3 {
+	const scale = state.scaleRamp
+		? sampleScaleRamp(
+				state.scaleRamp,
+				state.scaleRamp.elapsedSeconds + fractionalSeconds,
+			)
+		: state.scale;
+	return new Vec3(scale, scale, scale);
+}
+
+function sampleScaleRamp(ramp: ScaleRamp, elapsedSeconds: number): number {
+	if (elapsedSeconds >= ramp.durationSeconds) return ramp.end;
+	return (
+		ramp.start +
+		(ramp.end - ramp.start) * (elapsedSeconds / ramp.durationSeconds)
+	);
 }
 
 function sampleRamp(ramp: TranslucencyRamp, elapsedSeconds: number): number {

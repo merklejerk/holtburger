@@ -33,7 +33,9 @@ describe("EffectSystem", () => {
 		effects.advanceSemanticStep(TARGET.nodeId, 1 / 30);
 		const after = effects.samplePresentation(TARGET.nodeId, 0, 0);
 
-		expect(after.rootRotationModifier).not.toEqual(before.rootRotationModifier);
+		expect(after.rootTransformModifier).not.toEqual(
+			before.rootTransformModifier,
+		);
 	});
 
 	it("applies a sub-threshold ramp instantly and a timed ramp progressively", () => {
@@ -123,6 +125,59 @@ describe("EffectSystem", () => {
 		expect(() => effects.applySetOmega(TARGET, new Vec3(0, 0, 1))).toThrow(
 			"does not exist",
 		);
+	});
+
+	it("ramps whole-object scale and lands exactly on its target", () => {
+		const effects = install(1);
+
+		effects.applyScale(TARGET, { durationSeconds: 1, end: 3 });
+		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		// Halfway from the identity scale toward 3.
+		expect(
+			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+		).toBeCloseTo(2);
+
+		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		expect(
+			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+		).toBe(3);
+	});
+
+	it("continues a mid-flight scale ramp from the current scale, as retail does", () => {
+		const effects = install(1);
+
+		effects.applyScale(TARGET, { durationSeconds: 1, end: 3 });
+		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		// Retail's SetScale interpolates from wherever the object is now, not from a fixed base.
+		effects.applyScale(TARGET, { durationSeconds: 1, end: 4 });
+
+		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		expect(
+			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+		).toBeCloseTo(3);
+	});
+
+	it("applies a sub-threshold scale immediately", () => {
+		const effects = install(1);
+
+		effects.applyScale(TARGET, { durationSeconds: 0, end: 2 });
+
+		expect(
+			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+		).toBe(2);
+	});
+
+	it("samples a scale ramp ahead without committing that time", () => {
+		const effects = install(1);
+		effects.applyScale(TARGET, { durationSeconds: 1, end: 3 });
+
+		expect(
+			effects.samplePresentation(TARGET.nodeId, 0.5, 0).rootTransformModifier
+				.m11,
+		).toBeCloseTo(2);
+		expect(
+			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+		).toBe(1);
 	});
 
 	it("keeps part timelines independent and drops removed entity state", () => {

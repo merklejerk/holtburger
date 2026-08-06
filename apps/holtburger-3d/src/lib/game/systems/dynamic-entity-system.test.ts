@@ -315,7 +315,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			articulatedPose: {
 				partToObjectTransforms: [firstPartTransform, secondPartTransform],
 			},
-			effects: { ...sample.effects, rootRotationModifier: rootRotation },
+			effects: { ...sample.effects, rootTransformModifier: rootRotation },
 		};
 		installation.prepareCommit([rotatedSample]);
 		installation.commit();
@@ -404,7 +404,7 @@ function presentationSample(
 				{ length: animation.animation.partCount },
 				() => ({ translucency }),
 			),
-			rootRotationModifier: Mat4.identity(),
+			rootTransformModifier: Mat4.identity(),
 		},
 		nodeId,
 	};

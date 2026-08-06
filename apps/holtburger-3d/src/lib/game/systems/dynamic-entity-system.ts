@@ -565,11 +565,11 @@ export class DynamicEntitySystem<
 		const publishedPresentationBounds = presentationBoundsForSample(
 			updatedParts,
 			entity.source.scale,
-			sample.effects.rootRotationModifier,
+			sample.effects.rootTransformModifier,
 		);
 		this.#scene.updateLocalTransform(
 			entity.visualRootNodeId,
-			sample.effects.rootRotationModifier,
+			sample.effects.rootTransformModifier,
 		);
 		for (const { part, transform } of updatedParts) {
 			this.#scene.updateLocalTransform(

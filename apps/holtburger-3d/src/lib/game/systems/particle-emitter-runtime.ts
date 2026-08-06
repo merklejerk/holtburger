@@ -42,6 +42,14 @@ interface EmitterInstance {
 	emittedCount: number;
 	/** Stopped emitters release no further particles but let live ones finish their lifespans. */
 	stopped: boolean;
+	/**
+	 * When this emitter became hidden, or `null` while it is visible.
+	 *
+	 * Hidden emitters are not ticked at all. Retail instead ticks them every frame purely for
+	 * bookkeeping (acclient.c:318219-318252); closed-form state lets us replace that with one
+	 * reconciliation at the visibility transition, so a hidden emitter costs nothing per frame.
+	 */
+	hiddenSince: number | null;
 	particles: LiveParticle[];
 }
 
@@ -104,6 +112,7 @@ export class ParticleEmitterRuntime {
 			emitter,
 			emitterId,
 			hookOffset,
+			hiddenSince: null,
 			lastEmissionTime: null,
 			particles: [],
 			startTime: timeSeconds,
@@ -159,6 +168,7 @@ export class ParticleEmitterRuntime {
 	advance(
 		timeSeconds: number,
 		parentOriginOf: (target: BehaviorTarget) => Vector3 | null,
+		isVisible: (target: BehaviorTarget) => boolean = () => true,
 	): void {
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
 			const instance = this.#instances[index]!;
@@ -167,6 +177,15 @@ export class ParticleEmitterRuntime {
 			if (parentOrigin === null) {
 				this.#instances.splice(index, 1);
 				continue;
+			}
+			if (!isVisible(instance.target)) {
+				// Record the suspension start once, then do no work at all until it ends.
+				instance.hiddenSince ??= timeSeconds;
+				continue;
+			}
+			if (instance.hiddenSince !== null) {
+				this.#reconcileVisible(instance, timeSeconds);
+				instance.hiddenSince = null;
 			}
 			this.#reapExpired(instance, timeSeconds);
 			this.#applyAutoStop(instance, timeSeconds);
@@ -220,6 +239,42 @@ export class ParticleEmitterRuntime {
 			),
 			reapedEmitterCount: this.#reapedEmitterCount,
 		};
+	}
+
+	/**
+	 * Account for a hidden interval in one step, when the emitter becomes visible again.
+	 *
+	 * Retail's own off-screen policy splits the same way (acclient.c:305645-305662, 318189-318306):
+	 * a **persistent** emitter freezes its particle ages so nothing expires unseen, and a **finite**
+	 * emitter keeps advancing its bookkeeping so a burst still completes off-screen. We reproduce
+	 * both, but compute them once from the suspension duration instead of ticking every frame.
+	 */
+	#reconcileVisible(instance: EmitterInstance, timeSeconds: number): void {
+		const hiddenSeconds = timeSeconds - (instance.hiddenSince ?? timeSeconds);
+		if (hiddenSeconds <= 0) return;
+		if (instance.emitter.info.isPersistent) {
+			// Shifting every birth time forward by the suspension is exactly an age freeze, and it
+			// keeps the emission clock in step so the next particle is not immediately overdue.
+			instance.particles = instance.particles.map((particle) => ({
+				...particle,
+				birthTime: particle.birthTime + hiddenSeconds,
+			}));
+			if (instance.lastEmissionTime !== null)
+				instance.lastEmissionTime += hiddenSeconds;
+			return;
+		}
+		// A finite emitter's hidden emissions are analytic: elapsed / interval, capped by its
+		// remaining budget. Retail would have released them one frame at a time.
+		const info = instance.emitter.info;
+		if (info.emitsPerSecond && info.birthrateSeconds > 0 && !instance.stopped) {
+			const due = Math.floor(hiddenSeconds / info.birthrateSeconds);
+			const remaining =
+				info.totalParticles > 0
+					? Math.max(0, info.totalParticles - instance.emittedCount)
+					: due;
+			instance.emittedCount += Math.min(due, remaining);
+			if (due > 0) instance.lastEmissionTime = timeSeconds;
+		}
 	}
 
 	/** Particles die only by lifespan; retail never kills them any other way. */

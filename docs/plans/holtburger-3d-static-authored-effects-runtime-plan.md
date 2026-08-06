@@ -1029,8 +1029,9 @@ Progress: **In progress 2026-08-06.** Landed: typed 0x32 decoding with offsets v
 archive records, the content/transport/command lane, the frontend decode,
 `ParticleEmitterRepository` with its exact preparation-time motion envelope, the complete
 closed-form motion evaluator with a unit fixture per formula family, and `ParticleEmitterRuntime`
-(emission cadence, lifetime, stop/destroy, emitter-id replacement, follow vs leave-behind).
-Remaining: the GPU vertex stage and wiring the envelope into the existing visibility path.
+(emission cadence, lifetime, stop/destroy, emitter-id replacement, follow vs leave-behind, and
+zero-cost hidden emitters with transition-time reconciliation). Remaining: the GPU vertex stage and
+feeding the prepared envelope into the existing visibility path.
 
 #### Deliverables
 
@@ -1183,6 +1184,14 @@ Remaining: the GPU vertex stage and wiring the envelope into the existing visibi
   no catch-up** (bursting to fill a slow frame would change authored density), particles die only
   by lifespan, `stop` drains while `destroy` vanishes, and a nonzero `emitter_id` replaces a live
   same-id emitter while auto-id emitters stay independent.
+- **Hidden emitters cost nothing per frame, and the retail split is preserved.** A hidden emitter
+  records when it was suspended and is not ticked at all; the interval is settled once when it
+  becomes visible. Retail's own off-screen policy splits by persistence, and both halves are
+  reproduced: a **persistent** emitter freezes particle ages (implemented as shifting every birth
+  time forward by the suspension, which is an age freeze by arithmetic identity), and a **finite**
+  emitter's hidden emissions are computed analytically as `elapsed / interval` capped by its
+  remaining budget, so a burst still completes off-screen. This is point 4 of the ratified culling
+  strategy, landed with the runtime rather than with the renderer.
 - **A purely per-meter emitter emits nothing and says so.** The retail per-meter predicate is
   unrecovered from the decompile, so inventing a cadence would silently produce wrong density;
   emitting nothing is the visible failure.

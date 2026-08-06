@@ -271,6 +271,71 @@ describe("ParticleEmitterRuntime", () => {
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
 	});
 
+	it("freezes a hidden persistent emitter's particle ages instead of expiring them unseen", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+		const hidden = () => false;
+		const visible = () => true;
+
+		// Hidden across ten seconds, far beyond the two-second lifespan.
+		particles.advance(1, at, hidden);
+		particles.advance(10, at, visible);
+
+		// Retail freezes ages off-screen, so the particle is still alive on return.
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+	});
+
+	it("does no per-tick work while an emitter is hidden", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ birthrateSeconds: 0 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+		const hidden = () => false;
+
+		for (let step = 0; step < 50; step += 1)
+			particles.advance(step, at, hidden);
+
+		// Retail ticks hidden emitters every frame; closed-form state lets us emit nothing at all.
+		expect(particles.getDiagnostics().particleCount).toBe(0);
+	});
+
+	it("completes a hidden finite emitter's burst analytically", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({
+				birthrateSeconds: 1,
+				isPersistent: false,
+				lifespan: 100,
+				totalParticles: 4,
+			}),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+		const hidden = () => false;
+
+		particles.advance(0, at, hidden);
+		// Ten hidden seconds at a one-second interval exhausts the four-particle budget.
+		particles.advance(10, at, () => true);
+
+		expect(particles.getDiagnostics().emitterCount).toBe(0);
+		expect(particles.getDiagnostics().reapedEmitterCount).toBe(1);
+	});
+
 	it("refuses to invent a cadence for a purely per-meter emitter", () => {
 		const particles = runtime();
 		particles.create(

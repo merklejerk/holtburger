@@ -13,6 +13,8 @@ export interface OutdoorLightLookup {
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
+import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
+import type { ParticleDrawCohort } from "../systems/particle-emitter-runtime";
 import type { TexturePreparer } from "../textures/texture-preparer";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
@@ -402,11 +404,35 @@ export interface RendererSkyCapability {
 	clear(): void;
 }
 
+/**
+ * Particle mesh residency and per-frame cohort submission.
+ *
+ * Separate from the object path because particle meshes are not landblock residents: they are named
+ * by `CreateParticle` and arrive in batches with their own lifetime.
+ */
+export interface RendererParticleCapability {
+	/** Make one batch of particle meshes resident; already-resident meshes are skipped. */
+	install(
+		source: ParticleMeshPresentations,
+		preparer: TexturePreparer,
+	): Promise<void>;
+	/**
+	 * Submit this frame's visible cohorts.
+	 *
+	 * Called before `drawFrame`, because cohorts come from a system the renderer does not own and
+	 * are rebuilt every frame rather than retained.
+	 */
+	submit(cohorts: readonly ParticleDrawCohort[]): void;
+	clear(): void;
+}
+
 export interface Renderer {
 	/** Backend-specific diagnostics; absent renderers remain valid production implementations. */
 	readonly frameDiagnostics?: RendererFrameDiagnostics;
 	/** Celestial-sky residency, absent on backends that cannot draw one. */
 	readonly sky?: RendererSkyCapability;
+	/** Authored particle residency and submission, absent on backends that cannot draw them. */
+	readonly particles?: RendererParticleCapability;
 	drawFrame(input: FrameInput): RendererFrameFeedback;
 	destroy(): Promise<void>;
 }

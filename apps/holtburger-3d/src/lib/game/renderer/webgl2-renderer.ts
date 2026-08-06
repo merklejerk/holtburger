@@ -151,8 +151,14 @@ import {
 } from "./webgl2-texture-sampler-catalog";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { Camera } from "../runtime/types";
-import type { RendererSkyCapability } from "./renderer";
+import type {
+	RendererParticleCapability,
+	RendererSkyCapability,
+} from "./renderer";
 import { SKY_FAR_PLANE, skyViewMatrix, WebGL2SkyPass } from "./webgl2-sky-pass";
+import { ParticleMeshResidency } from "./particle-mesh-residency";
+import { WebGL2ParticlePass } from "./webgl2-particle-pass";
+import type { ParticleDrawCohort } from "../systems/particle-emitter-runtime";
 import {
 	createWebGL2SkyProgram,
 	type WebGL2SkyProgram,
@@ -430,6 +436,13 @@ export class WebGL2Renderer implements Renderer {
 	readonly #skyProjectionScratch = new Float32Array(16);
 	readonly #skyViewScratch = new Float32Array(16);
 	#skyPass: WebGL2SkyPass | null = null;
+	#particleResidency: ParticleMeshResidency | null = null;
+	#particlePass: WebGL2ParticlePass | null = null;
+	/** This frame's visible cohorts, replaced every submission rather than retained. */
+	#particleCohorts: readonly ParticleDrawCohort[] = [];
+	/** Reusable particle matrices; the pass runs every frame and must not allocate in it. */
+	readonly #particleProjectionScratch = new Float32Array(16);
+	readonly #particleViewScratch = new Float32Array(16);
 	#skyProgram: WebGL2SkyProgram | null = null;
 	/** Shared clock seconds for the current frame, driving derived texture-velocity phase. */
 	#skyClockSeconds = 0;
@@ -1695,6 +1708,36 @@ export class WebGL2Renderer implements Renderer {
 	 * Installed once per region load; the resource set is fixed for that region's lifetime, so
 	 * there is no incremental path and no per-frame residency work.
 	 */
+	/**
+	 * Authored particle residency and per-frame cohort submission.
+	 *
+	 * Meshes accumulate across batches rather than being replaced, because one script closure names
+	 * a few emitters and different residents keep naming the same meshes.
+	 */
+	readonly particles: RendererParticleCapability = {
+		clear: () => {
+			this.#particleResidency?.destroy();
+			this.#particleResidency = null;
+			this.#particlePass?.destroy();
+			this.#particlePass = null;
+			this.#particleCohorts = [];
+		},
+		install: async (source, preparer) => {
+			const residency = (this.#particleResidency ??= new ParticleMeshResidency(
+				this.#resources,
+			));
+			await residency.install(source, preparer);
+			// Linked on first residency rather than at construction: a scene with no authored
+			// particles never pays for a program it cannot draw with.
+			this.#particlePass ??= new WebGL2ParticlePass((hwGfxObjId) =>
+				this.#particleResidency?.resolve(hwGfxObjId) ?? null,
+			);
+		},
+		submit: (cohorts) => {
+			this.#particleCohorts = cohorts;
+		},
+	};
+
 	readonly sky: RendererSkyCapability = {
 		clear: () => {
 			this.#skyPass?.destroy();
@@ -1749,11 +1792,36 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
+	#drawParticles(view: PreparedView): void {
+		const pass = this.#particlePass;
+		if (!pass || this.#particleCohorts.length === 0) return;
+		pass.draw(
+			{
+				cameraPosition: [
+					view.camera.placement.position.x,
+					view.camera.placement.position.y,
+					view.camera.placement.position.z,
+				],
+				clockSeconds: this.#skyClockSeconds,
+				gl: this.#gl,
+				projection: mat4ToFloat32Array(
+					view.projection,
+					this.#particleProjectionScratch,
+				),
+				view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
+			},
+			this.#particleCohorts,
+		);
+	}
+
 	#drawView(view: PreparedView, shading: SceneShading): void {
 		this.#drawSky(view, shading.sky);
 		this.#drawTerrain(view, shading);
 		this.#drawOpaqueObjects(view, shading, null);
 		this.#drawBlendedObjects(view, shading, null);
+		// After the blended pass: particles are transparent and must not occlude the geometry they
+		// sort against.
+		this.#drawParticles(view);
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
 	}

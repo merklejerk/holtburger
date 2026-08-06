@@ -1030,8 +1030,9 @@ archive records, the content/transport/command lane, the frontend decode,
 `ParticleEmitterRepository` with its exact preparation-time motion envelope, the complete
 closed-form motion evaluator with a unit fixture per formula family, and `ParticleEmitterRuntime`
 (emission cadence, lifetime, stop/destroy, emitter-id replacement, follow vs leave-behind, and
-zero-cost hidden emitters with transition-time reconciliation). Remaining: the GPU vertex stage and
-feeding the prepared envelope into the existing visibility path.
+zero-cost hidden emitters with transition-time reconciliation), and the router's particle port.
+Remaining: the GPU vertex stage and feeding the prepared envelope into the existing visibility
+path.
 
 #### Deliverables
 
@@ -1184,6 +1185,14 @@ feeding the prepared envelope into the existing visibility path.
   no catch-up** (bursting to fill a slow frame would change authored density), particles die only
   by lifespan, `stop` drains while `destroy` vanishes, and a nonzero `emitter_id` replaces a live
   same-id emitter while auto-id emitters stay independent.
+- **The router delegates particle replay rather than deciding it.** Persistence is a property of the
+  emitter asset, which the particle runtime owns and the router deliberately does not, so
+  `create-particle` returns whatever the consumer did. This is the delegation the Phase 1 replay
+  policy specified, now implemented rather than described.
+- **An unstaged emitter reports `unprepared` instead of throwing.** A missing emitter is a staging
+  gap the router records with provenance, not a runtime fault worth killing a frame over. The
+  runtime instantiation in `game-runtime` lands in Phase 7 with activation, since authored particles
+  arrive only from physics scripts and no resident runs one until then.
 - **Hidden emitters cost nothing per frame, and the retail split is preserved.** A hidden emitter
   records when it was suspended and is not ticked at all; the interval is settled once when it
   becomes visible. Retail's own off-screen policy splits by persistence, and both halves are

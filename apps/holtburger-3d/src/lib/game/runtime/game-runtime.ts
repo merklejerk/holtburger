@@ -542,6 +542,10 @@ export class GameRuntime {
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
 				effects: this.#effects,
+				// Authored particles arrive only from physics scripts, and no resident runs one
+				// until Phase 7 activates them. Reporting unprepared keeps the outcome honest
+				// instead of pretending an emitter was created.
+				particles: { createEmitter: () => "unprepared" },
 				// Chained script activation lands with the script clock in Phase 7; until an authored
 				// script runs, no `CallPES` can reach this port.
 				scheduler: {

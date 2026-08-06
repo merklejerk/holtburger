@@ -100,6 +100,24 @@ interface ScriptActivationPort {
 	): void;
 }
 
+/**
+ * Authored particle emission.
+ *
+ * The port takes the emitter's DID rather than a prepared emitter: resolving it is the consumer's
+ * job, and the router must not hold asset handles.
+ */
+interface ParticleCommandPort {
+	createEmitter(
+		target: BehaviorTarget,
+		command: {
+			readonly emitterInfoId: DatAssetId;
+			readonly partIndex: number;
+			readonly offsetOrigin: readonly [number, number, number];
+			readonly emitterId: number;
+		},
+	): "created" | "unprepared";
+}
+
 /** Decides whether a target still exists at the generation a command was queued against. */
 interface BehaviorTargetRegistry {
 	isLive(target: BehaviorTarget): boolean;
@@ -107,6 +125,7 @@ interface BehaviorTargetRegistry {
 
 export interface BehaviorConsumers {
 	readonly effects: EffectCommandPort;
+	readonly particles: ParticleCommandPort;
 	readonly scheduler: ScriptActivationPort;
 	readonly targets: BehaviorTargetRegistry;
 }
@@ -206,10 +225,22 @@ export class BehaviorEventRouter {
 				// reads as a resolved decision rather than a missing consumer.
 				return "applied-at-preparation";
 
+			case "create-particle": {
+				// Replay is delegated rather than decided here: persistence is a property of the
+				// emitter asset, which the particle consumer owns and the router deliberately does
+				// not. A finite burst that already completed is suppressed; a persistent emitter is
+				// created and back-dated.
+				const outcome = this.#consumers.particles.createEmitter(
+					target,
+					command,
+				);
+				if (outcome === "unprepared") return "no-consumer";
+				return mode === "initial-state" ? "folded-initial-state" : "executed";
+			}
+
 			case "texture-velocity-part":
-			case "create-particle":
-				// Decoded and understood; the particle consumer lands in Phase 5. No shipped content
-				// authors a part-scoped scroll hook, so that arm has no planned consumer at all.
+				// No shipped content authors a part-scoped scroll hook, so this arm has no planned
+				// consumer at all rather than a deferred one.
 				return "no-consumer";
 
 			case "replace-object":

@@ -18,6 +18,7 @@ export function buildEffectRouter(effects: EffectSystem = new EffectSystem()): {
 	const router = new BehaviorEventRouter(
 		{
 			effects,
+			particles: { createEmitter: () => "unprepared" },
 			scheduler: {
 				scheduleActivation: () => {
 					throw new Error(

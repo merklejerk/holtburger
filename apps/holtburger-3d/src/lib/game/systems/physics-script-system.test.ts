@@ -47,6 +47,7 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 					system.scheduleActivation(target, activation);
 				},
 			},
+			particles: { createEmitter: () => "unprepared" as const },
 			targets: { isLive: () => options.liveTargets ?? true },
 		},
 		256,

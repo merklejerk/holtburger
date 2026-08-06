@@ -5,6 +5,7 @@ import { ParticleEmitterRepository } from "../behavior/particle-emitter-reposito
 import { AUTHORED_SCRIPT_FIXTURES } from "../behavior/authored-script-fixtures";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { EffectSystem } from "./effect-system";
+import { SoundTableRepository } from "../behavior/sound-table-repository";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import {
@@ -472,6 +473,12 @@ function createSystem(
 			},
 		}),
 		effects,
+		new SoundTableRepository({
+			destroy: () => {},
+			loadSoundTable: async (soundTableId) => {
+				throw new Error(`No sound table fixture for ${soundTableId}.`);
+			},
+		}),
 		(ownerId: string, generation: number) =>
 			`${ownerId}:generation:${generation}`,
 	);

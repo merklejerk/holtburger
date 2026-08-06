@@ -47,6 +47,10 @@ import { AnimationSystem } from "../systems/animation-system";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
+import { SoundTableRepository } from "../behavior/sound-table-repository";
+import type { SoundTableSource } from "../../assets/sound-table-source";
+import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
+import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
 import { ParticleEmitterRuntime } from "../systems/particle-emitter-runtime";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
@@ -196,6 +200,7 @@ export interface GameRuntimeDependencies {
 	readonly physicsScriptSource: PhysicsScriptSource;
 	readonly audioDevice: AudioDevice;
 	readonly particleEmitterSource: ParticleEmitterSource;
+	readonly soundTableSource: SoundTableSource;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -326,6 +331,9 @@ export class GameRuntime {
 	readonly #physicsScripts: PhysicsScriptRepository;
 	readonly #particleEmitters: ParticleEmitterRepository;
 	readonly #particles: ParticleEmitterRuntime;
+	readonly #soundTables: SoundTableRepository;
+	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
+	readonly #targetSoundTables = new Map<SceneNodeId, DecodedSoundTable>();
 	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId>;
 	readonly #audio: AudioSystem;
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
@@ -559,6 +567,7 @@ export class GameRuntime {
 			},
 		});
 		this.#effects = new EffectSystem();
+		this.#soundTables = new SoundTableRepository(dependencies.soundTableSource);
 		this.#physicsScripts = new PhysicsScriptRepository(
 			dependencies.physicsScriptSource,
 		);
@@ -588,6 +597,7 @@ export class GameRuntime {
 			this.#physicsScripts,
 			this.#particleEmitters,
 			this.#effects,
+			this.#soundTables,
 			dynamicGenerationToResourceOwnerId,
 		);
 		this.#audio = new AudioSystem(
@@ -611,6 +621,24 @@ export class GameRuntime {
 							probability: sound.probability,
 							soundId: sound.soundId,
 							volume: sound.volume,
+						});
+						return outcome === "played" ? "played" : "suppressed";
+					},
+					playSoundTableKey: (target, soundType) => {
+						const table = this.#targetSoundTables.get(target.nodeId);
+						const candidates = table?.entries.get(soundType);
+						// Retail's miss is a silent no-op; reporting it keeps a missing table and a
+						// missing key distinguishable from a sound that chose not to play.
+						if (!candidates) return "unprepared";
+						const candidate = selectSoundCandidate(candidates, Math.random());
+						if (!candidate) return "unprepared";
+						const origin = this.#sceneOriginOf(target);
+						if (origin === null) return "unprepared";
+						const outcome = this.#audio.trigger({
+							position: origin,
+							probability: candidate.probability,
+							soundId: candidate.soundId,
+							volume: candidate.volume,
 						});
 						return outcome === "played" ? "played" : "suppressed";
 					},
@@ -706,6 +734,7 @@ export class GameRuntime {
 		physicsScriptSource: PhysicsScriptSource,
 		audioDevice: AudioDevice,
 		particleEmitterSource: ParticleEmitterSource,
+		soundTableSource: SoundTableSource,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
@@ -716,6 +745,7 @@ export class GameRuntime {
 			audioDevice,
 			particleEmitterSource,
 			physicsScriptSource,
+			soundTableSource,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
 					? new InlineStaticObjectGeometryPreparer()
@@ -1051,6 +1081,8 @@ export class GameRuntime {
 		this.#physicsScriptSystem.destroy();
 		this.#audio.destroy();
 		this.#particleEmitters.destroy();
+		this.#soundTables.destroy();
+		this.#targetSoundTables.clear();
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();
@@ -1406,6 +1438,8 @@ export class GameRuntime {
 					// Script clocks start only after the generation publishes, so a resident cannot
 					// dispatch a command against a node that is not yet in the scene.
 					for (const entity of prepared) {
+						if (entity.soundTable !== null)
+							this.#targetSoundTables.set(entity.nodeId, entity.soundTable);
 						if (entity.scriptClosure === null) continue;
 						this.#physicsScriptSystem.install(
 							ownerId,
@@ -1459,6 +1493,10 @@ export class GameRuntime {
 		this.#envCellLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#physicsScriptSystem.removeOwner(ownerId);
+		for (const nodeId of this.#targetSoundTables.keys()) {
+			if (this.#scene.getResolvedPlacement(nodeId) === undefined)
+				this.#targetSoundTables.delete(nodeId);
+		}
 		// Emitters need no explicit removal: `#dynamics.removeOwner` destroys their nodes, and the
 		// particle runtime drops any emitter whose target stops publishing a transform.
 		this.#dynamics.removeOwner(ownerId);

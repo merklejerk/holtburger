@@ -19,11 +19,20 @@ import {
 } from "../renderer/renderer";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
+import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
+
+/** No runtime test stages a sound table, so any load here is a defect worth surfacing. */
+const SOUND_TABLE_SOURCE: SoundTableSource = {
+	destroy: () => {},
+	async loadSoundTable(soundTableId) {
+		throw new Error(`Unexpected sound table load for ${soundTableId}.`);
+	},
+};
 
 /** No runtime test stages an authored emitter, so any load here is a defect worth surfacing. */
 const PARTICLE_EMITTER_SOURCE: ParticleEmitterSource = {
@@ -177,6 +186,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 
 		runtime.updateSceneInterest({
@@ -303,6 +313,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -332,6 +343,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -374,6 +386,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -413,6 +426,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -444,6 +458,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
@@ -495,6 +510,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
@@ -538,6 +554,7 @@ describe("GameRuntime view and interest control", () => {
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
 		);
 
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));

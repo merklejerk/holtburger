@@ -8,6 +8,8 @@ import type {
 } from "../behavior/particle-emitter-repository";
 import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository";
 import type { EffectSystem } from "./effect-system";
+import type { SoundTableRepository } from "../behavior/sound-table-repository";
+import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
@@ -62,6 +64,8 @@ interface DynamicEntityRecord {
 	 * particle runtime reads them through the repository rather than holding them itself.
 	 */
 	emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[];
+	/** The resident's installed sound table, staged so a `SoundTable` key resolves from memory. */
+	soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null;
 	preparedAnimation: PreparedDynamicAnimation | null;
 	/** Conservative object-local envelope matching the exact pose currently published to draw. */
 	publishedPresentationBounds: AABB3;
@@ -102,6 +106,7 @@ export interface DynamicOwnerInstallation {
 interface StagedBehaviorAssets {
 	readonly closure: PreparedPhysicsScriptClosure;
 	readonly emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[];
+	readonly soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null;
 }
 
 interface PreparedDynamicEntity {
@@ -110,6 +115,8 @@ interface PreparedDynamicEntity {
 	readonly source: AuthoredDynamicSource;
 	/** Staged script closure, or `null` for a resident whose setup owns no default script. */
 	readonly scriptClosure: PreparedPhysicsScriptClosure | null;
+	/** The resident's installed sound table, or `null` when its setup installs none. */
+	readonly soundTable: DecodedSoundTable | null;
 }
 
 /** Owns dynamic entity trees, rigid-part components, and reusable visual preparation. */
@@ -123,6 +130,7 @@ export class DynamicEntitySystem<
 	readonly #scripts: PhysicsScriptRepository;
 	readonly #emitters: ParticleEmitterRepository;
 	readonly #effects: EffectSystem;
+	readonly #soundTables: SoundTableRepository;
 	readonly #templateOwnerId: (
 		ownerId: TOwnerId,
 		generation: number,
@@ -148,6 +156,7 @@ export class DynamicEntitySystem<
 		scripts: PhysicsScriptRepository,
 		emitters: ParticleEmitterRepository,
 		effects: EffectSystem,
+		soundTables: SoundTableRepository,
 		templateOwnerId: (
 			ownerId: TOwnerId,
 			generation: number,
@@ -159,6 +168,7 @@ export class DynamicEntitySystem<
 		this.#scripts = scripts;
 		this.#emitters = emitters;
 		this.#effects = effects;
+		this.#soundTables = soundTables;
 		this.#templateOwnerId = templateOwnerId;
 	}
 
@@ -266,6 +276,7 @@ export class DynamicEntitySystem<
 						animation: entity.preparedAnimation,
 						nodeId: entity.rootNodeId,
 						scriptClosure: entity.scriptClosure,
+						soundTable: entity.soundTableHandle?.asset ?? null,
 						source: entity.source,
 					};
 				});
@@ -313,6 +324,7 @@ export class DynamicEntitySystem<
 			animationHandle: null,
 			emitterHandles: [],
 			scriptClosure: null,
+			soundTableHandle: null,
 			articulatedPose: pose,
 			renderable: { parts },
 			rootNodeId,
@@ -468,6 +480,7 @@ export class DynamicEntitySystem<
 		if (scriptId === null) return null;
 		const closure = await this.#scripts.acquireClosure(scriptId);
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
+		let soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null = null;
 		try {
 			const emitterIds = new Set(
 				[...closure.scripts.values()].flatMap(
@@ -477,12 +490,20 @@ export class DynamicEntitySystem<
 			for (const emitterInfoId of emitterIds) {
 				emitterHandles.push(await this.#emitters.acquire(emitterInfoId));
 			}
+			// The table is the *object's*, installed from its setup, so it is staged per resident
+			// rather than per script: two residents running one script may resolve a key to
+			// different sounds.
+			const soundTableId = entity.source.behavior.soundTableId;
+			if (soundTableId !== null) {
+				soundTableHandle = await this.#soundTables.acquire(soundTableId);
+			}
 		} catch (cause) {
+			soundTableHandle?.release();
 			for (const handle of emitterHandles) handle.release();
 			closure.release();
 			throw cause;
 		}
-		return { closure, emitterHandles };
+		return { closure, emitterHandles, soundTableHandle };
 	}
 
 	async #prepareOwner(
@@ -521,6 +542,7 @@ export class DynamicEntitySystem<
 		const releaseBehaviorAssets = () => {
 			for (const staged of acquiredBehaviorAssets) {
 				staged.closure.release();
+				staged.soundTableHandle?.release();
 				for (const handle of staged.emitterHandles) handle.release();
 			}
 		};
@@ -586,6 +608,7 @@ export class DynamicEntitySystem<
 					parts: mergePreparedParts(entity.renderable.parts, template.parts),
 					effectPartCount: template.parts.length,
 					emitterHandles: scriptResult.value?.emitterHandles ?? [],
+					soundTableHandle: scriptResult.value?.soundTableHandle ?? null,
 					scriptClosure: scriptResult.value?.closure ?? null,
 				};
 			});
@@ -600,6 +623,7 @@ export class DynamicEntitySystem<
 				entity.animationHandle = result.handle;
 				entity.scriptClosure = result.scriptClosure;
 				entity.emitterHandles = result.emitterHandles;
+				entity.soundTableHandle = result.soundTableHandle;
 				entity.preparedAnimation = result.animation;
 				entity.renderable = { parts: result.parts };
 			}
@@ -748,6 +772,8 @@ export class DynamicEntitySystem<
 		entity.scriptClosure = null;
 		for (const handle of entity.emitterHandles) handle.release();
 		entity.emitterHandles = [];
+		entity.soundTableHandle?.release();
+		entity.soundTableHandle = null;
 		this.#effects.remove(entity.rootNodeId);
 		for (const part of entity.renderable.parts) {
 			this.#scene.destroyNode(part.nodeId);

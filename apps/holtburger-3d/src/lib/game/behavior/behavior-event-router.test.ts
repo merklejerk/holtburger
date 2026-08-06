@@ -30,6 +30,9 @@ function build(isLive = true) {
 		playSound: vi.fn<
 			(...args: never[]) => "played" | "suppressed" | "unprepared"
 		>(() => "unprepared"),
+		playSoundTableKey: vi.fn<
+			(...args: never[]) => "played" | "suppressed" | "unprepared"
+		>(() => "unprepared"),
 	};
 	const particles = {
 		createEmitter: vi.fn<(...args: never[]) => "created" | "unprepared">(

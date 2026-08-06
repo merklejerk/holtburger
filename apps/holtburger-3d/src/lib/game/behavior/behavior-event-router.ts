@@ -134,6 +134,16 @@ interface AudioCommandPort {
 			readonly volume: number;
 		},
 	): "played" | "suppressed" | "unprepared";
+	/**
+	 * Play a sound selected from the target's own installed sound table.
+	 *
+	 * The key is resolved by the consumer, not here: the table belongs to the *object*, so two
+	 * residents running the same script can resolve one key to different sounds.
+	 */
+	playSoundTableKey(
+		target: BehaviorTarget,
+		soundType: number,
+	): "played" | "suppressed" | "unprepared";
 }
 
 /** Decides whether a target still exists at the generation a command was queued against. */
@@ -235,11 +245,17 @@ export class BehaviorEventRouter {
 				return "executed";
 			}
 
-			case "sound-table":
-				// Resolving a SoundType key needs the owning object's installed sound table, which
-				// arrives with authored residents in Phase 7.
+			case "sound-table": {
 				if (mode === "initial-state") return "suppressed-initial-state";
-				return "no-consumer";
+				const outcome = this.#consumers.audio.playSoundTableKey(
+					target,
+					command.soundType,
+				);
+				// A key the resident's table does not author is retail's silent miss; ours reports
+				// it rather than pretending a sound played.
+				if (outcome === "unprepared") return "no-consumer";
+				return "executed";
+			}
 
 			case "scale":
 				// Persistent whole-object state, so replay behaves exactly as live execution does:

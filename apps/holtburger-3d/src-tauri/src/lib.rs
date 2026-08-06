@@ -26,6 +26,7 @@ mod landblock_source_batch;
 mod object_resource_closure;
 mod object_texture;
 mod outdoor_static_source;
+mod particle_emitter_source;
 mod physics_script_source;
 pub mod polygon_geometry;
 pub mod portal_geometry;
@@ -48,6 +49,7 @@ use object_texture::{
 use outdoor_static_source::{
     OutdoorStaticSourceRecordManifest, serialize_outdoor_static_record_binary,
 };
+use particle_emitter_source::serialize_particle_emitter_record_binary;
 use physics_script_source::serialize_physics_script_record_binary;
 use source_projection::dat_id;
 
@@ -109,6 +111,12 @@ struct LoadAnimationRequest {
 #[serde(rename_all = "camelCase")]
 struct LoadPhysicsScriptRequest {
     script_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadParticleEmitterRequest {
+    emitter_info_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,6 +212,18 @@ async fn load_physics_script(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Loads one immutable DAT particle-emitter definition as a compact typed binary record.
+#[tauri::command]
+async fn load_particle_emitter(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadParticleEmitterRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_particle_emitter_bytes(&state.runtime, &request.emitter_info_id)
+        .await
+        .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Builds the canonical landblock source batch used by Tauri and the headless browser harness.
 pub async fn load_landblock_source_batch_bytes(
     runtime: &ContentAssetRuntime,
@@ -275,6 +295,22 @@ pub async fn load_physics_script_bytes(
         unreachable!("PhysicsScript request must return a PhysicsScript")
     };
     serialize_physics_script_record_binary(&script)
+}
+
+/// Build the canonical typed particle-emitter response used by Tauri and focused host tests.
+pub async fn load_particle_emitter_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_emitter_info_id: &str,
+) -> Result<Vec<u8>> {
+    let emitter_info_id = parse_typed_dat_id(raw_emitter_info_id, 0x32)?;
+    let asset = runtime
+        .load(ContentAssetRequest::ParticleEmitterInfo(emitter_info_id))
+        .await
+        .with_context(|| format!("Could not load ParticleEmitterInfo 0x{emitter_info_id:08X}"))?;
+    let ContentAsset::ParticleEmitterInfo(info) = asset else {
+        unreachable!("ParticleEmitterInfo request must return a ParticleEmitterInfo")
+    };
+    serialize_particle_emitter_record_binary(&info)
 }
 
 async fn build_landblock_source_batch_response(
@@ -962,6 +998,7 @@ pub fn run() {
             host_status,
             load_active_region_data,
             load_animation,
+            load_particle_emitter,
             load_physics_script,
             load_landblock_source_batch,
             load_sky_source,

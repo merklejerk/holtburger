@@ -582,6 +582,34 @@ total_seconds == 0`. Stop (auto or hook) halts emission while live particles fin
   the same mechanism; our renderer ignores degrade info there **deliberately** — ratified
   2026-08-06: retail's LOD system is not being adopted, and a future custom LOD design owns that
   space. Particles are the one consumer where degrade _orientation_ is load-bearing.)
+- **The 13 motion types collapse to 7 distinct position formulas (decoded 2026-08-06).** The
+  `ParticleType` enum (acclient.h:3918-3934) and the `Particle::Update` switch
+  (acclient.c:317446-317664) group as follows, which is the shape an implementation should take
+  rather than thirteen separate cases:
+
+  | Value(s) | `ParticleType`                                                   | Position formula                             | Shipped?  |
+  | -------- | ---------------------------------------------------------------- | -------------------------------------------- | --------- |
+  | 0        | `Unknown_PT`                                                     | none                                         | no        |
+  | 1        | `Still_PT`                                                       | `parent + offset`                            | yes       |
+  | 2, 12    | `LocalVelocity_PT`, `GlobalVelocity_PT`                          | `parent + offset + a·t`                      | yes       |
+  | 3, 8, 10 | `ParabolicLVGA_PT`, `ParabolicLVLA_PT`, `ParabolicGVGA_PT`       | `parent + offset + a·t + ½·b·t²`             | 3, 8 only |
+  | 4, 9, 11 | `ParabolicLVGAGR_PT`, `ParabolicLVLALR_PT`, `ParabolicGVGAGR_PT` | parabolic, plus authored spin                | yes       |
+  | 5        | `Swarm_PT`                                                       | its own                                      | yes       |
+  | 6        | `Explode_PT`                                                     | its own, with the recorded `c.y × a.x` quirk | yes       |
+  | 7        | `Implode_PT`                                                     | its own                                      | yes       |
+
+  The `Local`/`Global` split within a family does **not** change the position formula — it selects
+  whether the authored vectors are rotated into world space by the spawn frame, which
+  `Particle::Init` already does before `Update` runs (recorded above). So a `Local`/`Global` pair
+  shares one evaluator and differs only in how its spawn constants were built. Likewise `GR`/`LR`
+  select the spin axis space, not a different trajectory.
+
+  Consequence for the GPU vertex stage: it implements **seven** position formulas and one
+  orientation branch set, not thirteen, and `ParabolicGVGA_PT` (10) is unreachable in shipped
+  content even though its formula is shared with two types that are reachable. The `Swarm`,
+  `Explode`, and `Implode` arms still need their exact expressions transcribed from
+  acclient.c:317600-317664 before implementation; the three families above are transcribed.
+
 - **All 13 motion types are closed-form in elapsed time.** Every formula is
   `position = f(t, spawn constants, parent frame)` with no per-frame integration state — the
   same derive-don't-accumulate shape as the texture-scroll model. A particle's mutable state

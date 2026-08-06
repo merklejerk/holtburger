@@ -1390,6 +1390,20 @@ binding, `SoundTable` key resolution, and the particle draw path with its harnes
 
 - Bind the particle draw cohorts through the renderer and verify the vertex stage against
   `particle-motion.ts` on real WebGL through the browser harness.
+
+  Shape confirmed 2026-08-06. A particle mesh is a **bare GfxObj**, not a setup, so it cannot go
+  through `resolve_setup_appearance`, which reads a `SetupModel`. The pieces that already exist:
+  `build_gfx_obj_geometry` projects a bare GfxObj's geometry, and the per-part surface resolution
+  inside `resolve_setup_appearance` is reusable as-is. What is missing is a
+  `resolve_gfx_obj_appearance(gfx_obj_id, appearance)` entry point that runs that per-part loop for
+  a single mesh, plus its content request, transport, frontend decode, template preparation, and a
+  renderer executor that binds `webgl2-particle-program` and streams `collectCohorts` through an
+  instance buffer.
+
+  Everything upstream of the draw is done: emitters stage, emit, expire, cull, and produce packed
+  instance records with their motion type; the vertex stage exists and its formulas are pinned by
+  the CPU evaluator's tests.
+
 - Resolve `SoundTable` keys against the owning resident's installed table. This needs the setup's
   `default_sound_table` carried to the resident and the 0x20 table staged with the script closure;
   the decoder and its selection semantics already exist.

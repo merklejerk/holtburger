@@ -16,6 +16,7 @@ pub use landblock_source_batch::LandblockSourceLayer;
 pub use sky_source::load_sky_source_bytes;
 
 mod animation_source;
+mod audio_source;
 mod behavior_hook_source;
 mod binary_source_record;
 pub mod cell_struct_projection;
@@ -35,6 +36,7 @@ mod sky_source;
 mod source_projection;
 
 use animation_source::serialize_animation_record_binary;
+use audio_source::serialize_audio_record_binary;
 use binary_source_record::BinarySectionWriter;
 use env_cell_source::serialize_env_cell_source_record;
 use landblock_source_batch::{
@@ -117,6 +119,12 @@ struct LoadPhysicsScriptRequest {
 #[serde(rename_all = "camelCase")]
 struct LoadParticleEmitterRequest {
     emitter_info_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadAudioRequest {
+    sound_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -224,6 +232,18 @@ async fn load_particle_emitter(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Loads one immutable DAT audio asset as a decoder-ready binary record.
+#[tauri::command]
+async fn load_audio(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadAudioRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_audio_bytes(&state.runtime, &request.sound_id)
+        .await
+        .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Builds the canonical landblock source batch used by Tauri and the headless browser harness.
 pub async fn load_landblock_source_batch_bytes(
     runtime: &ContentAssetRuntime,
@@ -311,6 +331,22 @@ pub async fn load_particle_emitter_bytes(
         unreachable!("ParticleEmitterInfo request must return a ParticleEmitterInfo")
     };
     serialize_particle_emitter_record_binary(&info)
+}
+
+/// Build the canonical typed audio response used by Tauri and focused host tests.
+pub async fn load_audio_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_sound_id: &str,
+) -> Result<Vec<u8>> {
+    let sound_id = parse_typed_dat_id(raw_sound_id, 0x0A)?;
+    let asset = runtime
+        .load(ContentAssetRequest::Wave(sound_id))
+        .await
+        .with_context(|| format!("Could not load Wave 0x{sound_id:08X}"))?;
+    let ContentAsset::Wave(wave) = asset else {
+        unreachable!("Wave request must return a Wave")
+    };
+    serialize_audio_record_binary(&wave)
 }
 
 async fn build_landblock_source_batch_response(
@@ -998,6 +1034,7 @@ pub fn run() {
             host_status,
             load_active_region_data,
             load_animation,
+            load_audio,
             load_particle_emitter,
             load_physics_script,
             load_landblock_source_batch,

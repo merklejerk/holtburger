@@ -36,11 +36,13 @@ pub struct SoundTableEntry {
 impl SoundTableEntry {
     /// Choose a candidate for a uniform roll in [0, 1), reproducing retail's selection.
     ///
-    /// **Retail never selects the last candidate.** The index is `floor((n − 1) × roll)`
-    /// (acclient.c:366752-366756), so with three candidates a roll approaching 1 still yields index
-    /// 1. This is a shipped bug, not a design, but authored content was balanced against it and the
-    /// last entry of every multi-candidate list is effectively dead. Reproduced deliberately;
-    /// "fixing" it would make sounds audible that no player has ever heard.
+    /// **Retail never selects the last candidate.** The index is `floor((n - 1) * roll)`
+    /// (acclient.c:366752-366756), so with three candidates a roll approaching 1 still yields
+    /// index 1. This is a shipped bug rather than a design, but authored content was balanced
+    /// against it and the last entry of every multi-candidate list is effectively dead. Reproduced
+    /// deliberately: "fixing" it would make sounds audible that no player has ever heard. The
+    /// 2026-08-06 archive census found exactly one key authoring more than one candidate, so this
+    /// reaches a single sound in the whole game.
     pub fn select(&self, roll: f32) -> Option<SoundCandidate> {
         if self.candidates.len() <= 1 {
             return self.candidates.first().copied();

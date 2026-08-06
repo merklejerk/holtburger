@@ -894,7 +894,9 @@ Progress: **Complete 2026-08-06.** Type check, lint, knip, Clippy, and all 696 f
 
 ### Phase 4: Implement Proven Visual Effect Commands
 
-Progress: Not started
+Progress: **Partially complete 2026-08-06.** Landed: the shared `textureScrollPhase` helper and the
+`ReplaceObjectHook` ratification. Remaining: the `Scale` and `TextureVelocity` consumers and the
+render-state widening they need.
 
 **Ratified 2026-08-06: `ReplaceObjectHook` execution is dropped.** Retail has no `Execute` for
 hook type 5 — the shipped client parses and preloads it, then does nothing, and the archive
@@ -933,7 +935,29 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **`skyTextureOffset` is hoisted, not copied.** It now lives in
+  `renderer/texture-scroll-phase.ts` as `textureScrollPhase`, carrying the seam-synchronization
+  rationale and the constant-rate precondition with it, and the sky pass calls the shared helper.
+  The name lost its `sky` prefix because it now has two consumers.
+- **`ReplaceObjectHook` no longer blocks animated activation.** Retail defines no `Execute` for hook
+  type 5, so an owner carrying one renders identically whether we run it or not; withholding correct
+  animation over it was strictly worse than reporting it inert. The router gained a distinct
+  `intentionally-inert` outcome so the decision reads as a decision rather than as a gap.
+- **The ratification's vocabulary was swept in the same change.** With `replace-object` no longer
+  blocking, the blocking-hook diagnostic's `reason` field had exactly one reachable value, so it was
+  removed rather than left as a constant. The test asserting the old blocking behavior was replaced
+  by one proving activation proceeds, plus one covering a hook that genuinely would misrender.
+
+#### Remaining Work
+
+- `Scale`: a whole-object uniform ramp from the object's current scale. The natural seam is the
+  existing `EffectPresentationSample.rootRotationModifier`, which should widen into a
+  `rootTransformModifier` carrying rotation and scale together rather than gaining a parallel field.
+  Conservative presentation bounds must track the ramp's **maximum** extent, not its current one.
+- `TextureVelocity`: the consumer stores the authored rate and the renderer derives phase through
+  `textureScrollPhase` at draw time. This is the one item that needs a renderer change — per-instance
+  UV offset is not in the current 20-float `ObjectInstanceData` layout — so it should be scoped
+  against the instancing path before implementation rather than bolted onto the effect sample.
 
 ### Phase 5: Add Authored Particle Fidelity
 

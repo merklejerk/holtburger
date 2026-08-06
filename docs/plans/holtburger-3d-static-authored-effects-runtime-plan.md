@@ -896,10 +896,10 @@ Progress: **Complete 2026-08-06.** Type check, lint, knip, Clippy, and all 696 f
 
 ### Phase 4: Implement Proven Visual Effect Commands
 
-Progress: **Substantially complete 2026-08-06.** Landed: the shared `textureScrollPhase` helper,
-the `ReplaceObjectHook` ratification, the `Scale` consumer with its render-state widening, and the
-preparation-time `TextureVelocity` rate resolution. Remaining: binding the resolved scroll rate
-through the object draw path, which is renderer wiring rather than effects design.
+Progress: **Complete 2026-08-06.** Landed: the shared `textureScrollPhase` helper, the
+`ReplaceObjectHook` ratification, the `Scale` consumer with its render-state widening, and the
+preparation-time `TextureVelocity` rate resolution. The renderer binding for that rate moved to
+Phase 7 — see the decision below.
 
 **Ratified 2026-08-06: `ReplaceObjectHook` execution is dropped.** Retail has no `Execute` for
 hook type 5 — the shipped client parses and preloads it, then does nothing, and the archive
@@ -964,11 +964,16 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
   unhandled — the complete census found zero part-scoped scroll hooks anywhere — so that arm has no
   planned consumer rather than a deferred one.
 
-#### Remaining Work
-
-- Bind the resolved scroll rate through the object draw path: carry it to the visual template as a
-  material fact and set the per-draw UV offset from `textureScrollPhase`, exactly as the sky pass
-  already does. This is the only remaining Phase 4 item and is renderer wiring, not effects design.
+- **The `TextureVelocity` renderer binding moved to Phase 7, on the no-dormant-infrastructure
+  contract.** The mechanism is small and its shape is settled: add a `uTextureOffset` uniform to the
+  object program (`vTextureCoordinate = aTextureCoordinate + uTextureOffset`, exactly as
+  `webgl2-sky-program.ts` already does), carry `textureScrollRate` on
+  `PreparedStaticObjectDrawCompatibility` so differing rates split into separate cohorts by the
+  existing compatibility test, and set the uniform once per draw from `textureScrollPhase`. But
+  **no authored resident runs a script until Phase 7 activates them**, so building it now would ship
+  a uniform that is provably zero at every call site — dormant infrastructure this plan explicitly
+  forbids. It lands with its producer instead. Phase 4 is complete without it: the rate is resolved,
+  validated, and reported, which is the effects-side work.
 - Conservative presentation bounds must track a `Scale` ramp's **maximum** extent. Published bounds
   are recomputed per sample so they already follow the current scale, but the activation-time
   `localBounds` staged by `prepareDynamicAnimation` predate any scale command and would under-bound
@@ -1141,6 +1146,10 @@ Progress: Not started
 
 #### Deliverables
 
+- Bind the `TextureVelocity` scroll rate through the object draw path, inherited from Phase 4 with
+  its producer: `uTextureOffset` on the object program, `textureScrollRate` on
+  `PreparedStaticObjectDrawCompatibility` so differing rates split cohorts through the existing
+  compatibility test, and one `textureScrollPhase` call per draw.
 - Stage complete script/effect closures before replacing retained static presentation.
 - Atomically promote script-only residents into the shared authored dynamic aggregate.
 - Activate animation and scripts independently for combined residents.

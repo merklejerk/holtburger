@@ -7,6 +7,7 @@ import type {
 	PreparedParticleEmitter,
 } from "../behavior/particle-emitter-repository";
 import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository";
+import type { EffectSystem } from "./effect-system";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
@@ -97,6 +98,7 @@ export interface DynamicOwnerInstallation {
 
 /** Runtime activation facts for one fully prepared but unpublished dynamic entity. */
 /** One resident's complete behavior staging: its script closure and every emitter it can reach. */
+/** Everything one entity needs to commit, resolved before any of it is applied. */
 interface StagedBehaviorAssets {
 	readonly closure: PreparedPhysicsScriptClosure;
 	readonly emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[];
@@ -120,6 +122,7 @@ export class DynamicEntitySystem<
 	readonly #animations: AnimationAssetRepository;
 	readonly #scripts: PhysicsScriptRepository;
 	readonly #emitters: ParticleEmitterRepository;
+	readonly #effects: EffectSystem;
 	readonly #templateOwnerId: (
 		ownerId: TOwnerId,
 		generation: number,
@@ -144,6 +147,7 @@ export class DynamicEntitySystem<
 		animations: AnimationAssetRepository,
 		scripts: PhysicsScriptRepository,
 		emitters: ParticleEmitterRepository,
+		effects: EffectSystem,
 		templateOwnerId: (
 			ownerId: TOwnerId,
 			generation: number,
@@ -154,6 +158,7 @@ export class DynamicEntitySystem<
 		this.#animations = animations;
 		this.#scripts = scripts;
 		this.#emitters = emitters;
+		this.#effects = effects;
 		this.#templateOwnerId = templateOwnerId;
 	}
 
@@ -567,6 +572,7 @@ export class DynamicEntitySystem<
 					),
 					handle: animationResult.value,
 					parts: mergePreparedParts(entity.renderable.parts, template.parts),
+					effectPartCount: template.parts.length,
 					emitterHandles: scriptResult.value?.emitterHandles ?? [],
 					scriptClosure: scriptResult.value?.closure ?? null,
 				};
@@ -575,6 +581,10 @@ export class DynamicEntitySystem<
 			for (let index = 0; index < entities.length; index += 1) {
 				const entity = entities[index]!;
 				const result = prepared[index]!;
+				// Effect state is installed here, before any producer can dispatch into it, and is
+				// owned by the entity rather than by animation: a script-only resident has effect
+				// state and no playback at all.
+				this.#effects.install(entity.rootNodeId, result.effectPartCount);
 				entity.animationHandle = result.handle;
 				entity.scriptClosure = result.scriptClosure;
 				entity.emitterHandles = result.emitterHandles;
@@ -726,6 +736,7 @@ export class DynamicEntitySystem<
 		entity.scriptClosure = null;
 		for (const handle of entity.emitterHandles) handle.release();
 		entity.emitterHandles = [];
+		this.#effects.remove(entity.rootNodeId);
 		for (const part of entity.renderable.parts) {
 			this.#scene.destroyNode(part.nodeId);
 		}

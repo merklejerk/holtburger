@@ -199,10 +199,7 @@ export class AnimationSystem<TOwnerId extends string> {
 				samples.push(this.#sample(nodeId, record));
 			}
 		} catch (cause) {
-			for (const nodeId of records.keys()) {
-				this.#effects.remove(nodeId);
-				this.#stagedNodeIds.delete(nodeId);
-			}
+			for (const nodeId of records.keys()) this.#stagedNodeIds.delete(nodeId);
 			throw cause;
 		}
 		let state: "staged" | "committed" | "released" = "staged";
@@ -223,10 +220,7 @@ export class AnimationSystem<TOwnerId extends string> {
 			},
 			release: () => {
 				if (state !== "staged") return;
-				for (const nodeId of records.keys()) {
-					this.#effects.remove(nodeId);
-					this.#stagedNodeIds.delete(nodeId);
-				}
+				for (const nodeId of records.keys()) this.#stagedNodeIds.delete(nodeId);
 				state = "released";
 			},
 			samples,
@@ -241,8 +235,7 @@ export class AnimationSystem<TOwnerId extends string> {
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
-		for (const nodeId of this.#records.keys()) this.#effects.remove(nodeId);
-		for (const nodeId of this.#stagedNodeIds) this.#effects.remove(nodeId);
+		// Effect state belongs to the entity, not to playback, so its owner tears it down.
 		this.#records.clear();
 		this.#owners.clear();
 		this.#stagedNodeIds.clear();
@@ -252,10 +245,7 @@ export class AnimationSystem<TOwnerId extends string> {
 	#removeOwnerRecords(ownerId: TOwnerId): void {
 		const nodes = this.#owners.get(ownerId);
 		if (!nodes) return;
-		for (const nodeId of nodes) {
-			this.#records.delete(nodeId);
-			this.#effects.remove(nodeId);
-		}
+		for (const nodeId of nodes) this.#records.delete(nodeId);
 		this.#owners.delete(ownerId);
 	}
 
@@ -324,7 +314,6 @@ export class AnimationSystem<TOwnerId extends string> {
 		animation: PreparedAnimation,
 	): AnimationRecord {
 		const nodeId = target.nodeId;
-		this.#effects.install(nodeId, animation.partCount);
 		const record: AnimationRecord = {
 			animation,
 			fractionalSeconds: 0,
@@ -332,26 +321,15 @@ export class AnimationSystem<TOwnerId extends string> {
 			lastTimeSeconds: null,
 			target,
 		};
-		try {
-			let remainingSeconds =
-				independentPhase(residentIdentity, animation.frameCount) /
-				animation.framesPerSecond;
-			while (
-				remainingSeconds + CLOCK_EPSILON_SECONDS >=
-				BEHAVIOR_STEP_SECONDS
-			) {
-				this.#advanceSemanticStep(nodeId, record, "initial-state");
-				remainingSeconds = Math.max(
-					0,
-					remainingSeconds - BEHAVIOR_STEP_SECONDS,
-				);
-			}
-			record.fractionalSeconds = remainingSeconds;
-			return record;
-		} catch (cause) {
-			this.#effects.remove(nodeId);
-			throw cause;
+		let remainingSeconds =
+			independentPhase(residentIdentity, animation.frameCount) /
+			animation.framesPerSecond;
+		while (remainingSeconds + CLOCK_EPSILON_SECONDS >= BEHAVIOR_STEP_SECONDS) {
+			this.#advanceSemanticStep(nodeId, record, "initial-state");
+			remainingSeconds = Math.max(0, remainingSeconds - BEHAVIOR_STEP_SECONDS);
 		}
+		record.fractionalSeconds = remainingSeconds;
+		return record;
 	}
 
 	#advanceSemanticStep(

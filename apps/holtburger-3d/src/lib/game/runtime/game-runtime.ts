@@ -558,6 +558,7 @@ export class GameRuntime {
 				},
 			},
 		});
+		this.#effects = new EffectSystem();
 		this.#physicsScripts = new PhysicsScriptRepository(
 			dependencies.physicsScriptSource,
 		);
@@ -586,6 +587,7 @@ export class GameRuntime {
 			new AnimationAssetRepository(dependencies.animationSource),
 			this.#physicsScripts,
 			this.#particleEmitters,
+			this.#effects,
 			dynamicGenerationToResourceOwnerId,
 		);
 		this.#audio = new AudioSystem(
@@ -593,7 +595,6 @@ export class GameRuntime {
 			Math.random,
 			FRONTEND_TUNING.audio.maximumSimultaneousVoices,
 		);
-		this.#effects = new EffectSystem();
 		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
 		// by design. A holder breaks the construction cycle without making the router mutable.
 		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId> } = {};

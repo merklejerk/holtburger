@@ -4,6 +4,7 @@ import type {
 } from "../behavior/behavior-event-router";
 import {
 	buildEffectRouter,
+	installEffectState,
 	testTarget,
 } from "../behavior/behavior-test-harness";
 import { describe, expect, it } from "vitest";
@@ -16,8 +17,11 @@ import { EffectSystem } from "./effect-system";
 
 /** An animation system over a throwaway effect system and its router. */
 function buildAnimationSystem() {
-	const { effects, router } = buildEffectRouter();
-	return new AnimationSystem<string>(effects, router);
+	const previousRouter = lastRouter;
+	const system = buildAnimationSystemOver(new EffectSystem());
+	// Assertions read the router of the system under test; a throwaway system must not steal it.
+	lastRouter = previousRouter;
+	return system;
 }
 
 /**
@@ -30,6 +34,24 @@ function buildAnimationSystemOver(effects: EffectSystem) {
 	const { router } = buildEffectRouter(effects);
 	const system = new AnimationSystem<string>(effects, router);
 	lastRouter = router;
+	// Effect state belongs to the entity, not to playback, so these tests stand in for the owner
+	// that installs it in production.
+	const install = system.install.bind(system);
+	system.install = (ownerId, target, identity, animation) => {
+		installEffectState(effects, target.nodeId, animation.partCount);
+		return install(ownerId, target, identity, animation);
+	};
+	const stageOwner = system.stageOwner.bind(system);
+	system.stageOwner = (ownerId, installations) => {
+		for (const installation of installations) {
+			installEffectState(
+				effects,
+				installation.target.nodeId,
+				installation.animation.partCount,
+			);
+		}
+		return stageOwner(ownerId, installations);
+	};
 	return system;
 }
 
@@ -156,12 +178,10 @@ describe("AnimationSystem", () => {
 		expect(advanceAndSample(system, 0).map((sample) => sample.nodeId)).toEqual([
 			"scene-node:11",
 		]);
-		expect(effects.getDiagnostics().residentEffectStateCount).toBe(1);
 	});
 
-	it("releases staged and active effect state deterministically", () => {
-		const effects = new EffectSystem();
-		const system = buildAnimationSystemOver(effects);
+	it("drops staged playback on release without disturbing the active owner", () => {
+		const system = buildAnimationSystem();
 		system.install(
 			"owner",
 			testTarget("scene-node:10"),
@@ -175,14 +195,13 @@ describe("AnimationSystem", () => {
 				residentIdentity: "resident:new",
 			},
 		]);
-		expect(effects.getDiagnostics().residentEffectStateCount).toBe(2);
 
 		staged.release();
-		expect(effects.getDiagnostics().residentEffectStateCount).toBe(1);
-		system.destroy();
-		expect(effects.getDiagnostics().residentEffectStateCount).toBe(0);
-		expect(() => system.advance(0)).toThrow("destroyed animation playback");
-		expect(() => staged.commit()).toThrow("state released");
+
+		// Effect-state lifetime belongs to the entity owner now; playback only keeps its records.
+		expect(advanceAndSample(system, 0).map((sample) => sample.nodeId)).toEqual([
+			"scene-node:10",
+		]);
 	});
 
 	it("folds effect history before the deterministic initial phase is sampled", () => {

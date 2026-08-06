@@ -1,4 +1,5 @@
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
+import type { DatAssetId } from "../game-types";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import {
 	particleLifeProgress,
@@ -11,6 +12,19 @@ import {
 
 /** Uniform [0, 1) source; injected so emission randomness is explicit and tests are exact. */
 export type UniformRoll = () => number;
+
+/** Everything the runtime needs from the rest of the app, injected once at construction. */
+export interface ParticleRuntimeDependencies {
+	readonly roll: UniformRoll;
+	/** Resolve an authored emitter DID to its staged definition, or `null` if none is staged. */
+	readonly resolveEmitter: (
+		emitterInfoId: DatAssetId,
+	) => PreparedParticleEmitter | null;
+	/** Current world origin of a target, or `null` once it stops publishing a transform. */
+	readonly originOf: (target: BehaviorTarget) => Vector3 | null;
+	/** Current runtime clock, needed because commands arrive mid-dispatch. */
+	readonly clock: () => number;
+}
 
 /** Retail's roll shape: `RollDice(-1, 1) * rand + base` — additive, never multiplicative. */
 function rolled(roll: UniformRoll, base: number, rand: number): number {
@@ -76,13 +90,49 @@ export interface ParticleRuntimeDiagnostics {
  * reaps, it does not integrate.
  */
 export class ParticleEmitterRuntime {
+	readonly #dependencies: ParticleRuntimeDependencies;
 	readonly #roll: UniformRoll;
 	readonly #instances: EmitterInstance[] = [];
 	#emittedTotal = 0;
 	#reapedEmitterCount = 0;
 
-	constructor(roll: UniformRoll) {
-		this.#roll = roll;
+	constructor(dependencies: ParticleRuntimeDependencies) {
+		this.#dependencies = dependencies;
+		this.#roll = dependencies.roll;
+	}
+
+	/**
+	 * The router's particle port.
+	 *
+	 * Reports `unprepared` rather than throwing when the emitter is not staged: a missing emitter is
+	 * a staging gap the router records with provenance, not a runtime fault worth killing a frame
+	 * over.
+	 */
+	createEmitter(
+		target: BehaviorTarget,
+		command: {
+			readonly emitterInfoId: DatAssetId;
+			readonly offsetOrigin: readonly [number, number, number];
+			readonly emitterId: number;
+		},
+	): "created" | "unprepared" {
+		const emitter = this.#dependencies.resolveEmitter(command.emitterInfoId);
+		if (emitter === null) return "unprepared";
+		const parentOrigin = this.#dependencies.originOf(target);
+		if (parentOrigin === null) return "unprepared";
+		this.create(
+			target,
+			emitter,
+			[
+				command.offsetOrigin[0],
+				command.offsetOrigin[1],
+				command.offsetOrigin[2],
+			],
+			command.emitterId,
+			this.#dependencies.clock(),
+			parentOrigin,
+		);
+		return "created";
 	}
 
 	/**

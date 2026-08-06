@@ -26,12 +26,17 @@ function build(isLive = true) {
 		applySetOmega: vi.fn(),
 		applyTransparentPart: vi.fn(),
 	};
+	const particles = {
+		createEmitter: vi.fn<(...args: never[]) => "created" | "unprepared">(
+			() => "unprepared",
+		),
+	};
 	const scheduler = { scheduleActivation: vi.fn() };
 	const router = new BehaviorEventRouter(
-		{ effects, scheduler, targets: { isLive: () => isLive } },
+		{ effects, particles, scheduler, targets: { isLive: () => isLive } },
 		4,
 	);
-	return { effects, router, scheduler };
+	return { effects, particles, router, scheduler };
 }
 
 const SET_OMEGA: PreparedBehaviorCommand = {
@@ -86,6 +91,46 @@ describe("BehaviorEventRouter", () => {
 		expect(router.dispatch(sound, TARGET, PROVENANCE, "live")).toBe(
 			"no-consumer",
 		);
+	});
+
+	it("routes particle creation and folds it when replayed", () => {
+		const { particles, router } = build();
+		const command: PreparedBehaviorCommand = {
+			emitterId: 0,
+			emitterInfoId: "0x3200020c",
+			kind: "create-particle",
+			offsetOrigin: [0, 0, 1],
+			partIndex: -1,
+		};
+		particles.createEmitter.mockReturnValue("created");
+
+		expect(router.dispatch(command, TARGET, PROVENANCE, "live")).toBe(
+			"executed",
+		);
+		expect(router.dispatch(command, TARGET, PROVENANCE, "initial-state")).toBe(
+			"folded-initial-state",
+		);
+		expect(particles.createEmitter).toHaveBeenCalledTimes(2);
+	});
+
+	it("records an unstaged emitter as unconsumed rather than as executed", () => {
+		const { particles, router } = build();
+		particles.createEmitter.mockReturnValue("unprepared");
+
+		expect(
+			router.dispatch(
+				{
+					emitterId: 0,
+					emitterInfoId: "0x32009999",
+					kind: "create-particle",
+					offsetOrigin: [0, 0, 0],
+					partIndex: -1,
+				},
+				TARGET,
+				PROVENANCE,
+				"live",
+			),
+		).toBe("no-consumer");
 	});
 
 	it("rejects a stale target without touching any consumer", () => {

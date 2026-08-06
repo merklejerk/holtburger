@@ -55,8 +55,24 @@ function prepared(
 	return { envelopeRadius: 10, id: info.id, info };
 }
 
-/** Mid-range roll keeps every randomized term at its authored base. */
-const runtime = () => new ParticleEmitterRuntime(() => 0.5);
+/**
+ * Mid-range roll keeps every randomized term at its authored base.
+ *
+ * Emitter resolution and the clock are only exercised through `createEmitter`; the tests that drive
+ * `create` directly pass their own time explicitly.
+ */
+const runtime = (
+	overrides: Partial<
+		ConstructorParameters<typeof ParticleEmitterRuntime>[0]
+	> = {},
+) =>
+	new ParticleEmitterRuntime({
+		clock: () => 0,
+		originOf: () => ORIGIN,
+		resolveEmitter: () => null,
+		roll: () => 0.5,
+		...overrides,
+	});
 
 describe("ParticleEmitterRuntime", () => {
 	it("releases initial particles immediately, before any interval applies", () => {
@@ -334,6 +350,38 @@ describe("ParticleEmitterRuntime", () => {
 
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
 		expect(particles.getDiagnostics().reapedEmitterCount).toBe(1);
+	});
+
+	it("creates an emitter through the router port when its definition is staged", () => {
+		const staged = prepared({ initialParticles: 2 });
+		const particles = runtime({
+			clock: () => 12,
+			resolveEmitter: (id) => (id === staged.id ? staged : null),
+		});
+
+		const outcome = particles.createEmitter(TARGET, {
+			emitterId: 0,
+			emitterInfoId: staged.id,
+			offsetOrigin: [0, 0, 5],
+		});
+
+		expect(outcome).toBe("created");
+		expect(particles.getDiagnostics().particleCount).toBe(2);
+		// The hook offset lands on top of the parent origin, not instead of it.
+		expect(particles.sample(12, at)[0]!.position[2]).toBeCloseTo(5);
+	});
+
+	it("reports an unstaged emitter instead of guessing or throwing", () => {
+		const particles = runtime({ resolveEmitter: () => null });
+
+		expect(
+			particles.createEmitter(TARGET, {
+				emitterId: 0,
+				emitterInfoId: "0x32009999" as DatAssetId,
+				offsetOrigin: [0, 0, 0],
+			}),
+		).toBe("unprepared");
+		expect(particles.getDiagnostics().emitterCount).toBe(0);
 	});
 
 	it("refuses to invent a cadence for a purely per-meter emitter", () => {

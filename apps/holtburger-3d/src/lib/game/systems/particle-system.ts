@@ -15,7 +15,7 @@ import {
 export type UniformRoll = () => number;
 
 /** Everything the runtime needs from the rest of the app, injected once at construction. */
-export interface ParticleRuntimeDependencies {
+export interface ParticleSystemDependencies {
 	readonly roll: UniformRoll;
 	/** Resolve an authored emitter DID to its staged definition, or `null` if none is staged. */
 	readonly resolveEmitter: (
@@ -83,7 +83,7 @@ export interface ParticleSample {
 	readonly translucency: number;
 }
 
-export interface ParticleRuntimeDiagnostics {
+export interface ParticleSystemDiagnostics {
 	readonly emitterCount: number;
 	readonly particleCount: number;
 	readonly emittedTotal: number;
@@ -98,14 +98,14 @@ export interface ParticleRuntimeDiagnostics {
  * is spawn constants plus birth times, because motion is closed form — this runtime schedules and
  * reaps, it does not integrate.
  */
-export class ParticleEmitterRuntime {
-	readonly #dependencies: ParticleRuntimeDependencies;
+export class ParticleSystem {
+	readonly #dependencies: ParticleSystemDependencies;
 	readonly #roll: UniformRoll;
 	readonly #instances: EmitterInstance[] = [];
 	#emittedTotal = 0;
 	#reapedEmitterCount = 0;
 
-	constructor(dependencies: ParticleRuntimeDependencies) {
+	constructor(dependencies: ParticleSystemDependencies) {
 		this.#dependencies = dependencies;
 		this.#roll = dependencies.roll;
 	}
@@ -369,7 +369,7 @@ export class ParticleEmitterRuntime {
 		return radius;
 	}
 
-	getDiagnostics(): ParticleRuntimeDiagnostics {
+	getDiagnostics(): ParticleSystemDiagnostics {
 		return {
 			emittedTotal: this.#emittedTotal,
 			emitterCount: this.#instances.length,

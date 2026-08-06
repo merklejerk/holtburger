@@ -158,7 +158,7 @@ import type {
 import { SKY_FAR_PLANE, skyViewMatrix, WebGL2SkyPass } from "./webgl2-sky-pass";
 import { ParticleMeshResidency } from "./particle-mesh-residency";
 import { WebGL2ParticlePass } from "./webgl2-particle-pass";
-import type { ParticleDrawCohort } from "../systems/particle-emitter-runtime";
+import type { ParticleDrawCohort } from "../systems/particle-system";
 import {
 	createWebGL2SkyProgram,
 	type WebGL2SkyProgram,

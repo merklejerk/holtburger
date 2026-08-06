@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ParticleDrawCohort } from "../systems/particle-emitter-runtime";
+import type { ParticleDrawCohort } from "../systems/particle-system";
 import type { DatAssetId } from "../game-types";
 import {
 	WebGL2ParticlePass,

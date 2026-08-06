@@ -1180,7 +1180,7 @@ see the decision below.
   to be checked against rather than eyeballed. The two authored `Explode` quirks and `Swarm`'s
   `sin`-on-y asymmetry each have a test whose stated purpose is to stop a later reader from
   "correcting" them.
-- **`ParticleEmitterRuntime` schedules and reaps; it never integrates.** Because motion is closed
+- **`ParticleSystem` schedules and reaps; it never integrates.** Because motion is closed
   form, a live particle is spawn constants plus a birth time, so the runtime's whole job is
   emission cadence, expiry, and emitter lifetime. Retail's quirks are reproduced deliberately and
   each has a test: `birthrate` is a **minimum interval** with **at most one particle per tick and
@@ -1188,7 +1188,7 @@ see the decision below.
   by lifespan, `stop` drains while `destroy` vanishes, and a nonzero `emitter_id` replaces a live
   same-id emitter while auto-id emitters stay independent.
 - **The renderer binding and harness verification move to Phase 7, on the same contract that moved
-  the `TextureVelocity` uniform.** Both need a live `ParticleEmitterRuntime` producing cohorts, and
+  the `TextureVelocity` uniform.** Both need a live `ParticleSystem` producing cohorts, and
   `game-runtime` instantiates none until Phase 7 activates authored scripts — authored particles
   arrive only from physics scripts, so there is nothing to draw before then. Building the executor
   now would mean a draw path provably reached zero times, and verifying a shader against an empty
@@ -1346,7 +1346,7 @@ residency, instance buffer, pass, and frame wiring.
   authored sounds arrive only from physics scripts, and a `SoundType` key cannot be resolved without
   a resident that has a sound table installed.
 - Bind particle draw cohorts through the renderer, inherited from Phase 5 with their producer:
-  instantiate `ParticleEmitterRuntime` in `game-runtime`, feed `collectCohorts` into an instanced
+  instantiate `ParticleSystem` in `game-runtime`, feed `collectCohorts` into an instanced
   draw using `webgl2-particle-program`, and compose `envelopeRadiusFor` into presentation bounds.
 - Verify the particle vertex stage against `particle-motion.ts` on real WebGL through the browser
   harness. `fakeGl` proves the program links and branches; only the harness proves the arithmetic.
@@ -1425,7 +1425,7 @@ residency, instance buffer, pass, and frame wiring.
 
   1. An install path that uploads a `ParticleMeshPresentations` batch into renderer-owned geometry
      and material residency, keyed by `hw_gfxobj_id`.
-  2. `ParticleDrawCohort[]` carried on the frame input, produced by `ParticleEmitterRuntime.collectCohorts`.
+  2. `ParticleDrawCohort[]` carried on the frame input, produced by `ParticleSystem.collectCohorts`.
   3. A `#drawParticles` call in `#drawView`, after `#drawBlendedObjects` — particles are transparent
      and must not occlude the blended pass they sort against.
 
@@ -1482,11 +1482,9 @@ Progress: Not started
       growth, orphaning, and upload; they differ in record layout and encoder. A generic buffer
       parameterized by float count and an `encodeInto` callback would carry both, but genericizing
       a tested class mid-phase was not worth the risk, so the duplication was taken deliberately.
-- [ ] Rename `ParticleEmitterRuntime` to `ParticleSystem`. It is the one frontend system that does
-      not follow the `<Concern>System` convention shared by `EffectSystem`, `AnimationSystem`,
-      `PhysicsScriptSystem`, and `AudioSystem`, and the `Runtime` suffix now reads as a different
-      kind of thing than it is. Sweep `ParticleRuntimeDependencies` and
-      `ParticleRuntimeDiagnostics` with it.
+- [x] Rename `ParticleEmitterRuntime` to `ParticleSystem`, with `ParticleSystemDependencies` and
+      `ParticleSystemDiagnostics` and the module renamed to `particle-system.ts`. Every frontend
+      system now follows the `<Concern>System` convention.
 - [ ] Confirm no authored `TextureVelocity` surface scrolls behind an unfired `CallPES` chain (see
       the debt ledger); the accepted early-scroll consequence is expected to be unreachable in
       shipped content, and this is where that expectation gets checked rather than assumed.

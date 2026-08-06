@@ -34,7 +34,13 @@ function encode(overrides: Record<string, unknown> = {}): Uint8Array {
 		definitions: [],
 		geometries: [],
 		materials: [],
-		meshes: [{ hwGfxObjId: "0x01000ff4", source: "gfx-obj/01000ff4" }],
+		meshes: [
+			{
+				hwGfxObjId: "0x01000ff4",
+				orientation: "viewer-facing",
+				source: "gfx-obj/01000ff4",
+			},
+		],
 		sectionByteOffsetBase: "section-data",
 		sections: SECTIONS,
 		textureDependencies: [],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
+import type { DecodedParticleMesh } from "../../assets/decode-particle-mesh-record";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { DatAssetId } from "../game-types";
 import { ParticleMeshCache } from "./particle-mesh-cache";
@@ -23,7 +23,10 @@ function fakeSource(): ParticleMeshSource & {
 			});
 			return {
 				presentations: new Map(
-					hwGfxObjIds.map((id) => [id, {} as DecodedStaticPresentation]),
+					hwGfxObjIds.map((id) => [
+						id,
+						{ orientation: "viewer-facing" } as DecodedParticleMesh,
+					]),
 				),
 				textureDependencies: [],
 			};

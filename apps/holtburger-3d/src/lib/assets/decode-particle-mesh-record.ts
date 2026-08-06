@@ -37,7 +37,14 @@ const manifestSchema = z.object({
 	byteOrder: z.literal("little-endian"),
 	sectionByteOffsetBase: z.literal("section-data"),
 	meshes: z
-		.array(z.object({ hwGfxObjId: datId, source: z.string().min(1) }))
+		.array(
+			z.object({
+				hwGfxObjId: datId,
+				source: z.string().min(1),
+				/** Orientation from the mesh's authored 0x11 near band. */
+				orientation: z.enum(["authored", "viewer-facing", "axis-locked"]),
+			}),
+		)
 		.min(1),
 	definitions: z.array(staticDefinitionSchema),
 	geometries: z.array(staticGeometrySchema),
@@ -58,8 +65,14 @@ const manifestSchema = z.object({
  * its cohorts on. The presentations are the same shape every other object path produces, so
  * particles draw through ordinary geometry and materials.
  */
+/** One particle mesh: its drawable presentation and how it orients at draw time. */
+export interface DecodedParticleMesh {
+	readonly presentation: DecodedStaticPresentation;
+	readonly orientation: "authored" | "viewer-facing" | "axis-locked";
+}
+
 export interface ParticleMeshPresentations {
-	readonly presentations: ReadonlyMap<DatAssetId, DecodedStaticPresentation>;
+	readonly presentations: ReadonlyMap<DatAssetId, DecodedParticleMesh>;
 	readonly textureDependencies: readonly {
 		readonly id: string;
 		readonly kind: "surface-texture" | "palette";
@@ -126,7 +139,7 @@ export function decodeParticleMeshRecord(
 			decodeStaticPresentation(definition, geometries, materials),
 		]),
 	);
-	const presentations = new Map<DatAssetId, DecodedStaticPresentation>();
+	const presentations = new Map<DatAssetId, DecodedParticleMesh>();
 	for (const mesh of manifest.meshes) {
 		const presentation = definitions.get(mesh.source);
 		if (presentation === undefined) {
@@ -134,10 +147,10 @@ export function decodeParticleMeshRecord(
 				`Particle mesh ${mesh.hwGfxObjId} references missing source ${mesh.source}.`,
 			);
 		}
-		presentations.set(
-			mesh.hwGfxObjId.toLowerCase() as DatAssetId,
+		presentations.set(mesh.hwGfxObjId.toLowerCase() as DatAssetId, {
+			orientation: mesh.orientation,
 			presentation,
-		);
+		});
 	}
 	return {
 		presentations,

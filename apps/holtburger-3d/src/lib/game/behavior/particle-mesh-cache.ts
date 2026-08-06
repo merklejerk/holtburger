@@ -1,5 +1,7 @@
-import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
-import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
+import type {
+	DecodedParticleMesh,
+	ParticleMeshPresentations,
+} from "../../assets/decode-particle-mesh-record";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { DatAssetId } from "../game-types";
 
@@ -13,7 +15,7 @@ import type { DatAssetId } from "../game-types";
  */
 export class ParticleMeshCache {
 	readonly #source: ParticleMeshSource;
-	readonly #presentations = new Map<DatAssetId, DecodedStaticPresentation>();
+	readonly #presentations = new Map<DatAssetId, DecodedParticleMesh>();
 	readonly #inFlight = new Map<DatAssetId, Promise<void>>();
 	#destroyed = false;
 
@@ -63,7 +65,7 @@ export class ParticleMeshCache {
 	}
 
 	/** Read a resident mesh without loading; `null` keeps frame-time IO impossible. */
-	get(hwGfxObjId: DatAssetId): DecodedStaticPresentation | null {
+	get(hwGfxObjId: DatAssetId): DecodedParticleMesh | null {
 		return this.#presentations.get(hwGfxObjId.toLowerCase() as DatAssetId) ?? null;
 	}
 

@@ -102,6 +102,9 @@ export class ParticleSystem {
 	readonly #dependencies: ParticleSystemDependencies;
 	readonly #roll: UniformRoll;
 	readonly #instances: EmitterInstance[] = [];
+	/** Reused across frames so cohort grouping does not allocate in the renderer's hot path. */
+	readonly #cohortScratch = new Map<string, ParticleDrawCohort>();
+	readonly #cohortScratchOutput: ParticleDrawCohort[] = [];
 	#emittedTotal = 0;
 	#reapedEmitterCount = 0;
 
@@ -269,7 +272,10 @@ export class ParticleSystem {
 	collectCohorts(
 		isVisible: (target: BehaviorTarget) => boolean = () => true,
 	): ParticleDrawCohort[] {
-		const cohorts = new Map<string, ParticleDrawCohort>();
+		// Cohort objects and their arrays persist across frames; only the per-particle records are
+		// rebuilt. Reusing those too is recorded as measured debt rather than guessed at.
+		const cohorts = this.#cohortScratch;
+		for (const cohort of cohorts.values()) cohort.particles.length = 0;
 		for (const instance of this.#instances) {
 			const info = instance.emitter.info;
 			// An unshipped motion type has no formula in either evaluator; drawing it motionless
@@ -306,7 +312,11 @@ export class ParticleSystem {
 				});
 			}
 		}
-		return [...cohorts.values()];
+		this.#cohortScratchOutput.length = 0;
+		for (const cohort of cohorts.values()) {
+			if (cohort.particles.length > 0) this.#cohortScratchOutput.push(cohort);
+		}
+		return this.#cohortScratchOutput;
 	}
 
 	/**

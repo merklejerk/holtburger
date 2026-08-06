@@ -41,11 +41,13 @@ const GEOMETRY: ParticleDrawGeometry = {
 	materialKind: 0,
 	orientation: 1,
 	paletteTexture: null,
+	rawSurfaceFlags: 0,
 	vertexArray: {} as WebGLVertexArrayObject,
 };
 
 function fakeGl() {
 	const draws: number[] = [];
+	const blendFuncs: Array<[number, number]> = [];
 	const intUniforms: Array<[string, number]> = [];
 	const gl = {
 		ARRAY_BUFFER: 1,
@@ -62,11 +64,16 @@ function fakeGl() {
 		TRIANGLES: 12,
 		UNSIGNED_INT: 13,
 		VERTEX_SHADER: 14,
+		ONE: 15,
+		ONE_MINUS_SRC_ALPHA: 16,
+		SRC_ALPHA: 17,
 		activeTexture: () => undefined,
 		attachShader: () => undefined,
 		bindBuffer: () => undefined,
 		bindTexture: () => undefined,
 		bindVertexArray: () => undefined,
+		blendFunc: (source: number, destination: number) =>
+			blendFuncs.push([source, destination]),
 		bufferData: () => undefined,
 		bufferSubData: () => undefined,
 		compileShader: () => undefined,
@@ -104,7 +111,7 @@ function fakeGl() {
 		vertexAttribDivisor: () => undefined,
 		vertexAttribPointer: () => undefined,
 	} as unknown as WebGL2RenderingContext;
-	return { draws, gl, intUniforms };
+	return { calls: { blendFuncs }, draws, gl, intUniforms };
 }
 
 const context = (gl: WebGL2RenderingContext) => ({
@@ -138,6 +145,17 @@ describe("WebGL2ParticlePass", () => {
 
 		expect(intUniforms).toContainEqual(["uMotionType", 6]);
 		expect(intUniforms).toContainEqual(["uOrientation", 1]);
+	});
+
+	it("selects a blend mode per cohort instead of inheriting one", () => {
+		const { calls, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+
+		pass.draw(context(gl), [cohort(2, 1)]);
+
+		// Enabling BLEND without a func leaves whatever the previous pass bound, which renders
+		// particles opaque over their own black backing.
+		expect(calls.blendFuncs).toHaveLength(1);
 	});
 
 	it("counts a cohort whose mesh is not resident instead of dropping it silently", () => {

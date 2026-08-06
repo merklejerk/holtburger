@@ -5,6 +5,7 @@ import {
 	type WebGL2ParticleProgram,
 } from "./webgl2-particle-program";
 import { WebGL2ParticleInstanceBuffer } from "./webgl2-particle-instance-buffer";
+import { objectBlendPolicy } from "./object-rendering-policy";
 
 /** One cohort's drawable mesh, already resident on the GPU. */
 export interface ParticleDrawGeometry {
@@ -17,6 +18,8 @@ export interface ParticleDrawGeometry {
 	/** How the fragment stage reads the base texture: direct, index8, or index16. */
 	readonly materialKind: number;
 	readonly alphaTest: number;
+	/** Authored surface flags, so blend selection reuses retail's mapping rather than guessing. */
+	readonly rawSurfaceFlags: number;
 	/** Orientation mode from the mesh's authored degrade band. */
 	readonly orientation: number;
 	readonly lockedAxis: readonly [number, number, number];
@@ -102,6 +105,8 @@ export class WebGL2ParticlePass {
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthMask(false);
 		gl.enable(gl.BLEND);
+		// Blend mode is selected per cohort below. Enabling BLEND without a func inherits whatever
+		// the previous pass left bound, which renders particles opaque over their own backing.
 
 		for (const cohort of drawable) {
 			const geometry = this.#resolveGeometry(cohort.hwGfxObjId);
@@ -111,6 +116,21 @@ export class WebGL2ParticlePass {
 				unresolvedCohortCount += 1;
 				continue;
 			}
+			// Retail's own flag-to-blend mapping, shared with the object and sky paths: additive
+			// surfaces keep their destination so a particle's black backing adds nothing.
+			const blend = objectBlendPolicy(geometry.rawSurfaceFlags);
+			gl.blendFunc(
+				blend.source === "one"
+					? gl.ONE
+					: blend.source === "one-minus-src-alpha"
+						? gl.ONE_MINUS_SRC_ALPHA
+						: gl.SRC_ALPHA,
+				blend.destination === "one"
+					? gl.ONE
+					: blend.destination === "src-alpha"
+						? gl.SRC_ALPHA
+						: gl.ONE_MINUS_SRC_ALPHA,
+			);
 			gl.bindVertexArray(geometry.vertexArray);
 			instances.bindAttributes();
 			const instanceCount = instances.upload(cohort.particles);

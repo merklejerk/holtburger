@@ -1,5 +1,5 @@
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
-import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
+import type { DecodedParticleMesh } from "../../assets/decode-particle-mesh-record";
 import type { DatAssetId } from "../game-types";
 import { createTexture2DUpload } from "../textures/texture-manager";
 import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
@@ -11,6 +11,7 @@ import type {
 } from "./resource-manager";
 import type { WebGL2ResourceManager } from "./webgl2-resource-manager";
 import type { ParticleDrawGeometry } from "./webgl2-particle-pass";
+import { PARTICLE_ORIENTATION } from "./webgl2-particle-program";
 
 /**
  * Renderer-owned residency for particle meshes, keyed by `hw_gfxobj_id`.
@@ -41,7 +42,7 @@ export class ParticleMeshResidency {
 		preparer: TexturePreparer,
 	): Promise<void> {
 		const facts = new Map<AssetTextureKey, AssetTextureFact>();
-		const pending: Array<[DatAssetId, DecodedStaticPresentation]> = [];
+		const pending: Array<[DatAssetId, DecodedParticleMesh]> = [];
 		for (const [hwGfxObjId, decoded] of batch.presentations) {
 			if (this.#meshes.has(hwGfxObjId)) continue;
 			pending.push([hwGfxObjId, decoded]);
@@ -89,6 +90,7 @@ export class ParticleMeshResidency {
 			lockedAxis: mesh.lockedAxis,
 			materialKind: mesh.materialKind,
 			orientation: mesh.orientation,
+			rawSurfaceFlags: mesh.rawSurfaceFlags,
 			paletteTexture:
 				palette === null ? null : this.#resources.getTexture2D(palette).texture,
 			vertexArray: geometry.vertexArray,
@@ -114,10 +116,10 @@ export class ParticleMeshResidency {
 
 	#resolveMesh(
 		hwGfxObjId: DatAssetId,
-		decoded: DecodedStaticPresentation,
+		decoded: DecodedParticleMesh,
 		facts: Map<AssetTextureKey, AssetTextureFact>,
 	): ResidentParticleMesh | null {
-		const part = decoded.presentation.parts[0];
+		const part = decoded.presentation.presentation.parts[0];
 		if (part === undefined) return null;
 		const label = `Particle mesh ${hwGfxObjId}`;
 		const geometry = this.#resources.createGeometry({
@@ -147,10 +149,14 @@ export class ParticleMeshResidency {
 			indexOffsetBytes: range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
 			lockedAxis: [0, 0, 1],
 			materialKind: 0,
-			// Orientation comes from the mesh's 0x11 degrade band; until that census lands, the
-			// authored frame is the honest default rather than a guessed billboard.
-			orientation: 0,
+			orientation:
+				decoded.orientation === "viewer-facing"
+					? PARTICLE_ORIENTATION.viewerFacing
+					: decoded.orientation === "axis-locked"
+						? PARTICLE_ORIENTATION.axisLocked
+						: PARTICLE_ORIENTATION.authored,
 			palette: range.material.textures.palette,
+			rawSurfaceFlags: range.material.source.rawSurfaceFlags,
 		};
 	}
 }
@@ -167,4 +173,5 @@ interface ResidentParticleMesh {
 	readonly alphaTest: number;
 	readonly orientation: number;
 	readonly lockedAxis: readonly [number, number, number];
+	readonly rawSurfaceFlags: number;
 }

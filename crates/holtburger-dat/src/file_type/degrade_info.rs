@@ -27,7 +27,7 @@ impl DegradeOrientation {
         match mode {
             1 => Self::Authored,
             2 => Self::ViewerFacing,
-            3 | 4 | 5 => Self::AxisLocked(mode as u8),
+            3..=5 => Self::AxisLocked(mode as u8),
             other => Self::Unknown(other),
         }
     }

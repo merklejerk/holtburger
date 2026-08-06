@@ -1063,6 +1063,35 @@ Progress: Not started
   author a single degrade band (expected), band selection is skipped and the base band's mode
   applies at all distances — consistent with the deliberate non-adoption of retail LOD
   elsewhere.
+- **Two test sets, not one workload (ratified 2026-08-06, from measured coverage).** A temporary
+  probe (removed after recording) decoded the seven emitter infos the measured representative slice
+  reaches and compared them to the whole archive:
+
+  | Measure                       | Representative slice      | Archive-wide                                               |
+  | ----------------------------- | ------------------------- | ---------------------------------------------------------- |
+  | Emitter infos                 | 7                         | 2,051                                                      |
+  | Motion types (`ParticleType`) | 3 — types 1, 2, 5 only    | 11 — 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12                     |
+  | `emitter_type`                | all `1` (per-second)      | per-second dominant; per-meter predicate still unrecovered |
+  | Persistent emitters           | 7 of 7                    | 1,236 of 2,051                                             |
+  | `is_parent_local`             | 0 in all 7 (leave-behind) | 814 of 2,051 follow                                        |
+
+  The slice therefore exercises **three of the eleven motion types actually shipped**, zero finite
+  emitters, and zero parent-following emitters. Validating this phase on the slice alone would ship
+  eight untested motion formulas plus the entire finite-emitter and follow paths. Widening the
+  slice is the wrong fix, because it conflates two obligations that want different tests:
+
+  1. **Integration acceptance stays on the measured slice.** Attachment to the right root/part, the
+     right authored time, correct placement and blend in a real scene — that needs a landblock you
+     can look at, and eight events is enough for it.
+  2. **Evaluation correctness gets unit fixtures per motion type**, checked against the retail
+     formulas already pinned with line cites in Retail Execution Evidence, plus fixtures for the
+     finite/persistent split and the follow/leave-behind split. These need no scene at all.
+
+  This keeps North Star 1 intact — nothing is implemented that the archive does not author — while
+  refusing to call eight formulas verified because three of them were. Note also that only 11 of the
+  13 documented `ParticleType` values appear in shipped content: types 0 and 10 author nothing, so
+  they are decoded and reported unsupported rather than implemented.
+
 - Census the emitter-info `hw_gfxobj_id` population early in this phase — mesh, surface, and
   palette complexity **plus each mesh's 0x11 degrade info** (orientation modes and LOD bands
   actually authored) — to pin exactly which fragment chunks and orientation branches particles
@@ -1072,6 +1101,9 @@ Progress: Not started
 
 - All eight measured representative `CreateParticle` events produce attributable visible effects at
   the correct authored roots/parts and times, covering both `part = -1` and `part = 0` attachment.
+- Every shipped motion type (1-9, 11, 12) has a unit fixture checked against its pinned retail
+  formula, and the finite/persistent and follow/leave-behind paths each have one, independently of
+  the scene workload. Types 0 and 10 author nothing in shipped content and report unsupported.
 - Removing the source owner deterministically removes its emitters and particles according to proven
   lifetime semantics.
 - Repeated emitters share immutable assets without sharing mutable particle state.

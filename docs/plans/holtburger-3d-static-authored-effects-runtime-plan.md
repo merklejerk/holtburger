@@ -1388,10 +1388,28 @@ binding, `SoundTable` key resolution, and the particle draw path with its harnes
 
 #### Remaining Work
 
-- Bind the `TextureVelocity` scroll rate and the particle draw cohorts through the renderer, and
-  resolve `SoundTable` keys against the owning resident's installed table.
-- Verify the particle vertex stage against `particle-motion.ts` on real WebGL through the browser
-  harness.
+- Bind the particle draw cohorts through the renderer and verify the vertex stage against
+  `particle-motion.ts` on real WebGL through the browser harness.
+- Resolve `SoundTable` keys against the owning resident's installed table. This needs the setup's
+  `default_sound_table` carried to the resident and the 0x20 table staged with the script closure;
+  the decoder and its selection semantics already exist.
+
+##### `TextureVelocity` binding is a render-contract change, not a binding (finding 2026-08-06)
+
+Attempted and deliberately backed out. The shader uniform and the per-draw compatibility field are
+both trivial, but the value has nowhere to come from: **GfxObj DataID does not reach the visual
+template or the renderer at all.** The render world is keyed by material and appearance identity,
+and `ResolvedMaterialFacts` carries DAT _surface_ facts, which a script-authored scroll rate is not.
+
+So "keyed by GfxObj DataID" — the property that makes the derived-phase model correct, because it is
+what keeps tiled instances in lockstep — requires threading a new source fact through the render
+contract. That is a deliberate contract change, not a wiring step, and it should be scoped as one.
+
+Weighing it: `TextureVelocity` has **zero occurrences in the measured representative workload** (11
+scripts archive-wide, none in DA55/DC58), so nothing observable is waiting on it. The rate is already
+resolved and validated at preparation by `resolveAuthoredTextureScroll`; only the render-side
+consumption is outstanding. Building a constant-zero uniform now would be the dormant infrastructure
+this plan forbids, so it waits for the contract change rather than being half-landed.
 
 #### Recorded Debt
 

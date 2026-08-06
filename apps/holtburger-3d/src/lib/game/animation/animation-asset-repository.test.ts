@@ -14,8 +14,8 @@ describe("AnimationAssetRepository", () => {
 
 		source.resolveNext(animation());
 		const [firstHandle, secondHandle] = await Promise.all([first, second]);
-		expect(firstHandle.animation).toBe(secondHandle.animation);
-		expect(firstHandle.animation.framesPerSecond).toBe(30);
+		expect(firstHandle.asset).toBe(secondHandle.asset);
+		expect(firstHandle.asset.framesPerSecond).toBe(30);
 		expect(repository.getState("0x03000001")).toBe("ready");
 
 		firstHandle.release();

@@ -7,6 +7,7 @@ pub mod gfx_obj;
 pub mod material;
 pub mod motion_kinematics;
 pub mod motion_table;
+pub mod physics_script;
 pub mod region;
 pub mod scene;
 pub mod setup_model;
@@ -28,6 +29,7 @@ pub use material::{
 };
 pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
 pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
+pub use physics_script::{PhysicsScript, PhysicsScriptRecord};
 pub use region::{REGION_DESC_FILE_ID, RegionDesc};
 pub use scene::{Scene, SceneObjectTemplate};
 pub use setup_model::SetupModel;

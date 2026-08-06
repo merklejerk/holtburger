@@ -433,7 +433,7 @@
 					<code
 						>{dynamics.dynamics.entityCount} / {dynamics.dynamics.templates
 							.templateCount} / {dynamics.dynamics.animationResources
-							.animationCount}</code
+							.assetCount}</code
 					>
 				</div>
 				<div class="ac-param-row">

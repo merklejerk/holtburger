@@ -449,7 +449,7 @@ export class DynamicEntitySystem<
 				}
 				return {
 					animation: prepareDynamicAnimation(
-						animationResult.value.animation,
+						animationResult.value.asset,
 						template,
 						entity.source.scale,
 						staticPresentationBounds(entity.source),

@@ -92,7 +92,7 @@ describe("decodeAnimationRecord", () => {
 				transparentPartResponse({ partIndex: 1 }),
 				"0x03000001",
 			),
-		).toThrow("TransparentPart index 1 is out of range for 1 parts");
+		).toThrow("transparent-part index 1 is out of range for 1 parts");
 		expect(() =>
 			decodeAnimationRecord(
 				transparentPartResponse({ durationSeconds: undefined }),
@@ -136,7 +136,7 @@ describe("decodeAnimationRecord", () => {
 
 		expect(decoded.hooks[0]).toMatchObject({
 			command: "sound",
-			kind: "deferred-effect",
+			kind: "unimplemented",
 			payload: { bytes: payloadBytes, kind: "raw" },
 		});
 		expect(() =>

@@ -1332,10 +1332,12 @@ remaining work:
 
 ### Phase 7: Activate Script-Only and Combined Authored Residents
 
-Progress: **In progress 2026-08-06.** Landed: script-closure and emitter staging through the entity
-lifecycle, script clocks installed and advancing, the Web Audio device, the particle runtime, the
-effect-state ownership move, and script-only promotion. Remaining: the `TextureVelocity` uniform
-binding, `SoundTable` key resolution, and the particle draw path with its harness verification.
+Progress: **Complete 2026-08-06**, except the `TextureVelocity` uniform, which is deferred as a
+render-contract change with no measured consumer (recorded below). Landed: script-closure, emitter,
+and sound-table staging through the entity lifecycle; script clocks installed and advancing; the
+Web Audio device; the particle runtime; the effect-state ownership move; script-only promotion;
+`SoundTable` key resolution; and the complete particle draw path — mesh closure, decode, cache,
+residency, instance buffer, pass, and frame wiring.
 
 #### Deliverables
 
@@ -1383,6 +1385,16 @@ binding, `SoundTable` key resolution, and the particle draw path with its harnes
 - **Emitters need no removal path.** Destroying an owner's nodes stops them publishing a transform,
   which the runtime already treats as the emitter going away — behavior that was tested in Phase 5
   before it had a caller.
+- **Particle mesh residency is fire-and-forget.** A resident activates immediately and its first
+  particles may miss a frame or two while meshes land, which the draw pass counts as unresolved
+  cohorts. Blocking activation on mesh residency would hold back correct script, audio, and
+  animation behavior for a purely visual dependency.
+- **Residency holds resource keys, not GL handles.** An earlier version cast keys straight to
+  `WebGLTexture` and `WebGLVertexArrayObject`; it type-checked and was a lie. Keys resolve to live
+  bindings only at draw time, so a mesh whose texture upload failed reports `null` and is counted
+  rather than drawn untextured.
+- **Particles draw after the blended pass**, because they are transparent and must not occlude the
+  geometry they sort against.
 - **Audio playback is best-effort.** An undecoded sound is skipped rather than queued: these are
   ambient one-shots tied to a moment, and playing one late is worse than not playing it.
 

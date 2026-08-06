@@ -1,0 +1,260 @@
+import { PARTICLE_TYPE } from "../behavior/particle-motion";
+import {
+	compileWebGL2Shader,
+	requireWebGL2Uniform,
+} from "./webgl2-shader-utils";
+
+/** Sampler units bound once for the particle program's lifetime. */
+export const PARTICLE_TEXTURE_UNITS = {
+	base: 0,
+	palette: 1,
+} as const;
+
+/**
+ * How a particle mesh is oriented at draw time.
+ *
+ * Retail resolves this from the mesh's `DegradeInfo` band, not from the emitter
+ * (`CPhysicsPart::calc_draw_frame`, acclient.c:319260-319290). Orientation is therefore a per-mesh
+ * fact, and cohorts are keyed by mesh, so it binds as a per-cohort constant and never as a
+ * per-instance attribute.
+ */
+/* Not exported until the draw path sets this uniform, which lands with Phase 7 activation. */
+const PARTICLE_ORIENTATION = {
+	/** Band mode 1: keep the authored spawn frame, including any `GR`/`LR` spin. */
+	authored: 0,
+	/** Band mode 2: full viewer-facing billboard. Retail re-heads the draw frame to the viewer. */
+	viewerFacing: 1,
+	/** Band modes 3/4/5: viewer alignment locked about one axis. */
+	axisLocked: 2,
+} as const;
+
+/**
+ * Particle vertex stage.
+ *
+ * Evaluates the closed-form motion of `Particle::Update` (acclient.c:317446-317664) on the GPU. Its
+ * CPU twin is `game/behavior/particle-motion.ts`, which is unit-tested per formula family; the two
+ * must stay in step, and the CPU side is the reference when they disagree.
+ *
+ * A particle carries only spawn constants and a birth time, so there is no simulation here — the
+ * whole trajectory is a function of elapsed time. That is what keeps per-particle CPU work to
+ * emission and expiry bookkeeping regardless of particle count.
+ *
+ * The 13 authored `ParticleType` values reduce to seven position formulas: the `Local`/`Global`
+ * split is resolved at spawn (the constants arrive already rotated into world space) and `GR`/`LR`
+ * selects a spin axis space rather than a trajectory.
+ */
+const PARTICLE_VERTEX_SHADER = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTextureCoordinate;
+
+// Per-instance spawn constants. Everything a particle needs for its whole life.
+layout(location = 3) in vec4 aOriginBirth;   // xyz = parent origin + hook offset, w = birth time
+layout(location = 4) in vec4 aOffsetLife;    // xyz = spawn offset, w = lifespan
+layout(location = 5) in vec3 aMotionA;
+layout(location = 6) in vec3 aMotionB;
+layout(location = 7) in vec3 aMotionC;
+layout(location = 8) in vec4 aAppearance;    // startScale, finalScale, startTrans, finalTrans
+
+uniform mat4 uProjection;
+uniform mat4 uView;
+/** Shared runtime clock; every particle derives its own elapsed time from its birth stamp. */
+uniform float uClockSeconds;
+/** One of PARTICLE_ORIENTATION, constant per cohort because it is a per-mesh fact. */
+uniform int uOrientation;
+/** Axis held fixed when uOrientation is axis-locked. */
+uniform vec3 uLockedAxis;
+/** World-space camera position; retail bills board to the eye, not to the screen plane. */
+uniform vec3 uCameraPosition;
+/** Authored ParticleType, constant per cohort. */
+uniform int uMotionType;
+
+out vec2 vTextureCoordinate;
+out float vTranslucency;
+
+vec3 evaluatePosition(vec3 base, float t) {
+	// Formula families, in the same order and with the same quirks as the CPU evaluator.
+	if (uMotionType == ${PARTICLE_TYPE.still}) {
+		return base;
+	}
+	if (uMotionType == ${PARTICLE_TYPE.localVelocity} || uMotionType == ${PARTICLE_TYPE.globalVelocity}) {
+		return base + aMotionA * t;
+	}
+	if (uMotionType == ${PARTICLE_TYPE.parabolicLvga} || uMotionType == ${PARTICLE_TYPE.parabolicLvla}
+		|| uMotionType == ${PARTICLE_TYPE.parabolicGvga} || uMotionType == ${PARTICLE_TYPE.parabolicLvgaGr}
+		|| uMotionType == ${PARTICLE_TYPE.parabolicLvlaLr} || uMotionType == ${PARTICLE_TYPE.parabolicGvgaGr}) {
+		return base + aMotionA * t + 0.5 * aMotionB * t * t;
+	}
+	if (uMotionType == ${PARTICLE_TYPE.swarm}) {
+		// sin on y, cos on x and z. Authored asymmetry; do not make this uniform.
+		return base + vec3(
+			cos(aMotionB.x * t) * aMotionC.x + aMotionA.x * t,
+			sin(aMotionB.y * t) * aMotionC.y + aMotionA.y * t,
+			cos(aMotionB.z * t) * aMotionC.z + aMotionA.z * t
+		);
+	}
+	if (uMotionType == ${PARTICLE_TYPE.explode}) {
+		// Both authored Explode quirks: every axis multiplies by aMotionA.x rather than its own
+		// component, and z carries an extra + aMotionA.z inside the parenthesis.
+		return base + vec3(
+			(aMotionB.x * t + aMotionC.x * aMotionA.x) * t,
+			(aMotionB.y * t + aMotionC.y * aMotionA.x) * t,
+			(aMotionB.z * t + aMotionC.z * aMotionA.x + aMotionA.z) * t
+		);
+	}
+	if (uMotionType == ${PARTICLE_TYPE.implode}) {
+		// One scalar cosine driven by aMotionA.x, applied to all three axes.
+		float wave = cos(aMotionA.x * t);
+		return base + wave * aMotionC + aMotionB * t * t;
+	}
+	return base;
+}
+
+/** Basis that turns the particle mesh to face the viewer, or the authored identity. */
+mat3 orientationBasis(vec3 worldPosition) {
+	if (uOrientation == ${PARTICLE_ORIENTATION.authored}) {
+		return mat3(1.0);
+	}
+	// Retail heads the draw frame at the viewer position, so the facing axis is toward the eye
+	// rather than along the camera's forward vector; the two differ off the screen centre.
+	vec3 forward = normalize(uCameraPosition - worldPosition);
+	vec3 reference = uOrientation == ${PARTICLE_ORIENTATION.axisLocked}
+		? normalize(uLockedAxis)
+		: vec3(0.0, 0.0, 1.0);
+	vec3 right = cross(reference, forward);
+	float rightLength = length(right);
+	// Degenerate when the particle sits on the locked axis; keep the authored frame rather than
+	// producing a NaN basis.
+	if (rightLength < 1e-5) {
+		return mat3(1.0);
+	}
+	right /= rightLength;
+	vec3 up = cross(forward, right);
+	return mat3(right, up, forward);
+}
+
+void main() {
+	float elapsed = max(uClockSeconds - aOriginBirth.w, 0.0);
+	float lifespan = aOffsetLife.w;
+	// Clamped, matching retail: a particle past its lifespan holds its final appearance.
+	float progress = lifespan > 0.0 ? min(elapsed / lifespan, 1.0) : 1.0;
+
+	vec3 base = aOriginBirth.xyz + aOffsetLife.xyz;
+	vec3 worldPosition = evaluatePosition(base, elapsed);
+	float scale = mix(aAppearance.x, aAppearance.y, progress);
+
+	vec3 local = orientationBasis(worldPosition) * (aPosition * scale);
+	vTextureCoordinate = aTextureCoordinate;
+	vTranslucency = mix(aAppearance.z, aAppearance.w, progress);
+	// The normal attribute is bound by the shared object geometry layout but unused: particles draw
+	// unlit, exactly as retail draws them.
+	gl_Position = uProjection * uView * vec4(worldPosition + local, 1.0);
+}
+`;
+
+/**
+ * Particle fragment stage.
+ *
+ * Composes the same material reads the object program uses rather than growing a parallel "simple"
+ * particle shader: particles are ordinary in-world GfxObj meshes drawn through the same
+ * surface-derived blend staging, so a separate path would drift back toward this one anyway.
+ * Per-particle animated translucency modulates alpha on top of that.
+ */
+const PARTICLE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec2 vTextureCoordinate;
+in float vTranslucency;
+
+uniform sampler2D uBase;
+uniform sampler2D uPalette;
+uniform int uMaterialKind;
+uniform float uAlphaTest;
+
+out vec4 outColor;
+
+vec4 sampleMaterial() {
+	if (uMaterialKind == 0) {
+		return texture(uBase, vTextureCoordinate);
+	}
+	// Paletted reads mirror the object program: the base texture holds indices, not colors.
+	float index = texture(uBase, vTextureCoordinate).r;
+	if (uMaterialKind == 2) {
+		index += texture(uBase, vTextureCoordinate).g * 256.0;
+	}
+	return texture(uPalette, vec2(index, 0.5));
+}
+
+void main() {
+	vec4 color = sampleMaterial();
+	// Translucency is retail's sense: 1 is fully transparent, so alpha is its complement.
+	color.a *= 1.0 - clamp(vTranslucency, 0.0, 1.0);
+	if (color.a < uAlphaTest) discard;
+	outColor = color;
+}
+`;
+
+export interface WebGL2ParticleProgram {
+	readonly program: WebGLProgram;
+	readonly uniforms: {
+		readonly alphaTest: WebGLUniformLocation;
+		readonly base: WebGLUniformLocation;
+		readonly cameraPosition: WebGLUniformLocation;
+		readonly clockSeconds: WebGLUniformLocation;
+		readonly lockedAxis: WebGLUniformLocation;
+		readonly materialKind: WebGLUniformLocation;
+		readonly motionType: WebGLUniformLocation;
+		readonly orientation: WebGLUniformLocation;
+		readonly palette: WebGLUniformLocation;
+		readonly projection: WebGLUniformLocation;
+		readonly view: WebGLUniformLocation;
+	};
+}
+
+/** Compile and link the particle program, binding its sampler units once. */
+export function createWebGL2ParticleProgram(
+	gl: WebGL2RenderingContext,
+): WebGL2ParticleProgram {
+	const vertex = compileWebGL2Shader(
+		gl,
+		gl.VERTEX_SHADER,
+		PARTICLE_VERTEX_SHADER,
+	);
+	const fragment = compileWebGL2Shader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		PARTICLE_FRAGMENT_SHADER,
+	);
+	const program = gl.createProgram();
+	gl.attachShader(program, vertex);
+	gl.attachShader(program, fragment);
+	gl.linkProgram(program);
+	gl.deleteShader(vertex);
+	gl.deleteShader(fragment);
+	if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+		const log = gl.getProgramInfoLog(program);
+		gl.deleteProgram(program);
+		throw new Error(`Particle program failed to link: ${log ?? "unknown"}`);
+	}
+	const uniforms: WebGL2ParticleProgram["uniforms"] = {
+		alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
+		base: requireWebGL2Uniform(gl, program, "uBase"),
+		cameraPosition: requireWebGL2Uniform(gl, program, "uCameraPosition"),
+		clockSeconds: requireWebGL2Uniform(gl, program, "uClockSeconds"),
+		lockedAxis: requireWebGL2Uniform(gl, program, "uLockedAxis"),
+		materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
+		motionType: requireWebGL2Uniform(gl, program, "uMotionType"),
+		orientation: requireWebGL2Uniform(gl, program, "uOrientation"),
+		palette: requireWebGL2Uniform(gl, program, "uPalette"),
+		projection: requireWebGL2Uniform(gl, program, "uProjection"),
+		view: requireWebGL2Uniform(gl, program, "uView"),
+	};
+	// Sampler units are invariant for the program's lifetime, so bind them once at creation.
+	gl.useProgram(program);
+	gl.uniform1i(uniforms.base, PARTICLE_TEXTURE_UNITS.base);
+	gl.uniform1i(uniforms.palette, PARTICLE_TEXTURE_UNITS.palette);
+	return { program, uniforms };
+}

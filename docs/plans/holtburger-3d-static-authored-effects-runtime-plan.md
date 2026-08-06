@@ -1030,9 +1030,10 @@ archive records, the content/transport/command lane, the frontend decode,
 `ParticleEmitterRepository` with its exact preparation-time motion envelope, the complete
 closed-form motion evaluator with a unit fixture per formula family, and `ParticleEmitterRuntime`
 (emission cadence, lifetime, stop/destroy, emitter-id replacement, follow vs leave-behind, and
-zero-cost hidden emitters with transition-time reconciliation), and the router's particle port.
-Remaining: the GPU vertex stage and feeding the prepared envelope into the existing visibility
-path.
+zero-cost hidden emitters with transition-time reconciliation), the router's particle port, the
+emitter bounds contribution, and the GPU particle program with its closed-form vertex stage.
+Remaining: the instanced draw path that binds cohorts and feeds the vertex stage, plus real-GPU
+verification of the shader against the CPU evaluator through the browser harness.
 
 #### Deliverables
 
@@ -1185,6 +1186,19 @@ path.
   no catch-up** (bursting to fill a slow frame would change authored density), particles die only
   by lifespan, `stop` drains while `destroy` vanishes, and a nonzero `emitter_id` replaces a live
   same-id emitter while auto-id emitters stay independent.
+- **The vertex stage interpolates its motion constants from `PARTICLE_TYPE`, not literals.** The
+  GLSL and `particle-motion.ts` implement the same seven formulas, so the risk worth engineering
+  against is drift between them. Interpolating the type values means a type added to the CPU
+  evaluator without a matching shader branch fails a test rather than producing silently motionless
+  particles. Same treatment for the orientation modes.
+- **The billboard basis is eye-facing, not screen-aligned.** Retail re-heads the draw frame at the
+  viewer _position_ (`Frame::set_vector_heading`), so the facing axis points at the eye rather than
+  along the camera's forward vector; the two differ away from the screen centre. A degenerate basis
+  (particle on the locked axis) falls back to the authored frame rather than emitting NaNs.
+- **The CPU evaluator is the reference, and real-GPU verification is still owed.** `fakeGl` proves
+  program creation and branch coverage but cannot prove the arithmetic. The browser harness runs
+  real WebGL and is the right place to check shader output against `particle-motion.ts`; that
+  verification is recorded as remaining work, not assumed.
 - **The router delegates particle replay rather than deciding it.** Persistence is a property of the
   emitter asset, which the particle runtime owns and the router deliberately does not, so
   `create-particle` returns whatever the consumer did. This is the delegation the Phase 1 replay

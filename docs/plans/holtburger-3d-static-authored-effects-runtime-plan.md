@@ -1478,10 +1478,18 @@ Progress: Not started
 - [ ] Confirm cyclic scheduling remains bounded in work per tick and observable in diagnostics.
 - [ ] Delete script-only deferral, placeholder effect ports, hollow unsupported-success tests, and any
       temporary duplicate effect representation.
-- [ ] Collapse `WebGL2InstanceBuffer` and `WebGL2ParticleInstanceBuffer`. They share capacity
-      growth, orphaning, and upload; they differ in record layout and encoder. A generic buffer
-      parameterized by float count and an `encodeInto` callback would carry both, but genericizing
-      a tested class mid-phase was not worth the risk, so the duplication was taken deliberately.
+- [x] Examined `WebGL2InstanceBuffer` versus `WebGL2ParticleInstanceBuffer` and **did not collapse
+      them.** They are different mechanisms, not one duplicated: the object buffer is a frame arena
+      (`resetFrame` then `updateRange` writes into a shared allocation, exposing a binding), while
+      the particle buffer uploads one whole cohort per draw. Forcing either model on the other would
+      be worse than the ~15 lines of create/grow/delete they share, which is below the bar for an
+      abstraction. The ledger's job was to force the look; the look says leave it.
+- [ ] **Measure the particle buffer's per-cohort reuse.** Every cohort uploads into the same buffer
+      immediately before its draw, so `bufferSubData` runs against a buffer with a draw already
+      queued. That is correct, but the driver must either rename the buffer or stall. If profiling
+      shows a stall, the fix is one allocation per frame with per-cohort offsets — the object
+      buffer's arena model — not a second buffer. Noted rather than pre-optimized, per this plan's
+      rule that structural change beats speculative micro-optimization.
 - [x] Rename `ParticleEmitterRuntime` to `ParticleSystem`, with `ParticleSystemDependencies` and
       `ParticleSystemDiagnostics` and the module renamed to `particle-system.ts`. Every frontend
       system now follows the `<Concern>System` convention.

@@ -250,8 +250,13 @@ boundary dry-run (its Phase R) when the effects plan completes. It runs as a par
 the effects plan, alongside — not ahead of, and not blocking — the spawned-entity plan, which has
 no dependency on weather in either direction.
 
+**Weather is deliberately not a roadmap Definition-of-Done item (ratified 2026-08-06).** It is a
+follow-on feature that consumes this roadmap's output rather than a condition for the roadmap being
+finished; gating completion on it would hold the dynamic-entity architecture open indefinitely
+behind scope that is genuinely optional. The weather plan keeps its own Definition of Done.
+
 Beyond the seam, the completed sky pass landed shared code the effects plan now reuses instead of
-rebuilding: the unit-tested derived-phase scroll arithmetic (`skyTextureOffset`), the corrected
+rebuilding: the unit-tested derived-phase scroll arithmetic (hoisted 2026-08-06 to the shared `textureScrollPhase`), the corrected
 staged blend selection in the shared `objectBlendPolicy`, standalone `TEXTURE_2D` residency, and
 the `resolveObjectMaterialRanges` span primitive. The effects plan's 2026-08-06 resteer records
 each with its consuming phase.

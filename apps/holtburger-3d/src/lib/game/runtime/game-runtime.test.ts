@@ -165,6 +165,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 
 		runtime.updateSceneInterest({
@@ -288,6 +290,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -314,6 +318,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -353,6 +359,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -389,6 +397,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -417,6 +427,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
@@ -465,6 +477,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
@@ -505,6 +519,8 @@ describe("GameRuntime view and interest control", () => {
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
+			// No runtime test triggers authored audio; a refusing device keeps that visible.
+			{ playOneShot: () => null },
 		);
 
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));

@@ -9,6 +9,15 @@ export const FRONTEND_TUNING = {
 		/** Visual sampling cadence for animated roots omitted by the previous rendered frame. */
 		offscreenSampleIntervalSeconds: 0.1,
 	},
+	audio: {
+		/**
+		 * Simultaneous authored voices before the oldest is stolen.
+		 *
+		 * Retail runs 16 with priority stealing, but every hook sound carries priority 0 and loses
+		 * every contest, so this is a plain budget rather than a priority queue.
+		 */
+		maximumSimultaneousVoices: 16,
+	},
 	diagnostics: {
 		/** Smoothing window used by the on-screen frame-time readout. */
 		frameMetricsEmaWindowMs: 1_000,

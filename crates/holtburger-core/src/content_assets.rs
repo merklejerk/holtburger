@@ -14,7 +14,7 @@ use holtburger_content::{
     TexturePixelFormat,
 };
 use holtburger_dat::file_type::{
-    Animation, GfxObj, Palette, PhysicsScript, RenderSurface, SetupModel,
+    Animation, GfxObj, Palette, ParticleEmitterInfo, PhysicsScript, RenderSurface, SetupModel,
 };
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex as TokioMutex, Semaphore};
@@ -32,6 +32,7 @@ pub enum ContentAssetRequest {
     RegionRenderProfile(u32),
     Animation(u32),
     PhysicsScript(u32),
+    ParticleEmitterInfo(u32),
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
@@ -76,6 +77,7 @@ pub enum ContentAsset {
     RegionRenderProfile(Box<ResolvedRegionRenderProfile>),
     Animation(Box<Animation>),
     PhysicsScript(Box<PhysicsScript>),
+    ParticleEmitterInfo(Box<ParticleEmitterInfo>),
     GfxObj(Arc<GfxObj>),
     SetupModel(Arc<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
@@ -291,6 +293,19 @@ impl ContentAssetService {
                     PhysicsScript::read(&mut Cursor::new(resource.bytes)).with_context(|| {
                         format!("Could not parse PhysicsScript 0x{script_id:08X}")
                     })?,
+                )))
+            }
+            ContentAssetRequest::ParticleEmitterInfo(emitter_info_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, emitter_info_id))
+                    .with_context(|| {
+                        format!("Could not load ParticleEmitterInfo 0x{emitter_info_id:08X}")
+                    })?;
+                Ok(ContentAsset::ParticleEmitterInfo(Box::new(
+                    ParticleEmitterInfo::read(&mut Cursor::new(resource.bytes)).with_context(
+                        || format!("Could not parse ParticleEmitterInfo 0x{emitter_info_id:08X}"),
+                    )?,
                 )))
             }
             ContentAssetRequest::GfxObj(gfx_obj_id) => Ok(ContentAsset::GfxObj(

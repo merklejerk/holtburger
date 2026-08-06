@@ -131,6 +131,12 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		nodes.add(target.nodeId);
 	}
 
+	/** Whether this system still holds the exact node and generation a command targets. */
+	holds(target: BehaviorTarget): boolean {
+		const record = this.#records.get(target.nodeId);
+		return record?.target.generation === target.generation;
+	}
+
 	/** Advance every script clock to `timeSeconds`, dispatching every record it crosses. */
 	advance(timeSeconds: number): void {
 		if (this.#destroyed)
@@ -143,7 +149,13 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		this.#lastAdvancementDurationMs = performance.now() - startedAt;
 	}
 
-	/** Remove one target's clocks, queued activations, and staged closure as one operation. */
+	/**
+	 * Remove one target's clocks and queued activations as one operation.
+	 *
+	 * The staged closure is **borrowed, not owned**: whoever acquired it releases it, because that
+	 * owner must also release it when preparation fails or is superseded — before any clock exists.
+	 * Releasing here as well would be a double release, which the repository correctly rejects.
+	 */
 	remove(ownerId: TOwnerId, nodeId: SceneNodeId): void {
 		const record = this.#records.get(nodeId);
 		if (!record) return;
@@ -151,7 +163,6 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		const nodes = this.#owners.get(ownerId);
 		nodes?.delete(nodeId);
 		if (nodes && nodes.size === 0) this.#owners.delete(ownerId);
-		record.closure.release();
 	}
 
 	removeOwner(ownerId: TOwnerId): void {
@@ -162,7 +173,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
-		for (const record of this.#records.values()) record.closure.release();
+		// Closures are borrowed; their owner releases them.
 		this.#records.clear();
 		this.#owners.clear();
 	}

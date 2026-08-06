@@ -157,18 +157,21 @@ describe("PhysicsScriptSystem", () => {
 		).toEqual(["rejected-stale-target"]);
 	});
 
-	it("releases the staged closure when its owner is removed", async () => {
+	it("stops dispatching for a removed owner and borrows rather than owns its closure", async () => {
 		const closure = await harness.repository.acquireClosure("0x33000711");
 		harness.system.install("owner", TARGET, closure, 0);
 		harness.system.advance(0);
 
 		harness.system.remove("owner", TARGET.nodeId);
 
-		expect(harness.repository.getDiagnostics().referenceCount).toBe(0);
-		// A removed owner cannot receive further commands.
 		const before = harness.router.getObservations().length;
 		harness.system.advance(10);
 		expect(harness.router.getObservations()).toHaveLength(before);
+		// The closure is still held: its acquirer releases it, not this system. Releasing here too
+		// would double-release whenever preparation staged a closure that never reached a clock.
+		expect(harness.repository.getDiagnostics().referenceCount).toBe(1);
+		closure.release();
+		expect(harness.repository.getDiagnostics().referenceCount).toBe(0);
 	});
 
 	it("refuses a clock that moves backwards rather than inventing an interpretation", async () => {

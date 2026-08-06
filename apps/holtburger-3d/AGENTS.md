@@ -116,6 +116,10 @@ cross-system orchestration. Express proven knowledge using the simpler current
 architecture, and do not carry diagnostics or provenance through operational
 contracts merely because the legacy app did.
 
+## Retail Decompile
+
+When referencing the retail decompile, we generally want to approximate its behavior but not necessarily its architecture. Do not fall into the trap of rebuilding the retail client in rust/typescript. That client was written in 1999 under 1999 constraints. We have modern techniques and more mature software patterns available to us and should be able to improve on its design and performance.
+
 ## Working Style
 
 - Prefer clean cutovers. Remove aliases, compatibility wrappers, stale comments,

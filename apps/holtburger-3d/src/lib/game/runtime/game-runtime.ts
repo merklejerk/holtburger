@@ -40,6 +40,7 @@ import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
+import { PhysicsScriptSystem } from "../systems/physics-script-system";
 import { BehaviorEventRouter } from "../behavior/behavior-event-router";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
@@ -311,6 +312,9 @@ export class GameRuntime {
 	readonly #effects: EffectSystem;
 	readonly #behaviorRouter: BehaviorEventRouter;
 	readonly #physicsScripts: PhysicsScriptRepository;
+	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId>;
+	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
+	#lastFrameTimeSeconds = 0;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
@@ -547,6 +551,9 @@ export class GameRuntime {
 			dynamicGenerationToResourceOwnerId,
 		);
 		this.#effects = new EffectSystem();
+		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
+		// by design. A holder breaks the construction cycle without making the router mutable.
+		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId> } = {};
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
 				// Authored sounds arrive only from physics scripts; no resident runs one until
@@ -560,17 +567,31 @@ export class GameRuntime {
 				// Chained script activation lands with the script clock in Phase 7; until an authored
 				// script runs, no `CallPES` can reach this port.
 				scheduler: {
-					scheduleActivation: () => {
-						throw new Error(
-							"Chained script activation has no owner until physics scripts are installed.",
-						);
+					scheduleActivation: (target, activation) => {
+						const system = scriptWiring.system;
+						if (!system)
+							throw new Error(
+								"Script activation reached an unwired scheduler.",
+							);
+						system.scheduleActivation(target, activation);
 					},
 				},
-				targets: { isLive: (target) => this.#animation.holds(target) },
+				// A target is live if either producer still holds it at this generation; scripts and
+				// animation install independently, so neither alone is authoritative.
+				targets: {
+					isLive: (target) =>
+						this.#animation.holds(target) ||
+						(scriptWiring.system?.holds(target) ?? false),
+				},
 			},
 			FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
 		);
 		this.#animation = new AnimationSystem(this.#effects, this.#behaviorRouter);
+		this.#physicsScriptSystem = new PhysicsScriptSystem<OwnerId>(
+			this.#behaviorRouter,
+			Math.random,
+		);
+		scriptWiring.system = this.#physicsScriptSystem;
 		this.#terrain = new TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>(
 			this.#scene,
 			dependencies.terrainGenerator,
@@ -887,6 +908,10 @@ export class GameRuntime {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		this.#lastFrameTimeSeconds = timeSeconds;
+		// Retail runs script hooks before this frame's animation hooks for static objects
+		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
+		this.#physicsScriptSystem.advance(timeSeconds);
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
 			animationFrame,
@@ -957,6 +982,7 @@ export class GameRuntime {
 		this.#renderer = null;
 		this.#animationPresentation.clear();
 		this.#animation.destroy();
+		this.#physicsScriptSystem.destroy();
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();
@@ -1309,6 +1335,20 @@ export class GameRuntime {
 				try {
 					installation.commit();
 					animationStage.commit();
+					// Script clocks start only after the generation publishes, so a resident cannot
+					// dispatch a command against a node that is not yet in the scene.
+					for (const entity of prepared) {
+						if (entity.scriptClosure === null) continue;
+						this.#physicsScriptSystem.install(
+							ownerId,
+							{
+								generation: installation.generation,
+								nodeId: entity.nodeId,
+							},
+							entity.scriptClosure,
+							this.#lastFrameTimeSeconds,
+						);
+					}
 				} catch (cause) {
 					animationStage.release();
 					installation.release();
@@ -1350,6 +1390,7 @@ export class GameRuntime {
 		this.#staticObjectLayerDiagnostics.delete(ownerId);
 		this.#envCellLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
+		this.#physicsScriptSystem.removeOwner(ownerId);
 		this.#dynamics.removeOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);
 		if (layer === LandblockLayerKind.Terrain) {

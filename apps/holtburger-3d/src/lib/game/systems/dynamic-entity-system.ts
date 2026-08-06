@@ -88,6 +88,8 @@ interface PreparedDynamicEntity {
 	readonly animation: PreparedDynamicAnimation;
 	readonly nodeId: SceneNodeId;
 	readonly source: AuthoredDynamicSource;
+	/** Staged script closure, or `null` for a resident whose setup owns no default script. */
+	readonly scriptClosure: PreparedPhysicsScriptClosure | null;
 }
 
 /** Owns dynamic entity trees, rigid-part components, and reusable visual preparation. */
@@ -181,7 +183,9 @@ export class DynamicEntitySystem<
 				// can trigger a load at frame time.
 				entity.source.behavior.physicsScriptId === null
 					? Promise.resolve(null)
-					: this.#scripts.acquireClosure(entity.source.behavior.physicsScriptId),
+					: this.#scripts.acquireClosure(
+							entity.source.behavior.physicsScriptId,
+						),
 			),
 		);
 		this.#pendingPreparations.add(preparationPromise);
@@ -238,6 +242,7 @@ export class DynamicEntitySystem<
 					return {
 						animation: entity.preparedAnimation,
 						nodeId: entity.rootNodeId,
+						scriptClosure: entity.scriptClosure,
 						source: entity.source,
 					};
 				});
@@ -436,11 +441,15 @@ export class DynamicEntitySystem<
 	): Promise<"ready" | "superseded"> {
 		// Settled separately rather than in one array so each lane keeps its own result type; a
 		// single `allSettled` would widen them into a union the release paths cannot discriminate.
-		const [templateResult, animationResults, scriptResults] = await Promise.all([
-			Promise.allSettled([preparation.completion]).then((results) => results[0]!),
-			Promise.allSettled(animationPreparations),
-			Promise.allSettled(scriptPreparations),
-		]);
+		const [templateResult, animationResults, scriptResults] = await Promise.all(
+			[
+				Promise.allSettled([preparation.completion]).then(
+					(results) => results[0]!,
+				),
+				Promise.allSettled(animationPreparations),
+				Promise.allSettled(scriptPreparations),
+			],
+		);
 		const settled = [templateResult, ...animationResults, ...scriptResults];
 		// Everything acquired must be releasable on any failure path, including a closure whose
 		// sibling animation rejected.

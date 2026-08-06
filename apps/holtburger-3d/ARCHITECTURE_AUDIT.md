@@ -123,8 +123,10 @@ withdraws its atlas claim and cannot become authoritative scene state.
 
 ## 4. Authored Dynamic Presentation
 
-Setup-backed residents with a default animation leave static baking but retain their authored root
-placement and scope. One appearance key owns a shared visual template; one animation ID owns a
+Setup-backed residents with a default animation **or a default physics script** leave static baking
+but retain their authored root placement and scope. That mirrors retail, which enrols a static object
+as animating for either (`CPhysicsObj::InitDefaults` sets state bit `0x40000` or `0x80000`), so a
+script-only resident is promoted for the same reason an animated one is; it simply has no playback. One appearance key owns a shared visual template; one animation ID owns a
 shared immutable prepared clip. Entity identity appears only in mutable playback, effect state,
 articulated pose data, and root ownership. `ObjectVisualTemplateRepository` stages the template's
 immutable preparation, indexed geometry, exact material ranges, and atlas residency as one lifecycle.
@@ -141,12 +143,47 @@ complete.
 Structural or unknown visual hooks keep a valid resting presentation with provenance rather than
 activating partial behavior.
 
+### Two behavior producers, one command union
+
+Animation and physics scripts are **two independent clocks dispatching the same authored hook
+vocabulary**. Both compile into one `PreparedBehaviorCommand` union and carry their own provenance
+beside it, so neither producer owns a command shape. `BehaviorEventRouter` sits at that cut: it
+routes each command to its consumer synchronously, records exactly one outcome with full provenance,
+and owns no clocks, queues, state, or resources. Producers arrive already knowing *when* a command
+runs; the router decides only where it goes and what happened.
+
+Every dispatch target is a `(nodeId, generation)` pair checked before each dispatch, because node ids
+are recycled and a queued command must never land on a successor.
+
+`PhysicsScriptSystem` owns per-entity wall-clock script timing — retail anchors record times to
+`Timer::cur_time` and never sub-steps them, so it does not borrow the animation lane's fixed step. An
+immediately chained `CallPES` starts its target at the caller's authored end rather than the current
+clock, which is what makes a self-calling script repeat at exactly its authored length with zero
+drift; a nonzero pause instead rolls a uniform delay. Catch-up and runaway share one per-entity
+dispatch budget whose exhaustion resynchronizes the entity and reports it, rather than silently
+discarding elapsed time the way retail's two-second cliff does. Statics run scripts before animation
+each frame, matching `animate_static_object`.
+
+`ParticleSystem` schedules and reaps but never integrates: particle motion is closed form in elapsed
+time, so a live particle is spawn constants plus a birth time, and a dedicated vertex stage evaluates
+its trajectory on the GPU. Emitters cull at emitter granularity against a preparation-time envelope
+and cost nothing per frame while hidden — the suspended interval is reconciled once on return.
+`AudioSystem` plays one-shot voices whose spatial parameters are computed once at trigger time and
+never updated; voices deliberately outlive their emitting owner, matching retail's fire-and-forget
+copies.
+
+Every behavior asset a resident can reach — script closure, emitter definitions, sound table,
+particle meshes — is staged before activation, and every frame-time lookup returns `null` for an
+unstaged asset rather than starting a load. Frame-time IO is structurally impossible rather than
+merely avoided.
+
 `AnimationSystem` advances semantic playback and hooks at 30 Hz and rebases gaps above two seconds.
 Visual sampling is a separate explicit operation over authoritative node IDs. The runtime samples
 roots selected by the previous completed renderer frame at render cadence and samples other active
-roots at a 100 ms product interval; zero remains the exact full-cadence baseline. `EffectSystem`
-consumes typed behavior commands directly and integrates retail axis-angle visual-root rotation plus
-per-part translucency on the semantic clock. A dispatch-only hook system and pass-through pose system
+roots at a 100 ms product interval; zero remains the exact full-cadence baseline. `EffectSystem` is a
+pure consumer: it owns persistent visual state — axis-angle visual-root rotation, whole-object scale,
+and per-part translucency on the semantic clock — while its *lifetime* belongs to the entity, not to
+playback, because a script-only resident has effect state and no animation at all. A dispatch-only hook system and pass-through pose system
 do not exist.
 
 `DynamicEntitySystem` publishes each complete articulated-pose-plus-effect sample together with a
@@ -160,8 +197,8 @@ transparent submission, carries instance alpha without widening the persistent i
 uses stable transparent ordering. Effect teardown and owner replacement clear persistent ramps,
 rotation, and per-part state before an identity can be reused.
 
-This section describes the landed static-authored runtime only. Spawned entities remain queued behind
-the authored-effects plan. Their selected architecture extends this presentation runtime through one
+This section describes the landed static-authored runtime only, which now includes the complete
+authored effects runtime: scripts, particles, and audio. Spawned entities remain queued behind it. Their selected architecture extends this presentation runtime through one
 world-owned entity model and the existing view-event path, expanded with one complete initial
 snapshot and resnapshot after detected receiver lag. No second dynamic system, stateful feed
 projector, or frontend placement authority is currently implemented.

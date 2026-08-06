@@ -533,6 +533,45 @@ impl ContentRepository {
             .collect()
     }
 
+    /// Resolve one bare GfxObj's appearance, with no owning setup.
+    ///
+    /// Particle meshes are `hw_gfxobj_id` references, not setups, so they cannot go through
+    /// [`Self::resolve_setup_appearance`], which reads a `SetupModel`. The per-part material
+    /// resolution is identical though, so this is that one call plus the dependency collection —
+    /// deliberately not a parallel material pipeline.
+    ///
+    /// Modeled as a single-part appearance because a GfxObj *is* one part; that keeps every
+    /// downstream template, geometry, and draw path unchanged.
+    pub fn resolve_gfx_obj_appearance(&self, gfx_obj_id: u32) -> Result<ResolvedSetupAppearance> {
+        let material_slots = self
+            .resolve_gfx_obj_material_slots_with_texture_changes(gfx_obj_id, &[])
+            .with_context(|| format!("failed to resolve GfxObj 0x{gfx_obj_id:08X} materials"))?;
+        let parts = vec![ResolvedSetupAppearancePart {
+            part_index: 0,
+            gfx_obj_id,
+            material_slots,
+        }];
+        let mut material_asset_ids = collect_setup_material_asset_ids(&parts);
+        let mut palette_dependencies = collect_setup_palette_dependencies(&parts);
+        material_asset_ids.sort_unstable();
+        material_asset_ids.dedup();
+        palette_dependencies.sort_unstable();
+        palette_dependencies.dedup();
+        Ok(ResolvedSetupAppearance {
+            setup_model_id: gfx_obj_id,
+            appearance_key: format!("gfxobj:0x{gfx_obj_id:08X}|base"),
+            parts,
+            material_asset_ids,
+            palette_dependencies,
+            // A bare GfxObj carries no ObjDesc, so every appearance override is empty by
+            // construction rather than defaulted.
+            anim_part_changes: Vec::new(),
+            palette_id: None,
+            sub_palettes: Vec::new(),
+            texture_changes: Vec::new(),
+        })
+    }
+
     fn resolve_gfx_obj_material_slots_with_texture_changes(
         &self,
         gfx_obj_id: u32,

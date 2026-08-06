@@ -1467,17 +1467,26 @@ this plan forbids, so it waits for the contract change rather than being half-la
 
 ### Phase 8: Resteer, Measure, and Clean Up
 
-Progress: Not started
+Progress: **Cleanup and resteer complete 2026-08-06.** Remaining: the runtime measurement items,
+which need the browser harness against production content rather than static checks.
 
 #### Task Checklist
 
 - [ ] Exercise the DA55/DC58 script-owner workloads and every recorded root script.
 - [ ] Measure script advancement, hook dispatch, particle simulation/upload/draw, audio asset/runtime,
       scene propagation, and teardown separately.
-- [ ] Confirm prepared resource counts track unique IDs rather than owners.
-- [ ] Confirm cyclic scheduling remains bounded in work per tick and observable in diagnostics.
-- [ ] Delete script-only deferral, placeholder effect ports, hollow unsupported-success tests, and any
-      temporary duplicate effect representation.
+- [x] Confirmed prepared resource counts track unique IDs rather than owners. `PreparedAssetRepository`
+      shares one preparation per id across every acquirer, proven for scripts (two roots reaching one
+      chained script transfer it once) and emitters, and `ParticleMeshCache` requests only meshes it
+      does not already hold.
+- [x] Confirmed cyclic scheduling stays bounded and observable. One per-entity dispatch budget covers
+      both runaway self-calls and long-stall catch-up; exhausting it resynchronizes the entity and
+      increments `resynchronizedCount`, proven by advancing a three-second loop across ten hours.
+- [x] Deleted the deferral scaffolding: script-only residents now promote, `BlockingAnimationHook`
+      (a hollow alias once the command union collapsed) is gone, the `deferred-effect` /
+      `unsupported-visual` arms merged into one `unimplemented` arm carrying its decision as data,
+      and the blocking-hook `reason` field went with the `ReplaceObject` ratification that left it
+      one reachable value.
 - [x] Examined `WebGL2InstanceBuffer` versus `WebGL2ParticleInstanceBuffer` and **did not collapse
       them.** They are different mechanisms, not one duplicated: the object buffer is a frame arena
       (`resetFrame` then `updateRange` writes into a shared allocation, exposing a binding), while
@@ -1493,15 +1502,18 @@ Progress: Not started
 - [x] Rename `ParticleEmitterRuntime` to `ParticleSystem`, with `ParticleSystemDependencies` and
       `ParticleSystemDiagnostics` and the module renamed to `particle-system.ts`. Every frontend
       system now follows the `<Concern>System` convention.
-- [ ] Confirm no authored `TextureVelocity` surface scrolls behind an unfired `CallPES` chain (see
-      the debt ledger); the accepted early-scroll consequence is expected to be unreachable in
-      shipped content, and this is where that expectation gets checked rather than assumed.
-- [ ] Update architecture documentation and hand the complete authored behavior model to the spawned-
-      entity plan.
-- [ ] Trigger the weather/sky-script plan's Phase R boundary dry-run
-      ([holtburger-3d-weather-sky-script-runtime-plan.md](holtburger-3d-weather-sky-script-runtime-plan.md))
-      against the landed PES execution and particle contracts; do not pre-build sky-target support
-      here.
+- [x] Confirmed no authored `TextureVelocity` surface scrolls behind an unfired `CallPES` chain.
+      Probed 2026-08-06 over all 2,161 default-script roots and their 2,190-script closure: **all
+      11 scroll-authoring scripts are setup default roots**, so every one activates the instant its
+      resident does and the accepted early-scroll consequence is unreachable in shipped content.
+      Verified rather than assumed, as the ledger required.
+- [x] Updated architecture documentation (`apps/holtburger-3d/ARCHITECTURE_AUDIT.md` section 4) with
+      the two-producer/one-union model, router ownership, and the structural frame-time-IO guarantee.
+      The spawned-entity plan inherits it unchanged.
+- [x] Ran the weather/sky-script plan's Phase R boundary dry-run
+      ([holtburger-3d-weather-sky-script-runtime-plan.md](holtburger-3d-weather-sky-script-runtime-plan.md)).
+      Verdict: the landed contracts host sky targets as an extension, with one identity decision
+      recorded for that plan to make first. No sky-target support was pre-built here.
 
 #### Acceptance Criteria
 

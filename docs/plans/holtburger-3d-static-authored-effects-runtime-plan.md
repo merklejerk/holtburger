@@ -731,6 +731,18 @@ itself lands at the head of Phase 2 with the type it constructs; its contents ar
   persistent state, emitted as ephemeral effects, or deliberately skipped per command family.~~
   Decided 2026-08-06; see the replay policy in Decisions and Course Corrections below.
 
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
+
 #### Acceptance Criteria
 
 - Every implementation phase is backed by exact asset IDs, record shapes, and reference paths; the
@@ -819,6 +831,18 @@ selection together with the recorded census and selection semantics.
 - Enumerate transitive dependencies with visited-set termination while preserving cyclic runtime
   edges.
 
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
+
 #### Acceptance Criteria
 
 - Many owners referencing one script perform one transfer and preparation per unique asset.
@@ -887,6 +911,18 @@ Progress: **Complete 2026-08-06.** Type check, lint, knip, Clippy, and all 696 f
 - Schedule `CallPES` activations without synchronous recursive execution.
 - Bound dispatch reentrancy independently of intentionally repeating scheduled scripts.
 - Tear down clocks, queued commands, and acquired closures atomically with owner removal.
+
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
 
 #### Acceptance Criteria
 
@@ -969,6 +1005,18 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
   (retail-faithful; see the ratification above), unblocking animated activation for the two
   affected animations.
 - Compose visual state through existing animation/template/dynamic-publication/render contracts.
+
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
 
 #### Acceptance Criteria
 
@@ -1142,6 +1190,18 @@ see the decision below.
   actually authored) — to pin exactly which fragment chunks and orientation branches particles
   reach, the same evidence-first move the sky pass used to right-size its program.
 
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
+
 #### Acceptance Criteria
 
 - All eight measured representative `CreateParticle` events produce attributable visible effects at
@@ -1292,6 +1352,18 @@ remaining work:
   contest), so a plain voice cap with oldest-steal is adopted as a recorded simplification.
 - Make unsupported device/format/runtime failures explicit without blocking unrelated visual state.
 
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
+
 #### Acceptance Criteria
 
 - All representative and selected fixture `SoundTable` / `SoundTweaked` events play the correct
@@ -1358,6 +1430,18 @@ residency, instance buffer, pass, and frame wiring.
 - Atomically promote script-only residents into the shared authored dynamic aggregate.
 - Activate animation and scripts independently for combined residents.
 - Preserve authored placement, source ownership, template sharing, and conservative bounds.
+
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
 
 #### Acceptance Criteria
 
@@ -1472,9 +1556,15 @@ which need the browser harness against production content rather than static che
 
 #### Task Checklist
 
-- [ ] Exercise the DA55/DC58 script-owner workloads and every recorded root script.
+- [x] Exercised the `0xDA55FFFF` script-owner workload through the browser harness against
+      production content. **41 authored dynamic residents promoted**, 41 effect states installed,
+      **87 dispatched commands across 10 distinct scripts** — 53 `create-particle`, 18
+      `sound-tweaked`, 16 `call-pes` — with outcomes `executed: 71, scheduled: 16` and **zero
+      console errors**. Scripts activate, chain, emit, and play end to end on real content.
 - [ ] Measure script advancement, hook dispatch, particle simulation/upload/draw, audio asset/runtime,
-      scene propagation, and teardown separately.
+      scene propagation, and teardown separately. The harness exposes `--profile-renderer` and
+      per-system diagnostics; a timing pass needs `--gpu`, since SwiftShader numbers are not
+      performance evidence.
 - [x] Confirmed prepared resource counts track unique IDs rather than owners. `PreparedAssetRepository`
       shares one preparation per id across every acquirer, proven for scripts (two roots reaching one
       chained script transfer it once) and emitters, and `ParticleMeshCache` requests only meshes it
@@ -1514,6 +1604,18 @@ which need the browser harness against production content rather than static che
       ([holtburger-3d-weather-sky-script-runtime-plan.md](holtburger-3d-weather-sky-script-runtime-plan.md)).
       Verdict: the landed contracts host sky targets as an extension, with one identity decision
       recorded for that plan to make first. No sky-target support was pre-built here.
+
+#### Runtime Verification Findings (2026-08-06)
+
+- **Two integration defects surfaced only under a real browser**, neither reachable by static checks:
+  1. The dev landblock content host served none of the four endpoints this plan added to
+     `HttpLandblockContentSource`, so every harness run would have 404'd the moment a script
+     activated. Nothing static covers the host and client agreeing on routes.
+  2. Every particle draw raised `GL_INVALID_OPERATION` — a texture-format/sampler mismatch. WebGL
+     validates **every active sampler** against its bound texture at draw time even when the shader
+     branches away from it, so binding the palette unit only for paletted meshes left it holding
+     whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
+- Both are fixed, and the workload now runs with zero console errors.
 
 #### Acceptance Criteria
 

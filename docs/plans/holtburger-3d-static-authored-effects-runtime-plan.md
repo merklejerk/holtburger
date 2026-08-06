@@ -1026,10 +1026,11 @@ activation. The two `0x0300055B` records become decode/inert-reporting fixtures.
 ### Phase 5: Add Authored Particle Fidelity
 
 Progress: **In progress 2026-08-06.** Landed: typed 0x32 decoding with offsets verified against real
-archive records, the content/transport/command lane, the frontend decode, and
-`ParticleEmitterRepository` with its exact preparation-time motion envelope. Remaining: the emitter
-runtime (emission, lifetime, attachment), the GPU vertex stage, and wiring the envelope into the
-existing visibility path.
+archive records, the content/transport/command lane, the frontend decode,
+`ParticleEmitterRepository` with its exact preparation-time motion envelope, and the complete
+closed-form motion evaluator with a unit fixture per formula family. Remaining: the emitter runtime
+(emission, lifetime, attachment), the GPU vertex stage, and wiring the envelope into the existing
+visibility path.
 
 #### Deliverables
 
@@ -1168,6 +1169,15 @@ existing visibility path.
 - **Derived facts are computed host-side, once.** Persistence, both trigger bits, and whether the
   motion type is one shipped content authors are resolved during projection, so no frontend consumer
   re-implements retail's tests.
+- **The motion evaluator landed as a pure CPU module ahead of the vertex stage.**
+  `particle-motion.ts` implements all seven position formulas plus the clamped scale/translucency
+  interpolation, with a unit fixture per family. This is the "evaluation correctness" half of the
+  test split ratified earlier: it needs no scene, and it gives the eventual GPU port something exact
+  to be checked against rather than eyeballed. The two authored `Explode` quirks and `Swarm`'s
+  `sin`-on-y asymmetry each have a test whose stated purpose is to stop a later reader from
+  "correcting" them.
+- **Unshipped motion types return `null`, not a zero vector.** A zero vector would silently render
+  particles at the world origin; `null` forces the caller to report.
 - **A trigger-less emitter fails decode.** With neither bit set an emitter can never release a
   particle; that is a decode fault rather than authored content, and a silently dead emitter would
   be far harder to notice than a loud failure.

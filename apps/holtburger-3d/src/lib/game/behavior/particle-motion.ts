@@ -1,0 +1,152 @@
+/**
+ * Closed-form particle motion, transcribed from retail `Particle::Update`
+ * (acclient.c:317446-317664).
+ *
+ * Every shipped motion type is `position = parent + offset + f(t)` with no integration state, so a
+ * particle's entire mutable state is its spawn constants plus its birth time. This module is the
+ * CPU reference for that evaluation: the runtime evaluates the same expressions in a vertex shader,
+ * and these tests are what pin the formulas so the GPU port can be checked against something.
+ *
+ * The 13 `ParticleType` values collapse to seven distinct position formulas. The `Local`/`Global`
+ * split does not appear here at all — it selects whether the authored vectors were rotated into
+ * world space by the spawn frame, which `Particle::Init` does before `Update` ever runs, so a
+ * `Local`/`Global` pair reaches this code with different constants and identical arithmetic.
+ * `GR`/`LR` likewise select a spin axis space and change orientation, not trajectory.
+ */
+
+export type Vector3 = readonly [number, number, number];
+
+/** Per-particle constants fixed at spawn; nothing here changes over the particle's life. */
+export interface ParticleSpawnConstants {
+	readonly offset: Vector3;
+	readonly a: Vector3;
+	readonly b: Vector3;
+	readonly c: Vector3;
+	readonly lifespan: number;
+	readonly startScale: number;
+	readonly finalScale: number;
+	readonly startTranslucency: number;
+	readonly finalTranslucency: number;
+}
+
+/** `ParticleType` values, named as retail names them (acclient.h:3918-3934). */
+export const PARTICLE_TYPE = {
+	explode: 6,
+	globalVelocity: 12,
+	implode: 7,
+	localVelocity: 2,
+	parabolicGvga: 10,
+	parabolicGvgaGr: 11,
+	parabolicLvga: 3,
+	parabolicLvgaGr: 4,
+	parabolicLvla: 8,
+	parabolicLvlaLr: 9,
+	still: 1,
+	swarm: 5,
+	unknown: 0,
+} as const;
+
+/**
+ * Position of one particle at elapsed time `t`, in the same space as `parentOrigin`.
+ *
+ * Returns `null` for a motion type shipped content never authors, so a caller reports rather than
+ * silently rendering a particle at the origin.
+ */
+export function particlePosition(
+	motionType: number,
+	spawn: ParticleSpawnConstants,
+	parentOrigin: Vector3,
+	t: number,
+): Vector3 | null {
+	const { a, b, c, offset } = spawn;
+	const base = (index: 0 | 1 | 2) => parentOrigin[index] + offset[index];
+
+	switch (motionType) {
+		case PARTICLE_TYPE.still:
+			return [base(0), base(1), base(2)];
+
+		case PARTICLE_TYPE.localVelocity:
+		case PARTICLE_TYPE.globalVelocity:
+			return [base(0) + a[0] * t, base(1) + a[1] * t, base(2) + a[2] * t];
+
+		// The `GR`/`LR` variants share this trajectory exactly; their spin is orientation-only,
+		// applied to the draw frame rather than to the position.
+		case PARTICLE_TYPE.parabolicLvga:
+		case PARTICLE_TYPE.parabolicLvla:
+		case PARTICLE_TYPE.parabolicGvga:
+		case PARTICLE_TYPE.parabolicLvgaGr:
+		case PARTICLE_TYPE.parabolicLvlaLr:
+		case PARTICLE_TYPE.parabolicGvgaGr:
+			return [
+				base(0) + a[0] * t + 0.5 * b[0] * t * t,
+				base(1) + a[1] * t + 0.5 * b[1] * t * t,
+				base(2) + a[2] * t + 0.5 * b[2] * t * t,
+			];
+
+		case PARTICLE_TYPE.swarm:
+			// `sin` on y, `cos` on x and z. Deliberately not symmetric; do not "correct" it.
+			return [
+				base(0) + Math.cos(b[0] * t) * c[0] + a[0] * t,
+				base(1) + Math.sin(b[1] * t) * c[1] + a[1] * t,
+				base(2) + Math.cos(b[2] * t) * c[2] + a[2] * t,
+			];
+
+		case PARTICLE_TYPE.explode:
+			// Two authored quirks, both verified against the decompile and both reproduced on
+			// purpose: every axis multiplies by `a[0]`, not its own component, and z carries an
+			// extra `+ a[2]` inside the parenthesis. Content was tuned against these.
+			return [
+				base(0) + (b[0] * t + c[0] * a[0]) * t,
+				base(1) + (b[1] * t + c[1] * a[0]) * t,
+				base(2) + (b[2] * t + c[2] * a[0] + a[2]) * t,
+			];
+
+		case PARTICLE_TYPE.implode: {
+			// One scalar cosine, driven by `a[0]`, applied to all three axes.
+			const wave = Math.cos(a[0] * t);
+			return [
+				base(0) + wave * c[0] + b[0] * t * t,
+				base(1) + wave * c[1] + b[1] * t * t,
+				base(2) + wave * c[2] + b[2] * t * t,
+			];
+		}
+
+		default:
+			return null;
+	}
+}
+
+/**
+ * Fraction of its lifespan a particle has lived, clamped to 1.
+ *
+ * Retail clamps rather than wrapping (acclient.c:317650-317656), so a particle that outlives its
+ * lifespan holds its final appearance instead of restarting it.
+ */
+export function particleLifeProgress(
+	spawn: ParticleSpawnConstants,
+	t: number,
+): number {
+	if (spawn.lifespan <= 0) return 1;
+	return t < spawn.lifespan ? t / spawn.lifespan : 1;
+}
+
+/** Uniform scale at elapsed time `t`; retail writes one scalar to all three axes. */
+export function particleScale(
+	spawn: ParticleSpawnConstants,
+	t: number,
+): number {
+	const progress = particleLifeProgress(spawn, t);
+	return spawn.startScale + (spawn.finalScale - spawn.startScale) * progress;
+}
+
+/** Translucency at elapsed time `t`, on the same clamped progress as scale. */
+export function particleTranslucency(
+	spawn: ParticleSpawnConstants,
+	t: number,
+): number {
+	const progress = particleLifeProgress(spawn, t);
+	return (
+		spawn.startTranslucency +
+		(spawn.finalTranslucency - spawn.startTranslucency) * progress
+	);
+}

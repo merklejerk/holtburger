@@ -818,6 +818,9 @@
 					contentSource,
 					contentSource,
 					contentSource,
+					// The harness renders headlessly; authored audio has no observable output here,
+					// so a device that refuses playback keeps the runtime honest without a context.
+					{ playOneShot: () => null },
 				);
 				// Harness comparisons select their render policy explicitly and start from flat.
 				runtime.setFrameSettings(frameSettings);

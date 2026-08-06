@@ -2,6 +2,8 @@
 	import { onMount } from "svelte";
 	import { TauriAnimationAssetSource } from "../lib/assets/tauri-animation-asset-source";
 	import { TauriPhysicsScriptSource } from "../lib/assets/tauri-physics-script-source";
+	import { TauriAudioSource } from "../lib/assets/tauri-audio-source";
+	import { WebAudioDevice } from "../lib/assets/web-audio-device";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -340,6 +342,7 @@
 					texturePixelSource,
 					TauriAnimationAssetSource.build(),
 					TauriPhysicsScriptSource.build(),
+					new WebAudioDevice(new AudioContext(), TauriAudioSource.build()),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
 				skySource = new TauriSkySource();

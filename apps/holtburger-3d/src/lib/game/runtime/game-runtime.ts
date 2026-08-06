@@ -1,3 +1,4 @@
+import { getMat4Translation } from "../math/matrices";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
@@ -41,6 +42,7 @@ import { AnimationSystem } from "../systems/animation-system";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
+import { AudioSystem, type AudioDevice } from "../systems/audio-system";
 import { BehaviorEventRouter } from "../behavior/behavior-event-router";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
@@ -184,6 +186,7 @@ const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics 
 export interface GameRuntimeDependencies {
 	readonly animationSource: AnimationAssetSource;
 	readonly physicsScriptSource: PhysicsScriptSource;
+	readonly audioDevice: AudioDevice;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -313,6 +316,7 @@ export class GameRuntime {
 	readonly #behaviorRouter: BehaviorEventRouter;
 	readonly #physicsScripts: PhysicsScriptRepository;
 	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId>;
+	readonly #audio: AudioSystem;
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
 	#lastFrameTimeSeconds = 0;
 	/** Active authored-dynamic residents grouped by their source owner. */
@@ -550,15 +554,33 @@ export class GameRuntime {
 			this.#physicsScripts,
 			dynamicGenerationToResourceOwnerId,
 		);
+		this.#audio = new AudioSystem(
+			dependencies.audioDevice,
+			Math.random,
+			FRONTEND_TUNING.audio.maximumSimultaneousVoices,
+		);
 		this.#effects = new EffectSystem();
 		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
 		// by design. A holder breaks the construction cycle without making the router mutable.
 		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId> } = {};
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
-				// Authored sounds arrive only from physics scripts; no resident runs one until
-				// Phase 7 activates them.
-				audio: { playSound: () => "unprepared" },
+				audio: {
+					playSound: (target, sound) => {
+						// A sound is placed at its emitting node's world position, resolved once at
+						// trigger time exactly as retail samples it.
+						const placement = this.#scene.getResolvedPlacement(target.nodeId);
+						if (!placement) return "unprepared";
+						const origin = getMat4Translation(placement.localToLandblock);
+						const outcome = this.#audio.trigger({
+							position: [origin.x, origin.y, origin.z],
+							probability: sound.probability,
+							soundId: sound.soundId,
+							volume: sound.volume,
+						});
+						return outcome === "played" ? "played" : "suppressed";
+					},
+				},
 				effects: this.#effects,
 				// Authored particles arrive only from physics scripts, and no resident runs one
 				// until Phase 7 activates them. Reporting unprepared keeps the outcome honest
@@ -645,6 +667,7 @@ export class GameRuntime {
 		texturePixelSource: TexturePixelSource,
 		animationSource: AnimationAssetSource,
 		physicsScriptSource: PhysicsScriptSource,
+		audioDevice: AudioDevice,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
@@ -652,6 +675,7 @@ export class GameRuntime {
 		]);
 		const runtime = new GameRuntime(device.resources, commitPipeline, {
 			animationSource,
+			audioDevice,
 			physicsScriptSource,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
@@ -983,6 +1007,7 @@ export class GameRuntime {
 		this.#animationPresentation.clear();
 		this.#animation.destroy();
 		this.#physicsScriptSystem.destroy();
+		this.#audio.destroy();
 		await this.#dynamics.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();

@@ -7,6 +7,7 @@ pub mod gfx_obj;
 pub mod material;
 pub mod motion_kinematics;
 pub mod motion_table;
+pub mod particle_emitter_info;
 pub mod physics_script;
 pub mod region;
 pub mod scene;
@@ -29,6 +30,7 @@ pub use material::{
 };
 pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
 pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
+pub use particle_emitter_info::{EmitterTrigger, ParticleEmitterInfo, ParticleMotion};
 pub use physics_script::{PhysicsScript, PhysicsScriptRecord};
 pub use region::{REGION_DESC_FILE_ID, RegionDesc};
 pub use scene::{Scene, SceneObjectTemplate};
@@ -61,6 +63,7 @@ pub enum DatFileType {
     Scene = 0x12,
     Region = 0x13,
     CombatManeuverTable = 0x30,
+    ParticleEmitter = 0x32,
     PhysicsScript = 0x33,
     PhysicsScriptTable = 0x34,
     LanguageString = 0x31,
@@ -130,6 +133,7 @@ impl DatFileType {
             0x12 => DatFileType::Scene,
             0x13 => DatFileType::Region,
             0x30 => DatFileType::CombatManeuverTable,
+            0x32 => DatFileType::ParticleEmitter,
             0x33 => DatFileType::PhysicsScript,
             0x34 => DatFileType::PhysicsScriptTable,
             0x31 => DatFileType::LanguageString,
@@ -163,6 +167,7 @@ impl DatFileType {
             0x13 => DatFileType::Region,
             0x30 => DatFileType::CombatManeuverTable,
             0x31 => DatFileType::LanguageString,
+            0x32 => DatFileType::ParticleEmitter,
             0x33 => DatFileType::PhysicsScript,
             0x34 => DatFileType::PhysicsScriptTable,
             0x40 => DatFileType::Font,
@@ -196,6 +201,7 @@ impl fmt::Display for DatFileType {
             DatFileType::Scene => "Scene (SCN)",
             DatFileType::Region => "Region (RGN)",
             DatFileType::CombatManeuverTable => "CombatManeuverTable",
+            DatFileType::ParticleEmitter => "ParticleEmitterInfo",
             DatFileType::PhysicsScript => "PhysicsScript",
             DatFileType::PhysicsScriptTable => "PhysicsScriptTable",
             DatFileType::LanguageString => "LanguageString",

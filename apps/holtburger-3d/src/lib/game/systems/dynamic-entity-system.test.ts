@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
+import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import {
@@ -425,6 +426,12 @@ function createSystem(
 		scene,
 		templates,
 		new AnimationAssetRepository(animationSource),
+		new PhysicsScriptRepository({
+			destroy: () => {},
+			loadPhysicsScript: async (scriptId) => {
+				throw new Error(`No script fixture for ${scriptId}.`);
+			},
+		}),
 		(ownerId, generation) => `${ownerId}:generation:${generation}`,
 	);
 	return { geometry, scene, system };

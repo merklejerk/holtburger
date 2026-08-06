@@ -1,3 +1,7 @@
+import type {
+	PhysicsScriptRepository,
+	PreparedPhysicsScriptClosure,
+} from "../behavior/physics-script-repository";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
@@ -38,6 +42,13 @@ interface DynamicEntityRecord {
 	renderable: DynamicEntityRenderable;
 	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
+	/**
+	 * Staged script closure for a resident whose setup owns a default script.
+	 *
+	 * Held here rather than in the script clock so it is released by the same teardown that frees
+	 * every other per-entity resource, and so a superseded generation cannot leak one.
+	 */
+	scriptClosure: PreparedPhysicsScriptClosure | null;
 	preparedAnimation: PreparedDynamicAnimation | null;
 	/** Conservative object-local envelope matching the exact pose currently published to draw. */
 	publishedPresentationBounds: AABB3;
@@ -87,6 +98,7 @@ export class DynamicEntitySystem<
 	readonly #scene: SceneGraph;
 	readonly #templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>;
 	readonly #animations: AnimationAssetRepository;
+	readonly #scripts: PhysicsScriptRepository;
 	readonly #templateOwnerId: (
 		ownerId: TOwnerId,
 		generation: number,
@@ -109,6 +121,7 @@ export class DynamicEntitySystem<
 		scene: SceneGraph,
 		templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>,
 		animations: AnimationAssetRepository,
+		scripts: PhysicsScriptRepository,
 		templateOwnerId: (
 			ownerId: TOwnerId,
 			generation: number,
@@ -117,6 +130,7 @@ export class DynamicEntitySystem<
 		this.#scene = scene;
 		this.#templates = templates;
 		this.#animations = animations;
+		this.#scripts = scripts;
 		this.#templateOwnerId = templateOwnerId;
 	}
 
@@ -161,6 +175,13 @@ export class DynamicEntitySystem<
 			templateOwnerId,
 			entities.map((entity) =>
 				this.#animations.acquire(entity.source.behavior.animationId),
+			),
+			entities.map((entity) =>
+				// Transitive `CallPES` staging happens here, before activation, so no chained script
+				// can trigger a load at frame time.
+				entity.source.behavior.physicsScriptId === null
+					? Promise.resolve(null)
+					: this.#scripts.acquireClosure(entity.source.behavior.physicsScriptId),
 			),
 		);
 		this.#pendingPreparations.add(preparationPromise);
@@ -262,6 +283,7 @@ export class DynamicEntitySystem<
 		}
 		const record: DynamicEntityRecord = {
 			animationHandle: null,
+			scriptClosure: null,
 			articulatedPose: pose,
 			renderable: { parts },
 			rootNodeId,
@@ -410,27 +432,39 @@ export class DynamicEntitySystem<
 		preparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>,
 		templateOwnerId: TTemplateOwnerId,
 		animationPreparations: readonly Promise<PreparedAnimationHandle>[],
+		scriptPreparations: readonly Promise<PreparedPhysicsScriptClosure | null>[],
 	): Promise<"ready" | "superseded"> {
-		const [templateResult, ...animationResults] = await Promise.allSettled([
-			preparation.completion,
-			...animationPreparations,
+		// Settled separately rather than in one array so each lane keeps its own result type; a
+		// single `allSettled` would widen them into a union the release paths cannot discriminate.
+		const [templateResult, animationResults, scriptResults] = await Promise.all([
+			Promise.allSettled([preparation.completion]).then((results) => results[0]!),
+			Promise.allSettled(animationPreparations),
+			Promise.allSettled(scriptPreparations),
 		]);
+		const settled = [templateResult, ...animationResults, ...scriptResults];
+		// Everything acquired must be releasable on any failure path, including a closure whose
+		// sibling animation rejected.
 		const acquiredHandles = animationResults.flatMap((result) =>
 			result.status === "fulfilled" ? [result.value] : [],
+		);
+		const acquiredClosures = scriptResults.flatMap((result) =>
+			result.status === "fulfilled" && result.value !== null
+				? [result.value]
+				: [],
 		);
 		const current =
 			!this.#destroyed && this.#ownerGenerations.get(ownerId) === generation;
 		if (!current) {
 			for (const handle of acquiredHandles) handle.release();
+			for (const closure of acquiredClosures) closure.release();
 			preparation.release();
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			return "superseded";
 		}
-		const failure = [templateResult, ...animationResults].find(
-			(result) => result.status === "rejected",
-		);
+		const failure = settled.find((result) => result.status === "rejected");
 		if (failure?.status === "rejected") {
 			for (const handle of acquiredHandles) handle.release();
+			for (const closure of acquiredClosures) closure.release();
 			preparation.release();
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			throw failure.reason;
@@ -455,6 +489,12 @@ export class DynamicEntitySystem<
 						`Animation for ${entity.source.identity.sourceId} settled without a handle.`,
 					);
 				}
+				const scriptResult = scriptResults[index];
+				if (scriptResult?.status !== "fulfilled") {
+					throw new Error(
+						`Script closure for ${entity.source.identity.sourceId} settled without a result.`,
+					);
+				}
 				return {
 					animation: prepareDynamicAnimation(
 						animationResult.value.asset,
@@ -464,6 +504,7 @@ export class DynamicEntitySystem<
 					),
 					handle: animationResult.value,
 					parts: mergePreparedParts(entity.renderable.parts, template.parts),
+					scriptClosure: scriptResult.value,
 				};
 			});
 			preparation.commit(templateOwnerId);
@@ -471,11 +512,13 @@ export class DynamicEntitySystem<
 				const entity = entities[index]!;
 				const result = prepared[index]!;
 				entity.animationHandle = result.handle;
+				entity.scriptClosure = result.scriptClosure;
 				entity.preparedAnimation = result.animation;
 				entity.renderable = { parts: result.parts };
 			}
 		} catch (cause) {
 			for (const handle of acquiredHandles) handle.release();
+			for (const closure of acquiredClosures) closure.release();
 			preparation.release();
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			throw cause;
@@ -614,6 +657,8 @@ export class DynamicEntitySystem<
 	#destroyEntityTree(entity: DynamicEntityRecord): void {
 		entity.animationHandle?.release();
 		entity.animationHandle = null;
+		entity.scriptClosure?.release();
+		entity.scriptClosure = null;
 		for (const part of entity.renderable.parts) {
 			this.#scene.destroyNode(part.nodeId);
 		}

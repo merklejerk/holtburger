@@ -18,10 +18,19 @@ import {
 	type Renderer,
 } from "../renderer/renderer";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
+import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
+
+/** No runtime test installs an authored script, so any load here is a defect worth surfacing. */
+const PHYSICS_SCRIPT_SOURCE: PhysicsScriptSource = {
+	destroy: () => {},
+	async loadPhysicsScript(scriptId) {
+		throw new Error(`Unexpected physics script load for ${scriptId}.`);
+	},
+};
 
 const ANIMATION_SOURCE: AnimationAssetSource = {
 	async loadAnimation(animationId) {
@@ -155,6 +164,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 
 		runtime.updateSceneInterest({
@@ -277,6 +287,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -302,6 +313,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -340,6 +352,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -375,6 +388,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -402,6 +416,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
@@ -449,6 +464,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
@@ -488,6 +504,7 @@ describe("GameRuntime view and interest control", () => {
 			pipeline,
 			{} as TexturePixelSource,
 			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
 		);
 
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));

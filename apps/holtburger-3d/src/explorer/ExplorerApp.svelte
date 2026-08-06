@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { TauriAnimationAssetSource } from "../lib/assets/tauri-animation-asset-source";
+	import { TauriPhysicsScriptSource } from "../lib/assets/tauri-physics-script-source";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -338,6 +339,7 @@
 					commitPipeline,
 					texturePixelSource,
 					TauriAnimationAssetSource.build(),
+					TauriPhysicsScriptSource.build(),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
 				skySource = new TauriSkySource();

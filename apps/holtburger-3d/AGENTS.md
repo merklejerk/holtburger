@@ -116,6 +116,10 @@ cross-system orchestration. Express proven knowledge using the simpler current
 architecture, and do not carry diagnostics or provenance through operational
 contracts merely because the legacy app did.
 
+## Retail Behavior
+
+Approximate retail behavior without necessarily reproducing its architecture. Do not fall into the trap of rebuilding the retail client in rust/typescript. That client was written in 1999 under 1999 constraints. We have modern techniques and more mature software patterns available to us and should be able to improve on its design and performance.
+
 ## Working Style
 
 - Prefer clean cutovers. Remove aliases, compatibility wrappers, stale comments,
@@ -133,3 +137,10 @@ contracts merely because the legacy app did.
   behavior depends on a real browser or GPU execution path.
 - Be mindful of hot path operations that can cause GC churn in the renderer. Use reusable buffers, in-place, or output-to-target semantics where appropriate.
 - Don't hide magic numbers and constants that are likely to need tweaking. Put them in places that can be easily found and accessed.
+
+## Documenting retail behavior
+
+Describe observed retail behavior directly. Use "Retail behavior is ..." for
+established facts and "Retail behavior suggests ..." for tentative conclusions. Preserve useful
+rationale, qualifications, observable consequences, and content censuses without
+direct implementation filenames, line citations, or executable addresses.

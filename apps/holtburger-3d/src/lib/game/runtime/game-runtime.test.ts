@@ -20,11 +20,20 @@ import {
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
+import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
+
+/** No runtime test stages a particle mesh, so any load here is a defect worth surfacing. */
+const PARTICLE_MESH_SOURCE: ParticleMeshSource = {
+	destroy: () => {},
+	async loadParticleMeshes(hwGfxObjIds) {
+		throw new Error(`Unexpected particle mesh load for ${hwGfxObjIds.join()}.`);
+	},
+};
 
 /** No runtime test stages a sound table, so any load here is a defect worth surfacing. */
 const SOUND_TABLE_SOURCE: SoundTableSource = {
@@ -187,6 +196,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 
 		runtime.updateSceneInterest({
@@ -314,6 +324,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -344,6 +355,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -387,6 +399,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -427,6 +440,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -459,6 +473,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
@@ -511,6 +526,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
@@ -555,6 +571,7 @@ describe("GameRuntime view and interest control", () => {
 			{ playOneShot: () => null },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
 		);
 
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));

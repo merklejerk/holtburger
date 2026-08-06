@@ -1,4 +1,5 @@
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
+import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { DatAssetId } from "../game-types";
 
@@ -23,9 +24,13 @@ export class ParticleMeshCache {
 	/**
 	 * Load every named mesh that is not already resident or in flight.
 	 *
-	 * Called during staging, so a `CreateParticle` reached at frame time finds its mesh in memory.
+	 * Returns the newly loaded batch so its caller can hand it to renderer residency, or `null`
+	 * when everything was already known — that distinction is what keeps the renderer from
+	 * re-uploading meshes it already holds.
 	 */
-	async prepare(hwGfxObjIds: readonly DatAssetId[]): Promise<void> {
+	async prepare(
+		hwGfxObjIds: readonly DatAssetId[],
+	): Promise<ParticleMeshPresentations | null> {
 		if (this.#destroyed)
 			throw new Error("Cannot prepare meshes on a destroyed particle mesh cache.");
 		const wanted = [...new Set(hwGfxObjIds.map((id) => id.toLowerCase()))].filter(
@@ -38,21 +43,23 @@ export class ParticleMeshCache {
 			.filter((entry): entry is Promise<void> => entry !== undefined);
 		if (wanted.length === 0) {
 			await Promise.all(pending);
-			return;
+			return null;
 		}
 		const load = this.#source
 			.loadParticleMeshes(wanted)
 			.then((batch) => {
-				if (this.#destroyed) return;
+				if (this.#destroyed) return null;
 				for (const [id, presentation] of batch.presentations) {
 					this.#presentations.set(id, presentation);
 				}
+				return batch;
 			})
 			.finally(() => {
 				for (const id of wanted) this.#inFlight.delete(id);
 			});
-		for (const id of wanted) this.#inFlight.set(id, load);
-		await Promise.all([load, ...pending]);
+		for (const id of wanted) this.#inFlight.set(id, load.then(() => undefined));
+		const [batch] = await Promise.all([load, ...pending]);
+		return batch;
 	}
 
 	/** Read a resident mesh without loading; `null` keeps frame-time IO impossible. */

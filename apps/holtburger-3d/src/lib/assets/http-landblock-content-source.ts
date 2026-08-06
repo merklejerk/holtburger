@@ -8,6 +8,8 @@ import { decodeParticleEmitterRecord } from "./decode-particle-emitter-record";
 import type { ParticleEmitterSource } from "./particle-emitter-source";
 import { decodeSoundTableRecord } from "./decode-sound-table-record";
 import type { SoundTableSource } from "./sound-table-source";
+import { decodeParticleMeshRecord } from "./decode-particle-mesh-record";
+import type { ParticleMeshSource } from "./particle-mesh-source";
 import type {
 	TexturePreparationServiceRequest,
 	TexturePreparationServiceResponse,
@@ -51,6 +53,7 @@ export class HttpLandblockContentSource
 		PhysicsScriptSource,
 		ParticleEmitterSource,
 		SoundTableSource,
+		ParticleMeshSource,
 		SkySourceLoader
 {
 	readonly #baseUrl: URL;
@@ -136,6 +139,12 @@ export class HttpLandblockContentSource
 		return decodeParticleEmitterRecord(
 			await this.#postBinary("particle-emitter", { emitterInfoId }),
 			emitterInfoId,
+		);
+	}
+
+	async loadParticleMeshes(hwGfxObjIds: readonly DatAssetId[]) {
+		return decodeParticleMeshRecord(
+			await this.#postBinary("particle-meshes", { hwGfxObjIds }),
 		);
 	}
 

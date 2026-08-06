@@ -40,8 +40,6 @@ pub enum ContentAssetRequest {
     SetupModel(u32),
     MaterialRecipe(u32),
     SetupAppearance(SetupAppearanceRequest),
-    /// Appearance for a bare GfxObj with no owning setup, such as a particle mesh.
-    GfxObjAppearance(u32),
     SurfaceTexture(u32),
     SurfaceTexturePixels(SurfaceTexturePixelsRequest),
     RenderSurface(u32),
@@ -357,17 +355,6 @@ impl ContentAssetService {
                     || format!("Could not resolve material recipe 0x{surface_id:08X}"),
                 )?),
             )),
-            ContentAssetRequest::GfxObjAppearance(gfx_obj_id) => {
-                Ok(ContentAsset::SetupAppearance(Box::new(
-                    self.content
-                        .resolve_gfx_obj_appearance(gfx_obj_id)
-                        .with_context(|| {
-                            format!(
-                                "Could not resolve GfxObj appearance for 0x{gfx_obj_id:08X}"
-                            )
-                        })?,
-                )))
-            }
             ContentAssetRequest::SetupAppearance(request) => {
                 let setup_model_id = request.setup_model_id;
                 Ok(ContentAsset::SetupAppearance(Box::new(

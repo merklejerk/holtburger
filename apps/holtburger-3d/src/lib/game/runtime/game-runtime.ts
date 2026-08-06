@@ -214,7 +214,6 @@ export interface AuthoredDynamicResidentDiagnostic {
 		readonly frameIndex: number;
 		readonly authoredOrder: number;
 		readonly command: string;
-		readonly reason: "deferred-structural" | "unsupported-visual";
 	}[];
 }
 
@@ -1264,10 +1263,6 @@ export class GameRuntime {
 								animationId: animation.animation.id,
 								authoredOrder: hook.authoredOrder,
 								command: animationHookCommand(hook),
-								reason:
-									hook.kind === "replace-object"
-										? "deferred-structural"
-										: "unsupported-visual",
 								frameIndex: hook.frameIndex,
 							}))
 						: [],

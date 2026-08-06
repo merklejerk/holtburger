@@ -1,4 +1,5 @@
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
+import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import {
@@ -65,6 +66,14 @@ interface EmitterInstance {
 	 */
 	hiddenSince: number | null;
 	particles: LiveParticle[];
+}
+
+/** One draw batch: a mesh, its motion law, and every particle sharing both. */
+export interface ParticleDrawCohort {
+	readonly hwGfxObjId: DatAssetId;
+	/** Bound as a vertex-stage constant, so cohorts never mix motion laws. */
+	readonly motionType: number;
+	readonly particles: ParticleInstanceRecord[];
 }
 
 /** One particle ready to draw, in world space. */
@@ -248,7 +257,66 @@ export class ParticleEmitterRuntime {
 		}
 	}
 
-	/** Sample every live particle for drawing, in world space. */
+	/**
+	 * Group live particles into draw cohorts, one per unique mesh and motion type.
+	 *
+	 * Cohorts carry the facts the vertex stage binds as constants — mesh, motion type — and the
+	 * per-particle spawn records it reads as instance attributes. No position is evaluated here:
+	 * that is the shader's job, and doing it twice is the CPU ceiling this design exists to avoid.
+	 *
+	 * `isVisible` culls at emitter granularity, never per particle, so a culled emitter contributes
+	 * no instance records at all that frame.
+	 */
+	collectCohorts(
+		isVisible: (target: BehaviorTarget) => boolean = () => true,
+	): ParticleDrawCohort[] {
+		const cohorts = new Map<string, ParticleDrawCohort>();
+		for (const instance of this.#instances) {
+			const info = instance.emitter.info;
+			// An unshipped motion type has no formula in either evaluator; drawing it motionless
+			// would misrepresent it as working.
+			if (info.motionType === null) continue;
+			if (!isVisible(instance.target)) continue;
+			const liveOrigin = this.#dependencies.originOf(instance.target);
+			if (liveOrigin === null) continue;
+			const key = `${info.hwGfxObjId}:${info.motionType}`;
+			let cohort = cohorts.get(key);
+			if (!cohort) {
+				cohort = {
+					hwGfxObjId: info.hwGfxObjId,
+					motionType: info.motionType,
+					particles: [],
+				};
+				cohorts.set(key, cohort);
+			}
+			for (const particle of instance.particles) {
+				cohort.particles.push({
+					a: particle.spawn.a,
+					b: particle.spawn.b,
+					birthTime: particle.birthTime,
+					c: particle.spawn.c,
+					finalScale: particle.spawn.finalScale,
+					finalTranslucency: particle.spawn.finalTranslucency,
+					lifespan: particle.spawn.lifespan,
+					offset: particle.spawn.offset,
+					// A following emitter's particles read the live origin; left-behind ones keep
+					// the snapshot taken when they spawned.
+					origin: particle.parentOriginSnapshot ?? liveOrigin,
+					startScale: particle.spawn.startScale,
+					startTranslucency: particle.spawn.startTranslucency,
+				});
+			}
+		}
+		return [...cohorts.values()];
+	}
+
+	/**
+	 * Evaluate every live particle on the CPU, in world space.
+	 *
+	 * Retained deliberately as the **reference** for the GPU vertex stage rather than as a draw
+	 * path: the shader implements the same formulas, and this is what its output is checked
+	 * against. Production drawing goes through {@link collectCohorts}.
+	 */
 	sample(
 		timeSeconds: number,
 		parentOriginOf: (target: BehaviorTarget) => Vector3 | null,
@@ -296,10 +364,7 @@ export class ParticleEmitterRuntime {
 			if (instance.target.nodeId !== target.nodeId) continue;
 			// The hook offset displaces the whole emitter, so it extends the owner's bound too.
 			const offsetLength = Math.hypot(...instance.hookOffset);
-			radius = Math.max(
-				radius,
-				offsetLength + instance.emitter.envelopeRadius,
-			);
+			radius = Math.max(radius, offsetLength + instance.emitter.envelopeRadius);
 		}
 		return radius;
 	}

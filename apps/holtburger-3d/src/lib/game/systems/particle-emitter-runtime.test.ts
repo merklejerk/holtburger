@@ -405,6 +405,104 @@ describe("ParticleEmitterRuntime", () => {
 		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(30);
 	});
 
+	it("groups particles into cohorts by mesh and motion type", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 2 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1, motionType: 5 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const cohorts = particles.collectCohorts();
+
+		// Same mesh, different motion law: the vertex stage binds it as a constant, so they split.
+		expect(cohorts).toHaveLength(2);
+		expect(cohorts.map((cohort) => cohort.particles.length).sort()).toEqual([
+			1, 2,
+		]);
+	});
+
+	it("merges emitters that share a mesh and motion type into one cohort", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		expect(particles.collectCohorts()).toHaveLength(1);
+	});
+
+	it("emits no instance records for a culled emitter", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 5 }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		// Culling is per emitter, so the whole cohort disappears rather than being filtered.
+		expect(particles.collectCohorts(() => false)).toHaveLength(0);
+	});
+
+	it("skips an unshipped motion type rather than drawing it motionless", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1, motionType: null }),
+			ORIGIN,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		expect(particles.collectCohorts()).toHaveLength(0);
+	});
+
+	it("carries spawn constants into cohorts, never evaluated positions", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			[0, 0, 3],
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const record = particles.collectCohorts()[0]!.particles[0]!;
+
+		// The shader derives position from these; the CPU must not have done it already.
+		expect(record.birthTime).toBe(0);
+		expect(record.origin[2]).toBeCloseTo(3);
+		expect(record.a).toEqual([1, 0, 0]);
+	});
+
 	it("refuses to invent a cadence for a purely per-meter emitter", () => {
 		const particles = runtime();
 		particles.create(

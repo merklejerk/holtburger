@@ -1032,8 +1032,9 @@ closed-form motion evaluator with a unit fixture per formula family, and `Partic
 (emission cadence, lifetime, stop/destroy, emitter-id replacement, follow vs leave-behind, and
 zero-cost hidden emitters with transition-time reconciliation), the router's particle port, the
 emitter bounds contribution, and the GPU particle program with its closed-form vertex stage.
-Remaining: the instanced draw path that binds cohorts and feeds the vertex stage, plus real-GPU
-verification of the shader against the CPU evaluator through the browser harness.
+and the instance packing and cohort grouping the draw path consumes. Remaining: binding those
+cohorts through the renderer, and real-GPU verification of the shader against the CPU evaluator
+through the browser harness.
 
 #### Deliverables
 
@@ -1186,6 +1187,16 @@ verification of the shader against the CPU evaluator through the browser harness
   no catch-up** (bursting to fill a slow frame would change authored density), particles die only
   by lifespan, `stop` drains while `destroy` vanishes, and a nonzero `emitter_id` replaces a live
   same-id emitter while auto-id emitters stay independent.
+- **Cohorts key on mesh _and_ motion type.** Motion type is a vertex-stage constant, so two
+  emitters sharing a mesh but not a motion law cannot share a draw; keying on both makes that
+  structural rather than a rule someone has to remember.
+- **Instance records carry spawn constants, never evaluated positions.** A test asserts this
+  directly, because the tempting shortcut — packing the CPU-evaluated position that `sample()`
+  already computes — would silently reintroduce the per-particle CPU cost the GPU stage exists to
+  remove.
+- **`sample()` survives as the GPU stage's reference, not as a draw path.** It evaluates the same
+  formulas on the CPU, which is exactly what the harness needs to check shader output against. Its
+  docstring says so, so it does not read as a redundant second renderer.
 - **The vertex stage interpolates its motion constants from `PARTICLE_TYPE`, not literals.** The
   GLSL and `particle-motion.ts` implement the same seven formulas, so the risk worth engineering
   against is drift between them. Interpolating the type values means a type added to the CPU

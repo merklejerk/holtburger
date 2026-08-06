@@ -50,6 +50,8 @@ export type BehaviorDispatchOutcome =
 	| "no-consumer"
 	/** Faithfully reproduced by doing nothing, because retail does nothing either. */
 	| "intentionally-inert"
+	/** Already reflected in prepared state; the runtime dispatch has nothing left to do. */
+	| "applied-at-preparation"
 	/** The target was removed or replaced before the command could run. */
 	| "rejected-stale-target";
 
@@ -64,6 +66,10 @@ export interface BehaviorObservation {
 
 /** Persistent visual and material state. Widened only by proven commands, never speculatively. */
 export interface EffectCommandPort {
+	applyScale(
+		target: BehaviorTarget,
+		values: { readonly end: number; readonly durationSeconds: number },
+	): void;
 	applySetOmega(target: BehaviorTarget, omega: Vec3Like): void;
 	applyTransparentPart(
 		target: BehaviorTarget,
@@ -188,10 +194,22 @@ export class BehaviorEventRouter {
 				return "no-consumer";
 
 			case "scale":
+				// Persistent whole-object state, so replay behaves exactly as live execution does:
+				// the ramp continues from the object's current scale and the remaining replay steps
+				// advance it to where it should be now.
+				this.#consumers.effects.applyScale(target, command);
+				return mode === "initial-state" ? "folded-initial-state" : "executed";
+
 			case "texture-velocity":
+				// Resolved once when the script closure was staged and carried as a material fact,
+				// so there is deliberately nothing to do at dispatch time. Recorded distinctly so it
+				// reads as a resolved decision rather than a missing consumer.
+				return "applied-at-preparation";
+
 			case "texture-velocity-part":
 			case "create-particle":
-				// Decoded and understood; consumers land in Phases 4 and 5.
+				// Decoded and understood; the particle consumer lands in Phase 5. No shipped content
+				// authors a part-scoped scroll hook, so that arm has no planned consumer at all.
 				return "no-consumer";
 
 			case "replace-object":

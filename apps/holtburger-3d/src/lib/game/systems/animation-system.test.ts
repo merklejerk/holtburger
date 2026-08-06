@@ -80,7 +80,7 @@ describe("AnimationSystem", () => {
 		const observationCount = observations().length;
 		const halfStep = requiredAt(advanceAndSample(first, 10 + 1 / 60), 0);
 		expect(halfStep.articulatedPose).not.toEqual(firstInitial.articulatedPose);
-		expect(halfStep.effects.rootRotationModifier).not.toEqual(Mat4.identity());
+		expect(halfStep.effects.rootTransformModifier).not.toEqual(Mat4.identity());
 		expect(observations()).toHaveLength(observationCount);
 	});
 
@@ -115,14 +115,14 @@ describe("AnimationSystem", () => {
 			animation,
 		);
 		const initialPoint = transformPoint3(
-			initial.effects.rootRotationModifier,
+			initial.effects.rootTransformModifier,
 			new Vec3(1, 0, 0),
 		);
 
 		advanceAndSample(system, 0);
 		const afterOneSecond = requiredAt(advanceAndSample(system, 1), 0);
 		const point = transformPoint3(
-			afterOneSecond.effects.rootRotationModifier,
+			afterOneSecond.effects.rootTransformModifier,
 			new Vec3(1, 0, 0),
 		);
 		const expectedRadians = 30 * 0.026797784;
@@ -285,8 +285,8 @@ describe("AnimationSystem", () => {
 		expect(sparseFinal.effects.partRenderStates).toEqual(
 			fullFinal.effects.partRenderStates,
 		);
-		expect(sparseFinal.effects.rootRotationModifier).toEqual(
-			fullFinal.effects.rootRotationModifier,
+		expect(sparseFinal.effects.rootTransformModifier).toEqual(
+			fullFinal.effects.rootTransformModifier,
 		);
 		expect(sparse.getDiagnostics().lastSampledPresentationCount).toBe(1);
 	});

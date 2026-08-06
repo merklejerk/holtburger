@@ -36,6 +36,7 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 	const router = new BehaviorEventRouter(
 		{
 			effects: {
+				applyScale: vi.fn(),
 				applySetOmega: vi.fn(),
 				applyTransparentPart: vi.fn(),
 			},

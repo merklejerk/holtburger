@@ -8,6 +8,7 @@ import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repos
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
+import type { SceneNodeId } from "../scene";
 import {
 	particleLifeProgress,
 	particlePosition,
@@ -470,10 +471,10 @@ export class ParticleSystem {
 	 * individual particle positions, and re-deriving them to cull would reintroduce exactly the
 	 * per-particle CPU ceiling this design exists to avoid.
 	 */
-	envelopeRadiusFor(target: BehaviorTarget): number {
+	envelopeRadiusFor(nodeId: SceneNodeId): number {
 		let radius = 0;
 		for (const instance of this.#instances) {
-			if (instance.target.nodeId !== target.nodeId) continue;
+			if (instance.target.nodeId !== nodeId) continue;
 			// The hook offset displaces the whole emitter, so it extends the owner's bound too.
 			const offsetLength = Math.hypot(...instance.hookOffset);
 			radius = Math.max(radius, offsetLength + instance.emitter.envelopeRadius);

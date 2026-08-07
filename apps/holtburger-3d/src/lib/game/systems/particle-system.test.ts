@@ -409,12 +409,12 @@ describe("ParticleSystem", () => {
 		);
 
 		// envelopeRadius is 10 in the fixture, displaced 4 by the hook offset.
-		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(14);
+		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeCloseTo(14);
 	});
 
 	it("contributes nothing for a target with no live emitters", () => {
 		// Zero rather than null, so a caller adds it to presentation bounds unconditionally.
-		expect(runtime().envelopeRadiusFor(TARGET)).toBe(0);
+		expect(runtime().envelopeRadiusFor(TARGET.nodeId)).toBe(0);
 	});
 
 	it("takes the widest emitter when a target runs several", () => {
@@ -436,7 +436,7 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(30);
+		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeCloseTo(30);
 	});
 
 	it("groups particles into cohorts by mesh and motion type", () => {

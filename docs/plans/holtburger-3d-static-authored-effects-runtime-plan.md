@@ -2588,11 +2588,22 @@ reported `kind=0` with the palette bound and ignored.
 particle it emits, designed so emitters ride the existing visibility path by growing their owner's
 presentation bounds. It has **no callers outside its own module**.
 
-So the derivation the question asks for is already written and already conservative: the envelope is
-`max(hook offset length + emitter envelope radius)` per target, and `PreparedParticleEmitter` carries
-`envelopeRadius` from preparation. What is missing is only the wiring — feed it into the owner's
-bounds so the renderer's existing footprint test covers emitters, then pass the resulting visibility
-into `collectCohorts`.
+**Fixed, by wiring rather than by designing.** The conservative derivation was already written:
+`max(hook offset length + emitter envelope radius)` per target, with `PreparedParticleEmitter`
+carrying `envelopeRadius` from preparation. Both halves are now connected.
+
+`DynamicEntitySystem` takes an injected `particleEnvelopeRadiusOf` and grows each entity's published
+presentation bounds by it, so the renderer's existing footprint test covers emitters without a
+parallel culling path. The radius source is injected because the live emitter set — and the authored
+hook offsets that displace it — belong to the particle system, not to the entity system.
+
+`GameRuntime` then culls `collectCohorts` against the previous frame's renderer selection. That is
+one frame behind, which is safe precisely because the bounds include the envelope: an emitter is
+selected on the frame its *envelope* crosses the frustum rather than when its mesh does, so the lag
+is absorbed by the margin rather than showing as pop-in.
+
+Measured at `0xDA56` radius 3 with 172 live emitters and 1,287 particles: cohort building costs
+`0.040 ms`, against `0.073 ms` previously at the smaller radius 2 with everything submitted.
 
 Worth naming: this is the **fifth** capability found built-but-unwired in this plan, after
 `setListener`, `prepare`, `release`, and the `TextureVelocity` resolver. Each of the first four was

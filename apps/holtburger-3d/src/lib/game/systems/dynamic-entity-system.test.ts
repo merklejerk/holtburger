@@ -481,6 +481,8 @@ function createSystem(
 		}),
 		(ownerId: string, generation: number) =>
 			`${ownerId}:generation:${generation}`,
+		// No emitters in these fixtures, so presentation bounds are the mesh alone.
+		() => 0,
 	);
 	return { effects, geometry, scene, system };
 }

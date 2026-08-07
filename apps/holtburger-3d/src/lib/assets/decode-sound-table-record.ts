@@ -93,10 +93,9 @@ export function decodeSoundTableRecord(
 /**
  * Choose a candidate for a uniform roll.
  *
- * **Deliberately diverges from retail, which can never select the last candidate.** Retail
- * computes `floor((n - 1) * roll)`, and its retail rand clamps to `0.99999988`, so
- * `(n - 1) * roll` never reaches `n - 1` and the final candidate of every multi-candidate list
- * is dead.
+ * **RETAIL DIVERGENCE: retail can never select the last candidate.** Retail computes
+ * `floor((n - 1) * roll)`, and its retail rand clamps to `0.99999988`, so `(n - 1) * roll`
+ * never reaches `n - 1` and the final candidate of every multi-candidate list is dead.
  *
  * Treated as an off-by-one rather than a design: the `-1` is the inclusive-bound convention of
  * the *integer* `RollDice` overload applied to a float scale that does not need it, and

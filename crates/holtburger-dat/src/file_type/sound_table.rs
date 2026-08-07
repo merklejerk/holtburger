@@ -36,11 +36,10 @@ pub struct SoundTableEntry {
 impl SoundTableEntry {
     /// Choose a candidate for a uniform roll in [0, 1).
     ///
-    /// **Deliberately diverges from retail, which can never select the last candidate.** Retail
-    /// computes `floor((n - 1) * roll)` where `roll` comes from retail roll dice(0.0, 1.0), and
-    /// retail rand clamps its result to `0.99999988`. One is therefore unreachable,
-    /// `(n - 1) * roll` never reaches `n - 1`, and the final candidate of every multi-candidate
-    /// list is dead.
+    /// **RETAIL DIVERGENCE: retail can never select the last candidate.** Retail computes
+    /// `floor((n - 1) * roll)` where `roll` comes from retail roll dice(0.0, 1.0), and retail
+    /// rand clamps its result to `0.99999988`. One is therefore unreachable, `(n - 1) * roll`
+    /// never reaches `n - 1`, and the final candidate of every multi-candidate list is dead.
     ///
     /// Treated as an off-by-one rather than a design. The `-1` is the inclusive-bound
     /// convention of the *integer* `RollDice` overload applied to a float scale that does not

@@ -4,10 +4,10 @@
 //! which is authoritative here. Use this sequential stream layout for field order. Fields are
 //! sequential and unaligned, matching ACE's `BinaryReader`.
 //!
-//! `sorting_sphere` is deliberately absent — it is not in the file. Retail derives it in
-//! `InitEnd` as `radius = max(max_offset, max_a * lifespan)`, which under-bounds the parabolic
-//! motion types; our runtime computes an exact envelope instead, so storing retail's guess
-//! would only invite someone to use it.
+//! RETAIL DIVERGENCE: `sorting_sphere` is deliberately absent — it is not in the file. Retail
+//! derives it in `InitEnd` as `radius = max(max_offset, max_a * lifespan)`, which under-bounds
+//! the parabolic motion types; our runtime computes an exact envelope instead, so storing
+//! retail's guess would only invite someone to use it.
 
 use binrw::{
     BinRead, BinResult,

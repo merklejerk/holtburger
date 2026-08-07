@@ -64,7 +64,7 @@ vec3 safeNormal(vec3 normal) {
 
 ${POINT_LIGHT_FALLOFF_GLSL}
 
-// Evaluated lights share the authored falloff with the interior bake, but deliberately not its
+// RETAIL DIVERGENCE: evaluated lights share the authored falloff with the interior bake, but not its
 // per-channel clamp. Retail clamps because it bakes into dense EnvCell vertices, where a vertex
 // rarely lands on the peak and interpolation hides the resulting plateau. Terrain evaluates per
 // pixel -- it must, since its vertices sit 24 units apart against lamps reaching 6 -- so that

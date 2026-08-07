@@ -130,11 +130,11 @@ pub struct CallPesHookPayload {
 
 /// A directly addressed sound with authored playback parameters.
 ///
-/// Field names follow retail's proven use, not ACE's labels: retail's `Execute` rolls against
-/// the **first** float after the sound id and discards the second entirely. The archive
-/// corroborates this — every representative record authors `probability = 1.0, unused = 0.0`,
-/// which under ACE's naming would give every authored ambient sound a zero chance of ever
-/// playing.
+/// RETAIL QUIRK: field names follow retail's proven use, not ACE's labels. Retail's `Execute`
+/// rolls against the **first** float after the sound id and discards the second entirely. The
+/// archive corroborates this — every representative record authors
+/// `probability = 1.0, unused = 0.0`, which under ACE's naming would give every authored
+/// ambient sound a zero chance of ever playing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SoundTweakedHookPayload {
     /// 0x0A `Wave` DID played directly, bypassing the object's sound table.

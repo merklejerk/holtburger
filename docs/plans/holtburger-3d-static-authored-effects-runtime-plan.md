@@ -784,13 +784,14 @@ this plan; script-only promotion added ~96 more residents to a road that was alr
 
 Options, in rough order of cost, recorded for a roadmap-level decision rather than picked here:
 
-1. **Do not promote generated scenery.** Cheapest; scenery scripts and animations stop running.
-2. **Share behavior per setup rather than per placement** — one clock per (setup, landblock), with
-   effects emitted at each placement. Preserves fidelity and compaction; the largest change.
-3. **Split presentation from behavior** (below). Removes the 96 script-only residents from the
-   per-frame path and any animated resident whose pose never actually changes.
-4. **Improve instance-run grouping.** Batching currently achieves only 3.6 instances per draw, and
-   run matching within a batch key is linear; both are worth attention regardless of the above.
+1. **Find the ~50x instance multiplier first.** Ninety-one promoted placements cannot legitimately
+   produce 13,000 instances. Until that is understood, everything below is premature.
+2. **Split presentation from behavior** (below). Removes script-only residents from the per-frame
+   path entirely; correct regardless of what the multiplier turns out to be.
+3. **Improve instance-run grouping.** Batching achieves only 3.6 instances per draw and run matching
+   within a batch key is linear; worth attention independently.
+4. **Reconsider promotion granularity** — only if the multiplier proves to be inherent to
+   per-placement promotion rather than a defect.
 
 **The presentation/behavior split, and the condition is already knowable at preparation.**
 A script-only resident needs per-frame presentation only if its closure authors a pose-changing

@@ -1720,12 +1720,19 @@ change this: `--enable-webgl-developer-extensions` and `--enable-webgl-draft-ext
 tried and neither affects the bit count. So the profiler's self-report is *correct*; it is measuring
 a capability Chrome will never grant, and would fail identically outside headless.
 
-The fix is to rebuild the profiler on `TIME_ELAPSED_EXT`, which carries one real design constraint:
+**Rebuilt on `TIME_ELAPSED_EXT` and now working.** First real GPU numbers this project has had, at
+`0xDA55` radius 2: opaque `1.133 ms`, terrain `0.074 ms`, blended `0.039 ms`, total `1.247 ms`,
+against CPU mean `2.31 ms` and p95 `2.8 ms` — the renderer is CPU-bound at this workload by roughly
+two to one, which is worth knowing before optimizing any draw path.
+
+The rebuild carried one real design constraint:
 only one elapsed query may be active at a time, so spans cannot nest. The existing
 opaque/blended/terrain/other phases are sequential and translate directly, but `totalMs` currently
 means "first to last command" and would become the sum of measured spans, losing the unmeasured gap
-that `otherMs` represents today. That is a contract change to `RendererGpuFrameProfile`, not a
-drop-in.
+that `otherMs` represents today. `RendererGpuFrameProfile` therefore lost `otherMs` entirely rather
+than reporting an unmeasured gap as zero, which would read as "no unattributed work" instead of "not
+measured". Two tests cover behaviour the timestamp model could not have: a nested phase throws, and a
+frame that measured nothing is dropped rather than stalling the backlog.
 
 Consequence for the measurement items: they were never blocked on harness capability. CPU numbers are
 available now, and the outstanding work is per-system instrumentation — a particle scope, tick-phase

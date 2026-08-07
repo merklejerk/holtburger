@@ -2409,6 +2409,11 @@ Retail quirk noted for whenever ambient lands: `PlayAmbientSound` pre-multiplies
 `ambient_sound_volume` **and** passes `is_ambient = 1`, so `GetAttenuation` multiplies by it again.
 Ambient volume is effectively squared, and that will be a reproduce-or-fix decision.
 
+**Corrected later — see Phase 10's Ground Truth.** Two claims in the paragraph above are wrong and
+are left standing only as a record of what was believed then. `is_continuous` is not a decoded field;
+it is derived from `base_chance == 0`. And continuous descriptors do not loop — retail retriggers a
+one-shot on a flat interval. The squaring decision was resolved: we fix it.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.
@@ -2935,99 +2940,140 @@ authored one-shots this plan already delivers.
 
 ### Scope
 
-**In scope.** Decoding the ambient descriptors, a timed scheduler that selects and fires them, the
-`ambient` sound category with its own user volume, and continuous (looping) playback, which
-`AudioSystem` does not currently support at all.
+**In scope.** Surfacing the already-decoded ambient descriptors, a timed scheduler that selects and
+fires them, the `ambient` sound category with its own user volume, and the placement retail gives
+intermittent sounds.
+
+**No longer in scope, on evidence.** Looping playback. The original scoping assumed continuous
+descriptors needed a looping voice and an extended `AudioVoice` contract; retail retriggers a
+one-shot on a flat interval instead, which `AudioSystem` already does.
 
 **Out of scope.** Music, interface sounds, and anything requiring a server connection.
 
 ### Ground Truth
 
-Retail's structures, already read during the audio investigation:
+Corrected after a review pass read the client's unpack and the `Ambient` class hierarchy rather than
+the runtime struct dump. Two of the original claims were wrong.
+
+**The descriptors are already decoded.** `SoundDesc` / `AmbientSoundTable` / `AmbientSound` live in
+`crates/holtburger-dat/src/file_type/region.rs`, reachable through `RegionDesc.sound_info`. The
+open question about new archive plumbing is answered: there is none to do.
+
+**`is_continuous` is derived, not stored.** Five floats are on the wire; the sixth slot is computed
+at load. `AmbientSTBDesc::UnPack` (acclient.c:367786) is explicit:
 
 ```c
-CSoundDesc       → SmartArray<AmbientSTBDesc*>          // region-level, acclient.h:47039
-CSceneType       → { scene_name, scenes[], sound_table_desc }   // scene types carry one too
-AmbientSTBDesc   → { stb_id, stb_not_found, ambient_sounds[], sound_table, play_count }
-AmbientSoundDesc → { stype, is_continuous, volume, base_chance, min_rate, max_rate }
+v8 = operator new(0x18u);            // 24 bytes, 6 slots
+v8[3] = *(float *)*v4;               // [3] base_chance, read from disk
+*((_DWORD *)v8 + 1) = v8[3] == 0.0;  // [1] is_continuous, DERIVED, never on the wire
 ```
 
-Behaviour lives in `SoundManager::PlayAmbientSound` (acclient.c:366813) and
-`PlayAmbientSoundFromCenter` (acclient.c:366845), reached through `Ambient::PlaySoundA`
-(acclient.c:367143). Both gate on `ambient_sounds_enabled` and pass `is_ambient = 1` to
-`GetAttenuation`.
+ACE agrees (`AmbientSoundDesc.IsContinuous => (BaseChance == 0)`) and our decoder already reads the
+correct five fields. **The trap:** a scheduler that reads `base_chance` as a probability and rolls
+against it silences every continuous sound, because theirs is zero by definition. This is the same
+shape as the `SoundTweakedHookPayload` quirk in `setup_model.rs`, where ACE's field naming would give
+every authored ambient sound a zero chance of playing. Second occurrence; expect a third.
 
-`RegionDesc` is already decoded (`ContentDecodeCache::region_desc`), so `CSoundDesc` is likely
-reachable without new archive plumbing — confirm before assuming it.
+**"Continuous" does not mean looping.** `Ambient::GetSound` (acclient.c:367290) branches on
+`is_continuous` to build one of two subclasses, and both are one-shots on a timer:
+
+| | `IntermitSound` (`base_chance > 0`) | `ConstantSound` (`base_chance == 0`) |
+| --- | --- | --- |
+| surroundings scale | **probability**: `base_chance / total_weight * sound_count` | **volume**: `volume / total_weight * sound_count` |
+| direction | 8 direction buckets with per-direction min/max distance (`AddDir`) | none; `AddTo` accumulates weight only |
+| placement | `GetSoundPos` rolls a bucket, jitters heading within its sector, rolls a distance | centred, unpositioned |
+| interval | `RollDice(min_rate, max_rate)` | flat `min_rate`, no roll |
+| plays when due | only if `PlayNow` passes | always |
+
+So intermittent is an occasional positioned event, and continuous is an ever-present bed whose
+loudness — not likelihood — tracks how much of the surrounding land authored it. A constant sound
+re-firing on a flat `min_rate` reads as faking a loop with one-shot playback; that reading is
+inference, and the census should check `min_rate` against actual wave durations.
+
+Distance weighting is `Ambient::CalcWeight`: `1.0` inside `ambient_sound_min_dist_sq`,
+`min_dist_sq / d²` between, `0` beyond `ambient_sound_max_dist_sq`.
+
+**`base_chance` is not read where the plan first said.** `SoundManager::PlayAmbientSound`
+(acclient.c:366813) rolls the *sound table's* probability, the same field the one-shot path already
+handles. `base_chance` belongs to `IntermitSound::PlayNow`, in the scheduler.
 
 ### North Stars
 
 1. Ambient is a **producer**, not a new audio system. It ends at `AudioSystem.trigger` like every
    other sound, and adds a category rather than a parallel path.
-2. Looping is the one genuinely new capability. Model its lifetime explicitly; a continuous voice
-   that outlives its region is a leak, and voices already deliberately outlive their owners.
+2. Both descriptor kinds are one-shots on a timer. Reach for a looping voice only if measurement
+   proves retriggering audibly seams, and treat that as a departure from retail rather than a port.
 3. The scheduler is authored data driving a clock, not per-frame polling of every descriptor.
 4. Reproduce retail's audible behaviour, including its quirks, but only where content was tuned
    against them.
+5. Derive `is_continuous` once, at decode, and put it in the contract type. No consumer re-tests
+   `base_chance == 0`.
 
-### Phase 10.1 — Decode the ambient descriptors
+### Phase 10.1 — Surface the ambient descriptors and census them
 
-Decode `CSoundDesc`/`AmbientSTBDesc`/`AmbientSoundDesc` from region data, and the `CSceneType`
-descriptor alongside them. Verify field order against ACE rather than the decompile's struct dump.
+Decoding is done. Remaining: expose `RegionDesc.sound_info` through `holtburger-content` to the
+frontend, and add `isContinuous` as a decoded-side derived field so no consumer re-derives it.
+Confirm whether `CSceneType` carries its own descriptor and whether ours decodes it.
 
-*Acceptance:* a census over shipped regions reports how many ambient descriptors exist, how many are
-continuous, and the observed `min_rate`/`max_rate`/`base_chance` distributions. That census decides
-the scheduler's shape, so it comes first.
+*Acceptance:* a census over shipped regions reports how many descriptors exist, how many are
+continuous, the `min_rate`/`max_rate`/`base_chance` distributions, and — for continuous descriptors —
+`min_rate` against the referenced wave's duration. That census decides the scheduler's shape, so it
+comes first.
 
 ### Phase 10.2 — The ambient category
 
 Add `ambientVolume` to `AudioSettings` and an `is_ambient` route through `placeSpatialAudio`, so
 category volume selection is explicit rather than implied by the single effect path.
 
-**Decision required — retail squares ambient volume.** `PlayAmbientSound` pre-multiplies by
-`ambient_sound_volume` *and* passes `is_ambient = 1`, so `GetAttenuation` multiplies by it again
-(acclient.c:366824 and 366440). Reproducing it makes our slider behave like retail's; fixing it makes
-the setting linear. This needs a call, and the phase should not proceed on a guess.
+**Decision made: fix the double multiply.** `PlayAmbientSound` pre-multiplies by
+`ambient_sound_volume` and also passes `is_ambient = 1`, so `GetAttenuation` multiplies by it a second
+time (acclient.c:366824 and 366440). We apply it once, giving a linear slider. Mark it
+`RETAIL DIVERGENCE:` at the site with both citations: the squaring is a defect rather than a tuning
+choice, it is a user setting rather than authored content, and no content can observe the difference.
 
-*Acceptance:* effect and ambient sounds resolve independently against their own volumes, with the
-squaring decision recorded and tested either way.
+*Acceptance:* effect and ambient sounds resolve independently against their own volumes, and a
+half-volume ambient setting yields half gain rather than a quarter.
 
 ### Phase 10.3 — The scheduler
 
-A system owning one clock per active ambient descriptor: on each due tick, roll `base_chance`, and on
-success resolve the descriptor's `SoundType` against its table and trigger. Re-arm from
-`min_rate`/`max_rate`. Ownership follows the region/scene the descriptor came from, so descriptors
-retire when their region does.
+One clock per active descriptor. On each due tick: a `ConstantSound` always plays and re-arms at
+`min_rate`; an `IntermitSound` rolls `PlayNow` against its weighted `play_chance`, plays on success,
+and re-arms at `RollDice(min_rate, max_rate)`. Ownership follows the region or scene the descriptor
+came from, so descriptors retire when their region does.
 
-*Acceptance:* the harness reports scheduled, fired, and suppressed counts, and a fixed clock produces
-a deterministic sequence.
+Weighting is what makes ambience respond to place, so it belongs here rather than being deferred:
+`sound_count` accumulates per surrounding contributor, and `total_weight` normalizes it. Positioning
+for intermittent sounds can start centred and gain `GetSoundPos` once the census says how many
+descriptors are intermittent.
 
-### Phase 10.4 — Continuous playback
+*Acceptance:* the harness reports scheduled, fired, and suppressed counts; a fixed clock produces a
+deterministic sequence; a continuous descriptor fires on its flat interval and never rolls a chance.
 
-`is_continuous` descriptors loop rather than firing repeatedly. This is the change with real risk:
-`AudioSystem` is documented as one-shots only, its voice budget assumes voices end on their own, and
-`AudioVoice.finished` never becomes true for a loop. Expect to extend the voice contract, not just
-set `loop = true`.
+### Phase 10.4 — Positional and directional intermittent sounds
 
-*Acceptance:* a looping voice holds exactly one budget slot, stops when its owner retires, and never
-strands a slot after teardown.
+Reshaped: the original looping-voice phase is gone, because retail does not loop. What remains is the
+placement retail gives intermittent sounds — direction buckets, sector jitter, and a distance roll
+biased toward the near end — which is the difference between ambience that sits in the world and
+ambience that sits in your head.
+
+*Acceptance:* an intermittent sound authored only to the north is never placed to the south, and its
+distance stays within the accumulated min/max for that direction.
 
 ### Risks
 
-- **The voice budget is 16 and shared.** Continuous ambience holding slots permanently could starve
-  authored effects. Retail runs the same budget; measure before adding a reservation.
-- **Ambient may need no spatialization at all.** `PlayAmbientSoundFromCenter` passes distance `0`,
-  meaning centred and unattenuated. If most shipped descriptors are centre-played, the positional
-  path may be the rare case rather than the default.
+- **Ambient may need little spatialization.** `PlayAmbientSoundFromCenter` passes distance `0`, and
+  continuous sounds have no direction at all. If the census says most descriptors are continuous, the
+  positional path is the rare case and 10.4 shrinks accordingly.
+- **Retrigger seams.** A constant sound faking a loop by retriggering may click at the boundary where
+  retail's did not. Measure before reaching for looping voices, which the voice budget assumes never
+  happen.
 - **Scope creep into the `Ambient` class.** Retail's `Ambient` also manages fade and transitions.
   Deliver the scheduler first and treat the rest as separately justified.
 
 ### Open Questions
 
-- Does `CSoundDesc` reach us through the already-decoded `RegionDesc`, or does it need new plumbing?
 - Are ambient descriptors selected by region, by scene type, or both simultaneously?
-- Reproduce or fix the squared ambient volume?
-
+- Does `CSceneType` carry a sound-table descriptor our decoder does not yet read?
 
 ## Definition of Done
 

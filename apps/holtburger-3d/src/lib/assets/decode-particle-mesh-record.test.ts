@@ -17,15 +17,14 @@ const SECTIONS = [
 	byteOffset: 0,
 	elementCount: 0,
 	name,
-	scalarType: name === "positions" ||
-	name === "normals" ||
-	name === "textureCoordinates"
-		? "f32"
-		: name === "indices"
-			? "u32"
-			: name === "materialSlots"
-				? "u16"
-				: "u8",
+	scalarType:
+		name === "positions" || name === "normals" || name === "textureCoordinates"
+			? "f32"
+			: name === "indices"
+				? "u32"
+				: name === "materialSlots"
+					? "u16"
+					: "u8",
 }));
 
 function encode(overrides: Record<string, unknown> = {}): Uint8Array {

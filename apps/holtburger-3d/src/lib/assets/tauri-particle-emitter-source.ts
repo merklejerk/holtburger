@@ -21,7 +21,10 @@ export class TauriParticleEmitterSource implements ParticleEmitterSource {
 		const response = await invoke<unknown>("load_particle_emitter", {
 			request: { emitterInfoId },
 		});
-		return decodeParticleEmitterRecord(asBinaryResponse(response), emitterInfoId);
+		return decodeParticleEmitterRecord(
+			asBinaryResponse(response),
+			emitterInfoId,
+		);
 	}
 
 	destroy(): void {

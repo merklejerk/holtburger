@@ -55,7 +55,10 @@ describe("particlePosition", () => {
 	});
 
 	it("applies half b t squared for every parabolic variant, spin included", () => {
-		const constants = spawn({ a: renderVector3([1, 0, 0]), b: renderVector3([4, 0, 0]) });
+		const constants = spawn({
+			a: renderVector3([1, 0, 0]),
+			b: renderVector3([4, 0, 0]),
+		});
 		const expected = 11 + 1 * 2 + 0.5 * 4 * 4;
 
 		for (const type of [
@@ -74,7 +77,10 @@ describe("particlePosition", () => {
 
 	it("uses sine on y but cosine on x and z for Swarm", () => {
 		// The asymmetry is authored, not a transcription slip: proving it stops a later "cleanup".
-		const constants = spawn({ b: renderVector3([1, 1, 1]), c: renderVector3([1, 1, 1]) });
+		const constants = spawn({
+			b: renderVector3([1, 1, 1]),
+			c: renderVector3([1, 1, 1]),
+		});
 		const t = Math.PI / 2;
 
 		const position = particlePosition(
@@ -94,7 +100,11 @@ describe("particlePosition", () => {
 
 	it("reproduces both authored Explode quirks exactly", () => {
 		// a = (2, 99, 5): if any axis used its own `a` component, y would move with 99.
-		const constants = spawn({ a: renderVector3([2, 99, 5]), b: renderVector3([0, 0, 0]), c: renderVector3([1, 1, 1]) });
+		const constants = spawn({
+			a: renderVector3([2, 99, 5]),
+			b: renderVector3([0, 0, 0]),
+			c: renderVector3([1, 1, 1]),
+		});
 
 		const position = particlePosition(
 			PARTICLE_TYPE.explode,
@@ -111,7 +121,11 @@ describe("particlePosition", () => {
 	});
 
 	it("drives Implode's single cosine from a.x across all three axes", () => {
-		const constants = spawn({ a: renderVector3([1, 50, 50]), b: renderVector3([0, 0, 0]), c: renderVector3([1, 2, 3]) });
+		const constants = spawn({
+			a: renderVector3([1, 50, 50]),
+			b: renderVector3([0, 0, 0]),
+			c: renderVector3([1, 2, 3]),
+		});
 		const wave = Math.cos(1 * 2);
 
 		const position = particlePosition(

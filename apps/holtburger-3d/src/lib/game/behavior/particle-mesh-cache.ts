@@ -34,8 +34,12 @@ export class ParticleMeshCache {
 		hwGfxObjIds: readonly DatAssetId[],
 	): Promise<ParticleMeshPresentations | null> {
 		if (this.#destroyed)
-			throw new Error("Cannot prepare meshes on a destroyed particle mesh cache.");
-		const wanted = [...new Set(hwGfxObjIds.map((id) => id.toLowerCase()))].filter(
+			throw new Error(
+				"Cannot prepare meshes on a destroyed particle mesh cache.",
+			);
+		const wanted = [
+			...new Set(hwGfxObjIds.map((id) => id.toLowerCase())),
+		].filter(
 			(id) =>
 				!this.#presentations.has(id as DatAssetId) &&
 				!this.#inFlight.has(id as DatAssetId),
@@ -59,14 +63,20 @@ export class ParticleMeshCache {
 			.finally(() => {
 				for (const id of wanted) this.#inFlight.delete(id);
 			});
-		for (const id of wanted) this.#inFlight.set(id, load.then(() => undefined));
+		for (const id of wanted)
+			this.#inFlight.set(
+				id,
+				load.then(() => undefined),
+			);
 		const [batch] = await Promise.all([load, ...pending]);
 		return batch;
 	}
 
 	/** Read a resident mesh without loading; `null` keeps frame-time IO impossible. */
 	get(hwGfxObjId: DatAssetId): DecodedParticleMesh | null {
-		return this.#presentations.get(hwGfxObjId.toLowerCase() as DatAssetId) ?? null;
+		return (
+			this.#presentations.get(hwGfxObjId.toLowerCase() as DatAssetId) ?? null
+		);
 	}
 
 	getDiagnostics() {

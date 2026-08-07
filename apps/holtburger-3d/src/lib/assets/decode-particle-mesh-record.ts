@@ -108,7 +108,9 @@ export function decodeParticleMeshRecord(
 		),
 	);
 	if (!parsed.success)
-		throw new Error(`${RECORD_LABEL} manifest is invalid: ${parsed.error.message}`);
+		throw new Error(
+			`${RECORD_LABEL} manifest is invalid: ${parsed.error.message}`,
+		);
 	const manifest = parsed.data;
 	const sections = validateBinarySections(
 		response,

@@ -68,7 +68,9 @@ export function decodeSoundTableRecord(
 	if (!parsed.success)
 		throw new Error(`Sound table manifest is invalid: ${parsed.error.message}`);
 	const manifest = parsed.data;
-	if (manifest.soundTableId.toLowerCase() !== expectedSoundTableId.toLowerCase()) {
+	if (
+		manifest.soundTableId.toLowerCase() !== expectedSoundTableId.toLowerCase()
+	) {
 		throw new Error(
 			`Sound table host returned ${manifest.soundTableId} for ${expectedSoundTableId}.`,
 		);

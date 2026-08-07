@@ -149,7 +149,7 @@ Animation and physics scripts are **two independent clocks dispatching the same 
 vocabulary**. Both compile into one `PreparedBehaviorCommand` union and carry their own provenance
 beside it, so neither producer owns a command shape. `BehaviorEventRouter` sits at that cut: it
 routes each command to its consumer synchronously, records exactly one outcome with full provenance,
-and owns no clocks, queues, state, or resources. Producers arrive already knowing *when* a command
+and owns no clocks, queues, state, or resources. Producers arrive already knowing _when_ a command
 runs; the router decides only where it goes and what happened.
 
 Every dispatch target is a `(nodeId, generation)` pair checked before each dispatch, because node ids
@@ -182,7 +182,7 @@ Visual sampling is a separate explicit operation over authoritative node IDs. Th
 roots selected by the previous completed renderer frame at render cadence and samples other active
 roots at a 100 ms product interval; zero remains the exact full-cadence baseline. `EffectSystem` is a
 pure consumer: it owns persistent visual state — axis-angle visual-root rotation, whole-object scale,
-and per-part translucency on the semantic clock — while its *lifetime* belongs to the entity, not to
+and per-part translucency on the semantic clock — while its _lifetime_ belongs to the entity, not to
 playback, because a script-only resident has effect state and no animation at all. A dispatch-only hook system and pass-through pose system
 do not exist.
 

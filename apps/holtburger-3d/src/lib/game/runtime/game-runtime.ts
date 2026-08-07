@@ -2,9 +2,9 @@ import { createLandblockWorldOrigin } from "../landblocks";
 import { getMat4Translation } from "../math/matrices";
 import {
 	renderVector3,
-	stableVector3,
+	sceneVector3,
 	type RenderVector3,
-	type StableVector3,
+	type SceneVector3,
 } from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -398,14 +398,14 @@ export class GameRuntime {
 	 * Landblock-local origins are meaningless outside their own landblock, and anchor-relative ones
 	 * decay the moment the camera crosses a boundary. This frame is the only one safe to retain.
 	 */
-	#stableOriginOf(target: {
+	#sceneOriginOf(target: {
 		readonly nodeId: SceneNodeId;
-	}): StableVector3 | null {
+	}): SceneVector3 | null {
 		const placement = this.#scene.getResolvedPlacement(target.nodeId);
 		if (!placement) return null;
 		const origin = getMat4Translation(placement.localToLandblock);
 		const landblockOrigin = createLandblockWorldOrigin(placement.landblockId);
-		return stableVector3([
+		return sceneVector3([
 			origin.x + landblockOrigin.x,
 			origin.y + landblockOrigin.y,
 			origin.z + landblockOrigin.z,
@@ -413,21 +413,21 @@ export class GameRuntime {
 	}
 
 	/** Scene-frame origin of this frame's render anchor, which is the camera's landblock. */
-	#renderAnchorOrigin(): StableVector3 {
+	#renderAnchorOrigin(): SceneVector3 {
 		const anchor = createLandblockWorldOrigin(
 			this.#camera.placement.landblockId,
 		);
-		return stableVector3([anchor.x, anchor.y, anchor.z]);
+		return sceneVector3([anchor.x, anchor.y, anchor.z]);
 	}
 
 	/**
-	 * Re-express a stable origin relative to this frame's render anchor.
+	 * Re-express a scene-frame origin relative to this frame's render anchor.
 	 *
 	 * The particle pass draws with the view matrix alone, so an origin left in any other frame lands
 	 * wherever the anchor happens to be. Subtracting here keeps the arithmetic in double precision,
 	 * which is the whole reason the renderer works anchor-relative rather than in scene coordinates.
 	 */
-	#toRenderSpace(origin: StableVector3): RenderVector3 {
+	#toRenderSpace(origin: SceneVector3): RenderVector3 {
 		const anchor = this.#renderAnchorOrigin();
 		return renderVector3([
 			origin[0] - anchor[0],
@@ -437,11 +437,11 @@ export class GameRuntime {
 	}
 
 	/** Anchor-relative origin for a consumer that uses it within the frame that produced it. */
-	#sceneOriginOf(target: {
+	#anchoredOriginOf(target: {
 		readonly nodeId: SceneNodeId;
 	}): RenderVector3 | null {
-		const stable = this.#stableOriginOf(target);
-		return stable === null ? null : this.#toRenderSpace(stable);
+		const origin = this.#sceneOriginOf(target);
+		return origin === null ? null : this.#toRenderSpace(origin);
 	}
 
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
@@ -681,7 +681,7 @@ export class GameRuntime {
 			// a load inside the frame.
 			resolveEmitter: (emitterInfoId) =>
 				this.#particleEmitters.getReady(emitterInfoId),
-			stableOriginOf: (target) => this.#stableOriginOf(target),
+			sceneOriginOf: (target) => this.#sceneOriginOf(target),
 			renderAnchorOrigin: () => this.#renderAnchorOrigin(),
 			roll: dependencies.roll ?? Math.random,
 		});
@@ -716,7 +716,7 @@ export class GameRuntime {
 					playSound: (target, sound) => {
 						// A sound is placed at its emitting node's world position, resolved once at
 						// trigger time exactly as retail samples it.
-						const origin = this.#sceneOriginOf(target);
+						const origin = this.#anchoredOriginOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							position: origin,
@@ -734,7 +734,7 @@ export class GameRuntime {
 						if (!candidates) return "unprepared";
 						const candidate = selectSoundCandidate(candidates, Math.random());
 						if (!candidate) return "unprepared";
-						const origin = this.#sceneOriginOf(target);
+						const origin = this.#anchoredOriginOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							position: origin,

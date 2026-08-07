@@ -14,7 +14,7 @@ declare const renderSpace: unique symbol;
  *
  * Positions of this type are **anchor-relative**: the anchor is the camera's landblock, so it moves
  * whenever the camera crosses a boundary, and an anchored position is valid only for the frame that
- * produced it. Retain a {@link StableVector3} instead and convert at the point of use.
+ * produced it. Retain a {@link SceneVector3} instead and convert at the point of use.
  *
  * That restriction is about positions, not about the type. The same brand carries displacements and
  * directions — a hook offset, a listener's right-hand axis, a sun vector — which are invariant under
@@ -82,29 +82,35 @@ export function renderVector3(
 	return vector as RenderVector3;
 }
 
-declare const stableSpace: unique symbol;
+declare const sceneSpace: unique symbol;
 
 /**
- * A render-axis position in the app's fixed scene frame, which no camera movement can invalidate.
+ * A render-axis position in **canonical scene space**: one origin for the whole world, at landblock
+ * (0, 0), which no camera movement can invalidate.
  *
- * This is the only frame a position may be **retained** in. {@link RenderVector3} is anchor-relative
- * and is valid only for the frame that produced it, so storing one is a defect that surfaces as
- * geometry jumping by a landblock multiple the moment the camera crosses a boundary. The two brands
- * are deliberately disjoint so that mistake cannot type-check.
+ * This is the frame the camera and residency queries have always used, and the only one a position
+ * may be **retained** in. {@link RenderVector3} measures from the camera's own landblock, so a
+ * stored one silently denotes a different world point once the camera crosses a boundary — the value
+ * is unchanged, its origin moved. That surfaces as geometry jumping by a landblock multiple. The two
+ * brands are deliberately disjoint so the mistake cannot type-check.
+ *
+ * The pair exists because the two requirements conflict: anchor-relative keeps shader coordinates
+ * small enough for f32, and scene space keeps stored coordinates meaningful over time. Converting is
+ * a single subtraction of the anchor's world origin, done in double precision on the CPU.
  */
-export type StableVector3 = readonly [number, number, number] & {
-	readonly [stableSpace]: true;
+export type SceneVector3 = readonly [number, number, number] & {
+	readonly [sceneSpace]: true;
 };
 
 /**
- * Assert that a vector is in the fixed scene frame.
+ * Assert that a vector is in canonical scene space.
  *
  * As with {@link renderVector3}, every call is a claim to justify at the call site.
  */
-export function stableVector3(
+export function sceneVector3(
 	vector: readonly [number, number, number],
-): StableVector3 {
-	return vector as StableVector3;
+): SceneVector3 {
+	return vector as SceneVector3;
 }
 
 export function acFrameTransform(

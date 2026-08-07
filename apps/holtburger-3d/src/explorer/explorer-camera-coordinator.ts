@@ -1,5 +1,5 @@
 import type { LandblockId } from "../lib/game/game-types";
-import { stableVector3 } from "../lib/assets/ac-frame";
+import { sceneVector3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
@@ -201,8 +201,8 @@ export class ExplorerCameraCoordinator {
 		this.#runtime.setAudioListener({
 			// The free-fly controller works in canonical scene coordinates: this is the same value
 			// handed to `queryWorldPointResidencyCandidates` to resolve which landblock and EnvCell
-			// the camera occupies, so it is stable-frame by construction.
-			position: stableVector3([position.x, position.y, position.z]),
+			// the camera occupies, so it is scene-frame by construction.
+			position: sceneVector3([position.x, position.y, position.z]),
 			rotation,
 		});
 	}

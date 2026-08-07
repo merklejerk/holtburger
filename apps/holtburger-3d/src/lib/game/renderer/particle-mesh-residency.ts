@@ -24,6 +24,19 @@ import { PARTICLE_ORIENTATION } from "./webgl2-particle-program";
  * names a single mesh, and every particle in a cohort shares it, so a multi-range mesh would mean
  * splitting a cohort mid-draw. The first material range wins and the rest are reported.
  */
+/**
+ * Reference axis for an axis-locked particle billboard, in **render** axes.
+ *
+ * Degrade modes 3, 4 and 5 lock about AC's x, y and z, but a census of every shipped
+ * `GfxObjDegradeInfo` finds only mode 5 — AC's z, which is up — so a single constant is lossless
+ * here: 3,852 authored, 251 viewer-facing, 28 axis-locked, all of them mode 5.
+ *
+ * AC's up is `(0, 0, 1)`, and writing that literally is the bug this constant exists to prevent:
+ * in render axes it is a *horizontal* vector, which sends the sprite's own up sideways and rolls
+ * the whole basis as the camera pitches. Converted, AC's up is `(0, 1, 0)`.
+ */
+const AXIS_LOCKED_REFERENCE: readonly [number, number, number] = [0, 1, 0];
+
 export class ParticleMeshResidency {
 	readonly #resources: WebGL2ResourceManager;
 	/** Resource keys, resolved to live bindings only in {@link resolve}. */
@@ -147,7 +160,7 @@ export class ParticleMeshResidency {
 			geometry,
 			indexCount: range.indexCount,
 			indexOffsetBytes: range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
-			lockedAxis: [0, 0, 1],
+			lockedAxis: AXIS_LOCKED_REFERENCE,
 			materialKind: 0,
 			orientation:
 				decoded.orientation === "viewer-facing"

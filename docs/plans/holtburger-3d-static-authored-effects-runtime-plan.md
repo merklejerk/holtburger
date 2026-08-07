@@ -1944,6 +1944,56 @@ reproduced in the harness. The evidence for this change is the formula tests, wh
 semantics directly — that Explode's extra term lands on render **up**, and that Swarm's sine lands on
 north and never on up. Visual confirmation of the reported flame remains outstanding.
 
+##### Coordinate-frame audit (2026-08-07)
+
+Three frame defects in one subsystem justified auditing the rest. Four failure modes were checked:
+retained anchor-relative values, asymmetric component indexing, unconverted authored data, and double
+conversion.
+
+**Clean.** `TextureVelocity` is UV space with no 3D axis involved. Lights convert `light.offset` once
+at decode and then ride render-space matrices. Geometry and bounds are converted **host-side in
+Rust** (`RenderAabb`/`RenderVec3`), which is why the TypeScript decoder only converts frames, scales,
+and loose authored direction vectors — the boundary is consistent with no gap. The sun vector,
+animation frames, and the newly landed particle motion path each convert exactly once.
+
+**Found: axis-locked billboards locked about a horizontal axis.** `particle-mesh-residency.ts`
+hardcoded `lockedAxis: [0, 0, 1]`. The shader consumes `uLockedAxis` in **render** axes — the sibling
+viewer-facing branch uses `vec3(0.0, 1.0, 0.0)` five lines away — so `(0, 0, 1)` is horizontal there,
+not up. With a horizontal reference, `right = cross(reference, forward)` comes out near-vertical and
+the sprite's own up maps sideways, which also rolls the whole basis as the camera pitches.
+
+A census of every shipped `GfxObjDegradeInfo` sizes it and settles the intent: 3,852 authored, 251
+viewer-facing, 28 axis-locked, and **every axis-locked record is mode 5 — AC's z, which is up**.
+Modes 3 and 4 never ship, so the decoder collapsing 3/4/5 into one `"axis-locked"` value is lossless.
+The reference is now a named `AXIS_LOCKED_REFERENCE = [0, 1, 0]` carrying that census and stating
+explicitly that writing AC's literal `(0, 0, 1)` is the bug it exists to prevent.
+
+This matches a reported symptom that the earlier motion fix did not explain: a candle flame pointing
+sideways at eye level and rotating bodily as the camera moved up or down. Billboarding is per
+particle — `orientationBasis` is evaluated with each instance's own world position — but every
+particle in a flame shares the locked axis, so they swing together and read as one rotating system.
+
+**Found: spatial audio never follows the camera.** Sound *triggers* are wired end to end
+(`BehaviorEventRouter` → runtime consumer → `AudioSystem.trigger`), and source positions are correct.
+`setListener` has **no production caller**, only its own test, so the listener stays at its
+constructed default of position `[0, 0, 0]` facing `[1, 0, 0]`. Every sound is panned and attenuated
+against the anchor origin rather than the camera. Not a frame confusion but a wiring gap, and one
+`knip` cannot see because a test keeps the method alive. Left open: who owns the listener pose, and
+whether it updates per frame or on movement, is a frontend policy decision.
+
+**Corrected: the `RenderVector3` doc overreached.** It was documented as anchor-relative and never to
+be retained, but the same brand carries displacements and directions — hook offsets, the listener's
+right axis, the sun vector — which are invariant under the anchor's pure translation and are safely
+retained today (`offsetOrigin` is, inside cached prepared commands). The doc now scopes the
+retention rule to positions and records that splitting position from displacement is worth doing only
+if a defect ever turns on the difference.
+
+Verification limit: the reported candle was reached in the harness at `0xdb560107`, and the fix
+changes those particles measurably — 265 pixels with a maximum channel delta of 198, concentrated
+exactly on the flame clusters, which also confirms those meshes really are axis-locked. But the
+camera framing put them at a few pixels across, so orientation could not be judged visually. Close-up
+confirmation is outstanding.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.

@@ -10,11 +10,16 @@ export interface AcFrame {
 declare const renderSpace: unique symbol;
 
 /**
- * A three-component vector in the app's render axes, **relative to the current render anchor**.
+ * A three-component vector **already converted into the app's render axes**.
  *
- * The anchor is the camera's landblock, so it moves whenever the camera crosses a landblock
- * boundary. A value of this type is therefore valid only for the frame that produced it and must
- * never be retained across frames; retain a {@link StableVector3} and convert at the point of use.
+ * Positions of this type are **anchor-relative**: the anchor is the camera's landblock, so it moves
+ * whenever the camera crosses a boundary, and an anchored position is valid only for the frame that
+ * produced it. Retain a {@link StableVector3} instead and convert at the point of use.
+ *
+ * That restriction is about positions, not about the type. The same brand carries displacements and
+ * directions — a hook offset, a listener's right-hand axis, a sun vector — which are invariant under
+ * the anchor's pure translation and are safe to retain. Splitting the two apart is worth doing if a
+ * defect ever turns on the difference; today the distinction is documented rather than typed.
  *
  * Deliberately a distinct type from a plain tuple, because AC is Z-up and the renderer is Y-up and
  * the two are otherwise indistinguishable. An authored `(0, 0, 1)` means *up*; the same tuple read

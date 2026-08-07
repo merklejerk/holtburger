@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { DatAssetId } from "../game/game-types";
 import type { PreparedBehaviorCommand } from "../game/behavior/prepared-behavior-command";
 import { Vec3 } from "../game/math/types";
+import { acVectorToRender } from "./ac-frame";
 
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
@@ -188,11 +189,12 @@ export function decodeBehaviorCommand(
 			};
 		case "create-particle":
 			// The authored quaternion stops here: retail never applies the hook frame's rotation.
+			// The origin is converted out of AC's Z-up axes, exactly as `set-omega` is.
 			return {
 				emitterId: payload.emitterId,
 				emitterInfoId: payload.emitterInfoId as DatAssetId,
 				kind: "create-particle",
-				offsetOrigin: payload.offsetOrigin,
+				offsetOrigin: acVectorToRender(payload.offsetOrigin),
 				partIndex: payload.partIndex,
 			};
 		case "call-pes":

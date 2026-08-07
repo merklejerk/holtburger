@@ -1797,10 +1797,13 @@ export class WebGL2Renderer implements Renderer {
 		if (!pass || this.#particleCohorts.length === 0) return;
 		pass.draw(
 			{
+				// Anchor-relative, matching both the view matrix and the particle origins. The
+				// camera's canonical position lives in a different frame, which would leave the
+				// billboard basis pointing at a spot thousands of units away.
 				cameraPosition: [
-					view.camera.placement.position.x,
-					view.camera.placement.position.y,
-					view.camera.placement.position.z,
+					view.cameraPosition.x,
+					view.cameraPosition.y,
+					view.cameraPosition.z,
 				],
 				clockSeconds: this.#skyClockSeconds,
 				gl: this.#gl,

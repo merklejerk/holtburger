@@ -119,9 +119,11 @@ mat3 orientationBasis(vec3 worldPosition) {
 	// Retail heads the draw frame at the viewer position, so the facing axis is toward the eye
 	// rather than along the camera's forward vector; the two differ off the screen centre.
 	vec3 forward = normalize(uCameraPosition - worldPosition);
+	// World up in *render* axes. Using AC's up here would roll the sprite as the camera moves,
+	// because the geometry has already been converted out of AC's Z-up frame.
 	vec3 reference = uOrientation == ${PARTICLE_ORIENTATION.axisLocked}
 		? normalize(uLockedAxis)
-		: vec3(0.0, 0.0, 1.0);
+		: vec3(0.0, 1.0, 0.0);
 	vec3 right = cross(reference, forward);
 	float rightLength = length(right);
 	// Degenerate when the particle sits on the locked axis; keep the authored frame rather than
@@ -144,6 +146,8 @@ void main() {
 	vec3 worldPosition = evaluatePosition(base, elapsed);
 	float scale = mix(aAppearance.x, aAppearance.y, progress);
 
+	// The mesh's authored plane faces its own +Z after conversion, so the basis maps local x/y to
+	// screen right/up and local z to the facing axis.
 	vec3 local = orientationBasis(worldPosition) * (aPosition * scale);
 	vTextureCoordinate = aTextureCoordinate;
 	vTranslucency = mix(aAppearance.z, aAppearance.w, progress);

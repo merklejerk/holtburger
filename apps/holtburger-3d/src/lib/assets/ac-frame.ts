@@ -7,6 +7,19 @@ export interface AcFrame {
 }
 
 /** Convert one AC frame and authored scale into the app's canonical render coordinate frame. */
+/**
+ * Convert one authored AC vector into the app's render axes.
+ *
+ * AC is Z-up; the renderer is Y-up. The mapping is `(x, z, -y)`, identical to the rotation
+ * conversion in {@link acFrameTransform}. Every authored direction, offset, velocity, or
+ * acceleration must go through this — an unconverted "up" offset lands horizontally.
+ */
+export function acVectorToRender(
+	vector: readonly [number, number, number],
+): [number, number, number] {
+	return [vector[0], vector[2], -vector[1]];
+}
+
 export function acFrameTransform(
 	input: AcFrame,
 	scale: readonly [number, number, number],

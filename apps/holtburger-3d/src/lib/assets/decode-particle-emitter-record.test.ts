@@ -49,6 +49,13 @@ function encode(overrides: Record<string, unknown> = {}): Uint8Array {
 	return bytes;
 }
 
+function decodeParticleMeshFixture() {
+	return decodeParticleEmitterRecord(
+		encode({ a: [1, 2, 3], offsetDir: [0, 0, 1] }),
+		"0x3200020c",
+	);
+}
+
 describe("decodeParticleEmitterRecord", () => {
 	it("decodes an authored emitter and keeps its derived persistence", () => {
 		const decoded = decodeParticleEmitterRecord(encode(), "0x3200020c");
@@ -57,6 +64,15 @@ describe("decodeParticleEmitterRecord", () => {
 		expect(decoded.hwGfxObjId).toBe("0x01000ff4");
 		expect(decoded.motionType).toBe(2);
 		expect(decoded.isPersistent).toBe(true);
+	});
+
+	it("converts authored vectors out of AC's Z-up axes", () => {
+		const decoded = decodeParticleMeshFixture();
+
+		// AC (0,0,1) is up; render up is +Y. An unconverted offset lands horizontally, which is
+		// exactly the "halo beside the lamp post instead of above it" failure.
+		expect(decoded.offsetDir).toEqual([0, 1, -0]);
+		expect(decoded.a).toEqual([1, 3, -2]);
 	});
 
 	it("carries an unshipped motion type as null rather than inventing one", () => {

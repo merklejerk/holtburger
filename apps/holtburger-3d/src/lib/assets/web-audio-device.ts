@@ -48,9 +48,19 @@ export class WebAudioDevice implements AudioDevice {
 		const panner = this.#context.createStereoPanner();
 		panner.pan.value = pan;
 		source.connect(gainNode).connect(panner).connect(this.#context.destination);
+		let finished = false;
+		// Web Audio reports the exact end, including a stop we requested, so the voice needs no
+		// duration bookkeeping to know it is done.
+		source.onended = () => {
+			finished = true;
+			source.disconnect();
+		};
 		source.start();
 		let stopped = false;
 		return {
+			get finished() {
+				return finished;
+			},
 			stop: () => {
 				if (stopped) return;
 				stopped = true;

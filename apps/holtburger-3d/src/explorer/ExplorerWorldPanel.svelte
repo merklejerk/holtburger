@@ -42,11 +42,14 @@
 		readonly clockFollowing: boolean;
 		/** Whether the audio listener rides the free camera; see the camera coordinator. */
 		readonly audioFollowsCamera: boolean;
+		/** Effect-category volume in [0, 1]; retail's other categories are not produced yet. */
+		readonly effectVolume: number;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
+		readonly updateEffectVolume: (volume: number) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		/** Renderer-only layer switches; these do not alter requested scene interest. */
@@ -76,6 +79,8 @@
 		clockFollowing,
 		audioFollowsCamera,
 		updateAudioFollowsCamera,
+		effectVolume,
+		updateEffectVolume,
 		updateDistanceFog,
 		updateViewerLight,
 		updateClockFollowing,
@@ -359,6 +364,20 @@
 				/>
 				<span>Audio follows camera</span>
 				<strong>{audioFollowsCamera ? "On" : "Off"}</strong>
+			</label>
+			<label class="explorer-environment-field">
+				<span>Effect volume</span>
+				<input
+					max="1"
+					min="0"
+					step="0.05"
+					type="range"
+					value={effectVolume}
+					oninput={(event) =>
+						updateEffectVolume(
+							Number((event.currentTarget as HTMLInputElement).value),
+						)}
+				/>
 			</label>
 			<label class="explorer-environment-field">
 				<span>EnvCell renderer</span>

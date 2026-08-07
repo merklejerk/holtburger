@@ -50,11 +50,13 @@
 		readonly viewerLightEnabled: boolean;
 		readonly clockFollowing: boolean;
 		readonly audioFollowsCamera: boolean;
+		readonly effectVolume: number;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
+		readonly updateEffectVolume: (volume: number) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		readonly layerVisibility: RenderLayerVisibility;
@@ -95,10 +97,12 @@
 		viewerLightEnabled,
 		clockFollowing,
 		audioFollowsCamera,
+		effectVolume,
 		updateDistanceFog,
 		updateViewerLight,
 		updateClockFollowing,
 		updateAudioFollowsCamera,
+		updateEffectVolume,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
 		layerVisibility,
@@ -219,10 +223,12 @@
 								{viewerLightEnabled}
 								{clockFollowing}
 								{audioFollowsCamera}
+								{effectVolume}
 								{updateDistanceFog}
 								{updateViewerLight}
 								{updateClockFollowing}
 								{updateAudioFollowsCamera}
+								{updateEffectVolume}
 								{envCellRenderMode}
 								{updateEnvCellRenderMode}
 								{layerVisibility}

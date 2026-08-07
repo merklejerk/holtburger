@@ -67,7 +67,11 @@ import { ParticleSystem } from "../systems/particle-system";
 import type { UniformRoll } from "../systems/particle-system";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
-import { AudioSystem, type AudioDevice } from "../systems/audio-system";
+import {
+	AudioSystem,
+	type AudioDevice,
+	type AudioSettings,
+} from "../systems/audio-system";
 import { BehaviorEventRouter } from "../behavior/behavior-event-router";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
@@ -900,6 +904,17 @@ export class GameRuntime {
 				2 * (x * z - w * y),
 			]),
 		});
+	}
+
+	/**
+	 * Apply user audio settings.
+	 *
+	 * Retail carries an enable flag and a volume per sound category; a volume of zero here is the
+	 * same observable behaviour as its flag being off. Only the effect category exists so far,
+	 * because authored hook sounds are effect sounds.
+	 */
+	setAudioSettings(settings: AudioSettings): void {
+		this.#audio.setSettings(settings);
 	}
 
 	/** Replace the authoritative primary camera without changing scene interest. */

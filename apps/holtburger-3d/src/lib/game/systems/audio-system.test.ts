@@ -10,6 +10,12 @@ import {
 
 const SOUND = "0x0a000207" as DatAssetId;
 
+/** A voice whose completion the test drives, and which counts its own stops. */
+interface FakeVoice extends AudioVoice {
+	finished: boolean;
+	stopCalls: number;
+}
+
 function build(
 	options: {
 		roll?: number;
@@ -20,7 +26,7 @@ function build(
 		maximumWarmupReplaySeconds?: number;
 	} = {},
 ) {
-	const stops: AudioVoice[] = [];
+	const stops: FakeVoice[] = [];
 	const played: Array<{ gain: number; pan: number; soundId: DatAssetId }> = [];
 	const cold = options.coldSounds ?? new Set<DatAssetId>();
 	const prepared: DatAssetId[] = [];
@@ -28,7 +34,13 @@ function build(
 		playOneShot: (soundId, gain, pan) => {
 			if (cold.has(soundId)) return null;
 			played.push({ gain, pan, soundId });
-			const voice = { stop: vi.fn() };
+			const voice: FakeVoice = {
+				finished: false,
+				stop: () => {
+					voice.stopCalls += 1;
+				},
+				stopCalls: 0,
+			};
 			stops.push(voice);
 			return voice;
 		},
@@ -79,7 +91,10 @@ describe("AudioSystem", () => {
 		// Every representative record authors probability 1.0, so this is the common path.
 		const roll = vi.fn(() => 0.99);
 		const system = new AudioSystem(
-			{ playOneShot: () => ({ stop: () => {} }), prepare: async () => {} },
+			{
+				playOneShot: () => ({ finished: false, stop: () => {} }),
+				prepare: async () => {},
+			},
 			roll,
 			8,
 			() => 0,
@@ -141,8 +156,8 @@ describe("AudioSystem", () => {
 		system.trigger(trigger());
 		system.trigger(trigger());
 
-		expect(stops[0]!.stop).toHaveBeenCalledTimes(1);
-		expect(stops[1]!.stop).not.toHaveBeenCalled();
+		expect(stops[0]!.stopCalls).toBe(1);
+		expect(stops[1]!.stopCalls).toBe(0);
 		expect(system.getDiagnostics()).toMatchObject({
 			activeVoiceCount: 2,
 			playedCount: 3,
@@ -150,16 +165,28 @@ describe("AudioSystem", () => {
 		});
 	});
 
-	it("frees budget when a finished voice is released, without stopping it", () => {
+	it("retires a voice that ended on its own instead of stealing from it", () => {
 		const { stops, system } = build({ voiceLimit: 1 });
 		system.trigger(trigger());
 
-		system.release(stops[0]!);
+		// The voice ends naturally between triggers, which is the common case: without noticing,
+		// the budget stays full forever and every later sound reports a steal.
+		stops[0]!.finished = true;
 		system.trigger(trigger());
 
-		// Releasing a finished voice must not stop it; it already ended on its own.
-		expect(stops[0]!.stop).not.toHaveBeenCalled();
+		expect(stops[0]!.stopCalls).toBe(0);
 		expect(system.getDiagnostics().stolenCount).toBe(0);
+		expect(system.getDiagnostics().activeVoiceCount).toBe(1);
+	});
+
+	it("still steals the oldest when every voice is genuinely playing", () => {
+		const { stops, system } = build({ voiceLimit: 1 });
+		system.trigger(trigger());
+
+		system.trigger(trigger());
+
+		expect(stops[0]!.stopCalls).toBe(1);
+		expect(system.getDiagnostics().stolenCount).toBe(1);
 	});
 
 	it("reports a device refusal rather than counting it as played", () => {
@@ -216,7 +243,7 @@ describe("AudioSystem", () => {
 
 		system.destroy();
 
-		expect(stops[0]!.stop).toHaveBeenCalledTimes(1);
+		expect(stops[0]!.stopCalls).toBe(1);
 		expect(system.getDiagnostics().activeVoiceCount).toBe(0);
 	});
 

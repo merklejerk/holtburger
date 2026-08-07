@@ -438,6 +438,8 @@ export class GameRuntime {
 
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
 	#lastFrameTimeSeconds = 0;
+	/** Previous frame's renderer selection, which particle culling reads. */
+	#selectedDynamicNodeIds = new Set<SceneNodeId>();
 	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
@@ -695,6 +697,9 @@ export class GameRuntime {
 			this.#effects,
 			this.#soundTables,
 			dynamicGenerationToResourceOwnerId,
+			// Emitters ride their owner's visibility: its bounds grow to contain what it emits, so
+			// the renderer's existing footprint test covers particles without a parallel path.
+			(nodeId) => this.#particles.envelopeRadiusFor(nodeId),
 		);
 		this.#audio = new AudioSystem(
 			dependencies.audioDevice,
@@ -1174,7 +1179,15 @@ export class GameRuntime {
 		tick?.mark("presentationPublish");
 		// Cohorts are rebuilt every frame from live emitters rather than retained, and cull at
 		// emitter granularity before any instance record is written.
-		renderer.particles?.submit(this.#particles.collectCohorts());
+		// Culled at emitter granularity against the previous frame's selection. Cohorts are built
+		// before the renderer selects, so this is one frame behind; the owner's bounds already
+		// include the particle envelope, so an emitter entering view is selected on the frame its
+		// envelope crosses the frustum rather than when its mesh does.
+		renderer.particles?.submit(
+			this.#particles.collectCohorts((target) =>
+				this.#selectedDynamicNodeIds.has(target.nodeId),
+			),
+		);
 		tick?.mark("particleCohort");
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
@@ -1197,6 +1210,7 @@ export class GameRuntime {
 			],
 		});
 		tick?.mark("render");
+		this.#selectedDynamicNodeIds = new Set(feedback.selectedDynamicNodeIds);
 		this.#animationPresentation.completeFrame(feedback, timeSeconds);
 		tick?.mark("frameCompletion");
 		tick?.finishTick();

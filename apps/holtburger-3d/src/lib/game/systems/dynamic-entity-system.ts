@@ -131,6 +131,7 @@ export class DynamicEntitySystem<
 	readonly #emitters: ParticleEmitterRepository;
 	readonly #effects: EffectSystem;
 	readonly #soundTables: SoundTableRepository;
+	readonly #particleEnvelopeRadiusOf: (nodeId: SceneNodeId) => number;
 	readonly #templateOwnerId: (
 		ownerId: TOwnerId,
 		generation: number,
@@ -163,6 +164,14 @@ export class DynamicEntitySystem<
 			ownerId: TOwnerId,
 			generation: number,
 		) => TTemplateOwnerId,
+		/**
+		 * Conservative radius around a target containing every particle it currently emits.
+		 *
+		 * Presentation bounds otherwise cover only the mesh, so an emitter whose particles reach
+		 * past it would be culled while still visible. Injected because the live emitter set — and
+		 * the authored hook offsets that displace it — belong to the particle system, not here.
+		 */
+		particleEnvelopeRadiusOf: (nodeId: SceneNodeId) => number,
 	) {
 		this.#scene = scene;
 		this.#templates = templates;
@@ -172,6 +181,7 @@ export class DynamicEntitySystem<
 		this.#effects = effects;
 		this.#soundTables = soundTables;
 		this.#templateOwnerId = templateOwnerId;
+		this.#particleEnvelopeRadiusOf = particleEnvelopeRadiusOf;
 	}
 
 	/** Replace one authored layer's complete promoted population as a single owner generation. */
@@ -475,6 +485,24 @@ export class DynamicEntitySystem<
 		this.#lastEffectOnlyPresentationCount = effectOnlyCount;
 	}
 
+	/** Grow presentation bounds to contain whatever this entity is currently emitting. */
+	#withParticleEnvelope(entity: DynamicEntityRecord, bounds: AABB3): AABB3 {
+		const radius = this.#particleEnvelopeRadiusOf(entity.rootNodeId);
+		if (radius <= 0) return bounds;
+		return new AABB3(
+			new Vec3(
+				bounds.min.x - radius,
+				bounds.min.y - radius,
+				bounds.min.z - radius,
+			),
+			new Vec3(
+				bounds.max.x + radius,
+				bounds.max.y + radius,
+				bounds.max.z + radius,
+			),
+		);
+	}
+
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
@@ -738,10 +766,13 @@ export class DynamicEntitySystem<
 				);
 			return { part, renderState, transform };
 		});
-		const publishedPresentationBounds = presentationBoundsForSample(
-			updatedParts,
-			entity.source.scale,
-			sample.effects.rootTransformModifier,
+		const publishedPresentationBounds = this.#withParticleEnvelope(
+			entity,
+			presentationBoundsForSample(
+				updatedParts,
+				entity.source.scale,
+				sample.effects.rootTransformModifier,
+			),
 		);
 		this.#scene.updateLocalTransform(
 			entity.visualRootNodeId,

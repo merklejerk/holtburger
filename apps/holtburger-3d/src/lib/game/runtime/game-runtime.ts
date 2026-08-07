@@ -1152,6 +1152,9 @@ export class GameRuntime {
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
 		const tick = this.#tickProfiler;
 		tick?.beginTick();
+		// Before either producer dispatches: a command applied this frame lands on state that has
+		// already reached this frame's behavior step, exactly as it did when animation drove it.
+		this.#effects.advance(timeSeconds);
 		this.#physicsScriptSystem.advance(timeSeconds);
 		tick?.mark("scriptAdvance");
 		this.#particles.advance(timeSeconds);

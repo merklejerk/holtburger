@@ -33,6 +33,7 @@ function buildAnimationSystem() {
 function buildAnimationSystemOver(effects: EffectSystem) {
 	const { router } = buildEffectRouter(effects);
 	const system = new AnimationSystem<string>(effects, router);
+	systemEffects.set(system, effects);
 	lastRouter = router;
 	// Effect state belongs to the entity, not to playback, so these tests stand in for the owner
 	// that installs it in production.
@@ -290,9 +291,13 @@ describe("AnimationSystem", () => {
 		advanceAndSample(sparse, 0);
 		for (const time of [1 / 30, 2 / 30]) {
 			advanceAndSample(full, time);
+			// Semantics advance every step on both paths; only *sampling* is sparse here, so the
+			// effect clock moves for `sparse` too.
+			sparseEffects.advance(time);
 			sparse.advance(time);
 		}
 		const fullFinal = requiredAt(advanceAndSample(full, 0.1), 0);
+		sparseEffects.advance(0.1);
 		const sparseFrame = sparse.advance(0.1);
 		const sparseFinal = requiredAt(
 			sparse.sample(sparseFrame, ["scene-node:1"]),
@@ -328,13 +333,30 @@ describe("AnimationSystem", () => {
 	});
 });
 
+/**
+ * Advance both clocks, then sample — the order `GameRuntime` uses.
+ *
+ * Effect stepping no longer rides animation playback, so a test that only advanced the animation
+ * would sample effect state frozen at install.
+ */
 function advanceAndSample(
 	system: AnimationSystem<string>,
 	timeSeconds: number,
 ) {
+	effectsFor(system).advance(timeSeconds);
 	const frame = system.advance(timeSeconds);
 	return system.sample(frame, frame.activeNodeIds);
 }
+
+/** The effect system a built animation system was wired over. */
+function effectsFor(system: AnimationSystem<string>): EffectSystem {
+	const effects = systemEffects.get(system);
+	if (!effects)
+		throw new Error("Animation system was not built by this suite.");
+	return effects;
+}
+
+const systemEffects = new WeakMap<AnimationSystem<string>, EffectSystem>();
 
 function clip(omega = new Vec3(0, 0, 1)): PreparedAnimation {
 	return {

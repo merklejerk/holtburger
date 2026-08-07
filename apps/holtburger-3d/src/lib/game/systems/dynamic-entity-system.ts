@@ -148,6 +148,8 @@ export class DynamicEntitySystem<
 	#destroyed = false;
 	#lastPresentationPublicationDurationMs = 0;
 	#lastPublishedPresentationCount = 0;
+	/** Publications for residents with behavior but no playback, which animation cannot cover. */
+	#lastEffectOnlyPresentationCount = 0;
 
 	constructor(
 		scene: SceneGraph,
@@ -424,6 +426,7 @@ export class DynamicEntitySystem<
 			lastPresentationPublicationDurationMs:
 				this.#lastPresentationPublicationDurationMs,
 			lastPublishedPresentationCount: this.#lastPublishedPresentationCount,
+			lastEffectOnlyPresentationCount: this.#lastEffectOnlyPresentationCount,
 			staticFallbackEntityCount: prepared.filter(
 				(animation) => animation?.kind === "retain-static-presentation",
 			).length,
@@ -449,8 +452,27 @@ export class DynamicEntitySystem<
 		for (const { entity, sample } of publications) {
 			this.#applySample(entity, sample);
 		}
+		let effectOnlyCount = 0;
+		for (const [nodeId, entity] of this.#entities) {
+			// An entity animation covers is either in this frame's samples or was deliberately
+			// skipped by the presentation cadence; publishing it here would override that choice.
+			if (entity.animationHandle !== null) continue;
+			if (publishedNodeIds.has(nodeId)) continue;
+			// An idle resident resolves to the same presentation every frame; republishing it is
+			// the per-frame streaming this split was meant to remove, not add.
+			if (!this.#effects.needsPresentation(nodeId)) continue;
+			// A script-only resident holds the pose it was installed with. Its effect state still
+			// ramps, rotates, and fades, and before this had no path to the scene at all.
+			this.#applySample(entity, {
+				articulatedPose: entity.articulatedPose,
+				effects: this.#effects.samplePresentation(nodeId),
+				nodeId,
+			});
+			effectOnlyCount += 1;
+		}
 		this.#lastPresentationPublicationDurationMs = performance.now() - startedAt;
-		this.#lastPublishedPresentationCount = samples.length;
+		this.#lastPublishedPresentationCount = samples.length + effectOnlyCount;
+		this.#lastEffectOnlyPresentationCount = effectOnlyCount;
 	}
 
 	async destroy(): Promise<void> {

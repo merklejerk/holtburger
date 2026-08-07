@@ -1703,74 +1703,43 @@ Treat the reopened checklist below as the live one; the first records what the o
 Consolidated from the findings below, which recorded this debt in prose as it was discovered. Ordered
 by value rather than by when it appeared.
 
-- [ ] **Split presentation from behavior.** Traced end to end 2026-08-07 and **larger than
-      recorded** — it is a missing clock, not a missing sample. Scoped below rather than started,
-      because it changes system ownership and deserves its own phase.
+- [x] **Split presentation from behavior.** `EffectSystem` now owns the behavior cadence and drives
+      every installed state, rather than being stepped by whichever producer happened to hold a
+      clock. `AnimationSystem.advanceSemanticStep` no longer touches effects; its remaining use,
+      `samplePresentation`, is legitimate because it is producing a presentation sample.
 
-      Effect state for a script-only resident is never *advanced*, not merely never read.
-      `EffectSystem.advanceSemanticStep` has exactly one caller,
-      `AnimationSystem.#advanceSemanticStep` (`animation-system.ts:340`), which runs only for nodes
-      holding an `AnimationRecord`. A resident whose `behavior.animationId` is null never acquires
-      one (`dynamic-entity-system.ts:216`). So for those residents:
+      That was the whole defect. Effect stepping had one caller — `AnimationSystem` — which runs only
+      for nodes holding an `AnimationRecord`, so a resident with a script but no animation was never
+      stepped. Its ramps never progressed, `SetOmega` never accumulated, `Scale` never ramped, and
+      nothing sampled the state anyway. `Scale`, `SetOmega` and `TransparentPart` on such a resident
+      were **silently inert**. Giving `PhysicsScriptSystem` the same dependency would have left the
+      mirror-image gap for an animated-but-unscripted entity; the state lives in `EffectSystem`, so
+      the clock does too, and both producers are now pure command sources.
 
-      1. translucency ramps never progress, because `ramp.elapsedSeconds` only moves per behavior
-         step;
-      2. `SetOmega` never accumulates, because rotation folds into `committedOrientation` per step;
-      3. `Scale` never ramps, for the same reason;
-      4. and nothing samples the state anyway, since `AnimationSystem.sample` only produces
-         `DynamicPresentationSample`s for nodes it has records for.
+      Consequences worth recording:
 
-      `Scale`, `SetOmega`, and `TransparentPart` authored by a script on a script-only resident are
-      therefore **silently inert** — written into effect state that neither ticks nor is read. No
-      error, no diagnostic. 43 `Scale` hooks exist archive-wide; none are in currently loaded
-      content, which is luck rather than design.
+      - **The cadence is global.** It was per playback, accumulated in each animation record, so
+        entities stepped on staggered phases; they now step together. Retail's behavior tick is
+        likewise global, and 30 Hz staggering is not observable in gameplay.
+      - **`samplePresentation` lost its time arguments.** Phase is a property of the clock, not of
+        whichever caller is sampling, and passing an animation record's phase in was how the two
+        became coupled in the first place.
+      - **Initial-state folding needed its own operation.** A newly installed playback replays its
+        history forward to an authored independent phase, which a global cadence cannot express —
+        it steps everything once per elapsed step, not one node many times. `foldSemanticStep` is
+        that one-time catch-up, and is documented as install-time only.
+      - **Idle residents do not publish.** Effect-only publication first cost 0.235 ms of a 2.8 ms
+        tick, publishing all 79 residents every frame — which is the per-frame streaming this item
+        also set out to remove. States now carry a dirty flag, set by every command and by any step
+        that changes something, cleared on sample. An inert resident resolves identically every
+        frame and is skipped: publication returns to **0.040 ms**, and the steady-state count is
+        zero.
 
-      **The owner is identifiable, and the asymmetry is visible in the constructors.** Physics
-      scripts already have their own system, symmetric with animation in every respect but one:
+      Three animation tests had to change, all of which were asserting the coupling rather than
+      behaviour: two now drive both clocks the way `GameRuntime` does, and one that sampled a ramp
+      "ahead" without committing now interpolates across a sub-step, since phase is no longer a
+      caller-supplied argument.
 
-      ```
-      new AnimationSystem(this.#effects, this.#behaviorRouter)    // effects AND router
-      new PhysicsScriptSystem(this.#behaviorRouter, Math.random)  // router only
-      ```
-
-      `AnimationSystem` touches `#effects` in exactly two places: `samplePresentation`
-      (`animation-system.ts:302`), which is legitimate — it is producing a presentation sample — and
-      `advanceSemanticStep` (`:340`), which is the misplaced responsibility. Effect *stepping* was
-      given to whichever system happened to own a behavior clock, and only one of the two producers
-      does.
-
-      So the fix is not to give `PhysicsScriptSystem` the same dependency, which would leave an
-      animated-but-unscripted entity uncovered by the mirror-image gap. **`EffectSystem` should
-      advance its own installed states**; it already owns both the state and the step function, and
-      `DynamicEntitySystem` installs state for *every* entity including script-only ones
-      (`dynamic-entity-system.ts:622`), so nothing is missing but the driver. Both producers then
-      become pure command sources into the router, which is what they always read as.
-
-      A design question falls out and should be settled first: the behavior cadence is currently
-      **per playback**, accumulated in each animation record's `fractionalSeconds`, so entities step
-      on staggered phases. A system-owned cadence would step them together. Retail's 30 Hz behavior
-      tick is global, which argues for the shared clock, but it is a semantic change and not merely
-      a move.
-
-      The second piece stays as recorded: publish an effect-only presentation for entities with no
-      animation, reusing `entity.articulatedPose`, which every entity carries from install
-      (`dynamic-entity-system.ts:328`), with care around double-publishing and around
-      `AnimationPresentationCadence`, which currently selects which nodes sample at all.
-
-      Not started deliberately: this is system-ownership surgery, and the session that found it had
-      little context left. Doing it badly is worse than scheduling it.
-- [x] **Retracted: `indexStart`/`indexCount` belong in `batchKey`.** Recorded as debt on the
-      assumption that they split cohorts needlessly, by analogy with `renderSide` and
-      `authoredCullMode`. Checking the draw call rather than reasoning from the analogy:
-      `drawElementsInstanced` takes **one** `indexStart` and `indexCount` for the entire call
-      (`webgl2-renderer.ts:2561`), so every instance in a cohort must share one index range. Two
-      draw units with different extents are different geometry and cannot merge by definition.
-
-      The range is also load-bearing rather than merely harmless. A part can still hold two ranges
-      with the same `bindingId` when its triangle stream interleaves materials — the systematic
-      cause was the `renderSide` alternation, but interleaving remains possible. Dropping the range
-      from the key would collide those into one cohort and draw the wrong triangles for some
-      instances. No change made, and the item is closed rather than carried.
 - [x] **Dropped: chasing byte-identical harness captures was the wrong problem.** Retired on review
       rather than finished, because the premise was wrong. Neither particle verification this
       session was actually blocked by run-to-run noise. The billboard fix diffed to **265 pixels at

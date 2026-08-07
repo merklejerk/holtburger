@@ -15,23 +15,70 @@ function install(partCount = 2) {
 	return effects;
 }
 
-function translucencies(
-	effects: EffectSystem,
-	fractionalSeconds = 0,
-): number[] {
+function translucencies(effects: EffectSystem): number[] {
 	return effects
-		.samplePresentation(TARGET.nodeId, fractionalSeconds, 0)
+		.samplePresentation(TARGET.nodeId)
 		.partRenderStates.map((state) => state.translucency);
 }
 
+/** Per-system wall time, so each test drives the shared clock from its own zero. */
+const clocks = new WeakMap<EffectSystem, number>();
+
+/** Drive the shared behavior clock forward, committing whole steps as they elapse. */
+function advance(effects: EffectSystem, elapsedSeconds: number): void {
+	let now = clocks.get(effects);
+	if (now === undefined) {
+		now = 0;
+		effects.advance(0);
+	}
+	now += elapsedSeconds;
+	clocks.set(effects, now);
+	effects.advance(now);
+}
+
 describe("EffectSystem", () => {
+	it("steps every installed state, not only those a playback drives", () => {
+		// The defect this clock exists to fix: stepping used to hang off `AnimationSystem`, so a
+		// resident with a script but no animation never advanced and its ramps were inert.
+		const effects = new EffectSystem();
+		effects.install("scene-node:scripted" as SceneNodeId, 1);
+		effects.install("scene-node:animated" as SceneNodeId, 1);
+		for (const nodeId of ["scene-node:scripted", "scene-node:animated"]) {
+			effects.applyTransparentPart(
+				{ generation: 1, nodeId: nodeId as SceneNodeId },
+				{ durationSeconds: 1, end: 1, partIndex: 0, start: 0 },
+			);
+		}
+
+		advance(effects, 0.5);
+
+		for (const nodeId of ["scene-node:scripted", "scene-node:animated"]) {
+			const sample = effects.samplePresentation(nodeId as SceneNodeId);
+			expect(sample.partRenderStates[0]?.translucency).toBeCloseTo(0.5, 1);
+		}
+	});
+
+	it("commits whole steps only, holding the remainder for the next advance", () => {
+		const effects = install(1);
+		effects.applyScale(TARGET, { durationSeconds: 1, end: 3 });
+
+		// Two sub-step advances that together exceed one step commit exactly one.
+		advance(effects, 0.02);
+		advance(effects, 0.02);
+
+		// Committed 1/30 plus a 0.0067 remainder: interpolation is continuous across the boundary.
+		expect(
+			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+		).toBeCloseTo(1.08, 2);
+	});
+
 	it("accumulates authored omega once per semantic step", () => {
 		const effects = install();
 		effects.applySetOmega(TARGET, new Vec3(0, 0, 1));
 
-		const before = effects.samplePresentation(TARGET.nodeId, 0, 0);
-		effects.advanceSemanticStep(TARGET.nodeId, 1 / 30);
-		const after = effects.samplePresentation(TARGET.nodeId, 0, 0);
+		const before = effects.samplePresentation(TARGET.nodeId);
+		advance(effects, 1 / 30);
+		const after = effects.samplePresentation(TARGET.nodeId);
 
 		expect(after.rootTransformModifier).not.toEqual(
 			before.rootTransformModifier,
@@ -56,7 +103,7 @@ describe("EffectSystem", () => {
 		// Part 0 jumped straight to its endpoint; part 1 is still at its start value.
 		expect(translucencies(effects)).toEqual([0.75, 0]);
 
-		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		advance(effects, 0.5);
 		expect(translucencies(effects)[1]).toBeCloseTo(0.5);
 	});
 
@@ -70,7 +117,7 @@ describe("EffectSystem", () => {
 		});
 
 		for (const step of [0.3, 0.45, 0.4]) {
-			effects.advanceSemanticStep(TARGET.nodeId, step);
+			advance(effects, step);
 		}
 
 		expect(translucencies(effects)).toEqual([1]);
@@ -85,9 +132,12 @@ describe("EffectSystem", () => {
 			start: 0,
 		});
 
-		expect(translucencies(effects, 0.5)[0]).toBeCloseTo(0.5);
-		// Sampling ahead must not advance the ramp itself.
-		expect(translucencies(effects, 0)[0]).toBe(0);
+		// Less than one behavior step, so nothing commits and the value comes purely from
+		// sub-step interpolation against the shared clock's phase.
+		advance(effects, 0.02);
+		expect(translucencies(effects)[0]).toBeCloseTo(0.02);
+		// Sampling must not advance the ramp: the same phase yields the same value.
+		expect(translucencies(effects)[0]).toBeCloseTo(0.02);
 	});
 
 	it("leaves a replayed ramp in flight rather than snapping it to its endpoint", () => {
@@ -101,7 +151,7 @@ describe("EffectSystem", () => {
 			partIndex: 0,
 			start: 0,
 		});
-		effects.advanceSemanticStep(TARGET.nodeId, 2.5);
+		advance(effects, 2.5);
 
 		expect(translucencies(effects)[0]).toBeCloseTo(0.25);
 	});
@@ -131,15 +181,15 @@ describe("EffectSystem", () => {
 		const effects = install(1);
 
 		effects.applyScale(TARGET, { durationSeconds: 1, end: 3 });
-		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		advance(effects, 0.5);
 		// Halfway from the identity scale toward 3.
 		expect(
-			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
 		).toBeCloseTo(2);
 
-		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		advance(effects, 0.5);
 		expect(
-			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
 		).toBe(3);
 	});
 
@@ -147,13 +197,13 @@ describe("EffectSystem", () => {
 		const effects = install(1);
 
 		effects.applyScale(TARGET, { durationSeconds: 1, end: 3 });
-		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		advance(effects, 0.5);
 		// Retail's SetScale interpolates from wherever the object is now, not from a fixed base.
 		effects.applyScale(TARGET, { durationSeconds: 1, end: 4 });
 
-		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		advance(effects, 0.5);
 		expect(
-			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
 		).toBeCloseTo(3);
 	});
 
@@ -163,21 +213,24 @@ describe("EffectSystem", () => {
 		effects.applyScale(TARGET, { durationSeconds: 0, end: 2 });
 
 		expect(
-			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
+			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
 		).toBe(2);
 	});
 
-	it("samples a scale ramp ahead without committing that time", () => {
+	it("interpolates a scale ramp across the sub-step without committing it", () => {
 		const effects = install(1);
 		effects.applyScale(TARGET, { durationSeconds: 1, end: 3 });
 
+		// Under one behavior step, so nothing commits and the value is pure interpolation.
+		advance(effects, 0.02);
+
 		expect(
-			effects.samplePresentation(TARGET.nodeId, 0.5, 0).rootTransformModifier
-				.m11,
-		).toBeCloseTo(2);
+			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+		).toBeCloseTo(1.04);
+		// Sampling must not advance the ramp: the same phase yields the same value.
 		expect(
-			effects.samplePresentation(TARGET.nodeId, 0, 0).rootTransformModifier.m11,
-		).toBe(1);
+			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+		).toBeCloseTo(1.04);
 	});
 
 	it("keeps part timelines independent and drops removed entity state", () => {
@@ -188,7 +241,7 @@ describe("EffectSystem", () => {
 			partIndex: 1,
 			start: 0,
 		});
-		effects.advanceSemanticStep(TARGET.nodeId, 0.5);
+		advance(effects, 0.5);
 
 		expect(translucencies(effects)[0]).toBe(0);
 		expect(effects.getDiagnostics().residentEffectStateCount).toBe(1);

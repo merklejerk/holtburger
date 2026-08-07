@@ -35,6 +35,14 @@ interface TranslucencyRamp {
 }
 
 interface EffectState {
+	/**
+	 * Whether this state has changed since it was last sampled.
+	 *
+	 * An inert resident — no ramp in flight, no omega — resolves to the same presentation every
+	 * frame, and publishing it is pure cost. A state stays dirty while it is animating, because
+	 * each committed step marks it again.
+	 */
+	dirty: boolean;
 	committedOrientation: Quat;
 	omega: Vec3;
 	/**
@@ -68,9 +76,19 @@ export interface EffectPresentationSample {
  * A pure consumer since Phase 3: producers own clocks and traversal, the router owns dispatch
  * decisions and their provenance, and this system owns only the state those decisions mutate.
  */
+/**
+ * Retail's behavior tick, and the cadence every effect ramp advances on.
+ *
+ * Exported from the system that owns the clock. Animation imports it for its own hook cadence.
+ */
+export const BEHAVIOR_STEP_SECONDS = 1 / 30;
+
 export class EffectSystem implements EffectCommandPort {
 	readonly #states = new Map<SceneNodeId, EffectState>();
 	#appliedCommandCount = 0;
+	/** Behavior-step accumulator, shared by every installed state. */
+	#fractionalSeconds = 0;
+	#lastTimeSeconds: number | null = null;
 
 	install(nodeId: SceneNodeId, partCount: number): void {
 		if (this.#states.has(nodeId))
@@ -82,16 +100,64 @@ export class EffectSystem implements EffectCommandPort {
 			omega: Vec3.zero(),
 			scale: 1,
 			scaleRamp: null,
+			dirty: true,
 			partTranslucencies: Array.from({ length: partCount }, () => 0),
 			translucencyRamps: Array.from({ length: partCount }, () => null),
 		});
 	}
 
-	/** Advance exactly one committed behavior step before that step departs animation frames. */
-	advanceSemanticStep(nodeId: SceneNodeId, stepSeconds: number): void {
-		if (!Number.isFinite(stepSeconds) || stepSeconds <= 0)
-			throw new Error("Effect behavior step must be finite and positive.");
+	/**
+	 * Advance the shared behavior clock, committing whole steps to every installed state.
+	 *
+	 * Owned here rather than by a producer. Stepping used to hang off `AnimationSystem`, which holds
+	 * a behavior clock per playback — so a resident with a script but no animation was never
+	 * stepped at all, and its ramps, `SetOmega`, and `Scale` were silently inert. Neither producer
+	 * is the right owner: giving it to `PhysicsScriptSystem` instead would leave the mirror-image
+	 * gap for an animated-but-unscripted entity. The state lives here, so the clock does too.
+	 *
+	 * The cadence is now global rather than per playback, so every entity steps on the same phase.
+	 * Retail's behavior tick is likewise global.
+	 */
+	advance(timeSeconds: number): void {
+		if (!Number.isFinite(timeSeconds))
+			throw new Error("Effect clock time must be finite.");
+		const previous = this.#lastTimeSeconds;
+		this.#lastTimeSeconds = timeSeconds;
+		if (previous === null) return;
+		if (timeSeconds < previous)
+			throw new Error("Effect clock moved backwards.");
+		this.#fractionalSeconds += timeSeconds - previous;
+		while (this.#fractionalSeconds >= BEHAVIOR_STEP_SECONDS) {
+			this.#fractionalSeconds -= BEHAVIOR_STEP_SECONDS;
+			for (const nodeId of this.#states.keys()) {
+				this.#commitStep(nodeId, BEHAVIOR_STEP_SECONDS);
+			}
+		}
+	}
+
+	/**
+	 * Commit one behavior step to a single state, for install-time replay only.
+	 *
+	 * Distinct from {@link advance}, which is the per-frame cadence across every state. A newly
+	 * installed playback folds its history forward to its authored independent phase, and the shared
+	 * clock cannot do that: it steps everything once per elapsed step, not one node many times.
+	 */
+	foldSemanticStep(nodeId: SceneNodeId): void {
+		this.#commitStep(nodeId, BEHAVIOR_STEP_SECONDS);
+	}
+
+	/** Advance exactly one committed behavior step for one state. */
+	#commitStep(nodeId: SceneNodeId, stepSeconds: number): void {
 		const state = this.#requiredState(nodeId);
+		// A state with nothing in flight presents identically after this step, so leaving it clean
+		// is what lets an idle resident stop publishing.
+		const animating =
+			state.scaleRamp !== null ||
+			state.omega.x !== 0 ||
+			state.omega.y !== 0 ||
+			state.omega.z !== 0 ||
+			state.translucencyRamps.some((ramp) => ramp !== null);
+		if (animating) state.dirty = true;
 		if (state.scaleRamp) {
 			state.scaleRamp.elapsedSeconds += stepSeconds;
 			if (state.scaleRamp.elapsedSeconds >= state.scaleRamp.durationSeconds) {
@@ -141,6 +207,7 @@ export class EffectSystem implements EffectCommandPort {
 		values: { readonly end: number; readonly durationSeconds: number },
 	): void {
 		const state = this.#requiredState(target.nodeId);
+		state.dirty = true;
 		this.#appliedCommandCount += 1;
 		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
 			state.scale = values.end;
@@ -157,6 +224,7 @@ export class EffectSystem implements EffectCommandPort {
 
 	applySetOmega(target: BehaviorTarget, omega: Vec3): void {
 		const state = this.#requiredState(target.nodeId);
+		state.dirty = true;
 		state.omega = new Vec3(omega.x, omega.y, omega.z);
 		this.#appliedCommandCount += 1;
 	}
@@ -179,6 +247,7 @@ export class EffectSystem implements EffectCommandPort {
 		},
 	): void {
 		const state = this.#requiredState(target.nodeId);
+		state.dirty = true;
 		if (values.partIndex >= state.partTranslucencies.length)
 			throw new Error(
 				`TransparentPart index ${values.partIndex} is out of range for active effect state.`,
@@ -199,21 +268,18 @@ export class EffectSystem implements EffectCommandPort {
 	}
 
 	/** Sample fractional visual state without committing time or emitting semantic hooks. */
-	samplePresentation(
-		nodeId: SceneNodeId,
-		fractionalSeconds: number,
-		semanticStepFraction: number,
-	): EffectPresentationSample {
-		if (!Number.isFinite(fractionalSeconds) || fractionalSeconds < 0)
-			throw new Error("Effect sample time must be finite and non-negative.");
-		if (
-			!Number.isFinite(semanticStepFraction) ||
-			semanticStepFraction < 0 ||
-			semanticStepFraction >= 1
-		) {
-			throw new Error("Effect step fraction must be within [0, 1).");
-		}
+	/**
+	 * Sample one state's presentation, interpolated across the shared clock's current sub-step.
+	 *
+	 * Takes no time arguments: the phase is a property of the behavior clock, not of whichever
+	 * caller happens to be sampling, and passing an animation record's phase in was how the two
+	 * became coupled.
+	 */
+	samplePresentation(nodeId: SceneNodeId): EffectPresentationSample {
+		const fractionalSeconds = this.#fractionalSeconds;
+		const semanticStepFraction = fractionalSeconds / BEHAVIOR_STEP_SECONDS;
 		const state = this.#requiredState(nodeId);
+		state.dirty = false;
 		const delta = rotationVectorQuaternion(
 			new Vec3(
 				state.omega.x * semanticStepFraction,
@@ -251,6 +317,11 @@ export class EffectSystem implements EffectCommandPort {
 			appliedCommandCount: this.#appliedCommandCount,
 			residentEffectStateCount: this.#states.size,
 		};
+	}
+
+	/** Whether this state would present differently from the last sample taken of it. */
+	needsPresentation(nodeId: SceneNodeId): boolean {
+		return this.#requiredState(nodeId).dirty;
 	}
 
 	#requiredState(nodeId: SceneNodeId): EffectState {

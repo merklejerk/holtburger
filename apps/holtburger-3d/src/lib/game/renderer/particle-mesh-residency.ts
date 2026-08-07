@@ -37,6 +37,19 @@ import { PARTICLE_ORIENTATION } from "./webgl2-particle-program";
  */
 const AXIS_LOCKED_REFERENCE: readonly [number, number, number] = [0, 1, 0];
 
+/**
+ * Shared with the object program so one encoding means one thing across both.
+ *
+ * The two shaders previously disagreed — the object program reserves 0 for solid colour while the
+ * particle program used 0 for a direct texture — which is how a paletted mesh could carry kind 0 and
+ * still take the unpaletted branch.
+ */
+const OBJECT_MATERIAL_KIND = {
+	"direct-color": 1,
+	index8: 2,
+	index16: 3,
+} as const;
+
 export class ParticleMeshResidency {
 	readonly #resources: WebGL2ResourceManager;
 	/** Resource keys, resolved to live bindings only in {@link resolve}. */
@@ -102,6 +115,7 @@ export class ParticleMeshResidency {
 			indexOffsetBytes: mesh.indexOffsetBytes,
 			lockedAxis: mesh.lockedAxis,
 			materialKind: mesh.materialKind,
+			palettedClipMap: mesh.palettedClipMap,
 			orientation: mesh.orientation,
 			rawSurfaceFlags: mesh.rawSurfaceFlags,
 			paletteTexture:
@@ -154,6 +168,15 @@ export class ParticleMeshResidency {
 		if (base === null) {
 			throw new Error(`${label} resolves a material with no base texture.`);
 		}
+		const source = range.material.source;
+		// A material carrying a base texture is a textured one by construction; a solid colour has
+		// none and was rejected above. Narrowed rather than defaulted so a new material arm fails
+		// here instead of silently decoding as direct colour, which is the defect being fixed.
+		if (source.kind !== "texture") {
+			throw new Error(
+				`${label} resolves a base texture on a non-textured material.`,
+			);
+		}
 		return {
 			alphaTest: range.ordering === "alpha-test" ? 0.5 : 0,
 			base,
@@ -161,7 +184,11 @@ export class ParticleMeshResidency {
 			indexCount: range.indexCount,
 			indexOffsetBytes: range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
 			lockedAxis: AXIS_LOCKED_REFERENCE,
-			materialKind: 0,
+			// Derived, not assumed. Hardcoding this to the direct-texture kind made every paletted
+			// particle sample its index texture as colour, so it never reached the palette, produced
+			// no alpha, and drew its cutout region as an opaque quad.
+			materialKind: OBJECT_MATERIAL_KIND[source.textureEncoding],
+			palettedClipMap: range.material.palettedClipMap,
 			orientation:
 				decoded.orientation === "viewer-facing"
 					? PARTICLE_ORIENTATION.viewerFacing
@@ -183,6 +210,8 @@ interface ResidentParticleMesh {
 	readonly indexCount: number;
 	readonly indexOffsetBytes: number;
 	readonly materialKind: number;
+	/** Retail's indexed cutout: palette indices below 8 are fully transparent. */
+	readonly palettedClipMap: boolean;
 	readonly alphaTest: number;
 	readonly orientation: number;
 	readonly lockedAxis: readonly [number, number, number];

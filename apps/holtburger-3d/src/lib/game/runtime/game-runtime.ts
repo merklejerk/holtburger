@@ -908,16 +908,14 @@ export class GameRuntime {
 	setAudioListener(placement: AudioListenerPlacement): void {
 		const { position, rotation } = placement;
 		if (
-			![position.x, position.y, position.z].every(Number.isFinite) ||
+			!position.every(Number.isFinite) ||
 			![rotation.w, rotation.x, rotation.y, rotation.z].every(Number.isFinite)
 		) {
 			throw new Error("Audio listener placement must be finite.");
 		}
 		const { w, x, y, z } = rotation;
 		this.#audio.setListener({
-			position: this.#toRenderSpace(
-				stableVector3([position.x, position.y, position.z]),
-			),
+			position: this.#toRenderSpace(position),
 			// First column of the rotation, which is its local +X: the listener's right hand.
 			right: renderVector3([
 				1 - 2 * (y * y + z * z),

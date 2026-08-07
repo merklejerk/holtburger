@@ -2043,6 +2043,25 @@ Incidentally fixed: `--brief` had been throwing on every invocation, referencing
 `effects.observations`, `deferredHookCount` and `executedHookCount`, none of which have existed since
 the effect system was reshaped. It now forwards the real shapes plus audio and particle counters.
 
+##### `AudioListenerPlacement` erased its own frame on arrival (finding 2026-08-07)
+
+The contract landed with `position: Vec3`, unbranded, and `setAudioListener` then called
+`stableVector3([position.x, position.y, position.z])` on it. That is the runtime asserting a frame
+about data the frontend supplied and the runtime cannot check — the exact erasure the brands exist to
+prevent, reintroduced one commit after they were extended.
+
+`position` is now `StableVector3`. The claim moves to `ExplorerCameraCoordinator`, which can justify
+it: the free-fly controller's position is the same value handed to
+`queryWorldPointResidencyCandidates` to resolve the camera's landblock and EnvCell, so it is
+stable-frame by construction. `rotation` stays a bare `Quat`, correctly — an orientation is invariant
+under the anchor's pure translation and has no frame to get wrong.
+
+Root cause worth recording: the app carries **two vector representations**, the `Vec3` class used by
+camera, math and matrices, and the branded tuples used by assets, particles and audio. Only the
+second carries frames, so every crossing between them is a point where the brand silently drops. This
+boundary was one. Branding `Vec3` itself, or converging on one representation, is the structural fix
+and is larger than any single defect has yet justified.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.

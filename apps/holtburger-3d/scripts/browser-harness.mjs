@@ -392,6 +392,22 @@ function parseArgs(args) {
 			case "--execute-portal":
 				parsed.executePortal = true;
 				break;
+			case "--capture-frame": {
+				const value = Number(requireValue(args, ++index, arg));
+				if (!Number.isInteger(value) || value <= 0) {
+					throw new Error("--capture-frame must be a positive integer.");
+				}
+				parsed.captureFrame = value;
+				break;
+			}
+			case "--frame-interval-ms": {
+				const value = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(value) || value <= 0) {
+					throw new Error("--frame-interval-ms must be a positive number.");
+				}
+				parsed.frameIntervalMs = value;
+				break;
+			}
 			case "--particle-seed": {
 				const value = Number(requireValue(args, ++index, arg));
 				if (!Number.isFinite(value)) {
@@ -673,6 +689,12 @@ Options:
                          Execute the complete planned graph through production GPU passes.
   --particle-seed <n>   Seed particle emission randomness so runs repeat exactly. Required for any
                          screenshot comparison of a scene containing particles.
+  --capture-frame <n>   Freeze runtime time at frame n, so the captured instant is identical no
+                         matter when the screenshot lands. Requires --frame-interval-ms.
+  --frame-interval-ms <n>
+                         Advance runtime time by a fixed step per frame instead of the wall clock.
+                         Pair with --particle-seed to make a particle scene reproducible; frame cost
+                         is still measured against the real clock, so timing runs are unaffected.
   --time-of-day <0..1>  Resolve region lighting and fog at this day fraction.
   --day-group <index>   Resolve the sky and lighting with an explicit day group instead of the
                          harness default of group 0. Shipped groups run 0-19; 3, 7, 9 and 15-19
@@ -1241,7 +1263,15 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		options.particleSeed === undefined
 			? ""
 			: `&particleSeed=${encodeURIComponent(options.particleSeed)}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}`;
+	const frameIntervalMs =
+		options.frameIntervalMs === undefined
+			? ""
+			: `&frameIntervalMs=${encodeURIComponent(options.frameIntervalMs)}`;
+	const captureFrame =
+		options.captureFrame === undefined
+			? ""
+			: `&captureFrame=${encodeURIComponent(options.captureFrame)}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -1592,6 +1622,9 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		} else if (options.profileRenderer) {
 			await delay(250);
 		}
+		if (options.captureFrame !== undefined) {
+			await waitForCaptureFrame(client, options.captureFrame);
+		}
 		// Recorded so any timing carries proof of which adapter produced it. SwiftShader numbers
 		// are not performance evidence.
 		const glRenderer = await evaluateExpression(
@@ -1858,6 +1891,19 @@ async function waitForEnvCellPublication(client, requestedLandblockId) {
 	throw new Error(
 		`Timed out awaiting EnvCell publication for landblock 0x${expectedId}ffff.`,
 	);
+}
+
+/** Block until the page has rendered the frame its simulation time is frozen at. */
+async function waitForCaptureFrame(client, captureFrame) {
+	for (let attempt = 0; attempt < 200; attempt += 1) {
+		const frames = await evaluateExpression(
+			client,
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state().frames",
+		);
+		if (frames >= captureFrame) return;
+		await delay(50);
+	}
+	throw new Error(`Timed out waiting for capture frame ${captureFrame}.`);
 }
 
 async function evaluate(client, functionExpression, args) {

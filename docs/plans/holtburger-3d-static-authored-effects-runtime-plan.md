@@ -1710,10 +1710,26 @@ by value rather than by when it appeared.
 - [ ] **Stop embedding `indexStart`/`indexCount` in `batchKey`.** Two ranges sharing a binding cannot
       cohort together because their extents differ, so the key defeats the merging this phase's
       batch-key work enabled. The next batching win after `renderSide` and `authoredCullMode`.
-- [ ] **Give the harness a fixed timestep.** Seeding the roll cut run-to-run particle noise from
-      1,971 pixels to 948; the residual is frame timing, since particle ages follow wall-clock
-      deltas. Until this lands no particle change can be proven visually, which already forced two
-      fixes this session to rest on unit tests alone.
+- [ ] **Make the harness reproducible.** Partially done, and the remaining cause is *not* what was
+      recorded here. Corrected on review: the runtime already takes its entire notion of time as one
+      argument to `render`, and every system downstream reads that argument, so time was fully
+      parameterized all along. The harness was simply choosing to pass `performance.now() / 1000`.
+      No fixed timestep inside the runtime is needed or wanted; nothing would be locked to a
+      constant frame rate.
+
+      Landed: `--frame-interval-ms` advances runtime time by a fixed step, and `--capture-frame`
+      freezes it at a chosen frame so the captured instant does not depend on when the screenshot
+      lands. Frame *cost* is still measured against the real clock, so timing runs are unaffected.
+
+      **Necessary but not sufficient — captures are still not byte-identical.** Measured across
+      run pairs at `0xDA55`: seeded on the wall clock 948 differing pixels, fixed interval 1,609,
+      fixed interval plus freeze at frame 120 1,887, and still differing at frame 600 behind a
+      six-second settle. The differences span the whole visible scene rather than only the particle
+      clusters, so the residual is scene-wide and is not particle ageing. Content streaming
+      completing at different frames was the obvious next hypothesis and a long settle did not
+      resolve it, so it is unproven. **The remaining source is unidentified; do not assume it is
+      loading order.** This needs isolation — bisect by disabling populations, starting with
+      `--exclude-authored-dynamics` to establish whether dynamics are involved at all.
 - [ ] **Converge the two vector representations.** The `Vec3` class carries no frame; the branded
       tuples do. Every crossing between them silently drops the brand, which is how
       `AudioListenerPlacement` shipped an unbranded position one commit after the brands were

@@ -110,6 +110,24 @@
 	 * the runtime's unauthored-lighting default instead of resolving the active region.
 	 */
 	const PARTICLE_SEED = query.get("particleSeed");
+	/**
+	 * Fixed milliseconds of runtime time per frame, or null to follow the wall clock.
+	 *
+	 * The runtime takes its whole notion of time as one argument to `render`, so nothing inside it
+	 * changes: this only chooses what the harness passes. With a value set, particle ages, animation
+	 * clocks, and script schedules advance identically between runs, which is what makes screenshot
+	 * comparison possible. Frame *cost* is still measured against the real clock, so timing runs are
+	 * unaffected either way.
+	 */
+	const FRAME_INTERVAL_MS = query.get("frameIntervalMs");
+	/**
+	 * Frame at which runtime time stops advancing, or null to keep advancing.
+	 *
+	 * A fixed interval alone is not reproducible: capture happens after a wall-clock settle, so two
+	 * runs screenshot at different frame counts and therefore different simulation times. Freezing
+	 * makes the captured instant identical no matter when the screenshot lands.
+	 */
+	const CAPTURE_FRAME = query.get("captureFrame");
 	const TIME_OF_DAY = query.get("timeOfDay");
 	const DAY_GROUP = query.get("dayGroup");
 	const ISOLATE_AUTHORED_DYNAMICS =
@@ -989,7 +1007,18 @@
 					const tickStartedAt = performance.now();
 					runtime.tick();
 					const renderStartedAt = performance.now();
-					runtime.render(renderStartedAt / 1_000);
+					runtime.render(
+						FRAME_INTERVAL_MS === null
+							? renderStartedAt / 1_000
+							: (Math.min(
+									frames,
+									CAPTURE_FRAME === null
+										? Number.POSITIVE_INFINITY
+										: Number(CAPTURE_FRAME),
+								) *
+									Number(FRAME_INTERVAL_MS)) /
+									1_000,
+					);
 					const frameFinishedAt = performance.now();
 					const tickMs = renderStartedAt - tickStartedAt;
 					const renderMs = frameFinishedAt - renderStartedAt;

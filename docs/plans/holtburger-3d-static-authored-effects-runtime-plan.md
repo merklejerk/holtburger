@@ -2528,6 +2528,66 @@ The convention is recorded in both `AGENTS.md` files, including the bar for depa
 defect from the decompile rather than inferring it, measure how much content is affected before
 changing anything, and require that authored content cannot observe the difference.
 
+## Addendum: Interim Triage (2026-08-07)
+
+Two defects reported from play after Phase 8's checklist emptied. Both diagnosed and neither fixed;
+recorded here so the diagnosis is not repeated.
+
+### Paletted particle materials never decode their palette
+
+Reported: swarming insect particles draw as red sprites on opaque black quads instead of cutting out.
+
+`particle-mesh-residency.ts:164` hardcodes **`materialKind: 0`** for every particle mesh. A cohort
+probe over `0xDA56` confirms the consequence — one cohort reports `hasPalette: true` alongside
+`materialKind: 0`:
+
+```
+0x01001ab0  flags 4  kind 0  alphaTest 0.5  blend src-alpha->one-minus-src-alpha  hasPalette true
+```
+
+`materialKind 0` is the particle shader's *direct texture* branch, so it samples the index texture as
+if it held colour and never reaches the palette. With no palette decode there is no alpha, nothing
+clears the `alphaTest` of 0.5, and the quad's backing stays opaque.
+
+Three things are wrong and all three must land together:
+
+1. **`materialKind` is not derived.** The object path resolves it from the prepared material
+   (`webgl2-renderer.ts:2504`): direct-color, index8, index16. Note the two programs use **different
+   encodings** — the object program reserves 0 for solid-colour, the particle program uses 0 for
+   direct texture — which is worth unifying rather than mirroring.
+2. **The clip-map rule is absent.** The object shader implements retail's indexed cutout as
+   `if (uPalettedClipMap != 0 && index < 8.0) return vec4(0.0)`
+   (`webgl2-object-program.ts:185`). The particle shader has no such uniform. This is the rule that
+   makes the sprite cut out at all.
+3. **Palette addressing is wrong even where it runs.** The particle shader does
+   `texture(uPalette, vec2(index, 0.5))` with `index` still normalized to [0, 1], while the object
+   path uses `texelFetch` against `uBaseRect`/`uPaletteRect` with the index decoded through
+   `* 255.0`. The comment claiming these "mirror the object program" is false.
+
+The fix is a particle fragment rewrite mirroring `paletteIndexAt`/`paletteColor`, plus plumbing the
+base and palette rects into particle geometry residency.
+
+### Particles have no culling policy, and the mechanism for one is unwired
+
+`ParticleSystem.collectCohorts` accepts an `isVisible` predicate that culls at emitter granularity.
+`GameRuntime` calls `collectCohorts()` with **no argument** (`game-runtime.ts:1177`), so the default
+`() => true` applies and **every live emitter is submitted every frame regardless of distance**.
+
+`envelopeRadiusFor` exists for exactly this — a conservative radius around a target containing every
+particle it emits, designed so emitters ride the existing visibility path by growing their owner's
+presentation bounds. It has **no callers outside its own module**.
+
+So the derivation the question asks for is already written and already conservative: the envelope is
+`max(hook offset length + emitter envelope radius)` per target, and `PreparedParticleEmitter` carries
+`envelopeRadius` from preparation. What is missing is only the wiring — feed it into the owner's
+bounds so the renderer's existing footprint test covers emitters, then pass the resulting visibility
+into `collectCohorts`.
+
+Worth naming: this is the **fifth** capability found built-but-unwired in this plan, after
+`setListener`, `prepare`, `release`, and the `TextureVelocity` resolver. Each of the first four was
+hiding a real defect. The pattern is strong enough to be worth a sweep of its own — a seam with no
+caller is a defect that has not been observed yet, not dead code.
+
 ## Addendum: Phase 9 — Region-Driven Ambient Audio
 
 Added after the plan's original scope was met. Ambient audio was deliberately excluded throughout,

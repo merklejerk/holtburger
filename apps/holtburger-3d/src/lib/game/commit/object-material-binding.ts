@@ -50,9 +50,7 @@ export function resolveObjectTriangleMaterial(options: {
 		);
 	}
 	const polygon = {
-		authoredCullMode: authoredCullMode(sideType),
 		cullFace: effectiveCullFace(sideType),
-		renderSide: renderSide(sideKind),
 		stippled: (stippling & (sideKind === 2 ? 0x02 : 0x01)) !== 0,
 	} as const;
 	return {
@@ -64,54 +62,40 @@ export function resolveObjectTriangleMaterial(options: {
 			source: material,
 			textures: { base: plan.baseTexture, palette: plan.paletteTexture },
 		},
-		bindingId: [
-			plan.id,
-			polygon.authoredCullMode,
-			polygon.cullFace,
-			polygon.renderSide,
-			polygon.stippled,
-		].join("|"),
+		// Keyed strictly on facts a draw honours. The expanded render side is excluded because
+		// both sides of a CULL_MODE_NONE polygon resolve the same material, cull face, and
+		// stippling, so keying on it would split every such polygon into its own pair of draw
+		// ranges for no draw-state difference. CULL_MODE_CLOCKWISE sides stay separate on their
+		// own merits, because they resolve different authored surfaces and so different plan ids.
+		// `stippled` has no consumer yet, but it is retained because it is meant to become draw
+		// state; it measures as a zero-cost axis today.
+		bindingId: [plan.id, polygon.cullFace, polygon.stippled].join("|"),
 		ordering: plan.ordering,
 		textureRequirements: plan.textureRequirements,
 	};
 }
 
-function authoredCullMode(
-	value: number,
-): ObjectMaterialBinding["polygon"]["authoredCullMode"] {
-	switch (value) {
-		case 0:
-			return "landblock";
-		case 1:
-			return "none";
-		case 2:
-			return "clockwise";
-		case 3:
-			return "counter-clockwise";
-		default:
-			throw new Error(`Unsupported polygon culling mode ${value}.`);
-	}
-}
-
+/**
+ * Reject an unsupported authored culling mode and reduce the supported ones to draw state.
+ *
+ * Rust expands None and Clockwise into explicit reversed-winding sides, so every mode but
+ * CounterClockwise arrives already one-sided about its own winding. Each resulting range must stay
+ * one-sided or the paired ranges submit the same coplanar surface twice.
+ *
+ * The authored mode itself is deliberately not retained. Landblock, None, and Clockwise all reduce
+ * to back-face rejection, so keeping the distinction would only split batches that share draw state.
+ */
 function effectiveCullFace(
 	value: number,
 ): ObjectMaterialBinding["polygon"]["cullFace"] {
-	// Rust expands None and Clockwise into explicit reversed-winding sides. Each resulting range
-	// must remain one-sided or the paired ranges submit the same coplanar surface twice.
-	return value === 3 ? "front" : "back";
-}
-
-function renderSide(
-	value: number,
-): ObjectMaterialBinding["polygon"]["renderSide"] {
 	switch (value) {
 		case 0:
-			return "positive";
 		case 1:
-			return "positive-reversed";
 		case 2:
-			return "negative";
+			return "back";
+		case 3:
+			return "front";
 		default:
-			throw new Error(`Unsupported polygon render side ${value}.`);
+			throw new Error(`Unsupported polygon culling mode ${value}.`);
 	}
 }

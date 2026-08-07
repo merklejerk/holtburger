@@ -298,9 +298,7 @@ function staticMaterial(): ObjectMaterialBinding {
 		detailRole: null,
 		palettedClipMap: false,
 		polygon: {
-			authoredCullMode: "landblock",
 			cullFace: "back",
-			renderSide: "positive",
 			stippled: false,
 		},
 		sampler: {

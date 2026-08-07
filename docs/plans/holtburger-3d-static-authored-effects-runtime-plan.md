@@ -764,7 +764,35 @@ Of the 267 promoted residents, only **171 have animation playback** — the othe
 and their parts never move**, yet every one is streamed into the frame instance arena every frame.
 Retail enrols script owners through `AddStaticAnimatingObject` for _update_, not for rendering.
 
-**The fix is a presentation/behavior split, and the condition is already knowable at preparation.**
+**Follow-up measurement: generated scenery is the entire multiplier, and this predates the plan.**
+
+| Generated-object radius | Entities | Animated | Dynamic draws | Instance high-water |
+| ----------------------: | -------: | -------: | ------------: | ------------------: |
+|                       0 |       44 |        0 |             0 |               **3** |
+|                       2 |      267 |      171 |         3,596 |          **13,057** |
+
+Generated scenery contributes 223 of the 267 entities, **all 171 animated ones**, every dynamic
+draw, and 13,054 of the 13,057 instances. Portal and flat frame modes measure identically, so view
+multiplication is not involved: this is ~49 instances per entity in a single view.
+
+**This is an architectural problem with promotion itself, not with this plan's script-only
+addition.** Generated scenery is thousands of _placements_ of a handful of _setups_, and the static
+path exploits that — the whole population compacts into 555 draws. Promotion is per **placement**,
+so every scenery object carrying setup-default behavior becomes its own per-frame-streamed entity,
+turning ~555 compacted draws into 3,596 dynamic ones. Animated scenery already took that path before
+this plan; script-only promotion added ~96 more residents to a road that was already wrong.
+
+Options, in rough order of cost, recorded for a roadmap-level decision rather than picked here:
+
+1. **Do not promote generated scenery.** Cheapest; scenery scripts and animations stop running.
+2. **Share behavior per setup rather than per placement** — one clock per (setup, landblock), with
+   effects emitted at each placement. Preserves fidelity and compaction; the largest change.
+3. **Split presentation from behavior** (below). Removes the 96 script-only residents from the
+   per-frame path and any animated resident whose pose never actually changes.
+4. **Improve instance-run grouping.** Batching currently achieves only 3.6 instances per draw, and
+   run matching within a batch key is linear; both are worth attention regardless of the above.
+
+**The presentation/behavior split, and the condition is already knowable at preparation.**
 A script-only resident needs per-frame presentation only if its closure authors a pose-changing
 command (`Scale`, `SetOmega`, `TransparentPart`); the measured closure authors none, and archive-wide
 only 43 `Scale` hooks exist. Everything else should keep baked static presentation and receive only

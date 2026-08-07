@@ -94,7 +94,7 @@ vec3 acDisplacement(vec3 offset, float t) {
 		return offset + aMotionA * t + 0.5 * aMotionB * t * t;
 	}
 	if (uMotionType == ${PARTICLE_TYPE.swarm}) {
-		// sin on AC's y, cos on AC's x and z. Authored asymmetry; do not make this uniform, and do
+		// RETAIL QUIRK: sin on AC's y, cos on AC's x and z. Do not make this uniform, and do
 		// not evaluate it against converted vectors, which swaps which axis gets the sine.
 		return offset + vec3(
 			cos(aMotionB.x * t) * aMotionC.x + aMotionA.x * t,
@@ -103,7 +103,7 @@ vec3 acDisplacement(vec3 offset, float t) {
 		);
 	}
 	if (uMotionType == ${PARTICLE_TYPE.explode}) {
-		// Both authored Explode quirks: every axis multiplies by aMotionA.x rather than its own
+		// RETAIL QUIRK: both Explode quirks. Every axis multiplies by aMotionA.x rather than its own
 		// component, and AC's z -- up -- carries an extra + aMotionA.z inside the parenthesis.
 		return offset + vec3(
 			(aMotionB.x * t + aMotionC.x * aMotionA.x) * t,
@@ -112,7 +112,7 @@ vec3 acDisplacement(vec3 offset, float t) {
 		);
 	}
 	if (uMotionType == ${PARTICLE_TYPE.implode}) {
-		// One scalar cosine driven by aMotionA.x, applied to all three axes.
+		// RETAIL QUIRK: one scalar cosine driven by aMotionA.x, applied to all three axes.
 		float wave = cos(aMotionA.x * t);
 		return offset + wave * aMotionC + aMotionB * t * t;
 	}

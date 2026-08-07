@@ -93,7 +93,7 @@ export function decodeSoundTableRecord(
 /**
  * Choose a candidate for a uniform roll.
  *
- * **Deliberately diverges from retail, which can never select the last candidate.** Retail computes
+ * **RETAIL DIVERGENCE: retail can never select the last candidate.** Retail computes
  * `floor((n - 1) * roll)` (acclient.c:366752-366756), and its `Random::rand` clamps to `0.99999988`
  * (acclient.c:101613-101615), so `(n - 1) * roll` never reaches `n - 1` and the final candidate of
  * every multi-candidate list is dead.

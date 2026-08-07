@@ -54,7 +54,7 @@ pub struct GfxObjDegradeInfo {
 impl GfxObjDegradeInfo {
     /// Orientation the mesh uses at ordinary viewing distance.
     ///
-    /// The **first** band, deliberately, rather than a distance lookup. Retail's LOD system is not
+    /// RETAIL DIVERGENCE: the **first** band, rather than a distance lookup. Retail's LOD system is not
     /// adopted here, so there is no band selection to run; the near band is the authored appearance
     /// and the far bands exist only to degrade it.
     pub fn near_orientation(&self) -> Option<DegradeOrientation> {

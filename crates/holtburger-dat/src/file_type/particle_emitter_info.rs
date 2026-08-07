@@ -5,7 +5,7 @@
 //! must not be used for field order. Fields are sequential and unaligned, matching ACE's
 //! `BinaryReader`.
 //!
-//! `sorting_sphere` is deliberately absent — it is not in the file. Retail derives it in `InitEnd`
+//! RETAIL DIVERGENCE: `sorting_sphere` is deliberately absent — it is not in the file. Retail derives it in `InitEnd`
 //! as `radius = max(max_offset, max_a * lifespan)` (acclient.c:312431-312445), which under-bounds
 //! the parabolic motion types; our runtime computes an exact envelope instead, so storing retail's
 //! guess would only invite someone to use it.

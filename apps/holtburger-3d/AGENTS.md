@@ -120,6 +120,34 @@ contracts merely because the legacy app did.
 
 When referencing the retail decompile, we generally want to approximate its behavior but not necessarily its architecture. Do not fall into the trap of rebuilding the retail client in rust/typescript. That client was written in 1999 under 1999 constraints. We have modern techniques and more mature software patterns available to us and should be able to improve on its design and performance.
 
+### Marking Retail Behavior Divergence
+
+Two greppable markers make the whole compatibility surface enumerable, which a third-party client
+needs to be able to answer in one command:
+
+- `RETAIL QUIRK:` — we **reproduce** a retail defect on purpose, because authored content was tuned
+  against it and "fixing" it would change how shipped content looks or sounds.
+- `RETAIL DIVERGENCE:` — we **deliberately depart** from retail, because the defect is provable and
+  content cannot observe the difference, or because a 1999 constraint no longer applies to us.
+
+```
+grep -rn "RETAIL QUIRK\|RETAIL DIVERGENCE" apps crates
+```
+
+Both require, in the same comment:
+
+1. An `acclient.c:` line reference for the behavior being matched or departed from.
+2. What breaks if someone "corrects" it, or what evidence proves departing is safe.
+3. The census that sized the blast radius, when one was run.
+
+Reserve the markers for **observable behavior**. An unimplemented case that no shipped content
+authors is a documented gap, not a divergence; say so plainly without a marker. Our own structural
+choices — what a batch key contains, which frame a value is retained in — are not divergences either.
+
+The bar for departing: authored content must be unable to observe the difference, or the difference
+must be provably an improvement no content depended on. Prove the defect from the decompile rather
+than inferring it, and measure how much content is affected before changing anything.
+
 ## Working Style
 
 - Prefer clean cutovers. Remove aliases, compatibility wrappers, stale comments,

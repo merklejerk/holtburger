@@ -36,7 +36,7 @@ pub struct SoundTableEntry {
 impl SoundTableEntry {
     /// Choose a candidate for a uniform roll in [0, 1).
     ///
-    /// **Deliberately diverges from retail, which can never select the last candidate.** Retail
+    /// **RETAIL DIVERGENCE: retail can never select the last candidate.** Retail
     /// computes `floor((n - 1) * roll)` (acclient.c:366752-366756) where `roll` comes from
     /// `Random::RollDice(0.0, 1.0)`, and `Random::rand` clamps its result to `0.99999988`
     /// (acclient.c:101613-101615). One is therefore unreachable, `(n - 1) * roll` never reaches

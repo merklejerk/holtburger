@@ -122,7 +122,7 @@ function acDisplacement(
 			);
 
 		case PARTICLE_TYPE.swarm:
-			// `sin` on AC's y, `cos` on AC's x and z. Deliberately not symmetric; do not "correct"
+			// RETAIL QUIRK: `sin` on AC's y, `cos` on AC's x and z. Not symmetric; do not "correct"
 			// it, and do not evaluate it against converted vectors, which silently swaps which axis
 			// gets the sine.
 			return ac(
@@ -132,7 +132,7 @@ function acDisplacement(
 			);
 
 		case PARTICLE_TYPE.explode:
-			// Two authored quirks, both verified against the decompile and both reproduced on
+			// RETAIL QUIRK: two of them, both verified against the decompile and both reproduced on
 			// purpose: every axis multiplies by `a[0]`, not its own component, and AC's z — up —
 			// carries an extra `+ a[2]` inside the parenthesis. Content was tuned against these.
 			return ac(
@@ -142,7 +142,8 @@ function acDisplacement(
 			);
 
 		case PARTICLE_TYPE.implode: {
-			// One scalar cosine, driven by `a[0]`, applied to all three axes.
+			// RETAIL QUIRK: one scalar cosine driven by `a[0]`, applied to all three axes rather
+			// than each axis using its own component.
 			const wave = Math.cos(a[0] * t);
 			return ac(
 				offset[0] + wave * c[0] + b[0] * t * t,

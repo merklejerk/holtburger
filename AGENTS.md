@@ -12,6 +12,18 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - Shared crates should contain behavior, data, and APIs that are plausibly common to both the TUI and a future 3D client. Frontend-specific UX or control policy should stay in the frontend.
 - Don't sacrifice cleaner design for backwards compatibility, especially for tests.
 
+## Retail Behavior Markers
+
+Where we knowingly match or depart from retail behavior, mark it so the compatibility surface can be
+enumerated with `grep -rn "RETAIL QUIRK\|RETAIL DIVERGENCE" apps crates`:
+
+- `RETAIL QUIRK:` — a retail defect reproduced on purpose, because content was tuned against it.
+- `RETAIL DIVERGENCE:` — a deliberate departure, because the defect is provable and content cannot
+  observe the difference.
+
+Both need an `acclient.c:` citation, the consequence of "correcting" it, and the census that sized
+the blast radius. See `apps/holtburger-3d/AGENTS.md` for the full convention.
+
 ## Crate Boundaries
 
 - `holtburger-common`: shared primitives and traits only.

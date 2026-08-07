@@ -131,7 +131,7 @@ pub struct CallPesHookPayload {
 
 /// A directly addressed sound with authored playback parameters.
 ///
-/// Field names follow retail's proven use, not ACE's labels: retail's `Execute` rolls against the
+/// RETAIL QUIRK: field names follow retail's proven use, not ACE's labels. Retail's `Execute` rolls against the
 /// **first** float after the sound id and discards the second entirely
 /// (acclient.c:329412-329431, 366790-366812). The archive corroborates this — every representative
 /// record authors `probability = 1.0, unused = 0.0`, which under ACE's naming would give every

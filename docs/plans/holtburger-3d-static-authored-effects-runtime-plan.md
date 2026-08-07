@@ -2280,6 +2280,34 @@ as a minimum interval with no catch-up — are all reproduced, because in each c
 demonstrably tuned against the behaviour. The distinguishing test is whether authored content can
 observe the difference: here, one entry can, and only to gain a sound no player has heard.
 
+##### Retail behavior markers (2026-08-07)
+
+Auditing whether reproduced retail defects were flagged in code found that they were — each with an
+`acclient.c:` citation and a reason — but under six different phrasings, and conflated with unrelated
+"deliberately" comments about our own structural choices. Answering "what do we intentionally do
+differently from retail?" required a six-alternative regex and still missed a site.
+
+Two markers now make the compatibility surface enumerable:
+
+```
+grep -rn "RETAIL QUIRK\|RETAIL DIVERGENCE" apps crates
+```
+
+`RETAIL QUIRK` marks a defect reproduced on purpose, `RETAIL DIVERGENCE` a deliberate departure.
+Thirteen sites across nine files: eight quirks (Swarm's asymmetric sine, Explode's two, Implode's
+scalar cosine, `birthrate` as a minimum interval, `SoundTweaked`'s field order — each in both the CPU
+reference and the shader where both exist) and five divergences (sound-table selection, degrade's
+first-band orientation, the absent `sorting_sphere`, and terrain lighting's unclamped falloff).
+
+Deliberately **not** marked: cases retail implements and we do not, where no shipped content authors
+them — `texture-velocity-part` is an unimplemented case with a census showing zero consumers, which
+is a documented gap rather than an observable difference. Nor our own structural choices, such as
+what a batch key contains or which frame a value is retained in.
+
+The convention is recorded in both `AGENTS.md` files, including the bar for departing: prove the
+defect from the decompile rather than inferring it, measure how much content is affected before
+changing anything, and require that authored content cannot observe the difference.
+
 ## Addendum: Phase 9 — Region-Driven Ambient Audio
 
 Added after the plan's original scope was met. Ambient audio was deliberately excluded throughout,

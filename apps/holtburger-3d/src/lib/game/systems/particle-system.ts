@@ -529,7 +529,7 @@ export class ParticleSystem {
 	/**
 	 * Release at most one particle, and only once the minimum interval has elapsed.
 	 *
-	 * `birthrate` is a **minimum interval**, not a rate, and retail emits at most one particle per
+	 * RETAIL QUIRK: `birthrate` is a **minimum interval**, not a rate, and retail emits at most one particle per
 	 * update with no catch-up (acclient.c:312447-312476, 318289). Reproduced deliberately: emitting
 	 * a burst to "catch up" a slow frame would change authored density.
 	 */

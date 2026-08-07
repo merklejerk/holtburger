@@ -1703,10 +1703,39 @@ Treat the reopened checklist below as the live one; the first records what the o
 Consolidated from the findings below, which recorded this debt in prose as it was discovered. Ordered
 by value rather than by when it appeared.
 
-- [ ] **Split presentation from behavior.** Carried forward from Phase 7's recorded debt and now the
-      largest structural item. A script-only resident publishes no presentation sample, so effect
-      state it authors is written and never read; it is also per-frame streamed for visuals it does
-      not have. 43 `Scale` hooks exist archive-wide.
+- [ ] **Split presentation from behavior.** Traced end to end 2026-08-07 and **larger than
+      recorded** — it is a missing clock, not a missing sample. Scoped below rather than started,
+      because it changes system ownership and deserves its own phase.
+
+      Effect state for a script-only resident is never *advanced*, not merely never read.
+      `EffectSystem.advanceSemanticStep` has exactly one caller,
+      `AnimationSystem.#advanceSemanticStep` (`animation-system.ts:340`), which runs only for nodes
+      holding an `AnimationRecord`. A resident whose `behavior.animationId` is null never acquires
+      one (`dynamic-entity-system.ts:216`). So for those residents:
+
+      1. translucency ramps never progress, because `ramp.elapsedSeconds` only moves per behavior
+         step;
+      2. `SetOmega` never accumulates, because rotation folds into `committedOrientation` per step;
+      3. `Scale` never ramps, for the same reason;
+      4. and nothing samples the state anyway, since `AnimationSystem.sample` only produces
+         `DynamicPresentationSample`s for nodes it has records for.
+
+      `Scale`, `SetOmega`, and `TransparentPart` authored by a script on a script-only resident are
+      therefore **silently inert** — written into effect state that neither ticks nor is read. No
+      error, no diagnostic. 43 `Scale` hooks exist archive-wide; none are in currently loaded
+      content, which is luck rather than design.
+
+      The shape of the fix: effect state needs a behavior-cadence clock that does not belong to
+      animation playback. `EffectSystem` already owns the state and the step function; what it lacks
+      is a driver for entities animation does not cover. Two pieces follow — advance every installed
+      effect state at the behavior cadence regardless of playback, and publish an effect-only
+      presentation for entities with no animation, reusing `entity.articulatedPose`, which every
+      entity already carries from install (`dynamic-entity-system.ts:328`). Both need care around
+      double-publishing and around `AnimationPresentationCadence`, which currently selects which
+      nodes sample at all.
+
+      Not started deliberately: this is system-ownership surgery, and the session that found it had
+      little context left. Doing it badly is worse than scheduling it.
 - [x] **Retracted: `indexStart`/`indexCount` belong in `batchKey`.** Recorded as debt on the
       assumption that they split cohorts needlessly, by analogy with `renderSide` and
       `authoredCullMode`. Checking the draw call rather than reasoning from the analogy:

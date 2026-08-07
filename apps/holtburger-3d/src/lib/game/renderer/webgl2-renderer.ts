@@ -1792,9 +1792,16 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
-	#drawParticles(view: PreparedView): void {
+	#drawParticles(
+		view: PreparedView,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
 		const pass = this.#particlePass;
 		if (!pass || this.#particleCohorts.length === 0) return;
+		// Timed separately from the blended pass so a per-cohort upload stall is attributable: each
+		// cohort writes into one shared buffer immediately before its own draw.
+		const startedAt = profile?.beginCpuPhase();
+		const gpuPhase = profile?.beginGpuPhase("particle") ?? null;
 		pass.draw(
 			{
 				// Anchor-relative, matching both the view matrix and the particle origins. The
@@ -1815,6 +1822,10 @@ export class WebGL2Renderer implements Renderer {
 			},
 			this.#particleCohorts,
 		);
+		gpuPhase?.finish();
+		if (startedAt !== undefined) {
+			profile?.finishCpuPhase("particleSubmission", startedAt);
+		}
 	}
 
 	#drawView(view: PreparedView, shading: SceneShading): void {
@@ -1824,7 +1835,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawBlendedObjects(view, shading, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
-		this.#drawParticles(view);
+		this.#drawParticles(view, null);
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
 	}
@@ -1858,6 +1869,10 @@ export class WebGL2Renderer implements Renderer {
 		} finally {
 			blendedGpu?.finish();
 		}
+
+		// Profiling must not change what is drawn. This path previously omitted particles entirely,
+		// so every profile measured a scene missing them and reported their cost as zero.
+		this.#drawParticles(view, profile);
 
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();

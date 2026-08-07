@@ -259,6 +259,8 @@ export interface RendererCpuFrameTimings {
 	readonly objectPreparationMs: number;
 	/** CPU wall time spent submitting opaque object work. */
 	readonly opaqueSubmissionMs: number;
+	/** CPU cost of building and uploading particle cohorts, separate from other blended work. */
+	readonly particleSubmissionMs: number;
 	/** Renderer work outside the named spans, including portal masks and orchestration. */
 	readonly otherMs: number;
 	/** CPU wall time spent planning portal visibility and execution topology. */
@@ -347,6 +349,14 @@ export type RendererGpuFrameProfile =
 			readonly kind: "available";
 			/** GPU elapsed-time span covering opaque object commands. */
 			readonly opaqueMs: number;
+			/**
+			 * GPU elapsed-time span covering particle commands.
+			 *
+			 * Separate from `blendedMs` so a per-cohort upload stall is attributable: every cohort
+			 * writes into one buffer immediately before its own draw, and the driver must either
+			 * rename the buffer or wait.
+			 */
+			readonly particleMs: number;
 			/** Submitted GPU frames whose timing results are not yet readable. */
 			readonly pendingFrameCount: number;
 			/** GPU elapsed-time span covering terrain commands. */

@@ -9,7 +9,7 @@ import type {
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** GPU phases whose timestamp intervals are aggregated across every view in one frame. */
-export type WebGL2GpuFramePhase = "terrain" | "opaque" | "blended";
+export type WebGL2GpuFramePhase = "terrain" | "opaque" | "blended" | "particle";
 
 /** Non-overlapping CPU spans recorded only while an explicit profiling session is active. */
 export type WebGL2CpuFramePhase =
@@ -27,6 +27,7 @@ export type WebGL2CpuFramePhase =
 	| "terrainSubmission"
 	| "opaqueSubmission"
 	| "blendedSubmission"
+	| "particleSubmission"
 	| "finalization";
 
 /**
@@ -65,6 +66,7 @@ const CPU_TIMING_KEYS = [
 	"objectPreparationMs",
 	"opaqueSubmissionMs",
 	"otherMs",
+	"particleSubmissionMs",
 	"portalGraphPlanningMs",
 	"sceneQueryMs",
 	"sceneContributionResolutionMs",
@@ -305,6 +307,7 @@ export class WebGL2GpuFrameProfiler {
 		let terrainMs = 0;
 		let opaqueMs = 0;
 		let blendedMs = 0;
+		let particleMs = 0;
 		for (const range of frame.ranges) {
 			const durationMs = milliseconds(range.query);
 			switch (range.phase) {
@@ -316,6 +319,9 @@ export class WebGL2GpuFrameProfiler {
 					break;
 				case "blended":
 					blendedMs += durationMs;
+					break;
+				case "particle":
+					particleMs += durationMs;
 			}
 		}
 		return {
@@ -323,12 +329,13 @@ export class WebGL2GpuFrameProfiler {
 			frameNumber: frame.frameNumber,
 			kind: "available",
 			opaqueMs,
+			particleMs,
 			pendingFrameCount: this.#pending.length,
 			terrainMs,
 			// The sum of what was measured, not wall-clock from first to last command. Elapsed
 			// queries cannot nest, so unattributed GPU work between phases is unmeasurable and is
 			// deliberately absent rather than reported as a zero.
-			totalMs: terrainMs + opaqueMs + blendedMs,
+			totalMs: terrainMs + opaqueMs + blendedMs + particleMs,
 		};
 	}
 
@@ -357,6 +364,7 @@ export class WebGL2FrameProfileCapture {
 	readonly #cpu = {
 		blendedOrderingMs: 0,
 		blendedSubmissionMs: 0,
+		particleSubmissionMs: 0,
 		contributionMergeMs: 0,
 		finalizationMs: 0,
 		generatedInstanceCullingMs: 0,
@@ -541,6 +549,7 @@ function summarizeCpuFrames(
 	const totals: Record<keyof RendererCpuFrameTimings, number> = {
 		blendedOrderingMs: 0,
 		blendedSubmissionMs: 0,
+		particleSubmissionMs: 0,
 		contributionMergeMs: 0,
 		finalizationMs: 0,
 		generatedInstanceCullingMs: 0,
@@ -576,6 +585,7 @@ function summarizeCpuFrames(
 		objectPreparationMs: totals.objectPreparationMs / sampleCount,
 		opaqueSubmissionMs: totals.opaqueSubmissionMs / sampleCount,
 		otherMs: totals.otherMs / sampleCount,
+		particleSubmissionMs: totals.particleSubmissionMs / sampleCount,
 		portalGraphPlanningMs: totals.portalGraphPlanningMs / sampleCount,
 		sceneQueryMs: totals.sceneQueryMs / sampleCount,
 		sceneContributionResolutionMs:

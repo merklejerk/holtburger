@@ -790,6 +790,7 @@ function briefHarnessReport(result) {
 						animation: authoredDynamics.animation,
 						audio: authoredDynamics.audio,
 						particles: authoredDynamics.particles,
+						physicsScripts: authoredDynamics.physicsScripts,
 						dynamics: authoredDynamics.dynamics,
 						presentationCadence: authoredDynamics.presentationCadence,
 						effects: authoredDynamics.effects,

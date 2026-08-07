@@ -1728,11 +1728,24 @@ by value rather than by when it appeared.
       below. Interactive confirmation is also faster and more decisive than any diff — the candle and
       the audio were both settled that way in seconds.
 
-- [ ] **Record a close-up particle camera.** Every particle verification this session failed on
-      framing: DA55's emitters are a few pixels across from the explorer-focus pose and the `0xdb56`
-      interior needed a hand-guessed position. Land one named pose that fills a usable fraction of
-      the frame with an authored emitter, so the next particle change can be looked at rather than
-      inferred. Small, and it retires the whole class of problem the determinism work was aimed at.
+- [x] **Recorded a close-up particle camera**, in `apps/holtburger-3d/AGENTS.md`:
+
+      ```
+      --landblock 0xda55ffff --building-radius 1 --explicit-object-radius 1
+      --generated-object-radius 1 --camera-position 42087,37.9,-16638.4
+      --camera-yaw 0 --camera-pitch 0 --particle-seed 7
+      ```
+
+      That frames a lit candle a couple of metres away, large enough to judge flame direction,
+      billboard orientation, and blending. Emitter positions turned out to be **discoverable rather
+      than guessable** — every live emitter's scene-space origin passes through `collectCohorts`, so
+      a temporary probe there yields real coordinates. Three guessed poses found nothing; the first
+      probed one worked. That is the technique worth remembering, more than the coordinates.
+
+      **It also closed the session's last verification gap immediately.** The candle flame rises
+      straight up, which is the visual confirmation of the asymmetric-motion fix that had rested
+      entirely on formula tests — the fix affecting 45% of shipped emitters. Framing was the whole
+      problem, exactly as the retired determinism item concluded.
 
 - [ ] **Converge the two vector representations.** The `Vec3` class carries no frame; the branded
       tuples do. Every crossing between them silently drops the brand, which is how
@@ -1817,8 +1830,9 @@ claimed:
   — the listener is placed, scene-space spatialization resolves real gain and pan, and warm-on-demand
   works, since every sound's first trigger is refused by a cold buffer and only plays after `prepare`
   resolves. It also settles the `AudioContext` question above without a code change.
-- The asymmetric-motion axis fix has no visual confirmation. The formula tests assert the semantics
-  directly, but no scene with a visible flame was framed close enough to judge.
+- ~~The asymmetric-motion axis fix has no visual confirmation.~~ **Confirmed 2026-08-07** from the
+  close-up particle camera above: the candle flame rises. Both of this session's verification gaps
+  are now closed by observation.
 
 #### Runtime Verification Findings (2026-08-06)
 

@@ -70,6 +70,29 @@ CPU: mean 2.307 ms  p95 2.8 ms
 SwiftShader is only the default because it is deterministic and available
 everywhere. Pass `--gpu` for anything meant to be performance evidence.
 
+### Looking at Particles
+
+Particle changes are verified by looking, not by diffing. A known close-up
+pose exists because every particle verification that failed did so on framing
+rather than on run-to-run noise:
+
+```
+npm run harness:browser -- --landblock 0xda55ffff \
+  --building-radius 1 --explicit-object-radius 1 --generated-object-radius 1 \
+  --camera-position 42087,37.9,-16638.4 --camera-yaw 0 --camera-pitch 0 \
+  --particle-seed 7 --screenshot <path>
+```
+
+That frames a lit candle a couple of metres away, large enough to judge flame
+direction, billboard orientation, and blending. `--particle-seed` makes
+emission repeatable; `--frame-interval-ms` and `--capture-frame` additionally
+freeze simulation time, though captures are still not byte-identical for
+reasons that were never isolated.
+
+Emitter positions are discoverable rather than guessable: the scene-space
+origin of every live emitter passes through `collectCohorts`, so a temporary
+probe there yields real coordinates to point a camera at.
+
 GPU spans are **elapsed-time** queries, not timestamps: Chrome reports zero
 `QUERY_COUNTER_BITS_EXT` for `TIMESTAMP_EXT`, because absolute GPU timestamps
 are a timing-attack vector, while `TIME_ELAPSED_EXT` is fully supported.

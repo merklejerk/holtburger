@@ -91,6 +91,37 @@ describe("ExplorerCameraCoordinator", () => {
 		coordinator.dispose();
 	});
 
+	it("places the audio listener with the camera only while that is switched on", () => {
+		const setAudioListener = vi.fn();
+		const { runtime } = createRuntime({ setAudioListener });
+		const coordinator = new ExplorerCameraCoordinator(
+			runtime,
+			{
+				setAutomaticPose: vi.fn(),
+				snapshotState: () => ({
+					hasManualControl: false,
+					pitchRadians: 0,
+					position: new Vec3(1, 2, 3),
+					yawRadians: 0,
+				}),
+			} as unknown as FreeFlyCameraController,
+			() => {},
+		);
+
+		coordinator.syncCameraResidency();
+		expect(setAudioListener).toHaveBeenCalledTimes(1);
+
+		// Off leaves the listener wherever it was rather than moving it somewhere arbitrary.
+		coordinator.setAudioFollowsCamera(false);
+		coordinator.syncCameraResidency();
+		expect(setAudioListener).toHaveBeenCalledTimes(1);
+
+		coordinator.setAudioFollowsCamera(true);
+		coordinator.syncCameraResidency();
+		expect(setAudioListener).toHaveBeenCalledTimes(2);
+		coordinator.dispose();
+	});
+
 	it("surfaces overlapping containment as ambiguity without choosing a cell", () => {
 		const setPrimaryCamera = vi.fn();
 		const statuses: string[] = [];
@@ -343,6 +374,7 @@ function createRuntime(
 		queryEnvCellBounds: GameRuntime["queryEnvCellBounds"];
 		queryEnvCellPointContainment: GameRuntime["queryEnvCellPointContainment"];
 		queryWorldPointResidencyCandidates: GameRuntime["queryWorldPointResidencyCandidates"];
+		setAudioListener: GameRuntime["setAudioListener"];
 		setPrimaryCamera: GameRuntime["setPrimaryCamera"];
 	}> = {},
 ): {
@@ -361,6 +393,7 @@ function createRuntime(
 				envCells: [],
 				outdoor: { envCellId: null, landblockId: "0x0102ffff" },
 			})),
+		setAudioListener: overrides.setAudioListener ?? vi.fn(),
 		setPrimaryCamera: overrides.setPrimaryCamera ?? vi.fn(),
 		subscribeSceneAvailability: (
 			nextListener: (event: SceneAvailabilityEvent) => void,

@@ -40,11 +40,24 @@ export interface AudioTrigger {
 export type AudioTriggerOutcome =
 	"played" | "lost-probability-roll" | "inaudible" | "device-refused";
 
+/**
+ * Why triggers did not become sound, counted separately.
+ *
+ * One counter per outcome, because "suppressed" spans causes with nothing in common: an authored
+ * probability that declined to play is correct behaviour, a trigger below the audible floor points
+ * at the listener pose, and a refused device points at the device. Conflating them makes silence
+ * undiagnosable, which is exactly what happened.
+ */
 export interface AudioDiagnostics {
 	readonly activeVoiceCount: number;
 	readonly playedCount: number;
 	readonly stolenCount: number;
-	readonly suppressedCount: number;
+	/** Declined by the authored probability roll before any spatial work. */
+	readonly lostProbabilityRollCount: number;
+	/** Below retail's audible floor for the current listener pose. */
+	readonly inaudibleCount: number;
+	/** Placed audibly, but the device had no buffer ready or was destroyed. */
+	readonly deviceRefusedCount: number;
 }
 
 /**
@@ -67,7 +80,9 @@ export class AudioSystem {
 	readonly #voices: AudioVoice[] = [];
 	#playedCount = 0;
 	#stolenCount = 0;
-	#suppressedCount = 0;
+	#lostProbabilityRollCount = 0;
+	#inaudibleCount = 0;
+	#deviceRefusedCount = 0;
 	#listener: AudioListener = {
 		// The renderer's own axes, not authored data.
 		position: renderVector3([0, 0, 0]),
@@ -95,7 +110,7 @@ export class AudioSystem {
 	trigger(trigger: AudioTrigger): AudioTriggerOutcome {
 		// Retail rolls the probability before doing any spatial work at all.
 		if (trigger.probability < 1 && this.#roll() >= trigger.probability) {
-			this.#suppressedCount += 1;
+			this.#lostProbabilityRollCount += 1;
 			return "lost-probability-roll";
 		}
 		const placement = placeSpatialAudio(
@@ -106,7 +121,7 @@ export class AudioSystem {
 		);
 		// Below retail's audible floor the sound is not played at all, rather than played silently.
 		if (placement === null) {
-			this.#suppressedCount += 1;
+			this.#inaudibleCount += 1;
 			return "inaudible";
 		}
 		if (this.#voices.length >= this.#voiceLimit) {
@@ -118,7 +133,10 @@ export class AudioSystem {
 			placement.gain,
 			placement.pan,
 		);
-		if (voice === null) return "device-refused";
+		if (voice === null) {
+			this.#deviceRefusedCount += 1;
+			return "device-refused";
+		}
 		this.#voices.push(voice);
 		this.#playedCount += 1;
 		return "played";
@@ -143,9 +161,11 @@ export class AudioSystem {
 	getDiagnostics(): AudioDiagnostics {
 		return {
 			activeVoiceCount: this.#voices.length,
+			deviceRefusedCount: this.#deviceRefusedCount,
+			inaudibleCount: this.#inaudibleCount,
+			lostProbabilityRollCount: this.#lostProbabilityRollCount,
 			playedCount: this.#playedCount,
 			stolenCount: this.#stolenCount,
-			suppressedCount: this.#suppressedCount,
 		};
 	}
 }

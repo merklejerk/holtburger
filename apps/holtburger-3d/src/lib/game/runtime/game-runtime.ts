@@ -142,7 +142,7 @@ import {
 	EnvCellGeometryPreparer,
 	type EnvCellRealizationArtifact,
 } from "./env-cell-realization";
-import type { Camera } from "./types";
+import type { AudioListenerPlacement, Camera } from "./types";
 import type {
 	SceneAvailabilityEvent,
 	SceneAvailabilityListener,
@@ -897,6 +897,36 @@ export class GameRuntime {
 		return () => this.#sceneAvailabilityListeners.delete(listener);
 	}
 
+	/**
+	 * Place the audio listener, in canonical scene space.
+	 *
+	 * Deliberately a frontend input rather than something derived from the primary camera. Where
+	 * the ears are is a client decision: a game client puts them on the player, while the explorer
+	 * flies a free camera and may want them somewhere else entirely. The runtime owns the frame
+	 * conversion and the retail spatial maths, not the choice.
+	 */
+	setAudioListener(placement: AudioListenerPlacement): void {
+		const { position, rotation } = placement;
+		if (
+			![position.x, position.y, position.z].every(Number.isFinite) ||
+			![rotation.w, rotation.x, rotation.y, rotation.z].every(Number.isFinite)
+		) {
+			throw new Error("Audio listener placement must be finite.");
+		}
+		const { w, x, y, z } = rotation;
+		this.#audio.setListener({
+			position: this.#toRenderSpace(
+				stableVector3([position.x, position.y, position.z]),
+			),
+			// First column of the rotation, which is its local +X: the listener's right hand.
+			right: renderVector3([
+				1 - 2 * (y * y + z * z),
+				2 * (x * y + w * z),
+				2 * (x * z - w * y),
+			]),
+		});
+	}
+
 	/** Replace the authoritative primary camera without changing scene interest. */
 	setPrimaryCamera(camera: Camera): void {
 		const { position, rotation } = camera.placement;
@@ -976,8 +1006,10 @@ export class GameRuntime {
 	getAuthoredDynamicRuntimeDiagnostics() {
 		return {
 			animation: this.#animation.getDiagnostics(),
+			audio: this.#audio.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
 			behavior: this.#behaviorRouter.getDiagnostics(),
+			particles: this.#particles.getDiagnostics(),
 			effects: this.#effects.getDiagnostics(),
 			presentationCadence: this.#animationPresentation.getDiagnostics(),
 			residents: this.getAuthoredDynamicResidentDiagnostics(),

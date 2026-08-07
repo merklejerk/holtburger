@@ -1729,8 +1729,8 @@ export class WebGL2Renderer implements Renderer {
 			await residency.install(source, preparer);
 			// Linked on first residency rather than at construction: a scene with no authored
 			// particles never pays for a program it cannot draw with.
-			this.#particlePass ??= new WebGL2ParticlePass((hwGfxObjId) =>
-				this.#particleResidency?.resolve(hwGfxObjId) ?? null,
+			this.#particlePass ??= new WebGL2ParticlePass(
+				(hwGfxObjId) => this.#particleResidency?.resolve(hwGfxObjId) ?? null,
 			);
 		},
 		submit: (cohorts) => {

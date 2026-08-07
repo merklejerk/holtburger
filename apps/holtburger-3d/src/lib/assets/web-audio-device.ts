@@ -1,8 +1,5 @@
 import type { DatAssetId } from "../game/game-types";
-import type {
-	AudioDevice,
-	AudioVoice,
-} from "../game/systems/audio-system";
+import type { AudioDevice, AudioVoice } from "../game/systems/audio-system";
 
 /** Loads one authored sound's decoder-ready bytes and its media type. */
 export interface AudioAssetSource {

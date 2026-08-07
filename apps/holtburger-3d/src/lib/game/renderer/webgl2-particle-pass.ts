@@ -88,7 +88,9 @@ export class WebGL2ParticlePass {
 			return;
 		}
 		const program = (this.#program ??= createWebGL2ParticleProgram(gl));
-		const instances = (this.#instances ??= new WebGL2ParticleInstanceBuffer(gl));
+		const instances = (this.#instances ??= new WebGL2ParticleInstanceBuffer(
+			gl,
+		));
 
 		gl.useProgram(program.program);
 		gl.uniformMatrix4fv(program.uniforms.projection, false, context.projection);

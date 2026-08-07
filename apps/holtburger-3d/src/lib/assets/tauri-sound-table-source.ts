@@ -14,7 +14,9 @@ export class TauriSoundTableSource implements SoundTableSource {
 
 	async loadSoundTable(soundTableId: DatAssetId) {
 		if (this.#destroyed)
-			throw new Error("Cannot load a sound table from a destroyed Tauri source.");
+			throw new Error(
+				"Cannot load a sound table from a destroyed Tauri source.",
+			);
 		const { invoke } = await import("@tauri-apps/api/core");
 		const response = await invoke<unknown>("load_sound_table", {
 			request: { soundTableId },

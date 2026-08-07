@@ -73,11 +73,7 @@ export function particlePosition(
 
 		case PARTICLE_TYPE.localVelocity:
 		case PARTICLE_TYPE.globalVelocity:
-			return render(
-				base(0) + a[0] * t,
-				base(1) + a[1] * t,
-				base(2) + a[2] * t,
-			);
+			return render(base(0) + a[0] * t, base(1) + a[1] * t, base(2) + a[2] * t);
 
 		// The `GR`/`LR` variants share this trajectory exactly; their spin is orientation-only,
 		// applied to the draw frame rather than to the position.

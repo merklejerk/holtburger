@@ -7,7 +7,12 @@ const SOUND = "0x0a000207" as DatAssetId;
 function fakeContext() {
 	const started: unknown[] = [];
 	const stopped: unknown[] = [];
-	const node = () => ({ connect: vi.fn(function (this: unknown, next: unknown) { return next; }), disconnect: vi.fn() });
+	const node = () => ({
+		connect: vi.fn(function (this: unknown, next: unknown) {
+			return next;
+		}),
+		disconnect: vi.fn(),
+	});
 	const context = {
 		createBufferSource: () => {
 			const source = {

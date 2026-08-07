@@ -63,9 +63,7 @@ function prepared(
  * `create` directly pass their own time explicitly.
  */
 const runtime = (
-	overrides: Partial<
-		ConstructorParameters<typeof ParticleSystem>[0]
-	> = {},
+	overrides: Partial<ConstructorParameters<typeof ParticleSystem>[0]> = {},
 ) =>
 	new ParticleSystem({
 		clock: () => 0,
@@ -263,7 +261,11 @@ describe("ParticleSystem", () => {
 		const following = runtime();
 		following.create(
 			TARGET,
-			prepared({ a: renderVector3([0, 0, 0]), followsParent: true, initialParticles: 1 }),
+			prepared({
+				a: renderVector3([0, 0, 0]),
+				followsParent: true,
+				initialParticles: 1,
+			}),
 			ORIGIN,
 			0,
 			0,
@@ -387,7 +389,14 @@ describe("ParticleSystem", () => {
 
 	it("contributes a conservative bound covering its hook offset and envelope", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared(), renderVector3([0, 0, 4]), 0, 0, ORIGIN);
+		particles.create(
+			TARGET,
+			prepared(),
+			renderVector3([0, 0, 4]),
+			0,
+			0,
+			ORIGIN,
+		);
 
 		// envelopeRadius is 10 in the fixture, displaced 4 by the hook offset.
 		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(14);
@@ -400,8 +409,22 @@ describe("ParticleSystem", () => {
 
 	it("takes the widest emitter when a target runs several", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared(), renderVector3([0, 0, 0]), 0, 0, ORIGIN);
-		particles.create(TARGET, prepared(), renderVector3([0, 0, 20]), 0, 0, ORIGIN);
+		particles.create(
+			TARGET,
+			prepared(),
+			renderVector3([0, 0, 0]),
+			0,
+			0,
+			ORIGIN,
+		);
+		particles.create(
+			TARGET,
+			prepared(),
+			renderVector3([0, 0, 20]),
+			0,
+			0,
+			ORIGIN,
+		);
 
 		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(30);
 	});

@@ -48,7 +48,10 @@ describe("decodeSoundTableRecord", () => {
 	it("rejects a key with no candidates", () => {
 		// A key that authors nothing could never play; that is a decode fault, not content.
 		expect(() =>
-			decodeSoundTableRecord(encode([{ candidates: [], soundType: 4 }]), "0x20000001"),
+			decodeSoundTableRecord(
+				encode([{ candidates: [], soundType: 4 }]),
+				"0x20000001",
+			),
 		).toThrow("invalid");
 	});
 });

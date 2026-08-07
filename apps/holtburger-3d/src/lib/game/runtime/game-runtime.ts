@@ -1,12 +1,6 @@
-import {
-	createLandblockOffset,
-	getLandblockCoordinates,
-} from "../landblocks";
+import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
 import { getMat4Translation } from "../math/matrices";
-import {
-	renderVector3,
-	type RenderVector3,
-} from "../../assets/ac-frame";
+import { renderVector3, type RenderVector3 } from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
@@ -626,7 +620,9 @@ export class GameRuntime {
 		});
 		this.#effects = new EffectSystem();
 		this.#soundTables = new SoundTableRepository(dependencies.soundTableSource);
-		this.#particleMeshes = new ParticleMeshCache(dependencies.particleMeshSource);
+		this.#particleMeshes = new ParticleMeshCache(
+			dependencies.particleMeshSource,
+		);
 		this.#physicsScripts = new PhysicsScriptRepository(
 			dependencies.physicsScriptSource,
 		);

@@ -743,6 +743,34 @@ itself lands at the head of Phase 2 with the type it constructs; its contents ar
      whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
 - Both are fixed, and the workload now runs with zero console errors.
 
+#### Performance Regression: script-only promotion streams static residents per frame (2026-08-06)
+
+Measured on `0xDA55FFFF` with buildings 4 / explicit 2 / generated 2 / env-cells 1, comparing
+`--exclude-authored-dynamics` against a normal run:
+
+| Measure                   | Without authored dynamics |       With |
+| ------------------------- | ------------------------: | ---------: |
+| Dynamic entities          |                        17 |        267 |
+| Dynamic draws             |                         0 |      3,596 |
+| Frame instance high-water |                     2,269 | **13,057** |
+
+**Particles are not the cost.** A CPU profile of the regressed frame puts 62% in
+`#drawOpaqueObjects` → `#prepareFrameInstanceRuns` → `formGroupedObjectInstanceRuns`, whose
+per-batch-key run matching is linear; the particle pass does not appear. The 5.75× growth in the
+frame instance arena is what pushed that grouping over.
+
+**Cause: Phase 7 conflated "has timed behavior" with "needs per-frame presentation streaming."**
+Of the 267 promoted residents, only **171 have animation playback** — the other **96 are script-only
+and their parts never move**, yet every one is streamed into the frame instance arena every frame.
+Retail enrols script owners through `AddStaticAnimatingObject` for _update_, not for rendering.
+
+**The fix is a presentation/behavior split, and the condition is already knowable at preparation.**
+A script-only resident needs per-frame presentation only if its closure authors a pose-changing
+command (`Scale`, `SetOmega`, `TransparentPart`); the measured closure authors none, and archive-wide
+only 43 `Scale` hooks exist. Everything else should keep baked static presentation and receive only
+a script clock. That also resolves the recorded debt about script-only residents publishing no
+presentation sample — it is the same distinction seen from the other side.
+
 #### Acceptance Criteria
 
 - Every implementation phase is backed by exact asset IDs, record shapes, and reference paths; the

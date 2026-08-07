@@ -1,4 +1,4 @@
-import type { RenderVector3 } from "../../assets/ac-frame";
+import type { AcVector3, RenderVector3 } from "../../assets/ac-frame";
 /**
  * Packs live particles into the per-instance layout the particle vertex stage declares.
  *
@@ -22,14 +22,25 @@ export const PARTICLE_INSTANCE_FLOAT_COUNT = 21;
 
 /** Everything one particle contributes to the instance stream. */
 export interface ParticleInstanceRecord {
-	/** Parent origin plus hook offset, resolved at spawn or read live for a following emitter. */
+	/**
+	 * Parent origin plus hook offset, resolved at spawn or read live for a following emitter.
+	 *
+	 * Anchor-relative, unlike the motion constants below: this is a scene position, and the vertex
+	 * stage adds the evaluated displacement to it after converting that displacement out of AC axes.
+	 */
 	readonly origin: RenderVector3;
 	readonly birthTime: number;
-	readonly offset: RenderVector3;
+	/**
+	 * Spawn constants in **AC's authored axes**, matching {@link ParticleSpawnConstants}.
+	 *
+	 * The vertex stage evaluates the motion laws in this space and converts once, because Swarm and
+	 * Explode read axis meaning from the component index and cannot be converted componentwise.
+	 */
+	readonly offset: AcVector3;
 	readonly lifespan: number;
-	readonly a: RenderVector3;
-	readonly b: RenderVector3;
-	readonly c: RenderVector3;
+	readonly a: AcVector3;
+	readonly b: AcVector3;
+	readonly c: AcVector3;
 	readonly startScale: number;
 	readonly finalScale: number;
 	readonly startTranslucency: number;

@@ -65,6 +65,7 @@ import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
 import { ParticleSystem } from "../systems/particle-system";
+import type { UniformRoll } from "../systems/particle-system";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
 import { AudioSystem, type AudioDevice } from "../systems/audio-system";
@@ -222,6 +223,13 @@ export interface GameRuntimeDependencies {
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
+	/**
+	 * Uniform [0, 1) source for authored randomness, defaulting to `Math.random`.
+	 *
+	 * Injectable so a diagnostic harness can make particle emission reproducible. Without a seed,
+	 * two runs of the same build differ enough that screenshots cannot resolve a rendering change.
+	 */
+	readonly roll?: UniformRoll;
 }
 
 /** Device boundary used by runtime to construct its private renderer facade. */
@@ -675,7 +683,7 @@ export class GameRuntime {
 				this.#particleEmitters.getReady(emitterInfoId),
 			stableOriginOf: (target) => this.#stableOriginOf(target),
 			renderAnchorOrigin: () => this.#renderAnchorOrigin(),
-			roll: Math.random,
+			roll: dependencies.roll ?? Math.random,
 		});
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
@@ -830,6 +838,7 @@ export class GameRuntime {
 		particleEmitterSource: ParticleEmitterSource,
 		soundTableSource: SoundTableSource,
 		particleMeshSource: ParticleMeshSource,
+		roll?: UniformRoll,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
@@ -841,6 +850,7 @@ export class GameRuntime {
 			particleEmitterSource,
 			physicsScriptSource,
 			particleMeshSource,
+			roll,
 			soundTableSource,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"

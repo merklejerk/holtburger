@@ -54,6 +54,24 @@
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
 	const CAMERA_FAR = 2_000;
+	/**
+	 * Deterministic uniform [0, 1) source, so particle emission repeats exactly between runs.
+	 *
+	 * mulberry32. Only the harness uses it: production randomness stays `Math.random`, and without
+	 * a seed two runs differ by more pixels than most rendering changes do, which makes screenshot
+	 * comparison useless for anything that emits particles.
+	 */
+	function seededRoll(seed: number): () => number {
+		if (!Number.isFinite(seed)) throw new Error("particleSeed must be finite.");
+		let state = seed >>> 0;
+		return () => {
+			state = (state + 0x6d2b79f5) >>> 0;
+			let drawn = Math.imul(state ^ (state >>> 15), 1 | state);
+			drawn = (drawn + Math.imul(drawn ^ (drawn >>> 7), 61 | drawn)) ^ drawn;
+			return ((drawn ^ (drawn >>> 14)) >>> 0) / 4294967296;
+		};
+	}
+
 	const query = new URLSearchParams(window.location.search);
 	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
 	const cameraHeightSource = query.get("cameraHeight");
@@ -73,6 +91,7 @@
 	 * Regional day fraction used to resolve lighting and fog. Absent means the harness keeps
 	 * the runtime's unauthored-lighting default instead of resolving the active region.
 	 */
+	const PARTICLE_SEED = query.get("particleSeed");
 	const TIME_OF_DAY = query.get("timeOfDay");
 	const DAY_GROUP = query.get("dayGroup");
 	const ISOLATE_AUTHORED_DYNAMICS =
@@ -824,6 +843,9 @@
 					contentSource,
 					contentSource,
 					contentSource,
+					PARTICLE_SEED === null
+						? undefined
+						: seededRoll(Number(PARTICLE_SEED)),
 				);
 				// Harness comparisons select their render policy explicitly and start from flat.
 				runtime.setFrameSettings(frameSettings);

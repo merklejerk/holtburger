@@ -1,4 +1,4 @@
-import { renderVector3 } from "../../assets/ac-frame";
+import { acVector3, renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import {
 	PARTICLE_TYPE,
@@ -16,21 +16,26 @@ function spawn(
 	overrides: Partial<ParticleSpawnConstants> = {},
 ): ParticleSpawnConstants {
 	return {
-		a: renderVector3([0, 0, 0]),
-		b: renderVector3([0, 0, 0]),
-		c: renderVector3([0, 0, 0]),
+		a: acVector3([0, 0, 0]),
+		b: acVector3([0, 0, 0]),
+		c: acVector3([0, 0, 0]),
 		finalScale: 1,
 		finalTranslucency: 1,
 		lifespan: 4,
-		offset: renderVector3([1, 2, 3]),
+		offset: acVector3([1, 2, 3]),
 		startScale: 1,
 		startTranslucency: 0,
 		...overrides,
 	};
 }
 
-/** Every formula is anchored on `parent + offset`; assert that once here. */
-const BASE: Vector3 = renderVector3([11, 22, 33]);
+/**
+ * Every formula is anchored on `parent + acToRender(offset)`.
+ *
+ * The authored offset `(1, 2, 3)` is AC's x/north/up, so it reaches render axes as `(1, 3, -2)`.
+ * Spelling that out once is what makes the axis-sensitive assertions below readable.
+ */
+const BASE: Vector3 = renderVector3([11, 23, 28]);
 
 describe("particlePosition", () => {
 	it("holds a Still particle at parent plus offset for all time", () => {
@@ -43,21 +48,22 @@ describe("particlePosition", () => {
 	});
 
 	it("advances a velocity particle linearly", () => {
-		const constants = spawn({ a: renderVector3([1, 2, 3]) });
+		const constants = spawn({ a: acVector3([1, 2, 3]) });
 
+		// AC displacement (1,2,3) + (1,2,3)*2 = (3,6,9), which reaches render axes as (3, 9, -6).
 		expect(
 			particlePosition(PARTICLE_TYPE.localVelocity, constants, PARENT, 2),
-		).toEqual(renderVector3([13, 26, 39]));
+		).toEqual(renderVector3([13, 29, 24]));
 		// The Global variant differs only in how its constants were built, never in arithmetic.
 		expect(
 			particlePosition(PARTICLE_TYPE.globalVelocity, constants, PARENT, 2),
-		).toEqual(renderVector3([13, 26, 39]));
+		).toEqual(renderVector3([13, 29, 24]));
 	});
 
 	it("applies half b t squared for every parabolic variant, spin included", () => {
 		const constants = spawn({
-			a: renderVector3([1, 0, 0]),
-			b: renderVector3([4, 0, 0]),
+			a: acVector3([1, 0, 0]),
+			b: acVector3([4, 0, 0]),
 		});
 		const expected = 11 + 1 * 2 + 0.5 * 4 * 4;
 
@@ -75,11 +81,11 @@ describe("particlePosition", () => {
 		}
 	});
 
-	it("uses sine on y but cosine on x and z for Swarm", () => {
+	it("uses sine on AC's y but cosine on AC's x and z for Swarm", () => {
 		// The asymmetry is authored, not a transcription slip: proving it stops a later "cleanup".
 		const constants = spawn({
-			b: renderVector3([1, 1, 1]),
-			c: renderVector3([1, 1, 1]),
+			b: acVector3([1, 1, 1]),
+			c: acVector3([1, 1, 1]),
 		});
 		const t = Math.PI / 2;
 
@@ -90,20 +96,22 @@ describe("particlePosition", () => {
 			t,
 		)!;
 
-		expect(position[0]).toBeCloseTo(11 + Math.cos(t));
-		expect(position[1]).toBeCloseTo(22 + Math.sin(t));
-		expect(position[2]).toBeCloseTo(33 + Math.cos(t));
-		// cos(pi/2) is 0 and sin(pi/2) is 1, so y separates from x and z.
-		expect(position[1] - 22).toBeCloseTo(1);
-		expect(position[0] - 11).toBeCloseTo(0);
+		// cos(pi/2) is 0 and sin(pi/2) is 1. The sine belongs to AC's y, which is the *north* axis,
+		// so it must land on render z — negated — and never on render y, which is up. Evaluating
+		// this against converted vectors put the sine on up instead.
+		expect(position[0]).toBeCloseTo(BASE[0] + Math.cos(t));
+		expect(position[1]).toBeCloseTo(BASE[1] + Math.cos(t));
+		expect(position[2]).toBeCloseTo(BASE[2] - Math.sin(t));
+		expect(position[2] - BASE[2]).toBeCloseTo(-1);
+		expect(position[1] - BASE[1]).toBeCloseTo(0);
 	});
 
 	it("reproduces both authored Explode quirks exactly", () => {
 		// a = (2, 99, 5): if any axis used its own `a` component, y would move with 99.
 		const constants = spawn({
-			a: renderVector3([2, 99, 5]),
-			b: renderVector3([0, 0, 0]),
-			c: renderVector3([1, 1, 1]),
+			a: acVector3([2, 99, 5]),
+			b: acVector3([0, 0, 0]),
+			c: acVector3([1, 1, 1]),
 		});
 
 		const position = particlePosition(
@@ -114,17 +122,20 @@ describe("particlePosition", () => {
 		)!;
 
 		// Every axis multiplies c by a.x (2), never by its own component.
-		expect(position[0]).toBeCloseTo(11 + 2);
-		expect(position[1]).toBeCloseTo(22 + 2);
-		// z additionally carries `+ a.z` (5) inside the parenthesis.
-		expect(position[2]).toBeCloseTo(33 + 2 + 5);
+		expect(position[0]).toBeCloseTo(BASE[0] + 2);
+		// AC's z is *up*, so its extra `+ a.z` (5) must reach render y. This is the assertion that
+		// fails when the law is evaluated against converted vectors: the upward push lands on the
+		// horizontal axis instead, which is a flame drifting sideways rather than rising.
+		expect(position[1]).toBeCloseTo(BASE[1] + 2 + 5);
+		// AC's y is north, which reaches render z negated and carries no extra term.
+		expect(position[2]).toBeCloseTo(BASE[2] - 2);
 	});
 
 	it("drives Implode's single cosine from a.x across all three axes", () => {
 		const constants = spawn({
-			a: renderVector3([1, 50, 50]),
-			b: renderVector3([0, 0, 0]),
-			c: renderVector3([1, 2, 3]),
+			a: acVector3([1, 50, 50]),
+			b: acVector3([0, 0, 0]),
+			c: acVector3([1, 2, 3]),
 		});
 		const wave = Math.cos(1 * 2);
 
@@ -135,9 +146,10 @@ describe("particlePosition", () => {
 			2,
 		)!;
 
-		expect(position[0]).toBeCloseTo(11 + wave * 1);
-		expect(position[1]).toBeCloseTo(22 + wave * 2);
-		expect(position[2]).toBeCloseTo(33 + wave * 3);
+		// Symmetric, so it survives the axis permutation: c reaches render axes as (1, 3, -2).
+		expect(position[0]).toBeCloseTo(BASE[0] + wave * 1);
+		expect(position[1]).toBeCloseTo(BASE[1] + wave * 3);
+		expect(position[2]).toBeCloseTo(BASE[2] - wave * 2);
 	});
 
 	it("reports a motion type shipped content never authors", () => {

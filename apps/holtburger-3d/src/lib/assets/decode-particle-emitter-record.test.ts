@@ -66,13 +66,14 @@ describe("decodeParticleEmitterRecord", () => {
 		expect(decoded.isPersistent).toBe(true);
 	});
 
-	it("converts authored vectors out of AC's Z-up axes", () => {
+	it("keeps motion constants in AC's authored axes", () => {
 		const decoded = decodeParticleMeshFixture();
 
-		// AC (0,0,1) is up; render up is +Y. An unconverted offset lands horizontally, which is
-		// exactly the "halo beside the lamp post instead of above it" failure.
-		expect(decoded.offsetDir).toEqual([0, 1, -0]);
-		expect(decoded.a).toEqual([1, 3, -2]);
+		// Deliberately unconverted. Swarm and Explode read axis meaning from the component index,
+		// so converting here would apply each rule to the wrong axis; `particlePosition` evaluates
+		// in AC and converts its displacement once instead.
+		expect(decoded.offsetDir).toEqual([0, 0, 1]);
+		expect(decoded.a).toEqual([1, 2, 3]);
 	});
 
 	it("carries an unshipped motion type as null rather than inventing one", () => {

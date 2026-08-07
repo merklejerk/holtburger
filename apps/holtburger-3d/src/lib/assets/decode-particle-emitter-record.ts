@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { DatAssetId } from "../game/game-types";
-import { acVectorToRender, type RenderVector3 } from "./ac-frame";
+import { acVector3, type AcVector3 } from "./ac-frame";
 
 const HEADER_LENGTH = 12;
 const MAGIC = "HBPE";
@@ -66,10 +66,17 @@ export type DecodedParticleEmitterInfo = Omit<
 	readonly id: DatAssetId;
 	readonly hwGfxObjId: DatAssetId;
 	/** Motion and offset vectors, already converted out of AC's Z-up axes. */
-	readonly a: RenderVector3;
-	readonly b: RenderVector3;
-	readonly c: RenderVector3;
-	readonly offsetDir: RenderVector3;
+	/**
+	 * Motion constants, deliberately left in AC's authored axes.
+	 *
+	 * The Swarm and Explode laws treat their components asymmetrically, so their axis meaning lives
+	 * in the component index and cannot survive a componentwise conversion here. `particlePosition`
+	 * evaluates in this space and converts the resulting displacement once.
+	 */
+	readonly a: AcVector3;
+	readonly b: AcVector3;
+	readonly c: AcVector3;
+	readonly offsetDir: AcVector3;
 };
 
 /** Decode and validate one typed particle-emitter host response. */
@@ -131,10 +138,10 @@ export function decodeParticleEmitterRecord(
 		...rest,
 		// Motion and offset vectors are authored in AC's Z-up axes; convert once here so no
 		// consumer, CPU or GPU, has to remember the convention.
-		a: acVectorToRender(manifest.a),
-		b: acVectorToRender(manifest.b),
-		c: acVectorToRender(manifest.c),
-		offsetDir: acVectorToRender(manifest.offsetDir),
+		a: acVector3(manifest.a),
+		b: acVector3(manifest.b),
+		c: acVector3(manifest.c),
+		offsetDir: acVector3(manifest.offsetDir),
 		hwGfxObjId: hwGfxObjId as DatAssetId,
 		id: emitterInfoId as DatAssetId,
 	};

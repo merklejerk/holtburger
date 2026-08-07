@@ -392,6 +392,14 @@ function parseArgs(args) {
 			case "--execute-portal":
 				parsed.executePortal = true;
 				break;
+			case "--particle-seed": {
+				const value = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(value)) {
+					throw new Error("--particle-seed must be a finite number.");
+				}
+				parsed.particleSeed = value;
+				break;
+			}
 			case "--time-of-day": {
 				const value = Number(requireValue(args, ++index, arg));
 				if (!Number.isFinite(value) || value < 0 || value >= 1) {
@@ -663,6 +671,8 @@ Options:
   --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
   --execute-portal
                          Execute the complete planned graph through production GPU passes.
+  --particle-seed <n>   Seed particle emission randomness so runs repeat exactly. Required for any
+                         screenshot comparison of a scene containing particles.
   --time-of-day <0..1>  Resolve region lighting and fog at this day fraction.
   --day-group <index>   Resolve the sky and lighting with an explicit day group instead of the
                          harness default of group 0. Shipped groups run 0-19; 3, 7, 9 and 15-19
@@ -1229,7 +1239,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		options.dayGroup === null
 			? ""
 			: `&dayGroup=${encodeURIComponent(options.dayGroup)}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}${dayGroup}`;
+	const particleSeed =
+		options.particleSeed === undefined
+			? ""
+			: `&particleSeed=${encodeURIComponent(options.particleSeed)}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,

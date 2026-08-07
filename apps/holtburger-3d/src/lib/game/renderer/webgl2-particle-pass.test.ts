@@ -1,4 +1,4 @@
-import { renderVector3 } from "../../assets/ac-frame";
+import { acVector3, renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { ParticleDrawCohort } from "../systems/particle-system";
 import type { DatAssetId } from "../game-types";
@@ -18,14 +18,14 @@ function cohort(
 		hwGfxObjId,
 		motionType,
 		particles: Array.from({ length: particleCount }, () => ({
-			a: renderVector3([1, 0, 0]),
-			b: renderVector3([0, 0, 0]),
+			a: acVector3([1, 0, 0]),
+			b: acVector3([0, 0, 0]),
 			birthTime: 0,
-			c: renderVector3([0, 0, 0]),
+			c: acVector3([0, 0, 0]),
 			finalScale: 1,
 			finalTranslucency: 1,
 			lifespan: 4,
-			offset: renderVector3([0, 0, 0]),
+			offset: acVector3([0, 0, 0]),
 			origin: renderVector3([0, 0, 0]),
 			startScale: 1,
 			startTranslucency: 0,

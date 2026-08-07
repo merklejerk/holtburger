@@ -1,5 +1,9 @@
-import type { RenderVector3, StableVector3 } from "../../assets/ac-frame";
-import { renderVector3, stableVector3 } from "../../assets/ac-frame";
+import type {
+	AcVector3,
+	RenderVector3,
+	StableVector3,
+} from "../../assets/ac-frame";
+import { acVector3, renderVector3, stableVector3 } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
@@ -606,44 +610,38 @@ export class ParticleSystem {
 	 * which is the same particle retail would produce from a zero-length projection.
 	 */
 	#spawnOffset(
-		offsetDir: Vector3,
+		offsetDir: AcVector3,
 		minOffset: number,
 		maxOffset: number,
-	): Vector3 {
+	): AcVector3 {
 		const roll = this.#roll;
-		// A random direction has no authored space; it is generated directly in render axes.
-		const random = renderVector3([
-			roll() * 2 - 1,
-			roll() * 2 - 1,
-			roll() * 2 - 1,
-		]);
+		// An isotropic random direction has no space of its own, but it is projected against the
+		// authored `offset_dir`, so it is generated in AC axes to match it.
+		const random = acVector3([roll() * 2 - 1, roll() * 2 - 1, roll() * 2 - 1]);
 		const dirLength = Math.hypot(...offsetDir);
 		let perpendicular = random;
 		if (dirLength > 0) {
-			const unit = renderVector3([
+			const unit = acVector3([
 				offsetDir[0] / dirLength,
 				offsetDir[1] / dirLength,
 				offsetDir[2] / dirLength,
 			]);
 			const along =
 				random[0] * unit[0] + random[1] * unit[1] + random[2] * unit[2];
-			perpendicular = renderVector3([
+			perpendicular = acVector3([
 				random[0] - along * unit[0],
 				random[1] - along * unit[1],
 				random[2] - along * unit[2],
 			]);
 		}
 		const length = Math.hypot(...perpendicular);
-		if (length === 0) return renderVector3([0, 0, 0]);
+		if (length === 0) return acVector3([0, 0, 0]);
 		const magnitude = minOffset + roll() * (maxOffset - minOffset);
 		return scaledVector(perpendicular, magnitude / length);
 	}
 }
 
-function scaledVector(vector: Vector3, scale: number): Vector3 {
-	return renderVector3([
-		vector[0] * scale,
-		vector[1] * scale,
-		vector[2] * scale,
-	]);
+/** Scale an authored motion constant, which never leaves AC axes before evaluation. */
+function scaledVector(vector: AcVector3, scale: number): AcVector3 {
+	return acVector3([vector[0] * scale, vector[1] * scale, vector[2] * scale]);
 }

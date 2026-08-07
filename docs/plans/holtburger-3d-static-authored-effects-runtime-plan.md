@@ -1888,6 +1888,62 @@ differ by 1,971 pixels (0.243%) — more than the 1,872 (0.231%) between before 
 Screenshots confirm particles still render and nothing structurally broke; they cannot resolve a
 change of this size. Seeding the injected roll for the harness is recorded as debt.
 
+##### Asymmetric motion laws were evaluated against converted vectors (finding 2026-08-07)
+
+Reported from play: a torch flame streamed sideways instead of rising. The conversion boundary was
+correct; the defect was downstream of it.
+
+`acVectorToRender` maps `(x, y, z)_AC → (x, z, -y)_render`, so `render[1]` is AC's **up** and
+`render[2]` is AC's north, negated. The motion laws were transcribed literally from
+`Particle::Update`, which indexes **AC** components — and the comments said so, naming AC axes over
+render-space indices.
+
+Symmetric arms survive this. `still`, the velocities, the parabolics and `implode` apply an identical
+operation to all three components, which commutes with the permutation because the negation on
+`render[2]` cancels through both sides. Converting at decode was sufficient for them.
+
+The two asymmetric arms did not:
+
+| Arm | Retail means | Was applied to | Effect |
+| --- | --- | --- | --- |
+| `swarm` | `sin` on AC y, `cos` on AC z | `sin` on render y (**up**) | sine and cosine swapped between up and north |
+| `explode` | extra `+a.z` on AC z (**up**) | render index 2 (**north**), sign-flipped | the upward push became a sideways push |
+
+The second row is the reported flame. Census over all 2,051 shipped emitters shows this is not an
+edge case: `swarm` 510 and `explode` 418, **928 emitters or 45% of shipped content**, and the two
+most-authored laws after `still`. Both evaluators carried it identically — the CPU reference and the
+GPU vertex stage.
+
+Landed:
+
+- `AcVector3` joins `RenderVector3` and `StableVector3` as a third disjoint brand. `acVectorToRender`
+  now accepts only an `AcVector3`, so authored data cannot reach a render-space consumer unconverted,
+  and converted data cannot reach an AC-space formula.
+- `a`, `b`, `c` and `offsetDir` are no longer converted at decode. They are authored motion
+  constants, and the type now says so.
+- `particlePosition` splits into `acDisplacement`, which evaluates in AC axes exactly as retail does,
+  and one conversion of the resulting displacement. `parentOrigin` is added after. The whole motion
+  path now contains exactly one axis conversion.
+- The vertex stage mirrors this with `acDisplacement` plus `acToRender`, so the instance attributes
+  carry AC-space constants and the shader converts once.
+- `#spawnOffset` moves to AC space with them; its perpendicular projection is rotation-equivariant,
+  so it is correct in either space provided it is consistent with `offset_dir`, which it now is.
+
+Caught during the change: removing the shared `base` term silently dropped the spawn `offset` from
+three arms in both evaluators. The existing formula tests failed immediately, which is the value of
+having pinned the arithmetic before touching it.
+
+The harness gained `--particle-seed`, which seeds emission randomness through a new optional `roll`
+dependency on `GameRuntimeDependencies` (production still uses `Math.random`). Two runs of an
+identical build fall from 1,971 differing pixels to 948. The residual is frame-timing rather than
+spawn, since particle ages depend on wall-clock deltas; fully determinising that needs a fixed
+harness timestep and is recorded as debt.
+
+Verification honesty: the DA55 scene has no visible flame, and the reported torch view was not
+reproduced in the harness. The evidence for this change is the formula tests, which assert the axis
+semantics directly — that Explode's extra term lands on render **up**, and that Swarm's sine lands on
+north and never on up. Visual confirmation of the reported flame remains outstanding.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.

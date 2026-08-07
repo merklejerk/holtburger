@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { DatAssetId } from "../game/game-types";
 import type { PreparedBehaviorCommand } from "../game/behavior/prepared-behavior-command";
 import { Vec3 } from "../game/math/types";
-import { acVectorToRender } from "./ac-frame";
+import { acVector3, acVectorToRender } from "./ac-frame";
 
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
@@ -194,7 +194,7 @@ export function decodeBehaviorCommand(
 				emitterId: payload.emitterId,
 				emitterInfoId: payload.emitterInfoId as DatAssetId,
 				kind: "create-particle",
-				offsetOrigin: acVectorToRender(payload.offsetOrigin),
+				offsetOrigin: acVectorToRender(acVector3(payload.offsetOrigin)),
 				partIndex: payload.partIndex,
 			};
 		case "call-pes":

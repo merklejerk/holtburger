@@ -1,4 +1,4 @@
-import { acVectorToRender } from "../../assets/ac-frame";
+import { acVector3, acVectorToRender } from "../../assets/ac-frame";
 import type { DecodedPhysicsScript } from "../../assets/decode-physics-script-record";
 import type { DatAssetId } from "../game-types";
 import type { PreparedBehaviorCommand } from "./prepared-behavior-command";
@@ -84,7 +84,7 @@ function createParticle(
 		emitterId: 0,
 		emitterInfoId: emitterInfoId as DatAssetId,
 		kind: "create-particle",
-		offsetOrigin: acVectorToRender(offsetOrigin),
+		offsetOrigin: acVectorToRender(acVector3(offsetOrigin)),
 		partIndex,
 	};
 }

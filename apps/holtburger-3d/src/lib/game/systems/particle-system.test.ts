@@ -1,4 +1,4 @@
-import { renderVector3, stableVector3 } from "../../assets/ac-frame";
+import { acVector3, renderVector3, stableVector3 } from "../../assets/ac-frame";
 import type { StableVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
@@ -21,10 +21,10 @@ function prepared(
 	overrides: Partial<DecodedParticleEmitterInfo> = {},
 ): PreparedParticleEmitter {
 	const info: DecodedParticleEmitterInfo = {
-		a: renderVector3([1, 0, 0]),
-		b: renderVector3([0, 0, 0]),
+		a: acVector3([1, 0, 0]),
+		b: acVector3([0, 0, 0]),
 		birthrateSeconds: 1,
-		c: renderVector3([0, 0, 0]),
+		c: acVector3([0, 0, 0]),
 		emitsPerMeter: false,
 		emitsPerSecond: true,
 		finalScale: 1,
@@ -46,7 +46,7 @@ function prepared(
 		minC: 1,
 		minOffset: 0,
 		motionType: 2,
-		offsetDir: renderVector3([0, 0, 1]),
+		offsetDir: acVector3([0, 0, 1]),
 		scaleRand: 0,
 		startScale: 1,
 		startTrans: 0,
@@ -255,7 +255,7 @@ describe("ParticleSystem", () => {
 		const left = runtime({ stableOriginOf: moving });
 		left.create(
 			TARGET,
-			prepared({ a: renderVector3([0, 0, 0]), initialParticles: 1 }),
+			prepared({ a: acVector3([0, 0, 0]), initialParticles: 1 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -265,7 +265,7 @@ describe("ParticleSystem", () => {
 		following.create(
 			TARGET,
 			prepared({
-				a: renderVector3([0, 0, 0]),
+				a: acVector3([0, 0, 0]),
 				followsParent: true,
 				initialParticles: 1,
 			}),

@@ -28,15 +28,39 @@ export type RenderVector3 = readonly [number, number, number] & {
 	readonly [renderSpace]: true;
 };
 
+declare const acSpace: unique symbol;
+
+/**
+ * A three-component vector still in **AC's authored axes**, which are Z-up with +Y north.
+ *
+ * Retained as a distinct type because some authored maths cannot simply be converted componentwise
+ * on the way in. A formula that treats its components asymmetrically — a sine on one axis, an extra
+ * term on another — carries AC's axis meaning in the component *index*, so evaluating it against
+ * converted vectors silently applies each rule to the wrong axis. Such formulas must be evaluated in
+ * this space and their result converted once, which is only safe if the space is visible in the type.
+ */
+export type AcVector3 = readonly [number, number, number] & {
+	readonly [acSpace]: true;
+};
+
+/**
+ * Assert that a vector is still in AC's authored axes.
+ *
+ * For values read straight out of the DAT, before any conversion.
+ */
+export function acVector3(
+	vector: readonly [number, number, number],
+): AcVector3 {
+	return vector as AcVector3;
+}
+
 /**
  * Convert one authored AC vector into the app's render axes.
  *
  * The mapping is `(x, z, -y)`, identical to the rotation conversion in {@link acFrameTransform}.
  * Every authored direction, offset, velocity, or acceleration goes through this.
  */
-export function acVectorToRender(
-	vector: readonly [number, number, number],
-): RenderVector3 {
+export function acVectorToRender(vector: AcVector3): RenderVector3 {
 	return [vector[0], vector[2], -vector[1]] as unknown as RenderVector3;
 }
 

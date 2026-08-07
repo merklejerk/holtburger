@@ -73,22 +73,30 @@ uniform int uMotionType;
 out vec2 vTextureCoordinate;
 out float vTranslucency;
 
-vec3 evaluatePosition(vec3 base, float t) {
+/**
+ * Displacement from the parent origin at elapsed time t, in AC's authored axes.
+ *
+ * Component meaning here is AC's: x, then north, then **up**. The instance attributes are delivered
+ * unconverted for exactly this reason — Swarm and Explode read axis meaning from the component, so
+ * evaluating them against converted vectors applies each rule to the wrong axis.
+ */
+vec3 acDisplacement(vec3 offset, float t) {
 	// Formula families, in the same order and with the same quirks as the CPU evaluator.
 	if (uMotionType == ${PARTICLE_TYPE.still}) {
-		return base;
+		return offset;
 	}
 	if (uMotionType == ${PARTICLE_TYPE.localVelocity} || uMotionType == ${PARTICLE_TYPE.globalVelocity}) {
-		return base + aMotionA * t;
+		return offset + aMotionA * t;
 	}
 	if (uMotionType == ${PARTICLE_TYPE.parabolicLvga} || uMotionType == ${PARTICLE_TYPE.parabolicLvla}
 		|| uMotionType == ${PARTICLE_TYPE.parabolicGvga} || uMotionType == ${PARTICLE_TYPE.parabolicLvgaGr}
 		|| uMotionType == ${PARTICLE_TYPE.parabolicLvlaLr} || uMotionType == ${PARTICLE_TYPE.parabolicGvgaGr}) {
-		return base + aMotionA * t + 0.5 * aMotionB * t * t;
+		return offset + aMotionA * t + 0.5 * aMotionB * t * t;
 	}
 	if (uMotionType == ${PARTICLE_TYPE.swarm}) {
-		// sin on y, cos on x and z. Authored asymmetry; do not make this uniform.
-		return base + vec3(
+		// sin on AC's y, cos on AC's x and z. Authored asymmetry; do not make this uniform, and do
+		// not evaluate it against converted vectors, which swaps which axis gets the sine.
+		return offset + vec3(
 			cos(aMotionB.x * t) * aMotionC.x + aMotionA.x * t,
 			sin(aMotionB.y * t) * aMotionC.y + aMotionA.y * t,
 			cos(aMotionB.z * t) * aMotionC.z + aMotionA.z * t
@@ -96,8 +104,8 @@ vec3 evaluatePosition(vec3 base, float t) {
 	}
 	if (uMotionType == ${PARTICLE_TYPE.explode}) {
 		// Both authored Explode quirks: every axis multiplies by aMotionA.x rather than its own
-		// component, and z carries an extra + aMotionA.z inside the parenthesis.
-		return base + vec3(
+		// component, and AC's z -- up -- carries an extra + aMotionA.z inside the parenthesis.
+		return offset + vec3(
 			(aMotionB.x * t + aMotionC.x * aMotionA.x) * t,
 			(aMotionB.y * t + aMotionC.y * aMotionA.x) * t,
 			(aMotionB.z * t + aMotionC.z * aMotionA.x + aMotionA.z) * t
@@ -106,9 +114,14 @@ vec3 evaluatePosition(vec3 base, float t) {
 	if (uMotionType == ${PARTICLE_TYPE.implode}) {
 		// One scalar cosine driven by aMotionA.x, applied to all three axes.
 		float wave = cos(aMotionA.x * t);
-		return base + wave * aMotionC + aMotionB * t * t;
+		return offset + wave * aMotionC + aMotionB * t * t;
 	}
-	return base;
+	return offset;
+}
+
+/** AC authors Z-up with +Y north; the renderer is Y-up with -Z north. */
+vec3 acToRender(vec3 v) {
+	return vec3(v.x, v.z, -v.y);
 }
 
 /** Basis that turns the particle mesh to face the viewer, or the authored identity. */
@@ -142,8 +155,10 @@ void main() {
 	// Clamped, matching retail: a particle past its lifespan holds its final appearance.
 	float progress = lifespan > 0.0 ? min(elapsed / lifespan, 1.0) : 1.0;
 
-	vec3 base = aOriginBirth.xyz + aOffsetLife.xyz;
-	vec3 worldPosition = evaluatePosition(base, elapsed);
+	// The origin is already anchor-relative; only the authored displacement needs converting, and
+	// it is converted exactly once here.
+	vec3 worldPosition =
+		aOriginBirth.xyz + acToRender(acDisplacement(aOffsetLife.xyz, elapsed));
 	float scale = mix(aAppearance.x, aAppearance.y, progress);
 
 	// The mesh's authored plane faces its own +Z after conversion, so the basis maps local x/y to

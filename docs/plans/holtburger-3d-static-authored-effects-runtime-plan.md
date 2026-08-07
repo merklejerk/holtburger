@@ -1707,9 +1707,18 @@ by value rather than by when it appeared.
       largest structural item. A script-only resident publishes no presentation sample, so effect
       state it authors is written and never read; it is also per-frame streamed for visuals it does
       not have. 43 `Scale` hooks exist archive-wide.
-- [ ] **Stop embedding `indexStart`/`indexCount` in `batchKey`.** Two ranges sharing a binding cannot
-      cohort together because their extents differ, so the key defeats the merging this phase's
-      batch-key work enabled. The next batching win after `renderSide` and `authoredCullMode`.
+- [x] **Retracted: `indexStart`/`indexCount` belong in `batchKey`.** Recorded as debt on the
+      assumption that they split cohorts needlessly, by analogy with `renderSide` and
+      `authoredCullMode`. Checking the draw call rather than reasoning from the analogy:
+      `drawElementsInstanced` takes **one** `indexStart` and `indexCount` for the entire call
+      (`webgl2-renderer.ts:2561`), so every instance in a cohort must share one index range. Two
+      draw units with different extents are different geometry and cannot merge by definition.
+
+      The range is also load-bearing rather than merely harmless. A part can still hold two ranges
+      with the same `bindingId` when its triangle stream interleaves materials — the systematic
+      cause was the `renderSide` alternation, but interleaving remains possible. Dropping the range
+      from the key would collide those into one cohort and draw the wrong triangles for some
+      instances. No change made, and the item is closed rather than carried.
 - [x] **Dropped: chasing byte-identical harness captures was the wrong problem.** Retired on review
       rather than finished, because the premise was wrong. Neither particle verification this
       session was actually blocked by run-to-run noise. The billboard fix diffed to **265 pixels at

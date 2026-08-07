@@ -16,6 +16,7 @@ import type { DatAssetId } from "../game-types";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { SceneNodeId } from "../scene";
 import {
+	PARTICLE_TYPE,
 	particleLifeProgress,
 	particlePosition,
 	rotatedSpawnConstants,
@@ -60,6 +61,12 @@ export interface ParticleSystemDependencies {
 	/** Current runtime clock, needed because commands arrive mid-dispatch. */
 	readonly clock: () => number;
 }
+
+/**
+ * Shortest vector retail's `normalize_check_small` will normalize (acclient.c:137456); anything
+ * shorter is zeroed instead of divided by.
+ */
+const MINIMUM_NORMALIZABLE_LENGTH = 0.00019999999;
 
 /** A pooled record the system fills in place; consumers still see the readonly contract. */
 type MutableParticleInstanceRecord = {
@@ -624,6 +631,19 @@ export class ParticleSystem {
 		const rotated = rotatedSpawnConstants(info.motionType);
 		const inFrame = (vector: AcVector3, applies: boolean): AcVector3 =>
 			applies ? rotateAcVector(rotation, vector) : vector;
+		// Retail rotates `offset` for every type, `Still` included, so this is unconditional. It is
+		// resolved before `c` because two motion types derive `c` from the rotated offset.
+		const derived = this.#deriveOffsetAndC(
+			info.motionType,
+			inFrame(
+				this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
+				true,
+			),
+			inFrame(
+				scaledVector(info.c, rolled(roll, info.minC, info.maxC - info.minC)),
+				rotated.c,
+			),
+		);
 		instance.particles.push({
 			birthTime: timeSeconds,
 			// A following emitter resolves its origin live every frame, so freezing one here would
@@ -641,18 +661,11 @@ export class ParticleSystem {
 					scaledVector(info.b, rolled(roll, info.minB, info.maxB - info.minB)),
 					rotated.b,
 				),
-				c: inFrame(
-					scaledVector(info.c, rolled(roll, info.minC, info.maxC - info.minC)),
-					rotated.c,
-				),
+				c: derived.c,
 				finalScale: info.finalScale,
 				finalTranslucency: info.finalTrans,
 				lifespan: Math.max(0, rolled(roll, info.lifespan, info.lifespanRand)),
-				// Retail rotates `offset` for every type, `Still` included, so this is unconditional.
-				offset: inFrame(
-					this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
-					true,
-				),
+				offset: derived.offset,
 				startScale: info.startScale,
 				startTranslucency: info.startTrans,
 			},
@@ -660,6 +673,66 @@ export class ParticleSystem {
 		instance.emittedCount += 1;
 		this.#emittedTotal += 1;
 		instance.lastEmissionTime = timeSeconds;
+	}
+
+	/**
+	 * `offset` and `c` at spawn, which two motion types derive rather than carry
+	 * (`Particle::Init`, acclient.c:317826-317864).
+	 *
+	 * Returned together because for `Implode` they are the same vector, and because both derivations
+	 * read the already-rotated offset. Every other type passes both through untouched.
+	 */
+	#deriveOffsetAndC(
+		motionType: number | null,
+		offset: AcVector3,
+		c: AcVector3,
+	): { readonly c: AcVector3; readonly offset: AcVector3 } {
+		switch (motionType) {
+			case PARTICLE_TYPE.explode:
+				return { c: this.#explodeDirection(c), offset };
+
+			case PARTICLE_TYPE.implode: {
+				// Retail scales the offset by `c` in place and then copies it into `c`, so the two end
+				// up identical. Reading the rotated offset is how implode inherits the owner's frame
+				// without appearing in the rotation table.
+				const scaled = acVector3([
+					offset[0] * c[0],
+					offset[1] * c[1],
+					offset[2] * c[2],
+				]);
+				return { c: scaled, offset: scaled };
+			}
+
+			default:
+				return { c, offset };
+		}
+	}
+
+	/**
+	 * A random direction for `Explode`, weighted by the authored `c` and then normalized
+	 * (acclient.c:317826-317847).
+	 *
+	 * The authored magnitude is **discarded**: `c` leaves here as a unit vector or as zero, so the
+	 * authored components only bias which directions are likely. Feeding authored `c` straight
+	 * through instead fires every particle of a burst along one direction rather than spraying.
+	 *
+	 * Both angles are rolled across the full circle, which is not a uniform distribution over the
+	 * sphere — it concentrates toward the poles. That is retail's sampling and content was authored
+	 * against it, so it is transcribed rather than corrected.
+	 */
+	#explodeDirection(weights: AcVector3): AcVector3 {
+		const roll = this.#roll;
+		const azimuth = roll() * 2 * Math.PI - Math.PI;
+		const elevation = roll() * 2 * Math.PI - Math.PI;
+		const equator = Math.cos(elevation);
+		const x = Math.cos(azimuth) * weights[0] * equator;
+		const y = Math.sin(azimuth) * weights[1] * equator;
+		const z = Math.sin(elevation) * weights[2];
+		const magnitude = Math.hypot(x, y, z);
+		// Retail's `normalize_check_small` refuses anything shorter than this and zeroes the vector
+		// rather than dividing by it (acclient.c:137456).
+		if (magnitude < MINIMUM_NORMALIZABLE_LENGTH) return acVector3([0, 0, 0]);
+		return acVector3([x / magnitude, y / magnitude, z / magnitude]);
 	}
 
 	/**

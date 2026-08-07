@@ -715,6 +715,76 @@ describe("ParticleSystem", () => {
 		expect(rotatedX).not.toBeCloseTo(authoredX);
 	});
 
+	/**
+	 * `Particle::Init` replaces Explode's authored `c` with a random unit direction, discarding the
+	 * authored magnitude. Passing authored `c` through instead fires an entire burst along one
+	 * direction rather than spraying.
+	 */
+	it("gives each exploding particle its own unit direction", () => {
+		let index = 0;
+		const particles = runtime({
+			// A varying roll, so successive particles draw different angles.
+			roll: () => {
+				index += 1;
+				return (index % 7) / 7;
+			},
+		});
+		particles.create(
+			TARGET,
+			prepared({
+				c: acVector3([1000, 1000, 1000]),
+				initialParticles: 4,
+				motionType: 6,
+			}),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const spawned = particles.collectCohorts()[0]!.particles;
+		for (const record of spawned) {
+			const magnitude = Math.hypot(...record.c);
+			// Unit or zero; the authored 1000 is gone either way.
+			expect(magnitude === 0 || Math.abs(magnitude - 1) < 1e-9).toBe(true);
+		}
+		const distinct = new Set(spawned.map((record) => record.c.join(",")));
+		expect(distinct.size).toBeGreaterThan(1);
+	});
+
+	/**
+	 * Implode scales its offset by authored `c` and then copies the result into `c`, so the two
+	 * leave spawn identical and both carry the owner's frame through the offset.
+	 */
+	it("derives an imploding particle's c from its own spawn offset", () => {
+		const particles = runtime({
+			roll: () => 0.75,
+			sceneRotationOf: () => YAWED_QUARTER_TURN,
+		});
+		particles.create(
+			TARGET,
+			prepared({
+				c: acVector3([2, 2, 2]),
+				initialParticles: 1,
+				maxC: 1,
+				maxOffset: 5,
+				minC: 1,
+				minOffset: 5,
+				motionType: 7,
+				offsetDir: acVector3([0, 0, 1]),
+			}),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const record = particles.collectCohorts()[0]!.particles[0]!;
+		expect(record.c).toEqual(record.offset);
+		// Authored c of 2 doubles the offset it was derived from, so neither is the raw offset.
+		expect(Math.hypot(...record.c)).toBeCloseTo(2 * 5);
+	});
+
 	it("carries spawn constants into cohorts, never evaluated positions", () => {
 		const particles = runtime();
 		particles.create(

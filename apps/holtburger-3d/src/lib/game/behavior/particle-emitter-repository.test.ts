@@ -58,6 +58,41 @@ class FixtureSource implements ParticleEmitterSource {
 }
 
 describe("emitterEnvelopeRadius", () => {
+	/**
+	 * Explode's `c` is replaced at spawn by a unit direction, so the authored magnitude never
+	 * reaches the trajectory and must not reach the bound either.
+	 */
+	it("ignores the authored c magnitude for an exploding emitter", () => {
+		const modest = emitterEnvelopeRadius(
+			emitter({
+				a: acVector3([1, 0, 0]),
+				c: acVector3([1, 0, 0]),
+				motionType: 6,
+			}),
+		);
+		const enormous = emitterEnvelopeRadius(
+			emitter({
+				a: acVector3([1, 0, 0]),
+				c: acVector3([1000, 0, 0]),
+				motionType: 6,
+			}),
+		);
+
+		expect(enormous).toBe(modest);
+	});
+
+	/** Implode derives `c` from the spawn offset, so its reach scales with the offset. */
+	it("scales an imploding emitter's bound by its spawn offset", () => {
+		const near = emitterEnvelopeRadius(
+			emitter({ c: acVector3([1, 0, 0]), maxOffset: 1, motionType: 7 }),
+		);
+		const far = emitterEnvelopeRadius(
+			emitter({ c: acVector3([1, 0, 0]), maxOffset: 10, motionType: 7 }),
+		);
+
+		expect(far).toBeGreaterThan(near);
+	});
+
 	it("bounds a purely linear emitter by velocity times lifespan", () => {
 		// 3 m/s for 2 s, plus the particle's own unit scale.
 		expect(

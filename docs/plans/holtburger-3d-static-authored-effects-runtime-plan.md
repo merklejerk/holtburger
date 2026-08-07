@@ -2809,7 +2809,18 @@ constant against the decompile table above; a yaw-90° owner turns a `LocalVeloc
 trajectory by 90° while leaving a `GlobalVelocity` one untouched.
 </details>
 
-### Phase 9.3 — `Explode` randomizes `c` onto the unit sphere
+### Phase 9.3 — `Explode` randomizes `c` onto the unit sphere — **done**
+
+`normalize_check_small` (acclient.c:137456) zeroes anything shorter than `0.00019999999` and
+otherwise normalizes, so `c` leaves spawn as a unit vector or as zero and the authored components
+only bias which directions are likely. Both angles are rolled across the full circle, which is not
+uniform over the sphere; that is retail's sampling and is transcribed rather than corrected.
+
+`motionReach`'s explode arm dropped the authored `|c|` factor accordingly. Neither the explode nor
+the implode arm had any test before this change, which is why the arithmetic could be wrong without
+anything failing; both are covered now.
+
+<details><summary>Original scoping</summary>
 
 `Init` replaces authored `c` with two `RollDice(-π, π)` angles projected to a direction, then
 `normalize_check_small`, zeroing it when degenerate. The authored magnitude is **discarded**: `c`
@@ -2821,14 +2832,25 @@ which is no longer the reach — the true magnitude is 1. Update it and its test
 
 Acceptance: two particles from one explode emitter spawn along different directions; every spawned
 `c` has magnitude 1 or 0; the envelope test uses the unit magnitude.
+</details>
 
-### Phase 9.4 — `Implode` derives `c` from the rotated offset
+### Phase 9.4 — `Implode` derives `c` from the rotated offset — **done**
+
+Read more closely than the scoping did: retail scales `offset` by `c` **in place** and then copies it
+into `c`, so both leave spawn as the same vector. The scoping described only the `c` half. That made
+`offset` and `c` interdependent at spawn, so they are derived together by one method returning both
+rather than by two that would have to agree on ordering.
+
+Implode's reach therefore scales with `maxOffset`, which `motionReach` now takes as a parameter.
+
+<details><summary>Original scoping</summary>
 
 `Init` sets `c = offset * c` componentwise, *after* `offset` has been rotated, so implode inherits
 the frame indirectly rather than through the rotation table. Ordering matters: this must read the
 rotated offset, not the authored one.
 
 Acceptance: an implode emitter on a rotated owner produces a `c` consistent with its rotated offset.
+</details>
 
 ### Risks
 

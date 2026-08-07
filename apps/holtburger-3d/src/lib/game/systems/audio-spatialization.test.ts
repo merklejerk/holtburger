@@ -49,6 +49,28 @@ describe("placeSpatialAudio", () => {
 		).toBeCloseTo(0);
 	});
 
+	it("clamps an authored volume above one instead of overdriving the device", () => {
+		// 45 shipped candidates author a volume above 1.0, the loudest at 10.0. Retail clamps after
+		// attenuation, so the extra volume buys range rather than near-field loudness.
+		expect(
+			placeSpatialAudio(sceneVector3([1, 0, 0]), LISTENER, RIGHT, 10)!.gain,
+		).toBe(1);
+		expect(
+			placeSpatialAudio(sceneVector3([10, 0, 0]), LISTENER, RIGHT, 10)!.gain,
+		).toBe(1);
+		// Far enough out that the falloff has taken it back below the ceiling.
+		expect(
+			placeSpatialAudio(sceneVector3([100, 0, 0]), LISTENER, RIGHT, 10)!.gain,
+		).toBeCloseTo(0.025);
+		// ...and it still carries far past where a volume of 1 would have cut off.
+		expect(
+			placeSpatialAudio(sceneVector3([200, 0, 0]), LISTENER, RIGHT, 10),
+		).not.toBeNull();
+		expect(
+			placeSpatialAudio(sceneVector3([200, 0, 0]), LISTENER, RIGHT, 1),
+		).toBeNull();
+	});
+
 	it("refuses to place a sound below retail's audible floor", () => {
 		// Well past the ~89 m cutoff at full volume, where retail does not play at all.
 		expect(

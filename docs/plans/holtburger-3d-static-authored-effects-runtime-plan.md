@@ -2127,11 +2127,28 @@ exercise the audio path (`applyHarnessCamera` now mirrors the Explorer coordinat
 camera height of 600 m puts the listener far outside the audible range of anything, which invalidated
 the first round of measurements.
 
-**Open question, not resolved.** Authored volumes observed in the archive include `0.01`. Under
-retail's inverse-square with a −50 dB floor that is audible only within about 9 m, which seems
-implausibly quiet for ambient content. Either the volume field is being read from the wrong offset,
-or retail's volume is not a linear gain. Worth settling before trusting `inaudibleCount` as a measure
-of anything but geometry.
+**Volume question, resolved — and it found a different defect.** The worry was that observed volumes
+of `0.01` implied an implausible 9 m audible range, so either the field was mis-read or volume was
+not a linear gain. Both were wrong, and the worry came from a five-sample probe at one location.
+
+Checked against ground truth rather than reasoned about. The decode matches ACE's `SoundTableData`
+field for field (`SoundId`, `Priority`, `Probability`, `Volume`). Every constant is confirmed in the
+decompile: `SoundManager::GetAttenuation` uses a flat radius of 5 (acclient.c:366432),
+`VOL_MIN_DIST_SQ_13 = 5.0 * 5.0` (acclient.c:758618), and `SoundManager::VOL_MIN = -50` dB
+(acclient.c:44588). A census of all 4,185 authored candidates puts the **median volume at 1.0**, so
+89 m is the typical range and `0.01` was an outlier, not the norm.
+
+What the census did find is that **45 candidates author a volume above 1.0, the loudest at 10.0**,
+and retail clamps after attenuation (`if (v4 > 1.0) v4 = 1.0`). We did not clamp at all, so those
+reached the device as up to a tenfold gain overdrive. A volume above 1 is authored to carry further —
+10.0 stays above the floor out to 281 m — not to play louder up close. Fixed, with a test asserting
+both halves: clamped near, and still audible at 200 m where a volume of 1 has cut off.
+
+Recorded as a real gap rather than a bug: retail multiplies the clamped gain by
+`ambient_sound_volume` or `effect_sound_volume` depending on an `is_ambient` flag
+(acclient.c:366440-366443). Those are user settings and we model neither the settings nor the
+ambient/effect distinction, so we are uniformly louder than retail at the same authored volume. A
+real client needs both.
 
 Still outstanding: `AudioSystem.release` has no caller because `AudioVoice` carries no completion
 signal, so finished voices never leave the budget. After 16 sounds the budget is permanently full,

@@ -14,9 +14,20 @@ const FLAT_GAIN_RADIUS_METERS = 5;
 const INVERSE_SQUARE_SCALE = 25;
 
 /**
+ * Gain ceiling retail applies after attenuation (`if (v4 > 1.0) v4 = 1.0`, acclient.c:366438).
+ *
+ * Not defensive: 45 of the 4,185 authored sound-table candidates carry a volume above 1.0, the
+ * loudest at 10.0. Those are authored to *carry further* — a volume of 10 stays above the floor out
+ * to 281 m — not to play ten times louder up close, and without the clamp they reach the device as a
+ * tenfold gain overdrive.
+ */
+const MAXIMUM_GAIN = 1;
+
+/**
  * Gain floor below which retail does not play the sound at all.
  *
- * -50 dB, which at full volume works out to roughly 89 m.
+ * `SoundManager::VOL_MIN = -50` dB (acclient.c:44588), which at full volume works out to roughly
+ * 89 m under the falloff above.
  */
 const AUDIBLE_GAIN_FLOOR = 10 ** (-50 / 20);
 
@@ -55,10 +66,14 @@ export function placeSpatialAudio(
 	// Inside the flat radius retail neither attenuates nor pans, so a sound at the listener's own
 	// position is centred rather than dividing by zero.
 	if (distance <= FLAT_GAIN_RADIUS_METERS) {
-		return volume >= AUDIBLE_GAIN_FLOOR ? { gain: volume, pan: 0 } : null;
+		const near = Math.min(volume, MAXIMUM_GAIN);
+		return near >= AUDIBLE_GAIN_FLOOR ? { gain: near, pan: 0 } : null;
 	}
 
-	const gain = (INVERSE_SQUARE_SCALE * volume) / (distance * distance);
+	const gain = Math.min(
+		(INVERSE_SQUARE_SCALE * volume) / (distance * distance),
+		MAXIMUM_GAIN,
+	);
 	if (gain < AUDIBLE_GAIN_FLOOR) return null;
 
 	const rightLength = Math.hypot(

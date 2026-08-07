@@ -1,5 +1,5 @@
-import type { SceneVector3 } from "../../assets/ac-frame";
-import type { Quat, Vec3 } from "../math/types";
+import type { SceneVec3, SceneVector3 } from "../../assets/ac-frame";
+import type { Quat } from "../math/types";
 import type { SceneResidency } from "../scene";
 
 export interface LoDConfig {
@@ -17,8 +17,8 @@ export interface LoDConfig {
 
 /** Camera pose and authoritative scene residency. */
 export interface CameraPlacement extends SceneResidency {
-	/** Camera position expressed in canonical scene/world space. */
-	readonly position: Vec3;
+	/** Camera position expressed in canonical scene space. */
+	readonly position: SceneVec3;
 	/** Camera-to-world orientation. */
 	readonly rotation: Quat;
 }

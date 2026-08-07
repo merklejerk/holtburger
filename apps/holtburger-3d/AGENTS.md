@@ -133,6 +133,38 @@ an extension capability Chrome does not grant. **Before recording a capability
 as unavailable, run the command and paste the failure.** A limitation without a
 reproduction is a guess, and whoever reads it next will believe it.
 
+## Coordinate Frames
+
+Four frames are in play, and values in them are indistinguishable at runtime — every one is three
+numbers. They are separated by type instead:
+
+| frame | origin | brands |
+| --- | --- | --- |
+| AC authored | per asset, **Z-up**, +Y north | `AcVector3` |
+| landblock-local | that landblock's corner | `LandblockVec3` |
+| canonical scene | world (0, 0) | `SceneVector3`, `SceneVec3` |
+| anchor-relative | the **camera's** landblock | `RenderVector3` |
+
+Two representations exist because two halves of the app want different shapes: assets, particles and
+audio work in tuples, while camera, matrix and scene code works in the `Vec3` class. The `*Vector3`
+brands are tuples and the `*Vec3` brands are `Vec3`. Both are erased at build time and cost nothing
+at runtime — `renderVector3(v)` returns the same reference, and the brand symbols emit no code.
+
+**The rule: brand positions in retained or cross-system contracts. Leave everything else a plain
+`Vec3`.** A scale, a size, a direction, or an immediately-consumed function parameter has no origin
+and therefore no frame to get wrong. A position that is stored, or that crosses a system boundary,
+does.
+
+Only `SceneVector3` and `LandblockVec3` may be **retained**. `RenderVector3` is measured from the
+camera's landblock, so a stored one silently means a different world point once the camera crosses a
+boundary — the value is unchanged, its origin moved.
+
+The enforcement gap worth knowing: this is compiler-checked at every boundary that already uses a
+branded type, and unchecked when someone declares a *new* contract field as bare `Vec3`. That is
+exactly how an unbranded position once reached `AudioListenerPlacement`, with the runtime asserting a
+frame it could not verify. If you write `sceneVec3(...)` or `renderVector3(...)` inside a consumer
+rather than at the producer that knows the frame, that assertion is a guess.
+
 ## Design Review Priorities
 
 When reviewing or changing this app, prioritize:

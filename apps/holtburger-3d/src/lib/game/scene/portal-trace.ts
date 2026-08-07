@@ -1,3 +1,4 @@
+import type { SceneVec3 } from "../../assets/ac-frame";
 import type { LandblockId } from "../game-types";
 import {
 	createLandblockWorldOrigin,
@@ -20,10 +21,10 @@ import { sameScope, scopeFor, scopeKey } from "./scope";
 /** Caller-supplied authoritative actor anchor and desired camera endpoint. */
 export interface ScenePortalTraceQuery {
 	readonly anchor: {
-		readonly position: Vec3;
+		readonly position: SceneVec3;
 		readonly residency: SceneResidency;
 	};
-	readonly endpoint: Vec3;
+	readonly endpoint: SceneVec3;
 }
 
 /** One topology-derived crossing retained for diagnostics and future camera policy. */

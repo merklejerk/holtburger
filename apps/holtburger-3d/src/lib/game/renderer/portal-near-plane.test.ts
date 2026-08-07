@@ -1,3 +1,4 @@
+import { sceneVec3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import { Quat, Vec3 } from "../math/types";
 import type { Camera } from "../runtime/types";
@@ -14,14 +15,14 @@ const CAMERA: Camera = {
 	placement: {
 		envCellId: null,
 		landblockId: "0x0000ffff",
-		position: Vec3.zero(),
+		position: sceneVec3(Vec3.zero()),
 		rotation: Quat.identity(),
 	},
 };
 
 describe("finite portal near-clip-volume intersection", () => {
 	it("constructs the exact finite quad from active projection facts", () => {
-		const near = createCameraNearClipVolume(CAMERA, 2);
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 2);
 
 		const expected = [
 			new Vec3(-2, -1, -1),
@@ -41,7 +42,7 @@ describe("finite portal near-clip-volume intersection", () => {
 	});
 
 	it("accepts crossings through actual aperture triangles", () => {
-		const near = createCameraNearClipVolume(CAMERA, 1);
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 1);
 		const crossing = triangleAperture(
 			[new Vec3(-0.5, 0, -2), new Vec3(0.5, 0, 0), new Vec3(0, 1, -2)],
 			new Vec3(0, -1, 0),
@@ -52,7 +53,7 @@ describe("finite portal near-clip-volume intersection", () => {
 	});
 
 	it("rejects plane intersections outside the finite aperture", () => {
-		const near = createCameraNearClipVolume(CAMERA, 1);
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 1);
 		const outside = triangleAperture(
 			[new Vec3(3, 0, -2), new Vec3(4, 0, 0), new Vec3(3, 1, -2)],
 			new Vec3(0, -1, 0),
@@ -63,7 +64,7 @@ describe("finite portal near-clip-volume intersection", () => {
 	});
 
 	it("accepts apertures inside the clipped volume without requiring cap contact", () => {
-		const near = createCameraNearClipVolume(CAMERA, 1);
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 1);
 		const faceOn = triangleAperture(
 			[
 				new Vec3(-0.25, -0.25, -0.5),
@@ -88,7 +89,7 @@ describe("finite portal near-clip-volume intersection", () => {
 	});
 
 	it("rejects apertures beyond the near cap", () => {
-		const near = createCameraNearClipVolume(CAMERA, 1);
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 1);
 		const beyondCap = triangleAperture(
 			[
 				new Vec3(-0.2, -0.2, -1.5),
@@ -103,7 +104,7 @@ describe("finite portal near-clip-volume intersection", () => {
 	});
 
 	it("treats exact cap edges and coplanar overlap as renderer straddles", () => {
-		const near = createCameraNearClipVolume(CAMERA, 1);
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 1);
 		const edgeTouch = triangleAperture(
 			[new Vec3(1, -0.5, -1), new Vec3(2, 0, -1), new Vec3(1, 0.5, -1)],
 			new Vec3(0, 0, -1),
@@ -122,7 +123,7 @@ describe("finite portal near-clip-volume intersection", () => {
 	});
 
 	it("does not manufacture a straddle while clipping across the contact band", () => {
-		const near = createCameraNearClipVolume(CAMERA, 1);
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 1);
 		const grazingOutside = triangleApertureFromPoints([
 			new Vec3(1.000_483_8, -0.000_148_9, -1.000_195_4),
 			new Vec3(1.000_297_3, -0.000_958_2, -0.999_950_4),
@@ -137,12 +138,10 @@ describe("finite portal near-clip-volume intersection", () => {
 	it("handles rotated cameras without reducing the quad to an AABB", () => {
 		const halfYaw = Math.PI / 4;
 		const near = createCameraNearClipVolume(
+			CAMERA,
 			{
-				...CAMERA,
-				placement: {
-					...CAMERA.placement,
-					rotation: new Quat(Math.cos(halfYaw), 0, Math.sin(halfYaw), 0),
-				},
+				position: CAMERA.placement.position,
+				rotation: new Quat(Math.cos(halfYaw), 0, Math.sin(halfYaw), 0),
 			},
 			1,
 		);
@@ -161,7 +160,11 @@ describe("finite portal near-clip-volume intersection", () => {
 
 	it("constructs clip planes independently of the camera's world scale", () => {
 		for (const near of [0.000_001, 1_000_000]) {
-			const volume = createCameraNearClipVolume({ ...CAMERA, near }, 1);
+			const volume = createCameraNearClipVolume(
+				{ ...CAMERA, near },
+				CAMERA.placement,
+				1,
+			);
 			for (const plane of volume.clippingPlanes) {
 				expect(
 					Math.hypot(plane.normal.x, plane.normal.y, plane.normal.z),
@@ -171,9 +174,9 @@ describe("finite portal near-clip-volume intersection", () => {
 	});
 
 	it("rejects invalid projection facts loudly", () => {
-		expect(() => createCameraNearClipVolume({ ...CAMERA, near: 0 }, 1)).toThrow(
-			"projection facts",
-		);
+		expect(() =>
+			createCameraNearClipVolume({ ...CAMERA, near: 0 }, CAMERA.placement, 1),
+		).toThrow("projection facts");
 	});
 });
 

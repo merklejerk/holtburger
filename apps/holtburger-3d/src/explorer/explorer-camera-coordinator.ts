@@ -1,5 +1,5 @@
 import type { LandblockId } from "../lib/game/game-types";
-import { sceneVector3 } from "../lib/assets/ac-frame";
+import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
@@ -354,7 +354,9 @@ function createCamera(
 		...FRONTEND_TUNING.explorer.camera.framing,
 		placement: {
 			...residency,
-			position: state.position,
+			// The controller works in canonical scene coordinates; the same value resolves
+			// residency through `queryWorldPointResidencyCandidates`.
+			position: sceneVec3(state.position),
 			rotation: createCameraRotationRadians(
 				state.yawRadians,
 				state.pitchRadians,

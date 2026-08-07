@@ -1,3 +1,4 @@
+import { landblockVec3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import { Mat4, Vec3 } from "../math/types";
 import {
@@ -15,7 +16,7 @@ const SINGLE_VERTEX = {
 
 function light(overrides: Partial<PlacedStaticLight> = {}): PlacedStaticLight {
 	return {
-		position: { x: 0, y: 1, z: 0 },
+		position: landblockVec3(new Vec3(0, 1, 0)),
 		color: { red: 1, green: 1, blue: 1 },
 		intensity: 100,
 		falloff: 4,
@@ -43,7 +44,12 @@ describe("bakeStaticLight", () => {
 				SINGLE_VERTEX.positions,
 				SINGLE_VERTEX.normals,
 				Mat4.identity(),
-				[light({ falloff, position: { x: 0, y: beyondRange, z: 0 } })],
+				[
+					light({
+						falloff,
+						position: landblockVec3(new Vec3(0, beyondRange, 0)),
+					}),
+				],
 			),
 		).toBeNull();
 	});
@@ -68,13 +74,25 @@ describe("bakeStaticLight", () => {
 			SINGLE_VERTEX.positions,
 			SINGLE_VERTEX.normals,
 			Mat4.identity(),
-			[light({ falloff: 10, intensity: 1, position: { x: 0, y: 2, z: 0 } })],
+			[
+				light({
+					falloff: 10,
+					intensity: 1,
+					position: landblockVec3(new Vec3(0, 2, 0)),
+				}),
+			],
 		);
 		const far = bakeStaticLight(
 			SINGLE_VERTEX.positions,
 			SINGLE_VERTEX.normals,
 			Mat4.identity(),
-			[light({ falloff: 10, intensity: 1, position: { x: 0, y: 10, z: 0 } })],
+			[
+				light({
+					falloff: 10,
+					intensity: 1,
+					position: landblockVec3(new Vec3(0, 10, 0)),
+				}),
+			],
 		);
 		expect(near![0]).toBeGreaterThan(far![0]!);
 	});
@@ -116,7 +134,7 @@ describe("bakeStaticLight", () => {
 			SINGLE_VERTEX.positions,
 			SINGLE_VERTEX.normals,
 			cellToLandblock,
-			[light({ falloff: 1, position: { x: 0, y: 5.5, z: 0 } })],
+			[light({ falloff: 1, position: landblockVec3(new Vec3(0, 5.5, 0)) })],
 		);
 		expect(baked).not.toBeNull();
 		expect(baked![0]).toBeGreaterThan(0);

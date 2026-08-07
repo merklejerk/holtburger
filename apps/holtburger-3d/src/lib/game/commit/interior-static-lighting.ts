@@ -1,3 +1,4 @@
+import { landblockVec3 } from "../../assets/ac-frame";
 import { transformPoint3 } from "../math/matrices";
 import { type Mat4, Vec3 } from "../math/types";
 import type {
@@ -22,10 +23,9 @@ export function placeObjectLights(
 ): void {
 	for (const light of lights) {
 		into.push({
-			position: transformPoint3(
-				objectToLandblock,
-				light.offset,
-				new Vec3(0, 0, 0),
+			// Placed through the object's landblock transform, so landblock-local by construction.
+			position: landblockVec3(
+				transformPoint3(objectToLandblock, light.offset, new Vec3(0, 0, 0)),
 			),
 			color: light.color,
 			intensity: light.intensity,

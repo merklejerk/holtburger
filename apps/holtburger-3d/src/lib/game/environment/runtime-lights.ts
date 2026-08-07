@@ -1,3 +1,4 @@
+import type { SceneVec3 } from "../../assets/ac-frame";
 /**
  * Retail scales an authored falloff by `rangeAdjust` to get a hardware light's reach
  * (`config_hardware_light`, acclient.c:432899; `rangeAdjust`, acclient.c:44671).
@@ -39,11 +40,7 @@ export const MAX_STATIC_LIGHTS = 64;
  * at one place, rather than each producer having to know the frame anchor.
  */
 export interface RuntimeLight {
-	readonly position: {
-		readonly x: number;
-		readonly y: number;
-		readonly z: number;
-	};
+	readonly position: SceneVec3;
 	readonly color: {
 		readonly red: number;
 		readonly green: number;

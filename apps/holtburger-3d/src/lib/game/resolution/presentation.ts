@@ -1,3 +1,4 @@
+import type { LandblockVec3 } from "../../assets/ac-frame";
 import type { DatAssetId } from "../game-types";
 import { transformAABB3 } from "../math/matrices";
 import { type AABB3, type Mat4, Vec3 } from "../math/types";
@@ -171,11 +172,8 @@ export interface ResolvedObjectLight {
  * drops class prototypes.
  */
 export interface PlacedStaticLight {
-	readonly position: {
-		readonly x: number;
-		readonly y: number;
-		readonly z: number;
-	};
+	/** Landblock-local, unlike `RuntimeLight`, which is canonical. */
+	readonly position: LandblockVec3;
 	readonly color: {
 		readonly red: number;
 		readonly green: number;

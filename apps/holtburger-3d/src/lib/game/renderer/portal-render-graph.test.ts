@@ -1292,17 +1292,8 @@ function planInput(
 
 function testNearClipVolume(near: number, position = new Vec3(0, 0, 1)) {
 	return createCameraNearClipVolume(
-		{
-			far: 100,
-			fov: 90,
-			near,
-			placement: {
-				envCellId: null,
-				landblockId: LANDBLOCK_ID,
-				position,
-				rotation: Quat.identity(),
-			},
-		},
+		{ fov: 90, near },
+		{ position, rotation: Quat.identity() },
 		1,
 	);
 }

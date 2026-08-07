@@ -1,4 +1,5 @@
-import { Mat4 } from "../math/types";
+import { sceneVec3 } from "../../assets/ac-frame";
+import { Mat4, Vec3 } from "../math/types";
 import type {
 	ResolvedOutdoorStaticLayerSource,
 	ResolvedStaticObjectLayerSource,
@@ -51,11 +52,14 @@ function gatherLayerLights(
 		);
 	}
 	return placed.map((light) => ({
-		position: {
-			x: light.position.x + origin.x,
-			y: light.position.y,
-			z: light.position.z + origin.z,
-		},
+		// Landblock-local plus the landblock's own origin: canonical scene space.
+		position: sceneVec3(
+			new Vec3(
+				light.position.x + origin.x,
+				light.position.y,
+				light.position.z + origin.z,
+			),
+		),
 		color: light.color,
 		range: light.falloff * RUNTIME_LIGHT_RANGE_SCALE,
 		// Scaled before falloff, so an authored 100 stops blowing out the inner half of the

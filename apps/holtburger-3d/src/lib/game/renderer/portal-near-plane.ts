@@ -27,7 +27,16 @@ export interface CameraNearClipVolume {
 
 /** Build the exact finite near-clip pyramid in canonical world coordinates. */
 export function createCameraNearClipVolume(
-	camera: Camera,
+	camera: Pick<Camera, "fov" | "near">,
+	/**
+	 * Eye pose in whatever frame the caller's view matrix uses — anchor-relative in production.
+	 *
+	 * Taken separately rather than as a `CameraPlacement` because that type is canonical scene
+	 * space, and the renderer was synthesizing one from an anchor-relative position to satisfy it.
+	 * A plain `Vec3` is right here: the pose is consumed immediately and never retained, so it has
+	 * no frame to get wrong across a boundary.
+	 */
+	pose: { readonly position: Vec3; readonly rotation: Quat },
 	aspectRatio: number,
 ): CameraNearClipVolume {
 	if (
@@ -52,13 +61,9 @@ export function createCameraNearClipVolume(
 		new Vec3(-halfWidth, halfHeight, -camera.near),
 	] as const;
 	const corners = localCorners.map((corner) =>
-		rotateAndTranslate(
-			corner,
-			camera.placement.rotation,
-			camera.placement.position,
-		),
+		rotateAndTranslate(corner, pose.rotation, pose.position),
 	) as unknown as [Vec3, Vec3, Vec3, Vec3];
-	const eye = camera.placement.position;
+	const eye = pose.position;
 	const interior = averagePoints([eye, ...corners]);
 	return {
 		clippingPlanes: [

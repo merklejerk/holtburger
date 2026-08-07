@@ -1094,13 +1094,12 @@ export class WebGL2Renderer implements Renderer {
 	): PortalRenderGraphPlanResult {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		const nearClipVolume = createCameraNearClipVolume(
+			viewInput.camera,
+			// Anchor-relative, matching the view matrix this volume is compared against. It used to
+			// be smuggled through a synthesized `CameraPlacement`, whose position is canonical.
 			{
-				...viewInput.camera,
-				placement: {
-					...viewInput.camera.placement,
-					landblockId: prepared.anchorLandblockId,
-					position: prepared.cameraPosition,
-				},
+				position: prepared.cameraPosition,
+				rotation: viewInput.camera.placement.rotation,
 			},
 			aspectRatio,
 		);

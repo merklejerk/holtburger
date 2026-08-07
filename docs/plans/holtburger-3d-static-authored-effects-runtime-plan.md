@@ -1747,10 +1747,28 @@ by value rather than by when it appeared.
       entirely on formula tests — the fix affecting 45% of shipped emitters. Framing was the whole
       problem, exactly as the retired determinism item concluded.
 
-- [ ] **Converge the two vector representations.** The `Vec3` class carries no frame; the branded
-      tuples do. Every crossing between them silently drops the brand, which is how
-      `AudioListenerPlacement` shipped an unbranded position one commit after the brands were
-      extended. Either brand `Vec3` or converge on one representation.
+- [x] **Branded positions where they matter, rather than converging the representations.** Chosen on
+      review over branding every `Vec3`: the two representations exist because two halves of the app
+      want different shapes, and a scale, size, direction, or immediately-consumed parameter has no
+      frame to get wrong. Branding those would be noise for a mistake that has happened once.
+
+      An audit found the exposure is **five contract fields, not a codebase-wide problem**. Two of
+      them are the sharp ones: `PlacedStaticLight.position` is landblock-local while
+      `RuntimeLight.position` is canonical — identical shape, both called a light position, one file
+      apart, distinguished only by prose. `SceneVec3` and `LandblockVec3` brand the `Vec3` class
+      without changing its shape, so consumers keep reading `.x`/`.y`/`.z` and only declarations and
+      construction sites moved. Twelve sites, exactly as scoped.
+
+      **The brand immediately found a real frame lie.** `webgl2-renderer` synthesized a
+      `CameraPlacement` — canonical by declaration — from `prepared.cameraPosition`, which is
+      anchor-relative, purely to satisfy `createCameraNearClipVolume(camera, aspectRatio)`. That
+      function only ever needed `fov`, `near`, and a pose, so it now takes the pose separately and
+      the synthesized placement is gone. Asserting past it would have repeated the
+      `AudioListenerPlacement` mistake in the same session that found it.
+
+      The frame table and the rule are recorded in `apps/holtburger-3d/AGENTS.md`, including the
+      honest enforcement gap: branding is compiler-checked at boundaries that already use a branded
+      type, and unchecked when a new contract field is declared as bare `Vec3`.
 - [x] **Per-particle cohort records are pooled.** `collectCohorts` allocated a record *and* a vector
       per particle per frame; both are now handed out from one pool that grows to the peak particle
       count, with the record owning its own origin vector. Kept despite the measurement — cohort

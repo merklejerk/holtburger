@@ -17,7 +17,7 @@
 		OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	} from "../../lib/game/landblocks";
 	import { createCameraRotationRadians } from "../../lib/game/math/camera-orientation";
-	import { sceneVector3 } from "../../lib/assets/ac-frame";
+	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
 	import type { Camera } from "../../lib/game/runtime/types";
 	import { Vec3 } from "../../lib/game/math/types";
 	import {
@@ -470,7 +470,7 @@
 			placement: {
 				envCellId: null,
 				landblockId,
-				position: cameraPosition,
+				position: sceneVec3(cameraPosition),
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 			},
 		});
@@ -503,7 +503,7 @@
 			placement: {
 				envCellId: null,
 				landblockId,
-				position: pose.position,
+				position: sceneVec3(pose.position),
 				rotation: createCameraRotationRadians(
 					pose.yawRadians,
 					pose.pitchRadians,
@@ -547,7 +547,7 @@
 			placement: {
 				envCellId,
 				landblockId,
-				position: new Vec3(...position),
+				position: sceneVec3(new Vec3(...position)),
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 			},
 		});
@@ -690,10 +690,10 @@
 		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
 		return runtime.tracePortalSegment({
 			anchor: {
-				position: new Vec3(...start),
+				position: sceneVec3(new Vec3(...start)),
 				residency: { envCellId, landblockId },
 			},
-			endpoint: new Vec3(...endpoint),
+			endpoint: sceneVec3(new Vec3(...endpoint)),
 		});
 	}
 
@@ -729,7 +729,7 @@
 					placement: {
 						envCellId,
 						landblockId,
-						position: new Vec3(...position),
+						position: sceneVec3(new Vec3(...position)),
 						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 					},
 				},
@@ -771,7 +771,7 @@
 					placement: {
 						envCellId,
 						landblockId,
-						position: new Vec3(...position),
+						position: sceneVec3(new Vec3(...position)),
 						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 					},
 				},

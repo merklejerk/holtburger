@@ -1,3 +1,5 @@
+import { sceneVec3 } from "../../assets/ac-frame";
+import { Vec3 } from "../math/types";
 import { describe, expect, it } from "vitest";
 import {
 	OUTDOOR_TERRAIN_GRID_CELLS,
@@ -16,7 +18,7 @@ const ORIGIN = { x: 0, z: 0 };
 /** A light at a landblock-local offset, with a reach small enough to stay inside one cell. */
 function lightAt(localX: number, localZ: number, range = 6): RuntimeLight {
 	return {
-		position: { x: localX, y: 0, z: localZ },
+		position: sceneVec3(new Vec3(localX, 0, localZ)),
 		color: { red: 1, green: 1, blue: 1 },
 		range,
 		intensity: 10,

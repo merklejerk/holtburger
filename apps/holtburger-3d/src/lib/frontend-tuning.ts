@@ -17,6 +17,15 @@ export const FRONTEND_TUNING = {
 		 * every contest, so this is a plain budget rather than a priority queue.
 		 */
 		maximumSimultaneousVoices: 16,
+		/**
+		 * How late a warmed sound may still be played, in seconds.
+		 *
+		 * The device refuses a sound whose buffer has not decoded, so the first trigger of any sound
+		 * warms it and replays once it lands. Beyond this the moment has passed and playing it would
+		 * place a sound where the listener no longer is, since retail fixes gain and pan at trigger
+		 * time and never updates them.
+		 */
+		maximumWarmupReplaySeconds: 0.25,
 	},
 	diagnostics: {
 		/** Smoothing window used by the on-screen frame-time readout. */

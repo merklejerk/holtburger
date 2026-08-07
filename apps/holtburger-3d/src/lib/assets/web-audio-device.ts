@@ -14,9 +14,9 @@ export interface AudioAssetSource {
  * about probability, attenuation, or voice budgets — those are game semantics that live in
  * `AudioSystem`.
  *
- * Playback is best-effort by design. A sound whose buffer has not decoded yet is **skipped, not
- * queued**: these are ambient one-shots tied to a moment, and playing one late is worse than not
- * playing it. The first request starts the decode so later triggers of the same sound land.
+ * A sound whose buffer has not decoded yet is **refused, not queued**. Refusal is a signal rather
+ * than a failure: `AudioSystem` warms the sound and replays it once, within a bound it owns, so the
+ * decision about how late is too late stays with game policy rather than with the adapter.
  */
 export class WebAudioDevice implements AudioDevice {
 	readonly #context: AudioContext;
@@ -65,7 +65,7 @@ export class WebAudioDevice implements AudioDevice {
 		};
 	}
 
-	/** Decode one sound so later triggers can play it immediately. */
+	/** Decode one sound, resolving exactly when `playOneShot` will accept it. */
 	async prepare(soundId: DatAssetId): Promise<void> {
 		await this.#prepare(soundId);
 	}

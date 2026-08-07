@@ -1,15 +1,15 @@
-import { renderVector3 } from "../../assets/ac-frame";
+import { renderVector3, sceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import { audibleRadiusMeters, placeSpatialAudio } from "./audio-spatialization";
 
-const LISTENER = renderVector3([0, 0, 0]);
+const LISTENER = sceneVector3([0, 0, 0]);
 const RIGHT = renderVector3([1, 0, 0]);
 
 describe("placeSpatialAudio", () => {
 	it("applies no attenuation or panning inside the flat radius", () => {
 		// Retail leaves everything within 5 m at full authored volume, centred.
 		const placement = placeSpatialAudio(
-			renderVector3([3, 0, 0]),
+			sceneVector3([3, 0, 0]),
 			LISTENER,
 			RIGHT,
 			0.8,
@@ -27,7 +27,7 @@ describe("placeSpatialAudio", () => {
 
 	it("falls off as 25 x volume over distance squared beyond the flat radius", () => {
 		const placement = placeSpatialAudio(
-			renderVector3([10, 0, 0]),
+			sceneVector3([10, 0, 0]),
 			LISTENER,
 			RIGHT,
 			1,
@@ -38,27 +38,27 @@ describe("placeSpatialAudio", () => {
 
 	it("pans by the source's projection onto the listener's right", () => {
 		expect(
-			placeSpatialAudio(renderVector3([10, 0, 0]), LISTENER, RIGHT, 1)!.pan,
+			placeSpatialAudio(sceneVector3([10, 0, 0]), LISTENER, RIGHT, 1)!.pan,
 		).toBeCloseTo(1);
 		expect(
-			placeSpatialAudio(renderVector3([-10, 0, 0]), LISTENER, RIGHT, 1)!.pan,
+			placeSpatialAudio(sceneVector3([-10, 0, 0]), LISTENER, RIGHT, 1)!.pan,
 		).toBeCloseTo(-1);
 		// Directly ahead: no lateral component, so centred despite being far away.
 		expect(
-			placeSpatialAudio(renderVector3([0, 0, 10]), LISTENER, RIGHT, 1)!.pan,
+			placeSpatialAudio(sceneVector3([0, 0, 10]), LISTENER, RIGHT, 1)!.pan,
 		).toBeCloseTo(0);
 	});
 
 	it("refuses to place a sound below retail's audible floor", () => {
 		// Well past the ~89 m cutoff at full volume, where retail does not play at all.
 		expect(
-			placeSpatialAudio(renderVector3([500, 0, 0]), LISTENER, RIGHT, 1),
+			placeSpatialAudio(sceneVector3([500, 0, 0]), LISTENER, RIGHT, 1),
 		).toBeNull();
 	});
 
 	it("refuses a silent source rather than placing an inaudible voice", () => {
 		expect(
-			placeSpatialAudio(renderVector3([1, 0, 0]), LISTENER, RIGHT, 0),
+			placeSpatialAudio(sceneVector3([1, 0, 0]), LISTENER, RIGHT, 0),
 		).toBeNull();
 	});
 });

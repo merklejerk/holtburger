@@ -17,6 +17,7 @@ export interface ParticleDrawGeometry {
 	readonly paletteTexture: WebGLTexture | null;
 	/** How the fragment stage reads the base texture: direct, index8, or index16. */
 	readonly materialKind: number;
+	readonly palettedClipMap: boolean;
 	readonly alphaTest: number;
 	/** Authored surface flags, so blend selection reuses retail's mapping rather than guessing. */
 	readonly rawSurfaceFlags: number;
@@ -148,6 +149,10 @@ export class WebGL2ParticlePass {
 				geometry.lockedAxis[2],
 			);
 			gl.uniform1i(program.uniforms.materialKind, geometry.materialKind);
+			gl.uniform1i(
+				program.uniforms.palettedClipMap,
+				geometry.palettedClipMap ? 1 : 0,
+			);
 			gl.uniform1f(program.uniforms.alphaTest, geometry.alphaTest);
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, geometry.baseTexture);

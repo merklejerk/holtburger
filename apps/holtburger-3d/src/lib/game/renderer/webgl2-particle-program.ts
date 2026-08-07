@@ -189,21 +189,51 @@ in float vTranslucency;
 
 uniform sampler2D uBase;
 uniform sampler2D uPalette;
+/** Shared encoding with the object program: 1 direct colour, 2 index8, 3 index16. */
 uniform int uMaterialKind;
+uniform int uPalettedClipMap;
 uniform float uAlphaTest;
 
 out vec4 outColor;
 
+/**
+ * Decode one palette index from the base texture.
+ *
+ * Uses texelFetch rather than texture: indices must not be filtered, since interpolating two
+ * palette indices produces a third unrelated colour. Particle textures are standalone rather than
+ * atlas pages, so the sample coordinate needs no rect offset.
+ */
+float paletteIndex() {
+	ivec2 size = textureSize(uBase, 0);
+	ivec2 texel = clamp(
+		ivec2(vTextureCoordinate * vec2(size)),
+		ivec2(0),
+		size - ivec2(1)
+	);
+	vec4 encoded = texelFetch(uBase, texel, 0) * 255.0;
+	return uMaterialKind == 3
+		? floor(encoded.r + 0.5) + floor(encoded.g + 0.5) * 256.0
+		: floor(encoded.r + 0.5);
+}
+
+vec4 paletteColor(float index) {
+	// Retail's indexed clip map: the first eight entries are cutout, not colour. Without this an
+	// alpha-tested sprite has no alpha to test and draws its backing opaque.
+	if (uPalettedClipMap != 0 && index < 8.0) return vec4(0.0);
+	ivec2 size = textureSize(uPalette, 0);
+	if (index >= float(size.x * size.y)) return vec4(0.0);
+	return texelFetch(
+		uPalette,
+		ivec2(int(mod(index, float(size.x))), int(index) / size.x),
+		0
+	);
+}
+
 vec4 sampleMaterial() {
-	if (uMaterialKind == 0) {
+	if (uMaterialKind == 1) {
 		return texture(uBase, vTextureCoordinate);
 	}
-	// Paletted reads mirror the object program: the base texture holds indices, not colors.
-	float index = texture(uBase, vTextureCoordinate).r;
-	if (uMaterialKind == 2) {
-		index += texture(uBase, vTextureCoordinate).g * 256.0;
-	}
-	return texture(uPalette, vec2(index, 0.5));
+	return paletteColor(paletteIndex());
 }
 
 void main() {
@@ -224,6 +254,7 @@ export interface WebGL2ParticleProgram {
 		readonly clockSeconds: WebGLUniformLocation;
 		readonly lockedAxis: WebGLUniformLocation;
 		readonly materialKind: WebGLUniformLocation;
+		readonly palettedClipMap: WebGLUniformLocation;
 		readonly motionType: WebGLUniformLocation;
 		readonly orientation: WebGLUniformLocation;
 		readonly palette: WebGLUniformLocation;
@@ -264,6 +295,7 @@ export function createWebGL2ParticleProgram(
 		clockSeconds: requireWebGL2Uniform(gl, program, "uClockSeconds"),
 		lockedAxis: requireWebGL2Uniform(gl, program, "uLockedAxis"),
 		materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
+		palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 		motionType: requireWebGL2Uniform(gl, program, "uMotionType"),
 		orientation: requireWebGL2Uniform(gl, program, "uOrientation"),
 		palette: requireWebGL2Uniform(gl, program, "uPalette"),

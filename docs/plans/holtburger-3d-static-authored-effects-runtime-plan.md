@@ -2564,8 +2564,19 @@ Three things are wrong and all three must land together:
    path uses `texelFetch` against `uBaseRect`/`uPaletteRect` with the index decoded through
    `* 255.0`. The comment claiming these "mirror the object program" is false.
 
-The fix is a particle fragment rewrite mirroring `paletteIndexAt`/`paletteColor`, plus plumbing the
-base and palette rects into particle geometry residency.
+**Fixed.** `materialKind` is derived from the material's `textureEncoding` through
+`OBJECT_MATERIAL_KIND`, shared with the object program so one encoding means one thing in both — the
+divergence was how a paletted mesh could carry kind 0 and still take the unpaletted branch. The
+particle fragment now mirrors `paletteIndexAt`/`paletteColor`, including the `index < 8.0` clip map,
+and decodes indices with `texelFetch` rather than filtering them.
+
+No rect plumbing was needed after all: particle textures are standalone rather than atlas pages, so
+`textureSize` replaces `uBaseRect`/`uPaletteRect`. A material carrying a base texture is narrowed to
+the textured arm and throws otherwise, so a new material arm fails loudly here instead of silently
+decoding as direct colour, which is the defect being fixed.
+
+Verified by probe: the offending cohort now reports `kind=3 clip=true pal=true` where it previously
+reported `kind=0` with the palette bound and ignored.
 
 ### Particles have no culling policy, and the mechanism for one is unwired
 

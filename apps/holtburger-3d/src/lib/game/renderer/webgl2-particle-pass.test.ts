@@ -39,9 +39,11 @@ const GEOMETRY: ParticleDrawGeometry = {
 	indexCount: 6,
 	indexOffsetBytes: 0,
 	lockedAxis: renderVector3([0, 0, 1]),
-	materialKind: 0,
+	// 1 is direct colour in the encoding now shared with the object program.
+	materialKind: 1,
 	orientation: 1,
 	paletteTexture: null,
+	palettedClipMap: false,
 	rawSurfaceFlags: 0,
 	vertexArray: {} as WebGLVertexArrayObject,
 };

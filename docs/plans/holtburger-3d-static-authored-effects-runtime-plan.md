@@ -1710,26 +1710,30 @@ by value rather than by when it appeared.
 - [ ] **Stop embedding `indexStart`/`indexCount` in `batchKey`.** Two ranges sharing a binding cannot
       cohort together because their extents differ, so the key defeats the merging this phase's
       batch-key work enabled. The next batching win after `renderSide` and `authoredCullMode`.
-- [ ] **Make the harness reproducible.** Partially done, and the remaining cause is *not* what was
-      recorded here. Corrected on review: the runtime already takes its entire notion of time as one
-      argument to `render`, and every system downstream reads that argument, so time was fully
-      parameterized all along. The harness was simply choosing to pass `performance.now() / 1000`.
-      No fixed timestep inside the runtime is needed or wanted; nothing would be locked to a
-      constant frame rate.
+- [x] **Dropped: chasing byte-identical harness captures was the wrong problem.** Retired on review
+      rather than finished, because the premise was wrong. Neither particle verification this
+      session was actually blocked by run-to-run noise. The billboard fix diffed to **265 pixels at
+      a maximum channel delta of 198, concentrated on the flame clusters** — decisive proof the fix
+      reached those meshes — against a noise floor of 948 mostly-single-step pixels. What failed was
+      judging *orientation* in a flame three pixels across. The motion fix had no visible flame in
+      the scene at all. **Both were camera-framing problems misread as determinism problems.**
 
-      Landed: `--frame-interval-ms` advances runtime time by a fixed step, and `--capture-frame`
-      freezes it at a chosen frame so the captured instant does not depend on when the screenshot
-      lands. Frame *cost* is still measured against the real clock, so timing runs are unaffected.
+      Kept, because they are cheap and correct: `--frame-interval-ms` and `--capture-frame`. Also
+      kept is the correction they produced — the runtime's time was fully parameterized all along,
+      and nothing inside it needs a fixed step. The unexplained scene-wide residual is left
+      unexplained rather than chased; an automated visual-regression suite would justify it and we
+      do not have one.
 
-      **Necessary but not sufficient — captures are still not byte-identical.** Measured across
-      run pairs at `0xDA55`: seeded on the wall clock 948 differing pixels, fixed interval 1,609,
-      fixed interval plus freeze at frame 120 1,887, and still differing at frame 600 behind a
-      six-second settle. The differences span the whole visible scene rather than only the particle
-      clusters, so the residual is scene-wide and is not particle ageing. Content streaming
-      completing at different frames was the obvious next hypothesis and a long settle did not
-      resolve it, so it is unproven. **The remaining source is unidentified; do not assume it is
-      loading order.** This needs isolation — bisect by disabling populations, starting with
-      `--exclude-authored-dynamics` to establish whether dynamics are involved at all.
+      What the two incidents actually called for is recorded instead: **a close-up particle camera**,
+      below. Interactive confirmation is also faster and more decisive than any diff — the candle and
+      the audio were both settled that way in seconds.
+
+- [ ] **Record a close-up particle camera.** Every particle verification this session failed on
+      framing: DA55's emitters are a few pixels across from the explorer-focus pose and the `0xdb56`
+      interior needed a hand-guessed position. Land one named pose that fills a usable fraction of
+      the frame with an authored emitter, so the next particle change can be looked at rather than
+      inferred. Small, and it retires the whole class of problem the determinism work was aimed at.
+
 - [ ] **Converge the two vector representations.** The `Vec3` class carries no frame; the branded
       tuples do. Every crossing between them silently drops the brand, which is how
       `AudioListenerPlacement` shipped an unbranded position one commit after the brands were

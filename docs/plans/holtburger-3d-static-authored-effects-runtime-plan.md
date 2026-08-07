@@ -1674,6 +1674,125 @@ which need the browser harness against production content rather than static che
      whatever a previous pass had put there. `fakeGl` cannot catch this; only the harness can.
 - Both are fixed, and the workload now runs with zero console errors.
 
+##### Root cause of the dynamic instance multiplier (finding 2026-08-07)
+
+The frame-instance blowup is **not** a promotion, view-multiplication, or particle problem. It is a
+draw-unit granularity defect in shared object geometry preparation that promotion merely exposed.
+
+Measured, per frame, at `0xDA55` with a radius-4 neighbourhood:
+
+| Metric | Value |
+| --- | --- |
+| `visibleDynamicEntityCount` | 12 |
+| `visibleDynamicPartCount` | 10788 |
+| Contributions per visible entity | 77 or 899, nothing between |
+
+Per-entity probe of the 899 population:
+
+```
+setup 0x020004BE  parts=3  drawUnits=[1, 450, 448]
+```
+
+`RigidPartDrawUnit`s come from `resolveObjectMaterialRanges`, which merges only **adjacent**
+triangles sharing a `bindingId`. `bindingId` includes per-triangle `renderSide`, `cullFace`,
+`authoredCullMode`, and `stippled` (`object-material-binding.ts:67`) — not just the material.
+
+`render_sides` (`polygon_geometry.rs:197`) expands a `CULL_MODE_NONE` polygon into a `Positive`
+side followed immediately by a `PositiveReversed` side, **per polygon**. So the emitted triangle
+stream alternates render side every polygon, and adjacent-run merging yields **two draw units per
+polygon** instead of two per part. 225 two-sided polygons become 450 draw units.
+
+This is why foliage-like setups dominate: `CULL_MODE_NONE` is exactly what AC authors on leaves,
+banners, and flames. Static residents pay this too, but the static geometry worker sorts
+contributions by `bindingId` before baking (`static-object-geometry-worker.ts:1085`), so the cost
+is amortized once. Dynamic entities re-expand the full unsorted list every frame.
+
+`renderSide` has **no renderer consumer**. It appears only in `bindingId` and in the artifact type;
+no shader, uniform, or draw-state path reads it. It is provenance that leaked into a batch key.
+
+Confirmed against the archive for the hot setup:
+
+```
+0x020004BE part0 gfx=0x010037E8 polygons=83  sidesType={0: 83}   -> 1 draw unit   (landblock, one side)
+0x020004BE part1 gfx=0x010037E9 polygons=225 sidesType={1: 225}  -> 450 draw units
+0x020004BE part2 gfx=0x010037EA polygons=224 sidesType={1: 224}  -> 448 draw units
+```
+
+Parts 1 and 2 are 100% `CULL_MODE_NONE`, with `neg_surface == pos_surface` on every polygon. The two
+sides are the *same material* differing only by winding and normal sign, so the split is pure waste.
+
+**Fix: drop `renderSide` from `bindingId`.** Every triangle of a `CULL_MODE_NONE` part then shares one
+binding and merges into a single contiguous run — 899 draw units collapse to ~3, with no visual
+change, no shader work, and no geometry change. `CULL_MODE_CLOCKWISE` polygons stay correctly split
+because their two sides resolve different `pos_surface`/`neg_surface` materials, which `plan.id`
+already distinguishes.
+
+**Landed and measured** at `0xDA55`, radius 4, same camera pose:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| `visibleDynamicPartCount` | 10788 | 66 |
+| `submittedDynamicDrawCount` | 3596 | 13 |
+| `submittedDynamicInstanceCount` | 10788 | 66 |
+| Contributions per visible entity | 77 / 899 | ~8 |
+
+The `renderSide` field was deleted outright rather than merely dropped from the key, since it had no
+consumer anywhere. `object-material-binding.test.ts` previously asserted
+`expect(positive.bindingId).not.toBe(reversed.bindingId)` — it was encoding the defect as an
+invariant — and now asserts the two expansions share one binding while staying one-sided.
+
+##### Full batch-key axis audit (2026-08-07)
+
+Every axis in the composed key was checked for a draw-time consumer and measured by removal.
+
+| Axis | Source | Consumer | Verdict |
+| --- | --- | --- | --- |
+| `material.id` | `plan.id` | material resolution | keep |
+| `renderSurfaceId` | `plan.id` | material resolution | keep |
+| `ordering` | `plan.id` | opaque/transparent pass split | keep |
+| `wrap` | `plan.id` | sampler policy | keep |
+| `baseTexture` / `paletteTexture` | `plan.id` | bound GL textures | keep |
+| `detailRole` | `plan.id` | terrain detail selection | keep |
+| `cullFace` | `bindingId` | `webgl2-renderer.ts:1555` | keep |
+| `renderSide` | `bindingId` | **none** | **removed** |
+| `authoredCullMode` | `bindingId` | **none** | **removed** |
+| `stippled` | `bindingId` | none | **kept** — see below |
+
+`cullFaceOverride` was checked as a possible indirect consumer of the authored mode; it is set only
+for EnvCell shells in flat mode and never reads polygon facts.
+
+Removal was measured independently at `0xDA55`, radius 4:
+
+| Metric | `renderSide` fixed | also minus `authoredCullMode` | also minus `stippled` |
+| --- | --- | --- | --- |
+| `submittedStaticObjectDrawCount` | 483 | 476 | 476 |
+| `submittedBakedStaticObjectDrawCount` | 216 | 209 | 209 |
+| `submittedDynamicDrawCount` | 13 | 11 | 11 |
+| `visibleDynamicPartCount` | 66 | 54 | 54 |
+
+`stippled` measures as a **zero-cost axis** — removing it changes nothing, because it never varies
+within an otherwise-identical binding in shipped content. It is retained deliberately: it is meant
+to become draw state, and it costs nothing to keep the split honest until retail's SetSurface
+stippling is implemented. That stippling is unimplemented is recorded as a separate content gap, not
+as dead provenance.
+
+Deleting `authoredCullMode` would have silently dropped the only validation of the authored
+`sides_type`, since `effectiveCullFace` accepted anything. The two functions were collapsed into one
+exhaustive `effectiveCullFace` switch that rejects unsupported modes and reduces supported ones to
+draw state, with a test covering the rejection.
+
+One further over-splitting source was found and left alone, because it is structural rather than a
+key axis: EnvCell shell range merging requires index contiguity, so a skipped non-renderable portal
+polygon splits a range even when the binding is unchanged (`env-cell-materialization.ts:307`).
+
+Separately considered and **not** adopted here: eliminating the duplicated reversed geometry for
+`CULL_MODE_NONE` entirely by carrying two-sidedness as a material property. The duplication exists
+only to supply the back face a flipped normal (`normal_scale: -1.0`), and our lighting is per-vertex
+in the vertex stage to match retail's fixed-function pipeline, where `gl_FrontFacing` is unavailable.
+It is achievable with a second lighting varying selected in the fragment stage, and would halve
+vertex and index memory for foliage-class meshes, but it is a rendering-fidelity change independent
+of this plan's instance-count defect.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.

@@ -97,13 +97,8 @@ export interface ObjectMaterialBinding {
 	/** Renderer compilation applies the retail indexed clip-map rule from this lossless fact. */
 	readonly palettedClipMap: boolean;
 	readonly polygon: {
-		/** Authored DAT polygon culling mode, retained as provenance after side expansion. */
-		readonly authoredCullMode:
-			"landblock" | "none" | "clockwise" | "counter-clockwise";
 		/** Effective GPU face rejection for this already-expanded render side. */
 		readonly cullFace: "back" | "front";
-		/** Expanded source side that selected this draw range's material and winding. */
-		readonly renderSide: "positive" | "positive-reversed" | "negative";
 		/** Retail SetSurface stippling flag selected from the expanded source side. */
 		readonly stippled: boolean;
 	};

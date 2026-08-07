@@ -16,7 +16,7 @@ const MATERIAL: ResolvedMaterial = {
 };
 
 describe("resolveObjectTriangleMaterial", () => {
-	it("keeps both CullMode.None expansions one-sided", () => {
+	it("keeps both CullMode.None expansions one-sided and in one binding", () => {
 		const geometry = expandedGeometry([0, 1], [1, 1]);
 
 		const positive = resolveObjectTriangleMaterial({
@@ -34,19 +34,15 @@ describe("resolveObjectTriangleMaterial", () => {
 			triangle: 1,
 		});
 
+		// Both expansions must stay one-sided so the pair does not submit the same coplanar
+		// surface twice, and must share a binding so they batch as one run instead of splitting
+		// every two-sided polygon into its own pair of draw ranges.
 		expect(positive.binding.polygon).toEqual({
-			authoredCullMode: "none",
 			cullFace: "back",
-			renderSide: "positive",
 			stippled: false,
 		});
-		expect(reversed.binding.polygon).toEqual({
-			authoredCullMode: "none",
-			cullFace: "back",
-			renderSide: "positive-reversed",
-			stippled: false,
-		});
-		expect(positive.bindingId).not.toBe(reversed.bindingId);
+		expect(reversed.binding.polygon).toEqual(positive.binding.polygon);
+		expect(reversed.bindingId).toBe(positive.bindingId);
 	});
 
 	it("preserves counter-clockwise authored rejection as front-face culling", () => {
@@ -58,10 +54,19 @@ describe("resolveObjectTriangleMaterial", () => {
 			triangle: 0,
 		});
 
-		expect(resolved.binding.polygon).toMatchObject({
-			authoredCullMode: "counter-clockwise",
-			cullFace: "front",
-		});
+		expect(resolved.binding.polygon).toMatchObject({ cullFace: "front" });
+	});
+
+	it("rejects an authored culling mode it cannot reduce to draw state", () => {
+		expect(() =>
+			resolveObjectTriangleMaterial({
+				detailRole: "environment",
+				geometry: expandedGeometry([0], [9]),
+				materials: [MATERIAL],
+				sourceLabel: "unsupported culling fixture",
+				triangle: 0,
+			}),
+		).toThrow("Unsupported polygon culling mode 9.");
 	});
 });
 

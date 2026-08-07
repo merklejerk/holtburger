@@ -1,3 +1,4 @@
+import { renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { DatAssetId } from "../game-types";
 import {
@@ -30,7 +31,7 @@ function build(options: { roll?: number; voiceLimit?: number } = {}) {
 
 function trigger(overrides: Partial<AudioTrigger> = {}): AudioTrigger {
 	return {
-		position: [0, 0, 0],
+		position: renderVector3([0, 0, 0]),
 		probability: 1,
 		soundId: SOUND,
 		volume: 1,
@@ -72,7 +73,7 @@ describe("AudioSystem", () => {
 	it("refuses a sound below retail's audible floor instead of playing it silently", () => {
 		const { played, system } = build();
 
-		expect(system.trigger(trigger({ position: [500, 0, 0] }))).toBe(
+		expect(system.trigger(trigger({ position: renderVector3([500, 0, 0]) }))).toBe(
 			"inaudible",
 		);
 		expect(played).toHaveLength(0);
@@ -80,9 +81,9 @@ describe("AudioSystem", () => {
 
 	it("attenuates and pans from the listener's placement", () => {
 		const { played, system } = build();
-		system.setListener({ position: [0, 0, 0], right: [1, 0, 0] });
+		system.setListener({ position: renderVector3([0, 0, 0]), right: renderVector3([1, 0, 0]) });
 
-		system.trigger(trigger({ position: [10, 0, 0] }));
+		system.trigger(trigger({ position: renderVector3([10, 0, 0]) }));
 
 		expect(played[0]!.gain).toBeCloseTo(0.25);
 		expect(played[0]!.pan).toBeCloseTo(1);

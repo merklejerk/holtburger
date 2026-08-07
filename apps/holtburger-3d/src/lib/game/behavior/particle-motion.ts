@@ -1,3 +1,4 @@
+import type { RenderVector3 } from "../../assets/ac-frame";
 /**
  * Closed-form particle motion, transcribed from retail `Particle::Update`
  * (acclient.c:317446-317664).
@@ -14,7 +15,8 @@
  * `GR`/`LR` likewise select a spin axis space and change orientation, not trajectory.
  */
 
-export type Vector3 = readonly [number, number, number];
+/** Every vector here is render-space; AC axes never reach motion evaluation. */
+export type Vector3 = RenderVector3;
 
 /** Per-particle constants fixed at spawn; nothing here changes over the particle's life. */
 export interface ParticleSpawnConstants {
@@ -61,13 +63,21 @@ export function particlePosition(
 	const { a, b, c, offset } = spawn;
 	const base = (index: 0 | 1 | 2) => parentOrigin[index] + offset[index];
 
+	// Every arm builds a fresh render-space vector; the brand is asserted once here rather than at
+	// each return, since the inputs are already render-space by type.
+	const render = (x: number, y: number, z: number): Vector3 =>
+		[x, y, z] as unknown as Vector3;
 	switch (motionType) {
 		case PARTICLE_TYPE.still:
-			return [base(0), base(1), base(2)];
+			return render(base(0), base(1), base(2));
 
 		case PARTICLE_TYPE.localVelocity:
 		case PARTICLE_TYPE.globalVelocity:
-			return [base(0) + a[0] * t, base(1) + a[1] * t, base(2) + a[2] * t];
+			return render(
+				base(0) + a[0] * t,
+				base(1) + a[1] * t,
+				base(2) + a[2] * t,
+			);
 
 		// The `GR`/`LR` variants share this trajectory exactly; their spin is orientation-only,
 		// applied to the draw frame rather than to the position.
@@ -77,38 +87,38 @@ export function particlePosition(
 		case PARTICLE_TYPE.parabolicLvgaGr:
 		case PARTICLE_TYPE.parabolicLvlaLr:
 		case PARTICLE_TYPE.parabolicGvgaGr:
-			return [
+			return render(
 				base(0) + a[0] * t + 0.5 * b[0] * t * t,
 				base(1) + a[1] * t + 0.5 * b[1] * t * t,
 				base(2) + a[2] * t + 0.5 * b[2] * t * t,
-			];
+			);
 
 		case PARTICLE_TYPE.swarm:
 			// `sin` on y, `cos` on x and z. Deliberately not symmetric; do not "correct" it.
-			return [
+			return render(
 				base(0) + Math.cos(b[0] * t) * c[0] + a[0] * t,
 				base(1) + Math.sin(b[1] * t) * c[1] + a[1] * t,
 				base(2) + Math.cos(b[2] * t) * c[2] + a[2] * t,
-			];
+			);
 
 		case PARTICLE_TYPE.explode:
 			// Two authored quirks, both verified against the decompile and both reproduced on
 			// purpose: every axis multiplies by `a[0]`, not its own component, and z carries an
 			// extra `+ a[2]` inside the parenthesis. Content was tuned against these.
-			return [
+			return render(
 				base(0) + (b[0] * t + c[0] * a[0]) * t,
 				base(1) + (b[1] * t + c[1] * a[0]) * t,
 				base(2) + (b[2] * t + c[2] * a[0] + a[2]) * t,
-			];
+			);
 
 		case PARTICLE_TYPE.implode: {
 			// One scalar cosine, driven by `a[0]`, applied to all three axes.
 			const wave = Math.cos(a[0] * t);
-			return [
+			return render(
 				base(0) + wave * c[0] + b[0] * t * t,
 				base(1) + wave * c[1] + b[1] * t * t,
 				base(2) + wave * c[2] + b[2] * t * t,
-			];
+			);
 		}
 
 		default:

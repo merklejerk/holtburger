@@ -1,3 +1,4 @@
+import type { RenderVector3 } from "../../assets/ac-frame";
 /**
  * Retail's positional audio math, transcribed from `SoundManager` (acclient.c:366427-366519).
  *
@@ -33,9 +34,9 @@ export interface SpatialAudioPlacement {
  * it, which is retail's heading-based pan expressed without a heading angle.
  */
 export function placeSpatialAudio(
-	sourcePosition: readonly [number, number, number],
-	listenerPosition: readonly [number, number, number],
-	listenerRight: readonly [number, number, number],
+	sourcePosition: RenderVector3,
+	listenerPosition: RenderVector3,
+	listenerRight: RenderVector3,
 	volume: number,
 ): SpatialAudioPlacement | null {
 	if (!(volume > 0)) return null;

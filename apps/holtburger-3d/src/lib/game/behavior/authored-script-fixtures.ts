@@ -1,3 +1,4 @@
+import { acVectorToRender } from "../../assets/ac-frame";
 import type { DecodedPhysicsScript } from "../../assets/decode-physics-script-record";
 import type { DatAssetId } from "../game-types";
 import type { PreparedBehaviorCommand } from "./prepared-behavior-command";
@@ -76,13 +77,14 @@ type FixtureCommand = PreparedBehaviorCommand;
 function createParticle(
 	emitterInfoId: string,
 	partIndex: number,
+	/** Authored AC-space offset, exactly as the archive records it. */
 	offsetOrigin: readonly [number, number, number],
 ): FixtureCommand {
 	return {
 		emitterId: 0,
 		emitterInfoId: emitterInfoId as DatAssetId,
 		kind: "create-particle",
-		offsetOrigin,
+		offsetOrigin: acVectorToRender(offsetOrigin),
 		partIndex,
 	};
 }

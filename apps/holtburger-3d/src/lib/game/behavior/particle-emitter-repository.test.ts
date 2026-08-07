@@ -1,3 +1,4 @@
+import { renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
@@ -11,10 +12,10 @@ function emitter(
 	overrides: Partial<DecodedParticleEmitterInfo> = {},
 ): DecodedParticleEmitterInfo {
 	return {
-		a: [0, 0, 0],
-		b: [0, 0, 0],
+		a: renderVector3([0, 0, 0]),
+		b: renderVector3([0, 0, 0]),
 		birthrateSeconds: 0.25,
-		c: [0, 0, 0],
+		c: renderVector3([0, 0, 0]),
 		emitsPerMeter: false,
 		emitsPerSecond: true,
 		finalScale: 1,
@@ -36,7 +37,7 @@ function emitter(
 		minC: 1,
 		minOffset: 0,
 		motionType: 1,
-		offsetDir: [0, 0, 1],
+		offsetDir: renderVector3([0, 0, 1]),
 		scaleRand: 0,
 		startScale: 1,
 		startTrans: 0,
@@ -59,18 +60,18 @@ class FixtureSource implements ParticleEmitterSource {
 describe("emitterEnvelopeRadius", () => {
 	it("bounds a purely linear emitter by velocity times lifespan", () => {
 		// 3 m/s for 2 s, plus the particle's own unit scale.
-		expect(emitterEnvelopeRadius(emitter({ a: [3, 0, 0] }))).toBeCloseTo(7);
+		expect(emitterEnvelopeRadius(emitter({ a: renderVector3([3, 0, 0]) }))).toBeCloseTo(7);
 	});
 
 	it("accounts for acceleration, which retail's own sphere ignores", () => {
 		// Retail's max(max_offset, max_a * lifespan) would return 0 here and clip the particles.
-		expect(emitterEnvelopeRadius(emitter({ b: [1, 0, 0] }))).toBeGreaterThan(4);
+		expect(emitterEnvelopeRadius(emitter({ b: renderVector3([1, 0, 0]) }))).toBeGreaterThan(4);
 	});
 
 	it("includes the randomized tail of lifespan and scale, not their base values", () => {
-		const base = emitterEnvelopeRadius(emitter({ a: [1, 0, 0] }));
+		const base = emitterEnvelopeRadius(emitter({ a: renderVector3([1, 0, 0]) }));
 		const randomized = emitterEnvelopeRadius(
-			emitter({ a: [1, 0, 0], lifespanRand: 2, scaleRand: 1 }),
+			emitter({ a: renderVector3([1, 0, 0]), lifespanRand: 2, scaleRand: 1 }),
 		);
 		expect(randomized).toBeGreaterThan(base);
 	});

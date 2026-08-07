@@ -1,3 +1,4 @@
+import { renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import {
 	PARTICLE_INSTANCE_FLOAT_COUNT,
@@ -6,15 +7,15 @@ import {
 } from "./particle-instance-stream";
 
 const RECORD: ParticleInstanceRecord = {
-	a: [7, 8, 9],
-	b: [10, 11, 12],
+	a: renderVector3([7, 8, 9]),
+	b: renderVector3([10, 11, 12]),
 	birthTime: 4,
-	c: [13, 14, 15],
+	c: renderVector3([13, 14, 15]),
 	finalScale: 17,
 	finalTranslucency: 19,
 	lifespan: 8,
-	offset: [5, 6, 7],
-	origin: [1, 2, 3],
+	offset: renderVector3([5, 6, 7]),
+	origin: renderVector3([1, 2, 3]),
 	startScale: 16,
 	startTranslucency: 18,
 };

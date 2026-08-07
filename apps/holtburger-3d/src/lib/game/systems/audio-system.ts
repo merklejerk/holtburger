@@ -1,3 +1,4 @@
+import { renderVector3, type RenderVector3 } from "../../assets/ac-frame";
 import type { DatAssetId } from "../game-types";
 import { placeSpatialAudio } from "./audio-spatialization";
 
@@ -23,8 +24,8 @@ export interface AudioDevice {
 
 /** Where the listener is and which way its right hand points. */
 export interface AudioListener {
-	readonly position: readonly [number, number, number];
-	readonly right: readonly [number, number, number];
+	readonly position: RenderVector3;
+	readonly right: RenderVector3;
 }
 
 /** One authored sound request, already resolved to a concrete asset. */
@@ -33,7 +34,7 @@ export interface AudioTrigger {
 	/** Play chance rolled once at trigger time. */
 	readonly probability: number;
 	readonly volume: number;
-	readonly position: readonly [number, number, number];
+	readonly position: RenderVector3;
 }
 
 export type AudioTriggerOutcome =
@@ -68,8 +69,9 @@ export class AudioSystem {
 	#stolenCount = 0;
 	#suppressedCount = 0;
 	#listener: AudioListener = {
-		position: [0, 0, 0],
-		right: [1, 0, 0],
+		// The renderer's own axes, not authored data.
+		position: renderVector3([0, 0, 0]),
+		right: renderVector3([1, 0, 0]),
 	};
 
 	/**

@@ -1,3 +1,5 @@
+import type { RenderVector3 } from "../../assets/ac-frame";
+import { renderVector3 } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
@@ -124,7 +126,7 @@ export class ParticleSystem {
 		target: BehaviorTarget,
 		command: {
 			readonly emitterInfoId: DatAssetId;
-			readonly offsetOrigin: readonly [number, number, number];
+			readonly offsetOrigin: RenderVector3;
 			readonly emitterId: number;
 		},
 	): "created" | "unprepared" {
@@ -135,11 +137,8 @@ export class ParticleSystem {
 		this.create(
 			target,
 			emitter,
-			[
-				command.offsetOrigin[0],
-				command.offsetOrigin[1],
-				command.offsetOrigin[2],
-			],
+			// Already render-space: the decode layer converted it out of AC axes.
+			command.offsetOrigin,
 			command.emitterId,
 			this.#dependencies.clock(),
 			parentOrigin,
@@ -484,11 +483,12 @@ export class ParticleSystem {
 		const info = instance.emitter.info;
 		if (instance.particles.length >= info.maxParticles) return;
 		const roll = this.#roll;
-		const spawnOrigin: Vector3 = [
+		// Both operands are render-space by type, so their sum is too.
+		const spawnOrigin = renderVector3([
 			parentOrigin[0] + instance.hookOffset[0],
 			parentOrigin[1] + instance.hookOffset[1],
 			parentOrigin[2] + instance.hookOffset[2],
-		];
+		]);
 		instance.particles.push({
 			birthTime: timeSeconds,
 			// A following emitter re-reads the live origin every frame, so it stores no snapshot at
@@ -529,30 +529,39 @@ export class ParticleSystem {
 		maxOffset: number,
 	): Vector3 {
 		const roll = this.#roll;
-		const random: Vector3 = [roll() * 2 - 1, roll() * 2 - 1, roll() * 2 - 1];
+		// A random direction has no authored space; it is generated directly in render axes.
+		const random = renderVector3([
+			roll() * 2 - 1,
+			roll() * 2 - 1,
+			roll() * 2 - 1,
+		]);
 		const dirLength = Math.hypot(...offsetDir);
 		let perpendicular = random;
 		if (dirLength > 0) {
-			const unit: Vector3 = [
+			const unit = renderVector3([
 				offsetDir[0] / dirLength,
 				offsetDir[1] / dirLength,
 				offsetDir[2] / dirLength,
-			];
+			]);
 			const along =
 				random[0] * unit[0] + random[1] * unit[1] + random[2] * unit[2];
-			perpendicular = [
+			perpendicular = renderVector3([
 				random[0] - along * unit[0],
 				random[1] - along * unit[1],
 				random[2] - along * unit[2],
-			];
+			]);
 		}
 		const length = Math.hypot(...perpendicular);
-		if (length === 0) return [0, 0, 0];
+		if (length === 0) return renderVector3([0, 0, 0]);
 		const magnitude = minOffset + roll() * (maxOffset - minOffset);
 		return scaledVector(perpendicular, magnitude / length);
 	}
 }
 
 function scaledVector(vector: Vector3, scale: number): Vector3 {
-	return [vector[0] * scale, vector[1] * scale, vector[2] * scale];
+	return renderVector3([
+		vector[0] * scale,
+		vector[1] * scale,
+		vector[2] * scale,
+	]);
 }

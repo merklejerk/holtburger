@@ -2681,9 +2681,141 @@ grew the envelope because that is where the bounds were being built; the broadph
 copy because nothing connected them. Nothing tested the broadphase path, which is why it shipped
 twice. The regression test now sets a non-zero radius and asserts both bounds grow.
 
-## Addendum: Phase 9 — Region-Driven Ambient Audio
+## Addendum: Phase 9 — Emitter-Frame Motion Constants
 
-Added after the plan's original scope was met. Ambient audio was deliberately excluded throughout,
+Pulled ahead of the ambient-audio phase: this is a correctness defect in shipped content, and
+ambient audio is a new feature. Added after a user report that the waterfall at `0x24bcffff` (48.9N, 72.4W) sprays sideways where
+retail sprays toward the viewer. The symptom is a fixed yaw error, and the cause is a retail
+mechanism we never implemented at all.
+
+### Goal
+
+Spawn particles in the emitter owner's frame, as retail does, so authored motion points where the
+content author aimed it.
+
+### Ground Truth
+
+`Particle::Update` (acclient.c:317446) treats `LocalVelocity_PT` and `GlobalVelocity_PT` identically,
+which is why our evaluator looked correct when checked against it. The distinction lives in
+`Particle::Init` (acclient.c:317743), which rotates the spawn constants into world space by
+`start_frame` — the owner's frame, snapshotted at spawn — via `Frame::localtoglobalvec`, selectively
+per motion type:
+
+| `ParticleType` | `a` | `b` | `c` |
+| --- | --- | --- | --- |
+| `Still` | — | — | — |
+| `LocalVelocity` | **rotated** | — | — |
+| `GlobalVelocity` | authored | — | — |
+| `ParabolicLVGA` | **rotated** | authored | — |
+| `ParabolicLVLA` | **rotated** | **rotated** | — |
+| `ParabolicGVGA` | authored | authored | — |
+| `ParabolicLVGAGR` | **rotated** | authored | authored |
+| `ParabolicLVLALR` | **rotated** | **rotated** | **rotated** |
+| `ParabolicGVGAGR` | authored | authored | authored |
+| `Swarm` | **rotated** | authored | authored |
+| `Explode` | authored | authored | randomized, see 9.3 |
+| `Implode` | authored | authored | derived, see 9.4 |
+
+The suffixes decode as **L**ocal/**G**lobal **V**elocity and **A**cceleration, naming exactly which
+constants are rotated. `start_frame` is the parent object's frame, or the *part's* frame when the
+emitter names a part (`part_index != -1`).
+
+Separately, and for **every** type including `Still`, `Init` rotates `offset` by `start_frame` before
+storing it. We do not, so static emitters sit in the wrong place on any rotated owner.
+
+### Scope
+
+**In scope.** Capturing the owner's orientation at spawn, the per-type rotation table, rotating
+`offset` unconditionally, and the two `Explode`/`Implode` constant derivations found in the same
+function.
+
+**Out of scope.** The `GR`/`LR` spin variants' per-frame `Frame::rotate` on the drawn particle
+orientation, which is a draw-frame concern rather than a trajectory one, and is already noted as
+orientation-only in `acDisplacement`. Any change to the motion formulas themselves.
+
+### North Stars
+
+1. **Bake at spawn, exactly as retail does.** `Init` rotates once and `Update` never sees a frame
+   again. If the rotation lands in the spawn constants, `acDisplacement`, the GLSL evaluator, and the
+   entire render path are untouched. Any design that needs a rotation at evaluation time is wrong.
+2. **Rotate in AC axes, before the one conversion.** Swarm's sine-on-y, Explode's `a[0]`-on-all-axes,
+   and Implode's scalar cosine are all AC-axis-specific. A rotation applied after the AC→render
+   conversion silently swaps which axis gets the sine — the exact defect already fixed once in this
+   plan.
+3. **The producer brands the frame.** Whoever already knows the authored orientation should hand it
+   over branded, rather than a consumer asserting a frame it inferred.
+
+### Phase 9.1 — Carry the owner's orientation to the emitter
+
+`ParticleSystemDependencies` exposes `sceneOriginOf(target)` and nothing about rotation. Two ways to
+get one, and the choice is the first real decision:
+
+- **(a) Carry the authored AC-space rotation forward** from landblock resolution, where the AC frame
+  is still intact before conversion. Preferred: the producer knows the frame, matching the coordinate
+  rule in `apps/holtburger-3d/AGENTS.md`.
+- **(b) Change-of-basis the resolved render transform back into AC axes** (`R_ac = P⁻¹ R_render P`).
+  Self-contained but re-derives a fact we already had and then threw away, and inverting our own
+  conversion is precisely where an axis swap hides.
+
+Deliverables: a companion `sceneOrientationOf(target)` dependency returning a branded AC-space
+rotation; an `EmitterInstance` that captures it at spawn beside the existing origin freeze.
+
+Acceptance: an emitter on a yaw-rotated owner reports a rotation that is not identity, and one on an
+unrotated owner reports identity exactly.
+
+### Phase 9.2 — Rotate the spawn constants per type
+
+Deliverables: a per-type table beside `PARTICLE_TYPE` naming which of `a`/`b`/`c` are rotated;
+`#emit` applies it plus the unconditional `offset` rotation.
+
+Acceptance: table-driven tests over all twelve shipped types asserting rotated-vs-authored per
+constant against the decompile table above; a yaw-90° owner turns a `LocalVelocity` emitter's
+trajectory by 90° while leaving a `GlobalVelocity` one untouched.
+
+### Phase 9.3 — `Explode` randomizes `c` onto the unit sphere
+
+`Init` replaces authored `c` with two `RollDice(-π, π)` angles projected to a direction, then
+`normalize_check_small`, zeroing it when degenerate. The authored magnitude is **discarded**: `c`
+is always a unit vector or zero. We feed authored `c` straight through, so explosions currently fire
+every particle along one authored direction instead of spraying.
+
+Consequence to sweep in the same change: `motionReach`'s `explode` arm bounds against authored `|c|`,
+which is no longer the reach — the true magnitude is 1. Update it and its test together.
+
+Acceptance: two particles from one explode emitter spawn along different directions; every spawned
+`c` has magnitude 1 or 0; the envelope test uses the unit magnitude.
+
+### Phase 9.4 — `Implode` derives `c` from the rotated offset
+
+`Init` sets `c = offset * c` componentwise, *after* `offset` has been rotated, so implode inherits
+the frame indirectly rather than through the rotation table. Ordering matters: this must read the
+rotated offset, not the authored one.
+
+Acceptance: an implode emitter on a rotated owner produces a `c` consistent with its rotated offset.
+
+### Risks
+
+- **Rotating in the wrong space.** The highest-probability failure, and it will look plausible.
+  Mitigated by testing the asymmetric types (Swarm, Explode) specifically, since a symmetric formula
+  cannot detect an axis swap. This is the second time this exact hazard has appeared in this plan.
+- **Part-attached emitters.** `start_frame` is the *part's* frame when `part_index != -1`. Resolving
+  the object's frame for a part-attached emitter would be wrong on any articulated owner, and wrong
+  in a way that only shows while the part is animating.
+- **Silent content shift.** Every existing emitter on a rotated owner changes direction. That is the
+  point, but it means any screenshot fixture recorded before this phase is invalid afterward.
+
+### Open Questions
+
+- 9.1(a) or 9.1(b)? Recommendation is (a); it needs a look at whether the authored rotation
+  survives to the layer that builds `AuthoredDynamicSource`, which currently exposes only a
+  render-space `ScenePlacement`.
+- Does any shipped emitter actually name a part (`part_index != -1`)? A census decides whether the
+  part-frame case is real work or a documented gap.
+
+## Addendum: Phase 10 — Region-Driven Ambient Audio
+
+Added after the plan's original scope was met, and deferred behind Phase 9 once emitter-frame
+motion was found to be wrong in shipped content. Ambient audio was deliberately excluded throughout,
 on the grounds that it is a scheduler rather than a hook consumer; this makes that exclusion a
 scheduled phase instead of a permanent boundary.
 
@@ -2729,7 +2861,7 @@ reachable without new archive plumbing — confirm before assuming it.
 4. Reproduce retail's audible behaviour, including its quirks, but only where content was tuned
    against them.
 
-### Phase 9.1 — Decode the ambient descriptors
+### Phase 10.1 — Decode the ambient descriptors
 
 Decode `CSoundDesc`/`AmbientSTBDesc`/`AmbientSoundDesc` from region data, and the `CSceneType`
 descriptor alongside them. Verify field order against ACE rather than the decompile's struct dump.
@@ -2738,7 +2870,7 @@ descriptor alongside them. Verify field order against ACE rather than the decomp
 continuous, and the observed `min_rate`/`max_rate`/`base_chance` distributions. That census decides
 the scheduler's shape, so it comes first.
 
-### Phase 9.2 — The ambient category
+### Phase 10.2 — The ambient category
 
 Add `ambientVolume` to `AudioSettings` and an `is_ambient` route through `placeSpatialAudio`, so
 category volume selection is explicit rather than implied by the single effect path.
@@ -2751,7 +2883,7 @@ the setting linear. This needs a call, and the phase should not proceed on a gue
 *Acceptance:* effect and ambient sounds resolve independently against their own volumes, with the
 squaring decision recorded and tested either way.
 
-### Phase 9.3 — The scheduler
+### Phase 10.3 — The scheduler
 
 A system owning one clock per active ambient descriptor: on each due tick, roll `base_chance`, and on
 success resolve the descriptor's `SoundType` against its table and trigger. Re-arm from
@@ -2761,7 +2893,7 @@ retire when their region does.
 *Acceptance:* the harness reports scheduled, fired, and suppressed counts, and a fixed clock produces
 a deterministic sequence.
 
-### Phase 9.4 — Continuous playback
+### Phase 10.4 — Continuous playback
 
 `is_continuous` descriptors loop rather than firing repeatedly. This is the change with real risk:
 `AudioSystem` is documented as one-shots only, its voice budget assumes voices end on their own, and
@@ -2786,136 +2918,6 @@ strands a slot after teardown.
 - Does `CSoundDesc` reach us through the already-decoded `RegionDesc`, or does it need new plumbing?
 - Are ambient descriptors selected by region, by scene type, or both simultaneously?
 - Reproduce or fix the squared ambient volume?
-
-## Addendum: Phase 10 — Emitter-Frame Motion Constants
-
-Added after a user report that the waterfall at `0x24bcffff` (48.9N, 72.4W) sprays sideways where
-retail sprays toward the viewer. The symptom is a fixed yaw error, and the cause is a retail
-mechanism we never implemented at all.
-
-### Goal
-
-Spawn particles in the emitter owner's frame, as retail does, so authored motion points where the
-content author aimed it.
-
-### Ground Truth
-
-`Particle::Update` (acclient.c:317446) treats `LocalVelocity_PT` and `GlobalVelocity_PT` identically,
-which is why our evaluator looked correct when checked against it. The distinction lives in
-`Particle::Init` (acclient.c:317743), which rotates the spawn constants into world space by
-`start_frame` — the owner's frame, snapshotted at spawn — via `Frame::localtoglobalvec`, selectively
-per motion type:
-
-| `ParticleType` | `a` | `b` | `c` |
-| --- | --- | --- | --- |
-| `Still` | — | — | — |
-| `LocalVelocity` | **rotated** | — | — |
-| `GlobalVelocity` | authored | — | — |
-| `ParabolicLVGA` | **rotated** | authored | — |
-| `ParabolicLVLA` | **rotated** | **rotated** | — |
-| `ParabolicGVGA` | authored | authored | — |
-| `ParabolicLVGAGR` | **rotated** | authored | authored |
-| `ParabolicLVLALR` | **rotated** | **rotated** | **rotated** |
-| `ParabolicGVGAGR` | authored | authored | authored |
-| `Swarm` | **rotated** | authored | authored |
-| `Explode` | authored | authored | randomized, see 10.3 |
-| `Implode` | authored | authored | derived, see 10.4 |
-
-The suffixes decode as **L**ocal/**G**lobal **V**elocity and **A**cceleration, naming exactly which
-constants are rotated. `start_frame` is the parent object's frame, or the *part's* frame when the
-emitter names a part (`part_index != -1`).
-
-Separately, and for **every** type including `Still`, `Init` rotates `offset` by `start_frame` before
-storing it. We do not, so static emitters sit in the wrong place on any rotated owner.
-
-### Scope
-
-**In scope.** Capturing the owner's orientation at spawn, the per-type rotation table, rotating
-`offset` unconditionally, and the two `Explode`/`Implode` constant derivations found in the same
-function.
-
-**Out of scope.** The `GR`/`LR` spin variants' per-frame `Frame::rotate` on the drawn particle
-orientation, which is a draw-frame concern rather than a trajectory one, and is already noted as
-orientation-only in `acDisplacement`. Any change to the motion formulas themselves.
-
-### North Stars
-
-1. **Bake at spawn, exactly as retail does.** `Init` rotates once and `Update` never sees a frame
-   again. If the rotation lands in the spawn constants, `acDisplacement`, the GLSL evaluator, and the
-   entire render path are untouched. Any design that needs a rotation at evaluation time is wrong.
-2. **Rotate in AC axes, before the one conversion.** Swarm's sine-on-y, Explode's `a[0]`-on-all-axes,
-   and Implode's scalar cosine are all AC-axis-specific. A rotation applied after the AC→render
-   conversion silently swaps which axis gets the sine — the exact defect already fixed once in this
-   plan.
-3. **The producer brands the frame.** Whoever already knows the authored orientation should hand it
-   over branded, rather than a consumer asserting a frame it inferred.
-
-### Phase 10.1 — Carry the owner's orientation to the emitter
-
-`ParticleSystemDependencies` exposes `sceneOriginOf(target)` and nothing about rotation. Two ways to
-get one, and the choice is the first real decision:
-
-- **(a) Carry the authored AC-space rotation forward** from landblock resolution, where the AC frame
-  is still intact before conversion. Preferred: the producer knows the frame, matching the coordinate
-  rule in `apps/holtburger-3d/AGENTS.md`.
-- **(b) Change-of-basis the resolved render transform back into AC axes** (`R_ac = P⁻¹ R_render P`).
-  Self-contained but re-derives a fact we already had and then threw away, and inverting our own
-  conversion is precisely where an axis swap hides.
-
-Deliverables: a companion `sceneOrientationOf(target)` dependency returning a branded AC-space
-rotation; an `EmitterInstance` that captures it at spawn beside the existing origin freeze.
-
-Acceptance: an emitter on a yaw-rotated owner reports a rotation that is not identity, and one on an
-unrotated owner reports identity exactly.
-
-### Phase 10.2 — Rotate the spawn constants per type
-
-Deliverables: a per-type table beside `PARTICLE_TYPE` naming which of `a`/`b`/`c` are rotated;
-`#emit` applies it plus the unconditional `offset` rotation.
-
-Acceptance: table-driven tests over all twelve shipped types asserting rotated-vs-authored per
-constant against the decompile table above; a yaw-90° owner turns a `LocalVelocity` emitter's
-trajectory by 90° while leaving a `GlobalVelocity` one untouched.
-
-### Phase 10.3 — `Explode` randomizes `c` onto the unit sphere
-
-`Init` replaces authored `c` with two `RollDice(-π, π)` angles projected to a direction, then
-`normalize_check_small`, zeroing it when degenerate. The authored magnitude is **discarded**: `c`
-is always a unit vector or zero. We feed authored `c` straight through, so explosions currently fire
-every particle along one authored direction instead of spraying.
-
-Consequence to sweep in the same change: `motionReach`'s `explode` arm bounds against authored `|c|`,
-which is no longer the reach — the true magnitude is 1. Update it and its test together.
-
-Acceptance: two particles from one explode emitter spawn along different directions; every spawned
-`c` has magnitude 1 or 0; the envelope test uses the unit magnitude.
-
-### Phase 10.4 — `Implode` derives `c` from the rotated offset
-
-`Init` sets `c = offset * c` componentwise, *after* `offset` has been rotated, so implode inherits
-the frame indirectly rather than through the rotation table. Ordering matters: this must read the
-rotated offset, not the authored one.
-
-Acceptance: an implode emitter on a rotated owner produces a `c` consistent with its rotated offset.
-
-### Risks
-
-- **Rotating in the wrong space.** The highest-probability failure, and it will look plausible.
-  Mitigated by testing the asymmetric types (Swarm, Explode) specifically, since a symmetric formula
-  cannot detect an axis swap. This is the second time this exact hazard has appeared in this plan.
-- **Part-attached emitters.** `start_frame` is the *part's* frame when `part_index != -1`. Resolving
-  the object's frame for a part-attached emitter would be wrong on any articulated owner, and wrong
-  in a way that only shows while the part is animating.
-- **Silent content shift.** Every existing emitter on a rotated owner changes direction. That is the
-  point, but it means any screenshot fixture recorded before this phase is invalid afterward.
-
-### Open Questions
-
-- 10.1(a) or 10.1(b)? Recommendation is (a); it needs a look at whether the authored rotation
-  survives to the layer that builds `AuthoredDynamicSource`, which currently exposes only a
-  render-space `ScenePlacement`.
-- Does any shipped emitter actually name a part (`part_index != -1`)? A census decides whether the
-  part-frame case is real work or a documented gap.
 
 
 ## Definition of Done

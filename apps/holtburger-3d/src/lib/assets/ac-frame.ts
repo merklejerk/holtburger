@@ -70,6 +70,96 @@ export function acVectorToRender(vector: AcVector3): RenderVector3 {
 }
 
 /**
+ * Convert one render-axis vector back into AC's authored axes.
+ *
+ * The exact inverse of {@link acVectorToRender}. Needed because some authored maths must be
+ * evaluated in AC axes against a rotation the scene only holds in render axes: the vector goes out
+ * to render space, is rotated there, and comes back.
+ */
+export function renderVectorToAc(vector: RenderVector3): AcVector3 {
+	return [vector[0], -vector[2], vector[1]] as unknown as AcVector3;
+}
+
+/**
+ * A rotation expressed in AC's authored axes, as the images of AC's three basis vectors.
+ *
+ * Stored as its columns rather than as a matrix type so it cannot be confused with the render-space
+ * transforms the scene graph holds; the component vectors carry the frame in their own brand, so
+ * this needs no brand of its own.
+ */
+export interface AcRotation {
+	/** Images of AC's x, y and z basis vectors, in that order. */
+	readonly columns: readonly [AcVector3, AcVector3, AcVector3];
+}
+
+/** AC's basis vectors, whose images under a render rotation define {@link AcRotation}. */
+const AC_BASIS: readonly [AcVector3, AcVector3, AcVector3] = [
+	acVector3([1, 0, 0]),
+	acVector3([0, 1, 0]),
+	acVector3([0, 0, 1]),
+];
+
+/**
+ * Extract an object's rotation from its resolved render transform, expressed in AC's authored axes.
+ *
+ * Retail rotates particle spawn constants by the owner's **current** frame at spawn
+ * (`Frame::localtoglobalvec`, acclient.c:317743), and those constants then feed formulas whose
+ * component indices carry AC's axis meaning. So the rotation has to be available in AC axes, while
+ * the only live copy of it is the render-space transform the scene graph resolves.
+ *
+ * Derived by sending each AC basis vector out to render space, rotating it, and bringing it back,
+ * rather than by hand-solving the conjugation. The signs are then a consequence of
+ * {@link acVectorToRender} and {@link renderVectorToAc} instead of a separate thing to get right.
+ *
+ * Scale is divided out per basis row: retail's `Frame` carries an origin and a quaternion and has no
+ * scale, so a scaled owner must not scale the velocities it emits. Shear is not represented in a
+ * TRS transform and is not accounted for.
+ */
+export function acRotationFromRenderTransform(transform: Mat4): AcRotation {
+	// Images of the render basis vectors, normalized so authored scale does not reach the result.
+	const rows: readonly [number, number, number][] = [
+		[transform.m11, transform.m12, transform.m13],
+		[transform.m21, transform.m22, transform.m23],
+		[transform.m31, transform.m32, transform.m33],
+	].map((row) => {
+		const [x, y, z] = row as [number, number, number];
+		const magnitude = Math.hypot(x, y, z);
+		if (magnitude === 0)
+			throw new Error("Transform basis is degenerate; it carries no rotation.");
+		return [x / magnitude, y / magnitude, z / magnitude];
+	}) as readonly [number, number, number][];
+	const rotateRender = (vector: RenderVector3): RenderVector3 =>
+		renderVector3([
+			rows[0]![0] * vector[0] +
+				rows[1]![0] * vector[1] +
+				rows[2]![0] * vector[2],
+			rows[0]![1] * vector[0] +
+				rows[1]![1] * vector[1] +
+				rows[2]![1] * vector[2],
+			rows[0]![2] * vector[0] +
+				rows[1]![2] * vector[1] +
+				rows[2]![2] * vector[2],
+		]);
+	const [x, y, z] = AC_BASIS.map((basis) =>
+		renderVectorToAc(rotateRender(acVectorToRender(basis))),
+	) as [AcVector3, AcVector3, AcVector3];
+	return { columns: [x, y, z] };
+}
+
+/** Rotate one AC-axis vector by an AC-axis rotation, preserving its magnitude. */
+export function rotateAcVector(
+	rotation: AcRotation,
+	vector: AcVector3,
+): AcVector3 {
+	const [x, y, z] = rotation.columns;
+	return acVector3([
+		x[0] * vector[0] + y[0] * vector[1] + z[0] * vector[2],
+		x[1] * vector[0] + y[1] * vector[1] + z[1] * vector[2],
+		x[2] * vector[0] + y[2] * vector[1] + z[2] * vector[2],
+	]);
+}
+
+/**
  * Assert that a vector is already in render axes.
  *
  * For values the renderer itself produced — a scene-graph translation, a camera position — which

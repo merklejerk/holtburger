@@ -56,6 +56,63 @@ export const PARTICLE_TYPE = {
 	unknown: 0,
 } as const;
 
+/** Which of a particle's spawn constants are rotated into the owner's frame at spawn. */
+export interface RotatedSpawnConstants {
+	readonly a: boolean;
+	readonly b: boolean;
+	readonly c: boolean;
+}
+
+const ROTATE_NONE: RotatedSpawnConstants = { a: false, b: false, c: false };
+
+/**
+ * Which spawn constants `Particle::Init` rotates by the owner's frame (acclient.c:317743-317884).
+ *
+ * This is the entire `Local`/`Global` distinction, and the only place it exists: `Update` evaluates
+ * a `Local`/`Global` pair with identical arithmetic, so a client that skips this rotates nothing and
+ * every emitter on a rotated owner fires in the wrong direction. The suffixes decode as **L**ocal or
+ * **G**lobal **V**elocity and **A**cceleration, naming exactly which constants are rotated.
+ *
+ * `offset` is deliberately absent: retail rotates it for *every* type, including `Still`, so it is
+ * unconditional rather than a per-type choice. `Explode` and `Implode` rotate none of a/b/c because
+ * they derive their `c` at spawn instead; see the spawn path.
+ */
+export function rotatedSpawnConstants(
+	motionType: number | null,
+): RotatedSpawnConstants {
+	switch (motionType) {
+		case PARTICLE_TYPE.localVelocity:
+		case PARTICLE_TYPE.parabolicLvga:
+			return { a: true, b: false, c: false };
+
+		case PARTICLE_TYPE.parabolicLvla:
+			return { a: true, b: true, c: false };
+
+		case PARTICLE_TYPE.parabolicLvgaGr:
+			// The `GR` spin axis stays authored; only the trajectory's `a` is rotated.
+			return { a: true, b: false, c: false };
+
+		case PARTICLE_TYPE.parabolicLvlaLr:
+			return { a: true, b: true, c: true };
+
+		case PARTICLE_TYPE.swarm:
+			// `b` is a frequency and `c` an amplitude; neither is a direction, so neither rotates.
+			return { a: true, b: false, c: false };
+
+		case PARTICLE_TYPE.still:
+		case PARTICLE_TYPE.globalVelocity:
+		case PARTICLE_TYPE.parabolicGvga:
+		case PARTICLE_TYPE.parabolicGvgaGr:
+		case PARTICLE_TYPE.explode:
+		case PARTICLE_TYPE.implode:
+			return ROTATE_NONE;
+
+		default:
+			// An unshipped type never reaches an evaluator, so it has no observable spawn frame.
+			return ROTATE_NONE;
+	}
+}
+
 /**
  * Position of one particle at elapsed time `t`, in the same space as `parentOrigin`.
  *

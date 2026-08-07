@@ -1,4 +1,11 @@
-import { acVector3, renderVector3, sceneVector3 } from "../../assets/ac-frame";
+import {
+	acRotationFromRenderTransform,
+	acVector3,
+	renderVector3,
+	sceneVector3,
+} from "../../assets/ac-frame";
+import { Mat4, Quat } from "../math/types";
+import { createRotationMat4 } from "../math/matrices";
 import type { SceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
@@ -64,12 +71,21 @@ function prepared(
  * Emitter resolution and the clock are only exercised through `createEmitter`; the tests that drive
  * `create` directly pass their own time explicitly.
  */
+/** A quarter turn about AC's up axis, the case the waterfall report turned on. */
+const YAWED_QUARTER_TURN = acRotationFromRenderTransform(
+	createRotationMat4(new Quat(Math.SQRT1_2, 0, Math.SQRT1_2, 0)),
+);
+
+/** An owner with no rotation, so these tests read authored constants unchanged. */
+const UNROTATED = acRotationFromRenderTransform(Mat4.identity());
+
 const runtime = (
 	overrides: Partial<ConstructorParameters<typeof ParticleSystem>[0]> = {},
 ) =>
 	new ParticleSystem({
 		clock: () => 0,
 		sceneOriginOf: () => ORIGIN,
+		sceneRotationOf: () => UNROTATED,
 		renderAnchorOrigin: () => sceneVector3([0, 0, 0]),
 		resolveEmitter: () => null,
 		roll: () => 0.5,
@@ -605,6 +621,98 @@ describe("ParticleSystem", () => {
 		);
 
 		expect(particles.collectCohorts()).toHaveLength(0);
+	});
+
+	/**
+	 * The `Local`/`Global` split lives entirely at spawn (`Particle::Init`, acclient.c:317743): the
+	 * evaluator sees identical arithmetic either way, so only the stored constants can tell them
+	 * apart. AC's +y is north and a quarter turn about up sends it to -x; in render axes that is -x
+	 * as well, since the conversion leaves x alone.
+	 */
+	it.each([
+		{
+			expectedX: -5,
+			motionType: 2,
+			name: "LocalVelocity rotates its velocity",
+		},
+		{
+			expectedX: 0,
+			motionType: 12,
+			name: "GlobalVelocity keeps its authored velocity",
+		},
+	])("$name", ({ expectedX, motionType }) => {
+		const particles = runtime({
+			sceneRotationOf: () => YAWED_QUARTER_TURN,
+		});
+		particles.create(
+			TARGET,
+			prepared({
+				a: acVector3([0, 5, 0]),
+				initialParticles: 1,
+				maxA: 1,
+				minA: 1,
+				motionType,
+			}),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		// One second of travel, so the sampled position is the velocity itself.
+		expect(particles.sample(1)[0]!.position[0]).toBeCloseTo(expectedX);
+	});
+
+	it("rotates the spawn offset for a Still emitter, which has no velocity to rotate", () => {
+		// The default roll of 0.5 yields a zero random direction, which no rotation can move.
+		const offsetRoll = () => 0.75;
+		const particles = runtime({
+			roll: offsetRoll,
+			sceneRotationOf: () => YAWED_QUARTER_TURN,
+		});
+		particles.create(
+			TARGET,
+			prepared({
+				initialParticles: 1,
+				maxOffset: 5,
+				minOffset: 5,
+				motionType: 1,
+				// Offsets are spread perpendicular to this axis, so an authored up axis spreads the
+				// particle across AC's horizontal plane, where a yaw is observable.
+				offsetDir: acVector3([0, 0, 1]),
+			}),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const [rotatedX, , rotatedZ] = particles.sample(0)[0]!.position;
+		const unrotated = runtime({
+			roll: offsetRoll,
+			sceneRotationOf: () => UNROTATED,
+		});
+		unrotated.create(
+			TARGET,
+			prepared({
+				initialParticles: 1,
+				maxOffset: 5,
+				minOffset: 5,
+				motionType: 1,
+				offsetDir: acVector3([0, 0, 1]),
+			}),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+		const [authoredX, , authoredZ] = unrotated.sample(0)[0]!.position;
+
+		// Retail rotates `offset` for every type, so the same roll lands somewhere else.
+		expect(Math.hypot(rotatedX, rotatedZ)).toBeCloseTo(
+			Math.hypot(authoredX, authoredZ),
+		);
+		expect(rotatedX).not.toBeCloseTo(authoredX);
 	});
 
 	it("carries spawn constants into cohorts, never evaluated positions", () => {

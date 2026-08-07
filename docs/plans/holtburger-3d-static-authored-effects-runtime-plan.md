@@ -2745,7 +2745,27 @@ orientation-only in `acDisplacement`. Any change to the motion formulas themselv
 3. **The producer brands the frame.** Whoever already knows the authored orientation should hand it
    over branded, rather than a consumer asserting a frame it inferred.
 
-### Phase 9.1 — Carry the owner's orientation to the emitter
+### Phase 9.1 — Carry the owner's orientation to the emitter — **done**
+
+**Resolved: (b), and (a) would have been wrong.** The recommendation above was made before checking
+what `start_frame` actually is. Retail snapshots the owner's frame *at spawn*, so a script that
+rotates its owner changes where its emitters fire; an authored decode-time quaternion cannot see
+that. `#sceneOriginOf` already reads `getResolvedPlacement(nodeId).localToLandblock`, the live
+resolved transform, so the rotation was sitting in the matrix the origin already came from. Retaining
+an authored quaternion beside it would also have been a second copy of one fact — the defect shape
+this plan has already hit twice.
+
+`acRotationFromRenderTransform` derives the AC-space rotation by sending each AC basis vector out to
+render space, rotating it, and bringing it back through the new `renderVectorToAc`. That was
+deliberate: the conjugation `P⁻¹RP` is easy to hand-solve wrong and impossible to eyeball, whereas
+this form is correct by construction from the two converters. Scale is divided out per basis row,
+because retail's `Frame` has no scale and a scaled owner must not scale the velocities it emits.
+
+`AcRotation` needs no brand of its own — it is three `AcVector3` columns, so the component brands
+carry the frame.
+
+<details><summary>Original scoping</summary>
+
 
 `ParticleSystemDependencies` exposes `sceneOriginOf(target)` and nothing about rotation. Two ways to
 get one, and the choice is the first real decision:
@@ -2762,8 +2782,24 @@ rotation; an `EmitterInstance` that captures it at spawn beside the existing ori
 
 Acceptance: an emitter on a yaw-rotated owner reports a rotation that is not identity, and one on an
 unrotated owner reports identity exactly.
+</details>
 
-### Phase 9.2 — Rotate the spawn constants per type
+### Phase 9.2 — Rotate the spawn constants per type — **done**
+
+`rotatedSpawnConstants` in `particle-motion.ts` mirrors `acDisplacement`'s switch, the pattern
+`motionReach` already set, so the three stay visibly in step. `offset` is deliberately *not* in that
+table: retail rotates it for every type, so it is unconditional at the spawn site instead.
+
+A missing rotation now throws rather than falling back to identity. `#emit`'s caller already resolved
+the same target's origin from the same placement, so a null rotation is a broken contract, not a
+target that went away.
+
+Note for the record: `particle-motion.ts`'s module comment already described this mechanism
+correctly — that `Local`/`Global` selects whether constants were rotated by the spawn frame, and that
+`Init` does it before `Update` runs. The knowledge was written down and the implementation was simply
+never built. A documented mechanism is not an implemented one.
+
+<details><summary>Original scoping</summary>
 
 Deliverables: a per-type table beside `PARTICLE_TYPE` naming which of `a`/`b`/`c` are rotated;
 `#emit` applies it plus the unconditional `offset` rotation.
@@ -2771,6 +2807,7 @@ Deliverables: a per-type table beside `PARTICLE_TYPE` naming which of `a`/`b`/`c
 Acceptance: table-driven tests over all twelve shipped types asserting rotated-vs-authored per
 constant against the decompile table above; a yaw-90° owner turns a `LocalVelocity` emitter's
 trajectory by 90° while leaving a `GlobalVelocity` one untouched.
+</details>
 
 ### Phase 9.3 — `Explode` randomizes `c` onto the unit sphere
 

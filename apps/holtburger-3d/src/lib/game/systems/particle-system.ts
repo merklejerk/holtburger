@@ -3,7 +3,13 @@ import type {
 	RenderVector3,
 	SceneVector3,
 } from "../../assets/ac-frame";
-import { acVector3, renderVector3, sceneVector3 } from "../../assets/ac-frame";
+import {
+	acVector3,
+	renderVector3,
+	rotateAcVector,
+	sceneVector3,
+} from "../../assets/ac-frame";
+import type { AcRotation } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
@@ -12,6 +18,7 @@ import type { SceneNodeId } from "../scene";
 import {
 	particleLifeProgress,
 	particlePosition,
+	rotatedSpawnConstants,
 	particleScale,
 	particleTranslucency,
 	type ParticleSpawnConstants,
@@ -34,6 +41,15 @@ export interface ParticleSystemDependencies {
 	 * Scene frame rather than anchor-relative because particle origins are retained across frames.
 	 */
 	readonly sceneOriginOf: (target: BehaviorTarget) => SceneVector3 | null;
+	/**
+	 * Current rotation of a target's frame, in AC's authored axes, or `null` once it stops
+	 * publishing one.
+	 *
+	 * Read at spawn and never retained, mirroring retail's `start_frame` snapshot. It must be the
+	 * *live* frame rather than the authored one: a script that rotates its owner changes where its
+	 * emitters fire, and an authored decode-time rotation would miss that.
+	 */
+	readonly sceneRotationOf: (target: BehaviorTarget) => AcRotation | null;
 	/**
 	 * Scene-frame origin of the current render anchor, subtracted to reach anchor-relative space.
 	 *
@@ -594,6 +610,20 @@ export class ParticleSystem {
 		const info = instance.emitter.info;
 		if (instance.particles.length >= info.maxParticles) return;
 		const roll = this.#roll;
+		// Retail snapshots the owner's frame at spawn (`start_frame`, acclient.c:317743) and rotates
+		// the constants into it once, so `Update` never sees a frame again. Doing the same here keeps
+		// the motion evaluators — CPU and GLSL alike — free of any notion of an owner.
+		const rotation = this.#dependencies.sceneRotationOf(instance.target);
+		// The caller already resolved this target's origin from the same placement, so a missing
+		// rotation is a broken contract rather than a target that has gone away.
+		if (rotation === null) {
+			throw new Error(
+				`Emitter target ${instance.target.nodeId} published an origin but no frame.`,
+			);
+		}
+		const rotated = rotatedSpawnConstants(info.motionType);
+		const inFrame = (vector: AcVector3, applies: boolean): AcVector3 =>
+			applies ? rotateAcVector(rotation, vector) : vector;
 		instance.particles.push({
 			birthTime: timeSeconds,
 			// A following emitter resolves its origin live every frame, so freezing one here would
@@ -603,16 +633,25 @@ export class ParticleSystem {
 				? null
 				: offsetOrigin(parentOrigin, instance.hookOffset),
 			spawn: {
-				a: scaledVector(info.a, rolled(roll, info.minA, info.maxA - info.minA)),
-				b: scaledVector(info.b, rolled(roll, info.minB, info.maxB - info.minB)),
-				c: scaledVector(info.c, rolled(roll, info.minC, info.maxC - info.minC)),
+				a: inFrame(
+					scaledVector(info.a, rolled(roll, info.minA, info.maxA - info.minA)),
+					rotated.a,
+				),
+				b: inFrame(
+					scaledVector(info.b, rolled(roll, info.minB, info.maxB - info.minB)),
+					rotated.b,
+				),
+				c: inFrame(
+					scaledVector(info.c, rolled(roll, info.minC, info.maxC - info.minC)),
+					rotated.c,
+				),
 				finalScale: info.finalScale,
 				finalTranslucency: info.finalTrans,
 				lifespan: Math.max(0, rolled(roll, info.lifespan, info.lifespanRand)),
-				offset: this.#spawnOffset(
-					info.offsetDir,
-					info.minOffset,
-					info.maxOffset,
+				// Retail rotates `offset` for every type, `Still` included, so this is unconditional.
+				offset: inFrame(
+					this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
+					true,
 				),
 				startScale: info.startScale,
 				startTranslucency: info.startTrans,

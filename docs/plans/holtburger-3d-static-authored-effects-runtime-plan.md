@@ -1621,10 +1621,29 @@ Treat the reopened checklist below as the live one; the first records what the o
       **87 dispatched commands across 10 distinct scripts** — 53 `create-particle`, 18
       `sound-tweaked`, 16 `call-pes` — with outcomes `executed: 71, scheduled: 16` and **zero
       console errors**. Scripts activate, chain, emit, and play end to end on real content.
-- [ ] Measure script advancement, hook dispatch, particle simulation/upload/draw, audio asset/runtime,
-      scene propagation, and teardown separately. **The `--gpu` blocker recorded here was wrong** —
-      see the GPU profiling finding in the reopened checklist. CPU timing works today; the remaining
-      work is per-system instrumentation, not harness capability.
+- [x] **Measured every update-tick phase separately.** `RuntimeTickProfiler` times script advance,
+      particle simulation, animation, presentation publication, cohort building, render, and frame
+      completion, with a sixty-frame mean. Always on rather than opt-in: seven `performance.now()`
+      calls at frame granularity, matching what `PhysicsScriptSystem` already did, because a
+      diagnostic nobody remembers to enable is one nobody has when they need it.
+
+      On real hardware at `0xDA55` radius 2, mean over sixty frames:
+
+      | phase | ms |
+      | --- | --- |
+      | total | 2.333 |
+      | render | 2.183 |
+      | particle cohorts | 0.058 |
+      | particle advance | 0.030 |
+      | presentation publish | 0.028 |
+      | animation advance | 0.017 |
+      | script advance | 0.013 |
+      | frame completion | 0.003 |
+
+      **Everything outside the renderer is 0.15 ms, 6% of the tick.** Hook dispatch and audio are
+      not separate phases because they run inside script and animation advancement, which together
+      cost 0.03 ms — instrumenting deeper would measure noise. The earlier `--gpu` blocker recorded
+      against this item was wrong; see the GPU profiling finding below.
 - [x] Confirmed prepared resource counts track unique IDs rather than owners. `PreparedAssetRepository`
       shares one preparation per id across every acquirer, proven for scripts (two roots reaching one
       chained script transfer it once) and emitters, and `ParticleMeshCache` requests only meshes it

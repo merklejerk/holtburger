@@ -210,6 +210,7 @@
 		readonly metrics: FrameSelectionMetrics | null;
 		/** Latest explicit renderer profile, or null while profiling is disabled. */
 		readonly frameProfile: RendererFrameProfile | null;
+		readonly tickProfile: ReturnType<GameRuntime["getTickProfile"]> | null;
 		readonly authoredDynamics: ReturnType<
 			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
@@ -927,6 +928,7 @@
 						return {
 							authoredDynamics:
 								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
+							tickProfile: runtime?.getTickProfile() ?? null,
 							camera: cameraEvidence,
 							error,
 							frameSettings,

@@ -804,6 +804,7 @@ function briefHarnessReport(result) {
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
 		frameProfile: result.state.frameProfile,
+		tickProfile: result.state.tickProfile,
 		frameSettings: result.state.frameSettings,
 		initialMetrics: result.initialState.metrics,
 		initialCamera: result.initialState.camera,

@@ -146,6 +146,8 @@ import {
 	type EnvCellRealizationArtifact,
 } from "./env-cell-realization";
 import type { AudioListenerPlacement, Camera } from "./types";
+import { RuntimeTickProfiler } from "./runtime-tick-profiler";
+import type { RuntimeTickProfile } from "./runtime-tick-profiler";
 import type {
 	SceneAvailabilityEvent,
 	SceneAvailabilityListener,
@@ -425,6 +427,7 @@ export class GameRuntime {
 
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
 	#lastFrameTimeSeconds = 0;
+	readonly #tickProfiler = new RuntimeTickProfiler();
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
@@ -1133,22 +1136,28 @@ export class GameRuntime {
 		this.#lastFrameTimeSeconds = timeSeconds;
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
+		const tickStartedAt = performance.now();
 		this.#physicsScriptSystem.advance(timeSeconds);
+		const afterScriptsAt = performance.now();
 		this.#particles.advance(timeSeconds);
+		const afterParticlesAt = performance.now();
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
 			animationFrame,
 			timeSeconds,
 		);
+		const afterAnimationAt = performance.now();
 		this.#dynamics.publishPresentation(
 			this.#animation.sample(
 				animationFrame,
 				presentationSelection.selectedNodeIds,
 			),
 		);
+		const afterPresentationAt = performance.now();
 		// Cohorts are rebuilt every frame from live emitters rather than retained, and cull at
 		// emitter granularity before any instance record is written.
 		renderer.particles?.submit(this.#particles.collectCohorts());
+		const afterCohortsAt = performance.now();
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
@@ -1169,7 +1178,24 @@ export class GameRuntime {
 				},
 			],
 		});
+		const afterRenderAt = performance.now();
 		this.#animationPresentation.completeFrame(feedback, timeSeconds);
+		const finishedAt = performance.now();
+		this.#tickProfiler.record({
+			animationAdvanceMs: afterAnimationAt - afterParticlesAt,
+			frameCompletionMs: finishedAt - afterRenderAt,
+			particleAdvanceMs: afterParticlesAt - afterScriptsAt,
+			particleCohortMs: afterCohortsAt - afterPresentationAt,
+			presentationPublishMs: afterPresentationAt - afterAnimationAt,
+			renderMs: afterRenderAt - afterCohortsAt,
+			scriptAdvanceMs: afterScriptsAt - tickStartedAt,
+			totalMs: finishedAt - tickStartedAt,
+		});
+	}
+
+	/** Per-phase update-tick timing, or null before the first tick completes. */
+	getTickProfile(): RuntimeTickProfile | null {
+		return this.#tickProfiler.getProfile();
 	}
 
 	/**

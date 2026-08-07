@@ -1622,9 +1622,9 @@ Treat the reopened checklist below as the live one; the first records what the o
       `sound-tweaked`, 16 `call-pes` — with outcomes `executed: 71, scheduled: 16` and **zero
       console errors**. Scripts activate, chain, emit, and play end to end on real content.
 - [ ] Measure script advancement, hook dispatch, particle simulation/upload/draw, audio asset/runtime,
-      scene propagation, and teardown separately. The harness exposes `--profile-renderer` and
-      per-system diagnostics; a timing pass needs `--gpu`, since SwiftShader numbers are not
-      performance evidence.
+      scene propagation, and teardown separately. **The `--gpu` blocker recorded here was wrong** —
+      see the GPU profiling finding in the reopened checklist. CPU timing works today; the remaining
+      work is per-system instrumentation, not harness capability.
 - [x] Confirmed prepared resource counts track unique IDs rather than owners. `PreparedAssetRepository`
       shares one preparation per id across every acquirer, proven for scripts (two roots reaching one
       chained script transfer it once) and emitters, and `ParticleMeshCache` requests only meshes it
@@ -1693,6 +1693,43 @@ by value rather than by when it appeared.
       with audible silence is the signal that it does.
 - [ ] Bind `TextureVelocity` in the renderer, or delete the resolved-but-unbound path. Unchanged
       from Phase 7: a render-contract change with zero measured consumers.
+
+#### GPU profiling was never blocked on `--gpu` (finding 2026-08-07)
+
+Phase 8's measurement items carried the note that a timing pass "needs `--gpu`, since SwiftShader
+numbers are not performance evidence." That note was inherited and never tested. Testing it:
+
+- **`--gpu` works.** The harness renders on the real adapter —
+  `ANGLE (AMD, Vulkan 1.4.354 (AMD Radeon RX 7900 XT (RADV NAVI31)), radv)`.
+- **CPU profiling works under it.** A six-second capture at `0xDA55` collected 60 samples, mean
+  total `2.25 ms`, p95 `2.9 ms`.
+- **GPU timing reports `{"kind": "unsupported"}`**, and that is the real blocker.
+
+The cause is specific and structural, not a flag. `WebGL2GpuFrameProfiler` is built on
+`TIMESTAMP_EXT` query counters and disqualifies itself when `QUERY_COUNTER_BITS_EXT` is zero. Probing
+Chrome directly:
+
+```
+hasExt: true   timestampBits: 0   elapsedBits: 64
+```
+
+Chrome exposes `EXT_disjoint_timer_query_webgl2` but reports **zero bits for `TIMESTAMP_EXT`** —
+absolute GPU timestamps are a high-precision timing-attack vector and are disabled — while
+`TIME_ELAPSED_EXT` is fully supported at 64 bits and its queries create and resolve. Flags do not
+change this: `--enable-webgl-developer-extensions` and `--enable-webgl-draft-extensions` were both
+tried and neither affects the bit count. So the profiler's self-report is *correct*; it is measuring
+a capability Chrome will never grant, and would fail identically outside headless.
+
+The fix is to rebuild the profiler on `TIME_ELAPSED_EXT`, which carries one real design constraint:
+only one elapsed query may be active at a time, so spans cannot nest. The existing
+opaque/blended/terrain/other phases are sequential and translate directly, but `totalMs` currently
+means "first to last command" and would become the sum of measured spans, losing the unmeasured gap
+that `otherMs` represents today. That is a contract change to `RendererGpuFrameProfile`, not a
+drop-in.
+
+Consequence for the measurement items: they were never blocked on harness capability. CPU numbers are
+available now, and the outstanding work is per-system instrumentation — a particle scope, tick-phase
+timings, and the runtime diagnostics bundle reaching the Explorer report.
 
 #### Outstanding Verification (2026-08-07)
 

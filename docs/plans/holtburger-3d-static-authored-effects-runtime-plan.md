@@ -2150,10 +2150,44 @@ Recorded as a real gap rather than a bug: retail multiplies the clamped gain by
 ambient/effect distinction, so we are uniformly louder than retail at the same authored volume. A
 real client needs both.
 
-Still outstanding: `AudioSystem.release` has no caller because `AudioVoice` carries no completion
-signal, so finished voices never leave the budget. After 16 sounds the budget is permanently full,
-every trigger reports a steal, and `activeVoiceCount` pins at the limit. Needs `onended` on the
-device and a completion callback on `AudioVoice`.
+##### Voice budget and effect volume (2026-08-07)
+
+**Voice retirement.** `AudioSystem.release` had no caller because `AudioVoice` carried no completion
+signal, so voices that ended naturally never left the budget: after 16 sounds it was permanently
+full, every trigger executed the steal branch, and `activeVoiceCount` pinned at the limit. Both
+counters were unreliable past 16 sounds, which is why the harness never showed it at 12 triggers.
+
+`AudioVoice` gains a `finished` flag rather than a completion callback. The budget is read at exactly
+one instant — the next trigger — so a push would deliver continuously to a consumer that reads once,
+and would need guarding against firing after a steal or after shutdown. The pull has no lifetime
+question and keeps the budget tests synchronous. `WebAudioDevice` sets the flag from `source.onended`,
+so accuracy still comes from Web Audio rather than from duration bookkeeping. `#claimVoiceSlot`
+sweeps finished voices immediately before the steal check, and the public `release` is gone.
+
+**Effect volume.** Authored hook sounds are **effect** sounds, not ambient — settled from the
+decompile rather than assumed. The object sound-table path `SoundManager::PlaySoundA(SoundType,
+CPhysicsObj*, ...)`, which resolves `physobj->sound_table` by `SoundType` exactly as our `sound-table`
+command does, gates on `effect_sounds_enabled` and passes `is_ambient = 0` (acclient.c:366946).
+
+Retail carries three categories, each with an enable flag and a volume: `effect`, `ambient`, and
+`interface`. `AudioSettings` exposes only `effectVolume`, because only effect sounds are produced;
+entries appear when their producers do. `GameRuntime.setAudioSettings` applies it and the Explorer
+World panel carries the slider.
+
+Placement matters and follows `GetAttenuation`: the category volume multiplies **after** the gain
+ceiling and **before** the audible-floor test, so turning a category down shortens its range as well
+as quietening it. That is retail's behaviour, not an ordering accident.
+
+Ambient remains out of scope, and now with a reason on record rather than an assertion. Ambient
+sounds are region-driven, not hook-driven: `CSoundDesc` holds `AmbientSTBDesc` entries, each a sound
+table plus a list of `AmbientSoundDesc { stype, is_continuous, volume, base_chance, min_rate,
+max_rate }`. That is a scheduler — play this `SoundType` every `min_rate`..`max_rate` seconds at
+`base_chance` — plus looping for `is_continuous`, neither of which `AudioSystem` does. `CSceneType`
+carries the same descriptor, so scene types contribute ambience too.
+
+Retail quirk noted for whenever ambient lands: `PlayAmbientSound` pre-multiplies by
+`ambient_sound_volume` **and** passes `is_ambient = 1`, so `GetAttenuation` multiplies by it again.
+Ambient volume is effectively squared, and that will be a reproduce-or-fix decision.
 
 #### Acceptance Criteria
 

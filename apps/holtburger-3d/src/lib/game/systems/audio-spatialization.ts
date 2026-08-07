@@ -44,6 +44,11 @@ export interface SpatialAudioPlacement {
  * `listenerRight` is the listener's right-hand unit vector; panning is the source's projection onto
  * it, which is retail's heading-based pan expressed without a heading angle.
  *
+ * `categoryVolume` is the user's setting for the sound's retail category, applied **after** the
+ * ceiling and **before** the floor test, exactly as `GetAttenuation` does. Turning a category down
+ * therefore shortens its audible range rather than only quietening it, which is retail's behaviour
+ * and not an accident of ordering.
+ *
  * Positions arrive in scene space rather than anchor-relative. Distance and projection are both
  * invariant under the anchor's pure translation, so spatial audio never needs to know where the
  * anchor is — and taking anchored positions would mean retaining one on the listener, which goes
@@ -54,8 +59,9 @@ export function placeSpatialAudio(
 	listenerPosition: SceneVector3,
 	listenerRight: RenderVector3,
 	volume: number,
+	categoryVolume: number,
 ): SpatialAudioPlacement | null {
-	if (!(volume > 0)) return null;
+	if (!(volume > 0) || !(categoryVolume > 0)) return null;
 	const delta = [
 		sourcePosition[0] - listenerPosition[0],
 		sourcePosition[1] - listenerPosition[1],
@@ -66,14 +72,15 @@ export function placeSpatialAudio(
 	// Inside the flat radius retail neither attenuates nor pans, so a sound at the listener's own
 	// position is centred rather than dividing by zero.
 	if (distance <= FLAT_GAIN_RADIUS_METERS) {
-		const near = Math.min(volume, MAXIMUM_GAIN);
+		const near = Math.min(volume, MAXIMUM_GAIN) * categoryVolume;
 		return near >= AUDIBLE_GAIN_FLOOR ? { gain: near, pan: 0 } : null;
 	}
 
-	const gain = Math.min(
-		(INVERSE_SQUARE_SCALE * volume) / (distance * distance),
-		MAXIMUM_GAIN,
-	);
+	const gain =
+		Math.min(
+			(INVERSE_SQUARE_SCALE * volume) / (distance * distance),
+			MAXIMUM_GAIN,
+		) * categoryVolume;
 	if (gain < AUDIBLE_GAIN_FLOOR) return null;
 
 	const rightLength = Math.hypot(

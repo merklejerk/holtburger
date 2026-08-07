@@ -11,6 +11,14 @@ import type { SpatialAudioPlacement } from "./audio-spatialization";
 /** A playing voice, from the system's point of view. */
 export interface AudioVoice {
 	stop(): void;
+	/**
+	 * Whether playback has ended on its own.
+	 *
+	 * Pulled rather than pushed. The budget is consulted at exactly one instant — the next trigger —
+	 * so a callback would deliver this continuously to a consumer that reads it once, and would need
+	 * guarding against firing after a steal or after shutdown. A flag has no lifetime question.
+	 */
+	readonly finished: boolean;
 }
 
 /**
@@ -32,6 +40,19 @@ export interface AudioDevice {
 	): AudioVoice | null;
 	/** Decode one sound, resolving exactly when `playOneShot` will accept it. */
 	prepare(soundId: DatAssetId): Promise<void>;
+}
+
+/**
+ * User audio settings, one entry per retail sound category we produce.
+ *
+ * Retail carries three — effect, ambient, and interface — each with its own enable flag and volume.
+ * Only effect exists here, because authored hook sounds are effect sounds
+ * (`SoundManager::PlaySoundA` gates on `effect_sounds_enabled` and passes `is_ambient = 0`). Ambient
+ * is a separate region-driven scheduler and interface is UI; entries appear when their producers do.
+ */
+export interface AudioSettings {
+	/** Linear multiplier on effect gain in [0, 1]; zero silences the category as retail's flag does. */
+	readonly effectVolume: number;
 }
 
 /** Where the listener is and which way its right hand points. */
@@ -110,6 +131,7 @@ export class AudioSystem {
 	#warmupExpiredCount = 0;
 	#warmupRefusedCount = 0;
 	#destroyed = false;
+	#settings: AudioSettings = { effectVolume: 1 };
 	#listener: AudioListener = {
 		// The scene origin facing +X, which is only ever right by accident. A frontend that wants
 		// audible sound must place the listener; `inaudibleCount` reports when it has not.
@@ -144,6 +166,14 @@ export class AudioSystem {
 		this.#listener = listener;
 	}
 
+	/** Apply user audio settings, which scale gain and therefore range, as retail's do. */
+	setSettings(settings: AudioSettings): void {
+		if (!(settings.effectVolume >= 0 && settings.effectVolume <= 1)) {
+			throw new Error("Effect volume must be within [0, 1].");
+		}
+		this.#settings = settings;
+	}
+
 	/** Roll, place, and play one authored sound, reporting exactly what happened. */
 	trigger(trigger: AudioTrigger): AudioTriggerOutcome {
 		// Retail rolls the probability before doing any spatial work at all.
@@ -156,16 +186,14 @@ export class AudioSystem {
 			this.#listener.position,
 			this.#listener.right,
 			trigger.volume,
+			this.#settings.effectVolume,
 		);
 		// Below retail's audible floor the sound is not played at all, rather than played silently.
 		if (placement === null) {
 			this.#inaudibleCount += 1;
 			return "inaudible";
 		}
-		if (this.#voices.length >= this.#voiceLimit) {
-			this.#voices.shift()?.stop();
-			this.#stolenCount += 1;
-		}
+		this.#claimVoiceSlot();
 		const voice = this.#device.playOneShot(
 			trigger.soundId,
 			placement.gain,
@@ -202,10 +230,7 @@ export class AudioSystem {
 				this.#warmupExpiredCount += 1;
 				return;
 			}
-			if (this.#voices.length >= this.#voiceLimit) {
-				this.#voices.shift()?.stop();
-				this.#stolenCount += 1;
-			}
+			this.#claimVoiceSlot();
 			const voice = this.#device.playOneShot(
 				soundId,
 				placement.gain,
@@ -223,10 +248,19 @@ export class AudioSystem {
 		});
 	}
 
-	/** Drop a finished voice from the budget without stopping it. */
-	release(voice: AudioVoice): void {
-		const index = this.#voices.indexOf(voice);
-		if (index >= 0) this.#voices.splice(index, 1);
+	/**
+	 * Retire voices that ended on their own, then steal the oldest if the budget is still full.
+	 *
+	 * Sweeping here rather than continuously is deliberate: the budget is read at exactly this
+	 * instant, and a voice that finished between triggers is not competing with anything until now.
+	 */
+	#claimVoiceSlot(): void {
+		for (let index = this.#voices.length - 1; index >= 0; index -= 1) {
+			if (this.#voices[index]!.finished) this.#voices.splice(index, 1);
+		}
+		if (this.#voices.length < this.#voiceLimit) return;
+		this.#voices.shift()?.stop();
+		this.#stolenCount += 1;
 	}
 
 	/**

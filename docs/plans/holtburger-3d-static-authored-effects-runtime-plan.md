@@ -1608,8 +1608,11 @@ this plan forbids, so it waits for the contract change rather than being half-la
 
 ### Phase 8: Resteer, Measure, and Clean Up
 
-Progress: **Cleanup and resteer complete 2026-08-06.** Remaining: the runtime measurement items,
-which need the browser harness against production content rather than static checks.
+Progress: cleanup and resteer were completed 2026-08-06, then **reopened 2026-08-07**. Playtesting
+the landed work surfaced a run of defects — five of them coordinate-frame errors — whose fixes
+introduced their own cleanup targets. The measurement items were never closed and still need `--gpu`.
+
+Treat the reopened checklist below as the live one; the first records what the original resteer did.
 
 #### Task Checklist
 
@@ -1661,6 +1664,45 @@ which need the browser harness against production content rather than static che
       ([holtburger-3d-weather-sky-script-runtime-plan.md](holtburger-3d-weather-sky-script-runtime-plan.md)).
       Verdict: the landed contracts host sky targets as an extension, with one identity decision
       recorded for that plan to make first. No sky-target support was pre-built here.
+
+#### Reopened Cleanup Checklist (2026-08-07)
+
+Consolidated from the findings below, which recorded this debt in prose as it was discovered. Ordered
+by value rather than by when it appeared.
+
+- [ ] **Split presentation from behavior.** Carried forward from Phase 7's recorded debt and now the
+      largest structural item. A script-only resident publishes no presentation sample, so effect
+      state it authors is written and never read; it is also per-frame streamed for visuals it does
+      not have. 43 `Scale` hooks exist archive-wide.
+- [ ] **Stop embedding `indexStart`/`indexCount` in `batchKey`.** Two ranges sharing a binding cannot
+      cohort together because their extents differ, so the key defeats the merging this phase's
+      batch-key work enabled. The next batching win after `renderSide` and `authoredCullMode`.
+- [ ] **Give the harness a fixed timestep.** Seeding the roll cut run-to-run particle noise from
+      1,971 pixels to 948; the residual is frame timing, since particle ages follow wall-clock
+      deltas. Until this lands no particle change can be proven visually, which already forced two
+      fixes this session to rest on unit tests alone.
+- [ ] **Converge the two vector representations.** The `Vec3` class carries no frame; the branded
+      tuples do. Every crossing between them silently drops the brand, which is how
+      `AudioListenerPlacement` shipped an unbranded position one commit after the brands were
+      extended. Either brand `Vec3` or converge on one representation.
+- [ ] **Reuse per-particle cohort records.** `collectCohorts` allocates an object per particle per
+      frame. Pooling the anchored origins removed one allocation of the pair; the record itself
+      remains, and the same pooled-borrow pattern applies.
+- [ ] **Resume the `AudioContext`, or prove it needs no resuming.** Untested and webview-dependent:
+      the harness runs headless Chrome, the Explorer runs Tauri WebKitGTK. `playedCount` above zero
+      with audible silence is the signal that it does.
+- [ ] Bind `TextureVelocity` in the renderer, or delete the resolved-but-unbound path. Unchanged
+      from Phase 7: a render-contract change with zero measured consumers.
+
+#### Outstanding Verification (2026-08-07)
+
+Two fixes landed without the evidence that would normally close them, both recorded rather than
+claimed:
+
+- Audio has never been heard. Twelve sounds reach the device in the harness, whose stub device always
+  refuses; a real `WebAudioDevice` should warm and play them. Unconfirmed in the Explorer.
+- The asymmetric-motion axis fix has no visual confirmation. The formula tests assert the semantics
+  directly, but no scene with a visible flame was framed close enough to judge.
 
 #### Runtime Verification Findings (2026-08-06)
 

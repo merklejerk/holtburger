@@ -1000,6 +1000,7 @@ export class GameRuntime {
 			dynamics: this.#dynamics.getDiagnostics(),
 			behavior: this.#behaviorRouter.getDiagnostics(),
 			particles: this.#particles.getDiagnostics(),
+			physicsScripts: this.#physicsScriptSystem.getDiagnostics(),
 			effects: this.#effects.getDiagnostics(),
 			presentationCadence: this.#animationPresentation.getDiagnostics(),
 			residents: this.getAuthoredDynamicResidentDiagnostics(),

@@ -1,6 +1,12 @@
-import { renderVector3, type RenderVector3 } from "../../assets/ac-frame";
+import {
+	renderVector3,
+	sceneVector3,
+	type RenderVector3,
+	type SceneVector3,
+} from "../../assets/ac-frame";
 import type { DatAssetId } from "../game-types";
 import { placeSpatialAudio } from "./audio-spatialization";
+import type { SpatialAudioPlacement } from "./audio-spatialization";
 
 /** A playing voice, from the system's point of view. */
 export interface AudioVoice {
@@ -14,17 +20,25 @@ export interface AudioVoice {
  * browser, and so the Web Audio adapter stays free of game semantics.
  */
 export interface AudioDevice {
-	/** Play one decoded sound immediately at the given gain and pan. */
+	/**
+	 * Play one sound immediately, or refuse with `null` when its buffer is not decoded yet.
+	 *
+	 * Refusal is a signal, not a failure: the system warms the sound and replays it.
+	 */
 	playOneShot(
 		soundId: DatAssetId,
 		gain: number,
 		pan: number,
 	): AudioVoice | null;
+	/** Decode one sound, resolving exactly when `playOneShot` will accept it. */
+	prepare(soundId: DatAssetId): Promise<void>;
 }
 
 /** Where the listener is and which way its right hand points. */
 export interface AudioListener {
-	readonly position: RenderVector3;
+	/** Scene space, so the listener survives the render anchor moving underneath it. */
+	readonly position: SceneVector3;
+	/** A direction, which the anchor's pure translation cannot affect. */
 	readonly right: RenderVector3;
 }
 
@@ -34,7 +48,8 @@ export interface AudioTrigger {
 	/** Play chance rolled once at trigger time. */
 	readonly probability: number;
 	readonly volume: number;
-	readonly position: RenderVector3;
+	/** Scene space, matching the listener; spatialization is purely relative. */
+	readonly position: SceneVector3;
 }
 
 export type AudioTriggerOutcome =
@@ -56,8 +71,14 @@ export interface AudioDiagnostics {
 	readonly lostProbabilityRollCount: number;
 	/** Below retail's audible floor for the current listener pose. */
 	readonly inaudibleCount: number;
-	/** Placed audibly, but the device had no buffer ready or was destroyed. */
+	/** Placed audibly, but the device had no buffer ready; each of these is warmed and retried. */
 	readonly deviceRefusedCount: number;
+	/** Refused once, then decoded and played in time. A subset of `playedCount`. */
+	readonly warmedPlayedCount: number;
+	/** Refused, then decoded too late for the moment it belonged to. */
+	readonly warmupExpiredCount: number;
+	/** Refused, then refused again after `prepare` resolved: the device broke its contract. */
+	readonly warmupRefusedCount: number;
 }
 
 /**
@@ -78,14 +99,21 @@ export class AudioSystem {
 	readonly #roll: () => number;
 	readonly #voiceLimit: number;
 	readonly #voices: AudioVoice[] = [];
+	readonly #clock: () => number;
+	readonly #maximumWarmupReplaySeconds: number;
 	#playedCount = 0;
 	#stolenCount = 0;
 	#lostProbabilityRollCount = 0;
 	#inaudibleCount = 0;
 	#deviceRefusedCount = 0;
+	#warmedPlayedCount = 0;
+	#warmupExpiredCount = 0;
+	#warmupRefusedCount = 0;
+	#destroyed = false;
 	#listener: AudioListener = {
-		// The renderer's own axes, not authored data.
-		position: renderVector3([0, 0, 0]),
+		// The scene origin facing +X, which is only ever right by accident. A frontend that wants
+		// audible sound must place the listener; `inaudibleCount` reports when it has not.
+		position: sceneVector3([0, 0, 0]),
 		right: renderVector3([1, 0, 0]),
 	};
 
@@ -94,12 +122,22 @@ export class AudioSystem {
 	 * Retail runs 16 voices with priority-based stealing, but hook sounds all carry priority 0 and
 	 * lose every contest, so a plain oldest-steal is the same behavior with less machinery.
 	 */
-	constructor(device: AudioDevice, roll: () => number, voiceLimit: number) {
+	constructor(
+		device: AudioDevice,
+		roll: () => number,
+		voiceLimit: number,
+		clock: () => number,
+		maximumWarmupReplaySeconds: number,
+	) {
 		if (!Number.isInteger(voiceLimit) || voiceLimit <= 0)
 			throw new Error("Audio voice limit must be a positive integer.");
+		if (!(maximumWarmupReplaySeconds >= 0))
+			throw new Error("Audio warmup replay bound must be non-negative.");
 		this.#device = device;
 		this.#roll = roll;
 		this.#voiceLimit = voiceLimit;
+		this.#clock = clock;
+		this.#maximumWarmupReplaySeconds = maximumWarmupReplaySeconds;
 	}
 
 	setListener(listener: AudioListener): void {
@@ -134,12 +172,55 @@ export class AudioSystem {
 			placement.pan,
 		);
 		if (voice === null) {
+			// The buffer is not decoded yet. Warm it and replay, rather than dropping the sound
+			// outright: the same path serves authored hooks and anything the network triggers
+			// later, neither of which can be enumerated ahead of time.
+			this.#warmAndReplay(trigger.soundId, placement, this.#clock());
 			this.#deviceRefusedCount += 1;
 			return "device-refused";
 		}
 		this.#voices.push(voice);
 		this.#playedCount += 1;
 		return "played";
+	}
+
+	/**
+	 * Decode a cold sound, then play it once if the moment has not passed.
+	 *
+	 * Gain and pan are the ones resolved at trigger time, which is retail's rule: spatial
+	 * parameters are fixed when the sound fires and never updated, so replaying with them is the
+	 * same sound arriving late rather than a differently-placed one.
+	 */
+	#warmAndReplay(
+		soundId: DatAssetId,
+		placement: SpatialAudioPlacement,
+		triggeredAt: number,
+	): void {
+		void this.#device.prepare(soundId).then(() => {
+			if (this.#destroyed) return;
+			if (this.#clock() - triggeredAt > this.#maximumWarmupReplaySeconds) {
+				this.#warmupExpiredCount += 1;
+				return;
+			}
+			if (this.#voices.length >= this.#voiceLimit) {
+				this.#voices.shift()?.stop();
+				this.#stolenCount += 1;
+			}
+			const voice = this.#device.playOneShot(
+				soundId,
+				placement.gain,
+				placement.pan,
+			);
+			if (voice === null) {
+				// `prepare` resolving is the device's promise that `playOneShot` will accept, so
+				// reaching here means the device broke that contract rather than being late.
+				this.#warmupRefusedCount += 1;
+				return;
+			}
+			this.#voices.push(voice);
+			this.#playedCount += 1;
+			this.#warmedPlayedCount += 1;
+		});
 	}
 
 	/** Drop a finished voice from the budget without stopping it. */
@@ -154,6 +235,7 @@ export class AudioSystem {
 	 * Deliberately not called on owner removal: voices outlive their owners in retail.
 	 */
 	destroy(): void {
+		this.#destroyed = true;
 		for (const voice of this.#voices) voice.stop();
 		this.#voices.length = 0;
 	}
@@ -162,6 +244,9 @@ export class AudioSystem {
 		return {
 			activeVoiceCount: this.#voices.length,
 			deviceRefusedCount: this.#deviceRefusedCount,
+			warmedPlayedCount: this.#warmedPlayedCount,
+			warmupExpiredCount: this.#warmupExpiredCount,
+			warmupRefusedCount: this.#warmupRefusedCount,
 			inaudibleCount: this.#inaudibleCount,
 			lostProbabilityRollCount: this.#lostProbabilityRollCount,
 			playedCount: this.#playedCount,

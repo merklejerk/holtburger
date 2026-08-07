@@ -3,7 +3,6 @@ import { getMat4Translation } from "../math/matrices";
 import {
 	renderVector3,
 	sceneVector3,
-	type RenderVector3,
 	type SceneVector3,
 } from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
@@ -420,30 +419,6 @@ export class GameRuntime {
 		return sceneVector3([anchor.x, anchor.y, anchor.z]);
 	}
 
-	/**
-	 * Re-express a scene-frame origin relative to this frame's render anchor.
-	 *
-	 * The particle pass draws with the view matrix alone, so an origin left in any other frame lands
-	 * wherever the anchor happens to be. Subtracting here keeps the arithmetic in double precision,
-	 * which is the whole reason the renderer works anchor-relative rather than in scene coordinates.
-	 */
-	#toRenderSpace(origin: SceneVector3): RenderVector3 {
-		const anchor = this.#renderAnchorOrigin();
-		return renderVector3([
-			origin[0] - anchor[0],
-			origin[1] - anchor[1],
-			origin[2] - anchor[2],
-		]);
-	}
-
-	/** Anchor-relative origin for a consumer that uses it within the frame that produced it. */
-	#anchoredOriginOf(target: {
-		readonly nodeId: SceneNodeId;
-	}): RenderVector3 | null {
-		const origin = this.#sceneOriginOf(target);
-		return origin === null ? null : this.#toRenderSpace(origin);
-	}
-
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
 	#lastFrameTimeSeconds = 0;
 	/** Active authored-dynamic residents grouped by their source owner. */
@@ -706,6 +681,8 @@ export class GameRuntime {
 			dependencies.audioDevice,
 			Math.random,
 			FRONTEND_TUNING.audio.maximumSimultaneousVoices,
+			() => this.#lastFrameTimeSeconds,
+			FRONTEND_TUNING.audio.maximumWarmupReplaySeconds,
 		);
 		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
 		// by design. A holder breaks the construction cycle without making the router mutable.
@@ -716,7 +693,7 @@ export class GameRuntime {
 					playSound: (target, sound) => {
 						// A sound is placed at its emitting node's world position, resolved once at
 						// trigger time exactly as retail samples it.
-						const origin = this.#anchoredOriginOf(target);
+						const origin = this.#sceneOriginOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							position: origin,
@@ -734,7 +711,7 @@ export class GameRuntime {
 						if (!candidates) return "unprepared";
 						const candidate = selectSoundCandidate(candidates, Math.random());
 						if (!candidate) return "unprepared";
-						const origin = this.#anchoredOriginOf(target);
+						const origin = this.#sceneOriginOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							position: origin,
@@ -915,7 +892,7 @@ export class GameRuntime {
 		}
 		const { w, x, y, z } = rotation;
 		this.#audio.setListener({
-			position: this.#toRenderSpace(position),
+			position,
 			// First column of the rotation, which is its local +X: the listener's right hand.
 			right: renderVector3([
 				1 - 2 * (y * y + z * z),

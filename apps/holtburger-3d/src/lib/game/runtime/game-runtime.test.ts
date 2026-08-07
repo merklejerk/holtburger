@@ -193,7 +193,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
@@ -321,7 +321,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
@@ -352,7 +352,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
@@ -396,7 +396,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
@@ -437,7 +437,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
@@ -470,7 +470,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
@@ -523,7 +523,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
@@ -568,7 +568,7 @@ describe("GameRuntime view and interest control", () => {
 			ANIMATION_SOURCE,
 			PHYSICS_SCRIPT_SOURCE,
 			// No runtime test triggers authored audio; a refusing device keeps that visible.
-			{ playOneShot: () => null },
+			{ playOneShot: () => null, prepare: async () => {} },
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,

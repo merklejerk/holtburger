@@ -1,4 +1,4 @@
-import type { RenderVector3 } from "../../assets/ac-frame";
+import type { RenderVector3, SceneVector3 } from "../../assets/ac-frame";
 /**
  * Retail's positional audio math, transcribed from `SoundManager` (acclient.c:366427-366519).
  *
@@ -32,10 +32,15 @@ export interface SpatialAudioPlacement {
  *
  * `listenerRight` is the listener's right-hand unit vector; panning is the source's projection onto
  * it, which is retail's heading-based pan expressed without a heading angle.
+ *
+ * Positions arrive in scene space rather than anchor-relative. Distance and projection are both
+ * invariant under the anchor's pure translation, so spatial audio never needs to know where the
+ * anchor is — and taking anchored positions would mean retaining one on the listener, which goes
+ * silently wrong by a landblock the moment the camera crosses a boundary.
  */
 export function placeSpatialAudio(
-	sourcePosition: RenderVector3,
-	listenerPosition: RenderVector3,
+	sourcePosition: SceneVector3,
+	listenerPosition: SceneVector3,
 	listenerRight: RenderVector3,
 	volume: number,
 ): SpatialAudioPlacement | null {

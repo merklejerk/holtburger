@@ -17,6 +17,8 @@
 		OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	} from "../../lib/game/landblocks";
 	import { createCameraRotationRadians } from "../../lib/game/math/camera-orientation";
+	import { sceneVector3 } from "../../lib/assets/ac-frame";
+	import type { Camera } from "../../lib/game/runtime/types";
 	import { Vec3 } from "../../lib/game/math/types";
 	import {
 		WebGL2Device,
@@ -70,6 +72,21 @@
 			drawn = (drawn + Math.imul(drawn ^ (drawn >>> 7), 61 | drawn)) ^ drawn;
 			return ((drawn ^ (drawn >>> 14)) >>> 0) / 4294967296;
 		};
+	}
+
+	/**
+	 * Set the camera and put the listener on it, exactly as the Explorer coordinator does.
+	 *
+	 * Without this the harness never places the listener, so every trigger reports `inaudible` and
+	 * the audio path cannot be exercised at all.
+	 */
+	function applyHarnessCamera(target: GameRuntime, camera: Camera): void {
+		target.setPrimaryCamera(camera);
+		const { position, rotation } = camera.placement;
+		target.setAudioListener({
+			position: sceneVector3([position.x, position.y, position.z]),
+			rotation,
+		});
 	}
 
 	const query = new URLSearchParams(window.location.search);
@@ -426,7 +443,7 @@
 		}
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const cameraPosition = new Vec3(...position);
-		runtime.setPrimaryCamera({
+		applyHarnessCamera(runtime, {
 			far: CAMERA_FAR,
 			fov: CAMERA_FOV_DEGREES,
 			near: CAMERA_NEAR,
@@ -461,7 +478,7 @@
 				`Browser harness cannot apply Explorer focus before terrain ${landblockId} is queryable.`,
 			);
 		}
-		runtime.setPrimaryCamera({
+		applyHarnessCamera(runtime, {
 			...FRONTEND_TUNING.explorer.camera.framing,
 			placement: {
 				envCellId: null,
@@ -503,7 +520,7 @@
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "portal frame");
 		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
-		runtime.setPrimaryCamera({
+		applyHarnessCamera(runtime, {
 			far: CAMERA_FAR,
 			fov: CAMERA_FOV_DEGREES,
 			near: CAMERA_NEAR,
@@ -839,7 +856,7 @@
 					contentSource,
 					// The harness renders headlessly; authored audio has no observable output here,
 					// so a device that refuses playback keeps the runtime honest without a context.
-					{ playOneShot: () => null },
+					{ playOneShot: () => null, prepare: async () => {} },
 					contentSource,
 					contentSource,
 					contentSource,

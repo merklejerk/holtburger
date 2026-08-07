@@ -2084,6 +2084,60 @@ helper. The two are one composition apart, and the names now say which is which.
 frames exists because anchor-relative keeps shader coordinates small enough for f32 while scene space
 keeps stored coordinates meaningful over time.
 
+##### Audio moved into scene space, and cold sounds warm on demand (2026-08-07)
+
+**Scene space.** `placeSpatialAudio` computes a difference, a length, and a projection — all
+invariant under the anchor's pure translation — so spatial audio never needed the anchor at all.
+`AudioListener.position` and `AudioTrigger.position` are now `SceneVector3`. That removes the last
+retained anchor-relative value in the codebase, which was the particle defect's shape sitting in
+another system, and makes the `setPrimaryCamera`-before-`setAudioListener` ordering irrelevant rather
+than load-bearing-and-unenforced.
+
+Net deletion: `#toRenderSpace` and `#anchoredOriginOf` had only audio callers and are gone. A test
+pins the invariant by translating listener and source together by a landblock and asserting gain and
+pan are unchanged — which is exactly what an anchor change looks like.
+
+**Warm-on-demand instead of prewarm-at-staging.** The original plan was to prewarm every sound a
+resident could trigger when its generation commits. Rejected on review, correctly: a real client
+takes sound triggers from the network, which cannot be enumerated ahead of time, so prewarming would
+have covered the authored case and left the case that actually matters. One JIT path covers both.
+
+`playOneShot` refusing is now a signal rather than a drop. `AudioSystem` calls `prepare`, which
+resolves exactly when the buffer is decoded, and replays once with the gain and pan resolved at
+trigger time — retail fixes those when the sound fires and never updates them, so a replay is the
+same sound arriving late rather than a differently-placed one. `maximumWarmupReplaySeconds` (0.25)
+bounds how late is acceptable. This reverses the adapter's previous "skipped, not queued" policy,
+whose doc has been updated rather than left contradicting the code.
+
+**Measured** at DA55 with the camera on a sound source:
+
+```
+deviceRefusedCount 12   warmedPlayedCount 0   warmupExpiredCount 0   warmupRefusedCount 12
+inaudibleCount 59       playedCount 0
+```
+
+Twelve sounds passed spatialization and reached the device — the first time any have this session,
+which is the proof the listener fix works. They then refuse again because the harness device is a
+stub that always returns null; `warmupRefusedCount` says exactly that, distinguishing a broken device
+contract from a sound that merely arrived late. Both were briefly one counter until that conflation
+repeated the `suppressedCount` mistake and was split.
+
+Two harness findings on the way: the harness never placed the listener at all, so it could not
+exercise the audio path (`applyHarnessCamera` now mirrors the Explorer coordinator), and its default
+camera height of 600 m puts the listener far outside the audible range of anything, which invalidated
+the first round of measurements.
+
+**Open question, not resolved.** Authored volumes observed in the archive include `0.01`. Under
+retail's inverse-square with a −50 dB floor that is audible only within about 9 m, which seems
+implausibly quiet for ambient content. Either the volume field is being read from the wrong offset,
+or retail's volume is not a linear gain. Worth settling before trusting `inaudibleCount` as a measure
+of anything but geometry.
+
+Still outstanding: `AudioSystem.release` has no caller because `AudioVoice` carries no completion
+signal, so finished voices never leave the budget. After 16 sounds the budget is permanently full,
+every trigger reports a steal, and `activeVoiceCount` pins at the limit. Needs `onended` on the
+device and a completion callback on `AudioVoice`.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.

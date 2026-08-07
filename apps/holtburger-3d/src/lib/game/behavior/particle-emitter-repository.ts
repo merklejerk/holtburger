@@ -84,7 +84,7 @@ export function emitterEnvelopeRadius(
 		Math.max(info.startScale, info.finalScale) + Math.max(0, info.scaleRand);
 	return (
 		Math.abs(info.maxOffset) +
-		motionReach(info.motionType, a, b, c, lifespan) +
+		motionReach(info.motionType, a, b, c, lifespan, Math.abs(info.maxOffset)) +
 		Math.max(0, maxScale)
 	);
 }
@@ -106,6 +106,8 @@ function motionReach(
 	b: number,
 	c: number,
 	lifespan: number,
+	/** Widest authored spawn offset, which `Implode` derives its own `c` from. */
+	maximumOffset: number,
 ): number {
 	switch (motionType) {
 		case PARTICLE_TYPE.still:
@@ -124,11 +126,15 @@ function motionReach(
 			// `cos(b·t)·c` is bounded by `|c|` however long it runs; only `a·t` accumulates.
 			return c + a * lifespan;
 		case PARTICLE_TYPE.explode:
-			// Every axis scales `c` by `a.x`, and z carries an extra `+a.z`; `a` bounds both.
-			return b * lifespan * lifespan + (c * a + a) * lifespan;
+			// `c` is not the authored vector here: spawn replaces it with a unit direction, so its
+			// magnitude is 1 and the authored components only bias which way particles go. Every axis
+			// scales that direction by `a.x`, and z carries an extra `+a.z`; `a` bounds both.
+			return b * lifespan * lifespan + 2 * a * lifespan;
 		case PARTICLE_TYPE.implode:
-			// One scalar cosine over `c`, plus `b·t²`.
-			return c + b * lifespan * lifespan;
+			// `c` is likewise derived at spawn, as the offset scaled componentwise by authored `c`,
+			// so the authored magnitude alone does not bound it. `maxOffset` already contributes the
+			// offset's reach to the envelope, and authored `c` scales it.
+			return 2 * c * maximumOffset + b * lifespan * lifespan;
 		default:
 			// An unshipped law has no formula in either evaluator, so nothing is drawn for it.
 			return 0;

@@ -44,6 +44,28 @@ export interface ParticleSystemDependencies {
 	readonly clock: () => number;
 }
 
+/** A pooled record the system fills in place; consumers still see the readonly contract. */
+type MutableParticleInstanceRecord = {
+	-readonly [K in keyof ParticleInstanceRecord]: ParticleInstanceRecord[K];
+} & { origin: [number, number, number] & RenderVector3 };
+
+function blankRecord(): MutableParticleInstanceRecord {
+	return {
+		a: acVector3([0, 0, 0]),
+		b: acVector3([0, 0, 0]),
+		birthTime: 0,
+		c: acVector3([0, 0, 0]),
+		finalScale: 0,
+		finalTranslucency: 0,
+		lifespan: 0,
+		offset: acVector3([0, 0, 0]),
+		origin: renderVector3([0, 0, 0]) as [number, number, number] &
+			RenderVector3,
+		startScale: 0,
+		startTranslucency: 0,
+	};
+}
+
 /** Translate a scene-frame origin by a frame-invariant displacement. */
 function offsetOrigin(
 	origin: SceneVector3,
@@ -163,14 +185,16 @@ export class ParticleSystem {
 	readonly #cohortScratch = new Map<string, ParticleDrawCohort>();
 	readonly #cohortScratchOutput: ParticleDrawCohort[] = [];
 	/**
-	 * Reused anchored-origin storage, one entry per particle drawn.
+	 * Reused instance records, one entry per particle drawn, each owning its origin vector.
 	 *
-	 * `collectCohorts` runs every frame over every live particle, so allocating a vector per
-	 * particle would be pure GC churn in the renderer's hot path. Entries are handed out by index
-	 * and are valid only until the next call, which is exactly the lifetime of the cohorts.
+	 * `collectCohorts` runs every frame over every live particle, so allocating a record and a
+	 * vector per particle would be pure GC churn in the renderer's hot path — and churn is worse
+	 * than its cost suggests, because it accumulates into collection pauses that are hard to
+	 * attribute back to the code that caused them. Records are handed out by index and are valid
+	 * only until the next call, which is exactly the lifetime of the cohorts that reference them.
 	 */
-	readonly #anchoredOrigins: [number, number, number][] = [];
-	#anchoredOriginsUsed = 0;
+	readonly #recordPool: MutableParticleInstanceRecord[] = [];
+	#recordsUsed = 0;
 	#emittedTotal = 0;
 	#reapedEmitterCount = 0;
 
@@ -345,7 +369,7 @@ export class ParticleSystem {
 		for (const cohort of cohorts.values()) cohort.particles.length = 0;
 		// The anchor is one value for the whole frame, so it is read once rather than per particle.
 		const anchor = this.#dependencies.renderAnchorOrigin();
-		this.#anchoredOriginsUsed = 0;
+		this.#recordsUsed = 0;
 		for (const instance of this.#instances) {
 			const info = instance.emitter.info;
 			// An unshipped motion type has no formula in either evaluator; drawing it motionless
@@ -366,22 +390,24 @@ export class ParticleSystem {
 				cohorts.set(key, cohort);
 			}
 			for (const particle of instance.particles) {
-				cohort.particles.push({
-					a: particle.spawn.a,
-					b: particle.spawn.b,
-					birthTime: particle.birthTime,
-					c: particle.spawn.c,
-					finalScale: particle.spawn.finalScale,
-					finalTranslucency: particle.spawn.finalTranslucency,
-					lifespan: particle.spawn.lifespan,
-					offset: particle.spawn.offset,
-					origin: this.#anchoredOrigin(
-						resolveSceneOrigin(particle, following),
-						anchor,
-					),
-					startScale: particle.spawn.startScale,
-					startTranslucency: particle.spawn.startTranslucency,
-				});
+				const record = this.#pooledRecord();
+				const sceneOrigin = resolveSceneOrigin(particle, following);
+				// Motion constants are shared with the spawn record rather than copied; only the
+				// anchored origin is per-frame, and it is written into the record's own vector.
+				record.a = particle.spawn.a;
+				record.b = particle.spawn.b;
+				record.birthTime = particle.birthTime;
+				record.c = particle.spawn.c;
+				record.finalScale = particle.spawn.finalScale;
+				record.finalTranslucency = particle.spawn.finalTranslucency;
+				record.lifespan = particle.spawn.lifespan;
+				record.offset = particle.spawn.offset;
+				record.origin[0] = sceneOrigin[0] - anchor[0];
+				record.origin[1] = sceneOrigin[1] - anchor[1];
+				record.origin[2] = sceneOrigin[2] - anchor[2];
+				record.startScale = particle.spawn.startScale;
+				record.startTranslucency = particle.spawn.startTranslucency;
+				cohort.particles.push(record);
 			}
 		}
 		this.#cohortScratchOutput.length = 0;
@@ -552,16 +578,11 @@ export class ParticleSystem {
 		this.#emit(instance, timeSeconds, parentOrigin);
 	}
 
-	/** Hand out the next pooled anchored origin, growing the pool only as the peak load grows. */
-	#anchoredOrigin(origin: SceneVector3, anchor: SceneVector3): RenderVector3 {
-		const target = (this.#anchoredOrigins[this.#anchoredOriginsUsed] ??= [
-			0, 0, 0,
-		]);
-		this.#anchoredOriginsUsed += 1;
-		target[0] = origin[0] - anchor[0];
-		target[1] = origin[1] - anchor[1];
-		target[2] = origin[2] - anchor[2];
-		return renderVector3(target);
+	/** Hand out the next pooled record, growing the pool only as the peak particle count grows. */
+	#pooledRecord(): MutableParticleInstanceRecord {
+		const record = (this.#recordPool[this.#recordsUsed] ??= blankRecord());
+		this.#recordsUsed += 1;
+		return record;
 	}
 
 	#emit(

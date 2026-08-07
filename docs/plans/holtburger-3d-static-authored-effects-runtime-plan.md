@@ -1734,15 +1734,30 @@ by value rather than by when it appeared.
       tuples do. Every crossing between them silently drops the brand, which is how
       `AudioListenerPlacement` shipped an unbranded position one commit after the brands were
       extended. Either brand `Vec3` or converge on one representation.
-- [ ] **Reuse per-particle cohort records.** `collectCohorts` allocates an object per particle per
-      frame. Pooling the anchored origins removed one allocation of the pair; the record itself
-      remains, and the same pooled-borrow pattern applies.
+- [x] **Per-particle cohort records are pooled.** `collectCohorts` allocated a record *and* a vector
+      per particle per frame; both are now handed out from one pool that grows to the peak particle
+      count, with the record owning its own origin vector. Kept despite the measurement — cohort
+      building is 0.073 ms of a 2.73 ms frame — because allocation churn is not well described by
+      per-frame cost: it accumulates into collection pauses that surface far from the code that
+      caused them. A test asserts pooled **identity** rather than equality, since fresh records
+      would still compare equal.
 - [x] **No `AudioContext` resume is needed.** Confirmed by play 2026-08-07: authored emitters are
       audible in the Explorer. The context is therefore already running under Tauri WebKitGTK, whose
       autoplay policy differs from the headless Chrome the harness uses. The suspicion was recorded
       on reasoning rather than evidence and is closed by observation rather than by code.
-- [ ] Bind `TextureVelocity` in the renderer, or delete the resolved-but-unbound path. Unchanged
-      from Phase 7: a render-contract change with zero measured consumers.
+- [x] **Deleted the resolved-but-unbound `TextureVelocity` path.** `authored-texture-scroll.ts` and
+      its test are gone: the resolver had **no callers at all**. Worse, the router reported
+      `applied-at-preparation` for the whole-object arm, claiming that resolver had carried the
+      scroll rate as a material fact — an outcome that was simply false, and which read in
+      diagnostics as a resolved decision rather than a gap. Both arms now report `no-consumer`
+      honestly, and the `applied-at-preparation` outcome is deleted rather than left as vocabulary
+      nothing produces.
+
+      **Not deleted, deliberately:** the Rust `holtburger-dat` decode of hook types 23 and 24, and
+      the frontend's typed payloads. That crate's contract is lossless decode of the file format, so
+      dropping the payload would make the decoder lossy to save nothing. The sky's own texture
+      scrolling is a separate, genuinely wired consumer and is untouched. What is gone is the
+      pretence of a consumer for the authored hook.
 
 #### GPU profiling was never blocked on `--gpu` (finding 2026-08-07)
 

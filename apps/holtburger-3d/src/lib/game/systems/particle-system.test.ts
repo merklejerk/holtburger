@@ -557,6 +557,27 @@ describe("ParticleSystem", () => {
 		expect(first[0]).not.toBe(first[1]);
 	});
 
+	it("reuses instance records too, not only the vectors inside them", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 2 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const first = [...particles.collectCohorts()[0]!.particles];
+		const second = [...particles.collectCohorts()[0]!.particles];
+
+		// The record is the other half of the per-particle-per-frame allocation. Churn is worse
+		// than its cost suggests: it accumulates into pauses that are hard to attribute back.
+		expect(second[0]).toBe(first[0]);
+		expect(second[1]).toBe(first[1]);
+		expect(first[0]).not.toBe(first[1]);
+	});
+
 	it("emits no instance records for a culled emitter", () => {
 		const particles = runtime();
 		particles.create(

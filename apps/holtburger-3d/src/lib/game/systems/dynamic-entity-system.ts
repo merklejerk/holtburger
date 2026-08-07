@@ -69,6 +69,8 @@ interface DynamicEntityRecord {
 	preparedAnimation: PreparedDynamicAnimation | null;
 	/** Conservative object-local envelope matching the exact pose currently published to draw. */
 	publishedPresentationBounds: AABB3;
+	/** Envelope already folded into the published bounds, so a change republishes them. */
+	appliedEnvelopeRadius: number;
 }
 
 interface DynamicOwnerRecord<TTemplateOwnerId extends string> {
@@ -343,6 +345,7 @@ export class DynamicEntitySystem<
 			source: resident,
 			preparedAnimation: null,
 			publishedPresentationBounds: staticPresentationBounds(resident),
+			appliedEnvelopeRadius: 0,
 			visualRootNodeId,
 		};
 		return record;
@@ -469,8 +472,17 @@ export class DynamicEntitySystem<
 			if (entity.animationHandle !== null) continue;
 			if (publishedNodeIds.has(nodeId)) continue;
 			// An idle resident resolves to the same presentation every frame; republishing it is
-			// the per-frame streaming this split was meant to remove, not add.
-			if (!this.#effects.needsPresentation(nodeId)) continue;
+			// the per-frame streaming this split was meant to remove, not add. Its particle
+			// envelope is not idle, though: emitters start and stop independently of effect state,
+			// and skipping on effects alone left the envelope out of the bounds entirely, so a
+			// swarm vanished the moment its owner's mesh left the frustum.
+			const envelopeRadius = this.#particleEnvelopeRadiusOf(nodeId);
+			if (
+				!this.#effects.needsPresentation(nodeId) &&
+				envelopeRadius === entity.appliedEnvelopeRadius
+			) {
+				continue;
+			}
 			// A script-only resident holds the pose it was installed with. Its effect state still
 			// ramps, rotates, and fades, and before this had no path to the scene at all.
 			this.#applySample(entity, {
@@ -488,6 +500,7 @@ export class DynamicEntitySystem<
 	/** Grow presentation bounds to contain whatever this entity is currently emitting. */
 	#withParticleEnvelope(entity: DynamicEntityRecord, bounds: AABB3): AABB3 {
 		const radius = this.#particleEnvelopeRadiusOf(entity.rootNodeId);
+		entity.appliedEnvelopeRadius = radius;
 		if (radius <= 0) return bounds;
 		return new AABB3(
 			new Vec3(

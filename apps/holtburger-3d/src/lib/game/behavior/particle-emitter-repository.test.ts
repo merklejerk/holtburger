@@ -61,15 +61,49 @@ describe("emitterEnvelopeRadius", () => {
 	it("bounds a purely linear emitter by velocity times lifespan", () => {
 		// 3 m/s for 2 s, plus the particle's own unit scale.
 		expect(
-			emitterEnvelopeRadius(emitter({ a: acVector3([3, 0, 0]) })),
+			emitterEnvelopeRadius(
+				emitter({ a: acVector3([3, 0, 0]), motionType: 2 }),
+			),
 		).toBeCloseTo(7);
 	});
 
 	it("accounts for acceleration, which retail's own sphere ignores", () => {
 		// Retail's max(max_offset, max_a * lifespan) would return 0 here and clip the particles.
+		// Half b t squared over 2 s is 2, plus unit scale.
 		expect(
-			emitterEnvelopeRadius(emitter({ b: acVector3([1, 0, 0]) })),
-		).toBeGreaterThan(4);
+			emitterEnvelopeRadius(
+				emitter({ b: acVector3([1, 0, 0]), motionType: 3 }),
+			),
+		).toBeCloseTo(3);
+	});
+
+	it("holds a still emitter to its offset, with no travel term at all", () => {
+		expect(
+			emitterEnvelopeRadius(
+				emitter({ a: acVector3([9, 0, 0]), maxOffset: 2, motionType: 1 }),
+			),
+		).toBeCloseTo(3);
+	});
+
+	it("bounds Swarm by its oscillation amplitude rather than by a cubed lifespan", () => {
+		// `c` is an amplitude and `b` a frequency, so neither accumulates with time. Treating them
+		// as polynomial coefficients produced a 410 m envelope for a fly swarm reaching about four,
+		// and an envelope that large never culls anything.
+		const swarm = emitterEnvelopeRadius(
+			emitter({
+				a: acVector3([0, 0, 0.1]),
+				b: acVector3([2, 2, 0.2]),
+				c: acVector3([1, 1, 0]),
+				lifespan: 5,
+				lifespanRand: 0.5,
+				maxOffset: 1,
+				motionType: 5,
+			}),
+		);
+
+		// |c| + |a| * 5.5 + offset 1 + scale 1.
+		expect(swarm).toBeCloseTo(1.414 + 0.55 + 1 + 1, 2);
+		expect(swarm).toBeLessThan(10);
 	});
 
 	it("includes the randomized tail of lifespan and scale, not their base values", () => {

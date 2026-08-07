@@ -1,34 +1,34 @@
 /**
- * Per-phase timing for the runtime's update tick, which the renderer profile does not cover.
+ * Optional per-phase timing for the runtime's update tick, which renderer profiling does not cover.
  *
- * The renderer profile explains draw cost. This explains everything before it: advancing scripts,
+ * Renderer profiling explains draw cost. This explains everything before it: advancing scripts,
  * simulating particles, sampling animation, publishing presentation into the scene, and building the
  * particle cohorts the renderer consumes.
  *
- * Always on, unlike renderer profiling. This is seven `performance.now()` calls at frame granularity
- * rather than per-draw clocks, `PhysicsScriptSystem` already times its own advance the same way, and
- * a diagnostic nobody remembers to enable is a diagnostic nobody has when they need it.
+ * Deliberately an **optional injected observer** rather than something the runtime owns. A profiler
+ * is diagnostic infrastructure, so a production runtime should not be obliged to construct one or
+ * carry its state, and the tick should not read as measurement with rendering in between. Absent,
+ * the tick pays one skipped optional call per phase and `getTickProfile` reports nothing.
  */
 
-/** One tick's phase durations, in milliseconds. */
-export interface RuntimeTickTimings {
-	/** Physics-script clock advancement, including every command it dispatches. */
-	readonly scriptAdvanceMs: number;
-	/** Particle emission, expiry, and envelope maintenance. */
-	readonly particleAdvanceMs: number;
-	/** Animation clock advancement and presentation-cadence selection. */
-	readonly animationAdvanceMs: number;
-	/** Sampling animation and publishing part transforms into the scene graph. */
-	readonly presentationPublishMs: number;
-	/** Grouping live particles into draw cohorts and handing them to the renderer. */
-	readonly particleCohortMs: number;
-	/** The renderer's own `drawFrame`, which its profile breaks down further. */
-	readonly renderMs: number;
-	/** Post-frame animation bookkeeping against renderer feedback. */
-	readonly frameCompletionMs: number;
-	/** Wall-clock across the whole tick, so unattributed work is visible as the shortfall. */
+/** Update-tick phases, in the order the runtime marks them. */
+export const RUNTIME_TICK_PHASES = [
+	"scriptAdvance",
+	"particleAdvance",
+	"animationAdvance",
+	"presentationPublish",
+	"particleCohort",
+	"render",
+	"frameCompletion",
+] as const;
+
+export type RuntimeTickPhase = (typeof RUNTIME_TICK_PHASES)[number];
+
+/** One tick's phase durations in milliseconds, plus the wall-clock total. */
+export type RuntimeTickTimings = Record<RuntimeTickPhase, number> & {
+	/** Wall-clock across the whole tick, so unattributed work shows as the shortfall. */
 	readonly totalMs: number;
-}
+};
 
 /** Latest tick plus a mean across the retained window. */
 export interface RuntimeTickProfile {
@@ -37,25 +37,53 @@ export interface RuntimeTickProfile {
 	readonly sampleCount: number;
 }
 
-const TIMING_KEYS = [
-	"scriptAdvanceMs",
-	"particleAdvanceMs",
-	"animationAdvanceMs",
-	"presentationPublishMs",
-	"particleCohortMs",
-	"renderMs",
-	"frameCompletionMs",
-	"totalMs",
-] as const satisfies readonly (keyof RuntimeTickTimings)[];
-
 /** Frames retained for the mean; one second at sixty frames, matching the renderer's window. */
 const WINDOW_SIZE = 60;
 
-export class RuntimeTickProfiler {
-	readonly #samples: RuntimeTickTimings[] = [];
+function emptyTimings(): Record<RuntimeTickPhase | "totalMs", number> {
+	const timings = { totalMs: 0 } as Record<
+		RuntimeTickPhase | "totalMs",
+		number
+	>;
+	for (const phase of RUNTIME_TICK_PHASES) timings[phase] = 0;
+	return timings;
+}
 
-	record(timings: RuntimeTickTimings): void {
-		this.#samples.push(timings);
+export class RuntimeTickProfiler {
+	readonly #clock: () => number;
+	readonly #samples: RuntimeTickTimings[] = [];
+	#current: Record<RuntimeTickPhase | "totalMs", number> | null = null;
+	#tickStartedAt = 0;
+	#lastMarkAt = 0;
+
+	/** The clock is injected so tests measure exact durations rather than real elapsed time. */
+	constructor(clock: () => number = () => performance.now()) {
+		this.#clock = clock;
+	}
+
+	/** Open a tick. An unfinished previous tick is discarded rather than blended into this one. */
+	beginTick(): void {
+		this.#current = emptyTimings();
+		this.#tickStartedAt = this.#clock();
+		this.#lastMarkAt = this.#tickStartedAt;
+	}
+
+	/** Close one phase, attributing everything since the previous mark to it. */
+	mark(phase: RuntimeTickPhase): void {
+		const current = this.#current;
+		if (!current) return;
+		const now = this.#clock();
+		current[phase] += now - this.#lastMarkAt;
+		this.#lastMarkAt = now;
+	}
+
+	/** Close the tick and retain it. */
+	finishTick(): void {
+		const current = this.#current;
+		if (!current) return;
+		current.totalMs = this.#clock() - this.#tickStartedAt;
+		this.#current = null;
+		this.#samples.push(current as RuntimeTickTimings);
 		if (this.#samples.length > WINDOW_SIZE) this.#samples.shift();
 	}
 
@@ -63,19 +91,17 @@ export class RuntimeTickProfiler {
 	getProfile(): RuntimeTickProfile | null {
 		const latest = this.#samples.at(-1);
 		if (!latest) return null;
-		const totals = Object.fromEntries(
-			TIMING_KEYS.map((key) => [key, 0]),
-		) as Record<keyof RuntimeTickTimings, number>;
+		const totals = emptyTimings();
 		for (const sample of this.#samples) {
-			for (const key of TIMING_KEYS) totals[key] += sample[key];
+			totals.totalMs += sample.totalMs;
+			for (const phase of RUNTIME_TICK_PHASES) totals[phase] += sample[phase];
 		}
 		const sampleCount = this.#samples.length;
-		return {
-			latest,
-			mean: Object.fromEntries(
-				TIMING_KEYS.map((key) => [key, totals[key] / sampleCount]),
-			) as unknown as RuntimeTickTimings,
-			sampleCount,
-		};
+		const mean = emptyTimings();
+		mean.totalMs = totals.totalMs / sampleCount;
+		for (const phase of RUNTIME_TICK_PHASES) {
+			mean[phase] = totals[phase] / sampleCount;
+		}
+		return { latest, mean: mean as RuntimeTickTimings, sampleCount };
 	}
 }

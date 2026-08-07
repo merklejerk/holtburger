@@ -33,6 +33,7 @@
 		type StaticObjectLayerRuntimeDiagnostics,
 		type StaticObjectRuntimeDiagnostics,
 	} from "../../lib/game/runtime/game-runtime";
+	import { RuntimeTickProfiler } from "../../lib/game/runtime/runtime-tick-profiler";
 	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
 	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
 	import {
@@ -864,6 +865,8 @@
 					PARTICLE_SEED === null
 						? undefined
 						: seededRoll(Number(PARTICLE_SEED)),
+					// The harness is a measurement surface, so it always wants tick timing.
+					new RuntimeTickProfiler(),
 				);
 				// Harness comparisons select their render policy explicitly and start from flat.
 				runtime.setFrameSettings(frameSettings);

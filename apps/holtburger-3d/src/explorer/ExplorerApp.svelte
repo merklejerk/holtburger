@@ -16,6 +16,7 @@
 		GameRuntime,
 		type StaticObjectRuntimeDiagnostics,
 	} from "../lib/game/runtime/game-runtime";
+	import { RuntimeTickProfiler } from "../lib/game/runtime/runtime-tick-profiler";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
 	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
@@ -364,6 +365,10 @@
 					TauriParticleEmitterSource.build(),
 					TauriSoundTableSource.build(),
 					TauriParticleMeshSource.build(),
+					undefined,
+					// The Explorer is a development surface and its Frame panel reports tick
+					// timing; the thin client route passes nothing and pays nothing.
+					new RuntimeTickProfiler(),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
 				skySource = new TauriSkySource();

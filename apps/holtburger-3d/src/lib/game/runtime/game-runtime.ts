@@ -146,8 +146,10 @@ import {
 	type EnvCellRealizationArtifact,
 } from "./env-cell-realization";
 import type { AudioListenerPlacement, Camera } from "./types";
-import { RuntimeTickProfiler } from "./runtime-tick-profiler";
-import type { RuntimeTickProfile } from "./runtime-tick-profiler";
+import type {
+	RuntimeTickProfile,
+	RuntimeTickProfiler,
+} from "./runtime-tick-profiler";
 import type {
 	SceneAvailabilityEvent,
 	SceneAvailabilityListener,
@@ -228,6 +230,14 @@ export interface GameRuntimeDependencies {
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
+	/**
+	 * Optional per-phase tick timing.
+	 *
+	 * Diagnostic infrastructure, so a production runtime is not obliged to construct one or carry
+	 * its state, and the tick reads as phases rather than as measurement. The Explorer and the
+	 * browser harness supply one; the thin client route does not.
+	 */
+	readonly tickProfiler?: RuntimeTickProfiler;
 	/**
 	 * Uniform [0, 1) source for authored randomness, defaulting to `Math.random`.
 	 *
@@ -427,7 +437,7 @@ export class GameRuntime {
 
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
 	#lastFrameTimeSeconds = 0;
-	readonly #tickProfiler = new RuntimeTickProfiler();
+	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
@@ -485,6 +495,7 @@ export class GameRuntime {
 		commitPipeline: CommitPipeline,
 		dependencies: GameRuntimeDependencies,
 	) {
+		this.#tickProfiler = dependencies.tickProfiler;
 		this.#terrainGenerator = dependencies.terrainGenerator;
 		this.#texturePreparer = dependencies.texturePreparer;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
@@ -823,6 +834,7 @@ export class GameRuntime {
 		soundTableSource: SoundTableSource,
 		particleMeshSource: ParticleMeshSource,
 		roll?: UniformRoll,
+		tickProfiler?: RuntimeTickProfiler,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			InlineTerrainGenerator.build(),
@@ -836,6 +848,7 @@ export class GameRuntime {
 			particleMeshSource,
 			roll,
 			soundTableSource,
+			tickProfiler,
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
 					? new InlineStaticObjectGeometryPreparer()
@@ -1136,28 +1149,29 @@ export class GameRuntime {
 		this.#lastFrameTimeSeconds = timeSeconds;
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
-		const tickStartedAt = performance.now();
+		const tick = this.#tickProfiler;
+		tick?.beginTick();
 		this.#physicsScriptSystem.advance(timeSeconds);
-		const afterScriptsAt = performance.now();
+		tick?.mark("scriptAdvance");
 		this.#particles.advance(timeSeconds);
-		const afterParticlesAt = performance.now();
+		tick?.mark("particleAdvance");
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
 			animationFrame,
 			timeSeconds,
 		);
-		const afterAnimationAt = performance.now();
+		tick?.mark("animationAdvance");
 		this.#dynamics.publishPresentation(
 			this.#animation.sample(
 				animationFrame,
 				presentationSelection.selectedNodeIds,
 			),
 		);
-		const afterPresentationAt = performance.now();
+		tick?.mark("presentationPublish");
 		// Cohorts are rebuilt every frame from live emitters rather than retained, and cull at
 		// emitter granularity before any instance record is written.
 		renderer.particles?.submit(this.#particles.collectCohorts());
-		const afterCohortsAt = performance.now();
+		tick?.mark("particleCohort");
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
@@ -1178,24 +1192,15 @@ export class GameRuntime {
 				},
 			],
 		});
-		const afterRenderAt = performance.now();
+		tick?.mark("render");
 		this.#animationPresentation.completeFrame(feedback, timeSeconds);
-		const finishedAt = performance.now();
-		this.#tickProfiler.record({
-			animationAdvanceMs: afterAnimationAt - afterParticlesAt,
-			frameCompletionMs: finishedAt - afterRenderAt,
-			particleAdvanceMs: afterParticlesAt - afterScriptsAt,
-			particleCohortMs: afterCohortsAt - afterPresentationAt,
-			presentationPublishMs: afterPresentationAt - afterAnimationAt,
-			renderMs: afterRenderAt - afterCohortsAt,
-			scriptAdvanceMs: afterScriptsAt - tickStartedAt,
-			totalMs: finishedAt - tickStartedAt,
-		});
+		tick?.mark("frameCompletion");
+		tick?.finishTick();
 	}
 
-	/** Per-phase update-tick timing, or null before the first tick completes. */
+	/** Per-phase update-tick timing; null unless a frontend injected a profiler. */
 	getTickProfile(): RuntimeTickProfile | null {
-		return this.#tickProfiler.getProfile();
+		return this.#tickProfiler?.getProfile() ?? null;
 	}
 
 	/**

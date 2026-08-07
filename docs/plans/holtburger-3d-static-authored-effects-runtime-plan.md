@@ -1640,6 +1640,15 @@ Treat the reopened checklist below as the live one; the first records what the o
       | script advance | 0.013 |
       | frame completion | 0.003 |
 
+      The profiler is an **optional injected observer**, not something the runtime owns. Making it a
+      required field was debug-coded: a production runtime should not be obliged to construct one or
+      carry its state, and the tick body should read as phases rather than as measurement with
+      rendering in between. The Explorer and the browser harness supply one; the thin client route
+      passes nothing and pays one skipped optional call per phase. That also answers the overhead
+      question honestly rather than by assertion — `performance.now()` measures 41.1 ns, so eight
+      calls cost 0.00033 ms, about 0.014% of the tick and an order of magnitude below the resolution
+      of the numbers being reported. The cost was never the objection; the contract was.
+
       **Everything outside the renderer is 0.15 ms, 6% of the tick.** Hook dispatch and audio are
       not separate phases because they run inside script and animation advancement, which together
       cost 0.03 ms — instrumenting deeper would measure noise. The earlier `--gpu` blocker recorded

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { expandBounds } from "../math/geometry-utils";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
@@ -365,6 +366,38 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(scene.getNode(nodeId)?.localBounds).toEqual(sweptBounds);
 	});
 
+	/**
+	 * Two independent culls read two different bounds. An envelope in only the presentation bounds
+	 * still loses the swarm, because the broadphase drops the owner before the footprint test runs.
+	 */
+	it("grows the broadphase bounds by the particle envelope, not only the drawn pose", async () => {
+		let envelopeRadius = 0;
+		const { scene, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			new FixtureAnimationSource(),
+			() => envelopeRadius,
+		);
+		const installation = system.replaceOwner("layer", [source("swarm-owner")]);
+		expect(await installation.ready).toBe("ready");
+		const prepared = requiredAt(installation.getPreparedEntities(), 0);
+		commit(installation);
+		const nodeId = requiredAt(installation.nodeIds, 0);
+		const meshBounds = scene.getNode(nodeId)?.localBounds?.clone();
+		const poseBounds = system.getPublishedPresentationBounds(nodeId)?.clone();
+		if (!meshBounds || !poseBounds)
+			throw new Error("Entity published no bounds.");
+
+		envelopeRadius = 5;
+		system.publishPresentation([presentationSample(prepared, 0)]);
+
+		expect(scene.getNode(nodeId)?.localBounds).toEqual(
+			expandBounds(meshBounds, 5),
+		);
+		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
+			expandBounds(poseBounds, 5),
+		);
+	});
+
 	it("activates a blocked visual clip as valid static presentation", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -445,6 +478,8 @@ function presentationSample(
 function createSystem(
 	preparer: ObjectVisualTemplatePreparer,
 	animationSource: AnimationAssetSource = new FixtureAnimationSource(),
+	// No emitters in most fixtures, so presentation bounds are the mesh alone.
+	particleEnvelopeRadiusOf: () => number = () => 0,
 ) {
 	const scene = new SceneGraph();
 	const effects = new EffectSystem();
@@ -481,8 +516,7 @@ function createSystem(
 		}),
 		(ownerId: string, generation: number) =>
 			`${ownerId}:generation:${generation}`,
-		// No emitters in these fixtures, so presentation bounds are the mesh alone.
-		() => 0,
+		() => particleEnvelopeRadiusOf(),
 	);
 	return { effects, geometry, scene, system };
 }

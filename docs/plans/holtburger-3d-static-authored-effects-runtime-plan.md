@@ -2643,6 +2643,44 @@ emitters starting and stopping still update bounds without reintroducing per-fra
 idle residents. Two optimisations that were individually correct combined into a defect neither
 would have caused alone — worth remembering when adding the next skip condition.
 
+### Swarm particles culled at close range, part two (2026-08-07)
+
+The envelope fixes above did not resolve the report. Reproduced in the harness by pointing a camera
+at a known fly emitter (`0x32000478`, scene origin `42355.0, 10.0, -16424.9`) and sweeping:
+
+| camera | result |
+| --- | --- |
+| 12 m / 6 m / 3 m / 1.5 m, level with the swarm | visible |
+| 1.0 m away, 3 m **above** | **culled** |
+| 0.5 m away, 2 m above | **culled** |
+| 1.0 m away, 1 m above | visible |
+
+So it was never distance; it was elevation at close range, where the angular offset to the owner's
+mesh is largest. A probe then showed the node never reaching the renderer's narrow-phase loop at all,
+which located the cull upstream.
+
+**Two independent culls read two different bounds, and the envelope only ever reached one.**
+
+| cull | bounds read | envelope? |
+| --- | --- | --- |
+| SceneGraph frustum query (broadphase) | `scene.updateBounds`, written **once at install** from `animation.localBounds` | no |
+| Renderer object-footprint test (narrow phase) | `publishedPresentationBounds` | yes |
+
+Camera above the swarm at close range puts the owner's mesh below the frustum's bottom plane while
+its particles are still on screen. The broadphase drops the node, so it never enters
+`selectedDynamicNodeIds`, so `collectCohorts` culls every particle the emitter owns. The narrow-phase
+envelope never got a chance to matter.
+
+`DynamicEntitySystem` now owns the radius in one place. `#refreshParticleEnvelope` folds it into both
+bounds and reports whether it moved; `#publishCullingBounds` republishes the broadphase envelope from
+the pose-independent `cullingBounds` captured at install. The scene bounds stay pose-independent —
+the existing invariant that an animated pose does not rewrite them is unchanged and still tested.
+
+Debt this exposed: **a derived fact with two consumers had no single owner.** The presentation path
+grew the envelope because that is where the bounds were being built; the broadphase kept a stale
+copy because nothing connected them. Nothing tested the broadphase path, which is why it shipped
+twice. The regression test now sets a non-zero radius and asserts both bounds grow.
+
 ## Addendum: Phase 9 — Region-Driven Ambient Audio
 
 Added after the plan's original scope was met. Ambient audio was deliberately excluded throughout,

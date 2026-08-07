@@ -1781,9 +1781,42 @@ Deleting `authoredCullMode` would have silently dropped the only validation of t
 exhaustive `effectiveCullFace` switch that rejects unsupported modes and reduces supported ones to
 draw state, with a test covering the rejection.
 
-One further over-splitting source was found and left alone, because it is structural rather than a
-key axis: EnvCell shell range merging requires index contiguity, so a skipped non-renderable portal
-polygon splits a range even when the binding is unchanged (`env-cell-materialization.ts:307`).
+##### EnvCell shell index compaction (2026-08-07)
+
+One further over-splitting source was structural rather than a key axis. Shell ranges addressed the
+authored index buffer directly (`indexStart = triangle * 3`), so contiguity was hostage to authored
+order twice over: non-renderable portal polygons were skipped but left in the buffer, punching holes
+that split a range whose binding never changed, and same-binding triangles were not necessarily
+adjacent to begin with.
+
+`planShellMaterialRanges` is replaced by `planShellDraws`, which emits the compacted index buffer and
+the ranges that tile it as one result, grouped binding-major. Every range is then contiguous by
+construction and the skipped triangles leave the uploaded buffer entirely. `objectGeometry` takes the
+index buffer as a parameter rather than reading it off the source.
+
+This is safe precisely because shell geometry is already realized per cell rather than shared by
+CellStruct identity, so each buffer has exactly one consumer. That is not true of static object
+geometry, which is why the same reorder was rejected there.
+
+Measured over the `0x7d64` interior, 430 shells:
+
+| | Before | After |
+| --- | --- | --- |
+| Ranges emitted | 2274 | **1574** |
+| Distinct bindings (the floor) | 1574 | 1574 |
+| Ranges per shell | 5.29 | 3.66 |
+
+Compaction lands exactly on the floor. In the indoor-root camera specifically the visible win is
+smaller — 22 to 21 submitted shell draws over 6 visible shells, with triangle count unchanged at 207
+— because that view sees few shells; the 31% is a property of the full residency.
+
+Rendering was verified rather than assumed. Before/after screenshots are visually identical: 402 of
+810,240 pixels differ (0.05%), only 20 by more than one channel step, scattered as isolated pixels
+rather than any coherent region. That is rasterization and blend-order rounding from the changed
+submission order, which is the accepted cost of the reorder.
+
+The accounting assertion got stronger rather than weaker: ranges must tile the compacted buffer
+exactly, with no gap, overlap, or remainder.
 
 Separately considered and **not** adopted here: eliminating the duplicated reversed geometry for
 `CULL_MODE_NONE` entirely by carrying two-sidedness as a material property. The duplication exists

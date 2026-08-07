@@ -1,9 +1,9 @@
 import type {
 	AcVector3,
 	RenderVector3,
-	StableVector3,
+	SceneVector3,
 } from "../../assets/ac-frame";
-import { acVector3, renderVector3, stableVector3 } from "../../assets/ac-frame";
+import { acVector3, renderVector3, sceneVector3 } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
@@ -30,26 +30,26 @@ export interface ParticleSystemDependencies {
 	/**
 	 * Current origin of a target in the fixed scene frame, or `null` once it stops publishing one.
 	 *
-	 * Stable rather than anchor-relative because particle origins are retained across frames.
+	 * Scene frame rather than anchor-relative because particle origins are retained across frames.
 	 */
-	readonly stableOriginOf: (target: BehaviorTarget) => StableVector3 | null;
+	readonly sceneOriginOf: (target: BehaviorTarget) => SceneVector3 | null;
 	/**
 	 * Scene-frame origin of the current render anchor, subtracted to reach anchor-relative space.
 	 *
 	 * Exposed as the anchor rather than as a conversion function so the subtraction can be hoisted
 	 * out of the per-particle loop and written into pooled storage.
 	 */
-	readonly renderAnchorOrigin: () => StableVector3;
+	readonly renderAnchorOrigin: () => SceneVector3;
 	/** Current runtime clock, needed because commands arrive mid-dispatch. */
 	readonly clock: () => number;
 }
 
-/** Translate a stable origin by a frame-invariant displacement. */
+/** Translate a scene-frame origin by a frame-invariant displacement. */
 function offsetOrigin(
-	origin: StableVector3,
+	origin: SceneVector3,
 	displacement: Vector3,
-): StableVector3 {
-	return stableVector3([
+): SceneVector3 {
+	return sceneVector3([
 		origin[0] + displacement[0],
 		origin[1] + displacement[1],
 		origin[2] + displacement[2],
@@ -65,8 +65,8 @@ function offsetOrigin(
  */
 function followingOrigin(
 	instance: EmitterInstance,
-	liveOrigin: StableVector3,
-): StableVector3 {
+	liveOrigin: SceneVector3,
+): SceneVector3 {
 	return offsetOrigin(liveOrigin, instance.hookOffset);
 }
 
@@ -75,10 +75,10 @@ function followingOrigin(
  *
  * Total by construction, and the only place the follow/leave distinction is read.
  */
-function resolveStableOrigin(
+function resolveSceneOrigin(
 	particle: LiveParticle,
-	followingOriginForFrame: StableVector3,
-): StableVector3 {
+	followingOriginForFrame: SceneVector3,
+): SceneVector3 {
 	return particle.frozenOrigin ?? followingOriginForFrame;
 }
 
@@ -96,10 +96,10 @@ interface LiveParticle {
 	 *
 	 * `null` when the emitter follows its parent (`is_parent_local != 0`,
 	 * acclient.c:318262-318273), which is genuine absence rather than a branch: the origin is then
-	 * resolved live instead. {@link ParticleSystem.resolveStableOrigin} owns that choice so no
+	 * resolved live instead. {@link ParticleSystem.resolveSceneOrigin} owns that choice so no
 	 * consumer re-derives it.
 	 */
-	readonly frozenOrigin: StableVector3 | null;
+	readonly frozenOrigin: SceneVector3 | null;
 }
 
 interface EmitterInstance {
@@ -196,7 +196,7 @@ export class ParticleSystem {
 	): "created" | "unprepared" {
 		const emitter = this.#dependencies.resolveEmitter(command.emitterInfoId);
 		if (emitter === null) return "unprepared";
-		const parentOrigin = this.#dependencies.stableOriginOf(target);
+		const parentOrigin = this.#dependencies.sceneOriginOf(target);
 		if (parentOrigin === null) return "unprepared";
 		this.create(
 			target,
@@ -222,7 +222,7 @@ export class ParticleSystem {
 		hookOffset: Vector3,
 		emitterId: number,
 		timeSeconds: number,
-		parentOrigin: StableVector3,
+		parentOrigin: SceneVector3,
 	): void {
 		if (emitterId !== 0) {
 			const existing = this.#instances.findIndex(
@@ -287,7 +287,7 @@ export class ParticleSystem {
 	/**
 	 * Advance every emitter to `timeSeconds`.
 	 *
-	 * Origins come from the injected `stableOriginOf`, so this runtime follows published entity
+	 * Origins come from the injected `sceneOriginOf`, so this runtime follows published entity
 	 * transforms without holding a reference to the entity itself.
 	 */
 	advance(
@@ -296,7 +296,7 @@ export class ParticleSystem {
 	): void {
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
 			const instance = this.#instances[index]!;
-			const parentOrigin = this.#dependencies.stableOriginOf(instance.target);
+			const parentOrigin = this.#dependencies.sceneOriginOf(instance.target);
 			// A target that no longer publishes a transform has gone away underneath us.
 			if (parentOrigin === null) {
 				this.#instances.splice(index, 1);
@@ -352,7 +352,7 @@ export class ParticleSystem {
 			// would misrepresent it as working.
 			if (info.motionType === null) continue;
 			if (!isVisible(instance.target)) continue;
-			const liveOrigin = this.#dependencies.stableOriginOf(instance.target);
+			const liveOrigin = this.#dependencies.sceneOriginOf(instance.target);
 			if (liveOrigin === null) continue;
 			const following = followingOrigin(instance, liveOrigin);
 			const key = `${info.hwGfxObjId}:${info.motionType}`;
@@ -376,7 +376,7 @@ export class ParticleSystem {
 					lifespan: particle.spawn.lifespan,
 					offset: particle.spawn.offset,
 					origin: this.#anchoredOrigin(
-						resolveStableOrigin(particle, following),
+						resolveSceneOrigin(particle, following),
 						anchor,
 					),
 					startScale: particle.spawn.startScale,
@@ -402,18 +402,18 @@ export class ParticleSystem {
 		const samples: ParticleSample[] = [];
 		const anchor = this.#dependencies.renderAnchorOrigin();
 		for (const instance of this.#instances) {
-			const liveOrigin = this.#dependencies.stableOriginOf(instance.target);
+			const liveOrigin = this.#dependencies.sceneOriginOf(instance.target);
 			if (liveOrigin === null) continue;
 			const motionType = instance.emitter.info.motionType;
 			if (motionType === null) continue;
 			const following = followingOrigin(instance, liveOrigin);
 			for (const particle of instance.particles) {
-				const stable = resolveStableOrigin(particle, following);
+				const sceneOrigin = resolveSceneOrigin(particle, following);
 				// The reference evaluator is not a draw path, so it may allocate.
 				const origin = renderVector3([
-					stable[0] - anchor[0],
-					stable[1] - anchor[1],
-					stable[2] - anchor[2],
+					sceneOrigin[0] - anchor[0],
+					sceneOrigin[1] - anchor[1],
+					sceneOrigin[2] - anchor[2],
 				]);
 				const elapsed = timeSeconds - particle.birthTime;
 				const position = particlePosition(
@@ -536,7 +536,7 @@ export class ParticleSystem {
 	#emitDue(
 		instance: EmitterInstance,
 		timeSeconds: number,
-		parentOrigin: StableVector3,
+		parentOrigin: SceneVector3,
 	): void {
 		const info = instance.emitter.info;
 		// The per-meter predicate is unrecovered from the decompile, so a purely per-meter emitter
@@ -553,7 +553,7 @@ export class ParticleSystem {
 	}
 
 	/** Hand out the next pooled anchored origin, growing the pool only as the peak load grows. */
-	#anchoredOrigin(origin: StableVector3, anchor: StableVector3): RenderVector3 {
+	#anchoredOrigin(origin: SceneVector3, anchor: SceneVector3): RenderVector3 {
 		const target = (this.#anchoredOrigins[this.#anchoredOriginsUsed] ??= [
 			0, 0, 0,
 		]);
@@ -567,7 +567,7 @@ export class ParticleSystem {
 	#emit(
 		instance: EmitterInstance,
 		timeSeconds: number,
-		parentOrigin: StableVector3,
+		parentOrigin: SceneVector3,
 	): void {
 		const info = instance.emitter.info;
 		if (instance.particles.length >= info.maxParticles) return;

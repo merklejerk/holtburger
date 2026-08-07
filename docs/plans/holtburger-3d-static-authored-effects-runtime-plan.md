@@ -1847,16 +1847,16 @@ Both were reproduced as failing tests before any fix.
 
 Landed:
 
-- `StableVector3` joins `RenderVector3` in `ac-frame.ts` as a **disjoint** brand. `RenderVector3` is
-  now documented as anchor-relative and valid only for the frame that produced it; `StableVector3` is
+- `SceneVector3` joins `RenderVector3` in `ac-frame.ts` as a **disjoint** brand. `RenderVector3` is
+  now documented as anchor-relative and valid only for the frame that produced it; `SceneVector3` is
   the only frame a position may be retained in. Storing an anchored value no longer type-checks.
-- `#sceneOriginOf` splits into `#stableOriginOf` and `#toRenderSpace`, composed for the audio callers
+- `#sceneOriginOf` splits into `#sceneOriginOf` and `#toRenderSpace`, composed for the audio callers
   that consume an origin within the frame that produced it. The anchor subtraction stays in double
   precision, which is the reason the renderer is anchor-relative at all.
-- One module-level `resolveStableOrigin` is the only place the follow/leave distinction is read. It
+- One module-level `resolveSceneOrigin` is the only place the follow/leave distinction is read. It
   is total, and applies the hook offset on the path both kinds traverse, so neither can lose it.
 - `advance` and `sample` no longer take their own parallel origin functions. All four origin sources
-  collapse to the single injected `stableOriginOf`.
+  collapse to the single injected `sceneOriginOf`.
 
 The audio path was checked and is clean: `trigger` resolves pan and gain once from the position and
 listener in the same instant, both in the same frame, then plays a fixed one-shot. Nothing persists.
@@ -1916,7 +1916,7 @@ GPU vertex stage.
 
 Landed:
 
-- `AcVector3` joins `RenderVector3` and `StableVector3` as a third disjoint brand. `acVectorToRender`
+- `AcVector3` joins `RenderVector3` and `SceneVector3` as a third disjoint brand. `acVectorToRender`
   now accepts only an `AcVector3`, so authored data cannot reach a render-space consumer unconverted,
   and converted data cannot reach an AC-space formula.
 - `a`, `b`, `c` and `offsetDir` are no longer converted at decode. They are authored motion
@@ -2046,14 +2046,14 @@ the effect system was reshaped. It now forwards the real shapes plus audio and p
 ##### `AudioListenerPlacement` erased its own frame on arrival (finding 2026-08-07)
 
 The contract landed with `position: Vec3`, unbranded, and `setAudioListener` then called
-`stableVector3([position.x, position.y, position.z])` on it. That is the runtime asserting a frame
+`sceneVector3([position.x, position.y, position.z])` on it. That is the runtime asserting a frame
 about data the frontend supplied and the runtime cannot check — the exact erasure the brands exist to
 prevent, reintroduced one commit after they were extended.
 
-`position` is now `StableVector3`. The claim moves to `ExplorerCameraCoordinator`, which can justify
+`position` is now `SceneVector3`. The claim moves to `ExplorerCameraCoordinator`, which can justify
 it: the free-fly controller's position is the same value handed to
 `queryWorldPointResidencyCandidates` to resolve the camera's landblock and EnvCell, so it is
-stable-frame by construction. `rotation` stays a bare `Quat`, correctly — an orientation is invariant
+scene-frame by construction. `rotation` stays a bare `Quat`, correctly — an orientation is invariant
 under the anchor's pure translation and has no frame to get wrong.
 
 Root cause worth recording: the app carries **two vector representations**, the `Vec3` class used by
@@ -2061,6 +2061,28 @@ camera, math and matrices, and the branded tuples used by assets, particles and 
 second carries frames, so every crossing between them is a point where the brand silently drops. This
 boundary was one. Branding `Vec3` itself, or converging on one representation, is the structural fix
 and is larger than any single defect has yet justified.
+
+##### `StableVector3` renamed to `SceneVector3` (2026-08-07)
+
+The brand was named after the property that mattered for correctness — safe to retain — while the
+codebase already had a name for the frame itself. `CameraPlacement.position` has always been
+documented as "canonical scene/world space", and `queryWorldPointResidencyCandidates` has always
+taken points in it. Introducing "stable space" left two names for one frame, which is exactly the
+vocabulary drift a rename is supposed to sweep.
+
+Renamed together, four commits after the brand landed and before anything calcified: the type, the
+`sceneVector3` assertion, the `sceneSpace` symbol, `ParticleSystemDependencies.sceneOriginOf`,
+`resolveSceneOrigin`, and the frame-sense prose. Unrelated correct uses of the English word —
+`stableId`, `planStableAtlasLayout`, stable sort tiebreaks — were deliberately left alone.
+
+The rename exposed a name collision worth its own note. `GameRuntime` already had a
+`#sceneOriginOf` that returned an **anchor-relative** origin, which under the new vocabulary is
+actively misleading. It is now `#anchoredOriginOf`, and `#sceneOriginOf` names the scene-frame
+helper. The two are one composition apart, and the names now say which is which.
+
+`SceneVector3`'s doc comment also gained the rationale that was previously only inferred: the pair of
+frames exists because anchor-relative keeps shader coordinates small enough for f32 while scene space
+keeps stored coordinates meaningful over time.
 
 #### Acceptance Criteria
 

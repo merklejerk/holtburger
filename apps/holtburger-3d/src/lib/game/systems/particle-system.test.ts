@@ -1,5 +1,5 @@
-import { acVector3, renderVector3, stableVector3 } from "../../assets/ac-frame";
-import type { StableVector3 } from "../../assets/ac-frame";
+import { acVector3, renderVector3, sceneVector3 } from "../../assets/ac-frame";
+import type { SceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
@@ -13,7 +13,7 @@ const TARGET: BehaviorTarget = {
 	generation: 1,
 	nodeId: "node-1" as SceneNodeId,
 };
-const ORIGIN: StableVector3 = stableVector3([0, 0, 0]);
+const ORIGIN: SceneVector3 = sceneVector3([0, 0, 0]);
 /** Hook offsets are displacements, not positions, so they stay in the plain render axes. */
 const NO_OFFSET: Vector3 = renderVector3([0, 0, 0]);
 
@@ -69,8 +69,8 @@ const runtime = (
 ) =>
 	new ParticleSystem({
 		clock: () => 0,
-		stableOriginOf: () => ORIGIN,
-		renderAnchorOrigin: () => stableVector3([0, 0, 0]),
+		sceneOriginOf: () => ORIGIN,
+		renderAnchorOrigin: () => sceneVector3([0, 0, 0]),
 		resolveEmitter: () => null,
 		roll: () => 0.5,
 		...overrides,
@@ -250,9 +250,9 @@ describe("ParticleSystem", () => {
 	it("leaves particles behind unless the emitter follows its parent", () => {
 		// The parent genuinely moves, which is the only case the two kinds must disagree on.
 		let parentX = 0;
-		const moving = () => stableVector3([parentX, 0, 0]);
+		const moving = () => sceneVector3([parentX, 0, 0]);
 
-		const left = runtime({ stableOriginOf: moving });
+		const left = runtime({ sceneOriginOf: moving });
 		left.create(
 			TARGET,
 			prepared({ a: acVector3([0, 0, 0]), initialParticles: 1 }),
@@ -261,7 +261,7 @@ describe("ParticleSystem", () => {
 			0,
 			ORIGIN,
 		);
-		const following = runtime({ stableOriginOf: moving });
+		const following = runtime({ sceneOriginOf: moving });
 		following.create(
 			TARGET,
 			prepared({
@@ -284,7 +284,7 @@ describe("ParticleSystem", () => {
 	it("drops emitters whose target stops publishing a transform", () => {
 		let published = true;
 		const particles = runtime({
-			stableOriginOf: () => (published ? ORIGIN : null),
+			sceneOriginOf: () => (published ? ORIGIN : null),
 		});
 		particles.create(
 			TARGET,
@@ -494,7 +494,7 @@ describe("ParticleSystem", () => {
 		// the anchor delta without anything in the world actually moving.
 		let anchorX = 0;
 		const particles = runtime({
-			renderAnchorOrigin: () => stableVector3([anchorX, 0, 0]),
+			renderAnchorOrigin: () => sceneVector3([anchorX, 0, 0]),
 		});
 		particles.create(
 			TARGET,

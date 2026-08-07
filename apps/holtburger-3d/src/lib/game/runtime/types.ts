@@ -1,4 +1,4 @@
-import type { StableVector3 } from "../../assets/ac-frame";
+import type { SceneVector3 } from "../../assets/ac-frame";
 import type { Quat, Vec3 } from "../math/types";
 import type { SceneResidency } from "../scene";
 
@@ -37,7 +37,7 @@ export interface AudioListenerPlacement {
 	 * owns. The runtime cannot check the claim, and asserting it on the runtime's side would be the
 	 * frame erasure this brand exists to prevent.
 	 */
-	readonly position: StableVector3;
+	readonly position: SceneVector3;
 	/** Listener-to-world orientation; its local +X is the right hand panning projects onto. */
 	readonly rotation: Quat;
 }

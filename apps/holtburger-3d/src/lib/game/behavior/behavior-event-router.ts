@@ -51,8 +51,6 @@ export type BehaviorDispatchOutcome =
 	| "no-consumer"
 	/** Faithfully reproduced by doing nothing, because retail does nothing either. */
 	| "intentionally-inert"
-	/** Already reflected in prepared state; the runtime dispatch has nothing left to do. */
-	| "applied-at-preparation"
 	/** The target was removed or replaced before the command could run. */
 	| "rejected-stale-target";
 
@@ -265,12 +263,6 @@ export class BehaviorEventRouter {
 				this.#consumers.effects.applyScale(target, command);
 				return mode === "initial-state" ? "folded-initial-state" : "executed";
 
-			case "texture-velocity":
-				// Resolved once when the script closure was staged and carried as a material fact,
-				// so there is deliberately nothing to do at dispatch time. Recorded distinctly so it
-				// reads as a resolved decision rather than a missing consumer.
-				return "applied-at-preparation";
-
 			case "create-particle": {
 				// Replay is delegated rather than decided here: persistence is a property of the
 				// emitter asset, which the particle consumer owns and the router deliberately does
@@ -284,9 +276,15 @@ export class BehaviorEventRouter {
 				return mode === "initial-state" ? "folded-initial-state" : "executed";
 			}
 
+			case "texture-velocity":
 			case "texture-velocity-part":
-				// No shipped content authors a part-scoped scroll hook, so this arm has no planned
-				// consumer at all rather than a deferred one.
+				// Decoded losslessly and deliberately unconsumed. The whole-object arm previously
+				// reported a distinct "applied at preparation" outcome, claiming a staging-time
+				// resolver carried it as a material fact — but that resolver had no callers, so the
+				// outcome was a lie and nothing ever scrolled. Both the resolver and the outcome
+				// are gone rather than left as vocabulary nothing produces. Binding it is a render-contract change with zero measured
+				// consumers: the workload authors none, and an archive census found no part-scoped
+				// hook anywhere. Reporting honestly is better than a resolved-looking no-op.
 				return "no-consumer";
 
 			case "replace-object":

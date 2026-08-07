@@ -11,6 +11,23 @@ export function containsPoint(bounds: AABB3, point: Vec3): boolean {
 	);
 }
 
+/** Grow `bounds` outward by `radius` on every axis; a non-positive radius returns it unchanged. */
+export function expandBounds(bounds: AABB3, radius: number): AABB3 {
+	if (radius <= 0) return bounds;
+	return new AABB3(
+		new Vec3(
+			bounds.min.x - radius,
+			bounds.min.y - radius,
+			bounds.min.z - radius,
+		),
+		new Vec3(
+			bounds.max.x + radius,
+			bounds.max.y + radius,
+			bounds.max.z + radius,
+		),
+	);
+}
+
 export function translateBounds(
 	bounds: AABB3,
 	translation: Vec3,

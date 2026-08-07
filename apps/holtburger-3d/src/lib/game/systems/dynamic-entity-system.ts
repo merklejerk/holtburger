@@ -37,6 +37,7 @@ import {
 	AnimationAssetRepository,
 	type PreparedAnimationHandle,
 } from "../animation/animation-asset-repository";
+import { expandBounds } from "../math/geometry-utils";
 import {
 	prepareDynamicAnimation,
 	type PreparedDynamicAnimation,
@@ -69,7 +70,13 @@ interface DynamicEntityRecord {
 	preparedAnimation: PreparedDynamicAnimation | null;
 	/** Conservative object-local envelope matching the exact pose currently published to draw. */
 	publishedPresentationBounds: AABB3;
-	/** Envelope already folded into the published bounds, so a change republishes them. */
+	/**
+	 * Pose-independent envelope the scene graph's broadphase culls against, before any particle
+	 * envelope. Covers every pose the entity's animation can reach, so it is published once at
+	 * install and only revisited when the particle envelope changes.
+	 */
+	cullingBounds: AABB3 | null;
+	/** Envelope already folded into both culling bounds, so a change republishes them. */
 	appliedEnvelopeRadius: number;
 }
 
@@ -345,6 +352,7 @@ export class DynamicEntitySystem<
 			source: resident,
 			preparedAnimation: null,
 			publishedPresentationBounds: staticPresentationBounds(resident),
+			cullingBounds: null,
 			appliedEnvelopeRadius: 0,
 			visualRootNodeId,
 		};
@@ -476,11 +484,8 @@ export class DynamicEntitySystem<
 			// envelope is not idle, though: emitters start and stop independently of effect state,
 			// and skipping on effects alone left the envelope out of the bounds entirely, so a
 			// swarm vanished the moment its owner's mesh left the frustum.
-			const envelopeRadius = this.#particleEnvelopeRadiusOf(nodeId);
-			if (
-				!this.#effects.needsPresentation(nodeId) &&
-				envelopeRadius === entity.appliedEnvelopeRadius
-			) {
+			const envelopeChanged = this.#refreshParticleEnvelope(entity);
+			if (!this.#effects.needsPresentation(nodeId) && !envelopeChanged) {
 				continue;
 			}
 			// A script-only resident holds the pose it was installed with. Its effect state still
@@ -498,21 +503,35 @@ export class DynamicEntitySystem<
 	}
 
 	/** Grow presentation bounds to contain whatever this entity is currently emitting. */
-	#withParticleEnvelope(entity: DynamicEntityRecord, bounds: AABB3): AABB3 {
+	/**
+	 * Fold the current particle envelope into every bounds that culls this entity.
+	 *
+	 * Two independent culls read two different bounds: the scene graph's pose-independent broadphase
+	 * bounds, and the per-pose presentation bounds behind the renderer's footprint test. An envelope
+	 * applied to only one of them still loses the whole swarm at the other, which is exactly what
+	 * happened — the mesh left the broadphase frustum while its particles were still on screen.
+	 *
+	 * Returns whether the radius moved, which is what lets an otherwise idle resident skip
+	 * republication without stranding a stale envelope.
+	 */
+	#refreshParticleEnvelope(entity: DynamicEntityRecord): boolean {
 		const radius = this.#particleEnvelopeRadiusOf(entity.rootNodeId);
+		if (radius === entity.appliedEnvelopeRadius) return false;
 		entity.appliedEnvelopeRadius = radius;
-		if (radius <= 0) return bounds;
-		return new AABB3(
-			new Vec3(
-				bounds.min.x - radius,
-				bounds.min.y - radius,
-				bounds.min.z - radius,
-			),
-			new Vec3(
-				bounds.max.x + radius,
-				bounds.max.y + radius,
-				bounds.max.z + radius,
-			),
+		this.#publishCullingBounds(entity);
+		return true;
+	}
+
+	/** Publish the broadphase envelope for the radius currently folded into this entity. */
+	#publishCullingBounds(entity: DynamicEntityRecord): void {
+		if (entity.cullingBounds === null) {
+			throw new Error(
+				`Dynamic entity ${entity.rootNodeId} has no culling bounds to publish.`,
+			);
+		}
+		this.#scene.updateBounds(
+			entity.rootNodeId,
+			expandBounds(entity.cullingBounds, entity.appliedEnvelopeRadius),
 		);
 	}
 
@@ -728,8 +747,10 @@ export class DynamicEntitySystem<
 				throw new Error(
 					`Static-fallback entity ${entity.rootNodeId} received an animated pose.`,
 				);
+			// Assigned before the first sample so every `#applySample` can publish an envelope.
+			entity.cullingBounds = animation.localBounds;
+			this.#publishCullingBounds(entity);
 			if (sample) this.#applySample(entity, sample);
-			this.#scene.updateBounds(entity.rootNodeId, animation.localBounds);
 			samples.delete(entity.rootNodeId);
 		}
 		if (samples.size > 0)
@@ -779,13 +800,14 @@ export class DynamicEntitySystem<
 				);
 			return { part, renderState, transform };
 		});
-		const publishedPresentationBounds = this.#withParticleEnvelope(
-			entity,
+		this.#refreshParticleEnvelope(entity);
+		const publishedPresentationBounds = expandBounds(
 			presentationBoundsForSample(
 				updatedParts,
 				entity.source.scale,
 				sample.effects.rootTransformModifier,
 			),
+			entity.appliedEnvelopeRadius,
 		);
 		this.#scene.updateLocalTransform(
 			entity.visualRootNodeId,

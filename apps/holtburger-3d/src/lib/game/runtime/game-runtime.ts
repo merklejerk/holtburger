@@ -1,9 +1,11 @@
 import { createLandblockWorldOrigin } from "../landblocks";
 import { getMat4Translation } from "../math/matrices";
 import {
+	acRotationFromRenderTransform,
 	renderVector3,
 	sceneVec3,
 	sceneVector3,
+	type AcRotation,
 	type SceneVector3,
 } from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
@@ -428,6 +430,20 @@ export class GameRuntime {
 		]);
 	}
 
+	/**
+	 * Current rotation of a target's frame, in AC's authored axes.
+	 *
+	 * Read from the same resolved placement as {@link GameRuntime.#sceneOriginOf}, so it reflects
+	 * whatever a script has rotated the owner to rather than its authored pose.
+	 */
+	#sceneRotationOf(target: {
+		readonly nodeId: SceneNodeId;
+	}): AcRotation | null {
+		const placement = this.#scene.getResolvedPlacement(target.nodeId);
+		if (!placement) return null;
+		return acRotationFromRenderTransform(placement.localToLandblock);
+	}
+
 	/** Scene-frame origin of this frame's render anchor, which is the camera's landblock. */
 	#renderAnchorOrigin(): SceneVector3 {
 		const anchor = createLandblockWorldOrigin(
@@ -678,6 +694,7 @@ export class GameRuntime {
 			resolveEmitter: (emitterInfoId) =>
 				this.#particleEmitters.getReady(emitterInfoId),
 			sceneOriginOf: (target) => this.#sceneOriginOf(target),
+			sceneRotationOf: (target) => this.#sceneRotationOf(target),
 			renderAnchorOrigin: () => this.#renderAnchorOrigin(),
 			roll: dependencies.roll ?? Math.random,
 		});

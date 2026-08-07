@@ -1721,9 +1721,10 @@ by value rather than by when it appeared.
 - [ ] **Reuse per-particle cohort records.** `collectCohorts` allocates an object per particle per
       frame. Pooling the anchored origins removed one allocation of the pair; the record itself
       remains, and the same pooled-borrow pattern applies.
-- [ ] **Resume the `AudioContext`, or prove it needs no resuming.** Untested and webview-dependent:
-      the harness runs headless Chrome, the Explorer runs Tauri WebKitGTK. `playedCount` above zero
-      with audible silence is the signal that it does.
+- [x] **No `AudioContext` resume is needed.** Confirmed by play 2026-08-07: authored emitters are
+      audible in the Explorer. The context is therefore already running under Tauri WebKitGTK, whose
+      autoplay policy differs from the headless Chrome the harness uses. The suspicion was recorded
+      on reasoning rather than evidence and is closed by observation rather than by code.
 - [ ] Bind `TextureVelocity` in the renderer, or delete the resolved-but-unbound path. Unchanged
       from Phase 7: a render-contract change with zero measured consumers.
 
@@ -1776,8 +1777,11 @@ timings, and the runtime diagnostics bundle reaching the Explorer report.
 Two fixes landed without the evidence that would normally close them, both recorded rather than
 claimed:
 
-- Audio has never been heard. Twelve sounds reach the device in the harness, whose stub device always
-  refuses; a real `WebAudioDevice` should warm and play them. Unconfirmed in the Explorer.
+- ~~Audio has never been heard.~~ **Confirmed by play 2026-08-07: authored emitters are audible in
+  the Explorer.** That closes the session's largest verification gap and ratifies three fixes at once
+  — the listener is placed, scene-space spatialization resolves real gain and pan, and warm-on-demand
+  works, since every sound's first trigger is refused by a cold buffer and only plays after `prepare`
+  resolves. It also settles the `AudioContext` question above without a code change.
 - The asymmetric-motion axis fix has no visual confirmation. The formula tests assert the semantics
   directly, but no scene with a visible flame was framed close enough to judge.
 

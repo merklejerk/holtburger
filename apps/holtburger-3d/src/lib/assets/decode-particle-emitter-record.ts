@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { DatAssetId } from "../game/game-types";
+import { acVectorToRender } from "./ac-frame";
 
 const HEADER_LENGTH = 12;
 const MAGIC = "HBPE";
@@ -116,6 +117,12 @@ export function decodeParticleEmitterRecord(
 	void byteOrder;
 	return {
 		...rest,
+		// Motion and offset vectors are authored in AC's Z-up axes; convert once here so no
+		// consumer, CPU or GPU, has to remember the convention.
+		a: acVectorToRender(manifest.a),
+		b: acVectorToRender(manifest.b),
+		c: acVectorToRender(manifest.c),
+		offsetDir: acVectorToRender(manifest.offsetDir),
 		hwGfxObjId: hwGfxObjId as DatAssetId,
 		id: emitterInfoId as DatAssetId,
 	};

@@ -1,3 +1,4 @@
+import { PARTICLE_TYPE } from "./particle-motion";
 import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import type { DatAssetId } from "../game-types";
@@ -66,19 +67,70 @@ export function emitterEnvelopeRadius(
 	info: DecodedParticleEmitterInfo,
 ): number {
 	const lifespan = info.lifespan + Math.max(0, info.lifespanRand);
-	const magnitude = (
+	// Each constant is scaled by a roll in [min, max], so the widest magnitude uses the larger end.
+	const reach = (
 		vector: readonly [number, number, number],
-		scale: number,
+		minimum: number,
+		maximum: number,
 	) =>
-		Math.hypot(vector[0], vector[1], vector[2]) * Math.max(1, Math.abs(scale));
-	const reach =
-		Math.abs(info.maxOffset) +
-		magnitude(info.a, info.maxA) * lifespan +
-		magnitude(info.b, info.maxB) * lifespan * lifespan +
-		magnitude(info.c, info.maxC) * lifespan * lifespan * lifespan;
+		Math.hypot(vector[0], vector[1], vector[2]) *
+		Math.max(Math.abs(minimum), Math.abs(maximum));
+	const a = reach(info.a, info.minA, info.maxA);
+	const b = reach(info.b, info.minB, info.maxB);
+	const c = reach(info.c, info.minC, info.maxC);
 	// A particle is a mesh, not a point, so its own scale extends the bound. `scaleRand` is additive
 	// on top of the authored endpoints, matching retail's `RollDice(-1,1) * rand + base`.
 	const maxScale =
 		Math.max(info.startScale, info.finalScale) + Math.max(0, info.scaleRand);
-	return reach + Math.max(0, maxScale);
+	return (
+		Math.abs(info.maxOffset) +
+		motionReach(info.motionType, a, b, c, lifespan) +
+		Math.max(0, maxScale)
+	);
+}
+
+/**
+ * Bound the displacement each motion law can reach, by that law rather than by one polynomial.
+ *
+ * Summing `a·t + b·t² + c·t³` for every type over-bounds enormously wherever a constant is not a
+ * polynomial coefficient. Swarm's `c` is an oscillation *amplitude* and its `b` a *frequency*; cubing
+ * a lifespan against them produced a 410 m envelope for a fly swarm whose true reach is about four,
+ * and 2.3 km for another. An envelope that large never culls anything, which is the opposite of what
+ * it is for.
+ *
+ * Formulas mirror `acDisplacement` in `particle-motion.ts`; keep the two in step.
+ */
+function motionReach(
+	motionType: number | null,
+	a: number,
+	b: number,
+	c: number,
+	lifespan: number,
+): number {
+	switch (motionType) {
+		case PARTICLE_TYPE.still:
+			return 0;
+		case PARTICLE_TYPE.localVelocity:
+		case PARTICLE_TYPE.globalVelocity:
+			return a * lifespan;
+		case PARTICLE_TYPE.parabolicLvga:
+		case PARTICLE_TYPE.parabolicLvgaGr:
+		case PARTICLE_TYPE.parabolicLvla:
+		case PARTICLE_TYPE.parabolicLvlaLr:
+		case PARTICLE_TYPE.parabolicGvga:
+		case PARTICLE_TYPE.parabolicGvgaGr:
+			return a * lifespan + 0.5 * b * lifespan * lifespan;
+		case PARTICLE_TYPE.swarm:
+			// `cos(b·t)·c` is bounded by `|c|` however long it runs; only `a·t` accumulates.
+			return c + a * lifespan;
+		case PARTICLE_TYPE.explode:
+			// Every axis scales `c` by `a.x`, and z carries an extra `+a.z`; `a` bounds both.
+			return b * lifespan * lifespan + (c * a + a) * lifespan;
+		case PARTICLE_TYPE.implode:
+			// One scalar cosine over `c`, plus `b·t²`.
+			return c + b * lifespan * lifespan;
+		default:
+			// An unshipped law has no formula in either evaluator, so nothing is drawn for it.
+			return 0;
+	}
 }

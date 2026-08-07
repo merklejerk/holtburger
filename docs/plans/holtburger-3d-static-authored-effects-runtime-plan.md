@@ -2610,6 +2610,39 @@ Worth naming: this is the **fifth** capability found built-but-unwired in this p
 hiding a real defect. The pattern is strong enough to be worth a sweep of its own — a seam with no
 caller is a defect that has not been observed yet, not dead code.
 
+### Swarm particles culled at close range (2026-08-07)
+
+Reported: fly swarms disappear when the camera gets near them. Two independent defects, one of them
+introduced by the culling change itself.
+
+**The envelope formula bounded every motion law with one polynomial.** `emitterEnvelopeRadius` summed
+`|a|·L + |b|·L² + |c|·L³` regardless of type. Swarm's `c` is an oscillation *amplitude* and its `b` a
+*frequency*, neither of which accumulates with time, so cubing a lifespan against them produced
+absurd bounds. Probed on real content:
+
+| emitter | motion | before | after |
+| --- | --- | --- | --- |
+| `0x32000478` (flies) | swarm | 409.0 m | **3.6 m** |
+| `0x320002a5` | swarm | 2308.3 m | **18.7 m** |
+| others | still/velocity/parabolic | 1–11 m | unchanged |
+
+`motionReach` now bounds each law by its own formula, mirroring `acDisplacement`. This is the same
+mistake as evaluating motion in the wrong axes: one generic expression standing in for laws that
+genuinely differ. An envelope of 410 m also never culls anything, so the feature was inert for
+exactly the emitters that most needed it.
+
+**The envelope never reached idle entities, which is what caused the reported symptom.** The
+dirty-flag optimisation added alongside the effect-clock split skips `#applySample` for residents
+whose effect state is clean — and `#withParticleEnvelope` runs inside `#applySample`. A resident that
+only emits particles has no effect state to dirty, so its bounds stayed mesh-only. A probe confirmed
+it directly, reporting `SKIPPED with envelope r=2318.3`. Walk up to the bush and its mesh leaves the
+frustum; the whole swarm goes with it.
+
+Entities now record the envelope folded into their published bounds and republish when it changes, so
+emitters starting and stopping still update bounds without reintroducing per-frame publication for
+idle residents. Two optimisations that were individually correct combined into a defect neither
+would have caused alone — worth remembering when adding the next skip condition.
+
 ## Addendum: Phase 9 — Region-Driven Ambient Audio
 
 Added after the plan's original scope was met. Ambient audio was deliberately excluded throughout,

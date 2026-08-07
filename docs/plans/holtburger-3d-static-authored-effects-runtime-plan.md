@@ -1643,12 +1643,17 @@ Treat the reopened checklist below as the live one; the first records what the o
       the particle buffer uploads one whole cohort per draw. Forcing either model on the other would
       be worse than the ~15 lines of create/grow/delete they share, which is below the bar for an
       abstraction. The ledger's job was to force the look; the look says leave it.
-- [ ] **Measure the particle buffer's per-cohort reuse.** Every cohort uploads into the same buffer
-      immediately before its draw, so `bufferSubData` runs against a buffer with a draw already
-      queued. That is correct, but the driver must either rename the buffer or stall. If profiling
-      shows a stall, the fix is one allocation per frame with per-cohort offsets — the object
-      buffer's arena model — not a second buffer. Noted rather than pre-optimized, per this plan's
-      rule that structural change beats speculative micro-optimization.
+- [x] **Measured the particle buffer's per-cohort reuse. There is no stall.** With a dedicated
+      particle phase on real hardware at `0xDA55` radius 2: GPU `particleMs 0.081` against
+      `opaqueMs 1.066`, and CPU `particleSubmissionMs 0.057` against a `2.21 ms` frame. The driver
+      renames the buffer rather than waiting, so the per-frame arena rewrite is not warranted and
+      the note that proposed it is closed rather than carried.
+
+      Adding the phase exposed a real defect first: **`#drawProfiledView` never drew particles at
+      all.** Profiling changed what was rendered, every profile measured a scene missing them, and
+      an earlier finding in this plan read "particle pass absent" from a profile and concluded
+      particles were cheap. That conclusion was an artifact. Fixed by drawing them on the profiled
+      path, which is what made the measurement possible.
 - [x] Rename `ParticleEmitterRuntime` to `ParticleSystem`, with `ParticleSystemDependencies` and
       `ParticleSystemDiagnostics` and the module renamed to `particle-system.ts`. Every frontend
       system now follows the `<Concern>System` convention.

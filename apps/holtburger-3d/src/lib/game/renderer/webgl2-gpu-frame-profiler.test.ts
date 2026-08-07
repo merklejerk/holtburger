@@ -32,6 +32,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 		frame.beginPhase("terrain").finish();
 		frame.beginPhase("terrain").finish();
 		frame.beginPhase("opaque").finish();
+		frame.beginPhase("particle").finish();
 		frame.finish();
 		expect(profiler.getProfile()).toEqual({
 			kind: "pending",
@@ -45,14 +46,15 @@ describe("WebGL2GpuFrameProfiler", () => {
 			frameNumber: 7,
 			kind: "available",
 			opaqueMs: 1,
+			particleMs: 1,
 			pendingFrameCount: 0,
 			// Two terrain phases at 1 ms each aggregate; total is their sum, since elapsed queries
 			// cannot nest and no query spans the frame.
 			terrainMs: 2,
-			totalMs: 3,
+			totalMs: 4,
 		});
 		// One query per phase, where the timestamp profiler needed a pair plus a frame pair.
-		expect(harness.deleteQuery).toHaveBeenCalledTimes(3);
+		expect(harness.deleteQuery).toHaveBeenCalledTimes(4);
 	});
 
 	it("refuses to nest elapsed queries, which WebGL permits only one of", () => {
@@ -139,6 +141,7 @@ describe("WebGL2FrameProfiler", () => {
 				objectPreparationMs: frameNumber * 2,
 				opaqueSubmissionMs: 0,
 				otherMs: 0,
+				particleSubmissionMs: 0,
 				portalGraphPlanningMs: 0,
 				sceneContributionResolutionMs: 0,
 				sceneQueryMs: 0,

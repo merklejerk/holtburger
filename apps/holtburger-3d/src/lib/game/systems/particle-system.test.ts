@@ -1,4 +1,5 @@
-import { renderVector3 } from "../../assets/ac-frame";
+import { renderVector3, stableVector3 } from "../../assets/ac-frame";
+import type { StableVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
@@ -12,8 +13,9 @@ const TARGET: BehaviorTarget = {
 	generation: 1,
 	nodeId: "node-1" as SceneNodeId,
 };
-const ORIGIN: Vector3 = renderVector3([0, 0, 0]);
-const at = (): Vector3 => ORIGIN;
+const ORIGIN: StableVector3 = stableVector3([0, 0, 0]);
+/** Hook offsets are displacements, not positions, so they stay in the plain render axes. */
+const NO_OFFSET: Vector3 = renderVector3([0, 0, 0]);
 
 function prepared(
 	overrides: Partial<DecodedParticleEmitterInfo> = {},
@@ -67,7 +69,8 @@ const runtime = (
 ) =>
 	new ParticleSystem({
 		clock: () => 0,
-		originOf: () => ORIGIN,
+		stableOriginOf: () => ORIGIN,
+		toRenderSpace: (origin) => renderVector3([origin[0], origin[1], origin[2]]),
 		resolveEmitter: () => null,
 		roll: () => 0.5,
 		...overrides,
@@ -80,7 +83,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 3 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -94,21 +97,21 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ birthrateSeconds: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		particles.advance(0, at);
+		particles.advance(0);
 		expect(particles.getDiagnostics().particleCount).toBe(1);
 
 		// Half an interval later: still one.
-		particles.advance(0.5, at);
+		particles.advance(0.5);
 		expect(particles.getDiagnostics().particleCount).toBe(1);
 
 		// Five intervals in one step releases exactly one more, not five.
-		particles.advance(5, at);
+		particles.advance(5);
 		expect(particles.getDiagnostics().particleCount).toBe(2);
 	});
 
@@ -117,13 +120,13 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ birthrateSeconds: 0, maxParticles: 3 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		for (let step = 0; step < 20; step += 1) particles.advance(step, at);
+		for (let step = 0; step < 20; step += 1) particles.advance(step);
 
 		expect(particles.getDiagnostics().particleCount).toBe(3);
 	});
@@ -133,15 +136,15 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		particles.advance(1, at);
+		particles.advance(1);
 		expect(particles.getDiagnostics().particleCount).toBe(1);
-		particles.advance(2.5, at);
+		particles.advance(2.5);
 		expect(particles.getDiagnostics().particleCount).toBe(0);
 	});
 
@@ -155,18 +158,18 @@ describe("ParticleSystem", () => {
 				lifespan: 1,
 				totalParticles: 2,
 			}),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		particles.advance(0, at);
-		particles.advance(0.1, at);
+		particles.advance(0);
+		particles.advance(0.1);
 		expect(particles.getDiagnostics().emitterCount).toBe(1);
 
 		// Budget spent, then the last particle ages out: the emitter reaps itself.
-		particles.advance(5, at);
+		particles.advance(5);
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
 		expect(particles.getDiagnostics().reapedEmitterCount).toBe(1);
 	});
@@ -176,13 +179,13 @@ describe("ParticleSystem", () => {
 		drained.create(
 			TARGET,
 			prepared({ initialParticles: 2, lifespan: 5 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 		drained.stop(TARGET, 0);
-		drained.advance(1, at);
+		drained.advance(1);
 		// Stopped emitters keep their live particles until each finishes its own lifespan.
 		expect(drained.getDiagnostics().particleCount).toBe(2);
 
@@ -190,7 +193,7 @@ describe("ParticleSystem", () => {
 		destroyed.create(
 			TARGET,
 			prepared({ initialParticles: 2 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -204,7 +207,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 2 }),
-			ORIGIN,
+			NO_OFFSET,
 			7,
 			0,
 			ORIGIN,
@@ -212,7 +215,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			7,
 			0,
 			ORIGIN,
@@ -227,7 +230,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -235,7 +238,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -245,20 +248,20 @@ describe("ParticleSystem", () => {
 	});
 
 	it("leaves particles behind unless the emitter follows its parent", () => {
-		const left = runtime();
+		// The parent genuinely moves, which is the only case the two kinds must disagree on.
+		let parentX = 0;
+		const moving = () => stableVector3([parentX, 0, 0]);
+
+		const left = runtime({ stableOriginOf: moving });
 		left.create(
 			TARGET,
 			prepared({ a: renderVector3([0, 0, 0]), initialParticles: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
-		const moved = (): Vector3 => renderVector3([100, 0, 0]);
-		// The parent moved, but a leave-behind particle stays at its spawn snapshot.
-		expect(left.sample(0, moved)[0]!.position[0]).toBeCloseTo(0);
-
-		const following = runtime();
+		const following = runtime({ stableOriginOf: moving });
 		following.create(
 			TARGET,
 			prepared({
@@ -266,26 +269,34 @@ describe("ParticleSystem", () => {
 				followsParent: true,
 				initialParticles: 1,
 			}),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
-		expect(following.sample(0, moved)[0]!.position[0]).toBeCloseTo(100);
+
+		parentX = 100;
+
+		expect(left.sample(0)[0]!.position[0]).toBeCloseTo(0);
+		expect(following.sample(0)[0]!.position[0]).toBeCloseTo(100);
 	});
 
 	it("drops emitters whose target stops publishing a transform", () => {
-		const particles = runtime();
+		let published = true;
+		const particles = runtime({
+			stableOriginOf: () => (published ? ORIGIN : null),
+		});
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		particles.advance(1, () => null);
+		published = false;
+		particles.advance(1);
 
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
 	});
@@ -295,7 +306,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -304,8 +315,8 @@ describe("ParticleSystem", () => {
 		const visible = () => true;
 
 		// Hidden across ten seconds, far beyond the two-second lifespan.
-		particles.advance(1, at, hidden);
-		particles.advance(10, at, visible);
+		particles.advance(1, hidden);
+		particles.advance(10, visible);
 
 		// Retail freezes ages off-screen, so the particle is still alive on return.
 		expect(particles.getDiagnostics().particleCount).toBe(1);
@@ -316,15 +327,14 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ birthrateSeconds: 0 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 		const hidden = () => false;
 
-		for (let step = 0; step < 50; step += 1)
-			particles.advance(step, at, hidden);
+		for (let step = 0; step < 50; step += 1) particles.advance(step, hidden);
 
 		// Retail ticks hidden emitters every frame; closed-form state lets us emit nothing at all.
 		expect(particles.getDiagnostics().particleCount).toBe(0);
@@ -340,16 +350,16 @@ describe("ParticleSystem", () => {
 				lifespan: 100,
 				totalParticles: 4,
 			}),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 		const hidden = () => false;
 
-		particles.advance(0, at, hidden);
+		particles.advance(0, hidden);
 		// Ten hidden seconds at a one-second interval exhausts the four-particle budget.
-		particles.advance(10, at, () => true);
+		particles.advance(10, () => true);
 
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
 		expect(particles.getDiagnostics().reapedEmitterCount).toBe(1);
@@ -371,7 +381,7 @@ describe("ParticleSystem", () => {
 		expect(outcome).toBe("created");
 		expect(particles.getDiagnostics().particleCount).toBe(2);
 		// The hook offset lands on top of the parent origin, not instead of it.
-		expect(particles.sample(12, at)[0]!.position[2]).toBeCloseTo(5);
+		expect(particles.sample(12)[0]!.position[2]).toBeCloseTo(5);
 	});
 
 	it("reports an unstaged emitter instead of guessing or throwing", () => {
@@ -434,7 +444,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 2 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -442,7 +452,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1, motionType: 5 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -462,7 +472,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -470,7 +480,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -479,12 +489,55 @@ describe("ParticleSystem", () => {
 		expect(particles.collectCohorts()).toHaveLength(1);
 	});
 
+	it("keeps left-behind particles in place when the render anchor moves", () => {
+		// Origins arrive anchor-relative, so crossing a landblock boundary shifts every origin by
+		// the anchor delta without anything in the world actually moving.
+		let anchorOffset = 0;
+		const particles = runtime({
+			toRenderSpace: (origin) =>
+				renderVector3([origin[0] + anchorOffset, origin[1], origin[2]]),
+		});
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const before = particles.collectCohorts()[0]!.particles[0]!.origin;
+		expect(before).toEqual([0, 0, 0]);
+
+		// The camera crosses one landblock; the emitter has not moved.
+		anchorOffset = -192;
+
+		const after = particles.collectCohorts()[0]!.particles[0]!.origin;
+		expect(after).toEqual([-192, 0, 0]);
+	});
+
+	it("applies the authored hook offset to a following emitter's particles", () => {
+		const particles = runtime();
+
+		particles.create(
+			TARGET,
+			prepared({ followsParent: true, initialParticles: 1 }),
+			renderVector3([5, 0, 0]),
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const record = particles.collectCohorts()[0]!.particles[0]!;
+		expect(record.origin).toEqual([5, 0, 0]);
+	});
+
 	it("emits no instance records for a culled emitter", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 5 }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -499,7 +552,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1, motionType: null }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
@@ -532,13 +585,13 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ emitsPerMeter: true, emitsPerSecond: false }),
-			ORIGIN,
+			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		particles.advance(100, at);
+		particles.advance(100);
 
 		// The retail per-meter predicate is unrecovered, so emitting anything would be a guess.
 		expect(particles.getDiagnostics().particleCount).toBe(0);

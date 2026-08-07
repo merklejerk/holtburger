@@ -10,7 +10,11 @@ export interface AcFrame {
 declare const renderSpace: unique symbol;
 
 /**
- * A three-component vector **already converted into the app's render axes**.
+ * A three-component vector in the app's render axes, **relative to the current render anchor**.
+ *
+ * The anchor is the camera's landblock, so it moves whenever the camera crosses a landblock
+ * boundary. A value of this type is therefore valid only for the frame that produced it and must
+ * never be retained across frames; retain a {@link StableVector3} and convert at the point of use.
  *
  * Deliberately a distinct type from a plain tuple, because AC is Z-up and the renderer is Y-up and
  * the two are otherwise indistinguishable. An authored `(0, 0, 1)` means *up*; the same tuple read
@@ -47,6 +51,31 @@ export function renderVector3(
 	vector: readonly [number, number, number],
 ): RenderVector3 {
 	return vector as RenderVector3;
+}
+
+declare const stableSpace: unique symbol;
+
+/**
+ * A render-axis position in the app's fixed scene frame, which no camera movement can invalidate.
+ *
+ * This is the only frame a position may be **retained** in. {@link RenderVector3} is anchor-relative
+ * and is valid only for the frame that produced it, so storing one is a defect that surfaces as
+ * geometry jumping by a landblock multiple the moment the camera crosses a boundary. The two brands
+ * are deliberately disjoint so that mistake cannot type-check.
+ */
+export type StableVector3 = readonly [number, number, number] & {
+	readonly [stableSpace]: true;
+};
+
+/**
+ * Assert that a vector is in the fixed scene frame.
+ *
+ * As with {@link renderVector3}, every call is a claim to justify at the call site.
+ */
+export function stableVector3(
+	vector: readonly [number, number, number],
+): StableVector3 {
+	return vector as StableVector3;
 }
 
 export function acFrameTransform(

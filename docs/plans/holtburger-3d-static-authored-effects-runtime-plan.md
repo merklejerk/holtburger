@@ -2868,6 +2868,37 @@ Acceptance: an implode emitter on a rotated owner produces a `c` consistent with
 - 9.1(a) or 9.1(b)? Recommendation is (a); it needs a look at whether the authored rotation
   survives to the layer that builds `AuthoredDynamicSource`, which currently exposes only a
   render-space `ScenePlacement`.
+### Phase 9.5 — The hook offset was rotated last instead of first
+
+Reported after 9.1–9.4 landed: the waterfall aimed correctly, but a smaller emitter beside it sat
+slightly out of place. The order of operations, not the rotation.
+
+`Particle::Init` (acclient.c:317796) sums the hook offset and the random spawn offset **first**, then
+rotates the sum by the owner's frame:
+
+```c
+v19 = offset->x + parent_offset->m_fOrigin.x;   // random + hook
+...
+this->offset = start_frame.m_fl2gv * (that sum) // one rotation, applied to both
+```
+
+We rotated only the random offset, and applied the hook offset separately as an unrotated
+displacement of the emitter *origin* — so on a rotated owner it pointed the authored direction
+instead of the owner's. The error is exactly the hook offset's magnitude, which is why it read as
+"slightly off" rather than as the waterfall's obvious reversal.
+
+The hook offset now stays in AC axes from decode through to spawn, where it is summed with the random
+offset and rotated once. It was previously converted to render axes in `decode-behavior-hook.ts`,
+which was premature: the value's only real consumer needs it in AC.
+
+Addition through subtraction: because the hook offset now belongs to the particle rather than to the
+emitter origin, `offsetOrigin` and `followingOrigin` both disappeared, and the frozen and following
+paths stopped having to agree about who applies it.
+
+Process note: the type errors from this change were briefly hidden by a check command grepped for
+only one of the two error formats the checker emits (`ERROR "file"` from svelte-check, but not
+`file(line,col): error TS…` from tsc). Grep both, or read the summary line.
+
 ### Remaining gap — part-attached emitters
 
 **Answered, and it is a real gap rather than a hypothetical one.** `CreateParticle` decodes

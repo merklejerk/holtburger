@@ -1,5 +1,5 @@
 import type { DatAssetId } from "../game-types";
-import type { RenderVector3 } from "../../assets/ac-frame";
+import type { AcVector3 } from "../../assets/ac-frame";
 import type { Vec3 } from "../math/types";
 
 /**
@@ -52,7 +52,7 @@ export type PreparedBehaviorCommand =
 			/** `-1` addresses the whole object; any other value addresses a part. */
 			readonly partIndex: number;
 			/** Spawn offset added to the parent frame's origin; retail ignores the authored rotation. */
-			readonly offsetOrigin: RenderVector3;
+			readonly offsetOrigin: AcVector3;
 			/** `0` requests an auto-assigned id; nonzero replaces any same-id emitter. */
 			readonly emitterId: number;
 	  }

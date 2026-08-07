@@ -7,7 +7,6 @@ import {
 	acVector3,
 	renderVector3,
 	rotateAcVector,
-	sceneVector3,
 } from "../../assets/ac-frame";
 import type { AcRotation } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
@@ -90,30 +89,13 @@ function blankRecord(): MutableParticleInstanceRecord {
 	};
 }
 
-/** Translate a scene-frame origin by a frame-invariant displacement. */
-function offsetOrigin(
-	origin: SceneVector3,
-	displacement: Vector3,
-): SceneVector3 {
-	return sceneVector3([
-		origin[0] + displacement[0],
-		origin[1] + displacement[1],
-		origin[2] + displacement[2],
+/** Sum two AC-axis displacements, which retail does before rotating the result. */
+function addAcVectors(left: AcVector3, right: AcVector3): AcVector3 {
+	return acVector3([
+		left[0] + right[0],
+		left[1] + right[1],
+		left[2] + right[2],
 	]);
-}
-
-/**
- * Origin every particle of a following emitter shares this frame.
- *
- * Constant per emitter per frame, so it resolves once outside the per-particle loop. Frozen
- * particles already carry the hook offset from spawn; this applies it for the following case, so
- * neither kind can lose it.
- */
-function followingOrigin(
-	instance: EmitterInstance,
-	liveOrigin: SceneVector3,
-): SceneVector3 {
-	return offsetOrigin(liveOrigin, instance.hookOffset);
 }
 
 /**
@@ -123,9 +105,9 @@ function followingOrigin(
  */
 function resolveSceneOrigin(
 	particle: LiveParticle,
-	followingOriginForFrame: SceneVector3,
+	liveOrigin: SceneVector3,
 ): SceneVector3 {
-	return particle.frozenOrigin ?? followingOriginForFrame;
+	return particle.frozenOrigin ?? liveOrigin;
 }
 
 /** Retail's roll shape: `RollDice(-1, 1) * rand + base` — additive, never multiplicative. */
@@ -153,8 +135,14 @@ interface EmitterInstance {
 	readonly target: BehaviorTarget;
 	/** Authored id: nonzero replaces any same-id emitter on the same target. */
 	readonly emitterId: number;
-	/** Spawn offset authored by the `CreateParticle` hook, added to the parent origin. */
-	readonly hookOffset: Vector3;
+	/**
+	 * Spawn offset authored by the `CreateParticle` hook, in AC's authored axes.
+	 *
+	 * Kept unconverted because retail adds it to the random spawn offset and rotates the *sum* by the
+	 * owner's frame (acclient.c:317796). It is folded into each particle's own offset at spawn rather
+	 * than applied to the emitter origin, so nothing downstream applies it a second time.
+	 */
+	readonly hookOffset: AcVector3;
 	readonly startTime: number;
 	lastEmissionTime: number | null;
 	emittedCount: number;
@@ -238,7 +226,7 @@ export class ParticleSystem {
 		target: BehaviorTarget,
 		command: {
 			readonly emitterInfoId: DatAssetId;
-			readonly offsetOrigin: RenderVector3;
+			readonly offsetOrigin: AcVector3;
 			readonly emitterId: number;
 		},
 	): "created" | "unprepared" {
@@ -267,7 +255,7 @@ export class ParticleSystem {
 	create(
 		target: BehaviorTarget,
 		emitter: PreparedParticleEmitter,
-		hookOffset: Vector3,
+		hookOffset: AcVector3,
 		emitterId: number,
 		timeSeconds: number,
 		parentOrigin: SceneVector3,
@@ -402,7 +390,6 @@ export class ParticleSystem {
 			if (!isVisible(instance.target)) continue;
 			const liveOrigin = this.#dependencies.sceneOriginOf(instance.target);
 			if (liveOrigin === null) continue;
-			const following = followingOrigin(instance, liveOrigin);
 			const key = `${info.hwGfxObjId}:${info.motionType}`;
 			let cohort = cohorts.get(key);
 			if (!cohort) {
@@ -415,7 +402,7 @@ export class ParticleSystem {
 			}
 			for (const particle of instance.particles) {
 				const record = this.#pooledRecord();
-				const sceneOrigin = resolveSceneOrigin(particle, following);
+				const sceneOrigin = resolveSceneOrigin(particle, liveOrigin);
 				// Motion constants are shared with the spawn record rather than copied; only the
 				// anchored origin is per-frame, and it is written into the record's own vector.
 				record.a = particle.spawn.a;
@@ -456,9 +443,8 @@ export class ParticleSystem {
 			if (liveOrigin === null) continue;
 			const motionType = instance.emitter.info.motionType;
 			if (motionType === null) continue;
-			const following = followingOrigin(instance, liveOrigin);
 			for (const particle of instance.particles) {
-				const sceneOrigin = resolveSceneOrigin(particle, following);
+				const sceneOrigin = resolveSceneOrigin(particle, liveOrigin);
 				// The reference evaluator is not a draw path, so it may allocate.
 				const origin = renderVector3([
 					sceneOrigin[0] - anchor[0],
@@ -636,7 +622,12 @@ export class ParticleSystem {
 		const derived = this.#deriveOffsetAndC(
 			info.motionType,
 			inFrame(
-				this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
+				// Retail sums the hook offset and the random offset and rotates the result once, so
+				// the hook offset turns with the owner exactly as the random one does.
+				addAcVectors(
+					instance.hookOffset,
+					this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
+				),
 				true,
 			),
 			inFrame(
@@ -649,9 +640,7 @@ export class ParticleSystem {
 			// A following emitter resolves its origin live every frame, so freezing one here would
 			// be a value nothing reads. The hook offset is applied by the shared resolution instead
 			// of here, so both kinds of emitter get it.
-			frozenOrigin: info.followsParent
-				? null
-				: offsetOrigin(parentOrigin, instance.hookOffset),
+			frozenOrigin: info.followsParent ? null : parentOrigin,
 			spawn: {
 				a: inFrame(
 					scaledVector(info.a, rolled(roll, info.minA, info.maxA - info.minA)),

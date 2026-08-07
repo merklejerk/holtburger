@@ -1,4 +1,4 @@
-import { renderVector3 } from "../../assets/ac-frame";
+import { acVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import { Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
@@ -108,7 +108,7 @@ describe("BehaviorEventRouter", () => {
 			emitterId: 0,
 			emitterInfoId: "0x3200020c",
 			kind: "create-particle",
-			offsetOrigin: renderVector3([0, 0, 1]),
+			offsetOrigin: acVector3([0, 0, 1]),
 			partIndex: -1,
 		};
 		particles.createEmitter.mockReturnValue("created");
@@ -132,7 +132,7 @@ describe("BehaviorEventRouter", () => {
 					emitterId: 0,
 					emitterInfoId: "0x32009999",
 					kind: "create-particle",
-					offsetOrigin: renderVector3([0, 0, 0]),
+					offsetOrigin: acVector3([0, 0, 0]),
 					partIndex: -1,
 				},
 				TARGET,

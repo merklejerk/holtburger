@@ -6,12 +6,11 @@ import {
 } from "../../assets/ac-frame";
 import { Mat4, Quat } from "../math/types";
 import { createRotationMat4 } from "../math/matrices";
-import type { SceneVector3 } from "../../assets/ac-frame";
+import type { AcVector3, SceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
-import type { Vector3 } from "../behavior/particle-motion";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import { ParticleSystem } from "./particle-system";
@@ -21,8 +20,8 @@ const TARGET: BehaviorTarget = {
 	nodeId: "node-1" as SceneNodeId,
 };
 const ORIGIN: SceneVector3 = sceneVector3([0, 0, 0]);
-/** Hook offsets are displacements, not positions, so they stay in the plain render axes. */
-const NO_OFFSET: Vector3 = renderVector3([0, 0, 0]);
+/** Hook offsets stay in AC axes so spawn can rotate them with the owner before converting. */
+const NO_OFFSET: AcVector3 = acVector3([0, 0, 0]);
 
 function prepared(
 	overrides: Partial<DecodedParticleEmitterInfo> = {},
@@ -391,13 +390,15 @@ describe("ParticleSystem", () => {
 		const outcome = particles.createEmitter(TARGET, {
 			emitterId: 0,
 			emitterInfoId: staged.id,
-			offsetOrigin: renderVector3([0, 0, 5]),
+			// AC's z is up, so this is five metres above the owner.
+			offsetOrigin: acVector3([0, 0, 5]),
 		});
 
 		expect(outcome).toBe("created");
 		expect(particles.getDiagnostics().particleCount).toBe(2);
-		// The hook offset lands on top of the parent origin, not instead of it.
-		expect(particles.sample(12)[0]!.position[2]).toBeCloseTo(5);
+		// The hook offset lands on top of the parent origin, not instead of it, and arrives in
+		// render axes where up is y.
+		expect(particles.sample(12)[0]!.position[1]).toBeCloseTo(5);
 	});
 
 	it("reports an unstaged emitter instead of guessing or throwing", () => {
@@ -407,7 +408,7 @@ describe("ParticleSystem", () => {
 			particles.createEmitter(TARGET, {
 				emitterId: 0,
 				emitterInfoId: "0x32009999" as DatAssetId,
-				offsetOrigin: renderVector3([0, 0, 0]),
+				offsetOrigin: acVector3([0, 0, 0]),
 			}),
 		).toBe("unprepared");
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
@@ -415,14 +416,7 @@ describe("ParticleSystem", () => {
 
 	it("contributes a conservative bound covering its hook offset and envelope", () => {
 		const particles = runtime();
-		particles.create(
-			TARGET,
-			prepared(),
-			renderVector3([0, 0, 4]),
-			0,
-			0,
-			ORIGIN,
-		);
+		particles.create(TARGET, prepared(), acVector3([0, 0, 4]), 0, 0, ORIGIN);
 
 		// envelopeRadius is 10 in the fixture, displaced 4 by the hook offset.
 		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeCloseTo(14);
@@ -435,22 +429,8 @@ describe("ParticleSystem", () => {
 
 	it("takes the widest emitter when a target runs several", () => {
 		const particles = runtime();
-		particles.create(
-			TARGET,
-			prepared(),
-			renderVector3([0, 0, 0]),
-			0,
-			0,
-			ORIGIN,
-		);
-		particles.create(
-			TARGET,
-			prepared(),
-			renderVector3([0, 0, 20]),
-			0,
-			0,
-			ORIGIN,
-		);
+		particles.create(TARGET, prepared(), acVector3([0, 0, 0]), 0, 0, ORIGIN);
+		particles.create(TARGET, prepared(), acVector3([0, 0, 20]), 0, 0, ORIGIN);
 
 		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeCloseTo(30);
 	});
@@ -532,20 +512,44 @@ describe("ParticleSystem", () => {
 		expect(after).toEqual([-192, 0, 0]);
 	});
 
-	it("applies the authored hook offset to a following emitter's particles", () => {
+	/**
+	 * Retail sums the hook offset with the random spawn offset and rotates the sum once
+	 * (acclient.c:317796), so the hook offset belongs to the particle rather than to the emitter
+	 * origin, and it turns with the owner.
+	 */
+	it("folds the hook offset into the particle's own offset, not into its origin", () => {
 		const particles = runtime();
 
 		particles.create(
 			TARGET,
 			prepared({ followsParent: true, initialParticles: 1 }),
-			renderVector3([5, 0, 0]),
+			acVector3([5, 0, 0]),
 			0,
 			0,
 			ORIGIN,
 		);
 
 		const record = particles.collectCohorts()[0]!.particles[0]!;
-		expect(record.origin).toEqual([5, 0, 0]);
+		expect(record.origin).toEqual([0, 0, 0]);
+		expect(record.offset).toEqual(acVector3([5, 0, 0]));
+	});
+
+	it("rotates the hook offset by the owner's frame", () => {
+		const particles = runtime({ sceneRotationOf: () => YAWED_QUARTER_TURN });
+
+		particles.create(
+			TARGET,
+			// AC's +y is north; a quarter turn about up sends it to -x.
+			prepared({ followsParent: true, initialParticles: 1 }),
+			acVector3([0, 5, 0]),
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const record = particles.collectCohorts()[0]!.particles[0]!;
+		expect(record.offset[0]).toBeCloseTo(-5);
+		expect(record.offset[1]).toBeCloseTo(0);
 	});
 
 	it("reuses anchored origin storage instead of allocating per particle per frame", () => {
@@ -790,7 +794,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			renderVector3([0, 0, 3]),
+			acVector3([0, 0, 3]),
 			0,
 			0,
 			ORIGIN,
@@ -800,7 +804,7 @@ describe("ParticleSystem", () => {
 
 		// The shader derives position from these; the CPU must not have done it already.
 		expect(record.birthTime).toBe(0);
-		expect(record.origin[2]).toBeCloseTo(3);
+		expect(record.offset).toEqual(acVector3([0, 0, 3]));
 		expect(record.a).toEqual(renderVector3([1, 0, 0]));
 	});
 

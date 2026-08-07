@@ -1,6 +1,11 @@
-import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
+import { createLandblockWorldOrigin } from "../landblocks";
 import { getMat4Translation } from "../math/matrices";
-import { renderVector3, type RenderVector3 } from "../../assets/ac-frame";
+import {
+	renderVector3,
+	stableVector3,
+	type RenderVector3,
+	type StableVector3,
+} from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
@@ -379,23 +384,50 @@ export class GameRuntime {
 	}
 
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
-	#sceneOriginOf(target: {
+	/**
+	 * Origin of a node in the fixed scene frame.
+	 *
+	 * Landblock-local origins are meaningless outside their own landblock, and anchor-relative ones
+	 * decay the moment the camera crosses a boundary. This frame is the only one safe to retain.
+	 */
+	#stableOriginOf(target: {
 		readonly nodeId: SceneNodeId;
-	}): RenderVector3 | null {
+	}): StableVector3 | null {
 		const placement = this.#scene.getResolvedPlacement(target.nodeId);
 		if (!placement) return null;
 		const origin = getMat4Translation(placement.localToLandblock);
-		// Anchor-relative, not landblock-local: the particle pass draws with the view matrix alone,
-		// so an origin left in its own landblock's frame lands wherever the anchor happens to be.
-		const offset = createLandblockOffset(
-			getLandblockCoordinates(placement.landblockId),
-			getLandblockCoordinates(this.#camera.placement.landblockId),
+		const landblockOrigin = createLandblockWorldOrigin(placement.landblockId);
+		return stableVector3([
+			origin.x + landblockOrigin.x,
+			origin.y + landblockOrigin.y,
+			origin.z + landblockOrigin.z,
+		]);
+	}
+
+	/**
+	 * Re-express a stable origin relative to this frame's render anchor.
+	 *
+	 * The particle pass draws with the view matrix alone, so an origin left in any other frame lands
+	 * wherever the anchor happens to be. Subtracting here keeps the arithmetic in double precision,
+	 * which is the whole reason the renderer works anchor-relative rather than in scene coordinates.
+	 */
+	#toRenderSpace(origin: StableVector3): RenderVector3 {
+		const anchor = createLandblockWorldOrigin(
+			this.#camera.placement.landblockId,
 		);
 		return renderVector3([
-			origin.x + offset.x,
-			origin.y + offset.y,
-			origin.z + offset.z,
+			origin[0] - anchor.x,
+			origin[1] - anchor.y,
+			origin[2] - anchor.z,
 		]);
+	}
+
+	/** Anchor-relative origin for a consumer that uses it within the frame that produced it. */
+	#sceneOriginOf(target: {
+		readonly nodeId: SceneNodeId;
+	}): RenderVector3 | null {
+		const stable = this.#stableOriginOf(target);
+		return stable === null ? null : this.#toRenderSpace(stable);
 	}
 
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
@@ -635,7 +667,8 @@ export class GameRuntime {
 			// a load inside the frame.
 			resolveEmitter: (emitterInfoId) =>
 				this.#particleEmitters.getReady(emitterInfoId),
-			originOf: (target) => this.#sceneOriginOf(target),
+			stableOriginOf: (target) => this.#stableOriginOf(target),
+			toRenderSpace: (origin) => this.#toRenderSpace(origin),
 			roll: Math.random,
 		});
 		this.#dynamics = new DynamicEntitySystem(
@@ -1062,9 +1095,7 @@ export class GameRuntime {
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
 		this.#physicsScriptSystem.advance(timeSeconds);
-		this.#particles.advance(timeSeconds, (target) =>
-			this.#sceneOriginOf(target),
-		);
+		this.#particles.advance(timeSeconds);
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
 			animationFrame,

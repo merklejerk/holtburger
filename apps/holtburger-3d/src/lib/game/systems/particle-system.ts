@@ -1,5 +1,5 @@
-import type { RenderVector3 } from "../../assets/ac-frame";
-import { renderVector3 } from "../../assets/ac-frame";
+import type { RenderVector3, StableVector3 } from "../../assets/ac-frame";
+import { renderVector3, stableVector3 } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
@@ -23,10 +23,43 @@ export interface ParticleSystemDependencies {
 	readonly resolveEmitter: (
 		emitterInfoId: DatAssetId,
 	) => PreparedParticleEmitter | null;
-	/** Current world origin of a target, or `null` once it stops publishing a transform. */
-	readonly originOf: (target: BehaviorTarget) => Vector3 | null;
+	/**
+	 * Current origin of a target in the fixed scene frame, or `null` once it stops publishing one.
+	 *
+	 * Stable rather than anchor-relative because particle origins are retained across frames.
+	 */
+	readonly stableOriginOf: (target: BehaviorTarget) => StableVector3 | null;
+	/** Re-express a retained origin in the anchor-relative frame this frame draws in. */
+	readonly toRenderSpace: (origin: StableVector3) => RenderVector3;
 	/** Current runtime clock, needed because commands arrive mid-dispatch. */
 	readonly clock: () => number;
+}
+
+/** Translate a stable origin by a frame-invariant displacement. */
+function offsetOrigin(
+	origin: StableVector3,
+	displacement: Vector3,
+): StableVector3 {
+	return stableVector3([
+		origin[0] + displacement[0],
+		origin[1] + displacement[1],
+		origin[2] + displacement[2],
+	]);
+}
+
+/**
+ * Resolve where one particle's motion formula originates, in the fixed scene frame.
+ *
+ * Total by construction, and the only place the follow/leave distinction is read. A frozen origin
+ * already carries the hook offset from spawn; a following emitter's is applied here, so neither
+ * kind can lose it.
+ */
+function resolveStableOrigin(
+	instance: EmitterInstance,
+	particle: LiveParticle,
+	liveOrigin: StableVector3,
+): StableVector3 {
+	return particle.frozenOrigin ?? offsetOrigin(liveOrigin, instance.hookOffset);
 }
 
 /** Retail's roll shape: `RollDice(-1, 1) * rand + base` — additive, never multiplicative. */
@@ -39,12 +72,14 @@ interface LiveParticle {
 	readonly birthTime: number;
 	readonly spawn: ParticleSpawnConstants;
 	/**
-	 * Parent origin captured at spawn, used when the emitter leaves particles behind.
+	 * Spawn origin frozen in the fixed scene frame, for an emitter that leaves particles behind.
 	 *
-	 * `null` means the emitter follows its parent, so the live origin is read each frame instead
-	 * (`is_parent_local != 0`, acclient.c:318262-318273).
+	 * `null` when the emitter follows its parent (`is_parent_local != 0`,
+	 * acclient.c:318262-318273), which is genuine absence rather than a branch: the origin is then
+	 * resolved live instead. {@link ParticleSystem.resolveStableOrigin} owns that choice so no
+	 * consumer re-derives it.
 	 */
-	readonly parentOriginSnapshot: Vector3 | null;
+	readonly frozenOrigin: StableVector3 | null;
 }
 
 interface EmitterInstance {
@@ -132,7 +167,7 @@ export class ParticleSystem {
 	): "created" | "unprepared" {
 		const emitter = this.#dependencies.resolveEmitter(command.emitterInfoId);
 		if (emitter === null) return "unprepared";
-		const parentOrigin = this.#dependencies.originOf(target);
+		const parentOrigin = this.#dependencies.stableOriginOf(target);
 		if (parentOrigin === null) return "unprepared";
 		this.create(
 			target,
@@ -158,7 +193,7 @@ export class ParticleSystem {
 		hookOffset: Vector3,
 		emitterId: number,
 		timeSeconds: number,
-		parentOrigin: Vector3,
+		parentOrigin: StableVector3,
 	): void {
 		if (emitterId !== 0) {
 			const existing = this.#instances.findIndex(
@@ -223,17 +258,16 @@ export class ParticleSystem {
 	/**
 	 * Advance every emitter to `timeSeconds`.
 	 *
-	 * `parentOriginOf` supplies the current origin for a target, so this runtime follows published
-	 * entity transforms without holding a reference to the entity itself.
+	 * Origins come from the injected `stableOriginOf`, so this runtime follows published entity
+	 * transforms without holding a reference to the entity itself.
 	 */
 	advance(
 		timeSeconds: number,
-		parentOriginOf: (target: BehaviorTarget) => Vector3 | null,
 		isVisible: (target: BehaviorTarget) => boolean = () => true,
 	): void {
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
 			const instance = this.#instances[index]!;
-			const parentOrigin = parentOriginOf(instance.target);
+			const parentOrigin = this.#dependencies.stableOriginOf(instance.target);
 			// A target that no longer publishes a transform has gone away underneath us.
 			if (parentOrigin === null) {
 				this.#instances.splice(index, 1);
@@ -282,7 +316,7 @@ export class ParticleSystem {
 			// would misrepresent it as working.
 			if (info.motionType === null) continue;
 			if (!isVisible(instance.target)) continue;
-			const liveOrigin = this.#dependencies.originOf(instance.target);
+			const liveOrigin = this.#dependencies.stableOriginOf(instance.target);
 			if (liveOrigin === null) continue;
 			const key = `${info.hwGfxObjId}:${info.motionType}`;
 			let cohort = cohorts.get(key);
@@ -304,9 +338,9 @@ export class ParticleSystem {
 					finalTranslucency: particle.spawn.finalTranslucency,
 					lifespan: particle.spawn.lifespan,
 					offset: particle.spawn.offset,
-					// A following emitter's particles read the live origin; left-behind ones keep
-					// the snapshot taken when they spawned.
-					origin: particle.parentOriginSnapshot ?? liveOrigin,
+					origin: this.#dependencies.toRenderSpace(
+						resolveStableOrigin(instance, particle, liveOrigin),
+					),
 					startScale: particle.spawn.startScale,
 					startTranslucency: particle.spawn.startTranslucency,
 				});
@@ -326,18 +360,17 @@ export class ParticleSystem {
 	 * path: the shader implements the same formulas, and this is what its output is checked
 	 * against. Production drawing goes through {@link collectCohorts}.
 	 */
-	sample(
-		timeSeconds: number,
-		parentOriginOf: (target: BehaviorTarget) => Vector3 | null,
-	): ParticleSample[] {
+	sample(timeSeconds: number): ParticleSample[] {
 		const samples: ParticleSample[] = [];
 		for (const instance of this.#instances) {
-			const liveOrigin = parentOriginOf(instance.target);
+			const liveOrigin = this.#dependencies.stableOriginOf(instance.target);
 			if (liveOrigin === null) continue;
 			const motionType = instance.emitter.info.motionType;
 			if (motionType === null) continue;
 			for (const particle of instance.particles) {
-				const origin = particle.parentOriginSnapshot ?? liveOrigin;
+				const origin = this.#dependencies.toRenderSpace(
+					resolveStableOrigin(instance, particle, liveOrigin),
+				);
 				const elapsed = timeSeconds - particle.birthTime;
 				const position = particlePosition(
 					motionType,
@@ -459,7 +492,7 @@ export class ParticleSystem {
 	#emitDue(
 		instance: EmitterInstance,
 		timeSeconds: number,
-		parentOrigin: Vector3,
+		parentOrigin: StableVector3,
 	): void {
 		const info = instance.emitter.info;
 		// The per-meter predicate is unrecovered from the decompile, so a purely per-meter emitter
@@ -478,22 +511,19 @@ export class ParticleSystem {
 	#emit(
 		instance: EmitterInstance,
 		timeSeconds: number,
-		parentOrigin: Vector3,
+		parentOrigin: StableVector3,
 	): void {
 		const info = instance.emitter.info;
 		if (instance.particles.length >= info.maxParticles) return;
 		const roll = this.#roll;
-		// Both operands are render-space by type, so their sum is too.
-		const spawnOrigin = renderVector3([
-			parentOrigin[0] + instance.hookOffset[0],
-			parentOrigin[1] + instance.hookOffset[1],
-			parentOrigin[2] + instance.hookOffset[2],
-		]);
 		instance.particles.push({
 			birthTime: timeSeconds,
-			// A following emitter re-reads the live origin every frame, so it stores no snapshot at
-			// all rather than storing one it would ignore.
-			parentOriginSnapshot: info.followsParent ? null : spawnOrigin,
+			// A following emitter resolves its origin live every frame, so freezing one here would
+			// be a value nothing reads. The hook offset is applied by the shared resolution instead
+			// of here, so both kinds of emitter get it.
+			frozenOrigin: info.followsParent
+				? null
+				: offsetOrigin(parentOrigin, instance.hookOffset),
 			spawn: {
 				a: scaledVector(info.a, rolled(roll, info.minA, info.maxA - info.minA)),
 				b: scaledVector(info.b, rolled(roll, info.minB, info.maxB - info.minB)),

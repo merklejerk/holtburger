@@ -1826,6 +1826,53 @@ It is achievable with a second lighting varying selected in the fragment stage, 
 vertex and index memory for foliage-class meshes, but it is a rendering-fidelity change independent
 of this plan's instance-count defect.
 
+##### Particle origins were split-brain across two coordinate frames (finding 2026-08-07)
+
+Reported from play: particles vanished for a few frames while approaching them, and appeared briefly
+where nothing should be. Both halves are the same event. `#sceneOriginOf` returned origins relative
+to the camera's landblock, and `LiveParticle.parentOriginSnapshot` **retained** one. Crossing a
+landblock boundary moved the anchor and every live snapshot was silently wrong by a landblock —
+proven at exactly 192 units. The self-heal is one particle lifespan, as stale particles expire and
+respawn.
+
+Underneath was a shape defect, not one bug. `#emit` encoded the emitter fact `info.followsParent`
+into a nullable per-particle field, and three separate read sites decoded it back with `??`. The two
+arms then differed in more than value: the following arm was live and self-correcting, the frozen arm
+decayed. A second, independent defect fell out of the same split — `spawnOrigin = parentOrigin +
+hookOffset` was computed inside the arm that discards it, so **every following emitter silently
+ignored its authored `CreateParticle` offset**. The two defects hit opposite populations: 1,237
+shipped emitters leave particles behind, 814 follow, so between them the split covered all 2,051.
+
+Both were reproduced as failing tests before any fix.
+
+Landed:
+
+- `StableVector3` joins `RenderVector3` in `ac-frame.ts` as a **disjoint** brand. `RenderVector3` is
+  now documented as anchor-relative and valid only for the frame that produced it; `StableVector3` is
+  the only frame a position may be retained in. Storing an anchored value no longer type-checks.
+- `#sceneOriginOf` splits into `#stableOriginOf` and `#toRenderSpace`, composed for the audio callers
+  that consume an origin within the frame that produced it. The anchor subtraction stays in double
+  precision, which is the reason the renderer is anchor-relative at all.
+- One module-level `resolveStableOrigin` is the only place the follow/leave distinction is read. It
+  is total, and applies the hook offset on the path both kinds traverse, so neither can lose it.
+- `advance` and `sample` no longer take their own parallel origin functions. All four origin sources
+  collapse to the single injected `stableOriginOf`.
+
+The audio path was checked and is clean: `trigger` resolves pan and gain once from the position and
+listener in the same instant, both in the same frame, then plays a fixed one-shot. Nothing persists.
+
+Concession: `collectCohorts` now allocates one tuple per particle per frame for the converted origin.
+It joins the already-recorded debt on reusing per-particle cohort records, which allocate a fresh
+object per particle per frame today regardless. Doing the conversion allocation-free means pushing
+the anchor into `writeParticleInstance`, which is a renderer contract change this finding does not
+justify on its own.
+
+Verification limit worth recording: **particle rendering is not reproducible in the harness.** Spawn
+randomness is `Math.random` at the runtime level with no seed, so two runs of an identical build
+differ by 1,971 pixels (0.243%) — more than the 1,872 (0.231%) between before and after this change.
+Screenshots confirm particles still render and nothing structurally broke; they cannot resolve a
+change of this size. Seeding the injected roll for the harness is recorded as debt.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.

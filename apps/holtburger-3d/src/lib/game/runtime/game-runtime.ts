@@ -3,6 +3,10 @@ import {
 	getLandblockCoordinates,
 } from "../landblocks";
 import { getMat4Translation } from "../math/matrices";
+import {
+	renderVector3,
+	type RenderVector3,
+} from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
@@ -383,7 +387,7 @@ export class GameRuntime {
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
 	#sceneOriginOf(target: {
 		readonly nodeId: SceneNodeId;
-	}): [number, number, number] | null {
+	}): RenderVector3 | null {
 		const placement = this.#scene.getResolvedPlacement(target.nodeId);
 		if (!placement) return null;
 		const origin = getMat4Translation(placement.localToLandblock);
@@ -393,7 +397,11 @@ export class GameRuntime {
 			getLandblockCoordinates(placement.landblockId),
 			getLandblockCoordinates(this.#camera.placement.landblockId),
 		);
-		return [origin.x + offset.x, origin.y + offset.y, origin.z + offset.z];
+		return renderVector3([
+			origin.x + offset.x,
+			origin.y + offset.y,
+			origin.z + offset.z,
+		]);
 	}
 
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */

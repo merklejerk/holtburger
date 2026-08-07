@@ -1,3 +1,4 @@
+import { renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
@@ -11,17 +12,17 @@ const TARGET: BehaviorTarget = {
 	generation: 1,
 	nodeId: "node-1" as SceneNodeId,
 };
-const ORIGIN: Vector3 = [0, 0, 0];
+const ORIGIN: Vector3 = renderVector3([0, 0, 0]);
 const at = (): Vector3 => ORIGIN;
 
 function prepared(
 	overrides: Partial<DecodedParticleEmitterInfo> = {},
 ): PreparedParticleEmitter {
 	const info: DecodedParticleEmitterInfo = {
-		a: [1, 0, 0],
-		b: [0, 0, 0],
+		a: renderVector3([1, 0, 0]),
+		b: renderVector3([0, 0, 0]),
 		birthrateSeconds: 1,
-		c: [0, 0, 0],
+		c: renderVector3([0, 0, 0]),
 		emitsPerMeter: false,
 		emitsPerSecond: true,
 		finalScale: 1,
@@ -43,7 +44,7 @@ function prepared(
 		minC: 1,
 		minOffset: 0,
 		motionType: 2,
-		offsetDir: [0, 0, 1],
+		offsetDir: renderVector3([0, 0, 1]),
 		scaleRand: 0,
 		startScale: 1,
 		startTrans: 0,
@@ -249,20 +250,20 @@ describe("ParticleSystem", () => {
 		const left = runtime();
 		left.create(
 			TARGET,
-			prepared({ a: [0, 0, 0], initialParticles: 1 }),
+			prepared({ a: renderVector3([0, 0, 0]), initialParticles: 1 }),
 			ORIGIN,
 			0,
 			0,
 			ORIGIN,
 		);
-		const moved = (): Vector3 => [100, 0, 0];
+		const moved = (): Vector3 => renderVector3([100, 0, 0]);
 		// The parent moved, but a leave-behind particle stays at its spawn snapshot.
 		expect(left.sample(0, moved)[0]!.position[0]).toBeCloseTo(0);
 
 		const following = runtime();
 		following.create(
 			TARGET,
-			prepared({ a: [0, 0, 0], followsParent: true, initialParticles: 1 }),
+			prepared({ a: renderVector3([0, 0, 0]), followsParent: true, initialParticles: 1 }),
 			ORIGIN,
 			0,
 			0,
@@ -362,7 +363,7 @@ describe("ParticleSystem", () => {
 		const outcome = particles.createEmitter(TARGET, {
 			emitterId: 0,
 			emitterInfoId: staged.id,
-			offsetOrigin: [0, 0, 5],
+			offsetOrigin: renderVector3([0, 0, 5]),
 		});
 
 		expect(outcome).toBe("created");
@@ -378,7 +379,7 @@ describe("ParticleSystem", () => {
 			particles.createEmitter(TARGET, {
 				emitterId: 0,
 				emitterInfoId: "0x32009999" as DatAssetId,
-				offsetOrigin: [0, 0, 0],
+				offsetOrigin: renderVector3([0, 0, 0]),
 			}),
 		).toBe("unprepared");
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
@@ -386,7 +387,7 @@ describe("ParticleSystem", () => {
 
 	it("contributes a conservative bound covering its hook offset and envelope", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared(), [0, 0, 4], 0, 0, ORIGIN);
+		particles.create(TARGET, prepared(), renderVector3([0, 0, 4]), 0, 0, ORIGIN);
 
 		// envelopeRadius is 10 in the fixture, displaced 4 by the hook offset.
 		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(14);
@@ -399,8 +400,8 @@ describe("ParticleSystem", () => {
 
 	it("takes the widest emitter when a target runs several", () => {
 		const particles = runtime();
-		particles.create(TARGET, prepared(), [0, 0, 0], 0, 0, ORIGIN);
-		particles.create(TARGET, prepared(), [0, 0, 20], 0, 0, ORIGIN);
+		particles.create(TARGET, prepared(), renderVector3([0, 0, 0]), 0, 0, ORIGIN);
+		particles.create(TARGET, prepared(), renderVector3([0, 0, 20]), 0, 0, ORIGIN);
 
 		expect(particles.envelopeRadiusFor(TARGET)).toBeCloseTo(30);
 	});
@@ -489,7 +490,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({ initialParticles: 1 }),
-			[0, 0, 3],
+			renderVector3([0, 0, 3]),
 			0,
 			0,
 			ORIGIN,
@@ -500,7 +501,7 @@ describe("ParticleSystem", () => {
 		// The shader derives position from these; the CPU must not have done it already.
 		expect(record.birthTime).toBe(0);
 		expect(record.origin[2]).toBeCloseTo(3);
-		expect(record.a).toEqual([1, 0, 0]);
+		expect(record.a).toEqual(renderVector3([1, 0, 0]));
 	});
 
 	it("refuses to invent a cadence for a purely per-meter emitter", () => {

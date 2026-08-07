@@ -7,17 +7,46 @@ export interface AcFrame {
 }
 
 /** Convert one AC frame and authored scale into the app's canonical render coordinate frame. */
+declare const renderSpace: unique symbol;
+
+/**
+ * A three-component vector **already converted into the app's render axes**.
+ *
+ * Deliberately a distinct type from a plain tuple, because AC is Z-up and the renderer is Y-up and
+ * the two are otherwise indistinguishable. An authored `(0, 0, 1)` means *up*; the same tuple read
+ * as a render vector points sideways. That mistake has shipped more than once, produced no type
+ * error, and was only ever caught by looking at the screen.
+ *
+ * {@link acVectorToRender} is the only way to produce one, so a consumer that declares
+ * `RenderVector3` cannot be handed raw authored data by accident.
+ */
+export type RenderVector3 = readonly [number, number, number] & {
+	readonly [renderSpace]: true;
+};
+
 /**
  * Convert one authored AC vector into the app's render axes.
  *
- * AC is Z-up; the renderer is Y-up. The mapping is `(x, z, -y)`, identical to the rotation
- * conversion in {@link acFrameTransform}. Every authored direction, offset, velocity, or
- * acceleration must go through this — an unconverted "up" offset lands horizontally.
+ * The mapping is `(x, z, -y)`, identical to the rotation conversion in {@link acFrameTransform}.
+ * Every authored direction, offset, velocity, or acceleration goes through this.
  */
 export function acVectorToRender(
 	vector: readonly [number, number, number],
-): [number, number, number] {
-	return [vector[0], vector[2], -vector[1]];
+): RenderVector3 {
+	return [vector[0], vector[2], -vector[1]] as unknown as RenderVector3;
+}
+
+/**
+ * Assert that a vector is already in render axes.
+ *
+ * For values the renderer itself produced — a scene-graph translation, a camera position — which
+ * never passed through AC space. Every call is a claim that needs justifying at the call site;
+ * reach for {@link acVectorToRender} instead whenever the value came from authored content.
+ */
+export function renderVector3(
+	vector: readonly [number, number, number],
+): RenderVector3 {
+	return vector as RenderVector3;
 }
 
 export function acFrameTransform(

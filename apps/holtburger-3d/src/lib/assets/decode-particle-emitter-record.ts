@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { DatAssetId } from "../game/game-types";
-import { acVectorToRender } from "./ac-frame";
+import { acVectorToRender, type RenderVector3 } from "./ac-frame";
 
 const HEADER_LENGTH = 12;
 const MAGIC = "HBPE";
@@ -54,10 +54,22 @@ const manifestSchema = z.object({
  */
 export type DecodedParticleEmitterInfo = Omit<
 	z.infer<typeof manifestSchema>,
-	"transport" | "byteOrder" | "emitterInfoId" | "hwGfxObjId"
+	| "transport"
+	| "byteOrder"
+	| "emitterInfoId"
+	| "hwGfxObjId"
+	| "a"
+	| "b"
+	| "c"
+	| "offsetDir"
 > & {
 	readonly id: DatAssetId;
 	readonly hwGfxObjId: DatAssetId;
+	/** Motion and offset vectors, already converted out of AC's Z-up axes. */
+	readonly a: RenderVector3;
+	readonly b: RenderVector3;
+	readonly c: RenderVector3;
+	readonly offsetDir: RenderVector3;
 };
 
 /** Decode and validate one typed particle-emitter host response. */

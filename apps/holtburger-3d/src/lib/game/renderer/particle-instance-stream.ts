@@ -1,3 +1,4 @@
+import type { RenderVector3 } from "../../assets/ac-frame";
 /**
  * Packs live particles into the per-instance layout the particle vertex stage declares.
  *
@@ -22,13 +23,13 @@ export const PARTICLE_INSTANCE_FLOAT_COUNT = 21;
 /** Everything one particle contributes to the instance stream. */
 export interface ParticleInstanceRecord {
 	/** Parent origin plus hook offset, resolved at spawn or read live for a following emitter. */
-	readonly origin: readonly [number, number, number];
+	readonly origin: RenderVector3;
 	readonly birthTime: number;
-	readonly offset: readonly [number, number, number];
+	readonly offset: RenderVector3;
 	readonly lifespan: number;
-	readonly a: readonly [number, number, number];
-	readonly b: readonly [number, number, number];
-	readonly c: readonly [number, number, number];
+	readonly a: RenderVector3;
+	readonly b: RenderVector3;
+	readonly c: RenderVector3;
 	readonly startScale: number;
 	readonly finalScale: number;
 	readonly startTranslucency: number;

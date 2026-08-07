@@ -1,3 +1,4 @@
+import { renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { ParticleDrawCohort } from "../systems/particle-system";
 import type { DatAssetId } from "../game-types";
@@ -17,15 +18,15 @@ function cohort(
 		hwGfxObjId,
 		motionType,
 		particles: Array.from({ length: particleCount }, () => ({
-			a: [1, 0, 0] as const,
-			b: [0, 0, 0] as const,
+			a: renderVector3([1, 0, 0]),
+			b: renderVector3([0, 0, 0]),
 			birthTime: 0,
-			c: [0, 0, 0] as const,
+			c: renderVector3([0, 0, 0]),
 			finalScale: 1,
 			finalTranslucency: 1,
 			lifespan: 4,
-			offset: [0, 0, 0] as const,
-			origin: [0, 0, 0] as const,
+			offset: renderVector3([0, 0, 0]),
+			origin: renderVector3([0, 0, 0]),
 			startScale: 1,
 			startTranslucency: 0,
 		})),
@@ -37,7 +38,7 @@ const GEOMETRY: ParticleDrawGeometry = {
 	baseTexture: {} as WebGLTexture,
 	indexCount: 6,
 	indexOffsetBytes: 0,
-	lockedAxis: [0, 0, 1],
+	lockedAxis: renderVector3([0, 0, 1]),
 	materialKind: 0,
 	orientation: 1,
 	paletteTexture: null,
@@ -115,7 +116,7 @@ function fakeGl() {
 }
 
 const context = (gl: WebGL2RenderingContext) => ({
-	cameraPosition: [0, 0, 0] as const,
+	cameraPosition: renderVector3([0, 0, 0]),
 	clockSeconds: 1,
 	gl,
 	projection: new Float32Array(16),

@@ -1,3 +1,4 @@
+import { renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import {
 	PARTICLE_TYPE,
@@ -9,19 +10,19 @@ import {
 	type Vector3,
 } from "./particle-motion";
 
-const PARENT: Vector3 = [10, 20, 30];
+const PARENT: Vector3 = renderVector3([10, 20, 30]);
 
 function spawn(
 	overrides: Partial<ParticleSpawnConstants> = {},
 ): ParticleSpawnConstants {
 	return {
-		a: [0, 0, 0],
-		b: [0, 0, 0],
-		c: [0, 0, 0],
+		a: renderVector3([0, 0, 0]),
+		b: renderVector3([0, 0, 0]),
+		c: renderVector3([0, 0, 0]),
 		finalScale: 1,
 		finalTranslucency: 1,
 		lifespan: 4,
-		offset: [1, 2, 3],
+		offset: renderVector3([1, 2, 3]),
 		startScale: 1,
 		startTranslucency: 0,
 		...overrides,
@@ -29,7 +30,7 @@ function spawn(
 }
 
 /** Every formula is anchored on `parent + offset`; assert that once here. */
-const BASE: Vector3 = [11, 22, 33];
+const BASE: Vector3 = renderVector3([11, 22, 33]);
 
 describe("particlePosition", () => {
 	it("holds a Still particle at parent plus offset for all time", () => {
@@ -42,19 +43,19 @@ describe("particlePosition", () => {
 	});
 
 	it("advances a velocity particle linearly", () => {
-		const constants = spawn({ a: [1, 2, 3] });
+		const constants = spawn({ a: renderVector3([1, 2, 3]) });
 
 		expect(
 			particlePosition(PARTICLE_TYPE.localVelocity, constants, PARENT, 2),
-		).toEqual([13, 26, 39]);
+		).toEqual(renderVector3([13, 26, 39]));
 		// The Global variant differs only in how its constants were built, never in arithmetic.
 		expect(
 			particlePosition(PARTICLE_TYPE.globalVelocity, constants, PARENT, 2),
-		).toEqual([13, 26, 39]);
+		).toEqual(renderVector3([13, 26, 39]));
 	});
 
 	it("applies half b t squared for every parabolic variant, spin included", () => {
-		const constants = spawn({ a: [1, 0, 0], b: [4, 0, 0] });
+		const constants = spawn({ a: renderVector3([1, 0, 0]), b: renderVector3([4, 0, 0]) });
 		const expected = 11 + 1 * 2 + 0.5 * 4 * 4;
 
 		for (const type of [
@@ -73,7 +74,7 @@ describe("particlePosition", () => {
 
 	it("uses sine on y but cosine on x and z for Swarm", () => {
 		// The asymmetry is authored, not a transcription slip: proving it stops a later "cleanup".
-		const constants = spawn({ b: [1, 1, 1], c: [1, 1, 1] });
+		const constants = spawn({ b: renderVector3([1, 1, 1]), c: renderVector3([1, 1, 1]) });
 		const t = Math.PI / 2;
 
 		const position = particlePosition(
@@ -93,7 +94,7 @@ describe("particlePosition", () => {
 
 	it("reproduces both authored Explode quirks exactly", () => {
 		// a = (2, 99, 5): if any axis used its own `a` component, y would move with 99.
-		const constants = spawn({ a: [2, 99, 5], b: [0, 0, 0], c: [1, 1, 1] });
+		const constants = spawn({ a: renderVector3([2, 99, 5]), b: renderVector3([0, 0, 0]), c: renderVector3([1, 1, 1]) });
 
 		const position = particlePosition(
 			PARTICLE_TYPE.explode,
@@ -110,7 +111,7 @@ describe("particlePosition", () => {
 	});
 
 	it("drives Implode's single cosine from a.x across all three axes", () => {
-		const constants = spawn({ a: [1, 50, 50], b: [0, 0, 0], c: [1, 2, 3] });
+		const constants = spawn({ a: renderVector3([1, 50, 50]), b: renderVector3([0, 0, 0]), c: renderVector3([1, 2, 3]) });
 		const wave = Math.cos(1 * 2);
 
 		const position = particlePosition(

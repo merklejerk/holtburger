@@ -1,3 +1,4 @@
+import type { RenderVector3 } from "../../assets/ac-frame";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import {
@@ -112,7 +113,7 @@ interface ParticleCommandPort {
 		command: {
 			readonly emitterInfoId: DatAssetId;
 			readonly partIndex: number;
-			readonly offsetOrigin: readonly [number, number, number];
+			readonly offsetOrigin: RenderVector3;
 			readonly emitterId: number;
 		},
 	): "created" | "unprepared";

@@ -1725,14 +1725,37 @@ by value rather than by when it appeared.
       error, no diagnostic. 43 `Scale` hooks exist archive-wide; none are in currently loaded
       content, which is luck rather than design.
 
-      The shape of the fix: effect state needs a behavior-cadence clock that does not belong to
-      animation playback. `EffectSystem` already owns the state and the step function; what it lacks
-      is a driver for entities animation does not cover. Two pieces follow — advance every installed
-      effect state at the behavior cadence regardless of playback, and publish an effect-only
-      presentation for entities with no animation, reusing `entity.articulatedPose`, which every
-      entity already carries from install (`dynamic-entity-system.ts:328`). Both need care around
-      double-publishing and around `AnimationPresentationCadence`, which currently selects which
-      nodes sample at all.
+      **The owner is identifiable, and the asymmetry is visible in the constructors.** Physics
+      scripts already have their own system, symmetric with animation in every respect but one:
+
+      ```
+      new AnimationSystem(this.#effects, this.#behaviorRouter)    // effects AND router
+      new PhysicsScriptSystem(this.#behaviorRouter, Math.random)  // router only
+      ```
+
+      `AnimationSystem` touches `#effects` in exactly two places: `samplePresentation`
+      (`animation-system.ts:302`), which is legitimate — it is producing a presentation sample — and
+      `advanceSemanticStep` (`:340`), which is the misplaced responsibility. Effect *stepping* was
+      given to whichever system happened to own a behavior clock, and only one of the two producers
+      does.
+
+      So the fix is not to give `PhysicsScriptSystem` the same dependency, which would leave an
+      animated-but-unscripted entity uncovered by the mirror-image gap. **`EffectSystem` should
+      advance its own installed states**; it already owns both the state and the step function, and
+      `DynamicEntitySystem` installs state for *every* entity including script-only ones
+      (`dynamic-entity-system.ts:622`), so nothing is missing but the driver. Both producers then
+      become pure command sources into the router, which is what they always read as.
+
+      A design question falls out and should be settled first: the behavior cadence is currently
+      **per playback**, accumulated in each animation record's `fractionalSeconds`, so entities step
+      on staggered phases. A system-owned cadence would step them together. Retail's 30 Hz behavior
+      tick is global, which argues for the shared clock, but it is a semantic change and not merely
+      a move.
+
+      The second piece stays as recorded: publish an effect-only presentation for entities with no
+      animation, reusing `entity.articulatedPose`, which every entity carries from install
+      (`dynamic-entity-system.ts:328`), with care around double-publishing and around
+      `AnimationPresentationCadence`, which currently selects which nodes sample at all.
 
       Not started deliberately: this is system-ownership surgery, and the session that found it had
       little context left. Doing it badly is worse than scheduling it.

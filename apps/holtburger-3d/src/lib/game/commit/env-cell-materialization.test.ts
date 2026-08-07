@@ -174,6 +174,36 @@ describe("planEnvCellMaterialization", () => {
 		).toEqual(["0x00010100", "0x00010101"]);
 	});
 
+	it("groups non-adjacent shell triangles that share a binding into one range", () => {
+		const sourceCell = cell("0x00010100", Mat4.identity(), []);
+		const shellGeometry = interleavedGeometry();
+
+		const plan = planEnvCellMaterialization(
+			layer([
+				{
+					...sourceCell,
+					structure: {
+						...sourceCell.structure,
+						geometry: shellGeometry,
+						surfaceSlotCount: 2,
+					},
+					materials: [SHARED_MATERIAL, distinctMaterial()],
+				},
+			]),
+		);
+
+		// Authored order interleaves the shared material, so contiguous ranges over the source
+		// buffer would need three draws. Compaction reorders indices to need two.
+		expect(plan.shells[0]?.materialRanges).toMatchObject([
+			{ indexStart: 0, indexCount: 6 },
+			{ indexStart: 6, indexCount: 3 },
+		]);
+		expect(plan.shellGeometries[0]?.geometry.indices).toEqual(
+			new Uint32Array([0, 1, 2, 0, 2, 3, 1, 2, 3]),
+		);
+		expect(plan.diagnostics).toMatchObject({ shellMaterialRangeCount: 2 });
+	});
+
 	it("fails the closed shell plan when a required material is missing", () => {
 		const sourceCell = cell("0x00010100", Mat4.identity(), []);
 
@@ -199,12 +229,14 @@ describe("planEnvCellMaterialization", () => {
 			]),
 		);
 
-		expect(plan.shellGeometries[0]?.geometry.indices).toBe(
-			shellGeometry.indices,
+		// The skipped triangle is dropped from the uploaded buffer, not merely from the ranges, so
+		// the surviving range addresses the compacted buffer from its start.
+		expect(plan.shellGeometries[0]?.geometry.indices).toEqual(
+			shellGeometry.indices.slice(3),
 		);
 		expect(plan.shells[0]?.materialRanges).toMatchObject([
 			{
-				indexStart: 3,
+				indexStart: 0,
 				indexCount: 3,
 				material: { source: { id: SHARED_MATERIAL.id } },
 			},
@@ -365,6 +397,39 @@ function twoTriangleGeometry(): ResolvedGeometry {
 		materialSideKinds: new Uint8Array([0, 0]),
 		materialSideTypes: new Uint8Array([1, 1]),
 		materialStippling: new Uint8Array([0, 0]),
+	};
+}
+
+/** A second textured material that resolves to a different binding than {@link material}. */
+function distinctMaterial(): ResolvedMaterial {
+	return {
+		id: "material:test-distinct",
+		kind: "texture",
+		colorTextureId: "0x06000002",
+		renderSurfaceId: "0x06000002",
+		paletteTextureId: null,
+		textureEncoding: "direct-color",
+		rawSurfaceFlags: 0x20002,
+		translucency: 0,
+		luminosity: 0,
+		diffuseScale: 1,
+	};
+}
+
+/** Three triangles whose first and last share a slot, sandwiching a different one. */
+function interleavedGeometry(): ResolvedGeometry {
+	return {
+		...geometry(),
+		id: "geometry:interleaved",
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
+		normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+		textureCoordinates: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+		indices: new Uint32Array([0, 1, 2, 1, 2, 3, 0, 2, 3]),
+		materialSlotIndices: new Uint16Array([0, 1, 0]),
+		materialWrapModes: new Uint8Array([0, 0, 0]),
+		materialSideKinds: new Uint8Array([0, 0, 0]),
+		materialSideTypes: new Uint8Array([1, 1, 1]),
+		materialStippling: new Uint8Array([0, 0, 0]),
 	};
 }
 

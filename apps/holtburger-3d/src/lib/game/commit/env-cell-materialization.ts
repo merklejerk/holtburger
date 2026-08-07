@@ -175,17 +175,19 @@ export function planEnvCellMaterialization(
 		const geometryKey = createObjectGeometryKey(
 			`${cell.structure.geometry.id}/cell:${cell.id}`,
 		);
-		if (!shellGeometries.has(geometryKey)) {
-			shellGeometries.set(geometryKey, {
-				key: geometryKey,
-				geometry: objectGeometry(cell.structure.geometry, bakedLight),
-			});
-		}
-		const materialRanges = planShellMaterialRanges(
+		// The compacted index buffer is planned with the ranges that address it, so the two cannot
+		// disagree about triangle order.
+		const { indices, ranges: materialRanges } = planShellDraws(
 			cell,
 			shellTextureRequirements,
 			shellMaterialIds,
 		);
+		if (!shellGeometries.has(geometryKey)) {
+			shellGeometries.set(geometryKey, {
+				key: geometryKey,
+				geometry: objectGeometry(cell.structure.geometry, bakedLight, indices),
+			});
+		}
 		shellMaterialRangeCount += materialRanges.length;
 		shells.push({
 			envCellId: cell.id,
@@ -265,19 +267,45 @@ export function planEnvCellMaterialization(
 	};
 }
 
-function planShellMaterialRanges(
+/**
+ * Compact a shell's triangles into one binding-major index buffer and the ranges that tile it.
+ *
+ * The authored index order cannot be described by contiguous ranges without waste. Non-renderable
+ * portal polygons are skipped, which punches holes that split a range even when its binding never
+ * changed, and same-binding triangles are not necessarily adjacent to begin with. Emitting indices
+ * grouped by binding makes every range contiguous by construction and drops the skipped triangles
+ * from the uploaded buffer entirely.
+ *
+ * Reordering is safe here because shell geometry is already realized per cell rather than shared by
+ * CellStruct identity, so this buffer has exactly one consumer.
+ */
+function planShellDraws(
 	cell: ResolvedEnvCellPresentation,
 	textureRequirements: Map<AssetTextureKey, AssetTextureFact>,
 	materialIds: Set<string>,
-): readonly EnvCellShellMaterialRange[] {
+): {
+	readonly indices: Uint32Array;
+	readonly ranges: readonly EnvCellShellMaterialRange[];
+} {
 	const geometry = cell.structure.geometry;
 	if (geometry.indices.length % 3 !== 0) {
 		throw new Error(`EnvCell ${cell.id} shell indices are not triangles.`);
 	}
-	const ranges: Array<
-		EnvCellShellMaterialRange & { readonly bindingId: string }
-	> = [];
-	let renderableIndexCount = 0;
+	if (geometry.materialSlotIndices.length * 3 !== geometry.indices.length) {
+		throw new Error(
+			`EnvCell ${cell.id} material slots do not cover its shell.`,
+		);
+	}
+	// Insertion-ordered so a shell's draw order stays a deterministic function of authored order:
+	// bindings appear in the order their first renderable triangle does.
+	const trianglesByBinding = new Map<
+		string,
+		{
+			readonly material: ObjectMaterialBinding;
+			readonly ordering: ObjectMaterialOrdering;
+			readonly triangles: number[];
+		}
+	>();
 	for (
 		let triangle = 0;
 		triangle < geometry.materialSlotIndices.length;
@@ -298,47 +326,53 @@ function planShellMaterialRanges(
 		) {
 			continue;
 		}
-		renderableIndexCount += 3;
 		addAssetTextureFacts(
 			textureRequirements,
 			resolved.textureRequirements,
 			"EnvCell shell",
 		);
 		materialIds.add(resolved.binding.source.id);
-		const previous = ranges.at(-1);
-		if (
-			previous?.bindingId === resolved.bindingId &&
-			previous.indexStart + previous.indexCount === triangle * 3
-		) {
-			ranges[ranges.length - 1] = {
-				...previous,
-				indexCount: previous.indexCount + 3,
-			};
+		const group = trianglesByBinding.get(resolved.bindingId);
+		if (group) {
+			group.triangles.push(triangle);
 			continue;
 		}
-		ranges.push({
-			bindingId: resolved.bindingId,
-			indexStart: triangle * 3,
-			indexCount: 3,
+		trianglesByBinding.set(resolved.bindingId, {
 			material: resolved.binding,
 			ordering: resolved.ordering,
+			triangles: [triangle],
 		});
 	}
-	if (
-		geometry.materialSlotIndices.length * 3 !== geometry.indices.length ||
-		ranges.reduce((count, range) => count + range.indexCount, 0) !==
-			renderableIndexCount
-	) {
+
+	let renderableTriangleCount = 0;
+	for (const group of trianglesByBinding.values()) {
+		renderableTriangleCount += group.triangles.length;
+	}
+	const indices = new Uint32Array(renderableTriangleCount * 3);
+	const ranges: EnvCellShellMaterialRange[] = [];
+	let cursor = 0;
+	for (const group of trianglesByBinding.values()) {
+		const indexStart = cursor;
+		for (const triangle of group.triangles) {
+			indices[cursor] = geometry.indices[triangle * 3]!;
+			indices[cursor + 1] = geometry.indices[triangle * 3 + 1]!;
+			indices[cursor + 2] = geometry.indices[triangle * 3 + 2]!;
+			cursor += 3;
+		}
+		ranges.push({
+			indexStart,
+			indexCount: cursor - indexStart,
+			material: group.material,
+			ordering: group.ordering,
+		});
+	}
+	// The ranges must tile the compacted buffer exactly: no gap, no overlap, nothing left over.
+	if (cursor !== indices.length) {
 		throw new Error(
 			`EnvCell ${cell.id} shell material range accounting failed.`,
 		);
 	}
-	return ranges.map((range) => ({
-		indexStart: range.indexStart,
-		indexCount: range.indexCount,
-		material: range.material,
-		ordering: range.ordering,
-	}));
+	return { indices, ranges };
 }
 
 function resolveResident(
@@ -374,16 +408,23 @@ function assertCellIdentity(
 	}
 }
 
+/**
+ * Realize shell geometry against a caller-supplied index buffer.
+ *
+ * Vertex streams are shared with the authored source, but indices are not: shells upload a
+ * compacted, binding-major buffer that the authored order cannot express.
+ */
 function objectGeometry(
 	geometry: ResolvedGeometry,
 	bakedLight: Float32Array | null,
+	indices: Uint32Array,
 ): ObjectGeometryData {
 	return {
 		kind: "object",
 		positions: geometry.positions,
 		normals: geometry.normals,
 		textureCoordinates: geometry.textureCoordinates,
-		indices: geometry.indices,
+		indices,
 		bakedLight,
 	};
 }

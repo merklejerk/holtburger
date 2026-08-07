@@ -1,3 +1,4 @@
+import { sceneVec3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -216,8 +217,8 @@ describe("GameRuntime view and interest control", () => {
 			placement: {
 				envCellId: null,
 				landblockId: "0x2020ffff",
-				position: createLandblockWorldOrigin("0x2020ffff").add(
-					new Vec3(10, 40, -20),
+				position: sceneVec3(
+					createLandblockWorldOrigin("0x2020ffff").add(new Vec3(10, 40, -20)),
 				),
 				rotation: Quat.identity(),
 			},
@@ -296,7 +297,7 @@ describe("GameRuntime view and interest control", () => {
 				placement: {
 					envCellId: null,
 					landblockId: "0x2020ffff",
-					position: new Vec3(Number.NaN, 0, 0),
+					position: sceneVec3(new Vec3(Number.NaN, 0, 0)),
 					rotation: Quat.identity(),
 				},
 			}),

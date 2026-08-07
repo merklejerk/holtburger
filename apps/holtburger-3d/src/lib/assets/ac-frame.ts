@@ -113,6 +113,39 @@ export function sceneVector3(
 	return vector as SceneVector3;
 }
 
+declare const landblockSpace: unique symbol;
+
+/**
+ * A {@link Vec3}-shaped position in canonical scene space.
+ *
+ * The `Vector3` brands above are tuples, which suits assets, particles, and audio. Camera, matrix,
+ * and scene code works in `Vec3`, so these brand the same frames without changing representation:
+ * consumers keep reading `.x`/`.y`/`.z`, and only declarations and construction sites move.
+ *
+ * Reserved for **positions** in retained or cross-system contracts. A scale, a size, a direction, or
+ * a local maths parameter has no origin and no frame to get wrong, and stays a plain `Vec3`.
+ */
+export type SceneVec3 = Vec3 & { readonly [sceneSpace]: true };
+
+/** Assert that a `Vec3` is in canonical scene space. */
+export function sceneVec3(vector: Vec3): SceneVec3 {
+	return vector as SceneVec3;
+}
+
+/**
+ * A {@link Vec3}-shaped position in one landblock's local frame.
+ *
+ * Distinct from {@link SceneVec3} because the two are the same shape and are both called "light
+ * position" one file apart: baked interior lights are landblock-local while runtime lights are
+ * canonical. A landblock-local position is meaningless without the landblock it belongs to.
+ */
+export type LandblockVec3 = Vec3 & { readonly [landblockSpace]: true };
+
+/** Assert that a `Vec3` is in one landblock's local frame. */
+export function landblockVec3(vector: Vec3): LandblockVec3 {
+	return vector as LandblockVec3;
+}
+
 export function acFrameTransform(
 	input: AcFrame,
 	scale: readonly [number, number, number],

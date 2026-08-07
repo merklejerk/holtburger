@@ -2,6 +2,7 @@ import { createLandblockWorldOrigin } from "../landblocks";
 import { getMat4Translation } from "../math/matrices";
 import {
 	renderVector3,
+	sceneVec3,
 	sceneVector3,
 	type SceneVector3,
 } from "../../assets/ac-frame";
@@ -177,7 +178,7 @@ const DEFAULT_CAMERA: Camera = {
 	placement: {
 		envCellId: null,
 		landblockId: INVALID_ID,
-		position: Vec3.zero(),
+		position: sceneVec3(Vec3.zero()),
 		rotation: Quat.identity(),
 	},
 };
@@ -951,7 +952,7 @@ export class GameRuntime {
 			placement: {
 				envCellId: camera.placement.envCellId,
 				landblockId: camera.placement.landblockId,
-				position: new Vec3(position.x, position.y, position.z),
+				position: sceneVec3(new Vec3(position.x, position.y, position.z)),
 				rotation: new Quat(rotation.w, rotation.x, rotation.y, rotation.z),
 			},
 		};

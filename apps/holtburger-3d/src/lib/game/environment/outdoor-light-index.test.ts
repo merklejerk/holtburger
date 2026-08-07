@@ -1,3 +1,5 @@
+import { sceneVec3 } from "../../assets/ac-frame";
+import { Vec3 } from "../../game/math/types";
 import { describe, expect, it } from "vitest";
 import type { LandblockId } from "../game-types";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
@@ -19,11 +21,13 @@ function lightIn(
 	range = 20,
 ): RuntimeLight {
 	return {
-		position: {
-			x: x * OUTDOOR_LANDBLOCK_WORLD_SIZE + offsetX,
-			y: 0,
-			z: -y * OUTDOOR_LANDBLOCK_WORLD_SIZE + offsetZ,
-		},
+		position: sceneVec3(
+			new Vec3(
+				x * OUTDOOR_LANDBLOCK_WORLD_SIZE + offsetX,
+				0,
+				-y * OUTDOOR_LANDBLOCK_WORLD_SIZE + offsetZ,
+			),
+		),
 		color: { red: 1, green: 1, blue: 1 },
 		range,
 		intensity: 10,

@@ -1,3 +1,5 @@
+import { Vec3 } from "../../game/math/types";
+import { sceneVec3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import {
 	MAX_DYNAMIC_LIGHTS,
@@ -9,7 +11,7 @@ const ORIGIN = { x: 0, y: 0, z: 0 };
 
 function lightAt(x: number): RuntimeLight {
 	return {
-		position: { x, y: 0, z: 0 },
+		position: sceneVec3(new Vec3(x, 0, 0)),
 		color: { red: 1, green: 1, blue: 1 },
 		range: 10,
 		intensity: 1,
@@ -39,9 +41,12 @@ describe("selectNearestLights", () => {
 	it("ranks by true distance rather than by any single axis", () => {
 		const near: RuntimeLight = {
 			...lightAt(0),
-			position: { x: 3, y: 0, z: 0 },
+			position: sceneVec3(new Vec3(3, 0, 0)),
 		};
-		const far: RuntimeLight = { ...lightAt(0), position: { x: 0, y: 4, z: 4 } };
+		const far: RuntimeLight = {
+			...lightAt(0),
+			position: sceneVec3(new Vec3(0, 4, 4)),
+		};
 		const selected = selectNearestLights([far, near], ORIGIN, 1);
 		expect(selected.lights[0]).toBe(near);
 	});

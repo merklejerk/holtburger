@@ -1,3 +1,4 @@
+import { sceneVec3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { ScenePortalCrossingInput, SceneResidency, SceneScope } from ".";
@@ -178,10 +179,10 @@ describe("authoritative-anchor portal tracing", () => {
 
 		const result = scene.tracePortalSegment({
 			anchor: {
-				position: new Vec3(5, 1, -10),
+				position: sceneVec3(new Vec3(5, 1, -10)),
 				residency: { envCellId: null, landblockId: LANDBLOCK },
 			},
-			endpoint: new Vec3(15, 1, -10),
+			endpoint: sceneVec3(new Vec3(15, 1, -10)),
 		});
 
 		expect(result).toMatchObject({
@@ -192,10 +193,10 @@ describe("authoritative-anchor portal tracing", () => {
 		expect(
 			scene.tracePortalSegment({
 				anchor: {
-					position: new Vec3(15, 1, -10),
+					position: sceneVec3(new Vec3(15, 1, -10)),
 					residency: residency(CELL_ONE),
 				},
-				endpoint: new Vec3(5, 1, -10),
+				endpoint: sceneVec3(new Vec3(5, 1, -10)),
 			}),
 		).toMatchObject({
 			kind: "complete",
@@ -207,10 +208,10 @@ describe("authoritative-anchor portal tracing", () => {
 		const result = traceScenePortalSegment(
 			{
 				anchor: {
-					position: new Vec3(5, 1, -10),
+					position: sceneVec3(new Vec3(5, 1, -10)),
 					residency: residency(CELL_ONE),
 				},
-				endpoint: new Vec3(15, 1, -10),
+				endpoint: sceneVec3(new Vec3(15, 1, -10)),
 			},
 			topology([], [], undefined, false),
 		);
@@ -227,10 +228,10 @@ describe("authoritative-anchor portal tracing", () => {
 		const result = traceScenePortalSegment(
 			{
 				anchor: {
-					position: new Vec3(5, 1, -10),
+					position: sceneVec3(new Vec3(5, 1, -10)),
 					residency: residency(CELL_ONE),
 				},
-				endpoint: new Vec3(15, 1, -10),
+				endpoint: sceneVec3(new Vec3(15, 1, -10)),
 			},
 			{
 				isScopeAvailable: (scope) => sameScope(scope, CELL_ONE),
@@ -260,7 +261,10 @@ function trace(
 ) {
 	const scopes = [OUTDOOR, CELL_ONE, CELL_TWO, CELL_THREE];
 	return traceScenePortalSegment(
-		{ anchor: { position: start, residency: anchorResidency }, endpoint },
+		{
+			anchor: { position: sceneVec3(start), residency: anchorResidency },
+			endpoint: sceneVec3(endpoint),
+		},
 		topology(crossings, scopes, maximumCrossingCount),
 	);
 }

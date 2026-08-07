@@ -9,9 +9,12 @@ import type {
 } from "../behavior/behavior-event-router";
 import type { SceneNodeId } from "../scene";
 import type { ArticulatedPose } from "./components";
-import { EffectSystem, type EffectPresentationSample } from "./effect-system";
+import {
+	BEHAVIOR_STEP_SECONDS,
+	EffectSystem,
+	type EffectPresentationSample,
+} from "./effect-system";
 
-const BEHAVIOR_STEP_SECONDS = 1 / 30;
 const DISCONTINUITY_SECONDS = 2;
 /** Absorbs timestamp subtraction noise without admitting a materially early behavior step. */
 const CLOCK_EPSILON_SECONDS = 1e-9;
@@ -299,11 +302,7 @@ export class AnimationSystem<TOwnerId extends string> {
 					visualAdvance.framePosition,
 				),
 			},
-			effects: this.#effects.samplePresentation(
-				nodeId,
-				record.fractionalSeconds,
-				record.fractionalSeconds / BEHAVIOR_STEP_SECONDS,
-			),
+			effects: this.#effects.samplePresentation(nodeId),
 			nodeId,
 		};
 	}
@@ -337,7 +336,9 @@ export class AnimationSystem<TOwnerId extends string> {
 		record: AnimationRecord,
 		mode: "initial-state" | "live",
 	): void {
-		this.#effects.advanceSemanticStep(nodeId, BEHAVIOR_STEP_SECONDS);
+		// Live steps ride the shared effect clock. An initial-state replay does not: it is catching
+		// one new node up to its authored phase, which a global cadence cannot express.
+		if (mode === "initial-state") this.#effects.foldSemanticStep(nodeId);
 		const advance = advanceCyclicFrame(
 			record.framePosition,
 			record.animation.framesPerSecond * BEHAVIOR_STEP_SECONDS,

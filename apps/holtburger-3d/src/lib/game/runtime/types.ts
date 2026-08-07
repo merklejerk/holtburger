@@ -22,6 +22,17 @@ export interface CameraPlacement extends SceneResidency {
 	readonly rotation: Quat;
 }
 
+/**
+ * Where a frontend places the audio listener, in canonical scene space.
+ *
+ * Separate from {@link Camera} because the listener is not a camera: it has no projection, and a
+ * client may deliberately place it somewhere the camera is not.
+ */
+export interface AudioListenerPlacement {
+	readonly position: Vec3;
+	readonly rotation: Quat;
+}
+
 export interface Camera {
 	/** Vertical field of view in degrees. */
 	readonly fov: number;

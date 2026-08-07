@@ -122,6 +122,13 @@
 	 * two ways to reach the same resolution.
 	 */
 	let clockFollowing = $state(false);
+	/** Mirrors the camera coordinator's default so the switch reflects reality on first paint. */
+	let audioFollowsCamera = $state(true);
+
+	function updateAudioFollowsCamera(enabled: boolean): void {
+		audioFollowsCamera = enabled;
+		cameraCoordinator?.setAudioFollowsCamera(enabled);
+	}
 	let clockStartedAtMs = 0;
 	let clockTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -466,6 +473,8 @@
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			{clockFollowing}
+			{audioFollowsCamera}
+			{updateAudioFollowsCamera}
 			{updateClockFollowing}
 			{updateDistanceFog}
 			{updateViewerLight}

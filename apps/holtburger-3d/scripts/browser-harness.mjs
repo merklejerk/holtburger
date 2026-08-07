@@ -788,16 +788,12 @@ function briefHarnessReport(result) {
 				? null
 				: {
 						animation: authoredDynamics.animation,
+						audio: authoredDynamics.audio,
+						particles: authoredDynamics.particles,
 						dynamics: authoredDynamics.dynamics,
 						presentationCadence: authoredDynamics.presentationCadence,
-						effects: {
-							residentEffectStateCount:
-								authoredDynamics.effects.residentEffectStateCount,
-							deferredHookCount: authoredDynamics.effects.deferredHookCount,
-							executedHookCount: authoredDynamics.effects.executedHookCount,
-							recentObservationCount:
-								authoredDynamics.effects.observations.length,
-						},
+						effects: authoredDynamics.effects,
+						behavior: authoredDynamics.behavior,
 						residentCount: authoredDynamics.residents.length,
 					},
 		glRenderer: result.glRenderer,

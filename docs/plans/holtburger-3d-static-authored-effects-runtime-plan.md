@@ -1994,6 +1994,55 @@ exactly on the flame clusters, which also confirms those meshes really are axis-
 camera framing put them at a few pixels across, so orientation could not be judged visually. Close-up
 confirmation is outstanding.
 
+##### Silence diagnosed: the listener, not the triggers (finding 2026-08-07)
+
+Reported: no audio at all in the Explorer. Measured at DA55, radius 2, after exposing the audio
+counters through runtime diagnostics into the harness:
+
+```
+playedCount 0   inaudibleCount 137   lostProbabilityRollCount 0   deviceRefusedCount 0
+```
+
+So DA55 authors plenty of sound — **137 triggers in one capture** — the router dispatches them, and
+positions resolve. Every one then dies at `placeSpatialAudio` returning null. `inaudible` has exactly
+one cause: gain below retail's −50 dB floor, roughly 89 m. With `setListener` never called, the
+listener sat at its default `[0, 0, 0]`, so distance was measured from the **landblock corner** while
+a landblock is 192 m across. Almost nothing survived.
+
+That diagnosis was only possible after splitting `suppressedCount`, which spanned
+`lost-probability-roll` and `inaudible` — outcomes with nothing in common, one correct behaviour and
+one pointing at the listener — while `device-refused` incremented nothing at all and was invisible.
+One counter per outcome now.
+
+Landed: `GameRuntime.setAudioListener(placement)` takes a canonical-space pose, converts it to
+anchor-relative, and derives the listener's right hand from the rotation's first column. It is
+deliberately **not** derived from the primary camera inside the runtime. Where the ears belong is a
+client decision — a game client puts them on the player, the explorer flies a free camera — so the
+runtime owns the frame conversion and the retail spatial maths while the frontend owns the choice.
+`ExplorerCameraCoordinator` applies it alongside `setPrimaryCamera` behind an
+**Audio follows camera** switch in the World panel, defaulting on.
+
+Two further gaps found and deliberately **not** fixed yet, to avoid stacking untested fixes on an
+unverified one:
+
+- **`WebAudioDevice.playOneShot` skips the first trigger of every sound.** It returns null and starts
+  the decode when the buffer is absent (`web-audio-device.ts:40`). This is our own code and platform
+  independent, and `prepare()` already exists for exactly this — but is unreachable, because the
+  `AudioDevice` interface the runtime holds declares only `playOneShot`. Whether missing the first
+  play actually matters is untested, and adding an interface method with no caller is the same
+  unwired-capability smell as `setListener` was.
+- **The `AudioContext` is constructed at startup and never resumed.** Flagged initially as a likely
+  blocker; that was reasoning, not evidence. The harness runs headless Chrome while the Explorer runs
+  a Tauri WebKitGTK webview, whose autoplay policy differs, so the claim is untested on the surface
+  that matters. It is also moot for the current silence, since nothing reached the device at all.
+
+Discriminator for the next round: once the listener is wired, `playedCount > 0` with audible silence
+means the context is suspended, while `deviceRefusedCount > 0` means undecoded buffers.
+
+Incidentally fixed: `--brief` had been throwing on every invocation, referencing
+`effects.observations`, `deferredHookCount` and `executedHookCount`, none of which have existed since
+the effect system was reshaped. It now forwards the real shapes plus audio and particle counters.
+
 #### Acceptance Criteria
 
 - Representative authored scripts, particles, and sounds execute with proven timing and ownership.

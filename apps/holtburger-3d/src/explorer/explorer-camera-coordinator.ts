@@ -67,6 +67,8 @@ export interface ExplorerCameraResidencySync {
  */
 export class ExplorerCameraCoordinator {
 	readonly #runtime: GameRuntime;
+	/** Explorer default: the free camera carries the ears, which is what a viewer expects. */
+	#audioFollowsCamera = true;
 	readonly #controller: FreeFlyCameraController;
 	readonly #onStatus: (status: ExplorerCameraFocusStatus) => void;
 	readonly #unsubscribeAvailability: () => void;
@@ -148,7 +150,7 @@ export class ExplorerCameraCoordinator {
 		if (resolution.kind === "resolved") {
 			this.#lastResolutionIssue = null;
 			this.#lastResidency = resolution.residency;
-			this.#runtime.setPrimaryCamera(createCamera(resolution.residency, state));
+			this.#applyCamera(createCamera(resolution.residency, state));
 			return { location, renderable: true };
 		}
 		if (resolution.kind === "ambiguous") {
@@ -173,10 +175,29 @@ export class ExplorerCameraCoordinator {
 					candidate.landblockId === lastResidency.landblockId,
 			)
 		) {
-			this.#runtime.setPrimaryCamera(createCamera(lastResidency, state));
+			this.#applyCamera(createCamera(lastResidency, state));
 			return { location, renderable: true };
 		}
 		return { location, renderable: false };
+	}
+
+	/**
+	 * Choose whether the audio listener rides the explorer's free camera.
+	 *
+	 * Explorer-local policy on purpose. The runtime owns the spatial maths but not the question of
+	 * where the ears belong, and a free-fly camera is not obviously the right answer: a game client
+	 * would put them on the player instead. Off leaves the listener wherever it last was, which is
+	 * the scene origin until something moves it.
+	 */
+	setAudioFollowsCamera(follows: boolean): void {
+		this.#audioFollowsCamera = follows;
+	}
+
+	#applyCamera(camera: Camera): void {
+		this.#runtime.setPrimaryCamera(camera);
+		if (this.#audioFollowsCamera) {
+			this.#runtime.setAudioListener(camera.placement);
+		}
 	}
 
 	dispose(): void {

@@ -404,6 +404,14 @@ export class GameRuntime {
 		]);
 	}
 
+	/** Scene-frame origin of this frame's render anchor, which is the camera's landblock. */
+	#renderAnchorOrigin(): StableVector3 {
+		const anchor = createLandblockWorldOrigin(
+			this.#camera.placement.landblockId,
+		);
+		return stableVector3([anchor.x, anchor.y, anchor.z]);
+	}
+
 	/**
 	 * Re-express a stable origin relative to this frame's render anchor.
 	 *
@@ -412,13 +420,11 @@ export class GameRuntime {
 	 * which is the whole reason the renderer works anchor-relative rather than in scene coordinates.
 	 */
 	#toRenderSpace(origin: StableVector3): RenderVector3 {
-		const anchor = createLandblockWorldOrigin(
-			this.#camera.placement.landblockId,
-		);
+		const anchor = this.#renderAnchorOrigin();
 		return renderVector3([
-			origin[0] - anchor.x,
-			origin[1] - anchor.y,
-			origin[2] - anchor.z,
+			origin[0] - anchor[0],
+			origin[1] - anchor[1],
+			origin[2] - anchor[2],
 		]);
 	}
 
@@ -668,7 +674,7 @@ export class GameRuntime {
 			resolveEmitter: (emitterInfoId) =>
 				this.#particleEmitters.getReady(emitterInfoId),
 			stableOriginOf: (target) => this.#stableOriginOf(target),
-			toRenderSpace: (origin) => this.#toRenderSpace(origin),
+			renderAnchorOrigin: () => this.#renderAnchorOrigin(),
 			roll: Math.random,
 		});
 		this.#dynamics = new DynamicEntitySystem(

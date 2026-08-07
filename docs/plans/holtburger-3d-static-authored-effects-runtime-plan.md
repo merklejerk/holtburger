@@ -1861,11 +1861,26 @@ Landed:
 The audio path was checked and is clean: `trigger` resolves pan and gain once from the position and
 listener in the same instant, both in the same frame, then plays a fixed one-shot. Nothing persists.
 
-Concession: `collectCohorts` now allocates one tuple per particle per frame for the converted origin.
-It joins the already-recorded debt on reusing per-particle cohort records, which allocate a fresh
-object per particle per frame today regardless. Doing the conversion allocation-free means pushing
-the anchor into `writeParticleInstance`, which is a renderer contract change this finding does not
-justify on its own.
+The first version of this conversion allocated per particle per frame — in fact twice, since the
+following case also rebuilt its offset origin inside the inner loop. That was rejected on review as
+too heavy for a renderer hot path, correctly. The landed version allocates nothing in the steady
+state:
+
+- The render anchor is one value for the whole frame, so it is read once per `collectCohorts` call
+  rather than once per particle.
+- A following emitter's origin is constant per emitter per frame, so `followingOrigin` resolves it
+  once outside the per-particle loop. Only frozen origins vary per particle.
+- Anchored origins are handed out from a pool that grows to the peak particle count and is then
+  reused every frame, so the per-particle work is three subtractions into existing storage.
+
+The pool makes `collectCohorts` output explicitly borrowed: cohorts, their record arrays, and the
+`origin` vectors within them are valid only until the next call. That matches the single consumer,
+which uploads them the same frame, and is now stated on the method. A test asserts pooled identity
+rather than equality, because a fresh vector per particle would still compare equal and would
+silently reintroduce exactly the churn the pool removes.
+
+Pushing the anchor into `writeParticleInstance` instead was considered and not taken: it would move
+frame knowledge into the renderer's buffer writer for no additional saving now that the pool exists.
 
 Verification limit worth recording: **particle rendering is not reproducible in the harness.** Spawn
 randomness is `Math.random` at the runtime level with no seed, so two runs of an identical build

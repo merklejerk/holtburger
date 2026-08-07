@@ -70,7 +70,7 @@ const runtime = (
 	new ParticleSystem({
 		clock: () => 0,
 		stableOriginOf: () => ORIGIN,
-		toRenderSpace: (origin) => renderVector3([origin[0], origin[1], origin[2]]),
+		renderAnchorOrigin: () => stableVector3([0, 0, 0]),
 		resolveEmitter: () => null,
 		roll: () => 0.5,
 		...overrides,
@@ -492,10 +492,9 @@ describe("ParticleSystem", () => {
 	it("keeps left-behind particles in place when the render anchor moves", () => {
 		// Origins arrive anchor-relative, so crossing a landblock boundary shifts every origin by
 		// the anchor delta without anything in the world actually moving.
-		let anchorOffset = 0;
+		let anchorX = 0;
 		const particles = runtime({
-			toRenderSpace: (origin) =>
-				renderVector3([origin[0] + anchorOffset, origin[1], origin[2]]),
+			renderAnchorOrigin: () => stableVector3([anchorX, 0, 0]),
 		});
 		particles.create(
 			TARGET,
@@ -506,11 +505,12 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const before = particles.collectCohorts()[0]!.particles[0]!.origin;
+		// Copied because origins are pooled storage that the next collect overwrites in place.
+		const before = [...particles.collectCohorts()[0]!.particles[0]!.origin];
 		expect(before).toEqual([0, 0, 0]);
 
 		// The camera crosses one landblock; the emitter has not moved.
-		anchorOffset = -192;
+		anchorX = 192;
 
 		const after = particles.collectCohorts()[0]!.particles[0]!.origin;
 		expect(after).toEqual([-192, 0, 0]);
@@ -530,6 +530,31 @@ describe("ParticleSystem", () => {
 
 		const record = particles.collectCohorts()[0]!.particles[0]!;
 		expect(record.origin).toEqual([5, 0, 0]);
+	});
+
+	it("reuses anchored origin storage instead of allocating per particle per frame", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 2 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const first = particles
+			.collectCohorts()[0]!
+			.particles.map(({ origin }) => origin);
+		const second = particles
+			.collectCohorts()[0]!
+			.particles.map(({ origin }) => origin);
+
+		// Identity, not equality: a fresh vector per particle per frame is the GC churn the pool
+		// exists to avoid, and it would still compare equal.
+		expect(second[0]).toBe(first[0]);
+		expect(second[1]).toBe(first[1]);
+		expect(first[0]).not.toBe(first[1]);
 	});
 
 	it("emits no instance records for a culled emitter", () => {

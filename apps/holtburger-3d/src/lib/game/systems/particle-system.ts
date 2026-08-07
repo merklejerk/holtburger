@@ -29,8 +29,13 @@ export interface ParticleSystemDependencies {
 	 * Stable rather than anchor-relative because particle origins are retained across frames.
 	 */
 	readonly stableOriginOf: (target: BehaviorTarget) => StableVector3 | null;
-	/** Re-express a retained origin in the anchor-relative frame this frame draws in. */
-	readonly toRenderSpace: (origin: StableVector3) => RenderVector3;
+	/**
+	 * Scene-frame origin of the current render anchor, subtracted to reach anchor-relative space.
+	 *
+	 * Exposed as the anchor rather than as a conversion function so the subtraction can be hoisted
+	 * out of the per-particle loop and written into pooled storage.
+	 */
+	readonly renderAnchorOrigin: () => StableVector3;
 	/** Current runtime clock, needed because commands arrive mid-dispatch. */
 	readonly clock: () => number;
 }
@@ -48,18 +53,29 @@ function offsetOrigin(
 }
 
 /**
- * Resolve where one particle's motion formula originates, in the fixed scene frame.
+ * Origin every particle of a following emitter shares this frame.
  *
- * Total by construction, and the only place the follow/leave distinction is read. A frozen origin
- * already carries the hook offset from spawn; a following emitter's is applied here, so neither
- * kind can lose it.
+ * Constant per emitter per frame, so it resolves once outside the per-particle loop. Frozen
+ * particles already carry the hook offset from spawn; this applies it for the following case, so
+ * neither kind can lose it.
  */
-function resolveStableOrigin(
+function followingOrigin(
 	instance: EmitterInstance,
-	particle: LiveParticle,
 	liveOrigin: StableVector3,
 ): StableVector3 {
-	return particle.frozenOrigin ?? offsetOrigin(liveOrigin, instance.hookOffset);
+	return offsetOrigin(liveOrigin, instance.hookOffset);
+}
+
+/**
+ * Resolve where one particle's motion formula originates, in the fixed scene frame.
+ *
+ * Total by construction, and the only place the follow/leave distinction is read.
+ */
+function resolveStableOrigin(
+	particle: LiveParticle,
+	followingOriginForFrame: StableVector3,
+): StableVector3 {
+	return particle.frozenOrigin ?? followingOriginForFrame;
 }
 
 /** Retail's roll shape: `RollDice(-1, 1) * rand + base` — additive, never multiplicative. */
@@ -142,6 +158,15 @@ export class ParticleSystem {
 	/** Reused across frames so cohort grouping does not allocate in the renderer's hot path. */
 	readonly #cohortScratch = new Map<string, ParticleDrawCohort>();
 	readonly #cohortScratchOutput: ParticleDrawCohort[] = [];
+	/**
+	 * Reused anchored-origin storage, one entry per particle drawn.
+	 *
+	 * `collectCohorts` runs every frame over every live particle, so allocating a vector per
+	 * particle would be pure GC churn in the renderer's hot path. Entries are handed out by index
+	 * and are valid only until the next call, which is exactly the lifetime of the cohorts.
+	 */
+	readonly #anchoredOrigins: [number, number, number][] = [];
+	#anchoredOriginsUsed = 0;
 	#emittedTotal = 0;
 	#reapedEmitterCount = 0;
 
@@ -302,6 +327,10 @@ export class ParticleSystem {
 	 *
 	 * `isVisible` culls at emitter granularity, never per particle, so a culled emitter contributes
 	 * no instance records at all that frame.
+	 *
+	 * The returned cohorts, their record arrays, and the `origin` vectors inside them are all reused
+	 * storage owned by this system. They are valid until the next call and must be consumed, not
+	 * retained — which matches the one consumer, the particle pass, uploading them the same frame.
 	 */
 	collectCohorts(
 		isVisible: (target: BehaviorTarget) => boolean = () => true,
@@ -310,6 +339,9 @@ export class ParticleSystem {
 		// rebuilt. Reusing those too is recorded as measured debt rather than guessed at.
 		const cohorts = this.#cohortScratch;
 		for (const cohort of cohorts.values()) cohort.particles.length = 0;
+		// The anchor is one value for the whole frame, so it is read once rather than per particle.
+		const anchor = this.#dependencies.renderAnchorOrigin();
+		this.#anchoredOriginsUsed = 0;
 		for (const instance of this.#instances) {
 			const info = instance.emitter.info;
 			// An unshipped motion type has no formula in either evaluator; drawing it motionless
@@ -318,6 +350,7 @@ export class ParticleSystem {
 			if (!isVisible(instance.target)) continue;
 			const liveOrigin = this.#dependencies.stableOriginOf(instance.target);
 			if (liveOrigin === null) continue;
+			const following = followingOrigin(instance, liveOrigin);
 			const key = `${info.hwGfxObjId}:${info.motionType}`;
 			let cohort = cohorts.get(key);
 			if (!cohort) {
@@ -338,8 +371,9 @@ export class ParticleSystem {
 					finalTranslucency: particle.spawn.finalTranslucency,
 					lifespan: particle.spawn.lifespan,
 					offset: particle.spawn.offset,
-					origin: this.#dependencies.toRenderSpace(
-						resolveStableOrigin(instance, particle, liveOrigin),
+					origin: this.#anchoredOrigin(
+						resolveStableOrigin(particle, following),
+						anchor,
 					),
 					startScale: particle.spawn.startScale,
 					startTranslucency: particle.spawn.startTranslucency,
@@ -362,15 +396,21 @@ export class ParticleSystem {
 	 */
 	sample(timeSeconds: number): ParticleSample[] {
 		const samples: ParticleSample[] = [];
+		const anchor = this.#dependencies.renderAnchorOrigin();
 		for (const instance of this.#instances) {
 			const liveOrigin = this.#dependencies.stableOriginOf(instance.target);
 			if (liveOrigin === null) continue;
 			const motionType = instance.emitter.info.motionType;
 			if (motionType === null) continue;
+			const following = followingOrigin(instance, liveOrigin);
 			for (const particle of instance.particles) {
-				const origin = this.#dependencies.toRenderSpace(
-					resolveStableOrigin(instance, particle, liveOrigin),
-				);
+				const stable = resolveStableOrigin(particle, following);
+				// The reference evaluator is not a draw path, so it may allocate.
+				const origin = renderVector3([
+					stable[0] - anchor[0],
+					stable[1] - anchor[1],
+					stable[2] - anchor[2],
+				]);
 				const elapsed = timeSeconds - particle.birthTime;
 				const position = particlePosition(
 					motionType,
@@ -506,6 +546,18 @@ export class ParticleSystem {
 			return;
 		}
 		this.#emit(instance, timeSeconds, parentOrigin);
+	}
+
+	/** Hand out the next pooled anchored origin, growing the pool only as the peak load grows. */
+	#anchoredOrigin(origin: StableVector3, anchor: StableVector3): RenderVector3 {
+		const target = (this.#anchoredOrigins[this.#anchoredOriginsUsed] ??= [
+			0, 0, 0,
+		]);
+		this.#anchoredOriginsUsed += 1;
+		target[0] = origin[0] - anchor[0];
+		target[1] = origin[1] - anchor[1];
+		target[2] = origin[2] - anchor[2];
+		return renderVector3(target);
 	}
 
 	#emit(

@@ -5,8 +5,8 @@
 //! reader (`UnpackableExtensions.cs:122-135`): a `u16` entry count, a `u16` bucket size we ignore,
 //! then `key, value` pairs.
 //!
-//! Selection semantics are retail's, and one of them is a genuine shipped bug — see
-//! [`SoundTableEntry::select`].
+//! Selection deliberately diverges from retail, which has a shipped off-by-one that strands the
+//! last candidate of every list — see [`SoundTableEntry::select`].
 
 use binrw::{
     BinRead, BinResult,
@@ -34,21 +34,30 @@ pub struct SoundTableEntry {
 }
 
 impl SoundTableEntry {
-    /// Choose a candidate for a uniform roll in [0, 1), reproducing retail's selection.
+    /// Choose a candidate for a uniform roll in [0, 1).
     ///
-    /// **Retail never selects the last candidate.** The index is `floor((n - 1) * roll)`
-    /// (acclient.c:366752-366756), so with three candidates a roll approaching 1 still yields
-    /// index 1. This is a shipped bug rather than a design, but authored content was balanced
-    /// against it and the last entry of every multi-candidate list is effectively dead. Reproduced
-    /// deliberately: "fixing" it would make sounds audible that no player has ever heard. The
-    /// 2026-08-06 archive census found exactly one key authoring more than one candidate, so this
-    /// reaches a single sound in the whole game.
+    /// **Deliberately diverges from retail, which can never select the last candidate.** Retail
+    /// computes `floor((n - 1) * roll)` (acclient.c:366752-366756) where `roll` comes from
+    /// `Random::RollDice(0.0, 1.0)`, and `Random::rand` clamps its result to `0.99999988`
+    /// (acclient.c:101613-101615). One is therefore unreachable, `(n - 1) * roll` never reaches
+    /// `n - 1`, and the final candidate of every multi-candidate list is dead.
+    ///
+    /// Treated as an off-by-one rather than a design. The `-1` is the inclusive-bound convention of
+    /// the *integer* `RollDice` overload applied to a float scale that does not need it, and
+    /// retail's own bounds check on the next line admits `v5 < num_stdatas`, permitting an index the
+    /// expression cannot produce — the guard was written for `n * roll`.
+    ///
+    /// Not reproducing it is safe: an archive census found 4,183 of 4,184 keys author exactly one
+    /// candidate, so the divergence reaches a single entry in the whole game, where one of two
+    /// sounds becomes reachable rather than dead.
     pub fn select(&self, roll: f32) -> Option<SoundCandidate> {
         if self.candidates.len() <= 1 {
             return self.candidates.first().copied();
         }
-        let index = (((self.candidates.len() - 1) as f32) * roll.clamp(0.0, 1.0)) as usize;
-        self.candidates.get(index).copied()
+        let index = ((self.candidates.len() as f32) * roll.clamp(0.0, 1.0)) as usize;
+        self.candidates
+            .get(index.min(self.candidates.len() - 1))
+            .copied()
     }
 }
 
@@ -158,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn reproduces_retails_never_select_the_last_candidate_bug() {
+    fn reaches_every_candidate_including_the_one_retail_cannot() {
         let make = |sound_id| SoundCandidate {
             priority: 0.0,
             probability: 1.0,
@@ -169,15 +178,14 @@ mod tests {
             candidates: vec![make(1), make(2), make(3)],
         };
 
-        // floor(2 * roll) never reaches index 2, so sound 3 is unreachable by design-accident.
+        // Retail's `floor((n - 1) * roll)` caps at index 1 and strands sound 3; `floor(n * roll)`
+        // divides the roll into equal thirds.
         assert_eq!(entry.select(0.0).unwrap().sound_id, 1);
         assert_eq!(entry.select(0.5).unwrap().sound_id, 2);
-        assert_eq!(entry.select(0.999).unwrap().sound_id, 2);
-        assert!(
-            !(0..1000)
-                .map(|step| entry.select(step as f32 / 1000.0).unwrap().sound_id)
-                .any(|sound_id| sound_id == 3)
-        );
+        assert_eq!(entry.select(0.999).unwrap().sound_id, 3);
+        // A roll of exactly 1 is unreachable from `Random::rand`, but the clamp must not index off
+        // the end if a caller supplies one.
+        assert_eq!(entry.select(1.0).unwrap().sound_id, 3);
     }
 
     #[test]

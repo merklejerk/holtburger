@@ -64,13 +64,16 @@ describe("selectSoundCandidate", () => {
 		expect(selectSoundCandidate(only, 0.999)).toBe(only[0]);
 	});
 
-	it("reproduces retail's never-select-the-last-candidate bug", () => {
+	it("reaches the last candidate, which retail's own formula strands", () => {
 		const candidates = [candidate("0x0a000001"), candidate("0x0a000002")];
 
-		// floor(1 * roll) never reaches index 1, so the second sound is unreachable.
-		for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
-			expect(selectSoundCandidate(candidates, roll)).toBe(candidates[0]);
-		}
+		// Retail's floor((n - 1) * roll) never reaches index 1. floor(n * roll) splits the roll.
+		expect(selectSoundCandidate(candidates, 0)).toBe(candidates[0]);
+		expect(selectSoundCandidate(candidates, 0.25)).toBe(candidates[0]);
+		expect(selectSoundCandidate(candidates, 0.5)).toBe(candidates[1]);
+		expect(selectSoundCandidate(candidates, 0.999)).toBe(candidates[1]);
+		// Unreachable from `Random::rand`, but it must not index past the end.
+		expect(selectSoundCandidate(candidates, 1)).toBe(candidates[1]);
 	});
 
 	it("reports an empty candidate list rather than inventing a sound", () => {

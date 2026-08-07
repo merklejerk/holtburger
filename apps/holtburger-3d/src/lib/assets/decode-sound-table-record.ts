@@ -91,12 +91,20 @@ export function decodeSoundTableRecord(
 }
 
 /**
- * Choose a candidate for a uniform roll, reproducing retail's selection.
+ * Choose a candidate for a uniform roll.
  *
- * **Retail never selects the last candidate:** the index is `floor((n - 1) * roll)`
- * (acclient.c:366752-366756). Reproduced deliberately, because authored content was balanced
- * against it. The 2026-08-06 archive census found exactly one key in the whole game authoring more
- * than one candidate, so this reaches a single sound.
+ * **Deliberately diverges from retail, which can never select the last candidate.** Retail computes
+ * `floor((n - 1) * roll)` (acclient.c:366752-366756), and its `Random::rand` clamps to `0.99999988`
+ * (acclient.c:101613-101615), so `(n - 1) * roll` never reaches `n - 1` and the final candidate of
+ * every multi-candidate list is dead.
+ *
+ * Treated as an off-by-one rather than a design: the `-1` is the inclusive-bound convention of the
+ * *integer* `RollDice` overload applied to a float scale that does not need it, and retail's own
+ * bounds check on the next line admits `v5 < num_stdatas` — an index the expression cannot produce,
+ * so the guard was written for `n * roll`.
+ *
+ * Safe to diverge: an archive census found 4,183 of 4,184 keys author exactly one candidate, where
+ * both formulas agree. This reaches a single entry in the whole game.
  */
 export function selectSoundCandidate(
 	candidates: readonly SoundCandidate[],
@@ -104,8 +112,7 @@ export function selectSoundCandidate(
 ): SoundCandidate | null {
 	if (candidates.length === 0) return null;
 	if (candidates.length === 1) return candidates[0]!;
-	const index = Math.floor(
-		(candidates.length - 1) * Math.min(Math.max(roll, 0), 1),
-	);
-	return candidates[index] ?? null;
+	const index = Math.floor(candidates.length * Math.min(Math.max(roll, 0), 1));
+	// A roll of exactly 1 cannot come from `Random::rand`, but must not index off the end here.
+	return candidates[Math.min(index, candidates.length - 1)] ?? null;
 }

@@ -2252,6 +2252,34 @@ hook dispatch consume prepared commands only.
 Retain current static presentation until every required behavior/effect dependency is ready, then
 swap atomically. Failure leaves the valid static presentation visible with diagnostics.
 
+##### Reversed: no longer reproducing the never-select-the-last-candidate bug (2026-08-07)
+
+Sound-table selection originally reproduced retail's `floor((n - 1) * roll)`
+(acclient.c:366752-366756) on the reasoning that authored content was balanced against it. Reversed
+on review, after establishing the bug is unambiguous rather than probable:
+
+- `Random::rand` **clamps its result to `0.99999988`** (acclient.c:101613-101615), the classic
+  `ran2` `1 - EPS`. One is unreachable, so `(n - 1) * roll` never reaches `n - 1` and the final
+  candidate of every multi-candidate list is dead rather than merely unlikely.
+- Retail's own bounds check on the very next line admits `v5 < num_stdatas`, permitting an index the
+  expression cannot produce. The guard was written for `n * roll`; the `-1` is the inclusive-bound
+  convention of the **integer** `RollDice` overload applied to a float scale that does not need it.
+
+Blast radius measured before changing anything: of 4,184 authored sound-table keys, **4,183 carry
+exactly one candidate**, where both formulas agree. Exactly one entry in the entire archive is
+affected, and there the change makes a stranded sound reachable rather than altering a balance.
+
+Fixed in both evaluators, Rust and TypeScript, each carrying the full reasoning at the call site so
+the divergence is not silently "corrected" back toward retail later. The tests that pinned the bug as
+an invariant now pin reachability instead, including the `roll === 1` clamp, which `Random::rand`
+cannot produce but a caller could supply.
+
+This is the plan's first deliberate divergence from retail behaviour. Earlier quirks — `Explode`
+multiplying every axis by `a.x`, `Swarm`'s asymmetric sine, `SoundTweaked`'s field order, `birthrate`
+as a minimum interval with no catch-up — are all reproduced, because in each case content was
+demonstrably tuned against the behaviour. The distinguishing test is whether authored content can
+observe the difference: here, one entry can, and only to gain a sound no player has heard.
+
 ## Addendum: Phase 9 — Region-Driven Ambient Audio
 
 Added after the plan's original scope was met. Ambient audio was deliberately excluded throughout,

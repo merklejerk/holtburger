@@ -2868,8 +2868,27 @@ Acceptance: an implode emitter on a rotated owner produces a `c` consistent with
 - 9.1(a) or 9.1(b)? Recommendation is (a); it needs a look at whether the authored rotation
   survives to the layer that builds `AuthoredDynamicSource`, which currently exposes only a
   render-space `ScenePlacement`.
-- Does any shipped emitter actually name a part (`part_index != -1`)? A census decides whether the
-  part-frame case is real work or a documented gap.
+### Remaining gap — part-attached emitters
+
+**Answered, and it is a real gap rather than a hypothetical one.** `CreateParticle` decodes
+`partIndex`, and `decode-behavior-hook.ts` even documents `-1` as the whole-object sentinel, so the
+schema admits part attachment. The field is then **dropped**: `ParticleSystem.createEmitter` accepts
+only `emitterId`, `emitterInfoId` and `offsetOrigin`, and every emitter targets the entity root.
+
+Consequences, both of which predate this phase:
+
+- The spawn origin is the object's, not the part's, so a part-attached emitter has always been in the
+  wrong place on an articulated owner.
+- `sceneRotationOf` now reads the object's rotation for it too, so Phase 9 gives it the wrong *frame*
+  as well. Retail uses the part's frame when `part_index != -1` (`Particle::Init`, acclient.c:317791).
+
+It is also a decoded field with no consumer, which is the shape this project treats as a defect on
+its own.
+
+What is still unknown is how much shipped content authors a non-`-1` `partIndex`. That census sizes
+the work and has not been run; until it is, the honest statement is that the case is unimplemented,
+not that it is absent. Fixing it means threading `partIndex` to a part node id and targeting that
+node, at which point both the origin and the frame follow for free.
 
 ## Addendum: Phase 10 — Region-Driven Ambient Audio
 

@@ -1,3 +1,4 @@
+import type { StableVector3 } from "../../assets/ac-frame";
 import type { Quat, Vec3 } from "../math/types";
 import type { SceneResidency } from "../scene";
 
@@ -29,7 +30,15 @@ export interface CameraPlacement extends SceneResidency {
  * client may deliberately place it somewhere the camera is not.
  */
 export interface AudioListenerPlacement {
-	readonly position: Vec3;
+	/**
+	 * Listener position in the fixed scene frame.
+	 *
+	 * Branded rather than a bare {@link Vec3} so the frontend states the frame at the boundary it
+	 * owns. The runtime cannot check the claim, and asserting it on the runtime's side would be the
+	 * frame erasure this brand exists to prevent.
+	 */
+	readonly position: StableVector3;
+	/** Listener-to-world orientation; its local +X is the right hand panning projects onto. */
 	readonly rotation: Quat;
 }
 

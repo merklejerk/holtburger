@@ -340,20 +340,25 @@ export type RendererGpuFrameProfile =
 			readonly pendingFrameCount: number;
 	  }
 	| {
-			/** GPU timestamp span covering blended object commands. */
+			/** GPU elapsed-time span covering blended object commands. */
 			readonly blendedMs: number;
 			/** Renderer frame identifier associated with this delayed result. */
 			readonly frameNumber: number;
 			readonly kind: "available";
-			/** GPU timestamp span covering opaque object commands. */
+			/** GPU elapsed-time span covering opaque object commands. */
 			readonly opaqueMs: number;
-			/** GPU command span outside the named phases. */
-			readonly otherMs: number;
-			/** Submitted GPU frames whose timestamp results are not yet readable. */
+			/** Submitted GPU frames whose timing results are not yet readable. */
 			readonly pendingFrameCount: number;
-			/** GPU timestamp span covering terrain commands. */
+			/** GPU elapsed-time span covering terrain commands. */
 			readonly terrainMs: number;
-			/** GPU timestamp span from the first to last command in the frame. */
+			/**
+			 * Sum of the measured phase spans, **not** wall-clock across the frame.
+			 *
+			 * Elapsed-time queries cannot nest, so no query can wrap the frame while phase queries
+			 * run inside it, and GPU work between phases is unmeasurable. There is deliberately no
+			 * `otherMs`: reporting an unmeasured gap as zero would read as "no unattributed work"
+			 * rather than "not measured".
+			 */
 			readonly totalMs: number;
 	  };
 

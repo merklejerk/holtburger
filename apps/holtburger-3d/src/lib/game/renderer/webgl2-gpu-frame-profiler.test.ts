@@ -22,7 +22,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 		expect(profiler.getProfile()).toEqual({ kind: "unsupported" });
 	});
 
-	it("polls delayed timestamps and aggregates repeated pass intervals", () => {
+	it("polls delayed results and aggregates repeated pass intervals", () => {
 		const harness = createGpuHarness(true);
 		const profiler = new WebGL2GpuFrameProfiler(harness.gl);
 		const frame = profiler.beginFrame(7);
@@ -45,12 +45,45 @@ describe("WebGL2GpuFrameProfiler", () => {
 			frameNumber: 7,
 			kind: "available",
 			opaqueMs: 1,
-			otherMs: 4,
 			pendingFrameCount: 0,
+			// Two terrain phases at 1 ms each aggregate; total is their sum, since elapsed queries
+			// cannot nest and no query spans the frame.
 			terrainMs: 2,
-			totalMs: 7,
+			totalMs: 3,
 		});
-		expect(harness.deleteQuery).toHaveBeenCalledTimes(8);
+		// One query per phase, where the timestamp profiler needed a pair plus a frame pair.
+		expect(harness.deleteQuery).toHaveBeenCalledTimes(3);
+	});
+
+	it("refuses to nest elapsed queries, which WebGL permits only one of", () => {
+		const harness = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(harness.gl);
+		const frame = profiler.beginFrame(1);
+		if (!frame)
+			throw new Error("Supported timer queries did not begin a frame.");
+		frame.beginPhase("terrain");
+
+		// The single-active-query constraint is why there is no frame-wide span; a caller that
+		// opens overlapping phases must fail rather than silently mismeasure.
+		expect(() => frame.beginPhase("opaque")).toThrow("cannot nest");
+	});
+
+	it("drops a frame that measured no phase instead of stalling the backlog", () => {
+		const harness = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(harness.gl);
+		const frame = profiler.beginFrame(1);
+		if (!frame)
+			throw new Error("Supported timer queries did not begin a frame.");
+		frame.finish();
+
+		profiler.poll();
+
+		// Nothing was measured, so there is no result to wait for and no query to delete.
+		expect(profiler.getProfile()).toEqual({
+			kind: "pending",
+			pendingFrameCount: 0,
+		});
+		expect(harness.deleteQuery).not.toHaveBeenCalled();
 	});
 
 	it("discards every pending frame when the GPU clock becomes disjoint", () => {
@@ -59,6 +92,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 		for (const frameNumber of [1, 2]) {
 			const frame = profiler.beginFrame(frameNumber);
 			if (!frame) throw new Error("Supported timer queries lost a frame.");
+			frame.beginPhase("opaque").finish();
 			frame.finish();
 		}
 
@@ -68,7 +102,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 			kind: "disjoint",
 			pendingFrameCount: 0,
 		});
-		expect(harness.deleteQuery).toHaveBeenCalledTimes(4);
+		expect(harness.deleteQuery).toHaveBeenCalledTimes(2);
 	});
 
 	it("bounds pending frames and tears down every retained query", () => {
@@ -77,12 +111,13 @@ describe("WebGL2GpuFrameProfiler", () => {
 		for (const frameNumber of [1, 2, 3, 4]) {
 			const frame = profiler.beginFrame(frameNumber);
 			if (!frame) throw new Error("Pending GPU capacity rejected too early.");
+			frame.beginPhase("opaque").finish();
 			frame.finish();
 		}
 
 		expect(profiler.beginFrame(5)).toBeNull();
 		profiler.destroy();
-		expect(harness.deleteQuery).toHaveBeenCalledTimes(8);
+		expect(harness.deleteQuery).toHaveBeenCalledTimes(4);
 	});
 });
 
@@ -174,7 +209,7 @@ function contributionMetrics(staticObjectPreparationCount: number) {
 
 function createGpuHarness(
 	supported: boolean,
-	timestampBits = 64,
+	elapsedBits = 64,
 ): {
 	readonly createQuery: ReturnType<typeof vi.fn>;
 	readonly deleteQuery: ReturnType<typeof vi.fn>;
@@ -182,35 +217,42 @@ function createGpuHarness(
 	readonly gl: WebGL2RenderingContext;
 	resultsAvailable: boolean;
 } {
-	const timestamps = new Map<WebGLQuery, number>();
-	let nextTimestamp = 0;
+	// Each elapsed query resolves to a fixed 1 ms, so a phase opened twice in one frame aggregates
+	// to 2 ms and the arithmetic under test stays obvious.
+	const elapsed = new Map<WebGLQuery, number>();
 	const state = {
 		disjoint: false,
 		resultsAvailable: false,
 	};
+	let active: WebGLQuery | null = null;
 	const createQuery = vi.fn(() => ({}) as WebGLQuery);
 	const deleteQuery = vi.fn();
 	const extension = supported
 		? {
 				GPU_DISJOINT_EXT: 0x8fbb,
 				QUERY_COUNTER_BITS_EXT: 0x8864,
-				TIMESTAMP_EXT: 0x8e28,
-				queryCounterEXT: (query: WebGLQuery) => {
-					timestamps.set(query, nextTimestamp);
-					nextTimestamp += 1_000_000;
-				},
+				TIME_ELAPSED_EXT: 0x88bf,
 			}
 		: null;
 	const gl = {
 		QUERY_RESULT: 0x8866,
 		QUERY_RESULT_AVAILABLE: 0x8867,
+		beginQuery: (_target: GLenum, query: WebGLQuery) => {
+			if (active) throw new Error("fake GL: nested elapsed query");
+			active = query;
+			elapsed.set(query, 1_000_000);
+		},
 		createQuery,
 		deleteQuery,
+		endQuery: () => {
+			if (!active) throw new Error("fake GL: no active elapsed query");
+			active = null;
+		},
 		getExtension: () => extension,
 		getParameter: () => state.disjoint,
-		getQuery: () => timestampBits,
+		getQuery: () => elapsedBits,
 		getQueryParameter: (query: WebGLQuery, parameter: GLenum) =>
-			parameter === 0x8867 ? state.resultsAvailable : timestamps.get(query),
+			parameter === 0x8867 ? state.resultsAvailable : elapsed.get(query),
 	} as unknown as WebGL2RenderingContext;
 	return {
 		createQuery,

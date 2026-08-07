@@ -58,11 +58,30 @@ perform profiling clocks, GPU-query work, or retain profiling samples. Enabling
 it may add CPU clocks and asynchronous GPU timestamp queries; disabling it must
 tear down those resources again.
 
-Treat the profile as attribution evidence, not a final diagnosis. GPU timestamp
-results can be delayed or unsupported, and the SwiftShader browser harness is
-useful for controlled before/after evidence but not for matching hardware
-timings. Corroborate surprising results with a browser-native profile and the
-underlying code path before optimizing.
+**The harness renders on the real GPU with `--gpu`, and CPU and GPU timing both
+work there.** A representative capture:
+
+```
+npm run harness:browser -- --brief --gpu --profile-renderer --measure-ms 6000 ...
+GPU: opaque 1.133 ms  terrain 0.074 ms  blended 0.039 ms  total 1.247 ms
+CPU: mean 2.307 ms  p95 2.8 ms
+```
+
+SwiftShader is only the default because it is deterministic and available
+everywhere. Pass `--gpu` for anything meant to be performance evidence.
+
+GPU spans are **elapsed-time** queries, not timestamps: Chrome reports zero
+`QUERY_COUNTER_BITS_EXT` for `TIMESTAMP_EXT`, because absolute GPU timestamps
+are a timing-attack vector, while `TIME_ELAPSED_EXT` is fully supported.
+Elapsed queries cannot nest, so phases are sequential and `gpu.totalMs` is the
+**sum of measured phases**, not wall-clock across the frame. There is
+deliberately no GPU `otherMs`: unattributed GPU work is unmeasurable rather
+than zero.
+
+Treat the profile as attribution evidence, not a final diagnosis. GPU results
+arrive delayed by a frame or more, and a disjoint GPU clock discards them.
+Corroborate surprising results against the underlying code path before
+optimizing.
 
 The browser harness is agent-owned diagnostic infrastructure:
 
@@ -83,6 +102,13 @@ interactive Tauri application is unsuitable for automation. Adapt the browser
 harness or create a focused harness. If required local content, Chrome, or
 another external prerequisite is genuinely unavailable, report the exact
 missing prerequisite and use synthetic evidence where practical.
+
+Do not assume the harness is less capable than it is. Recorded limitations have
+twice turned out to be untested inheritances: "GPU timing needs hardware we do
+not have" was false — `--gpu` works — and the real cause was a profiler built on
+an extension capability Chrome does not grant. **Before recording a capability
+as unavailable, run the command and paste the failure.** A limitation without a
+reproduction is a guess, and whoever reads it next will believe it.
 
 ## Design Review Priorities
 

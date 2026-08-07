@@ -29,25 +29,28 @@ export type WebGL2CpuFramePhase =
 	| "blendedSubmission"
 	| "finalization";
 
-/** WebGL2 timer-query extension shape absent from TypeScript's standard DOM declarations. */
+/**
+ * WebGL2 timer-query extension shape absent from TypeScript's standard DOM declarations.
+ *
+ * `TIMESTAMP_EXT` and `queryCounterEXT` are deliberately not declared. Chrome exposes this extension
+ * but reports **zero** `QUERY_COUNTER_BITS_EXT` for `TIMESTAMP_EXT` — absolute GPU timestamps are a
+ * high-precision timing-attack vector and are disabled — while `TIME_ELAPSED_EXT` reports 64 bits and
+ * works. A profiler built on timestamps therefore never runs in Chrome at all, headless or not.
+ */
 interface WebGL2DisjointTimerQueryExtension {
 	readonly GPU_DISJOINT_EXT: GLenum;
 	readonly QUERY_COUNTER_BITS_EXT: GLenum;
-	readonly TIMESTAMP_EXT: GLenum;
-	queryCounterEXT(query: WebGLQuery, target: GLenum): void;
+	readonly TIME_ELAPSED_EXT: GLenum;
 }
 
-interface TimestampRange {
-	readonly end: WebGLQuery;
+interface ElapsedRange {
 	readonly phase: WebGL2GpuFramePhase;
-	readonly start: WebGLQuery;
+	readonly query: WebGLQuery;
 }
 
 interface PendingFrame {
-	readonly end: WebGLQuery;
 	readonly frameNumber: number;
-	readonly ranges: readonly TimestampRange[];
-	readonly start: WebGLQuery;
+	readonly ranges: readonly ElapsedRange[];
 }
 
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
@@ -105,21 +108,15 @@ function createEmptyContributionMetrics(): MutableContributionFrameMetrics {
 export class WebGL2GpuFrameCapture {
 	readonly #owner: WebGL2GpuFrameProfiler;
 	readonly #frameNumber: number;
-	readonly #start: WebGLQuery;
-	readonly #ranges: TimestampRange[] = [];
+	readonly #ranges: ElapsedRange[] = [];
 	#finished = false;
 
-	constructor(
-		owner: WebGL2GpuFrameProfiler,
-		frameNumber: number,
-		start: WebGLQuery,
-	) {
+	constructor(owner: WebGL2GpuFrameProfiler, frameNumber: number) {
 		this.#owner = owner;
 		this.#frameNumber = frameNumber;
-		this.#start = start;
 	}
 
-	/** Place one timestamp immediately before a profiled draw phase. */
+	/** Open an elapsed-time query around one profiled draw phase. */
 	beginPhase(phase: WebGL2GpuFramePhase): WebGL2GpuFramePhaseCapture {
 		if (this.#finished) {
 			throw new Error(
@@ -129,35 +126,34 @@ export class WebGL2GpuFrameCapture {
 		return new WebGL2GpuFramePhaseCapture(
 			this,
 			phase,
-			this.#owner.createTimestamp(),
+			this.#owner.beginQuery(),
 		);
 	}
 
-	/** Close the frame timestamp span and transfer ownership to asynchronous polling. */
+	/** Transfer this frame's phase queries to asynchronous polling. */
 	finish(): void {
 		if (this.#finished) {
 			throw new Error("GPU frame capture finished more than once.");
 		}
 		this.#finished = true;
 		this.#owner.finishFrame({
-			end: this.#owner.createTimestamp(),
 			frameNumber: this.#frameNumber,
 			ranges: this.#ranges,
-			start: this.#start,
 		});
 	}
 
-	finishPhase(phase: WebGL2GpuFramePhase, start: WebGLQuery): void {
+	finishPhase(phase: WebGL2GpuFramePhase, query: WebGLQuery): void {
 		if (this.#finished) {
 			throw new Error(
 				"Cannot finish a GPU phase after its frame capture finished.",
 			);
 		}
-		this.#ranges.push({ end: this.#owner.createTimestamp(), phase, start });
+		this.#owner.endQuery();
+		this.#ranges.push({ phase, query });
 	}
 }
 
-/** One pass timestamp pair whose exact close point is owned by the draw-site caller. */
+/** One elapsed-time span whose exact close point is owned by the draw-site caller. */
 export class WebGL2GpuFramePhaseCapture {
 	readonly #frame: WebGL2GpuFrameCapture;
 	readonly #phase: WebGL2GpuFramePhase;
@@ -174,7 +170,7 @@ export class WebGL2GpuFramePhaseCapture {
 		this.#start = start;
 	}
 
-	/** Place the matching timestamp immediately after the profiled draw phase. */
+	/** Close the elapsed-time query immediately after the profiled draw phase. */
 	finish(): void {
 		if (this.#finished) {
 			throw new Error("GPU phase capture finished more than once.");
@@ -191,19 +187,21 @@ export class WebGL2GpuFrameProfiler {
 	readonly #pending: PendingFrame[] = [];
 	#latest: RendererGpuFrameProfile;
 	#destroyed = false;
+	/** WebGL permits one active elapsed-time query per context, so this guards nesting. */
+	#activeQuery: WebGLQuery | null = null;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
 		const extension = gl.getExtension(
 			"EXT_disjoint_timer_query_webgl2",
 		) as WebGL2DisjointTimerQueryExtension | null;
-		const timestampBits = extension
+		const elapsedBits = extension
 			? (gl.getQuery(
-					extension.TIMESTAMP_EXT,
+					extension.TIME_ELAPSED_EXT,
 					extension.QUERY_COUNTER_BITS_EXT,
 				) as number)
 			: 0;
-		this.#extension = timestampBits > 0 ? extension : null;
+		this.#extension = elapsedBits > 0 ? extension : null;
 		this.#latest = this.#extension
 			? { kind: "pending", pendingFrameCount: 0 }
 			: { kind: "unsupported" };
@@ -220,7 +218,7 @@ export class WebGL2GpuFrameProfiler {
 		) {
 			return null;
 		}
-		return new WebGL2GpuFrameCapture(this, frameNumber, this.createTimestamp());
+		return new WebGL2GpuFrameCapture(this, frameNumber);
 	}
 
 	/** Consume only already-available results; this method never synchronizes with the GPU. */
@@ -236,8 +234,14 @@ export class WebGL2GpuFrameProfiler {
 		for (;;) {
 			const pending = this.#pending[0];
 			if (!pending) return;
+			const last = pending.ranges.at(-1);
+			// A frame with no profiled phase has nothing to resolve; drop it rather than stall.
+			if (!last) {
+				this.#pending.shift();
+				continue;
+			}
 			const available = this.#gl.getQueryParameter(
-				pending.end,
+				last.query,
 				this.#gl.QUERY_RESULT_AVAILABLE,
 			) as boolean;
 			if (!available) return;
@@ -260,17 +264,34 @@ export class WebGL2GpuFrameProfiler {
 		this.#deletePending();
 	}
 
-	createTimestamp(): WebGLQuery {
+	/**
+	 * Open the one elapsed-time query WebGL permits to be active at a time.
+	 *
+	 * The single-active constraint is why phases cannot nest and why there is no frame-wide span: a
+	 * query wrapping the frame would have to close before any phase query could open inside it.
+	 */
+	beginQuery(): WebGLQuery {
 		const extension = this.#extension;
 		if (!extension) {
-			throw new Error(
-				"Cannot create a GPU timestamp without timer-query support.",
-			);
+			throw new Error("Cannot time a GPU phase without timer-query support.");
+		}
+		if (this.#activeQuery) {
+			throw new Error("A GPU phase query is already active; they cannot nest.");
 		}
 		const query = this.#gl.createQuery();
-		if (!query) throw new Error("Failed to allocate a GPU timestamp query.");
-		extension.queryCounterEXT(query, extension.TIMESTAMP_EXT);
+		if (!query) throw new Error("Failed to allocate a GPU elapsed-time query.");
+		this.#gl.beginQuery(extension.TIME_ELAPSED_EXT, query);
+		this.#activeQuery = query;
 		return query;
+	}
+
+	endQuery(): void {
+		const extension = this.#extension;
+		if (!extension || !this.#activeQuery) {
+			throw new Error("No GPU phase query is active to close.");
+		}
+		this.#gl.endQuery(extension.TIME_ELAPSED_EXT);
+		this.#activeQuery = null;
 	}
 
 	finishFrame(frame: PendingFrame): void {
@@ -278,22 +299,14 @@ export class WebGL2GpuFrameProfiler {
 	}
 
 	#resolveFrame(frame: PendingFrame): RendererGpuFrameProfile {
-		const milliseconds = (start: WebGLQuery, end: WebGLQuery): number => {
-			const startNanoseconds = this.#gl.getQueryParameter(
-				start,
-				this.#gl.QUERY_RESULT,
-			) as number;
-			const endNanoseconds = this.#gl.getQueryParameter(
-				end,
-				this.#gl.QUERY_RESULT,
-			) as number;
-			return (endNanoseconds - startNanoseconds) / NANOSECONDS_PER_MILLISECOND;
-		};
+		const milliseconds = (query: WebGLQuery): number =>
+			(this.#gl.getQueryParameter(query, this.#gl.QUERY_RESULT) as number) /
+			NANOSECONDS_PER_MILLISECOND;
 		let terrainMs = 0;
 		let opaqueMs = 0;
 		let blendedMs = 0;
 		for (const range of frame.ranges) {
-			const durationMs = milliseconds(range.start, range.end);
+			const durationMs = milliseconds(range.query);
 			switch (range.phase) {
 				case "terrain":
 					terrainMs += durationMs;
@@ -305,16 +318,17 @@ export class WebGL2GpuFrameProfiler {
 					blendedMs += durationMs;
 			}
 		}
-		const totalMs = milliseconds(frame.start, frame.end);
 		return {
 			blendedMs,
 			frameNumber: frame.frameNumber,
 			kind: "available",
 			opaqueMs,
-			otherMs: Math.max(0, totalMs - terrainMs - opaqueMs - blendedMs),
 			pendingFrameCount: this.#pending.length,
 			terrainMs,
-			totalMs,
+			// The sum of what was measured, not wall-clock from first to last command. Elapsed
+			// queries cannot nest, so unattributed GPU work between phases is unmeasurable and is
+			// deliberately absent rather than reported as a zero.
+			totalMs: terrainMs + opaqueMs + blendedMs,
 		};
 	}
 
@@ -324,11 +338,8 @@ export class WebGL2GpuFrameProfiler {
 	}
 
 	#deleteFrame(frame: PendingFrame): void {
-		this.#gl.deleteQuery(frame.start);
-		this.#gl.deleteQuery(frame.end);
 		for (const range of frame.ranges) {
-			this.#gl.deleteQuery(range.start);
-			this.#gl.deleteQuery(range.end);
+			this.#gl.deleteQuery(range.query);
 		}
 	}
 

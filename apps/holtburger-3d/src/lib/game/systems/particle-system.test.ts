@@ -85,6 +85,10 @@ const runtime = (
 		clock: () => 0,
 		sceneOriginOf: () => ORIGIN,
 		sceneRotationOf: () => UNROTATED,
+		partFrameOf: (target, partIndex) => ({
+			generation: target.generation,
+			nodeId: `${target.nodeId}/part/${partIndex}` as SceneNodeId,
+		}),
 		renderAnchorOrigin: () => sceneVector3([0, 0, 0]),
 		resolveEmitter: () => null,
 		roll: () => 0.5,
@@ -389,6 +393,7 @@ describe("ParticleSystem", () => {
 
 		const outcome = particles.createEmitter(TARGET, {
 			emitterId: 0,
+			partIndex: -1,
 			emitterInfoId: staged.id,
 			// AC's z is up, so this is five metres above the owner.
 			offsetOrigin: acVector3([0, 0, 5]),
@@ -401,12 +406,73 @@ describe("ParticleSystem", () => {
 		expect(particles.sample(12)[0]!.position[1]).toBeCloseTo(5);
 	});
 
+	/**
+	 * 6,692 of 7,365 authored `CreateParticle` hooks name a part rather than the whole object, so this
+	 * is the common case and not an edge one. Retail snapshots that part's frame
+	 * (`Particle::Init`, acclient.c:317791); using the object's puts nine emitters in ten in the wrong
+	 * place and aims them with the wrong rotation.
+	 */
+	it("positions a part-attached emitter by its part, not by its owner", () => {
+		const staged = prepared({ initialParticles: 1 });
+		const partNode = "node-1/part/4" as SceneNodeId;
+		const particles = runtime({
+			resolveEmitter: () => staged,
+			sceneOriginOf: (target) =>
+				target.nodeId === partNode ? sceneVector3([9, 0, 0]) : ORIGIN,
+		});
+
+		particles.createEmitter(TARGET, {
+			emitterId: 0,
+			emitterInfoId: staged.id,
+			offsetOrigin: acVector3([0, 0, 0]),
+			partIndex: 4,
+		});
+
+		expect(particles.collectCohorts()[0]!.particles[0]!.origin[0]).toBeCloseTo(
+			9,
+		);
+	});
+
+	it("keeps a part-attached emitter owned by its object for visibility and envelope", () => {
+		const staged = prepared({ initialParticles: 1 });
+		const particles = runtime({ resolveEmitter: () => staged });
+
+		particles.createEmitter(TARGET, {
+			emitterId: 0,
+			emitterInfoId: staged.id,
+			offsetOrigin: acVector3([0, 0, 0]),
+			partIndex: 4,
+		});
+
+		// The envelope belongs to the owning object; culling the part alone would lose the swarm.
+		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeGreaterThan(0);
+		expect(particles.collectCohorts(() => false)).toHaveLength(0);
+	});
+
+	it("refuses a part the owner does not have rather than falling back to the object", () => {
+		const staged = prepared();
+		const particles = runtime({
+			partFrameOf: () => null,
+			resolveEmitter: () => staged,
+		});
+
+		expect(
+			particles.createEmitter(TARGET, {
+				emitterId: 0,
+				emitterInfoId: staged.id,
+				offsetOrigin: acVector3([0, 0, 0]),
+				partIndex: 99,
+			}),
+		).toBe("unprepared");
+	});
+
 	it("reports an unstaged emitter instead of guessing or throwing", () => {
 		const particles = runtime({ resolveEmitter: () => null });
 
 		expect(
 			particles.createEmitter(TARGET, {
 				emitterId: 0,
+				partIndex: -1,
 				emitterInfoId: "0x32009999" as DatAssetId,
 				offsetOrigin: acVector3([0, 0, 0]),
 			}),

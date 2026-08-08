@@ -369,6 +369,25 @@ export class DynamicEntitySystem<
 		this.#removeOwnerEntities(ownerId);
 	}
 
+	/**
+	 * Scene node carrying one authored part's pose, for behavior that attaches to a part.
+	 *
+	 * `CreateParticle` names a part index and `-1` for the whole object, so a consumer that ignores it
+	 * places every part-attached emitter at the object's origin instead of the part's — and, since the
+	 * emitter frame drives spawn rotation too, aims it with the object's frame as well.
+	 */
+	resolvePartNode(
+		rootNodeId: SceneNodeId,
+		partIndex: number,
+	): SceneNodeId | null {
+		const entity = this.#entities.get(rootNodeId);
+		if (!entity) return null;
+		return (
+			entity.renderable.parts.find((part) => part.partIndex === partIndex)
+				?.nodeId ?? null
+		);
+	}
+
 	getRenderable(nodeId: SceneNodeId): DynamicEntityRenderable | null {
 		return this.#entities.get(nodeId)?.renderable ?? null;
 	}

@@ -138,6 +138,23 @@ describe("scanAmbientSources", () => {
 		expect(directions).not.toContain(AMBIENT_DIRECTION.south);
 	});
 
+	/**
+	 * The scene keeps far more terrain resident than ambience can reach, so a block that cannot hold a
+	 * cell in range must be rejected whole rather than walked cell by cell.
+	 */
+	it("skips a landblock entirely when none of it is within earshot", () => {
+		const near = block(AUTHORED_SAMPLE, [0, 0, 0]);
+		const far = block(AUTHORED_SAMPLE, [10_000, 0, 0]);
+		const listener = sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]);
+
+		const withFar = scanAmbientSources(listener, [near, far], resolver);
+		const withoutFar = scanAmbientSources(listener, [near], resolver);
+
+		// The distant block contributes nothing, so including it must not change the result at all.
+		expect(withFar.examinedCellCount).toBe(withoutFar.examinedCellCount);
+		expect(withFar.totalWeight).toBeCloseTo(withoutFar.totalWeight);
+	});
+
 	it("finds nothing when every authoring cell is out of range", () => {
 		// Far past the 120 m maximum.
 		const listener = sceneVector3([0, 0, 5000]);

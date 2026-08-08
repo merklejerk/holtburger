@@ -109,6 +109,19 @@ export function scanAmbientSources(
 
 	for (const block of blocks) {
 		const cellsPerSide = block.gridSize - 1;
+		// Reject a whole landblock before walking its cells. The scene keeps far more terrain resident
+		// than ambience can reach — 25 blocks in a typical explorer view against the 9 that can hold a
+		// cell within earshot — so without this the scan visits about 1,600 cells to find the ~70 that
+		// matter.
+		if (
+			!blockWithinAmbientRange(
+				block,
+				cellsPerSide * block.tileSize,
+				listenerPosition,
+			)
+		) {
+			continue;
+		}
 		for (let row = 0; row < cellsPerSide; row += 1) {
 			for (let column = 0; column < cellsPerSide; column += 1) {
 				const vertex = row * block.gridSize + column;
@@ -209,6 +222,38 @@ export function placeAmbientSound(
 		listenerPosition[1] + offset[1],
 		listenerPosition[2] + offset[2],
 	]);
+}
+
+/**
+ * Whether any cell of one landblock can lie within the ambient radius.
+ *
+ * Tests the listener against the block's axis-aligned span, so it rejects only blocks that provably
+ * cannot contribute. Height is deliberately ignored here: the per-cell test below uses the real
+ * vertex height, and a block-level bound would need the terrain's height range to stay conservative.
+ */
+function blockWithinAmbientRange(
+	block: AmbientTerrainBlock,
+	span: number,
+	listenerPosition: SceneVector3,
+): boolean {
+	// Canonical rows run south to north, which is render-local -Z, so the block spans -span in z.
+	const nearestX = clamp(
+		listenerPosition[0],
+		block.origin[0],
+		block.origin[0] + span,
+	);
+	const nearestZ = clamp(
+		listenerPosition[2],
+		block.origin[2] - span,
+		block.origin[2],
+	);
+	const deltaX = nearestX - listenerPosition[0];
+	const deltaZ = nearestZ - listenerPosition[2];
+	return deltaX * deltaX + deltaZ * deltaZ <= AMBIENT_MAX_DISTANCE_SQUARED;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+	return Math.min(maximum, Math.max(minimum, value));
 }
 
 /** Fold one cell's contribution into one descriptor (`Ambient::AddSound` → `AmbientSound::AddTo`). */

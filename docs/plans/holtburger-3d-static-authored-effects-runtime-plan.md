@@ -2904,7 +2904,7 @@ Process note: the type errors from this change were briefly hidden by a check co
 only one of the two error formats the checker emits (`ERROR "file"` from svelte-check, but not
 `file(line,col): error TS…` from tsc). Grep both, or read the summary line.
 
-### Remaining gap — part-attached emitters
+### Part-attached emitters — **closed 2026-08-07**
 
 **Answered, and it is a real gap rather than a hypothetical one.** `CreateParticle` decodes
 `partIndex`, and `decode-behavior-hook.ts` even documents `-1` as the whole-object sentinel, so the
@@ -2939,9 +2939,16 @@ creatures and items this runtime never activates. It does not prove nine in ten 
 run are misplaced, only that the authored content overwhelmingly uses part attachment. A second
 census restricted to the setup-default scripts of static residents would size the live blast radius.
 
-Fixing it means threading `partIndex` to a part node id and targeting that node, at which point both
-the origin and the frame follow for free — `sceneOriginOf` and `sceneRotationOf` already read whatever
-node the target names.
+**Implemented.** The fix splits two things `target` was conflating: an emitter is *owned* by its
+object — which is what gives it identity, visibility, and a culling envelope — and *positioned* by a
+node, which for a part-attached emitter is the part. `EmitterInstance` now carries `frameTarget`
+beside `target`; origin and rotation lookups follow the frame, while replacement, `isVisible`, and
+`envelopeRadiusFor` stay with the owner. An emitter naming a part its owner does not have is refused
+rather than silently falling back to the object.
+
+**Live blast radius, measured:** of 106 emitters active in a loaded scene, **40 are part-attached** and
+were previously positioned and aimed by their object's frame. That is lower than the 91% authored
+figure, as the scope caveat predicted, but it is still two emitters in five placed wrongly.
 
 ## Addendum: Phase 10 — Region-Driven Ambient Audio
 

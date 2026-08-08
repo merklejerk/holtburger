@@ -51,6 +51,17 @@ export interface ParticleSystemDependencies {
 	 */
 	readonly sceneRotationOf: (target: BehaviorTarget) => AcRotation | null;
 	/**
+	 * Resolve the node whose frame positions a part-attached emitter, or `null` when the part is
+	 * unknown.
+	 *
+	 * `CreateParticle` names a part index, and retail snapshots *that part's* frame rather than the
+	 * object's (`Particle::Init`, acclient.c:317791). A whole-object emitter authors `-1`.
+	 */
+	readonly partFrameOf: (
+		target: BehaviorTarget,
+		partIndex: number,
+	) => BehaviorTarget | null;
+	/**
 	 * Scene-frame origin of the current render anchor, subtracted to reach anchor-relative space.
 	 *
 	 * Exposed as the anchor rather than as a conversion function so the subtraction can be hoisted
@@ -66,6 +77,9 @@ export interface ParticleSystemDependencies {
  * shorter is zeroed instead of divided by.
  */
 const MINIMUM_NORMALIZABLE_LENGTH = 0.00019999999;
+
+/** `CreateParticle`'s sentinel for an emitter riding the object's own frame rather than a part. */
+const WHOLE_OBJECT_PART_INDEX = -1;
 
 /** A pooled record the system fills in place; consumers still see the readonly contract. */
 type MutableParticleInstanceRecord = {
@@ -132,7 +146,16 @@ interface LiveParticle {
 
 interface EmitterInstance {
 	readonly emitter: PreparedParticleEmitter;
+	/**
+	 * Owning entity: what this emitter's identity, visibility, and culling envelope belong to.
+	 *
+	 * Deliberately distinct from {@link frameTarget}. An emitter attached to a swinging lantern is
+	 * *owned* by the lantern object — that is what culls it and what its envelope grows — while its
+	 * particles are *positioned* by the moving part.
+	 */
 	readonly target: BehaviorTarget;
+	/** Node whose frame positions and aims the particles; the owner itself for a whole-object emitter. */
+	readonly frameTarget: BehaviorTarget;
 	/** Authored id: nonzero replaces any same-id emitter on the same target. */
 	readonly emitterId: number;
 	/**
@@ -228,20 +251,29 @@ export class ParticleSystem {
 			readonly emitterInfoId: DatAssetId;
 			readonly offsetOrigin: AcVector3;
 			readonly emitterId: number;
+			/** Authored part this emitter rides, or `-1` for the whole object's own frame. */
+			readonly partIndex: number;
 		},
 	): "created" | "unprepared" {
 		const emitter = this.#dependencies.resolveEmitter(command.emitterInfoId);
 		if (emitter === null) return "unprepared";
-		const parentOrigin = this.#dependencies.sceneOriginOf(target);
+		// An emitter riding a part is positioned and aimed by that part, while remaining owned by the
+		// object for identity, visibility, and culling.
+		const frameTarget =
+			command.partIndex === WHOLE_OBJECT_PART_INDEX
+				? target
+				: this.#dependencies.partFrameOf(target, command.partIndex);
+		if (frameTarget === null) return "unprepared";
+		const parentOrigin = this.#dependencies.sceneOriginOf(frameTarget);
 		if (parentOrigin === null) return "unprepared";
 		this.create(
 			target,
 			emitter,
-			// Already render-space: the decode layer converted it out of AC axes.
 			command.offsetOrigin,
 			command.emitterId,
 			this.#dependencies.clock(),
 			parentOrigin,
+			frameTarget,
 		);
 		return "created";
 	}
@@ -259,6 +291,8 @@ export class ParticleSystem {
 		emitterId: number,
 		timeSeconds: number,
 		parentOrigin: SceneVector3,
+		/** Node positioning the particles; defaults to the owner, which is the whole-object case. */
+		frameTarget: BehaviorTarget = target,
 	): void {
 		if (emitterId !== 0) {
 			const existing = this.#instances.findIndex(
@@ -272,6 +306,7 @@ export class ParticleSystem {
 			emittedCount: 0,
 			emitter,
 			emitterId,
+			frameTarget,
 			hookOffset,
 			hiddenSince: null,
 			lastEmissionTime: null,
@@ -332,7 +367,9 @@ export class ParticleSystem {
 	): void {
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
 			const instance = this.#instances[index]!;
-			const parentOrigin = this.#dependencies.sceneOriginOf(instance.target);
+			const parentOrigin = this.#dependencies.sceneOriginOf(
+				instance.frameTarget,
+			);
 			// A target that no longer publishes a transform has gone away underneath us.
 			if (parentOrigin === null) {
 				this.#instances.splice(index, 1);
@@ -388,7 +425,7 @@ export class ParticleSystem {
 			// would misrepresent it as working.
 			if (info.motionType === null) continue;
 			if (!isVisible(instance.target)) continue;
-			const liveOrigin = this.#dependencies.sceneOriginOf(instance.target);
+			const liveOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
 			if (liveOrigin === null) continue;
 			const key = `${info.hwGfxObjId}:${info.motionType}`;
 			let cohort = cohorts.get(key);
@@ -439,7 +476,7 @@ export class ParticleSystem {
 		const samples: ParticleSample[] = [];
 		const anchor = this.#dependencies.renderAnchorOrigin();
 		for (const instance of this.#instances) {
-			const liveOrigin = this.#dependencies.sceneOriginOf(instance.target);
+			const liveOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
 			if (liveOrigin === null) continue;
 			const motionType = instance.emitter.info.motionType;
 			if (motionType === null) continue;
@@ -606,12 +643,12 @@ export class ParticleSystem {
 		// Retail snapshots the owner's frame at spawn (`start_frame`, acclient.c:317743) and rotates
 		// the constants into it once, so `Update` never sees a frame again. Doing the same here keeps
 		// the motion evaluators — CPU and GLSL alike — free of any notion of an owner.
-		const rotation = this.#dependencies.sceneRotationOf(instance.target);
+		const rotation = this.#dependencies.sceneRotationOf(instance.frameTarget);
 		// The caller already resolved this target's origin from the same placement, so a missing
 		// rotation is a broken contract rather than a target that has gone away.
 		if (rotation === null) {
 			throw new Error(
-				`Emitter target ${instance.target.nodeId} published an origin but no frame.`,
+				`Emitter frame ${instance.frameTarget.nodeId} published an origin but no rotation.`,
 			);
 		}
 		const rotated = rotatedSpawnConstants(info.motionType);

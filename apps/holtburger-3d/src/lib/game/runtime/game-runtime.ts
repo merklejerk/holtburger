@@ -737,6 +737,9 @@ export class GameRuntime {
 						const origin = this.#sceneOriginOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
+							// Authored hook sounds are effect sounds: `PlaySoundA` gates on
+							// `effect_sounds_enabled` and passes `is_ambient = 0`.
+							category: "effect",
 							position: origin,
 							probability: sound.probability,
 							soundId: sound.soundId,
@@ -755,6 +758,7 @@ export class GameRuntime {
 						const origin = this.#sceneOriginOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
+							category: "effect",
 							position: origin,
 							probability: candidate.probability,
 							soundId: candidate.soundId,

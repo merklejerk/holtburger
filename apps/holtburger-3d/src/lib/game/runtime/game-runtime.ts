@@ -729,6 +729,15 @@ export class GameRuntime {
 				this.#particleEmitters.getReady(emitterInfoId),
 			sceneOriginOf: (target) => this.#sceneOriginOf(target),
 			sceneRotationOf: (target) => this.#sceneRotationOf(target),
+			// A part-attached emitter is positioned by its part's node, which the dynamics system owns.
+			// The generation is carried through unchanged: the part belongs to the same activation, so
+			// a command that has outlived its owner must still be rejected.
+			partFrameOf: (target, partIndex) => {
+				const nodeId = this.#dynamics.resolvePartNode(target.nodeId, partIndex);
+				return nodeId === null
+					? null
+					: { generation: target.generation, nodeId };
+			},
 			renderAnchorOrigin: () => this.#renderAnchorOrigin(),
 			roll: dependencies.roll ?? Math.random,
 		});

@@ -50,9 +50,10 @@ function emitter(
 
 class FixtureSource implements ParticleEmitterSource {
 	loads = 0;
+	constructor(readonly overrides: Partial<DecodedParticleEmitterInfo> = {}) {}
 	async loadParticleEmitter(emitterInfoId: DatAssetId) {
 		this.loads += 1;
-		return emitter({ id: emitterInfoId });
+		return emitter({ ...this.overrides, id: emitterInfoId });
 	}
 	destroy(): void {}
 }
@@ -166,9 +167,37 @@ describe("ParticleEmitterRepository", () => {
 
 		expect(source.loads).toBe(1);
 		expect(first.asset).toBe(second.asset);
+		expect(first.asset.kind).toBe("drawable");
+		if (first.asset.kind !== "drawable")
+			throw new Error("Expected drawable fixture.");
 		expect(first.asset.envelopeRadius).toBeGreaterThan(0);
+		expect(first.asset.meshId).toBe("0x01000ff4");
 		first.release();
 		second.release();
 		expect(repository.getDiagnostics().assetCount).toBe(0);
+	});
+
+	it("classifies retail's zero hardware mesh as intentionally inert", async () => {
+		const repository = new ParticleEmitterRepository(
+			new FixtureSource({ hwGfxObjId: "0x00000000" as DatAssetId }),
+		);
+
+		const handle = await repository.acquire("0x320003b7");
+
+		expect(handle.asset).toEqual({
+			id: "0x320003b7",
+			kind: "retail-inert",
+		});
+		handle.release();
+	});
+
+	it("fails loudly for a nonzero hardware ID outside the GfxObj family", async () => {
+		const repository = new ParticleEmitterRepository(
+			new FixtureSource({ hwGfxObjId: "0x02000001" as DatAssetId }),
+		);
+
+		await expect(repository.acquire("0x32000001")).rejects.toThrow(
+			"hardware mesh 0x02000001 is not a GfxObj",
+		);
 	});
 });

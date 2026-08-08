@@ -139,7 +139,7 @@ interface ParticleCommandPort {
 			readonly offsetOrigin: AcVector3;
 			readonly emitterId: number;
 		},
-	): "created" | "unprepared";
+	): "created" | "intentionally-inert" | "unprepared";
 }
 
 /**
@@ -298,6 +298,7 @@ export class BehaviorEventRouter {
 					command,
 				);
 				if (outcome === "unprepared") return "no-consumer";
+				if (outcome === "intentionally-inert") return outcome;
 				return mode === "initial-state" ? "folded-initial-state" : "executed";
 			}
 

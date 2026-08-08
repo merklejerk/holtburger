@@ -36,9 +36,9 @@ function build(isLive = true) {
 		>(() => "unprepared"),
 	};
 	const particles = {
-		createEmitter: vi.fn<(...args: never[]) => "created" | "unprepared">(
-			() => "unprepared",
-		),
+		createEmitter: vi.fn<
+			(...args: never[]) => "created" | "intentionally-inert" | "unprepared"
+		>(() => "unprepared"),
 	};
 	const scheduler = { scheduleActivation: vi.fn() };
 	const router = new BehaviorEventRouter(
@@ -140,6 +140,26 @@ describe("BehaviorEventRouter", () => {
 				"live",
 			),
 		).toBe("no-consumer");
+	});
+
+	it("records a retail-invalid particle emitter as intentionally inert", () => {
+		const { particles, router } = build();
+		particles.createEmitter.mockReturnValue("intentionally-inert");
+
+		expect(
+			router.dispatch(
+				{
+					emitterId: 0,
+					emitterInfoId: "0x320003b7",
+					kind: "create-particle",
+					offsetOrigin: acVector3([0, 0, 0]),
+					partIndex: -1,
+				},
+				TARGET,
+				PROVENANCE,
+				"live",
+			),
+		).toBe("intentionally-inert");
 	});
 
 	it("plays a live sound but suppresses a replayed one", () => {

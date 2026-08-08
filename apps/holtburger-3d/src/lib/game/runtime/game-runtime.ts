@@ -458,14 +458,31 @@ export class GameRuntime {
 			}
 		}
 		if (emitterInfoIds.size === 0) return;
-		const meshIds = [...emitterInfoIds]
-			.map((id) => this.#particleEmitters.getReady(id)?.info.hwGfxObjId ?? null)
-			.filter((id): id is DatAssetId => id !== null);
+		const meshIds = [...emitterInfoIds].flatMap((id) => {
+			const emitter = this.#particleEmitters.getReady(id);
+			return emitter?.kind === "drawable" ? [emitter.meshId] : [];
+		});
 		if (meshIds.length === 0) return;
 		const batch = await this.#particleMeshes.prepare(meshIds);
 		// Only a newly loaded batch reaches residency; already-known meshes never re-upload.
 		if (batch !== null)
 			await this.#renderer?.particles?.install(batch, this.#texturePreparer);
+	}
+
+	/** Keep committed mesh staging owned through shutdown and report host/device failures once. */
+	#stageCommittedParticleMeshes(
+		prepared: readonly {
+			readonly scriptClosure: PreparedPhysicsScriptClosure | null;
+		}[],
+	): void {
+		this.#trackRealizationContinuation(
+			this.#stageParticleMeshes(prepared).catch((cause) => {
+				log(
+					new Error("Particle mesh staging failed.", { cause }),
+					LogLevel.Error,
+				);
+			}),
+		);
 	}
 
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
@@ -618,7 +635,7 @@ export class GameRuntime {
 	readonly #sceneInterestCoordinator: SceneInterestCommitCoordinator;
 	/** Completed asynchronous commits awaiting the next synchronous runtime tick. */
 	readonly #commitArtifacts: PendingCommitArtifact[] = [];
-	/** Static-realization continuations awaited before runtime-owned resources are destroyed. */
+	/** Resource continuations awaited before runtime-owned sources and renderer state are destroyed. */
 	readonly #realizationContinuations = new Set<Promise<void>>();
 	/** Frontend listeners informed when placement facts become available or fail. */
 	readonly #sceneAvailabilityListeners = new Set<SceneAvailabilityListener>();
@@ -1878,7 +1895,7 @@ export class GameRuntime {
 					// dispatch a command against a node that is not yet in the scene.
 					// Mesh residency is requested here, once a generation commits, so a
 					// `CreateParticle` reached later finds its mesh already staged.
-					void this.#stageParticleMeshes(prepared);
+					this.#stageCommittedParticleMeshes(prepared);
 					for (const entity of prepared) {
 						if (entity.soundTable !== null)
 							this.#targetSoundTables.set(

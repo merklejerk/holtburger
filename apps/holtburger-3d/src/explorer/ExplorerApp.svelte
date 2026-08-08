@@ -172,6 +172,11 @@
 		applyFrameSettings();
 	}
 
+	function updateWeather(enabled: boolean): void {
+		frameSettings = { ...frameSettings, weatherEnabled: enabled };
+		applyFrameSettings();
+	}
+
 	function updateEnvCellRenderMode(mode: EnvCellRenderMode): void {
 		frameSettings = { ...frameSettings, envCellRenderMode: mode };
 		applyFrameSettings();
@@ -519,6 +524,8 @@
 			{updateDistanceFog}
 			{updateViewerLight}
 			viewerLightEnabled={frameSettings.viewerLightEnabled}
+			{updateWeather}
+			weatherEnabled={frameSettings.weatherEnabled}
 			envCellRenderMode={frameSettings.envCellRenderMode}
 			{updateEnvCellRenderMode}
 			layerVisibility={frameSettings.layerVisibility}

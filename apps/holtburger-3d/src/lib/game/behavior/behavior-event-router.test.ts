@@ -1,7 +1,7 @@
+import { behaviorTargetId } from "./behavior-event-router";
 import { acVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import { Vec3 } from "../math/types";
-import type { SceneNodeId } from "../scene";
 import {
 	BehaviorEventRouter,
 	type BehaviorCommandProvenance,
@@ -11,7 +11,7 @@ import type { PreparedBehaviorCommand } from "./prepared-behavior-command";
 
 const TARGET: BehaviorTarget = {
 	generation: 3,
-	nodeId: "node-1" as SceneNodeId,
+	targetId: behaviorTargetId("node-1"),
 };
 
 const PROVENANCE: BehaviorCommandProvenance = {
@@ -199,7 +199,7 @@ describe("BehaviorEventRouter", () => {
 			{
 				command: "set-omega",
 				generation: 3,
-				nodeId: "node-1",
+				targetId: "node-1",
 				outcome: "executed",
 				provenance: PROVENANCE,
 			},

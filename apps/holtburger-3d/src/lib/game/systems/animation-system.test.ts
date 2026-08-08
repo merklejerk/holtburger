@@ -39,7 +39,7 @@ function buildAnimationSystemOver(effects: EffectSystem) {
 	// that installs it in production.
 	const install = system.install.bind(system);
 	system.install = (ownerId, target, identity, animation) => {
-		installEffectState(effects, target.nodeId, animation.partCount);
+		installEffectState(effects, target.targetId, animation.partCount);
 		return install(ownerId, target, identity, animation);
 	};
 	const stageOwner = system.stageOwner.bind(system);
@@ -47,7 +47,7 @@ function buildAnimationSystemOver(effects: EffectSystem) {
 		for (const installation of installations) {
 			installEffectState(
 				effects,
-				installation.target.nodeId,
+				installation.target.targetId,
 				installation.animation.partCount,
 			);
 		}

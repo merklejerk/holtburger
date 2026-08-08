@@ -39,6 +39,7 @@ const GEOMETRY: ParticleDrawGeometry = {
 	indexCount: 6,
 	indexOffsetBytes: 0,
 	lockedAxis: renderVector3([0, 0, 1]),
+	materialColor: null,
 	// 1 is direct colour in the encoding now shared with the object program.
 	materialKind: 1,
 	orientation: 1,
@@ -109,6 +110,7 @@ function fakeGl() {
 		uniform1i: (location: { name: string }, value: number) =>
 			intUniforms.push([location.name, value]),
 		uniform3f: () => undefined,
+		uniform4f: () => undefined,
 		uniformMatrix4fv: () => undefined,
 		useProgram: () => undefined,
 		vertexAttribDivisor: () => undefined,

@@ -7,6 +7,7 @@ import type {
 	BehaviorEventRouter,
 	BehaviorTarget,
 } from "../behavior/behavior-event-router";
+import { requireSceneNodeId, sceneNodeIdOf } from "../scene/utils";
 import type { SceneNodeId } from "../scene";
 import type { ArticulatedPose } from "./components";
 import {
@@ -89,7 +90,13 @@ export class AnimationSystem<TOwnerId extends string> {
 
 	/** Whether this system still holds the exact node and generation a command targets. */
 	holds(target: BehaviorTarget): boolean {
-		const record = this.#records.get(target.nodeId);
+		// A total predicate, unlike the command methods: "do you hold this?" has a legitimate "no"
+		// for a target this system could never hold at all. Sky targets are not scene residents and
+		// never animate, and liveness asks every producer about every target, so treating a
+		// non-scene id as an error here would reject dispatch for targets that are perfectly alive.
+		const nodeId = sceneNodeIdOf(target.targetId);
+		if (nodeId === null) return false;
+		const record = this.#records.get(nodeId);
 		return record?.target.generation === target.generation;
 	}
 
@@ -101,7 +108,7 @@ export class AnimationSystem<TOwnerId extends string> {
 	): DynamicPresentationSample {
 		if (this.#destroyed)
 			throw new Error("Cannot install destroyed animation playback.");
-		const nodeId = target.nodeId;
+		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
 		if (this.#records.has(nodeId))
 			throw new Error(`Animation state for ${nodeId} already exists.`);
 		const record = this.#createRecord(target, residentIdentity, animation);
@@ -188,7 +195,10 @@ export class AnimationSystem<TOwnerId extends string> {
 		const samples: DynamicPresentationSample[] = [];
 		try {
 			for (const installation of installations) {
-				const nodeId = installation.target.nodeId;
+				const nodeId = requireSceneNodeId(
+					installation.target.targetId,
+					"AnimationSystem",
+				);
 				if (records.has(nodeId) || this.#records.has(nodeId)) {
 					throw new Error(`Animation state for ${nodeId} already exists.`);
 				}
@@ -312,7 +322,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		residentIdentity: string,
 		animation: PreparedAnimation,
 	): AnimationRecord {
-		const nodeId = target.nodeId;
+		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
 		const record: AnimationRecord = {
 			animation,
 			fractionalSeconds: 0,

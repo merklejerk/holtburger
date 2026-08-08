@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveSkyState, SKY_BRIGHTNESS_SCALE } from "./sky-state";
+import {
+	resolveSkyState,
+	skyObjectOrigin,
+	SKY_BRIGHTNESS_SCALE,
+	WEATHER_PIN_HEIGHT,
+} from "./sky-state";
 
 /**
  * The shipped region's first day group ("Sunny"), transcribed from a census of `dats/assets.hba`.
@@ -155,16 +160,66 @@ describe("resolveSkyState", () => {
 		expect(objectAt(0.5, "0x01004C36").properties).toBe(2);
 	});
 
-	it("marks weather objects non-celestial while still resolving them", () => {
-		const group = {
-			...SUNNY,
-			skyObjects: [skyObject({ gfx: "0x01004C42", properties: 13 })],
-			skyTimes: [skyTime(0, []), skyTime(0.5, [])],
+	/**
+	 * The four `properties` shapes the shipped region actually authors, per the 2026-08-05 census:
+	 * celestial (0 and 2), and weather at 4, 5, and 13.
+	 */
+	it("derives pass and viewer pin from the authored properties bits", () => {
+		const placementOf = (properties: number) => {
+			const group = {
+				...SUNNY,
+				skyObjects: [skyObject({ gfx: "0x01004C42", properties })],
+				skyTimes: [skyTime(0, []), skyTime(0.5, [])],
+			};
+			const resolved = resolveSkyState(group, 3, 0.25).objects;
+			expect(resolved).toHaveLength(1);
+			return resolved[0]!.placement;
 		};
-		const resolved = resolveSkyState(group, 3, 0.25).objects;
-		expect(resolved).toHaveLength(1);
-		expect(resolved[0]?.isCelestial).toBe(false);
-		expect(objectAt(0.5, "0x01004C36").isCelestial).toBe(true);
+
+		expect(placementOf(4)).toEqual({
+			kind: "weather",
+			pass: "before-world",
+			clampedHeight: WEATHER_PIN_HEIGHT,
+		});
+		expect(placementOf(5)).toEqual({
+			kind: "weather",
+			pass: "after-landscape",
+			clampedHeight: WEATHER_PIN_HEIGHT,
+		});
+		// Bit 8 suppresses the clamp, so the object tracks the viewer's own height instead.
+		expect(placementOf(13)).toEqual({
+			kind: "weather",
+			pass: "after-landscape",
+			clampedHeight: null,
+		});
+		expect(objectAt(0.5, "0x01004C36").placement).toEqual({
+			kind: "celestial",
+			pass: "before-world",
+		});
+	});
+
+	it("offsets only a height-clamped weather object away from the viewer", () => {
+		const viewerHeight = 42;
+		expect(
+			skyObjectOrigin({ kind: "celestial", pass: "before-world" }, viewerHeight),
+		).toEqual([0, 0, 0]);
+		expect(
+			skyObjectOrigin(
+				{ kind: "weather", pass: "after-landscape", clampedHeight: null },
+				viewerHeight,
+			),
+		).toEqual([0, 0, 0]);
+		// The clamp is an absolute height, so climbing pushes the sheet further below the viewer.
+		expect(
+			skyObjectOrigin(
+				{
+					kind: "weather",
+					pass: "after-landscape",
+					clampedHeight: WEATHER_PIN_HEIGHT,
+				},
+				viewerHeight,
+			),
+		).toEqual([0, 0, WEATHER_PIN_HEIGHT - viewerHeight]);
 	});
 
 	/** A gfx replacement applies unconditionally, so it can revive an out-of-window object. */

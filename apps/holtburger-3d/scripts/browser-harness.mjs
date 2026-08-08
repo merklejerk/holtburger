@@ -176,6 +176,7 @@ function parseArgs(args) {
 		gpu: false,
 		vitePort: DEFAULT_VITE_PORT,
 		staticLights: true,
+		weather: true,
 		profileRenderer: false,
 		textureFiltering: null,
 		lifecycle: false,
@@ -453,6 +454,9 @@ function parseArgs(args) {
 			case "--no-static-lights":
 				parsed.staticLights = false;
 				break;
+			case "--no-weather":
+				parsed.weather = false;
+				break;
 			case "--profile-renderer":
 				parsed.profileRenderer = true;
 				break;
@@ -708,6 +712,8 @@ Options:
   --vite-port <port>     Vite port to start or reuse. Change it when another worktree is running
                          a harness, or its server will silently serve that worktree's build.
   --no-static-lights     Disable authored outdoor lamps, for same-scene A/B of their cost.
+  --no-weather           Disable authored weather, mirroring retail's player option. Use it to
+                         A/B a Rainy day group against the same scene without rain.
   --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
   --texture-filtering <mode>
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
@@ -813,6 +819,7 @@ function briefHarnessReport(result) {
 						audio: authoredDynamics.audio,
 						particles: authoredDynamics.particles,
 						physicsScripts: authoredDynamics.physicsScripts,
+						skyScripts: authoredDynamics.skyScripts,
 						dynamics: authoredDynamics.dynamics,
 						presentationCadence: authoredDynamics.presentationCadence,
 						effects: authoredDynamics.effects,
@@ -1601,6 +1608,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setStaticLights",
+				[false],
+			);
+			await delay(50);
+		}
+		if (!options.weather) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setWeather",
 				[false],
 			);
 			await delay(50);

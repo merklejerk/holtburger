@@ -1,3 +1,4 @@
+import { behaviorTargetId } from "../behavior/behavior-event-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DecodedPhysicsScript } from "../../assets/decode-physics-script-record";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
@@ -9,7 +10,6 @@ import {
 } from "../behavior/behavior-event-router";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import type { DatAssetId } from "../game-types";
-import type { SceneNodeId } from "../scene";
 import { PhysicsScriptSystem } from "./physics-script-system";
 
 class FixtureScriptSource implements PhysicsScriptSource {
@@ -23,7 +23,7 @@ class FixtureScriptSource implements PhysicsScriptSource {
 
 const TARGET: BehaviorTarget = {
 	generation: 1,
-	nodeId: "node-1" as SceneNodeId,
+	targetId: behaviorTargetId("node-1"),
 };
 
 /** Wire a router whose only stateful consumer is the script system itself. */
@@ -165,7 +165,7 @@ describe("PhysicsScriptSystem", () => {
 		harness.system.install("owner", TARGET, closure, 0);
 		harness.system.advance(0);
 
-		harness.system.remove("owner", TARGET.nodeId);
+		harness.system.remove("owner", TARGET.targetId);
 
 		const before = harness.router.getObservations().length;
 		harness.system.advance(10);

@@ -107,3 +107,13 @@ export function staticRevisionToInstallNamespace(
 ): StaticInstallResourceNamespace {
 	return `static-install:${owner}/${revision}${partition ? `/${partition}` : ""}`;
 }
+
+/**
+ * Lifetime identity for every sky-object script.
+ *
+ * A single owner rather than one per day group: the sky is region-scoped and its scripts are torn
+ * down by the sky runtime's own reconciliation, not by a landblock layer being evicted.
+ */
+export type SkyOwnerId = "sky-objects";
+
+export const SKY_OWNER_ID: SkyOwnerId = "sky-objects";

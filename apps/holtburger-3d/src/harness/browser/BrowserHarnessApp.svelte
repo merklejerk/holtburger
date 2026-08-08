@@ -193,6 +193,8 @@
 		readonly setFrameProfiling: (enabled: boolean) => void;
 		/** Toggle authored outdoor lamps, to measure their cost against an identical scene. */
 		readonly setStaticLights: (enabled: boolean) => void;
+		/** Toggle authored weather, mirroring retail's `DisableMostWeatherEffects` player option. */
+		readonly setWeather: (enabled: boolean) => void;
 		/** Withdraw every requested scene layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
 		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
@@ -635,6 +637,12 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setWeather(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = { ...frameSettings, weatherEnabled: enabled };
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function clearSceneInterest(): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.clearSceneInterest();
@@ -951,6 +959,7 @@
 					setOutdoorCamera,
 					setFrameProfiling,
 					setStaticLights,
+					setWeather,
 					setMinimumObjectFootprintPixelArea,
 					setMinimumPortalFootprintPixelArea,
 					setOffscreenAnimationSampleIntervalSeconds,

@@ -48,6 +48,7 @@
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
 		readonly viewerLightEnabled: boolean;
+		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
 		readonly audioFollowsCamera: boolean;
 		readonly effectVolume: number;
@@ -55,6 +56,7 @@
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
+		readonly updateWeather: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
 		readonly updateEffectVolume: (volume: number) => void;
@@ -97,12 +99,14 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		viewerLightEnabled,
+		weatherEnabled,
 		clockFollowing,
 		audioFollowsCamera,
 		effectVolume,
 		ambientVolume,
 		updateDistanceFog,
 		updateViewerLight,
+		updateWeather,
 		updateClockFollowing,
 		updateAudioFollowsCamera,
 		updateEffectVolume,
@@ -225,12 +229,14 @@
 								{updateEnvironment}
 								{distanceFogEnabled}
 								{viewerLightEnabled}
+								{weatherEnabled}
 								{clockFollowing}
 								{audioFollowsCamera}
 								{effectVolume}
 								{ambientVolume}
 								{updateDistanceFog}
 								{updateViewerLight}
+								{updateWeather}
 								{updateClockFollowing}
 								{updateAudioFollowsCamera}
 								{updateEffectVolume}

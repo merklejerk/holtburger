@@ -48,6 +48,8 @@ describe("WebGL2GpuFrameProfiler", () => {
 			opaqueMs: 1,
 			particleMs: 1,
 			pendingFrameCount: 0,
+			// This frame drives no sky pass, so its span stays zero rather than being absent.
+			skyMs: 0,
 			// Two terrain phases at 1 ms each aggregate; total is their sum, since elapsed queries
 			// cannot nest and no query spans the frame.
 			terrainMs: 2,

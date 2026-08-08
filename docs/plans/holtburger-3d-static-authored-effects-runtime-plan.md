@@ -2940,9 +2940,9 @@ authored one-shots this plan already delivers.
 
 ### Scope
 
-**In scope.** Surfacing the already-decoded ambient descriptors, a timed scheduler that selects and
-fires them, the `ambient` sound category with its own user volume, and the placement retail gives
-intermittent sounds.
+**In scope.** Surfacing the already-decoded ambient descriptors, the per-cell terrain scan that
+selects and weights them, a timed scheduler that fires them, the `ambient` sound category with its own
+user volume, and the directional placement retail gives intermittent sounds.
 
 **No longer in scope, on evidence.** Looping playback. The original scoping assumed continuous
 descriptors needed a looping voice and an extended `AudioVoice` contract; retail retriggers a
@@ -2990,6 +2990,73 @@ loudness — not likelihood — tracks how much of the surrounding land authored
 re-firing on a flat `min_rate` reads as faking a loop with one-shot playback; that reading is
 inference, and the census should check `min_rate` against actual wave durations.
 
+**Ambient sources are terrain cells, not a region-level list.** This is the part the original
+scoping missed entirely, and it changes what the scheduler consumes. The caller of `Ambient::AddSound`
+(acclient.c:338010) walks the landblock's cell grid and treats every cell as a potential source:
+
+```c
+v19.frame.m_fOrigin = vertex_array.vertices[...];        // this cell's position
+v12 = terrain[...];                                      // packed terrain word
+v13 = (v12 >> 2) & 0x1F;                                 // terrain type
+scene_type_id = v12 >> 11;                               // scene type
+STBDesc = CRegionDesc::GetSTBDesc(region, v13, scene_type_id);
+if (STBDesc) Ambient::AddSound(listener, STBDesc, &v19); // the cell contributes
+```
+
+The descriptor lookup chains through data we already decode, which answers the open question about
+whether ambience is selected by region or by scene type — it is both, in sequence:
+
+```
+terrain word  -> (terrain_type, scene_type_id)
+              -> TerrainDesc.terrain_types[terrain_type].scene_types[scene_type_id]   (an index)
+              -> SceneDesc.scene_types[index].stb_index
+              -> SoundDesc.tables[stb_index]                                          (AmbientSoundTable)
+```
+
+`CTerrainDesc::GetSTBDesc` (acclient.c:292631) returns `scene_types[id]->sound_table_desc`; the file
+stores that pointer as `SceneType.stb_index`, which we already decode and whose only consumer today
+is a Tauri diagnostic field. Ambient is its real consumer.
+
+**The first two steps of that chain are already implemented**, for a different purpose.
+`generated_scenery.rs:128-134` unpacks the identical bits to place scenery:
+
+```rust
+let terrain_type = usize::from((terrain >> 2) & 0x1f);
+let scenery_type = usize::from(terrain >> 11);
+terrain_info.terrain_types.get(terrain_type).and_then(|t| t.scene_types.get(scenery_type))
+```
+
+So ambience and generated scenery are two consumers of one per-cell classification: what grows here,
+and what it sounds like. Extract that unpack into a shared helper rather than writing a second copy;
+the road bits (`& 0x03`, `generated_scenery.rs:583`) belong in it too.
+
+Per contributing cell, `AddSound` takes the listener-to-cell offset, rejects beyond
+`ambient_sound_max_dist_sq`, then calls `AddTo(weight, offset, dir)` on every sound in the
+descriptor. `IntermitSound::AddTo` records a distance band of `[d - 10, d + 10]`
+(`ambient_sound_min_dist * 0.5`, with `min_dist = 20`) into that direction's bucket. A cell close
+enough that `CalcDir` returns `0` is added to **all eight** directions instead, so the ground beneath
+the listener is omnidirectional.
+
+Placement then rolls inside what the terrain actually authored (`IntermitSound::GetSoundPos`,
+acclient.c:367457):
+
+```c
+dir  = sound_dir[ RollDice(0, num_dir) ];                       // a direction that has contributors
+head = heading(dir) + RollDice(0, 0.39269909) - 0.39269909/2;   // +/- 11.25 degrees inside the sector
+dist = min + (max - min) * RollDice(0,1)^2;                     // within that direction's band
+x += sin(head) * dist;  y += cos(head) * dist;  z unchanged;
+```
+
+So the randomness is bounded by where that terrain is: a river to the north produces river sound from
+the north, at roughly the right distance, without tracking individual sources. Two properties worth
+carrying deliberately:
+
+- **Ambience is two-dimensional.** `z` stays at the listener's, so it never arrives from above or below.
+- RETAIL QUIRK candidate: **the distance roll is squared**, biasing toward the near edge of the band.
+  Area-uniform sampling over a disc would use a square root. Whether the exponent is deliberate is
+  unprovable from the decompile, but it is audible and content was mixed against it, so reproduce it
+  and mark it rather than "correcting" it.
+
 Distance weighting is `Ambient::CalcWeight`: `1.0` inside `ambient_sound_min_dist_sq`,
 `min_dist_sq / d²` between, `0` beyond `ambient_sound_max_dist_sq`.
 
@@ -3004,6 +3071,7 @@ handles. `base_chance` belongs to `IntermitSound::PlayNow`, in the scheduler.
 2. Both descriptor kinds are one-shots on a timer. Reach for a looping voice only if measurement
    proves retriggering audibly seams, and treat that as a departure from retail rather than a port.
 3. The scheduler is authored data driving a clock, not per-frame polling of every descriptor.
+   Its input is the terrain scan, which is itself event-driven rather than per-frame.
 4. Reproduce retail's audible behaviour, including its quirks, but only where content was tuned
    against them.
 5. Derive `is_continuous` once, at decode, and put it in the contract type. No consumer re-tests
@@ -3034,36 +3102,50 @@ choice, it is a user setting rather than authored content, and no content can ob
 *Acceptance:* effect and ambient sounds resolve independently against their own volumes, and a
 half-volume ambient setting yields half gain rather than a quarter.
 
-### Phase 10.3 — The scheduler
+### Phase 10.3 — The terrain scan and the weighting
+
+Ahead of the scheduler, because it produces the scheduler's only input. Walk the cells within
+`ambient_sound_max_dist` of the listener, resolve each through the chain above, and accumulate per
+descriptor: `sound_count` from `CalcWeight`, and — for intermittent descriptors — per-direction
+distance bands from `CalcDir`. `total_weight` normalizes them.
+
+This is what makes ambience respond to place, and it is why weighting is not deferrable: it drives
+intermittent *probability* and constant *volume* alike. It is also the second consumer of the
+per-cell terrain classification, so the shared helper lands here.
+
+*Acceptance:* a listener surrounded by one terrain type accumulates weight in every direction; a
+listener at a boundary accumulates it only toward the authoring side; a listener beyond
+`ambient_sound_max_dist` of any authoring cell accumulates none.
+
+### Phase 10.4 — The scheduler
 
 One clock per active descriptor. On each due tick: a `ConstantSound` always plays and re-arms at
 `min_rate`; an `IntermitSound` rolls `PlayNow` against its weighted `play_chance`, plays on success,
-and re-arms at `RollDice(min_rate, max_rate)`. Ownership follows the region or scene the descriptor
-came from, so descriptors retire when their region does.
-
-Weighting is what makes ambience respond to place, so it belongs here rather than being deferred:
-`sound_count` accumulates per surrounding contributor, and `total_weight` normalizes it. Positioning
-for intermittent sounds can start centred and gain `GetSoundPos` once the census says how many
-descriptors are intermittent.
+and re-arms at `RollDice(min_rate, max_rate)`. Ownership follows the scan, so a descriptor retires
+once no cell contributes to it.
 
 *Acceptance:* the harness reports scheduled, fired, and suppressed counts; a fixed clock produces a
 deterministic sequence; a continuous descriptor fires on its flat interval and never rolls a chance.
 
-### Phase 10.4 — Positional and directional intermittent sounds
+### Phase 10.5 — Directional placement for intermittent sounds
 
-Reshaped: the original looping-voice phase is gone, because retail does not loop. What remains is the
-placement retail gives intermittent sounds — direction buckets, sector jitter, and a distance roll
-biased toward the near end — which is the difference between ambience that sits in the world and
-ambience that sits in your head.
+Roll a direction among those with contributors, jitter the heading inside its sector, roll a squared
+distance within that direction's band, and keep the listener's `z`. This is the difference between
+ambience that sits in the world and ambience that sits in the listener's head, and it is separable: a
+centred first cut is audible and correct in every respect except direction.
 
-*Acceptance:* an intermittent sound authored only to the north is never placed to the south, and its
-distance stays within the accumulated min/max for that direction.
+*Acceptance:* a sound authored only to the north is never placed to the south; its distance stays
+within the accumulated band for the direction chosen; a descriptor with no directional contributors
+plays centred rather than failing.
 
 ### Risks
 
 - **Ambient may need little spatialization.** `PlayAmbientSoundFromCenter` passes distance `0`, and
   continuous sounds have no direction at all. If the census says most descriptors are continuous, the
-  positional path is the rare case and 10.4 shrinks accordingly.
+  positional path is the rare case and 10.5 shrinks accordingly.
+- **The scan is per-listener-position work the plan had not budgeted.** Ambience is not a static
+  region property; it is recomputed from surrounding cells as the listener moves. Retail rebuilds on
+  cell transition, which bounds it, but that cadence needs measuring rather than assuming.
 - **Retrigger seams.** A constant sound faking a loop by retriggering may click at the boundary where
   retail's did not. Measure before reaching for looping voices, which the voice budget assumes never
   happen.
@@ -3072,8 +3154,13 @@ distance stays within the accumulated min/max for that direction.
 
 ### Open Questions
 
-- Are ambient descriptors selected by region, by scene type, or both simultaneously?
-- Does `CSceneType` carry a sound-table descriptor our decoder does not yet read?
+Both prior questions are answered in Ground Truth: descriptors are selected by terrain type and scene
+type per cell, chaining into the region's table list, and `SceneType.stb_index` is the link we already
+decode. What remains is a sizing question rather than a structural one:
+
+- How often must the terrain scan run? Retail rebuilds on cell transition (`Ambient::InitSounds`
+  takes a `Position`), but the cost of scanning an 8x8 grid per landblock across the ambient radius
+  has not been measured.
 
 ## Definition of Done
 

@@ -14,7 +14,7 @@ export const PARTICLE_TEXTURE_UNITS = {
  * How a particle mesh is oriented at draw time.
  *
  * Retail resolves this from the mesh's `DegradeInfo` band, not from the emitter. Orientation
- * is therefore a per-mesh fact, and cohorts are keyed by mesh, so it binds as a per-cohort
+ * is therefore a per-mesh fact, and batches are keyed by mesh, so it binds as a per-batch
  * constant and never as a per-instance attribute.
  */
 export const PARTICLE_ORIENTATION = {

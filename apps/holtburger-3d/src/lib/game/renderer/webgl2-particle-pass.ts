@@ -1,5 +1,5 @@
-import type { ParticleDrawCohort } from "../systems/particle-system";
 import type { DatAssetId } from "../game-types";
+import type { ParticleDrawBatch } from "./particle-render-routing";
 import {
 	createWebGL2ParticleProgram,
 	type WebGL2ParticleProgram,
@@ -7,7 +7,7 @@ import {
 import { WebGL2ParticleInstanceBuffer } from "./webgl2-particle-instance-buffer";
 import { objectBlendPolicy } from "./object-rendering-policy";
 
-/** One cohort's drawable mesh, already resident on the GPU. */
+/** One batch's drawable mesh, already resident on the GPU. */
 /** Neutral colour for a textured mesh, which never reads the solid-colour uniform. */
 const OPAQUE_WHITE = [1, 1, 1, 1] as const;
 
@@ -41,14 +41,14 @@ export interface ParticleDrawContext {
 }
 
 export interface ParticleDrawDiagnostics {
-	readonly drawnCohortCount: number;
+	readonly drawnBatchCount: number;
 	readonly drawnParticleCount: number;
-	/** Cohorts skipped because their mesh is not resident; never a silent zero. */
-	readonly unresolvedCohortCount: number;
+	/** Batches skipped because their mesh is not resident; never a silent zero. */
+	readonly unresolvedBatchCount: number;
 }
 
 /**
- * Draws every visible particle cohort as one instanced call per cohort.
+ * Draws every visible particle batch as one instanced call per batch.
  *
  * Retail draws each live particle as its own `CPhysicsPart` through the general per-part path. That
  * pins the *semantics* — surface flags drive blend state, particles are GfxObj meshes — but it is a
@@ -65,9 +65,9 @@ export class WebGL2ParticlePass {
 	#program: WebGL2ParticleProgram | null = null;
 	#instances: WebGL2ParticleInstanceBuffer | null = null;
 	#diagnostics: ParticleDrawDiagnostics = {
-		drawnCohortCount: 0,
+		drawnBatchCount: 0,
 		drawnParticleCount: 0,
-		unresolvedCohortCount: 0,
+		unresolvedBatchCount: 0,
 	};
 
 	constructor(
@@ -78,18 +78,18 @@ export class WebGL2ParticlePass {
 
 	draw(
 		context: ParticleDrawContext,
-		cohorts: readonly ParticleDrawCohort[],
+		batches: readonly ParticleDrawBatch[],
 	): void {
 		const { gl } = context;
-		let drawnCohortCount = 0;
+		let drawnBatchCount = 0;
 		let drawnParticleCount = 0;
-		let unresolvedCohortCount = 0;
-		const drawable = cohorts.filter((cohort) => cohort.particles.length > 0);
+		let unresolvedBatchCount = 0;
+		const drawable = batches.filter((batch) => batch.particles.length > 0);
 		if (drawable.length === 0) {
 			this.#diagnostics = {
-				drawnCohortCount: 0,
+				drawnBatchCount: 0,
 				drawnParticleCount: 0,
-				unresolvedCohortCount: 0,
+				unresolvedBatchCount: 0,
 			};
 			return;
 		}
@@ -113,15 +113,15 @@ export class WebGL2ParticlePass {
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthMask(false);
 		gl.enable(gl.BLEND);
-		// Blend mode is selected per cohort below. Enabling BLEND without a func inherits whatever
+		// Blend mode is selected per batch below. Enabling BLEND without a func inherits whatever
 		// the previous pass left bound, which renders particles opaque over their own backing.
 
-		for (const cohort of drawable) {
-			const geometry = this.#resolveGeometry(cohort.hwGfxObjId);
-			// A cohort whose mesh has not landed is counted, not silently dropped: the emitter is
+		for (const batch of drawable) {
+			const geometry = this.#resolveGeometry(batch.hwGfxObjId);
+			// A batch whose mesh has not landed is counted, not silently dropped: the emitter is
 			// live and the viewer is missing it.
 			if (geometry === null) {
-				unresolvedCohortCount += 1;
+				unresolvedBatchCount += 1;
 				continue;
 			}
 			// Retail's own flag-to-blend mapping, shared with the object and sky paths: additive
@@ -141,11 +141,11 @@ export class WebGL2ParticlePass {
 			);
 			gl.bindVertexArray(geometry.vertexArray);
 			instances.bindAttributes();
-			const instanceCount = instances.upload(cohort.particles);
+			const instanceCount = instances.upload(batch.particles);
 			if (instanceCount === 0) continue;
 
-			// Motion type and orientation are per-cohort constants, never per-instance attributes.
-			gl.uniform1i(program.uniforms.motionType, cohort.motionType);
+			// Motion type and orientation are per-batch constants, never per-instance attributes.
+			gl.uniform1i(program.uniforms.motionType, batch.motionType);
 			gl.uniform1i(program.uniforms.orientation, geometry.orientation);
 			gl.uniform3f(
 				program.uniforms.lockedAxis,
@@ -155,7 +155,7 @@ export class WebGL2ParticlePass {
 			);
 			gl.uniform1i(program.uniforms.materialKind, geometry.materialKind);
 			// Only the solid-colour kind reads this, but it is written unconditionally: a stale
-			// colour left by a previous cohort would otherwise tint the next untextured draw.
+			// colour left by a previous batch would otherwise tint the next untextured draw.
 			const color = geometry.materialColor ?? OPAQUE_WHITE;
 			gl.uniform4f(program.uniforms.materialColor, ...color);
 			gl.uniform1i(
@@ -181,7 +181,7 @@ export class WebGL2ParticlePass {
 				geometry.indexOffsetBytes,
 				instanceCount,
 			);
-			drawnCohortCount += 1;
+			drawnBatchCount += 1;
 			drawnParticleCount += instanceCount;
 		}
 
@@ -189,9 +189,9 @@ export class WebGL2ParticlePass {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		this.#diagnostics = {
-			drawnCohortCount,
+			drawnBatchCount,
 			drawnParticleCount,
-			unresolvedCohortCount,
+			unresolvedBatchCount,
 		};
 	}
 

@@ -3,7 +3,7 @@
  *
  * Renderer profiling explains draw cost. This explains everything before it: advancing scripts,
  * simulating particles, sampling animation, publishing presentation into the scene, and building the
- * particle cohorts the renderer consumes.
+ * owner-local particle sources the renderer consumes.
  *
  * Deliberately an **optional injected observer** rather than something the runtime owns. A profiler
  * is diagnostic infrastructure, so a production runtime should not be obliged to construct one or

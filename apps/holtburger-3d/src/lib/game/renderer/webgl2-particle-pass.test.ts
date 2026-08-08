@@ -1,7 +1,7 @@
 import { acVector3, renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
-import type { ParticleDrawCohort } from "../systems/particle-system";
 import type { DatAssetId } from "../game-types";
+import type { ParticleDrawBatch } from "./particle-render-routing";
 import {
 	WebGL2ParticlePass,
 	type ParticleDrawGeometry,
@@ -9,11 +9,11 @@ import {
 
 const MESH = "0x01000ff4" as DatAssetId;
 
-function cohort(
+function batch(
 	motionType: number,
 	particleCount: number,
 	hwGfxObjId: DatAssetId = MESH,
-): ParticleDrawCohort {
+): ParticleDrawBatch {
 	return {
 		hwGfxObjId,
 		motionType,
@@ -128,49 +128,49 @@ const context = (gl: WebGL2RenderingContext) => ({
 });
 
 describe("WebGL2ParticlePass", () => {
-	it("draws one instanced call per cohort", () => {
+	it("draws one instanced call per batch", () => {
 		const { draws, gl } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
-		pass.draw(context(gl), [cohort(2, 3), cohort(5, 7)]);
+		pass.draw(context(gl), [batch(2, 3), batch(5, 7)]);
 
-		// One call per cohort regardless of particle count; retail's per-part ceiling is not inherited.
+		// One call per batch regardless of particle count; retail's per-part ceiling is not inherited.
 		expect(draws).toEqual([3, 7]);
 		expect(pass.getDiagnostics()).toMatchObject({
-			drawnCohortCount: 2,
+			drawnBatchCount: 2,
 			drawnParticleCount: 10,
 		});
 	});
 
-	it("binds motion type as a per-cohort constant", () => {
+	it("binds motion type as a per-batch constant", () => {
 		const { gl, intUniforms } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
-		pass.draw(context(gl), [cohort(6, 1)]);
+		pass.draw(context(gl), [batch(6, 1)]);
 
 		expect(intUniforms).toContainEqual(["uMotionType", 6]);
 		expect(intUniforms).toContainEqual(["uOrientation", 1]);
 	});
 
-	it("selects a blend mode per cohort instead of inheriting one", () => {
+	it("selects a blend mode per batch instead of inheriting one", () => {
 		const { calls, gl } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
-		pass.draw(context(gl), [cohort(2, 1)]);
+		pass.draw(context(gl), [batch(2, 1)]);
 
 		// Enabling BLEND without a func leaves whatever the previous pass bound, which renders
 		// particles opaque over their own black backing.
 		expect(calls.blendFuncs).toHaveLength(1);
 	});
 
-	it("counts a cohort whose mesh is not resident instead of dropping it silently", () => {
+	it("counts a batch whose mesh is not resident instead of dropping it silently", () => {
 		const { draws, gl } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => null);
 
-		pass.draw(context(gl), [cohort(2, 4)]);
+		pass.draw(context(gl), [batch(2, 4)]);
 
 		expect(draws).toEqual([]);
-		expect(pass.getDiagnostics().unresolvedCohortCount).toBe(1);
+		expect(pass.getDiagnostics().unresolvedBatchCount).toBe(1);
 	});
 
 	it("does not create a program for an empty frame", () => {
@@ -179,10 +179,10 @@ describe("WebGL2ParticlePass", () => {
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
 		pass.draw(context(gl), []);
-		pass.draw(context(gl), [cohort(2, 0)]);
+		pass.draw(context(gl), [batch(2, 0)]);
 
 		// A scene with no live particles must cost nothing, including no lazy GPU allocation.
 		expect(createProgram).not.toHaveBeenCalled();
-		expect(pass.getDiagnostics().drawnCohortCount).toBe(0);
+		expect(pass.getDiagnostics().drawnBatchCount).toBe(0);
 	});
 });

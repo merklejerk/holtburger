@@ -66,7 +66,11 @@ import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
-import { ParticleSystem } from "../systems/particle-system";
+import {
+	EXTERIOR_PARTICLE_RENDER_OWNER,
+	ParticleSystem,
+	type ParticleRenderOwner,
+} from "../systems/particle-system";
 import { AmbientSystem } from "../systems/ambient-system";
 import {
 	ambientSoundTableIds,
@@ -526,7 +530,10 @@ export class GameRuntime {
 	 * to the same frame. Any other index names a part they do not have, which is `unprepared`
 	 * rather than a silent fallback to the root.
 	 */
-	#partFrameOf(target: BehaviorTarget, partIndex: number): BehaviorTarget | null {
+	#partFrameOf(
+		target: BehaviorTarget,
+		partIndex: number,
+	): BehaviorTarget | null {
 		if (this.#skyTargets.has(target.targetId)) {
 			return partIndex === SKY_OBJECT_ONLY_PART_INDEX ? target : null;
 		}
@@ -544,17 +551,21 @@ export class GameRuntime {
 	}
 
 	/**
-	 * Whether a target's particles survive this frame's culling.
+	 * Resolve the render owner for a target whose particles survive this frame's culling.
 	 *
 	 * Scene residents cull against the renderer's previous dynamic selection. Sky targets are
 	 * viewer-centered and drawn unconditionally — retail never culls the sky — so they are always
-	 * selected. Without this they would cull to nothing every frame: a sky target is by
-	 * construction absent from a selection built out of scene node ids.
+	 * selected and route through the exterior domain. Without that explicit owner they would cull
+	 * to nothing every frame: a sky target is absent from a selection built out of scene node ids.
 	 */
-	#isTargetSelected(target: BehaviorTarget): boolean {
-		if (this.#skyTargets.has(target.targetId)) return true;
+	#particleRenderOwner(target: BehaviorTarget): ParticleRenderOwner | null {
+		if (this.#skyTargets.has(target.targetId)) {
+			return EXTERIOR_PARTICLE_RENDER_OWNER;
+		}
 		const nodeId = sceneNodeIdOf(target.targetId);
-		return nodeId !== null && this.#selectedDynamicNodeIds.has(nodeId);
+		return nodeId !== null && this.#selectedDynamicNodeIds.has(nodeId)
+			? nodeId
+			: null;
 	}
 
 	/** Scene-frame origin of this frame's render anchor, which is the camera's landblock. */
@@ -851,7 +862,8 @@ export class GameRuntime {
 		});
 		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
 		// by design. A holder breaks the construction cycle without making the router mutable.
-		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId | SkyOwnerId> } = {};
+		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId | SkyOwnerId> } =
+			{};
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
 				audio: {
@@ -928,10 +940,12 @@ export class GameRuntime {
 		);
 		scriptWiring.system = this.#physicsScriptSystem;
 		this.#skyScripts = new SkyScriptSystem({
-			acquireClosure: (scriptId) => this.#physicsScripts.acquireClosure(scriptId),
+			acquireClosure: (scriptId) =>
+				this.#physicsScripts.acquireClosure(scriptId),
 			acquireEmitter: (emitterInfoId) =>
 				this.#particleEmitters.acquire(emitterInfoId),
-			installMeshes: (closure) => this.#stageParticleMeshes([{ scriptClosure: closure }]),
+			installMeshes: (closure) =>
+				this.#stageParticleMeshes([{ scriptClosure: closure }]),
 			installScript: (target, closure, timeSeconds) =>
 				this.#physicsScriptSystem.install(
 					SKY_OWNER_ID,
@@ -1435,7 +1449,9 @@ export class GameRuntime {
 		// include the particle envelope, so an emitter entering view is selected on the frame its
 		// envelope crosses the frustum rather than when its mesh does.
 		renderer.particles?.submit(
-			this.#particles.collectCohorts((target) => this.#isTargetSelected(target)),
+			this.#particles.collectCohorts((target) =>
+				this.#particleRenderOwner(target),
+			),
 		);
 		tick?.mark("particleCohort");
 		const anchorLandblockId = this.#camera.placement.landblockId;
@@ -1865,7 +1881,10 @@ export class GameRuntime {
 					void this.#stageParticleMeshes(prepared);
 					for (const entity of prepared) {
 						if (entity.soundTable !== null)
-							this.#targetSoundTables.set(behaviorTargetId(entity.nodeId), entity.soundTable);
+							this.#targetSoundTables.set(
+								behaviorTargetId(entity.nodeId),
+								entity.soundTable,
+							);
 						if (entity.scriptClosure === null) continue;
 						this.#physicsScriptSystem.install(
 							ownerId,
@@ -1924,7 +1943,10 @@ export class GameRuntime {
 			// today. A non-scene target has no placement that could have gone stale, and is removed
 			// by whichever module owns it rather than swept here.
 			const nodeId = sceneNodeIdOf(targetId);
-			if (nodeId !== null && this.#scene.getResolvedPlacement(nodeId) === undefined)
+			if (
+				nodeId !== null &&
+				this.#scene.getResolvedPlacement(nodeId) === undefined
+			)
 				this.#targetSoundTables.delete(targetId);
 		}
 		// Emitters need no explicit removal: `#dynamics.removeOwner` destroys their nodes, and the

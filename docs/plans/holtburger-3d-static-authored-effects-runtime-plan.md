@@ -3077,16 +3077,48 @@ handles. `base_chance` belongs to `IntermitSound::PlayNow`, in the scheduler.
 5. Derive `is_continuous` once, at decode, and put it in the contract type. No consumer re-tests
    `base_chance == 0`.
 
-### Phase 10.1 — Surface the ambient descriptors and census them
+### Phase 10.1 — Surface the ambient descriptors and census them — **done**
 
-Decoding is done. Remaining: expose `RegionDesc.sound_info` through `holtburger-content` to the
-frontend, and add `isContinuous` as a decoded-side derived field so no consumer re-derives it.
-Confirm whether `CSceneType` carries its own descriptor and whether ours decodes it.
+`is_continuous` is derived at decode in `holtburger-dat` (`base_chance == 0.0`) and carried through
+Tauri and the Zod schema, so no consumer re-tests the sentinel. Everything else was already plumbed:
+`RegionDesc.sound_info` and `scene_info` already reached the frontend and had no consumers.
 
-*Acceptance:* a census over shipped regions reports how many descriptors exist, how many are
-continuous, the `min_rate`/`max_rate`/`base_chance` distributions, and — for continuous descriptors —
-`min_rate` against the referenced wave's duration. That census decides the scheduler's shape, so it
-comes first.
+**Census over the shipped region** (37 tables, 383 descriptors):
+
+| | count | share |
+| --- | --- | --- |
+| intermittent | 343 | **89.6%** |
+| continuous | 40 | 10.4% |
+
+| distribution | min | median | max |
+| --- | --- | --- | --- |
+| intermittent `base_chance` | 0.200 | 0.500 | 1.000 |
+| intermittent `min_rate` | 0.000 | 2.800 | 30.000 |
+| intermittent `max_rate` | 1.000 | 12.000 | 40.000 |
+| continuous `min_rate` | 1.400 | 7.000 | 18.700 |
+
+**All 1024 terrain/scene combinations resolve to a sound table.** Ambience is authored everywhere, so
+the scan always finds descriptors and there is no sparse-coverage case to design around.
+
+**The fake-a-loop reading is confirmed, and it was inference before.** Comparing all 40 continuous
+descriptors' `min_rate` against their wave's duration:
+
+```
+stype=77 min_rate=9.04  duration=9.04s  ratio=1.00
+stype=70 min_rate=8.27  duration=8.27s  ratio=1.00
+stype=74 min_rate=10.54 duration=10.54s ratio=1.00
+stype=70 min_rate=3.70  duration=5.87s  ratio=0.63
+stype=70 min_rate=16.00 duration=9.06s  ratio=1.77
+```
+
+Several are *exactly* the wave length; the rest sit slightly under (overlapping) or near 1.5–2×
+(deliberately sparser). So continuous descriptors retrigger a one-shot at about its own length, and
+**scheduler timing accuracy is audible** for the ratio-1.00 cases: drift shows up as a gap in a sound
+meant to be seamless. Still no looping voice needed.
+
+**Census correction to a plan risk.** The risk section assumed that if most descriptors were
+continuous, directional placement would shrink. The reverse is true: intermittent outnumbers
+continuous roughly 9:1, so 10.5 is the common case and carries most of the audible character.
 
 ### Phase 10.2 — The ambient category
 
@@ -3140,9 +3172,12 @@ plays centred rather than failing.
 
 ### Risks
 
-- **Ambient may need little spatialization.** `PlayAmbientSoundFromCenter` passes distance `0`, and
-  continuous sounds have no direction at all. If the census says most descriptors are continuous, the
-  positional path is the rare case and 10.5 shrinks accordingly.
+- ~~**Ambient may need little spatialization.**~~ Retired by the census: 89.6% of descriptors are
+  intermittent, so the positional path is the common case rather than the rare one, and 10.5 is where
+  most of the audible character lives.
+- **Continuous scheduling drift is audible.** Several continuous descriptors author `min_rate`
+  exactly equal to their wave's duration, so they are seamless only if fired on time. A scheduler
+  that accumulates error turns them into a sound with a periodic gap.
 - **The scan is per-listener-position work the plan had not budgeted.** Ambience is not a static
   region property; it is recomputed from surrounding cells as the listener moves. Retail rebuilds on
   cell transition, which bounds it, but that cadence needs measuring rather than assuming.

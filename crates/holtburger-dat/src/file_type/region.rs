@@ -187,9 +187,19 @@ pub struct AmbientSoundTable {
 pub struct AmbientSound {
     pub sound_type: u32,
     pub volume: f32,
+    /// Chance rolled each time this sound comes due; `0.0` marks it continuous instead.
     pub base_chance: f32,
+    /// Seconds before it comes due again; the lower end of the interval roll, and the whole
+    /// interval for a continuous sound, which does not roll.
     pub min_rate: f32,
     pub max_rate: f32,
+    /// Whether this sound plays whenever it comes due rather than rolling `base_chance`.
+    ///
+    /// Derived, not stored: the client computes it at load as `base_chance == 0.0`
+    /// (`AmbientSTBDesc::UnPack`, acclient.c:367786) and switches on it to build a `ConstantSound`
+    /// rather than an `IntermitSound`. Computed here so no consumer re-tests the sentinel and
+    /// mistakes a continuous sound for one that can never play.
+    pub is_continuous: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -536,12 +546,16 @@ fn read_sound_desc<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<SoundDesc
             Ok(AmbientSoundTable {
                 stb_id: u32::read_le(reader)?,
                 sounds: read_unpackable_list(reader, |reader| {
+                    let sound_type = u32::read_le(reader)?;
+                    let volume = f32::read_le(reader)?;
+                    let base_chance = f32::read_le(reader)?;
                     Ok(AmbientSound {
-                        sound_type: u32::read_le(reader)?,
-                        volume: f32::read_le(reader)?,
-                        base_chance: f32::read_le(reader)?,
+                        sound_type,
+                        volume,
+                        base_chance,
                         min_rate: f32::read_le(reader)?,
                         max_rate: f32::read_le(reader)?,
+                        is_continuous: base_chance == 0.0,
                     })
                 })?,
             })
@@ -729,6 +743,12 @@ mod tests {
         let sound = region.sound_info.expect("sound should be present");
         assert_eq!(sound.tables[0].stb_id, 9);
         assert_eq!(sound.tables[0].sounds[0].sound_type, 17);
+        // `is_continuous` is derived rather than read, and a consumer that re-tested `base_chance`
+        // as a probability would silence exactly the sounds meant never to stop.
+        assert_eq!(sound.tables[0].sounds[0].base_chance, 0.25);
+        assert!(!sound.tables[0].sounds[0].is_continuous);
+        assert_eq!(sound.tables[0].sounds[1].base_chance, 0.0);
+        assert!(sound.tables[0].sounds[1].is_continuous);
 
         let scene = region.scene_info.expect("scene should be present");
         assert_eq!(scene.scene_types[0].scenes, vec![0x1200_0001]);
@@ -769,10 +789,10 @@ mod tests {
         write_f64(&mut bytes, 0.8);
         write_f64(&mut bytes, 15.0);
         align(&mut bytes);
-        write_list(&mut bytes, 1, |bytes| {
+        write_list(&mut bytes, 1, |bytes, _| {
             write_f32(bytes, 5.0);
             write_pstring(bytes, "Clear");
-            write_list(bytes, 1, |bytes| {
+            write_list(bytes, 1, |bytes, _| {
                 for value in [0.0, 1.0, 2.0, 3.0, 4.0, 5.0] {
                     write_f32(bytes, value);
                 }
@@ -781,7 +801,7 @@ mod tests {
                 }
                 align(bytes);
             });
-            write_list(bytes, 1, |bytes| {
+            write_list(bytes, 1, |bytes, _| {
                 write_f32(bytes, 0.25);
                 write_f32(bytes, 0.5);
                 write_f32(bytes, 90.0);
@@ -794,7 +814,7 @@ mod tests {
                 write_u32(bytes, 0xAABB_CCDD);
                 write_u32(bytes, 1);
                 align(bytes);
-                write_list(bytes, 1, |bytes| {
+                write_list(bytes, 1, |bytes, _| {
                     write_u32(bytes, 3);
                     write_u32(bytes, 0x0100_0002);
                     for value in [1.0, 0.8, 0.7, 0.6] {
@@ -805,38 +825,44 @@ mod tests {
             });
         });
 
-        write_list(&mut bytes, 1, |bytes| {
+        write_list(&mut bytes, 1, |bytes, _| {
             write_u32(bytes, 9);
-            write_list(bytes, 1, |bytes| {
-                write_u32(bytes, 17);
-                for value in [0.5, 0.25, 3.0, 4.0] {
+            // The first sound rolls a chance; the second authors zero, marking it continuous.
+            write_list(bytes, 2, |bytes, index| {
+                let (sound_type, fields) = if index == 0 {
+                    (17, [0.5, 0.25, 3.0, 4.0])
+                } else {
+                    (18, [0.75, 0.0, 7.0, 7.0])
+                };
+                write_u32(bytes, sound_type);
+                for value in fields {
                     write_f32(bytes, value);
                 }
             });
         });
 
-        write_list(&mut bytes, 1, |bytes| {
+        write_list(&mut bytes, 1, |bytes, _| {
             write_u32(bytes, 9);
-            write_list(bytes, 1, |bytes| write_u32(bytes, 0x1200_0001));
+            write_list(bytes, 1, |bytes, _| write_u32(bytes, 0x1200_0001));
         });
 
         write_u32(&mut bytes, 1); // one TerrainType
         write_pstring(&mut bytes, "grass");
         write_u32(&mut bytes, 0x00FF_00FF);
-        write_list(&mut bytes, 1, |bytes| write_u32(bytes, 0));
+        write_list(&mut bytes, 1, |bytes, _| write_u32(bytes, 0));
         write_u32(&mut bytes, 1); // palette-shift LandSurf
-        write_list(&mut bytes, 1, |bytes| {
+        write_list(&mut bytes, 1, |bytes, _| {
             write_u32(bytes, 0x0500_0001);
-            write_list(bytes, 1, |bytes| {
+            write_list(bytes, 1, |bytes, _| {
                 write_u32(bytes, 2);
                 write_u32(bytes, 4);
                 align(bytes);
             });
-            write_list(bytes, 1, |bytes| {
+            write_list(bytes, 1, |bytes, _| {
                 write_u32(bytes, 7);
                 write_u32(bytes, 12);
             });
-            write_list(bytes, 1, |bytes| {
+            write_list(bytes, 1, |bytes, _| {
                 write_u32(bytes, 31);
                 write_u32(bytes, 0x0400_0001);
                 align(bytes);
@@ -871,14 +897,14 @@ mod tests {
         write_f32(&mut bytes, 7620.0);
         write_u32(&mut bytes, 360);
         write_pstring(&mut bytes, "P.Y.");
-        write_list(&mut bytes, 1, |bytes| {
+        write_list(&mut bytes, 1, |bytes, _| {
             write_f32(bytes, 0.0);
             write_u32(bytes, 1);
             write_pstring(bytes, "Dawn");
         });
         write_u32(&mut bytes, 1);
         write_pstring(&mut bytes, "Monday");
-        write_list(&mut bytes, 1, |bytes| {
+        write_list(&mut bytes, 1, |bytes, _| {
             write_u32(bytes, 12);
             write_pstring(bytes, "Spring");
         });
@@ -886,12 +912,11 @@ mod tests {
         bytes
     }
 
-    fn write_list(bytes: &mut Vec<u8>, count: u32, write_item: impl FnOnce(&mut Vec<u8>)) {
+    /// Write a length-prefixed list, invoking `write_item` once per element with its index.
+    fn write_list(bytes: &mut Vec<u8>, count: u32, mut write_item: impl FnMut(&mut Vec<u8>, u32)) {
         write_u32(bytes, count);
-        if count == 1 {
-            write_item(bytes);
-        } else {
-            panic!("test helper only supports one-item lists");
+        for index in 0..count {
+            write_item(bytes, index);
         }
     }
 

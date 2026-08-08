@@ -2921,10 +2921,27 @@ Consequences, both of which predate this phase:
 It is also a decoded field with no consumer, which is the shape this project treats as a defect on
 its own.
 
-What is still unknown is how much shipped content authors a non-`-1` `partIndex`. That census sizes
-the work and has not been run; until it is, the honest statement is that the case is unimplemented,
-not that it is absent. Fixing it means threading `partIndex` to a part node id and targeting that
-node, at which point both the origin and the frame follow for free.
+**Census run 2026-08-07, and it inverts the assumption.** Across 3,500 physics scripts in the shipped
+archive:
+
+| `CreateParticle` hooks | 7,365 |
+| --- | --- |
+| whole-object (`partIndex == -1`) | 673 (9%) |
+| **part-attached** | **6,692 (91%)**, across 33 distinct part indices |
+
+Part attachment is not an edge case, it is the **dominant** case. Every one of those emitters
+currently spawns at the object's origin instead of the part's, and since Phase 9 it is also rotated by
+the object's frame rather than the part's. The earlier wording — "unimplemented rather than absent" —
+understated this: it is a defect affecting nine emitters in ten, not a gap awaiting sizing.
+
+Scope caveat worth keeping honest: the census counts *authored* hooks across all scripts, including
+creatures and items this runtime never activates. It does not prove nine in ten emitters we actually
+run are misplaced, only that the authored content overwhelmingly uses part attachment. A second
+census restricted to the setup-default scripts of static residents would size the live blast radius.
+
+Fixing it means threading `partIndex` to a part node id and targeting that node, at which point both
+the origin and the frame follow for free — `sceneOriginOf` and `sceneRotationOf` already read whatever
+node the target names.
 
 ## Addendum: Phase 10 — Region-Driven Ambient Audio
 

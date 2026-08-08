@@ -74,6 +74,8 @@ const soundSchema = z.object({
 					baseChance: finiteNumber,
 					minRate: finiteNumber,
 					maxRate: finiteNumber,
+					/** Derived at decode as `baseChance === 0`; never re-test the sentinel here. */
+					isContinuous: z.boolean(),
 				}),
 			),
 		}),

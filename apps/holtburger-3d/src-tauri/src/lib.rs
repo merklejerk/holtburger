@@ -822,6 +822,7 @@ fn active_region_manifest(active_region: &ActiveRegionData) -> ActiveRegionManif
                         "baseChance": sound.base_chance,
                         "minRate": sound.min_rate,
                         "maxRate": sound.max_rate,
+                        "isContinuous": sound.is_continuous,
                     })).collect::<Vec<_>>(),
                 })).collect::<Vec<_>>(),
             })),

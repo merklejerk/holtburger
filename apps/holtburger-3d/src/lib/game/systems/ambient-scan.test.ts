@@ -8,6 +8,7 @@ import {
 	ambientWeight,
 } from "./ambient-weighting";
 import {
+	placeAmbientSound,
 	scanAmbientSources,
 	type AmbientDescriptor,
 	type AmbientTerrainBlock,
@@ -178,5 +179,63 @@ describe("scanAmbientSources", () => {
 		expect(band).toBeDefined();
 		// Several rows of cells contribute, so the band spans more than one cell's ±10 m.
 		expect(band!.maximum - band!.minimum).toBeGreaterThan(AMBIENT_MIN_DISTANCE);
+	});
+});
+
+describe("placeAmbientSound", () => {
+	const LISTENER = sceneVector3([100, 5, -100]);
+	/** Scene z runs negative to the north, so a northward placement decreases z. */
+	const northBand = () =>
+		new Map([[AMBIENT_DIRECTION.north, { maximum: 60, minimum: 40 }]]);
+
+	it("places a north-authored sound to the north and never to the south", () => {
+		// A mid roll picks the only direction, sits mid-arc, and lands mid-band.
+		const placed = placeAmbientSound(northBand(), LISTENER, () => 0.5)!;
+
+		expect(placed[2]).toBeLessThan(LISTENER[2]);
+		// Two-dimensional: retail leaves the listener's own height alone.
+		expect(placed[1]).toBeCloseTo(LISTENER[1]);
+	});
+
+	it("keeps the distance inside the accumulated band", () => {
+		for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
+			const placed = placeAmbientSound(northBand(), LISTENER, () => roll)!;
+			const distance = Math.hypot(
+				placed[0] - LISTENER[0],
+				placed[2] - LISTENER[2],
+			);
+			expect(distance).toBeGreaterThanOrEqual(40 - 1e-6);
+			expect(distance).toBeLessThanOrEqual(60 + 1e-6);
+		}
+	});
+
+	/**
+	 * RETAIL QUIRK: the distance roll is squared, so a mid roll lands a quarter of the way across the
+	 * band rather than halfway. Reproduced because every shipped ambience was mixed against it.
+	 */
+	it("biases distance toward the near edge of the band", () => {
+		const placed = placeAmbientSound(northBand(), LISTENER, () => 0.5)!;
+		const distance = Math.hypot(
+			placed[0] - LISTENER[0],
+			placed[2] - LISTENER[2],
+		);
+
+		// 40 + 20 * 0.5^2 = 45, not the 50 a linear roll would give.
+		expect(distance).toBeCloseTo(45);
+	});
+
+	it("places an east-authored sound to the east", () => {
+		const bands = new Map([
+			[AMBIENT_DIRECTION.east, { maximum: 30, minimum: 30 }],
+		]);
+
+		const placed = placeAmbientSound(bands, LISTENER, () => 0.5)!;
+
+		expect(placed[0]).toBeGreaterThan(LISTENER[0]);
+		expect(placed[2]).toBeCloseTo(LISTENER[2]);
+	});
+
+	it("has no placement for a descriptor with no directional contributors", () => {
+		expect(placeAmbientSound(new Map(), LISTENER, () => 0.5)).toBeNull();
 	});
 });

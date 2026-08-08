@@ -119,6 +119,11 @@ export class TerrainSystem<
 	>();
 	/** Anchor whose selected render variants currently define terrain scene-node bounds. */
 	#boundsAnchorLandblockId: LandblockId | null = null;
+	/**
+	 * Bumped whenever the installed set changes, so consumers that derive from *which* landblocks are
+	 * resident can tell that their derivation is stale without diffing the set themselves.
+	 */
+	#installationRevision = 0;
 	#destroyed = false;
 
 	constructor(
@@ -203,6 +208,7 @@ export class TerrainSystem<
 			source,
 		};
 		this.#installations.set(input.landblockId, installation);
+		this.#installationRevision += 1;
 		void this.#generateAndRealize(input.landblockId, installation);
 	}
 
@@ -211,6 +217,7 @@ export class TerrainSystem<
 		const installation = this.#installations.get(landblockId);
 		if (!installation) return;
 		this.#installations.delete(landblockId);
+		this.#installationRevision += 1;
 		this.#releaseSourceResources(installation.source);
 	}
 
@@ -259,6 +266,11 @@ export class TerrainSystem<
 	 * Deliberately narrow and read-only: the ambient scan needs the packed terrain word and the
 	 * geometry to measure distance to it, and nothing else this system holds.
 	 */
+	/** Changes whenever a landblock's terrain is installed or removed. */
+	get installationRevision(): number {
+		return this.#installationRevision;
+	}
+
 	*listInstalledTerrain(): Generator<InstalledTerrain> {
 		for (const [landblockId, installation] of this.#installations) {
 			yield { generation: installation.source.input.generation, landblockId };

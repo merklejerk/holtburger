@@ -1025,11 +1025,9 @@ export class GameRuntime {
 		if (!candidates) return null;
 		const candidate = selectSoundCandidate(candidates, Math.random());
 		if (!candidate) return null;
-		return {
-			probability: candidate.probability,
-			soundId: candidate.soundId,
-			volume: candidate.volume,
-		};
+		// The candidate's authored volume is deliberately dropped: retail's ambient path plays at
+		// the descriptor's volume and reads only the candidate's probability.
+		return { probability: candidate.probability, soundId: candidate.soundId };
 	}
 
 	/**
@@ -1043,7 +1041,9 @@ export class GameRuntime {
 		const resolver = this.#ambientResolver;
 		if (!resolver) return;
 		const position = this.#audioListenerPosition;
-		const cell = ambientScanCellKey(position);
+		// Keyed on the terrain too, not only the listener: landblocks stream in after the first scan,
+		// and a listener standing still while its surroundings arrive would otherwise never hear them.
+		const cell = `${ambientScanCellKey(position)}/${this.#terrain.installationRevision}`;
 		if (cell === this.#ambientScanCell) return;
 		this.#ambientScanCell = cell;
 		this.#ambient.refresh(

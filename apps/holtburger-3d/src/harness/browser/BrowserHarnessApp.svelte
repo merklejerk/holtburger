@@ -892,6 +892,22 @@
 				runtime.installActiveRegionStaticDetails(
 					await staticDetailOwner.install(contentSource.activeRegion),
 				);
+				const ambientRegion = contentSource.activeRegion.data;
+				if (ambientRegion.sound && ambientRegion.scenes) {
+					await runtime.installAmbientRegion({
+						sceneTypes: ambientRegion.scenes.types.map((type) => ({
+							soundTableIndex: type.soundTableIndex,
+						})),
+						tables: ambientRegion.sound.tables.map((table) => ({
+							soundTableId: table.soundTableId,
+							sounds: table.sounds,
+						})),
+						terrainTypes:
+							ambientRegion.terrain?.types.map((type) => ({
+								sceneTypes: type.sceneTypes,
+							})) ?? [],
+					});
+				}
 				await runtime.installSky(await contentSource.loadSkySource());
 				if (TIME_OF_DAY !== null) {
 					const timeOfDay = Number(TIME_OF_DAY);

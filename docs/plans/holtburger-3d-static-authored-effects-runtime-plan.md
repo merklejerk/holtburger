@@ -3220,29 +3220,35 @@ Two real defects were found while integrating, and both are fixed:
 (acclient.c:366813 and 366489); only the candidate's `probability` is used. We were multiplying both
 and attenuating every ambient sound twice. `AmbientSoundSelection` now carries no volume at all.
 
-### Outstanding — ambience schedules but does not fire
+### Runtime verification — the scheduler fires
 
-**Phase 10 is not finished.** Against real content at `0xda56ffff`, the scan resolves **28 descriptors
-from real terrain** — so the terrain walk, the region chain, table staging, and weighting all work end
-to end — but no descriptor ever fires. Instrumented over a 120 s run:
+Against real content at `0xda56ffff`: **28 descriptors scheduled from real terrain, 48 fired and 194
+suppressed by chance rolls** over a 60 s measured run. The terrain walk, region chain, table staging,
+weighting, scheduling and chance rolls all work end to end.
 
-```
-now=41.1 n=28 id=1 refreshes=11 retired=0 sched=28 updates=0 fires=0 due=48.7,50.6,50.5
-```
+The earlier reading that "nothing fires" was **a measurement error, not a defect**. Two things
+conspired:
 
-`dueAt` sits a few seconds ahead of `now` no matter how long the run, so the schedule is being reset
-rather than advancing. The contradiction I could not resolve: `refresh` ran 11 times on one instance
-holding 28 entries, yet its `existing` branch never ran once and nothing was retired. That is not
-possible for a plain `Map` with stable string keys, so an assumption behind the instrumentation or the
-call path is wrong, and further guessing was not converging.
+1. `initialState` is captured right after settle, and the harness applies its camera at the *end* of
+   settle — so the first populated scan happened at `t = 8.8` and the diagnostics were read before any
+   interval could elapse. Frames after settle (`--measure-ms`) are what make ambience observable.
+2. Counter-only instrumentation produced an apparent impossibility — `refresh` running 11 times on one
+   instance holding 28 entries whose `existing` branch never ran. Logging the actual key sets
+   dissolved it immediately: the first ten refreshes had **empty scans** (`scanKeys=0`, nothing
+   installed yet), so there was nothing to update and nothing to retire. The counters were all
+   correct; the inference drawn from them was not.
 
-Next investigator's shortest path: log the actual key sets on successive refreshes rather than
-counters, and confirm `#refreshAmbient`'s caller identity — the probe accounting says one
-`AmbientSystem`, but the numbers only make sense if the map being written and the map being read are
-not the same object.
+Recorded because the lesson generalizes: *counters tell you how often, key sets tell you what*. Three
+probe rounds went on the former when one round of the latter answered it.
 
-Everything below the integration is unit-tested and green (890 tests): the scan, weighting,
-direction bucketing, band widening, region chain, scheduler cadence, and placement.
+**Audibility depends on standing near the ground that authors a sound**, and that is retail's design
+rather than a gap. Measured placements from the harness's elevated camera came out 67–118 m away at
+volumes 0.04–0.5, which falls under retail's own `VOL_MIN` floor of −50 dB. Ground the listener
+stands on contributes a 4–10 m band and is comfortably audible. A test pins both ends against
+`placeSpatialAudio` so the boundary cannot drift silently.
+
+Remaining verification the harness cannot give: **listening to it**. The harness camera sits above the
+terrain bound by design, so its placements are always the faint far-field case.
 
 ### Risks
 

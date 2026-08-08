@@ -9,7 +9,10 @@ import {
 	rotateAcVector,
 } from "../../assets/ac-frame";
 import type { AcRotation } from "../../assets/ac-frame";
-import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
+import type {
+	DrawableParticleEmitter,
+	PreparedParticleEmitter,
+} from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
 import type {
@@ -148,7 +151,7 @@ interface LiveParticle {
 }
 
 interface EmitterInstance {
-	readonly emitter: PreparedParticleEmitter;
+	readonly emitter: DrawableParticleEmitter;
 	/**
 	 * Owning entity: what this emitter's identity, visibility, and culling envelope belong to.
 	 *
@@ -268,9 +271,10 @@ export class ParticleSystem {
 			/** Authored part this emitter rides, or `-1` for the whole object's own frame. */
 			readonly partIndex: number;
 		},
-	): "created" | "unprepared" {
+	): "created" | "intentionally-inert" | "unprepared" {
 		const emitter = this.#dependencies.resolveEmitter(command.emitterInfoId);
 		if (emitter === null) return "unprepared";
+		if (emitter.kind === "retail-inert") return "intentionally-inert";
 		// An emitter riding a part is positioned and aimed by that part, while remaining owned by the
 		// object for identity, visibility, and culling.
 		const frameTarget =
@@ -300,7 +304,7 @@ export class ParticleSystem {
 	 */
 	create(
 		target: BehaviorTarget,
-		emitter: PreparedParticleEmitter,
+		emitter: DrawableParticleEmitter,
 		hookOffset: AcVector3,
 		emitterId: number,
 		timeSeconds: number,
@@ -431,6 +435,7 @@ export class ParticleSystem {
 		this.#recordsUsed = 0;
 		for (const instance of this.#instances) {
 			const info = instance.emitter.info;
+			const meshId = instance.emitter.meshId;
 			// An unshipped motion type has no formula in either evaluator; drawing it motionless
 			// would misrepresent it as working.
 			if (info.motionType === null) continue;
@@ -438,12 +443,12 @@ export class ParticleSystem {
 			if (renderOwner === null) continue;
 			const liveOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
 			if (liveOrigin === null) continue;
-			const key = `${renderOwner}\0${info.hwGfxObjId}:${info.motionType}`;
+			const key = `${renderOwner}\0${meshId}:${info.motionType}`;
 			this.#activeCohortKeys.add(key);
 			let cohort = cohorts.get(key);
 			if (!cohort) {
 				cohort = {
-					hwGfxObjId: info.hwGfxObjId,
+					hwGfxObjId: meshId,
 					motionType: info.motionType,
 					particles: [],
 					renderOwner,

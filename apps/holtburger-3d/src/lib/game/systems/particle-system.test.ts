@@ -11,7 +11,7 @@ import type { AcVector3, SceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
-import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
+import type { DrawableParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import { ParticleSystem } from "./particle-system";
@@ -30,7 +30,7 @@ const NO_OFFSET: AcVector3 = acVector3([0, 0, 0]);
 
 function prepared(
 	overrides: Partial<DecodedParticleEmitterInfo> = {},
-): PreparedParticleEmitter {
+): DrawableParticleEmitter {
 	const info: DecodedParticleEmitterInfo = {
 		a: acVector3([1, 0, 0]),
 		b: acVector3([0, 0, 0]),
@@ -66,7 +66,13 @@ function prepared(
 		transRand: 0,
 		...overrides,
 	};
-	return { envelopeRadius: 10, id: info.id, info };
+	return {
+		envelopeRadius: 10,
+		id: info.id,
+		info,
+		kind: "drawable",
+		meshId: info.hwGfxObjId,
+	};
 }
 
 /**
@@ -483,6 +489,28 @@ describe("ParticleSystem", () => {
 			}),
 		).toBe("unprepared");
 		expect(particles.getDiagnostics().emitterCount).toBe(0);
+	});
+
+	it("faithfully refuses a retail-inert emitter without simulating it", () => {
+		const particles = runtime({
+			resolveEmitter: () => ({
+				id: "0x320003b7" as DatAssetId,
+				kind: "retail-inert",
+			}),
+		});
+
+		expect(
+			particles.createEmitter(TARGET, {
+				emitterId: 0,
+				emitterInfoId: "0x320003b7" as DatAssetId,
+				offsetOrigin: NO_OFFSET,
+				partIndex: -1,
+			}),
+		).toBe("intentionally-inert");
+		expect(particles.getDiagnostics()).toMatchObject({
+			emitterCount: 0,
+			particleCount: 0,
+		});
 	});
 
 	it("contributes a conservative bound covering its hook offset and envelope", () => {

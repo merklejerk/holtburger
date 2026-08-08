@@ -5,16 +5,19 @@ import type { DatAssetId } from "../game-types";
 import { PreparedAssetRepository } from "./prepared-asset-repository";
 
 /**
- * Immutable prepared emitter definition, shared by every emitter instance that references it.
+ * An emitter retail can instantiate because it names a hardware GfxObj.
  *
- * Carries the exact conservative motion envelope alongside the authored fields, computed once here
- * rather than per activation. Retail derives its own sphere as
+ * Immutable and shared by every emitter instance that references it. Carries the exact conservative
+ * motion envelope alongside the authored fields, computed once here. Retail derives its own sphere as
  * `max(max_offset, max_a * lifespan)` (acclient.c:312431-312445), which is velocity-only and
  * provably under-bounds the parabolic motion types; ours accounts for the acceleration terms too.
  */
-export interface PreparedParticleEmitter {
+export interface DrawableParticleEmitter {
+	readonly kind: "drawable";
 	readonly id: DatAssetId;
 	readonly info: DecodedParticleEmitterInfo;
+	/** Validated 0x01 mesh ID consumed by staging and final GPU batching. */
+	readonly meshId: DatAssetId;
 	/**
 	 * Radius, from the emitter origin, containing every particle for its whole lifespan.
 	 *
@@ -23,6 +26,16 @@ export interface PreparedParticleEmitter {
 	 */
 	readonly envelopeRadius: number;
 }
+
+/** An authored emitter retail refuses before allocating particle state. */
+interface RetailInertParticleEmitter {
+	readonly kind: "retail-inert";
+	readonly id: DatAssetId;
+}
+
+/** Prepared activation decision, computed once from the authored hardware-mesh ID. */
+export type PreparedParticleEmitter =
+	DrawableParticleEmitter | RetailInertParticleEmitter;
 
 /** Shares immutable emitter-definition transfer/preparation over the common asset lifecycle. */
 export class ParticleEmitterRepository extends PreparedAssetRepository<
@@ -48,10 +61,23 @@ function prepareParticleEmitter(
 			`Particle emitter source returned ${decoded.id} for ${expectedId}.`,
 		);
 	}
+	// Retail rejects INVALID_DID before allocating the particle object or any parts
+	// (`ParticleEmitter::SetInfo`, acclient.c:318011-318081). The archive authors this on 29 of
+	// 2,051 emitters; staging those zero IDs would poison otherwise-valid mesh batches.
+	if (decoded.hwGfxObjId === "0x00000000") {
+		return { id: decoded.id, kind: "retail-inert" };
+	}
+	if (!decoded.hwGfxObjId.toLowerCase().startsWith("0x01")) {
+		throw new Error(
+			`Particle emitter ${decoded.id} hardware mesh ${decoded.hwGfxObjId} is not a GfxObj.`,
+		);
+	}
 	return {
 		envelopeRadius: emitterEnvelopeRadius(decoded),
 		id: decoded.id,
 		info: decoded,
+		kind: "drawable",
+		meshId: decoded.hwGfxObjId,
 	};
 }
 

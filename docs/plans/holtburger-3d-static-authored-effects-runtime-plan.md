@@ -1593,24 +1593,28 @@ what keeps tiled instances in lockstep — requires threading a new source fact 
 contract. That is a deliberate contract change, not a wiring step, and it should be scoped as one.
 
 Weighing it: `TextureVelocity` has **zero occurrences in the measured representative workload** (11
-scripts archive-wide, none in DA55/DC58), so nothing observable is waiting on it. The rate is already
-resolved and validated at preparation by `resolveAuthoredTextureScroll`; only the render-side
-consumption is outstanding. Building a constant-zero uniform now would be the dormant infrastructure
-this plan forbids, so it waits for the contract change rather than being half-landed.
+scripts archive-wide, none in DA55/DC58), so nothing observable is waiting on it. Building a constant-zero uniform now would be
+the dormant infrastructure this plan forbids, so it waits for the contract change rather than being
+half-landed.
+
+**Corrected later:** this paragraph originally claimed the rate was "already resolved and validated at
+preparation by `resolveAuthoredTextureScroll`". That resolver had no callers, so the claim — and the
+`applied at preparation` dispatch outcome built on it — were both false. Resolver and outcome are
+deleted; the router now reports `no-consumer`, which is the truth.
 
 #### Recorded Debt
 
-- A script-only resident publishes no presentation sample, so a script that authors `Scale`,
-  `SetOmega`, or `TransparentPart` on one would mutate effect state nothing reads. No measured
-  script does — the representative closure authors only `CreateParticle`, `SoundTweaked`, and
-  `CallPES` — but 43 `Scale` hooks exist archive-wide, so this needs an effect-only sampling path
-  before broader content activates.
+- ~~A script-only resident publishes no presentation sample, so a script that authors `Scale`,
+  `SetOmega`, or `TransparentPart` on one would mutate effect state nothing reads.~~ **Closed in
+  Phase 8**: `DynamicEntitySystem` gained effect-only publication for entities animation does not
+  cover, gated by a dirty flag so idle residents cost nothing per frame.
 
 ### Phase 8: Resteer, Measure, and Clean Up
 
 Progress: cleanup and resteer were completed 2026-08-06, then **reopened 2026-08-07**. Playtesting
 the landed work surfaced a run of defects — five of them coordinate-frame errors — whose fixes
-introduced their own cleanup targets. The measurement items were never closed and still need `--gpu`.
+introduced their own cleanup targets. The measurement items were closed later the same day, once
+`--gpu` turned out to have worked all along.
 
 Treat the reopened checklist below as the live one; the first records what the original resteer did.
 
@@ -3207,13 +3211,11 @@ fails.
 **Rescan cadence: the listener's 24 m terrain cell**, not its landblock. A landblock is 192 m across
 and the ambient radius is 120, so waiting for a landblock crossing would let the listener walk most of
 the way across the audible field before the surroundings were re-weighted. The open question asked how
-often the scan must run; this answers it structurally, but the **cost has still not been measured** —
-recorded as debt below.
+often the scan must run; this answers it structurally, and the cost was measured afterwards — see
+Open Questions.
 
 Debt and concessions:
 
-- The scan cost is unmeasured. It walks 64 cells per installed landblock on every cell transition,
-  which is bounded and infrequent, but "bounded" is not "measured".
 - Types whose only consumers are internal are unexported, because the lint gate treats an unused
   export as an error. Several will be exported the moment a second consumer appears.
 - The Explorer installs ambient facts fire-and-forget (`void installAmbientRegion(...)`), matching how
@@ -3319,9 +3321,19 @@ examining 69 cells within the ambient radius and resolving 28 descriptors. It ru
 transition, so at walking pace that is roughly once every five seconds — about 0.01% of frame time
 amortized, against a 2.3 ms mean tick. No budget concern.
 
-The obvious optimization if it ever becomes one: the loop visits 25 × 64 = 1600 cells to find the 69
-in range, so a per-block bounds rejection against the ambient radius would drop ~95% of the work.
-Deliberately not done — it is a real optimization for a cost that is not real yet.
+**Since bounded per block.** That measurement iterated whatever terrain the scene had resident, which
+is chosen by rendering concerns and has nothing to do with earshot — 1,600 cell visits to find the 69
+that mattered. A landblock is 192 m across against a 120 m radius, so only the 3×3 neighbourhood can
+hold a cell within earshot and the second ring is unreachable by 72 m. The scan now rejects a block
+against its own bounds before touching a cell, cutting the walk to ~576 cells for the same result.
+
+Implemented as an AABB rejection rather than a hardcoded 3×3, so the scan needs no landblock topology
+and stays correct if the radius or block size changes. Height is deliberately excluded from the block
+test — a vertical bound would need the terrain's height range to stay conservative, and the per-cell
+test already uses real vertex heights.
+
+The post-optimization cost was not re-measured. `0.5 ms` therefore stands as the honest ceiling rather
+than the current figure.
 
 ## Definition of Done
 

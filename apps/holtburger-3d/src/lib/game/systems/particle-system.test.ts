@@ -20,6 +20,10 @@ const TARGET: BehaviorTarget = {
 	generation: 1,
 	targetId: behaviorTargetId("node-1"),
 };
+const SECOND_TARGET: BehaviorTarget = {
+	generation: 1,
+	targetId: behaviorTargetId("node-2"),
+};
 const ORIGIN: SceneVector3 = sceneVector3([0, 0, 0]);
 /** Hook offsets stay in AC axes so spawn can rotate them with the owner before converting. */
 const NO_OFFSET: AcVector3 = acVector3([0, 0, 0]);
@@ -447,7 +451,7 @@ describe("ParticleSystem", () => {
 
 		// The envelope belongs to the owning object; culling the part alone would lose the swarm.
 		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeGreaterThan(0);
-		expect(particles.collectCohorts(() => false)).toHaveLength(0);
+		expect(particles.collectCohorts(() => null)).toHaveLength(0);
 	});
 
 	it("refuses a part the owner does not have rather than falling back to the object", () => {
@@ -550,6 +554,32 @@ describe("ParticleSystem", () => {
 		);
 
 		expect(particles.collectCohorts()).toHaveLength(1);
+	});
+
+	it("retains render owners until renderer-owned domain batching", () => {
+		const particles = runtime();
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 1 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+		particles.create(
+			SECOND_TARGET,
+			prepared({ initialParticles: 1 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const cohorts = particles.collectCohorts(
+			(target) => `scene-node:${target.targetId}` as SceneNodeId,
+		);
+		expect(cohorts).toHaveLength(2);
+		expect(new Set(cohorts.map((cohort) => cohort.renderOwner)).size).toBe(2);
 	});
 
 	it("keeps left-behind particles in place when the render anchor moves", () => {
@@ -677,7 +707,7 @@ describe("ParticleSystem", () => {
 		);
 
 		// Culling is per emitter, so the whole cohort disappears rather than being filtered.
-		expect(particles.collectCohorts(() => false)).toHaveLength(0);
+		expect(particles.collectCohorts(() => null)).toHaveLength(0);
 	});
 
 	it("skips an unshipped motion type rather than drawing it motionless", () => {

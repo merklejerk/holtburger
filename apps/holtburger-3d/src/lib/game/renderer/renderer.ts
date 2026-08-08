@@ -14,7 +14,7 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
-import type { ParticleDrawCohort } from "../systems/particle-system";
+import type { ParticleSourceCohort } from "../systems/particle-system";
 import type { TexturePreparer } from "../textures/texture-preparer";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
@@ -270,7 +270,7 @@ export interface RendererCpuFrameTimings {
 	readonly objectPreparationMs: number;
 	/** CPU wall time spent submitting opaque object work. */
 	readonly opaqueSubmissionMs: number;
-	/** CPU cost of building and uploading particle cohorts, separate from other blended work. */
+	/** CPU cost of routing sources and uploading particle batches, separate from blended work. */
 	readonly particleSubmissionMs: number;
 	/** Renderer work outside the named spans, including portal masks and orchestration. */
 	readonly otherMs: number;
@@ -363,7 +363,7 @@ export type RendererGpuFrameProfile =
 			/**
 			 * GPU elapsed-time span covering particle commands.
 			 *
-			 * Separate from `blendedMs` so a per-cohort upload stall is attributable: every cohort
+			 * Separate from `blendedMs` so a per-batch upload stall is attributable: every batch
 			 * writes into one buffer immediately before its own draw, and the driver must either
 			 * rename the buffer or wait.
 			 */
@@ -439,7 +439,7 @@ export interface RendererSkyCapability {
 }
 
 /**
- * Particle mesh residency and per-frame cohort submission.
+ * Particle mesh residency and per-frame owner-local source submission.
  *
  * Separate from the object path because particle meshes are not landblock residents: they are named
  * by `CreateParticle` and arrive in batches with their own lifetime.
@@ -451,12 +451,12 @@ export interface RendererParticleCapability {
 		preparer: TexturePreparer,
 	): Promise<void>;
 	/**
-	 * Submit this frame's visible cohorts.
+	 * Submit this frame's visible owner-local sources.
 	 *
-	 * Called before `drawFrame`, because cohorts come from a system the renderer does not own and
+	 * Called before `drawFrame`, because sources come from a system the renderer does not own and
 	 * are rebuilt every frame rather than retained.
 	 */
-	submit(cohorts: readonly ParticleDrawCohort[]): void;
+	submit(sources: readonly ParticleSourceCohort[]): void;
 	clear(): void;
 }
 

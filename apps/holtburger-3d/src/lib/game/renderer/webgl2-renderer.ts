@@ -159,7 +159,14 @@ import { SKY_FAR_PLANE, skyViewMatrix, WebGL2SkyPass } from "./webgl2-sky-pass";
 import type { SkyDrawPass } from "../environment/sky-state";
 import { ParticleMeshResidency } from "./particle-mesh-residency";
 import { WebGL2ParticlePass } from "./webgl2-particle-pass";
-import type { ParticleDrawCohort } from "../systems/particle-system";
+import {
+	EXTERIOR_PARTICLE_RENDER_OWNER,
+	type ParticleSourceCohort,
+} from "../systems/particle-system";
+import {
+	ParticleRenderBatcher,
+	type ParticleDrawBatch,
+} from "./particle-render-routing";
 import {
 	createWebGL2SkyProgram,
 	type WebGL2SkyProgram,
@@ -240,6 +247,8 @@ const PROBE_SHADING: SceneShading = {
 
 const ORIGIN = { x: 0, y: 0, z: 0 } as const;
 const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
+/** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
+const FLAT_PARTICLE_DOMAIN = "particle-render-domain:flat";
 /** Unlit result for draws that resolve no landblock lights at all. */
 const EMPTY_LANDBLOCK_LIGHTS: LandblockLights = {
 	lights: EMPTY_LIGHTS,
@@ -336,11 +345,16 @@ interface PreparedSceneContributions {
 	readonly terrain: readonly TerrainFrameInput[];
 	/** Opaque and alpha-test static-object ranges visible to this view. */
 	readonly objects: readonly PreparedObjectFrameInput[];
+	/** Final contribution-local batches, recoalesced after particle owner routing. */
+	readonly particles: readonly ParticleDrawBatch[];
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
 interface PreparedView
 	extends PreparedViewGeometry, PreparedSceneContributions {}
+
+/** Whether one contribution owns exterior-global passes such as sky and weather. */
+type SceneRenderDomain = "exterior" | "indoor";
 
 /** Read-only Gate-E evidence from the final pure portal planner and shared scene query. */
 export interface PortalRenderGraphProbeResult {
@@ -442,8 +456,10 @@ export class WebGL2Renderer implements Renderer {
 	#skyPass: WebGL2SkyPass | null = null;
 	#particleResidency: ParticleMeshResidency | null = null;
 	#particlePass: WebGL2ParticlePass | null = null;
-	/** This frame's visible cohorts, replaced every submission rather than retained. */
-	#particleCohorts: readonly ParticleDrawCohort[] = [];
+	/** This frame's owner-local sources, replaced every submission rather than retained. */
+	#particleSources: readonly ParticleSourceCohort[] = [];
+	/** Persistent scratch for owner routing and final contribution-local batch coalescing. */
+	readonly #particleBatcher = new ParticleRenderBatcher();
 	/** Reusable particle matrices; the pass runs every frame and must not allocate in it. */
 	readonly #particleProjectionScratch = new Float32Array(16);
 	readonly #particleViewScratch = new Float32Array(16);
@@ -739,6 +755,7 @@ export class WebGL2Renderer implements Renderer {
 					this.#drawProfiledView(
 						{ ...geometry, ...contributions },
 						shading,
+						"exterior",
 						profile,
 					);
 				} else {
@@ -749,6 +766,7 @@ export class WebGL2Renderer implements Renderer {
 							input.frameSettings,
 						),
 						shading,
+						"exterior",
 					);
 				}
 			}
@@ -843,21 +861,23 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
+					this.#particleBatcher,
 					profile,
 				);
 				const view = { ...prepared, ...contributions };
-				if (profile) this.#drawProfiledView(view, shading, profile);
-				else this.#drawView(view, shading);
+				if (profile) this.#drawProfiledView(view, shading, "exterior", profile);
+				else this.#drawView(view, shading, "exterior");
 			},
 			renderIndoorNodes: (_target, renderNodeIds) => {
 				const contributions = mergePortalNodeContributions(
 					renderNodeIds,
 					contributionsByNode,
+					this.#particleBatcher,
 					profile,
 				);
 				const view = { ...prepared, ...contributions };
-				if (profile) this.#drawProfiledView(view, shading, profile);
-				else this.#drawView(view, shading);
+				if (profile) this.#drawProfiledView(view, shading, "indoor", profile);
+				else this.#drawView(view, shading, "indoor");
 			},
 			resolveVisibilityAperture: (apertureId, crossingId) =>
 				this.#resolvePortalMask(prepared, apertureId, crossingId),
@@ -978,17 +998,27 @@ export class WebGL2Renderer implements Renderer {
 				const contributions = mergePortalNodeContributions(
 					[outdoorNodeId],
 					contributionsByNode,
+					this.#particleBatcher,
 					null,
 				);
-				this.#drawView({ ...prepared, ...contributions }, PROBE_SHADING);
+				this.#drawView(
+					{ ...prepared, ...contributions },
+					PROBE_SHADING,
+					"exterior",
+				);
 			},
 			renderIndoorNodes: (_target, renderNodeIds) => {
 				const contributions = mergePortalNodeContributions(
 					renderNodeIds,
 					contributionsByNode,
+					this.#particleBatcher,
 					null,
 				);
-				this.#drawView({ ...prepared, ...contributions }, PROBE_SHADING);
+				this.#drawView(
+					{ ...prepared, ...contributions },
+					PROBE_SHADING,
+					"indoor",
+				);
 			},
 			resolveVisibilityAperture: (apertureId, crossingId) =>
 				this.#resolvePortalMask(prepared, apertureId, crossingId),
@@ -1055,8 +1085,7 @@ export class WebGL2Renderer implements Renderer {
 		const collected = this.#collectScene(prepared, frameSettings, null);
 		return {
 			...prepared,
-			objects: collected.objects,
-			terrain: collected.terrain,
+			...collected,
 		};
 	}
 
@@ -1136,6 +1165,7 @@ export class WebGL2Renderer implements Renderer {
 	): ReadonlyMap<string, PreparedSceneContributions> {
 		const contributionsByNode = new Map<string, PreparedSceneContributions>();
 		const claimedSceneNodes = new Set<SceneNodeId>();
+		const renderNodeBySceneNode = new Map<SceneNodeId, string>();
 		const cullingGroupFilter = renderCullingGroupFilter(
 			frameSettings.layerVisibility,
 		);
@@ -1156,6 +1186,7 @@ export class WebGL2Renderer implements Renderer {
 						`Portal scene node ${sceneNodeId} belongs to more than one render node.`,
 					);
 				}
+				renderNodeBySceneNode.set(sceneNodeId, node.id);
 			}
 			contributionsByNode.set(
 				node.id,
@@ -1170,6 +1201,22 @@ export class WebGL2Renderer implements Renderer {
 		}
 		if (contributionsByNode.size !== plan.nodes.length) {
 			throw new Error("Portal contribution collection lost a render node.");
+		}
+		const outdoorNodeId =
+			plan.nodes.find((node) => node.kind === "outdoor")?.id ?? null;
+		const particlesByNode = this.#particleBatcher.route(
+			plan.topologyRevision,
+			this.#particleSources,
+			(owner) =>
+				owner === EXTERIOR_PARTICLE_RENDER_OWNER
+					? outdoorNodeId
+					: (renderNodeBySceneNode.get(owner) ?? null),
+		);
+		for (const [nodeId, contributions] of contributionsByNode) {
+			contributionsByNode.set(nodeId, {
+				...contributions,
+				particles: particlesByNode.get(nodeId) ?? [],
+			});
 		}
 		return contributionsByNode;
 	}
@@ -1227,7 +1274,14 @@ export class WebGL2Renderer implements Renderer {
 			frameSettings,
 			profile,
 		);
-		return contributions;
+		const particles = this.#particleBatcher
+			.route(
+				FLAT_PARTICLE_DOMAIN,
+				this.#particleSources,
+				() => FLAT_PARTICLE_DOMAIN,
+			)
+			.get(FLAT_PARTICLE_DOMAIN);
+		return { ...contributions, particles: particles ?? [] };
 	}
 
 	/**
@@ -1450,7 +1504,7 @@ export class WebGL2Renderer implements Renderer {
 				dynamicObjectCount,
 			);
 		}
-		return { objects: preparedObjects, terrain };
+		return { objects: preparedObjects, particles: [], terrain };
 	}
 
 	#retainsObjectFootprint(
@@ -1713,7 +1767,7 @@ export class WebGL2Renderer implements Renderer {
 	 * there is no incremental path and no per-frame residency work.
 	 */
 	/**
-	 * Authored particle residency and per-frame cohort submission.
+	 * Authored particle residency and per-frame source submission.
 	 *
 	 * Meshes accumulate across batches rather than being replaced, because one script closure names
 	 * a few emitters and different residents keep naming the same meshes.
@@ -1724,7 +1778,8 @@ export class WebGL2Renderer implements Renderer {
 			this.#particleResidency = null;
 			this.#particlePass?.destroy();
 			this.#particlePass = null;
-			this.#particleCohorts = [];
+			this.#particleSources = [];
+			this.#particleBatcher.clear();
 		},
 		install: async (source, preparer) => {
 			const residency = (this.#particleResidency ??= new ParticleMeshResidency(
@@ -1737,8 +1792,8 @@ export class WebGL2Renderer implements Renderer {
 				(hwGfxObjId) => this.#particleResidency?.resolve(hwGfxObjId) ?? null,
 			);
 		},
-		submit: (cohorts) => {
-			this.#particleCohorts = cohorts;
+		submit: (sources) => {
+			this.#particleSources = sources;
 		},
 	};
 
@@ -1820,15 +1875,14 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
-
 	#drawParticles(
 		view: PreparedView,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const pass = this.#particlePass;
-		if (!pass || this.#particleCohorts.length === 0) return;
-		// Timed separately from the blended pass so a per-cohort upload stall is attributable: each
-		// cohort writes into one shared buffer immediately before its own draw.
+		if (!pass || view.particles.length === 0) return;
+		// Timed separately from the blended pass so a per-batch upload stall is attributable: each
+		// batch writes into one shared buffer immediately before its own draw.
 		const startedAt = profile?.beginCpuPhase();
 		const gpuPhase = profile?.beginGpuPhase("particle") ?? null;
 		pass.draw(
@@ -1849,7 +1903,7 @@ export class WebGL2Renderer implements Renderer {
 				),
 				view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
 			},
-			this.#particleCohorts,
+			view.particles,
 		);
 		gpuPhase?.finish();
 		if (startedAt !== undefined) {
@@ -1857,14 +1911,19 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	#drawView(view: PreparedView, shading: SceneShading): void {
-		this.#drawSky(view, shading, "before-world");
+	/** Draw one scene-domain contribution, including exterior-global passes only for outdoors. */
+	#drawView(
+		view: PreparedView,
+		shading: SceneShading,
+		domain: SceneRenderDomain,
+	): void {
+		if (domain === "exterior") this.#drawSky(view, shading, "before-world");
 		this.#drawTerrain(view, shading);
 		this.#drawOpaqueObjects(view, shading, null);
 		// Retail's after-landscape weather: drawn once the landblock loop is down but before the
 		// deferred translucent flush, which is legitimately allowed to cover it (acclient.c:296725,
 		// 441068).
-		this.#drawSky(view, shading, "after-landscape");
+		if (domain === "exterior") this.#drawSky(view, shading, "after-landscape");
 		this.#drawBlendedObjects(view, shading, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
@@ -1877,11 +1936,15 @@ export class WebGL2Renderer implements Renderer {
 	#drawProfiledView(
 		view: PreparedView,
 		shading: SceneShading,
+		domain: SceneRenderDomain,
 		profile: WebGL2FrameProfileCapture,
 	): void {
-		const beforeSkyGpu = profile.beginGpuPhase("sky");
+		const beforeSkyGpu =
+			domain === "exterior" ? profile.beginGpuPhase("sky") : null;
 		try {
-			this.#drawSky(view, shading, "before-world");
+			if (domain === "exterior") {
+				this.#drawSky(view, shading, "before-world");
+			}
 		} finally {
 			beforeSkyGpu?.finish();
 		}
@@ -1903,9 +1966,12 @@ export class WebGL2Renderer implements Renderer {
 
 		// Same named phase as the before pass: the two are one cost to reason about, and elapsed
 		// queries cannot nest, so they are measured sequentially and summed.
-		const afterSkyGpu = profile.beginGpuPhase("sky");
+		const afterSkyGpu =
+			domain === "exterior" ? profile.beginGpuPhase("sky") : null;
 		try {
-			this.#drawSky(view, shading, "after-landscape");
+			if (domain === "exterior") {
+				this.#drawSky(view, shading, "after-landscape");
+			}
 		} finally {
 			afterSkyGpu?.finish();
 		}
@@ -2852,6 +2918,7 @@ function resolveStaticFragmentInstanceInput(
 function mergePortalNodeContributions(
 	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
 	contributionsByNode: ReadonlyMap<string, PreparedSceneContributions>,
+	particleBatcher: ParticleRenderBatcher,
 	profile: WebGL2FrameProfileCapture | null,
 ): PreparedSceneContributions {
 	profile?.recordPortalContributionUse(renderNodeIds);
@@ -2872,6 +2939,7 @@ function mergePortalNodeContributions(
 	}
 	const objects: PreparedObjectFrameInput[] = [];
 	const terrain: TerrainFrameInput[] = [];
+	const particleBatchGroups: (readonly ParticleDrawBatch[])[] = [];
 	const consumedNodeIds = new Set<string>();
 	const mergeStartedAt = profile?.beginCpuPhase();
 	for (const renderNodeId of renderNodeIds) {
@@ -2888,12 +2956,17 @@ function mergePortalNodeContributions(
 		}
 		objects.push(...contributions.objects);
 		terrain.push(...contributions.terrain);
+		particleBatchGroups.push(contributions.particles);
 	}
 	if (profile && mergeStartedAt !== undefined) {
 		profile.finishCpuPhase("contributionMerge", mergeStartedAt);
 		profile.recordContributionMerge();
 	}
-	return { objects, terrain };
+	return {
+		objects,
+		particles: particleBatcher.mergeContribution(particleBatchGroups),
+		terrain,
+	};
 }
 
 /** Check the semantic frame-template identity required in addition to prepared compatibility. */

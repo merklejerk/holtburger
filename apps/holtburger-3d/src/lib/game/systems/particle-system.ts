@@ -12,7 +12,11 @@ import type { AcRotation } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
-import type { BehaviorTarget, BehaviorTargetId } from "../behavior/behavior-event-router";
+import type {
+	BehaviorTarget,
+	BehaviorTargetId,
+} from "../behavior/behavior-event-router";
+import type { SceneNodeId } from "../scene";
 import {
 	PARTICLE_TYPE,
 	particleLifeProgress,
@@ -181,12 +185,21 @@ interface EmitterInstance {
 	particles: LiveParticle[];
 }
 
-/** One draw batch: a mesh, its motion law, and every particle sharing both. */
-export interface ParticleDrawCohort {
+/** Exterior-owned effects are routed through the portal graph's unique outdoor domain. */
+export const EXTERIOR_PARTICLE_RENDER_OWNER = "particle-render-owner:exterior";
+
+/** Stable routing owner retained until the renderer assigns particles to this frame's domains. */
+export type ParticleRenderOwner =
+	SceneNodeId | typeof EXTERIOR_PARTICLE_RENDER_OWNER;
+
+/** One owner-local source cohort awaiting renderer-owned portal-domain batching. */
+export interface ParticleSourceCohort {
 	readonly hwGfxObjId: DatAssetId;
 	/** Bound as a vertex-stage constant, so cohorts never mix motion laws. */
 	readonly motionType: number;
 	readonly particles: ParticleInstanceRecord[];
+	/** Owner used only for render-domain routing; it is not part of the final GPU batch key. */
+	readonly renderOwner: ParticleRenderOwner;
 }
 
 /** One particle ready to draw, in world space. */
@@ -216,8 +229,10 @@ export class ParticleSystem {
 	readonly #roll: UniformRoll;
 	readonly #instances: EmitterInstance[] = [];
 	/** Reused across frames so cohort grouping does not allocate in the renderer's hot path. */
-	readonly #cohortScratch = new Map<string, ParticleDrawCohort>();
-	readonly #cohortScratchOutput: ParticleDrawCohort[] = [];
+	readonly #cohortScratch = new Map<string, ParticleSourceCohort>();
+	/** Current-frame keys used to release scratch belonging to streamed-out owners. */
+	readonly #activeCohortKeys = new Set<string>();
+	readonly #cohortScratchOutput: ParticleSourceCohort[] = [];
 	/**
 	 * Reused instance records, one entry per particle drawn, each owning its origin vector.
 	 *
@@ -387,26 +402,30 @@ export class ParticleSystem {
 	}
 
 	/**
-	 * Group live particles into draw cohorts, one per unique mesh and motion type.
+	 * Group live particles into owner-local source cohorts.
 	 *
 	 * Cohorts carry the facts the vertex stage binds as constants — mesh, motion type — and the
 	 * per-particle spawn records it reads as instance attributes. No position is evaluated here:
 	 * that is the shader's job, and doing it twice is the CPU ceiling this design exists to avoid.
 	 *
-	 * `isVisible` culls at emitter granularity, never per particle, so a culled emitter contributes
-	 * no instance records at all that frame.
+	 * `resolveRenderOwner` both culls and preserves the fact needed to route the emitter into the
+	 * current portal graph. Owners intentionally remain separate here; the renderer erases them and
+	 * recoalesces by mesh and motion type after assigning each source to its final contribution.
 	 *
 	 * The returned cohorts, their record arrays, and the `origin` vectors inside them are all reused
 	 * storage owned by this system. They are valid until the next call and must be consumed, not
 	 * retained — which matches the one consumer, the particle pass, uploading them the same frame.
 	 */
 	collectCohorts(
-		isVisible: (target: BehaviorTarget) => boolean = () => true,
-	): ParticleDrawCohort[] {
+		resolveRenderOwner: (
+			target: BehaviorTarget,
+		) => ParticleRenderOwner | null = () => EXTERIOR_PARTICLE_RENDER_OWNER,
+	): ParticleSourceCohort[] {
 		// Cohort objects and their arrays persist across frames; only the per-particle records are
 		// rebuilt. Reusing those too is recorded as measured debt rather than guessed at.
 		const cohorts = this.#cohortScratch;
 		for (const cohort of cohorts.values()) cohort.particles.length = 0;
+		this.#activeCohortKeys.clear();
 		// The anchor is one value for the whole frame, so it is read once rather than per particle.
 		const anchor = this.#dependencies.renderAnchorOrigin();
 		this.#recordsUsed = 0;
@@ -415,16 +434,19 @@ export class ParticleSystem {
 			// An unshipped motion type has no formula in either evaluator; drawing it motionless
 			// would misrepresent it as working.
 			if (info.motionType === null) continue;
-			if (!isVisible(instance.target)) continue;
+			const renderOwner = resolveRenderOwner(instance.target);
+			if (renderOwner === null) continue;
 			const liveOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
 			if (liveOrigin === null) continue;
-			const key = `${info.hwGfxObjId}:${info.motionType}`;
+			const key = `${renderOwner}\0${info.hwGfxObjId}:${info.motionType}`;
+			this.#activeCohortKeys.add(key);
 			let cohort = cohorts.get(key);
 			if (!cohort) {
 				cohort = {
 					hwGfxObjId: info.hwGfxObjId,
 					motionType: info.motionType,
 					particles: [],
+					renderOwner,
 				};
 				cohorts.set(key, cohort);
 			}
@@ -448,6 +470,9 @@ export class ParticleSystem {
 				record.startTranslucency = particle.spawn.startTranslucency;
 				cohort.particles.push(record);
 			}
+		}
+		for (const key of cohorts.keys()) {
+			if (!this.#activeCohortKeys.has(key)) cohorts.delete(key);
 		}
 		this.#cohortScratchOutput.length = 0;
 		for (const cohort of cohorts.values()) {

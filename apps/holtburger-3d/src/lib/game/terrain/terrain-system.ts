@@ -38,6 +38,7 @@ import {
 	type TerrainDrawUnit,
 	type TerrainGeneratedTextureKeys,
 	type TerrainGenerationResult,
+	type TerrainGenerationSource,
 	type TerrainSourceInstallation,
 	type TerrainVariantDrawRange,
 	TERRAIN_MESH_STRIDES,
@@ -62,6 +63,12 @@ interface ResolvedTerrainSource<TOwnerId extends string> {
 	readonly input: TerrainSourceInstallation;
 	readonly geometry: TerrainGeometryKey;
 	readonly generatedTextures: TerrainGeneratedTextureKeys;
+}
+
+/** One installed landblock's authored terrain, paired with the block it belongs to. */
+export interface InstalledTerrain {
+	readonly landblockId: LandblockId;
+	readonly generation: TerrainGenerationSource;
 }
 
 interface LoadingTerrainInstallation<TOwnerId extends string> {
@@ -246,6 +253,18 @@ export class TerrainSystem<
 	}
 
 	/** Sample source-proven terrain height without waiting for generated GPU resources. */
+	/**
+	 * Authored terrain for every installed landblock, for consumers that classify the ground itself.
+	 *
+	 * Deliberately narrow and read-only: the ambient scan needs the packed terrain word and the
+	 * geometry to measure distance to it, and nothing else this system holds.
+	 */
+	*listInstalledTerrain(): Generator<InstalledTerrain> {
+		for (const [landblockId, installation] of this.#installations) {
+			yield { generation: installation.source.input.generation, landblockId };
+		}
+	}
+
 	querySurfaceAtWorldPoint(point: Vec3): TerrainSurfaceSample | null {
 		const landblockId = landblockAtWorldPoint(point);
 		if (!landblockId) return null;

@@ -18,6 +18,14 @@ const AMBIENT_MIN_DISTANCE_SQUARED = AMBIENT_MIN_DISTANCE ** 2;
 /** Retail ambient sound max dist sq; 120 m, beyond which nothing contributes. */
 export const AMBIENT_MAX_DISTANCE_SQUARED = 14400;
 
+/**
+ * Retail ambient sound min vol.
+ *
+ * A continuous sound whose weighted volume falls below this is not scheduled at all, rather
+ * than scheduled and played inaudibly.
+ */
+export const AMBIENT_MIN_VOLUME = 0.029999999;
+
 /** Half-width of the distance band one contributing cell contributes to its direction. */
 export const AMBIENT_DISTANCE_BAND_HALF_WIDTH = AMBIENT_MIN_DISTANCE * 0.5;
 

@@ -67,6 +67,17 @@ import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
 import { ParticleSystem } from "../systems/particle-system";
+import { AmbientSystem } from "../systems/ambient-system";
+import {
+	ambientSoundTableIds,
+	createAmbientTableResolver,
+	type AmbientRegionFacts,
+} from "../systems/ambient-region";
+import {
+	scanAmbientSources,
+	type AmbientTableResolver,
+	type AmbientTerrainBlock,
+} from "../systems/ambient-scan";
 import type { UniformRoll } from "../systems/particle-system";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
@@ -327,6 +338,20 @@ export interface EnvCellLayerRuntimeDiagnostics
 	readonly visibilityIslandCount: number;
 }
 
+/**
+ * How far the listener may move before the ambient scan re-runs.
+ *
+ * Cell-sized rather than landblock-sized: a landblock is 192 m across and the ambient radius is 120,
+ * so waiting for a landblock crossing would let the listener walk most of the way across the audible
+ * field before the surroundings were re-weighted.
+ */
+const AMBIENT_SCAN_CELL_SIZE = 24;
+
+/** Which scan cell a scene-frame position sits in, which is the rescan trigger. */
+function ambientScanCellKey(position: SceneVector3): string {
+	return `${Math.floor(position[0] / AMBIENT_SCAN_CELL_SIZE)}:${Math.floor(position[2] / AMBIENT_SCAN_CELL_SIZE)}`;
+}
+
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
 export class GameRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
@@ -377,6 +402,15 @@ export class GameRuntime {
 	readonly #targetSoundTables = new Map<SceneNodeId, DecodedSoundTable>();
 	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId>;
 	readonly #audio: AudioSystem;
+	readonly #ambient: AmbientSystem;
+	/** Where ambience is centred; the listener's own position, kept for the scan and for playback. */
+	#audioListenerPosition: SceneVector3 = sceneVector3([0, 0, 0]);
+	/** Region ambient facts, installed once per active region; `null` before one is installed. */
+	#ambientResolver: AmbientTableResolver | null = null;
+	/** Staged ambient sound tables, keyed as the descriptors name them. */
+	readonly #ambientSoundTables = new Map<DatAssetId, DecodedSoundTable>();
+	/** Cell the last ambient scan ran from, so walking within one cell does not rescan. */
+	#ambientScanCell: string | null = null;
 	/**
 	 * Make every mesh this generation's emitters can name resident.
 	 *
@@ -725,6 +759,13 @@ export class GameRuntime {
 			() => this.#lastFrameTimeSeconds,
 			FRONTEND_TUNING.audio.maximumWarmupReplaySeconds,
 		);
+		this.#ambient = new AmbientSystem({
+			listenerPosition: () => this.#audioListenerPosition,
+			play: (trigger) => this.#audio.trigger(trigger),
+			resolveSound: (soundTableId, soundType) =>
+				this.#resolveAmbientSound(soundTableId, soundType),
+			roll: dependencies.roll ?? Math.random,
+		});
 		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
 		// by design. A holder breaks the construction cycle without making the router mutable.
 		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId> } = {};
@@ -937,6 +978,7 @@ export class GameRuntime {
 		) {
 			throw new Error("Audio listener placement must be finite.");
 		}
+		this.#audioListenerPosition = position;
 		const { w, x, y, z } = rotation;
 		this.#audio.setListener({
 			position,
@@ -956,6 +998,77 @@ export class GameRuntime {
 	 * same observable behaviour as its flag being off. Only the effect category exists so far,
 	 * because authored hook sounds are effect sounds.
 	 */
+	/**
+	 * Install the active region's ambient facts and stage every sound table they can reach.
+	 *
+	 * Ambience is selected by the ground rather than by a hook, so nothing else will pull these
+	 * tables in; without staging them here every scheduled sound resolves to nothing.
+	 */
+	async installAmbientRegion(facts: AmbientRegionFacts): Promise<void> {
+		this.#ambientResolver = createAmbientTableResolver(facts);
+		this.#ambientScanCell = null;
+		const staged = await Promise.all(
+			ambientSoundTableIds(facts).map(async (soundTableId) => {
+				const handle = await this.#soundTables.acquire(soundTableId);
+				return [soundTableId, handle] as const;
+			}),
+		);
+		for (const [soundTableId, handle] of staged) {
+			this.#ambientSoundTables.set(soundTableId, handle.asset);
+		}
+	}
+
+	/** Resolve one ambient descriptor's `SoundType` against its staged table. */
+	#resolveAmbientSound(soundTableId: DatAssetId, soundType: number) {
+		const table = this.#ambientSoundTables.get(soundTableId);
+		const candidates = table?.entries.get(soundType);
+		if (!candidates) return null;
+		const candidate = selectSoundCandidate(candidates, Math.random());
+		if (!candidate) return null;
+		return {
+			probability: candidate.probability,
+			soundId: candidate.soundId,
+			volume: candidate.volume,
+		};
+	}
+
+	/**
+	 * Re-scan the surrounding terrain when the listener changes cell.
+	 *
+	 * Retail rebuilds on cell transition (`Ambient::InitSounds` takes a `Position`), and the scan
+	 * walks every cell of every installed landblock, so running it per frame would be pure waste:
+	 * ambience cannot change while the listener stays put.
+	 */
+	#refreshAmbient(timeSeconds: number): void {
+		const resolver = this.#ambientResolver;
+		if (!resolver) return;
+		const position = this.#audioListenerPosition;
+		const cell = ambientScanCellKey(position);
+		if (cell === this.#ambientScanCell) return;
+		this.#ambientScanCell = cell;
+		this.#ambient.refresh(
+			scanAmbientSources(position, this.#ambientTerrainBlocks(), resolver),
+			timeSeconds,
+		);
+	}
+
+	/** Installed terrain, expressed in the scene frame the scan measures distances in. */
+	*#ambientTerrainBlocks(): Generator<AmbientTerrainBlock> {
+		for (const {
+			generation,
+			landblockId,
+		} of this.#terrain.listInstalledTerrain()) {
+			const origin = createLandblockWorldOrigin(landblockId);
+			yield {
+				gridSize: generation.gridSize,
+				heights: generation.heights,
+				origin: sceneVector3([origin.x, origin.y, origin.z]),
+				terrainSamples: generation.terrainSamples,
+				tileSize: generation.tileSize,
+			};
+		}
+	}
+
 	setAudioSettings(settings: AudioSettings): void {
 		this.#audio.setSettings(settings);
 	}
@@ -1040,6 +1153,7 @@ export class GameRuntime {
 		return {
 			animation: this.#animation.getDiagnostics(),
 			audio: this.#audio.getDiagnostics(),
+			ambient: this.#ambient.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
 			behavior: this.#behaviorRouter.getDiagnostics(),
 			particles: this.#particles.getDiagnostics(),
@@ -1184,6 +1298,8 @@ export class GameRuntime {
 		this.#physicsScriptSystem.advance(timeSeconds);
 		tick?.mark("scriptAdvance");
 		this.#particles.advance(timeSeconds);
+		this.#refreshAmbient(timeSeconds);
+		this.#ambient.advance(timeSeconds);
 		tick?.mark("particleAdvance");
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(

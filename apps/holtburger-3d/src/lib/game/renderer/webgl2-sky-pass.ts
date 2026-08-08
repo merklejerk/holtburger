@@ -6,6 +6,7 @@ import { createTexture2DUpload } from "../textures/texture-manager";
 import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
 import { SKY_MATERIAL_KIND, SKY_TEXTURE_UNITS } from "./webgl2-sky-program";
 import { objectBlendPolicy, sourceOpacity } from "./object-rendering-policy";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { Mat4, Vec3 } from "../math/types";
 import type {
 	AssetTextureFact,
@@ -23,7 +24,8 @@ import type {
 	DecodedStaticPresentation,
 	SkySourcePresentations,
 } from "../../assets/decode-sky-record";
-import type { ResolvedSkyState } from "../environment/sky-state";
+import { skyObjectOrigin } from "../environment/sky-state";
+import type { ResolvedSkyState, SkyDrawPass } from "../environment/sky-state";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import type { WebGL2SkyProgram } from "./webgl2-sky-program";
@@ -41,6 +43,18 @@ export interface SkyDrawContext {
 	readonly view: Float32Array;
 	/** Shared clock seconds driving derived `tex_velocity` phase. */
 	readonly clockSeconds: number;
+	/**
+	 * The viewer's absolute AC-frame height, which weather objects pin against.
+	 *
+	 * Absolute rather than anchor-relative: the frame anchor translates horizontally only, so the
+	 * render frame's height already is the AC height the authored clamp is expressed in.
+	 */
+	readonly viewerHeight: number;
+	/**
+	 * Retail's `LScape::weather_enabled` (acclient.c:44269), driven by the player option
+	 * `DisableMostWeatherEffects`. Suppresses every weather object in both passes.
+	 */
+	readonly weatherEnabled: boolean;
 	/** Reusable scratch avoiding per-draw allocation in the frame path. */
 	readonly matrixScratch: Float32Array;
 }
@@ -106,10 +120,11 @@ export class WebGL2SkyPass {
 	}
 
 	/**
-	 * Make every celestial object resident.
+	 * Make every sky object resident, celestial and weather alike.
 	 *
-	 * Eager and complete: the census found 16 unique ids across all 20 day groups, so there is no
-	 * pop-in on a day-group rollover or a time-of-day scrub, and no on-demand machinery to own.
+	 * Eager and complete: the census found a couple of dozen unique ids across all 20 day groups, so
+	 * there is no pop-in on a day-group rollover, a time-of-day scrub, or a weather toggle, and no
+	 * on-demand machinery to own.
 	 */
 	static async prepare(
 		resources: WebGL2ResourceManager,
@@ -183,10 +198,17 @@ export class WebGL2SkyPass {
 			);
 			for (const range of resolveObjectMaterialRanges(part, label, facts)) {
 				const material = range.material;
+				const kind = materialKind(material, label);
+				// An unsupported surface drops its own range and nothing else. Sky content is
+				// authored, not generated, so the failure is a gap in this pass rather than a caller
+				// error, and taking down the whole region's sky — or the batch a mesh was staged
+				// with — is a far worse outcome than one missing range. Reported, never silent.
+				if (kind === null) continue;
 				if (material.textures.base === null) {
-					throw new Error(
-						`${label} resolves a material with no base texture; sky surfaces are always textured.`,
+					console.error(
+						`${label} resolves a textured material with no base texture; range dropped.`,
 					);
+					continue;
 				}
 				ranges.push({
 					alphaTest: range.ordering === "alpha-test" ? SKY_ALPHA_TEST : 0,
@@ -195,7 +217,7 @@ export class WebGL2SkyPass {
 					geometry,
 					indexCount: range.indexCount,
 					indexStart: range.indexStart,
-					materialKind: materialKind(material, label),
+					materialKind: kind,
 					palette: material.textures.palette,
 					palettedClipMap: material.palettedClipMap,
 					partTransform,
@@ -219,16 +241,32 @@ export class WebGL2SkyPass {
 	}
 
 	/**
-	 * Draw the resolved celestial sky under retail's pass policy.
+	 * Draw one of retail's two sky passes under its shared state policy.
 	 *
 	 * Depth test always with depth writes off, no fog, and a far-extended projection
-	 * (`GameSky::Draw`, acclient.c:297381): the sky can never occlude world geometry and is never
-	 * occluded by it, because it is drawn first into an untouched depth buffer.
+	 * (`GameSky::Draw`, acclient.c:297381) for both passes alike. The before pass runs into an
+	 * untouched depth buffer, so the world simply paints over it; the after pass runs once the world
+	 * is drawn and, under the same depth-always state, paints over the world in turn. That is why
+	 * terrain never occludes rain — the clamped sheet's height shapes its geometry, not its
+	 * occlusion.
+	 *
+	 * The caller owns the after pass's outdoors gate, which is a viewer fact rather than a sky one.
 	 */
-	draw(context: SkyDrawContext, sky: ResolvedSkyState): void {
+	draw(
+		context: SkyDrawContext,
+		sky: ResolvedSkyState,
+		pass: SkyDrawPass,
+	): void {
 		const { gl, program } = context;
-		const celestial = sky.objects.filter((object) => object.isCelestial);
-		if (celestial.length === 0) return;
+		// Retail's per-object test in the before loop and its whole-cell weather gate in the after
+		// loop reduce to the same predicate, because the after cell holds only weather objects in
+		// shipped content and its gate is `weather_enabled` either way (acclient.c:297404, 297418).
+		const drawn = sky.objects.filter(
+			(object) =>
+				object.placement.pass === pass &&
+				(context.weatherEnabled || object.placement.kind === "celestial"),
+		);
+		if (drawn.length === 0) return;
 
 		gl.useProgram(program.program);
 		// Culling stays off: the camera sits inside every sky mesh, so the authored cull face —
@@ -241,7 +279,7 @@ export class WebGL2SkyPass {
 		gl.uniformMatrix4fv(program.uniforms.projection, false, context.projection);
 		gl.uniformMatrix4fv(program.uniforms.view, false, context.view);
 
-		for (const object of celestial) {
+		for (const object of drawn) {
 			const resources = this.resolveObject(object.gfxObjectId);
 			if (resources === null) {
 				throw new Error(
@@ -249,7 +287,10 @@ export class WebGL2SkyPass {
 				);
 			}
 			const orientation = acFrameTransform(
-				{ origin: ORIGIN, orientation: object.orientation },
+				{
+					origin: skyObjectOrigin(object.placement, context.viewerHeight),
+					orientation: object.orientation,
+				},
 				UNIT_SCALE_TUPLE,
 			);
 			const offset = textureScrollPhase(
@@ -257,8 +298,20 @@ export class WebGL2SkyPass {
 				context.clockSeconds,
 			);
 			gl.uniform2f(program.uniforms.textureOffset, offset[0], offset[1]);
+			// Applied per object rather than per range so celestial layers are untouched: the
+			// divergence is about weather specifically, not about the sky pass as a whole.
+			const opacityScale =
+				object.placement.kind === "weather"
+					? FRONTEND_TUNING.rendering.weather.opacityScale
+					: 1;
 			for (const range of resources.ranges) {
-				this.#drawRange(context, range, orientation, object.material);
+				this.#drawRange(
+					context,
+					range,
+					orientation,
+					object.material,
+					opacityScale,
+				);
 			}
 		}
 
@@ -273,6 +326,7 @@ export class WebGL2SkyPass {
 		range: SkyDrawRange,
 		orientation: Mat4,
 		material: ResolvedSkyState["objects"][number]["material"],
+		opacityScale: number,
 	): void {
 		const { gl, program } = context;
 		const geometry = this.#resources.getGeometry(range.geometry);
@@ -307,33 +361,51 @@ export class WebGL2SkyPass {
 			program.uniforms.palettedClipMap,
 			range.palettedClipMap ? 1 : 0,
 		);
-		// The surface's own diffuse scale, which modulates the sampled texture exactly as it does in
-		// the object path.
-		gl.uniform1f(program.uniforms.diffuse, range.source.diffuseScale);
-		// An unauthored luminosity leaves the surface at full brightness, because retail skips the
-		// material write entirely at its -1 sentinel (acclient.c:297764). Falling back to the
-		// surface's own luminosity instead would black out layers that author none, such as the
-		// night stars.
-		gl.uniform1f(program.uniforms.luminosity, material.luminosity ?? 1);
+		// Retail skips the per-tick material write at its -1 sentinel (acclient.c:297764), leaving
+		// the surface's own authored value in place — so an unauthored channel falls back to the
+		// surface, not to a constant. The rain sheets are why this matters: they author luminosity
+		// 0.148 and every day group replacement for them is zero, so a full-brightness default drew
+		// them about seven times too bright on an additive surface.
+		gl.uniform1f(
+			program.uniforms.luminosity,
+			material.luminosity ?? range.source.luminosity,
+		);
+		// The day group's authored `max_bright`, falling back to the surface's own diffuse scale.
+		// Previously decoded and carried but never read, which left the sun and cloud layers without
+		// the diffuse term retail gives them.
+		gl.uniform1f(
+			program.uniforms.diffuse,
+			material.diffuse ?? range.source.diffuseScale,
+		);
 		// Two independent transparency sources multiply, exactly as the object path composes them:
 		// the surface's own authored translucency, and the day group's per-tick `transparent`
 		// replacement. Applying only the latter left additive cloud sheets contributing at full
 		// strength and washing the sky out.
+		// RETAIL DIVERGENCE: `opacityScale` is ours, not retail's — see
+		// `FRONTEND_TUNING.rendering.weather.opacityScale` for the citation, the census that sized
+		// it, and how to restore retail's contribution exactly. It is 1 for every celestial layer,
+		// so this expression is retail's own everywhere except authored weather.
 		gl.uniform1f(
 			program.uniforms.alpha,
 			sourceOpacity(range.source.translucency) *
-				(1 - (material.translucency ?? 0)),
+				(1 - (material.translucency ?? 0)) *
+				opacityScale,
 		);
 		this.#bindTexture(context, SKY_TEXTURE_UNITS.base, range.base, range.wrap);
-		if (range.palette !== null) {
-			// Palette lookups are exact texel fetches, so their wrap mode never applies.
-			this.#bindTexture(
-				context,
-				SKY_TEXTURE_UNITS.palette,
-				range.palette,
-				range.wrap,
-			);
-		}
+		// Palette lookups are exact texel fetches, so their wrap mode never applies.
+		//
+		// A direct-color surface still binds *something* here, because `uPalette` is statically used
+		// by the shader and WebGL validates every active sampler against its bound texture whether or
+		// not the branch that reads it executes. Leaving the unit alone inherits whatever the frame
+		// drew last, and the terrain pass leaves an integer `usampler2D` texture on this exact unit —
+		// which is a format/sampler mismatch that rejects every draw. Unreachable while the sky drew
+		// only before the world; the after-landscape weather pass made it reachable.
+		this.#bindTexture(
+			context,
+			SKY_TEXTURE_UNITS.palette,
+			range.palette ?? range.base,
+			range.wrap,
+		);
 		gl.drawElements(
 			gl.TRIANGLES,
 			range.indexCount,
@@ -392,11 +464,22 @@ export function skyViewMatrix(view: Mat4, target: Float32Array): Float32Array {
 /** Sky objects have no authored source scale; only their setup-default geometry scale applies. */
 const UNIT_SCALE = new Vec3(1, 1, 1);
 const UNIT_SCALE_TUPLE = [1, 1, 1] as const;
-const ORIGIN = [0, 0, 0] as const;
 
-function materialKind(material: ObjectMaterialBinding, label: string): number {
+/** The material kind to draw this surface with, or null when the pass cannot draw it at all. */
+function materialKind(
+	material: ObjectMaterialBinding,
+	label: string,
+): number | null {
+	// Untextured sky surfaces are unimplemented rather than impossible. No shipped sky object
+	// authors one — the whole censused sky closure is textured — so the solid-colour path the
+	// particle runtime carries is deliberately not duplicated here until content needs it. Saying
+	// so on the console names the gap; drawing something wrong, or taking the region down, would
+	// both be worse than one absent surface.
 	if (material.source.kind !== "texture") {
-		throw new Error(`${label} resolves a non-texture material.`);
+		console.error(
+			`${label} resolves a solid-colour material; the sky pass only implements textured surfaces, so this range is dropped.`,
+		);
+		return null;
 	}
 	switch (material.source.textureEncoding) {
 		case "direct-color":

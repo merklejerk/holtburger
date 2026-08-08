@@ -3,6 +3,8 @@ import type { DecodedParticleMesh } from "../../assets/decode-particle-mesh-reco
 import type { DatAssetId } from "../game-types";
 import { createTexture2DUpload } from "../textures/texture-manager";
 import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
+import { sourceOpacity } from "./object-rendering-policy";
+import { TexturePixelFormat } from "../textures/types";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import type {
@@ -50,6 +52,12 @@ const OBJECT_MATERIAL_KIND = {
 	index16: 3,
 } as const;
 
+/** The object program's reserved slot for an untextured surface, shared with the particle program. */
+const SOLID_COLOR_MATERIAL_KIND = 0;
+
+/** Opaque white, so the placeholder binding cannot tint anything if it is ever sampled. */
+const PLACEHOLDER_TEXEL = new Uint8Array([255, 255, 255, 255]);
+
 export class ParticleMeshResidency {
 	readonly #resources: WebGL2ResourceManager;
 	/** Resource keys, resolved to live bindings only in {@link resolve}. */
@@ -57,6 +65,16 @@ export class ParticleMeshResidency {
 	readonly #geometries: GeometryResourceKey[] = [];
 	readonly #textures = new Map<AssetTextureKey, Texture2DResourceKey>();
 	#multiRangeMeshCount = 0;
+	#droppedMeshCount = 0;
+	/**
+	 * One opaque white texel bound wherever an untextured mesh leaves a sampler unfed.
+	 *
+	 * WebGL validates every statically-used sampler against its bound texture whether or not the
+	 * branch reading it executes, and the particle pass runs after terrain has left integer
+	 * textures on these very units. A solid-colour mesh samples nothing, but it still has to bind
+	 * something compatible.
+	 */
+	#placeholderTexture: Texture2DResourceKey | null = null;
 
 	constructor(resources: WebGL2ResourceManager) {
 		this.#resources = resources;
@@ -101,7 +119,12 @@ export class ParticleMeshResidency {
 	resolve(hwGfxObjId: DatAssetId): ParticleDrawGeometry | null {
 		const mesh = this.#meshes.get(hwGfxObjId.toLowerCase() as DatAssetId);
 		if (mesh === undefined) return null;
-		const base = this.#textures.get(mesh.base);
+		// An untextured mesh has no upload to wait on; it binds the placeholder purely to keep the
+		// samplers complete and reads its colour from the uniform instead.
+		const base =
+			mesh.base === null
+				? this.#requirePlaceholderTexture()
+				: this.#textures.get(mesh.base);
 		// A mesh whose texture upload failed is not drawable; reporting null keeps it counted as an
 		// unresolved cohort rather than drawn untextured.
 		if (base === undefined) return null;
@@ -115,6 +138,7 @@ export class ParticleMeshResidency {
 			indexOffsetBytes: mesh.indexOffsetBytes,
 			lockedAxis: mesh.lockedAxis,
 			materialKind: mesh.materialKind,
+			materialColor: mesh.color,
 			palettedClipMap: mesh.palettedClipMap,
 			orientation: mesh.orientation,
 			rawSurfaceFlags: mesh.rawSurfaceFlags,
@@ -126,6 +150,8 @@ export class ParticleMeshResidency {
 
 	getDiagnostics() {
 		return {
+			/** Meshes this pass could not host, each already reported on the console. */
+			droppedMeshCount: this.#droppedMeshCount,
 			multiRangeMeshCount: this.#multiRangeMeshCount,
 			residentMeshCount: this.#meshes.size,
 		};
@@ -139,6 +165,17 @@ export class ParticleMeshResidency {
 		this.#geometries.length = 0;
 		this.#textures.clear();
 		this.#meshes.clear();
+	}
+
+	#requirePlaceholderTexture(): Texture2DResourceKey {
+		this.#placeholderTexture ??= this.#resources.createTexture2D({
+			data: PLACEHOLDER_TEXEL,
+			format: TexturePixelFormat.RGBA8,
+			height: 1,
+			mipLevels: 1,
+			width: 1,
+		});
+		return this.#placeholderTexture;
 	}
 
 	#resolveMesh(
@@ -165,21 +202,45 @@ export class ParticleMeshResidency {
 		// would have to split the cohort mid-draw. Counted rather than silently truncated.
 		if (ranges.length > 1) this.#multiRangeMeshCount += 1;
 		const base = range.material.textures.base;
-		if (base === null) {
-			throw new Error(`${label} resolves a material with no base texture.`);
-		}
 		const source = range.material.source;
-		// A material carrying a base texture is a textured one by construction; a solid colour has
-		// none and was rejected above. Narrowed rather than defaulted so a new material arm fails
-		// here instead of silently decoding as direct colour, which is the defect being fixed.
-		if (source.kind !== "texture") {
-			throw new Error(
-				`${label} resolves a base texture on a non-textured material.`,
+		// An untextured surface is authored content, not a defect: the rain emitter's mesh
+		// `0x01001646` is a solid pale blue-white. Retail renders these by writing the colour into a
+		// 1x1 texture and taking the ordinary textured path (`D3DPolyRender`, acclient.c:434074);
+		// we carry the colour as a uniform instead, exactly as the object program already does.
+		//
+		// Retail masks the authored colour's own alpha off and substitutes the surface translucency
+		// (`curr_color & 0xFFFFFF | (curr_alpha << 24)`), so the alpha here comes from translucency
+		// rather than from the colour's fourth component.
+		if (source.kind === "solid-color") {
+			const [red, green, blue] = source.color;
+			return {
+				alphaTest: range.ordering === "alpha-test" ? 0.5 : 0,
+				base: null,
+				color: [red, green, blue, sourceOpacity(source.translucency)],
+				geometry,
+				indexCount: range.indexCount,
+				indexOffsetBytes: range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
+				lockedAxis: AXIS_LOCKED_REFERENCE,
+				materialKind: SOLID_COLOR_MATERIAL_KIND,
+				palettedClipMap: range.material.palettedClipMap,
+				orientation: particleOrientation(decoded.orientation),
+				palette: null,
+				rawSurfaceFlags: source.rawSurfaceFlags,
+			};
+		}
+		if (base === null) {
+			// Dropped rather than thrown: this runs inside a batch install, so failing here would
+			// take down every mesh staged alongside this one for a defect in a single asset.
+			console.error(
+				`${label} resolves a textured material with no base texture; mesh dropped.`,
 			);
+			this.#droppedMeshCount += 1;
+			return null;
 		}
 		return {
 			alphaTest: range.ordering === "alpha-test" ? 0.5 : 0,
 			base,
+			color: null,
 			geometry,
 			indexCount: range.indexCount,
 			indexOffsetBytes: range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
@@ -189,23 +250,34 @@ export class ParticleMeshResidency {
 			// no alpha, and drew its cutout region as an opaque quad.
 			materialKind: OBJECT_MATERIAL_KIND[source.textureEncoding],
 			palettedClipMap: range.material.palettedClipMap,
-			orientation:
-				decoded.orientation === "viewer-facing"
-					? PARTICLE_ORIENTATION.viewerFacing
-					: decoded.orientation === "axis-locked"
-						? PARTICLE_ORIENTATION.axisLocked
-						: PARTICLE_ORIENTATION.authored,
+			orientation: particleOrientation(decoded.orientation),
 			palette: range.material.textures.palette,
 			rawSurfaceFlags: range.material.source.rawSurfaceFlags,
 		};
 	}
 }
 
+function particleOrientation(
+	orientation: DecodedParticleMesh["orientation"],
+): number {
+	return orientation === "viewer-facing"
+		? PARTICLE_ORIENTATION.viewerFacing
+		: orientation === "axis-locked"
+			? PARTICLE_ORIENTATION.axisLocked
+			: PARTICLE_ORIENTATION.authored;
+}
+
 /** One resident mesh, held as resource keys so residency never caches stale GL handles. */
 interface ResidentParticleMesh {
 	readonly geometry: GeometryResourceKey;
-	/** Asset keys, not resource keys: the upload that creates the resource runs after resolution. */
-	readonly base: AssetTextureKey;
+	/**
+	 * Asset keys, not resource keys: the upload that creates the resource runs after resolution.
+	 *
+	 * Null for an untextured surface, whose colour rides in {@link ResidentParticleMesh.color}.
+	 */
+	readonly base: AssetTextureKey | null;
+	/** Authored colour of an untextured surface, alpha already carrying its translucency. */
+	readonly color: readonly [number, number, number, number] | null;
 	readonly palette: AssetTextureKey | null;
 	readonly indexCount: number;
 	readonly indexOffsetBytes: number;

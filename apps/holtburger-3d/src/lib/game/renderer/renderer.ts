@@ -44,6 +44,16 @@ export interface FrameSettings {
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
 	readonly viewerLightEnabled: boolean;
 	/**
+	 * Whether authored weather draws, mirroring retail's `LScape::weather_enabled`
+	 * (acclient.c:44269).
+	 *
+	 * Retail drives it from the character option `DisableMostWeatherEffects` via
+	 * `SmartBox::EnableWeather` (acclient.c:137097), so this is a player-facing presentation choice
+	 * rather than a debug switch. Disabling it suppresses every weather object in both sky passes
+	 * and leaves celestial rendering untouched.
+	 */
+	readonly weatherEnabled: boolean;
+	/**
 	 * Authored outdoor lamps evaluated at draw time.
 	 *
 	 * Exists so their cost can be measured against the same scene and camera with them absent.
@@ -69,6 +79,7 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
 	viewerLightEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
+	weatherEnabled: FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
 	staticLightsEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
 	envCellRenderMode: FRONTEND_TUNING.rendering.frameDefaults.envCellRenderMode,
@@ -359,6 +370,14 @@ export type RendererGpuFrameProfile =
 			readonly particleMs: number;
 			/** Submitted GPU frames whose timing results are not yet readable. */
 			readonly pendingFrameCount: number;
+			/**
+			 * GPU elapsed-time span covering both sky passes.
+			 *
+			 * One figure rather than two: the before-world and after-landscape passes are the same
+			 * cost to reason about, and elapsed queries cannot nest, so they are measured
+			 * sequentially and summed.
+			 */
+			readonly skyMs: number;
 			/** GPU elapsed-time span covering terrain commands. */
 			readonly terrainMs: number;
 			/**

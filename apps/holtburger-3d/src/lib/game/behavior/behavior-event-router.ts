@@ -1,6 +1,5 @@
 import type { AcVector3 } from "../../assets/ac-frame";
 import type { DatAssetId } from "../game-types";
-import type { SceneNodeId } from "../scene";
 import {
 	behaviorCommandLabel,
 	type PreparedBehaviorCommand,
@@ -16,14 +15,40 @@ export interface BehaviorCommandProvenance {
 	readonly authoredOrder: number;
 }
 
+declare const behaviorTargetSpace: unique symbol;
+
+/**
+ * Identity of one behavior dispatch target, minted by whichever module owns the target.
+ *
+ * Deliberately not `SceneNodeId`. Most targets are scene-graph residents, but not all: sky objects
+ * are viewer-centered and owned by the sky module, which has no scene residency at all. Borrowing
+ * the scene's id type would have forced them into the scene graph purely to be addressable.
+ *
+ * Producers mint their own ids in their own namespace, and the composition root — the one place
+ * that knows every residency — resolves an id back to a frame. No consumer branches on which kind
+ * it holds; they take origins and rotations as injected functions.
+ */
+export type BehaviorTargetId = string & {
+	readonly [behaviorTargetSpace]: true;
+};
+
+/**
+ * Assert that a string is a behavior target id.
+ *
+ * Every call is a claim that the caller owns the namespace it is minting into.
+ */
+export function behaviorTargetId(id: string): BehaviorTargetId {
+	return id as BehaviorTargetId;
+}
+
 /**
  * One dispatch target, identified strongly enough to detect reuse.
  *
- * A scene node id alone is not sufficient: ids are recycled, so a queued command could otherwise
- * land on whatever now occupies the slot. The generation makes that detectable.
+ * An id alone is not sufficient: ids are recycled, so a queued command could otherwise land on
+ * whatever now occupies the slot. The generation makes that detectable.
  */
 export interface BehaviorTarget {
-	readonly nodeId: SceneNodeId;
+	readonly targetId: BehaviorTargetId;
 	readonly generation: number;
 }
 
@@ -56,7 +81,7 @@ export type BehaviorDispatchOutcome =
 
 /** One recorded dispatch decision, retained for diagnostics rather than for control flow. */
 export interface BehaviorObservation {
-	readonly nodeId: SceneNodeId;
+	readonly targetId: BehaviorTargetId;
 	readonly generation: number;
 	readonly command: string;
 	readonly outcome: BehaviorDispatchOutcome;
@@ -314,7 +339,7 @@ export class BehaviorEventRouter {
 		this.#observations.push({
 			command: behaviorCommandLabel(command),
 			generation: target.generation,
-			nodeId: target.nodeId,
+			targetId: target.targetId,
 			outcome,
 			provenance,
 		});

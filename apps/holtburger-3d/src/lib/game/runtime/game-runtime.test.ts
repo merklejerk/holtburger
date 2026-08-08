@@ -233,6 +233,7 @@ describe("GameRuntime view and interest control", () => {
 			distanceFogEnabled: true,
 			viewerLightEnabled:
 				FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
+			weatherEnabled: FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
 			staticLightsEnabled:
 				FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
 			envCellRenderMode: "portal",
@@ -251,6 +252,7 @@ describe("GameRuntime view and interest control", () => {
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
+			weatherEnabled: true,
 			staticLightsEnabled: true,
 			envCellRenderMode: "flat",
 			quality: {
@@ -264,6 +266,7 @@ describe("GameRuntime view and interest control", () => {
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
+			weatherEnabled: true,
 			staticLightsEnabled: true,
 			envCellRenderMode: "flat",
 			quality: {

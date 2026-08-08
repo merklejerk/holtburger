@@ -1,13 +1,13 @@
 import type {
 	BehaviorEventRouter,
 	BehaviorTarget,
+	BehaviorTargetId,
 } from "../behavior/behavior-event-router";
 import type {
 	PreparedPhysicsScript,
 	PreparedPhysicsScriptClosure,
 } from "../behavior/physics-script-repository";
 import type { DatAssetId } from "../game-types";
-import type { SceneNodeId } from "../scene";
 
 /**
  * Retail treats a `CallPES` pause below this as immediate rather than scheduling an `FPHook`
@@ -73,8 +73,8 @@ export type UniformRoll = () => number;
 export class PhysicsScriptSystem<TOwnerId extends string> {
 	readonly #router: BehaviorEventRouter;
 	readonly #roll: UniformRoll;
-	readonly #records = new Map<SceneNodeId, ScriptRecord>();
-	readonly #owners = new Map<TOwnerId, Set<SceneNodeId>>();
+	readonly #records = new Map<BehaviorTargetId, ScriptRecord>();
+	readonly #owners = new Map<TOwnerId, Set<BehaviorTargetId>>();
 	#resynchronizedCount = 0;
 	#lastAdvancementDurationMs = 0;
 	#destroyed = false;
@@ -104,8 +104,8 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	): void {
 		if (this.#destroyed)
 			throw new Error("Cannot install into a destroyed physics script system.");
-		if (this.#records.has(target.nodeId))
-			throw new Error(`Script state for ${target.nodeId} already exists.`);
+		if (this.#records.has(target.targetId))
+			throw new Error(`Script state for ${target.targetId} already exists.`);
 		if (!Number.isFinite(timeSeconds))
 			throw new Error("Script activation time must be finite.");
 		const root = closure.scripts.get(closure.rootId);
@@ -113,7 +113,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			throw new Error(
 				`Script closure for ${closure.rootId} does not contain its root.`,
 			);
-		this.#records.set(target.nodeId, {
+		this.#records.set(target.targetId, {
 			activations: [
 				{ nextRecordIndex: 0, script: root, startTime: timeSeconds },
 			],
@@ -123,17 +123,17 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			runawayCount: 0,
 			target,
 		});
-		let nodes = this.#owners.get(ownerId);
-		if (!nodes) {
-			nodes = new Set();
-			this.#owners.set(ownerId, nodes);
+		let targets = this.#owners.get(ownerId);
+		if (!targets) {
+			targets = new Set();
+			this.#owners.set(ownerId, targets);
 		}
-		nodes.add(target.nodeId);
+		targets.add(target.targetId);
 	}
 
-	/** Whether this system still holds the exact node and generation a command targets. */
+	/** Whether this system still holds the exact target and generation a command targets. */
 	holds(target: BehaviorTarget): boolean {
-		const record = this.#records.get(target.nodeId);
+		const record = this.#records.get(target.targetId);
 		return record?.target.generation === target.generation;
 	}
 
@@ -156,18 +156,18 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	 * owner must also release it when preparation fails or is superseded — before any clock exists.
 	 * Releasing here as well would be a double release, which the repository correctly rejects.
 	 */
-	remove(ownerId: TOwnerId, nodeId: SceneNodeId): void {
-		const record = this.#records.get(nodeId);
+	remove(ownerId: TOwnerId, targetId: BehaviorTargetId): void {
+		const record = this.#records.get(targetId);
 		if (!record) return;
-		this.#records.delete(nodeId);
-		const nodes = this.#owners.get(ownerId);
-		nodes?.delete(nodeId);
-		if (nodes && nodes.size === 0) this.#owners.delete(ownerId);
+		this.#records.delete(targetId);
+		const targets = this.#owners.get(ownerId);
+		targets?.delete(targetId);
+		if (targets && targets.size === 0) this.#owners.delete(ownerId);
 	}
 
 	removeOwner(ownerId: TOwnerId): void {
-		for (const nodeId of [...(this.#owners.get(ownerId) ?? [])])
-			this.remove(ownerId, nodeId);
+		for (const targetId of [...(this.#owners.get(ownerId) ?? [])])
+			this.remove(ownerId, targetId);
 	}
 
 	destroy(): void {
@@ -201,7 +201,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		// interpretation for it.
 		if (previous !== null && timeSeconds < previous)
 			throw new Error(
-				`Script clock for ${record.target.nodeId} moved backwards.`,
+				`Script clock for ${record.target.targetId} moved backwards.`,
 			);
 
 		let dispatches = 0;
@@ -349,7 +349,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			readonly pauseSeconds: number;
 		},
 	): void {
-		const record = this.#records.get(target.nodeId);
+		const record = this.#records.get(target.targetId);
 		if (!record || record.target.generation !== target.generation) return;
 		const startTime =
 			activation.pauseSeconds < INSTANT_PAUSE_SECONDS

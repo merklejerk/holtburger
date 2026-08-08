@@ -39,6 +39,8 @@
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
 		readonly viewerLightEnabled: boolean;
+		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
+		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
 		/** Whether the audio listener rides the free camera; see the camera coordinator. */
 		readonly audioFollowsCamera: boolean;
@@ -48,6 +50,7 @@
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
+		readonly updateWeather: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
 		readonly updateEffectVolume: (volume: number) => void;
@@ -78,6 +81,7 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		viewerLightEnabled,
+		weatherEnabled,
 		clockFollowing,
 		audioFollowsCamera,
 		updateAudioFollowsCamera,
@@ -87,6 +91,7 @@
 		updateAmbientVolume,
 		updateDistanceFog,
 		updateViewerLight,
+		updateWeather,
 		updateClockFollowing,
 		envCellRenderMode,
 		updateEnvCellRenderMode,
@@ -143,6 +148,10 @@
 
 	function handleViewerLightChange(event: Event): void {
 		updateViewerLight((event.currentTarget as HTMLInputElement).checked);
+	}
+
+	function handleWeatherChange(event: Event): void {
+		updateWeather((event.currentTarget as HTMLInputElement).checked);
 	}
 
 	function handleClockFollowingChange(event: Event): void {
@@ -350,6 +359,15 @@
 				/>
 				<span>Viewer light</span>
 				<strong>{viewerLightEnabled ? "On" : "Off"}</strong>
+			</label>
+			<label class="explorer-toggle">
+				<input
+					checked={weatherEnabled}
+					type="checkbox"
+					onchange={handleWeatherChange}
+				/>
+				<span>Weather</span>
+				<strong>{weatherEnabled ? "On" : "Off"}</strong>
 			</label>
 			<label class="explorer-toggle">
 				<input

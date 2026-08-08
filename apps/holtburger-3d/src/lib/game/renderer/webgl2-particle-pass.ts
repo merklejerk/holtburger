@@ -8,12 +8,17 @@ import { WebGL2ParticleInstanceBuffer } from "./webgl2-particle-instance-buffer"
 import { objectBlendPolicy } from "./object-rendering-policy";
 
 /** One cohort's drawable mesh, already resident on the GPU. */
+/** Neutral colour for a textured mesh, which never reads the solid-colour uniform. */
+const OPAQUE_WHITE = [1, 1, 1, 1] as const;
+
 export interface ParticleDrawGeometry {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly indexCount: number;
 	readonly indexOffsetBytes: number;
 	/** Base texture and its palette, bound to the program's fixed sampler units. */
 	readonly baseTexture: WebGLTexture;
+	/** Authored colour of an untextured surface, or null when the mesh samples a texture. */
+	readonly materialColor: readonly [number, number, number, number] | null;
 	readonly paletteTexture: WebGLTexture | null;
 	/** How the fragment stage reads the base texture: direct, index8, or index16. */
 	readonly materialKind: number;
@@ -149,6 +154,10 @@ export class WebGL2ParticlePass {
 				geometry.lockedAxis[2],
 			);
 			gl.uniform1i(program.uniforms.materialKind, geometry.materialKind);
+			// Only the solid-colour kind reads this, but it is written unconditionally: a stale
+			// colour left by a previous cohort would otherwise tint the next untextured draw.
+			const color = geometry.materialColor ?? OPAQUE_WHITE;
+			gl.uniform4f(program.uniforms.materialColor, ...color);
 			gl.uniform1i(
 				program.uniforms.palettedClipMap,
 				geometry.palettedClipMap ? 1 : 0,

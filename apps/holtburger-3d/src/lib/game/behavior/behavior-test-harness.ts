@@ -2,6 +2,7 @@ import type { SceneNodeId } from "../scene";
 import { EffectSystem } from "../systems/effect-system";
 import {
 	BehaviorEventRouter,
+	behaviorTargetId,
 	type BehaviorTarget,
 } from "./behavior-event-router";
 
@@ -53,5 +54,5 @@ export function installEffectState(
 
 /** The single-generation target a test uses when generation reuse is not what it is proving. */
 export function testTarget(nodeId: string): BehaviorTarget {
-	return { generation: 1, nodeId: nodeId as SceneNodeId };
+	return { generation: 1, targetId: behaviorTargetId(nodeId) };
 }

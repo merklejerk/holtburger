@@ -21,6 +21,86 @@ const MINIMUM_GROTATE_RADIANS = 0.00019999999;
 /** `properties` bit marking a viewer-pinned weather object rather than a celestial one (bit 4). */
 const WEATHER_PROPERTY_BIT = 4;
 
+/** `properties` bit moving an object into the after-landscape pass (bit 1). */
+const AFTER_LANDSCAPE_PROPERTY_BIT = 1;
+
+/** `properties` bit suppressing the viewer pin's height clamp, so the object tracks the viewer (bit 8). */
+const PIN_TRACKS_VIEWER_HEIGHT_PROPERTY_BIT = 8;
+
+/**
+ * The height retail clamps an unclamped-bit weather object to (`GameSky::UpdatePosition`,
+ * acclient.c:297333).
+ *
+ * An absolute cell-frame height, not an offset: the object follows the viewer in XY while its
+ * height stays 120 units below sea level however high the viewer climbs.
+ */
+export const WEATHER_PIN_HEIGHT = -120;
+
+/** Which of retail's two sky passes draws an object. */
+export type SkyDrawPass = "before-world" | "after-landscape";
+
+/**
+ * Which pass draws a sky object, and how it is pinned to the viewer.
+ *
+ * One composite rather than three loose flags because the facts are not independently meaningful:
+ * only a weather object is viewer-pinned, only a weather object is gated on the weather toggle, and
+ * only a weather object without bit 8 is height-clamped. Derived once here so the renderer reads a
+ * decision instead of re-deriving it from raw `properties` bits at draw time.
+ */
+export type SkyPlacement =
+	| { readonly kind: "celestial"; readonly pass: SkyDrawPass }
+	| {
+			readonly kind: "weather";
+			readonly pass: SkyDrawPass;
+			/**
+			 * Absolute AC-frame height the pin clamps to, or null when the object instead tracks the
+			 * viewer's own height. 76 of the 92 shipped weather objects set bit 8 and so track.
+			 */
+			readonly clampedHeight: number | null;
+	  };
+
+/** A viewer-pinned object sits exactly at the viewer, which is the sky pass's own origin. */
+const AT_VIEWER: readonly [number, number, number] = [0, 0, 0];
+
+/**
+ * The AC-frame origin one sky object draws at, measured from the viewer.
+ *
+ * Retail assigns a weather object the viewer's full origin on every position update and then forces
+ * its height when bit 8 is clear (`GameSky::UpdatePosition`, acclient.c:297325-297334). Expressed
+ * relative to the viewer because the sky pass draws through a view matrix with its translation
+ * stripped, so a viewer-pinned object is at the origin by construction and only the clamped ones
+ * need an offset at all.
+ *
+ * Celestial objects keep retail's own behavior of staying where they are — retail interpolates
+ * their origin against the viewer frame at ratio zero, which is a no-op.
+ */
+export function skyObjectOrigin(
+	placement: SkyPlacement,
+	viewerHeight: number,
+): readonly [number, number, number] {
+	if (placement.kind === "celestial" || placement.clampedHeight === null) {
+		return AT_VIEWER;
+	}
+	return [0, 0, placement.clampedHeight - viewerHeight];
+}
+
+/** Derive the composite placement from one object's raw `properties` bits. */
+function resolvePlacement(properties: number): SkyPlacement {
+	const pass: SkyDrawPass =
+		(properties & AFTER_LANDSCAPE_PROPERTY_BIT) === 0
+			? "before-world"
+			: "after-landscape";
+	if ((properties & WEATHER_PROPERTY_BIT) === 0) return { kind: "celestial", pass };
+	return {
+		kind: "weather",
+		pass,
+		clampedHeight:
+			(properties & PIN_TRACKS_VIEWER_HEIGHT_PROPERTY_BIT) === 0
+				? WEATHER_PIN_HEIGHT
+				: null,
+	};
+}
+
 /**
  * Instant per-tick material values, already scaled out of their authored 0-100 range.
  *
@@ -40,6 +120,14 @@ interface ResolvedSkyMaterial {
 /** One sky object resolved for the current day group and day fraction. */
 interface ResolvedSkyObject {
 	/**
+	 * The object's position in its day group's authored list.
+	 *
+	 * Carried because the resolved list drops objects outside their window, so a resolved array
+	 * index is not stable across ticks while this is. Anything that must recognise the same sky
+	 * object from one sky tick to the next — a running script clock, above all — keys on this.
+	 */
+	readonly authoredIndex: number;
+	/**
 	 * The object to draw. Usually a `GfxObj` (`0x01`), but celestial scope also includes the
 	 * Setup-family `0x02000714` that every shipped day group authors.
 	 */
@@ -50,25 +138,26 @@ interface ResolvedSkyObject {
 	 */
 	readonly particleEffectId: string;
 	/**
-	 * Raw `properties` bits, retained losslessly for weather and environment-override work.
+	 * Raw `properties` bits, retained losslessly for environment-override work.
 	 *
-	 * Bit 1 draws in the after-landscape cell pass, bit 2 hides the object while an environment
-	 * override is active with fog on, bit 4 marks a weather object, and bit 8 with bit 4 suppresses
-	 * retail's viewer-pin height clamp. Only bit 4 is consumed today, through `isCelestial`; bit 2
-	 * is the one an `AdminEnvirons` override will need, and twenty shipped objects set it — one per
-	 * day group. See the override seam note on `ResolvedSceneEnvironment`.
+	 * Bits 1, 4 and 8 are all consumed through {@link placement}. Bit 2 — which hides the object
+	 * while an environment override is active with fog on — is the one an `AdminEnvirons` override
+	 * will need, and twenty shipped objects set it, one per day group. See the override seam note on
+	 * `ResolvedSceneEnvironment`.
 	 */
 	readonly properties: number;
 	/**
-	 * Whether this object belongs to the celestial sky rather than the weather set. Weather objects
-	 * are viewer-pinned and out of scope for this pass, but they stay in the resolved list because
-	 * retail resolves one array and filters at draw time.
+	 * Which pass draws this object and how it is pinned to the viewer, derived from `properties`.
+	 *
+	 * Weather objects stay in the resolved list alongside celestial ones because retail resolves a
+	 * single array and filters at draw time.
 	 */
-	readonly isCelestial: boolean;
+	readonly placement: SkyPlacement;
 	/**
 	 * Orientation as an AC-authored frame quaternion `[w, x, y, z]`, ready for `acFrameTransform`.
-	 * Celestial objects carry no origin: retail leaves them at the viewer cell's origin and makes
-	 * them distant purely through the sky pass's extended far plane.
+	 * No origin rides alongside it: every sky object's origin follows the viewer, so it is derived
+	 * per frame by {@link skyObjectOrigin} rather than resolved here. Retail makes celestial objects
+	 * distant purely through the sky pass's extended far plane.
 	 */
 	readonly orientation: readonly [number, number, number, number];
 	/** Authored UV scroll rate in units per second, `[x, y]`; retail never uses the z component. */
@@ -98,8 +187,8 @@ export function resolveSkyState(
 	dayGroupIndex: number,
 	dayFraction: number,
 ): ResolvedSkyState {
-	const positions = dayGroup.skyObjects.map((object) =>
-		resolveCelestialPosition(dayFraction, object),
+	const positions = dayGroup.skyObjects.map((object, authoredIndex) =>
+		resolveCelestialPosition(dayFraction, object, authoredIndex),
 	);
 	if (dayGroup.skyTimes.length > 0) {
 		applyReplacements(
@@ -121,6 +210,7 @@ export function resolveSkyState(
  * before the invisible entries are dropped, so it cannot be built in its final shape in one pass.
  */
 interface CelestialPosition {
+	readonly authoredIndex: number;
 	gfxObjectId: string;
 	readonly particleEffectId: string;
 	readonly properties: number;
@@ -140,12 +230,14 @@ const INVALID_DAT_ID = "0x00000000";
 function resolveCelestialPosition(
 	dayFraction: number,
 	object: SkyDayGroup["skyObjects"][number],
+	authoredIndex: number,
 ): CelestialPosition {
 	const alwaysVisible = object.beginTime === object.endTime;
 	const visible =
 		alwaysVisible ||
 		(dayFraction > object.beginTime && dayFraction < object.endTime);
 	return {
+		authoredIndex,
 		gfxObjectId: visible ? object.defaultGfxObjectId : INVALID_DAT_ID,
 		particleEffectId: object.defaultParticleEffectId,
 		properties: object.properties,
@@ -241,10 +333,11 @@ function isVisible(position: CelestialPosition): boolean {
 
 function toResolvedSkyObject(position: CelestialPosition): ResolvedSkyObject {
 	return {
+		authoredIndex: position.authoredIndex,
 		gfxObjectId: position.gfxObjectId,
 		particleEffectId: position.particleEffectId,
 		properties: position.properties,
-		isCelestial: (position.properties & WEATHER_PROPERTY_BIT) === 0,
+		placement: resolvePlacement(position.properties),
 		orientation: celestialOrientation(position.heading, position.rotation),
 		textureVelocity: position.textureVelocity,
 		material: {

@@ -324,6 +324,48 @@ under a fogged environment override, bit 4 marks a weather object, and bit 8 wit
 the z clamp. In shipped content bit 1 never appears without bit 4, so the after-cell pass is purely
 weather.
 
+### Sky surface brightness
+
+`D3DPolyRender` picks **one** brightness channel per sky surface, never both
+(acclient.c:434305). Above zero, the surface's own `luminosity` drives Emissive. At zero it takes
+the else branch and drives Ambient and Diffuse from the diffuse value instead, so a zero-luminosity
+layer is lit rather than black. `CMaterial` leaves Ambient at its constructed 1.0 throughout
+(acclient.c:345710); only Emissive and Diffuse are ever written, by `SetLuminositySimple` and
+`SetDiffuseSimple`.
+
+The per-tick day-group write skips entirely at its -1 sentinel (`GameSky::UseTime`,
+acclient.c:297764), so an unauthored channel keeps the **surface's** authored value. That matters
+because content relies on it: the rain sheets author `luminosity` 0.148 and every day-group
+replacement for them is zero, so treating "unauthored" as full brightness drew them roughly seven
+times too bright on an additive surface. Measured over the shipped region, only two of the seven
+Sunny objects author a usable luminosity replacement at all.
+
+### Weather
+
+Weather objects are viewer-pinned: `GameSky::UpdatePosition` (acclient.c:297298) assigns each one
+the viewer's own origin every update, then forces its height to −120 unless bit 8 is set. That
+height is absolute in the cell frame, so an unclamped-bit sheet stays 120 units below sea level
+however high the viewer climbs, while the 76 bit-8 objects track the viewer's height instead.
+
+Retail runs two sky passes inside `LScape::draw` (acclient.c:296701): `GameSky::Draw(0)` before the
+landblock loop, and `GameSky::Draw(1)` after it, drawing the whole after-cell when
+`LScape::weather_enabled`. Both share one state block, so the after pass also draws depth-always
+with writes off — which is why **terrain never occludes rain**. The clamped sheet's height shapes
+its geometry, not its occlusion. The after pass additionally requires `SmartBox::is_player_outside`
+(acclient.c:137135), which tests only that the viewer's cell id is a landcell rather than an
+EnvCell; the before pass has no outdoor gate of its own.
+
+`LScape::weather_enabled` (acclient.c:44269) defaults true and is written only by
+`SmartBox::EnableWeather` (acclient.c:137097), driven by the character option
+`DisableMostWeatherEffects`. It is a player option, not a debug flag. Toggling it destroys and
+re-makes every bit-4 object; celestial objects survive untouched.
+
+The eight Rainy day groups (indices 3, 7, 9, 15–19) author 92 weather objects from five ids: rain
+sheets `0x01004C42` (`properties` 4, before pass) and `0x01004C44` (`properties` 5, after pass),
+both height-clamped, plus emitter Setups `0x02000588`, `0x02000589`, and `0x02000BA6`
+(`properties` 13, viewer-tracking). Because the before-pass sheet draws into an untouched depth
+buffer, the world paints over it; the rain a player actually sees is the after-pass sheet.
+
 ### Texture velocity
 
 `tex_velocity` scrolls a mesh's UVs. Retail accumulates `rate * dt` per frame and wraps at one
@@ -331,15 +373,42 @@ weather.
 of one mesh shares a phase. For constant authored rates — which is all shipped sky content — this
 is equivalent to deriving `fract(rate * clock)` directly, with no accumulator state.
 
-### Physics-script seam
+### Physics scripts
 
 96 shipped sky objects carry a `default_pes_object_id`. Most are the weather emitters, but
 `0x02000714` (script `0x330007DB`, `properties` 0, always visible) appears in **every** day group
 including clear skies, so the sky is a celestial consumer of authored physics scripts and not only
-a weather one. `holtburger-3d` carries the id through its resolved sky contract unexecuted; the
-scheduled weather/sky-script plan
-(`docs/plans/holtburger-3d-weather-sky-script-runtime-plan.md`) executes these scripts on the
-authored-effects runtime's systems and needs no schema change to claim them.
+a weather one.
+
+Retail never reads `default_pes_object_id` at all: `GameSky::MakeObject` passes only the gfx id, and
+the script runs because setup initialization plays the setup's own `default_script`
+(`CPhysicsObj::InitDefaults`, acclient.c:514489). The region field is authoring redundancy — it
+equals the referenced setup's `default_script` for every shipped sky object.
+
+`holtburger-3d` runs all four censused scripts (`0x330007DB` celestial; `0x33000428`, `0x3300042C`,
+`0x33000453` weather) on the shared physics-script, particle, and audio runtimes. Sky objects are
+not scene-graph residents, so they carry behavior-layer target ids of their own and the composition
+root resolves their viewer-pinned frames on demand; no consumer knows a sky target from a scene one.
+Activation reconciles against the resolved sky each tick, which is how day-group rollover, authored
+window transitions, and the weather toggle all collapse into one mechanism — the same shape as
+retail's `GameSky::CreateDeletePhysicsObjects`.
+
+An unsupported material drops its own draw and reports it, rather than failing the batch it was
+prepared with: one bad asset costs one range or one mesh, never a region's sky.
+
+`holtburger-3d` scales authored weather opacity by
+`FRONTEND_TUNING.rendering.weather.opacityScale`, a marked `RETAIL DIVERGENCE`. The columns are
+viewer-pinned with an absolute height clamp, so they sweep vertically past a camera that changes
+height quickly — faithful motion under an input envelope retail never had. Both rain surfaces are
+`ALPHA | ADDITIVE`, which blends `SRC_ALPHA, ONE`, so alpha scales the added light directly. Set
+the constant to 1 to restore retail exactly.
+
+One authored weather emitter (`0x320002C2`) draws an **untextured** mesh: surface `0x0800006C` is
+`BASE1_SOLID | TRANSLUCENT | ADDITIVE`, a pale blue-white raindrop. Retail has no solid-colour
+shading path — it writes the colour into a 1x1 texture and takes the ordinary textured path
+(`D3DPolyRender`, acclient.c:434074; `SetSolidColorTextureColor`, acclient.c:437178), masking the
+colour's own alpha off in favour of `1 - translucency`. We carry the colour as a shader uniform
+instead, matching the object path's existing convention; the alpha rule is reproduced exactly.
 
 ## Constants
 

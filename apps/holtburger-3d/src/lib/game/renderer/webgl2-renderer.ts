@@ -156,6 +156,7 @@ import type {
 	RendererSkyCapability,
 } from "./renderer";
 import { SKY_FAR_PLANE, skyViewMatrix, WebGL2SkyPass } from "./webgl2-sky-pass";
+import type { SkyDrawPass } from "../environment/sky-state";
 import { ParticleMeshResidency } from "./particle-mesh-residency";
 import { WebGL2ParticlePass } from "./webgl2-particle-pass";
 import type { ParticleDrawCohort } from "../systems/particle-system";
@@ -201,8 +202,10 @@ function anchorRelativePosition(
 
 interface SceneShading {
 	readonly fog: FrameInput["environment"]["distanceFog"];
-	/** Resolved celestial sky for this frame, or null when the region authors none. */
+	/** Resolved sky for this frame, celestial and weather, or null when the region authors none. */
 	readonly sky: FrameInput["environment"]["sky"];
+	/** Whether authored weather draws at all, mirroring retail's `LScape::weather_enabled`. */
+	readonly weatherEnabled: boolean;
 	/** Scene-space origin of the frame anchor, subtracted from every light position at bind. */
 	readonly anchorOrigin: LightAnchorOrigin;
 	/** How much of an authored outdoor lamp survives the frame's daylight, in [0, 1]. */
@@ -226,6 +229,7 @@ const PROBE_SHADING: SceneShading = {
 	fog: null,
 	// Probe views measure world draws only; the sky contributes no depth and no selection.
 	sky: null,
+	weatherEnabled: false,
 	// No lights, so neither the rebasing origin nor the daylight response is observable.
 	anchorOrigin: { x: 0, z: 0 },
 	authoredLightResponse: 0,
@@ -701,6 +705,7 @@ export class WebGL2Renderer implements Renderer {
 		const shading: SceneShading = {
 			fog,
 			sky: input.environment.sky,
+			weatherEnabled: input.frameSettings.weatherEnabled,
 			anchorOrigin: createLandblockWorldOrigin(input.anchorLandblockId),
 			authoredLightResponse: resolveAuthoredLightResponse(
 				input.environment.lighting,
@@ -1757,21 +1762,44 @@ export class WebGL2Renderer implements Renderer {
 	};
 
 	/**
-	 * Draw the celestial sky before anything else in the view.
+	 * Draw one of the sky's two passes.
 	 *
-	 * Retail draws it into an untouched depth buffer with depth-always and depth writes off, so the
-	 * world pass that follows simply paints over it wherever geometry exists. That ordering is why
-	 * the sky needs no visibility test of its own, indoors or out.
+	 * The before pass runs into an untouched depth buffer with depth-always and depth writes off, so
+	 * the world pass that follows simply paints over it wherever geometry exists. That ordering is
+	 * why the sky needs no visibility test of its own, indoors or out.
+	 *
+	 * The after pass carries the authored weather that retail draws once the landscape is down
+	 * (`LScape::draw`, acclient.c:296725), under the same depth-always state — which is what keeps
+	 * terrain from occluding rain. It is gated outdoors here rather than inside the pass, because
+	 * whether the viewer is outside is a property of the view, not of the sky.
 	 */
-	#drawSky(view: PreparedView, sky: SceneShading["sky"]): void {
+	#drawSky(
+		view: PreparedView,
+		shading: SceneShading,
+		skyPass: SkyDrawPass,
+	): void {
 		const pass = this.#skyPass;
+		const sky = shading.sky;
 		if (!pass || !sky || !this.#skyProgram) return;
+		// `SmartBox::is_player_outside` (acclient.c:137135) tests only that the viewer's cell is a
+		// landcell rather than an EnvCell. Deliberately not our sealed-cell test: retail suppresses
+		// the after pass from inside any EnvCell, including one that can see outdoors.
+		if (
+			skyPass === "after-landscape" &&
+			view.camera.placement.envCellId !== null
+		) {
+			return;
+		}
 		pass.draw(
 			{
 				clockSeconds: this.#skyClockSeconds,
 				gl: this.#gl,
 				matrixScratch: this.#skyMatrixScratch,
 				program: this.#skyProgram,
+				// The frame anchor translates horizontally only, so this render-frame height is
+				// already the absolute AC height the authored weather clamp is expressed in.
+				viewerHeight: view.cameraPosition.y,
+				weatherEnabled: shading.weatherEnabled,
 				// Retail rebuilds the projection with `zfar * 4` for the pass and restores it after
 				// (`GameSky::Draw`, acclient.c:297399); the world pass never sees this matrix.
 				projection: mat4ToFloat32Array(
@@ -1788,8 +1816,10 @@ export class WebGL2Renderer implements Renderer {
 				view: skyViewMatrix(view.view, this.#skyViewScratch),
 			},
 			sky,
+			skyPass,
 		);
 	}
+
 
 	#drawParticles(
 		view: PreparedView,
@@ -1828,9 +1858,13 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#drawView(view: PreparedView, shading: SceneShading): void {
-		this.#drawSky(view, shading.sky);
+		this.#drawSky(view, shading, "before-world");
 		this.#drawTerrain(view, shading);
 		this.#drawOpaqueObjects(view, shading, null);
+		// Retail's after-landscape weather: drawn once the landblock loop is down but before the
+		// deferred translucent flush, which is legitimately allowed to cover it (acclient.c:296725,
+		// 441068).
+		this.#drawSky(view, shading, "after-landscape");
 		this.#drawBlendedObjects(view, shading, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
@@ -1845,7 +1879,12 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture,
 	): void {
-		this.#drawSky(view, shading.sky);
+		const beforeSkyGpu = profile.beginGpuPhase("sky");
+		try {
+			this.#drawSky(view, shading, "before-world");
+		} finally {
+			beforeSkyGpu?.finish();
+		}
 		const terrainGpu = profile.beginGpuPhase("terrain");
 		const terrainStartedAt = profile.beginCpuPhase();
 		try {
@@ -1860,6 +1899,15 @@ export class WebGL2Renderer implements Renderer {
 			this.#drawOpaqueObjects(view, shading, profile);
 		} finally {
 			opaqueGpu?.finish();
+		}
+
+		// Same named phase as the before pass: the two are one cost to reason about, and elapsed
+		// queries cannot nest, so they are measured sequentially and summed.
+		const afterSkyGpu = profile.beginGpuPhase("sky");
+		try {
+			this.#drawSky(view, shading, "after-landscape");
+		} finally {
+			afterSkyGpu?.finish();
 		}
 
 		const blendedGpu = profile.beginGpuPhase("blended");
@@ -2240,7 +2288,14 @@ export class WebGL2Renderer implements Renderer {
 		const submissionStartedAt = profile?.beginCpuPhase();
 		const gl = this.#gl;
 		try {
-			this.#objectState.invalidate();
+			// Primes every object sampler unit, not just the cache, exactly as the opaque pass does.
+			// `invalidate()` alone was not enough: it makes issued binds re-apply, but a material
+			// that *skips* a bind — direct colour skips the palette, solid colour skips both — keeps
+			// whatever the frame last left on that unit. Terrain leaves integer `usampler2D`
+			// textures on units 0 and 1, and the opaque pass returns before priming them when a view
+			// has no opaque candidates, so a view of purely transparent objects reached this loop
+			// with an integer texture bound under a float sampler and every draw failed validation.
+			this.#beginObjectPhase();
 			gl.depthMask(false);
 			for (const object of sortedBlended) {
 				const program =

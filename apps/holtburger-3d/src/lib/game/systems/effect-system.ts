@@ -13,6 +13,7 @@ import {
 	multiplyMat4,
 } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
+import { requireSceneNodeId } from "../scene/utils";
 import type { SceneNodeId } from "../scene";
 import type { PartRenderState } from "./components";
 
@@ -206,7 +207,7 @@ export class EffectSystem implements EffectCommandPort {
 		target: BehaviorTarget,
 		values: { readonly end: number; readonly durationSeconds: number },
 	): void {
-		const state = this.#requiredState(target.nodeId);
+		const state = this.#requiredState(requireSceneNodeId(target.targetId, "EffectSystem"));
 		state.dirty = true;
 		this.#appliedCommandCount += 1;
 		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
@@ -223,7 +224,7 @@ export class EffectSystem implements EffectCommandPort {
 	}
 
 	applySetOmega(target: BehaviorTarget, omega: Vec3): void {
-		const state = this.#requiredState(target.nodeId);
+		const state = this.#requiredState(requireSceneNodeId(target.targetId, "EffectSystem"));
 		state.dirty = true;
 		state.omega = new Vec3(omega.x, omega.y, omega.z);
 		this.#appliedCommandCount += 1;
@@ -246,7 +247,7 @@ export class EffectSystem implements EffectCommandPort {
 			readonly durationSeconds: number;
 		},
 	): void {
-		const state = this.#requiredState(target.nodeId);
+		const state = this.#requiredState(requireSceneNodeId(target.targetId, "EffectSystem"));
 		state.dirty = true;
 		if (values.partIndex >= state.partTranslucencies.length)
 			throw new Error(

@@ -1,23 +1,27 @@
 import { describe, expect, it } from "vitest";
-import type { BehaviorTarget } from "../behavior/behavior-event-router";
+import {
+	behaviorTargetId,
+	type BehaviorTarget,
+} from "../behavior/behavior-event-router";
 import { Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import { EffectSystem } from "./effect-system";
 
+const NODE_ID = "scene-node:1" as SceneNodeId;
 const TARGET: BehaviorTarget = {
 	generation: 1,
-	nodeId: "node-1" as SceneNodeId,
+	targetId: behaviorTargetId(NODE_ID),
 };
 
 function install(partCount = 2) {
 	const effects = new EffectSystem();
-	effects.install(TARGET.nodeId, partCount);
+	effects.install(NODE_ID, partCount);
 	return effects;
 }
 
 function translucencies(effects: EffectSystem): number[] {
 	return effects
-		.samplePresentation(TARGET.nodeId)
+		.samplePresentation(NODE_ID)
 		.partRenderStates.map((state) => state.translucency);
 }
 
@@ -45,7 +49,7 @@ describe("EffectSystem", () => {
 		effects.install("scene-node:animated" as SceneNodeId, 1);
 		for (const nodeId of ["scene-node:scripted", "scene-node:animated"]) {
 			effects.applyTransparentPart(
-				{ generation: 1, nodeId: nodeId as SceneNodeId },
+				{ generation: 1, targetId: behaviorTargetId(nodeId) },
 				{ durationSeconds: 1, end: 1, partIndex: 0, start: 0 },
 			);
 		}
@@ -68,7 +72,7 @@ describe("EffectSystem", () => {
 
 		// Committed 1/30 plus a 0.0067 remainder: interpolation is continuous across the boundary.
 		expect(
-			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
 		).toBeCloseTo(1.08, 2);
 	});
 
@@ -76,9 +80,9 @@ describe("EffectSystem", () => {
 		const effects = install();
 		effects.applySetOmega(TARGET, new Vec3(0, 0, 1));
 
-		const before = effects.samplePresentation(TARGET.nodeId);
+		const before = effects.samplePresentation(NODE_ID);
 		advance(effects, 1 / 30);
-		const after = effects.samplePresentation(TARGET.nodeId);
+		const after = effects.samplePresentation(NODE_ID);
 
 		expect(after.rootTransformModifier).not.toEqual(
 			before.rootTransformModifier,
@@ -184,12 +188,12 @@ describe("EffectSystem", () => {
 		advance(effects, 0.5);
 		// Halfway from the identity scale toward 3.
 		expect(
-			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
 		).toBeCloseTo(2);
 
 		advance(effects, 0.5);
 		expect(
-			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
 		).toBe(3);
 	});
 
@@ -203,7 +207,7 @@ describe("EffectSystem", () => {
 
 		advance(effects, 0.5);
 		expect(
-			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
 		).toBeCloseTo(3);
 	});
 
@@ -213,7 +217,7 @@ describe("EffectSystem", () => {
 		effects.applyScale(TARGET, { durationSeconds: 0, end: 2 });
 
 		expect(
-			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
 		).toBe(2);
 	});
 
@@ -225,11 +229,11 @@ describe("EffectSystem", () => {
 		advance(effects, 0.02);
 
 		expect(
-			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
 		).toBeCloseTo(1.04);
 		// Sampling must not advance the ramp: the same phase yields the same value.
 		expect(
-			effects.samplePresentation(TARGET.nodeId).rootTransformModifier.m11,
+			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
 		).toBeCloseTo(1.04);
 	});
 
@@ -246,7 +250,7 @@ describe("EffectSystem", () => {
 		expect(translucencies(effects)[0]).toBe(0);
 		expect(effects.getDiagnostics().residentEffectStateCount).toBe(1);
 
-		effects.remove(TARGET.nodeId);
+		effects.remove(NODE_ID);
 		expect(effects.getDiagnostics().residentEffectStateCount).toBe(0);
 	});
 });

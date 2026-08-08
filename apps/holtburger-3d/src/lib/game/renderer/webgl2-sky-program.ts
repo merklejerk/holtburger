@@ -116,17 +116,18 @@ void main() {
 		? texture(uBase, vTextureCoordinate)
 		: paletteColor(paletteIndex());
 	if (color.a < uAlphaTest) discard;
-	// Retail writes luminosity into the fixed-function material's Emissive and max_bright into its
-	// Diffuse (CPhysicsPart::SetLighting, acclient.c:303784), and skips the write entirely at the
-	// -1 sentinel, leaving the surface at its own brightness. So an authored luminosity *replaces*
-	// the surface's brightness rather than adding to it: summing the two saturated every day group
-	// whose authored value reached 0.5, which is most of the daylight hours.
+	// Retail picks one brightness channel, never both. D3DPolyRender branches on the surface's own
+	// luminosity (acclient.c:434305): above zero it drives Emissive from it and the diffuse term
+	// contributes nothing visible; at zero it takes the else branch and drives Ambient and Diffuse
+	// instead. Multiplying the two together was wrong in both directions — it dimmed every emissive
+	// layer by its diffuse scale, and it made a zero-luminosity layer resolve to black, which is
+	// what the old full-brightness default existed to hide.
 	//
-	// uDiffuse is the surface's own diffuse scale and uLuminosity the authored brightness, already
-	// defaulted to full where the day group authors none — that default is what keeps unlit layers
-	// such as the night stars visible instead of resolving to black.
+	// Both uniforms already carry the day group's authored replacement where one exists and the
+	// surface's own value where it does not, which is retail's -1 sentinel behaviour.
+	float brightness = uLuminosity > 0.0 ? uLuminosity : uDiffuse;
 	fragmentColor = vec4(
-		color.rgb * uDiffuse * uLuminosity,
+		color.rgb * brightness,
 		color.a * uAlpha
 	);
 }

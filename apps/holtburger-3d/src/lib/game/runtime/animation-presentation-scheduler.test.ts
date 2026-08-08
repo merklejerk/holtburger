@@ -23,7 +23,7 @@ function buildAnimationSystem() {
 	const system = new AnimationSystem<string>(effects, router);
 	const install = system.install.bind(system);
 	system.install = (ownerId, target, identity, animation) => {
-		installEffectState(effects, target.nodeId, animation.partCount);
+		installEffectState(effects, target.targetId, animation.partCount);
 		return install(ownerId, target, identity, animation);
 	};
 	return system;

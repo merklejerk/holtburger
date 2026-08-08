@@ -86,7 +86,19 @@ import {
 	type AudioDevice,
 	type AudioSettings,
 } from "../systems/audio-system";
-import { BehaviorEventRouter } from "../behavior/behavior-event-router";
+import {
+	BehaviorEventRouter,
+	behaviorTargetId,
+} from "../behavior/behavior-event-router";
+import type {
+	BehaviorTarget,
+	BehaviorTargetId,
+} from "../behavior/behavior-event-router";
+import { sceneNodeIdOf } from "../scene/utils";
+import { SkyScriptSystem } from "../systems/sky-script-system";
+import { SKY_OWNER_ID, type SkyOwnerId } from "./owner-ids";
+import { SKY_OBJECT_ONLY_PART_INDEX } from "../environment/sky-behavior-targets";
+import type { SkyBehaviorTarget } from "../environment/sky-behavior-targets";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
@@ -399,8 +411,17 @@ export class GameRuntime {
 	readonly #soundTables: SoundTableRepository;
 	readonly #particleMeshes: ParticleMeshCache;
 	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
-	readonly #targetSoundTables = new Map<SceneNodeId, DecodedSoundTable>();
-	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId>;
+	readonly #targetSoundTables = new Map<BehaviorTargetId, DecodedSoundTable>();
+	/**
+	 * Sky-module-owned behavior targets, which have no scene residency at all.
+	 *
+	 * Registered at activation and removed at teardown, so membership is also the liveness signal
+	 * the residency resolvers read.
+	 */
+	readonly #skyTargets = new Map<BehaviorTargetId, SkyBehaviorTarget>();
+	/** Runs the scripts authored on sky objects; owns their staging and lifetime. */
+	readonly #skyScripts: SkyScriptSystem;
+	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId | SkyOwnerId>;
 	readonly #audio: AudioSystem;
 	readonly #ambient: AmbientSystem;
 	/** Where ambience is centred; the listener's own position, kept for the scan and for playback. */
@@ -450,10 +471,8 @@ export class GameRuntime {
 	 * Landblock-local origins are meaningless outside their own landblock, and anchor-relative ones
 	 * decay the moment the camera crosses a boundary. This frame is the only one safe to retain.
 	 */
-	#sceneOriginOf(target: {
-		readonly nodeId: SceneNodeId;
-	}): SceneVector3 | null {
-		const placement = this.#scene.getResolvedPlacement(target.nodeId);
+	#sceneOriginOf(nodeId: SceneNodeId): SceneVector3 | null {
+		const placement = this.#scene.getResolvedPlacement(nodeId);
 		if (!placement) return null;
 		const origin = getMat4Translation(placement.localToLandblock);
 		const landblockOrigin = createLandblockWorldOrigin(placement.landblockId);
@@ -470,12 +489,72 @@ export class GameRuntime {
 	 * Read from the same resolved placement as {@link GameRuntime.#sceneOriginOf}, so it reflects
 	 * whatever a script has rotated the owner to rather than its authored pose.
 	 */
-	#sceneRotationOf(target: {
-		readonly nodeId: SceneNodeId;
-	}): AcRotation | null {
-		const placement = this.#scene.getResolvedPlacement(target.nodeId);
+	#sceneRotationOf(nodeId: SceneNodeId): AcRotation | null {
+		const placement = this.#scene.getResolvedPlacement(nodeId);
 		if (!placement) return null;
 		return acRotationFromRenderTransform(placement.localToLandblock);
+	}
+
+	/**
+	 * Resolve one behavior target's frame, whichever module owns it.
+	 *
+	 * This is the single place that knows every residency, which is what lets `BehaviorTarget` stay
+	 * one id and one generation with no kind tag: consumers take origins and rotations as injected
+	 * functions and never learn that sky targets exist. A target in neither residency resolves
+	 * `null` rather than throwing, because that is exactly what a torn-down target should report —
+	 * teardown removes its registration, and a command queued against it must be rejected as stale.
+	 */
+	#originOf(target: BehaviorTarget): SceneVector3 | null {
+		const sky = this.#skyTargets.get(target.targetId);
+		if (sky) return sky.originOf();
+		const nodeId = sceneNodeIdOf(target.targetId);
+		return nodeId === null ? null : this.#sceneOriginOf(nodeId);
+	}
+
+	#rotationOf(target: BehaviorTarget): AcRotation | null {
+		const sky = this.#skyTargets.get(target.targetId);
+		if (sky) return sky.rotationOf();
+		const nodeId = sceneNodeIdOf(target.targetId);
+		return nodeId === null ? null : this.#sceneRotationOf(nodeId);
+	}
+
+	/**
+	 * Resolve the frame a part-attached emitter rides.
+	 *
+	 * Sky objects are single-part Setups — the whole censused set is one part, `0x010001EC`,
+	 * carrying only a default script — so their only part is the object itself and part 0 resolves
+	 * to the same frame. Any other index names a part they do not have, which is `unprepared`
+	 * rather than a silent fallback to the root.
+	 */
+	#partFrameOf(target: BehaviorTarget, partIndex: number): BehaviorTarget | null {
+		if (this.#skyTargets.has(target.targetId)) {
+			return partIndex === SKY_OBJECT_ONLY_PART_INDEX ? target : null;
+		}
+		const nodeId = sceneNodeIdOf(target.targetId);
+		if (nodeId === null) return null;
+		const partNodeId = this.#dynamics.resolvePartNode(nodeId, partIndex);
+		// The generation is carried through unchanged: the part belongs to the same activation, so
+		// a command that has outlived its owner must still be rejected.
+		return partNodeId === null
+			? null
+			: {
+					generation: target.generation,
+					targetId: behaviorTargetId(partNodeId),
+				};
+	}
+
+	/**
+	 * Whether a target's particles survive this frame's culling.
+	 *
+	 * Scene residents cull against the renderer's previous dynamic selection. Sky targets are
+	 * viewer-centered and drawn unconditionally — retail never culls the sky — so they are always
+	 * selected. Without this they would cull to nothing every frame: a sky target is by
+	 * construction absent from a selection built out of scene node ids.
+	 */
+	#isTargetSelected(target: BehaviorTarget): boolean {
+		if (this.#skyTargets.has(target.targetId)) return true;
+		const nodeId = sceneNodeIdOf(target.targetId);
+		return nodeId !== null && this.#selectedDynamicNodeIds.has(nodeId);
 	}
 
 	/** Scene-frame origin of this frame's render anchor, which is the camera's landblock. */
@@ -727,17 +806,12 @@ export class GameRuntime {
 			// a load inside the frame.
 			resolveEmitter: (emitterInfoId) =>
 				this.#particleEmitters.getReady(emitterInfoId),
-			sceneOriginOf: (target) => this.#sceneOriginOf(target),
-			sceneRotationOf: (target) => this.#sceneRotationOf(target),
+			sceneOriginOf: (target) => this.#originOf(target),
+			sceneRotationOf: (target) => this.#rotationOf(target),
 			// A part-attached emitter is positioned by its part's node, which the dynamics system owns.
 			// The generation is carried through unchanged: the part belongs to the same activation, so
 			// a command that has outlived its owner must still be rejected.
-			partFrameOf: (target, partIndex) => {
-				const nodeId = this.#dynamics.resolvePartNode(target.nodeId, partIndex);
-				return nodeId === null
-					? null
-					: { generation: target.generation, nodeId };
-			},
+			partFrameOf: (target, partIndex) => this.#partFrameOf(target, partIndex),
 			renderAnchorOrigin: () => this.#renderAnchorOrigin(),
 			roll: dependencies.roll ?? Math.random,
 		});
@@ -759,7 +833,7 @@ export class GameRuntime {
 			dynamicGenerationToResourceOwnerId,
 			// Emitters ride their owner's visibility: its bounds grow to contain what it emits, so
 			// the renderer's existing footprint test covers particles without a parallel path.
-			(nodeId) => this.#particles.envelopeRadiusFor(nodeId),
+			(nodeId) => this.#particles.envelopeRadiusFor(behaviorTargetId(nodeId)),
 		);
 		this.#audio = new AudioSystem(
 			dependencies.audioDevice,
@@ -777,14 +851,14 @@ export class GameRuntime {
 		});
 		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
 		// by design. A holder breaks the construction cycle without making the router mutable.
-		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId> } = {};
+		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId | SkyOwnerId> } = {};
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
 				audio: {
 					playSound: (target, sound) => {
 						// A sound is placed at its emitting node's world position, resolved once at
 						// trigger time exactly as retail samples it.
-						const origin = this.#sceneOriginOf(target);
+						const origin = this.#originOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							// Authored hook sounds are effect sounds: `PlaySoundA` gates on
@@ -798,14 +872,14 @@ export class GameRuntime {
 						return outcome === "played" ? "played" : "suppressed";
 					},
 					playSoundTableKey: (target, soundType) => {
-						const table = this.#targetSoundTables.get(target.nodeId);
+						const table = this.#targetSoundTables.get(target.targetId);
 						const candidates = table?.entries.get(soundType);
 						// Retail's miss is a silent no-op; reporting it keeps a missing table and a
 						// missing key distinguishable from a sound that chose not to play.
 						if (!candidates) return "unprepared";
 						const candidate = selectSoundCandidate(candidates, Math.random());
 						if (!candidate) return "unprepared";
-						const origin = this.#sceneOriginOf(target);
+						const origin = this.#originOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							category: "effect",
@@ -848,11 +922,35 @@ export class GameRuntime {
 			FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
 		);
 		this.#animation = new AnimationSystem(this.#effects, this.#behaviorRouter);
-		this.#physicsScriptSystem = new PhysicsScriptSystem<OwnerId>(
+		this.#physicsScriptSystem = new PhysicsScriptSystem<OwnerId | SkyOwnerId>(
 			this.#behaviorRouter,
 			Math.random,
 		);
 		scriptWiring.system = this.#physicsScriptSystem;
+		this.#skyScripts = new SkyScriptSystem({
+			acquireClosure: (scriptId) => this.#physicsScripts.acquireClosure(scriptId),
+			acquireEmitter: (emitterInfoId) =>
+				this.#particleEmitters.acquire(emitterInfoId),
+			installMeshes: (closure) => this.#stageParticleMeshes([{ scriptClosure: closure }]),
+			installScript: (target, closure, timeSeconds) =>
+				this.#physicsScriptSystem.install(
+					SKY_OWNER_ID,
+					target,
+					closure,
+					timeSeconds,
+				),
+			removeScript: (targetId) =>
+				this.#physicsScriptSystem.remove(SKY_OWNER_ID, targetId),
+			registerTarget: (targetId, target) =>
+				this.#skyTargets.set(targetId, target),
+			unregisterTarget: (targetId) => this.#skyTargets.delete(targetId),
+			// Read per call rather than captured, so every sky target follows the live camera.
+			viewerOrigin: () => {
+				const position = this.#camera.placement.position;
+				return sceneVector3([position.x, position.y, position.z]);
+			},
+			clock: () => this.#lastFrameTimeSeconds,
+		});
 		this.#terrain = new TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>(
 			this.#scene,
 			dependencies.terrainGenerator,
@@ -1167,6 +1265,7 @@ export class GameRuntime {
 			behavior: this.#behaviorRouter.getDiagnostics(),
 			particles: this.#particles.getDiagnostics(),
 			physicsScripts: this.#physicsScriptSystem.getDiagnostics(),
+			skyScripts: { activeCount: this.#skyScripts.activeCount },
 			effects: this.#effects.getDiagnostics(),
 			presentationCadence: this.#animationPresentation.getDiagnostics(),
 			residents: this.getAuthoredDynamicResidentDiagnostics(),
@@ -1301,6 +1400,12 @@ export class GameRuntime {
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
 		const tick = this.#tickProfiler;
 		tick?.beginTick();
+		// Reconciled before the clocks advance, so a script activated by this tick's sky state runs
+		// its `t=0` records on the same tick rather than a frame late.
+		this.#skyScripts.sync(
+			this.#environment.sky,
+			this.#frameSettings.weatherEnabled,
+		);
 		// Before either producer dispatches: a command applied this frame lands on state that has
 		// already reached this frame's behavior step, exactly as it did when animation drove it.
 		this.#effects.advance(timeSeconds);
@@ -1330,9 +1435,7 @@ export class GameRuntime {
 		// include the particle envelope, so an emitter entering view is selected on the frame its
 		// envelope crosses the frustum rather than when its mesh does.
 		renderer.particles?.submit(
-			this.#particles.collectCohorts((target) =>
-				this.#selectedDynamicNodeIds.has(target.nodeId),
-			),
+			this.#particles.collectCohorts((target) => this.#isTargetSelected(target)),
 		);
 		tick?.mark("particleCohort");
 		const anchorLandblockId = this.#camera.placement.landblockId;
@@ -1395,6 +1498,7 @@ export class GameRuntime {
 		this.#animation.destroy();
 		this.#physicsScriptSystem.destroy();
 		this.#audio.destroy();
+		this.#skyScripts.destroy();
 		this.#particleEmitters.destroy();
 		this.#soundTables.destroy();
 		this.#particleMeshes.destroy();
@@ -1704,7 +1808,10 @@ export class GameRuntime {
 								{
 									animation: animation.animation,
 									residentIdentity: residentKey(source.identity),
-									target: { generation: installation.generation, nodeId },
+									target: {
+										generation: installation.generation,
+										targetId: behaviorTargetId(nodeId),
+									},
 								},
 							]
 						: [],
@@ -1758,13 +1865,13 @@ export class GameRuntime {
 					void this.#stageParticleMeshes(prepared);
 					for (const entity of prepared) {
 						if (entity.soundTable !== null)
-							this.#targetSoundTables.set(entity.nodeId, entity.soundTable);
+							this.#targetSoundTables.set(behaviorTargetId(entity.nodeId), entity.soundTable);
 						if (entity.scriptClosure === null) continue;
 						this.#physicsScriptSystem.install(
 							ownerId,
 							{
 								generation: installation.generation,
-								nodeId: entity.nodeId,
+								targetId: behaviorTargetId(entity.nodeId),
 							},
 							entity.scriptClosure,
 							this.#lastFrameTimeSeconds,
@@ -1812,9 +1919,13 @@ export class GameRuntime {
 		this.#envCellLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#physicsScriptSystem.removeOwner(ownerId);
-		for (const nodeId of this.#targetSoundTables.keys()) {
-			if (this.#scene.getResolvedPlacement(nodeId) === undefined)
-				this.#targetSoundTables.delete(nodeId);
+		for (const targetId of this.#targetSoundTables.keys()) {
+			// A sound table is installed from a resident's own setup, so every key is a scene node
+			// today. A non-scene target has no placement that could have gone stale, and is removed
+			// by whichever module owns it rather than swept here.
+			const nodeId = sceneNodeIdOf(targetId);
+			if (nodeId !== null && this.#scene.getResolvedPlacement(nodeId) === undefined)
+				this.#targetSoundTables.delete(targetId);
 		}
 		// Emitters need no explicit removal: `#dynamics.removeOwner` destroys their nodes, and the
 		// particle runtime drops any emitter whose target stops publishing a transform.

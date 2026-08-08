@@ -1,9 +1,10 @@
-//! Closed resource record for the active region's celestial sky objects.
+//! Closed resource record for the active region's sky objects, celestial and weather alike.
 //!
-//! The sky's resource set is closed and tiny — 16 unique DAT ids across the shipped region's 20 day
-//! groups — so it is projected once at region load rather than discovered as day groups roll over.
-//! Only the resource closure crosses the boundary: placement is resolved per sky tick in the
-//! frontend from the region's already-serialized `SkyDesc`, so this record carries no residents.
+//! The sky's resource set is closed and tiny — a handful of unique DAT ids across the shipped
+//! region's 20 day groups — so it is projected once at region load rather than discovered as day
+//! groups roll over. Only the resource closure crosses the boundary: placement is resolved per sky
+//! tick in the frontend from the region's already-serialized `SkyDesc`, so this record carries no
+//! residents.
 
 use anyhow::{Context, Result};
 use holtburger_content::ActiveRegionData;
@@ -20,20 +21,13 @@ use crate::{
 pub(crate) const SKY_SOURCE_RECORD_BINARY_MAGIC: &[u8; 4] = b"HBSK";
 const SKY_SOURCE_RECORD_BINARY_HEADER_LEN: usize = 12;
 
-/// `properties` bit marking a viewer-pinned weather object rather than a celestial one.
-///
-/// Weather objects are resolved and carried through the frontend contract but are not drawn by the
-/// sky pass, so their resources are deliberately left out of this record (`GameSky::Draw`,
-/// acclient.c:297381, skips them unless `LScape::weather_enabled`).
-const WEATHER_PROPERTY_BIT: u32 = 4;
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SkySourceRecordManifest {
     pub(crate) transport: &'static str,
     pub(crate) byte_order: &'static str,
     pub(crate) section_byte_offset_base: &'static str,
-    /// Maps each celestial DAT id the frontend can resolve onto its prepared definition.
+    /// Maps each sky DAT id the frontend can resolve onto its prepared definition.
     pub(crate) objects: Vec<Value>,
     pub(crate) definitions: Vec<Value>,
     pub(crate) geometries: Vec<Value>,
@@ -42,36 +36,30 @@ pub(crate) struct SkySourceRecordManifest {
     pub(crate) sections: Vec<BinarySectionManifest>,
 }
 
-/// Every DAT id a celestial draw can reach, in ascending order.
+/// Every DAT id a sky draw can reach, in ascending order.
+///
+/// Celestial and weather objects alike: both are drawn by the sky pass, weather in its own
+/// after-landscape pass gated on the weather toggle (`GameSky::Draw`, acclient.c:297381). Weather
+/// resources were excluded while that pass did not exist, which left the rain sheets and the
+/// script-carrying emitter Setups unresolvable in the frontend.
 ///
 /// Both an object's `default_gfx_object_id` and any non-zero `SkyObjectReplace.gfx_object_id`
 /// qualify, because retail applies a gfx replacement unconditionally — including to an object
 /// currently outside its authored window (`SkyDesc::GetSky`, acclient.c:292478).
-fn celestial_source_ids(region: &ActiveRegionData) -> Vec<u32> {
+fn sky_source_ids(region: &ActiveRegionData) -> Vec<u32> {
     let Some(sky) = region.descriptor.sky_info.as_ref() else {
         return Vec::new();
     };
     let mut ids = std::collections::BTreeSet::new();
     for group in &sky.day_groups {
         for object in &group.sky_objects {
-            if object.properties & WEATHER_PROPERTY_BIT != 0 {
-                continue;
-            }
             if object.default_gfx_object_id != 0 {
                 ids.insert(object.default_gfx_object_id);
             }
         }
         for time in &group.sky_times {
             for replacement in &time.sky_object_replacements {
-                if replacement.gfx_object_id == 0 {
-                    continue;
-                }
-                // A replacement names its target object by index; only celestial targets belong here.
-                let celestial = group
-                    .sky_objects
-                    .get(replacement.object_index as usize)
-                    .is_some_and(|target| target.properties & WEATHER_PROPERTY_BIT == 0);
-                if celestial {
+                if replacement.gfx_object_id != 0 {
                     ids.insert(replacement.gfx_object_id);
                 }
             }
@@ -80,7 +68,7 @@ fn celestial_source_ids(region: &ActiveRegionData) -> Vec<u32> {
     ids.into_iter().collect()
 }
 
-/// Build the closed celestial resource record shared by Tauri and the headless browser harness.
+/// Build the closed sky resource record shared by Tauri and the headless browser harness.
 pub async fn load_sky_source_bytes(runtime: &ContentAssetRuntime) -> Result<Vec<u8>> {
     let asset = runtime
         .load(holtburger_core::ContentAssetRequest::ActiveRegionData)
@@ -92,7 +80,7 @@ pub async fn load_sky_source_bytes(runtime: &ContentAssetRuntime) -> Result<Vec<
 
     let mut closure = ObjectResourceClosure::default();
     let mut objects = Vec::new();
-    for source_did in celestial_source_ids(&region) {
+    for source_did in sky_source_ids(&region) {
         let definition = closure.add_resident(runtime, source_did).await?;
         objects.push(json!({
             "gfxObjectId": dat_id(source_did),

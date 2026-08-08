@@ -12,8 +12,7 @@ import type { AcRotation } from "../../assets/ac-frame";
 import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
 import type { DatAssetId } from "../game-types";
-import type { BehaviorTarget } from "../behavior/behavior-event-router";
-import type { SceneNodeId } from "../scene";
+import type { BehaviorTarget, BehaviorTargetId } from "../behavior/behavior-event-router";
 import {
 	PARTICLE_TYPE,
 	particleLifeProgress,
@@ -298,7 +297,7 @@ export class ParticleSystem {
 			const existing = this.#instances.findIndex(
 				(instance) =>
 					instance.emitterId === emitterId &&
-					instance.target.nodeId === target.nodeId,
+					instance.target.targetId === target.targetId,
 			);
 			if (existing >= 0) this.#instances.splice(existing, 1);
 		}
@@ -326,7 +325,7 @@ export class ParticleSystem {
 	stop(target: BehaviorTarget, emitterId: number): void {
 		for (const instance of this.#instances) {
 			if (
-				instance.target.nodeId === target.nodeId &&
+				instance.target.targetId === target.targetId &&
 				(emitterId === 0 || instance.emitterId === emitterId)
 			) {
 				instance.stopped = true;
@@ -339,7 +338,7 @@ export class ParticleSystem {
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
 			const instance = this.#instances[index]!;
 			if (
-				instance.target.nodeId === target.nodeId &&
+				instance.target.targetId === target.targetId &&
 				(emitterId === 0 || instance.emitterId === emitterId)
 			) {
 				this.#instances.splice(index, 1);
@@ -509,10 +508,10 @@ export class ParticleSystem {
 	 * individual particle positions, and re-deriving them to cull would reintroduce exactly the
 	 * per-particle CPU ceiling this design exists to avoid.
 	 */
-	envelopeRadiusFor(nodeId: SceneNodeId): number {
+	envelopeRadiusFor(targetId: BehaviorTargetId): number {
 		let radius = 0;
 		for (const instance of this.#instances) {
-			if (instance.target.nodeId !== nodeId) continue;
+			if (instance.target.targetId !== targetId) continue;
 			// The hook offset displaces the whole emitter, so it extends the owner's bound too.
 			const offsetLength = Math.hypot(...instance.hookOffset);
 			radius = Math.max(radius, offsetLength + instance.emitter.envelopeRadius);
@@ -640,7 +639,7 @@ export class ParticleSystem {
 		// rotation is a broken contract rather than a target that has gone away.
 		if (rotation === null) {
 			throw new Error(
-				`Emitter frame ${instance.frameTarget.nodeId} published an origin but no rotation.`,
+				`Emitter frame ${instance.frameTarget.targetId} published an origin but no rotation.`,
 			);
 		}
 		const rotated = rotatedSpawnConstants(info.motionType);

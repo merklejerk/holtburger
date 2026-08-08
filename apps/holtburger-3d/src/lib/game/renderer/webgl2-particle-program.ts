@@ -189,8 +189,18 @@ in float vTranslucency;
 
 uniform sampler2D uBase;
 uniform sampler2D uPalette;
-/** Shared encoding with the object program: 1 direct colour, 2 index8, 3 index16. */
+/** Shared encoding with the object program: 0 solid colour, 1 direct colour, 2 index8, 3 index16. */
 uniform int uMaterialKind;
+/**
+ * The authored colour of an untextured surface, already carrying its translucency as alpha.
+ *
+ * Only kind 0 reads it. Retail has no solid-colour path at all: it writes the colour into a 1x1
+ * texture and binds that (SetSolidColorTextureColor, acclient.c:437178). Sampling a one-texel
+ * texture to recover a value we already hold would be strictly worse, and the object program
+ * already carries the colour as a uniform, so this matches our own convention rather than retail's
+ * workaround. The visible result is identical.
+ */
+uniform vec4 uMaterialColor;
 uniform int uPalettedClipMap;
 uniform float uAlphaTest;
 
@@ -230,6 +240,9 @@ vec4 paletteColor(float index) {
 }
 
 vec4 sampleMaterial() {
+	if (uMaterialKind == 0) {
+		return uMaterialColor;
+	}
 	if (uMaterialKind == 1) {
 		return texture(uBase, vTextureCoordinate);
 	}
@@ -254,6 +267,7 @@ export interface WebGL2ParticleProgram {
 		readonly clockSeconds: WebGLUniformLocation;
 		readonly lockedAxis: WebGLUniformLocation;
 		readonly materialKind: WebGLUniformLocation;
+		readonly materialColor: WebGLUniformLocation;
 		readonly palettedClipMap: WebGLUniformLocation;
 		readonly motionType: WebGLUniformLocation;
 		readonly orientation: WebGLUniformLocation;
@@ -295,6 +309,7 @@ export function createWebGL2ParticleProgram(
 		clockSeconds: requireWebGL2Uniform(gl, program, "uClockSeconds"),
 		lockedAxis: requireWebGL2Uniform(gl, program, "uLockedAxis"),
 		materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
+		materialColor: requireWebGL2Uniform(gl, program, "uMaterialColor"),
 		palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 		motionType: requireWebGL2Uniform(gl, program, "uMotionType"),
 		orientation: requireWebGL2Uniform(gl, program, "uOrientation"),

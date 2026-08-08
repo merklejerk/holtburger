@@ -1,8 +1,11 @@
 # Holtburger 3D Weather and Sky-Script Runtime Plan
 
-Status: Executable — Phase R ran 2026-08-06 with a clean verdict, Phase 0 evidence completed
-2026-08-07, and the sky `BehaviorTarget` identity decision was ratified 2026-08-08 (option 3:
-behavior-owned target identity); nothing precedes Phase 1
+Status: Complete 2026-08-08 — Phase R ran 2026-08-06 with a clean verdict, Phase 0 evidence
+completed 2026-08-07, the identity decision was ratified 2026-08-08 (option 3), and Phases 1
+through 4 completed 2026-08-08. Two scope boundaries were deliberately widened along the way, both
+because authored weather was the first content to reach a gap: the particle runtime's
+untextured-material handling (Phase 3) and the sky pass's surface-brightness model (Phase 4).
+Carried debt is listed under "Known Gaps at Close".
 Created: 2026-08-06
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md` (parallel track)
 Prerequisites:
@@ -65,7 +68,9 @@ is two recorded seams with no owner: rainy day groups render their celestial set
   selection already exists in day-group hashing.
 - Any change to the effects runtime's authored-resident target ownership, script scheduling,
   particle, or audio internals. This plan is a consumer; if a contract does not fit, Phase R
-  renegotiates it with evidence rather than forking it.
+  renegotiates it with evidence rather than forking it. **Widened twice on 2026-08-08**, both by
+  explicit user decision and both because authored weather content was the first to reach a gap:
+  untextured particle materials (Phase 3), and the sky pass's surface-brightness model (Phase 4).
 - New sky schema fields. The sky pass carries `default_pes_object_id` and raw `properties`
   losslessly end to end already; a schema change here means one of these plans got its contract
   wrong.
@@ -94,8 +99,9 @@ is two recorded seams with no owner: rainy day groups render their celestial set
 ### Existing Code to Extend
 
 - `apps/holtburger-3d/src/lib/game/environment/sky-state.ts`: `ResolvedSkyObject` already carries
-  `properties`, `isCelestial`, and the PES id losslessly; the resolver keeps weather objects and
-  marks them, leaving nothing to re-derive.
+  `properties` and the PES id losslessly; the resolver keeps weather objects and marks them,
+  leaving nothing to re-derive. (Phase 1 replaced the `isCelestial` flag this originally named with
+  the richer `SkyPlacement` composite.)
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-sky-pass.ts`: celestial residency and draw
   policy. The derived-phase scroll arithmetic the rain sheets' `tex_velocity` (up to
   `(0.02, -2.0)`) also uses now lives in the shared `textureScrollPhase`
@@ -335,8 +341,8 @@ app's approximate-behavior-not-architecture doctrine.
 
 ### Phase 1: Weather Placement and Rendering
 
-Progress: Ready to execute — Phase R ran 2026-08-06 and Phase 0 completed 2026-08-07; the
-deliverables below are steered against recorded evidence, not direction.
+Progress: **Complete 2026-08-08.** All five deliverables landed and were verified in the browser
+harness on the real GPU against Rainy day group 3.
 
 #### Deliverables
 
@@ -360,18 +366,70 @@ deliverables below are steered against recorded evidence, not direction.
 
 #### Acceptance Criteria
 
-- Rainy day groups render scrolling rain sheets over terrain from inside the world, verified in
-  the harness across camera motion; non-rainy groups and interiors render none.
-- Toggling weather off and on recreates weather state without leaking residency or affecting
-  celestial rendering.
+- ~~Rainy day groups render scrolling rain sheets over terrain from inside the world, verified in
+  the harness across camera motion; non-rainy groups and interiors render none.~~ Verified
+  2026-08-08 on the real GPU: rain draws over terrain and trees from a ground-level pose in
+  landblock `0xda55ffff` under day group 3, and the after pass is suppressed from inside EnvCell
+  `0x7d64010e` while the before pass still runs (matching retail's asymmetric gate).
+- ~~Toggling weather off and on recreates weather state without leaking residency or affecting
+  celestial rendering.~~ Verified 2026-08-08 by an A/B capture at one fixed pose: `--no-weather`
+  removes every streak and leaves the celestial cloud layers pixel-identical. See the
+  recreate-on-toggle correction below for what this criterion does and does not yet prove.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- **The closure exclusion had two sites, not one.** Phase 0 named `sky_source.rs:57`; the
+  `SkyObjectReplace` path at `sky_source.rs:73` applied the same bit-4 filter to a replacement's
+  *target* object. Widening removed both, and the replacement path's target lookup collapsed
+  entirely — with every object eligible, a replacement no longer needs to resolve which object it
+  names. Net simpler than before. Verified by a temporary census probe: the closure goes from 16
+  to 21 unique DAT ids, adding exactly `0x01004C42`, `0x01004C44`, `0x02000588`, `0x02000589`,
+  and `0x02000BA6`, with the `properties` histogram reproducing the 2026-08-05 census exactly
+  (`{0: 120, 2: 20, 4: 8, 5: 8, 13: 76}`). Rainy groups are indices 3, 7, 9, 15, 16, 17, 18, 19.
+  Probe removed after recording.
+- **The two rain sheets straddle the pass boundary**, which the plan had not stated:
+  `0x01004C42` is `properties = 4` (before pass) and `0x01004C44` is `properties = 5` (after
+  pass); both are height-clamped, and the three emitter Setups are the `properties = 13`
+  viewer-tracking objects. So the before-pass sheet is occluded by terrain **by construction** —
+  it draws into an untouched depth buffer and the world paints over it — and the rain a player
+  actually sees is the after-pass sheet. Retail behaves identically; recorded because "the rain
+  sheets" reads as one thing and is two with different visibility.
+- **`isCelestial` was replaced by a `SkyPlacement` composite**, not extended. Pass selection
+  (bit 1), weather gating (bit 4), and the height clamp (bit 8) are derived once in `sky-state.ts`
+  and consumed as a decision, so the renderer never re-reads raw `properties`. `skyObjectOrigin`
+  is the single pure function owning the viewer pin.
+- **A latent sampler-completeness defect was exposed and fixed.** Moving a sky draw after the
+  terrain pass produced `GL_INVALID_OPERATION: Mismatch between texture format and sampler type`
+  on every weather draw. Cause: the terrain pass binds integer `usampler2D` textures to units 0
+  and 1, which are the sky program's `uBase` and `uPalette`; the sky pass skipped binding the
+  palette unit for a direct-color surface, so it inherited terrain's integer texture, and WebGL
+  validates every statically-used sampler regardless of which branch executes. The sky pass now
+  binds the palette unit unconditionally. This was unreachable while the sky only ever drew first.
+- **Recreate-on-toggle is a no-op at this phase, and that is the honest outcome.** Retail destroys
+  and re-makes bit-4 objects on toggle because it retains `CPhysicsObj` instances. Our weather
+  rendering holds no per-object state at all: resources are region-resident and placement is
+  derived per frame, so toggling is pure draw suppression and there is nothing to leak. The
+  criterion above therefore verifies celestial isolation but cannot yet verify teardown. Real
+  toggle teardown arrives with sky *script* state in Phase 3 — deliberately not pre-built here
+  rather than standing up dormant lifecycle machinery for state that does not exist.
+
+#### Debt
+
+- ~~The object path carries the **same** palette/sampler hazard the sky pass just fixed.~~ Traced
+  and fixed 2026-08-08. The mechanism already existed — `#beginObjectPhase()` primes every object
+  sampler unit — but only the opaque pass called it, and only *after* an early return on
+  `candidates.length === 0`. The blended pass called `#objectState.invalidate()` instead, which
+  makes issued binds re-apply but does nothing for a bind that is *skipped*: direct colour skips the
+  palette, solid colour skips both base and palette. So a view holding transparent or additive
+  objects and **no opaque ones** reached the blended loop with terrain's integer `usampler2D`
+  textures still on units 0 and 1, under float samplers, failing validation on every draw. The
+  blended pass now primes through `#beginObjectPhase()` exactly as the opaque pass does, which also
+  removes the cross-pass ordering dependency that made inserting the after-sky pass risky.
 
 ### Phase 2: Sky Script Targets
 
-Progress: Not started; steered by the ratified option-3 identity decision (2026-08-08).
+Progress: **Complete 2026-08-08.** The option-3 cutover landed, sky targets activate and tear down
+by reconciliation, and the celestial script executes with the behavior Phase 0 recorded.
 
 #### Deliverables
 
@@ -387,18 +445,79 @@ Progress: Not started; steered by the ratified option-3 identity decision (2026-
 
 #### Acceptance Criteria
 
-- The celestial script executes with the behavior Phase 0 recorded; unsupported commands report
-  provenance, never vanish.
-- Day-group rollover and region unload tear down sky script clocks, queued activations, and
-  acquired closures atomically.
+- ~~The celestial script executes with the behavior Phase 0 recorded; unsupported commands report
+  provenance, never vanish.~~ Verified 2026-08-08 against day group 0 (celestial only): one active
+  sky script, `0x330007db` dispatching exactly three `create-particle` commands, three live
+  emitters, nine particles, no errors — Phase 0's "three root-attached emitters started once at
+  `t=0`, no repetition, no sound", reproduced exactly. Every observation carries its script id and
+  authored position as provenance.
+- ~~Day-group rollover and region unload tear down sky script clocks, queued activations, and
+  acquired closures atomically.~~ Implemented as reconciliation with a supersession guard; see the
+  correction below for what is and is not yet verified.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- **Activation is reconciling, not event-driven.** `SkyScriptSystem.sync` takes the resolved sky
+  each tick and diffs it against what is running. That is what the sky already is — retail rebuilds
+  its object set every tick and reuses an object only when its identity still matches
+  (`GameSky::CreateDeletePhysicsObjects`, acclient.c:307587) — and it collapses day-group rollover,
+  authored-window transitions, and the weather toggle into one mechanism instead of three
+  separately detected events.
+- **`ResolvedSkyObject` gained `authoredIndex`.** The resolver drops objects outside their window,
+  so a resolved array index is not stable across ticks and cannot identify a running script clock.
+  Target ids are `sky-object:${dayGroupIndex}:${authoredIndex}`.
+- **The field renamed as well as the type.** The plan called for rebranding `BehaviorTarget.nodeId`
+  to `BehaviorTargetId`; the field is now `targetId`, because "node" stops being true the moment a
+  target need not be a scene resident. `BehaviorObservation` followed.
+- **The scene-keyed consumers kept their `SceneNodeId` keys** rather than rekeying on the brand,
+  and convert at their router-facing edge through a checked `requireSceneNodeId`. This turns the
+  dry-run's stated safety argument — "Phase 0 proved the sky vocabulary never reaches
+  `EffectSystem`" — from a content census into an enforced structural guarantee. The guard fired
+  immediately and correctly during bring-up, which is how the next item was found.
+- **`holds` is a total predicate; the command methods are not.** `AnimationSystem.holds` initially
+  used the throwing guard and rejected every sky dispatch, because liveness asks *every* producer
+  about *every* target. "Do you hold this?" has a legitimate "no" for a target the system could
+  never hold; `applyScale` on a target it does not hold remains an error. Distinguishing the two is
+  what made sky dispatch work at all.
+- **Two consumers needed residency awareness that the ratified decision did not name**, both found
+  by running the code rather than reading it. Neither required leaving option 3's shape — both are
+  the same composition-root lookup:
+  - `partFrameOf` resolved through the dynamics system, which a sky target is not in. Sky objects
+    are single-part Setups, so part 0 is the object itself; any other index is `unprepared`. Phase
+    3's `0x33000453` emits on part 0 and would otherwise never have created its emitter.
+  - Particle cohort culling tested membership in the renderer's dynamic-node selection, which a sky
+    target is absent from by construction, so every sky emitter would have culled to nothing every
+    frame. Sky targets are always selected — retail never culls the sky.
+- **Sky script staging needed no new record fields.** Scripts are already id-addressed through the
+  `load_physics_script` command rather than bundled into a landblock record, so the sky reuses the
+  existing repositories directly. The "no new sky schema fields" north star holds literally.
+
+#### Debt
+
+- Neither drop path is exercised by shipped content — which is the point, but it also means neither
+  is covered by a test. `ParticleMeshResidency` has no test file at all and would need a mocked
+  resource manager and texture preparer to get one, so a future change reintroducing a throw would
+  regress silently. The drop counter in its diagnostics is the only standing signal.
+- Teardown is implemented for day-group rollover, window close, weather toggle, script-id change,
+  and runtime destruction, with a supersession guard that releases assets staged for an activation
+  the sky has already moved past. Only the weather-toggle and steady-state paths have been
+  exercised on real content; rollover and region unload are structurally the same diff but were
+  not separately observed.
+- ~~Sky script assets are staged lazily and evicted on every teardown.~~ Fixed 2026-08-08.
+  `PreparedAssetRepository` drops a ready entry once its last handle releases, and sky scripts have
+  no other owner, so releasing on teardown meant every weather toggle, day-group rollover, and
+  authored window transition re-fetched the closure and emitter infos over IPC. `SkyScriptSystem`
+  now retains staged assets per **script id** for its own lifetime and releases them only at
+  `destroy`, matching the sky pass's eager-residency model. Teardown removes a clock and a target
+  registration and nothing else. Staging is also now shared per script id rather than per target,
+  which shipped content needs directly: a Rainy day group authors up to five instances of the same
+  emitter Setup, and each would otherwise have staged it independently. A staging that lands after
+  destroy releases itself rather than entering the retained set.
 
 ### Phase 3: Weather Emitter Scripts
 
-Progress: Not started.
+Progress: **Complete 2026-08-08.** The solid-colour gap below was brought into scope by the user
+and fixed; all four censused sky scripts now execute and their emitters render.
 
 #### Deliverables
 
@@ -407,25 +526,97 @@ Progress: Not started.
 
 #### Acceptance Criteria
 
-- Rainy groups produce the emitters' authored particle and audio behavior, attributable per
-  script; disabling weather stops and cleans them deterministically.
+- ~~Rainy groups produce the emitters' authored particle and audio behavior, attributable per
+  script; disabling weather stops and cleans them deterministically.~~ Verified 2026-08-08 on day
+  group 3: all four censused scripts dispatch — `0x330007DB`, `0x3300042C`, its `CallPES` partner
+  `0x3300042D`, and `0x33000453` — producing `create-particle`, `sound-tweaked`, and a scheduled
+  `call-pes`, each observation carrying its own script id and authored position. `--no-weather`
+  drops active sky scripts from three to one, leaving the celestial script running and reporting no
+  errors.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- **Scope widened, by decision, for untextured particle materials.** The blocker recorded above was
+  escalated and the user brought it in scope. Retail's answer settled the design: it has no
+  solid-colour shading path at all, writing the colour into a 1×1 texture and taking the ordinary
+  textured path (`D3DPolyRender`, acclient.c:434074; `SetSolidColorTextureColor`,
+  acclient.c:437178). We did **not** copy that. Our object program already carries an authored
+  colour as a uniform under reserved material kind 0, so the particle program gained the same kind
+  and uniform; synthesising a one-texel texture to recover a value we already hold would be
+  strictly worse. Retail's alpha rule *is* reproduced exactly: the authored colour's own alpha is
+  masked off in favour of `1 - translucency`.
+- **A 1×1 placeholder exists after all, for a different reason.** An untextured mesh binds it purely
+  so the statically-used samplers have compatible textures — the same GL validation rule that
+  produced Phase 1's sky defect, on the same units the terrain pass leaves integer textures on. It
+  is never sampled and carries no colour.
+- **An unsupported material now drops its own work loudly instead of throwing** (user decision,
+  2026-08-08). Both sites sit inside batch preparation, so a throw took down far more than the
+  asset that caused it: one untextured particle mesh failed every mesh staged alongside it, and one
+  untextured sky surface would have failed the region's whole sky. Each now reports the exact
+  object, part, and reason on the console and drops only itself — the sky loses one range, the
+  particle runtime loses one mesh, and `ParticleMeshResidency` counts the drop in its diagnostics so
+  it is visible without reading logs. This trades the house preference for failing loudly on our own
+  logic errors against blast radius, on the grounds that an unsupported *authored* material is a gap
+  in this renderer rather than a caller error.
+- **The sky pass still does not implement untextured surfaces**, and that stays deliberate: no
+  shipped sky object authors one, so building the path would be dormant infrastructure. It is a
+  documented unimplemented case, not a divergence, and needs no marker.
+- The escalation as first written overstated the cost: it described the fix as extending the
+  particle runtime's material model, when our pipeline already modelled solid colour end to end
+  (`ResolvedMaterial`, the material planner, and the object program) and only two consumers assumed
+  every material was textured.
 
 ### Phase 4: Resteer, Measure, and Clean Up
 
-Progress: Not started.
+Progress: **Complete 2026-08-08.**
 
-- [ ] Measure weather pass and sky-script cost; the sky pass's profiling debt (no named `sky`
+- [x] Measure weather pass and sky-script cost; the sky pass's profiling debt (no named `sky`
       phase) is paid here if either needs attention.
-- [ ] Sweep any temporary probes, placeholder gates, or dead vocabulary introduced along the way.
-- [ ] Update `docs/lighting.md`'s sky/weather sections and close the physics-script seam note.
+- [x] Sweep any temporary probes, placeholder gates, or dead vocabulary introduced along the way.
+- [x] Update `docs/lighting.md`'s sky/weather sections and close the physics-script seam note.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- **The sky pass's brightness model was wrong, and weather content exposed it** (scope widened by
+  user decision, 2026-08-08, after a reviewer flagged rain reading as an overlay). Three separate
+  defects, all in one expression:
+  - `luminosity ?? 1` treated an unauthored channel as full brightness. Retail's -1 sentinel leaves
+    the **surface's** own value (acclient.c:297764). The rain sheets author 0.148 and every
+    day-group replacement for them is zero, so they drew ~6.8x too bright — on an `ADDITIVE`
+    surface, which is why it read as rain being painted over the world.
+  - The two channels were **multiplied**. Retail branches: `surface->luminosity > 0` drives
+    Emissive, otherwise Ambient and Diffuse carry the surface (acclient.c:434305). Multiplying
+    dimmed every emissive layer by its diffuse scale.
+  - `ResolvedSkyMaterial.diffuse` — the authored `max_bright` — was decoded, carried through the
+    contract, and **never read**. The sun and cloud layers author usable values of 11-100 and were
+    losing them entirely.
+  The full-brightness default was defended in a comment as the only thing keeping zero-luminosity
+  layers such as the night stars from resolving to black. That was true *given the multiply*, and
+  stops being true once the branch is correct: the else branch is exactly what lights them. An A/B
+  night capture confirmed it — the night sky went from a murky brown wash to a clean deep-blue
+  gradient, so the fallback had been degrading the case it existed to protect.
+- **Weather opacity is now a marked divergence, by user decision** (2026-08-08). Reviewing against
+  retail, the viewer-pinned columns read as distracting during camera movement — and the reviewer
+  noted they are erratic *in retail too*, so this is a deliberate improvement rather than a bug
+  fix. `FRONTEND_TUNING.rendering.weatherOpacityScale` scales authored weather opacity only;
+  celestial layers pass 1 and are untouched. Verified the knob actually bites: both rain surfaces
+  are `ALPHA | ADDITIVE`, which `objectBlendPolicy` maps to `SRC_ALPHA, ONE`, so alpha scales the
+  added light. A pure-additive surface without the `ALPHA` bit would map to `ONE, ONE` and ignore
+  it, which is why this was checked rather than assumed. Marker, citation, safety evidence, and
+  census live on the constant; setting it to 1 restores retail exactly.
+- **The profiling debt was paid rather than argued away.** The first measurement compared total
+  frame cost between a clear and a rainy day group and found ~0.1 ms of CPU difference and no GPU
+  difference — but `gpu.totalMs` is the sum of *named* phases and there was no sky phase, so the
+  sky's GPU cost was not "zero", it was unmeasured. Rather than report an unfalsifiable number, the
+  named `sky` phase was added. Both passes share one phase: they are one cost to reason about, and
+  elapsed queries cannot nest.
+- **Measured cost, real GPU, landblock `0xda55ffff`, camera height 120:** sky GPU 0.099 ms clear
+  (day group 0) against 0.230 ms rainy (day group 3) — weather roughly doubles the sky pass and
+  adds ~0.13 ms. Whole-frame GPU is 0.61 ms against 0.63 ms. No attention warranted beyond having
+  made it visible.
+- Two temporary Rust probes (the day-group/closure census and the emitter-surface probe) and one
+  temporary renderer log were removed after recording their findings. The `--no-weather` harness
+  flag and the `skyScripts` diagnostic are permanent: both answer questions that recur.
 
 ## Risks and Mitigations
 
@@ -448,14 +639,34 @@ against retail captures or ACE-connected observation of rainy landblocks, not in
 
 ## Definition of Done
 
-- [ ] Rainy day groups render authored rain sheets and emitter effects; clear groups and
+- [x] Rainy day groups render authored rain sheets and emitter effects; clear groups and
       interiors render none.
-- [ ] All four censused sky physics scripts execute on the effects runtime with recorded behavior
+- [x] All four censused sky physics scripts execute on the effects runtime with recorded behavior
       and provenance-complete unsupported reporting.
-- [ ] Weather toggling matches retail's recreate semantics with no residency or state leaks.
-- [ ] No new sky schema fields; no forked script/particle/audio machinery; no dormant
-      infrastructure for environment overrides.
-- [ ] Formatting, lint, tests, Rust checks, and Clippy pass; architecture docs updated.
+- [x] Weather toggling matches retail's recreate semantics with no residency or state leaks. Sky
+      scripts drop from three to one and their assets are released; celestial state is untouched.
+- [x] No new sky schema fields; no forked script/particle/audio machinery; no dormant
+      infrastructure for environment overrides. One scope boundary was widened by explicit decision
+      (untextured particle materials) and is recorded under Phase 3 rather than quietly taken.
+- [x] Formatting, lint, tests, Rust checks, and Clippy pass; architecture docs updated.
+
+## Known Gaps at Close
+
+Every deliverable and acceptance criterion is met. These are carried forward deliberately, not
+overlooked, and each is written up in full under the phase that found it.
+
+| Gap                                                         | Owner phase | Status                                                                |
+| ----------------------------------------------------------- | ----------- | --------------------------------------------------------------------- |
+| Object path shares the palette/sampler binding hazard        | Phase 1     | **Fixed 2026-08-08**; blended pass now primes its sampler units       |
+| Sky script assets evicted and re-fetched on teardown         | Phase 2     | **Fixed 2026-08-08**; staged assets retained per script id            |
+| Retail's depth state for sky-object particles                | Open Q4     | Parked; unobservable in shipped content, evidence now argues we match |
+| Rollover and region-unload teardown not separately observed  | Phase 2     | Carried; structurally identical to the paths that were exercised      |
+| Neither material drop path has a test                        | Phase 3     | Carried; `ParticleMeshResidency` has no test harness                  |
+| Sky pass does not implement untextured surfaces              | Phase 3     | Carried deliberately; no shipped sky object authors one               |
+
+The two fixed items were both real defects rather than tidiness: the first was a latent draw
+failure reachable by any view of purely transparent objects, and the second was a regression this
+plan introduced. Nothing remaining is known to change rendering output.
 
 ## Open Questions
 
@@ -470,3 +681,30 @@ against retail captures or ACE-connected observation of rainy landblocks, not in
    result with less pass machinery?~~ Answered 2026-08-07: the pass is required for correctness.
    Sky/weather polys draw depth-always with writes off and bypass the alpha list, so terrain
    never occludes rain; depth-tested world-pass drawing cannot reproduce that (see Phase 0).
+4. **Do sky-object particles inherit the sky's depth state in retail?** Raised, advanced, and then
+   **parked as not worth resolving** on 2026-08-08. The *sheets* are settled and we match them
+   (acclient.c:297402, 434175). For particles, what is established: `CPhysicsObj::DrawRecursive`
+   (acclient.c:306364) draws only the part array and children, so particles are not drawn by the
+   object recursion; an emitter builds one particle `CPhysicsObj` (`makeParticleObject`,
+   acclient.c:318016) whose parts reach a cell only through `AddPartToShadowCells`
+   (acclient.c:306479), which needs that object to have a cell or shadow cells; and a cell draw
+   renders its `shadow_object_list` (acclient.c:437618-437641).
+
+   Two findings then argued against pursuing it. Structurally,
+   `CPhysicsObj::set_cell_id_recursive` (acclient.c:306444) propagates a cell to the part array and
+   children but **not** to particle emitters, and explicitly skips the part array when
+   `state & 0x1000` — a bit `makeParticleObject` sets. Particle objects are deliberately excluded
+   from that propagation, which makes "sky particles live in the sky cell, and so draw
+   depth-always" materially less likely than it first appeared. Observationally, a reviewer
+   comparing our weather against retail directly reported no discernible difference in the
+   particles.
+
+   Both readings are consistent with the same practical point: the shipped weather emitters produce
+   a handful of particles at a time (measured: 3 emitters, 9 live particles) and are viewer-pinned,
+   so like the sheets they are near-field and sit in front of most geometry whichever depth mode
+   applies. The remaining unknown is therefore real but unobservable in shipped content — a
+   documented gap rather than a divergence, and it needs no marker.
+
+   If it ever needs settling, the cheap test is observational rather than archaeological: stand
+   immediately beside a wall or tree during rain in retail and see whether particles draw over it.
+   Ours are depth-tested and would not.

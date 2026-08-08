@@ -1,3 +1,4 @@
+import { behaviorTargetId } from "../behavior/behavior-event-router";
 import {
 	acRotationFromRenderTransform,
 	acVector3,
@@ -17,7 +18,7 @@ import { ParticleSystem } from "./particle-system";
 
 const TARGET: BehaviorTarget = {
 	generation: 1,
-	nodeId: "node-1" as SceneNodeId,
+	targetId: behaviorTargetId("node-1"),
 };
 const ORIGIN: SceneVector3 = sceneVector3([0, 0, 0]);
 /** Hook offsets stay in AC axes so spawn can rotate them with the owner before converting. */
@@ -87,7 +88,7 @@ const runtime = (
 		sceneRotationOf: () => UNROTATED,
 		partFrameOf: (target, partIndex) => ({
 			generation: target.generation,
-			nodeId: `${target.nodeId}/part/${partIndex}` as SceneNodeId,
+			targetId: behaviorTargetId(`${target.targetId}/part/${partIndex}`),
 		}),
 		renderAnchorOrigin: () => sceneVector3([0, 0, 0]),
 		resolveEmitter: () => null,
@@ -418,7 +419,7 @@ describe("ParticleSystem", () => {
 		const particles = runtime({
 			resolveEmitter: () => staged,
 			sceneOriginOf: (target) =>
-				target.nodeId === partNode ? sceneVector3([9, 0, 0]) : ORIGIN,
+				target.targetId === partNode ? sceneVector3([9, 0, 0]) : ORIGIN,
 		});
 
 		particles.createEmitter(TARGET, {
@@ -445,7 +446,7 @@ describe("ParticleSystem", () => {
 		});
 
 		// The envelope belongs to the owning object; culling the part alone would lose the swarm.
-		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeGreaterThan(0);
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeGreaterThan(0);
 		expect(particles.collectCohorts(() => false)).toHaveLength(0);
 	});
 
@@ -485,12 +486,12 @@ describe("ParticleSystem", () => {
 		particles.create(TARGET, prepared(), acVector3([0, 0, 4]), 0, 0, ORIGIN);
 
 		// envelopeRadius is 10 in the fixture, displaced 4 by the hook offset.
-		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeCloseTo(14);
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(14);
 	});
 
 	it("contributes nothing for a target with no live emitters", () => {
 		// Zero rather than null, so a caller adds it to presentation bounds unconditionally.
-		expect(runtime().envelopeRadiusFor(TARGET.nodeId)).toBe(0);
+		expect(runtime().envelopeRadiusFor(TARGET.targetId)).toBe(0);
 	});
 
 	it("takes the widest emitter when a target runs several", () => {
@@ -498,7 +499,7 @@ describe("ParticleSystem", () => {
 		particles.create(TARGET, prepared(), acVector3([0, 0, 0]), 0, 0, ORIGIN);
 		particles.create(TARGET, prepared(), acVector3([0, 0, 20]), 0, 0, ORIGIN);
 
-		expect(particles.envelopeRadiusFor(TARGET.nodeId)).toBeCloseTo(30);
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(30);
 	});
 
 	it("groups particles into cohorts by mesh and motion type", () => {

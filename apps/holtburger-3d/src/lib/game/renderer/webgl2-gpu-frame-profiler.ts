@@ -9,7 +9,12 @@ import type {
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** GPU phases whose timestamp intervals are aggregated across every view in one frame. */
-export type WebGL2GpuFramePhase = "terrain" | "opaque" | "blended" | "particle";
+export type WebGL2GpuFramePhase =
+	| "sky"
+	| "terrain"
+	| "opaque"
+	| "blended"
+	| "particle";
 
 /** Non-overlapping CPU spans recorded only while an explicit profiling session is active. */
 export type WebGL2CpuFramePhase =
@@ -304,6 +309,7 @@ export class WebGL2GpuFrameProfiler {
 		const milliseconds = (query: WebGLQuery): number =>
 			(this.#gl.getQueryParameter(query, this.#gl.QUERY_RESULT) as number) /
 			NANOSECONDS_PER_MILLISECOND;
+		let skyMs = 0;
 		let terrainMs = 0;
 		let opaqueMs = 0;
 		let blendedMs = 0;
@@ -311,6 +317,9 @@ export class WebGL2GpuFrameProfiler {
 		for (const range of frame.ranges) {
 			const durationMs = milliseconds(range.query);
 			switch (range.phase) {
+				case "sky":
+					skyMs += durationMs;
+					break;
 				case "terrain":
 					terrainMs += durationMs;
 					break;
@@ -331,11 +340,12 @@ export class WebGL2GpuFrameProfiler {
 			opaqueMs,
 			particleMs,
 			pendingFrameCount: this.#pending.length,
+			skyMs,
 			terrainMs,
 			// The sum of what was measured, not wall-clock from first to last command. Elapsed
 			// queries cannot nest, so unattributed GPU work between phases is unmeasurable and is
 			// deliberately absent rather than reported as a zero.
-			totalMs: terrainMs + opaqueMs + blendedMs + particleMs,
+			totalMs: skyMs + terrainMs + opaqueMs + blendedMs + particleMs,
 		};
 	}
 

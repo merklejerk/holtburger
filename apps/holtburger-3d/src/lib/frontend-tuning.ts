@@ -96,10 +96,39 @@ export const FRONTEND_TUNING = {
 	rendering: {
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },
+		/** Authored weather presentation, which is ours to shape rather than inherit. */
+		weather: {
+			/**
+			 * How much of its authored opacity an authored weather object contributes, in [0, 1].
+			 *
+			 * RETAIL DIVERGENCE: retail draws weather columns at their full authored opacity
+			 * (`GameSky::Draw`, acclient.c:297381, with no per-object opacity policy anywhere in the
+			 * sky path). We scale them down deliberately.
+			 *
+			 * Why departing is safe: the rain columns are `0x01004C42` and `0x01004C44` and nothing
+			 * else — a census of the shipped region found exactly two weather meshes, both drawn only
+			 * by the sky pass, both purely decorative. No authored content, script, or gameplay system
+			 * reads their opacity, so nothing can observe the change but a viewer.
+			 *
+			 * Why it is wanted: both columns are viewer-pinned with an absolute height clamp
+			 * (`GameSky::UpdatePosition`, acclient.c:297298), so they slide vertically past the camera
+			 * whenever it changes height. Retail was tuned against a walking player; an explorer or
+			 * free-fly camera moves vertically far faster than retail could, which turns an authored
+			 * ambience into a distracting sweep. The motion is faithful, the input envelope is not.
+			 *
+			 * Set to 1 to restore retail's contribution exactly.
+			 */
+			opacityScale: 0.5,
+		},
 		frameDefaults: {
 			/** Whether region-authored distance fog is enabled initially. */
 			distanceFogEnabled: true,
 			viewerLightEnabled: true,
+			/**
+			 * Authored weather. Retail defaults `LScape::weather_enabled` to true
+			 * (acclient.c:44269) and only the player option turns it off, so we default it on too.
+			 */
+			weatherEnabled: true,
 			/** Authored outdoor lamps; disabled only to measure their cost. */
 			staticLightsEnabled: true,
 			/** Environment-cell visibility policy selected initially. */

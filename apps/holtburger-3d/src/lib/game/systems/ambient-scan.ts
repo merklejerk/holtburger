@@ -182,10 +182,20 @@ export function placeAmbientSound(
 		AMBIENT_DIRECTION_HEADING[direction] +
 		roll() * AMBIENT_DIRECTION_ARC -
 		AMBIENT_DIRECTION_ARC * 0.5;
-	// RETAIL QUIRK: the distance roll is squared, so sounds cluster toward the near edge of the band.
-	// Area-uniform sampling over a disc would take a square root instead. Whether the exponent is
-	// deliberate cannot be proven from the decompile, but it is audible and every shipped ambience was
-	// mixed against it, so it is transcribed rather than "corrected".
+	// RETAIL QUIRK: the distance roll is squared (acclient.c:367481), so a uniform roll lands a third
+	// of the way across the band on average and a quarter of the way at the median, rather than
+	// halfway. It is not merely "missing" an area correction — area-uniform sampling over an annulus
+	// takes a square root and biases *outward*, so this leans the opposite way from correct.
+	//
+	// Two consequences make it load-bearing rather than cosmetic. `AddDir` collapses every contributor
+	// in one direction into a single band, so a near-edge bias approximates hearing the *nearest*
+	// instance of that terrain rather than a random one. And because gain falls as 1/d², the far end
+	// of a wide band is usually under the audible floor: on a 5-125 m band the squared roll puts the
+	// median at 35 m where a linear roll would put it at 65 m, which is the difference between
+	// ambience that plays and ambience that is mostly culled.
+	//
+	// Nothing in the decompile shows intent either way. It is bounded — a placement never leaves
+	// [minimum, maximum] — and every shipped ambience was mixed against it, so it is transcribed.
 	const spread = roll();
 	const distance =
 		band.minimum + (band.maximum - band.minimum) * spread * spread;

@@ -3195,16 +3195,54 @@ Debt and concessions:
 - The Explorer installs ambient facts fire-and-forget (`void installAmbientRegion(...)`), matching how
   sky and static details are installed there. A staging failure is therefore visible only as silence.
 
-### Phase 10.5 — Directional placement for intermittent sounds
+### Phase 10.5 — Directional placement for intermittent sounds — **code done, not verified at runtime**
 
-Roll a direction among those with contributors, jitter the heading inside its sector, roll a squared
-distance within that direction's band, and keep the listener's `z`. This is the difference between
-ambience that sits in the world and ambience that sits in the listener's head, and it is separable: a
-centred first cut is audible and correct in every respect except direction.
+`placeAmbientSound` rolls a direction among those with contributors, jitters the heading inside its
+22.5° arc, rolls a squared distance within that direction's band, and keeps the listener's height.
+Built and unit-tested in AC axes, where the compass bearings are defined.
 
-*Acceptance:* a sound authored only to the north is never placed to the south; its distance stays
-within the accumulated band for the direction chosen; a descriptor with no directional contributors
-plays centred rather than failing.
+`RETAIL QUIRK:` the distance roll is squared, biasing toward the near edge of the band where
+area-uniform sampling over a disc would take a square root. Unprovable as deliberate from the
+decompile, audible, and every shipped ambience was mixed against it, so it is transcribed. A test
+pins the exact value (a mid roll lands at 45 m in a 40–60 m band, not 50).
+
+Two real defects were found while integrating, and both are fixed:
+
+- **`firedCount` counted only sounds that played**, so a scheduler firing correctly into an inaudible
+  placement reported zero. That is precisely the sin `AudioDiagnostics` already documents; the counter
+  is now split into `firedCount` (sent) and `playedCount` (became sound).
+- **The rescan gate keyed only on listener movement.** Landblocks stream in after the first scan, so a
+  stationary listener whose surroundings arrive later never heard them. The gate now also keys on
+  `TerrainSystem.installationRevision`.
+
+**Retail's ambient path ignores the sound table's authored volume.** `PlayAmbientSound` passes its own
+`volume` straight to `PlaySoundInternal`, which never reads the table entry's gain
+(acclient.c:366813 and 366489); only the candidate's `probability` is used. We were multiplying both
+and attenuating every ambient sound twice. `AmbientSoundSelection` now carries no volume at all.
+
+### Outstanding — ambience schedules but does not fire
+
+**Phase 10 is not finished.** Against real content at `0xda56ffff`, the scan resolves **28 descriptors
+from real terrain** — so the terrain walk, the region chain, table staging, and weighting all work end
+to end — but no descriptor ever fires. Instrumented over a 120 s run:
+
+```
+now=41.1 n=28 id=1 refreshes=11 retired=0 sched=28 updates=0 fires=0 due=48.7,50.6,50.5
+```
+
+`dueAt` sits a few seconds ahead of `now` no matter how long the run, so the schedule is being reset
+rather than advancing. The contradiction I could not resolve: `refresh` ran 11 times on one instance
+holding 28 entries, yet its `existing` branch never ran once and nothing was retired. That is not
+possible for a plain `Map` with stable string keys, so an assumption behind the instrumentation or the
+call path is wrong, and further guessing was not converging.
+
+Next investigator's shortest path: log the actual key sets on successive refreshes rather than
+counters, and confirm `#refreshAmbient`'s caller identity — the probe accounting says one
+`AmbientSystem`, but the numbers only make sense if the map being written and the map being read are
+not the same object.
+
+Everything below the integration is unit-tested and green (890 tests): the scan, weighting,
+direction bucketing, band widening, region chain, scheduler cadence, and placement.
 
 ### Risks
 

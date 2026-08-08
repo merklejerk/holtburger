@@ -71,6 +71,35 @@ export const AMBIENT_COMPASS_DIRECTIONS: readonly AmbientDirection[] = [
 	AMBIENT_DIRECTION.southeast,
 ];
 
+/**
+ * Compass bearing per direction (`LandDefs::heading`, acclient.c:446441), in radians.
+ *
+ * Zero is north and bearings increase clockwise through east, which is why placement takes `sin` for
+ * AC's x (east) and `cos` for AC's y (north) rather than the other way round.
+ */
+export const AMBIENT_DIRECTION_HEADING: Readonly<
+	Record<AmbientDirection, number>
+> = {
+	[AMBIENT_DIRECTION.inViewerBlock]: 0,
+	[AMBIENT_DIRECTION.north]: 0,
+	[AMBIENT_DIRECTION.south]: 3.1415927,
+	[AMBIENT_DIRECTION.east]: 1.5707964,
+	[AMBIENT_DIRECTION.west]: 4.712389,
+	[AMBIENT_DIRECTION.northwest]: 5.497787,
+	[AMBIENT_DIRECTION.southwest]: 3.9269907,
+	[AMBIENT_DIRECTION.northeast]: 0.78539819,
+	[AMBIENT_DIRECTION.southeast]: 2.3561945,
+};
+
+/**
+ * Width of the arc a placed sound may land within, centred on its direction's bearing
+ * (`DIR_ANGLE_IN_RAD`, acclient.c:44613).
+ *
+ * 0.3927 rad is 22.5°, half a compass sector, so a sound jitters ±11.25° about its bearing rather
+ * than snapping to eight exact headings.
+ */
+export const AMBIENT_DIRECTION_ARC = 0.39269909;
+
 /** Axis-dominance tolerance below which retail treats a component as zero. */
 const AXIS_EPSILON = 0.00019999999;
 

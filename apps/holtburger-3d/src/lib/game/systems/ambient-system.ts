@@ -3,7 +3,11 @@ import type { DatAssetId } from "../game-types";
 import type { AudioTrigger, AudioTriggerOutcome } from "./audio-system";
 import type { UniformRoll } from "./particle-system";
 import { AMBIENT_MIN_VOLUME } from "./ambient-weighting";
-import type { AmbientScanResult } from "./ambient-scan";
+import { placeAmbientSound, type AmbientScanResult } from "./ambient-scan";
+import type {
+	AmbientDirection,
+	AmbientDistanceBand,
+} from "./ambient-weighting";
 
 /**
  * Region ambience on its own clock, driven by what the surrounding terrain authors.
@@ -15,13 +19,18 @@ import type { AmbientScanResult } from "./ambient-scan";
  * interval is drawn — that one record with a branch is a fairer description than two classes.
  */
 
-/** One candidate chosen from a descriptor's sound table, ready to play. */
+/**
+ * One candidate chosen from a descriptor's sound table, ready to play.
+ *
+ * Deliberately carries no volume. The ambient path reads only the candidate's `probability`
+ * (`stdata.probability_`) and plays at the *descriptor's* volume: `PlayAmbientSound` passes its own
+ * `volume` argument straight to `PlaySoundInternal`, which never consults the table entry's gain
+ * (acclient.c:366813 and 366489). Applying both would attenuate every ambient sound twice.
+ */
 interface AmbientSoundSelection {
 	readonly soundId: DatAssetId;
 	/** The table candidate's own play chance, which retail rolls in `PlayAmbientSound`. */
 	readonly probability: number;
-	/** The candidate's authored gain, before the descriptor's own volume scales it. */
-	readonly volume: number;
 }
 
 export interface AmbientSystemDependencies {
@@ -55,11 +64,26 @@ interface ScheduledAmbient {
 	playChance: number;
 	/** Clock time this descriptor next comes due. */
 	dueAt: number;
+	/**
+	 * Per-direction distance bands from the most recent scan, rolled anew on every firing.
+	 *
+	 * Empty for a continuous descriptor, which retail plays centred; refreshed rather than retained,
+	 * so a sound follows the ground as the listener moves through it.
+	 */
+	directions: ReadonlyMap<AmbientDirection, AmbientDistanceBand>;
 }
 
 export interface AmbientDiagnostics {
 	readonly scheduledCount: number;
+	/**
+	 * Descriptors sent to the audio system, whatever became of them there.
+	 *
+	 * Separate from `playedCount` because conflating them makes silence undiagnosable: a scheduler
+	 * that never fires and one whose every firing is judged inaudible are different faults with
+	 * different causes, and counting only the sound that came out cannot tell them apart.
+	 */
 	readonly firedCount: number;
+	readonly playedCount: number;
 	/** Due descriptors that lost their chance roll, which is correct behaviour rather than a fault. */
 	readonly suppressedCount: number;
 	/** Due descriptors whose sound table had not staged yet. */
@@ -81,6 +105,7 @@ export class AmbientSystem {
 	readonly #dependencies: AmbientSystemDependencies;
 	readonly #scheduled = new Map<string, ScheduledAmbient>();
 	#firedCount = 0;
+	#playedCount = 0;
 	#suppressedCount = 0;
 	#unresolvedCount = 0;
 	#retiredCount = 0;
@@ -125,6 +150,7 @@ export class AmbientSystem {
 			if (existing) {
 				existing.volume = volume;
 				existing.playChance = playChance;
+				existing.directions = accumulation.directions;
 				continue;
 			}
 			this.#scheduled.set(key, {
@@ -135,6 +161,7 @@ export class AmbientSystem {
 						descriptor.minRate,
 						descriptor.maxRate,
 					),
+				directions: accumulation.directions,
 				isContinuous: descriptor.isContinuous,
 				key,
 				maxRate: descriptor.maxRate,
@@ -165,6 +192,7 @@ export class AmbientSystem {
 	getDiagnostics(): AmbientDiagnostics {
 		return {
 			firedCount: this.#firedCount,
+			playedCount: this.#playedCount,
 			retiredCount: this.#retiredCount,
 			scheduledCount: this.#scheduled.size,
 			suppressedCount: this.#suppressedCount,
@@ -192,13 +220,30 @@ export class AmbientSystem {
 		}
 		const outcome = this.#dependencies.play({
 			category: "ambient",
-			// Centred on the listener; intermittent sounds gain their own direction in 10.5.
-			position: this.#dependencies.listenerPosition(),
+			position: this.#place(scheduled),
 			probability: selection.probability,
 			soundId: selection.soundId,
-			volume: selection.volume * scheduled.volume,
+			volume: scheduled.volume,
 		});
-		if (outcome === "played") this.#firedCount += 1;
+		this.#firedCount += 1;
+		if (outcome === "played") this.#playedCount += 1;
+	}
+
+	/**
+	 * Where one firing lands: inside the ground that authored it, or centred when it has no direction.
+	 *
+	 * Rolled per firing rather than per scan, so successive calls of the same bird come from different
+	 * points within the same stretch of forest.
+	 */
+	#place(scheduled: ScheduledAmbient): SceneVector3 {
+		const listenerPosition = this.#dependencies.listenerPosition();
+		return (
+			placeAmbientSound(
+				scheduled.directions,
+				listenerPosition,
+				this.#dependencies.roll,
+			) ?? listenerPosition
+		);
 	}
 
 	#rearm(scheduled: ScheduledAmbient, timeSeconds: number): void {

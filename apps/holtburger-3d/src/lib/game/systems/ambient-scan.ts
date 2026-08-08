@@ -1,8 +1,16 @@
-import { renderVector3, renderVectorToAc } from "../../assets/ac-frame";
+import {
+	acVector3,
+	acVectorToRender,
+	renderVector3,
+	renderVectorToAc,
+	sceneVector3,
+} from "../../assets/ac-frame";
 import type { SceneVector3 } from "../../assets/ac-frame";
 import {
 	AMBIENT_COMPASS_DIRECTIONS,
 	AMBIENT_DIRECTION,
+	AMBIENT_DIRECTION_ARC,
+	AMBIENT_DIRECTION_HEADING,
 	AMBIENT_DISTANCE_BAND_HALF_WIDTH,
 	AMBIENT_MAX_DISTANCE_SQUARED,
 	AMBIENT_OMNIDIRECTIONAL_MIN_DISTANCE,
@@ -146,6 +154,51 @@ export function scanAmbientSources(
 	}
 
 	return { accumulations, examinedCellCount, totalWeight };
+}
+
+/**
+ * Place one firing of an intermittent sound within the ground that authored it
+ * (`IntermitSound::GetSoundPos`, acclient.c:367457).
+ *
+ * Rolls a direction among those with contributors, jitters the heading inside that direction's arc,
+ * and rolls a distance within the band those contributors span. The result is randomized but bounded
+ * by where the terrain actually is, which is what makes a river to the north sound like it is to the
+ * north without tracking individual sources.
+ *
+ * Returns `null` when the descriptor has no directional contributors, which the caller plays centred.
+ */
+export function placeAmbientSound(
+	directions: ReadonlyMap<AmbientDirection, AmbientDistanceBand>,
+	listenerPosition: SceneVector3,
+	roll: () => number,
+): SceneVector3 | null {
+	const entries = [...directions.entries()];
+	if (entries.length === 0) return null;
+	const chosen =
+		entries[Math.min(entries.length - 1, Math.floor(roll() * entries.length))];
+	if (!chosen) return null;
+	const [direction, band] = chosen;
+	const heading =
+		AMBIENT_DIRECTION_HEADING[direction] +
+		roll() * AMBIENT_DIRECTION_ARC -
+		AMBIENT_DIRECTION_ARC * 0.5;
+	// RETAIL QUIRK: the distance roll is squared, so sounds cluster toward the near edge of the band.
+	// Area-uniform sampling over a disc would take a square root instead. Whether the exponent is
+	// deliberate cannot be proven from the decompile, but it is audible and every shipped ambience was
+	// mixed against it, so it is transcribed rather than "corrected".
+	const spread = roll();
+	const distance =
+		band.minimum + (band.maximum - band.minimum) * spread * spread;
+	// Compass bearings live in AC's horizontal plane, so the offset is built there and converted once.
+	// Retail leaves the listener's own height alone, making ambience two-dimensional.
+	const offset = acVectorToRender(
+		acVector3([Math.sin(heading) * distance, Math.cos(heading) * distance, 0]),
+	);
+	return sceneVector3([
+		listenerPosition[0] + offset[0],
+		listenerPosition[1] + offset[1],
+		listenerPosition[2] + offset[2],
+	]);
 }
 
 /** Fold one cell's contribution into one descriptor (`Ambient::AddSound` → `AmbientSound::AddTo`). */

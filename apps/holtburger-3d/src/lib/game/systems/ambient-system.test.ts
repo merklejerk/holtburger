@@ -8,6 +8,7 @@ import {
 } from "./ambient-system";
 import type { AmbientDescriptor } from "./ambient-scan";
 import type { AmbientScanResult } from "./ambient-scan";
+import { AMBIENT_DIRECTION } from "./ambient-weighting";
 
 const TABLE = "0x20000017" as DatAssetId;
 const LISTENER = sceneVector3([0, 0, 0]);
@@ -57,7 +58,6 @@ function build(overrides: Partial<AmbientSystemDependencies> = {}) {
 		resolveSound: () => ({
 			probability: 1,
 			soundId: "0x0A000234" as DatAssetId,
-			volume: 1,
 		}),
 		roll: () => 0,
 		...overrides,
@@ -189,6 +189,30 @@ describe("AmbientSystem", () => {
 
 		expect(played).toHaveLength(0);
 		expect(system.getDiagnostics().unresolvedCount).toBe(1);
+	});
+
+	it("places an intermittent firing within the ground that authored it", () => {
+		const { played, system } = build({ roll: () => 0.5 });
+		const scanned = scan([descriptor()]);
+		// The only contributors lie to the north, 40-60 m out.
+		scanned.accumulations
+			.get("0:70")!
+			.directions.set(AMBIENT_DIRECTION.north, { maximum: 60, minimum: 40 });
+		system.refresh(scanned, 0);
+
+		system.advance(20);
+
+		// Scene z runs negative to the north, so a northward placement moves away from the listener.
+		expect(played[0]!.position[2]).toBeLessThan(LISTENER[2]);
+	});
+
+	it("centres a continuous firing, which has no direction to place it in", () => {
+		const { played, system } = build();
+		system.refresh(scan([descriptor({ isContinuous: true, minRate: 1 })]), 0);
+
+		system.advance(1);
+
+		expect(played[0]!.position).toEqual(LISTENER);
 	});
 
 	it("plays in the ambient category, so the ambient slider is what scales it", () => {

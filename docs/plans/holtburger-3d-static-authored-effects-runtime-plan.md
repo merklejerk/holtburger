@@ -3195,7 +3195,7 @@ Debt and concessions:
 - The Explorer installs ambient facts fire-and-forget (`void installAmbientRegion(...)`), matching how
   sky and static details are installed there. A staging failure is therefore visible only as silence.
 
-### Phase 10.5 — Directional placement for intermittent sounds — **code done, not verified at runtime**
+### Phase 10.5 — Directional placement for intermittent sounds — **done**
 
 `placeAmbientSound` rolls a direction among those with contributors, jitters the heading inside its
 22.5° arc, rolls a squared distance within that direction's band, and keeps the listener's height.
@@ -3250,6 +3250,25 @@ stands on contributes a 4–10 m band and is comfortably audible. A test pins bo
 Remaining verification the harness cannot give: **listening to it**. The harness camera sits above the
 terrain bound by design, so its placements are always the faint far-field case.
 
+### Sky, weather, and season contribute nothing
+
+Checked because it is the obvious next question and the answer is load-bearing for anyone extending
+this. Ambient playback (acclient.c:367690) drives everything through the `AmbientSound` vtable and
+takes no weather, sky, or time-of-day input. `DayGroup` carries `ChanceOfOccur`, `DayName`,
+`SkyObjects` and `SkyTime` and no sound field. `GameSky::s_weatherEnabled` gates only the creation and
+removal of sky *physics objects*, and `GameSky::MakeObject` (acclient.c:297343) builds those with a
+texture velocity and a cell assignment — no script activation, no sound hook. Selection is
+`(terrain type, scene type)` from a static terrain word, so it cannot vary with conditions either.
+
+In retail a thunderstorm is therefore silent. That is a limitation rather than a quirk, so the
+divergence bar for weather-reactive ambience is low — no content can observe it as wrong, and
+`AmbientSystem.refresh` already owns the weighting the hook would need. Recorded as a future feature
+decision, not taken here.
+
+By-catch confirming an earlier inference: the tick branches on `GetSoundPos(...) == 0` and plays
+`FromCenter` when it fails, and `ConstantSound` never overrides `GetSoundPos`, so continuous
+descriptors always take the centred path.
+
 ### Risks
 
 - ~~**Ambient may need little spatialization.**~~ Retired by the census: 89.6% of descriptors are
@@ -3258,24 +3277,27 @@ terrain bound by design, so its placements are always the faint far-field case.
 - **Continuous scheduling drift is audible.** Several continuous descriptors author `min_rate`
   exactly equal to their wave's duration, so they are seamless only if fired on time. A scheduler
   that accumulates error turns them into a sound with a periodic gap.
-- **The scan is per-listener-position work the plan had not budgeted.** Ambience is not a static
-  region property; it is recomputed from surrounding cells as the listener moves. Retail rebuilds on
-  cell transition, which bounds it, but that cadence needs measuring rather than assuming.
+- ~~**The scan is per-listener-position work the plan had not budgeted.**~~ Retired: measured at
+  0.5 ms per scan on 24 m cell transition, which is negligible amortized. See Open Questions.
 - **Retrigger seams.** A constant sound faking a loop by retriggering may click at the boundary where
   retail's did not. Measure before reaching for looping voices, which the voice budget assumes never
   happen.
 - **Scope creep into the `Ambient` class.** Retail's `Ambient` also manages fade and transitions.
   Deliver the scheduler first and treat the rest as separately justified.
 
-### Open Questions
+### Open Questions — all answered
 
-Both prior questions are answered in Ground Truth: descriptors are selected by terrain type and scene
-type per cell, chaining into the region's table list, and `SceneType.stb_index` is the link we already
-decode. What remains is a sizing question rather than a structural one:
+Selection is by terrain type and scene type per cell, chaining into the region's table list, with
+`SceneType.stb_index` as the link we already decode.
 
-- How often must the terrain scan run? Retail rebuilds on cell transition (`Ambient::InitSounds`
-  takes a `Position`), but the cost of scanning an 8x8 grid per landblock across the ambient radius
-  has not been measured.
+**Scan cost, measured 2026-08-07:** `0.5 ms` for one scan across **25 installed landblocks**,
+examining 69 cells within the ambient radius and resolving 28 descriptors. It runs on 24 m cell
+transition, so at walking pace that is roughly once every five seconds — about 0.01% of frame time
+amortized, against a 2.3 ms mean tick. No budget concern.
+
+The obvious optimization if it ever becomes one: the loop visits 25 × 64 = 1600 cells to find the 69
+in range, so a per-block bounds rejection against the ambient radius would drop ~95% of the work.
+Deliberately not done — it is a real optimization for a cost that is not real yet.
 
 ## Definition of Done
 

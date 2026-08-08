@@ -1,5 +1,6 @@
 import { AABB3, Vec3 } from "../math/types";
 import { getLandblockCoordinates } from "../landblocks";
+import { roadCodeOf, terrainCodeOf } from "./terrain-sample";
 import type { TerrainGeometryData } from "../renderer/geometry";
 import {
 	TERRAIN_GRID_CELLS,
@@ -359,8 +360,8 @@ function generateSurfaceField(
 function packTerrainPcode(samples: readonly number[]): number {
 	if (samples.length !== 4)
 		throw new Error("Terrain pcode requires four source samples.");
-	const terrainCodes = samples.map((sample) => (sample >>> 2) & 0x1f);
-	const roadCodes = samples.map((sample) => sample & 0x03);
+	const terrainCodes = samples.map(terrainCodeOf);
+	const roadCodes = samples.map(roadCodeOf);
 	return (
 		(0x10000000 |
 			(roadCodes[0] << 26) |

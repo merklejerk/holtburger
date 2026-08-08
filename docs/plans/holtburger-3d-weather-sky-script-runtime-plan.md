@@ -1,13 +1,14 @@
 # Holtburger 3D Weather and Sky-Script Runtime Plan
 
-Status: Queued — Phase R boundary dry-run complete 2026-08-06; implementation phases unblocked — blocked on the authored-effects plan; a boundary dry-run against its landed PES
-and particle contracts is mandatory before any phase executes
+Status: Executable — Phase R ran 2026-08-06 with a clean verdict, Phase 0 evidence completed
+2026-08-07, and the sky `BehaviorTarget` identity decision was ratified 2026-08-08 (option 3:
+behavior-owned target identity); nothing precedes Phase 1
 Created: 2026-08-06
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md` (parallel track)
 Prerequisites:
 
 - `docs/plans/holtburger-3d-sky-pass-plan.md` (complete 2026-08-06)
-- `docs/plans/holtburger-3d-static-authored-effects-runtime-plan.md` (queued)
+- `docs/plans/holtburger-3d-static-authored-effects-runtime-plan.md` (complete 2026-08-07)
 
 ## Authoring Provenance
 
@@ -95,12 +96,15 @@ is two recorded seams with no owner: rainy day groups render their celestial set
 - `apps/holtburger-3d/src/lib/game/environment/sky-state.ts`: `ResolvedSkyObject` already carries
   `properties`, `isCelestial`, and the PES id losslessly; the resolver keeps weather objects and
   marks them, leaving nothing to re-derive.
-- `apps/holtburger-3d/src/lib/game/renderer/webgl2-sky-pass.ts`: celestial residency, draw policy,
-  and the derived-phase scroll arithmetic (`skyTextureOffset`) the rain sheets' `tex_velocity`
-  (up to `(0.02, -2.0)`) also uses.
-- `apps/holtburger-3d/src-tauri/src/sky_source.rs`: the sky record already projects every gfx id a
-  sky draw can reach; Phase 0 verifies the weather GfxObjs and emitter Setups ride the same
-  closure.
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-sky-pass.ts`: celestial residency and draw
+  policy. The derived-phase scroll arithmetic the rain sheets' `tex_velocity` (up to
+  `(0.02, -2.0)`) also uses now lives in the shared `textureScrollPhase`
+  (`renderer/texture-scroll-phase.ts`), hoisted there by the effects plan.
+- `apps/holtburger-3d/src-tauri/src/sky_source.rs`: the sky record's closure machinery
+  (`ObjectResourceClosure`) already dispatches both GfxObj and Setup families, but
+  `celestial_source_ids` deliberately excludes bit-4 weather objects (`sky_source.rs:57`) —
+  Phase 1 widens that selection (a Phase 0 corrective finding; the original claim here that
+  weather ids already rode the closure was wrong).
 - The effects plan's landed systems, named only after they exist: `PhysicsScriptSystem`,
   `BehaviorEventRouter`, the particle runtime, and the audio runtime. Phase R binds this plan to
   their real shapes.
@@ -121,8 +125,9 @@ is two recorded seams with no owner: rainy day groups render their celestial set
 
 ### Phase 0: Evidence
 
-Progress: Script decode complete (2026-08-06); retail draw-policy, `weather_enabled`, and
-pass-ordering evidence remains.
+Progress: **Complete 2026-08-07.** Script decode landed 2026-08-06; the retail draw-policy,
+`weather_enabled`, pass-ordering, and closure findings below landed 2026-08-07 from the decompile
+and a temporary `weather_asset_probe` (removed after recording).
 
 #### Deliverables
 
@@ -143,14 +148,78 @@ pass-ordering evidence remains.
   `default_script`, so these scripts are ordinary members of the effects plan's setup-default
   census; only their _target ownership_ (sky-module-owned, viewer-centered) is new here.
 
-- Pin the rain sheets' full draw policy from retail: blend flags, depth behavior in the
-  after-landscape pass, and how the z-clamped sheet interacts with terrain depth.
-- Pin `weather_enabled` semantics: where retail stores it, what toggling destroys and recreates,
-  and whether any state survives a toggle.
-- Pin the after-cell pass ordering precisely: what "drawn after the landscape" means relative to
-  our world pass, transparency ordering, and portal compositing.
-- Verify the weather GfxObjs and emitter Setups resolve through the existing sky record closure
-  with no missing dependencies.
+- ~~Pin the rain sheets' full draw policy from retail: blend flags, depth behavior in the
+  after-landscape pass, and how the z-clamped sheet interacts with terrain depth.~~ Done
+  2026-08-07:
+
+  - Both sheets (`0x01004C42`, `0x01004C44`) are 8-polygon GfxObjs sharing one surface
+    `0x080000C5`: type `0x00010112` = `BASE1_IMAGE | TRANSLUCENT | ALPHA | ADDITIVE`, authored
+    translucency 0.5, luminosity 0.148, texture `0x05001A26` → `0x06004002`. No weather-specific
+    blend state exists anywhere — the shared `objectBlendPolicy` mapping applies unchanged.
+  - `GameSky::Draw` (acclient.c:297381-297437) wraps **both** sky passes in one state block:
+    fog forced to `LScape::m_override_enabled`, `zfar × 4`, `DEPTHTEST_ALWAYS` with depth writes
+    **off**, and `m_currentlyDrawingSky = 1`; on exit it restores `DEPTHTEST_LESSEQUAL`/write-on.
+  - While `m_currentlyDrawingSky` is set, `D3DPolyRender` **bypasses alpha-list deferral**
+    (acclient.c:434811-434814) and **skips per-surface depth-mode changes**
+    (acclient.c:434175-434176), so the translucent sheets draw immediately under the sky depth
+    state; FF lighting is forced on (acclient.c:434299), and the `ADDITIVE` bit disables fog
+    alpha (acclient.c:434177-434186).
+  - Consequence: **the z-clamped sheet never interacts with terrain depth at all.** Rain draws
+    over everything rendered before it; only later draws (portal-visible EnvCells, the post-
+    `LScape::draw` alpha flush) cover it. The z = −120 clamp shapes the sheet's geometry, not its
+    occlusion.
+
+- ~~Pin `weather_enabled` semantics: where retail stores it, what toggling destroys and recreates,
+  and whether any state survives a toggle.~~ Done 2026-08-07:
+
+  - `LScape::weather_enabled` is a static bool defaulting to `true` (acclient.c:44269), written
+    only by `SmartBox::EnableWeather` (acclient.c:137097), which is driven by the **character
+    option** `PlayerModule::DisableMostWeatherEffects` at login and on options change
+    (acclient.c:432565, 432696). Our explorer toggle mirrors a retail player option, not a debug
+    flag.
+  - Complete reader census: `GameSky::MakeObject`'s creation gate (acclient.c:297347),
+    `GameSky::Draw`'s per-object weather skip in the before pass (acclient.c:297418),
+    `LScape::draw`'s after-pass gate (acclient.c:296725), and toggle detection against the shadow
+    copy `GameSky::s_weatherEnabled` in `CreateDeletePhysicsObjects` (acclient.c:297617-297618).
+    Nothing else reads it.
+  - Toggle semantics (`GameSky::CreateDeletePhysicsObjects`, acclient.c:297587): an existing
+    object is reused only when its gfx id and properties match **and** weather did not toggle or
+    the object is not bit-4. On toggle, every bit-4 object is destroyed and re-made through
+    `MakeObject`, which returns null while weather is disabled. **Celestial objects survive
+    toggles untouched**; recreation happens on the next sky tick via `UseTime → GetSky →
+CreateDeletePhysicsObjects` (acclient.c:297744-297746).
+
+- ~~Pin the after-cell pass ordering precisely: what "drawn after the landscape" means relative to
+  our world pass, transparency ordering, and portal compositing.~~ Done 2026-08-07:
+
+  - Outdoor frame order (`PView::DrawCells`, acclient.c:441068): `LScape::draw` →
+    `D3DPolyRender::FlushAlphaList` → portal-visible EnvCells.
+  - Inside `LScape::draw` (acclient.c:296701-296729): `GameSky::Draw(0)` (celestial plus the
+    **8 `properties = 4` sheets**, which draw in the _before_ pass) → the landblock draw loop →
+    `GameSky::Draw(1)` when `weather_enabled`, which draws the whole `after_sky_cell` in one cell
+    draw. The 84 bit-1 objects (`properties` 5/13) live in that dedicated `after_sky_cell`;
+    everything else lives in `before_sky_cell` (`MakeObject`, acclient.c:297357-297363).
+  - The after pass additionally requires `SmartBox::is_player_outside` inside `Draw`
+    (acclient.c:297393); the before pass has no outdoor gate of its own.
+  - Deferred translucent world polys flush **after** the after pass, and portal-visible interiors
+    draw later still — both legitimately cover rain.
+
+- ~~Verify the weather GfxObjs and emitter Setups resolve through the existing sky record closure
+  with no missing dependencies.~~ Done 2026-08-07, **with a corrective finding**: they do _not_
+  ride the closure today — `celestial_source_ids` deliberately skips bit-4 objects
+  (`sky_source.rs:57`), so this plan's "Existing Code to Extend" claim was wrong and Phase 1 must
+  widen the closure. The widening is mechanical: `ObjectResourceClosure::add_resident` already
+  dispatches both `0x01` GfxObj and `0x02` Setup families. The probe confirmed all four script
+  Setups decode cleanly and share one shape — a single part `0x010001EC` carrying only
+  `default_script` (no animation, motion table, sound table, or script table): they are pure
+  script carriers, and the rain sheets decode with a fully-resolvable material graph.
+
+- Additional placement facts pinned along the way (`GameSky::UpdatePosition`,
+  acclient.c:297298-297341; `GameSky::UseTime`, acclient.c:297724): a bit-4 object's origin is set
+  to the **viewer's full XYZ** each position update, then z is forced to −120 unless bit 8 — so
+  bit-8 weather objects (the `properties = 13` majority) track the viewer's z rather than keeping
+  an authored height. On each sky tick, `UseTime` rebuilds frames from heading/rotation; bit-4
+  objects inherit the current pinned origin rather than resetting.
 
 #### Acceptance Criteria
 
@@ -163,7 +232,21 @@ pass-ordering evidence remains.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- **Retail never reads `default_pes_object_id` at all** (2026-08-07). `GameSky::MakeObject`
+  passes only the gfx/setup id to `CPhysicsObj::makeObject`; the script plays because setup
+  initialization itself runs `play_script_internal` on the setup's `default_script`
+  (`CPhysicsObj::InitDefaults`, acclient.c:514489-514504). This confirms the 2026-08-06 census
+  finding (`default_pes_object_id` equals the setup's own `default_script` everywhere) from the
+  consuming side: the region field is authoring redundancy, and our activation path should key on
+  the setup's default script exactly as the effects runtime already does for authored residents.
+- **The sky-closure claim in "Existing Code to Extend" was wrong and is corrected there.**
+  Weather objects are resolved and carried through the frontend contract, but their resources are
+  deliberately excluded from the sky source record; widening `celestial_source_ids` is a named
+  Phase 1 deliverable rather than an assumed given.
+- **Open question 3 is closed against modernization.** Retail's rain sheets draw depth-always
+  with no depth writes; a depth-tested world-pass draw would let terrain occlude rain and cannot
+  reproduce retail. The after-landscape pass (or an observably equivalent ordering) is required
+  for correctness, not just for the outdoors-only gate.
 
 ### Phase R: Boundary Dry-Run (mandatory gate)
 
@@ -184,23 +267,49 @@ targets as an extension, not a redesign** — with exactly one identity decision
 The consumers are injection-shaped, which is what makes this an extension: sky objects supply their
 own origin resolver and liveness predicate without any consumer learning what a sky object is.
 
-#### The one open decision: what a sky `BehaviorTarget` is
+#### The one open decision: what a sky `BehaviorTarget` is — RATIFIED 2026-08-08: option 3
 
 `BehaviorTarget` is `{ nodeId: SceneNodeId; generation: number }`. Sky objects are viewer-centered
-and sky-module-owned; they are **not scene-graph residents today**. Two ways to close that, and this
-plan must pick one before Phase 1:
+and sky-module-owned; they are **not scene-graph residents today**. Three ways to close that were
+considered:
 
 1. **Give sky script owners real scene nodes.** Sky objects gain nodes whose placement is
    viewer-pinned. Everything else works unchanged, including `#sceneOriginOf` and generation-based
-   liveness. Cost: the sky module acquires scene residency it currently, deliberately, does not have.
+   liveness. Cost: the sky module acquires scene residency it currently, deliberately, does not
+   have, and per-frame placement writes exist only to feed a callback that could compute the value.
 2. **Widen `BehaviorTarget` to a tagged identity** (`{ kind: "scene" | "sky"; ... }`) and inject a
    resolver per kind. Cost: every consumer's origin lookup becomes a branch, and the target type
    stops being a single obvious thing.
+3. **Behavior-owned target identity, residency resolved at the composition root.** `BehaviorTarget`
+   keeps its exact shape — one id plus one generation, no tag — but the id becomes a
+   behavior-layer brand (`BehaviorTargetId`) instead of borrowing `SceneNodeId`. The scene keeps
+   minting `scene-node:${n}` ids; the sky module mints its own. `GameRuntime`'s origin/rotation
+   resolvers (already private composition-root closures) become a residency lookup: scene targets
+   resolve through `getResolvedPlacement` as today, sky targets through a provider registered at
+   activation that computes the viewer-pinned origin **on demand from the camera**.
 
-**Recommendation: option 1.** The consumers already resolve origin through an injected callback, so
-option 2's branch buys nothing the injection does not already provide, while making the most-used
-type in the behavior runtime polymorphic. The sky pass's viewer-centering is a _rendering_ fact; a
-node with a viewer-pinned placement expresses the same thing without special-casing dispatch.
+**Ratified: option 3** (2026-08-08, superseding Phase R's original option-1 recommendation). The
+landed code makes it the honest choice:
+
+- Liveness never consulted the scene: `isLive` is producer-held
+  (`animation.holds || scripts.holds`, `game-runtime.ts:843`), so generation-safe identity needs
+  no node.
+- Origin is already pull-based: `ParticleSystem` polls the injected `sceneOriginOf` per frame for
+  following emitters (`particle-system.ts:420,471`). Option 1's per-frame placement writes would
+  push a value that is only ever pulled.
+- Phase 0 proved the sky vocabulary is exactly `CreateParticle`/`SoundTweaked`/`CallPES`, so sky
+  targets never reach `EffectSystem` or presentation — the only genuinely scene-node-keyed
+  consumers. Their entire consumer surface (particles, audio, scheduler) is origin-injected.
+- The residency lookup is a map at the composition root, not a branch inside any consumer — the
+  distinction that made option 2 wrong.
+
+Recorded costs: a mechanical rename ripples `BehaviorTarget.nodeId`/`BehaviorObservation.nodeId`
+from `SceneNodeId` to the behavior-owned brand across the behavior layer (Phase 2 work); the
+composition root gains one target-residency registry; sky providers must also supply rotation for
+emitter frames (the object's `CalcFrame` heading/rotation). This diverges from retail's
+_mechanism_ — retail really does give sky objects cell residency and pushes frames every update
+(`GameSky::UpdatePosition`) — but matches its observable behavior at the same cadence, per the
+app's approximate-behavior-not-architecture doctrine.
 
 #### Course corrections for the implementation phases
 
@@ -220,17 +329,34 @@ node with a viewer-pinned placement expresses the same thing without special-cas
 - Phase R executed at the effects-plan boundary as scheduled. No contract required renegotiation;
   the single identity question above is recorded as this plan's first decision rather than a
   roadmap-level escalation.
+- 2026-08-08: the identity decision was ratified as option 3 (behavior-owned target identity),
+  superseding this dry-run's option-1 recommendation after composition-level evidence showed
+  liveness and origin never actually depend on scene residency. See the decision block above.
 
 ### Phase 1: Weather Placement and Rendering
 
-Progress: Not started (direction until Phase R).
+Progress: Ready to execute — Phase R ran 2026-08-06 and Phase 0 completed 2026-08-07; the
+deliverables below are steered against recorded evidence, not direction.
 
 #### Deliverables
 
-- Viewer-pinned placement for weather objects per retail: XY pin, z = −120 clamp unless bit 8.
-- The after-landscape weather draw pass, gated outdoors-only, reusing the sky pass's residency and
-  scroll-phase arithmetic for the rain sheets.
-- A weather-enabled explorer control with retail's recreate-on-toggle semantics.
+- Widen `celestial_source_ids` in `sky_source.rs` to include weather objects (the Phase 0
+  corrective finding): the two rain-sheet GfxObjs and the three emitter Setups project through
+  the existing `ObjectResourceClosure` with no new machinery.
+- Viewer-pinned placement for weather objects per retail (`GameSky::UpdatePosition`,
+  acclient.c:297298-297341): the full origin follows the viewer each update, with z forced to
+  −120 unless bit 8 (bit-8 objects track the viewer's z).
+- Weather draw policy matching the recorded retail state block: depth-test always, depth writes
+  off, no alpha-list deferral, blend from the authored surface via the shared
+  `objectBlendPolicy` (the sheets are `TRANSLUCENT | ALPHA | ADDITIVE` at translucency 0.5), and
+  scroll phase from the shared `textureScrollPhase`.
+- Pass placement matching retail's observable order: the 8 `properties = 4` sheets draw with the
+  existing before-world sky pass; the 84 bit-1 objects draw in a new after-landscape pass that
+  runs after the world pass and before portal compositing, gated outdoors-only and on
+  weather-enabled.
+- A weather-enabled explorer control mirroring retail's player option
+  (`DisableMostWeatherEffects` → `SmartBox::EnableWeather`) with recreate-on-toggle semantics:
+  weather objects are destroyed/recreated on toggle, celestial state survives untouched.
 
 #### Acceptance Criteria
 
@@ -245,13 +371,18 @@ Progress: Not started (direction until Phase R).
 
 ### Phase 2: Sky Script Targets
 
-Progress: Not started (direction until Phase R).
+Progress: Not started; steered by the ratified option-3 identity decision (2026-08-08).
 
 #### Deliverables
 
-- Extend the script runtime's target port to sky-module-owned objects with generation-safe
-  identity, activation on day-group entry/visibility, and teardown on day-group rollover, weather
-  toggle, and region unload.
+- The option-3 identity cutover: rebrand `BehaviorTarget.nodeId` (and `BehaviorObservation`) from
+  `SceneNodeId` to a behavior-owned `BehaviorTargetId`, with the scene minting its ids unchanged
+  and a target-residency lookup at the composition root replacing the direct
+  `getResolvedPlacement` calls in `#sceneOriginOf`/`#sceneRotationOf`. A clean rename, not a
+  parallel type.
+- Sky targets registered with generation-safe identity and an on-demand viewer-pinned
+  origin/rotation provider; activation on day-group entry/visibility, teardown on day-group
+  rollover, weather toggle, and region unload.
 - Activate the celestial `0x330007DB` on `0x02000714` in every day group.
 
 #### Acceptance Criteria
@@ -267,7 +398,7 @@ Progress: Not started (direction until Phase R).
 
 ### Phase 3: Weather Emitter Scripts
 
-Progress: Not started (direction until Phase R).
+Progress: Not started.
 
 #### Deliverables
 
@@ -330,9 +461,12 @@ against retail captures or ACE-connected observation of rainy landblocks, not in
 
 1. ~~What does the celestial script `0x330007DB` actually do?~~ Answered 2026-08-06: three
    root-attached ambient particle emitters started once at `t=0` (see Phase 0).
-2. Where does retail's `weather_enabled` live, and does anything beyond the after-cell objects
-   read it?
-3. Do the rain sheets need the after-landscape pass for correctness, or only for the
+2. ~~Where does retail's `weather_enabled` live, and does anything beyond the after-cell objects
+   read it?~~ Answered 2026-08-07: `LScape::weather_enabled`, a static bool driven by the
+   character option `DisableMostWeatherEffects` via `SmartBox::EnableWeather`. Four readers
+   total — object creation, both draw passes' gates, and toggle detection (see Phase 0).
+3. ~~Do the rain sheets need the after-landscape pass for correctness, or only for the
    outdoors-only gate — i.e., could depth-tested drawing in the world pass reproduce retail's
-   result with less pass machinery? (Phase 0 evidence decides; North Star 2 says retail wins
-   ties.)
+   result with less pass machinery?~~ Answered 2026-08-07: the pass is required for correctness.
+   Sky/weather polys draw depth-always with writes off and bypass the alpha list, so terrain
+   never occludes rain; depth-tested world-pass drawing cannot reproduce that (see Phase 0).

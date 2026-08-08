@@ -1,6 +1,7 @@
 # Holtburger 3D Dynamic Entity Runtime Roadmap
 
-Status: Roadmap — convergence complete; authored effects queued next
+Status: Roadmap — authored effects complete; spawned-entity plan is the mainline next step, with
+the weather/sky-script plan unblocked as a parallel track
 Created: 2026-07-31
 Evidence pass: 2026-07-31
 Roadmap split: 2026-07-31
@@ -14,14 +15,14 @@ by explorer scenarios or a future network client.
 
 ## Convergence Provenance
 
-| Concern                           | Status                    | Evidence or owner                                                             |
-| --------------------------------- | ------------------------- | ----------------------------------------------------------------------------- |
-| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                                    |
-| Donor first slice                 | Complete on `claude` only | `c938a438`                                                                    |
-| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`               |
-| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                                 |
-| Effects execution                 | Queued                    | Resteered 2026-08-06 against the landed sky pass; executable on authorization |
-| Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; execute after effects        |
+| Concern                           | Status                    | Evidence or owner                                                   |
+| --------------------------------- | ------------------------- | ------------------------------------------------------------------- |
+| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                          |
+| Donor first slice                 | Complete on `claude` only | `c938a438`                                                          |
+| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`     |
+| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                       |
+| Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day     |
+| Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; next mainline plan |
 
 ## Why This Roadmap Is Split
 
@@ -83,7 +84,8 @@ entity or motion-table scaffolding.
 
 Plan: [holtburger-3d-static-authored-effects-runtime-plan.md](holtburger-3d-static-authored-effects-runtime-plan.md)
 
-Progress: Queued; resteered against the landed sky pass with an executable Phase 1 (2026-08-06).
+Progress: Complete (2026-08-07). All phases landed with retail-verified behavior; the reopened
+Phase 8 cleanup closed the same day.
 
 Outcome:
 
@@ -103,7 +105,8 @@ authority requirements.
 
 Plan: [holtburger-3d-spawned-entity-explorer-runtime-plan.md](holtburger-3d-spawned-entity-explorer-runtime-plan.md)
 
-Progress: Queued after the authored-effects plan; convergence audit and rewrite complete (2026-08-01).
+Progress: Queued — next mainline plan now that the authored-effects plan is complete; convergence
+audit and rewrite complete (2026-08-01).
 
 Outcome:
 
@@ -271,7 +274,8 @@ transport remain local. No universal runtime base class is introduced.
 
 - [x] The static-authored animation plan has retail visual parity and representative workload
       performance evidence.
-- [ ] The static-authored effects plan is complete with real script, particle, and sound consumers.
+- [x] The static-authored effects plan is complete with real script, particle, and sound consumers
+      (2026-08-07).
 - [ ] The spawned entity/Explorer runtime plan is complete across the Rust/Tauri/TypeScript boundary.
 - [ ] Authored and spawned entities reuse one frontend template, behavior, presentation, effect, and renderer
       architecture.

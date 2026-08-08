@@ -1,7 +1,7 @@
 # Holtburger 3D Static-Authored Effects Runtime Plan
 
-Status: Queued — resteered 2026-08-06 against the landed sky pass; Phase 1 is executable on
-authorization
+Status: Complete 2026-08-07 — all phases landed, the reopened Phase 8 cleanup closed, and every
+Definition-of-Done item verified
 Created: 2026-07-31
 Convergence review: 2026-08-01
 Sky-pass resteer: 2026-08-06
@@ -1633,30 +1633,31 @@ Treat the reopened checklist below as the live one; the first records what the o
 
       On real hardware at `0xDA55` radius 2, mean over sixty frames:
 
-      | phase | ms |
-      | --- | --- |
-      | total | 2.333 |
-      | render | 2.183 |
-      | particle cohorts | 0.058 |
-      | particle advance | 0.030 |
-      | presentation publish | 0.028 |
-      | animation advance | 0.017 |
-      | script advance | 0.013 |
-      | frame completion | 0.003 |
+          | phase | ms |
+          | --- | --- |
+          | total | 2.333 |
+          | render | 2.183 |
+          | particle cohorts | 0.058 |
+          | particle advance | 0.030 |
+          | presentation publish | 0.028 |
+          | animation advance | 0.017 |
+          | script advance | 0.013 |
+          | frame completion | 0.003 |
 
-      The profiler is an **optional injected observer**, not something the runtime owns. Making it a
-      required field was debug-coded: a production runtime should not be obliged to construct one or
-      carry its state, and the tick body should read as phases rather than as measurement with
-      rendering in between. The Explorer and the browser harness supply one; the thin client route
-      passes nothing and pays one skipped optional call per phase. That also answers the overhead
-      question honestly rather than by assertion — `performance.now()` measures 41.1 ns, so eight
-      calls cost 0.00033 ms, about 0.014% of the tick and an order of magnitude below the resolution
-      of the numbers being reported. The cost was never the objection; the contract was.
+          The profiler is an **optional injected observer**, not something the runtime owns. Making it a
+          required field was debug-coded: a production runtime should not be obliged to construct one or
+          carry its state, and the tick body should read as phases rather than as measurement with
+          rendering in between. The Explorer and the browser harness supply one; the thin client route
+          passes nothing and pays one skipped optional call per phase. That also answers the overhead
+          question honestly rather than by assertion — `performance.now()` measures 41.1 ns, so eight
+          calls cost 0.00033 ms, about 0.014% of the tick and an order of magnitude below the resolution
+          of the numbers being reported. The cost was never the objection; the contract was.
 
-      **Everything outside the renderer is 0.15 ms, 6% of the tick.** Hook dispatch and audio are
-      not separate phases because they run inside script and animation advancement, which together
-      cost 0.03 ms — instrumenting deeper would measure noise. The earlier `--gpu` blocker recorded
-      against this item was wrong; see the GPU profiling finding below.
+          **Everything outside the renderer is 0.15 ms, 6% of the tick.** Hook dispatch and audio are
+          not separate phases because they run inside script and animation advancement, which together
+          cost 0.03 ms — instrumenting deeper would measure noise. The earlier `--gpu` blocker recorded
+          against this item was wrong; see the GPU profiling finding below.
+
 - [x] Confirmed prepared resource counts track unique IDs rather than owners. `PreparedAssetRepository`
       shares one preparation per id across every acquirer, proven for scripts (two roots reaching one
       chained script transfer it once) and emitters, and `ParticleMeshCache` requests only meshes it
@@ -1682,10 +1683,11 @@ Treat the reopened checklist below as the live one; the first records what the o
       the note that proposed it is closed rather than carried.
 
       Adding the phase exposed a real defect first: **`#drawProfiledView` never drew particles at
-      all.** Profiling changed what was rendered, every profile measured a scene missing them, and
-      an earlier finding in this plan read "particle pass absent" from a profile and concluded
-      particles were cheap. That conclusion was an artifact. Fixed by drawing them on the profiled
-      path, which is what made the measurement possible.
+          all.** Profiling changed what was rendered, every profile measured a scene missing them, and
+          an earlier finding in this plan read "particle pass absent" from a profile and concluded
+          particles were cheap. That conclusion was an artifact. Fixed by drawing them on the profiled
+          path, which is what made the measurement possible.
+
 - [x] Rename `ParticleEmitterRuntime` to `ParticleSystem`, with `ParticleSystemDependencies` and
       `ParticleSystemDiagnostics` and the module renamed to `particle-system.ts`. Every frontend
       system now follows the `<Concern>System` convention.
@@ -1713,73 +1715,73 @@ by value rather than by when it appeared.
       `samplePresentation`, is legitimate because it is producing a presentation sample.
 
       That was the whole defect. Effect stepping had one caller — `AnimationSystem` — which runs only
-      for nodes holding an `AnimationRecord`, so a resident with a script but no animation was never
-      stepped. Its ramps never progressed, `SetOmega` never accumulated, `Scale` never ramped, and
-      nothing sampled the state anyway. `Scale`, `SetOmega` and `TransparentPart` on such a resident
-      were **silently inert**. Giving `PhysicsScriptSystem` the same dependency would have left the
-      mirror-image gap for an animated-but-unscripted entity; the state lives in `EffectSystem`, so
-      the clock does too, and both producers are now pure command sources.
+          for nodes holding an `AnimationRecord`, so a resident with a script but no animation was never
+          stepped. Its ramps never progressed, `SetOmega` never accumulated, `Scale` never ramped, and
+          nothing sampled the state anyway. `Scale`, `SetOmega` and `TransparentPart` on such a resident
+          were **silently inert**. Giving `PhysicsScriptSystem` the same dependency would have left the
+          mirror-image gap for an animated-but-unscripted entity; the state lives in `EffectSystem`, so
+          the clock does too, and both producers are now pure command sources.
 
-      Consequences worth recording:
+          Consequences worth recording:
 
-      - **The cadence is global.** It was per playback, accumulated in each animation record, so
-        entities stepped on staggered phases; they now step together. Retail's behavior tick is
-        likewise global, and 30 Hz staggering is not observable in gameplay.
-      - **`samplePresentation` lost its time arguments.** Phase is a property of the clock, not of
-        whichever caller is sampling, and passing an animation record's phase in was how the two
-        became coupled in the first place.
-      - **Initial-state folding needed its own operation.** A newly installed playback replays its
-        history forward to an authored independent phase, which a global cadence cannot express —
-        it steps everything once per elapsed step, not one node many times. `foldSemanticStep` is
-        that one-time catch-up, and is documented as install-time only.
-      - **Idle residents do not publish.** Effect-only publication first cost 0.235 ms of a 2.8 ms
-        tick, publishing all 79 residents every frame — which is the per-frame streaming this item
-        also set out to remove. States now carry a dirty flag, set by every command and by any step
-        that changes something, cleared on sample. An inert resident resolves identically every
-        frame and is skipped: publication returns to **0.040 ms**, and the steady-state count is
-        zero.
+          - **The cadence is global.** It was per playback, accumulated in each animation record, so
+            entities stepped on staggered phases; they now step together. Retail's behavior tick is
+            likewise global, and 30 Hz staggering is not observable in gameplay.
+          - **`samplePresentation` lost its time arguments.** Phase is a property of the clock, not of
+            whichever caller is sampling, and passing an animation record's phase in was how the two
+            became coupled in the first place.
+          - **Initial-state folding needed its own operation.** A newly installed playback replays its
+            history forward to an authored independent phase, which a global cadence cannot express —
+            it steps everything once per elapsed step, not one node many times. `foldSemanticStep` is
+            that one-time catch-up, and is documented as install-time only.
+          - **Idle residents do not publish.** Effect-only publication first cost 0.235 ms of a 2.8 ms
+            tick, publishing all 79 residents every frame — which is the per-frame streaming this item
+            also set out to remove. States now carry a dirty flag, set by every command and by any step
+            that changes something, cleared on sample. An inert resident resolves identically every
+            frame and is skipped: publication returns to **0.040 ms**, and the steady-state count is
+            zero.
 
-      Three animation tests had to change, all of which were asserting the coupling rather than
-      behaviour: two now drive both clocks the way `GameRuntime` does, and one that sampled a ramp
-      "ahead" without committing now interpolates across a sub-step, since phase is no longer a
-      caller-supplied argument.
+          Three animation tests had to change, all of which were asserting the coupling rather than
+          behaviour: two now drive both clocks the way `GameRuntime` does, and one that sampled a ramp
+          "ahead" without committing now interpolates across a sub-step, since phase is no longer a
+          caller-supplied argument.
 
 - [x] **Dropped: chasing byte-identical harness captures was the wrong problem.** Retired on review
       rather than finished, because the premise was wrong. Neither particle verification this
       session was actually blocked by run-to-run noise. The billboard fix diffed to **265 pixels at
       a maximum channel delta of 198, concentrated on the flame clusters** — decisive proof the fix
       reached those meshes — against a noise floor of 948 mostly-single-step pixels. What failed was
-      judging *orientation* in a flame three pixels across. The motion fix had no visible flame in
+      judging _orientation_ in a flame three pixels across. The motion fix had no visible flame in
       the scene at all. **Both were camera-framing problems misread as determinism problems.**
 
       Kept, because they are cheap and correct: `--frame-interval-ms` and `--capture-frame`. Also
-      kept is the correction they produced — the runtime's time was fully parameterized all along,
-      and nothing inside it needs a fixed step. The unexplained scene-wide residual is left
-      unexplained rather than chased; an automated visual-regression suite would justify it and we
-      do not have one.
+          kept is the correction they produced — the runtime's time was fully parameterized all along,
+          and nothing inside it needs a fixed step. The unexplained scene-wide residual is left
+          unexplained rather than chased; an automated visual-regression suite would justify it and we
+          do not have one.
 
-      What the two incidents actually called for is recorded instead: **a close-up particle camera**,
-      below. Interactive confirmation is also faster and more decisive than any diff — the candle and
-      the audio were both settled that way in seconds.
+          What the two incidents actually called for is recorded instead: **a close-up particle camera**,
+          below. Interactive confirmation is also faster and more decisive than any diff — the candle and
+          the audio were both settled that way in seconds.
 
 - [x] **Recorded a close-up particle camera**, in `apps/holtburger-3d/AGENTS.md`:
 
       ```
-      --landblock 0xda55ffff --building-radius 1 --explicit-object-radius 1
-      --generated-object-radius 1 --camera-position 42087,37.9,-16638.4
-      --camera-yaw 0 --camera-pitch 0 --particle-seed 7
-      ```
+          --landblock 0xda55ffff --building-radius 1 --explicit-object-radius 1
+          --generated-object-radius 1 --camera-position 42087,37.9,-16638.4
+          --camera-yaw 0 --camera-pitch 0 --particle-seed 7
+          ```
 
-      That frames a lit candle a couple of metres away, large enough to judge flame direction,
-      billboard orientation, and blending. Emitter positions turned out to be **discoverable rather
-      than guessable** — every live emitter's scene-space origin passes through `collectCohorts`, so
-      a temporary probe there yields real coordinates. Three guessed poses found nothing; the first
-      probed one worked. That is the technique worth remembering, more than the coordinates.
+          That frames a lit candle a couple of metres away, large enough to judge flame direction,
+          billboard orientation, and blending. Emitter positions turned out to be **discoverable rather
+          than guessable** — every live emitter's scene-space origin passes through `collectCohorts`, so
+          a temporary probe there yields real coordinates. Three guessed poses found nothing; the first
+          probed one worked. That is the technique worth remembering, more than the coordinates.
 
-      **It also closed the session's last verification gap immediately.** The candle flame rises
-      straight up, which is the visual confirmation of the asymmetric-motion fix that had rested
-      entirely on formula tests — the fix affecting 45% of shipped emitters. Framing was the whole
-      problem, exactly as the retired determinism item concluded.
+          **It also closed the session's last verification gap immediately.** The candle flame rises
+          straight up, which is the visual confirmation of the asymmetric-motion fix that had rested
+          entirely on formula tests — the fix affecting 45% of shipped emitters. Framing was the whole
+          problem, exactly as the retired determinism item concluded.
 
 - [x] **Branded positions where they matter, rather than converging the representations.** Chosen on
       review over branding every `Vec3`: the two representations exist because two halves of the app
@@ -1787,23 +1789,24 @@ by value rather than by when it appeared.
       frame to get wrong. Branding those would be noise for a mistake that has happened once.
 
       An audit found the exposure is **five contract fields, not a codebase-wide problem**. Two of
-      them are the sharp ones: `PlacedStaticLight.position` is landblock-local while
-      `RuntimeLight.position` is canonical — identical shape, both called a light position, one file
-      apart, distinguished only by prose. `SceneVec3` and `LandblockVec3` brand the `Vec3` class
-      without changing its shape, so consumers keep reading `.x`/`.y`/`.z` and only declarations and
-      construction sites moved. Twelve sites, exactly as scoped.
+          them are the sharp ones: `PlacedStaticLight.position` is landblock-local while
+          `RuntimeLight.position` is canonical — identical shape, both called a light position, one file
+          apart, distinguished only by prose. `SceneVec3` and `LandblockVec3` brand the `Vec3` class
+          without changing its shape, so consumers keep reading `.x`/`.y`/`.z` and only declarations and
+          construction sites moved. Twelve sites, exactly as scoped.
 
-      **The brand immediately found a real frame lie.** `webgl2-renderer` synthesized a
-      `CameraPlacement` — canonical by declaration — from `prepared.cameraPosition`, which is
-      anchor-relative, purely to satisfy `createCameraNearClipVolume(camera, aspectRatio)`. That
-      function only ever needed `fov`, `near`, and a pose, so it now takes the pose separately and
-      the synthesized placement is gone. Asserting past it would have repeated the
-      `AudioListenerPlacement` mistake in the same session that found it.
+          **The brand immediately found a real frame lie.** `webgl2-renderer` synthesized a
+          `CameraPlacement` — canonical by declaration — from `prepared.cameraPosition`, which is
+          anchor-relative, purely to satisfy `createCameraNearClipVolume(camera, aspectRatio)`. That
+          function only ever needed `fov`, `near`, and a pose, so it now takes the pose separately and
+          the synthesized placement is gone. Asserting past it would have repeated the
+          `AudioListenerPlacement` mistake in the same session that found it.
 
-      The frame table and the rule are recorded in `apps/holtburger-3d/AGENTS.md`, including the
-      honest enforcement gap: branding is compiler-checked at boundaries that already use a branded
-      type, and unchecked when a new contract field is declared as bare `Vec3`.
-- [x] **Per-particle cohort records are pooled.** `collectCohorts` allocated a record *and* a vector
+          The frame table and the rule are recorded in `apps/holtburger-3d/AGENTS.md`, including the
+          honest enforcement gap: branding is compiler-checked at boundaries that already use a branded
+          type, and unchecked when a new contract field is declared as bare `Vec3`.
+
+- [x] **Per-particle cohort records are pooled.** `collectCohorts` allocated a record _and_ a vector
       per particle per frame; both are now handed out from one pool that grows to the peak particle
       count, with the record owning its own origin vector. Kept despite the measurement — cohort
       building is 0.073 ms of a 2.73 ms frame — because allocation churn is not well described by
@@ -1823,10 +1826,10 @@ by value rather than by when it appeared.
       nothing produces.
 
       **Not deleted, deliberately:** the Rust `holtburger-dat` decode of hook types 23 and 24, and
-      the frontend's typed payloads. That crate's contract is lossless decode of the file format, so
-      dropping the payload would make the decoder lossy to save nothing. The sky's own texture
-      scrolling is a separate, genuinely wired consumer and is untouched. What is gone is the
-      pretence of a consumer for the authored hook.
+          the frontend's typed payloads. That crate's contract is lossless decode of the file format, so
+          dropping the payload would make the decoder lossy to save nothing. The sky's own texture
+          scrolling is a separate, genuinely wired consumer and is untouched. What is gone is the
+          pretence of a consumer for the authored hook.
 
 #### GPU profiling was never blocked on `--gpu` (finding 2026-08-07)
 
@@ -1851,7 +1854,7 @@ Chrome exposes `EXT_disjoint_timer_query_webgl2` but reports **zero bits for `TI
 absolute GPU timestamps are a high-precision timing-attack vector and are disabled — while
 `TIME_ELAPSED_EXT` is fully supported at 64 bits and its queries create and resolve. Flags do not
 change this: `--enable-webgl-developer-extensions` and `--enable-webgl-draft-extensions` were both
-tried and neither affects the bit count. So the profiler's self-report is *correct*; it is measuring
+tried and neither affects the bit count. So the profiler's self-report is _correct_; it is measuring
 a capability Chrome will never grant, and would fail identically outside headless.
 
 **Rebuilt on `TIME_ELAPSED_EXT` and now working.** First real GPU numbers this project has had, at
@@ -1905,10 +1908,10 @@ draw-unit granularity defect in shared object geometry preparation that promotio
 
 Measured, per frame, at `0xDA55` with a radius-4 neighbourhood:
 
-| Metric | Value |
-| --- | --- |
-| `visibleDynamicEntityCount` | 12 |
-| `visibleDynamicPartCount` | 10788 |
+| Metric                           | Value                      |
+| -------------------------------- | -------------------------- |
+| `visibleDynamicEntityCount`      | 12                         |
+| `visibleDynamicPartCount`        | 10788                      |
 | Contributions per visible entity | 77 or 899, nothing between |
 
 Per-entity probe of the 899 population:
@@ -1943,7 +1946,7 @@ Confirmed against the archive for the hot setup:
 ```
 
 Parts 1 and 2 are 100% `CULL_MODE_NONE`, with `neg_surface == pos_surface` on every polygon. The two
-sides are the *same material* differing only by winding and normal sign, so the split is pure waste.
+sides are the _same material_ differing only by winding and normal sign, so the split is pure waste.
 
 **Fix: drop `renderSide` from `bindingId`.** Every triangle of a `CULL_MODE_NONE` part then shares one
 binding and merges into a single contiguous run — 899 draw units collapse to ~3, with no visual
@@ -1953,12 +1956,12 @@ already distinguishes.
 
 **Landed and measured** at `0xDA55`, radius 4, same camera pose:
 
-| Metric | Before | After |
-| --- | --- | --- |
-| `visibleDynamicPartCount` | 10788 | 66 |
-| `submittedDynamicDrawCount` | 3596 | 13 |
-| `submittedDynamicInstanceCount` | 10788 | 66 |
-| Contributions per visible entity | 77 / 899 | ~8 |
+| Metric                           | Before   | After |
+| -------------------------------- | -------- | ----- |
+| `visibleDynamicPartCount`        | 10788    | 66    |
+| `submittedDynamicDrawCount`      | 3596     | 13    |
+| `submittedDynamicInstanceCount`  | 10788    | 66    |
+| Contributions per visible entity | 77 / 899 | ~8    |
 
 The `renderSide` field was deleted outright rather than merely dropped from the key, since it had no
 consumer anywhere. `object-material-binding.test.ts` previously asserted
@@ -1969,30 +1972,30 @@ invariant — and now asserts the two expansions share one binding while staying
 
 Every axis in the composed key was checked for a draw-time consumer and measured by removal.
 
-| Axis | Source | Consumer | Verdict |
-| --- | --- | --- | --- |
-| `material.id` | `plan.id` | material resolution | keep |
-| `renderSurfaceId` | `plan.id` | material resolution | keep |
-| `ordering` | `plan.id` | opaque/transparent pass split | keep |
-| `wrap` | `plan.id` | sampler policy | keep |
-| `baseTexture` / `paletteTexture` | `plan.id` | bound GL textures | keep |
-| `detailRole` | `plan.id` | terrain detail selection | keep |
-| `cullFace` | `bindingId` | `webgl2-renderer.ts:1555` | keep |
-| `renderSide` | `bindingId` | **none** | **removed** |
-| `authoredCullMode` | `bindingId` | **none** | **removed** |
-| `stippled` | `bindingId` | none | **kept** — see below |
+| Axis                             | Source      | Consumer                      | Verdict              |
+| -------------------------------- | ----------- | ----------------------------- | -------------------- |
+| `material.id`                    | `plan.id`   | material resolution           | keep                 |
+| `renderSurfaceId`                | `plan.id`   | material resolution           | keep                 |
+| `ordering`                       | `plan.id`   | opaque/transparent pass split | keep                 |
+| `wrap`                           | `plan.id`   | sampler policy                | keep                 |
+| `baseTexture` / `paletteTexture` | `plan.id`   | bound GL textures             | keep                 |
+| `detailRole`                     | `plan.id`   | terrain detail selection      | keep                 |
+| `cullFace`                       | `bindingId` | `webgl2-renderer.ts:1555`     | keep                 |
+| `renderSide`                     | `bindingId` | **none**                      | **removed**          |
+| `authoredCullMode`               | `bindingId` | **none**                      | **removed**          |
+| `stippled`                       | `bindingId` | none                          | **kept** — see below |
 
 `cullFaceOverride` was checked as a possible indirect consumer of the authored mode; it is set only
 for EnvCell shells in flat mode and never reads polygon facts.
 
 Removal was measured independently at `0xDA55`, radius 4:
 
-| Metric | `renderSide` fixed | also minus `authoredCullMode` | also minus `stippled` |
-| --- | --- | --- | --- |
-| `submittedStaticObjectDrawCount` | 483 | 476 | 476 |
-| `submittedBakedStaticObjectDrawCount` | 216 | 209 | 209 |
-| `submittedDynamicDrawCount` | 13 | 11 | 11 |
-| `visibleDynamicPartCount` | 66 | 54 | 54 |
+| Metric                                | `renderSide` fixed | also minus `authoredCullMode` | also minus `stippled` |
+| ------------------------------------- | ------------------ | ----------------------------- | --------------------- |
+| `submittedStaticObjectDrawCount`      | 483                | 476                           | 476                   |
+| `submittedBakedStaticObjectDrawCount` | 216                | 209                           | 209                   |
+| `submittedDynamicDrawCount`           | 13                 | 11                            | 11                    |
+| `visibleDynamicPartCount`             | 66                 | 54                            | 54                    |
 
 `stippled` measures as a **zero-cost axis** — removing it changes nothing, because it never varies
 within an otherwise-identical binding in shipped content. It is retained deliberately: it is meant
@@ -2024,11 +2027,11 @@ geometry, which is why the same reorder was rejected there.
 
 Measured over the `0x7d64` interior, 430 shells:
 
-| | Before | After |
-| --- | --- | --- |
-| Ranges emitted | 2274 | **1574** |
-| Distinct bindings (the floor) | 1574 | 1574 |
-| Ranges per shell | 5.29 | 3.66 |
+|                               | Before | After    |
+| ----------------------------- | ------ | -------- |
+| Ranges emitted                | 2274   | **1574** |
+| Distinct bindings (the floor) | 1574   | 1574     |
+| Ranges per shell              | 5.29   | 3.66     |
 
 Compaction lands exactly on the floor. In the indoor-root camera specifically the visible win is
 smaller — 22 to 21 submitted shell draws over 6 visible shells, with triangle count unchanged at 207
@@ -2128,10 +2131,10 @@ operation to all three components, which commutes with the permutation because t
 
 The two asymmetric arms did not:
 
-| Arm | Retail means | Was applied to | Effect |
-| --- | --- | --- | --- |
-| `swarm` | `sin` on AC y, `cos` on AC z | `sin` on render y (**up**) | sine and cosine swapped between up and north |
-| `explode` | extra `+a.z` on AC z (**up**) | render index 2 (**north**), sign-flipped | the upward push became a sideways push |
+| Arm       | Retail means                  | Was applied to                           | Effect                                       |
+| --------- | ----------------------------- | ---------------------------------------- | -------------------------------------------- |
+| `swarm`   | `sin` on AC y, `cos` on AC z  | `sin` on render y (**up**)               | sine and cosine swapped between up and north |
+| `explode` | extra `+a.z` on AC z (**up**) | render index 2 (**north**), sign-flipped | the upward push became a sideways push       |
 
 The second row is the reported flame. Census over all 2,051 shipped emitters shows this is not an
 edge case: `swarm` 510 and `explode` 418, **928 emitters or 45% of shipped content**, and the two
@@ -2199,7 +2202,7 @@ sideways at eye level and rotating bodily as the camera moved up or down. Billbo
 particle — `orientationBasis` is evaluated with each instance's own world position — but every
 particle in a flame shares the locked axis, so they swing together and read as one rotating system.
 
-**Found: spatial audio never follows the camera.** Sound *triggers* are wired end to end
+**Found: spatial audio never follows the camera.** Sound _triggers_ are wired end to end
 (`BehaviorEventRouter` → runtime consumer → `AudioSystem.trigger`), and source positions are correct.
 `setListener` has **no production caller**, only its own test, so the listener stays at its
 constructed default of position `[0, 0, 0]` facing `[1, 0, 0]`. Every sound is panned and attenuated
@@ -2562,7 +2565,7 @@ probe over `0xDA56` confirms the consequence — one cohort reports `hasPalette:
 0x01001ab0  flags 4  kind 0  alphaTest 0.5  blend src-alpha->one-minus-src-alpha  hasPalette true
 ```
 
-`materialKind 0` is the particle shader's *direct texture* branch, so it samples the index texture as
+`materialKind 0` is the particle shader's _direct texture_ branch, so it samples the index texture as
 if it held colour and never reaches the palette. With no palette decode there is no alpha, nothing
 clears the `alphaTest` of 0.5, and the quad's backing stays opaque.
 
@@ -2616,7 +2619,7 @@ hook offsets that displace it — belong to the particle system, not to the enti
 
 `GameRuntime` then culls `collectCohorts` against the previous frame's renderer selection. That is
 one frame behind, which is safe precisely because the bounds include the envelope: an emitter is
-selected on the frame its *envelope* crosses the frustum rather than when its mesh does, so the lag
+selected on the frame its _envelope_ crosses the frustum rather than when its mesh does, so the lag
 is absorbed by the margin rather than showing as pop-in.
 
 Measured at `0xDA56` radius 3 with 172 live emitters and 1,287 particles: cohort building costs
@@ -2633,15 +2636,15 @@ Reported: fly swarms disappear when the camera gets near them. Two independent d
 introduced by the culling change itself.
 
 **The envelope formula bounded every motion law with one polynomial.** `emitterEnvelopeRadius` summed
-`|a|·L + |b|·L² + |c|·L³` regardless of type. Swarm's `c` is an oscillation *amplitude* and its `b` a
-*frequency*, neither of which accumulates with time, so cubing a lifespan against them produced
+`|a|·L + |b|·L² + |c|·L³` regardless of type. Swarm's `c` is an oscillation _amplitude_ and its `b` a
+_frequency_, neither of which accumulates with time, so cubing a lifespan against them produced
 absurd bounds. Probed on real content:
 
-| emitter | motion | before | after |
-| --- | --- | --- | --- |
-| `0x32000478` (flies) | swarm | 409.0 m | **3.6 m** |
-| `0x320002a5` | swarm | 2308.3 m | **18.7 m** |
-| others | still/velocity/parabolic | 1–11 m | unchanged |
+| emitter              | motion                   | before   | after      |
+| -------------------- | ------------------------ | -------- | ---------- |
+| `0x32000478` (flies) | swarm                    | 409.0 m  | **3.6 m**  |
+| `0x320002a5`         | swarm                    | 2308.3 m | **18.7 m** |
+| others               | still/velocity/parabolic | 1–11 m   | unchanged  |
 
 `motionReach` now bounds each law by its own formula, mirroring `acDisplacement`. This is the same
 mistake as evaluating motion in the wrong axes: one generic expression standing in for laws that
@@ -2665,12 +2668,12 @@ would have caused alone — worth remembering when adding the next skip conditio
 The envelope fixes above did not resolve the report. Reproduced in the harness by pointing a camera
 at a known fly emitter (`0x32000478`, scene origin `42355.0, 10.0, -16424.9`) and sweeping:
 
-| camera | result |
-| --- | --- |
-| 12 m / 6 m / 3 m / 1.5 m, level with the swarm | visible |
-| 1.0 m away, 3 m **above** | **culled** |
-| 0.5 m away, 2 m above | **culled** |
-| 1.0 m away, 1 m above | visible |
+| camera                                         | result     |
+| ---------------------------------------------- | ---------- |
+| 12 m / 6 m / 3 m / 1.5 m, level with the swarm | visible    |
+| 1.0 m away, 3 m **above**                      | **culled** |
+| 0.5 m away, 2 m above                          | **culled** |
+| 1.0 m away, 1 m above                          | visible    |
 
 So it was never distance; it was elevation at close range, where the angular offset to the owner's
 mesh is largest. A probe then showed the node never reaching the renderer's narrow-phase loop at all,
@@ -2678,10 +2681,10 @@ which located the cull upstream.
 
 **Two independent culls read two different bounds, and the envelope only ever reached one.**
 
-| cull | bounds read | envelope? |
-| --- | --- | --- |
-| SceneGraph frustum query (broadphase) | `scene.updateBounds`, written **once at install** from `animation.localBounds` | no |
-| Renderer object-footprint test (narrow phase) | `publishedPresentationBounds` | yes |
+| cull                                          | bounds read                                                                    | envelope? |
+| --------------------------------------------- | ------------------------------------------------------------------------------ | --------- |
+| SceneGraph frustum query (broadphase)         | `scene.updateBounds`, written **once at install** from `animation.localBounds` | no        |
+| Renderer object-footprint test (narrow phase) | `publishedPresentationBounds`                                                  | yes       |
 
 Camera above the swarm at close range puts the owner's mesh below the frustum's bottom plane while
 its particles are still on screen. The broadphase drops the node, so it never enters
@@ -2718,23 +2721,23 @@ which is why our evaluator looked correct when checked against it. The distincti
 `start_frame` — the owner's frame, snapshotted at spawn — via `Frame::localtoglobalvec`, selectively
 per motion type:
 
-| `ParticleType` | `a` | `b` | `c` |
-| --- | --- | --- | --- |
-| `Still` | — | — | — |
-| `LocalVelocity` | **rotated** | — | — |
-| `GlobalVelocity` | authored | — | — |
-| `ParabolicLVGA` | **rotated** | authored | — |
-| `ParabolicLVLA` | **rotated** | **rotated** | — |
-| `ParabolicGVGA` | authored | authored | — |
-| `ParabolicLVGAGR` | **rotated** | authored | authored |
-| `ParabolicLVLALR` | **rotated** | **rotated** | **rotated** |
-| `ParabolicGVGAGR` | authored | authored | authored |
-| `Swarm` | **rotated** | authored | authored |
-| `Explode` | authored | authored | randomized, see 9.3 |
-| `Implode` | authored | authored | derived, see 9.4 |
+| `ParticleType`    | `a`         | `b`         | `c`                 |
+| ----------------- | ----------- | ----------- | ------------------- |
+| `Still`           | —           | —           | —                   |
+| `LocalVelocity`   | **rotated** | —           | —                   |
+| `GlobalVelocity`  | authored    | —           | —                   |
+| `ParabolicLVGA`   | **rotated** | authored    | —                   |
+| `ParabolicLVLA`   | **rotated** | **rotated** | —                   |
+| `ParabolicGVGA`   | authored    | authored    | —                   |
+| `ParabolicLVGAGR` | **rotated** | authored    | authored            |
+| `ParabolicLVLALR` | **rotated** | **rotated** | **rotated**         |
+| `ParabolicGVGAGR` | authored    | authored    | authored            |
+| `Swarm`           | **rotated** | authored    | authored            |
+| `Explode`         | authored    | authored    | randomized, see 9.3 |
+| `Implode`         | authored    | authored    | derived, see 9.4    |
 
 The suffixes decode as **L**ocal/**G**lobal **V**elocity and **A**cceleration, naming exactly which
-constants are rotated. `start_frame` is the parent object's frame, or the *part's* frame when the
+constants are rotated. `start_frame` is the parent object's frame, or the _part's_ frame when the
 emitter names a part (`part_index != -1`).
 
 Separately, and for **every** type including `Still`, `Init` rotates `offset` by `start_frame` before
@@ -2765,7 +2768,7 @@ orientation-only in `acDisplacement`. Any change to the motion formulas themselv
 ### Phase 9.1 — Carry the owner's orientation to the emitter — **done**
 
 **Resolved: (b), and (a) would have been wrong.** The recommendation above was made before checking
-what `start_frame` actually is. Retail snapshots the owner's frame *at spawn*, so a script that
+what `start_frame` actually is. Retail snapshots the owner's frame _at spawn_, so a script that
 rotates its owner changes where its emitters fire; an authored decode-time quaternion cannot see
 that. `#sceneOriginOf` already reads `getResolvedPlacement(nodeId).localToLandblock`, the live
 resolved transform, so the rotation was sitting in the matrix the origin already came from. Retaining
@@ -2782,7 +2785,6 @@ because retail's `Frame` has no scale and a scaled owner must not scale the velo
 carry the frame.
 
 <details><summary>Original scoping</summary>
-
 
 `ParticleSystemDependencies` exposes `sceneOriginOf(target)` and nothing about rotation. Two ways to
 get one, and the choice is the first real decision:
@@ -2804,7 +2806,7 @@ unrotated owner reports identity exactly.
 ### Phase 9.2 — Rotate the spawn constants per type — **done**
 
 `rotatedSpawnConstants` in `particle-motion.ts` mirrors `acDisplacement`'s switch, the pattern
-`motionReach` already set, so the three stay visibly in step. `offset` is deliberately *not* in that
+`motionReach` already set, so the three stay visibly in step. `offset` is deliberately _not_ in that
 table: retail rotates it for every type, so it is unconditional at the spawn site instead.
 
 A missing rotation now throws rather than falling back to identity. `#emit`'s caller already resolved
@@ -2862,7 +2864,7 @@ Implode's reach therefore scales with `maxOffset`, which `motionReach` now takes
 
 <details><summary>Original scoping</summary>
 
-`Init` sets `c = offset * c` componentwise, *after* `offset` has been rotated, so implode inherits
+`Init` sets `c = offset * c` componentwise, _after_ `offset` has been rotated, so implode inherits
 the frame indirectly rather than through the rotation table. Ordering matters: this must read the
 rotated offset, not the authored one.
 
@@ -2874,7 +2876,7 @@ Acceptance: an implode emitter on a rotated owner produces a `c` consistent with
 - **Rotating in the wrong space.** The highest-probability failure, and it will look plausible.
   Mitigated by testing the asymmetric types (Swarm, Explode) specifically, since a symmetric formula
   cannot detect an axis swap. This is the second time this exact hazard has appeared in this plan.
-- **Part-attached emitters.** `start_frame` is the *part's* frame when `part_index != -1`. Resolving
+- **Part-attached emitters.** `start_frame` is the _part's_ frame when `part_index != -1`. Resolving
   the object's frame for a part-attached emitter would be wrong on any articulated owner, and wrong
   in a way that only shows while the part is animating.
 - **Silent content shift.** Every existing emitter on a rotated owner changes direction. That is the
@@ -2885,6 +2887,7 @@ Acceptance: an implode emitter on a rotated owner produces a `c` consistent with
 - 9.1(a) or 9.1(b)? Recommendation is (a); it needs a look at whether the authored rotation
   survives to the layer that builds `AuthoredDynamicSource`, which currently exposes only a
   render-space `ScenePlacement`.
+
 ### Phase 9.5 — The hook offset was rotated last instead of first
 
 Reported after 9.1–9.4 landed: the waterfall aimed correctly, but a smaller emitter beside it sat
@@ -2900,7 +2903,7 @@ this->offset = start_frame.m_fl2gv * (that sum) // one rotation, applied to both
 ```
 
 We rotated only the random offset, and applied the hook offset separately as an unrotated
-displacement of the emitter *origin* — so on a rotated owner it pointed the authored direction
+displacement of the emitter _origin_ — so on a rotated owner it pointed the authored direction
 instead of the owner's. The error is exactly the hook offset's magnitude, which is why it read as
 "slightly off" rather than as the waterfall's obvious reversal.
 
@@ -2927,7 +2930,7 @@ Consequences, both of which predate this phase:
 
 - The spawn origin is the object's, not the part's, so a part-attached emitter has always been in the
   wrong place on an articulated owner.
-- `sceneRotationOf` now reads the object's rotation for it too, so Phase 9 gives it the wrong *frame*
+- `sceneRotationOf` now reads the object's rotation for it too, so Phase 9 gives it the wrong _frame_
   as well. Retail uses the part's frame when `part_index != -1` (`Particle::Init`, acclient.c:317791).
 
 It is also a decoded field with no consumer, which is the shape this project treats as a defect on
@@ -2936,23 +2939,23 @@ its own.
 **Census run 2026-08-07, and it inverts the assumption.** Across 3,500 physics scripts in the shipped
 archive:
 
-| `CreateParticle` hooks | 7,365 |
-| --- | --- |
-| whole-object (`partIndex == -1`) | 673 (9%) |
-| **part-attached** | **6,692 (91%)**, across 33 distinct part indices |
+| `CreateParticle` hooks           | 7,365                                            |
+| -------------------------------- | ------------------------------------------------ |
+| whole-object (`partIndex == -1`) | 673 (9%)                                         |
+| **part-attached**                | **6,692 (91%)**, across 33 distinct part indices |
 
 Part attachment is not an edge case, it is the **dominant** case. Every one of those emitters
 currently spawns at the object's origin instead of the part's, and since Phase 9 it is also rotated by
 the object's frame rather than the part's. The earlier wording — "unimplemented rather than absent" —
 understated this: it is a defect affecting nine emitters in ten, not a gap awaiting sizing.
 
-Scope caveat worth keeping honest: the census counts *authored* hooks across all scripts, including
+Scope caveat worth keeping honest: the census counts _authored_ hooks across all scripts, including
 creatures and items this runtime never activates. It does not prove nine in ten emitters we actually
 run are misplaced, only that the authored content overwhelmingly uses part attachment. A second
 census restricted to the setup-default scripts of static residents would size the live blast radius.
 
-**Implemented.** The fix splits two things `target` was conflating: an emitter is *owned* by its
-object — which is what gives it identity, visibility, and a culling envelope — and *positioned* by a
+**Implemented.** The fix splits two things `target` was conflating: an emitter is _owned_ by its
+object — which is what gives it identity, visibility, and a culling envelope — and _positioned_ by a
 node, which for a part-attached emitter is the part. `EmitterInstance` now carries `frameTarget`
 beside `target`; origin and rotation lookups follow the frame, while replacement, `isVisible`, and
 `envelopeRadiusFor` stay with the owner. An emitter naming a part its owner does not have is refused
@@ -3013,13 +3016,13 @@ every authored ambient sound a zero chance of playing. Second occurrence; expect
 **"Continuous" does not mean looping.** `Ambient::GetSound` (acclient.c:367290) branches on
 `is_continuous` to build one of two subclasses, and both are one-shots on a timer:
 
-| | `IntermitSound` (`base_chance > 0`) | `ConstantSound` (`base_chance == 0`) |
-| --- | --- | --- |
-| surroundings scale | **probability**: `base_chance / total_weight * sound_count` | **volume**: `volume / total_weight * sound_count` |
-| direction | 8 direction buckets with per-direction min/max distance (`AddDir`) | none; `AddTo` accumulates weight only |
-| placement | `GetSoundPos` rolls a bucket, jitters heading within its sector, rolls a distance | centred, unpositioned |
-| interval | `RollDice(min_rate, max_rate)` | flat `min_rate`, no roll |
-| plays when due | only if `PlayNow` passes | always |
+|                    | `IntermitSound` (`base_chance > 0`)                                               | `ConstantSound` (`base_chance == 0`)              |
+| ------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------- |
+| surroundings scale | **probability**: `base_chance / total_weight * sound_count`                       | **volume**: `volume / total_weight * sound_count` |
+| direction          | 8 direction buckets with per-direction min/max distance (`AddDir`)                | none; `AddTo` accumulates weight only             |
+| placement          | `GetSoundPos` rolls a bucket, jitters heading within its sector, rolls a distance | centred, unpositioned                             |
+| interval           | `RollDice(min_rate, max_rate)`                                                    | flat `min_rate`, no roll                          |
+| plays when due     | only if `PlayNow` passes                                                          | always                                            |
 
 So intermittent is an occasional positioned event, and continuous is an ever-present bed whose
 loudness — not likelihood — tracks how much of the surrounding land authored it. A constant sound
@@ -3097,7 +3100,7 @@ Distance weighting is `Ambient::CalcWeight`: `1.0` inside `ambient_sound_min_dis
 `min_dist_sq / d²` between, `0` beyond `ambient_sound_max_dist_sq`.
 
 **`base_chance` is not read where the plan first said.** `SoundManager::PlayAmbientSound`
-(acclient.c:366813) rolls the *sound table's* probability, the same field the one-shot path already
+(acclient.c:366813) rolls the _sound table's_ probability, the same field the one-shot path already
 handles. `base_chance` belongs to `IntermitSound::PlayNow`, in the scheduler.
 
 ### North Stars
@@ -3121,17 +3124,17 @@ Tauri and the Zod schema, so no consumer re-tests the sentinel. Everything else 
 
 **Census over the shipped region** (37 tables, 383 descriptors):
 
-| | count | share |
-| --- | --- | --- |
-| intermittent | 343 | **89.6%** |
-| continuous | 40 | 10.4% |
+|              | count | share     |
+| ------------ | ----- | --------- |
+| intermittent | 343   | **89.6%** |
+| continuous   | 40    | 10.4%     |
 
-| distribution | min | median | max |
-| --- | --- | --- | --- |
-| intermittent `base_chance` | 0.200 | 0.500 | 1.000 |
-| intermittent `min_rate` | 0.000 | 2.800 | 30.000 |
-| intermittent `max_rate` | 1.000 | 12.000 | 40.000 |
-| continuous `min_rate` | 1.400 | 7.000 | 18.700 |
+| distribution               | min   | median | max    |
+| -------------------------- | ----- | ------ | ------ |
+| intermittent `base_chance` | 0.200 | 0.500  | 1.000  |
+| intermittent `min_rate`    | 0.000 | 2.800  | 30.000 |
+| intermittent `max_rate`    | 1.000 | 12.000 | 40.000 |
+| continuous `min_rate`      | 1.400 | 7.000  | 18.700 |
 
 **All 1024 terrain/scene combinations resolve to a sound table.** Ambience is authored everywhere, so
 the scan always finds descriptors and there is no sparse-coverage case to design around.
@@ -3147,7 +3150,7 @@ stype=70 min_rate=3.70  duration=5.87s  ratio=0.63
 stype=70 min_rate=16.00 duration=9.06s  ratio=1.77
 ```
 
-Several are *exactly* the wave length; the rest sit slightly under (overlapping) or near 1.5–2×
+Several are _exactly_ the wave length; the rest sit slightly under (overlapping) or near 1.5–2×
 (deliberately sparser). So continuous descriptors retrigger a one-shot at about its own length, and
 **scheduler timing accuracy is audible** for the ratio-1.00 cases: drift shows up as a gap in a sound
 meant to be seamless. Still no looping voice needed.
@@ -3160,7 +3163,7 @@ continuous roughly 9:1, so 10.5 is the common case and carries most of the audib
 
 `AudioSettings` gains `ambientVolume`, and `AudioTrigger` gains a `category` field. The plan called
 for an `is_ambient` route through `placeSpatialAudio`, but that function already took a
-`categoryVolume` parameter, so the category is a *name* rather than a flag: `#categoryVolume` selects
+`categoryVolume` parameter, so the category is a _name_ rather than a flag: `#categoryVolume` selects
 which user volume the trigger scales by, and the spatialization math is untouched.
 
 **The decision is implemented and asserted, not merely commented.** Retail multiplies ambient gain by
@@ -3183,7 +3186,7 @@ a resolver, so the whole thing is testable without a browser, a clock, or a devi
 
 `terrain-sample.ts` extracts the packed-word unpack that `terrain-generator.ts` did inline. The
 cross-language duplicate remains: `generated_scenery.rs` has its own copy in Rust, and the two cannot
-share code. The plan's "extract rather than write a second copy" holds *within* each language, and
+share code. The plan's "extract rather than write a second copy" holds _within_ each language, and
 the layout is now documented in one place per side rather than four call sites.
 
 **All the compass maths runs in AC axes**, converting the listener-to-cell displacement once per
@@ -3193,7 +3196,7 @@ That is the third time this hazard has appeared in this plan, and the first time
 against rather than debugged after.
 
 Concession: constants and helpers whose only consumers arrive in 10.4 and 10.5 are deliberately
-*not* exported yet, because the lint gate treats an unused export as an error and the project treats
+_not_ exported yet, because the lint gate treats an unused export as an error and the project treats
 a field without a named consumer as a defect. They become exported when their consumer lands.
 
 ### Phase 10.4 — The scheduler — **done**
@@ -3206,7 +3209,7 @@ the `ambient` category.
 **Retail's two subclasses collapse into one record with a branch.** `IntermitSound` and
 `ConstantSound` differ in exactly three things — what the surroundings scale, whether a chance is
 rolled, and how the interval is drawn — so two classes would be more structure than the difference
-warrants. The one thing worth stating loudly is that the surroundings scale *either* gain or
+warrants. The one thing worth stating loudly is that the surroundings scale _either_ gain or
 probability, never both.
 
 **Scheduling advances by whole intervals rather than from "now".** The 10.1 census found continuous
@@ -3263,7 +3266,7 @@ weighting, scheduling and chance rolls all work end to end.
 The earlier reading that "nothing fires" was **a measurement error, not a defect**. Two things
 conspired:
 
-1. `initialState` is captured right after settle, and the harness applies its camera at the *end* of
+1. `initialState` is captured right after settle, and the harness applies its camera at the _end_ of
    settle — so the first populated scan happened at `t = 8.8` and the diagnostics were read before any
    interval could elapse. Frames after settle (`--measure-ms`) are what make ambience observable.
 2. Counter-only instrumentation produced an apparent impossibility — `refresh` running 11 times on one
@@ -3272,7 +3275,7 @@ conspired:
    installed yet), so there was nothing to update and nothing to retire. The counters were all
    correct; the inference drawn from them was not.
 
-Recorded because the lesson generalizes: *counters tell you how often, key sets tell you what*. Three
+Recorded because the lesson generalizes: _counters tell you how often, key sets tell you what_. Three
 probe rounds went on the former when one round of the latter answered it.
 
 **Audibility depends on standing near the ground that authors a sound**, and that is retail's design
@@ -3290,7 +3293,7 @@ Checked because it is the obvious next question and the answer is load-bearing f
 this. Ambient playback (acclient.c:367690) drives everything through the `AmbientSound` vtable and
 takes no weather, sky, or time-of-day input. `DayGroup` carries `ChanceOfOccur`, `DayName`,
 `SkyObjects` and `SkyTime` and no sound field. `GameSky::s_weatherEnabled` gates only the creation and
-removal of sky *physics objects*, and `GameSky::MakeObject` (acclient.c:297343) builds those with a
+removal of sky _physics objects_, and `GameSky::MakeObject` (acclient.c:297343) builds those with a
 texture velocity and a cell assignment — no script activation, no sound hook. Selection is
 `(terrain type, scene type)` from a static terrain word, so it cannot vary with conditions either.
 
@@ -3371,12 +3374,12 @@ reader does not chase it.
 **Four dead public methods, removed.** None hid a defect, which is itself the finding — the pattern
 that produced `partIndex` did not repeat:
 
-| removed | why it was safe |
-| --- | --- |
-| `ParticleSystem.removeTarget` | `advance` already prunes any emitter whose target stopped publishing a transform, so orphans self-heal every frame |
-| `DynamicEntitySystem.getPose` | plain accessor, no reader |
-| `SceneGraph.getEnvCellVisibilityIslandId` | plain accessor, no reader |
-| `GameRuntime.updateDynamicEntityPlacement` | a stub voiding both arguments and returning `false`, for ownership deliberately not materialized |
+| removed                                    | why it was safe                                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `ParticleSystem.removeTarget`              | `advance` already prunes any emitter whose target stopped publishing a transform, so orphans self-heal every frame |
+| `DynamicEntitySystem.getPose`              | plain accessor, no reader                                                                                          |
+| `SceneGraph.getEnvCellVisibilityIslandId`  | plain accessor, no reader                                                                                          |
+| `GameRuntime.updateDynamicEntityPlacement` | a stub voiding both arguments and returning `false`, for ownership deliberately not materialized                   |
 
 The last is the shape most worth watching: a public method that always fails, that nothing calls,
 reads as a capability rather than a placeholder.
@@ -3386,16 +3389,16 @@ character generation and LOD" — that was wrong on both count and contents. Ski
 have readers; they only looked orphaned because the exclusion glob had silently failed (see below).
 The accurate figure is **20 fields with no reader anywhere**, of 534 decoded:
 
-| file | fields | what it is |
-| --- | --- | --- |
-| `xp_table.rs` | 10 — the entire `XpTable` | experience curves; no consumer, no partial use |
-| `material.rs` | 6 across `ClothingTable`, `ClothingBase`, `CloObjectEffect`, `CloPaletteTemplate` | the clothing/palette-template chain |
-| `char_gen.rs` | 2 (`CharacterGenGender.base_obj_desc`, `EyeStrip.obj_desc_bald`) | character generation |
-| `degrade_info.rs` | 1 (`DegradeBand.ideal_distance`) | LOD band; its `max_distance` sibling *is* read |
-| `scene.rs` | 1 (`SceneObjectTemplate.orient`) | the finding above — retail ignores it too |
+| file              | fields                                                                            | what it is                                     |
+| ----------------- | --------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `xp_table.rs`     | 10 — the entire `XpTable`                                                         | experience curves; no consumer, no partial use |
+| `material.rs`     | 6 across `ClothingTable`, `ClothingBase`, `CloObjectEffect`, `CloPaletteTemplate` | the clothing/palette-template chain            |
+| `char_gen.rs`     | 2 (`CharacterGenGender.base_obj_desc`, `EyeStrip.obj_desc_bald`)                  | character generation                           |
+| `degrade_info.rs` | 1 (`DegradeBand.ideal_distance`)                                                  | LOD band; its `max_distance` sibling _is_ read |
+| `scene.rs`        | 1 (`SceneObjectTemplate.orient`)                                                  | the finding above — retail ignores it too      |
 
 Every one belongs to a subsystem this client has not built, and each is whole rather than partial:
-nothing reads *some* of `XpTable`. A partially-consumed struct is the shape that hides a `partIndex`;
+nothing reads _some_ of `XpTable`. A partially-consumed struct is the shape that hides a `partIndex`;
 a wholly-unconsumed one is just a format we decode faithfully and do not use yet.
 
 **A separate category worth naming: 8 fields read only by the conversion tool.**
@@ -3419,9 +3422,8 @@ checking it would have.
 ### What the sweep did not cover
 
 Fields consumed only by diagnostics or serialization still count as consumed here, so a field merely
-*echoed* to a manifest and never acted on would pass. `orient` was caught only because nothing touched
+_echoed_ to a manifest and never acted on would pass. `orient` was caught only because nothing touched
 it at all.
-
 
 ## Definition of Done
 

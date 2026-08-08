@@ -1379,16 +1379,6 @@ export class GameRuntime {
 		return this.#scene.getEnvCellSeenOutside(envCellId) === false;
 	}
 
-	updateDynamicEntityPlacement(
-		entityId: string,
-		placement: ScenePlacement,
-	): boolean {
-		void entityId;
-		void placement;
-		// Dynamic entity ownership is intentionally not materialized yet.
-		return false;
-	}
-
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;

@@ -443,11 +443,6 @@ export class DynamicEntitySystem<
 		});
 	}
 
-	getPose(nodeId: SceneNodeId): ArticulatedPose | null {
-		const entity = this.#entities.get(nodeId);
-		return entity ? entity.articulatedPose : null;
-	}
-
 	/** Inspect complete preparation without exposing repository handles or mutable staging state. */
 	getPreparedAnimation(nodeId: SceneNodeId): PreparedDynamicAnimation | null {
 		return this.#entities.get(nodeId)?.preparedAnimation ?? null;

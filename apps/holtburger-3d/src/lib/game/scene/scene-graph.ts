@@ -554,13 +554,6 @@ export class SceneGraph {
 		);
 	}
 
-	/** Return the proof-backed render-scheduling island for one installed EnvCell scope. */
-	getEnvCellVisibilityIslandId(
-		envCellId: EnvCellId,
-	): SceneEnvCellScopeInput["visibilityIslandId"] | null {
-		return this.#envCellScopes.get(envCellId)?.visibilityIslandId ?? null;
-	}
-
 	/**
 	 * Report whether one installed EnvCell authored SeenOutside.
 	 *

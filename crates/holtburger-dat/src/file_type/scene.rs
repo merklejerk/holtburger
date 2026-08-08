@@ -34,6 +34,12 @@ pub struct SceneObjectTemplate {
     pub min_slope: f32,
     pub max_slope: f32,
     pub align: u32,
+    /// Retained for losslessness only; retail decodes this and never consults it.
+    ///
+    /// Its only appearances in the client are the constructor zeroing it and retail encoding /
+    /// `UnPack` round-tripping it. Placement reads `base_loc`, `max_rot` and `align` —
+    /// `GetObjFrame` and `ObjAlign` never touch `orient`. Having no consumer is therefore
+    /// correct rather than a gap.
     pub orient: u32,
     pub weenie_object_id: u32,
 }

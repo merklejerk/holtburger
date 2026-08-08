@@ -377,6 +377,23 @@
 					new RuntimeTickProfiler(),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
+				// Ambience is selected by the ground rather than by a hook, so nothing else pulls its
+				// sound tables in; installing the region's facts is what stages them.
+				if (activeRegion?.data.sound && activeRegion.data.scenes) {
+					void gameRuntime.installAmbientRegion({
+						sceneTypes: activeRegion.data.scenes.types.map((type) => ({
+							soundTableIndex: type.soundTableIndex,
+						})),
+						tables: activeRegion.data.sound.tables.map((table) => ({
+							soundTableId: table.soundTableId,
+							sounds: table.sounds,
+						})),
+						terrainTypes:
+							activeRegion.data.terrain?.types.map((type) => ({
+								sceneTypes: type.sceneTypes,
+							})) ?? [],
+					});
+				}
 				skySource = new TauriSkySource();
 				await gameRuntime.installSky(await skySource.loadSkySource());
 				if (destroyed) return;

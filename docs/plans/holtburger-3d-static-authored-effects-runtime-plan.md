@@ -3160,15 +3160,40 @@ Concession: constants and helpers whose only consumers arrive in 10.4 and 10.5 a
 *not* exported yet, because the lint gate treats an unused export as an error and the project treats
 a field without a named consumer as a defect. They become exported when their consumer lands.
 
-### Phase 10.4 — The scheduler
+### Phase 10.4 — The scheduler — **done**
 
-One clock per active descriptor. On each due tick: a `ConstantSound` always plays and re-arms at
-`min_rate`; an `IntermitSound` rolls `PlayNow` against its weighted `play_chance`, plays on success,
-and re-arms at `RollDice(min_rate, max_rate)`. Ownership follows the scan, so a descriptor retires
-once no cell contributes to it.
+`AmbientSystem` owns one clock per audible descriptor and is wired end to end: `installAmbientRegion`
+flattens the region's terrain→scene→table chain into a direct lookup and stages every sound table it
+can reach, the runtime rescans on cell transition, and firings leave through `AudioSystem.trigger` in
+the `ambient` category.
 
-*Acceptance:* the harness reports scheduled, fired, and suppressed counts; a fixed clock produces a
-deterministic sequence; a continuous descriptor fires on its flat interval and never rolls a chance.
+**Retail's two subclasses collapse into one record with a branch.** `IntermitSound` and
+`ConstantSound` differ in exactly three things — what the surroundings scale, whether a chance is
+rolled, and how the interval is drawn — so two classes would be more structure than the difference
+warrants. The one thing worth stating loudly is that the surroundings scale *either* gain or
+probability, never both.
+
+**Scheduling advances by whole intervals rather than from "now".** The 10.1 census found continuous
+descriptors authoring `min_rate` exactly equal to their wave's duration, so re-arming from the service
+time would add a frame's jitter as a gap on every fire. One interval of lag is tolerated before the
+cadence resynchronizes, so a stall cannot bank a burst of missed firings. A test pins this: served at
+4.3 s, 8.4 s and 12.2 s on a 4 s cadence it must fire three times, which a drifting implementation
+fails.
+
+**Rescan cadence: the listener's 24 m terrain cell**, not its landblock. A landblock is 192 m across
+and the ambient radius is 120, so waiting for a landblock crossing would let the listener walk most of
+the way across the audible field before the surroundings were re-weighted. The open question asked how
+often the scan must run; this answers it structurally, but the **cost has still not been measured** —
+recorded as debt below.
+
+Debt and concessions:
+
+- The scan cost is unmeasured. It walks 64 cells per installed landblock on every cell transition,
+  which is bounded and infrequent, but "bounded" is not "measured".
+- Types whose only consumers are internal are unexported, because the lint gate treats an unused
+  export as an error. Several will be exported the moment a second consumer appears.
+- The Explorer installs ambient facts fire-and-forget (`void installAmbientRegion(...)`), matching how
+  sky and static details are installed there. A staging failure is therefore visible only as silence.
 
 ### Phase 10.5 — Directional placement for intermittent sounds
 

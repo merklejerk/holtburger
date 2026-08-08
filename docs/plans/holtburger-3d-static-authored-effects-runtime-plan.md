@@ -2163,10 +2163,12 @@ identical build fall from 1,971 differing pixels to 948. The residual is frame-t
 spawn, since particle ages depend on wall-clock deltas; fully determinising that needs a fixed
 harness timestep and is recorded as debt.
 
-Verification honesty: the DA55 scene has no visible flame, and the reported torch view was not
-reproduced in the harness. The evidence for this change is the formula tests, which assert the axis
-semantics directly — that Explode's extra term lands on render **up**, and that Swarm's sine lands on
-north and never on up. Visual confirmation of the reported flame remains outstanding.
+Verification honesty: at the time of writing, the DA55 scene had no visible flame and the reported
+torch view was not reproduced in the harness, so the evidence was the formula tests alone — that
+Explode's extra term lands on render **up**, and that Swarm's sine lands on north and never on up.
+
+**Closed later the same day.** The close-up particle pose in `apps/holtburger-3d/AGENTS.md` frames a
+lit candle a couple of metres away, and the flame rises. The gap was framing, not the fix.
 
 ##### Coordinate-frame audit (2026-08-07)
 
@@ -2246,8 +2248,8 @@ runtime owns the frame conversion and the retail spatial maths while the fronten
 `ExplorerCameraCoordinator` applies it alongside `setPrimaryCamera` behind an
 **Audio follows camera** switch in the World panel, defaulting on.
 
-Two further gaps found and deliberately **not** fixed yet, to avoid stacking untested fixes on an
-unverified one:
+Two further gaps found and deliberately **not** fixed at the time, to avoid stacking untested fixes on
+an unverified one. Both were closed later the same day; see the note below them:
 
 - **`WebAudioDevice.playOneShot` skips the first trigger of every sound.** It returns null and starts
   the decode when the buffer is absent (`web-audio-device.ts:40`). This is our own code and platform
@@ -2262,6 +2264,12 @@ unverified one:
 
 Discriminator for the next round: once the listener is wired, `playedCount > 0` with audible silence
 means the context is suspended, while `deviceRefusedCount > 0` means undecoded buffers.
+
+**Both closed later the same day.** Warm-on-demand landed — `prepare()` reached the runtime and
+`maximumWarmupReplaySeconds` bounds the replay, with `warmedPlayedCount` / `warmupRefusedCount` /
+`warmupExpiredCount` separating its outcomes. The `AudioContext` question was settled by playing the
+Explorer rather than by a code change: authored emitters are audible, so the context was never
+suspended on the surface that matters. The discriminator above was what made that a one-run answer.
 
 Incidentally fixed: `--brief` had been throwing on every invocation, referencing
 `effects.observations`, `deferredHookCount` and `executedHookCount`, none of which have existed since

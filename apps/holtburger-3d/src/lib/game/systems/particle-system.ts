@@ -347,14 +347,6 @@ export class ParticleSystem {
 		}
 	}
 
-	/** Owner removal vanishes live particles instantly; retail never drains them. */
-	removeTarget(nodeId: BehaviorTarget["nodeId"]): void {
-		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
-			if (this.#instances[index]!.target.nodeId === nodeId)
-				this.#instances.splice(index, 1);
-		}
-	}
-
 	/**
 	 * Advance every emitter to `timeSeconds`.
 	 *

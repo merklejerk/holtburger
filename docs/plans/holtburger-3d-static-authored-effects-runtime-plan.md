@@ -3335,6 +3335,55 @@ test already uses real vertex heights.
 The post-optimization cost was not re-measured. `0.5 ms` therefore stands as the honest ceiling rather
 than the current figure.
 
+## Addendum: Consumer Sweep (2026-08-07)
+
+Run after `partIndex` — a decoded field silently dropped for the whole plan — turned up by accident
+rather than by looking. If one hid that long, others might.
+
+**Method and its blind spots.** Two passes: every `pub` field of a decoded DAT struct against
+workspace-wide reads, and every public class method in `src/lib/game` against call sites. Both
+first-pass results were mostly false positives, and the reasons are worth recording because the next
+sweep will hit them again:
+
+- Dot-access search misses fields consumed by **destructuring**. `CreateParticleHookPayload.emitter_id`
+  looked orphaned and is read everywhere, as `emitter_id,` in a pattern.
+- Bare-name search misses nothing but flags plenty: nested helper functions and constructors are not
+  class API. 584 method matches reduced to 4 real ones only after excluding both.
+- A field consumed across the Tauri boundary changes case. `snake_case` in Rust becomes `camelCase` in
+  the manifest, so a search for one spelling finds neither side.
+
+### Findings
+
+**`SceneObjectTemplate.orient` — decoded, never read, and that is correct.** Retail never reads it
+either: its only appearances in the whole client are the constructor zeroing it and `Pack`/`UnPack`
+round-tripping it (acclient.c:442234, 442431, 442544). Scenery placement uses `base_loc`, `max_rot`
+and `align`; neither `GetObjFrame` nor `ObjAlign` touches `orient`. Documented in place so the next
+reader does not chase it.
+
+**Four dead public methods, removed.** None hid a defect, which is itself the finding — the pattern
+that produced `partIndex` did not repeat:
+
+| removed | why it was safe |
+| --- | --- |
+| `ParticleSystem.removeTarget` | `advance` already prunes any emitter whose target stopped publishing a transform, so orphans self-heal every frame |
+| `DynamicEntitySystem.getPose` | plain accessor, no reader |
+| `SceneGraph.getEnvCellVisibilityIslandId` | plain accessor, no reader |
+| `GameRuntime.updateDynamicEntityPlacement` | a stub voiding both arguments and returning `false`, for ownership deliberately not materialized |
+
+The last is the shape most worth watching: a public method that always fails, that nothing calls,
+reads as a capability rather than a placeholder.
+
+**Everything else is honest.** The remaining ~30 unconsumed decoded fields belong to tables this
+client does not implement at all — skill, spell and XP tables, clothing bases, character generation,
+LOD degrade bands. Decoded for losslessness with no pretence of a consumer.
+
+### What the sweep did not cover
+
+Fields consumed only by diagnostics or serialization still count as consumed here, so a field merely
+*echoed* to a manifest and never acted on would pass. `orient` was caught only because nothing touched
+it at all.
+
+
 ## Definition of Done
 
 - [x] Every supported setup default physics script is decoded, prepared, and scheduled.

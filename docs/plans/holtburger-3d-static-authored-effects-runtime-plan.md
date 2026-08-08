@@ -3138,20 +3138,27 @@ Concession: the Explorer slider is threaded through four components
 travels. Adding a second one doubled the prop plumbing rather than introducing an audio-settings
 object. Worth collapsing when a third category arrives, not before.
 
-### Phase 10.3 — The terrain scan and the weighting
+### Phase 10.3 — The terrain scan and the weighting — **done**
 
-Ahead of the scheduler, because it produces the scheduler's only input. Walk the cells within
-`ambient_sound_max_dist` of the listener, resolve each through the chain above, and accumulate per
-descriptor: `sound_count` from `CalcWeight`, and — for intermittent descriptors — per-direction
-distance bands from `CalcDir`. `total_weight` normalizes them.
+`scanAmbientSources` walks every installed landblock's 8×8 cells, rejects anything past
+`ambient_sound_max_dist_sq`, and accumulates per descriptor: `soundCount` from `ambientWeight`, and
+per-direction distance bands from `ambientDirection`. Kept a pure function of position, terrain, and
+a resolver, so the whole thing is testable without a browser, a clock, or a device.
 
-This is what makes ambience respond to place, and it is why weighting is not deferrable: it drives
-intermittent *probability* and constant *volume* alike. It is also the second consumer of the
-per-cell terrain classification, so the shared helper lands here.
+`terrain-sample.ts` extracts the packed-word unpack that `terrain-generator.ts` did inline. The
+cross-language duplicate remains: `generated_scenery.rs` has its own copy in Rust, and the two cannot
+share code. The plan's "extract rather than write a second copy" holds *within* each language, and
+the layout is now documented in one place per side rather than four call sites.
 
-*Acceptance:* a listener surrounded by one terrain type accumulates weight in every direction; a
-listener at a boundary accumulates it only toward the authoring side; a listener beyond
-`ambient_sound_max_dist` of any authoring cell accumulates none.
+**All the compass maths runs in AC axes**, converting the listener-to-cell displacement once per
+cell. `ambientDirection` compares |x| against |y| and the headings are compass bearings in that
+plane, so a render-axis vector would bucket sounds into the wrong quadrant while still type-checking.
+That is the third time this hazard has appeared in this plan, and the first time it was designed
+against rather than debugged after.
+
+Concession: constants and helpers whose only consumers arrive in 10.4 and 10.5 are deliberately
+*not* exported yet, because the lint gate treats an unused export as an error and the project treats
+a field without a named consumer as a defect. They become exported when their consumer lands.
 
 ### Phase 10.4 — The scheduler
 

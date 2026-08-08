@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sceneVector3 } from "../../assets/ac-frame";
+import { renderVector3, sceneVector3 } from "../../assets/ac-frame";
+import { placeSpatialAudio } from "./audio-spatialization";
 import {
 	AMBIENT_DIRECTION,
 	AMBIENT_MAX_DISTANCE_SQUARED,
@@ -184,6 +185,7 @@ describe("scanAmbientSources", () => {
 
 describe("placeAmbientSound", () => {
 	const LISTENER = sceneVector3([100, 5, -100]);
+	const RIGHT = renderVector3([1, 0, 0]);
 	/** Scene z runs negative to the north, so a northward placement decreases z. */
 	const northBand = () =>
 		new Map([[AMBIENT_DIRECTION.north, { maximum: 60, minimum: 40 }]]);
@@ -234,6 +236,26 @@ describe("placeAmbientSound", () => {
 		expect(placed[0]).toBeGreaterThan(LISTENER[0]);
 		expect(placed[2]).toBeCloseTo(LISTENER[2]);
 	});
+
+	/**
+	 * The bands are what decide audibility, so they are worth pinning against retail's own floor.
+	 * Ground the listener stands on contributes a 4-10 m band and is comfortably audible; terrain a
+	 * hundred metres off is not, at any authored volume a descriptor actually carries.
+	 */
+	it.each([
+		{ audible: true, band: { maximum: 10, minimum: 4 }, volume: 0.5 },
+		{ audible: false, band: { maximum: 110, minimum: 100 }, volume: 0.5 },
+	])(
+		"places a $volume-volume sound whose audibility is $audible at $band",
+		({ audible, band, volume }) => {
+			const bands = new Map([[AMBIENT_DIRECTION.north, band]]);
+			const placed = placeAmbientSound(bands, LISTENER, () => 0.5)!;
+
+			const placement = placeSpatialAudio(placed, LISTENER, RIGHT, volume, 1);
+
+			expect(placement !== null).toBe(audible);
+		},
+	);
 
 	it("has no placement for a descriptor with no directional contributors", () => {
 		expect(placeAmbientSound(new Map(), LISTENER, () => 0.5)).toBeNull();

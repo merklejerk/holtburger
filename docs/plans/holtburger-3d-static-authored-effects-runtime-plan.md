@@ -3120,19 +3120,23 @@ meant to be seamless. Still no looping voice needed.
 continuous, directional placement would shrink. The reverse is true: intermittent outnumbers
 continuous roughly 9:1, so 10.5 is the common case and carries most of the audible character.
 
-### Phase 10.2 — The ambient category
+### Phase 10.2 — The ambient category — **done**
 
-Add `ambientVolume` to `AudioSettings` and an `is_ambient` route through `placeSpatialAudio`, so
-category volume selection is explicit rather than implied by the single effect path.
+`AudioSettings` gains `ambientVolume`, and `AudioTrigger` gains a `category` field. The plan called
+for an `is_ambient` route through `placeSpatialAudio`, but that function already took a
+`categoryVolume` parameter, so the category is a *name* rather than a flag: `#categoryVolume` selects
+which user volume the trigger scales by, and the spatialization math is untouched.
 
-**Decision made: fix the double multiply.** `PlayAmbientSound` pre-multiplies by
-`ambient_sound_volume` and also passes `is_ambient = 1`, so `GetAttenuation` multiplies by it a second
-time (acclient.c:366824 and 366440). We apply it once, giving a linear slider. Mark it
-`RETAIL DIVERGENCE:` at the site with both citations: the squaring is a defect rather than a tuning
-choice, it is a user setting rather than authored content, and no content can observe the difference.
+**The decision is implemented and asserted, not merely commented.** Retail multiplies ambient gain by
+`ambient_sound_volume` twice — `PlayAmbientSound` pre-multiplies (acclient.c:366824) and
+`GetAttenuation` multiplies again for `is_ambient = 1` (acclient.c:366440) — so a half setting lands
+at a quarter. We apply it once. `RETAIL DIVERGENCE:` sits on the `ambientVolume` field, and a test
+asserts a half ambient setting yields half gain while the effect category is unaffected.
 
-*Acceptance:* effect and ambient sounds resolve independently against their own volumes, and a
-half-volume ambient setting yields half gain rather than a quarter.
+Concession: the Explorer slider is threaded through four components
+(`ExplorerApp` → `ExplorerTools` → `ExplorerWorldPanel`) because that is how `effectVolume` already
+travels. Adding a second one doubled the prop plumbing rather than introducing an audio-settings
+object. Worth collapsing when a third category arrives, not before.
 
 ### Phase 10.3 — The terrain scan and the weighting
 

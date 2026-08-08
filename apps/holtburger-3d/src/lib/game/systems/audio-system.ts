@@ -43,16 +43,35 @@ export interface AudioDevice {
 }
 
 /**
+ * Retail sound categories we produce, each with its own user volume.
+ *
+ * Retail carries a third, interface, for UI sound; it appears when its producer does.
+ */
+export type AudioCategory = "effect" | "ambient";
+
+/**
  * User audio settings, one entry per retail sound category we produce.
  *
- * Retail carries three — effect, ambient, and interface — each with its own enable flag and volume.
- * Only effect exists here, because authored hook sounds are effect sounds
- * (`SoundManager::PlaySoundA` gates on `effect_sounds_enabled` and passes `is_ambient = 0`). Ambient
- * is a separate region-driven scheduler and interface is UI; entries appear when their producers do.
+ * Authored hook sounds are effect sounds (`SoundManager::PlaySoundA` gates on
+ * `effect_sounds_enabled` and passes `is_ambient = 0`); region-driven ambience is its own category
+ * with its own slider, as retail's options screen has.
  */
 export interface AudioSettings {
 	/** Linear multiplier on effect gain in [0, 1]; zero silences the category as retail's flag does. */
 	readonly effectVolume: number;
+	/**
+	 * Linear multiplier on ambient gain in [0, 1].
+	 *
+	 * RETAIL DIVERGENCE: retail applies this **twice**. `PlayAmbientSound` pre-multiplies its volume
+	 * by `ambient_sound_volume` (acclient.c:366824) and also passes `is_ambient = 1`, so
+	 * `GetAttenuation` multiplies by it a second time (acclient.c:366440) — a half-volume setting
+	 * yields a quarter of the gain. We apply it once, giving a linear slider.
+	 *
+	 * Safe to depart from: this is a user setting rather than authored content, so no content can
+	 * observe the difference, and the doubling is a defect rather than a tuning choice — the same
+	 * `GetAttenuation` call applies the effect category exactly once for the non-ambient path.
+	 */
+	readonly ambientVolume: number;
 }
 
 /** Where the listener is and which way its right hand points. */
@@ -71,6 +90,8 @@ export interface AudioTrigger {
 	readonly volume: number;
 	/** Scene space, matching the listener; spatialization is purely relative. */
 	readonly position: SceneVector3;
+	/** Selects which user volume scales this sound; retail's `is_ambient` as a name rather than a flag. */
+	readonly category: AudioCategory;
 }
 
 export type AudioTriggerOutcome =
@@ -131,7 +152,7 @@ export class AudioSystem {
 	#warmupExpiredCount = 0;
 	#warmupRefusedCount = 0;
 	#destroyed = false;
-	#settings: AudioSettings = { effectVolume: 1 };
+	#settings: AudioSettings = { ambientVolume: 1, effectVolume: 1 };
 	#listener: AudioListener = {
 		// The scene origin facing +X, which is only ever right by accident. A frontend that wants
 		// audible sound must place the listener; `inaudibleCount` reports when it has not.
@@ -168,10 +189,22 @@ export class AudioSystem {
 
 	/** Apply user audio settings, which scale gain and therefore range, as retail's do. */
 	setSettings(settings: AudioSettings): void {
-		if (!(settings.effectVolume >= 0 && settings.effectVolume <= 1)) {
-			throw new Error("Effect volume must be within [0, 1].");
+		for (const [category, volume] of [
+			["Effect", settings.effectVolume],
+			["Ambient", settings.ambientVolume],
+		] as const) {
+			if (!(volume >= 0 && volume <= 1)) {
+				throw new Error(`${category} volume must be within [0, 1].`);
+			}
 		}
 		this.#settings = settings;
+	}
+
+	/** The user volume for one category, which is the only thing the category selects. */
+	#categoryVolume(category: AudioCategory): number {
+		return category === "ambient"
+			? this.#settings.ambientVolume
+			: this.#settings.effectVolume;
 	}
 
 	/** Roll, place, and play one authored sound, reporting exactly what happened. */
@@ -186,7 +219,7 @@ export class AudioSystem {
 			this.#listener.position,
 			this.#listener.right,
 			trigger.volume,
-			this.#settings.effectVolume,
+			this.#categoryVolume(trigger.category),
 		);
 		// Below retail's audible floor the sound is not played at all, rather than played silently.
 		if (placement === null) {

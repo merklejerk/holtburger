@@ -44,12 +44,14 @@
 		readonly audioFollowsCamera: boolean;
 		/** Effect-category volume in [0, 1]; retail's other categories are not produced yet. */
 		readonly effectVolume: number;
+		readonly ambientVolume: number;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
 		readonly updateEffectVolume: (volume: number) => void;
+		readonly updateAmbientVolume: (volume: number) => void;
 		readonly envCellRenderMode: EnvCellRenderMode;
 		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		/** Renderer-only layer switches; these do not alter requested scene interest. */
@@ -80,7 +82,9 @@
 		audioFollowsCamera,
 		updateAudioFollowsCamera,
 		effectVolume,
+		ambientVolume,
 		updateEffectVolume,
+		updateAmbientVolume,
 		updateDistanceFog,
 		updateViewerLight,
 		updateClockFollowing,
@@ -375,6 +379,20 @@
 					value={effectVolume}
 					oninput={(event) =>
 						updateEffectVolume(
+							Number((event.currentTarget as HTMLInputElement).value),
+						)}
+				/>
+			</label>
+			<label class="explorer-environment-field">
+				<span>Ambient volume</span>
+				<input
+					max="1"
+					min="0"
+					step="0.05"
+					type="range"
+					value={ambientVolume}
+					oninput={(event) =>
+						updateAmbientVolume(
 							Number((event.currentTarget as HTMLInputElement).value),
 						)}
 				/>

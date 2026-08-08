@@ -61,6 +61,7 @@ function build(
 
 function trigger(overrides: Partial<AudioTrigger> = {}): AudioTrigger {
 	return {
+		category: "effect",
 		position: sceneVector3([0, 0, 0]),
 		probability: 1,
 		soundId: SOUND,
@@ -70,6 +71,32 @@ function trigger(overrides: Partial<AudioTrigger> = {}): AudioTrigger {
 }
 
 describe("AudioSystem", () => {
+	/**
+	 * RETAIL DIVERGENCE, asserted rather than only commented: retail multiplies ambient gain by
+	 * `ambient_sound_volume` twice (acclient.c:366824 and 366440), so a half setting would land at a
+	 * quarter. We apply it once, and the two categories scale independently.
+	 */
+	it("scales ambient gain linearly, and independently of the effect volume", () => {
+		const { played, system } = build();
+		system.setSettings({ ambientVolume: 0.5, effectVolume: 1 });
+
+		system.trigger(trigger({ category: "ambient" }));
+		system.trigger(trigger({ category: "effect" }));
+
+		expect(played[0]!.gain).toBeCloseTo(0.5);
+		expect(played[1]!.gain).toBeCloseTo(1);
+	});
+
+	it("rejects an out-of-range volume in either category", () => {
+		const { system } = build();
+		expect(() =>
+			system.setSettings({ ambientVolume: 2, effectVolume: 1 }),
+		).toThrow("Ambient volume");
+		expect(() =>
+			system.setSettings({ ambientVolume: 1, effectVolume: -1 }),
+		).toThrow("Effect volume");
+	});
+
 	it("plays a certain sound at its authored volume when the listener is on top of it", () => {
 		const { played, system } = build();
 

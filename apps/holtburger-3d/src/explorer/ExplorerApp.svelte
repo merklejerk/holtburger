@@ -126,12 +126,18 @@
 	/** Mirrors the camera coordinator's default so the switch reflects reality on first paint. */
 	let audioFollowsCamera = $state(true);
 
-	/** Mirrors `AudioSystem`'s own default, which is full effect volume. */
+	/** Mirror `AudioSystem`'s own defaults, which are full volume in every category. */
 	let effectVolume = $state(1);
+	let ambientVolume = $state(1);
 
 	function updateEffectVolume(volume: number): void {
 		effectVolume = volume;
-		gameRuntime?.setAudioSettings({ effectVolume: volume });
+		gameRuntime?.setAudioSettings({ ambientVolume, effectVolume: volume });
+	}
+
+	function updateAmbientVolume(volume: number): void {
+		ambientVolume = volume;
+		gameRuntime?.setAudioSettings({ ambientVolume: volume, effectVolume });
 	}
 
 	function updateAudioFollowsCamera(enabled: boolean): void {
@@ -488,8 +494,10 @@
 			{clockFollowing}
 			{audioFollowsCamera}
 			{effectVolume}
+			{ambientVolume}
 			{updateAudioFollowsCamera}
 			{updateEffectVolume}
+			{updateAmbientVolume}
 			{updateClockFollowing}
 			{updateDistanceFog}
 			{updateViewerLight}

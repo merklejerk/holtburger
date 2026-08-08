@@ -3373,9 +3373,40 @@ that produced `partIndex` did not repeat:
 The last is the shape most worth watching: a public method that always fails, that nothing calls,
 reads as a capability rather than a placeholder.
 
-**Everything else is honest.** The remaining ~30 unconsumed decoded fields belong to tables this
-client does not implement at all — skill, spell and XP tables, clothing bases, character generation,
-LOD degrade bands. Decoded for losslessness with no pretence of a consumer.
+**Everything else, enumerated.** A first pass said "~30 fields across skill, spell, XP, clothing,
+character generation and LOD" — that was wrong on both count and contents. Skill and spell tables do
+have readers; they only looked orphaned because the exclusion glob had silently failed (see below).
+The accurate figure is **20 fields with no reader anywhere**, of 534 decoded:
+
+| file | fields | what it is |
+| --- | --- | --- |
+| `xp_table.rs` | 10 — the entire `XpTable` | experience curves; no consumer, no partial use |
+| `material.rs` | 6 across `ClothingTable`, `ClothingBase`, `CloObjectEffect`, `CloPaletteTemplate` | the clothing/palette-template chain |
+| `char_gen.rs` | 2 (`CharacterGenGender.base_obj_desc`, `EyeStrip.obj_desc_bald`) | character generation |
+| `degrade_info.rs` | 1 (`DegradeBand.ideal_distance`) | LOD band; its `max_distance` sibling *is* read |
+| `scene.rs` | 1 (`SceneObjectTemplate.orient`) | the finding above — retail ignores it too |
+
+Every one belongs to a subsystem this client has not built, and each is whole rather than partial:
+nothing reads *some* of `XpTable`. A partially-consumed struct is the shape that hides a `partIndex`;
+a wholly-unconsumed one is just a format we decode faithfully and do not use yet.
+
+**A separate category worth naming: 8 fields read only by the conversion tool.**
+`MotionTable`/`MotionData`/`AnimData` (`anim_id`, `low_frame`, `high_frame`, `framerate`,
+`style_defaults`, `anims`) and `MotionKinematics` are decoded and carried into the HBA archive by
+`holtburger-tools`, and the runtime never reads them. That is expected — animation reaches the client
+by another path — but "the archive carries it" is not the same as "the client uses it", and the
+distinction is invisible unless the sweep separates them.
+
+### Tooling failure worth recording
+
+`rg` in this environment is ugrep, whose `-g '!path'` exclusion silently does nothing. The first sweep
+therefore counted every field as consumed by its own defining file, and a second pass reported
+`0 fields with no reader` — a clean-looking result that was pure artifact. It was caught only because
+that contradicted the `orient` finding from the pass before.
+
+Do the exclusion in the caller, not the search tool. A search whose filter silently fails reports
+success, and this is the second time in this plan that reading an unverified probe cost more than
+checking it would have.
 
 ### What the sweep did not cover
 

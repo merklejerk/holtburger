@@ -78,6 +78,7 @@ try {
 						portalRenderGraph: result.portalRenderGraph,
 						portalContextLossPolicy: result.state.portalContextLossPolicy,
 						portalSubstrate: result.state.portalSubstrate,
+						portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
 						hybridPortalExecution: result.state.hybridPortalExecution,
 						internalPortalExecutionFixture:
 							result.state.internalPortalExecution,
@@ -783,6 +784,7 @@ function assertPortalSubstrateFixture(state) {
 		disposedTargetCount: 2,
 		extent: null,
 	});
+	assertPortalScopeAtlasTargetsFixture(state.portalScopeAtlasTargets);
 	const contextLoss = state.portalContextLossPolicy;
 	if (
 		!contextLoss?.lossEventCanceled ||
@@ -803,6 +805,67 @@ function assertPortalSubstrateFixture(state) {
 	) {
 		throw new Error(
 			`Portal substrate fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
+		);
+	}
+}
+
+function assertPortalScopeAtlasTargetsFixture(fixture) {
+	if (!fixture) {
+		throw new Error(
+			"Portal scope-atlas target fixture did not publish evidence.",
+		);
+	}
+	for (const field of [
+		"initialFramebuffersComplete",
+		"initialResourcesValid",
+		"resizedFramebuffersComplete",
+		"resizedResourcesValid",
+		"resizedTargetReplaced",
+		"sameExtentTargetReused",
+	]) {
+		if (fixture[field] !== true) {
+			throw new Error(`Portal scope-atlas target fixture failed ${field}.`);
+		}
+	}
+	assertScopeAtlasTargetDiagnostics(fixture.initialDiagnostics, {
+		activeBytes: 960,
+		activeFramebufferCount: 4,
+		activeRenderbufferCount: 1,
+		activeTextureCount: 5,
+		allocatedGenerationCount: 1,
+		disposedGenerationCount: 0,
+		extents: {
+			atlas: { height: 8, width: 8 },
+			drawingBuffer: { height: 4, width: 4 },
+		},
+	});
+	assertScopeAtlasTargetDiagnostics(fixture.resizedDiagnostics, {
+		activeBytes: 1_920,
+		activeFramebufferCount: 4,
+		activeRenderbufferCount: 1,
+		activeTextureCount: 5,
+		allocatedGenerationCount: 2,
+		disposedGenerationCount: 1,
+		extents: {
+			atlas: { height: 8, width: 16 },
+			drawingBuffer: { height: 4, width: 8 },
+		},
+	});
+	assertScopeAtlasTargetDiagnostics(fixture.disposedDiagnostics, {
+		activeBytes: 0,
+		activeFramebufferCount: 0,
+		activeRenderbufferCount: 0,
+		activeTextureCount: 0,
+		allocatedGenerationCount: 2,
+		disposedGenerationCount: 2,
+		extents: null,
+	});
+}
+
+function assertScopeAtlasTargetDiagnostics(actual, expected) {
+	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+		throw new Error(
+			`Portal scope-atlas target diagnostics mismatch: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}.`,
 		);
 	}
 }

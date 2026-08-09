@@ -28,6 +28,7 @@
 	import type { WebGL2PortalSubstrateFixtureResult } from "../../lib/game/renderer/webgl2-portal-substrate-fixture";
 	import type { WebGL2HybridPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-hybrid-portal-executor-fixture";
 	import type { WebGL2InternalPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-internal-portal-executor-fixture";
+	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
 	import {
 		GameRuntime,
 		type StaticObjectLayerRuntimeDiagnostics,
@@ -252,6 +253,8 @@
 		readonly portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null;
 		/** Pixel-read production-substrate evidence requested by the dedicated fixture. */
 		readonly portalSubstrate: WebGL2PortalSubstrateFixtureResult | null;
+		/** Browser allocation evidence for the selected scope-atlas target generation. */
+		readonly portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null;
 		/** Pixel-read exterior-transition composition evidence requested by Gate F. */
 		readonly hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null;
 		/** Pixel-read internal graph execution evidence requested by Gate G. */
@@ -272,7 +275,9 @@
 		readonly near: number;
 		readonly pitchDegrees: number;
 		readonly policy:
-			"explicit-env-cell" | "explicit-outdoor" | "explorer-outdoor-focus";
+			| "explicit-env-cell"
+			| "explicit-outdoor"
+			| "explorer-outdoor-focus";
 		readonly position: readonly [number, number, number];
 		readonly yawDegrees: number;
 	}
@@ -344,6 +349,8 @@
 	let portalTargetCapabilities: PortalTargetCapabilityProbe | null = null;
 	let portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null = null;
 	let portalSubstrate: WebGL2PortalSubstrateFixtureResult | null = null;
+	let portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null =
+		null;
 	let hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null =
 		null;
 	let internalPortalExecution: WebGL2InternalPortalExecutionFixtureResult | null =
@@ -854,6 +861,7 @@
 				if (fixture === "portal-substrate") {
 					portalTargetCapabilities = device.probePortalTargetCapabilities();
 					portalSubstrate = device.probePortalSubstrate();
+					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
 					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy();
 				}
 				if (fixture === "portal-hybrid-execution") {
@@ -985,6 +993,7 @@
 							metrics: frameDiagnostics?.selectionMetrics ?? null,
 							portalContextLossPolicy,
 							portalSubstrate,
+							portalScopeAtlasTargets,
 							portalTargetCapabilities,
 							ready,
 							staticObjectLayers: {

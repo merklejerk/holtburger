@@ -9,9 +9,9 @@ import {
 import type {
 	PortalMaskStencilPolicy,
 	PortalMaskDepthCompare,
-	PortalRenderExtent,
 	WebGL2SceneDomainTarget,
 } from "./webgl2-portal-substrate";
+import type { WebGL2RenderExtent } from "./webgl2-render-target";
 
 type PortalRenderNodeId = PortalRenderWorkPlan["nodes"][number]["id"];
 type VisibilityApertureId = Extract<
@@ -43,7 +43,7 @@ export interface PortalExecutionSubstrate {
 	present(
 		source: WebGL2SceneDomainTarget,
 		destination: WebGLFramebuffer | null,
-		destinationExtent: PortalRenderExtent,
+		destinationExtent: WebGL2RenderExtent,
 	): void;
 	/** Replace depth once inside one completed render-layer union. */
 	resetMaskedDepth(
@@ -52,11 +52,11 @@ export interface PortalExecutionSubstrate {
 		depth: number,
 	): void;
 	/** Allocate or reuse the single synchronous scene-domain target. */
-	resize(extent: PortalRenderExtent): WebGL2SceneDomainTarget;
+	resize(extent: WebGL2RenderExtent): WebGL2SceneDomainTarget;
 	/** Restore the ordinary destination state after offscreen execution. */
 	restoreOrdinaryPass(
 		framebuffer: WebGLFramebuffer | null,
-		extent: PortalRenderExtent,
+		extent: WebGL2RenderExtent,
 	): void;
 	/** Add one graph-selected effective aperture to a render-layer union. */
 	writeLayerMask(
@@ -83,7 +83,7 @@ export interface PortalExecutionInput {
 	/** Active view destination; `null` names the default framebuffer. */
 	readonly destination: WebGLFramebuffer | null;
 	/** Active destination extent, which is also the required offscreen extent. */
-	readonly extent: PortalRenderExtent;
+	readonly extent: WebGL2RenderExtent;
 	/** Authoritative final planner graph; the executor derives no topology or schedule. */
 	readonly plan: PortalRenderWorkPlan;
 	/** Resolve one graph-selected effective aperture to its existing GPU draw range. */

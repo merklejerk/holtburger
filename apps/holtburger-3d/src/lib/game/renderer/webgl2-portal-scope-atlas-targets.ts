@@ -6,7 +6,10 @@ import {
 const RGBA8_BYTES_PER_PIXEL = 4;
 const DEPTH_COMPONENT24_BYTES_PER_PIXEL = 4;
 const DEPTH_COMPONENT32F_BYTES_PER_PIXEL = 4;
-const R32UI_BYTES_PER_PIXEL = 4;
+const R8UI_BYTES_PER_PIXEL = 1;
+
+/** Zero is uncovered; every nonzero R8UI value identifies one retained arrival state. */
+export const PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT = 0xff;
 
 /** Independent extents for atlas-local scene data and screen-space propagation state. */
 export interface PortalScopeAtlasTargetExtents {
@@ -123,7 +126,7 @@ export class WebGL2PortalScopeAtlasTargets {
 	getDiagnostics(): WebGL2PortalScopeAtlasTargetDiagnostics {
 		const extents = this.#targets?.extents ?? null;
 		return {
-			activeBytes: extents ? targetSetByteLength(extents) : 0,
+			activeBytes: extents ? portalScopeAtlasTargetByteLength(extents) : 0,
 			activeFramebufferCount: this.#targets ? 4 : 0,
 			activeRenderbufferCount: this.#targets ? 1 : 0,
 			activeTextureCount: this.#targets ? 5 : 0,
@@ -312,7 +315,7 @@ function allocateFrontierTarget(
 		textures,
 		`frontier ${ordinal} state texture`,
 	);
-	initializeTexture(gl, state, gl.R32UI, extent);
+	initializeTexture(gl, state, gl.R8UI, extent);
 	gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
 	gl.framebufferTexture2D(
 		gl.FRAMEBUFFER,
@@ -439,7 +442,7 @@ function validateTargetExtents(extents: PortalScopeAtlasTargetExtents): void {
 			"Portal scope atlas must contain the complete drawing-buffer root tile.",
 		);
 	}
-	const byteLength = targetSetByteLength(extents);
+	const byteLength = portalScopeAtlasTargetByteLength(extents);
 	if (!Number.isSafeInteger(byteLength)) {
 		throw new Error(
 			"Portal scope-atlas target byte length exceeds safe integers.",
@@ -447,7 +450,10 @@ function validateTargetExtents(extents: PortalScopeAtlasTargetExtents): void {
 	}
 }
 
-function targetSetByteLength(extents: PortalScopeAtlasTargetExtents): number {
+/** Exact configured attachment bytes, excluding opaque driver-owned framebuffer metadata. */
+export function portalScopeAtlasTargetByteLength(
+	extents: PortalScopeAtlasTargetExtents,
+): number {
 	const atlasPixels = extents.atlas.width * extents.atlas.height;
 	const drawingBufferPixels =
 		extents.drawingBuffer.width * extents.drawingBuffer.height;
@@ -457,7 +463,7 @@ function targetSetByteLength(extents: PortalScopeAtlasTargetExtents): number {
 				DEPTH_COMPONENT24_BYTES_PER_PIXEL +
 				DEPTH_COMPONENT32F_BYTES_PER_PIXEL) +
 		drawingBufferPixels *
-			(2 * R32UI_BYTES_PER_PIXEL + DEPTH_COMPONENT24_BYTES_PER_PIXEL)
+			(2 * R8UI_BYTES_PER_PIXEL + DEPTH_COMPONENT24_BYTES_PER_PIXEL)
 	);
 }
 

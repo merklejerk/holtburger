@@ -14,6 +14,8 @@ export interface PortalScopeAtlasResource {
 	readonly atlas: { readonly height: number; readonly width: number };
 	/** Camera render extent used to convert conservative NDC windows to integer pixels. */
 	readonly drawingBuffer: { readonly height: number; readonly width: number };
+	/** Root plus directed-crossing ids representable by the fixed frontier attachments. */
+	readonly maximumArrivalStateCount: number;
 }
 
 /** Fixed GPU-command shape derived from one accepted visibility and atlas plan. */
@@ -48,7 +50,11 @@ interface PortalScopeAtlasPlanTrace {
 	readonly atlasPixelCapacity: number;
 	/** Bounding rectangle of every committed tile, including shelf gaps. */
 	readonly atlasPackedExtentPixelCount: number;
-	/** Whole-frontier retreats caused by atlas capacity. */
+	/** Whole-frontier retreats caused specifically by atlas packing capacity. */
+	readonly atlasCapacityRetreatCount: number;
+	/** Whole-frontier retreats caused specifically by arrival-state format capacity. */
+	readonly arrivalStateCapacityRetreatCount: number;
+	/** Whole-frontier retreats caused by any fixed GPU resource capacity. */
 	readonly frontierRetreatCount: number;
 	/** Packing passes; accepted frames perform one unless atlas capacity forces retreat. */
 	readonly packingAttemptCount: number;
@@ -79,8 +85,10 @@ interface MutablePortalScopeAtlasCommandLedger extends PortalScopeAtlasCommandLe
 interface MutablePortalScopeAtlasPlanTrace extends PortalScopeAtlasPlanTrace {
 	arenaCapacityBytes: number;
 	arenaGrowthCount: 0;
+	atlasCapacityRetreatCount: number;
 	atlasPixelCapacity: number;
 	atlasPackedExtentPixelCount: number;
+	arrivalStateCapacityRetreatCount: number;
 	frontierRetreatCount: number;
 	packingAttemptCount: number;
 	portalOwnedFrameHeapRecordCreationCount: 0;
@@ -179,8 +187,10 @@ class MutablePortalScopeAtlasFrameView implements PortalScopeAtlasFrameView {
 	readonly trace: MutablePortalScopeAtlasPlanTrace = {
 		arenaCapacityBytes: 0,
 		arenaGrowthCount: 0,
+		atlasCapacityRetreatCount: 0,
 		atlasPackedExtentPixelCount: 0,
 		atlasPixelCapacity: 0,
+		arrivalStateCapacityRetreatCount: 0,
 		frontierRetreatCount: 0,
 		packingAttemptCount: 0,
 		portalOwnedFrameHeapRecordCreationCount: 0,
@@ -290,6 +300,18 @@ export class PortalScopeAtlasPlanner {
 		validateResource(resource, input, this.#maximumTileCount);
 		const visibility = this.#culler.cull(topology, input);
 		this.#beginFrame(visibility, resource);
+		while (
+			visibility.selectedCrossingCount + 1 >
+			resource.maximumArrivalStateCount
+		) {
+			if (!this.#culler.declineDeepestCompletedFrontier(visibility)) {
+				throw new Error(
+					"Portal scope atlas cannot retain its root arrival state.",
+				);
+			}
+			this.#frame.trace.arrivalStateCapacityRetreatCount += 1;
+			this.#frame.trace.frontierRetreatCount += 1;
+		}
 		while (true) {
 			this.#frame.trace.packingAttemptCount += 1;
 			this.#deriveTileBounds(visibility, resource);
@@ -306,6 +328,7 @@ export class PortalScopeAtlasPlanner {
 					"Portal scope atlas cannot retain the root drawing-buffer tile.",
 				);
 			}
+			this.#frame.trace.atlasCapacityRetreatCount += 1;
 			this.#frame.trace.frontierRetreatCount += 1;
 		}
 		this.#frame.tileCount = visibility.selectedScopeCount;
@@ -322,6 +345,8 @@ export class PortalScopeAtlasPlanner {
 		this.#frame.trace.atlasPixelCapacity =
 			resource.atlas.width * resource.atlas.height;
 		this.#frame.trace.atlasPackedExtentPixelCount = 0;
+		this.#frame.trace.atlasCapacityRetreatCount = 0;
+		this.#frame.trace.arrivalStateCapacityRetreatCount = 0;
 		this.#frame.trace.frontierRetreatCount = 0;
 		this.#frame.trace.packingAttemptCount = 0;
 		this.#frame.trace.tilePixelCount = 0;
@@ -528,6 +553,7 @@ function validateResource(
 		["atlas height", resource.atlas.height],
 		["drawing-buffer width", resource.drawingBuffer.width],
 		["drawing-buffer height", resource.drawingBuffer.height],
+		["maximum arrival-state count", resource.maximumArrivalStateCount],
 	] as const) {
 		if (!Number.isSafeInteger(value) || value <= 0 || value > MAXIMUM_UINT32) {
 			throw new Error(`Portal scope-atlas ${name} must fit a positive Uint32.`);

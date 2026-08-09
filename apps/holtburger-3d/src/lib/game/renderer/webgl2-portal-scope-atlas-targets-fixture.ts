@@ -1,4 +1,5 @@
 import {
+	PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT,
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetDiagnostics,
 	type WebGL2PortalScopeAtlasTargetSet,
@@ -16,6 +17,7 @@ const RESIZED_EXTENTS = {
 /** Focused browser evidence for fixed atlas formats and transactional target ownership. */
 export interface WebGL2PortalScopeAtlasTargetsFixtureResult {
 	readonly disposedDiagnostics: WebGL2PortalScopeAtlasTargetDiagnostics;
+	readonly frontierR8uiRoundTripPassed: boolean;
 	readonly initialDiagnostics: WebGL2PortalScopeAtlasTargetDiagnostics;
 	readonly initialFramebuffersComplete: boolean;
 	readonly initialResourcesValid: boolean;
@@ -41,6 +43,10 @@ export function runWebGL2PortalScopeAtlasTargetsFixture(
 		const initial = targets.resize(INITIAL_EXTENTS);
 		const initialDiagnostics = targets.getDiagnostics();
 		const initialFramebuffersComplete = framebuffersComplete(gl, initial);
+		const frontierR8uiRoundTripPassed = frontierR8uiRoundTrip(
+			gl,
+			initial.frontiers[0],
+		);
 		const initialResourcesValid = resourcesValid(gl, initial);
 		const sameExtentTargetReused =
 			targets.resize({
@@ -55,6 +61,7 @@ export function runWebGL2PortalScopeAtlasTargetsFixture(
 		targets.destroy();
 		return {
 			disposedDiagnostics: targets.getDiagnostics(),
+			frontierR8uiRoundTripPassed,
 			initialDiagnostics,
 			initialFramebuffersComplete,
 			initialResourcesValid,
@@ -66,6 +73,37 @@ export function runWebGL2PortalScopeAtlasTargetsFixture(
 		};
 	} finally {
 		targets.destroy();
+	}
+}
+
+/** Prove the selected integer attachment preserves every usable arrival-state bit. */
+function frontierR8uiRoundTrip(
+	gl: WebGL2RenderingContext,
+	target: WebGL2PortalScopeAtlasTargetSet["frontiers"][number],
+): boolean {
+	const previousDraw = gl.getParameter(
+		gl.DRAW_FRAMEBUFFER_BINDING,
+	) as WebGLFramebuffer | null;
+	const previousRead = gl.getParameter(
+		gl.READ_FRAMEBUFFER_BINDING,
+	) as WebGLFramebuffer | null;
+	const expected = new Uint32Array([
+		PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT,
+		0,
+		0,
+		0,
+	]);
+	const actual = new Uint8Array(1);
+	try {
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
+		gl.clearBufferuiv(gl.COLOR, 0, expected);
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
+		gl.readBuffer(gl.COLOR_ATTACHMENT0);
+		gl.readPixels(0, 0, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_BYTE, actual);
+		return actual[0] === PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT;
+	} finally {
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, previousDraw);
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, previousRead);
 	}
 }
 

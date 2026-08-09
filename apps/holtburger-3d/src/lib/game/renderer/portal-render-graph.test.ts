@@ -1476,6 +1476,8 @@ describe("portal scope-atlas planning", () => {
 		const frame = planner.plan(graph, input, {
 			atlas: { height: 100, width: 200 },
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
 
 		expect(frame.visibility.status).toBe("complete");
@@ -1535,6 +1537,8 @@ describe("portal scope-atlas planning", () => {
 		const frame = planner.plan(graph, input, {
 			atlas: { height: 150, width: 100 },
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
 
 		expect(frame.visibility.status).toBe("truncated");
@@ -1549,6 +1553,8 @@ describe("portal scope-atlas planning", () => {
 			"has no selected atlas tile",
 		);
 		expect(frame.trace.frontierRetreatCount).toBe(2);
+		expect(frame.trace.atlasCapacityRetreatCount).toBe(2);
+		expect(frame.trace.arrivalStateCapacityRetreatCount).toBe(0);
 		expect(frame.trace.packingAttemptCount).toBe(3);
 		expect(frame.commands).toEqual({
 			crossingInstancePreparationCount: 1,
@@ -1565,6 +1571,42 @@ describe("portal scope-atlas planning", () => {
 		expect(frame.visibility.trace.projectionPrimitiveCount).toBeGreaterThan(0);
 	});
 
+	it("retreats before packing when arrival-state ids exceed their fixed format", () => {
+		const middle = envCellScope("state-middle");
+		const leaf = envCellScope("state-leaf");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(middle, "state-middle"),
+				topologyScope(leaf, "state-leaf"),
+			],
+			[
+				crossing("state-middle", OUTDOOR_SCOPE, middle),
+				crossing("state-leaf", middle, leaf),
+			],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumArrivalStateCount: 2,
+		});
+
+		expect(frame.visibility.status).toBe("truncated");
+		expect(frame.visibility.completedDepth).toBe(1);
+		expect(frame.visibility.declinedDepth).toBe(2);
+		expect(frame.visibility.selectedCrossingCount).toBe(1);
+		expect(frame.trace).toMatchObject({
+			atlasCapacityRetreatCount: 0,
+			// The terminal empty frontier is discarded before the crossing-bearing frontier.
+			arrivalStateCapacityRetreatCount: 2,
+			frontierRetreatCount: 2,
+			packingAttemptCount: 1,
+		});
+	});
+
 	it("uses the configured fixed propagation depth and reuses its frame records", () => {
 		const child = envCellScope("child");
 		const graph = topology(
@@ -1576,6 +1618,8 @@ describe("portal scope-atlas planning", () => {
 		const resource = {
 			atlas: { height: 100, width: 200 },
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		};
 
 		const first = planner.plan(graph, input, resource);
@@ -1633,6 +1677,8 @@ describe("portal scope-atlas planning", () => {
 				width: TEST_ATLAS_PACKING_EXTENT,
 			},
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
 
 		expect(frame.tileCount).toBe(TEST_ATLAS_PACKING_CHILD_COUNT + 1);
@@ -1680,6 +1726,8 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, input, {
 				atlas: { height: 100, width: 99 },
 				drawingBuffer: input.portalFootprint.drawingBuffer,
+				maximumArrivalStateCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
 		).toThrow("retain the full drawing-buffer root tile");
 	});
@@ -1693,18 +1741,24 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, ordinaryInput, {
 				atlas: { height: 0, width: 100 },
 				drawingBuffer: ordinaryInput.portalFootprint.drawingBuffer,
+				maximumArrivalStateCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
 		).toThrow("fit a positive Uint32");
 		expect(() =>
 			planner.plan(graph, ordinaryInput, {
 				atlas: { height: 100, width: TEST_UINT32_OVERFLOW },
 				drawingBuffer: ordinaryInput.portalFootprint.drawingBuffer,
+				maximumArrivalStateCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
 		).toThrow("fit a positive Uint32");
 		expect(() =>
 			planner.plan(graph, ordinaryInput, {
 				atlas: { height: 100, width: 100 },
 				drawingBuffer: { height: 100, width: 99 },
+				maximumArrivalStateCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
 		).toThrow("culler drawing-buffer extents differ");
 
@@ -1721,6 +1775,8 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, unsafePixelInput, {
 				atlas: unsafePixelInput.portalFootprint.drawingBuffer,
 				drawingBuffer: unsafePixelInput.portalFootprint.drawingBuffer,
+				maximumArrivalStateCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
 		).toThrow("pixel capacity exceeds safe integer storage");
 
@@ -1737,6 +1793,8 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, unsafeTraceInput, {
 				atlas: unsafeTraceInput.portalFootprint.drawingBuffer,
 				drawingBuffer: unsafeTraceInput.portalFootprint.drawingBuffer,
+				maximumArrivalStateCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
 		).toThrow("tile-area trace exceeds safe integer storage");
 	});
@@ -1761,6 +1819,8 @@ describe("portal scope-atlas planning", () => {
 				{
 					atlas: { height: 100, width: 100 },
 					drawingBuffer: input.portalFootprint.drawingBuffer,
+					maximumArrivalStateCount:
+						PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 				},
 			),
 		).toThrow("duplicate render scope key duplicate");

@@ -27,10 +27,19 @@ import {
 	type PortalRenderWorkPlan,
 } from "./portal-render-graph";
 import {
+	PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
+	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
+	PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT,
+	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
+	PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES,
+	PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES,
+} from "./portal-arrival-metadata";
+import {
 	PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL,
 	PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
-	PortalCrossingTriangleStreamArena,
+	PortalPropagationStreamArena,
 } from "./portal-crossing-triangle-stream";
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
@@ -1685,11 +1694,24 @@ describe("portal scope-atlas planning", () => {
 			maximumArrivalStateCount:
 				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
-		const stream = new PortalCrossingTriangleStreamArena(12);
+		const stream = new PortalPropagationStreamArena(12);
 
 		const firstView = stream.prepare(frame, input.anchorCoordinates);
 		const secondView = stream.prepare(frame, input.anchorCoordinates);
 		const slots = new Uint32Array(stream.bytes.buffer);
+		const metadataRecordSlotCount =
+			PORTAL_ARRIVAL_METADATA_RECORD_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+		const firstCrossingRecordOffset = metadataRecordSlotCount;
+		const secondCrossingRecordOffset = metadataRecordSlotCount * 2;
+		const metadataScopeSlot =
+			PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES /
+			Uint32Array.BYTES_PER_ELEMENT;
+		const metadataReciprocalSlot =
+			PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES /
+			Uint32Array.BYTES_PER_ELEMENT;
+		const metadataFlagsSlot =
+			PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES /
+			Uint32Array.BYTES_PER_ELEMENT;
 
 		expect(secondView).toBe(firstView);
 		expect(secondView.vertexCount).toBe(12);
@@ -1697,14 +1719,45 @@ describe("portal scope-atlas planning", () => {
 			12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 		);
 		expect(secondView.trace).toMatchObject({
-			arenaCapacityBytes: 12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+			arenaCapacityBytes:
+				12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES +
+				PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
 			arenaGrowthCount: 0,
+			arrivalMetadataCapacityBytes: PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+			arrivalMetadataStateWriteCount: 3,
+			arrivalPlaneScalarWriteCount: 8,
 			crossingInputCount: 2,
 			portalOwnedFrameHeapRecordCreationCount: 0,
 			positionScalarReadCount: 36,
+			reciprocalArrivalStateReadCount: 2,
 			triangleIndexReadCount: 12,
+			triangleCapacityBytes: 12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 			vertexHighWaterCount: 12,
 		});
+		expect(secondView.arrivalMetadataStateCount).toBe(3);
+		expect(secondView.usedArrivalMetadataByteLength).toBe(
+			3 * PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
+		);
+		const arrivalFloats = new Float32Array(stream.arrivalMetadataBytes.buffer);
+		const arrivalUints = new Uint32Array(stream.arrivalMetadataBytes.buffer);
+		expect(
+			Array.from(
+				arrivalFloats.slice(
+					firstCrossingRecordOffset,
+					firstCrossingRecordOffset + PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT,
+				),
+			),
+		).toEqual([-0, -0, -1, -0]);
+		expect(
+			[metadataScopeSlot, metadataReciprocalSlot, metadataFlagsSlot].map(
+				(slot) => arrivalUints[firstCrossingRecordOffset + slot],
+			),
+		).toEqual([1, 0, PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE]);
+		expect(
+			[metadataScopeSlot, metadataReciprocalSlot, metadataFlagsSlot].map(
+				(slot) => arrivalUints[secondCrossingRecordOffset + slot],
+			),
+		).toEqual([2, 0, PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE]);
 		// Slot 3/4/5 are output arrival, source scope, and depth policy respectively.
 		expect(Array.from(slots.slice(3, 6))).toEqual([
 			2,
@@ -1716,6 +1769,73 @@ describe("portal scope-atlas planning", () => {
 			0,
 			PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
 		]);
+	});
+
+	it("resolves selected reciprocal crossings to their packed arrival ids", () => {
+		const left = envCellScope("reciprocal-left");
+		const right = envCellScope("reciprocal-right");
+		const leftToRightId = "portal-crossing:left-right" as const;
+		const rightToLeftId = "portal-crossing:right-left" as const;
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(left, "reciprocal-left"),
+				topologyScope(right, "reciprocal-right"),
+			],
+			[
+				crossing("root-left", OUTDOOR_SCOPE, left, {
+					aperture: rectangle(-0.9, -0.8, -0.1, 0.8),
+				}),
+				crossing("root-right", OUTDOOR_SCOPE, right, {
+					aperture: rectangle(0.1, -0.8, 0.9, 0.8),
+				}),
+				crossing("left-right", left, right, {
+					aperture: rectangle(-0.9, -0.8, -0.1, 0.8),
+					reciprocalCrossingId: rightToLeftId,
+				}),
+				crossing("right-left", right, left, {
+					aperture: rectangle(0.1, -0.8, 0.9, 0.8),
+					reciprocalCrossingId: leftToRightId,
+				}),
+			],
+		);
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+		const frame = scopeAtlasPlanner().plan(graph, input, {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount: 24,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+		const selectedOrdinalById = new Map<PortalCrossingId, number>();
+		for (
+			let ordinal = 0;
+			ordinal < frame.visibility.selectedCrossingCount;
+			ordinal += 1
+		) {
+			selectedOrdinalById.set(
+				frame.visibility.selectedCrossing(ordinal).id,
+				ordinal,
+			);
+		}
+		const leftToRightOrdinal = selectedOrdinalById.get(leftToRightId);
+		const rightToLeftOrdinal = selectedOrdinalById.get(rightToLeftId);
+		expect(leftToRightOrdinal).toBeTypeOf("number");
+		expect(rightToLeftOrdinal).toBeTypeOf("number");
+		if (leftToRightOrdinal === undefined || rightToLeftOrdinal === undefined) {
+			throw new Error("Reciprocal cycle crossings were not selected.");
+		}
+
+		expect(
+			frame.visibility.selectedCrossingReciprocalArrivalStateId(
+				leftToRightOrdinal,
+			),
+		).toBe(rightToLeftOrdinal + 2);
+		expect(
+			frame.visibility.selectedCrossingReciprocalArrivalStateId(
+				rightToLeftOrdinal,
+			),
+		).toBe(leftToRightOrdinal + 2);
 	});
 
 	it("uses the configured fixed propagation depth and reuses its frame records", () => {

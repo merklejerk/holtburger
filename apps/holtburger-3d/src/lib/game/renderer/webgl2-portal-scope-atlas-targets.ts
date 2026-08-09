@@ -8,9 +8,6 @@ const DEPTH_COMPONENT24_BYTES_PER_PIXEL = 4;
 const DEPTH_COMPONENT32F_BYTES_PER_PIXEL = 4;
 const R8UI_BYTES_PER_PIXEL = 1;
 
-/** Zero is uncovered; every nonzero R8UI value identifies one retained arrival state. */
-export const PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT = 0xff;
-
 /** Independent extents for atlas-local scene data and screen-space propagation state. */
 export interface PortalScopeAtlasTargetExtents {
 	/** Packed scope tiles; this extent is never smaller than the drawing buffer. */

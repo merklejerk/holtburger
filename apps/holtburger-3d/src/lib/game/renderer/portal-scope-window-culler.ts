@@ -118,10 +118,18 @@ export interface PortalScopeWindowFrameView {
 	selectedCrossing(ordinal: number): ScenePortalCrossingInput;
 	/** Return the selected source-scope ordinal for one directed crossing. */
 	selectedCrossingSourceScopeOrdinal(ordinal: number): number;
+	/** Return the selected target-scope ordinal for one directed crossing. */
+	selectedCrossingTargetScopeOrdinal(ordinal: number): number;
+	/** Return the selected reciprocal's arrival id, or zero when no selected reciprocal exists. */
+	selectedCrossingReciprocalArrivalStateId(ordinal: number): number;
 	/** Return the visibility aperture's topology-owned landblock x coordinate. */
-	selectedCrossingLandblockX(ordinal: number): number;
+	selectedCrossingVisibilityLandblockX(ordinal: number): number;
 	/** Return the visibility aperture's topology-owned landblock y coordinate. */
-	selectedCrossingLandblockY(ordinal: number): number;
+	selectedCrossingVisibilityLandblockY(ordinal: number): number;
+	/** Return the source aperture's topology-owned landblock x coordinate. */
+	selectedCrossingSourceLandblockX(ordinal: number): number;
+	/** Return the source aperture's topology-owned landblock y coordinate. */
+	selectedCrossingSourceLandblockY(ordinal: number): number;
 	/** Read one selected arena window without constructing an immutable window record. */
 	selectedFragmentCount(ordinal: number): number;
 	/** Read one selected fragment's vertex count through the non-retained frame view. */
@@ -146,6 +154,8 @@ class PortalScopeWindowTopologyIndex {
 	readonly crossings: readonly IndexedCrossing[];
 	readonly outgoingCrossingIds: Uint32Array;
 	readonly outgoingOffsets: Uint32Array;
+	/** Stable reciprocal crossing id, or -1 when the directed crossing has no reciprocal. */
+	readonly reciprocalCrossingIds: Int32Array;
 	readonly revision: number;
 	/** Canonical renderer scope keys resolved to topology-stable integer ids. */
 	readonly scopeIdByRenderKey: ReadonlyMap<string, number>;
@@ -198,6 +208,39 @@ class PortalScopeWindowTopologyIndex {
 				});
 			}),
 		);
+		const crossingIdByPortalId = new Map<
+			ScenePortalCrossingInput["id"],
+			number
+		>();
+		for (
+			let crossingId = 0;
+			crossingId < this.crossings.length;
+			crossingId += 1
+		) {
+			const portalId = this.crossings[crossingId]!.crossing.id;
+			if (crossingIdByPortalId.has(portalId)) {
+				throw new Error(`Portal topology repeats crossing id ${portalId}.`);
+			}
+			crossingIdByPortalId.set(portalId, crossingId);
+		}
+		this.reciprocalCrossingIds = new Int32Array(this.crossings.length);
+		this.reciprocalCrossingIds.fill(-1);
+		for (
+			let crossingId = 0;
+			crossingId < this.crossings.length;
+			crossingId += 1
+		) {
+			const reciprocalPortalId =
+				this.crossings[crossingId]!.crossing.reciprocalCrossingId;
+			if (reciprocalPortalId === null) continue;
+			const reciprocalCrossingId = crossingIdByPortalId.get(reciprocalPortalId);
+			if (reciprocalCrossingId === undefined) {
+				throw new Error(
+					`Portal crossing reciprocal ${reciprocalPortalId} is unavailable in this topology.`,
+				);
+			}
+			this.reciprocalCrossingIds[crossingId] = reciprocalCrossingId;
+		}
 		this.outgoingOffsets = new Uint32Array(this.scopes.length + 1);
 		for (const { sourceScopeId } of this.crossings) {
 			this.outgoingOffsets[sourceScopeId + 1] += 1;
@@ -243,7 +286,11 @@ class PortalScopeWindowArena {
 	readonly queueScopeIds: Uint32Array;
 	readonly queueWindows: Uint32Array;
 	readonly selectedByScopeId: Uint8Array;
+	/** Selection marker indexed by topology-stable crossing id. */
+	readonly selectedByCrossingId: Uint8Array;
 	readonly selectedCrossingIds: Uint32Array;
+	/** Selected ordinal indexed by stable crossing id while its marker is set. */
+	readonly selectedOrdinalByCrossingId: Uint32Array;
 	/** Selected ordinal indexed by stable scope id; valid only while selectedByScopeId is set. */
 	readonly selectedOrdinalByScopeId: Uint32Array;
 	readonly selectedScopeIds: Uint32Array;
@@ -272,7 +319,9 @@ class PortalScopeWindowArena {
 		this.queueWindows = new Uint32Array(workItemCount);
 		this.queueWindows.fill(NO_PORTAL_ARENA_WINDOW);
 		this.selectedByScopeId = new Uint8Array(scopeCount);
+		this.selectedByCrossingId = new Uint8Array(crossingCount);
 		this.selectedCrossingIds = new Uint32Array(crossingCount);
+		this.selectedOrdinalByCrossingId = new Uint32Array(crossingCount);
 		this.selectedOrdinalByScopeId = new Uint32Array(scopeCount);
 		this.selectedScopeIds = new Uint32Array(scopeCount);
 		this.windows = new PortalWindowArena(windowCapacity);
@@ -289,7 +338,9 @@ class PortalScopeWindowArena {
 			this.queueScopeIds.byteLength +
 			this.queueWindows.byteLength +
 			this.selectedByScopeId.byteLength +
+			this.selectedByCrossingId.byteLength +
 			this.selectedCrossingIds.byteLength +
+			this.selectedOrdinalByCrossingId.byteLength +
 			this.selectedOrdinalByScopeId.byteLength +
 			this.selectedScopeIds.byteLength +
 			this.windows.trace.capacityBytes;
@@ -348,27 +399,58 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	}
 
 	selectedCrossingSourceScopeOrdinal(ordinal: number): number {
-		const arena = this.#requireArena();
-		const sourceScopeId = this.#selectedIndexedCrossing(ordinal).sourceScopeId;
-		if (arena.selectedByScopeId[sourceScopeId] === 0) {
-			throw new Error(
-				"Selected portal crossing has an unselected source scope.",
-			);
-		}
-		return arena.selectedOrdinalByScopeId[sourceScopeId]!;
+		return this.#selectedCrossingScopeOrdinal(ordinal, "sourceScopeId");
 	}
 
-	selectedCrossingLandblockX(ordinal: number): number {
+	selectedCrossingTargetScopeOrdinal(ordinal: number): number {
+		return this.#selectedCrossingScopeOrdinal(ordinal, "targetScopeId");
+	}
+
+	selectedCrossingReciprocalArrivalStateId(ordinal: number): number {
+		const reciprocalCrossingId =
+			this.index!.reciprocalCrossingIds[this.#selectedCrossingId(ordinal)]!;
+		if (reciprocalCrossingId < 0) return 0;
+		const arena = this.#requireArena();
+		return arena.selectedByCrossingId[reciprocalCrossingId] === 0
+			? 0
+			: arena.selectedOrdinalByCrossingId[reciprocalCrossingId]! + 2;
+	}
+
+	selectedCrossingVisibilityLandblockX(ordinal: number): number {
 		return this.#selectedIndexedCrossing(ordinal).visibilityAperture
 			.landblockCoordinates.x;
 	}
 
-	selectedCrossingLandblockY(ordinal: number): number {
+	selectedCrossingVisibilityLandblockY(ordinal: number): number {
 		return this.#selectedIndexedCrossing(ordinal).visibilityAperture
 			.landblockCoordinates.y;
 	}
 
+	selectedCrossingSourceLandblockX(ordinal: number): number {
+		return this.#selectedIndexedCrossing(ordinal).sourceLandblockX;
+	}
+
+	selectedCrossingSourceLandblockY(ordinal: number): number {
+		return this.#selectedIndexedCrossing(ordinal).sourceLandblockY;
+	}
+
+	#selectedCrossingScopeOrdinal(
+		ordinal: number,
+		field: "sourceScopeId" | "targetScopeId",
+	): number {
+		const arena = this.#requireArena();
+		const scopeId = this.#selectedIndexedCrossing(ordinal)[field];
+		if (arena.selectedByScopeId[scopeId] === 0) {
+			throw new Error(`Selected portal crossing has an unselected ${field}.`);
+		}
+		return arena.selectedOrdinalByScopeId[scopeId]!;
+	}
+
 	#selectedIndexedCrossing(ordinal: number): IndexedCrossing {
+		return this.index!.crossings[this.#selectedCrossingId(ordinal)]!;
+	}
+
+	#selectedCrossingId(ordinal: number): number {
 		if (
 			!Number.isInteger(ordinal) ||
 			ordinal < 0 ||
@@ -378,8 +460,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 				`Portal selected-crossing ordinal ${ordinal} is unavailable.`,
 			);
 		}
-		const crossingId = this.#requireArena().selectedCrossingIds[ordinal]!;
-		return this.index!.crossings[crossingId]!;
+		return this.#requireArena().selectedCrossingIds[ordinal]!;
 	}
 
 	selectedFragmentCount(ordinal: number): number {
@@ -569,7 +650,8 @@ export class PortalScopeWindowCuller {
 		this.#frame.trace.arenaCapacityBytes =
 			arena.typedCapacityBytes +
 			index.outgoingCrossingIds.byteLength +
-			index.outgoingOffsets.byteLength;
+			index.outgoingOffsets.byteLength +
+			index.reciprocalCrossingIds.byteLength;
 		this.#frame.trace.projectionPrimitiveCount = this.#projectionPrimitiveCount;
 		this.#frame.trace.queueHighWaterCount = this.#queueHighWaterCount;
 		this.#frame.trace.selectedCrossingInputCount =
@@ -664,6 +746,17 @@ export class PortalScopeWindowCuller {
 		arena: PortalScopeWindowArena,
 		index: PortalScopeWindowTopologyIndex,
 	): void {
+		for (
+			let ordinal = 0;
+			ordinal <
+			Math.min(
+				this.#frame.selectedCrossingCount,
+				arena.selectedCrossingIds.length,
+			);
+			ordinal += 1
+		) {
+			arena.selectedByCrossingId[arena.selectedCrossingIds[ordinal]!] = 0;
+		}
 		let selectedCrossingCount = 0;
 		for (
 			let crossingId = 0;
@@ -678,6 +771,8 @@ export class PortalScopeWindowCuller {
 				continue;
 			}
 			arena.selectedCrossingIds[selectedCrossingCount] = crossingId;
+			arena.selectedByCrossingId[crossingId] = 1;
+			arena.selectedOrdinalByCrossingId[crossingId] = selectedCrossingCount;
 			selectedCrossingCount += 1;
 		}
 		this.#selectedCrossingInputCount += index.crossings.length;

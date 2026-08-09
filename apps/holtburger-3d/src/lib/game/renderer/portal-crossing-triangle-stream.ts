@@ -3,8 +3,16 @@ import {
 	type LandblockCoordinates,
 } from "../landblocks";
 import type { ScenePortalCrossingInput } from "../scene";
+import {
+	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
+	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
+	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
+	PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES,
+	PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES,
+	PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT,
+	writeOrientedPortalArrivalPlane,
+} from "./portal-arrival-metadata";
 import type { PortalScopeAtlasFrameView } from "./portal-scope-atlas-planner";
-import { PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT } from "./webgl2-portal-scope-atlas-targets";
 
 /** Interleaved float/integer slots in one expanded crossing-triangle vertex. */
 export const PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES = 24;
@@ -26,8 +34,12 @@ const FIRST_CROSSING_ARRIVAL_STATE_ID = ROOT_ARRIVAL_STATE_ID + 1;
 
 /** Allocation and input-read facts for one prepared crossing stream. */
 interface PortalCrossingTriangleStreamTrace {
-	/** Fixed typed backing storage allocated at arena construction. */
+	/** Fixed triangle plus arrival-metadata storage allocated at arena construction. */
 	readonly arenaCapacityBytes: number;
+	/** Fixed arrival UBO staging storage allocated at arena construction. */
+	readonly arrivalMetadataCapacityBytes: number;
+	/** Root plus selected crossing records populated by this preparation. */
+	readonly arrivalMetadataStateWriteCount: number;
 	/** Camera-time backing-store growth; fixed storage makes this structurally zero. */
 	readonly arenaGrowthCount: 0;
 	/** Selected crossings inspected exactly once while expanding retained geometry. */
@@ -36,6 +48,12 @@ interface PortalCrossingTriangleStreamTrace {
 	readonly triangleIndexReadCount: number;
 	/** Topology-owned xyz scalar values copied into anchor-relative storage. */
 	readonly positionScalarReadCount: number;
+	/** Oriented anchor-plane scalars written once per selected crossing. */
+	readonly arrivalPlaneScalarWriteCount: number;
+	/** Selected reciprocal arrival ids resolved without camera-time string lookup. */
+	readonly reciprocalArrivalStateReadCount: number;
+	/** Fixed expanded triangle storage allocated at arena construction. */
+	readonly triangleCapacityBytes: number;
 	/** Normal-path portal-owned records created by one preparation. */
 	readonly portalOwnedFrameHeapRecordCreationCount: 0;
 	/** Largest initialized triangle-vertex tail reached by this preparation. */
@@ -44,8 +62,11 @@ interface PortalCrossingTriangleStreamTrace {
 
 interface MutablePortalCrossingTriangleStreamTrace extends PortalCrossingTriangleStreamTrace {
 	crossingInputCount: number;
+	arrivalMetadataStateWriteCount: number;
+	arrivalPlaneScalarWriteCount: number;
 	triangleIndexReadCount: number;
 	positionScalarReadCount: number;
+	reciprocalArrivalStateReadCount: number;
 	vertexHighWaterCount: number;
 }
 
@@ -53,23 +74,41 @@ interface MutablePortalCrossingTriangleStreamTrace extends PortalCrossingTriangl
 export interface PortalCrossingTriangleStreamView {
 	/** Complete fixed-capacity byte view; uploads use `usedByteLength` without slicing it. */
 	readonly bytes: Uint8Array;
-	readonly trace: PortalCrossingTriangleStreamTrace;
 	readonly usedByteLength: number;
 	readonly vertexCount: number;
 }
 
+/** Reused non-retained view over the fixed arrival-metadata staging prefix. */
+export interface PortalArrivalMetadataStreamView {
+	/** Complete fixed-capacity arrival-metadata bytes; upload only the initialized prefix. */
+	readonly arrivalMetadataBytes: Uint8Array;
+	readonly arrivalMetadataStateCount: number;
+	readonly usedArrivalMetadataByteLength: number;
+}
+
+/** Reused composite view whose geometry and arrival ids are prepared from the same frame. */
+export interface PortalPropagationStreamView
+	extends PortalCrossingTriangleStreamView, PortalArrivalMetadataStreamView {
+	readonly trace: PortalCrossingTriangleStreamTrace;
+}
+
 /**
- * Expand every retained indexed aperture once into a fixed, GPU-ready triangle stream.
+ * Expand retained indexed apertures and their arrival routes into fixed, GPU-ready streams.
  *
  * Arrival ids follow the culler's stable selected-crossing order: zero is uncovered, one is the
- * root, and crossing ordinal zero begins at two. The stream is invalid after the next `prepare`.
+ * root, and crossing ordinal zero begins at two. Both views expire at the next `prepare`.
  */
-export class PortalCrossingTriangleStreamArena implements PortalCrossingTriangleStreamView {
+export class PortalPropagationStreamArena implements PortalPropagationStreamView {
+	readonly arrivalMetadataBytes: Uint8Array;
 	readonly bytes: Uint8Array;
 	readonly trace: MutablePortalCrossingTriangleStreamTrace;
+	readonly #arrivalFloatSlots: Float32Array;
+	readonly #arrivalUintSlots: Uint32Array;
 	readonly #floatSlots: Float32Array;
 	readonly #maximumTriangleVertexCount: number;
 	readonly #uintSlots: Uint32Array;
+	arrivalMetadataStateCount = 0;
+	usedArrivalMetadataByteLength = 0;
 	usedByteLength = 0;
 	vertexCount = 0;
 
@@ -85,17 +124,28 @@ export class PortalCrossingTriangleStreamArena implements PortalCrossingTriangle
 		const arena = new ArrayBuffer(
 			maximumTriangleVertexCount * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 		);
+		const arrivalArena = new ArrayBuffer(
+			PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT * PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
+		);
+		this.arrivalMetadataBytes = new Uint8Array(arrivalArena);
 		this.bytes = new Uint8Array(arena);
+		this.#arrivalFloatSlots = new Float32Array(arrivalArena);
+		this.#arrivalUintSlots = new Uint32Array(arrivalArena);
 		this.#floatSlots = new Float32Array(arena);
 		this.#maximumTriangleVertexCount = maximumTriangleVertexCount;
 		this.#uintSlots = new Uint32Array(arena);
 		this.trace = {
-			arenaCapacityBytes: arena.byteLength,
+			arenaCapacityBytes: arena.byteLength + arrivalArena.byteLength,
 			arenaGrowthCount: 0,
+			arrivalMetadataCapacityBytes: arrivalArena.byteLength,
+			arrivalMetadataStateWriteCount: 0,
+			arrivalPlaneScalarWriteCount: 0,
 			crossingInputCount: 0,
 			portalOwnedFrameHeapRecordCreationCount: 0,
 			positionScalarReadCount: 0,
+			reciprocalArrivalStateReadCount: 0,
 			triangleIndexReadCount: 0,
+			triangleCapacityBytes: arena.byteLength,
 			vertexHighWaterCount: 0,
 		};
 	}
@@ -103,7 +153,7 @@ export class PortalCrossingTriangleStreamArena implements PortalCrossingTriangle
 	prepare(
 		frame: PortalScopeAtlasFrameView,
 		anchorCoordinates: LandblockCoordinates,
-	): PortalCrossingTriangleStreamView {
+	): PortalPropagationStreamView {
 		const plannedVertexCount = frame.trace.crossingTriangleVertexCount;
 		if (plannedVertexCount > this.#maximumTriangleVertexCount) {
 			throw new Error(
@@ -111,13 +161,29 @@ export class PortalCrossingTriangleStreamArena implements PortalCrossingTriangle
 			);
 		}
 		this.vertexCount = 0;
+		this.arrivalMetadataStateCount = 0;
 		this.usedByteLength = 0;
+		this.usedArrivalMetadataByteLength = 0;
+		this.trace.arrivalMetadataStateWriteCount = 0;
+		this.trace.arrivalPlaneScalarWriteCount = 0;
 		this.trace.crossingInputCount = 0;
 		this.trace.positionScalarReadCount = 0;
+		this.trace.reciprocalArrivalStateReadCount = 0;
 		this.trace.triangleIndexReadCount = 0;
 		this.trace.vertexHighWaterCount = 0;
 
 		const visibility = frame.visibility;
+		if (
+			visibility.selectedCrossingCount + 1 >
+			PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT
+		) {
+			throw new Error(
+				"Portal propagation arrival states exceed R8UI metadata.",
+			);
+		}
+		// The culler always selects the root first, so its destination scope ordinal is zero.
+		this.#writeArrivalRoute(0, 0, 0, 0);
+		this.arrivalMetadataStateCount = 1;
 		for (
 			let crossingOrdinal = 0;
 			crossingOrdinal < visibility.selectedCrossingCount;
@@ -127,25 +193,50 @@ export class PortalCrossingTriangleStreamArena implements PortalCrossingTriangle
 			const aperture = crossing.visibilityAperture;
 			const outputArrivalStateId =
 				FIRST_CROSSING_ARRIVAL_STATE_ID + crossingOrdinal;
-			if (
-				outputArrivalStateId > PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT
-			) {
-				throw new Error(
-					`Portal crossing arrival id ${outputArrivalStateId} exceeds the R8UI frontier format.`,
-				);
-			}
 			const sourceScopeOrdinal =
 				visibility.selectedCrossingSourceScopeOrdinal(crossingOrdinal);
+			const targetScopeOrdinal =
+				visibility.selectedCrossingTargetScopeOrdinal(crossingOrdinal);
+			const reciprocalArrivalStateId =
+				visibility.selectedCrossingReciprocalArrivalStateId(crossingOrdinal);
 			const depthPolicy = encodeDepthPolicy(crossing.maskDepthPolicy);
 			const offsetX =
-				(visibility.selectedCrossingLandblockX(crossingOrdinal) -
+				(visibility.selectedCrossingVisibilityLandblockX(crossingOrdinal) -
 					anchorCoordinates.x) *
 				OUTDOOR_LANDBLOCK_WORLD_SIZE;
 			const offsetZ =
 				-(
-					visibility.selectedCrossingLandblockY(crossingOrdinal) -
+					visibility.selectedCrossingVisibilityLandblockY(crossingOrdinal) -
 					anchorCoordinates.y
 				) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+			const sourceOffsetX =
+				(visibility.selectedCrossingSourceLandblockX(crossingOrdinal) -
+					anchorCoordinates.x) *
+				OUTDOOR_LANDBLOCK_WORLD_SIZE;
+			const sourceOffsetZ =
+				-(
+					visibility.selectedCrossingSourceLandblockY(crossingOrdinal) -
+					anchorCoordinates.y
+				) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+			const arrivalRecordOrdinal = crossingOrdinal + 1;
+			const arrivalFloatOffset =
+				(arrivalRecordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES) /
+				Float32Array.BYTES_PER_ELEMENT;
+			writeOrientedPortalArrivalPlane(
+				this.#arrivalFloatSlots,
+				arrivalFloatOffset,
+				crossing.sourceAperture.plane,
+				crossing.acceptedSide,
+				sourceOffsetX,
+				sourceOffsetZ,
+			);
+			this.#writeArrivalRoute(
+				arrivalRecordOrdinal,
+				targetScopeOrdinal,
+				reciprocalArrivalStateId,
+				PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
+			);
+			this.arrivalMetadataStateCount += 1;
 			for (let cursor = 0; cursor < aperture.indices.length; cursor += 1) {
 				const sourceVertex = aperture.indices[cursor]!;
 				const sourceSlot = sourceVertex * 3;
@@ -165,6 +256,8 @@ export class PortalCrossingTriangleStreamArena implements PortalCrossingTriangle
 				this.vertexCount += 1;
 			}
 			this.trace.crossingInputCount += 1;
+			this.trace.arrivalPlaneScalarWriteCount += 4;
+			this.trace.reciprocalArrivalStateReadCount += 1;
 			this.trace.triangleIndexReadCount += aperture.indices.length;
 			this.trace.positionScalarReadCount += aperture.indices.length * 3;
 		}
@@ -175,8 +268,32 @@ export class PortalCrossingTriangleStreamArena implements PortalCrossingTriangle
 		}
 		this.usedByteLength =
 			this.vertexCount * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES;
+		this.usedArrivalMetadataByteLength =
+			this.arrivalMetadataStateCount * PORTAL_ARRIVAL_METADATA_RECORD_BYTES;
+		this.trace.arrivalMetadataStateWriteCount = this.arrivalMetadataStateCount;
 		this.trace.vertexHighWaterCount = this.vertexCount;
 		return this;
+	}
+
+	#writeArrivalRoute(
+		recordOrdinal: number,
+		scopeOrdinal: number,
+		reciprocalArrivalStateId: number,
+		flags: number,
+	): void {
+		const byteOffset = recordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES;
+		this.#arrivalUintSlots[
+			(byteOffset + PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES) /
+				Uint32Array.BYTES_PER_ELEMENT
+		] = scopeOrdinal;
+		this.#arrivalUintSlots[
+			(byteOffset + PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES) /
+				Uint32Array.BYTES_PER_ELEMENT
+		] = reciprocalArrivalStateId;
+		this.#arrivalUintSlots[
+			(byteOffset + PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES) /
+				Uint32Array.BYTES_PER_ELEMENT
+		] = flags;
 	}
 }
 

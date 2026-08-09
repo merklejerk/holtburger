@@ -29,11 +29,19 @@ import {
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
+import { PortalScopeAtlasPlanner } from "./portal-scope-atlas-planner";
 
 const LANDBLOCK_ID = "0x0001ffff";
 const OUTDOOR_SCOPE = { kind: "outdoor" } as const satisfies SceneScope;
 const DEFAULT_MAXIMUM_STENCIL_VALUE = 0xff;
 const DEFAULT_SAFETY_WORK_ITEM_LIMIT = 10_000;
+const TEST_ATLAS_MAXIMUM_PATH_DEPTH = 4;
+const TEST_ATLAS_PACKING_CHILD_COUNT = 24;
+const TEST_ATLAS_PACKING_EXTENT = 400;
+const TEST_ATLAS_UNSAFE_PIXEL_EXTENT = 100_000_000;
+const TEST_ATLAS_UNSAFE_TILE_EXTENT = 20_000_000;
+const TEST_UINT32_OVERFLOW = 0x1_0000_0000;
+const TEST_RECTANGLE_VERTEX_COUNT = 4;
 
 describe("portal render graph planning", () => {
 	it("rejects invalid portal-footprint policies at the planner boundary", () => {
@@ -1450,6 +1458,299 @@ describe("portal scope-window culler bridge", () => {
 		expect(changedFrame.trace.topologyBuildCount).toBe(2);
 	});
 });
+
+describe("portal scope-atlas planning", () => {
+	it("packs conservative tile bounds and derives clip transforms without heap records", () => {
+		const child = envCellScope("child");
+		const graph = topology(
+			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
+			[
+				crossing("child", OUTDOOR_SCOPE, child, {
+					aperture: rectangle(-0.5, -0.5, 0.5, 0.5),
+				}),
+			],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 100, width: 200 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+		});
+
+		expect(frame.visibility.status).toBe("complete");
+		expect(frame.tileCount).toBe(2);
+		expect(frame.tileX(0)).toBe(0);
+		expect(frame.tileY(0)).toBe(0);
+		expect(frame.tileWidth(0)).toBe(100);
+		expect(frame.tileHeight(0)).toBe(100);
+		expect(frame.tileX(1)).toBe(100);
+		expect(frame.tileY(1)).toBe(0);
+		expect(frame.tileWidth(1)).toBe(50);
+		expect(frame.tileHeight(1)).toBe(50);
+		expect(frame.tileClipScaleX(1)).toBe(2);
+		expect(frame.tileClipScaleY(1)).toBe(2);
+		expect(frame.tileClipOffsetX(1)).toBe(0);
+		expect(frame.tileClipOffsetY(1)).toBe(0);
+		expect(frame.trace).toMatchObject({
+			arenaGrowthCount: 0,
+			atlasPackedExtentPixelCount: 15_000,
+			atlasPixelCapacity: 20_000,
+			frontierRetreatCount: 0,
+			packingAttemptCount: 1,
+			portalOwnedFrameHeapRecordCreationCount: 0,
+			tilePixelCount: 12_500,
+			tilePlacementAttemptCount: 2,
+			windowVertexReadCount: 8,
+		});
+		expect(frame.trace.arenaCapacityBytes).toBeGreaterThan(0);
+	});
+
+	it("retreats complete frontiers until fixed atlas capacity fits without re-culling", () => {
+		const middle = envCellScope("middle");
+		const leaf = envCellScope("leaf");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(middle, "middle"),
+				topologyScope(leaf, "leaf"),
+			],
+			[
+				crossing("root-middle", OUTDOOR_SCOPE, middle, {
+					aperture: rectangle(-1, -0.5, 1, 0.5),
+				}),
+				crossing("middle-leaf", middle, leaf, {
+					aperture: rectangle(-1, -0.25, 1, 0.25),
+				}),
+			],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 150, width: 100 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+		});
+
+		expect(frame.visibility.status).toBe("truncated");
+		expect(frame.visibility.completedDepth).toBe(1);
+		expect(frame.visibility.declinedDepth).toBe(2);
+		expect(frame.visibility.selectedScopeCount).toBe(2);
+		expect(frame.visibility.selectedCrossingCount).toBe(1);
+		expect(frame.visibility.selectedCrossing(0).id).toBe(
+			"portal-crossing:root-middle",
+		);
+		expect(frame.trace.frontierRetreatCount).toBe(2);
+		expect(frame.trace.packingAttemptCount).toBe(3);
+		expect(frame.commands).toEqual({
+			crossingInstancePreparationCount: 1,
+			frontierClearCommandCount: 1,
+			maskPropagationCommandCount: 1,
+			maskPropagationInstanceCount: 1,
+			opaqueCompositeCommandCount: 1,
+			opaqueCompositeInstanceCount: 2,
+			scopeEnvelopeReductionCommandCount: 1,
+			scopeEnvelopeReductionInstanceCount: 2,
+			traversalDepth: 1,
+		});
+		// Projection is charged once by culling; packing retries only revisit retained window vertices.
+		expect(frame.visibility.trace.projectionPrimitiveCount).toBeGreaterThan(0);
+	});
+
+	it("uses the configured fixed propagation depth and reuses its frame records", () => {
+		const child = envCellScope("child");
+		const graph = topology(
+			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
+			[crossing("child", OUTDOOR_SCOPE, child)],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+		const resource = {
+			atlas: { height: 100, width: 200 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+		};
+
+		const first = planner.plan(graph, input, resource);
+		const commands = first.commands;
+		const trace = first.trace;
+		const second = planner.plan(graph, input, resource);
+
+		expect(second).toBe(first);
+		expect(second.commands).toBe(commands);
+		expect(second.trace).toBe(trace);
+		expect(second.commands.traversalDepth).toBe(TEST_ATLAS_MAXIMUM_PATH_DEPTH);
+		expect(second.commands.maskPropagationCommandCount).toBe(
+			TEST_ATLAS_MAXIMUM_PATH_DEPTH,
+		);
+		expect(second.commands.scopeEnvelopeReductionCommandCount).toBe(
+			TEST_ATLAS_MAXIMUM_PATH_DEPTH,
+		);
+	});
+
+	it("keeps a dense deterministic tile corpus in bounds without overlap", () => {
+		const children = Array.from(
+			{ length: TEST_ATLAS_PACKING_CHILD_COUNT },
+			(_, ordinal) => envCellScope(`packing-${ordinal}`),
+		);
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				...children.map((scope, ordinal) =>
+					topologyScope(scope, `packing-${ordinal}`),
+				),
+			],
+			children.map((target, ordinal) => {
+				const column = ordinal % 6;
+				const row = Math.floor(ordinal / 6);
+				const centerX = -0.75 + column * 0.3;
+				const centerY = -0.75 + row * 0.5;
+				const width = 0.1 + (ordinal % 4) * 0.08;
+				const height = 0.1 + (ordinal % 3) * 0.1;
+				return crossing(`packing-${ordinal}`, OUTDOOR_SCOPE, target, {
+					aperture: rectangle(
+						centerX - width / 2,
+						centerY - height / 2,
+						centerX + width / 2,
+						centerY + height / 2,
+					),
+				});
+			}),
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+
+		const frame = planner.plan(graph, input, {
+			atlas: {
+				height: TEST_ATLAS_PACKING_EXTENT,
+				width: TEST_ATLAS_PACKING_EXTENT,
+			},
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+		});
+
+		expect(frame.tileCount).toBe(TEST_ATLAS_PACKING_CHILD_COUNT + 1);
+		expect(frame.trace.packingAttemptCount).toBe(1);
+		expect(frame.trace.tilePlacementAttemptCount).toBe(frame.tileCount);
+		expect(frame.trace.windowVertexReadCount).toBe(
+			frame.tileCount * TEST_RECTANGLE_VERTEX_COUNT,
+		);
+		expect(frame.trace.tileSortComparisonCount).toBeLessThanOrEqual(
+			frame.tileCount * Math.ceil(Math.log2(frame.tileCount)),
+		);
+		expect(frame.trace.atlasPackedExtentPixelCount).toBeLessThanOrEqual(
+			frame.trace.atlasPixelCapacity,
+		);
+		for (let left = 0; left < frame.tileCount; left += 1) {
+			expect(frame.tileX(left) + frame.tileWidth(left)).toBeLessThanOrEqual(
+				TEST_ATLAS_PACKING_EXTENT,
+			);
+			expect(frame.tileY(left) + frame.tileHeight(left)).toBeLessThanOrEqual(
+				TEST_ATLAS_PACKING_EXTENT,
+			);
+			for (let right = left + 1; right < frame.tileCount; right += 1) {
+				const separated =
+					frame.tileX(left) + frame.tileWidth(left) <= frame.tileX(right) ||
+					frame.tileX(right) + frame.tileWidth(right) <= frame.tileX(left) ||
+					frame.tileY(left) + frame.tileHeight(left) <= frame.tileY(right) ||
+					frame.tileY(right) + frame.tileHeight(right) <= frame.tileY(left);
+				expect(separated, `tile overlap ${left}/${right}`).toBe(true);
+			}
+		}
+		expect(frame.commands.maskPropagationInstanceCount).toBe(
+			TEST_ATLAS_MAXIMUM_PATH_DEPTH * TEST_ATLAS_PACKING_CHILD_COUNT,
+		);
+		expect(frame.commands.scopeEnvelopeReductionInstanceCount).toBe(
+			TEST_ATLAS_MAXIMUM_PATH_DEPTH * frame.tileCount,
+		);
+	});
+
+	it("rejects a resource that cannot always retain the root tile", () => {
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+		const graph = topology([topologyScope(OUTDOOR_SCOPE, null)], []);
+
+		expect(() =>
+			planner.plan(graph, input, {
+				atlas: { height: 100, width: 99 },
+				drawingBuffer: input.portalFootprint.drawingBuffer,
+			}),
+		).toThrow("retain the full drawing-buffer root tile");
+	});
+
+	it("rejects resource dimensions and trace totals that cannot fit their storage", () => {
+		const planner = scopeAtlasPlanner();
+		const graph = topology([topologyScope(OUTDOOR_SCOPE, null)], []);
+		const ordinaryInput = atlasPlanInput(OUTDOOR_SCOPE);
+
+		expect(() =>
+			planner.plan(graph, ordinaryInput, {
+				atlas: { height: 0, width: 100 },
+				drawingBuffer: ordinaryInput.portalFootprint.drawingBuffer,
+			}),
+		).toThrow("fit a positive Uint32");
+		expect(() =>
+			planner.plan(graph, ordinaryInput, {
+				atlas: { height: 100, width: TEST_UINT32_OVERFLOW },
+				drawingBuffer: ordinaryInput.portalFootprint.drawingBuffer,
+			}),
+		).toThrow("fit a positive Uint32");
+		expect(() =>
+			planner.plan(graph, ordinaryInput, {
+				atlas: { height: 100, width: 100 },
+				drawingBuffer: { height: 100, width: 99 },
+			}),
+		).toThrow("culler drawing-buffer extents differ");
+
+		const unsafePixelInput = planInput(OUTDOOR_SCOPE, {
+			portalFootprint: {
+				drawingBuffer: {
+					height: TEST_ATLAS_UNSAFE_PIXEL_EXTENT,
+					width: TEST_ATLAS_UNSAFE_PIXEL_EXTENT,
+				},
+				minimumPixelArea: 0,
+			},
+		});
+		expect(() =>
+			planner.plan(graph, unsafePixelInput, {
+				atlas: unsafePixelInput.portalFootprint.drawingBuffer,
+				drawingBuffer: unsafePixelInput.portalFootprint.drawingBuffer,
+			}),
+		).toThrow("pixel capacity exceeds safe integer storage");
+
+		const unsafeTraceInput = planInput(OUTDOOR_SCOPE, {
+			portalFootprint: {
+				drawingBuffer: {
+					height: TEST_ATLAS_UNSAFE_TILE_EXTENT,
+					width: TEST_ATLAS_UNSAFE_TILE_EXTENT,
+				},
+				minimumPixelArea: 0,
+			},
+		});
+		expect(() =>
+			planner.plan(graph, unsafeTraceInput, {
+				atlas: unsafeTraceInput.portalFootprint.drawingBuffer,
+				drawingBuffer: unsafeTraceInput.portalFootprint.drawingBuffer,
+			}),
+		).toThrow("tile-area trace exceeds safe integer storage");
+	});
+});
+
+function scopeAtlasPlanner(): PortalScopeAtlasPlanner {
+	return new PortalScopeAtlasPlanner({
+		maximumDepth: TEST_ATLAS_MAXIMUM_PATH_DEPTH,
+		maximumProjectionPrimitiveCount: 100_000,
+		maximumWorkItemCount: 64,
+		windowArena: scopeWindowArenaCapacity(),
+	});
+}
+
+function atlasPlanInput(rootScope: SceneScope): PortalRenderGraphPlanInput {
+	return planInput(rootScope, {
+		portalFootprint: {
+			drawingBuffer: { height: 100, width: 100 },
+			minimumPixelArea: 0,
+		},
+	});
+}
 
 function scopeWindowSnapshot(
 	frame: ReturnType<PortalScopeWindowCuller["cull"]>,

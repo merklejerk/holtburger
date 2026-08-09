@@ -1,6 +1,6 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 full-culler drift gate and capacity policy proved; production atlas wiring remains
+Status: Phase 7 CPU culler, scope-atlas planning, and command ledger proved; WebGL wiring remains
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -1550,6 +1550,40 @@ in response to camera motion.
   clock or GC-pause metric.
 - Target/attachment lifecycle, capacity cutoff, resize, and context-loss coverage.
 
+### Scope-Atlas CPU Planning Checkpoint — 2026-08-09
+
+`PortalScopeAtlasPlanner` now owns the first synchronous consumer of the non-retained culler frame.
+It derives conservative integer tile bounds directly from arena vertices, computes each tile's clip
+scale and offset once, packs the tiles into a fixed renderer-supplied extent, and publishes a reused
+scalar frame view. The planner owns fixed typed arrays for bounds, placements, transforms, stable
+merge-sort ordinals, and sort scratch. An accepted fixed-capacity frame creates no portal-owned heap
+record and grows no arena.
+
+The first-cut packer is stable next-fit decreasing-height shelving. Its accepted-frame CPU bound is
+`O(V + S log S + S)`: inspect every retained window vertex once, stable-sort the `S` scope tiles by
+height/width, and attempt each placement once. This deliberately avoids the allocation and
+free-rectangle proliferation of the resident texture-atlas packer. Shelving can reject a layout
+that a more complex packer could fit. That concession is observable through tile pixels, packed
+extent pixels, placement/comparison counts, and complete-frontier retreat counts; a later packer
+must earn its complexity from deterministic real-scene traces.
+
+The culler retains three scalar checkpoints before each frontier expansion. If atlas capacity is
+insufficient, the planner restores the deepest checkpoint in place and retries packing without
+re-running aperture projection or admission. A cutoff can cross a completed frontier that changed
+no retained window before reaching one that releases pixels, so the exceptional-path bound is at
+most `D + 1` packing passes. The golden accepted path remains one pass. The root tile is guaranteed
+by requiring atlas width and height to be at least the drawing-buffer extent; violating that
+resource contract fails loudly before culling.
+
+The culler also materializes selected directed crossings into topology-sized typed storage with one
+linear crossing scan per finalized visibility selection. Exceptional atlas retreat repeats that
+bounded scan and reports the exact cumulative count. The atlas command ledger consumes those ids
+and the policy-owned maximum depth to record zero or exactly `D` frontier clears, propagation
+commands, and scope-envelope reductions, plus one instanced opaque resolve for a non-empty atlas.
+When culler or atlas capacity declines a frontier, the ledger uses the retained shallower depth. No
+path count, camera-time `Map`, scope-key string, convergence readback, or per-state command enters
+this contract. GPU attachment and shader refinement remain intentionally unwired.
+
 ### Task Checklist
 
 - [x] Establish a visibility-only culler bridge with topology-stable integer adjacency, typed
@@ -1593,9 +1627,9 @@ in response to camera motion.
       budgets at topology/capacity setup. A camera pose that exceeds them rejects the deepest
       incomplete frontier atomically; it never grows an arena or creates a fallback object graph.
 - [x] Expose a frame plan as a non-retained scalar view over arena storage.
-- [ ] Consume that view synchronously in production before the next planning pass. Any future
+- [x] Consume that view synchronously in production before the next planning pass. Any future
       retained/async consumer must request an explicit owned copy outside the renderer hot path.
-- [ ] Pack scope-window tiles transactionally and derive each tile transform once in the planner.
+- [x] Pack scope-window tiles transactionally and derive each tile transform once in the planner.
       Reject the deepest incomplete frontier when state, tile, or primitive capacity is exhausted.
 - [ ] Route each scope-homogeneous opaque submission to its tile with one shader-visible uniform;
       retain the existing run boundaries and prove that routing adds no submission. Do not add a
@@ -1604,7 +1638,7 @@ in response to camera motion.
       portal without clipping geometry that legitimately protrudes in front of the portal plane.
 - [ ] Encode one arrival state per pixel in ping-pong integer frontier attachments, select the
       nearest valid outgoing portal with depth, and accumulate one scope envelope per round.
-- [ ] Record exactly `D` clears, `D` propagation draws, `D` envelope-reduction draws, and one
+- [x] Record exactly `D` clears, `D` propagation draws, `D` envelope-reduction draws, and one
       scope-atlas resolve for non-empty visibility. No convergence readback or per-state command.
 - [ ] Keep geometry/instance preparation independent from atlas allocation and pool attachments only
       by a proved non-overlapping lifetime.

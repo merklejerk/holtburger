@@ -41,6 +41,7 @@ import {
 	PortalPropagationStreamArena,
 } from "./portal-crossing-triangle-stream";
 import {
+	PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES,
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
 } from "./portal-propagation-metadata";
@@ -1700,13 +1701,25 @@ describe("portal scope-atlas planning", () => {
 		});
 		const stream = new PortalPropagationStreamArena(12);
 
-		const firstView = stream.prepare(frame, input.anchorCoordinates);
-		const secondView = stream.prepare(frame, input.anchorCoordinates);
+		const firstView = stream.prepare(
+			frame,
+			input.anchorCoordinates,
+			input.clipFromAnchor,
+		);
+		const secondView = stream.prepare(
+			frame,
+			input.anchorCoordinates,
+			input.clipFromAnchor,
+		);
 		const slots = new Uint32Array(stream.bytes.buffer);
 		const metadataRecordSlotCount =
 			PORTAL_ARRIVAL_METADATA_RECORD_BYTES / Uint32Array.BYTES_PER_ELEMENT;
-		const firstCrossingRecordOffset = metadataRecordSlotCount;
-		const secondCrossingRecordOffset = metadataRecordSlotCount * 2;
+		const cameraSlotCount =
+			PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES /
+			Float32Array.BYTES_PER_ELEMENT;
+		const firstCrossingRecordOffset = cameraSlotCount + metadataRecordSlotCount;
+		const secondCrossingRecordOffset =
+			cameraSlotCount + metadataRecordSlotCount * 2;
 		const metadataScopeSlot =
 			PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES /
 			Uint32Array.BYTES_PER_ELEMENT;
@@ -1743,8 +1756,7 @@ describe("portal scope-atlas planning", () => {
 		expect(secondView.arrivalMetadataStateCount).toBe(3);
 		expect(secondView.scopeMetadataStateCount).toBe(3);
 		expect(secondView.usedPropagationMetadataByteLength).toBe(
-			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES +
-				3 * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES,
+			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 		);
 		const arrivalFloats = new Float32Array(
 			stream.propagationMetadataBytes.buffer,

@@ -27,6 +27,10 @@ import {
 	runWebGL2PortalScopeAtlasTargetsFixture,
 	type WebGL2PortalScopeAtlasTargetsFixtureResult,
 } from "./webgl2-portal-scope-atlas-targets-fixture";
+import {
+	runWebGL2PortalScopeAtlasExecutorFixture,
+	type WebGL2PortalScopeAtlasExecutorFixtureResult,
+} from "./webgl2-portal-scope-atlas-executor-fixture";
 
 /** One transient RGBA preview copied from a live two-dimensional GPU texture. */
 export interface Texture2DReadback {
@@ -204,6 +208,12 @@ export class WebGL2Device {
 	probePortalScopeAtlasTargets(): WebGL2PortalScopeAtlasTargetsFixtureResult {
 		this.#assertReady();
 		return runWebGL2PortalScopeAtlasTargetsFixture(this.#gl);
+	}
+
+	/** Execute the propagation, envelope, and resolve GLSL against the symbolic oracle. */
+	probePortalScopeAtlasExecutor(): WebGL2PortalScopeAtlasExecutorFixtureResult {
+		this.#assertReady();
+		return runWebGL2PortalScopeAtlasExecutorFixture(this.#gl);
 	}
 
 	/** Run the standalone direct exterior-transition fixture. */

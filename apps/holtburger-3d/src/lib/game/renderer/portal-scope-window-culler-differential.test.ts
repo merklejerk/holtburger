@@ -548,6 +548,26 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 		.sort(compareScopeWindows);
 	const actual = arenaWindowSnapshot(arenaFrame);
 	assertEquivalentWindows(actual, expected, fixture.label);
+	const selectedScopeIdentities = new Set(expected.map(({ scope }) => scope));
+	const expectedCrossingIds = fixture.topology.crossings
+		.filter(
+			({ source, target }) =>
+				selectedScopeIdentities.has(scopeIdentity(source)) &&
+				selectedScopeIdentities.has(scopeIdentity(target)),
+		)
+		.map(({ id }) => id)
+		.sort();
+	const actualCrossingIds = Array.from(
+		{ length: arenaFrame.selectedCrossingCount },
+		(_, ordinal) => arenaFrame.selectedCrossing(ordinal).id,
+	);
+	expect(actualCrossingIds, `${fixture.label} selected crossings`).toEqual(
+		expectedCrossingIds,
+	);
+	expect(
+		arenaFrame.trace.selectedCrossingInputCount,
+		`${fixture.label} selected-crossing scan`,
+	).toBe(fixture.topology.crossings.length);
 	return {
 		arena: actual,
 		completedDepth: arenaFrame.completedDepth,

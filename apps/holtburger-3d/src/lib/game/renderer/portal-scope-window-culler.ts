@@ -65,6 +65,8 @@ interface PortalScopeWindowArenaTrace {
 	readonly queueHighWaterCount: number;
 	/** Immutable projection primitives charged before execution. */
 	readonly projectionPrimitiveCount: number;
+	/** Topology crossings inspected while materializing final selected-crossing streams. */
+	readonly selectedCrossingInputCount: number;
 	/** Number of topology/capacity rebuilds since construction. */
 	readonly topologyBuildCount: number;
 	/** Normal-path portal-owned records created by one camera update. */
@@ -87,6 +89,7 @@ interface MutablePortalScopeWindowArenaTrace {
 	exceptionalDiagnosticHeapRecordCreationCount: 0 | 1;
 	projectionPrimitiveCount: number;
 	queueHighWaterCount: number;
+	selectedCrossingInputCount: number;
 	topologyBuildCount: number;
 	portalOwnedFrameHeapRecordCreationCount: 0;
 	windowFragmentHighWaterCount: number;
@@ -102,12 +105,15 @@ export interface PortalScopeWindowFrameView {
 	readonly completedDepth: number;
 	/** First frontier declined atomically because a configured budget was exhausted. */
 	readonly declinedDepth: number | null;
+	readonly selectedCrossingCount: number;
 	readonly selectedScopeCount: number;
 	readonly status: "complete" | "truncated";
 	readonly topologyRevision: number;
 	readonly trace: PortalScopeWindowArenaTrace;
 	/** Return the persistent topology scope for one selected ordinal. */
 	selectedScope(ordinal: number): SceneScope;
+	/** Return one selected persistent directed crossing without constructing a frame record. */
+	selectedCrossing(ordinal: number): ScenePortalCrossingInput;
 	/** Read one selected arena window without constructing an immutable window record. */
 	selectedFragmentCount(ordinal: number): number;
 	/** Read one selected fragment's vertex count through the non-retained frame view. */
@@ -214,6 +220,12 @@ class PortalScopeWindowTopologyIndex {
 /** Fixed queue, selection, mutation, and numeric-window storage. */
 class PortalScopeWindowArena {
 	readonly coverageByScopeId: Uint32Array;
+	/** Mutation-log tails retained before each frontier expansion. */
+	readonly frontierMutationCheckpoints: Uint32Array;
+	/** Work-queue tails paired with the frontier mutation checkpoints. */
+	readonly frontierQueueCheckpoints: Uint32Array;
+	/** Numeric-window tails paired with the frontier mutation checkpoints. */
+	readonly frontierWindowCheckpoints: Uint32Array;
 	readonly mutationPreviousCoverage: Uint32Array;
 	readonly mutationPreviousSelection: Uint8Array;
 	readonly mutationScopeIds: Uint32Array;
@@ -222,17 +234,23 @@ class PortalScopeWindowArena {
 	readonly queueScopeIds: Uint32Array;
 	readonly queueWindows: Uint32Array;
 	readonly selectedByScopeId: Uint8Array;
+	readonly selectedCrossingIds: Uint32Array;
 	readonly selectedScopeIds: Uint32Array;
 	readonly typedCapacityBytes: number;
 	readonly windows: PortalWindowArena;
 
 	constructor(
 		scopeCount: number,
+		crossingCount: number,
 		workItemCount: number,
+		maximumDepth: number,
 		windowCapacity: PortalWindowArenaCapacity,
 	) {
 		this.coverageByScopeId = new Uint32Array(scopeCount);
 		this.coverageByScopeId.fill(NO_PORTAL_ARENA_WINDOW);
+		this.frontierMutationCheckpoints = new Uint32Array(maximumDepth);
+		this.frontierQueueCheckpoints = new Uint32Array(maximumDepth);
+		this.frontierWindowCheckpoints = new Uint32Array(maximumDepth);
 		this.mutationPreviousCoverage = new Uint32Array(workItemCount);
 		this.mutationPreviousCoverage.fill(NO_PORTAL_ARENA_WINDOW);
 		this.mutationPreviousSelection = new Uint8Array(workItemCount);
@@ -243,10 +261,14 @@ class PortalScopeWindowArena {
 		this.queueWindows = new Uint32Array(workItemCount);
 		this.queueWindows.fill(NO_PORTAL_ARENA_WINDOW);
 		this.selectedByScopeId = new Uint8Array(scopeCount);
+		this.selectedCrossingIds = new Uint32Array(crossingCount);
 		this.selectedScopeIds = new Uint32Array(scopeCount);
 		this.windows = new PortalWindowArena(windowCapacity);
 		this.typedCapacityBytes =
 			this.coverageByScopeId.byteLength +
+			this.frontierMutationCheckpoints.byteLength +
+			this.frontierQueueCheckpoints.byteLength +
+			this.frontierWindowCheckpoints.byteLength +
 			this.mutationPreviousCoverage.byteLength +
 			this.mutationPreviousSelection.byteLength +
 			this.mutationScopeIds.byteLength +
@@ -255,6 +277,7 @@ class PortalScopeWindowArena {
 			this.queueScopeIds.byteLength +
 			this.queueWindows.byteLength +
 			this.selectedByScopeId.byteLength +
+			this.selectedCrossingIds.byteLength +
 			this.selectedScopeIds.byteLength +
 			this.windows.trace.capacityBytes;
 	}
@@ -264,6 +287,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	completedDepth = 0;
 	declinedDepth: number | null = null;
 	index: PortalScopeWindowTopologyIndex | null = null;
+	selectedCrossingCount = 0;
 	selectedScopeCount = 0;
 	status: "complete" | "truncated" = "complete";
 	readonly trace: MutablePortalScopeWindowArenaTrace = {
@@ -272,6 +296,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		exceptionalDiagnosticHeapRecordCreationCount: 0,
 		projectionPrimitiveCount: 0,
 		queueHighWaterCount: 0,
+		selectedCrossingInputCount: 0,
 		topologyBuildCount: 0,
 		portalOwnedFrameHeapRecordCreationCount: 0,
 		windowFragmentHighWaterCount: 0,
@@ -290,6 +315,20 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	selectedScope(ordinal: number): SceneScope {
 		const scopeId = this.#selectedScopeId(ordinal);
 		return this.index!.scopes[scopeId]!;
+	}
+
+	selectedCrossing(ordinal: number): ScenePortalCrossingInput {
+		if (
+			!Number.isInteger(ordinal) ||
+			ordinal < 0 ||
+			ordinal >= this.selectedCrossingCount
+		) {
+			throw new Error(
+				`Portal selected-crossing ordinal ${ordinal} is unavailable.`,
+			);
+		}
+		const crossingId = this.#requireArena().selectedCrossingIds[ordinal]!;
+		return this.index!.crossings[crossingId]!.crossing;
 	}
 
 	selectedFragmentCount(ordinal: number): number {
@@ -391,6 +430,7 @@ export class PortalScopeWindowCuller {
 	#projectionPrimitiveCount = 0;
 	#queueCount = 0;
 	#queueHighWaterCount = 0;
+	#selectedCrossingInputCount = 0;
 	#selectedScopeCount = 0;
 	#topologyBuildCount = 0;
 
@@ -441,6 +481,9 @@ export class PortalScopeWindowCuller {
 			const queueCheckpoint = this.#queueCount;
 			const mutationCheckpoint = this.#mutationCount;
 			const windowCheckpoint = arena.windows.checkpoint();
+			arena.frontierQueueCheckpoints[depth] = queueCheckpoint;
+			arena.frontierMutationCheckpoints[depth] = mutationCheckpoint;
+			arena.frontierWindowCheckpoints[depth] = windowCheckpoint;
 			try {
 				while (cursor < frontierEnd) {
 					this.#expand(arena, index, input, cursor);
@@ -471,12 +514,15 @@ export class PortalScopeWindowCuller {
 		this.#frame.index = index;
 		this.#frame.selectedScopeCount = this.#selectedScopeCount;
 		this.#frame.status = declinedDepth === null ? "complete" : "truncated";
+		this.#refreshSelectedCrossings(arena, index);
 		this.#frame.trace.arenaCapacityBytes =
 			arena.typedCapacityBytes +
 			index.outgoingCrossingIds.byteLength +
 			index.outgoingOffsets.byteLength;
 		this.#frame.trace.projectionPrimitiveCount = this.#projectionPrimitiveCount;
 		this.#frame.trace.queueHighWaterCount = this.#queueHighWaterCount;
+		this.#frame.trace.selectedCrossingInputCount =
+			this.#selectedCrossingInputCount;
 		this.#frame.trace.topologyBuildCount = this.#topologyBuildCount;
 		this.#frame.trace.windowFragmentHighWaterCount =
 			arena.windows.trace.fragmentHighWaterCount;
@@ -489,6 +535,37 @@ export class PortalScopeWindowCuller {
 		this.#frame.trace.windowVertexHighWaterCount =
 			arena.windows.trace.vertexHighWaterCount;
 		return this.#frame;
+	}
+
+	/**
+	 * Atomically remove the deepest completed frontier from the current non-retained frame.
+	 *
+	 * A synchronous capacity consumer may call this after `cull` and before the next `cull`. The
+	 * culler restores retained checkpoints instead of projecting any aperture a second time.
+	 */
+	declineDeepestCompletedFrontier(frame: PortalScopeWindowFrameView): boolean {
+		if (frame !== this.#frame || !this.#arena || !this.#index) {
+			throw new Error(
+				"Portal frontier retreat requires the current culler frame.",
+			);
+		}
+		const declinedDepth = this.#frame.completedDepth;
+		if (declinedDepth === 0) return false;
+		const retainedDepth = declinedDepth - 1;
+		this.#rollback(
+			this.#arena,
+			this.#arena.frontierMutationCheckpoints[retainedDepth]!,
+			this.#arena.frontierQueueCheckpoints[retainedDepth]!,
+			this.#arena.frontierWindowCheckpoints[retainedDepth]!,
+		);
+		this.#frame.completedDepth = retainedDepth;
+		this.#frame.declinedDepth = declinedDepth;
+		this.#frame.selectedScopeCount = this.#selectedScopeCount;
+		this.#frame.status = "truncated";
+		this.#refreshSelectedCrossings(this.#arena, this.#index);
+		this.#frame.trace.selectedCrossingInputCount =
+			this.#selectedCrossingInputCount;
+		return true;
 	}
 
 	#beginFrame(arena: PortalScopeWindowArena): number {
@@ -507,6 +584,7 @@ export class PortalScopeWindowCuller {
 		this.#projectionPrimitiveCount = 0;
 		this.#queueCount = 0;
 		this.#queueHighWaterCount = 0;
+		this.#selectedCrossingInputCount = 0;
 		this.#selectedScopeCount = 0;
 		this.#frame.trace.exceptionalDiagnosticHeapRecordCreationCount = 0;
 		return arena.windows.reset();
@@ -523,10 +601,36 @@ export class PortalScopeWindowCuller {
 		this.#index = index;
 		this.#arena = new PortalScopeWindowArena(
 			index.scopes.length,
+			index.crossings.length,
 			this.#capacity.maximumWorkItemCount,
+			this.#capacity.maximumDepth,
 			this.#capacity.windowArena,
 		);
 		this.#topologyBuildCount += 1;
+	}
+
+	#refreshSelectedCrossings(
+		arena: PortalScopeWindowArena,
+		index: PortalScopeWindowTopologyIndex,
+	): void {
+		let selectedCrossingCount = 0;
+		for (
+			let crossingId = 0;
+			crossingId < index.crossings.length;
+			crossingId += 1
+		) {
+			const crossing = index.crossings[crossingId]!;
+			if (
+				arena.selectedByScopeId[crossing.sourceScopeId] === 0 ||
+				arena.selectedByScopeId[crossing.targetScopeId] === 0
+			) {
+				continue;
+			}
+			arena.selectedCrossingIds[selectedCrossingCount] = crossingId;
+			selectedCrossingCount += 1;
+		}
+		this.#selectedCrossingInputCount += index.crossings.length;
+		this.#frame.selectedCrossingCount = selectedCrossingCount;
 	}
 
 	#expand(

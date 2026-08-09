@@ -21,15 +21,6 @@ describe("WebGL2 portal crossing triangle buffer", () => {
 		);
 		const stream: PortalCrossingTriangleStreamView = {
 			bytes,
-			trace: {
-				arenaCapacityBytes: bytes.byteLength,
-				arenaGrowthCount: 0,
-				crossingInputCount: 1,
-				portalOwnedFrameHeapRecordCreationCount: 0,
-				positionScalarReadCount: TEST_VERTEX_COUNT * 3,
-				triangleIndexReadCount: TEST_VERTEX_COUNT,
-				vertexHighWaterCount: TEST_VERTEX_COUNT,
-			},
 			usedByteLength:
 				TEST_VERTEX_COUNT * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 			vertexCount: TEST_VERTEX_COUNT,

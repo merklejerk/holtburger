@@ -1,9 +1,9 @@
 import type { PortalScopeWindowCullerCapacity } from "./portal-scope-window-culler";
+import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "./portal-arrival-metadata";
 import {
 	PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT,
 	PORTAL_ROOT_WINDOW_VERTEX_COUNT,
 } from "./portal-window-arena";
-import { PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT } from "./webgl2-portal-scope-atlas-targets";
 
 /** Independent limits selected from Gate C and the archive-wide authored-geometry census. */
 interface PortalRenderCapacityLimits {
@@ -144,7 +144,7 @@ export const PORTAL_RENDER_CAPACITY_POLICY = createPortalRenderCapacityPolicy({
 	scopeAtlas: {
 		columnCount: 2,
 		maximumCrossingTriangleVertexCount: 2_048,
-		maximumArrivalStateCount: PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT,
+		maximumArrivalStateCount: PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT,
 		rowCount: 3,
 	},
 });

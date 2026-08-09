@@ -1,9 +1,9 @@
 import {
-	PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT,
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetDiagnostics,
 	type WebGL2PortalScopeAtlasTargetSet,
 } from "./webgl2-portal-scope-atlas-targets";
+import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "./portal-arrival-metadata";
 import {
 	PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
@@ -118,15 +118,6 @@ function crossingStreamRoundTrip(
 	const bytes = new Uint8Array(arena);
 	const stream: PortalCrossingTriangleStreamView = {
 		bytes,
-		trace: {
-			arenaCapacityBytes: bytes.byteLength,
-			arenaGrowthCount: 0,
-			crossingInputCount: 1,
-			portalOwnedFrameHeapRecordCreationCount: 0,
-			positionScalarReadCount: vertexCount * 3,
-			triangleIndexReadCount: vertexCount,
-			vertexHighWaterCount: vertexCount,
-		},
 		usedByteLength: bytes.byteLength,
 		vertexCount,
 	};
@@ -172,7 +163,7 @@ function crossingStreamRoundTrip(
 		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
 		gl.readBuffer(gl.COLOR_ATTACHMENT0);
 		gl.readPixels(0, 0, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_BYTE, actual);
-		return actual[0] === PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT;
+		return actual[0] === PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT;
 	} finally {
 		owner.destroy();
 		gl.deleteProgram(program);
@@ -268,7 +259,7 @@ function frontierR8uiRoundTrip(
 		gl.READ_FRAMEBUFFER_BINDING,
 	) as WebGLFramebuffer | null;
 	const expected = new Uint32Array([
-		PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT,
+		PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT,
 		0,
 		0,
 		0,
@@ -280,7 +271,7 @@ function frontierR8uiRoundTrip(
 		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
 		gl.readBuffer(gl.COLOR_ATTACHMENT0);
 		gl.readPixels(0, 0, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_BYTE, actual);
-		return actual[0] === PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT;
+		return actual[0] === PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT;
 	} finally {
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, previousDraw);
 		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, previousRead);

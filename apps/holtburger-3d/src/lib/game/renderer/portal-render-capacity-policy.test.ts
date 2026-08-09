@@ -10,47 +10,54 @@ import {
 
 describe("portal render capacity policy", () => {
 	it("owns the accepted depth and derives every arena dimension", () => {
-		const limits = {
+		const selection = {
 			maximumAuthoredApertureVertexCount: 7,
 			maximumPathDepth: 3,
 			maximumProjectionPrimitiveCount: 101,
 			maximumScopeWindowWorkItemCount: 5,
+			scopeAtlas: {
+				columnCount: 2,
+				maximumArrivalStateCount: 31,
+				rowCount: 4,
+			},
 		};
 
-		const policy = createPortalRenderCapacityPolicy(limits);
+		const policy = createPortalRenderCapacityPolicy(selection);
 		const maximumVisibilityApertureVertexCount =
-			limits.maximumAuthoredApertureVertexCount ** 2 +
-			2 * limits.maximumAuthoredApertureVertexCount;
+			selection.maximumAuthoredApertureVertexCount ** 2 +
+			2 * selection.maximumAuthoredApertureVertexCount;
 
 		expect(policy.culler).toEqual({
-			maximumDepth: limits.maximumPathDepth,
-			maximumProjectionPrimitiveCount: limits.maximumProjectionPrimitiveCount,
-			maximumWorkItemCount: limits.maximumScopeWindowWorkItemCount,
+			maximumDepth: selection.maximumPathDepth,
+			maximumProjectionPrimitiveCount:
+				selection.maximumProjectionPrimitiveCount,
+			maximumWorkItemCount: selection.maximumScopeWindowWorkItemCount,
 			windowArena: {
 				maximumApertureVertexCount: maximumVisibilityApertureVertexCount,
 				maximumFragmentCount:
-					1 + Math.floor(limits.maximumProjectionPrimitiveCount / 3),
+					1 + Math.floor(selection.maximumProjectionPrimitiveCount / 3),
 				maximumTemporaryFragmentCount: Math.floor(
-					limits.maximumProjectionPrimitiveCount / 3,
+					selection.maximumProjectionPrimitiveCount / 3,
 				),
 				maximumTemporaryVertexCount: Math.max(
-					limits.maximumProjectionPrimitiveCount,
+					selection.maximumProjectionPrimitiveCount,
 					PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-						limits.maximumPathDepth *
+						selection.maximumPathDepth *
 							(maximumVisibilityApertureVertexCount +
 								PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT),
 				),
 				maximumVertexCount:
 					PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-					limits.maximumProjectionPrimitiveCount,
+					selection.maximumProjectionPrimitiveCount,
 				maximumVerticesPerFragment:
 					PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-					limits.maximumPathDepth *
+					selection.maximumPathDepth *
 						(maximumVisibilityApertureVertexCount +
 							PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT),
-				maximumWindowCount: limits.maximumScopeWindowWorkItemCount * 2 - 2,
+				maximumWindowCount: selection.maximumScopeWindowWorkItemCount * 2 - 2,
 			},
 		});
+		expect(policy.scopeAtlas).toEqual(selection.scopeAtlas);
 	});
 
 	it("publishes one immutable production policy", () => {
@@ -59,6 +66,9 @@ describe("portal render capacity policy", () => {
 		);
 		expect(Object.isFrozen(PORTAL_RENDER_CAPACITY_POLICY)).toBe(true);
 		expect(Object.isFrozen(PORTAL_RENDER_CAPACITY_POLICY.culler)).toBe(true);
+		expect(Object.isFrozen(PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas)).toBe(
+			true,
+		);
 		expect(
 			Object.isFrozen(PORTAL_RENDER_CAPACITY_POLICY.culler.windowArena),
 		).toBe(true);
@@ -71,7 +81,44 @@ describe("portal render capacity policy", () => {
 				maximumPathDepth: 1,
 				maximumProjectionPrimitiveCount: 1,
 				maximumScopeWindowWorkItemCount: 1,
+				scopeAtlas: {
+					columnCount: 1,
+					maximumArrivalStateCount: 1,
+					rowCount: 1,
+				},
 			}),
 		).toThrow("maximumAuthoredApertureVertexCount");
+	});
+
+	it("rejects invalid atlas extent multiples", () => {
+		expect(() =>
+			createPortalRenderCapacityPolicy({
+				maximumAuthoredApertureVertexCount: 3,
+				maximumPathDepth: 1,
+				maximumProjectionPrimitiveCount: 1,
+				maximumScopeWindowWorkItemCount: 1,
+				scopeAtlas: {
+					columnCount: 2,
+					maximumArrivalStateCount: 1,
+					rowCount: 0,
+				},
+			}),
+		).toThrow("scopeAtlas.rowCount");
+	});
+
+	it("rejects an arrival-state format with no usable id", () => {
+		expect(() =>
+			createPortalRenderCapacityPolicy({
+				maximumAuthoredApertureVertexCount: 3,
+				maximumPathDepth: 1,
+				maximumProjectionPrimitiveCount: 1,
+				maximumScopeWindowWorkItemCount: 1,
+				scopeAtlas: {
+					columnCount: 1,
+					maximumArrivalStateCount: 0,
+					rowCount: 1,
+				},
+			}),
+		).toThrow("scopeAtlas.maximumArrivalStateCount");
 	});
 });

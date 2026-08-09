@@ -45,15 +45,15 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		expect(state.textureStorage).toEqual([
 			{ format: state.gl.RGBA8, height: 4, width: 4 },
 			{ format: state.gl.DEPTH_COMPONENT24, height: 4, width: 4 },
-			{ format: state.gl.R32UI, height: 2, width: 2 },
-			{ format: state.gl.R32UI, height: 2, width: 2 },
+			{ format: state.gl.R8UI, height: 2, width: 2 },
+			{ format: state.gl.R8UI, height: 2, width: 2 },
 			{ format: state.gl.DEPTH_COMPONENT32F, height: 4, width: 4 },
 		]);
 		expect(state.renderbufferStorage).toEqual([
 			{ format: state.gl.DEPTH_COMPONENT24, height: 2, width: 2 },
 		]);
 		expect(targets.getDiagnostics()).toEqual({
-			activeBytes: 240,
+			activeBytes: 216,
 			activeFramebufferCount: 4,
 			activeRenderbufferCount: 1,
 			activeTextureCount: 5,
@@ -78,7 +78,7 @@ describe("WebGL2 portal scope-atlas targets", () => {
 			textures: 5,
 		});
 		expect(targets.getDiagnostics()).toEqual({
-			activeBytes: 480,
+			activeBytes: 432,
 			activeFramebufferCount: 4,
 			activeRenderbufferCount: 1,
 			activeTextureCount: 5,
@@ -235,7 +235,7 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 		MAX_TEXTURE_SIZE: 0x0d33,
 		NEAREST: 0x2600,
 		NONE: 0,
-		R32UI: 0x8236,
+		R8UI: 0x8232,
 		READ_FRAMEBUFFER: 0x8ca8,
 		READ_FRAMEBUFFER_BINDING: 0x8caa,
 		RENDERBUFFER: 0x8d41,

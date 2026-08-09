@@ -1522,7 +1522,11 @@ contract and does not own that number.
 `portal-render-capacity-policy.ts` now owns the complete selected portal capacity object. Its named
 `maximumPathDepth` field owns `16` and feeds culler depth plus ordinary fixtures and trace scheduling.
 The selected independent cutoffs are 8,700 scope-window work items, 240,181 checked projection
-primitives, and the archive-censused maximum 24 authored aperture vertices.
+primitives, the archive-censused maximum 24 authored aperture vertices, and a fixed scope-atlas
+extent of two drawing-buffer columns by three rows. The same policy admits at most 255 arrival
+states: zero remains the uncovered sentinel and the 255 nonzero `R8UI` values identify the root
+plus retained directed crossings. Both GPU selections are justified by the real-scene checkpoint
+below; neither is an arena-derived number.
 
 Arena dimensions are mechanical rather than individually tuned. A reciprocal polygon intersection
 can retain both input boundaries plus one intersection per edge pair, yielding a conservative
@@ -1622,16 +1626,18 @@ existing final draw count.
 
 `WebGL2PortalScopeAtlasTargets` owns one fixed attachment generation with four framebuffers, five
 textures, and one renderbuffer. Scope-local opaque work retains `RGBA8` color and sampleable
-`DEPTH_COMPONENT24` depth over the packed atlas. Two drawing-buffer-sized `R32UI` textures hold the
+`DEPTH_COMPONENT24` depth over the packed atlas. Two drawing-buffer-sized `R8UI` textures hold the
 ping-pong arrival state. They share one `DEPTH_COMPONENT24` renderbuffer because a batched crossing
 draw still needs ordinary depth testing to select the nearest valid outgoing portal. The scope
 envelope is one atlas-sized, depth-only `DEPTH_COMPONENT32F` texture. The selected formats require
-no stencil attachment and no float color-renderability or float-blending extension.
+no stencil attachment and no float color-renderability or float-blending extension. `R8UI` is a
+core color-renderable integer format in WebGL2's underlying GLES 3.0 format table; no optional
+extension is part of the capacity contract.
 
 The shared frontier depth is a correction to Gate C's preliminary memory estimate; state alone
 cannot implement nearest-crossing selection without integer atomics, per-crossing commands, or a
 depth attachment. The accepted fixed storage is therefore exactly
-`12 * atlasPixels + 12 * drawingBufferPixels` bytes: color, local depth, and envelope depth over the
+`12 * atlasPixels + 6 * drawingBufferPixels` bytes: color, local depth, and envelope depth over the
 atlas; two integer frontier planes and one shared frontier depth plane over the drawing buffer.
 Framebuffer objects themselves are counted separately rather than assigned guessed byte sizes.
 
@@ -1655,10 +1661,73 @@ than pretending stale handles can be restored locally.
 
 Focused browser evidence ran through the existing portal-substrate fixture on the real GPU path
 (ANGLE/Vulkan on AMD Radeon RX 7900 XT). All initial and replacement framebuffers were complete,
-all handles were valid, same-extent reuse and changed-extent replacement held, disposal returned
-every active resource count and byte count to zero, and no browser/WebGL error was reported. The
-fixture performs no screenshot comparison and contributes no timing claim. Shader sampling,
-propagation, reduction, and compositing remain unwired.
+the maximum arrival id `255` survived an `R8UI` clear and `RED_INTEGER`/`UNSIGNED_BYTE` readback, all
+handles were valid, same-extent reuse and changed-extent replacement held, disposal returned every
+active resource count and byte count to zero, and no browser/WebGL error was reported. The fixture
+performs no screenshot comparison and contributes no timing claim. Shader sampling, propagation,
+reduction, and compositing remain unwired.
+
+### Real-Scene Atlas and Arrival-State Capacity Checkpoint — 2026-08-09
+
+`portal-work-trace.ts --atlas-capacity` now runs the production `PortalScopeAtlasPlanner`, arena
+culler, and stable shelf packer directly over decoded archive topology and deterministic production
+camera matrices. It compares each bounded fixed-extent candidate against a logical one-shelf
+baseline wide enough for every policy-admitted scope tile. Exact selected scope keys, crossing ids,
+tile dimensions, completion depth, declined depth, and status must match before a pose counts as
+preserved. This is a browser-free symbolic trace; it performs no rendering, screenshot comparison,
+wall-clock measurement, or CPU-time inference.
+
+The capacity search covers the field repro plus the archive-selected median-transition,
+p95-transition, and maximum-fan-out landblocks: 320 deterministic poses at each of 1600x1200,
+1600x1000, 1920x1080, and 2560x1080. Varying the drawing buffer changes both the production camera
+projection and integer tile packing. The offline trace intentionally invokes the planner once for
+the guaranteed baseline and once per candidate. Those repeated calls are policy-search work and
+are not part of the production one-plan-per-camera contract.
+
+| fixed policy                           | 4:3 preserved | 16:10 preserved | 16:9 preserved | ultrawide preserved | total     |
+| -------------------------------------- | ------------- | --------------- | -------------- | ------------------- | --------- |
+| 1x4 extent, logically unbounded ids    | 310/320       | 314/320         | 314/320        | 317/320             | 1255/1280 |
+| 2x3 extent, logically unbounded ids    | 320/320       | 319/320         | 319/320        | 320/320             | 1278/1280 |
+| 2x4 extent, logically unbounded ids    | 320/320       | 320/320         | 320/320        | 320/320             | 1280/1280 |
+| selected 2x3 extent plus 255-state ids | 319/320       | 318/320         | 318/320        | 319/320             | 1274/1280 |
+
+The selected first-cut extent is `2x3`. Its two extent-only misses are the same `0x599bffff`
+source-far camera under 16:10 and 16:9 projection: the complete baseline reaches depth 4 with 23
+scopes and 44 crossings, while fixed capacity atomically retains depth 2 with 3 scopes and 4
+crossings after two frontier retreats. `2x4` preserves those occurrences but adds 24 target bytes
+per drawing-buffer pixel and admits their downstream scope work. This is a deliberate bounded
+cutoff, not a claim that 99.84% trace preservation proves universal fit.
+
+Arrival-state capacity is evaluated independently from atlas extent. The extent candidate grid
+uses a logical unbounded id capacity, while the selected production trace reruns the production
+planner with exactly 255 arrival states. Across the original 1,280-pose corpus, the `R8UI` cutoff
+trips four times: the same `0xec0effff` maximum-fan-out indoor pose under each aspect ratio. Its
+baseline reaches depth 7 with 302, 304, 306, or 310 crossings; the complete-frontier cutoff retains
+depth 3 with 246, 248, 250, or 254 crossings. Each occurrence loses two scopes and 56 crossings
+after four frontier retreats. Combined with the two independent atlas misses, the selected
+production policy preserves 1,274 of 1,280 pose/aspect occurrences.
+
+An expanded state-pressure pass evaluates the first 128 deterministic poses in each risk scene at
+all four aspect ratios: 2,048 pose/aspect occurrences. It finds 18 arrival-state cutoffs, all in the
+same archive-selected `0xec0effff` maximum-fan-out environment family, plus the two existing atlas
+cutoffs. Observed maxima are four lost completed depths, 11 lost scopes, 146 lost crossings, and four
+state-capacity retreats; those maxima do not all belong to one pose. The production path still
+performs one cull and one successful packing attempt; it never creates GPU work for a rejected
+frontier.
+
+With `R8UI`, the selected `2x3` target set costs exactly `78 * drawingBufferPixels` bytes. At
+1920x1080 it allocates a 3840x3240 atlas and 161,740,800 bytes (154.25 MiB), saving 12,441,600 bytes
+(11.87 MiB) from the prior 32-bit frontier planes. At 3840x2160 it costs 646,963,200 bytes (616.99
+MiB), saving 49,766,400 bytes (47.46 MiB), before opaque driver metadata. Production cutover must
+still select an explicit maximum portal-render pixel/byte budget before allocating these targets;
+desktop texture-dimension support alone is not a memory-admission policy. No untraced automatic
+resolution fallback is selected at this checkpoint.
+
+`3x2` has the same bytes and aggregate preservation as `2x3`, but requires a materially wider
+texture at every traced drawing buffer. The taller `2x3` orientation is therefore the simpler
+device-capacity choice. Target creation still fails loudly when the fixed extent exceeds the actual
+WebGL2 texture limit; no camera-time target resize, alternate packer, or hidden recursive fallback
+is introduced. A later packer or larger policy must pay for itself with a new deterministic trace.
 
 ### Task Checklist
 
@@ -1707,6 +1776,12 @@ propagation, reduction, and compositing remain unwired.
       retained/async consumer must request an explicit owned copy outside the renderer hot path.
 - [x] Pack scope-window tiles transactionally and derive each tile transform once in the planner.
       Reject the deepest incomplete frontier when state, tile, or primitive capacity is exhausted.
+- [x] Select one fixed `2x3` atlas extent from cross-aspect real-scene symbolic traces. Keep the
+      extent in the production capacity contract, allocate no camera-dependent size, and preserve
+      complete-frontier cutoff when the shelf packer cannot fit a deeper round.
+- [x] Select `R8UI` frontier attachments from an independently traced 255-state capacity. Reserve
+      zero for uncovered, decline complete frontiers before packing when retained arrival ids do not
+      fit, and keep extent-only and id-capacity evidence separate.
 - [ ] Route each scope-homogeneous opaque submission to its tile with one shader-visible uniform;
       retain the existing run boundaries and prove that routing adds no submission. Do not add a
       per-instance scope attribute unless a later, separately traced cross-scope consolidation wins.
@@ -1753,6 +1828,10 @@ propagation, reduction, and compositing remain unwired.
 - Gate C's accepted path-depth value `16` has one production capacity-policy owner. The culler,
   propagation schedule, arena derivation, diagnostics, and ordinary fixtures consume that field and
   do not repeat a literal or independently derive it.
+- The same policy owns the selected `2x3` atlas multiple and 255-state `R8UI` frontier capacity. At
+  1920x1080 the complete target set is exactly 161,740,800 bytes; either capacity exhaustion
+  declines a complete frontier and never resizes or repacks a GPU target in response to camera
+  motion.
 - Every selected physical opaque compatibility batch is prepared and submitted once. Atlas routing
   does not create a draw per scope, arrival state, or tile.
 - GPU command counts match the accepted `O(D)` ledger, and logical propagation work is bounded by
@@ -1992,8 +2071,8 @@ propagation, reduction, and compositing remain unwired.
 
 ## Remaining Production Questions
 
-1. What fixed atlas extent policy admits the deterministic real-scene packing distribution without
-   committing the device maximum or introducing camera-time target resize churn?
+1. What explicit drawing-buffer pixel/byte budget admits the fixed `2x3` target without allowing a
+   high-DPI or 4K viewport to consume an unreasonable share of GPU memory?
 2. Which crossing-instance and scope-reduction stream layout lets the fixed `D` rounds remain one
    propagation and one reduction command each without rebuilding records per round?
 3. Can any atlas/frontier attachment lifetime be pooled with an existing renderer target without

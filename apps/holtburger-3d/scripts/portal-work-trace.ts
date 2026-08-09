@@ -68,6 +68,13 @@ import {
 } from "../src/lib/game/renderer/portal-render-graph";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "../src/lib/game/renderer/portal-render-capacity-policy";
 import {
+	PortalScopeAtlasPlanner,
+	type PortalScopeAtlasFrameView,
+	type PortalScopeAtlasResource,
+} from "../src/lib/game/renderer/portal-scope-atlas-planner";
+import type { PortalScopeWindowCullInput } from "../src/lib/game/renderer/portal-scope-window-culler";
+import { portalScopeAtlasTargetByteLength } from "../src/lib/game/renderer/webgl2-portal-scope-atlas-targets";
+import {
 	createPortalArrivalStateDryScheduleTrace,
 	createCurrentPortalDryScheduleTrace,
 	createPortalPathViewDrySchedule,
@@ -80,9 +87,17 @@ import { ParticleSystem } from "../src/lib/game/systems/particle-system";
 import { PhysicsScriptSystem } from "../src/lib/game/systems/physics-script-system";
 
 const CAMERA = Object.freeze({ far: 10_000, fov: 70, near: 0.1 });
-const ASPECT_RATIO = 16 / 9;
-const DRAWING_BUFFER = Object.freeze({ height: 1_080, width: 1_920 });
+const DEFAULT_DRAWING_BUFFER = Object.freeze({ height: 1_080, width: 1_920 });
 const PARTICLE_TRACE_TIME_SECONDS = 1;
+/** Largest relative atlas dimension evaluated by the offline fixed-capacity policy search. */
+const MAXIMUM_ATLAS_POLICY_MULTIPLIER = 4;
+/** Logical no-cutoff capacity used to isolate atlas extent from arrival-id experiments. */
+const GUARANTEED_ARRIVAL_STATE_CAPACITY = 0xffff_ffff;
+
+interface TraceDrawingBuffer {
+	readonly height: number;
+	readonly width: number;
+}
 
 /** JSON payload emitted by the narrow Rust archive adapter. */
 interface ArchiveTraceRecord {
@@ -142,7 +157,7 @@ interface ArchivePortalCensusLandblock {
 }
 
 /** Exact order statistics retained without assigning guessed CPU weights. */
-interface ArchivePortalCensusDistribution {
+interface NumericTraceDistribution {
 	readonly maximum: number;
 	readonly median: number;
 	readonly minimum: number;
@@ -171,7 +186,7 @@ type ArchivePortalCensusDimension =
 /** Compact reproducible census report used to choose exact camera-trace workloads. */
 interface ArchivePortalCensusReport {
 	readonly distributions: Readonly<
-		Record<ArchivePortalCensusDimension, ArchivePortalCensusDistribution>
+		Record<ArchivePortalCensusDimension, NumericTraceDistribution>
 	>;
 	readonly failureCount: number;
 	readonly kind: "holtburger-portal-archive-census";
@@ -213,6 +228,27 @@ interface PortalWorkTraceReport {
 		readonly maximumOutgoingCrossingCount: number;
 		readonly scopeCount: number;
 	};
+}
+
+/** One fixed atlas extent expressed relative to the drawing buffer. */
+interface AtlasCapacityPolicy {
+	readonly columnCount: number;
+	readonly id: string;
+	readonly rowCount: number;
+}
+
+/** Browser-free fixed-atlas evidence from the production arena culler and shelf packer. */
+interface PortalAtlasCapacityTraceReport {
+	readonly drawingBuffer: TraceDrawingBuffer;
+	readonly kind: "holtburger-portal-atlas-capacity-trace";
+	readonly landblockIds: readonly LandblockId[];
+	readonly policies: readonly ReturnType<typeof summarizeAtlasPolicy>[];
+	readonly poses: readonly ReturnType<typeof traceAtlasCapacityPose>[];
+	/** Production extent and arrival-id policy evaluated beside the extent-only grid. */
+	readonly selectedPolicy: ReturnType<typeof summarizeSelectedAtlasPolicy>;
+	/** Smallest candidate preserving every baseline pose, or null when the grid is insufficient. */
+	readonly smallestFullyPreservingPolicyId: string | null;
+	readonly topology: ReturnType<typeof topologyDistribution>;
 }
 
 /** Exact CPU artifacts prepared from the same decoded real source records as production. */
@@ -270,6 +306,44 @@ if (poses.length === 0) {
 		"Portal trace workload produced no deterministic camera poses.",
 	);
 }
+if (options.mode === "atlas-capacity") {
+	const atlasPlanner = new PortalScopeAtlasPlanner(
+		PORTAL_RENDER_CAPACITY_POLICY.culler,
+	);
+	const atlasCapacityPolicies = createAtlasCapacityPolicies(
+		options.drawingBuffer,
+	);
+	const tracedPoses = poses.map((pose) =>
+		traceAtlasCapacityPose(
+			topology,
+			pose,
+			atlasPlanner,
+			options.drawingBuffer,
+			atlasCapacityPolicies,
+		),
+	);
+	const policies = atlasCapacityPolicies.map((policy) =>
+		summarizeAtlasPolicy(policy, tracedPoses),
+	);
+	const smallestFullyPreservingPolicy = policies.find(
+		({ baselinePreservationCount }) =>
+			baselinePreservationCount === tracedPoses.length,
+	);
+	const report: PortalAtlasCapacityTraceReport = {
+		drawingBuffer: options.drawingBuffer,
+		kind: "holtburger-portal-atlas-capacity-trace",
+		landblockIds: options.landblockIds,
+		policies,
+		poses: tracedPoses,
+		selectedPolicy: summarizeSelectedAtlasPolicy(tracedPoses),
+		smallestFullyPreservingPolicyId: smallestFullyPreservingPolicy
+			? smallestFullyPreservingPolicy.id
+			: null,
+		topology: topologyDistribution(topology),
+	};
+	process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+	process.exit(0);
+}
 const currentPlanner = new PortalRenderGraphPlanner();
 const candidatePlanner = new PortalPathViewPlanner();
 const report: PortalWorkTraceReport = {
@@ -283,6 +357,7 @@ const report: PortalWorkTraceReport = {
 			archive.content,
 			currentPlanner,
 			candidatePlanner,
+			options.drawingBuffer,
 		),
 	),
 	topology: topologyDistribution(topology),
@@ -292,9 +367,11 @@ process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 function parseArguments(arguments_: readonly string[]):
 	| {
 			readonly archiveRecordsPath: string | null;
+			readonly drawingBuffer: TraceDrawingBuffer;
 			readonly kind: "workload";
 			readonly landblockIds: readonly LandblockId[];
 			readonly maximumPoseCount: number;
+			readonly mode: "atlas-capacity" | "workload";
 	  }
 	| { readonly kind: "census" } {
 	if (arguments_.length === 1 && arguments_[0] === "--census") {
@@ -302,9 +379,22 @@ function parseArguments(arguments_: readonly string[]):
 	}
 	const landblockIds: LandblockId[] = [];
 	let archiveRecordsPath: string | null = null;
+	let drawingBuffer: TraceDrawingBuffer = DEFAULT_DRAWING_BUFFER;
+	let mode: "atlas-capacity" | "workload" = "workload";
 	let maximumPoseCount = 128;
 	for (let index = 0; index < arguments_.length; index += 1) {
 		const argument = arguments_[index]!;
+		if (argument === "--atlas-capacity") {
+			mode = "atlas-capacity";
+			continue;
+		}
+		if (argument === "--drawing-buffer") {
+			const raw = arguments_[index + 1];
+			if (!raw) throw new Error("--drawing-buffer requires WIDTHxHEIGHT.");
+			drawingBuffer = parseDrawingBuffer(raw);
+			index += 1;
+			continue;
+		}
 		if (argument === "--max-poses") {
 			const raw = arguments_[index + 1];
 			if (!raw) throw new Error("--max-poses requires a positive integer.");
@@ -327,7 +417,7 @@ function parseArguments(arguments_: readonly string[]):
 	}
 	if (landblockIds.length === 0) {
 		throw new Error(
-			"usage: npm run trace:portals -- <landblock-id> [landblock-id ...] [--max-poses N]",
+			"usage: npm run trace:portals -- <landblock-id> [landblock-id ...] [--max-poses N] [--atlas-capacity] [--drawing-buffer WIDTHxHEIGHT]",
 		);
 	}
 	if (!Number.isSafeInteger(maximumPoseCount) || maximumPoseCount <= 0) {
@@ -335,10 +425,28 @@ function parseArguments(arguments_: readonly string[]):
 	}
 	return {
 		archiveRecordsPath,
+		drawingBuffer,
 		kind: "workload",
 		landblockIds: Object.freeze([...new Set(landblockIds)].sort()),
 		maximumPoseCount,
+		mode,
 	};
+}
+
+function parseDrawingBuffer(raw: string): TraceDrawingBuffer {
+	const match = /^(\d+)x(\d+)$/.exec(raw);
+	if (!match) throw new Error("--drawing-buffer requires WIDTHxHEIGHT.");
+	const width = Number(match[1]);
+	const height = Number(match[2]);
+	if (
+		!Number.isSafeInteger(width) ||
+		width <= 0 ||
+		!Number.isSafeInteger(height) ||
+		height <= 0
+	) {
+		throw new Error("--drawing-buffer dimensions must be positive integers.");
+	}
+	return Object.freeze({ height, width });
 }
 
 async function loadArchiveArtifacts(
@@ -579,7 +687,7 @@ function createCensusReport(
 			dimension,
 			distribution(census.landblocks.map((record) => record[dimension])),
 		]),
-	) as Record<ArchivePortalCensusDimension, ArchivePortalCensusDistribution>;
+	) as Record<ArchivePortalCensusDimension, NumericTraceDistribution>;
 	const outdoorTransitions = census.landblocks.filter(
 		({ outsidePortalCount }) => outsidePortalCount > 0,
 	);
@@ -640,9 +748,7 @@ function createCensusReport(
 	});
 }
 
-function distribution(
-	input: readonly number[],
-): ArchivePortalCensusDistribution {
+function distribution(input: readonly number[]): NumericTraceDistribution {
 	const values = input.toSorted((left, right) => left - right);
 	const at = (quantile: number) =>
 		values[Math.floor(quantile * (values.length - 1))]!;
@@ -1073,39 +1179,445 @@ function apertureCenter(crossing: ScenePortalCrossingInput): Vec3 {
 	return new Vec3(x / vertexCount, y / vertexCount, z / vertexCount);
 }
 
+interface AtlasPlanSnapshot {
+	readonly atlas: PortalScopeAtlasResource["atlas"];
+	readonly completedDepth: number;
+	readonly declinedDepth: number | null;
+	readonly packing: {
+		readonly atlasCapacityRetreatCount: number;
+		readonly atlasPackedExtentPixelCount: number;
+		readonly arrivalStateCapacityRetreatCount: number;
+		readonly frontierRetreatCount: number;
+		readonly packingAttemptCount: number;
+		readonly tilePixelCount: number;
+		readonly tilePlacementAttemptCount: number;
+		readonly tileSortComparisonCount: number;
+		readonly windowVertexReadCount: number;
+	};
+	readonly selectedCrossingIds: readonly string[];
+	readonly selectedScopeTiles: readonly {
+		readonly height: number;
+		readonly scopeKey: string;
+		readonly width: number;
+	}[];
+	readonly status: "complete" | "truncated";
+	readonly visibilityWork: {
+		readonly projectionPrimitiveCount: number;
+		readonly queueHighWaterCount: number;
+		readonly windowFragmentHighWaterCount: number;
+		readonly windowHighWaterCount: number;
+		readonly windowVertexHighWaterCount: number;
+	};
+}
+
+function createAtlasCapacityPolicies(
+	drawingBuffer: TraceDrawingBuffer,
+): readonly AtlasCapacityPolicy[] {
+	const policies: AtlasCapacityPolicy[] = [];
+	for (
+		let columnCount = 1;
+		columnCount <= MAXIMUM_ATLAS_POLICY_MULTIPLIER;
+		columnCount += 1
+	) {
+		for (
+			let rowCount = 1;
+			rowCount <= MAXIMUM_ATLAS_POLICY_MULTIPLIER;
+			rowCount += 1
+		) {
+			const policy = { columnCount, rowCount };
+			policies.push({ ...policy, id: atlasPolicyId(policy) });
+		}
+	}
+	policies.sort((left, right) => {
+		const leftResource = atlasResource(
+			left,
+			drawingBuffer,
+			GUARANTEED_ARRIVAL_STATE_CAPACITY,
+		);
+		const rightResource = atlasResource(
+			right,
+			drawingBuffer,
+			GUARANTEED_ARRIVAL_STATE_CAPACITY,
+		);
+		const byteDifference =
+			portalScopeAtlasTargetByteLength(leftResource) -
+			portalScopeAtlasTargetByteLength(rightResource);
+		if (byteDifference !== 0) return byteDifference;
+		const maximumDimensionDifference =
+			Math.max(leftResource.atlas.width, leftResource.atlas.height) -
+			Math.max(rightResource.atlas.width, rightResource.atlas.height);
+		if (maximumDimensionDifference !== 0) return maximumDimensionDifference;
+		return left.id.localeCompare(right.id);
+	});
+	return Object.freeze(policies);
+}
+
+function atlasPolicyId(policy: {
+	readonly columnCount: number;
+	readonly rowCount: number;
+}): string {
+	return `${policy.columnCount}x${policy.rowCount}`;
+}
+
+function traceAtlasCapacityPose(
+	topology: SceneTopologyView,
+	pose: TracePose,
+	planner: PortalScopeAtlasPlanner,
+	drawingBuffer: TraceDrawingBuffer,
+	policiesToTrace: readonly AtlasCapacityPolicy[],
+) {
+	const input = createScopeAtlasCullInput(pose, drawingBuffer);
+	const guaranteedResource: PortalScopeAtlasResource = {
+		atlas: {
+			height: drawingBuffer.height,
+			width:
+				drawingBuffer.width *
+				PORTAL_RENDER_CAPACITY_POLICY.maximumScopeWindowWorkItemCount,
+		},
+		drawingBuffer,
+		maximumArrivalStateCount: GUARANTEED_ARRIVAL_STATE_CAPACITY,
+	};
+	const baseline = snapshotAtlasPlan(
+		planner.plan(topology, input, guaranteedResource),
+		guaranteedResource,
+	);
+	if (
+		baseline.packing.frontierRetreatCount !== 0 ||
+		baseline.packing.packingAttemptCount !== 1
+	) {
+		throw new Error(
+			`Portal atlas trace baseline ${pose.id} did not fit its guaranteed single shelf.`,
+		);
+	}
+	const policies = policiesToTrace.map((policy) => {
+		const resource = atlasResource(
+			policy,
+			drawingBuffer,
+			GUARANTEED_ARRIVAL_STATE_CAPACITY,
+		);
+		const candidate = snapshotAtlasPlan(
+			planner.plan(topology, input, resource),
+			resource,
+		);
+		return compareAtlasPlan(pose.id, policy, baseline, candidate, resource);
+	});
+	const selectedPolicy = PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas;
+	const selectedResource = atlasResource(
+		selectedPolicy,
+		drawingBuffer,
+		selectedPolicy.maximumArrivalStateCount,
+	);
+	const selected = snapshotAtlasPlan(
+		planner.plan(topology, input, selectedResource),
+		selectedResource,
+	);
+	const baselineTileWidths = baseline.selectedScopeTiles.map(
+		({ width }) => width,
+	);
+	const baselineTileHeights = baseline.selectedScopeTiles.map(
+		({ height }) => height,
+	);
+	return {
+		baseline: {
+			...publicAtlasPlan(baseline),
+			selectedScopeTiles: baseline.selectedScopeTiles,
+			singleShelfExtent: {
+				height: baselineTileHeights.reduce(
+					(maximum, height) => Math.max(maximum, height),
+					0,
+				),
+				width: baselineTileWidths.reduce((total, width) => total + width, 0),
+			},
+		},
+		id: pose.id,
+		policies,
+		rootScope: scopeKey(pose.rootScope),
+		selectedPolicy: compareAtlasPlan(
+			pose.id,
+			selectedPolicy,
+			baseline,
+			selected,
+			selectedResource,
+		),
+	};
+}
+
+function compareAtlasPlan(
+	poseId: string,
+	policy: { readonly columnCount: number; readonly rowCount: number },
+	baseline: AtlasPlanSnapshot,
+	candidate: AtlasPlanSnapshot,
+	resource: PortalScopeAtlasResource,
+) {
+	const id = atlasPolicyId(policy);
+	if (
+		candidate.completedDepth > baseline.completedDepth ||
+		candidate.selectedCrossingIds.length >
+			baseline.selectedCrossingIds.length ||
+		candidate.selectedScopeTiles.length > baseline.selectedScopeTiles.length
+	) {
+		throw new Error(
+			`Portal atlas policy ${id} expanded the guaranteed baseline for ${poseId}.`,
+		);
+	}
+	return {
+		...publicAtlasPlan(candidate),
+		baselinePreserved: sameAtlasSelection(baseline, candidate),
+		columnCount: policy.columnCount,
+		completedDepthLoss: Math.max(
+			0,
+			baseline.completedDepth - candidate.completedDepth,
+		),
+		id,
+		rowCount: policy.rowCount,
+		selectedCrossingLoss:
+			baseline.selectedCrossingIds.length -
+			candidate.selectedCrossingIds.length,
+		selectedScopeLoss:
+			baseline.selectedScopeTiles.length - candidate.selectedScopeTiles.length,
+		targetBytes: portalScopeAtlasTargetByteLength(resource),
+	};
+}
+
+function createScopeAtlasCullInput(
+	pose: TracePose,
+	drawingBuffer: TraceDrawingBuffer,
+): PortalScopeWindowCullInput {
+	const common = createTraceCameraProjection(pose, drawingBuffer);
+	return {
+		...common,
+		portalFootprint: { drawingBuffer, minimumPixelArea: 0 },
+	};
+}
+
+function createTraceCameraProjection(
+	pose: TracePose,
+	drawingBuffer: TraceDrawingBuffer,
+) {
+	const rotation = createCameraRotationRadians(pose.yaw, pose.pitch);
+	const projection = createPerspectiveMat4(
+		CAMERA.fov,
+		drawingBuffer.width / drawingBuffer.height,
+		CAMERA.near,
+		CAMERA.far,
+	);
+	return {
+		anchorCoordinates: getLandblockCoordinates(pose.anchorLandblockId),
+		clipFromAnchor: multiplyMat4(
+			projection,
+			createViewMat4(pose.position, rotation),
+		),
+		nearClipVolume: createCameraNearClipVolume(
+			CAMERA,
+			{ position: pose.position, rotation },
+			drawingBuffer.width / drawingBuffer.height,
+		),
+		rootScope: pose.rootScope,
+	};
+}
+
+function snapshotAtlasPlan(
+	frame: PortalScopeAtlasFrameView,
+	resource: PortalScopeAtlasResource,
+): AtlasPlanSnapshot {
+	const selectedScopeTiles = Array.from(
+		{ length: frame.visibility.selectedScopeCount },
+		(_, ordinal) => ({
+			height: frame.tileHeight(ordinal),
+			scopeKey: scopeKey(frame.visibility.selectedScope(ordinal)),
+			width: frame.tileWidth(ordinal),
+		}),
+	);
+	const selectedCrossingIds = Array.from(
+		{ length: frame.visibility.selectedCrossingCount },
+		(_, ordinal) => frame.visibility.selectedCrossing(ordinal).id,
+	);
+	return {
+		atlas: { ...resource.atlas },
+		completedDepth: frame.visibility.completedDepth,
+		declinedDepth: frame.visibility.declinedDepth,
+		packing: {
+			atlasCapacityRetreatCount: frame.trace.atlasCapacityRetreatCount,
+			atlasPackedExtentPixelCount: frame.trace.atlasPackedExtentPixelCount,
+			arrivalStateCapacityRetreatCount:
+				frame.trace.arrivalStateCapacityRetreatCount,
+			frontierRetreatCount: frame.trace.frontierRetreatCount,
+			packingAttemptCount: frame.trace.packingAttemptCount,
+			tilePixelCount: frame.trace.tilePixelCount,
+			tilePlacementAttemptCount: frame.trace.tilePlacementAttemptCount,
+			tileSortComparisonCount: frame.trace.tileSortComparisonCount,
+			windowVertexReadCount: frame.trace.windowVertexReadCount,
+		},
+		selectedCrossingIds,
+		selectedScopeTiles,
+		status: frame.visibility.status,
+		visibilityWork: {
+			projectionPrimitiveCount: frame.visibility.trace.projectionPrimitiveCount,
+			queueHighWaterCount: frame.visibility.trace.queueHighWaterCount,
+			windowFragmentHighWaterCount:
+				frame.visibility.trace.windowFragmentHighWaterCount,
+			windowHighWaterCount: frame.visibility.trace.windowHighWaterCount,
+			windowVertexHighWaterCount:
+				frame.visibility.trace.windowVertexHighWaterCount,
+		},
+	};
+}
+
+function publicAtlasPlan(snapshot: AtlasPlanSnapshot) {
+	const atlasPixelCapacity = snapshot.atlas.width * snapshot.atlas.height;
+	return {
+		atlas: snapshot.atlas,
+		atlasPixelCapacity,
+		atlasUtilization: snapshot.packing.tilePixelCount / atlasPixelCapacity,
+		completedDepth: snapshot.completedDepth,
+		declinedDepth: snapshot.declinedDepth,
+		packedExtentUtilization:
+			snapshot.packing.tilePixelCount /
+			snapshot.packing.atlasPackedExtentPixelCount,
+		packing: snapshot.packing,
+		selectedCrossingCount: snapshot.selectedCrossingIds.length,
+		selectedScopeCount: snapshot.selectedScopeTiles.length,
+		status: snapshot.status,
+		visibilityWork: snapshot.visibilityWork,
+	};
+}
+
+function sameAtlasSelection(
+	baseline: AtlasPlanSnapshot,
+	candidate: AtlasPlanSnapshot,
+): boolean {
+	return (
+		baseline.status === candidate.status &&
+		baseline.completedDepth === candidate.completedDepth &&
+		baseline.declinedDepth === candidate.declinedDepth &&
+		sameStrings(baseline.selectedCrossingIds, candidate.selectedCrossingIds) &&
+		baseline.selectedScopeTiles.length ===
+			candidate.selectedScopeTiles.length &&
+		baseline.selectedScopeTiles.every((tile, ordinal) => {
+			const other = candidate.selectedScopeTiles[ordinal];
+			return (
+				other !== undefined &&
+				tile.scopeKey === other.scopeKey &&
+				tile.width === other.width &&
+				tile.height === other.height
+			);
+		})
+	);
+}
+
+function sameStrings(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((value, index) => value === right[index])
+	);
+}
+
+function atlasResource(
+	policy: { readonly columnCount: number; readonly rowCount: number },
+	drawingBuffer: TraceDrawingBuffer,
+	maximumArrivalStateCount: number,
+): PortalScopeAtlasResource {
+	return {
+		atlas: {
+			height: drawingBuffer.height * policy.rowCount,
+			width: drawingBuffer.width * policy.columnCount,
+		},
+		drawingBuffer,
+		maximumArrivalStateCount,
+	};
+}
+
+function summarizeAtlasPolicy(
+	policy: AtlasCapacityPolicy,
+	poses: readonly ReturnType<typeof traceAtlasCapacityPose>[],
+) {
+	const traces = poses.map((pose) => {
+		const trace = pose.policies.find(({ id }) => id === policy.id);
+		if (!trace) {
+			throw new Error(
+				`Portal atlas trace pose ${pose.id} omitted policy ${policy.id}.`,
+			);
+		}
+		return trace;
+	});
+	return summarizeAtlasTraces(policy, traces);
+}
+
+function summarizeSelectedAtlasPolicy(
+	poses: readonly ReturnType<typeof traceAtlasCapacityPose>[],
+) {
+	return summarizeAtlasTraces(
+		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas,
+		poses.map(({ selectedPolicy }) => selectedPolicy),
+	);
+}
+
+function summarizeAtlasTraces(
+	policy: { readonly columnCount: number; readonly rowCount: number },
+	traces: readonly ReturnType<typeof compareAtlasPlan>[],
+) {
+	const id = atlasPolicyId(policy);
+	const first = traces[0];
+	if (!first) {
+		throw new Error(`Portal atlas policy ${id} has no pose traces.`);
+	}
+	return {
+		atlas: first.atlas,
+		atlasPixelCapacity: first.atlasPixelCapacity,
+		atlasUtilization: distribution(
+			traces.map(({ atlasUtilization }) => atlasUtilization),
+		),
+		baselinePreservationCount: traces.filter(
+			({ baselinePreserved }) => baselinePreserved,
+		).length,
+		columnCount: policy.columnCount,
+		completedDepthLoss: distribution(
+			traces.map(({ completedDepthLoss }) => completedDepthLoss),
+		),
+		frontierRetreatCount: distribution(
+			traces.map(({ packing }) => packing.frontierRetreatCount),
+		),
+		atlasCapacityRetreatCount: distribution(
+			traces.map(({ packing }) => packing.atlasCapacityRetreatCount),
+		),
+		arrivalStateCapacityRetreatCount: distribution(
+			traces.map(({ packing }) => packing.arrivalStateCapacityRetreatCount),
+		),
+		id,
+		packedExtentUtilization: distribution(
+			traces.map(({ packedExtentUtilization }) => packedExtentUtilization),
+		),
+		packingAttemptCount: distribution(
+			traces.map(({ packing }) => packing.packingAttemptCount),
+		),
+		poseCount: traces.length,
+		rowCount: policy.rowCount,
+		selectedCrossingLoss: distribution(
+			traces.map(({ selectedCrossingLoss }) => selectedCrossingLoss),
+		),
+		selectedScopeLoss: distribution(
+			traces.map(({ selectedScopeLoss }) => selectedScopeLoss),
+		),
+		targetBytes: first.targetBytes,
+	};
+}
+
 function tracePose(
 	topology: SceneTopologyView,
 	pose: TracePose,
 	content: ArchiveContentArtifacts,
 	currentPlanner: PortalRenderGraphPlanner,
 	candidatePlanner: PortalPathViewPlanner,
+	drawingBuffer: TraceDrawingBuffer,
 ) {
-	const rotation = createCameraRotationRadians(pose.yaw, pose.pitch);
-	const projection = createPerspectiveMat4(
-		CAMERA.fov,
-		ASPECT_RATIO,
-		CAMERA.near,
-		CAMERA.far,
-	);
-	const clipFromAnchor = multiplyMat4(
-		projection,
-		createViewMat4(pose.position, rotation),
-	);
-	const nearClipVolume = createCameraNearClipVolume(
-		CAMERA,
-		{ position: pose.position, rotation },
-		ASPECT_RATIO,
-	);
-	const common = {
-		anchorCoordinates: getLandblockCoordinates(pose.anchorLandblockId),
-		clipFromAnchor,
-		nearClipVolume,
-		rootScope: pose.rootScope,
-	};
+	const common = createTraceCameraProjection(pose, drawingBuffer);
 	const currentInput: PortalRenderGraphPlanInput = {
 		...common,
 		maximumStencilValue: 0xff,
-		portalFootprint: { drawingBuffer: DRAWING_BUFFER, minimumPixelArea: 0 },
+		portalFootprint: { drawingBuffer, minimumPixelArea: 0 },
 		safetyWorkItemLimit: 100_000,
 	};
 	const candidateInput: PortalPathViewPlanInput = {
@@ -1118,8 +1630,8 @@ function tracePose(
 			maximumProjectionPrimitiveCount: 10_000_000,
 		},
 		portalFootprint: {
-			drawingBufferHeight: DRAWING_BUFFER.height,
-			drawingBufferWidth: DRAWING_BUFFER.width,
+			drawingBufferHeight: drawingBuffer.height,
+			drawingBufferWidth: drawingBuffer.width,
 			minimumPixelArea: 0,
 		},
 	};
@@ -1139,7 +1651,7 @@ function tracePose(
 							dryWorkload,
 							topology.crossings,
 							candidateInput.budget.maximumPathDepth,
-							DRAWING_BUFFER,
+							drawingBuffer,
 						),
 						family: "arrival-state-scope-atlas" as const,
 						visibility: current.plan.diagnostics,

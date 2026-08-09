@@ -4,6 +4,10 @@ import {
 } from "./webgl2-shader-utils";
 import type { WebGL2GeometryBinding } from "./webgl2-resource-manager";
 import type { PortalViewWindow } from "./portal-view-window";
+import {
+	type WebGL2RenderExtent,
+	validateWebGL2RenderExtent,
+} from "./webgl2-render-target";
 
 const COLOR_BYTES_PER_PIXEL = 4;
 const DEPTH_STENCIL_BYTES_PER_PIXEL = 4;
@@ -14,18 +18,14 @@ const COPLANAR_PORTAL_MASK_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 
 /** Resident-depth comparison selected by the planner-owned mask source. */
 export type PortalMaskDepthCompare =
-	"always" | "less-or-equal" | "less-or-equal-offset";
-/** Positive drawing-buffer extent owned by one scene-domain target generation. */
-export interface PortalRenderExtent {
-	readonly height: number;
-	readonly width: number;
-}
-
+	| "always"
+	| "less-or-equal"
+	| "less-or-equal-offset";
 /** One color/depth-stencil framebuffer owning the completed portal view. */
 export interface WebGL2SceneDomainTarget {
 	readonly color: WebGLTexture;
 	readonly depthStencil: WebGLTexture;
-	readonly extent: PortalRenderExtent;
+	readonly extent: WebGL2RenderExtent;
 	readonly framebuffer: WebGLFramebuffer;
 }
 
@@ -35,7 +35,7 @@ export interface WebGL2PortalSubstrateDiagnostics {
 	readonly activeTargetCount: number;
 	readonly allocatedTargetCount: number;
 	readonly disposedTargetCount: number;
-	readonly extent: PortalRenderExtent | null;
+	readonly extent: WebGL2RenderExtent | null;
 }
 
 /** One stencil transition supported by a portal mask rasterization pass. */
@@ -55,38 +55,38 @@ export type PortalMaskStencilPolicy =
 /** Fixed-function pass baselines established without inspecting ambient renderer state. */
 export type PortalPassStateCommand =
 	| {
-			readonly extent: PortalRenderExtent;
+			readonly extent: WebGL2RenderExtent;
 			readonly framebuffer: WebGLFramebuffer | null;
 			readonly kind: "clear";
 	  }
 	| {
-			readonly extent: PortalRenderExtent;
+			readonly extent: WebGL2RenderExtent;
 			readonly framebuffer: WebGLFramebuffer | null;
 			readonly kind: "ordinary";
 	  }
 	| {
 			readonly depthCompare: PortalMaskDepthCompare;
-			readonly extent: PortalRenderExtent;
+			readonly extent: WebGL2RenderExtent;
 			readonly framebuffer: WebGLFramebuffer;
 			readonly kind: "mask-write";
 			readonly stencilPolicy: PortalMaskStencilPolicy;
 	  }
 	| {
 			readonly depth: number;
-			readonly extent: PortalRenderExtent;
+			readonly extent: WebGL2RenderExtent;
 			readonly framebuffer: WebGLFramebuffer;
 			readonly kind: "masked-depth-reset";
 			readonly renderLayer: number;
 	  }
 	| {
 			readonly depth: number;
-			readonly extent: PortalRenderExtent;
+			readonly extent: WebGL2RenderExtent;
 			readonly framebuffer: WebGLFramebuffer;
 			readonly kind: "masked-scene-initialize";
 			readonly renderLayer: number;
 	  }
 	| {
-			readonly extent: PortalRenderExtent;
+			readonly extent: WebGL2RenderExtent;
 			readonly framebuffer: WebGLFramebuffer;
 			readonly kind: "masked-ordinary";
 			readonly renderLayer: number;
@@ -97,7 +97,7 @@ export function applyPortalPassState(
 	gl: WebGL2RenderingContext,
 	command: PortalPassStateCommand,
 ): void {
-	validateExtent(command.extent);
+	validateWebGL2RenderExtent(command.extent, "Portal pass");
 	gl.bindFramebuffer(gl.FRAMEBUFFER, command.framebuffer);
 	gl.viewport(0, 0, command.extent.width, command.extent.height);
 	gl.disable(gl.BLEND);
@@ -212,9 +212,9 @@ export class WebGL2PortalSubstrate {
 		this.#gl = gl;
 	}
 
-	resize(extent: PortalRenderExtent): WebGL2SceneDomainTarget {
+	resize(extent: WebGL2RenderExtent): WebGL2SceneDomainTarget {
 		this.#assertAlive();
-		validateExtent(extent);
+		validateWebGL2RenderExtent(extent, "Portal target");
 		if (
 			this.#target?.extent.width === extent.width &&
 			this.#target.extent.height === extent.height
@@ -392,11 +392,11 @@ export class WebGL2PortalSubstrate {
 	present(
 		source: WebGL2SceneDomainTarget,
 		destination: WebGLFramebuffer | null,
-		destinationExtent: PortalRenderExtent,
+		destinationExtent: WebGL2RenderExtent,
 	): void {
 		this.#assertAlive();
 		requireTarget(this.#target, source);
-		validateExtent(destinationExtent);
+		validateWebGL2RenderExtent(destinationExtent, "Portal destination");
 		const gl = this.#gl;
 		applyPortalPassState(gl, {
 			extent: destinationExtent,
@@ -422,7 +422,7 @@ export class WebGL2PortalSubstrate {
 
 	restoreOrdinaryPass(
 		framebuffer: WebGLFramebuffer | null,
-		extent: PortalRenderExtent,
+		extent: WebGL2RenderExtent,
 	): void {
 		this.#assertAlive();
 		const gl = this.#gl;
@@ -511,7 +511,7 @@ export class WebGL2PortalSubstrate {
 		);
 	}
 
-	#allocateTarget(extent: PortalRenderExtent): WebGL2SceneDomainTarget {
+	#allocateTarget(extent: WebGL2RenderExtent): WebGL2SceneDomainTarget {
 		const maximumTextureSize = this.#gl.getParameter(
 			this.#gl.MAX_TEXTURE_SIZE,
 		) as number;
@@ -590,7 +590,7 @@ interface AllocationBindings {
 
 function allocateSceneDomainTarget(
 	gl: WebGL2RenderingContext,
-	extent: PortalRenderExtent,
+	extent: WebGL2RenderExtent,
 	label: string,
 ): WebGL2SceneDomainTarget {
 	const framebuffer = requireResource(
@@ -638,7 +638,7 @@ function allocateSceneDomainTarget(
 function initializeTargetTexture(
 	gl: WebGL2RenderingContext,
 	texture: WebGLTexture,
-	extent: PortalRenderExtent,
+	extent: WebGL2RenderExtent,
 	depthStencil: boolean,
 ): void {
 	gl.activeTexture(gl.TEXTURE0);
@@ -858,17 +858,6 @@ function restoreAllocationBindings(
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, bindings.texture);
 	gl.activeTexture(bindings.activeTexture);
-}
-
-function validateExtent(extent: PortalRenderExtent): void {
-	if (
-		!Number.isInteger(extent.width) ||
-		!Number.isInteger(extent.height) ||
-		extent.width <= 0 ||
-		extent.height <= 0
-	) {
-		throw new Error("Portal render extent must contain positive integers.");
-	}
 }
 
 function validateDrawRange(

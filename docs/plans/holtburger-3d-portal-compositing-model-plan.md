@@ -1,6 +1,6 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 CPU atlas and opaque-routing contracts proved; WebGL wiring remains
+Status: Phase 7 CPU contracts and WebGL2 target lifecycle proved; draw/shader wiring remains
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -1397,9 +1397,10 @@ not consume the 8-bit stencil namespace. Phase 7 must still select a texture rep
 enforce the explicit state/work budget rather than invent an unbounded fallback.
 
 Scope-window bounds also make the off-screen cost concrete. Across the sampled maxima, bounded
-RGBA8 plus depth/stencil scope tiles range up to 76,813,008 bytes and 32-bit scope envelopes up to
-38,406,504 bytes; the two full-screen 32-bit frontier planes add 16,588,800 bytes at the traced
-resolution. These are conservative allocation inputs before atlas packing gaps, not measured GPU
+RGBA8 plus depth scope tiles range up to 76,813,008 bytes and 32-bit scope envelopes up to
+38,406,504 bytes. The two full-screen 32-bit frontier planes add 16,588,800 bytes at the traced
+resolution; Phase 7 later corrected this estimate to include one shared nearest-crossing depth
+plane. These are conservative allocation inputs before atlas packing gaps, not measured GPU
 residency. Phase 7 must still prove practical packing. The entry audit below closes the
 single-submit routing question; if implementation cannot preserve that proved boundary or batch
 propagation in `O(D)` commands, the substrate is rejected without reopening path replay.
@@ -1617,6 +1618,48 @@ the injected counting substrate at the production run boundary during cutover. T
 the complexity proof or the no-inflation result, both of which are parameterized by the renderer's
 existing final draw count.
 
+### WebGL2 Target Lifecycle Checkpoint — 2026-08-09
+
+`WebGL2PortalScopeAtlasTargets` owns one fixed attachment generation with four framebuffers, five
+textures, and one renderbuffer. Scope-local opaque work retains `RGBA8` color and sampleable
+`DEPTH_COMPONENT24` depth over the packed atlas. Two drawing-buffer-sized `R32UI` textures hold the
+ping-pong arrival state. They share one `DEPTH_COMPONENT24` renderbuffer because a batched crossing
+draw still needs ordinary depth testing to select the nearest valid outgoing portal. The scope
+envelope is one atlas-sized, depth-only `DEPTH_COMPONENT32F` texture. The selected formats require
+no stencil attachment and no float color-renderability or float-blending extension.
+
+The shared frontier depth is a correction to Gate C's preliminary memory estimate; state alone
+cannot implement nearest-crossing selection without integer atomics, per-crossing commands, or a
+depth attachment. The accepted fixed storage is therefore exactly
+`12 * atlasPixels + 12 * drawingBufferPixels` bytes: color, local depth, and envelope depth over the
+atlas; two integer frontier planes and one shared frontier depth plane over the drawing buffer.
+Framebuffer objects themselves are counted separately rather than assigned guessed byte sizes.
+
+The depth-only envelope avoids an integer color plane plus a second atlas-sized reduction-depth
+attachment. Its encoding reserves `0` for uncovered, `[0, 0.5]` for finite maximum exits, and `1`
+for an unbounded scope appearance. Scaling both finite exit and fragment depths by `0.5` preserves
+the strict `fragmentDepth < exitDepth` predicate while keeping a far-plane finite exit distinct
+from unbounded. A finite exit at zero intentionally aliases uncovered: normalized raster fragments
+cannot satisfy `fragmentDepth < 0`, so the two states are observationally equivalent. The retained
+symbolic format test checks 66,563 finite/unbounded/uncovered fragment comparisons, including both
+near- and far-plane boundaries. This is a substrate encoding proof, not a second compositor oracle.
+
+Construction and same-extent resize allocate no GPU resource. A changed extent allocates and
+validates the complete replacement before publication, then disposes the previous generation.
+Failure deletes every partial replacement handle and leaves the previous generation active.
+Allocation restores active texture, texture-unit bindings, draw/read framebuffer bindings, and the
+renderbuffer binding. Atlas dimensions must contain the drawing-buffer root tile and fit
+`MAX_TEXTURE_SIZE`; frontier dimensions must additionally fit `MAX_RENDERBUFFER_SIZE`. Disposal is
+idempotent. Context loss continues to use the existing whole-device restart-required policy rather
+than pretending stale handles can be restored locally.
+
+Focused browser evidence ran through the existing portal-substrate fixture on the real GPU path
+(ANGLE/Vulkan on AMD Radeon RX 7900 XT). All initial and replacement framebuffers were complete,
+all handles were valid, same-extent reuse and changed-extent replacement held, disposal returned
+every active resource count and byte count to zero, and no browser/WebGL error was reported. The
+fixture performs no screenshot comparison and contributes no timing claim. Shader sampling,
+propagation, reduction, and compositing remain unwired.
+
 ### Task Checklist
 
 - [x] Establish a visibility-only culler bridge with topology-stable integer adjacency, typed
@@ -1675,6 +1718,10 @@ existing final draw count.
       scope-atlas resolve for non-empty visibility. No convergence readback or per-state command.
 - [ ] Keep geometry/instance preparation independent from atlas allocation and pool attachments only
       by a proved non-overlapping lifetime.
+- [x] Allocate scope color/local depth, ping-pong integer frontier state with shared selection depth,
+      and depth-only scope-envelope targets transactionally. Reuse equal extents; preserve the old
+      generation on partial failure; cover resize, disposal, device limits, exact bytes, binding
+      restoration, and actual-browser framebuffer completeness without activating a shadow renderer.
 - [ ] Reuse crossing-instance, scope-reduction, opaque-routing, transparent-order, and particle-pack
       typed streams. Use explicit counts/ranges and caller-provided sort scratch rather than
       `map`/`filter`/spread/sorted-copy pipelines in portal-owned frame code.
@@ -1945,12 +1992,11 @@ existing final draw count.
 
 ## Remaining Production Questions
 
-1. What conflict-color, potential-view, path-depth, envelope-coverage, and exterior-reuse
-   distributions occur in a non-rendering archive/topology projection census, and what production
-   work budgets should those distributions set below the hard 256-label ceiling?
-2. Does unique potential-view count bound every meaningful planner operation, or does continuous
-   window fragmentation require a separate explicit budget?
-3. Which WebGL2 texture/atlas packing implements the logical 32-bit scope envelope with the least
-   attachment traffic on supported browsers?
-4. If two candidates remain non-dominated after real-scene tracing, which explicit CPU-owned work
-   dimension or memory/bandwidth concession should decide between them?
+1. What fixed atlas extent policy admits the deterministic real-scene packing distribution without
+   committing the device maximum or introducing camera-time target resize churn?
+2. Which crossing-instance and scope-reduction stream layout lets the fixed `D` rounds remain one
+   propagation and one reduction command each without rebuilding records per round?
+3. Can any atlas/frontier attachment lifetime be pooled with an existing renderer target without
+   adding framebuffer reattachment commands or coupling unrelated resize/context-loss ownership?
+4. If later traces justify a more complex atlas packer or route-key cache, which explicit CPU-owned
+   operation count pays for that added mechanism?

@@ -23,6 +23,10 @@ import {
 	probeWebGL2TextureFilteringSupport,
 	type WebGL2TextureFilteringSupport,
 } from "./webgl2-texture-filtering-support";
+import {
+	runWebGL2PortalScopeAtlasTargetsFixture,
+	type WebGL2PortalScopeAtlasTargetsFixtureResult,
+} from "./webgl2-portal-scope-atlas-targets-fixture";
 
 /** One transient RGBA preview copied from a live two-dimensional GPU texture. */
 export interface Texture2DReadback {
@@ -194,6 +198,12 @@ export class WebGL2Device {
 	probePortalSubstrate(): WebGL2PortalSubstrateFixtureResult {
 		this.#assertReady();
 		return runWebGL2PortalSubstrateFixture(this.#gl, this.resources);
+	}
+
+	/** Prove the selected scope-atlas attachment formats and lifecycle on this browser context. */
+	probePortalScopeAtlasTargets(): WebGL2PortalScopeAtlasTargetsFixtureResult {
+		this.#assertReady();
+		return runWebGL2PortalScopeAtlasTargetsFixture(this.#gl);
 	}
 
 	/** Run the standalone direct exterior-transition fixture. */

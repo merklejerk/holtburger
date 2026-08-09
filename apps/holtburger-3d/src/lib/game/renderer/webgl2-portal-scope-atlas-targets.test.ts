@@ -21,7 +21,6 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		expect(targets.getDiagnostics()).toEqual({
 			activeBytes: 0,
 			activeFramebufferCount: 0,
-			activeRenderbufferCount: 0,
 			activeTextureCount: 0,
 			allocatedGenerationCount: 0,
 			disposedGenerationCount: 0,
@@ -38,25 +37,21 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		expect(targets.getTargets()).toBe(first);
 		expect(state.created).toEqual({
 			framebuffers: 4,
-			renderbuffers: 1,
-			textures: 5,
+			textures: 6,
 		});
 		expect(state.framebufferStatusCheckCount).toBe(4);
 		expect(state.textureStorage).toEqual([
 			{ format: state.gl.RGBA8, height: 4, width: 4 },
 			{ format: state.gl.DEPTH_COMPONENT24, height: 4, width: 4 },
+			{ format: state.gl.DEPTH_COMPONENT24, height: 2, width: 2 },
 			{ format: state.gl.R8UI, height: 2, width: 2 },
 			{ format: state.gl.R8UI, height: 2, width: 2 },
 			{ format: state.gl.DEPTH_COMPONENT32F, height: 4, width: 4 },
 		]);
-		expect(state.renderbufferStorage).toEqual([
-			{ format: state.gl.DEPTH_COMPONENT24, height: 2, width: 2 },
-		]);
 		expect(targets.getDiagnostics()).toEqual({
 			activeBytes: 216,
 			activeFramebufferCount: 4,
-			activeRenderbufferCount: 1,
-			activeTextureCount: 5,
+			activeTextureCount: 6,
 			allocatedGenerationCount: 1,
 			disposedGenerationCount: 0,
 			extents: INITIAL_EXTENTS,
@@ -74,14 +69,12 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		expect(targets.getTargets()).toBe(second);
 		expect(state.deleted).toEqual({
 			framebuffers: 4,
-			renderbuffers: 1,
-			textures: 5,
+			textures: 6,
 		});
 		expect(targets.getDiagnostics()).toEqual({
 			activeBytes: 432,
 			activeFramebufferCount: 4,
-			activeRenderbufferCount: 1,
-			activeTextureCount: 5,
+			activeTextureCount: 6,
 			allocatedGenerationCount: 2,
 			disposedGenerationCount: 1,
 			extents: RESIZED_EXTENTS,
@@ -91,8 +84,7 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		targets.destroy();
 		expect(state.deleted).toEqual({
 			framebuffers: 8,
-			renderbuffers: 2,
-			textures: 10,
+			textures: 12,
 		});
 		expect(targets.getDiagnostics()).toMatchObject({
 			activeBytes: 0,
@@ -125,17 +117,13 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		});
 		expect(state.deleted).toEqual({
 			framebuffers: 3,
-			renderbuffers: 1,
-			textures: 4,
+			textures: 5,
 		});
 		expect(readBindings(state.gl)).toEqual(expectedBindings);
 	});
 
 	it("rejects impossible extents before allocating resources", () => {
-		const state = createFakeWebGL2({
-			maximumRenderbufferSize: 4,
-			maximumTextureSize: 8,
-		});
+		const state = createFakeWebGL2({ maximumTextureSize: 8 });
 		const targets = new WebGL2PortalScopeAtlasTargets(state.gl);
 
 		expect(() =>
@@ -152,12 +140,6 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		).toThrow("exceeds maximum texture size 8");
 		expect(() =>
 			targets.resize({
-				atlas: { height: 8, width: 8 },
-				drawingBuffer: { height: 5, width: 4 },
-			}),
-		).toThrow("exceeds maximum renderbuffer size 4");
-		expect(() =>
-			targets.resize({
 				atlas: {
 					height: Number.MAX_SAFE_INTEGER,
 					width: Number.MAX_SAFE_INTEGER,
@@ -170,14 +152,12 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		).toThrow("target byte length exceeds safe integers");
 		expect(state.created).toEqual({
 			framebuffers: 0,
-			renderbuffers: 0,
 			textures: 0,
 		});
 	});
 });
 
 interface FakeWebGL2Options {
-	readonly maximumRenderbufferSize: number;
 	readonly maximumTextureSize: number;
 }
 
@@ -187,13 +167,11 @@ interface FakeWebGL2State {
 	failFramebufferCheckAt: number | null;
 	readonly gl: WebGL2RenderingContext;
 	readonly framebufferStatusCheckCount: number;
-	readonly renderbufferStorage: StorageRecord[];
 	readonly textureStorage: StorageRecord[];
 }
 
 interface ResourceCounts {
 	framebuffers: number;
-	renderbuffers: number;
 	textures: number;
 }
 
@@ -208,15 +186,11 @@ interface BindingSnapshot {
 	readonly activeTextureBinding: WebGLTexture | null;
 	readonly drawFramebuffer: WebGLFramebuffer | null;
 	readonly readFramebuffer: WebGLFramebuffer | null;
-	readonly renderbuffer: WebGLRenderbuffer | null;
 	readonly texture0Binding: WebGLTexture | null;
 }
 
 function createDefaultFakeWebGL2(): FakeWebGL2State {
-	return createFakeWebGL2({
-		maximumRenderbufferSize: 16_384,
-		maximumTextureSize: 16_384,
-	});
+	return createFakeWebGL2({ maximumTextureSize: 16_384 });
 }
 
 function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
@@ -231,15 +205,12 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 		DRAW_FRAMEBUFFER_BINDING: 0x8ca6,
 		FRAMEBUFFER: 0x8d40,
 		FRAMEBUFFER_COMPLETE: 0x8cd5,
-		MAX_RENDERBUFFER_SIZE: 0x84e8,
 		MAX_TEXTURE_SIZE: 0x0d33,
 		NEAREST: 0x2600,
 		NONE: 0,
 		R8UI: 0x8232,
 		READ_FRAMEBUFFER: 0x8ca8,
 		READ_FRAMEBUFFER_BINDING: 0x8caa,
-		RENDERBUFFER: 0x8d41,
-		RENDERBUFFER_BINDING: 0x8ca7,
 		RGBA8: 0x8058,
 		TEXTURE0: 0x84c0,
 		TEXTURE_2D: 0x0de1,
@@ -251,15 +222,12 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 	} as const;
 	const created: ResourceCounts = {
 		framebuffers: 0,
-		renderbuffers: 0,
 		textures: 0,
 	};
 	const deleted: ResourceCounts = {
 		framebuffers: 0,
-		renderbuffers: 0,
 		textures: 0,
 	};
-	const renderbufferStorage: StorageRecord[] = [];
 	const textureStorage: StorageRecord[] = [];
 	const textureBindings = new Map<GLenum, WebGLTexture | null>();
 	let activeTexture: GLenum = constants.TEXTURE0;
@@ -267,7 +235,6 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 	let failFramebufferCheckAt: number | null = null;
 	let framebufferStatusCheckCount = 0;
 	let readFramebuffer: WebGLFramebuffer | null = null;
-	let renderbuffer: WebGLRenderbuffer | null = null;
 	const gl = {
 		...constants,
 		activeTexture: (texture: GLenum) => {
@@ -287,9 +254,6 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 				readFramebuffer = framebuffer;
 			}
 		},
-		bindRenderbuffer: (_target: GLenum, value: WebGLRenderbuffer | null) => {
-			renderbuffer = value;
-		},
 		bindTexture: (_target: GLenum, texture: WebGLTexture | null) => {
 			textureBindings.set(activeTexture, texture);
 		},
@@ -301,21 +265,15 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 		},
 		createFramebuffer: () =>
 			fakeResource<WebGLFramebuffer>("framebuffer", ++created.framebuffers),
-		createRenderbuffer: () =>
-			fakeResource<WebGLRenderbuffer>("renderbuffer", ++created.renderbuffers),
 		createTexture: () =>
 			fakeResource<WebGLTexture>("texture", ++created.textures),
 		deleteFramebuffer: () => {
 			deleted.framebuffers += 1;
 		},
-		deleteRenderbuffer: () => {
-			deleted.renderbuffers += 1;
-		},
 		deleteTexture: () => {
 			deleted.textures += 1;
 		},
 		drawBuffers: () => undefined,
-		framebufferRenderbuffer: () => undefined,
 		framebufferTexture2D: () => undefined,
 		getParameter: (parameter: GLenum): unknown => {
 			switch (parameter) {
@@ -323,14 +281,10 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 					return activeTexture;
 				case constants.DRAW_FRAMEBUFFER_BINDING:
 					return drawFramebuffer;
-				case constants.MAX_RENDERBUFFER_SIZE:
-					return options.maximumRenderbufferSize;
 				case constants.MAX_TEXTURE_SIZE:
 					return options.maximumTextureSize;
 				case constants.READ_FRAMEBUFFER_BINDING:
 					return readFramebuffer;
-				case constants.RENDERBUFFER_BINDING:
-					return renderbuffer;
 				case constants.TEXTURE_BINDING_2D:
 					return textureBindings.get(activeTexture) ?? null;
 				default:
@@ -338,14 +292,6 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 			}
 		},
 		readBuffer: () => undefined,
-		renderbufferStorage: (
-			_target: GLenum,
-			format: GLenum,
-			width: number,
-			height: number,
-		) => {
-			renderbufferStorage.push({ format, height, width });
-		},
 		texParameteri: () => undefined,
 		texStorage2D: (
 			_target: GLenum,
@@ -370,7 +316,6 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 			return framebufferStatusCheckCount;
 		},
 		gl,
-		renderbufferStorage,
 		textureStorage,
 	};
 	return state;
@@ -390,23 +335,17 @@ function installUnrelatedBindings(gl: WebGL2RenderingContext): BindingSnapshot {
 		"unrelated-framebuffer",
 		1,
 	);
-	const renderbuffer = fakeResource<WebGLRenderbuffer>(
-		"unrelated-renderbuffer",
-		0,
-	);
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, texture0);
 	gl.activeTexture(gl.TEXTURE0 + 1);
 	gl.bindTexture(gl.TEXTURE_2D, activeTextureBinding);
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, drawFramebuffer);
 	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFramebuffer);
-	gl.bindRenderbuffer(gl.RENDERBUFFER, renderbuffer);
 	return {
 		activeTexture: gl.TEXTURE0 + 1,
 		activeTextureBinding,
 		drawFramebuffer,
 		readFramebuffer,
-		renderbuffer,
 		texture0Binding: texture0,
 	};
 }
@@ -430,9 +369,6 @@ function readBindings(gl: WebGL2RenderingContext): BindingSnapshot {
 		readFramebuffer: gl.getParameter(
 			gl.READ_FRAMEBUFFER_BINDING,
 		) as WebGLFramebuffer | null,
-		renderbuffer: gl.getParameter(
-			gl.RENDERBUFFER_BINDING,
-		) as WebGLRenderbuffer | null,
 		texture0Binding,
 	};
 }

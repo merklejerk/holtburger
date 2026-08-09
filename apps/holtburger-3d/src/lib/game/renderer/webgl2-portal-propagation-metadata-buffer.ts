@@ -1,26 +1,30 @@
 import {
-	PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
 	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
 	PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT,
 } from "./portal-arrival-metadata";
-import type { PortalArrivalMetadataStreamView } from "./portal-crossing-triangle-stream";
+import type { PortalPropagationMetadataStreamView } from "./portal-crossing-triangle-stream";
+import {
+	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
+} from "./portal-propagation-metadata";
+import { PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES } from "./portal-scope-tile-metadata";
 
-/** Fixed WebGL2 uniform-buffer owner for root and directed-crossing arrival records. */
-export class WebGL2PortalArrivalMetadataBuffer {
+/** Fixed WebGL2 uniform-buffer owner for arrival routes and selected scope-tile records. */
+export class WebGL2PortalPropagationMetadataBuffer {
 	readonly #buffer: WebGLBuffer;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #maximumBindingCount: number;
 	#destroyed = false;
-	#uploadedStateCount = 0;
+	#uploaded = false;
 
 	constructor(gl: WebGL2RenderingContext) {
 		const maximumBlockBytes = requirePositiveLimit(
 			gl.getParameter(gl.MAX_UNIFORM_BLOCK_SIZE),
 			"MAX_UNIFORM_BLOCK_SIZE",
 		);
-		if (maximumBlockBytes < PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES) {
+		if (maximumBlockBytes < PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES) {
 			throw new Error(
-				`Portal arrival metadata requires ${PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES} uniform bytes, but this device exposes ${maximumBlockBytes}.`,
+				`Portal propagation metadata requires ${PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES} uniform bytes, but this device exposes ${maximumBlockBytes}.`,
 			);
 		}
 		this.#maximumBindingCount = requirePositiveLimit(
@@ -29,7 +33,7 @@ export class WebGL2PortalArrivalMetadataBuffer {
 		);
 		const buffer = gl.createBuffer();
 		if (!buffer) {
-			throw new Error("Failed to allocate portal arrival metadata buffer.");
+			throw new Error("Failed to allocate portal propagation metadata buffer.");
 		}
 		this.#buffer = buffer;
 		this.#gl = gl;
@@ -40,7 +44,7 @@ export class WebGL2PortalArrivalMetadataBuffer {
 			gl.bindBuffer(gl.UNIFORM_BUFFER, buffer);
 			gl.bufferData(
 				gl.UNIFORM_BUFFER,
-				PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 				gl.DYNAMIC_DRAW,
 			);
 		} catch (cause) {
@@ -51,19 +55,24 @@ export class WebGL2PortalArrivalMetadataBuffer {
 		}
 	}
 
-	/** Upload the populated root/crossing prefix without reallocating or slicing staging storage. */
-	upload(stream: PortalArrivalMetadataStreamView): void {
+	/** Upload one combined prefix, accepting bounded unused arrival slots to save one driver call. */
+	upload(stream: PortalPropagationMetadataStreamView): void {
 		this.#requireAlive();
 		const expectedByteLength =
-			stream.arrivalMetadataStateCount * PORTAL_ARRIVAL_METADATA_RECORD_BYTES;
+			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES +
+			stream.scopeMetadataStateCount * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES;
 		if (
 			stream.arrivalMetadataStateCount < 1 ||
 			stream.arrivalMetadataStateCount > PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT ||
-			stream.usedArrivalMetadataByteLength !== expectedByteLength ||
-			expectedByteLength > stream.arrivalMetadataBytes.byteLength
+			stream.scopeMetadataStateCount < 1 ||
+			stream.scopeMetadataStateCount > stream.arrivalMetadataStateCount ||
+			stream.usedPropagationMetadataByteLength !== expectedByteLength ||
+			expectedByteLength > stream.propagationMetadataBytes.byteLength ||
+			stream.arrivalMetadataStateCount * PORTAL_ARRIVAL_METADATA_RECORD_BYTES >
+				PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES
 		) {
 			throw new Error(
-				"Portal arrival metadata upload does not match its populated state count.",
+				"Portal propagation metadata upload does not match its populated state counts.",
 			);
 		}
 		try {
@@ -71,14 +80,14 @@ export class WebGL2PortalArrivalMetadataBuffer {
 			this.#gl.bufferSubData(
 				this.#gl.UNIFORM_BUFFER,
 				0,
-				stream.arrivalMetadataBytes,
+				stream.propagationMetadataBytes,
 				0,
 				expectedByteLength,
 			);
 		} finally {
 			this.#gl.bindBuffer(this.#gl.UNIFORM_BUFFER, null);
 		}
-		this.#uploadedStateCount = stream.arrivalMetadataStateCount;
+		this.#uploaded = true;
 	}
 
 	/** Bind the already uploaded metadata to one shader-owned uniform-block binding point. */
@@ -90,11 +99,11 @@ export class WebGL2PortalArrivalMetadataBuffer {
 			bindingPoint >= this.#maximumBindingCount
 		) {
 			throw new Error(
-				`Portal arrival metadata binding ${bindingPoint} is outside this device's binding range.`,
+				`Portal propagation metadata binding ${bindingPoint} is outside this device's binding range.`,
 			);
 		}
-		if (this.#uploadedStateCount === 0) {
-			throw new Error("Portal arrival metadata has not been uploaded.");
+		if (!this.#uploaded) {
+			throw new Error("Portal propagation metadata has not been uploaded.");
 		}
 		this.#gl.bindBufferBase(
 			this.#gl.UNIFORM_BUFFER,
@@ -111,7 +120,7 @@ export class WebGL2PortalArrivalMetadataBuffer {
 
 	#requireAlive(): void {
 		if (this.#destroyed) {
-			throw new Error("Portal arrival metadata buffer has been destroyed.");
+			throw new Error("Portal propagation metadata buffer has been destroyed.");
 		}
 	}
 }

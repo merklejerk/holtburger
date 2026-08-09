@@ -9,6 +9,7 @@ import type {
 	SceneTopologyView,
 } from "../scene";
 import type { PlanarAperture } from "../scene/planar-aperture";
+import { scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import {
 	PortalRenderGraphPlanner,
@@ -548,6 +549,14 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 		.sort(compareScopeWindows);
 	const actual = arenaWindowSnapshot(arenaFrame);
 	assertEquivalentWindows(actual, expected, fixture.label);
+	for (let ordinal = 0; ordinal < arenaFrame.selectedScopeCount; ordinal += 1) {
+		expect(
+			arenaFrame.selectedScopeOrdinal(
+				scopeKey(arenaFrame.selectedScope(ordinal)),
+			),
+			`${fixture.label} selected-scope ordinal`,
+		).toBe(ordinal);
+	}
 	const selectedScopeIdentities = new Set(expected.map(({ scope }) => scope));
 	const expectedCrossingIds = fixture.topology.crossings
 		.filter(

@@ -96,6 +96,8 @@ export interface PortalScopeAtlasFrameView {
 	readonly tileCount: number;
 	readonly trace: PortalScopeAtlasPlanTrace;
 	readonly visibility: PortalScopeWindowFrameView;
+	/** Resolve an already-formed renderer run directly to its selected-scope tile. */
+	tileOrdinalForRenderScopeKey(renderScopeKey: string): number;
 	/** Horizontal clip-space scale routing ordinary camera projection into this tile. */
 	tileClipScaleX(ordinal: number): number;
 	/** Vertical clip-space scale routing ordinary camera projection into this tile. */
@@ -200,6 +202,16 @@ class MutablePortalScopeAtlasFrameView implements PortalScopeAtlasFrameView {
 
 	setVisibility(visibility: PortalScopeWindowFrameView): void {
 		this.#visibility = visibility;
+	}
+
+	tileOrdinalForRenderScopeKey(renderScopeKey: string): number {
+		const ordinal = this.visibility.selectedScopeOrdinal(renderScopeKey);
+		if (ordinal === null) {
+			throw new Error(
+				`Portal renderer scope key ${renderScopeKey} has no selected atlas tile.`,
+			);
+		}
+		return ordinal;
 	}
 
 	tileClipOffsetX(ordinal: number): number {

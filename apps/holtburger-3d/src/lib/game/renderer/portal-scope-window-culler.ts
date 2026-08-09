@@ -8,7 +8,7 @@ import type {
 	SceneScope,
 	SceneTopologyView,
 } from "../scene";
-import { sameScope } from "../scene/scope";
+import { sameScope, scopeKey } from "../scene/scope";
 import {
 	type CameraNearClipPrimitiveKind,
 	type CameraNearClipPrimitiveMeter,
@@ -112,6 +112,8 @@ export interface PortalScopeWindowFrameView {
 	readonly trace: PortalScopeWindowArenaTrace;
 	/** Return the persistent topology scope for one selected ordinal. */
 	selectedScope(ordinal: number): SceneScope;
+	/** Resolve an existing renderer scope key to its selected ordinal, or null when culled. */
+	selectedScopeOrdinal(renderScopeKey: string): number | null;
 	/** Return one selected persistent directed crossing without constructing a frame record. */
 	selectedCrossing(ordinal: number): ScenePortalCrossingInput;
 	/** Read one selected arena window without constructing an immutable window record. */
@@ -139,6 +141,8 @@ class PortalScopeWindowTopologyIndex {
 	readonly outgoingCrossingIds: Uint32Array;
 	readonly outgoingOffsets: Uint32Array;
 	readonly revision: number;
+	/** Canonical renderer scope keys resolved to topology-stable integer ids. */
+	readonly scopeIdByRenderKey: ReadonlyMap<string, number>;
 	readonly scopes: readonly SceneScope[];
 	readonly view: SceneTopologyView;
 
@@ -148,24 +152,28 @@ class PortalScopeWindowTopologyIndex {
 		this.scopes = Object.freeze(
 			[...topology.scopes]
 				.sort((left, right) =>
-					scopeIdentity(left.scope).localeCompare(scopeIdentity(right.scope)),
+					scopeKey(left.scope).localeCompare(scopeKey(right.scope)),
 				)
 				.map(({ scope }) => scope),
 		);
-		const scopeIdByIdentity = new Map(
-			this.scopes.map((scope, scopeId) => [scopeIdentity(scope), scopeId]),
-		);
+		const scopeIdByRenderKey = new Map<string, number>();
+		for (let scopeId = 0; scopeId < this.scopes.length; scopeId += 1) {
+			const key = scopeKey(this.scopes[scopeId]!);
+			if (scopeIdByRenderKey.has(key)) {
+				throw new Error(
+					`Portal topology has duplicate render scope key ${key}.`,
+				);
+			}
+			scopeIdByRenderKey.set(key, scopeId);
+		}
+		this.scopeIdByRenderKey = scopeIdByRenderKey;
 		const crossingInputs = [...topology.crossings].sort((left, right) =>
 			left.id.localeCompare(right.id),
 		);
 		this.crossings = Object.freeze(
 			crossingInputs.map((crossing): IndexedCrossing => {
-				const sourceScopeId = scopeIdByIdentity.get(
-					scopeIdentity(crossing.source),
-				);
-				const targetScopeId = scopeIdByIdentity.get(
-					scopeIdentity(crossing.target),
-				);
+				const sourceScopeId = scopeIdByRenderKey.get(scopeKey(crossing.source));
+				const targetScopeId = scopeIdByRenderKey.get(scopeKey(crossing.target));
 				if (sourceScopeId === undefined || targetScopeId === undefined) {
 					throw new Error(
 						`Portal crossing ${crossing.id} references an unavailable scope.`,
@@ -206,14 +214,9 @@ class PortalScopeWindowTopologyIndex {
 	}
 
 	findScopeId(scope: SceneScope): number {
-		// Real archive traces peak at 32 selected scopes. A linear scan avoids a camera-time Map
-		// lookup and makes the topology-owned integer conversion allocation-free.
-		for (let scopeId = 0; scopeId < this.scopes.length; scopeId += 1) {
-			if (sameScope(this.scopes[scopeId]!, scope)) return scopeId;
-		}
-		throw new Error(
-			`Portal root scope ${scopeIdentity(scope)} is unavailable.`,
-		);
+		const scopeId = this.scopeIdByRenderKey.get(scopeKey(scope));
+		if (scopeId !== undefined) return scopeId;
+		throw new Error(`Portal root scope ${scopeKey(scope)} is unavailable.`);
 	}
 }
 
@@ -235,6 +238,8 @@ class PortalScopeWindowArena {
 	readonly queueWindows: Uint32Array;
 	readonly selectedByScopeId: Uint8Array;
 	readonly selectedCrossingIds: Uint32Array;
+	/** Selected ordinal indexed by stable scope id; valid only while selectedByScopeId is set. */
+	readonly selectedOrdinalByScopeId: Uint32Array;
 	readonly selectedScopeIds: Uint32Array;
 	readonly typedCapacityBytes: number;
 	readonly windows: PortalWindowArena;
@@ -262,6 +267,7 @@ class PortalScopeWindowArena {
 		this.queueWindows.fill(NO_PORTAL_ARENA_WINDOW);
 		this.selectedByScopeId = new Uint8Array(scopeCount);
 		this.selectedCrossingIds = new Uint32Array(crossingCount);
+		this.selectedOrdinalByScopeId = new Uint32Array(scopeCount);
 		this.selectedScopeIds = new Uint32Array(scopeCount);
 		this.windows = new PortalWindowArena(windowCapacity);
 		this.typedCapacityBytes =
@@ -278,6 +284,7 @@ class PortalScopeWindowArena {
 			this.queueWindows.byteLength +
 			this.selectedByScopeId.byteLength +
 			this.selectedCrossingIds.byteLength +
+			this.selectedOrdinalByScopeId.byteLength +
 			this.selectedScopeIds.byteLength +
 			this.windows.trace.capacityBytes;
 	}
@@ -315,6 +322,19 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	selectedScope(ordinal: number): SceneScope {
 		const scopeId = this.#selectedScopeId(ordinal);
 		return this.index!.scopes[scopeId]!;
+	}
+
+	selectedScopeOrdinal(renderScopeKey: string): number | null {
+		const arena = this.#requireArena();
+		const scopeId = this.index!.scopeIdByRenderKey.get(renderScopeKey);
+		if (scopeId === undefined) {
+			throw new Error(
+				`Portal renderer scope key ${renderScopeKey} is unavailable in this topology.`,
+			);
+		}
+		return arena.selectedByScopeId[scopeId] === 0
+			? null
+			: arena.selectedOrdinalByScopeId[scopeId]!;
 	}
 
 	selectedCrossing(ordinal: number): ScenePortalCrossingInput {
@@ -770,6 +790,7 @@ export class PortalScopeWindowCuller {
 		}
 		if (wasSelected === 0) {
 			arena.selectedByScopeId[scopeId] = 1;
+			arena.selectedOrdinalByScopeId[scopeId] = this.#selectedScopeCount;
 			arena.selectedScopeIds[this.#selectedScopeCount] = scopeId;
 			this.#selectedScopeCount += 1;
 		}
@@ -815,12 +836,6 @@ function prepareAperture(
 		aperture,
 		landblockCoordinates: getLandblockCoordinates(aperture.landblockId),
 	});
-}
-
-function scopeIdentity(scope: SceneScope): string {
-	return scope.kind === "outdoor"
-		? "outdoor"
-		: `${scope.landblockId}/${scope.envCellId}`;
 }
 
 function facesCamera(

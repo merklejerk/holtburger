@@ -1,6 +1,6 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 CPU culler, scope-atlas planning, and command ledger proved; WebGL wiring remains
+Status: Phase 7 CPU atlas and opaque-routing contracts proved; WebGL wiring remains
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -1581,8 +1581,41 @@ bounded scan and reports the exact cumulative count. The atlas command ledger co
 and the policy-owned maximum depth to record zero or exactly `D` frontier clears, propagation
 commands, and scope-envelope reductions, plus one instanced opaque resolve for a non-empty atlas.
 When culler or atlas capacity declines a frontier, the ledger uses the retained shallower depth. No
-path count, camera-time `Map`, scope-key string, convergence readback, or per-state command enters
-this contract. GPU attachment and shader refinement remain intentionally unwired.
+path count, camera-time `Map` or scope-key construction, convergence readback, or per-state command
+enters this contract. GPU attachment and shader refinement remain intentionally unwired.
+
+### Opaque Routing Contract Checkpoint — 2026-08-09
+
+The final production submission audit found two existing scope-homogeneous boundaries. Terrain is
+already one outdoor-only pass with one draw per `TerrainFrameInput`. Opaque and alpha-test objects
+reach `#drawOpaqueObjects` as one `PreparedObjectFrameInput` per final draw after generated and
+dynamic frame instances have been recoalesced; `renderScopeKey` is already part of the grouping
+identity and is retained on the representative output record. Atlas routing therefore needs no
+route array, route-record capacity, regrouping pass, per-instance field, or new submission type.
+
+`PortalScopeAtlasOpaqueRouter` expresses that boundary as synchronous scalar resolution. A
+non-empty terrain pass resolves the outdoor tile once and shares it across all terrain draws. Every
+final object draw performs one canonical scope-key lookup and immediately receives its tile
+ordinal. The structural CPU increment is exactly
+`indicator(terrainDrawCount > 0) + finalOpaqueObjectDrawCount` topology-map lookups, with zero
+portal-owned frame records. The API cannot enumerate, split, reorder, retain, or duplicate a draw
+because it accepts and returns only one scalar route at a time.
+
+The topology index now retains one canonical renderer-key map at topology lifetime. That same map
+replaces the prior temporary identity map and linear camera-root scan, and a typed selected ordinal
+table converts its stable scope id directly to the atlas tile. Adding another integer scope field
+to every object or instance record was rejected: the canonical key is already required for correct
+run formation, and coupling contribution resolution to camera-selected atlas ids would add memory
+and invalidation work without removing the unavoidable per-final-draw routing decision. A
+last-scope cache is also deferred until deterministic traces demonstrate useful key locality.
+
+The archive dry trace cannot honestly claim exact final WebGL object-run counts: it stops before
+WebGL-resolved compatibility and currently omits dynamic opaque parts. Reimplementing that logic in
+the trace would create the parallel approximation this gate is meant to prevent. The existing
+prepared-range count remains a conservative routing upper bound; exact final counts will come from
+the injected counting substrate at the production run boundary during cutover. This does not weaken
+the complexity proof or the no-inflation result, both of which are parameterized by the renderer's
+existing final draw count.
 
 ### Task Checklist
 

@@ -59,6 +59,8 @@ interface PortalScopeWindowArenaTrace {
 	readonly arenaGrowthCount: 0;
 	/** Typed backing storage allocated at the most recent topology/capacity event. */
 	readonly arenaCapacityBytes: number;
+	/** Fresh typed error records allocated by this camera plan's exceptional cutoff. */
+	readonly exceptionalDiagnosticHeapRecordCreationCount: 0 | 1;
 	/** Largest admitted queue population reached by this camera plan. */
 	readonly queueHighWaterCount: number;
 	/** Immutable projection primitives charged before execution. */
@@ -82,6 +84,7 @@ interface PortalScopeWindowArenaTrace {
 interface MutablePortalScopeWindowArenaTrace {
 	arenaGrowthCount: 0;
 	arenaCapacityBytes: number;
+	exceptionalDiagnosticHeapRecordCreationCount: 0 | 1;
 	projectionPrimitiveCount: number;
 	queueHighWaterCount: number;
 	topologyBuildCount: number;
@@ -266,6 +269,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	readonly trace: MutablePortalScopeWindowArenaTrace = {
 		arenaGrowthCount: 0,
 		arenaCapacityBytes: 0,
+		exceptionalDiagnosticHeapRecordCreationCount: 0,
 		projectionPrimitiveCount: 0,
 		queueHighWaterCount: 0,
 		topologyBuildCount: 0,
@@ -349,11 +353,29 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	}
 }
 
-class ProjectionCapacityExceeded extends Error {}
-class WorkItemCapacityExceeded extends Error {}
-// Expected frame cutoffs throw retained identities so atomic rollback does not create error records.
-const PROJECTION_CAPACITY_EXCEEDED = new ProjectionCapacityExceeded();
-const WORK_ITEM_CAPACITY_EXCEEDED = new WorkItemCapacityExceeded();
+/** Atomic projection-budget cutoff carrying the exact failing count. */
+class ProjectionCapacityExceeded extends Error {
+	constructor(
+		readonly maximum: number,
+		readonly observed: number,
+	) {
+		super(
+			`Portal projection budget ${maximum} was exceeded by count ${observed}.`,
+		);
+	}
+}
+
+/** Fixed work storage cutoff identified by the operation that exhausted it. */
+class WorkItemCapacityExceeded extends Error {
+	constructor(
+		readonly maximum: number,
+		readonly operation: "mutation" | "queue",
+	) {
+		super(
+			`Portal ${operation} storage exhausted its ${maximum}-item capacity.`,
+		);
+	}
+}
 
 /**
  * Visibility-only traversal using topology-owned adjacency and camera-owned fixed arenas.
@@ -384,7 +406,10 @@ export class PortalScopeWindowCuller {
 				const observed = this.#projectionPrimitiveCount + count;
 				this.#projectionPrimitiveCount = observed;
 				if (observed > this.#capacity.maximumProjectionPrimitiveCount) {
-					throw PROJECTION_CAPACITY_EXCEEDED;
+					throw new ProjectionCapacityExceeded(
+						this.#capacity.maximumProjectionPrimitiveCount,
+						observed,
+					);
 				}
 			},
 		};
@@ -436,6 +461,7 @@ export class PortalScopeWindowCuller {
 					queueCheckpoint,
 					windowCheckpoint,
 				);
+				this.#frame.trace.exceptionalDiagnosticHeapRecordCreationCount = 1;
 				declinedDepth = depth + 1;
 				break;
 			}
@@ -482,6 +508,7 @@ export class PortalScopeWindowCuller {
 		this.#queueCount = 0;
 		this.#queueHighWaterCount = 0;
 		this.#selectedScopeCount = 0;
+		this.#frame.trace.exceptionalDiagnosticHeapRecordCreationCount = 0;
 		return arena.windows.reset();
 	}
 
@@ -601,7 +628,7 @@ export class PortalScopeWindowCuller {
 		window: number,
 	): void {
 		if (this.#queueCount >= arena.queueScopeIds.length) {
-			throw WORK_ITEM_CAPACITY_EXCEEDED;
+			throw new WorkItemCapacityExceeded(arena.queueScopeIds.length, "queue");
 		}
 		if (depth > 0xffff)
 			throw new Error(`Portal culler depth ${depth} exceeds storage.`);
@@ -626,7 +653,10 @@ export class PortalScopeWindowCuller {
 		const wasSelected = arena.selectedByScopeId[scopeId];
 		if (recordMutation) {
 			if (this.#mutationCount >= arena.mutationScopeIds.length) {
-				throw WORK_ITEM_CAPACITY_EXCEEDED;
+				throw new WorkItemCapacityExceeded(
+					arena.mutationScopeIds.length,
+					"mutation",
+				);
 			}
 			arena.mutationScopeIds[this.#mutationCount] = scopeId;
 			arena.mutationPreviousSelection[this.#mutationCount] = wasSelected;

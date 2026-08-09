@@ -1,6 +1,6 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 arena kernel proved; full-culler seeded differential gate blocks capacity and production wiring
+Status: Phase 7 full-culler drift gate and capacity policy proved; production atlas wiring remains
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -1454,36 +1454,35 @@ authored vertices into retained xyz arrays and clips triangles through the five 
 planes without point or polygon records. Camera projection validation was also changed from a
 temporary matrix-value array to direct scalar checks.
 
-The current prototype makes work-item, near/projection primitive, and polygon-arena capacity cutoffs
-throw preallocated module-lifetime `Error` sentinels before rolling back the incomplete
-crossing-depth frontier, including committed window tails. This avoids cutoff allocation, but each
-reused error carries a stack captured at module initialization rather than the failing operation.
-That diagnostic lie is not worth optimizing an exceptional path. Before production wiring, replace
-the sentinels with fresh typed errors and count the one exceptional diagnostic record honestly.
-Rollback still creates no fallback graph and never grows arena storage.
+Work-item, near/projection primitive, and polygon-arena capacity cutoffs now throw fresh typed errors
+before rolling back the incomplete crossing-depth frontier, including committed window tails. The
+error captures the actual failing operation and counts as exactly one exceptional diagnostic heap
+record. Accepted frames reset that counter to zero. Rollback still creates no fallback graph and
+never grows arena storage.
 
 The reused trace separates backing bytes, queue and polygon high-water counts, projection
-primitives, topology rebuilds, arena growth (structurally zero), and portal-owned frame heap records.
-Its current hardcoded zero is valid for accepted fixed-capacity frames; it must report the diagnostic
-error allocation on an exceptional capacity cutoff after the sentinel cleanup. The non-retained
-frame view exposes scalar fragment/vertex readers and never reconstructs an immutable window.
+primitives, topology rebuilds, arena growth (structurally zero), portal-owned accepted-frame heap
+records (zero), and exceptional diagnostic heap records (zero or one). The non-retained frame view
+exposes scalar fragment/vertex readers and never reconstructs an immutable window.
 
-Symbolic equivalence currently covers homogeneous, perspective, near-ray, and multipart projection;
-contained, containing, and partial admission; 128 deterministic triangle-intersection cases;
-triangle-order/cyclic-index metamorphism; six near-volume boundary cases including grazing contact;
-and culler-level cyclic, near-plane, and multipart topologies. Separate tests prove atomic queue,
-primitive, and committed-fragment exhaustion plus frame/trace reuse. This evidence uses Vitest only:
-no browser, renderer, screenshots, SwiftShader, wall-clock timing, or real-scene harness. The culler
-remains disconnected from production and archive candidate traces until the full-culler differential
-gate below passes, its capacity policy is derived, and its synchronous consumer boundary is wired
-into the selected planner.
+Symbolic equivalence covers homogeneous, perspective, near-ray, and multipart projection;
+contained, containing, and partial admission; the retained 128 deterministic triangle-intersection
+cases; triangle-order/cyclic-index metamorphism; and six near-volume boundary cases including
+grazing contact. The complete immutable planner and arena culler additionally match over those 128
+retained cases plus 336 seeded topology/camera cases split evenly across one-hop, accumulated fan-in,
+multipart, cycle/immediate-return, near-contact, footprint-rejection, and cross-landblock families.
+Every expanded input is replayed under crossing/scope storage reversal, triangle storage reversal
+with cyclic index rotation, and their combination: 1,472 complete shared inputs and 2,944 independent
+planner/culler executions. Family-specific assertions prove the intended branch was reached instead
+of accepting mutually boring inputs. Failures include seed, case, family, camera, topology, mutation,
+and normalized-window diffs. This evidence uses Vitest only: no browser, renderer, screenshots,
+SwiftShader, wall-clock timing, or real-scene harness.
 
-The current evidence is intentionally not promoted into a general drift claim. The 128-case seeded
-corpus exercises the arena's triangle-intersection kernel, while complete culler equivalence still
-rests on a small deterministic set of cyclic, near-plane, multipart, and capacity fixtures. That is
-not enough protection for a permanent dual implementation of clipping and admission.
+Separate tests prove atomic queue, primitive, and committed-fragment exhaustion plus frame/trace
+reuse. The arena remains disconnected from production until a synchronous atlas consumer can replace
+the legacy immutable schedule without production shadow execution.
 
-### Dual-Implementation Drift Gate — Blocking Production Wiring
+### Dual-Implementation Drift Gate — Passed; Guards Production Wiring
 
 The immutable `PortalViewWindow` path and packed `PortalWindowArena` path are a deliberate DRY
 violation with different lifetime and allocation strategies. They must remain algorithmically
@@ -1491,7 +1490,7 @@ independent: sharing tolerances, prepared inputs, deterministic generators, and 
 allowed; sharing projection, clipping, normalization, intersection, merge, admission, or traversal
 helpers would make the differential proof circular. Production must never shadow-run both paths.
 
-Before capacity derivation or production wiring:
+Completed before capacity derivation or production wiring:
 
 1. Refactor the existing deterministic seeded geometry inputs into test-only reusable generators.
    Feed each already-retained seed and case to both the immutable planner and arena culler.
@@ -1509,22 +1508,29 @@ Before capacity derivation or production wiring:
    capacity model merely to make failure modes look differential.
 
 Gate exit requires every retained deterministic fixture, existing seed, expanded culler seed, and
-metamorphic variant to pass without weakening comparison tolerances. Only then may capacity
-derivation and the synchronous production cutover proceed.
+metamorphic variant to pass without weakening comparison tolerances. The gate passed on 2026-08-09;
+production shadow execution remains prohibited.
 
 ### Capacity Policy Ownership — After the Drift Gate
 
-The accepted maximum portal path/propagation depth is currently `16`, repeated as
-`maximumDepth: 16` in culler test literals. It is policy selected by Gate C, not a geometric or
-storage invariant of `PortalScopeWindowCuller`; the culler must continue accepting an explicit
-capacity contract and must not own that number.
+The accepted maximum portal path/propagation depth is `16`. Before this checkpoint it was repeated
+as `maximumDepth: 16` in culler test literals. It is policy selected by Gate C, not a geometric or
+storage invariant of `PortalScopeWindowCuller`; the culler continues accepting an explicit capacity
+contract and does not own that number.
 
-Before substrate work, add one production capacity-policy module (provisionally
-`portal-render-capacity-policy.ts`) containing the complete selected portal capacity object. Its
-named `maximumPathDepth` field owns `16` and feeds culler `maximumDepth`, propagation rounds, arena
-derivation, diagnostics, and ordinary test fixtures. Focused boundary tests may override it through
-an explicit test capacity builder. Do not create an isolated depth-only constants file or duplicate
-the model/oracle budget as a production dependency.
+`portal-render-capacity-policy.ts` now owns the complete selected portal capacity object. Its named
+`maximumPathDepth` field owns `16` and feeds culler depth plus ordinary fixtures and trace scheduling.
+The selected independent cutoffs are 8,700 scope-window work items, 240,181 checked projection
+primitives, and the archive-censused maximum 24 authored aperture vertices.
+
+Arena dimensions are mechanical rather than individually tuned. A reciprocal polygon intersection
+can retain both input boundaries plus one intersection per edge pair, yielding a conservative
+visibility-aperture bound `A² + 2A = 624`. Six homogeneous clip planes and sixteen nested
+intersections yield `4 + D * (624 + 6) = 10,084` vertices in one convex fragment. The primitive
+budget bounds 80,061 committed fragments, 80,060 temporary fragments, 240,185 committed vertices,
+and 240,181 temporary vertices; the work budget bounds 17,398 committed window handles. Cutoff is
+the intentional response to an unseen input beyond these selected limits. No arena dimension grows
+in response to camera motion.
 
 ### Deliverables
 
@@ -1560,20 +1566,22 @@ the model/oracle budget as a production dependency.
       output-to-target production clipping kernel and prove it equivalent over the bounded, seeded,
       near-plane, multipart, and metamorphic projection corpora. This establishes kernel equivalence,
       not the full-culler drift gate.
-- [ ] Reuse the retained seeded geometry inputs in a test-only full-culler differential corpus; do
+- [x] Reuse the retained seeded geometry inputs in a test-only full-culler differential corpus; do
       not copy either clipping implementation into the generator or snapshot assertion.
-- [ ] Expand the differential corpus to hundreds of replayable topology/camera cases covering
+- [x] Expand the differential corpus to hundreds of replayable topology/camera cases covering
       accumulated coverage, cycles, multipart apertures, near contact, footprint rejection, and
       cross-landblock anchoring. Report seed and case ordinal on every mismatch.
-- [ ] Apply storage-order and cyclic-index metamorphisms to the same generated inputs and require
+- [x] Apply storage-order and cyclic-index metamorphisms to the same generated inputs and require
       identical immutable-planner and arena-culler normalized scope windows before capacity work.
-- [ ] Replace module-lifetime capacity `Error` sentinels with fresh typed errors so a cutoff stack
+- [x] Replace module-lifetime capacity `Error` sentinels with fresh typed errors so a cutoff stack
       identifies the failing operation. Permit and trace exactly one diagnostic heap record for an
       exceptional cutoff; preserve frontier-atomic rollback and zero arena growth.
-- [ ] Add one production portal capacity-policy module after the differential gate. Give the Gate C
-      depth value `16` one named `maximumPathDepth` owner and derive culler `maximumDepth`,
-      propagation rounds, and ordinary test capacity fixtures from it. Keep policy out of the culler
-      kernel and do not create a depth-only constants file.
+- [x] Add one production portal capacity-policy module after the differential gate. Give the Gate C
+      depth value `16` one named `maximumPathDepth` owner and derive culler `maximumDepth` plus
+      ordinary test and trace fixtures from it. Keep policy out of the culler kernel and do not
+      create a depth-only constants file.
+- [ ] Feed the same `maximumPathDepth` field into the production atlas propagation rounds and their
+      diagnostics when that synchronous consumer is implemented.
 - [x] Index topology-stable scopes, crossings, apertures, and adjacency with persistent integer ids.
       Do not construct scope-key strings, `Map`, `Set`, `Vec2`, polygon objects, or work-item objects
       during a camera planning pass.
@@ -1581,7 +1589,7 @@ the model/oracle budget as a production dependency.
       with integer offsets/counts, reusable double-buffer clipping scratch, touched-id selected-set
       reset, and explicit high-water bounds. Reset logical lengths without clearing or replacing
       backing storage.
-- [ ] Derive CPU arena capacities from the accepted state, work-item, polygon-primitive, and vertex
+- [x] Derive CPU arena capacities from the accepted state, work-item, polygon-primitive, and vertex
       budgets at topology/capacity setup. A camera pose that exceeds them rejects the deepest
       incomplete frontier atomically; it never grows an arena or creates a fallback object graph.
 - [x] Expose a frame plan as a non-retained scalar view over arena storage.
@@ -1779,28 +1787,28 @@ the model/oracle budget as a production dependency.
 
 ## Risks and Mitigations
 
-| Risk                                                                              | Mitigation                                                                                                                                                                    |
-| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The oracle accidentally copies candidate assumptions.                             | Keep ray/fragment traversal independent from layers, SCCs, labels, targets, and execution operations; require hand-derived fixtures first.                                    |
-| Finite pixels omit continuous raster edge behavior.                               | Treat effective footprints as model input and retain focused projection and WebGL raster fixtures at the boundary.                                                            |
-| Bounded search is mistaken for a universal proof.                                 | Label bounded evidence honestly and maintain explicit induction/algebraic proof obligations or a machine-checked theorem for universal claims.                                |
-| Scenario enumeration explodes.                                                    | Use symmetry reduction, canonical identity ordering, small exhaustive bounds, seeded larger cases, and replayable minimization before adding a library.                       |
-| A compositing budget is applied only after the planner constructs rejected paths. | Enumerate canonical breadth-first frontiers, reject the first over-budget frontier atomically, report lower-bound diagnostics, and never generate descendants.                |
-| A trace counts the wrong proxy for CPU work.                                      | Derive the complexity ledger from actual code, trace primitive operations/allocations at their owner, and require a scenario where each dimension differs.                    |
-| Reverse traversal is not a valid transparent order for all AC content.            | Let arbitrary fragment depths generate counterexamples; prove portal-separation constraints from content or select global cross-view ordering.                                |
-| Multiple paths overlap at one pixel and lose parent provenance.                   | Preserve path fragments until a safe-union rewrite proves overlap harmless; include overlapping-projection cases in exhaustive search.                                        |
-| More targets trade CPU work for excessive bandwidth.                              | Keep target/pixel/byte work separate from CPU-owned operations and accept only strict dominance or an explicit bounded Pareto trade.                                          |
-| Per-domain caching adds lookup/copy work that prior experiments found costly.     | Trace lookup, validation, preparation, composites, and submissions separately; reject a cache that is dominated on real exterior workloads.                                   |
-| Correct path views multiply domain submissions.                                   | Prepare once, union only proved-compatible views, reuse instance uploads/ranges, evaluate domain-layer caches, and expose unavoidable repeats explicitly.                     |
-| Transparency breaks existing material batching.                                   | Reuse exact compatibility and adjacent camera-order rules; make visibility submission a hard outer boundary rather than a new material key per object.                        |
-| Particle routing duplicates CPU work or uploads.                                  | Keep owner-to-domain routing separate from views and pack each owner's frame instances once before visibility submission.                                                     |
-| Exterior caching transfers imprecise depth on some browsers.                      | Keep it a candidate until exact synthetic framebuffer readback passes on target browsers/GPUs.                                                                                |
-| Model code becomes a second production planner.                                   | Keep model types isolated, pure, and test-only until a selected contract is deliberately ported; production never imports the oracle.                                         |
-| Immutable window clipping creates per-frame young-generation churn.               | Keep it as proof code; use a budget-sized typed-array arena and output-to-target kernel in production, prove equivalence, and reject rather than grow on camera motion.       |
-| Immutable and arena clipping drift after their deliberate dual implementation.    | Block production wiring on full-culler seeded differential and metamorphic corpora; share inputs and tolerances, never algorithmic clipping/admission helpers.                |
-| A “zero-GC” claim hides exceptional diagnostics or arena/GPU-resource growth.    | Guarantee zero owned records only for accepted fixed-capacity plans; trace one allowed cutoff error separately from arena growth, topology/capacity, and resize allocation.   |
-| Gate C's depth 16 becomes duplicated substrate folklore.                          | Give the complete production capacity policy one `maximumPathDepth` owner; derive culler depth, propagation rounds, diagnostics, and ordinary fixtures from that field.       |
-| Historical tests preserve dead architecture.                                      | Port only live semantic cases, then delete tests whose only purpose is old contract shape or call order.                                                                      |
+| Risk                                                                              | Mitigation                                                                                                                                                                  |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The oracle accidentally copies candidate assumptions.                             | Keep ray/fragment traversal independent from layers, SCCs, labels, targets, and execution operations; require hand-derived fixtures first.                                  |
+| Finite pixels omit continuous raster edge behavior.                               | Treat effective footprints as model input and retain focused projection and WebGL raster fixtures at the boundary.                                                          |
+| Bounded search is mistaken for a universal proof.                                 | Label bounded evidence honestly and maintain explicit induction/algebraic proof obligations or a machine-checked theorem for universal claims.                              |
+| Scenario enumeration explodes.                                                    | Use symmetry reduction, canonical identity ordering, small exhaustive bounds, seeded larger cases, and replayable minimization before adding a library.                     |
+| A compositing budget is applied only after the planner constructs rejected paths. | Enumerate canonical breadth-first frontiers, reject the first over-budget frontier atomically, report lower-bound diagnostics, and never generate descendants.              |
+| A trace counts the wrong proxy for CPU work.                                      | Derive the complexity ledger from actual code, trace primitive operations/allocations at their owner, and require a scenario where each dimension differs.                  |
+| Reverse traversal is not a valid transparent order for all AC content.            | Let arbitrary fragment depths generate counterexamples; prove portal-separation constraints from content or select global cross-view ordering.                              |
+| Multiple paths overlap at one pixel and lose parent provenance.                   | Preserve path fragments until a safe-union rewrite proves overlap harmless; include overlapping-projection cases in exhaustive search.                                      |
+| More targets trade CPU work for excessive bandwidth.                              | Keep target/pixel/byte work separate from CPU-owned operations and accept only strict dominance or an explicit bounded Pareto trade.                                        |
+| Per-domain caching adds lookup/copy work that prior experiments found costly.     | Trace lookup, validation, preparation, composites, and submissions separately; reject a cache that is dominated on real exterior workloads.                                 |
+| Correct path views multiply domain submissions.                                   | Prepare once, union only proved-compatible views, reuse instance uploads/ranges, evaluate domain-layer caches, and expose unavoidable repeats explicitly.                   |
+| Transparency breaks existing material batching.                                   | Reuse exact compatibility and adjacent camera-order rules; make visibility submission a hard outer boundary rather than a new material key per object.                      |
+| Particle routing duplicates CPU work or uploads.                                  | Keep owner-to-domain routing separate from views and pack each owner's frame instances once before visibility submission.                                                   |
+| Exterior caching transfers imprecise depth on some browsers.                      | Keep it a candidate until exact synthetic framebuffer readback passes on target browsers/GPUs.                                                                              |
+| Model code becomes a second production planner.                                   | Keep model types isolated, pure, and test-only until a selected contract is deliberately ported; production never imports the oracle.                                       |
+| Immutable window clipping creates per-frame young-generation churn.               | Keep it as proof code; use a budget-sized typed-array arena and output-to-target kernel in production, prove equivalence, and reject rather than grow on camera motion.     |
+| Immutable and arena clipping drift after their deliberate dual implementation.    | Block production wiring on full-culler seeded differential and metamorphic corpora; share inputs and tolerances, never algorithmic clipping/admission helpers.              |
+| A “zero-GC” claim hides exceptional diagnostics or arena/GPU-resource growth.     | Guarantee zero owned records only for accepted fixed-capacity plans; trace one allowed cutoff error separately from arena growth, topology/capacity, and resize allocation. |
+| Gate C's depth 16 becomes duplicated substrate folklore.                          | Give the complete production capacity policy one `maximumPathDepth` owner; derive culler depth, propagation rounds, diagnostics, and ordinary fixtures from that field.     |
+| Historical tests preserve dead architecture.                                      | Port only live semantic cases, then delete tests whose only purpose is old contract shape or call order.                                                                    |
 
 ## Definition of Done
 
@@ -1827,7 +1835,7 @@ the model/oracle budget as a production dependency.
       fallback graph.
 - [x] The arena-backed projection kernel is equivalent to the immutable proof implementation over
       every retained exact, seeded, near-plane, multipart, and metamorphic projection case.
-- [ ] The complete arena culler is differentially equivalent to the immutable planner over retained
+- [x] The complete arena culler is differentially equivalent to the immutable planner over retained
       fixtures, existing seeds, hundreds of expanded topology/camera cases, and storage-order
       metamorphisms, with replayable seed/case failures.
 - [ ] One production capacity-policy contract owns Gate C's `maximumPathDepth: 16`; culler,

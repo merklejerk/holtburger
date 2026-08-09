@@ -66,6 +66,7 @@ import {
 	PortalRenderGraphPlanner,
 	type PortalRenderGraphPlanInput,
 } from "../src/lib/game/renderer/portal-render-graph";
+import { PORTAL_RENDER_CAPACITY_POLICY } from "../src/lib/game/renderer/portal-render-capacity-policy";
 import {
 	createPortalArrivalStateDryScheduleTrace,
 	createCurrentPortalDryScheduleTrace,
@@ -1112,7 +1113,7 @@ function tracePose(
 		budget: {
 			maximumConflictPrimitiveCount: 10_000_000,
 			maximumOwnershipLabelCount: 0x100,
-			maximumPathDepth: 16,
+			maximumPathDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 			maximumPathViewCount: 8_192,
 			maximumProjectionPrimitiveCount: 10_000_000,
 		},

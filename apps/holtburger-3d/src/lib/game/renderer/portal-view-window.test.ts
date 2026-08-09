@@ -20,6 +20,10 @@ import {
 	PortalWindowArena,
 	type PortalArenaWindowReader,
 } from "./portal-window-arena";
+import {
+	PORTAL_WINDOW_GEOMETRY_SEED,
+	seededPortalTrianglePairs,
+} from "./portal-window-seeded-test-support";
 
 const ORIGIN: LandblockCoordinates = { x: 0, y: 0 };
 const IDENTITY_PROJECTION: PreparedPortalProjection = {
@@ -326,10 +330,10 @@ describe("portal view windows", () => {
 	});
 
 	it("agrees with an independent exact triangle oracle", () => {
-		const random = seededRandom(0x5eed);
-		for (let fixture = 0; fixture < 128; fixture += 1) {
-			const inheritedTriangle = randomTriangle(random);
-			const apertureTriangle = randomTriangle(random);
+		const pairs = seededPortalTrianglePairs(PORTAL_WINDOW_GEOMETRY_SEED, 128);
+		for (let fixture = 0; fixture < pairs.length; fixture += 1) {
+			const { aperture: apertureTriangle, inherited: inheritedTriangle } =
+				pairs[fixture]!;
 			const inherited = createPortalViewWindow([inheritedTriangle]);
 			if (!inherited) throw new Error("Random triangle normalized empty.");
 			const result = clipPortalWindowThroughAperture(
@@ -573,10 +577,10 @@ describe("portal window arena", () => {
 	});
 
 	it("matches the seeded triangle intersection corpus", () => {
-		const random = seededRandom(0x5eed);
-		for (let fixture = 0; fixture < 128; fixture += 1) {
-			const inheritedTriangle = randomTriangle(random);
-			const apertureTriangle = randomTriangle(random);
+		const pairs = seededPortalTrianglePairs(PORTAL_WINDOW_GEOMETRY_SEED, 128);
+		for (let fixture = 0; fixture < pairs.length; fixture += 1) {
+			const { aperture: apertureTriangle, inherited: inheritedTriangle } =
+				pairs[fixture]!;
 			const inheritedInput = aperture(
 				inheritedTriangle.map((point) => [point.x, point.y, 0] as const),
 			);
@@ -736,17 +740,6 @@ function planarAperture(
 	};
 }
 
-function randomTriangle(random: () => number): readonly Vec2[] {
-	for (;;) {
-		const triangle = [
-			new Vec2(random() * 1.8 - 0.9, random() * 1.8 - 0.9),
-			new Vec2(random() * 1.8 - 0.9, random() * 1.8 - 0.9),
-			new Vec2(random() * 1.8 - 0.9, random() * 1.8 - 0.9),
-		];
-		if (Math.abs(signedArea(triangle)) > 0.05) return triangle;
-	}
-}
-
 function referenceTrianglesIntersect(
 	left: readonly Vec2[],
 	right: readonly Vec2[],
@@ -807,21 +800,4 @@ function orientation(start: Vec2, end: Vec2, point: Vec2): number {
 		(end.x - start.x) * (point.y - start.y) -
 		(end.y - start.y) * (point.x - start.x)
 	);
-}
-
-function signedArea(vertices: readonly Vec2[]): number {
-	return (
-		(vertices[0]!.x * (vertices[1]!.y - vertices[2]!.y) +
-			vertices[1]!.x * (vertices[2]!.y - vertices[0]!.y) +
-			vertices[2]!.x * (vertices[0]!.y - vertices[1]!.y)) /
-		2
-	);
-}
-
-function seededRandom(seed: number): () => number {
-	let state = seed >>> 0;
-	return () => {
-		state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
-		return state / 0x1_0000_0000;
-	};
 }

@@ -26,6 +26,7 @@ import {
 	type PortalRenderGraphPlanInput,
 	type PortalRenderWorkPlan,
 } from "./portal-render-graph";
+import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 
 const LANDBLOCK_ID = "0x0001ffff";
@@ -1229,6 +1230,262 @@ describe("portal render graph planning", () => {
 	});
 });
 
+describe("portal scope-window culler bridge", () => {
+	it("matches the immutable planner coverage through a cyclic topology", () => {
+		const middle = envCellScope("middle");
+		const leaf = envCellScope("leaf");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(middle, "middle"),
+				topologyScope(leaf, "leaf"),
+			],
+			[
+				crossing("out-middle", OUTDOOR_SCOPE, middle, {
+					aperture: rectangle(-0.9, -0.9, -0.1, 0.9),
+				}),
+				crossing("middle-leaf", middle, leaf, {
+					aperture: rectangle(-0.8, -0.8, -0.2, 0.8),
+				}),
+				crossing("leaf-out", leaf, OUTDOOR_SCOPE, {
+					aperture: rectangle(-0.7, -0.7, -0.3, 0.7),
+				}),
+			],
+		);
+		const input = planInput(OUTDOOR_SCOPE);
+		const expected = requirePlan(graph, input).scopeWindows;
+		const culler = new PortalScopeWindowCuller({
+			maximumDepth: 16,
+			maximumProjectionPrimitiveCount: 100_000,
+			maximumWorkItemCount: 64,
+			windowArena: scopeWindowArenaCapacity(),
+		});
+
+		const actual = culler.cull(graph, input);
+
+		expect(actual.status).toBe("complete");
+		expect(scopeWindowSnapshot(actual)).toEqual(
+			expected
+				.map(({ scope, window }) => ({
+					scope: scopeIdentity(scope),
+					window: windowSnapshot(window),
+				}))
+				.sort((left, right) => left.scope.localeCompare(right.scope)),
+		);
+		expect(actual.trace.queueHighWaterCount).toBeGreaterThan(0);
+		expect(actual.trace.arenaCapacityBytes).toBeGreaterThan(0);
+	});
+
+	it("matches near-plane and multipart immutable projection results", () => {
+		const nearChild = envCellScope("near-child");
+		const splitChild = envCellScope("split-child");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(nearChild, "near-child"),
+				topologyScope(splitChild, "split-child"),
+			],
+			[
+				crossing("near", OUTDOOR_SCOPE, nearChild, {
+					aperture: rectangle(-0.8, -0.8, 0.8, 0.8, 0.75),
+				}),
+				crossing("split", OUTDOOR_SCOPE, splitChild, {
+					aperture: splitAperture(),
+				}),
+			],
+		);
+		const input = planInput(OUTDOOR_SCOPE);
+		const expected = requirePlan(graph, input).scopeWindows;
+		const culler = new PortalScopeWindowCuller({
+			maximumDepth: 16,
+			maximumProjectionPrimitiveCount: 100_000,
+			maximumWorkItemCount: 64,
+			windowArena: scopeWindowArenaCapacity(),
+		});
+
+		const actual = culler.cull(graph, input);
+
+		expect(scopeWindowSnapshot(actual)).toEqual(
+			expected
+				.map(({ scope, window }) => ({
+					scope: scopeIdentity(scope),
+					window: windowSnapshot(window),
+				}))
+				.sort((left, right) => left.scope.localeCompare(right.scope)),
+		);
+		let splitOrdinal = -1;
+		for (let ordinal = 0; ordinal < actual.selectedScopeCount; ordinal += 1) {
+			if (
+				scopeIdentity(actual.selectedScope(ordinal)).endsWith("/split-child")
+			) {
+				splitOrdinal = ordinal;
+				break;
+			}
+		}
+		expect(splitOrdinal).toBeGreaterThanOrEqual(0);
+		expect(actual.selectedFragmentCount(splitOrdinal)).toBe(2);
+	});
+
+	it("declines a whole fan-out frontier when fixed queue capacity is exhausted", () => {
+		const left = envCellScope("left");
+		const right = envCellScope("right");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(left, "left"),
+				topologyScope(right, "right"),
+			],
+			[
+				crossing("left", OUTDOOR_SCOPE, left),
+				crossing("right", OUTDOOR_SCOPE, right),
+			],
+		);
+		const culler = new PortalScopeWindowCuller({
+			maximumDepth: 16,
+			maximumProjectionPrimitiveCount: 100_000,
+			maximumWorkItemCount: 2,
+			windowArena: scopeWindowArenaCapacity(),
+		});
+
+		const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
+
+		expect(frame.status).toBe("truncated");
+		expect(frame.completedDepth).toBe(0);
+		expect(frame.declinedDepth).toBe(1);
+		expect(scopeWindowSnapshot(frame)).toEqual([
+			{
+				scope: "outdoor",
+				window: windowSnapshot(createFullPortalViewWindow()),
+			},
+		]);
+	});
+
+	it("declines a whole frontier when committed polygon capacity is exhausted", () => {
+		const child = envCellScope("child");
+		const graph = topology(
+			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
+			[crossing("child", OUTDOOR_SCOPE, child)],
+		);
+		const culler = new PortalScopeWindowCuller({
+			maximumDepth: 16,
+			maximumProjectionPrimitiveCount: 100_000,
+			maximumWorkItemCount: 8,
+			windowArena: {
+				...scopeWindowArenaCapacity(),
+				maximumFragmentCount: 1,
+			},
+		});
+
+		const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
+
+		expect(frame.status).toBe("truncated");
+		expect(frame.completedDepth).toBe(0);
+		expect(frame.declinedDepth).toBe(1);
+		expect(scopeWindowSnapshot(frame)).toEqual([
+			{
+				scope: "outdoor",
+				window: windowSnapshot(createFullPortalViewWindow()),
+			},
+		]);
+		expect(frame.trace.portalOwnedFrameHeapRecordCreationCount).toBe(0);
+	});
+
+	it("declines the frontier before a projection exceeds its atomic primitive budget", () => {
+		const child = envCellScope("child");
+		const maximumProjectionPrimitiveCount = 1;
+		const graph = topology(
+			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
+			[crossing("child", OUTDOOR_SCOPE, child)],
+		);
+		const culler = new PortalScopeWindowCuller({
+			maximumDepth: 16,
+			maximumProjectionPrimitiveCount,
+			maximumWorkItemCount: 8,
+			windowArena: scopeWindowArenaCapacity(),
+		});
+
+		const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
+
+		expect(frame.status).toBe("truncated");
+		expect(frame.completedDepth).toBe(0);
+		expect(frame.declinedDepth).toBe(1);
+		expect(frame.selectedScopeCount).toBe(1);
+		expect(scopeIdentity(frame.selectedScope(0))).toBe("outdoor");
+		expect(frame.trace.projectionPrimitiveCount).toBeGreaterThan(
+			maximumProjectionPrimitiveCount,
+		);
+	});
+
+	it("reuses its frame view and arena until topology actually changes", () => {
+		const firstGraph = topology([topologyScope(OUTDOOR_SCOPE, null)], []);
+		const secondGraph = {
+			...topology([topologyScope(OUTDOOR_SCOPE, null)], []),
+			revision: firstGraph.revision,
+		};
+		const capacity = {
+			maximumDepth: 16,
+			maximumProjectionPrimitiveCount: 100_000,
+			maximumWorkItemCount: 8,
+			windowArena: scopeWindowArenaCapacity(),
+		};
+		const culler = new PortalScopeWindowCuller(capacity);
+		const firstFrame = culler.cull(firstGraph, planInput(OUTDOOR_SCOPE));
+		const trace = firstFrame.trace;
+		const secondFrame = culler.cull(firstGraph, planInput(OUTDOOR_SCOPE));
+
+		expect(secondFrame).toBe(firstFrame);
+		expect(secondFrame.trace).toBe(trace);
+		expect(secondFrame.trace.topologyBuildCount).toBe(1);
+		expect(secondFrame.trace.portalOwnedFrameHeapRecordCreationCount).toBe(0);
+		expect(secondFrame.trace.arenaGrowthCount).toBe(0);
+
+		const changedFrame = culler.cull(secondGraph, planInput(OUTDOOR_SCOPE));
+		expect(changedFrame.trace.topologyBuildCount).toBe(2);
+	});
+});
+
+function scopeWindowSnapshot(
+	frame: ReturnType<PortalScopeWindowCuller["cull"]>,
+): readonly {
+	readonly scope: string;
+	readonly window: readonly number[][][];
+}[] {
+	return Array.from({ length: frame.selectedScopeCount }, (_, ordinal) => ({
+		scope: scopeIdentity(frame.selectedScope(ordinal)),
+		window: Array.from(
+			{ length: frame.selectedFragmentCount(ordinal) },
+			(_, fragment) =>
+				Array.from(
+					{
+						length: frame.selectedFragmentVertexCount(ordinal, fragment),
+					},
+					(_, vertex) => [
+						frame.selectedVertexX(ordinal, fragment, vertex),
+						frame.selectedVertexY(ordinal, fragment, vertex),
+					],
+				),
+		),
+	})).sort((left, right) => left.scope.localeCompare(right.scope));
+}
+
+function scopeWindowArenaCapacity() {
+	return {
+		maximumApertureVertexCount: 64,
+		maximumFragmentCount: 2_048,
+		maximumTemporaryFragmentCount: 256,
+		maximumTemporaryVertexCount: 16_384,
+		maximumVertexCount: 16_384,
+		maximumVerticesPerFragment: 64,
+		maximumWindowCount: 512,
+	};
+}
+
+function windowSnapshot(window: PortalViewWindow): readonly number[][][] {
+	return window.fragments.map(({ vertices }) =>
+		vertices.map(({ x, y }) => [x, y]),
+	);
+}
+
 function indoorLayer(
 	renderLayer: number,
 	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
@@ -1413,6 +1670,17 @@ function rectangle(
 			minX,
 			maxY,
 			z,
+		]),
+	};
+}
+
+function splitAperture(): PlanarAperture {
+	return {
+		indices: new Uint32Array([0, 1, 2, 3, 4, 5]),
+		plane: { d: 0, normal: new Vec3(0, 0, 1) },
+		vertices: new Float32Array([
+			-0.9, -0.8, 0, -0.2, -0.8, 0, -0.55, 0.7, 0, 0.2, -0.8, 0, 0.9, -0.8, 0,
+			0.55, 0.7, 0,
 		]),
 	};
 }

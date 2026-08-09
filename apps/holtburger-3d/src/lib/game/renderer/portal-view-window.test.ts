@@ -11,9 +11,15 @@ import {
 	createPortalViewWindow,
 	portalViewWindowBounds,
 	portalViewWindowContainsPoint,
+	preparePortalApertureProjectionInput,
 	type PortalApertureProjectionInput,
 	type PreparedPortalProjection,
 } from "./portal-view-window";
+import {
+	NO_PORTAL_ARENA_WINDOW,
+	PortalWindowArena,
+	type PortalArenaWindowReader,
+} from "./portal-window-arena";
 
 const ORIGIN: LandblockCoordinates = { x: 0, y: 0 };
 const IDENTITY_PROJECTION: PreparedPortalProjection = {
@@ -362,6 +368,287 @@ describe("portal view windows", () => {
 		).toThrow("matrix must be finite");
 	});
 });
+
+describe("portal window arena", () => {
+	it("matches immutable homogeneous, near-ray, and multipart projection", () => {
+		for (const fixture of [
+			{
+				aperture: aperture([
+					[-0.5, -0.5, 0],
+					[0.5, -0.5, 0],
+					[0, 0.5, 0],
+				]),
+				near: false,
+				projection: IDENTITY_PROJECTION,
+			},
+			{
+				aperture: aperture([
+					[-0.5, -0.5, -2],
+					[0.5, -0.5, -2],
+					[0, 0.5, -0.5],
+				]),
+				near: false,
+				projection: perspectiveProjection(),
+			},
+			{
+				aperture: aperture([
+					[-0.2, -0.2, -0.5],
+					[0.2, -0.2, -0.5],
+					[0, 0.2, -0.5],
+				]),
+				near: true,
+				projection: perspectiveProjection(),
+			},
+			{
+				aperture: aperture(
+					[
+						[-0.8, -0.8, 0],
+						[0.8, -0.8, 0],
+						[0.8, -0.2, 0],
+						[-0.2, -0.2, 0],
+						[-0.2, 0.8, 0],
+						[-0.8, 0.8, 0],
+					],
+					[0, 1, 3, 1, 2, 3, 0, 3, 5, 3, 4, 5],
+				),
+				near: false,
+				projection: IDENTITY_PROJECTION,
+			},
+		] as const) {
+			const arena = arenaFixture();
+			const root = arena.reset();
+			const immutable = fixture.near
+				? clipPortalWindowThroughNearClipAperture(
+						fixture.projection,
+						createFullPortalViewWindow(),
+						fixture.aperture,
+					)
+				: clipPortalWindowThroughAperture(
+						fixture.projection,
+						createFullPortalViewWindow(),
+						fixture.aperture,
+					);
+			const visible = arena.projectAndAdmit(
+				root,
+				NO_PORTAL_ARENA_WINDOW,
+				fixture.projection,
+				preparePortalApertureProjectionInput(fixture.aperture),
+				fixture.near,
+				0,
+				null,
+			);
+
+			expect(visible).toBe(immutable.kind === "visible");
+			if (!visible || immutable.kind !== "visible") continue;
+			expect(arenaWindowSnapshot(arena, arena.admittedCoverage)).toEqual(
+				immutableWindowSnapshot(immutable.window),
+			);
+		}
+	});
+
+	it("matches immutable admission for contained, containing, and partial windows", () => {
+		const arena = arenaFixture();
+		const root = arena.reset();
+		const coverageInput = aperture(
+			[
+				[-0.8, -0.8, 0],
+				[0.2, -0.8, 0],
+				[0.2, 0.8, 0],
+				[-0.8, 0.8, 0],
+			],
+			[0, 1, 2, 0, 2, 3],
+		);
+		expect(
+			arena.projectAndAdmit(
+				root,
+				NO_PORTAL_ARENA_WINDOW,
+				IDENTITY_PROJECTION,
+				preparePortalApertureProjectionInput(coverageInput),
+				false,
+				0,
+				null,
+			),
+		).toBe(true);
+		const coverage = arena.admittedCoverage;
+		const immutableCoverage = clipPortalWindowThroughAperture(
+			IDENTITY_PROJECTION,
+			createFullPortalViewWindow(),
+			coverageInput,
+		);
+		if (immutableCoverage.kind !== "visible") {
+			throw new Error("Expected visible coverage fixture.");
+		}
+		for (const candidate of [
+			aperture(
+				[
+					[-0.6, -0.5, 0],
+					[0, -0.5, 0],
+					[0, 0.5, 0],
+					[-0.6, 0.5, 0],
+				],
+				[0, 1, 2, 0, 2, 3],
+			),
+			aperture(
+				[
+					[-0.9, -0.9, 0],
+					[0.4, -0.9, 0],
+					[0.4, 0.9, 0],
+					[-0.9, 0.9, 0],
+				],
+				[0, 1, 2, 0, 2, 3],
+			),
+			aperture(
+				[
+					[0, -0.5, 0],
+					[0.6, -0.5, 0],
+					[0.6, 0.5, 0],
+					[0, 0.5, 0],
+				],
+				[0, 1, 2, 0, 2, 3],
+			),
+		]) {
+			const immutableCandidate = clipPortalWindowThroughAperture(
+				IDENTITY_PROJECTION,
+				createFullPortalViewWindow(),
+				candidate,
+			);
+			if (immutableCandidate.kind !== "visible") {
+				throw new Error("Expected visible candidate fixture.");
+			}
+			const immutable = admitPortalViewWindow(
+				immutableCoverage.window,
+				immutableCandidate.window,
+			);
+			const changed = arena.projectAndAdmit(
+				root,
+				coverage,
+				IDENTITY_PROJECTION,
+				preparePortalApertureProjectionInput(candidate),
+				false,
+				0,
+				null,
+			);
+
+			expect(changed).toBe(immutable.delta !== null);
+			if (!changed || !immutable.delta) continue;
+			expect(arenaWindowSnapshot(arena, arena.admittedDelta)).toEqual(
+				immutableWindowSnapshot(immutable.delta),
+			);
+			expect(arenaWindowSnapshot(arena, arena.admittedCoverage)).toEqual(
+				immutableWindowSnapshot(immutable.coverage),
+			);
+		}
+	});
+
+	it("preserves multipart output under triangle order and cyclic-index changes", () => {
+		const points = [
+			[-0.8, -0.8, 0],
+			[0.8, -0.8, 0],
+			[0.8, -0.2, 0],
+			[-0.2, -0.2, 0],
+			[-0.2, 0.8, 0],
+			[-0.8, 0.8, 0],
+		] as const;
+		const variants = [
+			[0, 1, 3, 1, 2, 3, 0, 3, 5, 3, 4, 5],
+			[4, 5, 3, 3, 5, 0, 2, 3, 1, 1, 3, 0],
+		] as const;
+		let expected: readonly number[][][] | null = null;
+		for (const indices of variants) {
+			const arena = arenaFixture();
+			const visible = arena.projectAndAdmit(
+				arena.reset(),
+				NO_PORTAL_ARENA_WINDOW,
+				IDENTITY_PROJECTION,
+				preparePortalApertureProjectionInput(aperture(points, indices)),
+				false,
+				0,
+				null,
+			);
+			expect(visible).toBe(true);
+			const actual = arenaWindowSnapshot(arena, arena.admittedCoverage);
+			expected ??= actual;
+			expect(actual).toEqual(expected);
+		}
+	});
+
+	it("matches the seeded triangle intersection corpus", () => {
+		const random = seededRandom(0x5eed);
+		for (let fixture = 0; fixture < 128; fixture += 1) {
+			const inheritedTriangle = randomTriangle(random);
+			const apertureTriangle = randomTriangle(random);
+			const inheritedInput = aperture(
+				inheritedTriangle.map((point) => [point.x, point.y, 0] as const),
+			);
+			const candidateInput = aperture(
+				apertureTriangle.map((point) => [point.x, point.y, 0] as const),
+			);
+			const arena = arenaFixture();
+			const root = arena.reset();
+			if (
+				!arena.projectAndAdmit(
+					root,
+					NO_PORTAL_ARENA_WINDOW,
+					IDENTITY_PROJECTION,
+					preparePortalApertureProjectionInput(inheritedInput),
+					false,
+					0,
+					null,
+				)
+			) {
+				throw new Error(`Inherited arena fixture ${fixture} normalized empty.`);
+			}
+			const visible = arena.projectAndAdmit(
+				arena.admittedCoverage,
+				NO_PORTAL_ARENA_WINDOW,
+				IDENTITY_PROJECTION,
+				preparePortalApertureProjectionInput(candidateInput),
+				false,
+				0,
+				null,
+			);
+
+			expect(visible, `fixture ${fixture}`).toBe(
+				referenceTrianglesIntersect(inheritedTriangle, apertureTriangle),
+			);
+		}
+	});
+});
+
+function arenaFixture(): PortalWindowArena {
+	return new PortalWindowArena({
+		maximumApertureVertexCount: 64,
+		maximumFragmentCount: 1_024,
+		maximumTemporaryFragmentCount: 128,
+		maximumTemporaryVertexCount: 8_192,
+		maximumVertexCount: 8_192,
+		maximumVerticesPerFragment: 64,
+		maximumWindowCount: 256,
+	});
+}
+
+function arenaWindowSnapshot(
+	reader: PortalArenaWindowReader,
+	window: number,
+): readonly number[][][] {
+	return Array.from({ length: reader.fragmentCount(window) }, (_, fragment) =>
+		Array.from(
+			{ length: reader.fragmentVertexCount(window, fragment) },
+			(_, vertex) => [
+				reader.vertexX(window, fragment, vertex),
+				reader.vertexY(window, fragment, vertex),
+			],
+		),
+	);
+}
+
+function immutableWindowSnapshot(
+	window: NonNullable<ReturnType<typeof createPortalViewWindow>>,
+): readonly number[][][] {
+	return window.fragments.map(({ vertices }) =>
+		vertices.map(({ x, y }) => [x, y]),
+	);
+}
 
 function perspectiveProjection(): PreparedPortalProjection {
 	return {

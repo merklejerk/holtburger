@@ -1,5 +1,6 @@
 import type { GeometryResourceKey } from "./resource-manager";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
+import { createEmptyPortalWindowProjectionDiagnostics } from "./portal-view-window";
 import { WebGL2ResourceManager } from "./webgl2-resource-manager";
 
 export const FIXTURE_IDENTITY_CLIP_FROM_LOCAL = new Float32Array([
@@ -23,17 +24,5 @@ export function createPortalFixtureGeometry(
 
 /** Zeroed projection counters for hand-authored executor plans. */
 export function emptyFixtureProjectionDiagnostics(): PortalRenderWorkPlan["diagnostics"]["projection"] {
-	return {
-		broadPhaseRejectedPairCount: 0,
-		createdClipVertexCount: 0,
-		createdNdcVertexCount: 0,
-		createdPolygonCount: 0,
-		emptyExactIntersectionCount: 0,
-		exactIntersectionPairCount: 0,
-		homogeneousClippedPolygonCount: 0,
-		homogeneousRejectedTriangleCount: 0,
-		inputTriangleCount: 0,
-		outputFragmentCount: 0,
-		outputVertexCount: 0,
-	};
+	return createEmptyPortalWindowProjectionDiagnostics();
 }

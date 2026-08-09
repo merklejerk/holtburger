@@ -18,8 +18,11 @@ import {
 } from "./portal-near-plane";
 import {
 	admitPortalViewWindow,
+	createEmptyPortalWindowProjectionDiagnostics,
 	createFullPortalViewWindow,
 	portalViewWindowNdcArea,
+	portalViewWindowBounds,
+	preparePortalApertureProjectionInput,
 	PortalWindowProjector,
 	type PortalApertureProjectionInput,
 	type PortalViewWindow,
@@ -38,6 +41,13 @@ interface PortalRenderNode {
 	readonly kind: "indoor-visibility-island" | "outdoor";
 	readonly renderLayer: number;
 	readonly scopes: readonly SceneScope[];
+}
+
+/** One authored scope paired with its monotone union of admitted screen-space coverage. */
+interface PortalRenderScopeWindow {
+	readonly bounds: ReturnType<typeof portalViewWindowBounds>;
+	readonly scope: SceneScope;
+	readonly window: PortalViewWindow;
 }
 
 /** Executable mask representation selected once from the crossing/near-clip relationship. */
@@ -129,7 +139,8 @@ interface PortalIndoorRenderContribution {
 }
 
 type PortalRenderContribution =
-	PortalExteriorRenderContribution | PortalIndoorRenderContribution;
+	| PortalExteriorRenderContribution
+	| PortalIndoorRenderContribution;
 
 /** Ordered executable contributions sharing one completed graph layer. */
 interface PortalRenderLayer {
@@ -189,6 +200,8 @@ export interface PortalRenderWorkPlan {
 	readonly rootNodeId: PortalRenderNodeId;
 	/** Exact scopes to resolve through the shared SceneGraph culling query. */
 	readonly selectedScopes: readonly SceneScope[];
+	/** Path-free scope coverage consumed independently from the legacy contribution schedule. */
+	readonly scopeWindows: readonly PortalRenderScopeWindow[];
 	readonly topologyRevision: number;
 }
 
@@ -308,7 +321,7 @@ class PortalPlanningContext {
 			(input.portalFootprint.drawingBuffer.width *
 				input.portalFootprint.drawingBuffer.height) /
 			4;
-		this.#projector = new PortalWindowProjector(input);
+		this.#projector = new PortalWindowProjector(input, null);
 	}
 
 	plan(): PortalRenderWorkPlan {
@@ -371,6 +384,19 @@ class PortalPlanningContext {
 		const selectedScopes = [...this.#selectedScopes.values()].sort(
 			(left, right) => scopeKey(left).localeCompare(scopeKey(right)),
 		);
+		const scopeWindows = selectedScopes.map((scope) => {
+			const window = this.#scopeCoverage.get(scopeKey(scope));
+			if (!window) {
+				throw new Error(
+					`Portal render scope ${scopeKey(scope)} lost its admitted coverage.`,
+				);
+			}
+			return Object.freeze({
+				bounds: portalViewWindowBounds(window),
+				scope,
+				window,
+			});
+		});
 		return {
 			capacity,
 			diagnostics: {
@@ -414,6 +440,7 @@ class PortalPlanningContext {
 			renderLayers,
 			rootNodeId: rootDomain.id,
 			selectedScopes,
+			scopeWindows,
 			topologyRevision: this.#index.view.revision,
 		};
 	}
@@ -455,6 +482,8 @@ class PortalPlanningContext {
 				this.#sameDomainBoundaryCrossingIds.add(crossing.id);
 			}
 			const apertureInput = createVisibilityApertureInput(crossing);
+			const preparedAperture =
+				preparePortalApertureProjectionInput(apertureInput);
 			const anchorAperture = this.#anchorAperture(apertureInput);
 			const nearPlaneStraddle = apertureIntersectsCameraNearClipVolume(
 				this.#input.nearClipVolume,
@@ -467,9 +496,9 @@ class PortalPlanningContext {
 			const projection = nearPlaneStraddle
 				? this.#projector.clipThroughNearClipAperture(
 						item.window,
-						apertureInput,
+						preparedAperture,
 					)
-				: this.#projector.clipThroughAperture(item.window, apertureInput);
+				: this.#projector.clipThroughAperture(item.window, preparedAperture);
 			addProjectionDiagnostics(this.#projection, projection.diagnostics);
 			if (projection.kind === "empty") {
 				this.emptyWindowCount += 1;
@@ -1220,19 +1249,7 @@ function validatePlanInput(input: PortalRenderGraphPlanInput): void {
 }
 
 function createProjectionDiagnostics(): ProjectionDiagnostics {
-	return {
-		broadPhaseRejectedPairCount: 0,
-		createdClipVertexCount: 0,
-		createdNdcVertexCount: 0,
-		createdPolygonCount: 0,
-		emptyExactIntersectionCount: 0,
-		exactIntersectionPairCount: 0,
-		homogeneousClippedPolygonCount: 0,
-		homogeneousRejectedTriangleCount: 0,
-		inputTriangleCount: 0,
-		outputFragmentCount: 0,
-		outputVertexCount: 0,
-	};
+	return createEmptyPortalWindowProjectionDiagnostics();
 }
 
 function addProjectionDiagnostics(

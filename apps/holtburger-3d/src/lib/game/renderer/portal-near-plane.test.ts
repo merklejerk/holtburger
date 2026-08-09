@@ -1,12 +1,14 @@
 import { sceneVec3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
-import { Quat, Vec3 } from "../math/types";
+import { Mat4, Quat, Vec3 } from "../math/types";
 import type { Camera } from "../runtime/types";
 import type { PlanarAperture } from "../scene/planar-aperture";
 import {
 	apertureIntersectsCameraNearClipVolume,
 	createCameraNearClipVolume,
 } from "./portal-near-plane";
+import { preparePortalApertureProjectionInput } from "./portal-view-window";
+import { PortalWindowArena } from "./portal-window-arena";
 
 const CAMERA: Camera = {
 	far: 100,
@@ -178,7 +180,72 @@ describe("finite portal near-clip-volume intersection", () => {
 			createCameraNearClipVolume({ ...CAMERA, near: 0 }, CAMERA.placement, 1),
 		).toThrow("projection facts");
 	});
+
+	it("matches the immutable classifier across the near-volume boundary corpus", () => {
+		const near = createCameraNearClipVolume(CAMERA, CAMERA.placement, 1);
+		const apertures = [
+			triangleApertureFromPoints([
+				new Vec3(-0.5, 0, -2),
+				new Vec3(0.5, 0, 0),
+				new Vec3(0, 1, -2),
+			]),
+			triangleApertureFromPoints([
+				new Vec3(3, 0, -2),
+				new Vec3(4, 0, 0),
+				new Vec3(3, 1, -2),
+			]),
+			triangleApertureFromPoints([
+				new Vec3(-0.2, -0.2, -1.5),
+				new Vec3(0.2, -0.2, -1.5),
+				new Vec3(0, 0.2, -1.5),
+			]),
+			triangleApertureFromPoints([
+				new Vec3(1, -0.5, -1),
+				new Vec3(2, 0, -1),
+				new Vec3(1, 0.5, -1),
+			]),
+			triangleApertureFromPoints([
+				new Vec3(-2, -0.1, -1),
+				new Vec3(2, -0.1, -1),
+				new Vec3(0, 0.1, -1),
+			]),
+			triangleApertureFromPoints([
+				new Vec3(1.000_483_8, -0.000_148_9, -1.000_195_4),
+				new Vec3(1.000_297_3, -0.000_958_2, -0.999_950_4),
+				new Vec3(1.000_497_8, 0.000_285_4, -1.000_201_7),
+			]),
+		];
+		const arena = nearClassifierArena();
+		for (const aperture of apertures) {
+			expect(
+				arena.apertureIntersectsNearClip(
+					near,
+					preparePortalApertureProjectionInput({
+						aperture,
+						landblockCoordinates: { x: 0, y: 0 },
+					}),
+					{
+						anchorCoordinates: { x: 0, y: 0 },
+						clipFromAnchor: Mat4.identity(),
+					},
+					null,
+				),
+			).toBe(apertureIntersectsCameraNearClipVolume(near, aperture));
+		}
+	});
 });
+
+function nearClassifierArena(): PortalWindowArena {
+	return new PortalWindowArena({
+		maximumApertureVertexCount: 16,
+		maximumFragmentCount: 16,
+		maximumTemporaryFragmentCount: 16,
+		maximumTemporaryVertexCount: 128,
+		maximumVertexCount: 128,
+		maximumVerticesPerFragment: 16,
+		maximumWindowCount: 16,
+	});
+}
 
 function triangleAperture(
 	points: readonly [Vec3, Vec3, Vec3],

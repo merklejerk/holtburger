@@ -25,6 +25,7 @@ serde_json.workspace = true
 tauri = { version = "2", features = [] }
 tokio.workspace = true
 geo = "0.33.1"
+hex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

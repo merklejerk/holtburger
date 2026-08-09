@@ -270,10 +270,11 @@ interface ObjectFrameInput {
 		| "env-cell-shell"
 		| "env-cell-resident"
 		| "dynamic";
-	/** Scene/portal residency boundary that must never be crossed by an instance run. */
-	readonly renderDomainKey: string;
+	/** Canonical authored scope; an instance run must never cross this atlas-routing boundary. */
+	readonly renderScopeKey: string;
 	readonly cullFaceOverride:
-		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
+		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
+		| null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -1362,7 +1363,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: drawUnit.material,
 						ordering: drawUnit.ordering,
-						renderDomainKey: `${node.placement.landblockId}/${scopeKey(node.placement.scope)}`,
+						renderScopeKey: scopeKey(node.placement.scope),
 						source,
 						transparentSort: drawUnit.transparentSort,
 					});
@@ -1384,7 +1385,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: template.material,
 						ordering: "transparent",
-						renderDomainKey: `${node.placement.landblockId}/${scopeKey(node.placement.scope)}`,
+						renderScopeKey: scopeKey(node.placement.scope),
 						source,
 						transparentSort: template.transparentSort,
 					});
@@ -1421,7 +1422,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: instance.sourceToLandblock,
 						material: drawUnit.material,
 						ordering: drawUnit.ordering,
-						renderDomainKey: domain.key,
+						renderScopeKey: scopeKey(domain.scope),
 						source: "dynamic",
 						transparentSort,
 					});
@@ -1456,7 +1457,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: resolved.drawUnit.material,
 						ordering: resolved.drawUnit.ordering,
-						renderDomainKey: `${node.placement.landblockId}/${scopeKey(node.placement.scope)}`,
+						renderScopeKey: scopeKey(node.placement.scope),
 						source: "env-cell-shell",
 						transparentSort: resolved.drawUnit.transparentSort,
 					});
@@ -2987,7 +2988,7 @@ function frameTemplateBatchIdentityEquals(
 	return (
 		leftInstances.cohortKey === rightInstances.cohortKey &&
 		left.source === right.source &&
-		left.renderDomainKey === right.renderDomainKey &&
+		left.renderScopeKey === right.renderScopeKey &&
 		left.geometry === right.geometry &&
 		left.landblockId === right.landblockId &&
 		left.indexStart === right.indexStart &&
@@ -3008,7 +3009,7 @@ function opaqueObjectInstanceBatchKey(
 			"Opaque instance grouping received a non-frame instance input.",
 		);
 	}
-	return `${object.ordering}\0${object.source}\0${object.renderDomainKey}\0${object.landblockId}\0${instances.cohortKey}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`;
+	return `${object.ordering}\0${object.source}\0${object.renderScopeKey}\0${object.landblockId}\0${instances.cohortKey}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`;
 }
 
 function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {

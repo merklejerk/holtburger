@@ -116,6 +116,12 @@ export interface PortalScopeWindowFrameView {
 	selectedScopeOrdinal(renderScopeKey: string): number | null;
 	/** Return one selected persistent directed crossing without constructing a frame record. */
 	selectedCrossing(ordinal: number): ScenePortalCrossingInput;
+	/** Return the selected source-scope ordinal for one directed crossing. */
+	selectedCrossingSourceScopeOrdinal(ordinal: number): number;
+	/** Return the visibility aperture's topology-owned landblock x coordinate. */
+	selectedCrossingLandblockX(ordinal: number): number;
+	/** Return the visibility aperture's topology-owned landblock y coordinate. */
+	selectedCrossingLandblockY(ordinal: number): number;
 	/** Read one selected arena window without constructing an immutable window record. */
 	selectedFragmentCount(ordinal: number): number;
 	/** Read one selected fragment's vertex count through the non-retained frame view. */
@@ -338,6 +344,31 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	}
 
 	selectedCrossing(ordinal: number): ScenePortalCrossingInput {
+		return this.#selectedIndexedCrossing(ordinal).crossing;
+	}
+
+	selectedCrossingSourceScopeOrdinal(ordinal: number): number {
+		const arena = this.#requireArena();
+		const sourceScopeId = this.#selectedIndexedCrossing(ordinal).sourceScopeId;
+		if (arena.selectedByScopeId[sourceScopeId] === 0) {
+			throw new Error(
+				"Selected portal crossing has an unselected source scope.",
+			);
+		}
+		return arena.selectedOrdinalByScopeId[sourceScopeId]!;
+	}
+
+	selectedCrossingLandblockX(ordinal: number): number {
+		return this.#selectedIndexedCrossing(ordinal).visibilityAperture
+			.landblockCoordinates.x;
+	}
+
+	selectedCrossingLandblockY(ordinal: number): number {
+		return this.#selectedIndexedCrossing(ordinal).visibilityAperture
+			.landblockCoordinates.y;
+	}
+
+	#selectedIndexedCrossing(ordinal: number): IndexedCrossing {
 		if (
 			!Number.isInteger(ordinal) ||
 			ordinal < 0 ||
@@ -348,7 +379,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 			);
 		}
 		const crossingId = this.#requireArena().selectedCrossingIds[ordinal]!;
-		return this.index!.crossings[crossingId]!.crossing;
+		return this.index!.crossings[crossingId]!;
 	}
 
 	selectedFragmentCount(ordinal: number): number {

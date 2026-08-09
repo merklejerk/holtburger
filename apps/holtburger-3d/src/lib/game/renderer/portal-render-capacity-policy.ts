@@ -21,6 +21,8 @@ interface PortalRenderCapacityLimits {
 interface PortalScopeAtlasCapacitySelection {
 	/** Horizontal drawing-buffer tiles allocated once per target generation. */
 	readonly columnCount: number;
+	/** Expanded aperture triangle vertices uploaded once for all retained crossings. */
+	readonly maximumCrossingTriangleVertexCount: number;
 	/** Root plus directed-crossing arrival ids representable by the frontier format. */
 	readonly maximumArrivalStateCount: number;
 	/** Vertical drawing-buffer tiles allocated once per target generation. */
@@ -114,6 +116,11 @@ function validateSelection(selection: PortalRenderCapacitySelection): void {
 		],
 		["scopeAtlas.columnCount", selection.scopeAtlas.columnCount, 1],
 		[
+			"scopeAtlas.maximumCrossingTriangleVertexCount",
+			selection.scopeAtlas.maximumCrossingTriangleVertexCount,
+			3,
+		],
+		[
 			"scopeAtlas.maximumArrivalStateCount",
 			selection.scopeAtlas.maximumArrivalStateCount,
 			1,
@@ -136,6 +143,7 @@ export const PORTAL_RENDER_CAPACITY_POLICY = createPortalRenderCapacityPolicy({
 	maximumScopeWindowWorkItemCount: 8_700,
 	scopeAtlas: {
 		columnCount: 2,
+		maximumCrossingTriangleVertexCount: 2_048,
 		maximumArrivalStateCount: PORTAL_SCOPE_ATLAS_MAXIMUM_ARRIVAL_STATE_COUNT,
 		rowCount: 3,
 	},

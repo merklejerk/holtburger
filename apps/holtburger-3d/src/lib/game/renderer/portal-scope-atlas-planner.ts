@@ -14,19 +14,21 @@ export interface PortalScopeAtlasResource {
 	readonly atlas: { readonly height: number; readonly width: number };
 	/** Camera render extent used to convert conservative NDC windows to integer pixels. */
 	readonly drawingBuffer: { readonly height: number; readonly width: number };
+	/** Expanded aperture triangle vertices available to one uploaded crossing stream. */
+	readonly maximumCrossingTriangleVertexCount: number;
 	/** Root plus directed-crossing ids representable by the fixed frontier attachments. */
 	readonly maximumArrivalStateCount: number;
 }
 
 /** Fixed GPU-command shape derived from one accepted visibility and atlas plan. */
 interface PortalScopeAtlasCommandLedger {
-	/** Selected crossing instances prepared once and reused by every propagation command. */
+	/** Selected crossings expanded once into geometry reused by every propagation command. */
 	readonly crossingInstancePreparationCount: number;
 	/** One frontier clear for each retained propagation round. */
 	readonly frontierClearCommandCount: number;
 	/** Crossing instances evaluated across every retained propagation round. */
 	readonly maskPropagationInstanceCount: number;
-	/** One instanced portal propagation command per retained round. */
+	/** One batched aperture-stream propagation command per retained round. */
 	readonly maskPropagationCommandCount: number;
 	/** One instanced resolve command when at least one scope tile exists. */
 	readonly opaqueCompositeCommandCount: 0 | 1;
@@ -54,6 +56,10 @@ interface PortalScopeAtlasPlanTrace {
 	readonly atlasCapacityRetreatCount: number;
 	/** Whole-frontier retreats caused specifically by arrival-state format capacity. */
 	readonly arrivalStateCapacityRetreatCount: number;
+	/** Retained crossing aperture vertices copied once into the GPU stream. */
+	readonly crossingTriangleVertexCount: number;
+	/** Whole-frontier retreats caused specifically by crossing-stream capacity. */
+	readonly crossingTriangleVertexCapacityRetreatCount: number;
 	/** Whole-frontier retreats caused by any fixed GPU resource capacity. */
 	readonly frontierRetreatCount: number;
 	/** Packing passes; accepted frames perform one unless atlas capacity forces retreat. */
@@ -89,6 +95,8 @@ interface MutablePortalScopeAtlasPlanTrace extends PortalScopeAtlasPlanTrace {
 	atlasPixelCapacity: number;
 	atlasPackedExtentPixelCount: number;
 	arrivalStateCapacityRetreatCount: number;
+	crossingTriangleVertexCount: number;
+	crossingTriangleVertexCapacityRetreatCount: number;
 	frontierRetreatCount: number;
 	packingAttemptCount: number;
 	portalOwnedFrameHeapRecordCreationCount: 0;
@@ -191,6 +199,8 @@ class MutablePortalScopeAtlasFrameView implements PortalScopeAtlasFrameView {
 		atlasPackedExtentPixelCount: 0,
 		atlasPixelCapacity: 0,
 		arrivalStateCapacityRetreatCount: 0,
+		crossingTriangleVertexCount: 0,
+		crossingTriangleVertexCapacityRetreatCount: 0,
 		frontierRetreatCount: 0,
 		packingAttemptCount: 0,
 		portalOwnedFrameHeapRecordCreationCount: 0,
@@ -312,6 +322,21 @@ export class PortalScopeAtlasPlanner {
 			this.#frame.trace.arrivalStateCapacityRetreatCount += 1;
 			this.#frame.trace.frontierRetreatCount += 1;
 		}
+		let crossingTriangleVertexCount =
+			this.#countCrossingTriangleVertices(visibility);
+		while (
+			crossingTriangleVertexCount > resource.maximumCrossingTriangleVertexCount
+		) {
+			if (!this.#culler.declineDeepestCompletedFrontier(visibility)) {
+				throw new Error(
+					"Portal scope atlas cannot retain one crossing triangle.",
+				);
+			}
+			this.#frame.trace.crossingTriangleVertexCapacityRetreatCount += 1;
+			this.#frame.trace.frontierRetreatCount += 1;
+			crossingTriangleVertexCount =
+				this.#countCrossingTriangleVertices(visibility);
+		}
 		while (true) {
 			this.#frame.trace.packingAttemptCount += 1;
 			this.#deriveTileBounds(visibility, resource);
@@ -330,7 +355,10 @@ export class PortalScopeAtlasPlanner {
 			}
 			this.#frame.trace.atlasCapacityRetreatCount += 1;
 			this.#frame.trace.frontierRetreatCount += 1;
+			crossingTriangleVertexCount =
+				this.#countCrossingTriangleVertices(visibility);
 		}
+		this.#frame.trace.crossingTriangleVertexCount = crossingTriangleVertexCount;
 		this.#frame.tileCount = visibility.selectedScopeCount;
 		this.#writeCommandLedger(visibility);
 		return this.#frame;
@@ -347,12 +375,35 @@ export class PortalScopeAtlasPlanner {
 		this.#frame.trace.atlasPackedExtentPixelCount = 0;
 		this.#frame.trace.atlasCapacityRetreatCount = 0;
 		this.#frame.trace.arrivalStateCapacityRetreatCount = 0;
+		this.#frame.trace.crossingTriangleVertexCount = 0;
+		this.#frame.trace.crossingTriangleVertexCapacityRetreatCount = 0;
 		this.#frame.trace.frontierRetreatCount = 0;
 		this.#frame.trace.packingAttemptCount = 0;
 		this.#frame.trace.tilePixelCount = 0;
 		this.#frame.trace.tilePlacementAttemptCount = 0;
 		this.#frame.trace.tileSortComparisonCount = 0;
 		this.#frame.trace.windowVertexReadCount = 0;
+	}
+
+	#countCrossingTriangleVertices(
+		visibility: PortalScopeWindowFrameView,
+	): number {
+		let count = 0;
+		for (
+			let ordinal = 0;
+			ordinal < visibility.selectedCrossingCount;
+			ordinal += 1
+		) {
+			const crossing = visibility.selectedCrossing(ordinal);
+			const apertureCount = crossing.visibilityAperture.indices.length;
+			if (apertureCount === 0 || apertureCount % 3 !== 0) {
+				throw new Error(
+					`Portal crossing ${crossing.id} has an invalid triangle stream.`,
+				);
+			}
+			count += apertureCount;
+		}
+		return count;
 	}
 
 	#deriveTileBounds(
@@ -553,6 +604,10 @@ function validateResource(
 		["atlas height", resource.atlas.height],
 		["drawing-buffer width", resource.drawingBuffer.width],
 		["drawing-buffer height", resource.drawingBuffer.height],
+		[
+			"maximum crossing triangle-vertex count",
+			resource.maximumCrossingTriangleVertexCount,
+		],
 		["maximum arrival-state count", resource.maximumArrivalStateCount],
 	] as const) {
 		if (!Number.isSafeInteger(value) || value <= 0 || value > MAXIMUM_UINT32) {

@@ -26,6 +26,12 @@ import {
 	type PortalRenderGraphPlanInput,
 	type PortalRenderWorkPlan,
 } from "./portal-render-graph";
+import {
+	PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL,
+	PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
+	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+	PortalCrossingTriangleStreamArena,
+} from "./portal-crossing-triangle-stream";
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
@@ -1476,6 +1482,9 @@ describe("portal scope-atlas planning", () => {
 		const frame = planner.plan(graph, input, {
 			atlas: { height: 100, width: 200 },
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
 			maximumArrivalStateCount:
 				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
@@ -1537,6 +1546,9 @@ describe("portal scope-atlas planning", () => {
 		const frame = planner.plan(graph, input, {
 			atlas: { height: 150, width: 100 },
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
 			maximumArrivalStateCount:
 				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
@@ -1591,6 +1603,9 @@ describe("portal scope-atlas planning", () => {
 		const frame = planner.plan(graph, input, {
 			atlas: { height: 300, width: 300 },
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
 			maximumArrivalStateCount: 2,
 		});
 
@@ -1607,6 +1622,102 @@ describe("portal scope-atlas planning", () => {
 		});
 	});
 
+	it("retreats before packing when expanded crossing triangles exceed fixed storage", () => {
+		const middle = envCellScope("stream-middle");
+		const leaf = envCellScope("stream-leaf");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(middle, "stream-middle"),
+				topologyScope(leaf, "stream-leaf"),
+			],
+			[
+				crossing("stream-middle", OUTDOOR_SCOPE, middle),
+				crossing("stream-leaf", middle, leaf),
+			],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount: 6,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.visibility.status).toBe("truncated");
+		expect(frame.visibility.completedDepth).toBe(1);
+		expect(frame.visibility.selectedCrossingCount).toBe(1);
+		expect(frame.trace).toMatchObject({
+			atlasCapacityRetreatCount: 0,
+			arrivalStateCapacityRetreatCount: 0,
+			crossingTriangleVertexCapacityRetreatCount: 2,
+			crossingTriangleVertexCount: 6,
+			frontierRetreatCount: 2,
+			packingAttemptCount: 1,
+		});
+	});
+
+	it("expands retained indexed apertures once into one reused interleaved stream", () => {
+		const first = envCellScope("stream-first");
+		const second = envCellScope("stream-second");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(first, "stream-first"),
+				topologyScope(second, "stream-second"),
+			],
+			[
+				crossing("a-stream-first", OUTDOOR_SCOPE, first),
+				crossing("b-stream-second", OUTDOOR_SCOPE, second, {
+					maskDepthPolicy: "reject-equal-depth",
+				}),
+			],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount: 12,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+		const stream = new PortalCrossingTriangleStreamArena(12);
+
+		const firstView = stream.prepare(frame, input.anchorCoordinates);
+		const secondView = stream.prepare(frame, input.anchorCoordinates);
+		const slots = new Uint32Array(stream.bytes.buffer);
+
+		expect(secondView).toBe(firstView);
+		expect(secondView.vertexCount).toBe(12);
+		expect(secondView.usedByteLength).toBe(
+			12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+		);
+		expect(secondView.trace).toMatchObject({
+			arenaCapacityBytes: 12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+			arenaGrowthCount: 0,
+			crossingInputCount: 2,
+			portalOwnedFrameHeapRecordCreationCount: 0,
+			positionScalarReadCount: 36,
+			triangleIndexReadCount: 12,
+			vertexHighWaterCount: 12,
+		});
+		// Slot 3/4/5 are output arrival, source scope, and depth policy respectively.
+		expect(Array.from(slots.slice(3, 6))).toEqual([
+			2,
+			0,
+			PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL,
+		]);
+		expect(Array.from(slots.slice(6 * 6 + 3, 6 * 6 + 6))).toEqual([
+			3,
+			0,
+			PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
+		]);
+	});
+
 	it("uses the configured fixed propagation depth and reuses its frame records", () => {
 		const child = envCellScope("child");
 		const graph = topology(
@@ -1618,6 +1729,9 @@ describe("portal scope-atlas planning", () => {
 		const resource = {
 			atlas: { height: 100, width: 200 },
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
 			maximumArrivalStateCount:
 				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		};
@@ -1677,6 +1791,9 @@ describe("portal scope-atlas planning", () => {
 				width: TEST_ATLAS_PACKING_EXTENT,
 			},
 			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
 			maximumArrivalStateCount:
 				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
@@ -1726,6 +1843,9 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, input, {
 				atlas: { height: 100, width: 99 },
 				drawingBuffer: input.portalFootprint.drawingBuffer,
+				maximumCrossingTriangleVertexCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+						.maximumCrossingTriangleVertexCount,
 				maximumArrivalStateCount:
 					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
@@ -1741,6 +1861,9 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, ordinaryInput, {
 				atlas: { height: 0, width: 100 },
 				drawingBuffer: ordinaryInput.portalFootprint.drawingBuffer,
+				maximumCrossingTriangleVertexCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+						.maximumCrossingTriangleVertexCount,
 				maximumArrivalStateCount:
 					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
@@ -1749,6 +1872,9 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, ordinaryInput, {
 				atlas: { height: 100, width: TEST_UINT32_OVERFLOW },
 				drawingBuffer: ordinaryInput.portalFootprint.drawingBuffer,
+				maximumCrossingTriangleVertexCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+						.maximumCrossingTriangleVertexCount,
 				maximumArrivalStateCount:
 					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
@@ -1757,6 +1883,9 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, ordinaryInput, {
 				atlas: { height: 100, width: 100 },
 				drawingBuffer: { height: 100, width: 99 },
+				maximumCrossingTriangleVertexCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+						.maximumCrossingTriangleVertexCount,
 				maximumArrivalStateCount:
 					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
@@ -1775,6 +1904,9 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, unsafePixelInput, {
 				atlas: unsafePixelInput.portalFootprint.drawingBuffer,
 				drawingBuffer: unsafePixelInput.portalFootprint.drawingBuffer,
+				maximumCrossingTriangleVertexCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+						.maximumCrossingTriangleVertexCount,
 				maximumArrivalStateCount:
 					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
@@ -1793,6 +1925,9 @@ describe("portal scope-atlas planning", () => {
 			planner.plan(graph, unsafeTraceInput, {
 				atlas: unsafeTraceInput.portalFootprint.drawingBuffer,
 				drawingBuffer: unsafeTraceInput.portalFootprint.drawingBuffer,
+				maximumCrossingTriangleVertexCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+						.maximumCrossingTriangleVertexCount,
 				maximumArrivalStateCount:
 					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 			}),
@@ -1819,6 +1954,9 @@ describe("portal scope-atlas planning", () => {
 				{
 					atlas: { height: 100, width: 100 },
 					drawingBuffer: input.portalFootprint.drawingBuffer,
+					maximumCrossingTriangleVertexCount:
+						PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+							.maximumCrossingTriangleVertexCount,
 					maximumArrivalStateCount:
 						PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 				},
@@ -2006,6 +2144,7 @@ function crossing(
 		readonly acceptedSide?: ScenePortalCrossingInput["acceptedSide"];
 		readonly aperture?: PlanarAperture;
 		readonly exactMatch?: boolean;
+		readonly maskDepthPolicy?: ScenePortalCrossingInput["maskDepthPolicy"];
 		readonly reciprocalCrossingId?: PortalCrossingId | null;
 		readonly spatialRelationship?: ScenePortalCrossingInput["spatialRelationship"];
 		readonly visibilityAperture?: PlanarAperture;
@@ -2035,7 +2174,7 @@ function crossing(
 		acceptedSide: options.acceptedSide ?? "positive",
 		exactMatch: options.exactMatch ?? true,
 		id: `portal-crossing:${id}`,
-		maskDepthPolicy: "allow-equal-depth",
+		maskDepthPolicy: options.maskDepthPolicy ?? "allow-equal-depth",
 		reciprocalCrossingId: options.reciprocalCrossingId ?? null,
 		source,
 		sourceAperture: sceneAperture,

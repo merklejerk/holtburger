@@ -816,6 +816,7 @@ function assertPortalScopeAtlasTargetsFixture(fixture) {
 		);
 	}
 	for (const field of [
+		"crossingStreamIntegerAttributePassed",
 		"frontierR8uiRoundTripPassed",
 		"initialFramebuffersComplete",
 		"initialResourcesValid",

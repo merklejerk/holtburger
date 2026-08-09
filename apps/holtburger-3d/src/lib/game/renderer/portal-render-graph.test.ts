@@ -28,6 +28,7 @@ import {
 } from "./portal-render-graph";
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
+import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
 
 const LANDBLOCK_ID = "0x0001ffff";
 const OUTDOOR_SCOPE = { kind: "outdoor" } as const satisfies SceneScope;
@@ -1255,7 +1256,7 @@ describe("portal scope-window culler bridge", () => {
 		const input = planInput(OUTDOOR_SCOPE);
 		const expected = requirePlan(graph, input).scopeWindows;
 		const culler = new PortalScopeWindowCuller({
-			maximumDepth: 16,
+			maximumDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 			maximumProjectionPrimitiveCount: 100_000,
 			maximumWorkItemCount: 64,
 			windowArena: scopeWindowArenaCapacity(),
@@ -1297,7 +1298,7 @@ describe("portal scope-window culler bridge", () => {
 		const input = planInput(OUTDOOR_SCOPE);
 		const expected = requirePlan(graph, input).scopeWindows;
 		const culler = new PortalScopeWindowCuller({
-			maximumDepth: 16,
+			maximumDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 			maximumProjectionPrimitiveCount: 100_000,
 			maximumWorkItemCount: 64,
 			windowArena: scopeWindowArenaCapacity(),
@@ -1341,7 +1342,7 @@ describe("portal scope-window culler bridge", () => {
 			],
 		);
 		const culler = new PortalScopeWindowCuller({
-			maximumDepth: 16,
+			maximumDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 			maximumProjectionPrimitiveCount: 100_000,
 			maximumWorkItemCount: 2,
 			windowArena: scopeWindowArenaCapacity(),
@@ -1352,6 +1353,7 @@ describe("portal scope-window culler bridge", () => {
 		expect(frame.status).toBe("truncated");
 		expect(frame.completedDepth).toBe(0);
 		expect(frame.declinedDepth).toBe(1);
+		expect(frame.trace.exceptionalDiagnosticHeapRecordCreationCount).toBe(1);
 		expect(scopeWindowSnapshot(frame)).toEqual([
 			{
 				scope: "outdoor",
@@ -1367,7 +1369,7 @@ describe("portal scope-window culler bridge", () => {
 			[crossing("child", OUTDOOR_SCOPE, child)],
 		);
 		const culler = new PortalScopeWindowCuller({
-			maximumDepth: 16,
+			maximumDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 			maximumProjectionPrimitiveCount: 100_000,
 			maximumWorkItemCount: 8,
 			windowArena: {
@@ -1381,6 +1383,7 @@ describe("portal scope-window culler bridge", () => {
 		expect(frame.status).toBe("truncated");
 		expect(frame.completedDepth).toBe(0);
 		expect(frame.declinedDepth).toBe(1);
+		expect(frame.trace.exceptionalDiagnosticHeapRecordCreationCount).toBe(1);
 		expect(scopeWindowSnapshot(frame)).toEqual([
 			{
 				scope: "outdoor",
@@ -1398,7 +1401,7 @@ describe("portal scope-window culler bridge", () => {
 			[crossing("child", OUTDOOR_SCOPE, child)],
 		);
 		const culler = new PortalScopeWindowCuller({
-			maximumDepth: 16,
+			maximumDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 			maximumProjectionPrimitiveCount,
 			maximumWorkItemCount: 8,
 			windowArena: scopeWindowArenaCapacity(),
@@ -1409,6 +1412,7 @@ describe("portal scope-window culler bridge", () => {
 		expect(frame.status).toBe("truncated");
 		expect(frame.completedDepth).toBe(0);
 		expect(frame.declinedDepth).toBe(1);
+		expect(frame.trace.exceptionalDiagnosticHeapRecordCreationCount).toBe(1);
 		expect(frame.selectedScopeCount).toBe(1);
 		expect(scopeIdentity(frame.selectedScope(0))).toBe("outdoor");
 		expect(frame.trace.projectionPrimitiveCount).toBeGreaterThan(
@@ -1423,7 +1427,7 @@ describe("portal scope-window culler bridge", () => {
 			revision: firstGraph.revision,
 		};
 		const capacity = {
-			maximumDepth: 16,
+			maximumDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 			maximumProjectionPrimitiveCount: 100_000,
 			maximumWorkItemCount: 8,
 			windowArena: scopeWindowArenaCapacity(),
@@ -1436,6 +1440,9 @@ describe("portal scope-window culler bridge", () => {
 		expect(secondFrame).toBe(firstFrame);
 		expect(secondFrame.trace).toBe(trace);
 		expect(secondFrame.trace.topologyBuildCount).toBe(1);
+		expect(secondFrame.trace.exceptionalDiagnosticHeapRecordCreationCount).toBe(
+			0,
+		);
 		expect(secondFrame.trace.portalOwnedFrameHeapRecordCreationCount).toBe(0);
 		expect(secondFrame.trace.arenaGrowthCount).toBe(0);
 

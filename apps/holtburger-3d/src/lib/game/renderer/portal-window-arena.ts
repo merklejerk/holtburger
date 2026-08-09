@@ -16,6 +16,10 @@ import {
 
 /** Sentinel stored in integer queues when no committed arena window exists. */
 export const NO_PORTAL_ARENA_WINDOW = 0xffff_ffff;
+/** Full WebGL homogeneous clip volume: left, right, bottom, top, near, and far. */
+export const PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT = 6;
+/** Four corners in the initial full-screen NDC window. */
+export const PORTAL_ROOT_WINDOW_VERTEX_COUNT = 4;
 
 /** Fixed backing-store dimensions selected at a topology/capacity event. */
 export interface PortalWindowArenaCapacity {
@@ -37,42 +41,17 @@ export interface PortalWindowArenaCapacity {
 
 /** Arena exhaustion is handled only at the culler's complete-frontier transaction boundary. */
 export class PortalWindowArenaCapacityExceeded extends Error {
+	/** Capacity dimension whose fixed backing store could not accept the operation. */
 	constructor(readonly dimension: keyof PortalWindowArenaCapacity) {
 		super(`Portal window arena exhausted ${dimension}.`);
 	}
 }
 
-/** Capacity cutoffs reuse module-lifetime sentinels so truncation creates no frame record. */
-const CAPACITY_EXCEEDED: Readonly<
-	Record<keyof PortalWindowArenaCapacity, PortalWindowArenaCapacityExceeded>
-> = Object.freeze({
-	maximumApertureVertexCount: new PortalWindowArenaCapacityExceeded(
-		"maximumApertureVertexCount",
-	),
-	maximumFragmentCount: new PortalWindowArenaCapacityExceeded(
-		"maximumFragmentCount",
-	),
-	maximumTemporaryFragmentCount: new PortalWindowArenaCapacityExceeded(
-		"maximumTemporaryFragmentCount",
-	),
-	maximumTemporaryVertexCount: new PortalWindowArenaCapacityExceeded(
-		"maximumTemporaryVertexCount",
-	),
-	maximumVertexCount: new PortalWindowArenaCapacityExceeded(
-		"maximumVertexCount",
-	),
-	maximumVerticesPerFragment: new PortalWindowArenaCapacityExceeded(
-		"maximumVerticesPerFragment",
-	),
-	maximumWindowCount: new PortalWindowArenaCapacityExceeded(
-		"maximumWindowCount",
-	),
-});
-
 function capacityExceeded(
 	dimension: keyof PortalWindowArenaCapacity,
 ): PortalWindowArenaCapacityExceeded {
-	return CAPACITY_EXCEEDED[dimension];
+	// Capacity rejection is exceptional; a fresh error preserves the actual failing stack.
+	return new PortalWindowArenaCapacityExceeded(dimension);
 }
 
 /** Allocation-free view over one committed arena window. */
@@ -640,7 +619,9 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 			let scratchY = this.#clipBy;
 			let scratchZ = this.#clipBz;
 			let scratchW = this.#clipBw;
-			const planeCount = nearClipRays ? 5 : 6;
+			const planeCount = nearClipRays
+				? PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT - 1
+				: PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT;
 			for (let plane = 0; plane < planeCount && count >= 3; plane += 1) {
 				count = clipHomogeneousPolygon(
 					activeX,

@@ -1492,6 +1492,11 @@ describe("portal scope-atlas planning", () => {
 		expect(frame.tileClipScaleY(1)).toBe(2);
 		expect(frame.tileClipOffsetX(1)).toBe(0);
 		expect(frame.tileClipOffsetY(1)).toBe(0);
+		expect(frame.tileOrdinalForRenderScopeKey("outdoor")).toBe(0);
+		expect(frame.tileOrdinalForRenderScopeKey(child.envCellId)).toBe(1);
+		expect(() => frame.tileOrdinalForRenderScopeKey("missing")).toThrow(
+			"unavailable in this topology",
+		);
 		expect(frame.trace).toMatchObject({
 			arenaGrowthCount: 0,
 			atlasPackedExtentPixelCount: 15_000,
@@ -1539,6 +1544,9 @@ describe("portal scope-atlas planning", () => {
 		expect(frame.visibility.selectedCrossingCount).toBe(1);
 		expect(frame.visibility.selectedCrossing(0).id).toBe(
 			"portal-crossing:root-middle",
+		);
+		expect(() => frame.tileOrdinalForRenderScopeKey(leaf.envCellId)).toThrow(
+			"has no selected atlas tile",
 		);
 		expect(frame.trace.frontierRetreatCount).toBe(2);
 		expect(frame.trace.packingAttemptCount).toBe(3);
@@ -1731,6 +1739,31 @@ describe("portal scope-atlas planning", () => {
 				drawingBuffer: unsafeTraceInput.portalFootprint.drawingBuffer,
 			}),
 		).toThrow("tile-area trace exceeds safe integer storage");
+	});
+
+	it("rejects duplicate canonical renderer keys at the topology boundary", () => {
+		const first = envCellScope("duplicate");
+		const second = {
+			envCellId: first.envCellId,
+			kind: "env-cell",
+			landblockId: "0x0002ffff",
+		} as const satisfies SceneScope;
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(first);
+
+		expect(() =>
+			planner.plan(
+				topology(
+					[topologyScope(first, "first"), topologyScope(second, "second")],
+					[],
+				),
+				input,
+				{
+					atlas: { height: 100, width: 100 },
+					drawingBuffer: input.portalFootprint.drawingBuffer,
+				},
+			),
+		).toThrow("duplicate render scope key duplicate");
 	});
 });
 

@@ -27,7 +27,6 @@ import {
 	type PortalRenderWorkPlan,
 } from "./portal-render-graph";
 import {
-	PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
 	PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT,
@@ -41,10 +40,15 @@ import {
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 	PortalPropagationStreamArena,
 } from "./portal-crossing-triangle-stream";
+import {
+	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
+} from "./portal-propagation-metadata";
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
 import { PortalScopeAtlasPlanner } from "./portal-scope-atlas-planner";
+import { PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES } from "./portal-scope-tile-metadata";
 
 const LANDBLOCK_ID = "0x0001ffff";
 const OUTDOOR_SCOPE = { kind: "outdoor" } as const satisfies SceneScope;
@@ -1721,25 +1725,33 @@ describe("portal scope-atlas planning", () => {
 		expect(secondView.trace).toMatchObject({
 			arenaCapacityBytes:
 				12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES +
-				PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 			arenaGrowthCount: 0,
-			arrivalMetadataCapacityBytes: PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
 			arrivalMetadataStateWriteCount: 3,
 			arrivalPlaneScalarWriteCount: 8,
 			crossingInputCount: 2,
 			portalOwnedFrameHeapRecordCreationCount: 0,
 			positionScalarReadCount: 36,
+			propagationMetadataCapacityBytes:
+				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 			reciprocalArrivalStateReadCount: 2,
+			scopeMetadataStateWriteCount: 3,
 			triangleIndexReadCount: 12,
 			triangleCapacityBytes: 12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 			vertexHighWaterCount: 12,
 		});
 		expect(secondView.arrivalMetadataStateCount).toBe(3);
-		expect(secondView.usedArrivalMetadataByteLength).toBe(
-			3 * PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
+		expect(secondView.scopeMetadataStateCount).toBe(3);
+		expect(secondView.usedPropagationMetadataByteLength).toBe(
+			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES +
+				3 * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES,
 		);
-		const arrivalFloats = new Float32Array(stream.arrivalMetadataBytes.buffer);
-		const arrivalUints = new Uint32Array(stream.arrivalMetadataBytes.buffer);
+		const arrivalFloats = new Float32Array(
+			stream.propagationMetadataBytes.buffer,
+		);
+		const arrivalUints = new Uint32Array(
+			stream.propagationMetadataBytes.buffer,
+		);
 		expect(
 			Array.from(
 				arrivalFloats.slice(
@@ -1758,6 +1770,28 @@ describe("portal scope-atlas planning", () => {
 				(slot) => arrivalUints[secondCrossingRecordOffset + slot],
 			),
 		).toEqual([2, 0, PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE]);
+		const rootScopeMetadataOffset =
+			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES /
+			Uint32Array.BYTES_PER_ELEMENT;
+		expect(
+			Array.from(
+				arrivalUints.slice(
+					rootScopeMetadataOffset,
+					rootScopeMetadataOffset +
+						PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES /
+							Uint32Array.BYTES_PER_ELEMENT,
+				),
+			),
+		).toEqual([
+			frame.tileX(0),
+			frame.tileY(0),
+			frame.tileScreenX(0),
+			frame.tileScreenY(0),
+			frame.tileWidth(0),
+			frame.tileHeight(0),
+			0,
+			0,
+		]);
 		// Slot 3/4/5 are output arrival, source scope, and depth policy respectively.
 		expect(Array.from(slots.slice(3, 6))).toEqual([
 			2,

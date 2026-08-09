@@ -1,7 +1,7 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 CPU contracts, packed arrival metadata, bounded crossing stream, and WebGL2 target
-lifecycle proved; propagation/reduction shader wiring remains
+Status: Phase 7 CPU contracts, combined propagation metadata, bounded crossing stream, attachment
+command core, and WebGL2 target lifecycle proved; propagation/reduction shader wiring remains
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -1626,14 +1626,15 @@ existing final draw count.
 
 ### WebGL2 Target Lifecycle Checkpoint — 2026-08-09
 
-`WebGL2PortalScopeAtlasTargets` owns one fixed attachment generation with four framebuffers, five
-textures, and one renderbuffer. Scope-local opaque work retains `RGBA8` color and sampleable
-`DEPTH_COMPONENT24` depth over the packed atlas. Two drawing-buffer-sized `R8UI` textures hold the
-ping-pong arrival state. They share one `DEPTH_COMPONENT24` renderbuffer because a batched crossing
-draw still needs ordinary depth testing to select the nearest valid outgoing portal. The scope
-envelope is one atlas-sized, depth-only `DEPTH_COMPONENT32F` texture. The selected formats require
-no stencil attachment and no float color-renderability or float-blending extension. `R8UI` is a
-core color-renderable integer format in WebGL2's underlying GLES 3.0 format table; no optional
+`WebGL2PortalScopeAtlasTargets` owns one fixed attachment generation with four framebuffers and six
+textures. Scope-local opaque work retains `RGBA8` color and sampleable `DEPTH_COMPONENT24` depth
+over the packed atlas. Two drawing-buffer-sized `R8UI` textures hold the ping-pong arrival state.
+They share one drawing-buffer-sized `DEPTH_COMPONENT24` texture because a batched crossing draw
+needs ordinary depth testing to select the nearest valid outgoing portal and the following
+reduction draw must sample that winning depth. A renderbuffer cannot satisfy the latter contract.
+The scope envelope is one atlas-sized, depth-only `DEPTH_COMPONENT32F` texture. The selected formats
+require no stencil attachment and no float color-renderability or float-blending extension. `R8UI`
+is a core color-renderable integer format in WebGL2's underlying GLES 3.0 format table; no optional
 extension is part of the capacity contract.
 
 The shared frontier depth is a correction to Gate C's preliminary memory estimate; state alone
@@ -1655,11 +1656,11 @@ near- and far-plane boundaries. This is a substrate encoding proof, not a second
 Construction and same-extent resize allocate no GPU resource. A changed extent allocates and
 validates the complete replacement before publication, then disposes the previous generation.
 Failure deletes every partial replacement handle and leaves the previous generation active.
-Allocation restores active texture, texture-unit bindings, draw/read framebuffer bindings, and the
-renderbuffer binding. Atlas dimensions must contain the drawing-buffer root tile and fit
-`MAX_TEXTURE_SIZE`; frontier dimensions must additionally fit `MAX_RENDERBUFFER_SIZE`. Disposal is
-idempotent. Context loss continues to use the existing whole-device restart-required policy rather
-than pretending stale handles can be restored locally.
+Allocation restores active texture, texture-unit bindings, and draw/read framebuffer bindings.
+Atlas and drawing-buffer attachment dimensions must fit `MAX_TEXTURE_SIZE`, and the atlas must
+contain the drawing-buffer root tile. Disposal is idempotent. Context loss continues to use the
+existing whole-device restart-required policy rather than pretending stale handles can be restored
+locally.
 
 Focused browser evidence ran through the existing portal-substrate fixture on the real GPU path
 (ANGLE/Vulkan on AMD Radeon RX 7900 XT). All initial and replacement framebuffers were complete,
@@ -1777,13 +1778,13 @@ evidence.
 
 ### Oriented Arrival-Metadata Proof Checkpoint — 2026-08-09
 
-The remaining per-arrival question is resolved without another drawing-buffer-sized texture.
+The per-arrival question is resolved without another drawing-buffer-sized texture.
 Every nonzero frontier value identifies either the root or one retained directed crossing. The
 crossing identity already determines the destination scope, the reciprocal crossing to suppress,
 and the source aperture plane. A fixed 32-byte std140 record therefore stores one anchor-space
 oriented `vec4` plane followed by one `uvec4` route containing destination-scope ordinal,
 reciprocal arrival id, and an entry-plane flag. The root record has scope ordinal zero and no entry
-plane. The 255-record capacity is exactly 8,160 bytes on the CPU and 8,160 bytes in one UBO.
+plane. The 255-record arrival section is exactly 8,160 bytes on both CPU and GPU.
 
 The plane is oriented so its positive half-space lies beyond the directed entry aperture. For one
 frontier pixel, an outgoing crossing is eligible only when its source scope matches the current
@@ -1819,17 +1820,65 @@ selection resets only the previously selected crossing markers and fills selecte
 during the existing crossing scan. The propagation arena then writes four plane scalars and three
 route scalars per retained crossing while it already expands that crossing's triangle indices; it
 creates no frame record, sort, slice, map, storage growth, or fallback. Root initialization is one
-route record. The fixed CPU propagation storage is now 57,312 bytes: 49,152 triangle bytes plus
-8,160 metadata bytes. GPU storage has the same fixed split. A camera plan performs one contiguous
-triangle prefix upload and one contiguous metadata prefix upload; propagation still submits one
-triangle draw per round, independent of crossing count.
+route record. Arrival data shares the propagation metadata block described below rather than owning
+a second UBO or upload.
 
-`WebGL2PortalArrivalMetadataBuffer` validates `MAX_UNIFORM_BLOCK_SIZE` and binding-point capacity,
-allocates the 8,160-byte store once, uploads only the populated root/crossing prefix without slicing
+### Scope-Tile Metadata and Attachment Command Checkpoint — 2026-08-09
+
+One scope record must support both directions of the reduction mapping: a drawing-buffer pixel to
+the corresponding local-depth atlas pixel, and an instanced unit quad to the exact atlas tile
+rectangle. Atlas scale/offset alone loses the original screen origin and tile extent, so the
+minimal readable record selected here is six exact integers: atlas origin, screen origin, width,
+and height. Two std140 `uvec4` slots occupy 32 bytes per record; the two spare integers are reserved
+and written as zero. A 2,048-case deterministic algebra corpus proves screen-to-atlas mapping,
+its inverse, and instanced atlas-NDC placement at tile edges and interior samples.
+
+The fixed scope section is another 255 records, or 8,160 bytes. Arrival and scope sections share
+one 16,320-byte propagation UBO and one CPU staging allocation. The camera path writes each selected
+scope record once while preparing the existing propagation stream, then writes root/crossing
+arrival records into the first section while expanding the already selected crossings. It creates
+no per-scope record objects, new traversal, sort, slice, storage growth, or fallback. The combined
+upload is one prefix ending after the populated scope records. Because the scope section follows
+the full fixed arrival section, sparse frames transfer up to 8,128 bytes of unused arrival capacity;
+this deliberate CPU-biased trade saves one `bufferSubData` call and one uniform-block binding while
+leaving worst-case transfer bytes unchanged from two full buffers. The owner validates the actual
+device `MAX_UNIFORM_BLOCK_SIZE` and binding-point capacity before allocation.
+
+The fixed CPU propagation arena is therefore 65,472 bytes: 49,152 crossing-triangle bytes plus
+16,320 combined metadata bytes. GPU buffer storage has the same fixed split. Each camera plan issues
+one metadata upload and, when at least one crossing exists, one triangle-stream upload.
+
+The proof-only attachment command compiler captures the shader-independent framebuffer, clear,
+draw, ping-pong, and root-initialization contract without allocating a production frame schedule.
+Round zero treats the root frontier implicitly. A root-only plan clears the envelope to unbounded
+and performs no frontier work. A nonzero retained traversal depth `D` clears the envelope to
+uncovered, then repeats one frontier framebuffer bind, separate `R8UI` state and depth clears, one
+propagation draw, one envelope bind, and one instanced reduction draw per round. The final reduction
+also folds newly reached depth-`D` destinations as unbounded. One output bind and one instanced
+resolve finish either path.
+
+For depth `D`, the exact attachment-owned ledger is one metadata upload, one crossing upload iff the
+stream is non-empty, `2D + 2` framebuffer binds, one envelope clear, `D` integer-state clears, `D`
+depth clears, and `2D + 1` draws. Reduction remains one draw with `S` instances per round; it adds
+`O(S)` metadata writes to existing preparation but no per-scope CPU command. The immutable command
+records are test proof machinery only. Production must issue the same scalar loop directly.
+Program, VAO, texture/sampler, viewport, uniform, and blend/depth-state calls are intentionally not
+claimed by this ledger; their exact sequence belongs to the shader/executor owner in the next
+checkpoint.
+
+The shared frontier depth attachment was changed from a renderbuffer to a same-format texture after
+this command dry-run exposed that reduction must sample the winning crossing depth. This changes
+neither the target byte formula nor framebuffer count. The focused real-GPU substrate fixture was
+rerun on ANGLE/Vulkan with the AMD Radeon RX 7900 XT after that correction: framebuffer completeness,
+resource lifecycle, integer state readback, and zero WebGL errors still held. It provides no
+screenshot, semantic-oracle, or timing evidence.
+
+`WebGL2PortalPropagationMetadataBuffer` allocates the combined store once, uploads without slicing
 or reallocating, and disposes idempotently. Its deterministic fake-WebGL command ledger covers
-allocation, binding restoration, prefix upload, bind-base range checks, unsupported capacity, and
-disposal. Actual-browser UBO layout/readback belongs with the propagation shader fixture; running a
-browser before a shader consumes this contract would add ceremony without proving another fact.
+allocation, binding restoration, combined-prefix upload, state-count consistency, bind-base range
+checks, unsupported capacity, and disposal. Actual-browser UBO layout/readback belongs with the
+propagation shader fixture; running a browser before a shader consumes this contract would add
+ceremony without proving another fact.
 
 ### Task Checklist
 
@@ -1888,10 +1937,14 @@ browser before a shader consumes this contract would add ceremony without provin
       Count final aperture indices before packing, decline complete frontiers on overflow, expand
       once into a 48 KiB allocation-free arena, upload one contiguous prefix, and reuse one ordinary
       draw per propagation round without requiring `WEBGL_multi_draw`.
-- [x] Pack root plus directed-crossing arrival metadata into a fixed 8,160-byte arena/UBO during the
-      existing crossing expansion. Prove oriented-plane translation, strict per-pixel arrival
-      progress, reciprocal suppression, final-round destination folding, and deferred
-      transparent/particle equivalence symbolically before shader wiring.
+- [x] Pack root plus directed-crossing arrival metadata into a fixed 8,160-byte section of the
+      combined arena/UBO during existing crossing expansion. Prove oriented-plane translation,
+      strict per-pixel arrival progress, reciprocal suppression, final-round destination folding,
+      and deferred transparent/particle equivalence symbolically before shader wiring.
+- [x] Pack one six-integer scope-tile record per selected scope into the same fixed metadata block.
+      Prove screen/atlas inversion and instanced tile placement, keep reduction to one instanced
+      draw per round, and accept the sparse-prefix transfer concession to retain one metadata upload
+      and one binding.
 - [ ] Route each scope-homogeneous opaque submission to its tile with one shader-visible uniform;
       retain the existing run boundaries and prove that routing adds no submission. Do not add a
       per-instance scope attribute unless a later, separately traced cross-scope consolidation wins.
@@ -1901,8 +1954,10 @@ browser before a shader consumes this contract would add ceremony without provin
       nearest valid outgoing portal with depth, and accumulate one scope envelope per round. The
       packed metadata algebra and exact command count are proved; WebGL2 shader/FBO refinement is
       not yet wired.
-- [x] Record exactly `D` clears, `D` propagation draws, `D` envelope-reduction draws, and one
-      scope-atlas resolve for non-empty visibility. No convergence readback or per-state command.
+- [x] Record one envelope clear plus exactly `D` frontier-clear bundles, `D` propagation draws, `D`
+      envelope-reduction draws, and one scope-atlas resolve for non-empty visibility. The physical
+      attachment ledger expands each frontier bundle into separate integer-state and depth clears.
+      No convergence readback or per-state command.
 - [ ] Keep geometry/instance preparation independent from atlas allocation and pool attachments only
       by a proved non-overlapping lifetime.
 - [x] Allocate scope color/local depth, ping-pong integer frontier state with shared selection depth,
@@ -1912,7 +1967,8 @@ browser before a shader consumes this contract would add ceremony without provin
 - [ ] Reuse scope-reduction, opaque-routing, transparent-order, and particle-pack typed streams. Use
       explicit counts/ranges and caller-provided sort scratch rather than
       `map`/`filter`/spread/sorted-copy pipelines in portal-owned frame code. The crossing triangle
-      and arrival-metadata streams are complete; their propagation shader remains unwired.
+      and combined arrival/scope metadata streams are complete; their propagation shader remains
+      unwired.
 - [x] Trace arena capacity bytes, per-pool high-water counts, arena growth events, and portal-owned
       accepted-frame heap-record creation as separate unweighted dimensions. Fixed element widths
       make the high-water byte derivation mechanical. Extend the ledger with the allowed exceptional
@@ -1943,7 +1999,7 @@ browser before a shader consumes this contract would add ceremony without provin
   do not repeat a literal or independently derive it.
 - The same policy owns the selected `2x3` atlas multiple, 255-state `R8UI` frontier capacity, and
   2,048-record crossing stream. At 1920x1080 the complete target set is exactly 161,740,800 bytes
-  plus one 57,312-byte CPU propagation arena and 57,312 GPU buffer bytes; any capacity exhaustion
+  plus one 65,472-byte CPU propagation arena and 65,472 GPU buffer bytes; any capacity exhaustion
   declines a complete frontier and never resizes or repacks a GPU resource in response to camera
   motion.
 - Every selected physical opaque compatibility batch is prepared and submitted once. Atlas routing
@@ -2188,8 +2244,8 @@ browser before a shader consumes this contract would add ceremony without provin
 
 1. What explicit drawing-buffer pixel/byte budget admits the fixed `2x3` target without allowing a
    high-DPI or 4K viewport to consume an unreasonable share of GPU memory?
-2. Which minimal scope-tile metadata and reduction-instance layout lets the proved propagation
-   algebra sample local depth and update atlas envelopes without adding a per-scope CPU command?
+2. What exact program, VAO, texture/sampler, viewport, uniform, and fixed-function state sequence
+   realizes the proved attachment loop without redundant state changes or hidden per-scope work?
 3. Can any atlas/frontier attachment lifetime be pooled with an existing renderer target without
    adding framebuffer reattachment commands or coupling unrelated resize/context-loss ownership?
 4. If later traces justify a more complex atlas packer or route-key cache, which explicit CPU-owned

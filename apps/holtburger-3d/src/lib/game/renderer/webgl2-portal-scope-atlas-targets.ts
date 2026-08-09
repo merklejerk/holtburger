@@ -39,8 +39,8 @@ interface WebGL2PortalScopeEnvelopeTarget {
 export interface WebGL2PortalScopeAtlasTargetSet {
 	readonly envelope: WebGL2PortalScopeEnvelopeTarget;
 	readonly extents: PortalScopeAtlasTargetExtents;
-	/** Shared nearest-crossing depth, cleared before writing either frontier output. */
-	readonly frontierDepth: WebGLRenderbuffer;
+	/** Shared sampleable nearest-crossing depth, cleared before writing either frontier output. */
+	readonly frontierDepth: WebGLTexture;
 	readonly frontiers: readonly [
 		WebGL2PortalScopeAtlasFrontierTarget,
 		WebGL2PortalScopeAtlasFrontierTarget,
@@ -52,7 +52,6 @@ export interface WebGL2PortalScopeAtlasTargetSet {
 export interface WebGL2PortalScopeAtlasTargetDiagnostics {
 	readonly activeBytes: number;
 	readonly activeFramebufferCount: number;
-	readonly activeRenderbufferCount: number;
 	readonly activeTextureCount: number;
 	readonly allocatedGenerationCount: number;
 	readonly disposedGenerationCount: number;
@@ -64,7 +63,6 @@ interface WebGL2AllocationBindings {
 	readonly activeTextureBinding: WebGLTexture | null;
 	readonly drawFramebuffer: WebGLFramebuffer | null;
 	readonly readFramebuffer: WebGLFramebuffer | null;
-	readonly renderbuffer: WebGLRenderbuffer | null;
 	readonly texture0Binding: WebGLTexture | null;
 }
 
@@ -125,8 +123,7 @@ export class WebGL2PortalScopeAtlasTargets {
 		return {
 			activeBytes: extents ? portalScopeAtlasTargetByteLength(extents) : 0,
 			activeFramebufferCount: this.#targets ? 4 : 0,
-			activeRenderbufferCount: this.#targets ? 1 : 0,
-			activeTextureCount: this.#targets ? 5 : 0,
+			activeTextureCount: this.#targets ? 6 : 0,
 			allocatedGenerationCount: this.#allocatedGenerationCount,
 			disposedGenerationCount: this.#disposedGenerationCount,
 			extents: extents ? copyTargetExtents(extents) : null,
@@ -165,18 +162,6 @@ export class WebGL2PortalScopeAtlasTargets {
 				);
 			}
 		}
-		const maximumRenderbufferSize = requirePositiveDeviceLimit(
-			this.#gl.getParameter(this.#gl.MAX_RENDERBUFFER_SIZE),
-			"MAX_RENDERBUFFER_SIZE",
-		);
-		if (
-			extents.drawingBuffer.width > maximumRenderbufferSize ||
-			extents.drawingBuffer.height > maximumRenderbufferSize
-		) {
-			throw new Error(
-				`Portal scope-atlas drawing-buffer extent ${extents.drawingBuffer.width}x${extents.drawingBuffer.height} exceeds maximum renderbuffer size ${maximumRenderbufferSize}.`,
-			);
-		}
 	}
 
 	#assertAlive(): void {
@@ -191,7 +176,6 @@ function allocateTargetSet(
 	extents: PortalScopeAtlasTargetExtents,
 ): WebGL2PortalScopeAtlasTargetSet {
 	const framebuffers: WebGLFramebuffer[] = [];
-	const renderbuffers: WebGLRenderbuffer[] = [];
 	const textures: WebGLTexture[] = [];
 	try {
 		const sceneFramebuffer = createFramebuffer(
@@ -221,17 +205,12 @@ function allocateTargetSet(
 		configureColorFramebuffer(gl);
 		requireCompleteFramebuffer(gl, "scene framebuffer");
 
-		const frontierDepth = createRenderbuffer(
+		const frontierDepth = createTexture(gl, textures, "frontier depth texture");
+		initializeTexture(
 			gl,
-			renderbuffers,
-			"frontier depth renderbuffer",
-		);
-		gl.bindRenderbuffer(gl.RENDERBUFFER, frontierDepth);
-		gl.renderbufferStorage(
-			gl.RENDERBUFFER,
+			frontierDepth,
 			gl.DEPTH_COMPONENT24,
-			extents.drawingBuffer.width,
-			extents.drawingBuffer.height,
+			extents.drawingBuffer,
 		);
 		const firstFrontier = allocateFrontierTarget(
 			gl,
@@ -287,8 +266,6 @@ function allocateTargetSet(
 		};
 	} catch (cause) {
 		for (const framebuffer of framebuffers) gl.deleteFramebuffer(framebuffer);
-		for (const renderbuffer of renderbuffers)
-			gl.deleteRenderbuffer(renderbuffer);
 		for (const texture of textures) gl.deleteTexture(texture);
 		throw cause;
 	}
@@ -298,7 +275,7 @@ function allocateFrontierTarget(
 	gl: WebGL2RenderingContext,
 	ordinal: 0 | 1,
 	extent: WebGL2RenderExtent,
-	depth: WebGLRenderbuffer,
+	depth: WebGLTexture,
 	framebuffers: WebGLFramebuffer[],
 	textures: WebGLTexture[],
 ): WebGL2PortalScopeAtlasFrontierTarget {
@@ -321,11 +298,12 @@ function allocateFrontierTarget(
 		state,
 		0,
 	);
-	gl.framebufferRenderbuffer(
+	gl.framebufferTexture2D(
 		gl.FRAMEBUFFER,
 		gl.DEPTH_ATTACHMENT,
-		gl.RENDERBUFFER,
+		gl.TEXTURE_2D,
 		depth,
+		0,
 	);
 	configureColorFramebuffer(gl);
 	requireCompleteFramebuffer(gl, `frontier ${ordinal} framebuffer`);
@@ -383,19 +361,6 @@ function createFramebuffer(
 	return resource;
 }
 
-function createRenderbuffer(
-	gl: WebGL2RenderingContext,
-	resources: WebGLRenderbuffer[],
-	owner: string,
-): WebGLRenderbuffer {
-	const resource = gl.createRenderbuffer();
-	if (!resource) {
-		throw new Error(`Failed to allocate portal scope-atlas ${owner}.`);
-	}
-	resources.push(resource);
-	return resource;
-}
-
 function createTexture(
 	gl: WebGL2RenderingContext,
 	resources: WebGLTexture[],
@@ -417,11 +382,11 @@ function disposeTargetSet(
 	gl.deleteFramebuffer(targets.frontiers[0].framebuffer);
 	gl.deleteFramebuffer(targets.frontiers[1].framebuffer);
 	gl.deleteFramebuffer(targets.envelope.framebuffer);
-	gl.deleteRenderbuffer(targets.frontierDepth);
 	gl.deleteTexture(targets.scene.color);
 	gl.deleteTexture(targets.scene.depth);
 	gl.deleteTexture(targets.frontiers[0].state);
 	gl.deleteTexture(targets.frontiers[1].state);
+	gl.deleteTexture(targets.frontierDepth);
 	gl.deleteTexture(targets.envelope.depth);
 }
 
@@ -514,9 +479,6 @@ function captureAllocationBindings(
 		readFramebuffer: gl.getParameter(
 			gl.READ_FRAMEBUFFER_BINDING,
 		) as WebGLFramebuffer | null,
-		renderbuffer: gl.getParameter(
-			gl.RENDERBUFFER_BINDING,
-		) as WebGLRenderbuffer | null,
 		texture0Binding,
 	};
 }
@@ -527,7 +489,6 @@ function restoreAllocationBindings(
 ): void {
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, bindings.drawFramebuffer);
 	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, bindings.readFramebuffer);
-	gl.bindRenderbuffer(gl.RENDERBUFFER, bindings.renderbuffer);
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, bindings.texture0Binding);
 	gl.activeTexture(bindings.activeTexture);

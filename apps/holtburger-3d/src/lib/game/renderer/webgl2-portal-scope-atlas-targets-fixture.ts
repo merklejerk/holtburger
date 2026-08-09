@@ -318,7 +318,7 @@ function resourcesValid(
 		gl.isFramebuffer(targets.frontiers[0].framebuffer) &&
 		gl.isFramebuffer(targets.frontiers[1].framebuffer) &&
 		gl.isFramebuffer(targets.envelope.framebuffer) &&
-		gl.isRenderbuffer(targets.frontierDepth) &&
+		gl.isTexture(targets.frontierDepth) &&
 		gl.isTexture(targets.scene.color) &&
 		gl.isTexture(targets.scene.depth) &&
 		gl.isTexture(targets.frontiers[0].state) &&

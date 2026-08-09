@@ -130,6 +130,10 @@ export interface PortalScopeAtlasFrameView {
 	tileX(ordinal: number): number;
 	/** Integer atlas viewport y origin for one selected-scope ordinal. */
 	tileY(ordinal: number): number;
+	/** Drawing-buffer x origin represented by the tile's first texel. */
+	tileScreenX(ordinal: number): number;
+	/** Drawing-buffer y origin represented by the tile's first texel. */
+	tileScreenY(ordinal: number): number;
 }
 
 /** Fixed structure-of-arrays storage for scope bounds, placements, transforms, and sort scratch. */
@@ -264,6 +268,14 @@ class MutablePortalScopeAtlasFrameView implements PortalScopeAtlasFrameView {
 
 	tileY(ordinal: number): number {
 		return this.arena.y[this.#tileOrdinal(ordinal)]!;
+	}
+
+	tileScreenX(ordinal: number): number {
+		return this.arena.minimumX[this.#tileOrdinal(ordinal)]!;
+	}
+
+	tileScreenY(ordinal: number): number {
+		return this.arena.minimumY[this.#tileOrdinal(ordinal)]!;
 	}
 
 	#tileOrdinal(ordinal: number): number {

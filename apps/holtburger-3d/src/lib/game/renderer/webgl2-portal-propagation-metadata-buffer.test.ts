@@ -1,22 +1,27 @@
 import { describe, expect, it } from "vitest";
+import type { PortalPropagationMetadataStreamView } from "./portal-crossing-triangle-stream";
 import {
-	PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
-	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
-} from "./portal-arrival-metadata";
-import type { PortalArrivalMetadataStreamView } from "./portal-crossing-triangle-stream";
-import { WebGL2PortalArrivalMetadataBuffer } from "./webgl2-portal-arrival-metadata-buffer";
+	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
+} from "./portal-propagation-metadata";
+import { PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES } from "./portal-scope-tile-metadata";
+import { WebGL2PortalPropagationMetadataBuffer } from "./webgl2-portal-propagation-metadata-buffer";
 
+const TEST_ARRIVAL_STATE_COUNT = 3;
 const TEST_BINDING_POINT = 3;
-const TEST_STATE_COUNT = 2;
+const TEST_SCOPE_STATE_COUNT = 2;
 
-describe("WebGL2 portal arrival metadata buffer", () => {
-	it("allocates once, uploads one populated prefix, and binds that generation", () => {
+describe("WebGL2 portal propagation metadata buffer", () => {
+	it("allocates once, uploads one combined prefix, and binds that generation", () => {
 		const fixture = fakeWebGL2({
-			maximumBlockBytes: PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+			maximumBlockBytes: PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 			maximumBindingCount: 8,
 		});
-		const owner = new WebGL2PortalArrivalMetadataBuffer(fixture.gl);
-		const stream = arrivalStream(TEST_STATE_COUNT);
+		const owner = new WebGL2PortalPropagationMetadataBuffer(fixture.gl);
+		const stream = propagationStream(
+			TEST_ARRIVAL_STATE_COUNT,
+			TEST_SCOPE_STATE_COUNT,
+		);
 
 		expect(fixture.currentBuffer).toBe(fixture.previousBuffer);
 		owner.upload(stream);
@@ -24,14 +29,16 @@ describe("WebGL2 portal arrival metadata buffer", () => {
 
 		expect(fixture.allocations).toEqual([
 			{
-				byteLength: PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+				byteLength: PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 				usage: fixture.gl.DYNAMIC_DRAW,
 			},
 		]);
 		expect(fixture.uploads).toEqual([
 			{
-				bytes: stream.arrivalMetadataBytes,
-				length: TEST_STATE_COUNT * PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
+				bytes: stream.propagationMetadataBytes,
+				length:
+					PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES +
+					TEST_SCOPE_STATE_COUNT * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES,
 			},
 		]);
 		expect(fixture.baseBindings).toEqual([
@@ -44,26 +51,26 @@ describe("WebGL2 portal arrival metadata buffer", () => {
 		expect(() => owner.upload(stream)).toThrow("has been destroyed");
 	});
 
-	it("rejects unsupported capacity and invalid use before mutating GPU state", () => {
+	it("rejects unsupported capacity and inconsistent state counts", () => {
 		const unsupported = fakeWebGL2({
-			maximumBlockBytes: PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES - 1,
+			maximumBlockBytes: PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES - 1,
 			maximumBindingCount: 8,
 		});
-		expect(() => new WebGL2PortalArrivalMetadataBuffer(unsupported.gl)).toThrow(
-			"uniform bytes",
-		);
+		expect(
+			() => new WebGL2PortalPropagationMetadataBuffer(unsupported.gl),
+		).toThrow("uniform bytes");
 		expect(unsupported.createdBufferCount).toBe(0);
 
 		const fixture = fakeWebGL2({
-			maximumBlockBytes: PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+			maximumBlockBytes: PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 			maximumBindingCount: 4,
 		});
-		const owner = new WebGL2PortalArrivalMetadataBuffer(fixture.gl);
+		const owner = new WebGL2PortalPropagationMetadataBuffer(fixture.gl);
 		expect(() => owner.bindBase(0)).toThrow("has not been uploaded");
-		expect(() => owner.upload(arrivalStream(0))).toThrow(
-			"does not match its populated state count",
+		expect(() => owner.upload(propagationStream(1, 2))).toThrow(
+			"does not match its populated state counts",
 		);
-		owner.upload(arrivalStream(1));
+		owner.upload(propagationStream(1, 1));
 		expect(() => owner.bindBase(4)).toThrow(
 			"outside this device's binding range",
 		);
@@ -71,14 +78,19 @@ describe("WebGL2 portal arrival metadata buffer", () => {
 	});
 });
 
-function arrivalStream(stateCount: number): PortalArrivalMetadataStreamView {
+function propagationStream(
+	arrivalStateCount: number,
+	scopeStateCount: number,
+): PortalPropagationMetadataStreamView {
 	return {
-		arrivalMetadataBytes: new Uint8Array(
-			PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+		arrivalMetadataStateCount: arrivalStateCount,
+		propagationMetadataBytes: new Uint8Array(
+			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 		),
-		arrivalMetadataStateCount: stateCount,
-		usedArrivalMetadataByteLength:
-			stateCount * PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
+		scopeMetadataStateCount: scopeStateCount,
+		usedPropagationMetadataByteLength:
+			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES +
+			scopeStateCount * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES,
 	};
 }
 

@@ -2,6 +2,8 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	type LandblockCoordinates,
 } from "../landblocks";
+import { mat4ToFloat32Array } from "../math/matrices";
+import type { Mat4 } from "../math/types";
 import type { ScenePortalCrossingInput } from "../scene";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
@@ -13,6 +15,7 @@ import {
 	writeOrientedPortalArrivalPlane,
 } from "./portal-arrival-metadata";
 import {
+	PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES,
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
 } from "./portal-propagation-metadata";
@@ -44,7 +47,7 @@ const FIRST_CROSSING_ARRIVAL_STATE_ID = ROOT_ARRIVAL_STATE_ID + 1;
 interface PortalCrossingTriangleStreamTrace {
 	/** Fixed triangle plus propagation-metadata storage allocated at arena construction. */
 	readonly arenaCapacityBytes: number;
-	/** Fixed combined arrival/scope UBO staging storage allocated at arena construction. */
+	/** Fixed combined camera/arrival/scope UBO staging storage allocated at construction. */
 	readonly propagationMetadataCapacityBytes: number;
 	/** Root plus selected crossing records populated by this preparation. */
 	readonly arrivalMetadataStateWriteCount: number;
@@ -89,16 +92,16 @@ export interface PortalCrossingTriangleStreamView {
 	readonly vertexCount: number;
 }
 
-/** Reused non-retained view over the combined fixed propagation-metadata prefix. */
+/** Reused non-retained view over the fixed camera/arrival/scope propagation block. */
 export interface PortalPropagationMetadataStreamView {
-	/** Complete fixed-capacity arrival/scope bytes; upload only the initialized prefix. */
+	/** Complete guaranteed-size uniform block uploaded without slicing. */
 	readonly propagationMetadataBytes: Uint8Array;
 	readonly arrivalMetadataStateCount: number;
 	readonly scopeMetadataStateCount: number;
 	readonly usedPropagationMetadataByteLength: number;
 }
 
-/** Reused composite view whose geometry and arrival ids are prepared from the same frame. */
+/** Reused composite view whose geometry, camera, and routes come from the same frame. */
 export interface PortalPropagationStreamView
 	extends
 		PortalCrossingTriangleStreamView,
@@ -169,6 +172,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 	prepare(
 		frame: PortalScopeAtlasFrameView,
 		anchorCoordinates: LandblockCoordinates,
+		clipFromAnchor: Mat4,
 	): PortalPropagationStreamView {
 		const plannedVertexCount = frame.trace.crossingTriangleVertexCount;
 		if (plannedVertexCount > this.#maximumTriangleVertexCount) {
@@ -189,6 +193,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		this.trace.scopeMetadataStateWriteCount = 0;
 		this.trace.triangleIndexReadCount = 0;
 		this.trace.vertexHighWaterCount = 0;
+		mat4ToFloat32Array(clipFromAnchor, this.#metadataFloatSlots);
 
 		const visibility = frame.visibility;
 		if (
@@ -265,7 +270,8 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 				) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 			const arrivalRecordOrdinal = crossingOrdinal + 1;
 			const arrivalFloatOffset =
-				(arrivalRecordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES) /
+				(PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES +
+					arrivalRecordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES) /
 				Float32Array.BYTES_PER_ELEMENT;
 			writeOrientedPortalArrivalPlane(
 				this.#metadataFloatSlots,
@@ -314,8 +320,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		this.usedByteLength =
 			this.vertexCount * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES;
 		this.usedPropagationMetadataByteLength =
-			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES +
-			this.scopeMetadataStateCount * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES;
+			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES;
 		this.trace.arrivalMetadataStateWriteCount = this.arrivalMetadataStateCount;
 		this.trace.scopeMetadataStateWriteCount = this.scopeMetadataStateCount;
 		this.trace.vertexHighWaterCount = this.vertexCount;
@@ -328,7 +333,9 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		reciprocalArrivalStateId: number,
 		flags: number,
 	): void {
-		const byteOffset = recordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES;
+		const byteOffset =
+			PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES +
+			recordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES;
 		this.#metadataUintSlots[
 			(byteOffset + PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES) /
 				Uint32Array.BYTES_PER_ELEMENT

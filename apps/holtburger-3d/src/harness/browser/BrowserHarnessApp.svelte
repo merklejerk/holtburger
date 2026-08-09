@@ -29,6 +29,7 @@
 	import type { WebGL2HybridPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-hybrid-portal-executor-fixture";
 	import type { WebGL2InternalPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-internal-portal-executor-fixture";
 	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
+	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
 	import {
 		GameRuntime,
 		type StaticObjectLayerRuntimeDiagnostics,
@@ -255,6 +256,8 @@
 		readonly portalSubstrate: WebGL2PortalSubstrateFixtureResult | null;
 		/** Browser allocation evidence for the selected scope-atlas target generation. */
 		readonly portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null;
+		/** Numeric real-GPU evidence for the scope-atlas shader executor. */
+		readonly portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null;
 		/** Pixel-read exterior-transition composition evidence requested by Gate F. */
 		readonly hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null;
 		/** Pixel-read internal graph execution evidence requested by Gate G. */
@@ -350,6 +353,8 @@
 	let portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null = null;
 	let portalSubstrate: WebGL2PortalSubstrateFixtureResult | null = null;
 	let portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null =
+		null;
+	let portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null =
 		null;
 	let hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null =
 		null;
@@ -862,6 +867,7 @@
 					portalTargetCapabilities = device.probePortalTargetCapabilities();
 					portalSubstrate = device.probePortalSubstrate();
 					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
+					portalScopeAtlasExecutor = device.probePortalScopeAtlasExecutor();
 					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy();
 				}
 				if (fixture === "portal-hybrid-execution") {
@@ -993,6 +999,7 @@
 							metrics: frameDiagnostics?.selectionMetrics ?? null,
 							portalContextLossPolicy,
 							portalSubstrate,
+							portalScopeAtlasExecutor,
 							portalScopeAtlasTargets,
 							portalTargetCapabilities,
 							ready,

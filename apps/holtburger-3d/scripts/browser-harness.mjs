@@ -785,6 +785,7 @@ function assertPortalSubstrateFixture(state) {
 		extent: null,
 	});
 	assertPortalScopeAtlasTargetsFixture(state.portalScopeAtlasTargets);
+	assertPortalScopeAtlasExecutorFixture(state.portalScopeAtlasExecutor);
 	const contextLoss = state.portalContextLossPolicy;
 	if (
 		!contextLoss?.lossEventCanceled ||
@@ -809,6 +810,26 @@ function assertPortalSubstrateFixture(state) {
 	}
 }
 
+function assertPortalScopeAtlasExecutorFixture(fixture) {
+	if (!fixture) {
+		throw new Error(
+			"Portal scope-atlas executor fixture did not publish evidence.",
+		);
+	}
+	for (const field of [
+		"frontierMatchesOracle",
+		"opaqueOcclusionMatchesOracle",
+		"propagatedResolveMatchesOracle",
+		"rootOnlyResolveMatchesOracle",
+	]) {
+		if (fixture[field] !== true) {
+			throw new Error(
+				`Portal scope-atlas executor fixture failed ${field}: ${JSON.stringify(fixture)}.`,
+			);
+		}
+	}
+}
+
 function assertPortalScopeAtlasTargetsFixture(fixture) {
 	if (!fixture) {
 		throw new Error(
@@ -816,7 +837,6 @@ function assertPortalScopeAtlasTargetsFixture(fixture) {
 		);
 	}
 	for (const field of [
-		"crossingStreamIntegerAttributePassed",
 		"frontierR8uiRoundTripPassed",
 		"initialFramebuffersComplete",
 		"initialResourcesValid",

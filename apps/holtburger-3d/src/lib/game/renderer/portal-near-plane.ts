@@ -7,7 +7,7 @@ import {
 } from "../scene/planar-aperture";
 
 /** World-space contact band used only for renderer near-clip ownership decisions. */
-const NEAR_CLIP_CONTACT_EPSILON = 0.000_2;
+export const NEAR_CLIP_CONTACT_EPSILON = 0.000_2;
 
 /** Dimensionless collinearity threshold for constructing normalized clip planes. */
 const DEGENERATE_PLANE_SINE = Number.EPSILON * 64;
@@ -23,6 +23,89 @@ export interface CameraNearClipVolume {
 	];
 	readonly corners: readonly [Vec3, Vec3, Vec3, Vec3];
 	readonly eye: Vec3;
+}
+
+const PREPARED_CAMERA_NEAR_CLIP_APERTURE: unique symbol = Symbol(
+	"prepared-camera-near-clip-aperture",
+);
+
+/** Validated aperture accepted by the checked camera-time near-clip classifier. */
+export interface PreparedCameraNearClipAperture extends PlanarAperture {
+	/** Constructor-owned brand preventing camera planning from bypassing checked preparation. */
+	readonly [PREPARED_CAMERA_NEAR_CLIP_APERTURE]: true;
+}
+
+/** Camera-dependent primitive dimensions consumed by near-clip aperture classification. */
+export type CameraNearClipPrimitiveKind =
+	| "apertureVertexReadCount"
+	| "coordinateValidationCount"
+	| "createdPolygonCount"
+	| "createdVertexCount"
+	| "indexValidationCount"
+	| "triangleTestCount"
+	| "vertexPlaneTestCount";
+
+/** Exact checked work performed across one or more near-clip aperture classifications. */
+export type CameraNearClipDiagnostics = Readonly<
+	Record<CameraNearClipPrimitiveKind, number>
+>;
+
+/** Checked operation sink shared with the planner's atomic projection budget. */
+export interface CameraNearClipPrimitiveMeter {
+	/** Charge a positive operation count before the associated work occurs. */
+	consume(kind: CameraNearClipPrimitiveKind, count: number): void;
+}
+
+/** Allocate a zeroed near-clip aggregate for one camera plan. */
+export function createEmptyCameraNearClipDiagnostics(): CameraNearClipDiagnostics {
+	return Object.freeze({
+		apertureVertexReadCount: 0,
+		coordinateValidationCount: 0,
+		createdPolygonCount: 0,
+		createdVertexCount: 0,
+		indexValidationCount: 0,
+		triangleTestCount: 0,
+		vertexPlaneTestCount: 0,
+	});
+}
+
+/** Sum exactly the near-clip dimensions charged to the planner's projection budget. */
+export function cameraNearClipPrimitiveCount(
+	diagnostics: CameraNearClipDiagnostics,
+): number {
+	return (
+		diagnostics.apertureVertexReadCount +
+		diagnostics.coordinateValidationCount +
+		diagnostics.createdPolygonCount +
+		diagnostics.createdVertexCount +
+		diagnostics.indexValidationCount +
+		diagnostics.triangleTestCount +
+		diagnostics.vertexPlaneTestCount
+	);
+}
+
+/** Validate an aperture while charging every data-dependent validation loop before execution. */
+export function prepareCameraNearClipAperture(
+	aperture: PlanarAperture,
+	meter: CameraNearClipPrimitiveMeter,
+): PreparedCameraNearClipAperture {
+	if (
+		aperture.indices.length === 0 ||
+		aperture.indices.length % 3 !== 0 ||
+		aperture.vertices.length === 0 ||
+		aperture.vertices.length % 3 !== 0
+	) {
+		// Preserve the authored-geometry failure rather than reporting a zero-sized trace charge.
+		validatePlanarAperture(aperture);
+		throw new Error("Portal aperture shape validation returned unexpectedly.");
+	}
+	meter.consume("indexValidationCount", aperture.indices.length);
+	meter.consume("coordinateValidationCount", aperture.vertices.length);
+	validatePlanarAperture(aperture);
+	return {
+		...aperture,
+		[PREPARED_CAMERA_NEAR_CLIP_APERTURE]: true,
+	};
 }
 
 /** Build the exact finite near-clip pyramid in canonical world coordinates. */
@@ -89,15 +172,41 @@ export function apertureIntersectsCameraNearClipVolume(
 	aperture: PlanarAperture,
 ): boolean {
 	validatePlanarAperture(aperture);
-	const points = readVertices(aperture);
+	return intersectsPreparedCameraNearClipVolume(
+		volume,
+		{
+			...aperture,
+			[PREPARED_CAMERA_NEAR_CLIP_APERTURE]: true,
+		},
+		null,
+	);
+}
+
+/** Test one already-validated aperture while charging every camera-dependent primitive. */
+export function preparedApertureIntersectsCameraNearClipVolume(
+	volume: CameraNearClipVolume,
+	aperture: PreparedCameraNearClipAperture,
+	meter: CameraNearClipPrimitiveMeter,
+): boolean {
+	return intersectsPreparedCameraNearClipVolume(volume, aperture, meter);
+}
+
+function intersectsPreparedCameraNearClipVolume(
+	volume: CameraNearClipVolume,
+	aperture: PreparedCameraNearClipAperture,
+	meter: CameraNearClipPrimitiveMeter | null,
+): boolean {
+	const points = readVertices(aperture, meter);
 	for (let index = 0; index < aperture.indices.length; index += 3) {
+		charge(meter, "triangleTestCount", 1);
+		charge(meter, "createdPolygonCount", 1);
 		let polygon = [
 			points[aperture.indices[index]!]!,
 			points[aperture.indices[index + 1]!]!,
 			points[aperture.indices[index + 2]!]!,
 		];
 		for (const plane of volume.clippingPlanes) {
-			polygon = clipPolygonToHalfSpace(polygon, plane);
+			polygon = clipPolygonToHalfSpace(polygon, plane, meter);
 			if (polygon.length === 0) break;
 		}
 		if (polygon.length > 0) return true;
@@ -105,9 +214,14 @@ export function apertureIntersectsCameraNearClipVolume(
 	return false;
 }
 
-function readVertices(aperture: PlanarAperture): readonly Vec3[] {
+function readVertices(
+	aperture: PlanarAperture,
+	meter: CameraNearClipPrimitiveMeter | null,
+): readonly Vec3[] {
 	const points: Vec3[] = [];
 	for (let index = 0; index < aperture.vertices.length; index += 3) {
+		charge(meter, "apertureVertexReadCount", 1);
+		charge(meter, "createdVertexCount", 1);
 		points.push(
 			new Vec3(
 				aperture.vertices[index]!,
@@ -171,11 +285,15 @@ function orientedPlane(
 function clipPolygonToHalfSpace(
 	polygon: readonly Vec3[],
 	plane: PlanarAperturePlane,
+	meter: CameraNearClipPrimitiveMeter | null,
 ): Vec3[] {
+	charge(meter, "createdPolygonCount", 1);
 	const clipped: Vec3[] = [];
 	let previous = polygon.at(-1)!;
+	charge(meter, "vertexPlaneTestCount", 1);
 	let previousDistance = planeDistance(plane, previous);
 	for (const current of polygon) {
+		charge(meter, "vertexPlaneTestCount", 1);
 		const currentDistance = planeDistance(plane, current);
 		const previousInside = previousDistance <= NEAR_CLIP_CONTACT_EPSILON;
 		const currentInside = currentDistance <= NEAR_CLIP_CONTACT_EPSILON;
@@ -183,6 +301,7 @@ function clipPolygonToHalfSpace(
 			const fraction =
 				(previousDistance - NEAR_CLIP_CONTACT_EPSILON) /
 				(previousDistance - currentDistance);
+			charge(meter, "createdVertexCount", 1);
 			clipped.push(lerp(previous, current, fraction));
 		}
 		if (currentInside) clipped.push(current);
@@ -190,6 +309,19 @@ function clipPolygonToHalfSpace(
 		previousDistance = currentDistance;
 	}
 	return clipped;
+}
+
+function charge(
+	meter: CameraNearClipPrimitiveMeter | null,
+	kind: CameraNearClipPrimitiveKind,
+	count: number,
+): void {
+	if (!Number.isSafeInteger(count) || count <= 0) {
+		throw new Error(
+			`Portal near-clip counter ${kind} received invalid count ${count}.`,
+		);
+	}
+	meter?.consume(kind, count);
 }
 
 function planeDistance(plane: PlanarAperturePlane, point: Vec3): number {

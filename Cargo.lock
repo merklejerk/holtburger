@@ -2242,6 +2242,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "geo",
+ "hex",
  "holtburger-common",
  "holtburger-content",
  "holtburger-core",

@@ -607,6 +607,7 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: INTERIOR_NODE_ID,
 		selectedScopes: nodes.flatMap((value) => value.scopes),
+		scopeWindows: [],
 		topologyRevision: 1,
 	} as PortalRenderWorkPlan;
 }
@@ -707,6 +708,7 @@ function rootReentryCyclePlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: INTERIOR_NODE_ID,
 		selectedScopes: nodes.flatMap((value) => value.scopes),
+		scopeWindows: [],
 		topologyRevision: 1,
 	} as PortalRenderWorkPlan;
 }
@@ -882,6 +884,7 @@ function transitionPlan(
 				],
 		rootNodeId,
 		selectedScopes: [],
+		scopeWindows: [],
 		topologyRevision: 1,
 	} as PortalRenderWorkPlan;
 }

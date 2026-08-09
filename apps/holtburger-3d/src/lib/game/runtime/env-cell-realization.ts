@@ -63,7 +63,7 @@ export class EnvCellGeometryPreparer {
 			),
 		);
 		return {
-			environment: environmentArtifact(options.source),
+			environment: createEnvCellEnvironmentArtifact(options.source),
 			residents: mergeResidentArtifacts(
 				options.owner,
 				options.revision,
@@ -74,7 +74,8 @@ export class EnvCellGeometryPreparer {
 	}
 }
 
-function environmentArtifact(
+/** Project one materialization plan into the exact scene topology artifact used by the renderer. */
+export function createEnvCellEnvironmentArtifact(
 	plan: EnvCellMaterializationPlan,
 ): EnvCellLayerArtifact {
 	const visibilityIslands = buildVisibilityIslands(plan);

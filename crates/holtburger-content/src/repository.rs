@@ -208,6 +208,14 @@ impl ContentRepository {
         self.source_description.as_deref()
     }
 
+    /// Returns the mounted static-resource census in deterministic mount/index order.
+    ///
+    /// This is metadata only: callers that need bytes must still use `read_resource`, which
+    /// applies the repository's layered resolution policy.
+    pub fn resource_index(&self) -> &[RepositoryResourceIndexEntry] {
+        &self.resource_index
+    }
+
     pub fn resource_metadata(&self, key: ResourceKey<'_>) -> Option<holtburger_dat::FileMetadata> {
         let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
         resources.get_metadata_by_key(key)

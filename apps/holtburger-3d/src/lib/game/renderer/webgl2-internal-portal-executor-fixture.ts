@@ -255,6 +255,7 @@ function reverseStraddlePlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: TARGET,
 		selectedScopes: nodes.flatMap((value) => value.scopes),
+		scopeWindows: [],
 		topologyRevision: 1,
 	} as PortalRenderWorkPlan;
 }
@@ -462,6 +463,7 @@ function internalFixturePlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: ROOT,
 		selectedScopes: nodes.flatMap((value) => value.scopes),
+		scopeWindows: [],
 		topologyRevision: 1,
 	} as PortalRenderWorkPlan;
 }

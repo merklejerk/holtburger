@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { PortalCrossingId } from "../scene";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
-import { createFullPortalViewWindow } from "./portal-view-window";
+import {
+	createEmptyPortalWindowProjectionDiagnostics,
+	createFullPortalViewWindow,
+} from "./portal-view-window";
 import type { ResolvedPortalMask } from "./webgl2-portal-mask";
 import {
 	executePortalGraph,
@@ -760,6 +763,7 @@ function outdoorRootPlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: OUTDOOR,
 		selectedScopes: [],
+		scopeWindows: [],
 	};
 }
 
@@ -817,6 +821,7 @@ function outdoorRootCyclePlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: OUTDOOR,
 		selectedScopes: [],
+		scopeWindows: [],
 	};
 }
 
@@ -890,6 +895,7 @@ function hybridPlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: ROOT,
 		selectedScopes: [],
+		scopeWindows: [],
 	};
 }
 
@@ -953,6 +959,7 @@ function rootReentryPlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: ROOT,
 		selectedScopes: [],
+		scopeWindows: [],
 	};
 }
 
@@ -1018,6 +1025,7 @@ function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 		],
 		rootNodeId: ROOT,
 		selectedScopes: [],
+		scopeWindows: [],
 	};
 }
 
@@ -1102,19 +1110,7 @@ function internalPlan(): PortalRenderWorkPlan {
 			emptyWindowCount: 0,
 			maximumRetainedFragmentsPerScope: 2,
 			nearPlaneSeedCount: 0,
-			projection: {
-				broadPhaseRejectedPairCount: 0,
-				createdClipVertexCount: 0,
-				createdNdcVertexCount: 0,
-				createdPolygonCount: 0,
-				emptyExactIntersectionCount: 0,
-				exactIntersectionPairCount: 0,
-				homogeneousClippedPolygonCount: 0,
-				homogeneousRejectedTriangleCount: 0,
-				inputTriangleCount: 0,
-				outputFragmentCount: 0,
-				outputVertexCount: 0,
-			},
+			projection: createEmptyPortalWindowProjectionDiagnostics(),
 			rejectedFacingCrossingCount: 2,
 			rejectedPortalFootprintCount: 0,
 			sameDomainBoundaryCrossingCount: 0,
@@ -1170,6 +1166,7 @@ function internalPlan(): PortalRenderWorkPlan {
 			scope("root"),
 			scope("target"),
 		],
+		scopeWindows: [],
 		topologyRevision: 1,
 	};
 }
@@ -1217,5 +1214,6 @@ function rootSeedPlan(): PortalRenderWorkPlan {
 			indoorLayer(1, [LEFT], [seedEdge.crossingId]),
 		],
 		selectedScopes: nodes.flatMap((node) => node.scopes),
+		scopeWindows: [],
 	};
 }

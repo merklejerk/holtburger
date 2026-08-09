@@ -295,6 +295,18 @@ pub async fn load_landblock_source_batch_bytes(
     build_landblock_source_batch_response(runtime, request).await
 }
 
+/// Builds the canonical EnvCell source record for the browser-free portal trace evaluator.
+pub async fn load_env_cell_source_record_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_landblock_id: &str,
+) -> Result<Vec<u8>> {
+    let landblock_id = parse_landblock_id(raw_landblock_id)?;
+    let request =
+        LandblockSourceBatchRequest::new(landblock_id, vec![LandblockSourceLayer::EnvCells])?;
+    let source_batch = load_landblock_source_batch_asset(runtime, request).await?;
+    serialize_env_cell_source_record(runtime, &source_batch).await
+}
+
 /// Build the canonical active-region response used by Tauri and the headless browser harness.
 pub async fn load_active_region_data_bytes(runtime: &ContentAssetRuntime) -> Result<Vec<u8>> {
     let asset = runtime

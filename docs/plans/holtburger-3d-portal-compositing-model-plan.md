@@ -1,6 +1,7 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 CPU contracts and WebGL2 target lifecycle proved; draw/shader wiring remains
+Status: Phase 7 CPU contracts, bounded crossing stream, and WebGL2 target lifecycle proved;
+propagation/reduction shader wiring remains
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -1525,8 +1526,9 @@ The selected independent cutoffs are 8,700 scope-window work items, 240,181 chec
 primitives, the archive-censused maximum 24 authored aperture vertices, and a fixed scope-atlas
 extent of two drawing-buffer columns by three rows. The same policy admits at most 255 arrival
 states: zero remains the uncovered sentinel and the 255 nonzero `R8UI` values identify the root
-plus retained directed crossings. Both GPU selections are justified by the real-scene checkpoint
-below; neither is an arena-derived number.
+plus retained directed crossings. It also admits at most 2,048 expanded crossing-triangle vertices
+per accepted camera plan. All three GPU selections are justified by the real-scene checkpoints
+below; none is an arena-derived number.
 
 Arena dimensions are mechanical rather than individually tuned. A reciprocal polygon intersection
 can retain both input boundaries plus one intersection per edge pair, yielding a conservative
@@ -1729,6 +1731,50 @@ device-capacity choice. Target creation still fails loudly when the fixed extent
 WebGL2 texture limit; no camera-time target resize, alternate packer, or hidden recursive fallback
 is introduced. A later packer or larger policy must pay for itself with a new deterministic trace.
 
+### Crossing Triangle-Stream Capacity Checkpoint — 2026-08-09
+
+The expanded real-scene pass also records the exact indexed triangle vertices belonging to every
+selected visibility aperture after all arrival-state and atlas cutoffs. Across the same 2,048
+pose/aspect occurrences, the largest accepted stream is 1,122 vertices: the `0xec0effff`
+maximum-fan-out family under the ultrawide source-near pose, with 254 retained crossings. The
+largest single effective visibility aperture contributes 45 vertices. The maximum-fan-out
+family's p99 stream is 972 vertices. These are decoded production apertures and production culler
+selections; the trace does not infer triangle counts from authored polygon vertex counts because
+reciprocal intersection apertures may be multipart or concave and are explicitly triangulated.
+
+The selected first-cut capacity is 2,048 vertex records. At 24 bytes per record this is exactly
+49,152 bytes (48 KiB) of CPU arena storage and the same fixed GPU buffer allocation. It leaves 926
+records, or 82.5% capacity headroom over the corpus maximum. Every traced occurrence is preserved
+by this capacity. An unseen overflow restores the deepest completed culler checkpoint until the
+whole retained stream fits; it never clips one aperture, grows either buffer, or builds a fallback
+draw list.
+
+`PortalCrossingTriangleStreamArena` expands the final selected indexed apertures into one
+non-indexed interleaved stream. Each record contains anchor-relative xyz `float32`, output arrival
+id `uint32`, source-scope tile ordinal `uint32`, and the equal-depth policy bit `uint32`.
+Topology-lifetime scalar landblock coordinates and selected-scope ordinals avoid camera-time
+coordinate objects and scope-key construction. Arrival ids use zero for uncovered, one for root,
+and selected crossing ordinal plus two thereafter. The planner verifies the final index count
+before the arena writes; the arena then requires its copied count to equal that plan, so mutable
+topology drift fails loudly.
+
+The accepted CPU path has two bounded linear geometry passes: `O(I)` index reads to admit capacity,
+then `O(I)` index reads and `3I` position-scalar reads to expand the stream. It creates zero
+portal-owned frame records and performs no sort, slice, map construction, or storage growth. The
+GPU owner allocates once per capacity event, performs one contiguous `bufferSubData` per changed
+camera plan, and reuses one VAO for exactly one ordinary `drawArrays(TRIANGLES)` per propagation
+round. Logical work is `D * X` crossing evaluations and physical vertex work is `D * I`, while CPU
+submission remains `O(D)` and independent of `X`.
+
+Ordinary instancing was rejected because retained crossings reference heterogeneous aperture
+geometry. `WEBGL_multi_draw` was available on the focused target adapter, but requiring an
+extension would retain per-aperture ranges and topology VAO complexity merely to save the bounded
+expansion. The 48 KiB stream is smaller and simpler for the observed distribution and needs only
+core WebGL2. A focused fixture—not a scene screenshot—proved the mixed float/integer attribute
+layout through the production upload/draw owner and exact `R8UI` pixel readback on ANGLE/Vulkan
+with the Radeon RX 7900 XT. The fixture contributes no topology, CPU-time, or visual-correctness
+evidence.
+
 ### Task Checklist
 
 - [x] Establish a visibility-only culler bridge with topology-stable integer adjacency, typed
@@ -1782,6 +1828,10 @@ is introduced. A later packer or larger policy must pay for itself with a new de
 - [x] Select `R8UI` frontier attachments from an independently traced 255-state capacity. Reserve
       zero for uncovered, decline complete frontiers before packing when retained arrival ids do not
       fit, and keep extent-only and id-capacity evidence separate.
+- [x] Select a fixed 2,048-vertex crossing stream from the expanded cross-aspect real-scene trace.
+      Count final aperture indices before packing, decline complete frontiers on overflow, expand
+      once into a 48 KiB allocation-free arena, upload one contiguous prefix, and reuse one ordinary
+      draw per propagation round without requiring `WEBGL_multi_draw`.
 - [ ] Route each scope-homogeneous opaque submission to its tile with one shader-visible uniform;
       retain the existing run boundaries and prove that routing adds no submission. Do not add a
       per-instance scope attribute unless a later, separately traced cross-scope consolidation wins.
@@ -1797,9 +1847,10 @@ is introduced. A later packer or larger policy must pay for itself with a new de
       and depth-only scope-envelope targets transactionally. Reuse equal extents; preserve the old
       generation on partial failure; cover resize, disposal, device limits, exact bytes, binding
       restoration, and actual-browser framebuffer completeness without activating a shadow renderer.
-- [ ] Reuse crossing-instance, scope-reduction, opaque-routing, transparent-order, and particle-pack
-      typed streams. Use explicit counts/ranges and caller-provided sort scratch rather than
-      `map`/`filter`/spread/sorted-copy pipelines in portal-owned frame code.
+- [ ] Reuse scope-reduction, opaque-routing, transparent-order, and particle-pack typed streams. Use
+      explicit counts/ranges and caller-provided sort scratch rather than
+      `map`/`filter`/spread/sorted-copy pipelines in portal-owned frame code. The crossing triangle
+      stream is complete; its propagation shader remains unwired.
 - [x] Trace arena capacity bytes, per-pool high-water counts, arena growth events, and portal-owned
       accepted-frame heap-record creation as separate unweighted dimensions. Fixed element widths
       make the high-water byte derivation mechanical. Extend the ledger with the allowed exceptional
@@ -1828,14 +1879,15 @@ is introduced. A later packer or larger policy must pay for itself with a new de
 - Gate C's accepted path-depth value `16` has one production capacity-policy owner. The culler,
   propagation schedule, arena derivation, diagnostics, and ordinary fixtures consume that field and
   do not repeat a literal or independently derive it.
-- The same policy owns the selected `2x3` atlas multiple and 255-state `R8UI` frontier capacity. At
-  1920x1080 the complete target set is exactly 161,740,800 bytes; either capacity exhaustion
-  declines a complete frontier and never resizes or repacks a GPU target in response to camera
-  motion.
+- The same policy owns the selected `2x3` atlas multiple, 255-state `R8UI` frontier capacity, and
+  2,048-record crossing stream. At 1920x1080 the complete target set is exactly 161,740,800 bytes
+  plus one 49,152-byte CPU arena and one 49,152-byte GPU buffer; any capacity exhaustion declines a
+  complete frontier and never resizes or repacks a GPU resource in response to camera motion.
 - Every selected physical opaque compatibility batch is prepared and submitted once. Atlas routing
   does not create a draw per scope, arrival state, or tile.
-- GPU command counts match the accepted `O(D)` ledger, and logical propagation work is bounded by
-  `D * X` crossing instances plus `D * S` scope reductions.
+- GPU command counts match the accepted `O(D)` ledger. Logical propagation work is bounded by
+  `D * X` crossing evaluations, physical propagation work by `D * I` expanded triangle vertices,
+  and scope reduction by `D * S` instances.
 - Focused synthetic readback matches abstract opaque identities and occlusion for canonical
   re-entry/cycle shapes. The backend performs no topology inference.
 - Target resize, disposal, context loss, capacity cutoff, and partial allocation failure are
@@ -2073,8 +2125,9 @@ is introduced. A later packer or larger policy must pay for itself with a new de
 
 1. What explicit drawing-buffer pixel/byte budget admits the fixed `2x3` target without allowing a
    high-DPI or 4K viewport to consume an unreasonable share of GPU memory?
-2. Which crossing-instance and scope-reduction stream layout lets the fixed `D` rounds remain one
-   propagation and one reduction command each without rebuilding records per round?
+2. Which minimal per-arrival metadata and entry-depth representation lets propagation compare an
+   incoming state's source-surface depth without adding a second drawing-buffer depth texture or a
+   per-arrival draw?
 3. Can any atlas/frontier attachment lifetime be pooled with an existing renderer target without
    adding framebuffer reattachment commands or coupling unrelated resize/context-loss ownership?
 4. If later traces justify a more complex atlas packer or route-key cache, which explicit CPU-owned

@@ -17,6 +17,7 @@ describe("portal render capacity policy", () => {
 			maximumScopeWindowWorkItemCount: 5,
 			scopeAtlas: {
 				columnCount: 2,
+				maximumCrossingTriangleVertexCount: 37,
 				maximumArrivalStateCount: 31,
 				rowCount: 4,
 			},
@@ -83,6 +84,7 @@ describe("portal render capacity policy", () => {
 				maximumScopeWindowWorkItemCount: 1,
 				scopeAtlas: {
 					columnCount: 1,
+					maximumCrossingTriangleVertexCount: 3,
 					maximumArrivalStateCount: 1,
 					rowCount: 1,
 				},
@@ -99,6 +101,7 @@ describe("portal render capacity policy", () => {
 				maximumScopeWindowWorkItemCount: 1,
 				scopeAtlas: {
 					columnCount: 2,
+					maximumCrossingTriangleVertexCount: 3,
 					maximumArrivalStateCount: 1,
 					rowCount: 0,
 				},
@@ -115,10 +118,28 @@ describe("portal render capacity policy", () => {
 				maximumScopeWindowWorkItemCount: 1,
 				scopeAtlas: {
 					columnCount: 1,
+					maximumCrossingTriangleVertexCount: 3,
 					maximumArrivalStateCount: 0,
 					rowCount: 1,
 				},
 			}),
 		).toThrow("scopeAtlas.maximumArrivalStateCount");
+	});
+
+	it("rejects a crossing stream too small for one triangle", () => {
+		expect(() =>
+			createPortalRenderCapacityPolicy({
+				maximumAuthoredApertureVertexCount: 3,
+				maximumPathDepth: 1,
+				maximumProjectionPrimitiveCount: 1,
+				maximumScopeWindowWorkItemCount: 1,
+				scopeAtlas: {
+					columnCount: 1,
+					maximumCrossingTriangleVertexCount: 2,
+					maximumArrivalStateCount: 1,
+					rowCount: 1,
+				},
+			}),
+		).toThrow("scopeAtlas.maximumCrossingTriangleVertexCount");
 	});
 });

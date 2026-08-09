@@ -93,6 +93,8 @@ const PARTICLE_TRACE_TIME_SECONDS = 1;
 const MAXIMUM_ATLAS_POLICY_MULTIPLIER = 4;
 /** Logical no-cutoff capacity used to isolate atlas extent from arrival-id experiments. */
 const GUARANTEED_ARRIVAL_STATE_CAPACITY = 0xffff_ffff;
+/** Logical no-cutoff capacity used to isolate atlas extent from triangle-stream experiments. */
+const GUARANTEED_CROSSING_TRIANGLE_VERTEX_CAPACITY = 0xffff_ffff;
 
 interface TraceDrawingBuffer {
 	readonly height: number;
@@ -1187,6 +1189,7 @@ interface AtlasPlanSnapshot {
 		readonly atlasCapacityRetreatCount: number;
 		readonly atlasPackedExtentPixelCount: number;
 		readonly arrivalStateCapacityRetreatCount: number;
+		readonly crossingTriangleVertexCapacityRetreatCount: number;
 		readonly frontierRetreatCount: number;
 		readonly packingAttemptCount: number;
 		readonly tilePixelCount: number;
@@ -1195,6 +1198,14 @@ interface AtlasPlanSnapshot {
 		readonly windowVertexReadCount: number;
 	};
 	readonly selectedCrossingIds: readonly string[];
+	readonly selectedCrossingGeometry: {
+		/** Largest expanded triangle-vertex contribution from one retained crossing. */
+		readonly maximumTriangleVertexCount: number;
+		/** Physical triangles copied once into the proposed non-indexed frame stream. */
+		readonly triangleCount: number;
+		/** Vertex records uploaded once and reused by every propagation round. */
+		readonly triangleVertexCount: number;
+	};
 	readonly selectedScopeTiles: readonly {
 		readonly height: number;
 		readonly scopeKey: string;
@@ -1233,11 +1244,13 @@ function createAtlasCapacityPolicies(
 			left,
 			drawingBuffer,
 			GUARANTEED_ARRIVAL_STATE_CAPACITY,
+			GUARANTEED_CROSSING_TRIANGLE_VERTEX_CAPACITY,
 		);
 		const rightResource = atlasResource(
 			right,
 			drawingBuffer,
 			GUARANTEED_ARRIVAL_STATE_CAPACITY,
+			GUARANTEED_CROSSING_TRIANGLE_VERTEX_CAPACITY,
 		);
 		const byteDifference =
 			portalScopeAtlasTargetByteLength(leftResource) -
@@ -1276,6 +1289,8 @@ function traceAtlasCapacityPose(
 		},
 		drawingBuffer,
 		maximumArrivalStateCount: GUARANTEED_ARRIVAL_STATE_CAPACITY,
+		maximumCrossingTriangleVertexCount:
+			GUARANTEED_CROSSING_TRIANGLE_VERTEX_CAPACITY,
 	};
 	const baseline = snapshotAtlasPlan(
 		planner.plan(topology, input, guaranteedResource),
@@ -1294,6 +1309,7 @@ function traceAtlasCapacityPose(
 			policy,
 			drawingBuffer,
 			GUARANTEED_ARRIVAL_STATE_CAPACITY,
+			GUARANTEED_CROSSING_TRIANGLE_VERTEX_CAPACITY,
 		);
 		const candidate = snapshotAtlasPlan(
 			planner.plan(topology, input, resource),
@@ -1306,6 +1322,7 @@ function traceAtlasCapacityPose(
 		selectedPolicy,
 		drawingBuffer,
 		selectedPolicy.maximumArrivalStateCount,
+		selectedPolicy.maximumCrossingTriangleVertexCount,
 	);
 	const selected = snapshotAtlasPlan(
 		planner.plan(topology, input, selectedResource),
@@ -1428,10 +1445,29 @@ function snapshotAtlasPlan(
 			width: frame.tileWidth(ordinal),
 		}),
 	);
-	const selectedCrossingIds = Array.from(
-		{ length: frame.visibility.selectedCrossingCount },
-		(_, ordinal) => frame.visibility.selectedCrossing(ordinal).id,
-	);
+	const selectedCrossingIds: string[] = [];
+	let maximumTriangleVertexCount = 0;
+	let triangleVertexCount = 0;
+	for (
+		let ordinal = 0;
+		ordinal < frame.visibility.selectedCrossingCount;
+		ordinal += 1
+	) {
+		const crossing = frame.visibility.selectedCrossing(ordinal);
+		const crossingTriangleVertexCount =
+			crossing.visibilityAperture.indices.length;
+		if (crossingTriangleVertexCount % 3 !== 0) {
+			throw new Error(
+				`Portal crossing ${crossing.id} has a non-triangular visibility aperture.`,
+			);
+		}
+		selectedCrossingIds.push(crossing.id);
+		maximumTriangleVertexCount = Math.max(
+			maximumTriangleVertexCount,
+			crossingTriangleVertexCount,
+		);
+		triangleVertexCount += crossingTriangleVertexCount;
+	}
 	return {
 		atlas: { ...resource.atlas },
 		completedDepth: frame.visibility.completedDepth,
@@ -1441,6 +1477,8 @@ function snapshotAtlasPlan(
 			atlasPackedExtentPixelCount: frame.trace.atlasPackedExtentPixelCount,
 			arrivalStateCapacityRetreatCount:
 				frame.trace.arrivalStateCapacityRetreatCount,
+			crossingTriangleVertexCapacityRetreatCount:
+				frame.trace.crossingTriangleVertexCapacityRetreatCount,
 			frontierRetreatCount: frame.trace.frontierRetreatCount,
 			packingAttemptCount: frame.trace.packingAttemptCount,
 			tilePixelCount: frame.trace.tilePixelCount,
@@ -1449,6 +1487,11 @@ function snapshotAtlasPlan(
 			windowVertexReadCount: frame.trace.windowVertexReadCount,
 		},
 		selectedCrossingIds,
+		selectedCrossingGeometry: {
+			maximumTriangleVertexCount,
+			triangleCount: triangleVertexCount / 3,
+			triangleVertexCount,
+		},
 		selectedScopeTiles,
 		status: frame.visibility.status,
 		visibilityWork: {
@@ -1476,6 +1519,7 @@ function publicAtlasPlan(snapshot: AtlasPlanSnapshot) {
 			snapshot.packing.atlasPackedExtentPixelCount,
 		packing: snapshot.packing,
 		selectedCrossingCount: snapshot.selectedCrossingIds.length,
+		selectedCrossingGeometry: snapshot.selectedCrossingGeometry,
 		selectedScopeCount: snapshot.selectedScopeTiles.length,
 		status: snapshot.status,
 		visibilityWork: snapshot.visibilityWork,
@@ -1519,6 +1563,7 @@ function atlasResource(
 	policy: { readonly columnCount: number; readonly rowCount: number },
 	drawingBuffer: TraceDrawingBuffer,
 	maximumArrivalStateCount: number,
+	maximumCrossingTriangleVertexCount: number,
 ): PortalScopeAtlasResource {
 	return {
 		atlas: {
@@ -1527,6 +1572,7 @@ function atlasResource(
 		},
 		drawingBuffer,
 		maximumArrivalStateCount,
+		maximumCrossingTriangleVertexCount,
 	};
 }
 
@@ -1586,9 +1632,20 @@ function summarizeAtlasTraces(
 		arrivalStateCapacityRetreatCount: distribution(
 			traces.map(({ packing }) => packing.arrivalStateCapacityRetreatCount),
 		),
+		crossingTriangleVertexCapacityRetreatCount: distribution(
+			traces.map(
+				({ packing }) => packing.crossingTriangleVertexCapacityRetreatCount,
+			),
+		),
 		id,
 		packedExtentUtilization: distribution(
 			traces.map(({ packedExtentUtilization }) => packedExtentUtilization),
+		),
+		maximumCrossingTriangleVertexCount: distribution(
+			traces.map(
+				({ selectedCrossingGeometry }) =>
+					selectedCrossingGeometry.maximumTriangleVertexCount,
+			),
 		),
 		packingAttemptCount: distribution(
 			traces.map(({ packing }) => packing.packingAttemptCount),
@@ -1597,6 +1654,12 @@ function summarizeAtlasTraces(
 		rowCount: policy.rowCount,
 		selectedCrossingLoss: distribution(
 			traces.map(({ selectedCrossingLoss }) => selectedCrossingLoss),
+		),
+		selectedCrossingTriangleVertexCount: distribution(
+			traces.map(
+				({ selectedCrossingGeometry }) =>
+					selectedCrossingGeometry.triangleVertexCount,
+			),
 		),
 		selectedScopeLoss: distribution(
 			traces.map(({ selectedScopeLoss }) => selectedScopeLoss),

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { AABB2, Vec2 } from "../math/types";
 import type { SceneScope } from "../scene";
 import { scopeKey } from "../scene/scope";
@@ -41,7 +42,7 @@ describe("createPortalPathViewDrySchedule", () => {
 					deferred: [
 						{
 							batchKey: "glass",
-							distanceRank: 20,
+							distanceSquared: 20,
 							kind: "transparent",
 							submissionKey: "outdoor-glass",
 						},
@@ -60,7 +61,7 @@ describe("createPortalPathViewDrySchedule", () => {
 					deferred: [
 						{
 							batchKey: "smoke",
-							distanceRank: 10,
+							distanceSquared: 10,
 							kind: "additive",
 							submissionKey: "indoor-smoke",
 						},
@@ -169,7 +170,7 @@ describe("createPortalPathViewDrySchedule", () => {
 });
 
 describe("createPortalArrivalStateDryScheduleTrace", () => {
-	it("quotients reference paths while retaining one physical batch and upload stream", () => {
+	it("quotients reference paths while retaining physical batches and one upload stream", () => {
 		const referencePlan = portalPlan([
 			view("root", OUTDOOR, EXTERIOR, 0, 0),
 			view("inside", INDOOR, INTERIOR, 1, 1),
@@ -182,7 +183,7 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 					deferred: [
 						{
 							batchKey: "glass",
-							distanceRank: 20,
+							distanceSquared: 20,
 							kind: "transparent",
 							submissionKey: "outdoor-glass",
 						},
@@ -193,6 +194,11 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 							batchKey: "flame",
 							instanceCount: 12,
 							sourceKey: "outdoor-flame",
+						},
+						{
+							batchKey: "rain",
+							instanceCount: 3,
+							sourceKey: "outdoor-rain",
 						},
 					],
 					scopeKey: scopeKey(OUTDOOR),
@@ -232,9 +238,9 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			scopeWindowBoundedLayerColorDepthBytes: 80_000,
 			scopeWindowBoundedLayerPixelCount: 10_000,
 			scopeWindowBoundedVisibilityEnvelopeBytes: 40_000,
-			particleBatchCount: 1,
-			particleInstancePackCount: 12,
-			particleSourceCount: 1,
+			particleBatchCount: 2,
+			particleInstancePackCount: 15,
+			particleSourceCount: 2,
 			particleUploadCount: 1,
 			scopeVisibilityEnvelopeCount: 2,
 			scopeVisibilityEnvelopeInputCount: 3,
@@ -242,6 +248,11 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			scopeVisibilityEnvelopeReductionInstanceCount: 4,
 			traversalCrossingCount: 2,
 			traversalDepth: 2,
+			transparentBatchKeyEvaluationCount: 1,
+			transparentDepthBandClassificationCount: 1,
+			transparentDepthBucketVisitCount:
+				FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount,
+			transparentNearSquareRootCount: 1,
 			visibilityFramebufferChangeCount: 4,
 		});
 	});

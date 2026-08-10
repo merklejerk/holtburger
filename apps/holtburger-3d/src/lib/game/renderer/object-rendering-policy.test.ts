@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	areStaticObjectDrawsCompatible,
+	createObjectSubmissionPhases,
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
 	objectBlendPolicy,
@@ -10,6 +11,7 @@ import {
 } from "./object-rendering-policy";
 import {
 	createObjectFragmentShader,
+	createPortalObjectFragmentShader,
 	createObjectVertexShader,
 } from "./webgl2-object-program";
 
@@ -34,6 +36,12 @@ describe("orderTransparentObjectRanges", () => {
 			"near-b",
 		]);
 		expect(ordered.far).toEqual([]);
+		expect(ordered.trace).toEqual({
+			batchKeyEvaluationCount: 3,
+			depthBandClassificationCount: 3,
+			depthBucketVisitCount: TRANSPARENT_TUNING.depthBucketCount,
+			nearSquareRootCount: 3,
+		});
 	});
 
 	it("groups far ranges by first-seen batching cohort", () => {
@@ -111,6 +119,69 @@ describe("orderTransparentObjectRanges", () => {
 			"far-a-2",
 			"far-b",
 		]);
+	});
+});
+
+describe("createObjectSubmissionPhases", () => {
+	it("partitions one physical population and globally orders transparency", () => {
+		const distanceCalls: string[] = [];
+		const batchCalls: string[] = [];
+		const objects = [
+			{ cohort: null, distance: 0, id: "wall", ordering: "opaque" },
+			{
+				cohort: "glass",
+				distance: TRANSPARENT_TUNING.nearDistance + 2,
+				id: "far-glass-a",
+				ordering: "transparent",
+			},
+			{ cohort: null, distance: 0, id: "fence", ordering: "alpha-test" },
+			{
+				cohort: null,
+				distance: TRANSPARENT_TUNING.nearDistance - 1,
+				id: "near-glass",
+				ordering: "transparent",
+			},
+			{ cohort: null, distance: 0, id: "glow", ordering: "additive" },
+			{
+				cohort: "glass",
+				distance: TRANSPARENT_TUNING.nearDistance + 1,
+				id: "far-glass-b",
+				ordering: "transparent",
+			},
+		] as const;
+
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(object) => {
+				distanceCalls.push(object.id);
+				return object.distance ** 2;
+			},
+			(object) => {
+				batchCalls.push(object.id);
+				return object.cohort;
+			},
+		);
+
+		expect(phases.opaque.map(({ id }) => id)).toEqual(["wall", "fence"]);
+		expect(phases.transparent.far.map(({ id }) => id)).toEqual([
+			"far-glass-a",
+			"far-glass-b",
+		]);
+		expect(phases.transparent.near.map(({ id }) => id)).toEqual(["near-glass"]);
+		expect(phases.additive.map(({ id }) => id)).toEqual(["glow"]);
+		expect(distanceCalls).toEqual(["far-glass-a", "near-glass", "far-glass-b"]);
+		expect(batchCalls).toHaveLength(distanceCalls.length);
+		expect(batchCalls.toSorted()).toEqual(distanceCalls.toSorted());
+	});
+
+	it("rejects invalid transparent camera distances", () => {
+		expect(() =>
+			createObjectSubmissionPhases(
+				[{ ordering: "transparent" }] as const,
+				() => Number.NaN,
+				() => null,
+			),
+		).toThrow("camera distance must be finite and non-negative");
 	});
 });
 
@@ -350,6 +421,22 @@ describe("areStaticObjectDrawsCompatible", () => {
 });
 
 describe("object fragment variants", () => {
+	it("applies the scope envelope before sampling a portal-deferred material", () => {
+		const shader = createPortalObjectFragmentShader(false);
+		const visibility = shader.indexOf(
+			"if (!portalDeferredFragmentVisible()) discard;",
+		);
+		const material = shader.indexOf(
+			"vec4 color = sampleMaterial() * vInstanceColor;",
+		);
+
+		expect(shader).toContain("uniform uint uPortalScope;");
+		expect(shader).toContain("uScopes[uPortalScope]");
+		expect(shader).toContain("gl_FragCoord.z * 0.5 < envelopeDepth");
+		expect(visibility).toBeGreaterThan(-1);
+		expect(visibility).toBeLessThan(material);
+	});
+
 	it("guards every texture sample behind the material state that enables it", () => {
 		const shader = createObjectFragmentShader(false);
 		const solidReturn = shader.indexOf(

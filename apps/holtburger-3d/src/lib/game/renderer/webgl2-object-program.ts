@@ -4,6 +4,11 @@ import {
 } from "./webgl2-shader-utils";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
 import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
+import {
+	bindWebGL2PortalDeferredVisibilityProgram,
+	PORTAL_DEFERRED_VISIBILITY_GLSL,
+	type WebGL2PortalDeferredVisibilityUniforms,
+} from "./portal-deferred-visibility-glsl";
 
 /** Object transform source selected at shader compilation rather than through nullable uniforms. */
 export type ObjectVertexTransformSource = "baked" | "instanced";
@@ -93,6 +98,18 @@ void main() {
 
 /** Build the object fragment variant; the unfogged variant omits fog uniforms entirely. */
 export function createObjectFragmentShader(distanceFog: boolean): string {
+	return createObjectFragmentShaderVariant(distanceFog, false);
+}
+
+/** Build the deferred object variant that rejects fragments outside one authored scope envelope. */
+export function createPortalObjectFragmentShader(distanceFog: boolean): string {
+	return createObjectFragmentShaderVariant(distanceFog, true);
+}
+
+function createObjectFragmentShaderVariant(
+	distanceFog: boolean,
+	portalVisibility: boolean,
+): string {
 	const fogDeclarations = distanceFog
 		? `
 uniform int uFogEnabled;
@@ -105,10 +122,18 @@ ${WEBGL2_DISTANCE_FOG_GLSL}`
 	const fogApplication = distanceFog
 		? "color.rgb = applyDistanceFog(color.rgb, vViewerDistance);"
 		: "";
+	const portalDeclarations = portalVisibility
+		? PORTAL_DEFERRED_VISIBILITY_GLSL
+		: "";
+	const portalApplication = portalVisibility
+		? "if (!portalDeferredFragmentVisible()) discard;"
+		: "";
 	return `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
+
+${portalDeclarations}
 
 uniform sampler2D uBase;
 uniform sampler2D uPalette;
@@ -248,6 +273,7 @@ vec4 sampleMaterial() {
 }
 
 void main() {
+	${portalApplication}
 	vec4 color = sampleMaterial() * vInstanceColor;
 	// Retail builds one clamped vertex color from emissive plus the lit terms, then the
 	// texture stage modulates it (acclient.c:345688 sets Emissive = surface luminosity).
@@ -276,6 +302,8 @@ void main() {
 /** Shared uniforms for every renderer-owned static-object material program. */
 interface WebGL2ObjectProgramBase {
 	readonly program: WebGLProgram;
+	/** Null for ordinary draws; otherwise the sole per-draw authored-scope selector. */
+	readonly portalVisibilityUniforms: WebGL2PortalDeferredVisibilityUniforms | null;
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
 		readonly ambientColor: WebGLUniformLocation;
@@ -339,6 +367,7 @@ export interface WebGL2FogInstancedObjectProgram extends WebGL2InstancedObjectPr
 
 interface WebGL2ObjectProgramOptions {
 	readonly distanceFog: boolean;
+	readonly portalVisibility: boolean;
 	readonly transformSource: ObjectVertexTransformSource;
 }
 
@@ -351,6 +380,7 @@ export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: false;
+		readonly portalVisibility?: false;
 		readonly transformSource?: "baked";
 	},
 ): WebGL2ObjectProgram;
@@ -359,6 +389,7 @@ export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: true;
+		readonly portalVisibility?: false;
 		readonly transformSource: "instanced";
 	},
 ): WebGL2FogInstancedObjectProgram;
@@ -367,6 +398,25 @@ export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: false;
+		readonly portalVisibility?: false;
+		readonly transformSource: "instanced";
+	},
+): WebGL2InstancedObjectProgram;
+/** Compile an unfogged baked program with scope-envelope visibility. */
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: {
+		readonly distanceFog: false;
+		readonly portalVisibility: true;
+		readonly transformSource?: "baked";
+	},
+): WebGL2ObjectProgram;
+/** Compile an unfogged instanced program with scope-envelope visibility. */
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: {
+		readonly distanceFog: false;
+		readonly portalVisibility: true;
 		readonly transformSource: "instanced";
 	},
 ): WebGL2InstancedObjectProgram;
@@ -379,6 +429,7 @@ export function createWebGL2ObjectProgram(
 	| WebGL2InstancedObjectProgram
 	| WebGL2FogInstancedObjectProgram {
 	const distanceFog = options.distanceFog ?? true;
+	const portalVisibility = options.portalVisibility ?? false;
 	const transformSource = options.transformSource ?? "baked";
 	const vertexShader = compileWebGL2Shader(
 		gl,
@@ -388,7 +439,9 @@ export function createWebGL2ObjectProgram(
 	const fragmentShader = compileWebGL2Shader(
 		gl,
 		gl.FRAGMENT_SHADER,
-		createObjectFragmentShader(distanceFog),
+		portalVisibility
+			? createPortalObjectFragmentShader(distanceFog)
+			: createObjectFragmentShader(distanceFog),
 	);
 	const program = gl.createProgram();
 	if (!program) throw new Error("Failed to allocate object shader program.");
@@ -457,10 +510,14 @@ export function createWebGL2ObjectProgram(
 		gl.uniform1i(uniforms.base, OBJECT_TEXTURE_UNITS.base);
 		gl.uniform1i(uniforms.palette, OBJECT_TEXTURE_UNITS.palette);
 		gl.uniform1i(uniforms.detail, OBJECT_TEXTURE_UNITS.detail);
+		const portalVisibilityUniforms = portalVisibility
+			? bindWebGL2PortalDeferredVisibilityProgram(gl, program)
+			: null;
 		const objectProgram: WebGL2ObjectProgram | WebGL2InstancedObjectProgram =
 			transformSource === "baked"
 				? {
 						program,
+						portalVisibilityUniforms,
 						transformSource,
 						uniforms: {
 							...uniforms,
@@ -473,6 +530,7 @@ export function createWebGL2ObjectProgram(
 					}
 				: {
 						program,
+						portalVisibilityUniforms,
 						transformSource,
 						uniforms,
 					};

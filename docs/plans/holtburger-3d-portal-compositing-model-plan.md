@@ -1,7 +1,8 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 opaque backend accepted after proving and fixing inherited WebGL sampler state;
-Phase 8 deferred transparency and particle integration is next
+Status: Phases 7 and 8 accepted behind the explicit probe; opaque scope-atlas execution,
+arbitrary-order deferred filtering, single-upload particles, and exterior-tile weather have numeric
+hardware evidence; Phase 9 real-scene operation traces are next before cutover
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -200,9 +201,16 @@ not as the architecture to incrementally patch.
     planes, and tests target geometry against those edges plus the camera near plane. It does not
     install the entry portal plane as a target-cell clip plane, so target geometry may protrude in
     front of that plane.
-- `acclient-eor-source/acclient.c:434698`
-  - `D3DPolyRender::FlushAlphaList` is the deferred-alpha evidence to inspect before claiming a
-    retail-equivalent transparent order.
+- `acclient-eor-source/acclient.c:433868-433923`, `434698-434780`
+  - `D3DPolyRender::AddMeshToAlphaList` appends into separate clip/alpha arrays and
+    `FlushAlphaList` replays both arrays in insertion order; neither function globally depth-sorts
+    deferred fragments.
+- `acclient-eor-source/acclient.c:318142-318159`, `306478-306506`, `437640-437670`,
+  `683390-683427`
+  - emitted particles are ordinary `CPhysicsPart` values added to cell shadow-part lists; the cell
+    sorts those parts by viewer distance before drawing them through the same mesh/alpha queue as
+    ordinary objects. Retail therefore supplies an upstream physical order rather than asking the
+    portal compositor to invent a frame-global fragment order.
 - ACE, ACViewer, and shipped DAT content remain ground truth for topology and spatial data. They
   may support diagnostics and censuses, but permanent tests must not depend on unchecked runtime
   archives.
@@ -282,13 +290,16 @@ rewrite establishes observational equivalence.
 For every pixel, the oracle returns:
 
 - the nearest visible opaque or alpha-tested fragment identity;
-- the exact far-to-near ordered sequence of alpha-blended fragment identities in front of that
-  opaque result;
+- the visible alpha-blended fragment identities in front of that opaque result, canonically sorted
+  far-to-near so independent visibility results have a deterministic comparison form;
 - the multiset of visible additive fragment identities in front of that opaque result; and
 - the visibility paths that admitted each fragment.
 
-Particles use the same symbolic result as equivalent transparent geometry. This makes particle
-composition testable without simulation, billboarding, textures, or WebGL.
+Particles use the same symbolic visibility result as equivalent transparent geometry. Production
+composition additionally accepts an already-ordered physical deferred stream and proves that the
+portal predicate is a stable filter over it. This keeps portal admission independent from the
+renderer's object/particle ordering policy while making particle composition testable without
+simulation, billboarding, textures, or WebGL.
 
 ### Proof Obligations
 
@@ -301,10 +312,10 @@ The model and eventual production design must maintain a proof ledger for these 
    not occluded before the portal boundary.
 4. **Opaque composition:** completed opaque execution equals the oracle's nearest visible opaque
    fragment at every pixel.
-5. **Transparent composition:** completed ordered alpha sequences equal the oracle exactly;
-   additive results match as multisets.
+5. **Transparent composition:** the scope envelope admits exactly the oracle-visible alpha set and
+   preserves the caller's physical alpha sequence; additive results match as multisets.
 6. **Particle equivalence:** replacing a modeled particle with an equivalent transparent fragment
-   changes no output.
+   at the same physical sequence position changes no portal admission or output.
 7. **Label alpha-renaming:** changing transient ownership labels without changing transitions
    changes no output.
 8. **Disjoint sibling commutativity:** changing execution order for proved-disjoint sibling views
@@ -392,10 +403,11 @@ deferred against the final composed opaque depth unless another exact representa
 
 ### Cached Exterior Opaque Layer
 
-Treat expensive same-camera exterior opaque content as a special measured cache candidate. Root and
-re-entered outdoor views composite its color and depth through path-specific masks, while weather,
-transparent objects, and particles remain path-aware deferred work. This candidate must prove that
-sampling and writing cached depth preserves the oracle and passes target browser/GPU portability.
+Treat expensive same-camera exterior content as a special measured cache candidate. Root and
+re-entered outdoor views composite its opaque color/depth plus after-landscape weather through
+path-specific masks, while transparent objects and particles remain path-aware deferred work. This
+candidate must prove that sampling and writing cached depth preserves the oracle and passes target
+browser/GPU portability.
 
 ### Exterior-Only Cache Selection
 
@@ -524,7 +536,7 @@ executors and validators do not re-derive it.
       incoming crossing, and current depth interval.
 - [x] Preserve repeated domain appearances when their path or entry-depth interval differs.
 - [x] Suppress only the immediate reciprocal/shared physical aperture proven by the input.
-- [x] Compute the visible opaque fragment and exact transparent/additive results independently for
+- [x] Compute the visible opaque fragment and exact transparent/additive visibility independently for
       each pixel.
 - [x] Emit path provenance beside fragment results for counterexample diagnosis.
 - [x] Prove termination over the finite state space or fail loudly when an input violates the
@@ -737,8 +749,10 @@ fragment semantics does not need it.
   optimization and must be proved for the selected view set.
 - 2026-08-08: The end-to-end shared-target candidate derives admitted view coverage from successful
   exact-owner transitions, derives scope envelopes from that coverage, and composes opaque,
-  alpha-tested, globally ordered alpha, additive, and particle work without consulting the oracle.
-  It matches the oracle over both published corpora and the multi-pixel metamorphic fixtures.
+  alpha-tested, canonically depth-ordered alpha, additive, and particle work without consulting the
+  oracle. It matches the oracle over both published corpora and the multi-pixel metamorphic fixtures.
+  The 2026-08-09 Phase 8 audit later narrowed this from a production ordering requirement to a
+  canonical comparison form plus stable filtering of caller-supplied physical order.
 - 2026-08-08: Disjoint views may share a label. Compatible opaque batches are counted once per
   `(batch, label)` rather than once per view, so ordinary non-overlapping siblings do not split a
   within-domain batch. Overlapping views split only when exact ownership requires it.
@@ -783,15 +797,16 @@ winner:
 3. Opaque and alpha-tested submissions group by `(content domain, ownership label, prepared batch)`.
    Disjoint sibling views therefore retain one compatible domain batch. An overlap creates another
    submission only when sharing would make ownership ambiguous.
-4. The explicitly identified exterior domain may render opaque content once to a color/depth cache
-   and composite through every admitted appearance when it is one authored scope with multiple
-   potential appearances and opaque work. No other domain is cache-eligible in the first cut.
-   Multi-scope domains are never collapsed into one cache without a new safe-union proof.
+4. The explicitly identified exterior domain may render opaque content once to a color/depth cache,
+   paint retail's depth-always after-landscape weather into that same outdoor tile, and composite
+   both through every admitted appearance when it is one authored scope with multiple potential
+   appearances and opaque work. No other domain is cache-eligible in the first cut. Multi-scope
+   domains are never collapsed into one cache without a new safe-union proof.
 5. Successful opaque transitions produce observable view coverage. Every authored scope reduces
    its appearances to one 32-bit farthest-exit envelope per covered pixel. After opaque completion,
-   alpha is globally depth sorted; additive and particle blend work uses the same envelope and final
-   opaque depth. Each physical submission and particle upload occurs once, with adjacent compatible
-   ordered runs preserved.
+   the portal compositor stably filters the renderer's physical alpha, additive, and particle
+   streams through that envelope and final opaque depth. Each physical submission and
+   particle upload occurs once, with the renderer's existing compatible ordered runs preserved.
 6. The planner admits only complete path-depth frontiers. Three independent budgets bound path
    depth, cumulative potential-view count, and conflict-colored ownership labels. If the next
    frontier exceeds any budget, every view in that frontier and all descendants are omitted. The
@@ -813,7 +828,8 @@ winner:
 - **Deferred reduction:** for fragment depth `d` in scope `s`, visibility is existential over
   admitted appearances: `exists exit: d < exit`. The union is exactly `d < max(exit)`, with an
   unbounded occurrence represented explicitly. Final opaque depth is a second independent upper
-  bound. This applies identically to alpha objects, additive effects, weather, and particles.
+  bound. This applies identically to alpha objects, additive effects, and particles. Weather is
+  exterior-tile work under retail's separate depth-always ordering, not a deferred fragment.
 - **Disjoint-label rewrite:** descendants inherit a subset of every ancestor footprint. Therefore
   two disjoint views have disjoint descendant pixels, and reusing their label cannot satisfy a
   transition on the wrong branch.
@@ -978,9 +994,12 @@ Candidate bound obligations:
   their actual values distinct.
 - Topology-revision work is `O(S + X + A + H + G)` plus the exact aperture seam-merge counters. It
   is retained behind topology object/revision identity and is absent from the per-camera bound.
-- Scope-envelope formation is `O(N + Y log Y)`. Deferred deduplication is `O(R)`, deterministic
-  global alpha ordering records exact comparisons and is `O(R log R)`, and particle routing/packing
-  is `O(K + I)` with uploads bounded by compatible physical particle batches rather than `N`.
+- Scope-envelope formation is `O(N + Y log Y)`. Deferred deduplication is `O(R)`. Production alpha
+  ordering preserves the existing fixed far/near depth-band policy in `O(R + Z)`, where `Z` is the
+  configured fixed bucket count: the dry trace records exactly `R` depth classifications, `R`
+  compatibility-key evaluations, `R_near` square roots, and `Z` bucket visits for one global
+  selected population. Particle routing/packing is `O(K + I)`, with one contiguous frame-stream
+  upload and compatible physical batches retained as draw boundaries rather than upload boundaries.
 - Opaque scheduling is `O(N + J log J)`, where `B <= J <= B * N`. `J - B` is the explicit CPU/draw
   expansion caused when one physical indoor scope must target multiple ownership labels. The dry
   trace now reports `B`, `J`, and final opaque submissions independently; Gate C must reject the
@@ -1029,7 +1048,7 @@ bounded trade.
       count and a specific acceptance decision that consumes it.
 - [x] Derive worst-case and budget-bounded complexity from the actual algorithms. At minimum cover
       crossing traversal, continuous window clipping/admission, canonical ordering, conflict
-      coloring, scope-envelope construction, scene resolution, batch/run formation, global alpha
+      coloring, scope-envelope construction, scene resolution, batch/run formation, frame-global alpha
       ordering, and particle packing. State every size variable and identify which explicit budget
       bounds it.
 - [x] Separate topology-revision preprocessing from per-camera work. Canonical adjacency ordering,
@@ -1247,9 +1266,10 @@ simple paths.
 
 After propagation, reduce arrival states by authored scope. One scope envelope records coverage and
 the farthest portal exit admitted at each pixel. Opaque and alpha-tested fragments execute once per
-physical batch through that envelope and ordinary depth testing. Alpha, additive, weather, and
-particle sources remain physical, globally ordered where required, and consume the same envelope.
-No fragment or upload retains arrival-state or path identity.
+physical batch through that envelope and ordinary depth testing. Alpha, additive, and particle
+sources remain physical, globally ordered where required, and consume the same envelope. Weather
+is already part of the exterior tile before resolve. No fragment or upload retains arrival-state or
+path identity.
 
 ### Deliverables
 
@@ -1289,8 +1309,9 @@ instances.
   selected scope. No live allocation or operation count may depend on simple path count.
 - Prepare and submit each physical opaque/alpha-test batch once: exactly `B` batch inputs before
   ordinary renderer compatibility coalescing, with no mask-driven splitting.
-- Preserve physical deferred complexity: `O(R log R)` global alpha ordering and `O(K + I)` particle
-  routing/packing, with one upload per compatible physical particle batch.
+- Preserve physical deferred complexity: `O(R + Z)` frame-global bounded-band object-alpha ordering and
+  `O(K + I)` particle routing/packing, with one contiguous upload for the selected physical particle
+  population. Compatible mesh/motion/scope batches remain draw boundaries, not upload boundaries.
 - Exhausting state, depth, or primitive capacity declines the deepest incomplete frontier as a
   whole. It never falls back to path replay, recursive targets, or partial label reuse.
 
@@ -1316,7 +1337,7 @@ draw-command multiplication.
 ### Acceptance Criteria
 
 - Every bounded and seeded semantic case is equivalent to the ray oracle for opaque, alpha-test,
-  globally ordered alpha, additive, and particle results.
+  and deferred visibility, while preserving arbitrary caller-supplied alpha/particle order.
 - The candidate has no path identity, path ancestry copy, conflict coloring, or path-view replay in
   its operational contract.
 - Maximum live visibility state is bounded by `1 + X` arrival states plus `S` scope envelopes.
@@ -1945,15 +1966,15 @@ folding, geometry protruding in front of the final entry plane, local opaque occ
 resolve, and exact `R8UI` frontier ids. Numeric color and integer readback match the independent ray
 oracle on the real GPU path (ANGLE/Vulkan, AMD Radeon RX 7900 XT), with no screenshot comparison,
 SwiftShader semantic claim, timing sample, or WebGL error. This proves shader/substrate refinement;
-it does not yet prove production geometry routing or transparent/particle integration.
+the later Phase 8 fixture separately proves production deferred shader integration.
 
 ### Production Opaque Routing Checkpoint — 2026-08-09
 
 The replacement path now has one lazy renderer-lifetime owner for its arena culler, atlas planner,
 crossing/metadata stream, opaque router, fixed targets, and GLSL executor. It is exercised through
 an explicit one-shot production probe rather than shadowing continuous frames. Public portal mode
-remains entirely on the legacy compositor until Phase 8 can move transparent objects and particles
-with the opaque path; running two compositors continuously or temporarily letting unmasked blends
+remains entirely on the legacy compositor until the Phase 9 operation trace accepts the completed
+replacement schedule; running two compositors continuously or temporarily letting unmasked blends
 leak across the new opaque result were both rejected.
 
 Terrain and object vertex programs now accept one `uClipTransform`. Flat draws bind identity.
@@ -2112,7 +2133,8 @@ heuristic.
       explicit counts/ranges and caller-provided sort scratch rather than
       `map`/`filter`/spread/sorted-copy pipelines in portal-owned frame code. The crossing triangle
       and combined camera/arrival/scope metadata streams plus the propagation/reduction/resolve
-      shaders are complete; production transparent/particle consumers remain unwired.
+      shaders, production transparent ordering, and single-upload particle consumers are wired;
+      Phase 9 must still audit the end-to-end renderer glue before claiming this allocation shape.
 - [x] Trace arena capacity bytes, per-pool high-water counts, arena growth events, and portal-owned
       accepted-frame heap-record creation as separate unweighted dimensions. Fixed element widths
       make the high-water byte derivation mechanical. Extend the ledger with the allowed exceptional
@@ -2121,7 +2143,7 @@ heuristic.
 - [x] After the structural ledger passes, use focused synthetic pixel readback for attachment format,
       integer/depth sampling, propagation, reduction, and opaque resolve. Do not use scene
       screenshots, SwiftShader timing, or the browser harness as a semantic oracle.
-- [ ] Prove transparent and particle blend semantics through the Phase 8 executor rather than
+- [x] Prove transparent and particle blend semantics through the Phase 8 executor rather than
       extending the opaque substrate fixture into a second compositor.
 
 ### Acceptance Criteria
@@ -2191,32 +2213,89 @@ heuristic.
 
 ### Task Checklist
 
-- [ ] Split terrain/opaque/alpha-test work from alpha-blended/additive/particle work without
+- [x] Split terrain/opaque/alpha-test work from alpha-blended/additive/particle work without
       duplicating prepared-state construction.
-- [ ] Preserve the existing exact transparent compatibility and camera ordering rules within each
-      selected visibility order.
-- [ ] Classify alpha-test as opaque, alpha blend as ordered, and additive work according to the
+- [x] Preserve the existing transparent compatibility and bounded camera-ordering rules without
+      making portal scope part of a batch key.
+- [x] Classify alpha-test as opaque, alpha blend as ordered, and additive work according to the
       model's commutativity/depth rules.
-- [ ] Pack particle instance data once per frame/domain owner and submit ranges without repeating
+- [x] Pack particle instance data once per frame/domain owner and submit ranges without repeating
       uploads for repeated views.
-- [ ] Ensure parent transparent fragments can compose over descendant opaque/transparent results
+- [x] Ensure parent transparent fragments can compose over descendant opaque/transparent results
       when their depth requires it.
-- [ ] Ensure child content cannot clip parent particles merely because ownership labels were not
+- [x] Ensure child content cannot clip parent particles merely because ownership labels were not
       unwound.
-- [ ] Cover weather and exterior-transparent work under the same path-specific rules.
+- [x] Cover weather and exterior-transparent work under the selected path-specific rules.
 
 ### Acceptance Criteria
 
-- Browser readback agrees with the oracle for parent/child alpha, additive, alpha-test, and
-  particle cases.
-- Particle-versus-equivalent-transparent-quad fixtures produce equivalent composition.
+- Numeric hardware readback agrees with the oracle for parent/child alpha, additive, alpha-test,
+  and particle cases.
+- Particle-versus-equivalent-transparent-quad fixtures produce equivalent composition at the same
+  physical sequence position.
 - No particle instance population is uploaded again merely because its domain has another view.
 - Draw/run counts differ from the model cost vector only through documented backend batching.
 
 ### Decisions and Course Corrections
 
-- A transparent result that merely “looks acceptable” does not pass. Ordered symbolic oracle
-  equivalence is the acceptance contract.
+- A transparent result that merely “looks acceptable” does not pass. Exact symbolic admission plus
+  stable preservation of the renderer-supplied physical sequence is the portal acceptance
+  contract; the portal layer does not redefine the renderer's broader transparency policy.
+- 2026-08-09: Phase 8A introduced one production-owned `ObjectSubmissionPhases` contract after
+  material/resource preparation. It inspects each physical object once, classifies alpha-test with
+  opaque work, applies the existing far/near transparent policy once to the complete selected
+  population, and retains additive work as its own deferred phase. Visibility is not a material key;
+  the existing exact compatibility check remains the only place where scope-homogeneous instance
+  runs stop.
+- 2026-08-09: The earlier dry schedule's `O(R log R)` stable merge sort and exact comparison counter
+  did not describe production, which uses eight fixed near-depth bands plus far cohort grouping.
+  The dry schedule now calls the production ordering policy and records classifications, batch-key
+  evaluations, near square roots, and fixed bucket visits separately. This is `O(R + Z)` and exposes
+  the old executor's repeated `Z` scan per contribution versus one scan for the selected candidate.
+- 2026-08-09: Particle instance storage now packs every compatible physical batch into one
+  contiguous frame stream, uploads it once, and binds draw ranges by base-instance byte offset.
+  Draw batching is unchanged; only `bufferSubData` submissions fall from one per batch to zero or one
+  per pass. The scope-atlas probe now invokes that pass once globally, flattens scope groups into
+  renderer-lifetime scratch, and sets one scalar scope uniform per existing physical draw. Scope
+  identity remains absent from the mesh/motion compatibility key, so the visibility contract adds
+  neither an upload nor a batch boundary.
+- 2026-08-09: Deferred object and particle fragment variants share one scope-envelope GLSL
+  predicate backed by the existing metadata UBO and envelope-depth texture. A submission rejects
+  pixels outside its packed tile or beyond its authored scope exit, while ordinary fixed-function
+  depth still tests against the final opaque resolve. Programs are lazy and one scalar scope
+  ordinal is the only per-draw routing mutation. The exact production shaders are source-checked
+  and their submission paths are unit-tested.
+- 2026-08-09: A 4x4 numeric WebGL2 fixture on the hardware ANGLE/AMD Vulkan path resolves real opaque
+  scope-atlas depth, then composes far-parent alpha, child alpha, near-parent alpha, and the
+  production particle fragment variant. Integer readback agrees with the independently computed
+  result, including parent blend-back over child content and particle/transparent equivalence. The
+  fixture uses no screenshot or timing evidence.
+- 2026-08-09: A targeted retail audit corrected an over-strong model assumption. Retail particle
+  parts enter the same distance-sorted cell list as object parts (`acclient.c:318142-318159`,
+  `306478-306506`, `437640-437670`, `683390-683427`), while alpha mesh subsets append and flush in
+  stable queue order without a global fragment sort (`acclient.c:433868-433923`,
+  `434698-434780`). The portal theorem is therefore parametric over an upstream physical deferred
+  order: scope envelopes and final depth form a stable filter and never reorder it. The complete
+  3,980-scene bounded corpus now checks this property under deliberately reversed physical order.
+  A one-off shipped-archive census found 342 unique particle meshes: 229 additive and 113 ordinary
+  alpha/order-sensitive. Exact cross-family interleaving, one instanced draw per compatible particle
+  cohort, and zero per-particle CPU sorting cannot all be provided by ordinary WebGL2 source-over
+  blending. The current object-then-particle policy remains a separate renderer compatibility
+  question rather than being hidden inside portal correctness.
+- 2026-08-09: A second targeted retail audit corrected weather placement. `LScape::draw` paints
+  after-landscape weather after exterior blocks (`acclient.c:296701-296727`), `GameSky::Draw` uses
+  depth-always without depth writes (`acclient.c:297381-297432`), and `PView::DrawCells` draws
+  EnvCells afterward (`acclient.c:441091-441229`). Weather therefore belongs in the cached outdoor
+  tile after exterior opaque and before portal resolve; replaying it after final resolve would put
+  rain over indoor child geometry. The dedicated deferred-weather shader variant was deleted. A 4x4
+  AMD hardware fixture now proves that weather remains over outdoor pixels while child opaque wins
+  the portal center, with no extra weather draw, envelope lookup, or scope-dependent batch.
+- 2026-08-09: The renderer now has one private scope-atlas execution schedule shared by the
+  one-shot production probe and the pending public-mode cutover. It performs the selected-scope
+  scene query, contribution preparation, particle routing, exterior-tile celestial/opaque/weather
+  work, propagation/resolve, and deferred object/particle submission exactly once in that order.
+  The probe was renamed from “opaque execution” to “scope-atlas execution”; opaque routing retains
+  its narrower name because it remains a genuine subsystem boundary.
 
 ## Phase 9: Integrated Real-Scene Operation Trace
 
@@ -2260,6 +2339,19 @@ heuristic.
 - If the selected production candidate is dominated or exposes an unacceptable real-scene tail,
   revert it and select another already-proved model candidate. Do not mutate semantics to rescue
   its trace.
+- 2026-08-09 cutover dry-run: the current Explorer metrics for render layers, mask edges, submitted
+  render nodes, and exterior render count are legacy-executor facts with no honest one-for-one
+  scope-atlas meaning. Phase 9 must replace their consumers with distinct selected-scope,
+  selected-crossing, retained-depth, propagation-command, routing, target-byte, and truncation facts;
+  it must not repurpose old field names.
+- The existing offline candidate schedule currently receives selected scopes and crossings from the
+  legacy `PortalRenderGraphPlanner`. Before any current/candidate result is accepted, feed it the
+  actual `PortalScopeAtlasPlanner` frame and its command/packing traces. Otherwise the evaluator
+  would measure the replacement executor over visibility chosen by the implementation it is meant
+  to replace.
+- Once that trace passes, public cutover is a small call-site substitution to the shared scope-atlas
+  execution schedule followed by one clean deletion sweep. Do not retain a runtime planner toggle
+  or compatibility alias for the old `--execute-scope-atlas-opaque` probe name.
 
 ## Phase 10: Cleanup and Documentation
 
@@ -2369,8 +2461,9 @@ heuristic.
 
 ## Resolved Model Questions
 
-- Alpha must be globally camera-depth sorted; reverse ancestry is not assumed. Additive and particle
-  work consumes the same admitted scope envelope.
+- Portal visibility does not impose an alpha order. It stably filters the renderer's physical
+  deferred sequence; reverse ancestry and global fragment sorting are both outside the portal
+  theorem. Additive and particle work consumes the same admitted scope envelope.
 - The finite oracle state is one path-specific scope occurrence, pixel, incoming crossing, and
   monotonically increasing entry depth.
 - Sibling overlap is supported. Conflict coloring reuses labels for disjoint footprints without
@@ -2396,3 +2489,7 @@ heuristic.
    adding framebuffer reattachment commands or coupling unrelated resize/context-loss ownership?
 2. If later traces justify a more complex atlas packer or route-key cache, which explicit CPU-owned
    operation count pays for that added mechanism?
+3. Should the renderer retain its current bounded object-then-particle transparency policy, emulate
+   retail's cell-part ordering, or deliberately adopt an approximate OIT policy? This is observable
+   transparency policy with 113 ordinary-alpha particle meshes in the shipped archive, not a portal
+   visibility prerequisite.

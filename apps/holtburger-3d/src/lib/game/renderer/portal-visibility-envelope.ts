@@ -36,6 +36,12 @@ interface MutableEnvelope {
 	readonly unbounded: boolean[];
 }
 
+/** One pixel's deferred survivors in the caller's original physical submission order. */
+export interface PortalDeferredSequencePixelResult {
+	readonly fragments: readonly PortalModelFragment[];
+	readonly pixel: PortalModelPixel;
+}
+
 /** Collapse path appearances into the exact per-scope predicate consumed by deferred fragments. */
 export function createPortalScopeVisibilityEnvelopes(
 	scene: PortalModelScene,
@@ -144,6 +150,42 @@ export function composePortalDeferredFromEnvelopes(
 				additive: Object.freeze(additive),
 				alphaBlended: Object.freeze(alphaBlended),
 				opaque: referencePixel.opaque,
+				pixel: referencePixel.pixel,
+			});
+		}),
+	);
+}
+
+/**
+ * Apply portal visibility to an already-ordered physical deferred stream without reordering it.
+ *
+ * Portal composition owns only admission through the scope envelope and completed opaque depth.
+ * Object/particle ordering is an orthogonal renderer policy: preserving the supplied sequence lets
+ * the production renderer keep its bounded object ordering and compatible particle instancing.
+ */
+export function filterPortalDeferredSequenceFromEnvelopes(
+	reference: PortalReferenceFrame,
+	envelopes: readonly PortalScopeVisibilityEnvelope[],
+	orderedFragments: readonly PortalModelFragment[],
+): readonly PortalDeferredSequencePixelResult[] {
+	const envelopeByScope = new Map(
+		envelopes.map((envelope) => [envelope.scopeId, envelope]),
+	);
+	return Object.freeze(
+		reference.pixels.map((referencePixel) => {
+			const opaqueDepth =
+				referencePixel.opaque?.depth ?? Number.POSITIVE_INFINITY;
+			return Object.freeze({
+				fragments: Object.freeze(
+					orderedFragments.filter((fragment) =>
+						isDeferredVisible(
+							fragment,
+							referencePixel.pixel,
+							opaqueDepth,
+							envelopeByScope,
+						),
+					),
+				),
 				pixel: referencePixel.pixel,
 			});
 		}),

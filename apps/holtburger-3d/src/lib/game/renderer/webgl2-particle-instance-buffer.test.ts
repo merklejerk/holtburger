@@ -24,7 +24,7 @@ function fakeGl() {
 		bufferData: vi.fn(),
 		bufferSubData: vi.fn(),
 		divisors: [] as number[],
-		pointers: [] as number[],
+		pointers: [] as Array<{ location: number; offset: number }>,
 	};
 	const gl = {
 		ARRAY_BUFFER: 1,
@@ -37,17 +37,29 @@ function fakeGl() {
 		deleteBuffer: () => undefined,
 		enableVertexAttribArray: () => undefined,
 		vertexAttribDivisor: (location: number) => calls.divisors.push(location),
-		vertexAttribPointer: (location: number) => calls.pointers.push(location),
+		vertexAttribPointer: (
+			location: number,
+			_componentCount: number,
+			_type: number,
+			_normalized: boolean,
+			_stride: number,
+			offset: number,
+		) => calls.pointers.push({ location, offset }),
 	} as unknown as WebGL2RenderingContext;
 	return { calls, gl };
 }
 
 describe("WebGL2ParticleInstanceBuffer", () => {
-	it("uploads every record and reports the instance count", () => {
+	it("uploads every physical batch once and reports the frame instance count", () => {
 		const { calls, gl } = fakeGl();
 		const buffer = new WebGL2ParticleInstanceBuffer(gl);
 
-		expect(buffer.upload([record(0), record(1)])).toBe(2);
+		expect(
+			buffer.prepareFrame([
+				{ particles: [record(0)] },
+				{ particles: [record(1)] },
+			]),
+		).toBe(2);
 		expect(calls.bufferSubData).toHaveBeenCalledTimes(1);
 	});
 
@@ -55,11 +67,13 @@ describe("WebGL2ParticleInstanceBuffer", () => {
 		const { calls, gl } = fakeGl();
 		const buffer = new WebGL2ParticleInstanceBuffer(gl);
 
-		buffer.upload(Array.from({ length: 40 }, (_, index) => record(index)));
+		buffer.prepareFrame([
+			{ particles: Array.from({ length: 40 }, (_, index) => record(index)) },
+		]);
 		const allocations = calls.bufferData.mock.calls.length;
 
 		// Particle counts oscillate every frame; shrinking would reallocate immediately.
-		buffer.upload([record(0)]);
+		buffer.prepareFrame([{ particles: [record(0)] }]);
 		expect(calls.bufferData.mock.calls.length).toBe(allocations);
 	});
 
@@ -67,7 +81,7 @@ describe("WebGL2ParticleInstanceBuffer", () => {
 		const { calls, gl } = fakeGl();
 		const buffer = new WebGL2ParticleInstanceBuffer(gl);
 
-		expect(buffer.upload([])).toBe(0);
+		expect(buffer.prepareFrame([])).toBe(0);
 		expect(calls.bufferSubData).not.toHaveBeenCalled();
 	});
 
@@ -75,10 +89,15 @@ describe("WebGL2ParticleInstanceBuffer", () => {
 		const { calls, gl } = fakeGl();
 		const buffer = new WebGL2ParticleInstanceBuffer(gl);
 
-		buffer.bindAttributes();
+		buffer.prepareFrame([{ particles: [record(0), record(1)] }]);
+		buffer.bindAttributes(1);
 
 		// Locations 3-8, matching the vertex stage's declarations.
-		expect(calls.pointers).toEqual([3, 4, 5, 6, 7, 8]);
+		expect(calls.pointers.map(({ location }) => location)).toEqual([
+			3, 4, 5, 6, 7, 8,
+		]);
+		// One particle occupies 21 floats, so range-relative attributes start 84 bytes in.
+		expect(calls.pointers[0]?.offset).toBe(84);
 		expect(calls.divisors).toEqual([3, 4, 5, 6, 7, 8]);
 	});
 
@@ -87,6 +106,8 @@ describe("WebGL2ParticleInstanceBuffer", () => {
 		const buffer = new WebGL2ParticleInstanceBuffer(gl);
 		buffer.destroy();
 
-		expect(() => buffer.upload([record(0)])).toThrow("destroyed");
+		expect(() => buffer.prepareFrame([{ particles: [record(0)] }])).toThrow(
+			"destroyed",
+		);
 	});
 });

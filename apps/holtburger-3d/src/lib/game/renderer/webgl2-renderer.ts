@@ -123,14 +123,14 @@ import {
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
 	areStaticObjectDrawsCompatible,
+	createObjectSubmissionPhases,
 	objectBlendPolicy,
-	orderTransparentObjectRanges,
+	type ObjectSubmissionPhases,
 	type PreparedObjectAtlasBinding,
 	type PreparedObjectMaterial,
 	type PreparedObjectTextureBinding,
 	type PreparedStaticObjectDrawCompatibility,
 	type ObjectBlendPolicy,
-	type TransparentObjectRange,
 } from "./object-rendering-policy";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
 import {
@@ -178,7 +178,10 @@ import {
 	WebGL2FrameProfiler,
 	type WebGL2FrameProfileCapture,
 } from "./webgl2-gpu-frame-profiler";
-import { WebGL2PortalScopeAtlasPipeline } from "./webgl2-portal-scope-atlas-pipeline";
+import {
+	WebGL2PortalScopeAtlasPipeline,
+	type WebGL2PortalScopeAtlasFrame,
+} from "./webgl2-portal-scope-atlas-pipeline";
 
 /** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
 const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
@@ -375,8 +378,8 @@ export interface PortalExecutionProbeResult {
 	readonly selectionMetrics: FrameSelectionMetrics | null;
 }
 
-/** Explicit production-geometry evidence for the replacement opaque scope-atlas path. */
-export interface PortalScopeAtlasOpaqueExecutionProbeResult {
+/** Explicit production-geometry evidence for the complete replacement scope-atlas path. */
+export interface PortalScopeAtlasExecutionProbeResult {
 	readonly crossingCount: number;
 	readonly objectSubmissionCount: number;
 	readonly planningDurationMs: number;
@@ -479,6 +482,8 @@ export class WebGL2Renderer implements Renderer {
 	readonly #particleProjectionScratch = new Float32Array(16);
 	readonly #particleViewScratch = new Float32Array(16);
 	#skyProgram: WebGL2SkyProgram | null = null;
+	/** Lazy sky variant routing celestial and weather geometry into the packed outdoor tile. */
+	#portalAtlasSkyProgram: WebGL2SkyProgram | null = null;
 	/** Shared clock seconds for the current frame, driving derived texture-velocity phase. */
 	#skyClockSeconds = 0;
 	readonly #offsetScratch = new Vec3(0, 0, 0);
@@ -516,6 +521,10 @@ export class WebGL2Renderer implements Renderer {
 	/** Transparent and additive materials deliberately use a shader with no fog uniforms. */
 	readonly #blendedObjectProgram: WebGL2ObjectProgram;
 	readonly #blendedInstancedObjectProgram: WebGL2InstancedObjectProgram;
+	/** Lazy scope-envelope variants; flat and legacy portal frames never compile them. */
+	#portalBlendedObjectProgram: WebGL2ObjectProgram | null = null;
+	#portalBlendedInstancedObjectProgram: WebGL2InstancedObjectProgram | null =
+		null;
 	/** Complete float-compatible fallback for every statically active object sampler. */
 	readonly #objectFallbackBinding: PreparedObjectTextureBinding<
 		WebGLTexture,
@@ -1056,16 +1065,16 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	/**
-	 * Execute the replacement opaque path explicitly without shadowing continuous production frames.
+	 * Execute the replacement path explicitly without shadowing continuous production frames.
 	 *
-	 * Transparencies and particles remain on the legacy compositor until Phase 8 can cut the whole
-	 * portal mode over atomically; this probe renders only terrain plus opaque/alpha-test objects.
+	 * This remains an explicit probe until every deferred family shares the scope-envelope contract
+	 * and the replacement compositor can cut portal mode over atomically.
 	 */
-	probePortalScopeAtlasOpaqueExecution(
+	probePortalScopeAtlasExecution(
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		viewInput: FrameViewInput,
 		rootScope: SceneScope,
-	): PortalScopeAtlasOpaqueExecutionProbeResult {
+	): PortalScopeAtlasExecutionProbeResult {
 		this.#assertDeviceReady();
 		this.#resizeCanvasForDpr();
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
@@ -1082,43 +1091,21 @@ export class WebGL2Renderer implements Renderer {
 		);
 		const planningDurationMs = performance.now() - planningStartedAt;
 		this.#resetFrameSelectionMetrics(1, "portal");
-		const visible = this.#world.queryScopeSelectionScene(
-			prepared.frustum,
-			prepared.anchorLandblockId,
-			frame,
-			INCLUDE_ALL_SCENE_CULLING_GROUPS,
-		);
-		const contributions = this.#resolveSceneContributions(
+		this.#executePortalScopeAtlasFrame(
 			prepared,
-			visible.entries,
+			frame,
+			[
+				FRONTEND_TUNING.rendering.clearColor.red,
+				FRONTEND_TUNING.rendering.clearColor.green,
+				FRONTEND_TUNING.rendering.clearColor.blue,
+				FRONTEND_TUNING.rendering.clearColor.alpha,
+			],
+			PROBE_SHADING,
 			DEFAULT_FRAME_SETTINGS,
 			null,
+			pipeline,
 		);
-		const clearColor = [
-			FRONTEND_TUNING.rendering.clearColor.red,
-			FRONTEND_TUNING.rendering.clearColor.green,
-			FRONTEND_TUNING.rendering.clearColor.blue,
-			FRONTEND_TUNING.rendering.clearColor.alpha,
-		] as const;
-		const gl = this.#gl;
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-		gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
-		gl.clearDepth(1);
-		gl.clearColor(...clearColor);
-		gl.colorMask(true, true, true, true);
-		gl.depthMask(true);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-		pipeline.beginOpaqueScene(clearColor);
-		const view = { ...prepared, ...contributions };
-		this.#drawTerrain(view, PROBE_SHADING, pipeline);
-		this.#drawOpaqueObjects(view, PROBE_SHADING, null, pipeline);
-		pipeline.execute(null);
-		this.#beginObjectPhase();
 		const targetDiagnostics = pipeline.getDiagnostics();
-		this.#frameSelectionMetrics.sceneDomainTargetCount =
-			targetDiagnostics.extents === null ? 0 : 1;
-		this.#frameSelectionMetrics.sceneDomainTargetBytes =
-			targetDiagnostics.activeBytes;
 		this.#finishFrameSelectionMetrics();
 		return {
 			crossingCount: frame.atlas.visibility.selectedCrossingCount,
@@ -1130,6 +1117,88 @@ export class WebGL2Renderer implements Renderer {
 			terrainSubmissionCount: frame.opaqueRouting.trace.terrainSubmissionCount,
 			traversalDepth: frame.atlas.commands.traversalDepth,
 		};
+	}
+
+	/**
+	 * Execute one already-planned scope-atlas frame without reconstructing visibility or draw order.
+	 *
+	 * This is the single replacement-compositor schedule used by the explicit probe and the pending
+	 * public-mode cutover. Keeping it unified prevents the validation path from proving a subtly
+	 * different weather/deferred order than continuous rendering will use.
+	 */
+	#executePortalScopeAtlasFrame(
+		prepared: PreparedViewGeometry,
+		frame: WebGL2PortalScopeAtlasFrame,
+		clearColor: readonly [number, number, number, number],
+		shading: SceneShading,
+		frameSettings: FrameSettings,
+		profile: WebGL2FrameProfileCapture | null,
+		pipeline: WebGL2PortalScopeAtlasPipeline,
+	): void {
+		const visible = this.#world.queryScopeSelectionScene(
+			prepared.frustum,
+			prepared.anchorLandblockId,
+			frame,
+			INCLUDE_ALL_SCENE_CULLING_GROUPS,
+		);
+		const contributions = this.#resolveSceneContributions(
+			prepared,
+			visible.entries,
+			frameSettings,
+			profile,
+		);
+		const particlesByScope = this.#particleBatcher.route(
+			`scope-atlas:${frame.atlas.visibility.topologyRevision}`,
+			this.#particleSources,
+			(owner) => {
+				const renderScopeKey =
+					owner === EXTERIOR_PARTICLE_RENDER_OWNER
+						? "outdoor"
+						: this.#world.getRenderScopeKey(owner);
+				if (renderScopeKey === null) return null;
+				return frame.atlas.visibility.selectedScopeOrdinal(renderScopeKey) ===
+					null
+					? null
+					: renderScopeKey;
+			},
+		);
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
+		gl.clearDepth(1);
+		gl.clearColor(...clearColor);
+		gl.colorMask(true, true, true, true);
+		gl.depthMask(true);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		pipeline.beginOpaqueScene(clearColor);
+		const view = { ...prepared, ...contributions };
+		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
+		const hasOutdoorScope =
+			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
+		if (hasOutdoorScope) {
+			this.#drawSky(view, shading, "before-world", pipeline);
+		}
+		this.#drawTerrain(view, shading, pipeline);
+		this.#drawOpaqueObjects(
+			view,
+			objectPhases.opaque,
+			shading,
+			profile,
+			pipeline,
+		);
+		if (hasOutdoorScope) {
+			this.#drawSky(view, shading, "after-landscape", pipeline);
+		}
+		pipeline.execute(null);
+		pipeline.beginDeferredScene(null);
+		this.#drawBlendedObjects(view, objectPhases, shading, profile, pipeline);
+		this.#drawParticles(view, profile, particlesByScope, pipeline);
+		this.#beginObjectPhase();
+		const targetDiagnostics = pipeline.getDiagnostics();
+		this.#frameSelectionMetrics.sceneDomainTargetCount =
+			targetDiagnostics.extents === null ? 0 : 1;
+		this.#frameSelectionMetrics.sceneDomainTargetBytes =
+			targetDiagnostics.activeBytes;
 	}
 
 	async destroy(): Promise<void> {
@@ -1144,11 +1213,23 @@ export class WebGL2Renderer implements Renderer {
 		this.#skyPass = null;
 		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
 		this.#skyProgram = null;
+		if (this.#portalAtlasSkyProgram) {
+			this.#gl.deleteProgram(this.#portalAtlasSkyProgram.program);
+		}
+		this.#portalAtlasSkyProgram = null;
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
 		this.#gl.deleteProgram(this.#instancedObjectProgram.program);
 		this.#gl.deleteProgram(this.#blendedObjectProgram.program);
 		this.#gl.deleteProgram(this.#blendedInstancedObjectProgram.program);
+		if (this.#portalBlendedObjectProgram) {
+			this.#gl.deleteProgram(this.#portalBlendedObjectProgram.program);
+		}
+		this.#portalBlendedObjectProgram = null;
+		if (this.#portalBlendedInstancedObjectProgram) {
+			this.#gl.deleteProgram(this.#portalBlendedInstancedObjectProgram.program);
+		}
+		this.#portalBlendedInstancedObjectProgram = null;
 		this.#gl.deleteTexture(this.#objectFallbackBinding.texture);
 		this.#frameInstances.destroy();
 	}
@@ -1941,6 +2022,7 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		shading: SceneShading,
 		skyPass: SkyDrawPass,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		const pass = this.#skyPass;
 		const sky = shading.sky;
@@ -1954,12 +2036,26 @@ export class WebGL2Renderer implements Renderer {
 		) {
 			return;
 		}
+		const program = portalPipeline
+			? (this.#portalAtlasSkyProgram ??= createWebGL2SkyProgram(this.#gl, {
+					portalAtlas: true,
+				}))
+			: this.#skyProgram;
+		if (portalPipeline) {
+			const clipTransform = program.clipTransformUniform;
+			if (!clipTransform) {
+				throw new Error(
+					"Portal sky draw selected a program without an atlas transform.",
+				);
+			}
+			portalPipeline.routeOutdoorOpaqueSubmission(clipTransform);
+		}
 		pass.draw(
 			{
 				clockSeconds: this.#skyClockSeconds,
 				gl: this.#gl,
 				matrixScratch: this.#skyMatrixScratch,
-				program: this.#skyProgram,
+				program,
 				// The frame anchor translates horizontally only, so this render-frame height is
 				// already the absolute AC height the authored weather clamp is expressed in.
 				viewerHeight: view.cameraPosition.y,
@@ -1987,33 +2083,43 @@ export class WebGL2Renderer implements Renderer {
 	#drawParticles(
 		view: PreparedView,
 		profile: WebGL2FrameProfileCapture | null,
+		particlesByScope: ReadonlyMap<string, readonly ParticleDrawBatch[]> | null,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		const pass = this.#particlePass;
-		if (!pass || view.particles.length === 0) return;
-		// Timed separately from the blended pass so a per-batch upload stall is attributable: each
-		// batch writes into one shared buffer immediately before its own draw.
+		if (!pass) return;
+		if ((particlesByScope === null) !== (portalPipeline === null)) {
+			throw new Error(
+				"Particle scope groups and portal pipeline must be supplied together.",
+			);
+		}
+		if (particlesByScope === null && view.particles.length === 0) return;
+		// Timed separately from the blended pass so the one contiguous frame upload and physical
+		// particle draw boundaries remain attributable.
 		const startedAt = profile?.beginCpuPhase();
 		const gpuPhase = profile?.beginGpuPhase("particle") ?? null;
-		pass.draw(
-			{
-				// Anchor-relative, matching both the view matrix and the particle origins. The
-				// camera's canonical position lives in a different frame, which would leave the
-				// billboard basis pointing at a spot thousands of units away.
-				cameraPosition: [
-					view.cameraPosition.x,
-					view.cameraPosition.y,
-					view.cameraPosition.z,
-				],
-				clockSeconds: this.#skyClockSeconds,
-				gl: this.#gl,
-				projection: mat4ToFloat32Array(
-					view.projection,
-					this.#particleProjectionScratch,
-				),
-				view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
-			},
-			view.particles,
-		);
+		const context = {
+			// Anchor-relative, matching both the view matrix and the particle origins. The
+			// camera's canonical position lives in a different frame, which would leave the
+			// billboard basis pointing at a spot thousands of units away.
+			cameraPosition: [
+				view.cameraPosition.x,
+				view.cameraPosition.y,
+				view.cameraPosition.z,
+			] as const,
+			clockSeconds: this.#skyClockSeconds,
+			gl: this.#gl,
+			projection: mat4ToFloat32Array(
+				view.projection,
+				this.#particleProjectionScratch,
+			),
+			view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
+		};
+		if (particlesByScope && portalPipeline) {
+			pass.drawScoped(context, particlesByScope, portalPipeline);
+		} else {
+			pass.draw(context, view.particles);
+		}
 		gpuPhase?.finish();
 		if (startedAt !== undefined) {
 			profile?.finishCpuPhase("particleSubmission", startedAt);
@@ -2026,17 +2132,22 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 		domain: SceneRenderDomain,
 	): void {
-		if (domain === "exterior") this.#drawSky(view, shading, "before-world");
+		const objectPhases = this.#createObjectSubmissionPhases(view, null);
+		if (domain === "exterior") {
+			this.#drawSky(view, shading, "before-world", null);
+		}
 		this.#drawTerrain(view, shading, null);
-		this.#drawOpaqueObjects(view, shading, null, null);
+		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, null, null);
 		// Retail's after-landscape weather: drawn once the landblock loop is down but before the
 		// deferred translucent flush, which is legitimately allowed to cover it (acclient.c:296725,
 		// 441068).
-		if (domain === "exterior") this.#drawSky(view, shading, "after-landscape");
-		this.#drawBlendedObjects(view, shading, null);
+		if (domain === "exterior") {
+			this.#drawSky(view, shading, "after-landscape", null);
+		}
+		this.#drawBlendedObjects(view, objectPhases, shading, null, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
-		this.#drawParticles(view, null);
+		this.#drawParticles(view, null, null, null);
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
 	}
@@ -2048,11 +2159,12 @@ export class WebGL2Renderer implements Renderer {
 		domain: SceneRenderDomain,
 		profile: WebGL2FrameProfileCapture,
 	): void {
+		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
 		const beforeSkyGpu =
 			domain === "exterior" ? profile.beginGpuPhase("sky") : null;
 		try {
 			if (domain === "exterior") {
-				this.#drawSky(view, shading, "before-world");
+				this.#drawSky(view, shading, "before-world", null);
 			}
 		} finally {
 			beforeSkyGpu?.finish();
@@ -2068,7 +2180,13 @@ export class WebGL2Renderer implements Renderer {
 
 		const opaqueGpu = profile.beginGpuPhase("opaque");
 		try {
-			this.#drawOpaqueObjects(view, shading, profile, null);
+			this.#drawOpaqueObjects(
+				view,
+				objectPhases.opaque,
+				shading,
+				profile,
+				null,
+			);
 		} finally {
 			opaqueGpu?.finish();
 		}
@@ -2079,7 +2197,7 @@ export class WebGL2Renderer implements Renderer {
 			domain === "exterior" ? profile.beginGpuPhase("sky") : null;
 		try {
 			if (domain === "exterior") {
-				this.#drawSky(view, shading, "after-landscape");
+				this.#drawSky(view, shading, "after-landscape", null);
 			}
 		} finally {
 			afterSkyGpu?.finish();
@@ -2087,14 +2205,14 @@ export class WebGL2Renderer implements Renderer {
 
 		const blendedGpu = profile.beginGpuPhase("blended");
 		try {
-			this.#drawBlendedObjects(view, shading, profile);
+			this.#drawBlendedObjects(view, objectPhases, shading, profile, null);
 		} finally {
 			blendedGpu?.finish();
 		}
 
 		// Profiling must not change what is drawn. This path previously omitted particles entirely,
 		// so every profile measured a scene missing them and reported their cost as zero.
-		this.#drawParticles(view, profile);
+		this.#drawParticles(view, profile, null, null);
 
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
@@ -2363,15 +2481,80 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
+	/** Partition one prepared physical object population for both opaque and deferred consumers. */
+	#createObjectSubmissionPhases(
+		view: PreparedView,
+		profile: WebGL2FrameProfileCapture | null,
+	): ObjectSubmissionPhases<PreparedObjectFrameInput> {
+		const orderingStartedAt = profile?.beginCpuPhase();
+		try {
+			const phases = createObjectSubmissionPhases(
+				view.objects,
+				(object) => this.#transparentDistanceSquared(object, view),
+				(object) =>
+					object.instances?.kind === "frame-template"
+						? object.instances.cohortKey
+						: null,
+			);
+			this.#frameSelectionMetrics.transparentObjectCandidateCount +=
+				phases.transparent.far.length + phases.transparent.near.length;
+			this.#frameSelectionMetrics.farTransparentObjectCandidateCount +=
+				phases.transparent.far.length;
+			this.#frameSelectionMetrics.nearTransparentObjectCandidateCount +=
+				phases.transparent.near.length;
+			return phases;
+		} finally {
+			if (profile && orderingStartedAt !== undefined) {
+				profile.finishCpuPhase("blendedOrdering", orderingStartedAt);
+			}
+		}
+	}
+
+	/** Compute the existing object-center camera ordering fact exactly once per transparent range. */
+	#transparentDistanceSquared(
+		object: PreparedObjectFrameInput,
+		view: PreparedViewGeometry,
+	): number {
+		const facts = object.transparentSort;
+		if (!facts) {
+			throw new Error(
+				"Transparent static-object contribution lacks sort facts.",
+			);
+		}
+		if (object.instances?.kind === "frame-template") {
+			transformPoint3(
+				object.instances.instance.sourceToLandblock,
+				facts.center,
+				this.#transparentCenterScratch,
+			);
+		} else {
+			transformPoint3(
+				object.localToLandblock,
+				facts.center,
+				this.#transparentCenterScratch,
+			);
+		}
+		const offset = createLandblockOffset(
+			getLandblockCoordinates(object.landblockId),
+			view.anchorCoordinates,
+			this.#offsetScratch,
+		);
+		const x =
+			this.#transparentCenterScratch.x + offset.x - view.cameraPosition.x;
+		const y =
+			this.#transparentCenterScratch.y + offset.y - view.cameraPosition.y;
+		const z =
+			this.#transparentCenterScratch.z + offset.z - view.cameraPosition.z;
+		return x * x + y * y + z * z;
+	}
+
 	#drawOpaqueObjects(
 		view: PreparedView,
+		candidates: readonly PreparedObjectFrameInput[],
 		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		const candidates = view.objects.filter(
-			({ ordering }) => ordering === "opaque" || ordering === "alpha-test",
-		);
 		if (candidates.length === 0) return;
 		const objects = this.#prepareFrameInstanceRuns(
 			[candidates],
@@ -2409,73 +2592,16 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawBlendedObjects(
 		view: PreparedView,
+		phases: ObjectSubmissionPhases<PreparedObjectFrameInput>,
 		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		const orderingStartedAt = profile?.beginCpuPhase();
-		const transparent: TransparentObjectRange<PreparedObjectFrameInput>[] = [];
-		const additive: PreparedObjectFrameInput[] = [];
-		for (const object of view.objects) {
-			if (object.ordering === "additive") {
-				additive.push(object);
-				continue;
-			}
-			if (object.ordering !== "transparent") continue;
-			const facts = object.transparentSort;
-			if (!facts)
-				throw new Error(
-					"Transparent static-object contribution lacks sort facts.",
-				);
-			if (object.instances?.kind === "frame-template") {
-				transformPoint3(
-					object.instances.instance.sourceToLandblock,
-					facts.center,
-					this.#transparentCenterScratch,
-				);
-			} else {
-				transformPoint3(
-					object.localToLandblock,
-					facts.center,
-					this.#transparentCenterScratch,
-				);
-			}
-			const offset = createLandblockOffset(
-				getLandblockCoordinates(object.landblockId),
-				view.anchorCoordinates,
-				this.#offsetScratch,
-			);
-			const x =
-				this.#transparentCenterScratch.x + offset.x - view.cameraPosition.x;
-			const y =
-				this.#transparentCenterScratch.y + offset.y - view.cameraPosition.y;
-			const z =
-				this.#transparentCenterScratch.z + offset.z - view.cameraPosition.z;
-			transparent.push({
-				distanceSquared: x * x + y * y + z * z,
-				range: object,
-			});
-		}
-		const orderedTransparent = orderTransparentObjectRanges(
-			transparent,
-			(object) =>
-				object.instances?.kind === "frame-template"
-					? object.instances.cohortKey
-					: null,
-		);
-		this.#frameSelectionMetrics.transparentObjectCandidateCount +=
-			transparent.length;
-		this.#frameSelectionMetrics.farTransparentObjectCandidateCount +=
-			orderedTransparent.far.length;
-		this.#frameSelectionMetrics.nearTransparentObjectCandidateCount +=
-			orderedTransparent.near.length;
-		if (profile && orderingStartedAt !== undefined) {
-			profile.finishCpuPhase("blendedOrdering", orderingStartedAt);
-		}
 		const sortedBlended = this.#prepareFrameBlendedRuns(
 			{
-				additive,
-				far: orderedTransparent.far.map(({ range }) => range),
-				near: orderedTransparent.near.map(({ range }) => range),
+				additive: phases.additive,
+				far: phases.transparent.far,
+				near: phases.transparent.near,
 			},
 			profile,
 		);
@@ -2492,13 +2618,28 @@ export class WebGL2Renderer implements Renderer {
 			// with an integer texture bound under a float sampler and every draw failed validation.
 			this.#beginObjectPhase();
 			gl.depthMask(false);
+			const portalPrograms = portalPipeline
+				? this.#requirePortalBlendedObjectPrograms()
+				: null;
 			for (const object of sortedBlended) {
 				const program =
 					object.drawKind === "instanced"
-						? this.#blendedInstancedObjectProgram
-						: this.#blendedObjectProgram;
+						? (portalPrograms?.instanced ?? this.#blendedInstancedObjectProgram)
+						: (portalPrograms?.baked ?? this.#blendedObjectProgram);
 				if (this.#objectState.applyProgram(program.program)) {
 					this.#activateObjectProgram(program, view, shading);
+				}
+				if (portalPipeline) {
+					const uniforms = program.portalVisibilityUniforms;
+					if (!uniforms) {
+						throw new Error(
+							"Portal deferred object draw selected a program without scope-envelope visibility.",
+						);
+					}
+					portalPipeline.routeDeferredSubmission(
+						object.renderScopeKey,
+						uniforms,
+					);
 				}
 				this.#applyObjectLighting(program, object, shading);
 				this.#objectState.applyBlend(object.blendPolicy);
@@ -2509,6 +2650,29 @@ export class WebGL2Renderer implements Renderer {
 				profile.finishCpuPhase("blendedSubmission", submissionStartedAt);
 			}
 		}
+	}
+
+	/** Compile the two portal-only material variants on the first replacement-compositor frame. */
+	#requirePortalBlendedObjectPrograms(): {
+		readonly baked: WebGL2ObjectProgram;
+		readonly instanced: WebGL2InstancedObjectProgram;
+	} {
+		this.#portalBlendedObjectProgram ??= createWebGL2ObjectProgram(this.#gl, {
+			distanceFog: false,
+			portalVisibility: true,
+		});
+		this.#portalBlendedInstancedObjectProgram ??= createWebGL2ObjectProgram(
+			this.#gl,
+			{
+				distanceFog: false,
+				portalVisibility: true,
+				transformSource: "instanced",
+			},
+		);
+		return {
+			baked: this.#portalBlendedObjectProgram,
+			instanced: this.#portalBlendedInstancedObjectProgram,
+		};
 	}
 
 	/**

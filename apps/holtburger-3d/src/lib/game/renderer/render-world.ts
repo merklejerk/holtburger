@@ -38,6 +38,7 @@ import type { StaticInstanceStreamData } from "../systems/static-resources";
 import type { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 import type { StaticDetailRole } from "../resolution/static-detail-role";
 import { LandblockLayerKind } from "../runtime/scene-interest";
+import { scopeKey } from "../scene/scope";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
@@ -219,6 +220,12 @@ export class RenderWorld {
 
 	getPortalTopologyView(): SceneTopologyView {
 		return this.#systems.scene.getPortalTopologyView();
+	}
+
+	/** Resolve one resident scene owner to the renderer's canonical scope identity. */
+	getRenderScopeKey(nodeId: SceneNodeId): string | null {
+		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
+		return placement ? scopeKey(placement.scope) : null;
 	}
 
 	resolveTerrainDrawUnit(

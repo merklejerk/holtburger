@@ -60,7 +60,7 @@ describe("portal executor structural costs", () => {
 		expect(exteriorCache.cost.repeatedContentPreparationCount).toBe(0);
 	});
 
-	it("keeps repeated-view particles at one upload and one atlas-backed batch", () => {
+	it("keeps repeated-view particle batches in one contiguous upload", () => {
 		const scene = portalModelTestScene(
 			[
 				{
@@ -68,6 +68,7 @@ describe("portal executor structural costs", () => {
 					fragments: [
 						alphaBlendedFragment("cloud", 0),
 						particleFragment("weather", 1, "alpha-blended"),
+						particleFragment("sparks", 5, "additive"),
 						opaqueFragment("exterior", 7),
 					],
 					scope: "outside",
@@ -93,9 +94,9 @@ describe("portal executor structural costs", () => {
 		const replay = candidate(candidates, "shared-view-stencil-replay");
 
 		expect(recursive.cost.particleUploadCount).toBe(1);
-		expect(recursive.cost.particleDrawBatchCount).toBe(1);
+		expect(recursive.cost.particleDrawBatchCount).toBe(2);
 		expect(exteriorCache.cost.particleUploadCount).toBe(1);
-		expect(exteriorCache.cost.particleDrawBatchCount).toBe(1);
+		expect(exteriorCache.cost.particleDrawBatchCount).toBe(2);
 		expect(replay.cost.visibilityAttachmentBytes).toBe(0);
 		expect(replay.cost.maskDrawCount).toBeGreaterThan(
 			exteriorCache.cost.maskDrawCount,

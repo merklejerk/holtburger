@@ -55,6 +55,17 @@ import {
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetSet,
 } from "./webgl2-portal-scope-atlas-targets";
+import {
+	bindWebGL2PortalDeferredVisibilityProgram,
+	PORTAL_DEFERRED_VISIBILITY_GLSL,
+	type WebGL2PortalDeferredVisibilityUniforms,
+} from "./portal-deferred-visibility-glsl";
+import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
+import {
+	compileWebGL2Shader,
+	requireWebGL2Uniform,
+} from "./webgl2-shader-utils";
+import { createParticleFragmentShader } from "./webgl2-particle-program";
 
 const DRAWING_EXTENT = { height: 4, width: 4 } as const;
 const ATLAS_EXTENT = { height: 4, width: 16 } as const;
@@ -63,6 +74,7 @@ const ROOT_COLOR = [204, 51, 26, 255] as const;
 const MIDDLE_COLOR = [204, 204, 26, 255] as const;
 const DEEP_COLOR = [26, 204, 204, 255] as const;
 const LEAF_COLOR = [51, 204, 51, 255] as const;
+const WEATHER_COLOR = [77, 128, 230, 255] as const;
 const CLEAR_COLOR = [26, 51, 204, 255] as const;
 const CENTER_PIXELS = new Set([5, 6, 9, 10]);
 const FIXTURE_LANDBLOCK_ID = "0x0001ffff";
@@ -88,12 +100,18 @@ const PRODUCTION_PACKED_FIXTURE_POLICY = createPortalRenderCapacityPolicy({
 
 /** Numeric real-GPU evidence for the shader substrate against the independent ray oracle. */
 export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
+	readonly deferredCompositionMatchesOracle: boolean;
+	readonly deferredPixels: readonly number[];
+	readonly exteriorWeatherComposesBehindChildOpaque: boolean;
 	readonly frontierMatchesOracle: boolean;
 	readonly opaqueOcclusionMatchesOracle: boolean;
 	readonly productionPackedHostileSamplerResolveMatchesOracle: boolean;
 	readonly productionPackedResolveMatchesOracle: boolean;
 	readonly propagatedResolveMatchesOracle: boolean;
+	readonly particleMatchesEquivalentTransparency: boolean;
+	readonly particlePixels: readonly number[];
 	readonly rootOnlyResolveMatchesOracle: boolean;
+	readonly weatherPixels: readonly number[];
 	readonly propagatedPixels: readonly number[];
 	readonly expectedPropagatedPixels: readonly number[];
 }
@@ -196,9 +214,40 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				return readOutput(gl);
 			},
 		);
+		seedProductionPackedSceneAtlas(gl, targets, productionPackedFrame);
+		paintPlannedTileColor(gl, targets, productionPackedFrame, 0, WEATHER_COLOR);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream: productionPackedStream,
+			targets,
+			traversalDepth: productionPackedFrame.commands.traversalDepth,
+		});
+		const weatherPixels = readOutput(gl);
+		const expectedWeatherPixels = solidPixels(WEATHER_COLOR);
+		for (const pixel of CENTER_PIXELS) {
+			expectedWeatherPixels.set(LEAF_COLOR, pixel * 4);
+		}
+		const deferred = runDeferredCompositionFixture(
+			gl,
+			executor,
+			targets,
+			productionPackedStream,
+			productionPackedFrame,
+		);
 		requireNoWebGL2Error(gl, "after portal scope-atlas shader execution");
 
 		return {
+			deferredCompositionMatchesOracle: pixelRgbMatches(
+				deferred.transparentPixels,
+				deferred.expectedPixels,
+			),
+			deferredPixels: [...deferred.transparentPixels],
+			exteriorWeatherComposesBehindChildOpaque: pixelsMatch(
+				weatherPixels,
+				expectedWeatherPixels,
+			),
 			expectedPropagatedPixels: [...expectedPropagatedPixels],
 			frontierMatchesOracle: frontier.every(
 				(value, pixel) => value === (CENTER_PIXELS.has(pixel) ? 4 : 0),
@@ -207,6 +256,11 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				occludedPixels,
 				expectedOccludedPixels,
 			),
+			particleMatchesEquivalentTransparency: pixelsMatch(
+				deferred.particlePixels,
+				deferred.transparentPixels,
+			),
+			particlePixels: [...deferred.particlePixels],
 			productionPackedResolveMatchesOracle: pixelsMatch(
 				productionPackedPixels,
 				expectedProductionPackedPixels,
@@ -226,6 +280,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				rootOnlyPixels,
 				solidPixels(ROOT_COLOR),
 			),
+			weatherPixels: [...weatherPixels],
 		};
 	} finally {
 		executor.destroy();
@@ -564,6 +619,32 @@ function clearPlannedTile(
 	clearCurrentTile(gl, color, depth);
 }
 
+/** Paint depth-always exterior weather into one scope tile without changing its opaque depth. */
+function paintPlannedTileColor(
+	gl: WebGL2RenderingContext,
+	targets: WebGL2PortalScopeAtlasTargetSet,
+	frame: PortalScopeAtlasFrameView,
+	ordinal: number,
+	color: readonly [number, number, number, number],
+): void {
+	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
+	gl.viewport(0, 0, ATLAS_EXTENT.width, ATLAS_EXTENT.height);
+	gl.enable(gl.SCISSOR_TEST);
+	gl.scissor(
+		frame.tileX(ordinal),
+		frame.tileY(ordinal),
+		frame.tileWidth(ordinal),
+		frame.tileHeight(ordinal),
+	);
+	gl.colorMask(true, true, true, true);
+	gl.clearBufferfv(
+		gl.COLOR,
+		0,
+		new Float32Array(color.map((component) => component / 255)),
+	);
+	gl.disable(gl.SCISSOR_TEST);
+}
+
 function clearTile(
 	gl: WebGL2RenderingContext,
 	x: number,
@@ -591,6 +672,11 @@ function clearOutput(gl: WebGL2RenderingContext): void {
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 	gl.viewport(0, 0, DRAWING_EXTENT.width, DRAWING_EXTENT.height);
 	gl.disable(gl.SCISSOR_TEST);
+	// Fixture stages deliberately leave depth writes disabled. Make the reset independent from the
+	// previous stage so a repeated executor resolve cannot fail its strict LESS test against stale
+	// equal depth and accidentally blend the next schedule over the previous schedule.
+	gl.colorMask(true, true, true, true);
+	gl.depthMask(true);
 	gl.clearBufferfv(
 		gl.COLOR,
 		0,
@@ -616,6 +702,321 @@ function readOutput(gl: WebGL2RenderingContext): Uint8Array {
 	);
 	return pixels;
 }
+
+interface DeferredFixtureProgram {
+	readonly program: WebGLProgram;
+	readonly portal: WebGL2PortalDeferredVisibilityUniforms;
+	readonly color: WebGLUniformLocation;
+	readonly depth: WebGLUniformLocation;
+}
+
+interface ParticleFixtureProgram {
+	readonly program: WebGLProgram;
+	readonly portal: WebGL2PortalDeferredVisibilityUniforms;
+	readonly color: WebGLUniformLocation;
+	readonly depth: WebGLUniformLocation;
+	readonly translucency: WebGLUniformLocation;
+}
+
+/** Numeric alpha/particle composition over the executor's real envelope and resolved depth. */
+function runDeferredCompositionFixture(
+	gl: WebGL2RenderingContext,
+	executor: WebGL2PortalScopeAtlasExecutor,
+	targets: WebGL2PortalScopeAtlasTargetSet,
+	stream: PortalCrossingTriangleStreamView &
+		PortalPropagationMetadataStreamView,
+	frame: PortalScopeAtlasFrameView,
+): {
+	readonly expectedPixels: Uint8Array;
+	readonly particlePixels: Uint8Array;
+	readonly transparentPixels: Uint8Array;
+} {
+	const transparent = createDeferredFixtureProgram(gl);
+	const particle = createParticleFixtureProgram(gl);
+	const vertexArray = gl.createVertexArray();
+	const materialTexture = createFixtureMaterialTexture(gl);
+	if (!vertexArray) {
+		gl.deleteProgram(transparent.program);
+		gl.deleteProgram(particle.program);
+		gl.deleteTexture(materialTexture);
+		throw new Error("Failed to allocate the deferred-composition fixture VAO.");
+	}
+	try {
+		seedProductionPackedSceneAtlas(gl, targets, frame);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream,
+			targets,
+			traversalDepth: frame.commands.traversalDepth,
+		});
+		beginDeferredFixture(gl, targets, vertexArray);
+		drawDeferredFixtureSchedule(gl, transparent);
+		const transparentPixels = readOutput(gl);
+
+		seedProductionPackedSceneAtlas(gl, targets, frame);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream,
+			targets,
+			traversalDepth: frame.commands.traversalDepth,
+		});
+		beginDeferredFixture(gl, targets, vertexArray);
+		bindFixtureMaterialTexture(gl, materialTexture);
+		drawParticleFixtureSchedule(gl, particle);
+		const particlePixels = readOutput(gl);
+
+		return {
+			expectedPixels: expectedDeferredCompositionPixels(),
+			particlePixels,
+			transparentPixels,
+		};
+	} finally {
+		gl.deleteTexture(materialTexture);
+		gl.deleteVertexArray(vertexArray);
+		gl.deleteProgram(transparent.program);
+		gl.deleteProgram(particle.program);
+	}
+}
+
+function beginDeferredFixture(
+	gl: WebGL2RenderingContext,
+	targets: WebGL2PortalScopeAtlasTargetSet,
+	vertexArray: WebGLVertexArrayObject,
+): void {
+	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+	gl.viewport(0, 0, DRAWING_EXTENT.width, DRAWING_EXTENT.height);
+	gl.disable(gl.SCISSOR_TEST);
+	gl.enable(gl.DEPTH_TEST);
+	gl.depthFunc(gl.LESS);
+	gl.depthMask(false);
+	gl.enable(gl.BLEND);
+	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+	gl.bindVertexArray(vertexArray);
+	const envelopeUnit = PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth;
+	gl.bindSampler(envelopeUnit, null);
+	gl.activeTexture(gl.TEXTURE0 + envelopeUnit);
+	gl.bindTexture(gl.TEXTURE_2D, targets.envelope.depth);
+}
+
+function drawDeferredFixtureSchedule(
+	gl: WebGL2RenderingContext,
+	fixture: DeferredFixtureProgram,
+): void {
+	gl.useProgram(fixture.program);
+	drawDeferredFixture(gl, fixture, 0, 0.55, [0, 0, 1, 0.5]);
+	drawDeferredFixture(gl, fixture, 1, 0.5, [1, 1, 0, 0.5]);
+	drawDeferredFixture(gl, fixture, 0, 0.4, [1, 0, 1, 0.5]);
+}
+
+function drawDeferredFixture(
+	gl: WebGL2RenderingContext,
+	fixture: DeferredFixtureProgram,
+	scope: number,
+	depth: number,
+	color: readonly [number, number, number, number],
+): void {
+	gl.uniform1ui(fixture.portal.scope, scope);
+	gl.uniform1f(fixture.depth, depth);
+	gl.uniform4f(fixture.color, ...color);
+	gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function drawParticleFixtureSchedule(
+	gl: WebGL2RenderingContext,
+	fixture: ParticleFixtureProgram,
+): void {
+	gl.useProgram(fixture.program);
+	gl.uniform1f(fixture.translucency, 0.5);
+	drawParticleFixture(gl, fixture, 0, 0.55, [0, 0, 1, 1]);
+	drawParticleFixture(gl, fixture, 1, 0.5, [1, 1, 0, 1]);
+	drawParticleFixture(gl, fixture, 0, 0.4, [1, 0, 1, 1]);
+}
+
+function drawParticleFixture(
+	gl: WebGL2RenderingContext,
+	fixture: ParticleFixtureProgram,
+	scope: number,
+	depth: number,
+	color: readonly [number, number, number, number],
+): void {
+	gl.uniform1ui(fixture.portal.scope, scope);
+	gl.uniform1f(fixture.depth, depth);
+	gl.uniform4f(fixture.color, ...color);
+	gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function createDeferredFixtureProgram(
+	gl: WebGL2RenderingContext,
+): DeferredFixtureProgram {
+	const program = linkFixtureProgram(
+		gl,
+		DEFERRED_FIXTURE_VERTEX_SHADER,
+		DEFERRED_FIXTURE_FRAGMENT_SHADER,
+	);
+	return {
+		color: requireWebGL2Uniform(gl, program, "uColor"),
+		depth: requireWebGL2Uniform(gl, program, "uDepth"),
+		portal: bindWebGL2PortalDeferredVisibilityProgram(gl, program),
+		program,
+	};
+}
+
+function createParticleFixtureProgram(
+	gl: WebGL2RenderingContext,
+): ParticleFixtureProgram {
+	const program = linkFixtureProgram(
+		gl,
+		PARTICLE_FIXTURE_VERTEX_SHADER,
+		createParticleFragmentShader(true),
+	);
+	gl.useProgram(program);
+	gl.uniform1i(requireWebGL2Uniform(gl, program, "uBase"), 0);
+	gl.uniform1i(requireWebGL2Uniform(gl, program, "uPalette"), 1);
+	gl.uniform1i(requireWebGL2Uniform(gl, program, "uMaterialKind"), 0);
+	gl.uniform1i(requireWebGL2Uniform(gl, program, "uPalettedClipMap"), 0);
+	gl.uniform1f(requireWebGL2Uniform(gl, program, "uAlphaTest"), 0);
+	return {
+		color: requireWebGL2Uniform(gl, program, "uMaterialColor"),
+		depth: requireWebGL2Uniform(gl, program, "uDepth"),
+		portal: bindWebGL2PortalDeferredVisibilityProgram(gl, program),
+		program,
+		translucency: requireWebGL2Uniform(gl, program, "uTranslucency"),
+	};
+}
+
+function linkFixtureProgram(
+	gl: WebGL2RenderingContext,
+	vertexSource: string,
+	fragmentSource: string,
+): WebGLProgram {
+	const vertex = compileWebGL2Shader(gl, gl.VERTEX_SHADER, vertexSource);
+	const fragment = compileWebGL2Shader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+	const program = gl.createProgram();
+	if (!program) {
+		gl.deleteShader(vertex);
+		gl.deleteShader(fragment);
+		throw new Error(
+			"Failed to allocate a deferred-composition fixture program.",
+		);
+	}
+	try {
+		gl.attachShader(program, vertex);
+		gl.attachShader(program, fragment);
+		gl.linkProgram(program);
+		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+			throw new Error(
+				`Deferred-composition fixture failed to link: ${gl.getProgramInfoLog(program) ?? "unknown"}`,
+			);
+		}
+		return program;
+	} catch (error) {
+		gl.deleteProgram(program);
+		throw error;
+	} finally {
+		gl.deleteShader(vertex);
+		gl.deleteShader(fragment);
+	}
+}
+
+function createFixtureMaterialTexture(
+	gl: WebGL2RenderingContext,
+): WebGLTexture {
+	const texture = gl.createTexture();
+	if (!texture) throw new Error("Failed to allocate fixture material texture.");
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	gl.texImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGBA8,
+		1,
+		1,
+		0,
+		gl.RGBA,
+		gl.UNSIGNED_BYTE,
+		new Uint8Array([255, 255, 255, 255]),
+	);
+	return texture;
+}
+
+function bindFixtureMaterialTexture(
+	gl: WebGL2RenderingContext,
+	texture: WebGLTexture,
+): void {
+	for (const unit of [0, 1]) {
+		gl.bindSampler(unit, null);
+		gl.activeTexture(gl.TEXTURE0 + unit);
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+	}
+}
+
+function expectedDeferredCompositionPixels(): Uint8Array {
+	const outside = blendHalf(blendHalf(ROOT_COLOR, [0, 0, 255]), [255, 0, 255]);
+	const center = blendHalf(blendHalf(LEAF_COLOR, [255, 255, 0]), [255, 0, 255]);
+	const pixels = new Uint8Array(
+		DRAWING_EXTENT.width * DRAWING_EXTENT.height * 4,
+	);
+	for (let pixel = 0; pixel < pixels.length / 4; pixel += 1) {
+		pixels.set(CENTER_PIXELS.has(pixel) ? center : outside, pixel * 4);
+	}
+	return pixels;
+}
+
+function blendHalf(
+	destination: readonly [number, number, number, number],
+	sourceRgb: readonly [number, number, number],
+): readonly [number, number, number, number] {
+	return [
+		Math.round(sourceRgb[0] * 0.5 + destination[0] * 0.5),
+		Math.round(sourceRgb[1] * 0.5 + destination[1] * 0.5),
+		Math.round(sourceRgb[2] * 0.5 + destination[2] * 0.5),
+		255,
+	];
+}
+
+const DEFERRED_FIXTURE_VERTEX_SHADER = `#version 300 es
+precision highp float;
+uniform float uDepth;
+void main() {
+	const vec2 positions[3] = vec2[3](
+		vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
+	);
+	gl_Position = vec4(positions[gl_VertexID], uDepth * 2.0 - 1.0, 1.0);
+}
+`;
+
+const DEFERRED_FIXTURE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+${PORTAL_DEFERRED_VISIBILITY_GLSL}
+uniform vec4 uColor;
+out vec4 outColor;
+void main() {
+	if (!portalDeferredFragmentVisible()) discard;
+	outColor = uColor;
+}
+`;
+
+const PARTICLE_FIXTURE_VERTEX_SHADER = `#version 300 es
+precision highp float;
+uniform float uDepth;
+uniform float uTranslucency;
+out vec2 vTextureCoordinate;
+out float vTranslucency;
+void main() {
+	const vec2 positions[3] = vec2[3](
+		vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)
+	);
+	vTextureCoordinate = vec2(0.0);
+	vTranslucency = uTranslucency;
+	gl_Position = vec4(positions[gl_VertexID], uDepth * 2.0 - 1.0, 1.0);
+}
+`;
 
 function executeWithHostileSamplers(
 	gl: WebGL2RenderingContext,
@@ -791,6 +1192,25 @@ function pixelsMatch(actual: Uint8Array, expected: Uint8Array): boolean {
 			Math.abs(actualComponent - expectedComponent) > 2
 		) {
 			return false;
+		}
+	}
+	return true;
+}
+
+function pixelRgbMatches(actual: Uint8Array, expected: Uint8Array): boolean {
+	if (actual.length !== expected.length || actual.length % 4 !== 0)
+		return false;
+	for (let offset = 0; offset < actual.length; offset += 4) {
+		for (let component = 0; component < 3; component += 1) {
+			const actualComponent = actual[offset + component];
+			const expectedComponent = expected[offset + component];
+			if (
+				actualComponent === undefined ||
+				expectedComponent === undefined ||
+				Math.abs(actualComponent - expectedComponent) > 2
+			) {
+				return false;
+			}
 		}
 	}
 	return true;

@@ -50,6 +50,7 @@ interface PortalExecutorCostVector {
 	readonly orderedTransparentRunCount: number;
 	readonly ownershipLabelCount: number;
 	readonly particleDrawBatchCount: number;
+	/** Contiguous particle frame-stream uploads, independent from compatible draw-batch count. */
 	readonly particleUploadCount: number;
 	readonly repeatedContentPreparationCount: number;
 	readonly resetPixelCount: number;
@@ -268,9 +269,7 @@ function commonCost(
 		orderedTransparentRunCount: compatibleRunCount(alpha, true, false),
 		ownershipLabelCount: 0,
 		particleDrawBatchCount: compatibleRunCount(particle, false, false),
-		particleUploadCount: new Set(
-			particle.map(({ submissionId }) => submissionId),
-		).size,
+		particleUploadCount: particle.length === 0 ? 0 : 1,
 		repeatedContentPreparationCount: 0,
 		resetPixelCount: 0,
 		topologyWorkItemCount: potentialPlan.raySegmentCount,

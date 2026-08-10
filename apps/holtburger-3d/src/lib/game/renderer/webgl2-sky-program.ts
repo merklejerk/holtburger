@@ -32,7 +32,12 @@ export const SKY_MATERIAL_KIND = {
  * purely through the pass's extended far plane. The view matrix therefore arrives with its
  * translation already removed, so the sky rotates with the camera but never translates with it.
  */
-const SKY_VERTEX_SHADER = `#version 300 es
+export function createSkyVertexShader(portalAtlas: boolean): string {
+	const portalDeclaration = portalAtlas ? "uniform vec4 uClipTransform;" : "";
+	const position = portalAtlas
+		? "uClipTransform * uProjection * uView * uModel * vec4(aPosition, 1.0)"
+		: "uProjection * uView * uModel * vec4(aPosition, 1.0)";
+	return `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTextureCoordinate;
@@ -42,6 +47,7 @@ uniform mat4 uView;
 uniform mat4 uModel;
 /** Authored \`tex_velocity\` phase for this draw, already wrapped into [0, 1). */
 uniform vec2 uTextureOffset;
+${portalDeclaration}
 
 out vec2 vTextureCoordinate;
 
@@ -49,9 +55,10 @@ void main() {
 	// The normal attribute is bound by the shared object geometry layout but unused: retail draws
 	// the sky with lighting suppressed, so there is nothing to light against.
 	vTextureCoordinate = aTextureCoordinate + uTextureOffset;
-	gl_Position = uProjection * uView * uModel * vec4(aPosition, 1.0);
+	gl_Position = ${position};
 }
 `;
+}
 
 /**
  * Sky fragment stage.
@@ -68,7 +75,8 @@ void main() {
  * Omitted rather than stubbed because nothing can currently activate an override, and an
  * unreachable fog path would go untested until the day it matters.
  */
-const SKY_FRAGMENT_SHADER = `#version 300 es
+export function createSkyFragmentShader(): string {
+	return `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -132,9 +140,12 @@ void main() {
 	);
 }
 `;
+}
 
 export interface WebGL2SkyProgram {
 	readonly program: WebGLProgram;
+	/** Present only while drawing sky geometry into the packed outdoor tile. */
+	readonly clipTransformUniform: WebGLUniformLocation | null;
 	readonly uniforms: {
 		readonly projection: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
@@ -152,16 +163,19 @@ export interface WebGL2SkyProgram {
 /** Link the sky program and bind its sampler units once. */
 export function createWebGL2SkyProgram(
 	gl: WebGL2RenderingContext,
+	options: {
+		readonly portalAtlas?: boolean;
+	} = {},
 ): WebGL2SkyProgram {
 	const vertexShader = compileWebGL2Shader(
 		gl,
 		gl.VERTEX_SHADER,
-		SKY_VERTEX_SHADER,
+		createSkyVertexShader(options.portalAtlas ?? false),
 	);
 	const fragmentShader = compileWebGL2Shader(
 		gl,
 		gl.FRAGMENT_SHADER,
-		SKY_FRAGMENT_SHADER,
+		createSkyFragmentShader(),
 	);
 	const program = gl.createProgram();
 	if (!program) throw new Error("Failed to allocate sky shader program.");
@@ -186,6 +200,9 @@ export function createWebGL2SkyProgram(
 	);
 	gl.useProgram(null);
 	return {
+		clipTransformUniform: options.portalAtlas
+			? requireWebGL2Uniform(gl, program, "uClipTransform")
+			: null,
 		program,
 		uniforms: {
 			alpha: requireWebGL2Uniform(gl, program, "uAlpha"),

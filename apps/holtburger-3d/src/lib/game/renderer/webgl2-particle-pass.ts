@@ -4,6 +4,7 @@ import {
 	createWebGL2ParticleProgram,
 	type WebGL2ParticleProgram,
 } from "./webgl2-particle-program";
+import type { WebGL2PortalDeferredVisibilityUniforms } from "./portal-deferred-visibility-glsl";
 import { WebGL2ParticleInstanceBuffer } from "./webgl2-particle-instance-buffer";
 import { objectBlendPolicy } from "./object-rendering-policy";
 
@@ -47,6 +48,14 @@ export interface ParticleDrawDiagnostics {
 	readonly unresolvedBatchCount: number;
 }
 
+/** Injected scope-atlas routing without coupling the reusable particle pass to its owner. */
+export interface ParticlePortalScopeRouting {
+	routeDeferredSubmission(
+		renderScopeKey: string,
+		uniforms: WebGL2PortalDeferredVisibilityUniforms,
+	): void;
+}
+
 /**
  * Draws every visible particle batch as one instanced call per batch.
  *
@@ -62,8 +71,13 @@ export class WebGL2ParticlePass {
 	readonly #resolveGeometry: (
 		hwGfxObjId: DatAssetId,
 	) => ParticleDrawGeometry | null;
+	#gl: WebGL2RenderingContext | null = null;
 	#program: WebGL2ParticleProgram | null = null;
+	#portalProgram: WebGL2ParticleProgram | null = null;
 	#instances: WebGL2ParticleInstanceBuffer | null = null;
+	/** Reused flattening scratch keeps all scoped batches in one contiguous frame upload. */
+	readonly #scopedBatches: ParticleDrawBatch[] = [];
+	readonly #scopedRenderScopeKeys: string[] = [];
 	#diagnostics: ParticleDrawDiagnostics = {
 		drawnBatchCount: 0,
 		drawnParticleCount: 0,
@@ -80,12 +94,46 @@ export class WebGL2ParticlePass {
 		context: ParticleDrawContext,
 		batches: readonly ParticleDrawBatch[],
 	): void {
+		this.#draw(context, batches, null, null);
+	}
+
+	/** Draw scope-grouped particles with one upload and one scalar scope route per physical draw. */
+	drawScoped(
+		context: ParticleDrawContext,
+		batchesByScope: ReadonlyMap<string, readonly ParticleDrawBatch[]>,
+		routing: ParticlePortalScopeRouting,
+	): void {
+		this.#scopedBatches.length = 0;
+		this.#scopedRenderScopeKeys.length = 0;
+		for (const [renderScopeKey, batches] of batchesByScope) {
+			for (const batch of batches) {
+				this.#scopedBatches.push(batch);
+				this.#scopedRenderScopeKeys.push(renderScopeKey);
+			}
+		}
+		this.#draw(
+			context,
+			this.#scopedBatches,
+			this.#scopedRenderScopeKeys,
+			routing,
+		);
+	}
+
+	#draw(
+		context: ParticleDrawContext,
+		batches: readonly ParticleDrawBatch[],
+		renderScopeKeys: readonly string[] | null,
+		routing: ParticlePortalScopeRouting | null,
+	): void {
 		const { gl } = context;
 		let drawnBatchCount = 0;
 		let drawnParticleCount = 0;
 		let unresolvedBatchCount = 0;
-		const drawable = batches.filter((batch) => batch.particles.length > 0);
-		if (drawable.length === 0) {
+		let preparedInstanceCount = 0;
+		for (const batch of batches) {
+			preparedInstanceCount += batch.particles.length;
+		}
+		if (preparedInstanceCount === 0) {
 			this.#diagnostics = {
 				drawnBatchCount: 0,
 				drawnParticleCount: 0,
@@ -93,10 +141,38 @@ export class WebGL2ParticlePass {
 			};
 			return;
 		}
-		const program = (this.#program ??= createWebGL2ParticleProgram(gl));
+		if ((renderScopeKeys === null) !== (routing === null)) {
+			throw new Error(
+				"Particle portal scope keys and routing must be supplied together.",
+			);
+		}
+		if (renderScopeKeys && renderScopeKeys.length !== batches.length) {
+			throw new Error(
+				`Particle scope routing has ${renderScopeKeys.length} keys for ${batches.length} batches.`,
+			);
+		}
+		if (this.#gl !== null && this.#gl !== gl) {
+			throw new Error("Particle pass cannot move between WebGL devices.");
+		}
+		this.#gl = gl;
 		const instances = (this.#instances ??= new WebGL2ParticleInstanceBuffer(
 			gl,
 		));
+		const uploadedInstanceCount = instances.prepareFrame(batches);
+		if (uploadedInstanceCount !== preparedInstanceCount) {
+			throw new Error(
+				`Particle preparation uploaded ${uploadedInstanceCount} of ${preparedInstanceCount} instances.`,
+			);
+		}
+		const program = routing
+			? (this.#portalProgram ??= createWebGL2ParticleProgram(gl, true))
+			: (this.#program ??= createWebGL2ParticleProgram(gl));
+		const portalVisibilityUniforms = program.portalVisibilityUniforms;
+		if (routing && !portalVisibilityUniforms) {
+			throw new Error(
+				"Portal particle draw selected a program without scope-envelope visibility.",
+			);
+		}
 
 		gl.useProgram(program.program);
 		gl.uniformMatrix4fv(program.uniforms.projection, false, context.projection);
@@ -116,12 +192,19 @@ export class WebGL2ParticlePass {
 		// Blend mode is selected per batch below. Enabling BLEND without a func inherits whatever
 		// the previous pass left bound, which renders particles opaque over their own backing.
 
-		for (const batch of drawable) {
+		let firstInstance = 0;
+		for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+			const batch = batches[batchIndex];
+			if (!batch)
+				throw new Error(`Particle batch ${batchIndex} is unavailable.`);
+			const instanceCount = batch.particles.length;
+			if (instanceCount === 0) continue;
 			const geometry = this.#resolveGeometry(batch.hwGfxObjId);
 			// A batch whose mesh has not landed is counted, not silently dropped: the emitter is
 			// live and the viewer is missing it.
 			if (geometry === null) {
 				unresolvedBatchCount += 1;
+				firstInstance += instanceCount;
 				continue;
 			}
 			// Retail's own flag-to-blend mapping, shared with the object and sky paths: additive
@@ -140,9 +223,22 @@ export class WebGL2ParticlePass {
 						: gl.ONE_MINUS_SRC_ALPHA,
 			);
 			gl.bindVertexArray(geometry.vertexArray);
-			instances.bindAttributes();
-			const instanceCount = instances.upload(batch.particles);
-			if (instanceCount === 0) continue;
+			instances.bindAttributes(firstInstance);
+			if (routing) {
+				if (portalVisibilityUniforms === null) {
+					throw new Error(
+						"Portal particle program lost its scope-envelope uniforms.",
+					);
+				}
+				const renderScopeKey = renderScopeKeys?.[batchIndex];
+				if (renderScopeKey === undefined) {
+					throw new Error(`Particle batch ${batchIndex} has no render scope.`);
+				}
+				routing.routeDeferredSubmission(
+					renderScopeKey,
+					portalVisibilityUniforms,
+				);
+			}
 
 			// Motion type and orientation are per-batch constants, never per-instance attributes.
 			gl.uniform1i(program.uniforms.motionType, batch.motionType);
@@ -183,6 +279,12 @@ export class WebGL2ParticlePass {
 			);
 			drawnBatchCount += 1;
 			drawnParticleCount += instanceCount;
+			firstInstance += instanceCount;
+		}
+		if (firstInstance !== preparedInstanceCount) {
+			throw new Error(
+				`Particle submission consumed ${firstInstance} of ${preparedInstanceCount} prepared instances.`,
+			);
 		}
 
 		gl.bindVertexArray(null);
@@ -202,6 +304,14 @@ export class WebGL2ParticlePass {
 	destroy(): void {
 		this.#instances?.destroy();
 		this.#instances = null;
+		if (this.#program) this.#gl?.deleteProgram(this.#program.program);
 		this.#program = null;
+		if (this.#portalProgram) {
+			this.#gl?.deleteProgram(this.#portalProgram.program);
+		}
+		this.#portalProgram = null;
+		this.#gl = null;
+		this.#scopedBatches.length = 0;
+		this.#scopedRenderScopeKeys.length = 0;
 	}
 }

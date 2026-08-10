@@ -7,6 +7,8 @@ import {
 	enumeratePortalModelCorpus,
 	generateSeededPortalModelScenes,
 } from "./portal-model-enumerator";
+import { executePortalArrivalStateCompositor } from "./portal-arrival-state-compositor";
+import { portalModelFootprintHas, portalModelPixel } from "./portal-model";
 import { composePortalReferenceFrame } from "./portal-reference-compositor";
 
 const BOUNDS = {
@@ -75,6 +77,30 @@ describe("portal model bounded enumeration", () => {
 				throw new Error(
 					`Recursive executor diverged: ${JSON.stringify({ divergence, scene })}`,
 				);
+			}
+		}
+	});
+
+	it("leaves exactly one unbounded terminal scope at every bounded-corpus pixel", () => {
+		const corpus = enumeratePortalModelCorpus(BOUNDS);
+		for (const scene of corpus.scenes) {
+			const frame = executePortalArrivalStateCompositor(scene);
+			for (let pixelValue = 0; pixelValue < scene.pixelCount; pixelValue += 1) {
+				const pixel = portalModelPixel(pixelValue, scene.pixelCount);
+				let unboundedScopeCount = 0;
+				for (const envelope of frame.envelopes) {
+					if (
+						portalModelFootprintHas(envelope.coverage, pixel) &&
+						envelope.maximumExitDepthByPixel[pixel] === null
+					) {
+						unboundedScopeCount += 1;
+					}
+				}
+				if (unboundedScopeCount !== 1) {
+					throw new Error(
+						`Expected one terminal scope at pixel ${pixel}; found ${unboundedScopeCount}: ${JSON.stringify(scene)}`,
+					);
+				}
 			}
 		}
 	});

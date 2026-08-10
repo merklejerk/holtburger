@@ -23,11 +23,7 @@
 	import {
 		WebGL2Device,
 		type WebGL2ContextLossPolicyProbe,
-		type PortalTargetCapabilityProbe,
 	} from "../../lib/game/renderer/webgl2-device";
-	import type { WebGL2PortalSubstrateFixtureResult } from "../../lib/game/renderer/webgl2-portal-substrate-fixture";
-	import type { WebGL2HybridPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-hybrid-portal-executor-fixture";
-	import type { WebGL2InternalPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-internal-portal-executor-fixture";
 	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
 	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
 	import {
@@ -46,8 +42,6 @@
 	} from "../../lib/game/renderer/renderer";
 	import type {
 		PortalExecutionProbeResult,
-		PortalRenderGraphProbeResult,
-		PortalScopeAtlasExecutionProbeResult,
 		WebGL2Renderer,
 	} from "../../lib/game/renderer/webgl2-renderer";
 	import {
@@ -206,29 +200,13 @@
 			start: readonly [number, number, number],
 			endpoint: readonly [number, number, number],
 		) => ReturnType<GameRuntime["tracePortalSegment"]>;
-		/** Exercise final pure portal planning and the shared selected-scope scene query. */
-		readonly probePortalRenderGraph: (
-			envCellId: string,
-			position: readonly [number, number, number],
-			cameraYawDegrees: number,
-			cameraPitchDegrees: number,
-			safetyWorkItemLimit: number,
-		) => PortalRenderGraphProbeResult;
-		/** Exercise the production portal graph executor without activating public portal mode. */
+		/** Exercise the public portal compositor without changing continuous frame settings. */
 		readonly probePortalExecution: (
 			envCellId: string,
 			position: readonly [number, number, number],
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
-			safetyWorkItemLimit: number,
 		) => PortalExecutionProbeResult;
-		/** Execute the replacement scope-atlas compositor without frame shadowing. */
-		readonly probePortalScopeAtlasExecution: (
-			envCellId: string,
-			position: readonly [number, number, number],
-			cameraYawDegrees: number,
-			cameraPitchDegrees: number,
-		) => PortalScopeAtlasExecutionProbeResult;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => BrowserHarnessState;
 	}
@@ -256,20 +234,12 @@
 			readonly generated: readonly StaticObjectLayerRuntimeDiagnostics[];
 			readonly objects: readonly StaticObjectLayerRuntimeDiagnostics[];
 		};
-		/** Executable facts for the planned portal scene-domain attachment formats. */
-		readonly portalTargetCapabilities: PortalTargetCapabilityProbe | null;
 		/** Whole-device invalidation proof from an isolated browser context. */
 		readonly portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null;
-		/** Pixel-read production-substrate evidence requested by the dedicated fixture. */
-		readonly portalSubstrate: WebGL2PortalSubstrateFixtureResult | null;
 		/** Browser allocation evidence for the selected scope-atlas target generation. */
 		readonly portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null;
 		/** Numeric real-GPU evidence for the scope-atlas shader executor. */
 		readonly portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null;
-		/** Pixel-read exterior-transition composition evidence requested by Gate F. */
-		readonly hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null;
-		/** Pixel-read internal graph execution evidence requested by Gate G. */
-		readonly internalPortalExecution: WebGL2InternalPortalExecutionFixtureResult | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
 		readonly ready: boolean;
@@ -357,16 +327,10 @@
 		...DEFAULT_FRAME_SETTINGS,
 		envCellRenderMode: "flat",
 	};
-	let portalTargetCapabilities: PortalTargetCapabilityProbe | null = null;
 	let portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null = null;
-	let portalSubstrate: WebGL2PortalSubstrateFixtureResult | null = null;
 	let portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null =
 		null;
 	let portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null =
-		null;
-	let hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null =
-		null;
-	let internalPortalExecution: WebGL2InternalPortalExecutionFixtureResult | null =
 		null;
 	let ready = false;
 	const fixture = query.get("fixture");
@@ -725,96 +689,12 @@
 		});
 	}
 
-	function probePortalRenderGraph(
-		rawEnvCellId: string,
-		position: readonly [number, number, number],
-		cameraYawDegrees: number,
-		cameraPitchDegrees: number,
-		safetyWorkItemLimit: number,
-	): PortalRenderGraphProbeResult {
-		if (!renderer) throw new Error("Browser harness renderer is not ready.");
-		if (
-			position.length !== 3 ||
-			!position.every(Number.isFinite) ||
-			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite) ||
-			!Number.isInteger(safetyWorkItemLimit) ||
-			safetyWorkItemLimit <= 0
-		) {
-			throw new Error(
-				"Browser harness portal graph probe requires a finite position/orientation and positive integer work limit.",
-			);
-		}
-		const envCellId = parseEnvCellId(rawEnvCellId, "portal graph");
-		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
-		return renderer.probePortalRenderGraph(
-			landblockId,
-			{
-				cameraInsideSealedCell: false,
-				camera: {
-					far: CAMERA_FAR,
-					fov: CAMERA_FOV_DEGREES,
-					near: CAMERA_NEAR,
-					placement: {
-						envCellId,
-						landblockId,
-						position: sceneVec3(new Vec3(...position)),
-						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
-					},
-				},
-			},
-			{ envCellId, kind: "env-cell", landblockId },
-			safetyWorkItemLimit,
-		);
-	}
-
 	function probePortalExecution(
 		rawEnvCellId: string,
 		position: readonly [number, number, number],
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
-		safetyWorkItemLimit: number,
 	): PortalExecutionProbeResult {
-		if (!renderer) throw new Error("Browser harness renderer is not ready.");
-		if (
-			position.length !== 3 ||
-			!position.every(Number.isFinite) ||
-			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite) ||
-			!Number.isInteger(safetyWorkItemLimit) ||
-			safetyWorkItemLimit <= 0
-		) {
-			throw new Error(
-				"Browser harness portal execution probe requires a finite position/orientation and positive integer work limit.",
-			);
-		}
-		const envCellId = parseEnvCellId(rawEnvCellId, "portal execution");
-		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
-		return renderer.probePortalExecution(
-			landblockId,
-			{
-				cameraInsideSealedCell: false,
-				camera: {
-					far: CAMERA_FAR,
-					fov: CAMERA_FOV_DEGREES,
-					near: CAMERA_NEAR,
-					placement: {
-						envCellId,
-						landblockId,
-						position: sceneVec3(new Vec3(...position)),
-						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
-					},
-				},
-			},
-			{ envCellId, kind: "env-cell", landblockId },
-			safetyWorkItemLimit,
-		);
-	}
-
-	function probePortalScopeAtlasExecution(
-		rawEnvCellId: string,
-		position: readonly [number, number, number],
-		cameraYawDegrees: number,
-		cameraPitchDegrees: number,
-	): PortalScopeAtlasExecutionProbeResult {
 		if (!renderer) throw new Error("Browser harness renderer is not ready.");
 		if (
 			position.length !== 3 ||
@@ -822,12 +702,12 @@
 			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
 		) {
 			throw new Error(
-				"Browser harness scope-atlas probe requires a finite position and orientation.",
+				"Browser harness portal execution probe requires a finite position and orientation.",
 			);
 		}
-		const envCellId = parseEnvCellId(rawEnvCellId, "scope atlas");
+		const envCellId = parseEnvCellId(rawEnvCellId, "portal execution");
 		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
-		return renderer.probePortalScopeAtlasExecution(
+		return renderer.probePortalExecution(
 			landblockId,
 			{
 				cameraInsideSealedCell: false,
@@ -909,18 +789,10 @@
 						: contentSource;
 				device = await WebGL2Device.build(canvasElement!);
 				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
-				if (fixture === "portal-substrate") {
-					portalTargetCapabilities = device.probePortalTargetCapabilities();
-					portalSubstrate = device.probePortalSubstrate();
+				if (fixture === "portal-scope-atlas") {
 					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
 					portalScopeAtlasExecutor = device.probePortalScopeAtlasExecutor();
 					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy();
-				}
-				if (fixture === "portal-hybrid-execution") {
-					hybridPortalExecution = device.probeHybridPortalExecution();
-				}
-				if (fixture === "portal-internal-execution") {
-					internalPortalExecution = device.probeInternalPortalExecution();
 				}
 				pipeline =
 					fixture === "blended"
@@ -1011,8 +883,6 @@
 					clearSceneInterest,
 					focusExplorerOutdoor,
 					probePortalExecution,
-					probePortalRenderGraph,
-					probePortalScopeAtlasExecution,
 					requestSceneInterest,
 					setCameraLandblock,
 					setEnvCellCamera,
@@ -1040,15 +910,11 @@
 							error,
 							frameSettings,
 							frameProfile: frameDiagnostics?.profile ?? null,
-							hybridPortalExecution,
 							frames,
-							internalPortalExecution,
 							metrics: frameDiagnostics?.selectionMetrics ?? null,
 							portalContextLossPolicy,
-							portalSubstrate,
 							portalScopeAtlasExecutor,
 							portalScopeAtlasTargets,
-							portalTargetCapabilities,
 							ready,
 							staticObjectLayers: {
 								buildings:

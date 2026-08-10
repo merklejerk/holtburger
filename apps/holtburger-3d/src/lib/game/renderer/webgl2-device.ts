@@ -6,18 +6,6 @@ import {
 	type Texture2DResourceKey,
 } from "./resource-manager";
 import { TexturePixelFormat } from "../textures/types";
-import {
-	runWebGL2PortalSubstrateFixture,
-	type WebGL2PortalSubstrateFixtureResult,
-} from "./webgl2-portal-substrate-fixture";
-import {
-	runWebGL2HybridPortalExecutionFixture,
-	type WebGL2HybridPortalExecutionFixtureResult,
-} from "./webgl2-hybrid-portal-executor-fixture";
-import {
-	runWebGL2InternalPortalExecutionFixture,
-	type WebGL2InternalPortalExecutionFixtureResult,
-} from "./webgl2-internal-portal-executor-fixture";
 import type { TextureFilteringCapabilities } from "./texture-filtering-policy";
 import {
 	probeWebGL2TextureFilteringSupport,
@@ -40,16 +28,6 @@ export interface Texture2DReadback {
 	/** Rows preserve the atlas packer's coordinate order for placement-bound overlays. */
 	readonly pixels: Uint8Array;
 	readonly width: number;
-}
-
-/** Executable browser facts for the fixed portal scene-domain target contract. */
-export interface PortalTargetCapabilityProbe {
-	readonly colorFormat: "RGBA8";
-	readonly depthBits: number;
-	readonly depthStencilFormat: "DEPTH24_STENCIL8";
-	readonly framebufferComplete: boolean;
-	readonly maximumTextureSize: number;
-	readonly stencilBits: number;
 }
 
 /** Cold context identity captured only for an explicitly exported diagnostic report. */
@@ -149,7 +127,7 @@ export class WebGL2Device {
 			let rejectionMessage = "";
 			let rendererRejectionMessage = "";
 			try {
-				device.probePortalTargetCapabilities();
+				device.probePortalScopeAtlasTargets();
 			} catch (cause) {
 				rejectionMessage =
 					cause instanceof Error ? cause.message : String(cause);
@@ -189,21 +167,6 @@ export class WebGL2Device {
 		);
 	}
 
-	/**
-	 * Execute the Gate-C format probe against this device's actual browser context.
-	 * All temporary state and resources are restored before normal renderer construction resumes.
-	 */
-	probePortalTargetCapabilities(): PortalTargetCapabilityProbe {
-		this.#assertReady();
-		return probePortalTargetCapabilities(this.#gl);
-	}
-
-	/** Run the Gate-D production-substrate fixture against this device's browser context. */
-	probePortalSubstrate(): WebGL2PortalSubstrateFixtureResult {
-		this.#assertReady();
-		return runWebGL2PortalSubstrateFixture(this.#gl, this.resources);
-	}
-
 	/** Prove the selected scope-atlas attachment formats and lifecycle on this browser context. */
 	probePortalScopeAtlasTargets(): WebGL2PortalScopeAtlasTargetsFixtureResult {
 		this.#assertReady();
@@ -214,18 +177,6 @@ export class WebGL2Device {
 	probePortalScopeAtlasExecutor(): WebGL2PortalScopeAtlasExecutorFixtureResult {
 		this.#assertReady();
 		return runWebGL2PortalScopeAtlasExecutorFixture(this.#gl);
-	}
-
-	/** Run the standalone direct exterior-transition fixture. */
-	probeHybridPortalExecution(): WebGL2HybridPortalExecutionFixtureResult {
-		this.#assertReady();
-		return runWebGL2HybridPortalExecutionFixture(this.#gl, this.resources);
-	}
-
-	/** Run the Gate-G indoor graph execution fixture through production targets and masks. */
-	probeInternalPortalExecution(): WebGL2InternalPortalExecutionFixtureResult {
-		this.#assertReady();
-		return runWebGL2InternalPortalExecutionFixture(this.#gl, this.resources);
 	}
 
 	/** Return a copied discriminant suitable for app-level restart policy and diagnostics. */
@@ -366,137 +317,4 @@ export class WebGL2Device {
 		extension.loseContext();
 		return event;
 	}
-}
-
-function probePortalTargetCapabilities(
-	gl: WebGL2RenderingContext,
-): PortalTargetCapabilityProbe {
-	const framebuffer = requireGlResource(
-		gl.createFramebuffer(),
-		"portal capability framebuffer",
-	);
-	const color = requireGlResource(
-		gl.createTexture(),
-		"portal capability color texture",
-	);
-	const depthStencil = requireGlResource(
-		gl.createTexture(),
-		"portal capability depth-stencil texture",
-	);
-	const previous = captureProbeState(gl);
-	try {
-		gl.activeTexture(gl.TEXTURE0);
-		initializeProbeTexture(gl, color, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-		initializeProbeTexture(
-			gl,
-			depthStencil,
-			gl.DEPTH24_STENCIL8,
-			gl.DEPTH_STENCIL,
-			gl.UNSIGNED_INT_24_8,
-		);
-
-		gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-		gl.framebufferTexture2D(
-			gl.FRAMEBUFFER,
-			gl.COLOR_ATTACHMENT0,
-			gl.TEXTURE_2D,
-			color,
-			0,
-		);
-		gl.framebufferTexture2D(
-			gl.FRAMEBUFFER,
-			gl.DEPTH_STENCIL_ATTACHMENT,
-			gl.TEXTURE_2D,
-			depthStencil,
-			0,
-		);
-		const framebufferComplete =
-			gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
-		const error = gl.getError();
-		if (error !== gl.NO_ERROR) {
-			throw new Error(
-				`Portal capability probe failed with WebGL error ${error}.`,
-			);
-		}
-		return {
-			colorFormat: "RGBA8",
-			depthBits: framebufferComplete
-				? (gl.getParameter(gl.DEPTH_BITS) as number)
-				: 0,
-			depthStencilFormat: "DEPTH24_STENCIL8",
-			framebufferComplete,
-			maximumTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
-			stencilBits: framebufferComplete
-				? (gl.getParameter(gl.STENCIL_BITS) as number)
-				: 0,
-		};
-	} finally {
-		restoreProbeState(gl, previous);
-		gl.deleteTexture(depthStencil);
-		gl.deleteTexture(color);
-		gl.deleteFramebuffer(framebuffer);
-	}
-}
-
-interface PortalProbeState {
-	readonly activeTexture: number;
-	readonly activeTextureBinding: WebGLTexture | null;
-	readonly drawFramebuffer: WebGLFramebuffer | null;
-	readonly readFramebuffer: WebGLFramebuffer | null;
-	readonly texture0Binding: WebGLTexture | null;
-}
-
-function captureProbeState(gl: WebGL2RenderingContext): PortalProbeState {
-	const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
-	const activeTextureBinding = gl.getParameter(
-		gl.TEXTURE_BINDING_2D,
-	) as WebGLTexture | null;
-	gl.activeTexture(gl.TEXTURE0);
-	const texture0Binding = gl.getParameter(
-		gl.TEXTURE_BINDING_2D,
-	) as WebGLTexture | null;
-	gl.activeTexture(activeTexture);
-	return {
-		activeTexture,
-		activeTextureBinding,
-		drawFramebuffer: gl.getParameter(
-			gl.DRAW_FRAMEBUFFER_BINDING,
-		) as WebGLFramebuffer | null,
-		readFramebuffer: gl.getParameter(
-			gl.READ_FRAMEBUFFER_BINDING,
-		) as WebGLFramebuffer | null,
-		texture0Binding,
-	};
-}
-
-function restoreProbeState(
-	gl: WebGL2RenderingContext,
-	state: PortalProbeState,
-): void {
-	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, state.drawFramebuffer);
-	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, state.readFramebuffer);
-	gl.activeTexture(gl.TEXTURE0);
-	gl.bindTexture(gl.TEXTURE_2D, state.texture0Binding);
-	gl.activeTexture(state.activeTexture);
-	gl.bindTexture(gl.TEXTURE_2D, state.activeTextureBinding);
-}
-
-function initializeProbeTexture(
-	gl: WebGL2RenderingContext,
-	texture: WebGLTexture,
-	internalFormat: number,
-	format: number,
-	type: number,
-): void {
-	gl.bindTexture(gl.TEXTURE_2D, texture);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-	gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, 1, 1, 0, format, type, null);
-}
-
-function requireGlResource<T>(resource: T | null, label: string): T {
-	if (resource === null) throw new Error(`Failed to allocate ${label}.`);
-	return resource;
 }

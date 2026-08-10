@@ -5,7 +5,6 @@ import {
 } from "../landblocks";
 import {
 	createPerspectiveMat4,
-	createTranslationMat4,
 	createViewMat4,
 	mat4ToFloat32Array,
 	multiplyMat4,
@@ -13,18 +12,9 @@ import {
 } from "../math/matrices";
 import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
-import {
-	INCLUDE_ALL_SCENE_CULLING_GROUPS,
-	type SceneNodeId,
-	type SceneScope,
-} from "../scene";
+import { type SceneNodeId, type SceneScope } from "../scene";
 import { scopeFor, scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
-import {
-	PortalRenderGraphPlanner,
-	type PortalRenderGraphPlanResult,
-	type PortalRenderWorkPlan,
-} from "./portal-render-graph";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type {
 	ObjectMaterialBinding,
@@ -133,17 +123,8 @@ import {
 	type ObjectBlendPolicy,
 } from "./object-rendering-policy";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
-import {
-	MAXIMUM_PORTAL_RENDER_LAYER,
-	WebGL2PortalSubstrate,
-} from "./webgl2-portal-substrate";
 import type { PreparedPortalProjection } from "./portal-view-window";
 import type { PortalScopeWindowCullInput } from "./portal-scope-window-culler";
-import {
-	executePortalGraph,
-	type PortalFrameDiagnostics,
-} from "./webgl2-portal-executor";
-import type { ResolvedPortalMask } from "./webgl2-portal-mask";
 import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import {
@@ -185,8 +166,6 @@ import {
 
 /** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
 const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
-/** Corruption guard only; fixed-point convergence, not this number, terminates valid planning. */
-const PORTAL_PLANNING_WORK_ITEM_LIMIT = 100_000;
 
 /** One visible landblock terrain source paired with selected renderer resources. */
 /**
@@ -362,24 +341,8 @@ interface PreparedView
 /** Whether one contribution owns exterior-global passes such as sky and weather. */
 type SceneRenderDomain = "exterior" | "indoor";
 
-/** Read-only Gate-E evidence from the final pure portal planner and shared scene query. */
-export interface PortalRenderGraphProbeResult {
-	readonly planningDurationMs: number;
-	readonly result: PortalRenderGraphPlanResult;
-	readonly selectedSceneEntryCount: number | null;
-}
-
-/** Explicit portal-graph execution evidence without enabling the public portal render mode. */
+/** Explicit production-geometry evidence for the public scope-atlas path. */
 export interface PortalExecutionProbeResult {
-	readonly diagnostics: PortalFrameDiagnostics | null;
-	readonly planningDurationMs: number;
-	readonly result: PortalRenderGraphPlanResult;
-	/** Selection and submission facts sampled immediately after the explicit execution. */
-	readonly selectionMetrics: FrameSelectionMetrics | null;
-}
-
-/** Explicit production-geometry evidence for the complete replacement scope-atlas path. */
-export interface PortalScopeAtlasExecutionProbeResult {
 	readonly crossingCount: number;
 	readonly objectSubmissionCount: number;
 	readonly planningDurationMs: number;
@@ -411,19 +374,16 @@ interface MutableFrameSelectionMetrics {
 	submittedEnvCellResidentDrawCount: number;
 	submittedEnvCellResidentTriangleCount: number;
 	envCellShellCullOverrideCount: number;
-	submittedPortalApertureDrawCount: number;
-	portalMaskEdgeCount: number;
-	portalNearPlaneSeedCount: number;
-	portalRejectedFacingCrossingCount: number;
-	portalRejectedFootprintCount: number;
-	portalSameDomainBoundaryCrossingCount: number;
-	portalAdmittedScopeWindowStateCount: number;
-	portalRenderLayerCount: number;
-	portalRenderNodeCount: number;
-	portalSubmittedRenderNodeCount: number;
-	portalExteriorRenderCount: number;
-	sceneDomainTargetCount: number;
-	sceneDomainTargetBytes: number;
+	portalSelectedScopeCount: number;
+	portalSelectedCrossingCount: number;
+	portalCompletedCullDepth: number;
+	portalPropagationDrawCount: number;
+	portalProjectionPrimitiveCount: number;
+	portalAtlasTilePixelCount: number;
+	portalFrontierRetreatCount: number;
+	portalTruncatedViewCount: number;
+	portalFramebufferCount: number;
+	portalTargetBytes: number;
 	submittedStaticObjectDrawCount: number;
 	submittedStaticObjectTriangleCount: number;
 	submittedBakedStaticObjectDrawCount: number;
@@ -503,12 +463,8 @@ export class WebGL2Renderer implements Renderer {
 	readonly #generatedInstanceSelector = new GeneratedInstanceSelector();
 	/** Exact state mirror scoped to independently invalidated object phases. */
 	readonly #objectState: WebGL2ObjectStateApplicator;
-	/** Lazy portal mechanics; construction allocates no GPU target or shader resource. */
-	readonly #portalSubstrate: WebGL2PortalSubstrate;
-	/** Replacement portal owner, created only by an explicit scope-atlas execution. */
+	/** Portal owner created lazily when the first portal frame needs GPU resources. */
 	#portalScopeAtlasPipeline: WebGL2PortalScopeAtlasPipeline | null = null;
-	/** Pure planner retaining only the immutable index for the active topology revision. */
-	readonly #portalRenderGraphPlanner = new PortalRenderGraphPlanner();
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
 	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
@@ -557,19 +513,16 @@ export class WebGL2Renderer implements Renderer {
 		submittedEnvCellResidentDrawCount: 0,
 		submittedEnvCellResidentTriangleCount: 0,
 		envCellShellCullOverrideCount: 0,
-		submittedPortalApertureDrawCount: 0,
-		portalMaskEdgeCount: 0,
-		portalNearPlaneSeedCount: 0,
-		portalRejectedFacingCrossingCount: 0,
-		portalRejectedFootprintCount: 0,
-		portalSameDomainBoundaryCrossingCount: 0,
-		portalAdmittedScopeWindowStateCount: 0,
-		portalRenderLayerCount: 0,
-		portalRenderNodeCount: 0,
-		portalSubmittedRenderNodeCount: 0,
-		portalExteriorRenderCount: 0,
-		sceneDomainTargetCount: 0,
-		sceneDomainTargetBytes: 0,
+		portalSelectedScopeCount: 0,
+		portalSelectedCrossingCount: 0,
+		portalCompletedCullDepth: 0,
+		portalPropagationDrawCount: 0,
+		portalProjectionPrimitiveCount: 0,
+		portalAtlasTilePixelCount: 0,
+		portalFrontierRetreatCount: 0,
+		portalTruncatedViewCount: 0,
+		portalFramebufferCount: 0,
+		portalTargetBytes: 0,
 		visibleSceneEntries: 0,
 		visibleStaticLayerCount: 0,
 		visibleStaticNodeCount: 0,
@@ -649,7 +602,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#dynamicLightScratch = createDynamicLightScratch();
 		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
 		this.#objectState = new WebGL2ObjectStateApplicator(gl);
-		this.#portalSubstrate = new WebGL2PortalSubstrate(gl);
 		this.#world = world;
 		this.#terrainProgram = createWebGL2TerrainProgram(gl);
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
@@ -824,11 +776,7 @@ export class WebGL2Renderer implements Renderer {
 			}
 		}
 		const finalizationStartedAt = profile?.beginCpuPhase();
-		const portalTargets = this.#portalSubstrate.getDiagnostics();
-		this.#frameSelectionMetrics.sceneDomainTargetCount =
-			portalTargets.activeTargetCount;
-		this.#frameSelectionMetrics.sceneDomainTargetBytes =
-			portalTargets.activeBytes;
+		this.#updatePortalTargetMetrics();
 		this.#finishFrameSelectionMetrics();
 		if (profile && finalizationStartedAt !== undefined) {
 			profile.finishCpuPhase("finalization", finalizationStartedAt);
@@ -857,224 +805,70 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const placement = viewInput.camera.placement;
 		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
+		const pipeline = (this.#portalScopeAtlasPipeline ??=
+			new WebGL2PortalScopeAtlasPipeline(this.#gl));
 		const planningStartedAt = profile?.beginCpuPhase();
-		const result = this.#planPortalRenderGraph(
-			prepared,
-			viewInput,
-			rootScope,
-			PORTAL_PLANNING_WORK_ITEM_LIMIT,
+		const frame = pipeline.prepare(
+			this.#world.getPortalTopologyView(),
+			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
+			prepared.anchorCoordinates,
+			prepared.clipFromAnchor,
+			this.#frameWidth,
+			this.#frameHeight,
 		);
 		if (profile && planningStartedAt !== undefined) {
-			profile.finishCpuPhase("portalGraphPlanning", planningStartedAt);
+			profile.finishCpuPhase("portalPlanning", planningStartedAt);
 		}
-		if (result.kind !== "planned") {
-			throw new Error(
-				`Portal frame planning failed ${result.reason}: required stencil ${result.requiredMaximumStencilValue}, work items ${result.workItemCount}.`,
-			);
-		}
-		const contributionsByNode = this.#collectPortalNodeContributions(
+		this.#accumulatePortalScopeAtlasMetrics(frame);
+		this.#executePortalScopeAtlasFrame(
 			prepared,
-			result.plan,
+			frame,
+			clearColor,
+			shading,
 			frameSettings,
 			profile,
+			pipeline,
 		);
-		const diagnostics = executePortalGraph(this.#portalSubstrate, {
-			clearColor,
-			destination: null,
-			extent: { height: this.#frameHeight, width: this.#frameWidth },
-			plan: result.plan,
-			renderExterior: (_target, outdoorNodeId) => {
-				const contributions = mergePortalNodeContributions(
-					[outdoorNodeId],
-					contributionsByNode,
-					this.#particleBatcher,
-					profile,
-				);
-				const view = { ...prepared, ...contributions };
-				if (profile) this.#drawProfiledView(view, shading, "exterior", profile);
-				else this.#drawView(view, shading, "exterior");
-			},
-			renderIndoorNodes: (_target, renderNodeIds) => {
-				const contributions = mergePortalNodeContributions(
-					renderNodeIds,
-					contributionsByNode,
-					this.#particleBatcher,
-					profile,
-				);
-				const view = { ...prepared, ...contributions };
-				if (profile) this.#drawProfiledView(view, shading, "indoor", profile);
-				else this.#drawView(view, shading, "indoor");
-			},
-			resolveVisibilityAperture: (apertureId, crossingId) =>
-				this.#resolvePortalMask(prepared, apertureId, crossingId),
-		});
-		this.#accumulatePortalDiagnostics(diagnostics);
-		const portalTargets = this.#portalSubstrate.getDiagnostics();
-		this.#frameSelectionMetrics.sceneDomainTargetCount =
-			portalTargets.activeTargetCount;
-		this.#frameSelectionMetrics.sceneDomainTargetBytes =
-			portalTargets.activeBytes;
 	}
 
-	/** Aggregate one independent view's consumed graph facts into the frame snapshot. */
-	#accumulatePortalDiagnostics(diagnostics: PortalFrameDiagnostics): void {
+	/** Aggregate one independent view's scope-atlas plan into the frame snapshot. */
+	#accumulatePortalScopeAtlasMetrics(frame: WebGL2PortalScopeAtlasFrame): void {
+		const atlas = frame.atlas;
+		const visibility = atlas.visibility;
 		const metrics = this.#frameSelectionMetrics;
-		metrics.submittedPortalApertureDrawCount += diagnostics.maskDrawCount;
-		metrics.portalMaskEdgeCount += diagnostics.maskEdgeCount;
-		metrics.portalNearPlaneSeedCount += diagnostics.nearPlaneSeedCount;
-		metrics.portalRejectedFacingCrossingCount +=
-			diagnostics.rejectedFacingCrossingCount;
-		metrics.portalRejectedFootprintCount +=
-			diagnostics.rejectedPortalFootprintCount;
-		metrics.portalSameDomainBoundaryCrossingCount +=
-			diagnostics.sameDomainBoundaryCrossingCount;
-		metrics.portalAdmittedScopeWindowStateCount +=
-			diagnostics.admittedScopeWindowStateCount;
-		metrics.portalRenderLayerCount += diagnostics.renderLayerCount;
-		metrics.portalRenderNodeCount += diagnostics.renderNodeCount;
-		metrics.portalSubmittedRenderNodeCount +=
-			diagnostics.submittedRenderNodeCount;
-		metrics.portalExteriorRenderCount += diagnostics.exteriorRenderCount;
+		metrics.portalSelectedScopeCount += visibility.selectedScopeCount;
+		metrics.portalSelectedCrossingCount += visibility.selectedCrossingCount;
+		metrics.portalCompletedCullDepth += visibility.completedDepth;
+		metrics.portalPropagationDrawCount +=
+			atlas.commands.maskPropagationCommandCount;
+		metrics.portalProjectionPrimitiveCount +=
+			visibility.trace.projectionPrimitiveCount;
+		metrics.portalAtlasTilePixelCount += atlas.trace.tilePixelCount;
+		metrics.portalFrontierRetreatCount += atlas.trace.frontierRetreatCount;
+		if (visibility.status === "truncated")
+			metrics.portalTruncatedViewCount += 1;
+	}
+
+	/** Copy renderer-lifetime target ownership into the current diagnostics snapshot. */
+	#updatePortalTargetMetrics(): void {
+		const diagnostics =
+			this.#portalScopeAtlasPipeline?.getDiagnostics() ?? null;
+		this.#frameSelectionMetrics.portalFramebufferCount =
+			diagnostics?.activeFramebufferCount ?? 0;
+		this.#frameSelectionMetrics.portalTargetBytes =
+			diagnostics?.activeBytes ?? 0;
 	}
 
 	/**
-	 * Exercise final portal planning without allocating targets or activating portal drawing.
+	 * Execute the public portal path through production contribution and GPU paths.
 	 *
-	 * The returned culling count consumes the same explicit-scope SceneGraph query that Phase 12
-	 * will use, preventing the diagnostic seam from inventing a parallel selection policy.
-	 */
-	probePortalRenderGraph(
-		anchorLandblockId: FrameInput["anchorLandblockId"],
-		viewInput: FrameViewInput,
-		rootScope: SceneScope,
-		safetyWorkItemLimit: number,
-	): PortalRenderGraphProbeResult {
-		this.#assertDeviceReady();
-		this.#resizeCanvasForDpr();
-		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
-		const planningStartedAt = performance.now();
-		const result = this.#planPortalRenderGraph(
-			prepared,
-			viewInput,
-			rootScope,
-			safetyWorkItemLimit,
-		);
-		const planningDurationMs = performance.now() - planningStartedAt;
-		const selectedSceneEntryCount =
-			result.kind === "planned"
-				? this.#world.queryScopesScene(
-						prepared.frustum,
-						anchorLandblockId,
-						result.plan.selectedScopes,
-						INCLUDE_ALL_SCENE_CULLING_GROUPS,
-					).entries.length
-				: null;
-		return { planningDurationMs, result, selectedSceneEntryCount };
-	}
-
-	/**
-	 * Execute one complete graph through production contribution and GPU paths.
-	 *
-	 * This explicit harness seam returns one-shot planning and execution facts without changing the
-	 * continuous frame mode.
+	 * This harness seam shares both planning and execution with continuous portal rendering.
 	 */
 	probePortalExecution(
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		viewInput: FrameViewInput,
 		rootScope: SceneScope,
-		safetyWorkItemLimit: number,
 	): PortalExecutionProbeResult {
-		this.#assertDeviceReady();
-		this.#resizeCanvasForDpr();
-		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
-		const planningStartedAt = performance.now();
-		const result = this.#planPortalRenderGraph(
-			prepared,
-			viewInput,
-			rootScope,
-			safetyWorkItemLimit,
-		);
-		const planningDurationMs = performance.now() - planningStartedAt;
-		if (result.kind !== "planned") {
-			return {
-				diagnostics: null,
-				planningDurationMs,
-				result,
-				selectionMetrics: null,
-			};
-		}
-		this.#resetFrameSelectionMetrics(1, "portal");
-		const contributionsByNode = this.#collectPortalNodeContributions(
-			prepared,
-			result.plan,
-			DEFAULT_FRAME_SETTINGS,
-			null,
-		);
-		const diagnostics = executePortalGraph(this.#portalSubstrate, {
-			clearColor: [
-				FRONTEND_TUNING.rendering.clearColor.red,
-				FRONTEND_TUNING.rendering.clearColor.green,
-				FRONTEND_TUNING.rendering.clearColor.blue,
-				FRONTEND_TUNING.rendering.clearColor.alpha,
-			],
-			destination: null,
-			extent: { height: this.#frameHeight, width: this.#frameWidth },
-			plan: result.plan,
-			renderExterior: (_target, outdoorNodeId) => {
-				const contributions = mergePortalNodeContributions(
-					[outdoorNodeId],
-					contributionsByNode,
-					this.#particleBatcher,
-					null,
-				);
-				this.#drawView(
-					{ ...prepared, ...contributions },
-					PROBE_SHADING,
-					"exterior",
-				);
-			},
-			renderIndoorNodes: (_target, renderNodeIds) => {
-				const contributions = mergePortalNodeContributions(
-					renderNodeIds,
-					contributionsByNode,
-					this.#particleBatcher,
-					null,
-				);
-				this.#drawView(
-					{ ...prepared, ...contributions },
-					PROBE_SHADING,
-					"indoor",
-				);
-			},
-			resolveVisibilityAperture: (apertureId, crossingId) =>
-				this.#resolvePortalMask(prepared, apertureId, crossingId),
-		});
-		this.#accumulatePortalDiagnostics(diagnostics);
-		const portalTargets = this.#portalSubstrate.getDiagnostics();
-		this.#frameSelectionMetrics.sceneDomainTargetCount =
-			portalTargets.activeTargetCount;
-		this.#frameSelectionMetrics.sceneDomainTargetBytes =
-			portalTargets.activeBytes;
-		this.#finishFrameSelectionMetrics();
-		return {
-			diagnostics,
-			planningDurationMs,
-			result,
-			selectionMetrics: { ...this.#frameSelectionMetrics },
-		};
-	}
-
-	/**
-	 * Execute the replacement path explicitly without shadowing continuous production frames.
-	 *
-	 * This remains an explicit probe until every deferred family shares the scope-envelope contract
-	 * and the replacement compositor can cut portal mode over atomically.
-	 */
-	probePortalScopeAtlasExecution(
-		anchorLandblockId: FrameInput["anchorLandblockId"],
-		viewInput: FrameViewInput,
-		rootScope: SceneScope,
-	): PortalScopeAtlasExecutionProbeResult {
 		this.#assertDeviceReady();
 		this.#resizeCanvasForDpr();
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
@@ -1091,6 +885,7 @@ export class WebGL2Renderer implements Renderer {
 		);
 		const planningDurationMs = performance.now() - planningStartedAt;
 		this.#resetFrameSelectionMetrics(1, "portal");
+		this.#accumulatePortalScopeAtlasMetrics(frame);
 		this.#executePortalScopeAtlasFrame(
 			prepared,
 			frame,
@@ -1105,7 +900,7 @@ export class WebGL2Renderer implements Renderer {
 			null,
 			pipeline,
 		);
-		const targetDiagnostics = pipeline.getDiagnostics();
+		this.#updatePortalTargetMetrics();
 		this.#finishFrameSelectionMetrics();
 		return {
 			crossingCount: frame.atlas.visibility.selectedCrossingCount,
@@ -1113,7 +908,7 @@ export class WebGL2Renderer implements Renderer {
 			planningDurationMs,
 			scopeCount: frame.count,
 			selectionMetrics: { ...this.#frameSelectionMetrics },
-			targetBytes: targetDiagnostics.activeBytes,
+			targetBytes: this.#frameSelectionMetrics.portalTargetBytes,
 			terrainSubmissionCount: frame.opaqueRouting.trace.terrainSubmissionCount,
 			traversalDepth: frame.atlas.commands.traversalDepth,
 		};
@@ -1122,9 +917,8 @@ export class WebGL2Renderer implements Renderer {
 	/**
 	 * Execute one already-planned scope-atlas frame without reconstructing visibility or draw order.
 	 *
-	 * This is the single replacement-compositor schedule used by the explicit probe and the pending
-	 * public-mode cutover. Keeping it unified prevents the validation path from proving a subtly
-	 * different weather/deferred order than continuous rendering will use.
+	 * This is the single public compositor schedule shared by continuous rendering and its explicit
+	 * probe. Keeping it unified prevents diagnostics from exercising a subtly different order.
 	 */
 	#executePortalScopeAtlasFrame(
 		prepared: PreparedViewGeometry,
@@ -1139,7 +933,7 @@ export class WebGL2Renderer implements Renderer {
 			prepared.frustum,
 			prepared.anchorLandblockId,
 			frame,
-			INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			renderCullingGroupFilter(frameSettings.layerVisibility),
 		);
 		const contributions = this.#resolveSceneContributions(
 			prepared,
@@ -1194,11 +988,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawBlendedObjects(view, objectPhases, shading, profile, pipeline);
 		this.#drawParticles(view, profile, particlesByScope, pipeline);
 		this.#beginObjectPhase();
-		const targetDiagnostics = pipeline.getDiagnostics();
-		this.#frameSelectionMetrics.sceneDomainTargetCount =
-			targetDiagnostics.extents === null ? 0 : 1;
-		this.#frameSelectionMetrics.sceneDomainTargetBytes =
-			targetDiagnostics.activeBytes;
 	}
 
 	async destroy(): Promise<void> {
@@ -1206,7 +995,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameProfiler = null;
 		this.#textureSamplers.destroy();
 		destroyWebGL2TerrainLightMaskTexture(this.#gl, this.#terrainLightMask);
-		this.#portalSubstrate.destroy();
 		this.#portalScopeAtlasPipeline?.destroy();
 		this.#portalScopeAtlasPipeline = null;
 		this.#skyPass?.destroy();
@@ -1297,26 +1085,6 @@ export class WebGL2Renderer implements Renderer {
 		};
 	}
 
-	#planPortalRenderGraph(
-		prepared: PreparedViewGeometry,
-		viewInput: FrameViewInput,
-		rootScope: SceneScope,
-		safetyWorkItemLimit: number,
-	): PortalRenderGraphPlanResult {
-		return this.#portalRenderGraphPlanner.plan(
-			this.#world.getPortalTopologyView(),
-			{
-				...this.#createPortalScopeWindowCullInput(
-					prepared,
-					viewInput,
-					rootScope,
-				),
-				maximumStencilValue: MAXIMUM_PORTAL_RENDER_LAYER,
-				safetyWorkItemLimit,
-			},
-		);
-	}
-
 	#createPortalScopeWindowCullInput(
 		prepared: PreparedViewGeometry,
 		viewInput: FrameViewInput,
@@ -1327,8 +1095,7 @@ export class WebGL2Renderer implements Renderer {
 			...prepared,
 			nearClipVolume: createCameraNearClipVolume(
 				viewInput.camera,
-				// Anchor-relative, matching the view matrix this volume is compared against. It used to
-				// be smuggled through a synthesized `CameraPlacement`, whose position is canonical.
+				// Anchor-relative, matching the view matrix this volume is compared against.
 				{
 					position: prepared.cameraPosition,
 					rotation: viewInput.camera.placement.rotation,
@@ -1343,104 +1110,6 @@ export class WebGL2Renderer implements Renderer {
 				minimumPixelArea: this.#minimumPortalFootprintPixelArea,
 			},
 			rootScope,
-		};
-	}
-
-	/** Resolve each unique graph node through the shared explicit-scope scene query exactly once. */
-	#collectPortalNodeContributions(
-		prepared: PreparedViewGeometry,
-		plan: PortalRenderWorkPlan,
-		frameSettings: FrameSettings,
-		profile: WebGL2FrameProfileCapture | null,
-	): ReadonlyMap<string, PreparedSceneContributions> {
-		const contributionsByNode = new Map<string, PreparedSceneContributions>();
-		const claimedSceneNodes = new Set<SceneNodeId>();
-		const renderNodeBySceneNode = new Map<SceneNodeId, string>();
-		const cullingGroupFilter = renderCullingGroupFilter(
-			frameSettings.layerVisibility,
-		);
-		for (const node of plan.nodes) {
-			const queryStartedAt = profile?.beginCpuPhase();
-			const visible = this.#world.queryScopesScene(
-				prepared.frustum,
-				prepared.anchorLandblockId,
-				node.scopes,
-				cullingGroupFilter,
-			);
-			if (profile && queryStartedAt !== undefined) {
-				profile.finishCpuPhase("sceneQuery", queryStartedAt);
-			}
-			for (const sceneNodeId of visible.entries) {
-				if (!claimedSceneNodes.add(sceneNodeId)) {
-					throw new Error(
-						`Portal scene node ${sceneNodeId} belongs to more than one render node.`,
-					);
-				}
-				renderNodeBySceneNode.set(sceneNodeId, node.id);
-			}
-			contributionsByNode.set(
-				node.id,
-				this.#resolveSceneContributions(
-					prepared,
-					visible.entries,
-					frameSettings,
-					profile,
-				),
-			);
-			profile?.recordPortalNodePreparation();
-		}
-		if (contributionsByNode.size !== plan.nodes.length) {
-			throw new Error("Portal contribution collection lost a render node.");
-		}
-		const outdoorNodeId =
-			plan.nodes.find((node) => node.kind === "outdoor")?.id ?? null;
-		const particlesByNode = this.#particleBatcher.route(
-			plan.topologyRevision,
-			this.#particleSources,
-			(owner) =>
-				owner === EXTERIOR_PARTICLE_RENDER_OWNER
-					? outdoorNodeId
-					: (renderNodeBySceneNode.get(owner) ?? null),
-		);
-		for (const [nodeId, contributions] of contributionsByNode) {
-			contributionsByNode.set(nodeId, {
-				...contributions,
-				particles: particlesByNode.get(nodeId) ?? [],
-			});
-		}
-		return contributionsByNode;
-	}
-
-	/** Resolve one effective aperture in its owning landblock frame into this view's clip frame. */
-	#resolvePortalMask(
-		prepared: PreparedViewGeometry,
-		apertureId: Extract<
-			PortalRenderWorkPlan["maskEdges"][number]["maskSource"],
-			{ readonly kind: "world-aperture" }
-		>["visibilityApertureId"],
-		crossingId: PortalRenderWorkPlan["maskEdges"][number]["crossingId"],
-	): ResolvedPortalMask {
-		const drawUnit = this.#world.getPortalDrawUnit(apertureId);
-		if (!drawUnit) {
-			throw new Error(
-				`Portal crossing ${crossingId} cannot resolve visibility aperture ${apertureId}.`,
-			);
-		}
-		const resolved = this.#world.resolvePortalDrawUnit(drawUnit);
-		const landblockOffset = createLandblockOffset(
-			getLandblockCoordinates(drawUnit.landblockId),
-			prepared.anchorCoordinates,
-		);
-		const anchorFromLandblock = createTranslationMat4(landblockOffset);
-		const clipFromLocal = multiplyMat4(
-			prepared.clipFromAnchor,
-			anchorFromLandblock,
-		);
-		return {
-			clipFromLocal: mat4ToFloat32Array(clipFromLocal),
-			geometry: this.#resources.getGeometry(resolved.geometry),
-			indexCount: resolved.drawUnit.indexCount,
-			indexStart: resolved.drawUnit.indexStart,
 		};
 	}
 
@@ -1882,19 +1551,16 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedEnvCellResidentDrawCount = 0;
 		metrics.submittedEnvCellResidentTriangleCount = 0;
 		metrics.envCellShellCullOverrideCount = 0;
-		metrics.submittedPortalApertureDrawCount = 0;
-		metrics.portalMaskEdgeCount = 0;
-		metrics.portalNearPlaneSeedCount = 0;
-		metrics.portalRejectedFacingCrossingCount = 0;
-		metrics.portalRejectedFootprintCount = 0;
-		metrics.portalSameDomainBoundaryCrossingCount = 0;
-		metrics.portalAdmittedScopeWindowStateCount = 0;
-		metrics.portalRenderLayerCount = 0;
-		metrics.portalRenderNodeCount = 0;
-		metrics.portalSubmittedRenderNodeCount = 0;
-		metrics.portalExteriorRenderCount = 0;
-		metrics.sceneDomainTargetCount = 0;
-		metrics.sceneDomainTargetBytes = 0;
+		metrics.portalSelectedScopeCount = 0;
+		metrics.portalSelectedCrossingCount = 0;
+		metrics.portalCompletedCullDepth = 0;
+		metrics.portalPropagationDrawCount = 0;
+		metrics.portalProjectionPrimitiveCount = 0;
+		metrics.portalAtlasTilePixelCount = 0;
+		metrics.portalFrontierRetreatCount = 0;
+		metrics.portalTruncatedViewCount = 0;
+		metrics.portalFramebufferCount = 0;
+		metrics.portalTargetBytes = 0;
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
 		this.#visibleEnvCellScopes.clear();
@@ -2041,6 +1707,10 @@ export class WebGL2Renderer implements Renderer {
 					portalAtlas: true,
 				}))
 			: this.#skyProgram;
+		// Program selection lives here because atlas routing writes a uniform owned by that variant.
+		// Uploading the tile before binding its program is INVALID_OPERATION and leaves the transform
+		// zeroed, collapsing every sky vertex without making the subsequent draw itself fail.
+		this.#gl.useProgram(program.program);
 		if (portalPipeline) {
 			const clipTransform = program.clipTransformUniform;
 			if (!clipTransform) {
@@ -3201,66 +2871,6 @@ function resolveStaticFragmentInstanceInput(
 		throw new Error("Baked static object unexpectedly resolved instance data.");
 	}
 	return { cohortKey: drawUnit.cohortKey, data, kind: "static-fragment" };
-}
-
-/**
- * Combine every unique render node assigned to one stencil layer before drawing its passes.
- *
- * Merging first presents one complete contribution to instance grouping and transparency policy
- * instead of accidentally treating each environment cell as an independent miniature scene.
- */
-function mergePortalNodeContributions(
-	renderNodeIds: readonly PortalRenderWorkPlan["nodes"][number]["id"][],
-	contributionsByNode: ReadonlyMap<string, PreparedSceneContributions>,
-	particleBatcher: ParticleRenderBatcher,
-	profile: WebGL2FrameProfileCapture | null,
-): PreparedSceneContributions {
-	profile?.recordPortalContributionUse(renderNodeIds);
-	if (renderNodeIds.length === 1) {
-		const renderNodeId = renderNodeIds[0];
-		if (renderNodeId === undefined) {
-			throw new Error(
-				"Single-node portal merge lost its render node identity.",
-			);
-		}
-		const contributions = contributionsByNode.get(renderNodeId);
-		if (!contributions) {
-			throw new Error(
-				`Portal render layer cannot resolve contributions for ${renderNodeId}.`,
-			);
-		}
-		return contributions;
-	}
-	const objects: PreparedObjectFrameInput[] = [];
-	const terrain: TerrainFrameInput[] = [];
-	const particleBatchGroups: (readonly ParticleDrawBatch[])[] = [];
-	const consumedNodeIds = new Set<string>();
-	const mergeStartedAt = profile?.beginCpuPhase();
-	for (const renderNodeId of renderNodeIds) {
-		if (!consumedNodeIds.add(renderNodeId)) {
-			throw new Error(
-				`Portal render layer requests node ${renderNodeId} more than once.`,
-			);
-		}
-		const contributions = contributionsByNode.get(renderNodeId);
-		if (!contributions) {
-			throw new Error(
-				`Portal render layer cannot resolve contributions for ${renderNodeId}.`,
-			);
-		}
-		objects.push(...contributions.objects);
-		terrain.push(...contributions.terrain);
-		particleBatchGroups.push(contributions.particles);
-	}
-	if (profile && mergeStartedAt !== undefined) {
-		profile.finishCpuPhase("contributionMerge", mergeStartedAt);
-		profile.recordContributionMerge();
-	}
-	return {
-		objects,
-		particles: particleBatcher.mergeContribution(particleBatchGroups),
-		terrain,
-	};
 }
 
 /** Check the semantic frame-template identity required in addition to prepared compatibility. */

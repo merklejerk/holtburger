@@ -11,7 +11,6 @@ const DEFAULT_VITE_PORT = 1420;
 const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
 const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 const DEFAULT_SETTLE_MS = 10_000;
-const DEFAULT_PORTAL_GRAPH_WORK_LIMIT = 100_000;
 const DEFAULT_VIEWPORT_WIDTH = 1_280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
 const DEFAULT_DEVICE_SCALE_FACTOR = 1;
@@ -75,14 +74,8 @@ try {
 						filteringCycleStates: result.filteringCycleStates,
 						modeCycleStates: result.modeCycleStates,
 						portalExecution: result.portalExecution,
-						portalScopeAtlasExecution: result.portalScopeAtlasExecution,
-						portalRenderGraph: result.portalRenderGraph,
 						portalContextLossPolicy: result.state.portalContextLossPolicy,
-						portalSubstrate: result.state.portalSubstrate,
 						portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
-						hybridPortalExecution: result.state.hybridPortalExecution,
-						internalPortalExecutionFixture:
-							result.state.internalPortalExecution,
 						consoleMessages: result.consoleMessages,
 						generatedDisabledState: result.generatedDisabledState,
 						fixture: options.fixture,
@@ -120,14 +113,8 @@ try {
 	if (options.filteringCycle) {
 		assertFilteringCycle(result.initialState, result.filteringCycleStates);
 	}
-	if (options.fixture === "portal-substrate") {
-		assertPortalSubstrateFixture(result.state);
-	}
-	if (options.fixture === "portal-hybrid-execution") {
-		assertHybridPortalExecutionFixture(result.state);
-	}
-	if (options.fixture === "portal-internal-execution") {
-		assertInternalPortalExecutionFixture(result.state);
+	if (options.fixture === "portal-scope-atlas") {
+		assertPortalScopeAtlasFixture(result.state);
 	}
 } finally {
 	await Promise.allSettled(children.toReversed().map(stopChild));
@@ -164,13 +151,10 @@ function parseArgs(args) {
 		traceEndpoint: null,
 		envCellCameraId: null,
 		envCellCameraPosition: null,
-		portalWorkLimit: DEFAULT_PORTAL_GRAPH_WORK_LIMIT,
 		minimumPortalFootprintPixelArea: null,
 		minimumObjectFootprintPixelArea: null,
 		offscreenAnimationSampleIntervalMs: null,
-		probePortalGraph: false,
 		executePortal: false,
-		executeScopeAtlas: false,
 		frameMode: null,
 		timeOfDay: null,
 		dayGroup: null,
@@ -342,15 +326,6 @@ function parseArgs(args) {
 					arg,
 				);
 				break;
-			case "--portal-work-limit":
-				parsed.portalWorkLimit = Number(requireValue(args, ++index, arg));
-				if (
-					!Number.isInteger(parsed.portalWorkLimit) ||
-					parsed.portalWorkLimit <= 0
-				) {
-					throw new Error("--portal-work-limit must be a positive integer.");
-				}
-				break;
 			case "--minimum-portal-footprint-pixel-area":
 				parsed.minimumPortalFootprintPixelArea = Number(
 					requireValue(args, ++index, arg),
@@ -390,14 +365,8 @@ function parseArgs(args) {
 					);
 				}
 				break;
-			case "--probe-portal-graph":
-				parsed.probePortalGraph = true;
-				break;
 			case "--execute-portal":
 				parsed.executePortal = true;
-				break;
-			case "--execute-scope-atlas":
-				parsed.executeScopeAtlas = true;
 				break;
 			case "--capture-frame": {
 				const value = Number(requireValue(args, ++index, arg));
@@ -481,16 +450,12 @@ function parseArgs(args) {
 			case "--fixture":
 				parsed.fixture = requireValue(args, ++index, arg);
 				if (
-					![
-						"blended",
-						"instanced",
-						"portal-hybrid-execution",
-						"portal-internal-execution",
-						"portal-substrate",
-					].includes(parsed.fixture)
+					!["blended", "instanced", "portal-scope-atlas"].includes(
+						parsed.fixture,
+					)
 				) {
 					throw new Error(
-						"--fixture must be blended, instanced, portal-hybrid-execution, portal-internal-execution, or portal-substrate.",
+						"--fixture must be blended, instanced, or portal-scope-atlas.",
 					);
 				}
 				break;
@@ -611,14 +576,9 @@ function parseArgs(args) {
 			"--env-cell-camera and --env-cell-position must be supplied together.",
 		);
 	}
-	if (
-		(parsed.executePortal ||
-			parsed.executeScopeAtlas ||
-			parsed.probePortalGraph) &&
-		envCellCameraOptionCount !== 2
-	) {
+	if (parsed.executePortal && envCellCameraOptionCount !== 2) {
 		throw new Error(
-			"Portal execution and graph probes require an EnvCell camera and position.",
+			"Portal execution requires an EnvCell camera and position.",
 		);
 	}
 	return parsed;
@@ -688,18 +648,14 @@ Options:
                          Authoritative EnvCell residency for the continuous camera.
   --env-cell-position <x,y,z>
                          Canonical position for the EnvCell camera.
-  --portal-work-limit <n>
-                         Explicit planner safety bound. Default: ${DEFAULT_PORTAL_GRAPH_WORK_LIMIT}
   --minimum-portal-footprint-pixel-area <px2>
                          Override the production recursive portal-footprint cutoff.
   --minimum-object-footprint-pixel-area <px2>
                          Override independently optional object footprint culling.
   --offscreen-animation-sample-interval-ms <ms>
                          Override offscreen visual animation sampling; zero is full cadence.
-  --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
   --execute-portal
-                         Execute the complete planned graph through production GPU passes.
-  --execute-scope-atlas  Execute the complete replacement scope-atlas compositor once.
+                         Execute the public portal compositor once through production GPU passes.
   --particle-seed <n>   Seed particle emission randomness so runs repeat exactly. Required for any
                          screenshot comparison of a scene containing particles.
   --capture-frame <n>   Freeze runtime time at frame n, so the captured instant is identical no
@@ -726,8 +682,7 @@ Options:
   --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
   --texture-filtering <mode>
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
-  --fixture <name>      Use the blended, instanced, portal-hybrid-execution,
-                         portal-internal-execution, or portal-substrate fixture.
+  --fixture <name>      Use the blended, instanced, or portal-scope-atlas fixture.
   --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
   --screenshot <path>   Persist the captured PNG after the harness exits.
@@ -735,63 +690,7 @@ Options:
 `);
 }
 
-function assertPortalSubstrateFixture(state) {
-	const capabilities = state.portalTargetCapabilities;
-	if (
-		capabilities?.framebufferComplete !== true ||
-		capabilities.colorFormat !== "RGBA8" ||
-		capabilities.depthStencilFormat !== "DEPTH24_STENCIL8" ||
-		capabilities.depthBits !== 24 ||
-		capabilities.stencilBits !== 8 ||
-		capabilities.maximumTextureSize < 16
-	) {
-		throw new Error(
-			`Portal target capability probe failed: ${JSON.stringify(capabilities)}.`,
-		);
-	}
-	const fixture = state.portalSubstrate;
-	if (!fixture) {
-		throw new Error("Portal substrate fixture did not publish evidence.");
-	}
-	for (const field of [
-		"arbitraryApertureMaskPassed",
-		"finalPresentationPassed",
-		"layerUnionPassed",
-		"maskedDepthResetPassed",
-		"maskedDepthResetRetainedColor",
-		"maskedSceneInitializationPassed",
-		"nestedLayerConfinementPassed",
-		"ordinaryStateRestored",
-		"orderedLayerOverwritePassed",
-		"parentConstrainedApertureMaskPassed",
-		"parentConstrainedWindowMaskPassed",
-		"resizedTargetReplaced",
-	]) {
-		if (fixture[field] !== true) {
-			throw new Error(`Portal substrate fixture failed ${field}.`);
-		}
-	}
-	assertTargetDiagnostics(fixture.targetDiagnostics, {
-		activeBytes: 512,
-		activeTargetCount: 1,
-		allocatedTargetCount: 1,
-		disposedTargetCount: 0,
-		extent: { height: 8, width: 8 },
-	});
-	assertTargetDiagnostics(fixture.resizedDiagnostics, {
-		activeBytes: 2_048,
-		activeTargetCount: 1,
-		allocatedTargetCount: 2,
-		disposedTargetCount: 1,
-		extent: { height: 16, width: 16 },
-	});
-	assertTargetDiagnostics(fixture.disposedDiagnostics, {
-		activeBytes: 0,
-		activeTargetCount: 0,
-		allocatedTargetCount: 2,
-		disposedTargetCount: 2,
-		extent: null,
-	});
+function assertPortalScopeAtlasFixture(state) {
 	assertPortalScopeAtlasTargetsFixture(state.portalScopeAtlasTargets);
 	assertPortalScopeAtlasExecutorFixture(state.portalScopeAtlasExecutor);
 	const contextLoss = state.portalContextLossPolicy;
@@ -809,11 +708,11 @@ function assertPortalSubstrateFixture(state) {
 	if (
 		!metrics ||
 		metrics.envCellRenderMode !== "flat" ||
-		metrics.submittedPortalApertureDrawCount !== 0 ||
-		metrics.sceneDomainTargetCount !== 0
+		metrics.portalPropagationDrawCount !== 0 ||
+		metrics.portalFramebufferCount !== 0
 	) {
 		throw new Error(
-			`Portal substrate fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
+			`Portal scope-atlas fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
 		);
 	}
 }
@@ -828,6 +727,8 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 		"deferredCompositionMatchesOracle",
 		"exteriorWeatherComposesBehindChildOpaque",
 		"frontierMatchesOracle",
+		"nearPlaneStraddleMatchesOracle",
+		"nearPlaneStraddleOrdinaryPolicyIsRejected",
 		"opaqueOcclusionMatchesOracle",
 		"productionPackedHostileSamplerResolveMatchesOracle",
 		"productionPackedResolveMatchesOracle",
@@ -931,7 +832,7 @@ function briefHarnessReport(result) {
 		tickProfile: result.state.tickProfile,
 		frameSettings: result.state.frameSettings,
 		portalScopeAtlasExecutorFixture: result.state.portalScopeAtlasExecutor,
-		portalScopeAtlasExecution: result.portalScopeAtlasExecution,
+		portalExecution: result.portalExecution,
 		initialMetrics: result.initialState.metrics,
 		initialCamera: result.initialState.camera,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
@@ -1023,16 +924,14 @@ function assertModeCycle(initialState, states) {
 		}
 		if (expectedMode === "flat") {
 			for (const key of [
-				"portalExteriorRenderCount",
-				"portalMaskEdgeCount",
-				"portalNearPlaneSeedCount",
-				"portalRenderLayerCount",
-				"portalRenderNodeCount",
-				"portalRejectedFacingCrossingCount",
-				"portalRejectedFootprintCount",
-				"portalSameDomainBoundaryCrossingCount",
-				"portalSubmittedRenderNodeCount",
-				"submittedPortalApertureDrawCount",
+				"portalAtlasTilePixelCount",
+				"portalCompletedCullDepth",
+				"portalFrontierRetreatCount",
+				"portalProjectionPrimitiveCount",
+				"portalPropagationDrawCount",
+				"portalSelectedCrossingCount",
+				"portalSelectedScopeCount",
+				"portalTruncatedViewCount",
 			]) {
 				if (state.metrics[key] !== 0) {
 					throw new Error(
@@ -1042,17 +941,17 @@ function assertModeCycle(initialState, states) {
 			}
 		}
 	}
-	const firstPortalTargets = states[0].metrics.sceneDomainTargetCount;
-	const firstPortalTargetBytes = states[0].metrics.sceneDomainTargetBytes;
+	const firstPortalTargets = states[0].metrics.portalFramebufferCount;
+	const firstPortalTargetBytes = states[0].metrics.portalTargetBytes;
 	if (firstPortalTargets <= 0 || firstPortalTargetBytes <= 0) {
 		throw new Error(
-			"Mode cycle portal frame did not retain scene-domain targets and bytes.",
+			"Mode cycle portal frame did not retain scope-atlas targets and bytes.",
 		);
 	}
 	for (const [index, state] of states.entries()) {
 		if (
-			state.metrics.sceneDomainTargetCount !== firstPortalTargets ||
-			state.metrics.sceneDomainTargetBytes !== firstPortalTargetBytes
+			state.metrics.portalFramebufferCount !== firstPortalTargets ||
+			state.metrics.portalTargetBytes !== firstPortalTargetBytes
 		) {
 			throw new Error(
 				`Mode cycle snapshot ${index} drifted retained portal target ownership.`,
@@ -1083,215 +982,6 @@ function assertFilteringCycle(initialState, states) {
 				`Filtering cycle ${policy} changed resident resources without a content request.`,
 			);
 		}
-	}
-}
-
-function assertHybridPortalExecutionFixture(state) {
-	const fixture = state.hybridPortalExecution;
-	if (!fixture) {
-		throw new Error(
-			"Direct exterior contribution fixture did not publish evidence.",
-		);
-	}
-	for (const field of [
-		"blendOrderingPassed",
-		"exteriorDepthOcclusionPassed",
-		"hybridCyclePassed",
-		"hybridStraddlePassed",
-		"interiorDepthOrderingPassed",
-		"multiWindowUnionPassed",
-		"noStaleViewReusePassed",
-		"rootReentryPassed",
-		"straddleDualSidePassed",
-		"straddleExteriorBranchPassed",
-		"targetReusePassed",
-		"tunnelDepthResetPassed",
-	]) {
-		if (fixture[field] !== true) {
-			throw new Error(
-				`Direct exterior contribution fixture failed ${field}: ${JSON.stringify(fixture)}.`,
-			);
-		}
-	}
-	const expectedOutdoor = {
-		admittedScopeWindowStateCount: 0,
-		exteriorRenderCount: 1,
-		maskDrawCount: 2,
-		maskEdgeCount: 2,
-		nearPlaneSeedCount: 0,
-		rejectedFacingCrossingCount: 0,
-		sameDomainBoundaryCrossingCount: 0,
-		renderLayerCount: 2,
-		renderNodeCount: 2,
-		submittedRenderNodeCount: 2,
-	};
-	const expectedIndoor = { ...expectedOutdoor };
-	if (JSON.stringify(fixture.outdoorRoot) !== JSON.stringify(expectedOutdoor)) {
-		throw new Error(
-			`Exterior-root composition diagnostics mismatch: ${JSON.stringify(fixture.outdoorRoot)}.`,
-		);
-	}
-	if (JSON.stringify(fixture.indoorRoot) !== JSON.stringify(expectedIndoor)) {
-		throw new Error(
-			`Indoor-root composition diagnostics mismatch: ${JSON.stringify(fixture.indoorRoot)}.`,
-		);
-	}
-	const expectedOutdoorStraddle = {
-		...expectedOutdoor,
-		maskDrawCount: 2,
-		nearPlaneSeedCount: 1,
-		renderNodeCount: 3,
-		submittedRenderNodeCount: 3,
-	};
-	const expectedIndoorStraddle = {
-		...expectedOutdoorStraddle,
-		renderLayerCount: 3,
-	};
-	if (
-		JSON.stringify(fixture.outdoorStraddle) !==
-		JSON.stringify(expectedOutdoorStraddle)
-	) {
-		throw new Error(
-			`outdoor straddle diagnostics mismatch: ${JSON.stringify(fixture.outdoorStraddle)}.`,
-		);
-	}
-	if (
-		JSON.stringify(fixture.indoorStraddle) !==
-		JSON.stringify(expectedIndoorStraddle)
-	) {
-		throw new Error(
-			`indoor straddle diagnostics mismatch: ${JSON.stringify(fixture.indoorStraddle)}.`,
-		);
-	}
-	const expectedHybridTrace = {
-		admittedScopeWindowStateCount: 4,
-		exteriorRenderCount: 1,
-		maskDrawCount: 3,
-		maskEdgeCount: 4,
-		nearPlaneSeedCount: 0,
-		rejectedFacingCrossingCount: 0,
-		sameDomainBoundaryCrossingCount: 0,
-		renderLayerCount: 2,
-		renderNodeCount: 3,
-		submittedRenderNodeCount: 3,
-	};
-	if (
-		JSON.stringify(fixture.hybridTrace) !== JSON.stringify(expectedHybridTrace)
-	) {
-		throw new Error(
-			`Hybrid portal diagnostics mismatch: ${JSON.stringify(fixture.hybridTrace)}.`,
-		);
-	}
-	const expectedRootReentryTrace = {
-		admittedScopeWindowStateCount: 3,
-		exteriorRenderCount: 1,
-		maskDrawCount: 3,
-		maskEdgeCount: 3,
-		nearPlaneSeedCount: 0,
-		rejectedFacingCrossingCount: 0,
-		sameDomainBoundaryCrossingCount: 0,
-		renderLayerCount: 2,
-		renderNodeCount: 2,
-		submittedRenderNodeCount: 3,
-	};
-	if (
-		JSON.stringify(fixture.rootReentryTrace) !==
-		JSON.stringify(expectedRootReentryTrace)
-	) {
-		throw new Error(
-			`Root re-entry diagnostics mismatch: ${JSON.stringify(fixture.rootReentryTrace)}.`,
-		);
-	}
-	const metrics = state.metrics;
-	if (
-		!metrics ||
-		metrics.envCellRenderMode !== "flat" ||
-		metrics.submittedPortalApertureDrawCount !== 0 ||
-		metrics.sceneDomainTargetCount !== 0
-	) {
-		throw new Error(
-			`Exterior composition fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
-		);
-	}
-}
-
-function assertInternalPortalExecutionFixture(state) {
-	const fixture = state.internalPortalExecution;
-	if (!fixture) {
-		throw new Error(
-			"Internal portal execution fixture did not publish evidence.",
-		);
-	}
-	for (const field of [
-		"alphaTestPassed",
-		"exactMaskConfinementPassed",
-		"layerUnionPassed",
-		"materialOrderingPassed",
-		"nearPlaneDualSidePassed",
-		"nestedDepthConfinementPassed",
-		"uniqueNodeSubmissionPassed",
-	]) {
-		if (fixture[field] !== true) {
-			throw new Error(
-				`Internal portal execution fixture failed ${field}: ${JSON.stringify(fixture)}.`,
-			);
-		}
-	}
-	const expectedTrace = {
-		admittedScopeWindowStateCount: 5,
-		exteriorRenderCount: 0,
-		maskDrawCount: 4,
-		maskEdgeCount: 4,
-		nearPlaneSeedCount: 0,
-		rejectedFacingCrossingCount: 0,
-		sameDomainBoundaryCrossingCount: 0,
-		renderLayerCount: 3,
-		renderNodeCount: 4,
-		submittedRenderNodeCount: 4,
-	};
-	if (JSON.stringify(fixture.trace) !== JSON.stringify(expectedTrace)) {
-		throw new Error(
-			`Internal portal execution diagnostics mismatch: ${JSON.stringify(fixture.trace)}.`,
-		);
-	}
-	const expectedReverseTrace = {
-		admittedScopeWindowStateCount: 2,
-		exteriorRenderCount: 0,
-		maskDrawCount: 1,
-		maskEdgeCount: 1,
-		nearPlaneSeedCount: 1,
-		rejectedFacingCrossingCount: 0,
-		sameDomainBoundaryCrossingCount: 0,
-		renderLayerCount: 2,
-		renderNodeCount: 2,
-		submittedRenderNodeCount: 2,
-	};
-	if (
-		JSON.stringify(fixture.reverseTrace) !==
-		JSON.stringify(expectedReverseTrace)
-	) {
-		throw new Error(
-			`Reverse internal portal diagnostics mismatch: ${JSON.stringify(fixture.reverseTrace)}.`,
-		);
-	}
-	const metrics = state.metrics;
-	if (
-		!metrics ||
-		metrics.envCellRenderMode !== "flat" ||
-		metrics.submittedPortalApertureDrawCount !== 0 ||
-		metrics.sceneDomainTargetCount !== 0
-	) {
-		throw new Error(
-			`Internal portal execution fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
-		);
-	}
-}
-
-function assertTargetDiagnostics(actual, expected) {
-	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-		throw new Error(
-			`Portal target diagnostics mismatch: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}.`,
-		);
 	}
 }
 
@@ -1585,35 +1275,9 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					],
 				)
 			: null;
-		const portalRenderGraph = options.probePortalGraph
-			? await evaluate(
-					client,
-					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalRenderGraph",
-					[
-						options.envCellCameraId,
-						options.envCellCameraPosition,
-						options.cameraYawDegrees,
-						options.cameraPitchDegrees,
-						options.portalWorkLimit,
-					],
-				)
-			: null;
-		const portalExecution = options.executePortal
-			? await evaluate(
-					client,
-					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalExecution",
-					[
-						options.envCellCameraId,
-						options.envCellCameraPosition,
-						options.cameraYawDegrees,
-						options.cameraPitchDegrees,
-						options.portalWorkLimit,
-					],
-				)
-			: null;
-		let scopeAtlasScreenshot = null;
-		let portalScopeAtlasExecution = null;
-		if (options.executeScopeAtlas) {
+		let portalScreenshot = null;
+		let portalExecution = null;
+		if (options.executePortal) {
 			const args = [
 				options.envCellCameraId,
 				options.envCellCameraPosition,
@@ -1627,7 +1291,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					client,
 					`(() => {
 						const execution = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__
-							.probePortalScopeAtlasExecution(...${JSON.stringify(args)});
+							.probePortalExecution(...${JSON.stringify(args)});
 						const canvas = document.querySelector("canvas");
 						if (!(canvas instanceof HTMLCanvasElement)) {
 							throw new Error("Browser harness renderer canvas is unavailable.");
@@ -1638,12 +1302,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						};
 					})()`,
 				);
-				portalScopeAtlasExecution = capture.execution;
-				scopeAtlasScreenshot = capture.screenshot;
+				portalExecution = capture.execution;
+				portalScreenshot = capture.screenshot;
 			} else {
-				portalScopeAtlasExecution = await evaluate(
+				portalExecution = await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalScopeAtlasExecution",
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalExecution",
 					args,
 				);
 			}
@@ -1793,8 +1457,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
-		const screenshot = scopeAtlasScreenshot
-			? { data: scopeAtlasScreenshot }
+		const screenshot = portalScreenshot
+			? { data: portalScreenshot }
 			: await client.send("Page.captureScreenshot", {
 					captureBeyondViewport: false,
 					format: "png",
@@ -1807,9 +1471,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			filteringCycleStates,
 			modeCycleStates,
 			lifecycleState,
-			portalRenderGraph,
 			portalExecution,
-			portalScopeAtlasExecution,
 			portalTrace,
 			relocationState,
 			screenshot: screenshot.data,

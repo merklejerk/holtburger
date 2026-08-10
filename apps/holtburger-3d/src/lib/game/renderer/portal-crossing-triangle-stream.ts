@@ -30,12 +30,14 @@ export const PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES = 24;
 export const PORTAL_CROSSING_TRIANGLE_POSITION_OFFSET_BYTES = 0;
 export const PORTAL_CROSSING_TRIANGLE_OUTPUT_ARRIVAL_OFFSET_BYTES = 12;
 export const PORTAL_CROSSING_TRIANGLE_SOURCE_SCOPE_OFFSET_BYTES = 16;
-export const PORTAL_CROSSING_TRIANGLE_DEPTH_POLICY_OFFSET_BYTES = 20;
+export const PORTAL_CROSSING_TRIANGLE_POLICY_OFFSET_BYTES = 20;
 
 /** Integer shader encoding for an aperture allowed to tie its source surface depth. */
 export const PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL = 0;
 /** Integer shader encoding for an aperture required to be strictly nearer than source depth. */
 export const PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL = 1;
+/** Packed policy bit selecting eye-ray clipping and unconditional source-depth admission. */
+export const PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG = 2;
 
 const UINT32_BYTES = Uint32Array.BYTES_PER_ELEMENT;
 const RECORD_SLOT_COUNT =
@@ -249,7 +251,11 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 				visibility.selectedCrossingTargetScopeOrdinal(crossingOrdinal);
 			const reciprocalArrivalStateId =
 				visibility.selectedCrossingReciprocalArrivalStateId(crossingOrdinal);
-			const depthPolicy = encodeDepthPolicy(crossing.maskDepthPolicy);
+			const packedPolicy =
+				encodeDepthPolicy(crossing.maskDepthPolicy) |
+				(visibility.selectedCrossingNearPlaneStraddle(crossingOrdinal)
+					? PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG
+					: 0);
 			const offsetX =
 				(visibility.selectedCrossingVisibilityLandblockX(crossingOrdinal) -
 					anchorCoordinates.x) *
@@ -303,7 +309,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 					aperture.vertices[sourceSlot + 2]! + offsetZ;
 				this.#uintSlots[outputSlot + 3] = outputArrivalStateId;
 				this.#uintSlots[outputSlot + 4] = sourceScopeOrdinal;
-				this.#uintSlots[outputSlot + 5] = depthPolicy;
+				this.#uintSlots[outputSlot + 5] = packedPolicy;
 				this.vertexCount += 1;
 			}
 			this.trace.crossingInputCount += 1;

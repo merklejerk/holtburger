@@ -27,7 +27,12 @@ describe("portal sky shader variants", () => {
 		const shader = createSkyVertexShader(true);
 
 		expect(shader).toContain("uniform vec4 uClipTransform");
-		expect(shader).toContain("gl_Position = uClipTransform * uProjection");
+		expect(shader).toContain(
+			"clipPosition.xy = clipPosition.xy * uClipTransform.xy",
+		);
+		expect(shader).toContain("clipPosition.ww * uClipTransform.zw");
+		expect(shader).toContain("gl_Position = clipPosition");
+		expect(shader).not.toContain("uClipTransform * uProjection");
 	});
 
 	it("keeps the sky material shader independent from portal visibility state", () => {

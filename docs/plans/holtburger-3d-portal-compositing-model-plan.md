@@ -2405,16 +2405,16 @@ bound requires no convergence readback, topology walk, or new frame allocation.
 
 ### Task Checklist
 
-- [ ] List every guarantee provided by the deleted planner/executor before removal and name its
+- [x] List every guarantee provided by the deleted planner/executor before removal and name its
       replacement.
-- [ ] Delete dead layer, suffix, exterior-special-case, and ceremonial label contracts superseded
+- [x] Delete dead layer, suffix, exterior-special-case, and ceremonial label contracts superseded
       by the selected view model.
-- [ ] Sweep production code, tests, diagnostics, UI, harness labels, and documentation for retired
+- [x] Sweep production code, tests, diagnostics, UI, harness labels, and documentation for retired
       vocabulary.
-- [ ] Remove temporary archive probes, per-case logs, and hot-path instrumentation.
-- [ ] Retain only metrics with a distinct performance/correctness scenario.
-- [ ] Document model assumptions, proved rewrites, backend capacity limits, and failure behavior.
-- [ ] Run formatting, production/test typechecking, complete tests, ESLint, Knip, Clippy with
+- [x] Remove temporary comparative archive probes, per-case logs, and hot-path instrumentation.
+- [x] Retain only metrics with a distinct performance/correctness scenario.
+- [x] Document model assumptions, proved rewrites, backend capacity limits, and failure behavior.
+- [x] Run formatting, production/test typechecking, complete tests, ESLint, Knip, Clippy with
       warnings denied, builds, focused browser substrate fixtures, archive gates, complexity checks,
       and deterministic operation traces.
 
@@ -2430,6 +2430,54 @@ bound requires no convergence readback, topology walk, or new frame allocation.
 
 - Cleanup is part of the cutover. Compatibility shims preserving the disproved schedule are not an
   acceptable final state.
+- The public renderer and the explicit harness probe now share one
+  `WebGL2PortalScopeAtlasPipeline.prepare` plus execution schedule. There is no shadow compositor or
+  runtime mode flag.
+- Deleted-planner guarantee ledger:
+  - scope reachability and aperture clipping move to `PortalScopeWindowCuller`, with the independent
+    immutable `portal-scope-window-reference.ts` retaining differential proof coverage;
+  - bounded termination and preflight move to atomic complete-frontier cutoff plus the one
+    `PORTAL_RENDER_CAPACITY_POLICY` owner;
+  - mask isolation and nested ownership move to per-pixel arrival propagation in ping-pong `R8UI`
+    frontiers;
+  - independent local depth moves to one packed color/depth tile per selected authored scope;
+  - exterior reuse moves to the outdoor scope tile, with no exterior-only CPU schedule;
+  - opaque ordering/occlusion move to scope-atlas local depth plus the instanced opaque resolve;
+  - Explorer layer visibility remains one renderer-owned culling-group filter applied to the
+    scope-selection scene query before contribution preparation;
+  - transparent, additive, weather, and particle composition move to final-pass scope-envelope
+    tests while preserving physical renderer ordering and batch keys;
+  - resize/disposal and context-loss guarantees move to transactional scope-atlas target ownership
+    and whole-renderer restart policy; and
+  - flat-mode isolation remains explicit zero portal planning/command work while retaining an
+    already-allocated target generation for mode-switch reuse.
+- The immutable proof implementation is now a focused scope-window reference, not the deleted graph
+  planner. The full seeded topology/geometry and storage-order metamorphic corpus still judges the
+  arena culler, so the intentional dual implementation keeps its drift tripwire without retaining
+  dead scheduling concepts.
+- The archive tool now traces only the selected production planner, dry physical-work schedule, GPU
+  command ledger, and exact target bytes. Historical current/candidate comparisons remain in the
+  Phase 9 checkpoint and this ledger rather than as permanent executable architecture.
+- A real-GPU `0xda55ffff` mode cycle after cutover selected 18 scopes and 42 crossings, charged
+  7,880 CPU projection primitives, submitted 149 static draws, retained live particles, reproduced
+  identical portal metrics on both portal passes, reported no browser errors, and retained one
+  71,884,800-byte target generation across flat frames.
+- Final review caught one probe-to-production seam leak before commit: the scope-atlas scene query
+  still used the probe's all-groups filter. The public executor now derives the query filter from
+  `frameSettings.layerVisibility`, preserving Explorer layer toggles without changing scope
+  planning or batch identity.
+- Post-cutover field verification caught a near-plane execution seam: the arena culler retained the
+  correct eye-ray scope window but the crossing stream discarded its straddle classification, so
+  propagation sent the authored aperture through ordinary GPU near clipping and source-depth
+  rejection. Retained queue entries now rebuild one fixed byte of straddle state per crossing; the
+  existing packed crossing-policy word carries that fact without increasing vertex size or draw
+  count. For straddles, the vertex shader fixes clip-space `z` at the shared NDC epsilon, reducing
+  canonical clipping to the same `w >= epsilon` and x/y side planes used by the CPU projector, and
+  the fragment shader omits the inapplicable source-depth rejection. A numeric real-GPU fixture
+  proves the ordinary policy rejects the hostile crossing before proving the packed policy restores
+  its exact 2x2 ray footprint over nearer resident depth.
+- Full repository `prettier --check` remains red on 31 untouched pre-existing files. Every file in
+  this cutover is formatted; unrelated formatting churn is deliberately excluded from this change.
 
 ## Risks and Mitigations
 
@@ -2471,11 +2519,11 @@ bound requires no convergence readback, topology walk, or new frame allocation.
 - [x] Candidate cost vectors and archive census identify the correctness/performance frontier.
 - [x] Gate C accepts the production planner and schedule using code-derived complexity plus
       deterministic real-archive work traces before backend refinement begins.
-- [ ] The selected production planner represents path-free arrival/frontier state and authored
+- [x] The selected production planner represents path-free arrival/frontier state and authored
       scope envelopes independently from prepared domains.
-- [ ] Production budget enforcement bounds planner discovery as well as renderer execution, rejects
+- [x] Production budget enforcement bounds planner discovery as well as renderer execution, rejects
       whole frontiers deterministically, and does not compute exact rejected totals.
-- [ ] At fixed topology/capacity/resource dimensions, every accepted portal plan creates no
+- [x] At fixed topology/capacity/resource dimensions, every accepted portal plan creates no
       portal-owned JS heap records, grows no CPU arena, and retains no frame plan past the next
       planning pass. An exceptional cutoff creates at most one traced diagnostic error and no
       fallback graph.
@@ -2488,15 +2536,15 @@ bound requires no convergence readback, topology walk, or new frame allocation.
       propagation, arena derivation, diagnostics, and ordinary tests contain no duplicate literal.
 - [x] The selected backend refines the modeled executor and passes numeric real-GPU substrate
       fixtures through depth three, local opaque occlusion, protrusion, and root-only resolve.
-- [ ] Opaque, alpha-tested, alpha-blended, additive, weather, and particle composition match the
+- [x] Opaque, alpha-tested, alpha-blended, additive, weather, and particle composition match the
       oracle.
-- [ ] Domain content and particle instances are prepared/uploaded once per owning frame lifetime.
-- [ ] Within-domain batches are split only at proved visibility-submission boundaries.
-- [ ] Additional targets/composites have trace-backed justification and bounded lifecycle/memory.
+- [x] Domain content and particle instances are prepared/uploaded once per owning frame lifetime.
+- [x] Within-domain batches are split only at proved visibility-submission boundaries.
+- [x] Additional targets/composites have trace-backed justification and bounded lifecycle/memory.
 - [ ] All reported transition sequences work through interactive movement.
-- [ ] Matched real-scene operation traces contain no unexplained planning, preparation, ordering,
+- [x] Matched real-scene operation traces contain no unexplained planning, preparation, ordering,
       allocation, upload, mask, composite, or submission changes.
-- [ ] Retired planner/executor code and vocabulary are deleted in the same cutover.
+- [x] Retired planner/executor code and vocabulary are deleted in the same cutover.
 - [ ] Documentation, tests, checks, lint, builds, focused browser substrate fixtures, archive gates,
       complexity proofs, and operation traces are complete.
 

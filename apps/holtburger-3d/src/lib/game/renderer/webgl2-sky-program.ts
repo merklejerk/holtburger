@@ -34,9 +34,10 @@ export const SKY_MATERIAL_KIND = {
  */
 export function createSkyVertexShader(portalAtlas: boolean): string {
 	const portalDeclaration = portalAtlas ? "uniform vec4 uClipTransform;" : "";
-	const position = portalAtlas
-		? "uClipTransform * uProjection * uView * uModel * vec4(aPosition, 1.0)"
-		: "uProjection * uView * uModel * vec4(aPosition, 1.0)";
+	const portalTransform = portalAtlas
+		? `clipPosition.xy = clipPosition.xy * uClipTransform.xy
+		+ clipPosition.ww * uClipTransform.zw;`
+		: "";
 	return `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
@@ -55,7 +56,9 @@ void main() {
 	// The normal attribute is bound by the shared object geometry layout but unused: retail draws
 	// the sky with lighting suppressed, so there is nothing to light against.
 	vTextureCoordinate = aTextureCoordinate + uTextureOffset;
-	gl_Position = ${position};
+	vec4 clipPosition = uProjection * uView * uModel * vec4(aPosition, 1.0);
+	${portalTransform}
+	gl_Position = clipPosition;
 }
 `;
 }

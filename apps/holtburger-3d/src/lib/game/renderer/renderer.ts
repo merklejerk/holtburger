@@ -156,24 +156,26 @@ export interface FrameSelectionMetrics {
 	readonly submittedEnvCellResidentDrawCount: number;
 	readonly submittedEnvCellResidentTriangleCount: number;
 	readonly envCellShellCullOverrideCount: number;
-	/** Flat mode must keep all later portal-rendering work at zero. */
-	readonly submittedPortalApertureDrawCount: number;
-	readonly portalMaskEdgeCount: number;
-	readonly portalNearPlaneSeedCount: number;
-	readonly portalRejectedFacingCrossingCount: number;
-	/** Non-near-plane crossings omitted below the configured projected footprint. */
-	readonly portalRejectedFootprintCount: number;
-	/** Mask boundaries omitted because both endpoints share one render domain. */
-	readonly portalSameDomainBoundaryCrossingCount: number;
-	/** Novel scope-local portal windows admitted by the bounded planner. */
-	readonly portalAdmittedScopeWindowStateCount: number;
-	readonly portalRenderLayerCount: number;
-	readonly portalRenderNodeCount: number;
-	readonly portalSubmittedRenderNodeCount: number;
-	readonly portalExteriorRenderCount: number;
-	readonly sceneDomainTargetCount: number;
-	/** Retained color plus depth-stencil attachment bytes owned by portal targets. */
-	readonly sceneDomainTargetBytes: number;
+	/** Physical authored scopes packed across all portal views in this frame. */
+	readonly portalSelectedScopeCount: number;
+	/** Directed crossings assigned arrival states across all portal views. */
+	readonly portalSelectedCrossingCount: number;
+	/** Deepest complete CPU culling frontiers summed across portal views. */
+	readonly portalCompletedCullDepth: number;
+	/** Instanced crossing-propagation draws submitted across portal views. */
+	readonly portalPropagationDrawCount: number;
+	/** Checked projection/admission primitives charged during portal culling. */
+	readonly portalProjectionPrimitiveCount: number;
+	/** Committed scope-tile pixels excluding atlas packing gaps. */
+	readonly portalAtlasTilePixelCount: number;
+	/** Whole-frontier retreats caused by fixed GPU resource capacity. */
+	readonly portalFrontierRetreatCount: number;
+	/** Portal views stopped at any explicit CPU or GPU capacity. */
+	readonly portalTruncatedViewCount: number;
+	/** Live framebuffers owned by the current portal target generation. */
+	readonly portalFramebufferCount: number;
+	/** Exact live bytes owned by the current portal target generation. */
+	readonly portalTargetBytes: number;
 	/** All static-object draw calls submitted to the backend this frame. */
 	readonly submittedStaticObjectDrawCount: number;
 	/** Triangles submitted by all static-object draws, including instance multiplication. */
@@ -256,8 +258,6 @@ export interface RendererCpuFrameTimings {
 	readonly blendedOrderingMs: number;
 	/** CPU wall time spent submitting blended object work. */
 	readonly blendedSubmissionMs: number;
-	/** CPU wall time spent concatenating multi-node portal contribution arrays. */
-	readonly contributionMergeMs: number;
 	/** CPU wall time spent finalizing renderer diagnostics. */
 	readonly finalizationMs: number;
 	/** CPU wall time spent projecting and selecting generated-instance envelopes. */
@@ -272,10 +272,10 @@ export interface RendererCpuFrameTimings {
 	readonly opaqueSubmissionMs: number;
 	/** CPU cost of routing sources and uploading particle batches, separate from blended work. */
 	readonly particleSubmissionMs: number;
-	/** Renderer work outside the named spans, including portal masks and orchestration. */
+	/** Renderer work outside the named spans, including compositor orchestration. */
 	readonly otherMs: number;
-	/** CPU wall time spent planning portal visibility and execution topology. */
-	readonly portalGraphPlanningMs: number;
+	/** CPU wall time spent planning portal visibility, packing, and execution. */
+	readonly portalPlanningMs: number;
 	/** CPU wall time spent querying visible scene identities. */
 	readonly sceneQueryMs: number;
 	/** CPU wall time spent resolving selected scene identities into raw frame inputs. */
@@ -292,24 +292,10 @@ export interface RendererCpuFrameTimings {
 
 /** Per-frame contribution work recorded only by an explicitly active renderer profile. */
 export interface RendererContributionFrameMetrics {
-	/** Portal contribution callbacks that combined more than one prepared node. */
-	readonly multiNodeMergeCount: number;
 	/** Dynamic object inputs compiled into frame-current draw state. */
 	readonly dynamicObjectPreparationCount: number;
 	/** Non-dynamic object inputs compiled from retained scene contributions. */
 	readonly staticObjectPreparationCount: number;
-	/** Unique portal contribution node sets consumed by executor callbacks. */
-	readonly portalContributionSetCount: number;
-	/** Portal contribution node-set callback invocations. */
-	readonly portalContributionSetUseCount: number;
-	/** Portal nodes prepared before executor callbacks begin. */
-	readonly portalNodePreparationCount: number;
-	/** Prepared portal-node uses after the first use in the same frame. */
-	readonly repeatedPortalNodeUseCount: number;
-	/** Portal contribution node-set uses after the first identical set use. */
-	readonly repeatedPortalContributionSetUseCount: number;
-	/** Prepared portal nodes consumed by executor callbacks. */
-	readonly portalNodeUseCount: number;
 }
 
 /** Renderer CPU timings for one explicitly profiled frame. */

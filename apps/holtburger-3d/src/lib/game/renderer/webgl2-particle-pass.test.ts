@@ -192,6 +192,7 @@ describe("WebGL2ParticlePass", () => {
 		);
 
 		expect(shader).toContain("uniform uint uPortalScope");
+		expect(shader).toContain("uniform highp sampler2D uPortalEnvelopeDepth;");
 		expect(visibilityIndex).toBeGreaterThanOrEqual(0);
 		expect(visibilityIndex).toBeLessThan(
 			shader.indexOf("vec4 color = sampleMaterial()"),

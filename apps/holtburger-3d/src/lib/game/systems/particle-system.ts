@@ -188,12 +188,13 @@ interface EmitterInstance {
 	particles: LiveParticle[];
 }
 
-/** Exterior-owned effects are routed through the portal graph's unique outdoor domain. */
+/** Exterior-owned effects are routed through the selected outdoor scope envelope. */
 export const EXTERIOR_PARTICLE_RENDER_OWNER = "particle-render-owner:exterior";
 
 /** Stable routing owner retained until the renderer assigns particles to this frame's domains. */
 export type ParticleRenderOwner =
-	SceneNodeId | typeof EXTERIOR_PARTICLE_RENDER_OWNER;
+	| SceneNodeId
+	| typeof EXTERIOR_PARTICLE_RENDER_OWNER;
 
 /** One owner-local source cohort awaiting renderer-owned portal-domain batching. */
 export interface ParticleSourceCohort {
@@ -413,8 +414,8 @@ export class ParticleSystem {
 	 * that is the shader's job, and doing it twice is the CPU ceiling this design exists to avoid.
 	 *
 	 * `resolveRenderOwner` both culls and preserves the fact needed to route the emitter into the
-	 * current portal graph. Owners intentionally remain separate here; the renderer erases them and
-	 * recoalesces by mesh and motion type after assigning each source to its final contribution.
+	 * current portal scope selection. Owners intentionally remain separate here; the renderer erases
+	 * them and recoalesces by mesh and motion type after assigning each source to its scope envelope.
 	 *
 	 * The returned cohorts, their record arrays, and the `origin` vectors inside them are all reused
 	 * storage owned by this system. They are valid until the next call and must be consumed, not

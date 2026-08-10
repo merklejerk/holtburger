@@ -1,5 +1,5 @@
 import {
-	PORTAL_CROSSING_TRIANGLE_DEPTH_POLICY_OFFSET_BYTES,
+	PORTAL_CROSSING_TRIANGLE_POLICY_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_OUTPUT_ARRIVAL_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_POSITION_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_SOURCE_SCOPE_OFFSET_BYTES,
@@ -24,7 +24,7 @@ import {
 const POSITION_ATTRIBUTE_LOCATION = 0;
 const OUTPUT_ARRIVAL_ATTRIBUTE_LOCATION = 1;
 const SOURCE_SCOPE_ATTRIBUTE_LOCATION = 2;
-const DEPTH_POLICY_ATTRIBUTE_LOCATION = 3;
+const POLICY_ATTRIBUTE_LOCATION = 3;
 
 type SinkMethod<Name extends keyof PortalScopeAtlasWebGLSink> = Parameters<
 	PortalScopeAtlasWebGLSink[Name]
@@ -335,7 +335,11 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 
 	depthFunction(...[compare]: SinkMethod<"depthFunction">): void {
 		this.#gl.depthFunc(
-			compare === "greater" ? this.#gl.GREATER : this.#gl.LESS,
+			compare === "greater"
+				? this.#gl.GREATER
+				: compare === "less-equal"
+					? this.#gl.LEQUAL
+					: this.#gl.LESS,
 		);
 	}
 
@@ -491,10 +495,7 @@ function configureCrossingAttributes(gl: WebGL2RenderingContext): void {
 			SOURCE_SCOPE_ATTRIBUTE_LOCATION,
 			PORTAL_CROSSING_TRIANGLE_SOURCE_SCOPE_OFFSET_BYTES,
 		],
-		[
-			DEPTH_POLICY_ATTRIBUTE_LOCATION,
-			PORTAL_CROSSING_TRIANGLE_DEPTH_POLICY_OFFSET_BYTES,
-		],
+		[POLICY_ATTRIBUTE_LOCATION, PORTAL_CROSSING_TRIANGLE_POLICY_OFFSET_BYTES],
 	] as const) {
 		gl.enableVertexAttribArray(location);
 		gl.vertexAttribIPointer(

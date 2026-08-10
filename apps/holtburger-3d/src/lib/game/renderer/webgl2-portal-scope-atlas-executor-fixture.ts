@@ -13,6 +13,7 @@ import {
 	type PortalModelScopeId,
 } from "./portal-model";
 import { getLandblockCoordinates } from "../landblocks";
+import { createPerspectiveMat4 } from "../math/matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
 	ScenePortalCrossingInput,
@@ -34,6 +35,8 @@ import {
 } from "./portal-arrival-metadata";
 import {
 	PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL,
+	PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG,
+	PORTAL_CROSSING_TRIANGLE_POLICY_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 	PortalPropagationStreamArena,
 	type PortalCrossingTriangleStreamView,
@@ -78,6 +81,7 @@ const WEATHER_COLOR = [77, 128, 230, 255] as const;
 const CLEAR_COLOR = [26, 51, 204, 255] as const;
 const CENTER_PIXELS = new Set([5, 6, 9, 10]);
 const FIXTURE_LANDBLOCK_ID = "0x0001ffff";
+const STRADDLE_CLIP_FROM_ANCHOR = createPerspectiveMat4(90, 1, 0.5, 100);
 const FIXTURE_ROOT_SCOPE = { kind: "outdoor" } as const satisfies SceneScope;
 const FIXTURE_CHILD_SCOPE = {
 	envCellId: "scope-atlas-packed-child",
@@ -105,6 +109,8 @@ export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
 	readonly exteriorWeatherComposesBehindChildOpaque: boolean;
 	readonly frontierMatchesOracle: boolean;
 	readonly opaqueOcclusionMatchesOracle: boolean;
+	readonly nearPlaneStraddleMatchesOracle: boolean;
+	readonly nearPlaneStraddleOrdinaryPolicyIsRejected: boolean;
 	readonly productionPackedHostileSamplerResolveMatchesOracle: boolean;
 	readonly productionPackedResolveMatchesOracle: boolean;
 	readonly propagatedResolveMatchesOracle: boolean;
@@ -199,6 +205,35 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			expectedProductionPackedPixels.set(LEAF_COLOR, pixel * 4);
 		}
 
+		const straddleFrame = createProductionPackedFrame("near-plane-straddle");
+		const straddleStream = new PortalPropagationStreamArena(6).prepare(
+			straddleFrame,
+			getLandblockCoordinates(FIXTURE_LANDBLOCK_ID),
+			STRADDLE_CLIP_FROM_ANCHOR,
+		);
+		setNearClipRayPolicy(straddleStream, false);
+		seedProductionPackedSceneAtlas(gl, targets, straddleFrame, 0.2);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream: straddleStream,
+			targets,
+			traversalDepth: straddleFrame.commands.traversalDepth,
+		});
+		const ordinaryPolicyStraddlePixels = readOutput(gl);
+		setNearClipRayPolicy(straddleStream, true);
+		seedProductionPackedSceneAtlas(gl, targets, straddleFrame, 0.2);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream: straddleStream,
+			targets,
+			traversalDepth: straddleFrame.commands.traversalDepth,
+		});
+		const straddlePixels = readOutput(gl);
+
 		seedProductionPackedSceneAtlas(gl, targets, productionPackedFrame);
 		clearOutput(gl);
 		const productionPackedHostileSampler = executeWithHostileSamplers(
@@ -256,6 +291,14 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				occludedPixels,
 				expectedOccludedPixels,
 			),
+			nearPlaneStraddleMatchesOracle: pixelsMatch(
+				straddlePixels,
+				expectedProductionPackedPixels,
+			),
+			nearPlaneStraddleOrdinaryPolicyIsRejected: pixelsMatch(
+				ordinaryPolicyStraddlePixels,
+				solidPixels(ROOT_COLOR),
+			),
 			particleMatchesEquivalentTransparency: pixelsMatch(
 				deferred.particlePixels,
 				deferred.transparentPixels,
@@ -290,12 +333,14 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 }
 
 /** Build the smallest real planner-to-arena stream containing a conservative child tile. */
-function createProductionPackedFrame(): PortalScopeAtlasFrameView {
+function createProductionPackedFrame(
+	kind: "ordinary" | "near-plane-straddle" = "ordinary",
+): PortalScopeAtlasFrameView {
 	const planner = new PortalScopeAtlasPlanner(
 		PRODUCTION_PACKED_FIXTURE_POLICY.culler,
 	);
-	const input = createProductionPackedInput();
-	const frame = planner.plan(createProductionPackedTopology(), input, {
+	const input = createProductionPackedInput(kind);
+	const frame = planner.plan(createProductionPackedTopology(kind), input, {
 		atlas: ATLAS_EXTENT,
 		drawingBuffer: DRAWING_EXTENT,
 		maximumArrivalStateCount:
@@ -319,13 +364,19 @@ function createProductionPackedFrame(): PortalScopeAtlasFrameView {
 	return frame;
 }
 
-function createProductionPackedInput() {
+function createProductionPackedInput(kind: "ordinary" | "near-plane-straddle") {
+	const straddlesNearPlane = kind === "near-plane-straddle";
 	return {
 		anchorCoordinates: getLandblockCoordinates(FIXTURE_LANDBLOCK_ID),
-		clipFromAnchor: Mat4.identity(),
+		clipFromAnchor: straddlesNearPlane
+			? STRADDLE_CLIP_FROM_ANCHOR
+			: Mat4.identity(),
 		nearClipVolume: createCameraNearClipVolume(
 			{ fov: 90, near: 0.5 },
-			{ position: new Vec3(0, 0, 1), rotation: Quat.identity() },
+			{
+				position: new Vec3(0, 0, straddlesNearPlane ? 0 : 1),
+				rotation: Quat.identity(),
+			},
 			1,
 		),
 		portalFootprint: { drawingBuffer: DRAWING_EXTENT, minimumPixelArea: 0 },
@@ -333,12 +384,16 @@ function createProductionPackedInput() {
 	};
 }
 
-function createProductionPackedTopology(): SceneTopologyView {
+function createProductionPackedTopology(
+	kind: "ordinary" | "near-plane-straddle",
+): SceneTopologyView {
+	const straddlesNearPlane = kind === "near-plane-straddle";
 	const crossing = createFixtureCrossing(
 		"scope-atlas-packed-child",
 		FIXTURE_ROOT_SCOPE,
 		FIXTURE_CHILD_SCOPE,
-		0,
+		straddlesNearPlane ? -0.25 : 0,
+		straddlesNearPlane ? 0.125 : 0.5,
 	);
 	const scopes: readonly SceneTopologyScope[] = [
 		{
@@ -365,8 +420,15 @@ function createFixtureCrossing(
 	source: SceneScope,
 	target: SceneScope,
 	z: number,
+	halfExtent: number,
 ): ScenePortalCrossingInput {
-	const aperture = rectangleAperture(-0.5, -0.5, 0.5, 0.5, z);
+	const aperture = rectangleAperture(
+		-halfExtent,
+		-halfExtent,
+		halfExtent,
+		halfExtent,
+		z,
+	);
 	const sceneAperture = {
 		id: `portal-aperture:${id}` as const,
 		indices: aperture.indices,
@@ -502,6 +564,26 @@ function createRootOnlyStream(): PortalCrossingTriangleStreamView &
 	};
 }
 
+/** Toggle the packed policy bit to retain an executable ordinary-path negative control. */
+function setNearClipRayPolicy(
+	stream: PortalCrossingTriangleStreamView,
+	enabled: boolean,
+): void {
+	const slots = new Uint32Array(stream.bytes.buffer);
+	const slotsPerVertex =
+		PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES /
+		Uint32Array.BYTES_PER_ELEMENT;
+	const policySlotOffset =
+		PORTAL_CROSSING_TRIANGLE_POLICY_OFFSET_BYTES /
+		Uint32Array.BYTES_PER_ELEMENT;
+	for (let vertex = 0; vertex < stream.vertexCount; vertex += 1) {
+		const policySlot = vertex * slotsPerVertex + policySlotOffset;
+		slots[policySlot] = enabled
+			? slots[policySlot]! | PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG
+			: slots[policySlot]! & ~PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG;
+	}
+}
+
 function createMetadata(scopeCount: 1 | 4): Uint8Array {
 	const buffer = new ArrayBuffer(PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES);
 	const floats = new Float32Array(buffer);
@@ -594,11 +676,12 @@ function seedProductionPackedSceneAtlas(
 	gl: WebGL2RenderingContext,
 	targets: WebGL2PortalScopeAtlasTargetSet,
 	frame: PortalScopeAtlasFrameView,
+	rootDepth = 0.8,
 ): void {
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
 	gl.viewport(0, 0, ATLAS_EXTENT.width, ATLAS_EXTENT.height);
 	gl.enable(gl.SCISSOR_TEST);
-	clearPlannedTile(gl, frame, 0, ROOT_COLOR, 0.8);
+	clearPlannedTile(gl, frame, 0, ROOT_COLOR, rootDepth);
 	clearPlannedTile(gl, frame, 1, LEAF_COLOR, 0.6);
 	gl.disable(gl.SCISSOR_TEST);
 }
@@ -672,9 +755,9 @@ function clearOutput(gl: WebGL2RenderingContext): void {
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 	gl.viewport(0, 0, DRAWING_EXTENT.width, DRAWING_EXTENT.height);
 	gl.disable(gl.SCISSOR_TEST);
-	// Fixture stages deliberately leave depth writes disabled. Make the reset independent from the
-	// previous stage so a repeated executor resolve cannot fail its strict LESS test against stale
-	// equal depth and accidentally blend the next schedule over the previous schedule.
+	// Fixture stages deliberately leave depth writes disabled. Reset both attachments so a repeated
+	// executor resolve cannot retain stale color or depth. Resolve deliberately accepts equal clear
+	// depth because terminal sky/background pixels remain at one.
 	gl.colorMask(true, true, true, true);
 	gl.depthMask(true);
 	gl.clearBufferfv(

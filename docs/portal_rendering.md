@@ -142,171 +142,119 @@ Directed segment tracing:
 
 These are query primitives, not a player or third-person camera controller.
 
-## Per-View Portal Planning
+## Production Portal Compositor
 
-Portal rendering starts by assigning the full screen-space view window to the camera's supplied
-scope only. Traversal coverage and render ownership are separate:
+Portal mode uses a path-free arrival-state model. The CPU determines which authored scopes and
+directed crossings can contribute; the GPU determines, per pixel, which arrival state is nearest.
+No domain-owned contribution schedule, permanent stencil id, or per-path scene submission survives
+into production.
 
-- one exact scope-local window controls which outgoing crossings may be traversed;
-- one proof-backed visibility island owns the geometry for its reached member scopes; and
-- reaching another scope in an existing island extends that node's selected scope list without
-  giving every island member the same window.
+### Fixed-capacity scope-window culling
 
-For each admitted scope-window delta, the planner:
+The camera's authoritative scope starts with the full normalized screen window. The culler advances
+breadth-first in complete crossing frontiers. For each admitted scope-window delta it:
 
-1. considers source-keyed outgoing crossings;
-2. skips the proven reciprocal or shared authored aperture used to admit that delta;
-3. rejects apertures not facing the camera, except finite near-plane straddles;
-4. projects the effective visibility aperture;
-5. clips it through the incoming view window;
-6. admits only new, non-subsumed window coverage; and
-7. records a target render node and, only across render-domain boundaries, an incoming mask edge.
+1. visits that scope's source-keyed outgoing crossings;
+2. suppresses only the reciprocal/shared aperture that admitted the delta;
+3. rejects wrong-facing apertures unless the finite near-clip volume intersects them;
+4. projects the effective visibility aperture and clips it by the inherited window;
+5. applies the physical-pixel footprint cutoff to ordinary crossings; and
+6. admits only window coverage not already present for the target scope.
 
-Incoming-crossing provenance suppresses only immediate backtracking through the same physical
-portal. It does not suppress a later return through a different portal. This mirrors retail
-`PView::AddToCell`/`AddViewToPortals`, where the incoming portal is marked and excluded while
-expanding the newly reached cell.
+Coverage is accumulated by authored scope, not render domain or topology path. This is legal because
+retail clips portal screen windows but does not install a portal user clip plane on scene geometry:
+objects may protrude outside the aperture that made their scope visible. The compatibility rule and
+decompile citation live beside the symbolic oracle in
+`portal-reference-compositor.ts` (`PView::ClipPortals`,
+`acclient.c:441813-441942`).
 
-Depth-continuous seams and same-domain topology boundaries propagate the clipped window to their
-target scope without consuming stencil. A same-domain boundary can therefore constrain traversal
-even though ordinary depth already unifies its endpoints for drawing.
+Production uses typed-array topology indexes, queues, and polygon arenas. At fixed topology and
+capacity an accepted camera update creates no portal-owned JavaScript records and grows no arena.
+A separate readable immutable traversal is retained only as a differential oracle. It shares
+projection inputs and tolerances with production, but not clipping/admission control flow.
 
-Windows are renderer-local visibility geometry. Scene meshes are not CPU-clipped. Ordinary scene
-selection still uses frustum tests over scope/culling-group/node bounds.
+Capacity is part of the visual contract:
 
-A render node owns one outdoor domain or one proof-backed indoor visibility island. Its geometry
-query contains only member scopes reached by exact traversal. Alternate routes add incoming mask
-edges; they do not create another geometry owner.
+- traversal depth, work items, checked projection primitives, window storage, arrival ids, crossing
+  triangle vertices, atlas pixels, target bytes, and device texture extent are explicit limits;
+- the first over-budget complete frontier is omitted atomically;
+- descendants of that frontier are never discovered;
+- no fallback planner or partial GPU mutation runs; and
+- stencil capacity is irrelevant because the selected backend does not use stencil.
 
-The planner assigns render layers, identifies graph cycles, prepares the outdoor-containing
-component, authors an executable contribution schedule, and preflights the available eight-bit
-stencil labels. Exact windows remove triangulation-only seams when adjacent pieces have a convex
-union and cache immutable aperture convex decomposition by source identity. Concave, holed,
-overlapping, and disconnected regions remain explicit. A work limit exists only as a
-failed-invariant guard; monotonic scope-local window admission is the termination model.
+The production policy currently accepts at most 16 crossing frontiers and 256 arrival-state values.
+Those values have one named owner in `portal-render-capacity-policy.ts`.
 
-## Mask and Direct Ownership Execution
+### Packed scope atlas
 
-The executor consumes the completed graph and derives no second topology or contribution plan.
+Every selected authored scope receives one conservative rectangular tile in a fixed 2-by-3 atlas.
+The renderer performs the ordinary scene query once for the complete selected scope set, resolves
+physical contributions once, and preserves existing material/instance batch boundaries.
 
-For each ordinary masked contribution:
+Opaque and alpha-tested work is routed by scope into its tile:
 
-- every incoming effective aperture is drawn material-free into the same stencil label;
-- the union is completed before ordinary geometry is submitted;
-- depth is reset only inside that union when the target contribution requires a fresh scene
-  domain; and
-- the planner-named render nodes are submitted under that label.
+- outdoor terrain and exterior-global opaque sky work route to the outdoor tile;
+- a scope-homogeneous object draw routes to that scope's tile;
+- local depth remains independent between tiles; and
+- the same physical batch is not split merely because a scope has multiple portal appearances.
 
-Ordinary contributions use a layer-wide stencil union, not a paired source/target aperture
-protocol or increment/decrement mask stack. Before any same-layer contribution changes depth, the
-executor completes every unrelated entry union under its planner-owned label.
+The atlas stores `RGBA8` color and `DEPTH_COMPONENT24` local depth. Packing gaps are charged in
+target bytes and exposed separately from committed tile pixels.
 
-A cyclic exterior component may have one explicit indoor suffix. Its entry and suffix labels are
-adjacent values above the ordinary render layers. Internal suffix apertures increment only pixels
-whose stencil still equals the entry label, so the result is exactly the suffix label and cannot
-escape the exterior entry region. The suffix classifies each submitted node as either deferred
-from ordinary execution or additional masked work for a node already drawn elsewhere. This
-guarded increment is a typed planner/executor contract, not an executor-created route or general
-stencil stack.
+### Arrival propagation and opaque resolve
 
-Internal masks use existing depth (`LEQUAL`) so nearer geometry can occlude an opening. A portal
-polygon may also carry an opaque CellStruct surface, including horizontal floor portals such as
-`0x1A7302B2 -> 0x1A73029D`. Re-rasterizing that aperture at equal depth would let the mask
-intermittently replace its own visible floor as projection slope changes. The host therefore marks
-crossings whose authored source portal also contributes shell triangles. Only those mask writes
-enable `POLYGON_OFFSET_FILL` with `polygonOffset(1, 1)`, conservatively pushing the mask behind its
-coincident visible geometry. Material-free apertures retain unbiased `LEQUAL`, which preserves
-equality needed by nested portal unions. Scene passes explicitly disable polygon offset, so
-CellStruct depth and seams remain unbiased. The accepted browser matrix also covers opaque,
-alpha-tested, transparent, and additive contributions.
+Each selected directed crossing is expanded once into a reusable instanced triangle stream.
+Propagation starts with arrival state zero for the root scope. Two full-screen `R8UI` textures
+ping-pong the current/next arrival id while one shared `DEPTH_COMPONENT24` texture selects the
+nearest eligible crossing. One batched propagation draw covers every selected crossing in a
+retained propagation round; the CPU does not walk pixels, paths, or per-crossing draw calls. A
+complete CPU cull uses the model's fixed path-depth ceiling as the universal propagation bound,
+further capped by selected crossing count. A capacity-truncated cull instead uses its last complete
+frontier depth.
 
-## Outdoor Transitions
+Alongside propagation, one instanced reduction draw per retained round writes the maximum visible
+exit depth for every authored scope into a packed `DEPTH_COMPONENT32F` envelope. A final instanced opaque
+resolve samples the winning scope tile's color/local depth and composes it into the output
+framebuffer. Resolve accepts equal output depth so the terminal scope's sky or empty background,
+which intentionally retains clear depth, survives composition. The envelope rejects every
+nonterminal scope at that depth before fixed-function depth testing. Root-only scenes use the same
+schedule.
 
-Every admitted outdoor/indoor transition is masked unless the finite camera near plane intersects
-its aperture. An apparently shallow entrance can lead to a cell below terrain one edge later, so
-an optimization that skips the transition mask based on the immediate cell is unsafe. Near-plane
-contact is a separate, exact renderer condition rather than such an optimization.
+This is why indoor/outdoor re-entry and cycles no longer require special cases: re-entering a scope
+creates another arrival state, while its physical geometry still occupies one scope tile.
 
-The renderer owns one full-size color plus depth-stencil portal target. It is cleared once per
-independent view, and every reached scene domain renders directly into that target.
+### Deferred objects, particles, and weather
 
-For an outdoor root, exterior terrain, buildings, and objects render unmasked as layer zero. For
-an indoor root, all exterior entry masks are completed against the existing root depth first.
-Color and depth inside the exterior label are then initialized to the view clear values, and the
-exterior renders once under that label. Root color and depth remain untouched outside the entry
-union.
+Portal visibility is not an alpha-sort key. Opaque resolve completes first. Transparent objects,
+additive effects, and particles retain the renderer's existing physical ordering and batching, then
+draw once to the output framebuffer. Their portal shader selects the owning authored scope and
+rejects fragments beyond that scope's reduced visibility envelope.
 
-If the outdoor strongly connected component contains re-entered indoor work, its internal masks
-promote only entry-owned pixels to the adjacent suffix label. Suffix depth is reset without
-changing the exterior color beneath it, then the suffix submission groups render together under
-that label to preserve global material ordering. A root island may therefore render ordinarily at
-layer zero and again as an additional masked suffix after exterior initialization. Non-root
-suffix nodes can instead be deferred from ordinary execution. Return-to-outdoor edges remain graph
-provenance and do not redraw the exterior. Unrelated same-layer contributions use distinct labels
-whose masks were completed before either contribution mutated depth.
+Particle emitters remain owner-local until routing. Each selected source is packed/uploaded once,
+then compatible mesh/motion cohorts recoalesce without adding a path or portal id to the GPU batch
+key. This lets particles in the camera's EnvCell draw over an outdoor portal exactly as retail does,
+while particles belonging to a deeper scope remain clipped by that deeper scope's envelope.
 
-The target is allocated lazily, reused at the same extent, replaced transactionally on resize,
-and destroyed with the renderer. Flat mode performs no target or portal work, although an already
-allocated target remains cached for cheap mode switching.
+Exterior sky and authored weather are rendered into the outdoor scope tile. Retail's existing
+inside/outside weather gate remains camera-residency policy and is independent from portal
+compositing.
 
-## Recursive Footprint Policy
+### Targets and lifecycle
 
-Portal traversal carries the exact inherited screen-space window through every crossing. After
-homogeneous projection and exact intersection with that parent window, the planner may reject a
-crossing whose final drawing-buffer footprint is strictly smaller than the configured pixel-area
-threshold. The production default is 64 physical pixels squared; zero is the exact disabled
-baseline, and equality is retained.
+One lazy renderer-owned target generation contains four framebuffers and six textures:
 
-The decision occurs before target-scope selection, mask admission, coverage admission, render-node
-construction, or descendant traversal. A rejected crossing therefore creates no downstream scene
-query, contribution preparation, stencil work, draw submission, or recursive portal work. The
-policy measures the actual projected opportunity rather than camera distance, hop count, or an
-approximate bounding rectangle. Alternate routes remain independent and can still admit the same
-scope through a larger inherited window.
+- packed atlas `RGBA8` color plus `DEPTH_COMPONENT24` depth;
+- two full-screen `R8UI` arrival-state frontiers;
+- one shared full-screen `DEPTH_COMPONENT24` crossing-depth texture; and
+- one packed `DEPTH_COMPONENT32F` scope-envelope texture.
 
-Near-plane-straddling crossings are exempt. Their projected area is unstable at the camera plane,
-and they may own the camera's current domain transition; the exact near-clip path below remains
-authoritative for them.
+Same-extent frames reuse the generation. Resize is transactional: every replacement framebuffer
+must be complete before the old generation is disposed. The configured byte ceiling is 256 MiB,
+and device `MAX_TEXTURE_SIZE` is checked before allocation. Capacity failure stops portal
+composition loudly; WebGL context loss requires whole-renderer restart.
 
-## Near-Plane Straddles
-
-The unstable case is not the camera point touching a portal plane. It is the finite aperture
-entering the clipped volume between the camera eye and near-plane quad.
-
-The renderer constructs and validates that finite pyramid once per view from the typed eye and
-ordered near-plane corners. Its five normalized planes are then reused for every crossing. The
-world-space contact band is renderer-owned and independent from scene-query tolerances; plane
-degeneracy uses a separate dimensionless angular threshold.
-
-The renderer clips exact convex aperture pieces against that finite pyramid. Testing only its near-plane cap
-misses oblique apertures that enter the clipped volume without touching the cap. The half-space
-clipper classifies and intersects against the same expanded boundary, avoiding extrapolated
-vertices around the contact band. For a real volume intersection, the planner computes the
-aperture's exact eye-ray footprint without applying the ordinary near-depth rejection. Positive
-homogeneous `w`, the four view sides, and the inherited parent window still clip the result. The
-resulting footprint becomes the adjacent domain's traversal window, so every downstream portal
-remains inside the same set of aperture-crossing camera rays.
-
-Residency remains the sole layer-zero root. The straddled target occupies the next ordinary render
-layer, but its stencil union uses the retained screen-space footprint instead of rasterizing the
-world-space aperture. Each edge carries exactly one executable mask source: either that authored
-aperture or the retained near-clip window. The NDC straddle mask deliberately uses `ALWAYS`, because
-the exact footprint has already selected aperture-crossing rays and resident floor or terrain depth
-must not veto the ownership transfer. Depth is then reset only inside the mask and the adjacent
-domain renders directly. Near-clip window masks carry no source-surface depth policy and this
-`ALWAYS` comparison remains unbiased. Ordinary world-aperture masks retain policy-selected
-`LEQUAL`. Root color
-and depth therefore remain authoritative outside the footprint; adjacent color and depth become
-authoritative inside it. Downstream portals continue through later layers and remain bounded by the
-inherited window. The policy is frame-local and does not merge permanent visibility islands or
-mutate camera or actor residency.
-
-When a straddled aperture fills the near plane, its ray footprint may legitimately cover the full
-screen. Incoming-crossing suppression prevents the reciprocal direction of that same aperture from
-immediately claiming the full screen again and redrawing the root over the adjacent domain.
-
-Multi-portal corners use the same closure process. There is no fixed-hop rule, aperture-AABB
-shortcut, or camera-point slab.
+Flat mode performs no portal planning or GPU commands. An already allocated generation remains
+cached across mode switches and is destroyed with the renderer.
 
 ## Flat Inspection Mode
 
@@ -327,10 +275,12 @@ Proven by synthetic tests and selected archive/browser fixtures:
 - reciprocal intersection preprocessing;
 - Cell BSP point containment;
 - directed finite-aperture segment tracing;
-- scope-local traversal with visibility-island render ownership;
-- explicit render contributions with unique node identity and repeated masked submissions;
-- indoor/outdoor cycles;
-- direct color/depth scene-domain ownership;
+- fixed-capacity scope-local traversal with whole-frontier cutoff;
+- immutable/arena differential equivalence over seeded topology and geometry corpora;
+- path-free arrival propagation through indoor/outdoor cycles and re-entry;
+- one physical opaque preparation/submission per selected scope;
+- transparent, additive, weather, and particle scope-envelope composition;
+- packed target format, byte accounting, resize, and disposal invariants;
 - near-plane straddles;
 - flat/portal lifecycle stability; and
 - universal static detail roles for building, environment, and object materials.
@@ -343,3 +293,6 @@ Deliberately deferred:
 - using potentially-visible lists as preload policy;
 - portal-frustum planes in the scene spatial index; and
 - context restoration after WebGL context loss.
+
+Context loss deliberately requests whole-renderer restart rather than reconstructing a partial
+portal target generation in place.

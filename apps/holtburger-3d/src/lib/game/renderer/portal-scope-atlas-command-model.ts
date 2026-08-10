@@ -10,6 +10,7 @@ import {
 type FrontierOrdinal = 0 | 1;
 type PortalScopeAtlasBuffer = "crossings" | "metadata";
 type PortalScopeAtlasBufferTarget = "array" | "uniform";
+type PortalScopeAtlasDepthComparison = "greater" | "less" | "less-equal";
 type PortalScopeAtlasCapability =
 	| "blend"
 	| "cull-face"
@@ -103,7 +104,7 @@ export interface PortalScopeAtlasWebGLSink {
 	/** Select current/next frontier parity for one reduction round. */
 	uniformReductionRound(round: number): void;
 	/** Select the comparison used by the next depth-writing pass. */
-	depthFunction(compare: "greater" | "less"): void;
+	depthFunction(compare: PortalScopeAtlasDepthComparison): void;
 	/** Select crossing geometry or the shared unit quad. */
 	bindVertexArray(vertexArray: PortalScopeAtlasVertexArray): void;
 	/** Submit the crossing stream once for one output frontier. */
@@ -166,7 +167,10 @@ export type PortalScopeAtlasWebGLCall =
 	| { readonly kind: "use-program"; readonly program: PortalScopeAtlasProgram }
 	| { readonly depth: number; readonly kind: "uniform-reduction-depth" }
 	| { readonly kind: "uniform-reduction-round"; readonly round: number }
-	| { readonly compare: "greater" | "less"; readonly kind: "depth-function" }
+	| {
+			readonly compare: PortalScopeAtlasDepthComparison;
+			readonly kind: "depth-function";
+	  }
 	| {
 			readonly kind: "bind-vertex-array";
 			readonly vertexArray: PortalScopeAtlasVertexArray;
@@ -263,7 +267,10 @@ export function executePortalScopeAtlasWebGLCalls(
 	sink.bindFramebuffer("output");
 	sink.viewport("output");
 	sink.useProgram("resolve");
-	sink.depthFunction("less");
+	// Sky and empty terminal backgrounds intentionally retain the clear depth of one. The envelope
+	// rejects every nonterminal scope at that depth, so equality admits exactly the ray's terminal
+	// scope without weakening opaque nearest-depth selection.
+	sink.depthFunction("less-equal");
 	if (input.traversalDepth === 0) sink.bindVertexArray("unit-quad");
 	sink.drawResolve(input.scopeCount);
 }

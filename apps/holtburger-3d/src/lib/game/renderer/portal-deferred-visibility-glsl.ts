@@ -21,7 +21,10 @@ export interface WebGL2PortalDeferredVisibilityUniforms {
 export const PORTAL_DEFERRED_VISIBILITY_GLSL = `
 ${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
-uniform sampler2D uPortalEnvelopeDepth;
+// Keep depth lookup coordinates high precision independently of the consuming shader's defaults.
+// Particle fragments do not otherwise need a sampler precision declaration, and mediump lookup
+// coordinates visibly shimmer along distant portal boundaries.
+uniform highp sampler2D uPortalEnvelopeDepth;
 uniform uint uPortalScope;
 
 bool portalDeferredFragmentVisible() {

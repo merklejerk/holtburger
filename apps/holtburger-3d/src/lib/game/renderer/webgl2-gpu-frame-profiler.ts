@@ -23,12 +23,11 @@ export type WebGL2CpuFramePhase =
 	| "sceneQuery"
 	| "sceneContributionResolution"
 	| "objectPreparation"
-	| "contributionMerge"
 	| "blendedOrdering"
 	| "generatedInstanceCulling"
 	| "instanceRunPreparation"
 	| "instanceUpload"
-	| "portalGraphPlanning"
+	| "portalPlanning"
 	| "terrainSubmission"
 	| "opaqueSubmission"
 	| "blendedSubmission"
@@ -63,7 +62,6 @@ const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 const CPU_TIMING_KEYS = [
 	"blendedOrderingMs",
 	"blendedSubmissionMs",
-	"contributionMergeMs",
 	"finalizationMs",
 	"generatedInstanceCullingMs",
 	"instanceRunPreparationMs",
@@ -72,7 +70,7 @@ const CPU_TIMING_KEYS = [
 	"opaqueSubmissionMs",
 	"otherMs",
 	"particleSubmissionMs",
-	"portalGraphPlanningMs",
+	"portalPlanningMs",
 	"sceneQueryMs",
 	"sceneContributionResolutionMs",
 	"setupMs",
@@ -82,15 +80,8 @@ const CPU_TIMING_KEYS = [
 ] as const satisfies readonly (keyof RendererCpuFrameTimings)[];
 
 const CONTRIBUTION_METRIC_KEYS = [
-	"multiNodeMergeCount",
 	"dynamicObjectPreparationCount",
 	"staticObjectPreparationCount",
-	"portalContributionSetCount",
-	"portalContributionSetUseCount",
-	"portalNodePreparationCount",
-	"repeatedPortalNodeUseCount",
-	"repeatedPortalContributionSetUseCount",
-	"portalNodeUseCount",
 ] as const satisfies readonly (keyof RendererContributionFrameMetrics)[];
 
 type MutableContributionFrameMetrics = {
@@ -99,15 +90,8 @@ type MutableContributionFrameMetrics = {
 
 function createEmptyContributionMetrics(): MutableContributionFrameMetrics {
 	return {
-		multiNodeMergeCount: 0,
 		dynamicObjectPreparationCount: 0,
 		staticObjectPreparationCount: 0,
-		portalContributionSetCount: 0,
-		portalContributionSetUseCount: 0,
-		portalNodePreparationCount: 0,
-		repeatedPortalNodeUseCount: 0,
-		repeatedPortalContributionSetUseCount: 0,
-		portalNodeUseCount: 0,
 	};
 }
 
@@ -375,14 +359,13 @@ export class WebGL2FrameProfileCapture {
 		blendedOrderingMs: 0,
 		blendedSubmissionMs: 0,
 		particleSubmissionMs: 0,
-		contributionMergeMs: 0,
 		finalizationMs: 0,
 		generatedInstanceCullingMs: 0,
 		instanceRunPreparationMs: 0,
 		instanceUploadMs: 0,
 		objectPreparationMs: 0,
 		opaqueSubmissionMs: 0,
-		portalGraphPlanningMs: 0,
+		portalPlanningMs: 0,
 		sceneQueryMs: 0,
 		sceneContributionResolutionMs: 0,
 		setupMs: 0,
@@ -390,8 +373,6 @@ export class WebGL2FrameProfileCapture {
 		viewPreparationMs: 0,
 	};
 	readonly #contribution = createEmptyContributionMetrics();
-	readonly #portalContributionSetUses = new Map<string, number>();
-	readonly #portalNodeUses = new Map<string, number>();
 	#finished = false;
 
 	constructor(
@@ -432,35 +413,6 @@ export class WebGL2FrameProfileCapture {
 		this.#contribution.dynamicObjectPreparationCount += dynamicCount;
 	}
 
-	/** Record one portal node prepared exactly once before graph execution. */
-	recordPortalNodePreparation(): void {
-		this.#contribution.portalNodePreparationCount += 1;
-	}
-
-	/** Record the exact prepared-node set consumed by one executor callback. */
-	recordPortalContributionUse(renderNodeIds: readonly string[]): void {
-		const setIdentity = renderNodeIds.toSorted().join("\u0000");
-		const priorSetUses = this.#portalContributionSetUses.get(setIdentity) ?? 0;
-		this.#portalContributionSetUses.set(setIdentity, priorSetUses + 1);
-		this.#contribution.portalContributionSetUseCount += 1;
-		if (priorSetUses > 0) {
-			this.#contribution.repeatedPortalContributionSetUseCount += 1;
-		}
-		for (const renderNodeId of renderNodeIds) {
-			const priorNodeUses = this.#portalNodeUses.get(renderNodeId) ?? 0;
-			this.#portalNodeUses.set(renderNodeId, priorNodeUses + 1);
-			this.#contribution.portalNodeUseCount += 1;
-			if (priorNodeUses > 0) {
-				this.#contribution.repeatedPortalNodeUseCount += 1;
-			}
-		}
-	}
-
-	/** Record one multi-node contribution concatenation. */
-	recordContributionMerge(): void {
-		this.#contribution.multiNodeMergeCount += 1;
-	}
-
 	/** Begin one GPU phase interval when timestamp queries are supported and admitted. */
 	beginGpuPhase(phase: WebGL2GpuFramePhase): WebGL2GpuFramePhaseCapture | null {
 		return this.#gpu?.beginPhase(phase) ?? null;
@@ -479,11 +431,10 @@ export class WebGL2FrameProfileCapture {
 			this.#cpu.sceneQueryMs +
 			this.#cpu.sceneContributionResolutionMs +
 			this.#cpu.objectPreparationMs +
-			this.#cpu.contributionMergeMs +
 			this.#cpu.blendedOrderingMs +
 			this.#cpu.instanceRunPreparationMs +
 			this.#cpu.instanceUploadMs +
-			this.#cpu.portalGraphPlanningMs +
+			this.#cpu.portalPlanningMs +
 			this.#cpu.terrainSubmissionMs +
 			this.#cpu.opaqueSubmissionMs +
 			this.#cpu.blendedSubmissionMs +
@@ -491,10 +442,7 @@ export class WebGL2FrameProfileCapture {
 			this.#cpu.generatedInstanceCullingMs;
 		this.#owner.finishFrame({
 			...this.#cpu,
-			contribution: {
-				...this.#contribution,
-				portalContributionSetCount: this.#portalContributionSetUses.size,
-			},
+			contribution: { ...this.#contribution },
 			frameNumber: this.#frameNumber,
 			otherMs: Math.max(0, totalMs - namedMs),
 			totalMs,
@@ -560,7 +508,6 @@ function summarizeCpuFrames(
 		blendedOrderingMs: 0,
 		blendedSubmissionMs: 0,
 		particleSubmissionMs: 0,
-		contributionMergeMs: 0,
 		finalizationMs: 0,
 		generatedInstanceCullingMs: 0,
 		instanceRunPreparationMs: 0,
@@ -568,7 +515,7 @@ function summarizeCpuFrames(
 		objectPreparationMs: 0,
 		opaqueSubmissionMs: 0,
 		otherMs: 0,
-		portalGraphPlanningMs: 0,
+		portalPlanningMs: 0,
 		sceneQueryMs: 0,
 		sceneContributionResolutionMs: 0,
 		setupMs: 0,
@@ -587,7 +534,6 @@ function summarizeCpuFrames(
 	const mean: RendererCpuFrameTimings = {
 		blendedOrderingMs: totals.blendedOrderingMs / sampleCount,
 		blendedSubmissionMs: totals.blendedSubmissionMs / sampleCount,
-		contributionMergeMs: totals.contributionMergeMs / sampleCount,
 		finalizationMs: totals.finalizationMs / sampleCount,
 		generatedInstanceCullingMs: totals.generatedInstanceCullingMs / sampleCount,
 		instanceRunPreparationMs: totals.instanceRunPreparationMs / sampleCount,
@@ -596,7 +542,7 @@ function summarizeCpuFrames(
 		opaqueSubmissionMs: totals.opaqueSubmissionMs / sampleCount,
 		otherMs: totals.otherMs / sampleCount,
 		particleSubmissionMs: totals.particleSubmissionMs / sampleCount,
-		portalGraphPlanningMs: totals.portalGraphPlanningMs / sampleCount,
+		portalPlanningMs: totals.portalPlanningMs / sampleCount,
 		sceneQueryMs: totals.sceneQueryMs / sampleCount,
 		sceneContributionResolutionMs:
 			totals.sceneContributionResolutionMs / sampleCount,
@@ -630,18 +576,9 @@ function averageContributionMetrics(
 	sampleCount: number,
 ): RendererContributionFrameMetrics {
 	return {
-		multiNodeMergeCount: totals.multiNodeMergeCount / sampleCount,
 		dynamicObjectPreparationCount:
 			totals.dynamicObjectPreparationCount / sampleCount,
 		staticObjectPreparationCount:
 			totals.staticObjectPreparationCount / sampleCount,
-		portalContributionSetCount: totals.portalContributionSetCount / sampleCount,
-		portalContributionSetUseCount:
-			totals.portalContributionSetUseCount / sampleCount,
-		portalNodePreparationCount: totals.portalNodePreparationCount / sampleCount,
-		repeatedPortalNodeUseCount: totals.repeatedPortalNodeUseCount / sampleCount,
-		repeatedPortalContributionSetUseCount:
-			totals.repeatedPortalContributionSetUseCount / sampleCount,
-		portalNodeUseCount: totals.portalNodeUseCount / sampleCount,
 	};
 }

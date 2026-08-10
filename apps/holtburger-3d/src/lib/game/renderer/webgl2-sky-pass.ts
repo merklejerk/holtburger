@@ -34,6 +34,7 @@ import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catal
 /** Per-frame device and view state the sky pass draws against. */
 export interface SkyDrawContext {
 	readonly gl: WebGL2RenderingContext;
+	/** Caller-selected program, already active so portal routing can bind its tile before drawing. */
 	readonly program: WebGL2SkyProgram;
 	readonly samplers: WebGL2TextureSamplerCatalog;
 	readonly textureFiltering: TextureFilteringPolicy;
@@ -268,7 +269,6 @@ export class WebGL2SkyPass {
 		);
 		if (drawn.length === 0) return;
 
-		gl.useProgram(program.program);
 		// Culling stays off: the camera sits inside every sky mesh, so the authored cull face —
 		// derived for objects viewed from outside — would reject the faces the viewer needs.
 		// Enabling it was measured to change nothing on shipped content.

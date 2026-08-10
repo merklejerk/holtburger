@@ -1449,6 +1449,8 @@ interface AtlasPlanSnapshot {
 	readonly visibilityWork: {
 		readonly projectionPrimitiveCount: number;
 		readonly queueHighWaterCount: number;
+		readonly selectedCrossingInputCount: number;
+		readonly selectedCrossingMarkerWordInputCount: number;
 		readonly windowFragmentHighWaterCount: number;
 		readonly windowHighWaterCount: number;
 		readonly windowVertexHighWaterCount: number;
@@ -1751,6 +1753,10 @@ function snapshotAtlasPlan(
 		visibilityWork: {
 			projectionPrimitiveCount: frame.visibility.trace.projectionPrimitiveCount,
 			queueHighWaterCount: frame.visibility.trace.queueHighWaterCount,
+			selectedCrossingInputCount:
+				frame.visibility.trace.selectedCrossingInputCount,
+			selectedCrossingMarkerWordInputCount:
+				frame.visibility.trace.selectedCrossingMarkerWordInputCount,
 			windowFragmentHighWaterCount:
 				frame.visibility.trace.windowFragmentHighWaterCount,
 			windowHighWaterCount: frame.visibility.trace.windowHighWaterCount,
@@ -2107,6 +2113,7 @@ function createDrySceneWorkload(
 	for (const landblockId of content.terrainLandblockIds) {
 		outdoor.opaque.push({
 			batchKey: `terrain:${landblockId}`,
+			kind: "terrain",
 			preparationKey: `terrain:${landblockId}`,
 		});
 	}
@@ -2146,6 +2153,7 @@ function appendDryDraw(
 	if (input.ordering === "opaque" || input.ordering === "alpha-test") {
 		target.opaque.push({
 			batchKey: input.batchKey,
+			kind: "object",
 			preparationKey: input.physicalKey,
 		});
 		return;

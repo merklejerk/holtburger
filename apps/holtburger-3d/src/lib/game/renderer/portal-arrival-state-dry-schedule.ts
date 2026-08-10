@@ -9,6 +9,8 @@ import {
 export interface PortalDryOpaqueBatch {
 	/** Final renderer compatibility identity for one physical batch. */
 	readonly batchKey: string;
+	/** Production submission pass; terrain routes once while objects route by authored scope. */
+	readonly kind: "object" | "terrain";
 	/** Physical preparation identity; repeated appearances must retain this value. */
 	readonly preparationKey: string;
 }
@@ -78,6 +80,8 @@ export interface PortalArrivalStateDryPlan {
 	>;
 	/** Canonical physical scopes retained by the production culler. */
 	readonly selectedScopeKeys: readonly string[];
+	/** Render-domain tile ordinal aligned with each selected authored scope. */
+	readonly selectedScopeRenderDomainOrdinals: readonly number[];
 	/** Selected directed crossings encoded into arrival states. */
 	readonly selectedCrossingCount: number;
 	/** Sum of committed packed scope-tile areas, excluding atlas gaps. */
@@ -110,6 +114,11 @@ export function snapshotPortalArrivalStateDryPlan(
 		}),
 		selectedCrossingCount: frame.visibility.selectedCrossingCount,
 		selectedScopeKeys: Object.freeze(selectedScopeKeys),
+		selectedScopeRenderDomainOrdinals: Object.freeze(
+			selectedScopeKeys.map((_, ordinal) =>
+				frame.visibility.selectedScopeRenderDomainOrdinal(ordinal),
+			),
+		),
 		tilePixelCount: frame.trace.tilePixelCount,
 	});
 }
@@ -146,6 +155,12 @@ export interface PortalArrivalStateDryScheduleTrace {
 	readonly opaqueCompositeInstanceCount: number;
 	/** Final physical opaque submissions; equal to the physical batch count. */
 	readonly opaqueSubmissionCount: number;
+	/** First object scope plus adjacent authored-scope changes in final physical opaque order. */
+	readonly opaqueAuthoredScopeTransitionCount: number;
+	/** Tile resolutions after terrain-pass and adjacent authored-object scope reuse. */
+	readonly opaqueTileResolutionCount: number;
+	/** First packed domain plus adjacent domain changes across terrain and opaque objects. */
+	readonly opaqueRenderDomainTransitionCount: number;
 	/** Compatible physical particle batches. */
 	readonly particleBatchCount: number;
 	/** Live particle instances copied into frame upload storage. */
@@ -199,20 +214,40 @@ export function createPortalArrivalStateDryScheduleTrace(
 	validateDrawingBuffer(drawingBuffer);
 	const workloadByScope = indexWorkload(workload);
 	const selectedScopeKeys = new Set(plan.selectedScopeKeys);
-	const selectedWorkloads = [...selectedScopeKeys].sort().map((key) => {
+	if (
+		plan.selectedScopeRenderDomainOrdinals.length !==
+		plan.selectedScopeKeys.length
+	) {
+		throw new Error(
+			"Portal arrival-state dry plan scope and render-domain counts differ.",
+		);
+	}
+	const selectedWorkloads = plan.selectedScopeKeys.map((key, ordinal) => {
 		const scope = workloadByScope.get(key);
 		if (!scope) {
 			throw new Error(
 				`Portal arrival-state dry workload is missing selected scope ${key}.`,
 			);
 		}
-		return scope;
+		const renderDomainOrdinal = plan.selectedScopeRenderDomainOrdinals[ordinal];
+		if (
+			renderDomainOrdinal === undefined ||
+			!Number.isSafeInteger(renderDomainOrdinal) ||
+			renderDomainOrdinal < 0
+		) {
+			throw new Error(
+				`Portal arrival-state dry scope ${key} has an invalid render domain.`,
+			);
+		}
+		return { renderDomainOrdinal, workload: scope };
 	});
+	const orderedWorkloads = selectedWorkloads.map(({ workload }) => workload);
 	const traversalCrossingCount = plan.selectedCrossingCount;
 	const traversalDepth = plan.commands.traversalDepth;
 	const opaquePhysicalBatchCount =
-		uniqueOpaquePhysicalBatchCount(selectedWorkloads);
-	const deferredInput = selectedWorkloads.flatMap((scope) => scope.deferred);
+		uniqueOpaquePhysicalBatchCount(orderedWorkloads);
+	const opaqueRouting = traceOpaqueRouting(selectedWorkloads);
+	const deferredInput = orderedWorkloads.flatMap((scope) => scope.deferred);
 	const deferred = uniqueByKey(
 		deferredInput,
 		({ submissionKey }) => submissionKey,
@@ -226,7 +261,7 @@ export function createPortalArrivalStateDryScheduleTrace(
 			.filter(({ kind }) => kind === "additive")
 			.map(({ batchKey }) => batchKey),
 	).size;
-	const particleInput = selectedWorkloads.flatMap((scope) => scope.particles);
+	const particleInput = orderedWorkloads.flatMap((scope) => scope.particles);
 	const particles = uniqueByKey(
 		particleInput,
 		({ sourceKey }) => sourceKey,
@@ -256,6 +291,11 @@ export function createPortalArrivalStateDryScheduleTrace(
 		opaqueCompositeCommandCount: plan.commands.opaqueCompositeCommandCount,
 		opaqueCompositeInstanceCount: plan.commands.opaqueCompositeInstanceCount,
 		opaqueSubmissionCount: opaquePhysicalBatchCount,
+		opaqueAuthoredScopeTransitionCount:
+			opaqueRouting.authoredScopeTransitionCount,
+		opaqueRenderDomainTransitionCount:
+			opaqueRouting.renderDomainTransitionCount,
+		opaqueTileResolutionCount: opaqueRouting.tileResolutionCount,
 		particleBatchCount,
 		particleInstancePackCount: particles.reduce(
 			(total, particle) => total + particle.instanceCount,
@@ -291,6 +331,46 @@ export function createPortalArrivalStateDryScheduleTrace(
 		traversalCrossingCount,
 		traversalDepth,
 	});
+}
+
+function traceOpaqueRouting(
+	selected: readonly {
+		readonly renderDomainOrdinal: number;
+		readonly workload: PortalDryScopeWorkload;
+	}[],
+): {
+	readonly authoredScopeTransitionCount: number;
+	readonly renderDomainTransitionCount: number;
+	readonly tileResolutionCount: number;
+} {
+	let activeRenderDomainOrdinal = -1;
+	let authoredScopeTransitionCount = 0;
+	let renderDomainTransitionCount = 0;
+	let tileResolutionCount = 0;
+	const outdoor = selected.find(
+		({ workload }) => workload.scopeKey === "outdoor",
+	);
+	if (outdoor?.workload.opaque.some(({ kind }) => kind === "terrain")) {
+		activeRenderDomainOrdinal = outdoor.renderDomainOrdinal;
+		renderDomainTransitionCount += 1;
+		tileResolutionCount += 1;
+	}
+	for (const { renderDomainOrdinal, workload } of selected) {
+		if (!workload.opaque.some(({ kind }) => kind === "object")) continue;
+		// Scene selection is scope-contiguous, and opaque instance grouping includes render scope in
+		// its compatibility key. One selected scope therefore remains one adjacent routing run.
+		authoredScopeTransitionCount += 1;
+		tileResolutionCount += 1;
+		if (activeRenderDomainOrdinal !== renderDomainOrdinal) {
+			activeRenderDomainOrdinal = renderDomainOrdinal;
+			renderDomainTransitionCount += 1;
+		}
+	}
+	return {
+		authoredScopeTransitionCount,
+		renderDomainTransitionCount,
+		tileResolutionCount,
+	};
 }
 
 function uniqueOpaquePhysicalBatchCount(

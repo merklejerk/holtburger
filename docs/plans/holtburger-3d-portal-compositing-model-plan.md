@@ -1,8 +1,8 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phases 7 through 9 accepted behind the explicit probe; the scope-atlas compositor has
-symbolic correctness evidence, numeric hardware evidence, and matched renderer-free operation
-traces over the archive risk set; public cutover and legacy deletion are next
+Status: Production cutover and Phase 12C are complete; the scope-atlas compositor retains its
+symbolic/numeric correctness evidence, and the first optimization slice accepted sparse crossing
+materialization plus routed tile-state reuse while rejecting packer and round-bound complexity
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -2908,15 +2908,16 @@ Results from this opening slice may resteer which 12A traces remain worth produc
 
 #### 12C. Remove avoidable whole-topology and packing work
 
-- [ ] Compare the current final all-crossing scan with enumeration through the already-packed
-      outgoing ranges of selected scopes, filtering selected targets. Prove identical stable
-      crossing order and reciprocal-arrival IDs before replacing the `O(E)` pass.
+- [x] Replace the final all-crossing scan with selected-scope outgoing-range enumeration only when
+      a topology-derived iteration bound is strictly smaller. Pack selected crossing markers into
+      integer words, then scan those words in stable crossing-id order so reciprocal arrival ids and
+      GPU stream order remain identical. Dense cases retain the direct full scan.
 - [x] Retain immediately live packed-tile state across the existing opaque draw sequence. Viewport
       changes now occur only when the render-domain ordinal changes; clip-transform writes occur
       only when the tile changes or ordinary program setup overwrites that program's uniform; and
       adjacent identical authored scopes reuse one scalar tile resolution. The state owner creates
       no frame records and cannot reorder, split, or duplicate a draw.
-- [ ] Extend the deterministic archive workload with exact authored-scope and render-domain
+- [x] Extend the deterministic archive workload with exact authored-scope and render-domain
       transitions in the already-formed physical opaque submission order. The first corrected
       `0x00070100` settled trace already proves the important one-domain case independently of
       ordering: 27 opaque submissions require one routed viewport update, down from 27.
@@ -2925,14 +2926,15 @@ Results from this opening slice may resteer which 12A traces remain worth produc
       executor ownership at every accepted depth: each 15-call round alternates framebuffer,
       viewport, program, depth comparison, and vertex array around two required clears and draws.
       No executor command was deleted.
-- [ ] Trace atlas bound reads, sort comparisons, placement attempts, and retained packing order.
-      Evaluate counting/radix or retained-order packing only if a real dimension improves without
-      increasing committed pixels or camera-time heap work.
-- [ ] Investigate whether the accepted propagation round count can be derived more tightly from the
-      selected arrival graph than from completed culler depth. Reject GPU readback or polling; a
-      tighter bound must be computed from already-owned integer topology with fewer operations than
-      it removes.
-- [ ] Keep the fixed-capacity early-stop contract. Optimization may reduce work before a limit but
+- [x] Trace atlas bound reads, sort comparisons, placement attempts, and retained packing order.
+      Reject a replacement packer: every one of the 512 risk poses packs in one attempt, with at
+      most 14 domains, 40 sort comparisons, 120 bound reads, and 14 placement attempts.
+- [x] Investigate whether the accepted propagation round count can be derived more tightly from the
+      selected arrival graph than from completed culler depth. Reject the cheap SCC avenue: all 106
+      depth-capped risk poses have fully reciprocal, root-connected selected domain graphs, so they
+      form one SCC and retain the current crossing bound. Path-history or GPU convergence mechanisms
+      add more work/complexity than this phase can prove they remove.
+- [x] Keep the fixed-capacity early-stop contract. Optimization may reduce work before a limit but
       may not turn a complete-frontier cutoff into partial rendering or a fallback compositor.
 
 #### 12D. Inspect topology/load-time preparation
@@ -3017,6 +3019,17 @@ Results from this opening slice may resteer which 12A traces remain worth produc
 - 2026-08-10: The command-state audit finds no removable repeated assignment inside the 282-call
   executor envelope. The accepted first optimization instead suppresses redundant per-draw packed
   viewport, clip-transform, and adjacent scope-resolution work without changing physical batches.
+- 2026-08-10: The completed 12C archive replay covers 512 poses across the eight retained risk
+  landblocks. Adaptive selected-crossing materialization reduces the former 1,097,856 whole-topology
+  crossing inspections to 51,301 selected-source crossing inspections plus 33,174 packed marker-word
+  reads. The conservative topology bound keeps the original scan on dense poses, preserves canonical
+  crossing order and reciprocal arrival ids, creates no frame records, and replaces the one-byte-per-
+  crossing selection marker with one bit per crossing.
+- 2026-08-10: The routed opaque trace contains 37,503 physical submissions, 5,229 authored-scope tile
+  resolutions, and 2,499 adjacent render-domain transitions. This retains the previously accepted
+  tile-state optimization: it removes redundant routing/state work without reordering or changing a
+  physical batch. The packer and propagation-round candidates are rejected by the measured bounds
+  above rather than implemented speculatively.
 
 ## Risks and Mitigations
 

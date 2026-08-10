@@ -173,6 +173,12 @@ capacity an accepted camera update creates no portal-owned JavaScript records an
 A separate readable immutable traversal is retained only as a differential oracle. It shares
 projection inputs and tolerances with production, but not clipping/admission control flow.
 
+Final crossing materialization is adaptive. Sparse selections enumerate only the already-packed
+outgoing ranges of selected scopes, mark accepted crossings in a one-bit-per-crossing buffer, and
+scan packed words to recover canonical crossing-id order. A topology-derived bound chooses this
+path only when its worst-case iterations beat the direct whole-crossing scan; dense selections keep
+the direct scan. Reciprocal arrival ids and crossing-stream order are therefore unchanged.
+
 Capacity is part of the visual contract:
 
 - traversal depth, work items, checked projection primitives, window storage, arrival ids, crossing

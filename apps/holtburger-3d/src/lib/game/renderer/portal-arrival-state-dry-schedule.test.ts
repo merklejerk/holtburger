@@ -32,6 +32,7 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			},
 			selectedCrossingCount: 2,
 			selectedScopeKeys: [scopeKey(OUTDOOR), scopeKey(INDOOR)],
+			selectedScopeRenderDomainOrdinals: [0, 1],
 			tilePixelCount: 10_000,
 		};
 		const workload: PortalDrySceneWorkload = {
@@ -45,7 +46,13 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 							submissionKey: "outdoor-glass",
 						},
 					],
-					opaque: [{ batchKey: "terrain", preparationKey: "terrain" }],
+					opaque: [
+						{
+							batchKey: "terrain",
+							kind: "terrain",
+							preparationKey: "terrain",
+						},
+					],
 					particles: [
 						{
 							batchKey: "flame",
@@ -62,7 +69,9 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 				},
 				{
 					...emptyScope(INDOOR),
-					opaque: [{ batchKey: "wall", preparationKey: "wall" }],
+					opaque: [
+						{ batchKey: "wall", kind: "object", preparationKey: "wall" },
+					],
 				},
 			],
 		};
@@ -85,7 +94,10 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			nextFrontierClearCommandCount: 2,
 			opaqueCompositeCommandCount: 1,
 			opaqueCompositeInstanceCount: 2,
+			opaqueAuthoredScopeTransitionCount: 1,
+			opaqueRenderDomainTransitionCount: 2,
 			opaqueSubmissionCount: 2,
+			opaqueTileResolutionCount: 2,
 			particleBatchCount: 2,
 			particleInstancePackCount: 15,
 			particleSourceCount: 2,
@@ -107,6 +119,55 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 				FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount,
 			transparentNearSquareRootCount: 1,
 		});
+	});
+
+	it("separates authored-scope lookups from packed-domain viewport transitions", () => {
+		const scopes = Array.from({ length: 7 }, (_, ordinal) => ({
+			envCellId: `0xda5501${ordinal.toString(16).padStart(2, "0")}`,
+			kind: "env-cell" as const,
+			landblockId: "0xda55ffff",
+		}));
+		const plan: PortalArrivalStateDryPlan = {
+			atlasPixelCapacity: 10_000,
+			commands: {
+				crossingInstancePreparationCount: 0,
+				frontierClearCommandCount: 0,
+				maskPropagationCommandCount: 0,
+				maskPropagationInstanceCount: 0,
+				opaqueCompositeCommandCount: 1,
+				opaqueCompositeInstanceCount: 1,
+				scopeEnvelopeReductionCommandCount: 0,
+				scopeEnvelopeReductionInstanceCount: 0,
+				traversalDepth: 0,
+			},
+			selectedCrossingCount: 0,
+			selectedScopeKeys: scopes.map(scopeKey),
+			selectedScopeRenderDomainOrdinals: scopes.map(() => 0),
+			tilePixelCount: 10_000,
+		};
+		const workload: PortalDrySceneWorkload = {
+			scopes: scopes.map((scope, scopeOrdinal) => ({
+				...emptyScope(scope),
+				opaque: Array.from(
+					{ length: scopeOrdinal < 6 ? 4 : 3 },
+					(_, batchOrdinal) => ({
+						batchKey: `batch-${scopeOrdinal}-${batchOrdinal}`,
+						kind: "object" as const,
+						preparationKey: `object-${scopeOrdinal}-${batchOrdinal}`,
+					}),
+				),
+			})),
+		};
+
+		const trace = createPortalArrivalStateDryScheduleTrace(plan, workload, {
+			height: 50,
+			width: 100,
+		});
+
+		expect(trace.opaqueSubmissionCount).toBe(27);
+		expect(trace.opaqueAuthoredScopeTransitionCount).toBe(7);
+		expect(trace.opaqueTileResolutionCount).toBe(7);
+		expect(trace.opaqueRenderDomainTransitionCount).toBe(1);
 	});
 });
 

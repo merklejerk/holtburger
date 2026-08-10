@@ -53,8 +53,8 @@ export interface PortalScopeAtlasExecutionInput {
 	readonly crossingVertexCount: number;
 	/** Shader-owned uniform-block binding selected at device construction. */
 	readonly metadataBindingPoint: number;
-	/** Selected scope records consumed as reduction and resolve instances. */
-	readonly scopeCount: number;
+	/** Selected render-domain records consumed as reduction and resolve instances. */
+	readonly renderDomainCount: number;
 	/** Complete propagation rounds retained by the capacity-bounded planner. */
 	readonly traversalDepth: number;
 }
@@ -112,11 +112,11 @@ export interface PortalScopeAtlasWebGLSink {
 	/** Submit all selected scope envelopes once for one round. */
 	drawReduction(
 		next: FrontierOrdinal,
-		scopeCount: number,
+		renderDomainCount: number,
 		terminal: boolean,
 	): void;
 	/** Submit all selected scope tiles once to the external output. */
-	drawResolve(scopeCount: number): void;
+	drawResolve(renderDomainCount: number): void;
 }
 
 /** One shader-independent WebGL entry call in the scope-atlas execution sequence. */
@@ -183,10 +183,10 @@ export type PortalScopeAtlasWebGLCall =
 	| {
 			readonly kind: "draw-reduction";
 			readonly next: FrontierOrdinal;
-			readonly scopeCount: number;
+			readonly renderDomainCount: number;
 			readonly terminal: boolean;
 	  }
-	| { readonly kind: "draw-resolve"; readonly scopeCount: number };
+	| { readonly kind: "draw-resolve"; readonly renderDomainCount: number };
 
 /** Exact WebGL entry-call counts derived from one proof-only command sequence. */
 interface PortalScopeAtlasWebGLCallTrace {
@@ -259,7 +259,7 @@ export function executePortalScopeAtlasWebGLCalls(
 		sink.bindVertexArray("unit-quad");
 		sink.drawReduction(
 			output,
-			input.scopeCount,
+			input.renderDomainCount,
 			round === input.traversalDepth - 1,
 		);
 	}
@@ -272,7 +272,7 @@ export function executePortalScopeAtlasWebGLCalls(
 	// scope without weakening opaque nearest-depth selection.
 	sink.depthFunction("less-equal");
 	if (input.traversalDepth === 0) sink.bindVertexArray("unit-quad");
-	sink.drawResolve(input.scopeCount);
+	sink.drawResolve(input.renderDomainCount);
 }
 
 function validateExecutionInput(input: PortalScopeAtlasExecutionInput): void {
@@ -281,13 +281,15 @@ function validateExecutionInput(input: PortalScopeAtlasExecutionInput): void {
 		input.metadataBindingPoint,
 		"metadata binding point",
 	);
-	requirePositiveInteger(input.scopeCount, "scope count");
+	requirePositiveInteger(input.renderDomainCount, "render domain count");
 	requireNonNegativeInteger(input.traversalDepth, "traversal depth");
 	if (input.traversalDepth > PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth) {
 		throw new Error("Portal scope-atlas traversal depth exceeds its policy.");
 	}
-	if (input.scopeCount > PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT) {
-		throw new Error("Portal scope-atlas scope count exceeds R8UI capacity.");
+	if (input.renderDomainCount > PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT) {
+		throw new Error(
+			"Portal scope-atlas render domain count exceeds R8UI capacity.",
+		);
 	}
 	if (input.crossingVertexCount % 3 !== 0) {
 		throw new Error(
@@ -299,9 +301,9 @@ function validateExecutionInput(input: PortalScopeAtlasExecutionInput): void {
 			"Portal scope-atlas propagation depth and crossing stream must both be empty or non-empty.",
 		);
 	}
-	if (input.traversalDepth === 0 && input.scopeCount !== 1) {
+	if (input.traversalDepth === 0 && input.renderDomainCount !== 1) {
 		throw new Error(
-			"Portal scope-atlas root-only execution must contain exactly one scope.",
+			"Portal scope-atlas root-only execution must contain exactly one render domain.",
 		);
 	}
 }
@@ -431,10 +433,15 @@ function createRecordingSink(
 		depthMask: (write) => calls.push({ kind: "depth-mask", write }),
 		drawPropagation: (output, vertexCount) =>
 			calls.push({ kind: "draw-propagation", output, vertexCount }),
-		drawReduction: (next, scopeCount, terminal) =>
-			calls.push({ kind: "draw-reduction", next, scopeCount, terminal }),
-		drawResolve: (scopeCount) =>
-			calls.push({ kind: "draw-resolve", scopeCount }),
+		drawReduction: (next, renderDomainCount, terminal) =>
+			calls.push({
+				kind: "draw-reduction",
+				next,
+				renderDomainCount,
+				terminal,
+			}),
+		drawResolve: (renderDomainCount) =>
+			calls.push({ kind: "draw-resolve", renderDomainCount }),
 		setCapability: (capability, enabled) =>
 			calls.push({ capability, enabled, kind: "set-capability" }),
 		uniformReductionDepth: (depth) =>

@@ -531,7 +531,7 @@ function createPropagationStream(): PortalCrossingTriangleStreamView &
 		arrivalMetadataStateCount: 4,
 		bytes: new Uint8Array(arena),
 		propagationMetadataBytes: createMetadata(4),
-		scopeMetadataStateCount: 4,
+		renderDomainMetadataStateCount: 4,
 		usedByteLength: arena.byteLength,
 		usedPropagationMetadataByteLength:
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
@@ -556,7 +556,7 @@ function createRootOnlyStream(): PortalCrossingTriangleStreamView &
 		arrivalMetadataStateCount: 1,
 		bytes: new Uint8Array(0),
 		propagationMetadataBytes: createMetadata(1),
-		scopeMetadataStateCount: 1,
+		renderDomainMetadataStateCount: 1,
 		usedByteLength: 0,
 		usedPropagationMetadataByteLength:
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
@@ -898,11 +898,11 @@ function drawDeferredFixtureSchedule(
 function drawDeferredFixture(
 	gl: WebGL2RenderingContext,
 	fixture: DeferredFixtureProgram,
-	scope: number,
+	renderDomain: number,
 	depth: number,
 	color: readonly [number, number, number, number],
 ): void {
-	gl.uniform1ui(fixture.portal.scope, scope);
+	gl.uniform1ui(fixture.portal.renderDomain, renderDomain);
 	gl.uniform1f(fixture.depth, depth);
 	gl.uniform4f(fixture.color, ...color);
 	gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -922,11 +922,11 @@ function drawParticleFixtureSchedule(
 function drawParticleFixture(
 	gl: WebGL2RenderingContext,
 	fixture: ParticleFixtureProgram,
-	scope: number,
+	renderDomain: number,
 	depth: number,
 	color: readonly [number, number, number, number],
 ): void {
-	gl.uniform1ui(fixture.portal.scope, scope);
+	gl.uniform1ui(fixture.portal.renderDomain, renderDomain);
 	gl.uniform1f(fixture.depth, depth);
 	gl.uniform4f(fixture.color, ...color);
 	gl.drawArrays(gl.TRIANGLES, 0, 3);

@@ -345,6 +345,8 @@ describe("portal scope-atlas planning", () => {
 		expect(frame.tileClipScaleY(1)).toBe(2);
 		expect(frame.tileClipOffsetX(1)).toBe(0);
 		expect(frame.tileClipOffsetY(1)).toBe(0);
+		expect(frame.tileScreenX(1)).toBe(25);
+		expect(frame.tileScreenY(1)).toBe(25);
 		expect(frame.tileOrdinalForRenderScopeKey("outdoor")).toBe(0);
 		expect(frame.tileOrdinalForRenderScopeKey(child.envCellId)).toBe(1);
 		expect(() => frame.tileOrdinalForRenderScopeKey("missing")).toThrow(
@@ -362,6 +364,66 @@ describe("portal scope-atlas planning", () => {
 			windowVertexReadCount: 8,
 		});
 		expect(frame.trace.arenaCapacityBytes).toBeGreaterThan(0);
+	});
+
+	it("collapses selected depth-continuous cells into one render-domain tile", () => {
+		const root = envCellScope("island-root");
+		const neighbor = envCellScope("island-neighbor");
+		const destination = envCellScope("island-destination");
+		const graph = topology(
+			[
+				topologyScope(root, "shared"),
+				topologyScope(neighbor, "shared"),
+				topologyScope(destination, "destination"),
+			],
+			[
+				crossing("internal-seam", root, neighbor, {
+					aperture: rectangle(-0.5, -0.5, 0.5, 0.5),
+					spatialRelationship: {
+						kind: "indoor-depth-continuous",
+						reciprocalApertureId: "portal-aperture:internal-seam/reciprocal",
+					},
+				}),
+				crossing("island-exit", neighbor, destination, {
+					aperture: rectangle(-0.25, -0.25, 0.25, 0.25),
+				}),
+			],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(root);
+
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 100, width: 200 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.visibility.selectedScopeCount).toBe(3);
+		expect(frame.visibility.selectedRenderDomainCount).toBe(2);
+		expect(frame.visibility.selectedCrossingCount).toBe(1);
+		expect(frame.visibility.selectedCrossing(0).id).toBe(
+			"portal-crossing:island-exit",
+		);
+		expect(frame.visibility.selectedCrossingSourceRenderDomainOrdinal(0)).toBe(
+			0,
+		);
+		expect(frame.visibility.selectedCrossingTargetRenderDomainOrdinal(0)).toBe(
+			1,
+		);
+		expect(frame.tileCount).toBe(2);
+		expect(frame.tileOrdinalForRenderScopeKey(root.envCellId)).toBe(0);
+		expect(frame.tileOrdinalForRenderScopeKey(neighbor.envCellId)).toBe(0);
+		expect(frame.tileOrdinalForRenderScopeKey(destination.envCellId)).toBe(1);
+		expect(frame.commands).toMatchObject({
+			crossingInstancePreparationCount: 1,
+			opaqueCompositeInstanceCount: 2,
+			scopeEnvelopeReductionInstanceCount: 2,
+			traversalDepth: 1,
+		});
 	});
 
 	it("retreats complete frontiers until fixed atlas capacity fits without re-culling", () => {
@@ -581,13 +643,13 @@ describe("portal scope-atlas planning", () => {
 			propagationMetadataCapacityBytes:
 				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 			reciprocalArrivalStateReadCount: 2,
-			scopeMetadataStateWriteCount: 3,
+			renderDomainMetadataStateWriteCount: 3,
 			triangleIndexReadCount: 12,
 			triangleCapacityBytes: 12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 			vertexHighWaterCount: 12,
 		});
 		expect(secondView.arrivalMetadataStateCount).toBe(3);
-		expect(secondView.scopeMetadataStateCount).toBe(3);
+		expect(secondView.renderDomainMetadataStateCount).toBe(3);
 		expect(secondView.usedPropagationMetadataByteLength).toBe(
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 		);
@@ -957,7 +1019,7 @@ describe("portal scope-atlas planning", () => {
 						PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 				},
 			),
-		).toThrow("duplicate render scope key duplicate");
+		).toThrow("duplicate authored scope key duplicate");
 	});
 });
 

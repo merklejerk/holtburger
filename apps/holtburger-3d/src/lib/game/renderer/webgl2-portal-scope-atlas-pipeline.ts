@@ -236,14 +236,14 @@ export class WebGL2PortalScopeAtlasPipeline {
 		gl.activeTexture(gl.TEXTURE0);
 	}
 
-	/** Select one authored scope envelope without changing the caller's physical draw boundary. */
+	/** Resolve one authored scope to its domain envelope without changing the physical draw. */
 	routeDeferredSubmission(
 		renderScopeKey: string,
 		uniforms: WebGL2PortalDeferredVisibilityUniforms,
 	): void {
 		const ordinal =
 			this.#requireFrame().atlas.tileOrdinalForRenderScopeKey(renderScopeKey);
-		this.#gl.uniform1ui(uniforms.scope, ordinal);
+		this.#gl.uniform1ui(uniforms.renderDomain, ordinal);
 	}
 
 	getDiagnostics(): WebGL2PortalScopeAtlasTargetDiagnostics {

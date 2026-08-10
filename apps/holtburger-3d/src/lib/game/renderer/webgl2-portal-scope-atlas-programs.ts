@@ -6,6 +6,7 @@ import {
 	PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG,
 } from "./portal-crossing-triangle-stream";
 import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
+import { PORTAL_ENVELOPE_SAMPLING_GLSL } from "./portal-envelope-sampling-glsl";
 import {
 	bindPortalScopeAtlasMetadataBlock,
 	PORTAL_SCOPE_ATLAS_METADATA_GLSL,
@@ -161,19 +162,18 @@ precision highp int;
 precision highp sampler2D;
 
 ${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
+${PORTAL_ENVELOPE_SAMPLING_GLSL}
 
 uniform sampler2D uSceneColor;
 uniform sampler2D uSceneDepth;
-uniform sampler2D uEnvelopeDepth;
 flat in uint vScope;
 layout(location = 0) out vec4 outColor;
 
 void main() {
 	PortalScopeMetadata scope = uScopes[vScope];
 	ivec2 screenPixel = ivec2(gl_FragCoord.xy);
-	ivec2 atlasPixel = ivec2(scope.atlasAndScreenOrigin.xy)
-		+ screenPixel - ivec2(scope.atlasAndScreenOrigin.zw);
-	float envelopeDepth = texelFetch(uEnvelopeDepth, atlasPixel, 0).r;
+	ivec2 atlasPixel = portalScopeAtlasPixel(scope, screenPixel);
+	float envelopeDepth = portalEnvelopeDepthAtAtlasPixel(scope, atlasPixel);
 	float sceneDepth = texelFetch(uSceneDepth, atlasPixel, 0).r;
 	if (envelopeDepth != 1.0 && sceneDepth * 0.5 >= envelopeDepth) discard;
 	outColor = texelFetch(uSceneColor, atlasPixel, 0);
@@ -281,7 +281,7 @@ export function createWebGL2PortalScopeAtlasPrograms(
 			PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.sceneDepth,
 		);
 		gl.uniform1i(
-			requireWebGL2Uniform(gl, resolve, "uEnvelopeDepth"),
+			requireWebGL2Uniform(gl, resolve, "uPortalEnvelopeDepth"),
 			PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth,
 		);
 		return {

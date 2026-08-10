@@ -136,7 +136,7 @@ export const FRONTEND_TUNING = {
 			/** Physical-pixel cutoff for independently optional object presentations. */
 			minimumObjectFootprintPixelArea: 64,
 			/** Physical-pixel cutoff for non-near-plane recursive portal windows. */
-			minimumPortalFootprintPixelArea: 64,
+			minimumPortalFootprintPixelArea: 4,
 			/** Requested normalized-texture filtering before device capability resolution. */
 			textureFiltering: "anisotropic-2x",
 		},

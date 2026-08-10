@@ -2635,35 +2635,63 @@ an explanation for the steady-state portal compositor cost.
 
 #### 11C. Classify the white portal-seam fragments numerically
 
-- [ ] Treat the white fragments as an independent portal-boundary defect. Preserve a stable camera
+- [x] Treat the white fragments as an independent portal-boundary defect. Preserve a stable camera
       showing their alignment with authored portal seams, compare flat and portal modes, and capture
       deterministic pixel readback at affected coordinates. Screenshots may locate a repro but are
       not the acceptance oracle.
-- [ ] Disable authored particles at the existing diagnostic boundary as a control while preserving
+- [x] Disable authored particles at the existing diagnostic boundary as a control while preserving
       camera, content, portal mode, and environment. A negative result closes the particle
       explanation; a positive result requires identifying the owning emitter, particle
       mesh/material, motion law, and retail appearance before changing portal code.
-- [ ] For portal-only fragments, label atlas clear pixels, arrival ownership, reduced scope envelope,
+- [x] For portal-only fragments, label atlas clear pixels, arrival ownership, reduced scope envelope,
       scene color, and scene depth with distinct numeric sentinels in a focused probe. Determine
       whether each bad pixel is uncovered, samples outside its tile, fails source-depth ownership,
       or resolves an unintended scope.
-- [ ] Test the leading coverage-disagreement hypothesis directly. The production path clears every
+- [x] Test the leading coverage-disagreement hypothesis directly. The production path clears every
       atlas scene texel to the fog/background color, independently rasterizes portal envelopes and
       scope geometry, and resolves admitted scene color even when scene depth remains `1.0`. Prove
       whether each white fragment is an envelope-admitted texel at untouched scene depth rather
       than inferring that result from its color.
-- [ ] Verify integer ownership sampling, scene-depth sampling precision, `NEAREST`/clamp state, tile
+- [x] Verify integer ownership sampling, scene-depth sampling precision, `NEAREST`/clamp state, tile
       bounds, and resolve-coordinate arithmetic. The current path uses exact `texelFetch` rather
       than framebuffer blits or filtered UV samples, so adjacent-tile bleed is rejected unless the
       coordinate or metadata proof itself fails. Do not add padding, epsilon, dilation, or altered
       filtering until one failed invariant identifies it as the owner.
-- [ ] For fragments present in flat mode, compare adjacent depth-continuous EnvCell shell edge
+- [x] For fragments present in flat mode, compare adjacent depth-continuous EnvCell shell edge
       positions after their authored transforms. Distinguish exact shared edges, T-junctions,
-      noncoplanar gaps, and raster precision from the visibility-island relationship; the compositor
-      still gives every authored EnvCell its own scope even when load-time scheduling groups a
+      noncoplanar gaps, and raster precision from the visibility-island relationship; determine
+      whether the compositor manufactures a boundary after load-time scheduling has grouped a
       depth-continuous island.
-- [ ] Add the smallest asset-independent numeric fixture protecting the diagnosed invariant, then
-      remove temporary debug colors, readback hooks, and counters that have no continuing consumer.
+- [x] Add the smallest asset-independent fixture protecting the structural visibility-island
+      invariant, then remove temporary debug colors, readback hooks, and counters that have no
+      continuing consumer. Envelope-gutter radius is tuning policy and has no behavioral fixture.
+
+The retained field pose matches the Explorer's 60-degree camera and the reported room framing. A
+same-frame particle-on/off control changes only unrelated authored particle pixels. More decisively,
+the seam fragments track the time-varying sky/fog color; source inspection proves that exact color
+clears both the output and every packed scene tile at depth one. The fragments are therefore atlas
+clear exposure, not particle geometry or filtered adjacent-tile sampling.
+
+Field A/B rejected several narrower explanations. Explicit high-precision depth samplers and atlas
+lookup offsets did not remove the fragments; opposite one-texel offsets merely moved the exposed
+edge, scene-color/depth dilation had no effect, and disabling the portal-footprint cutoff left the
+residual pinholes. Changing packed opaque rasterization to an integer-translated full viewport also
+had no visible effect and was removed rather than retained as speculative complexity.
+
+Conservative, tile-clamped scope-envelope sampling nearly eliminated the fragments, including the
+residual present with a zero footprint cutoff. Its radius is a named shader tuning value and may be
+reduced to zero; tests do not promote the current kernel to compositor semantics. Opaque resolve,
+transparent objects, and particles consume the same helper so tuning cannot silently fork their
+visibility predicates.
+
+The investigation also found a separate cutover regression that multiplied the affected seams.
+Load-time realization still builds proof-backed depth-continuous `visibilityIslandId` components,
+but the scope-atlas backend gave every selected EnvCell an independent tile and propagated their
+internal crossings as ownership transitions. The corrected substrate keeps authored scope windows
+for traversal and scene selection, unions selected member windows into one render-domain tile,
+routes every selected member's existing batches to that tile, and omits same-domain crossings from
+GPU arrival propagation. A focused fixture covers an internal seam followed by a genuine domain
+exit; the seam consumes no arrival state while the exit retains one.
 
 ### Acceptance Criteria
 
@@ -2674,8 +2702,9 @@ an explanation for the steady-state portal compositor cost.
   retained without relying on wall-clock measurements.
 - The remaining renderer workload is attributed with structural counters and asynchronous GPU
   phase queries, with HUD update time no longer mistaken for GPU time.
-- Every white fragment in the retained minimal reproduction has a named data owner and failed
-  invariant. No portal seam workaround is accepted merely because it hides the pixels.
+- The retained minimal reproduction identifies atlas-clear exposure through envelope disagreement;
+  its conservative sampling radius remains explicit tuning policy, and proof-backed internal-island
+  seams no longer reach the compositor at all.
 - Phase 12 begins from the corrected dungeon baseline and records whether its PVS, projection,
   packing, host-preparation, or exterior-reuse avenues still dominate meaningful CPU work.
 
@@ -2692,6 +2721,18 @@ an explanation for the steady-state portal compositor cost.
   leading testable hypothesis is an envelope-admitted pixel whose independently rasterized scene
   geometry left the clear-color texel untouched. Particles remain one control, not the primary
   theory.
+- 2026-08-10: Time-of-day field evidence closes particle attribution: the fragments follow the
+  sky/fog clear color. Conservative scope-envelope sampling addresses the genuine-boundary artifact;
+  its radius remains tuning policy rather than a tested semantic constant. The no-effect packed
+  raster-translation experiment was deleted.
+- 2026-08-10: Restored visibility-island render ownership within the scope atlas without broadening
+  cell-granular traversal or scene selection. Member cells share one tile, local depth, envelope,
+  and deferred route; their internal crossings no longer consume GPU arrival states. Existing
+  physical submissions remain intact, so the correction adds no draw or batch boundary.
+- 2026-08-10: Explorer field verification in dungeon `0x00070100` found no remaining internal-island
+  compositor seams or moving sky-color pinholes at the inspected pose. This closes Phase 11 field
+  acceptance while leaving the conservative envelope radius explicitly tunable rather than
+  promoting its current value to a semantic invariant.
 - 2026-08-10: Wall-clock CPU measurements remain outside optimization acceptance. The sampling
   profile selects the loop to audit; code-derived bounds and deterministic operation counts prove
   the correction. GPU timer queries may identify a remaining hardware phase but do not substitute
@@ -2752,12 +2793,12 @@ After traversal, `#refreshSelectedCrossings` scans all retained topology crossin
 crossings whose source and target scopes were selected. This final `O(E)` pass is independent from
 the earlier outgoing-adjacency work and is an explicit optimization candidate.
 
-Depth-continuous visibility islands do not replace authored EnvCell scope identity in the selected
-scope atlas. `buildVisibilityIslands` groups cells only after proving reciprocal exact-match,
-coplanarity, opposed half-spaces, and bounds separation; the culler, atlas tile lookup, scene query,
-opaque routing, particles, and deferred envelopes still select and route each EnvCell scope by its
-own renderer key. Physical preparation may preserve batching across compatible work, but it does not
-authorize lifting a cell-level PVS decision to the whole visibility island.
+Depth-continuous visibility islands replace authored EnvCell identity only for render ownership.
+`buildVisibilityIslands` groups cells after proving reciprocal exact-match, coplanarity, opposed
+half-spaces, and bounds separation. The culler still retains one scope window per authored cell, and
+scene query plus any future PVS rejection remain cell-granular. The atlas unions selected member
+windows into one render-domain tile; opaque routing, particles, deferred envelopes, and local depth
+therefore share the island without admitting geometry from an unselected member.
 
 Retail has stronger authored-PVS behavior than the initial integration contract preserved:
 

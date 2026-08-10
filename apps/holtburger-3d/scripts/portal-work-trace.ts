@@ -1951,7 +1951,7 @@ function tracePose(
 	const scopeAtlasExecutor = compilePortalScopeAtlasWebGLCalls({
 		crossingVertexCount: scopeAtlasFrame.trace.crossingTriangleVertexCount,
 		metadataBindingPoint: PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT,
-		scopeCount: scopeAtlasFrame.visibility.selectedScopeCount,
+		renderDomainCount: scopeAtlasFrame.visibility.selectedRenderDomainCount,
 		traversalDepth: scopeAtlasFrame.commands.traversalDepth,
 	});
 	return {

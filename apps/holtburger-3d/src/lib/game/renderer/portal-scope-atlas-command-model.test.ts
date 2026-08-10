@@ -17,7 +17,7 @@ describe("portal scope-atlas WebGL call model", () => {
 		const plan = compilePortalScopeAtlasWebGLCalls({
 			crossingVertexCount: 18,
 			metadataBindingPoint: METADATA_BINDING_POINT,
-			scopeCount: 4,
+			renderDomainCount: 4,
 			traversalDepth: 3,
 		});
 
@@ -62,24 +62,24 @@ describe("portal scope-atlas WebGL call model", () => {
 			{
 				kind: "draw-reduction",
 				next: 0,
-				scopeCount: 4,
+				renderDomainCount: 4,
 				terminal: false,
 			},
 			{ kind: "draw-propagation", output: 1, vertexCount: 18 },
 			{
 				kind: "draw-reduction",
 				next: 1,
-				scopeCount: 4,
+				renderDomainCount: 4,
 				terminal: false,
 			},
 			{ kind: "draw-propagation", output: 0, vertexCount: 18 },
 			{
 				kind: "draw-reduction",
 				next: 0,
-				scopeCount: 4,
+				renderDomainCount: 4,
 				terminal: true,
 			},
-			{ kind: "draw-resolve", scopeCount: 4 },
+			{ kind: "draw-resolve", renderDomainCount: 4 },
 		]);
 		expect(plan.calls.filter((call) => call.kind.includes("clear"))).toEqual([
 			{
@@ -96,7 +96,7 @@ describe("portal scope-atlas WebGL call model", () => {
 		const plan = compilePortalScopeAtlasWebGLCalls({
 			crossingVertexCount: 0,
 			metadataBindingPoint: METADATA_BINDING_POINT,
-			scopeCount: 1,
+			renderDomainCount: 1,
 			traversalDepth: 0,
 		});
 
@@ -127,7 +127,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			{ kind: "bind-texture-2d", texture: "envelope-depth" },
 		]);
 		expect(plan.calls.filter((call) => call.kind.startsWith("draw-"))).toEqual([
-			{ kind: "draw-resolve", scopeCount: 1 },
+			{ kind: "draw-resolve", renderDomainCount: 1 },
 		]);
 		expect(plan.calls.filter((call) => call.kind === "depth-function")).toEqual(
 			[{ compare: "less-equal", kind: "depth-function" }],
@@ -143,7 +143,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			const plan = compilePortalScopeAtlasWebGLCalls({
 				crossingVertexCount: traversalDepth === 0 ? 0 : 3,
 				metadataBindingPoint: METADATA_BINDING_POINT,
-				scopeCount: traversalDepth + 1,
+				renderDomainCount: traversalDepth + 1,
 				traversalDepth,
 			});
 			expect(
@@ -162,7 +162,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			const plan = compilePortalScopeAtlasWebGLCalls({
 				crossingVertexCount: 3,
 				metadataBindingPoint: METADATA_BINDING_POINT,
-				scopeCount: traversalDepth + 1,
+				renderDomainCount: traversalDepth + 1,
 				traversalDepth,
 			});
 
@@ -173,17 +173,17 @@ describe("portal scope-atlas WebGL call model", () => {
 		}
 	});
 
-	it("changes only instance counts when selected scope count changes", () => {
+	it("changes only instance counts when selected render-domain count changes", () => {
 		const shallow = compilePortalScopeAtlasWebGLCalls({
 			crossingVertexCount: 3,
 			metadataBindingPoint: METADATA_BINDING_POINT,
-			scopeCount: 1,
+			renderDomainCount: 1,
 			traversalDepth: 1,
 		});
 		const dense = compilePortalScopeAtlasWebGLCalls({
 			crossingVertexCount: 3,
 			metadataBindingPoint: METADATA_BINDING_POINT,
-			scopeCount: 255,
+			renderDomainCount: 255,
 			traversalDepth: 1,
 		});
 
@@ -203,16 +203,16 @@ describe("portal scope-atlas WebGL call model", () => {
 			input: {
 				crossingVertexCount: 0,
 				metadataBindingPoint: -1,
-				scopeCount: 1,
+				renderDomainCount: 1,
 				traversalDepth: 0,
 			},
 		},
 		{
-			expected: "scope count exceeds R8UI capacity",
+			expected: "render domain count exceeds R8UI capacity",
 			input: {
 				crossingVertexCount: 0,
 				metadataBindingPoint: 0,
-				scopeCount: 256,
+				renderDomainCount: 256,
 				traversalDepth: 0,
 			},
 		},
@@ -221,7 +221,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			input: {
 				crossingVertexCount: 3,
 				metadataBindingPoint: 0,
-				scopeCount: 1,
+				renderDomainCount: 1,
 				traversalDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth + 1,
 			},
 		},
@@ -230,7 +230,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			input: {
 				crossingVertexCount: 1,
 				metadataBindingPoint: 0,
-				scopeCount: 1,
+				renderDomainCount: 1,
 				traversalDepth: 1,
 			},
 		},
@@ -239,16 +239,16 @@ describe("portal scope-atlas WebGL call model", () => {
 			input: {
 				crossingVertexCount: 0,
 				metadataBindingPoint: 0,
-				scopeCount: 1,
+				renderDomainCount: 1,
 				traversalDepth: 1,
 			},
 		},
 		{
-			expected: "root-only execution must contain exactly one scope",
+			expected: "root-only execution must contain exactly one render domain",
 			input: {
 				crossingVertexCount: 0,
 				metadataBindingPoint: 0,
-				scopeCount: 2,
+				renderDomainCount: 2,
 				traversalDepth: 0,
 			},
 		},

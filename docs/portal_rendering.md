@@ -185,26 +185,34 @@ Capacity is part of the visual contract:
 The production policy currently accepts at most 16 crossing frontiers and 256 arrival-state values.
 Those values have one named owner in `portal-render-capacity-policy.ts`.
 
-### Packed scope atlas
+### Packed render-domain atlas
 
-Every selected authored scope receives one conservative rectangular tile in a fixed 2-by-3 atlas.
-The renderer performs the ordinary scene query once for the complete selected scope set, resolves
-physical contributions once, and preserves existing material/instance batch boundaries.
+Every selected outdoor or proof-backed indoor visibility-island render domain receives one
+conservative rectangular tile in a fixed 2-by-3 atlas. Authored EnvCell scopes remain independent
+for portal traversal and scene selection; selected member windows are unioned only when deriving
+their shared render-domain tile. The renderer performs the ordinary scene query once for the
+complete selected scope set, resolves physical contributions once, and preserves existing
+material/instance batch boundaries.
 
-Opaque and alpha-tested work is routed by scope into its tile:
+Opaque and alpha-tested work retains its authored scope key, which resolves directly to the owning
+render-domain tile:
 
 - outdoor terrain and exterior-global opaque sky work route to the outdoor tile;
-- a scope-homogeneous object draw routes to that scope's tile;
+- a scope-homogeneous object draw routes to its scope's visibility-island tile;
 - local depth remains independent between tiles; and
 - the same physical batch is not split merely because a scope has multiple portal appearances.
+
+Depth-continuous member-cell crossings constrain CPU traversal but do not enter GPU propagation.
+Ordinary shared depth already composes their geometry, so retaining those crossings would
+manufacture internal compositor seams and consume arrival-state work with no ownership transition.
 
 The atlas stores `RGBA8` color and `DEPTH_COMPONENT24` local depth. Packing gaps are charged in
 target bytes and exposed separately from committed tile pixels.
 
 ### Arrival propagation and opaque resolve
 
-Each selected directed crossing is expanded once into a reusable instanced triangle stream.
-Propagation starts with arrival state zero for the root scope. Two full-screen `R8UI` textures
+Each selected cross-domain directed crossing is expanded once into a reusable instanced triangle
+stream. Propagation starts with arrival state zero for the root render domain. Two full-screen `R8UI` textures
 ping-pong the current/next arrival id while one shared `DEPTH_COMPONENT24` texture selects the
 nearest eligible crossing. One batched propagation draw covers every selected crossing in a
 retained propagation round; the CPU does not walk pixels, paths, or per-crossing draw calls. A
@@ -213,29 +221,29 @@ further capped by selected crossing count. A capacity-truncated cull instead use
 frontier depth.
 
 Alongside propagation, one instanced reduction draw per retained round writes the maximum visible
-exit depth for every authored scope into a packed `DEPTH_COMPONENT32F` envelope. A final instanced opaque
-resolve samples the winning scope tile's color/local depth and composes it into the output
+exit depth for every selected render domain into a packed `DEPTH_COMPONENT32F` envelope. A final
+instanced opaque resolve samples the winning domain tile's color/local depth and composes it into the output
 framebuffer. Resolve accepts equal output depth so the terminal scope's sky or empty background,
 which intentionally retains clear depth, survives composition. The envelope rejects every
 nonterminal scope at that depth before fixed-function depth testing. Root-only scenes use the same
 schedule.
 
-This is why indoor/outdoor re-entry and cycles no longer require special cases: re-entering a scope
-creates another arrival state, while its physical geometry still occupies one scope tile.
+This is why indoor/outdoor re-entry and cycles no longer require special cases: re-entering a render
+domain creates another arrival state, while its physical geometry still occupies one domain tile.
 
 ### Deferred objects, particles, and weather
 
 Portal visibility is not an alpha-sort key. Opaque resolve completes first. Transparent objects,
 additive effects, and particles retain the renderer's existing physical ordering and batching, then
 draw once to the output framebuffer. Their portal shader selects the owning authored scope and
-rejects fragments beyond that scope's reduced visibility envelope.
+resolves its render domain, then rejects fragments beyond that domain's reduced visibility envelope.
 
 Particle emitters remain owner-local until routing. Each selected source is packed/uploaded once,
 then compatible mesh/motion cohorts recoalesce without adding a path or portal id to the GPU batch
 key. This lets particles in the camera's EnvCell draw over an outdoor portal exactly as retail does,
 while particles belonging to a deeper scope remain clipped by that deeper scope's envelope.
 
-Exterior sky and authored weather are rendered into the outdoor scope tile. Retail's existing
+Exterior sky and authored weather are rendered into the outdoor render-domain tile. Retail's existing
 inside/outside weather gate remains camera-residency policy and is independent from portal
 compositing.
 
@@ -246,7 +254,7 @@ One lazy renderer-owned target generation contains four framebuffers and six tex
 - packed atlas `RGBA8` color plus `DEPTH_COMPONENT24` depth;
 - two full-screen `R8UI` arrival-state frontiers;
 - one shared full-screen `DEPTH_COMPONENT24` crossing-depth texture; and
-- one packed `DEPTH_COMPONENT32F` scope-envelope texture.
+- one packed `DEPTH_COMPONENT32F` render-domain envelope texture.
 
 Same-extent frames reuse the generation. Resize is transactional: every replacement framebuffer
 must be complete before the old generation is disposed. The configured byte ceiling is 256 MiB,

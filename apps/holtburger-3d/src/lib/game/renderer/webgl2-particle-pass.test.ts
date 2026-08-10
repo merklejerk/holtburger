@@ -191,7 +191,7 @@ describe("WebGL2ParticlePass", () => {
 			"if (!portalDeferredFragmentVisible()) discard;",
 		);
 
-		expect(shader).toContain("uniform uint uPortalScope");
+		expect(shader).toContain("uniform uint uPortalRenderDomain");
 		expect(shader).toContain("uniform highp sampler2D uPortalEnvelopeDepth;");
 		expect(visibilityIndex).toBeGreaterThanOrEqual(0);
 		expect(visibilityIndex).toBeLessThan(

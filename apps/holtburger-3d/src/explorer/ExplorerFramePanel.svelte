@@ -159,13 +159,37 @@
 							>
 						</div>
 						<div class="ac-param-row">
-							<span class="ac-param-key">Portal plan / object prepare</span>
+							<span class="ac-param-key"
+								>Portal plan / compose / object prepare</span
+							>
 							<code
-								>{profile.cpu.mean.portalPlanningMs.toFixed(2)} / {profile.cpu.mean.objectPreparationMs.toFixed(
+								>{profile.cpu.mean.portalPlanningMs.toFixed(2)} / {profile.cpu.mean.portalCompositionMs.toFixed(
 									2,
-								)} ms</code
+								)} / {profile.cpu.mean.objectPreparationMs.toFixed(2)} ms</code
 							>
 						</div>
+						<div class="ac-param-row">
+							<span class="ac-param-key">Particle submit</span>
+							<code>{profile.cpu.mean.particleSubmissionMs.toFixed(2)} ms</code>
+						</div>
+						{#if profile.gpu.kind === "available"}
+							<div class="ac-param-row">
+								<span class="ac-param-key">GPU portal / opaque / particle</span>
+								<code
+									>{profile.gpu.portalCompositionMs.toFixed(2)} / {profile.gpu.opaqueMs.toFixed(
+										2,
+									)} / {profile.gpu.particleMs.toFixed(2)} ms</code
+								>
+							</div>
+							<div class="ac-param-row">
+								<span class="ac-param-key">GPU sky / terrain / blended</span>
+								<code
+									>{profile.gpu.skyMs.toFixed(2)} / {profile.gpu.terrainMs.toFixed(
+										2,
+									)} / {profile.gpu.blendedMs.toFixed(2)} ms</code
+								>
+							</div>
+						{/if}
 						<div class="ac-param-row">
 							<span class="ac-param-key">Generated cull / runs / upload</span>
 							<code
@@ -263,6 +287,15 @@
 					<span class="ac-param-key">Visible dynamics / parts</span>
 					<code
 						>{metrics.visibleDynamicEntityCount} / {metrics.visibleDynamicPartCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key"
+						>Particle batches / instances / unresolved</span
+					>
+					<code
+						>{metrics.submittedParticleBatchCount} / {metrics.submittedParticleInstanceCount}
+						/ {metrics.unresolvedParticleBatchCount}</code
 					>
 				</div>
 			</div>

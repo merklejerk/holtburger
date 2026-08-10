@@ -2558,22 +2558,80 @@ particle population, an explicit hypothesis to test.
 
 #### 11B. Separate particle lifetime from portal and GPU work
 
-- [ ] Explain and rename the HUD `draw` label or its documentation so it cannot be read as a pure
+- [x] Explain and rename the HUD `draw` label or its documentation so it cannot be read as a pure
       renderer/GPU duration. It currently covers the entire `GameRuntime.render` update-and-draw
       phase; retain the more precise runtime and renderer profilers for ownership.
-- [ ] Capture the existing renderer frame profile for the reproduction after the CPU correction:
+- [x] Capture the existing renderer frame profile for the reproduction after the CPU correction:
       portal planning, contribution resolution, object preparation, uploads, submissions, GPU phase
       queries, selected scopes/crossings, atlas pixels, propagation draws, scene draws, triangles,
       particle batches, and particle instances. Timer queries are attribution evidence, not an
       optimization acceptance benchmark.
-- [ ] Compare identical camera and layer state in portal and flat EnvCell modes. A cost that remains
+- [x] Compare identical camera and layer state in portal and flat EnvCell modes. A cost that remains
       in flat mode is not charged to portal planning or atlas propagation; a scope-dependent change
       must retain its exact operation vector.
-- [ ] Use layer isolation only to assign existing work: EnvCell shells, residents, dynamic objects,
+- [x] Use layer isolation only to assign existing work: EnvCell shells, residents, dynamic objects,
       particles, and exterior contributions. Do not let a diagnostic toggle become a production
       scheduling abstraction.
-- [ ] Rank remaining CPU and GPU owners only after the particle correction. Phase 12 must not optimize
+- [x] Rank remaining CPU and GPU owners only after the particle correction. Phase 12 must not optimize
       PVS traversal or atlas packing to compensate for work demonstrably owned by particle lifetime.
+
+#### 11B Outcome: The Fixed Compositor Schedule Owns the Dungeon GPU Cost
+
+The retained reproduction is EnvCell `0x0007014d` at canonical position `[70, 3, -1184]`, yaw
+`-90` degrees, pitch `0`, in landblock `0x0007ffff`. The browser runs use a 1280x720 drawing buffer,
+the same loaded content, layer state, particle seed, fixed 60 Hz runtime advance, and simulation
+freeze at frame 120. They differ only by EnvCell render mode or the one explicitly recorded layer
+toggle. Chrome reports an AMD Radeon RX 7900 XT through RADV; SwiftShader is not performance
+evidence and was not used.
+
+The exact production workload separates as follows:
+
+| operation                                 |    portal |        flat | portal with EnvCells hidden |
+| ----------------------------------------- | --------: | ----------: | --------------------------: |
+| selected scopes / crossings               |   22 / 46 |       0 / 0 |                     22 / 46 |
+| culler projection primitives              |     6,215 |           0 |                       6,215 |
+| scope-atlas tile pixels                   | 2,913,663 |           0 |                   2,913,663 |
+| propagation draws                         |        16 |           0 |                          16 |
+| scene entries                             |        27 |          62 |                           0 |
+| static draws / triangles                  |  55 / 955 | 151 / 7,120 |                       0 / 0 |
+| EnvCell shell draws / triangles           |  43 / 250 |   102 / 644 |                       0 / 0 |
+| EnvCell resident draws / triangles        |  12 / 705 |  49 / 6,476 |                       0 / 0 |
+| dynamic draws / instances                 |     0 / 0 |      8 / 16 |                       0 / 0 |
+| transparent draws                         |         5 |          11 |                           0 |
+| particle batches / instances / unresolved | 0 / 0 / 0 |   2 / 8 / 0 |                   0 / 0 / 0 |
+
+The hidden-EnvCell control changes only the existing production layer filter. It deliberately does
+not change topology planning or become a second scheduling model. Removing every selected shell,
+resident, and deferred object leaves the same 22-scope atlas and 16-round compositor schedule.
+The asynchronous GPU queries assign approximately `0.917 ms` of a `1.001 ms` measured portal
+command span to portal composition; the hidden-EnvCell control still assigns approximately
+`0.942 ms` to that phase. Flat mode reports approximately `0.189 ms` total measured GPU commands.
+These values rank hardware phases only; no acceptance or projected speedup depends on their noisy
+wall-clock duration.
+
+The CPU-facing structural ledger explains the remaining submission shape. The independent command
+model emits exactly 282 WebGL entries for the fixed 16 propagation/reduction rounds and final
+resolve, including 33 physical compositor draws. The 55 static draws split into 50 opaque and five
+transparent draws; each opaque draw performs one scope lookup plus one `viewport` and one
+clip-transform uniform update, for 100 routing entries not present in flat mode. The observed CPU
+phase order is opaque submission, portal
+composition, then portal planning; their retained operation vectors are respectively 50 draws plus
+50 lookups and 100 routing entries, 282 compositor entries, and 6,215 projection primitives. The
+timed means (`0.872`, `0.128`, and `0.098 ms`) select those lanes for investigation but are not proof
+that unlike operations have equal cost.
+
+The deterministic browser-free pose
+`indoor-settled/portal-crossing:0x0007ffff/237` retains the same canonical camera at its default
+1920x1080 trace extent. It selects 19 scopes and 40 crossings, charges 5,612 projection primitives,
+packs 6,598,625 tile pixels, submits 43 opaque and six transparent batches, and compiles the same
+282-entry compositor schedule. This is the reproducible CPU/command oracle; the browser is needed
+only to attribute asynchronous GPU phases and verify production wiring.
+
+The particle system has 51 live particles in the frozen browser state, but none of their owner
+scopes is selected by this portal view. Flat mode admits two batches and eight particle instances;
+their approximately `0.010 ms` CPU and `0.008 ms` GPU spans are immaterial here. Particle lifetime
+and the prior quadratic envelope lookup therefore remain a separately corrected runtime owner, not
+an explanation for the steady-state portal compositor cost.
 
 #### 11C. Classify the white portal-seam fragments numerically
 
@@ -2658,6 +2716,21 @@ particle population, an explicit hypothesis to test.
   The previous effect-only path refreshed once to decide whether to publish and again while applying
   the same sample. Culling-bound publication occurs inside the changed-envelope branch, so its count
   is exactly the envelope-change count; a duplicate diagnostic would add no independent fact.
+- 2026-08-10: The Explorer HUD now labels its outer interval `update+draw`; that interval includes
+  all `GameRuntime.render` advancement and cannot be interpreted as renderer or GPU time. Portal
+  profiling now owns scene query, planning, composition, terrain, opaque, blended, and particle
+  spans without changing their draw schedule. A profiler audit also found that particle submission
+  was recorded but omitted from the named-time sum, causing it to be counted again as `other`; a
+  focused clock test protects the corrected accounting.
+- 2026-08-10: Exact particle batch, instance, and unresolved-mesh counts are now part of the renderer
+  frame contract. The pass already owned those facts; the renderer adds three integers after the
+  existing diagnostics read and allocates no frame-path collection.
+- 2026-08-10: Phase 11B ranks the fixed 16-round scope-atlas compositor as the dominant dungeon GPU
+  owner. Hiding all EnvCell render contributions preserves the same topology, atlas pixels, and
+  approximately `0.94 ms` portal GPU span while removing every scene draw. Phase 12 should first
+  inspect fixed-round compositor traffic and redundant per-draw scope routing; PVS or packing work
+  cannot explain this layer-independent GPU result, though planning still retains its 6,215 exact
+  projection primitives as a separate CPU optimization lane.
 
 ## Phase 12: Optimization Addendum
 
@@ -2790,6 +2863,13 @@ commit is a pre-teleport reproduction setup and must not be assumed to identify 
 - [ ] Compare the current final all-crossing scan with enumeration through the already-packed
       outgoing ranges of selected scopes, filtering selected targets. Prove identical stable
       crossing order and reciprocal-arrival IDs before replacing the `O(E)` pass.
+- [ ] Count scope-ordinal transitions in the already-formed physical opaque submission order. The
+      current router performs one lookup, `viewport`, and clip-transform update for every draw;
+      evaluate retaining the active tile only for adjacent same-scope draws. Do not reorder physical
+      draws, add a scope material key, or create more draw batches to improve this counter.
+- [ ] Classify the exact 282-entry compositor command sequence into required transitions and
+      redundant repeated state. Remove only calls proved redundant by the command-model state
+      machine and concrete WebGL executor tests; do not let driver timing define state correctness.
 - [ ] Trace atlas bound reads, sort comparisons, placement attempts, and retained packing order.
       Evaluate counting/radix or retained-order packing only if a real dimension improves without
       increasing committed pixels or camera-time heap work.

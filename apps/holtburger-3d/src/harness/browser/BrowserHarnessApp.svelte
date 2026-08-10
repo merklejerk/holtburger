@@ -174,6 +174,11 @@
 		readonly setEnvCellRenderMode: (
 			envCellRenderMode: "flat" | "portal",
 		) => void;
+		/** Toggle one existing production layer solely for workload isolation. */
+		readonly setLayerVisibility: (
+			layer: keyof FrameSettings["layerVisibility"],
+			visible: boolean,
+		) => void;
 		/** Change filterable texture quality without changing content or resources. */
 		readonly setTextureFiltering: (policy: string) => void;
 		/** Change the generic portal-footprint cutoff without rebuilding content. */
@@ -556,6 +561,21 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setLayerVisibility(
+		layer: keyof FrameSettings["layerVisibility"],
+		visible: boolean,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!(layer in frameSettings.layerVisibility)) {
+			throw new Error(`Unknown browser harness render layer ${layer}.`);
+		}
+		frameSettings = {
+			...frameSettings,
+			layerVisibility: { ...frameSettings.layerVisibility, [layer]: visible },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function setTextureFiltering(rawPolicy: string): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (!isTextureFilteringPolicy(rawPolicy)) {
@@ -887,6 +907,7 @@
 					setCameraLandblock,
 					setEnvCellCamera,
 					setEnvCellRenderMode,
+					setLayerVisibility,
 					setOutdoorCamera,
 					setFrameProfiling,
 					setStaticLights,

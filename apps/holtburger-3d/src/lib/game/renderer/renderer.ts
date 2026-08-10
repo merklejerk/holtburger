@@ -226,6 +226,12 @@ export interface FrameSelectionMetrics {
 	readonly submittedDynamicDrawCount: number;
 	/** Dynamic rigid-part instances submitted through shared frame instancing. */
 	readonly submittedDynamicInstanceCount: number;
+	/** Particle batches that resolved to one physical instanced draw. */
+	readonly submittedParticleBatchCount: number;
+	/** Particle sprite instances submitted by resolved batches. */
+	readonly submittedParticleInstanceCount: number;
+	/** Live particle batches skipped because their mesh was not resident. */
+	readonly unresolvedParticleBatchCount: number;
 	/** Current reusable object frame-arena capacity in instances. */
 	readonly frameInstanceCapacity: number;
 	/** Lifetime geometric growth count for the reusable frame arena. */
@@ -272,9 +278,11 @@ export interface RendererCpuFrameTimings {
 	readonly opaqueSubmissionMs: number;
 	/** CPU cost of routing sources and uploading particle batches, separate from blended work. */
 	readonly particleSubmissionMs: number;
-	/** Renderer work outside the named spans, including compositor orchestration. */
+	/** Renderer work outside the named spans. */
 	readonly otherMs: number;
-	/** CPU wall time spent planning portal visibility, packing, and execution. */
+	/** CPU wall time spent clearing, propagating, reducing, and resolving portal targets. */
+	readonly portalCompositionMs: number;
+	/** CPU wall time spent planning portal visibility and packing its atlas. */
 	readonly portalPlanningMs: number;
 	/** CPU wall time spent querying visible scene identities. */
 	readonly sceneQueryMs: number;
@@ -354,6 +362,8 @@ export type RendererGpuFrameProfile =
 			 * rename the buffer or wait.
 			 */
 			readonly particleMs: number;
+			/** GPU elapsed-time spans covering portal target setup and composition commands. */
+			readonly portalCompositionMs: number;
 			/** Submitted GPU frames whose timing results are not yet readable. */
 			readonly pendingFrameCount: number;
 			/**

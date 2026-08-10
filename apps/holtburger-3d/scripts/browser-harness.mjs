@@ -142,6 +142,7 @@ function parseArgs(args) {
 		explicitObjectRadius: null,
 		generatedObjectRadius: null,
 		disableGeneratedBeforeCapture: false,
+		disabledLayersBeforeCapture: [],
 		isolateAuthoredDynamics: false,
 		excludeAuthoredDynamics: false,
 		cameraLandblockId: null,
@@ -230,6 +231,24 @@ function parseArgs(args) {
 			case "--disable-generated-before-capture":
 				parsed.disableGeneratedBeforeCapture = true;
 				break;
+			case "--disable-layer-before-capture": {
+				const layer = requireValue(args, ++index, arg);
+				if (
+					![
+						"terrain",
+						"buildings",
+						"objects",
+						"generated",
+						"env-cells",
+					].includes(layer)
+				) {
+					throw new Error(
+						"--disable-layer-before-capture requires a production render layer.",
+					);
+				}
+				parsed.disabledLayersBeforeCapture.push(layer);
+				break;
+			}
 			case "--isolate-authored-dynamics":
 				parsed.isolateAuthoredDynamics = true;
 				break;
@@ -622,6 +641,8 @@ Options:
   --generated-object-radius <n> Request generated objects within the building neighborhood.
   --disable-generated-before-capture
                          Withdraw generated interest after the initial snapshot.
+  --disable-layer-before-capture <layer>
+                         Hide one production layer for diagnostic workload isolation; repeatable.
   --isolate-authored-dynamics
                          Keep terrain and promoted outdoor dynamics but strip outdoor statics.
   --exclude-authored-dynamics
@@ -1418,6 +1439,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			await delay(50);
 		}
+		for (const layer of options.disabledLayersBeforeCapture) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setLayerVisibility",
+				[layer, false],
+			);
+		}
+		if (options.disabledLayersBeforeCapture.length > 0) await delay(50);
 		if (options.profileRenderer) {
 			await evaluate(
 				client,

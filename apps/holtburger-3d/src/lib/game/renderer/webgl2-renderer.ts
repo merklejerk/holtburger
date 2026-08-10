@@ -409,6 +409,9 @@ interface MutableFrameSelectionMetrics {
 	submittedAdditiveObjectDrawCount: number;
 	submittedDynamicDrawCount: number;
 	submittedDynamicInstanceCount: number;
+	submittedParticleBatchCount: number;
+	submittedParticleInstanceCount: number;
+	unresolvedParticleBatchCount: number;
 	frameInstanceCapacity: number;
 	frameInstanceGrowthCount: number;
 	frameInstanceViewHighWaterMark: number;
@@ -551,6 +554,9 @@ export class WebGL2Renderer implements Renderer {
 		submittedAdditiveObjectDrawCount: 0,
 		submittedDynamicDrawCount: 0,
 		submittedDynamicInstanceCount: 0,
+		submittedParticleBatchCount: 0,
+		submittedParticleInstanceCount: 0,
+		unresolvedParticleBatchCount: 0,
 		frameInstanceCapacity: 0,
 		frameInstanceGrowthCount: 0,
 		frameInstanceViewHighWaterMark: 0,
@@ -929,12 +935,16 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture | null,
 		pipeline: WebGL2PortalScopeAtlasPipeline,
 	): void {
+		const queryStartedAt = profile?.beginCpuPhase();
 		const visible = this.#world.queryScopeSelectionScene(
 			prepared.frustum,
 			prepared.anchorLandblockId,
 			frame,
 			renderCullingGroupFilter(frameSettings.layerVisibility),
 		);
+		if (profile && queryStartedAt !== undefined) {
+			profile.finishCpuPhase("sceneQuery", queryStartedAt);
+		}
 		const contributions = this.#resolveSceneContributions(
 			prepared,
 			visible.entries,
@@ -957,23 +967,32 @@ export class WebGL2Renderer implements Renderer {
 			},
 		);
 		const gl = this.#gl;
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-		gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
-		gl.clearDepth(1);
-		gl.clearColor(...clearColor);
-		gl.colorMask(true, true, true, true);
-		gl.depthMask(true);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-		pipeline.beginOpaqueScene(clearColor);
+		const setupGpu = profile?.beginGpuPhase("portalComposition") ?? null;
+		const setupStartedAt = profile?.beginCpuPhase();
+		try {
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+			gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
+			gl.clearDepth(1);
+			gl.clearColor(...clearColor);
+			gl.colorMask(true, true, true, true);
+			gl.depthMask(true);
+			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+			pipeline.beginOpaqueScene(clearColor);
+		} finally {
+			if (profile && setupStartedAt !== undefined) {
+				profile.finishCpuPhase("portalComposition", setupStartedAt);
+			}
+			setupGpu?.finish();
+		}
 		const view = { ...prepared, ...contributions };
 		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
 		if (hasOutdoorScope) {
-			this.#drawSky(view, shading, "before-world", pipeline);
+			this.#submitSkyPhase(view, shading, "before-world", profile, pipeline);
 		}
-		this.#drawTerrain(view, shading, pipeline);
-		this.#drawOpaqueObjects(
+		this.#submitTerrainPhase(view, shading, profile, pipeline);
+		this.#submitOpaquePhase(
 			view,
 			objectPhases.opaque,
 			shading,
@@ -981,11 +1000,20 @@ export class WebGL2Renderer implements Renderer {
 			pipeline,
 		);
 		if (hasOutdoorScope) {
-			this.#drawSky(view, shading, "after-landscape", pipeline);
+			this.#submitSkyPhase(view, shading, "after-landscape", profile, pipeline);
 		}
-		pipeline.execute(null);
-		pipeline.beginDeferredScene(null);
-		this.#drawBlendedObjects(view, objectPhases, shading, profile, pipeline);
+		const compositionGpu = profile?.beginGpuPhase("portalComposition") ?? null;
+		const compositionStartedAt = profile?.beginCpuPhase();
+		try {
+			pipeline.execute(null);
+			pipeline.beginDeferredScene(null);
+		} finally {
+			if (profile && compositionStartedAt !== undefined) {
+				profile.finishCpuPhase("portalComposition", compositionStartedAt);
+			}
+			compositionGpu?.finish();
+		}
+		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
 		this.#drawParticles(view, profile, particlesByScope, pipeline);
 		this.#beginObjectPhase();
 	}
@@ -1592,6 +1620,9 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedAdditiveObjectDrawCount = 0;
 		metrics.submittedDynamicDrawCount = 0;
 		metrics.submittedDynamicInstanceCount = 0;
+		metrics.submittedParticleBatchCount = 0;
+		metrics.submittedParticleInstanceCount = 0;
+		metrics.unresolvedParticleBatchCount = 0;
 		metrics.frameInstanceCapacity = 0;
 		metrics.frameInstanceGrowthCount = 0;
 		metrics.frameInstanceViewHighWaterMark = 0;
@@ -1766,8 +1797,8 @@ export class WebGL2Renderer implements Renderer {
 		if (particlesByScope === null && view.particles.length === 0) return;
 		// Timed separately from the blended pass so the one contiguous frame upload and physical
 		// particle draw boundaries remain attributable.
-		const startedAt = profile?.beginCpuPhase();
 		const gpuPhase = profile?.beginGpuPhase("particle") ?? null;
+		const startedAt = profile?.beginCpuPhase();
 		const context = {
 			// Anchor-relative, matching both the view matrix and the particle origins. The
 			// camera's canonical position lives in a different frame, which would leave the
@@ -1785,14 +1816,24 @@ export class WebGL2Renderer implements Renderer {
 			),
 			view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
 		};
-		if (particlesByScope && portalPipeline) {
-			pass.drawScoped(context, particlesByScope, portalPipeline);
-		} else {
-			pass.draw(context, view.particles);
-		}
-		gpuPhase?.finish();
-		if (startedAt !== undefined) {
-			profile?.finishCpuPhase("particleSubmission", startedAt);
+		try {
+			if (particlesByScope && portalPipeline) {
+				pass.drawScoped(context, particlesByScope, portalPipeline);
+			} else {
+				pass.draw(context, view.particles);
+			}
+			const diagnostics = pass.getDiagnostics();
+			this.#frameSelectionMetrics.submittedParticleBatchCount +=
+				diagnostics.drawnBatchCount;
+			this.#frameSelectionMetrics.submittedParticleInstanceCount +=
+				diagnostics.drawnParticleCount;
+			this.#frameSelectionMetrics.unresolvedParticleBatchCount +=
+				diagnostics.unresolvedBatchCount;
+		} finally {
+			if (startedAt !== undefined) {
+				profile?.finishCpuPhase("particleSubmission", startedAt);
+			}
+			gpuPhase?.finish();
 		}
 	}
 
@@ -1830,55 +1871,16 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture,
 	): void {
 		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
-		const beforeSkyGpu =
-			domain === "exterior" ? profile.beginGpuPhase("sky") : null;
-		try {
-			if (domain === "exterior") {
-				this.#drawSky(view, shading, "before-world", null);
-			}
-		} finally {
-			beforeSkyGpu?.finish();
+		if (domain === "exterior") {
+			this.#submitSkyPhase(view, shading, "before-world", profile, null);
 		}
-		const terrainGpu = profile.beginGpuPhase("terrain");
-		const terrainStartedAt = profile.beginCpuPhase();
-		try {
-			this.#drawTerrain(view, shading, null);
-		} finally {
-			profile.finishCpuPhase("terrainSubmission", terrainStartedAt);
-			terrainGpu?.finish();
+		this.#submitTerrainPhase(view, shading, profile, null);
+		this.#submitOpaquePhase(view, objectPhases.opaque, shading, profile, null);
+		if (domain === "exterior") {
+			// Both sky passes share one aggregate phase because elapsed queries cannot nest.
+			this.#submitSkyPhase(view, shading, "after-landscape", profile, null);
 		}
-
-		const opaqueGpu = profile.beginGpuPhase("opaque");
-		try {
-			this.#drawOpaqueObjects(
-				view,
-				objectPhases.opaque,
-				shading,
-				profile,
-				null,
-			);
-		} finally {
-			opaqueGpu?.finish();
-		}
-
-		// Same named phase as the before pass: the two are one cost to reason about, and elapsed
-		// queries cannot nest, so they are measured sequentially and summed.
-		const afterSkyGpu =
-			domain === "exterior" ? profile.beginGpuPhase("sky") : null;
-		try {
-			if (domain === "exterior") {
-				this.#drawSky(view, shading, "after-landscape", null);
-			}
-		} finally {
-			afterSkyGpu?.finish();
-		}
-
-		const blendedGpu = profile.beginGpuPhase("blended");
-		try {
-			this.#drawBlendedObjects(view, objectPhases, shading, profile, null);
-		} finally {
-			blendedGpu?.finish();
-		}
+		this.#submitBlendedPhase(view, objectPhases, shading, profile, null);
 
 		// Profiling must not change what is drawn. This path previously omitted particles entirely,
 		// so every profile measured a scene missing them and reported their cost as zero.
@@ -1886,6 +1888,73 @@ export class WebGL2Renderer implements Renderer {
 
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
+	}
+
+	/** Submit one sky pass while preserving the caller's portal routing and optional GPU span. */
+	#submitSkyPhase(
+		view: PreparedView,
+		shading: SceneShading,
+		phase: "before-world" | "after-landscape",
+		profile: WebGL2FrameProfileCapture | null,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+	): void {
+		const gpu = profile?.beginGpuPhase("sky") ?? null;
+		try {
+			this.#drawSky(view, shading, phase, portalPipeline);
+		} finally {
+			gpu?.finish();
+		}
+	}
+
+	/** Submit terrain through shared flat/portal profiling ownership. */
+	#submitTerrainPhase(
+		view: PreparedView,
+		shading: SceneShading,
+		profile: WebGL2FrameProfileCapture | null,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+	): void {
+		const gpu = profile?.beginGpuPhase("terrain") ?? null;
+		const startedAt = profile?.beginCpuPhase();
+		try {
+			this.#drawTerrain(view, shading, portalPipeline);
+		} finally {
+			if (profile && startedAt !== undefined) {
+				profile.finishCpuPhase("terrainSubmission", startedAt);
+			}
+			gpu?.finish();
+		}
+	}
+
+	/** Submit physical opaque batches once through shared flat/portal GPU attribution. */
+	#submitOpaquePhase(
+		view: PreparedView,
+		opaque: ObjectSubmissionPhases<PreparedObjectFrameInput>["opaque"],
+		shading: SceneShading,
+		profile: WebGL2FrameProfileCapture | null,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+	): void {
+		const gpu = profile?.beginGpuPhase("opaque") ?? null;
+		try {
+			this.#drawOpaqueObjects(view, opaque, shading, profile, portalPipeline);
+		} finally {
+			gpu?.finish();
+		}
+	}
+
+	/** Submit deferred objects through shared flat/portal GPU attribution. */
+	#submitBlendedPhase(
+		view: PreparedView,
+		phases: ObjectSubmissionPhases<PreparedObjectFrameInput>,
+		shading: SceneShading,
+		profile: WebGL2FrameProfileCapture | null,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+	): void {
+		const gpu = profile?.beginGpuPhase("blended") ?? null;
+		try {
+			this.#drawBlendedObjects(view, phases, shading, profile, portalPipeline);
+		} finally {
+			gpu?.finish();
+		}
 	}
 
 	#drawTerrain(

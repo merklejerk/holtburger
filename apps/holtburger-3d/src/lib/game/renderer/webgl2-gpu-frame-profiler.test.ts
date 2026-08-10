@@ -33,6 +33,8 @@ describe("WebGL2GpuFrameProfiler", () => {
 		frame.beginPhase("terrain").finish();
 		frame.beginPhase("opaque").finish();
 		frame.beginPhase("particle").finish();
+		frame.beginPhase("portalComposition").finish();
+		frame.beginPhase("portalComposition").finish();
 		frame.finish();
 		expect(profiler.getProfile()).toEqual({
 			kind: "pending",
@@ -48,15 +50,16 @@ describe("WebGL2GpuFrameProfiler", () => {
 			opaqueMs: 1,
 			particleMs: 1,
 			pendingFrameCount: 0,
+			portalCompositionMs: 2,
 			// This frame drives no sky pass, so its span stays zero rather than being absent.
 			skyMs: 0,
 			// Two terrain phases at 1 ms each aggregate; total is their sum, since elapsed queries
 			// cannot nest and no query spans the frame.
 			terrainMs: 2,
-			totalMs: 4,
+			totalMs: 6,
 		});
 		// One query per phase, where the timestamp profiler needed a pair plus a frame pair.
-		expect(harness.deleteQuery).toHaveBeenCalledTimes(4);
+		expect(harness.deleteQuery).toHaveBeenCalledTimes(6);
 	});
 
 	it("refuses to nest elapsed queries, which WebGL permits only one of", () => {
@@ -143,6 +146,7 @@ describe("WebGL2FrameProfiler", () => {
 				opaqueSubmissionMs: 0,
 				otherMs: 0,
 				particleSubmissionMs: 0,
+				portalCompositionMs: 0,
 				portalPlanningMs: 0,
 				sceneContributionResolutionMs: 0,
 				sceneQueryMs: 0,
@@ -181,6 +185,30 @@ describe("WebGL2FrameProfiler", () => {
 			dynamicObjectPreparationCount: 2,
 			staticObjectPreparationCount: 5,
 		});
+	});
+
+	it("does not also charge named particle submission time to other", () => {
+		const now = vi
+			.spyOn(performance, "now")
+			.mockReturnValueOnce(0)
+			.mockReturnValueOnce(1)
+			.mockReturnValueOnce(4)
+			.mockReturnValueOnce(10);
+		try {
+			const profiler = new WebGL2FrameProfiler(createGpuHarness(false).gl);
+			const frame = profiler.beginFrame();
+			const particleStartedAt = frame.beginCpuPhase();
+			frame.finishCpuPhase("particleSubmission", particleStartedAt);
+			frame.finish();
+
+			expect(profiler.getProfile()?.cpu.mean).toMatchObject({
+				otherMs: 7,
+				particleSubmissionMs: 3,
+				totalMs: 10,
+			});
+		} finally {
+			now.mockRestore();
+		}
 	});
 });
 

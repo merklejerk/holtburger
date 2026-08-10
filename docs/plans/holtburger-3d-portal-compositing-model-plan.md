@@ -1,8 +1,8 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phases 7 and 8 accepted behind the explicit probe; opaque scope-atlas execution,
-arbitrary-order deferred filtering, single-upload particles, and exterior-tile weather have numeric
-hardware evidence; Phase 9 real-scene operation traces are next before cutover
+Status: Phases 7 through 9 accepted behind the explicit probe; the scope-atlas compositor has
+symbolic correctness evidence, numeric hardware evidence, and matched renderer-free operation
+traces over the archive risk set; public cutover and legacy deletion are next
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -2036,6 +2036,11 @@ pressure point. Phase 9 must trace this structural call count over real camera p
 requires a symbolically proved per-frame upper bound, not convergence readback or a timing-driven
 heuristic.
 
+Phase 9 replaced that fixed nonempty-frame schedule with the already-proved selected-directed-
+crossing bound. Strict per-pixel entry depth prevents one directed planar crossing from recurring on
+one ray, so a frame with `X` selected crossings needs at most `min(maximumPathDepth, X)` rounds. The
+bound requires no convergence readback, topology walk, or new frame allocation.
+
 ### Task Checklist
 
 - [x] Establish a visibility-only culler bridge with topology-stable integer adjacency, typed
@@ -2307,19 +2312,19 @@ heuristic.
 
 ### Task Checklist
 
-- [ ] Run indoor-root, outdoor-root, hybrid re-entry, dense-cycle, near-plane, and particle-heavy
+- [x] Run indoor-root, outdoor-root, hybrid re-entry, dense-cycle, near-plane, and particle-heavy
       archive poses and motion traces selected by the Phase 6 census.
-- [ ] Record prepared domains, path views, merged submissions, repeated submissions, opaque and
+- [x] Record prepared domains, path views, merged submissions, repeated submissions, opaque and
       transparent runs, particle uploads/draws, masks/composites, targets/bytes, and WebGL errors.
-- [ ] Trace planning, scene resolution, object preparation, run formation, transparent comparisons,
+- [x] Trace planning, scene resolution, object preparation, run formation, transparent comparisons,
       particle packing, uploads, masks, composites, target changes, and WebGL command submissions as
       separate unweighted dimensions.
-- [ ] Feed real-scene completed plans into an injected counting substrate so executor command traces
+- [x] Feed real-scene completed plans into an injected counting substrate so executor command traces
       require no browser, WebGL context, screenshots, frame settling, or wall-clock sampling.
-- [ ] Compare current/candidate traces over identical inputs and preserve workload facts beside each
+- [x] Compare current/candidate traces over identical inputs and preserve workload facts beside each
       vector. Use separate builds or commits; do not ship a runtime dual-planner mode merely to
       preserve the evaluator.
-- [ ] Replay deterministic camera paths through every reported transition rather than tracing only
+- [x] Replay deterministic camera paths through every reported transition rather than tracing only
       fixed poses.
 
 ### Acceptance Criteria
@@ -2352,6 +2357,42 @@ heuristic.
 - Once that trace passes, public cutover is a small call-site substitution to the shared scope-atlas
   execution schedule followed by one clean deletion sweep. Do not retain a runtime planner toggle
   or compatibility alias for the old `--execute-scope-atlas-opaque` probe name.
+- 2026-08-09: The Phase 9 evaluator now runs the production `PortalScopeAtlasPlanner`, snapshots its
+  exact selected scopes, crossings, packing, truncation, and command ledger, and compiles the same
+  allocation-free WebGL call stream as production. Attachment costs use the selected `R8UI`,
+  `DEPTH24`, `RGBA8`, and `DEPTH32F` formats and are checked against the production target allocator.
+  The candidate no longer receives visibility selected by either legacy planner. Pose limiting is
+  stratified across indoor/outdoor roots and settled/source-near/source-far/target-near/target-far
+  samples instead of truncating a lexicographically ordered pose list.
+- 2026-08-09: The first archive replay found a `-0.0000068056` inward turn left by floating-point
+  half-space clipping in `0x7d64ffff`. The exact aperture was convex. Raising the general collinearity
+  tolerance discarded a genuine narrow intersection in seeded fixture 61 and was rejected. The
+  accepted normalizer removes only small winding-inverting, forward-progress residue after winding
+  canonicalization; outward convex turns remain visible. The immutable oracle corpus, arena
+  differential corpus, exact archive-derived regression, and material-concavity rejection all pass.
+- 2026-08-09: Eight matched workloads contributed 512 deterministic poses: 364 indoor roots, 148
+  outdoor roots, and 435 portal-motion samples. All 476 complete candidate plans match the legacy
+  planner's selected physical scopes and opaque submissions exactly. Neither reference planner
+  throws. The remaining 36 poses stop explicitly at an accepted capacity: 24 at depth 16, one at
+  atlas extent, seven at the 255-arrival-state limit, and four at 240,181 charged projection
+  primitives. A depth-cap bookkeeping defect initially labeled the first group complete; the culler
+  now reports the retained frontier as executable and the unexpanded next frontier as declined
+  without traversing it or allocating a diagnostic error.
+- 2026-08-09: Across the 476 complete plans, the candidate reduces content preparations from 1,321
+  to 476, particle uploads from 400 to 280, and transparent depth-bucket visits from 7,664 to 3,808.
+  No complete plan changes opaque submissions or any other shared object/particle work dimension.
+  The explicit GPU trade is four framebuffer targets instead of one and 161,740,800 portal-target
+  bytes at the traced 1920x1080 drawing buffer; those attachments are the bounded correctness
+  substrate rather than a hidden CPU-work substitution.
+- 2026-08-09: Selected-crossing propagation bounding reduces the exact candidate executor total
+  from the former fixed-depth counterfactual of 124,476 calls to 99,141 over all 512 poses, a 20.4%
+  structural reduction. It improves 205 poses, removes as many as 225 calls from one pose, and
+  produces min/median/p90/max call counts of 30/222/282/282. Selected-scope counts are 1/7/21/33,
+  selected crossings are 0/14/62/254, and atlas utilization is 16.7%/32.2%/54.4%/89.1% over the
+  same min/median/p90/max distribution. These are deterministic operation counts, not CPU timings.
+- Phase 9 accepts the scope-atlas candidate. The next step is the public call-site cutover followed
+  immediately by deletion of the legacy domain-owned render-layer/SCC execution schedule; the
+  offline comparison tool remains development evidence, not a runtime dual-planner mode.
 
 ## Phase 10: Cleanup and Documentation
 

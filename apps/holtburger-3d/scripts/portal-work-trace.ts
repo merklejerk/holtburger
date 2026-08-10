@@ -67,6 +67,7 @@ import {
 	type PortalRenderGraphPlanInput,
 } from "../src/lib/game/renderer/portal-render-graph";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "../src/lib/game/renderer/portal-render-capacity-policy";
+import { compilePortalScopeAtlasWebGLCalls } from "../src/lib/game/renderer/portal-scope-atlas-command-model";
 import {
 	PortalScopeAtlasPlanner,
 	type PortalScopeAtlasFrameView,
@@ -78,11 +79,13 @@ import {
 	createPortalArrivalStateDryScheduleTrace,
 	createCurrentPortalDryScheduleTrace,
 	createPortalPathViewDrySchedule,
+	snapshotPortalArrivalStateDryPlan,
 	type PortalDryDeferredSubmission,
 	type PortalDryOpaqueBatch,
 	type PortalDryParticleSource,
 	type PortalDrySceneWorkload,
 } from "../src/lib/game/renderer/portal-path-view-schedule";
+import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "../src/lib/game/renderer/portal-scope-atlas-metadata-glsl";
 import { ParticleSystem } from "../src/lib/game/systems/particle-system";
 import { PhysicsScriptSystem } from "../src/lib/game/systems/physics-script-system";
 
@@ -300,9 +303,10 @@ for (const artifact of archive.artifacts) {
 		graph.upsertPortalCrossing(crossing);
 }
 const topology = graph.getPortalTopologyView();
-const poses = createTracePoses(topology, archive.artifacts)
-	.sort((left, right) => left.id.localeCompare(right.id))
-	.slice(0, options.maximumPoseCount);
+const poses = selectTracePoses(
+	createTracePoses(topology, archive.artifacts),
+	options.maximumPoseCount,
+);
 if (poses.length === 0) {
 	throw new Error(
 		"Portal trace workload produced no deterministic camera poses.",
@@ -348,6 +352,9 @@ if (options.mode === "atlas-capacity") {
 }
 const currentPlanner = new PortalRenderGraphPlanner();
 const candidatePlanner = new PortalPathViewPlanner();
+const scopeAtlasPlanner = new PortalScopeAtlasPlanner(
+	PORTAL_RENDER_CAPACITY_POLICY.culler,
+);
 const report: PortalWorkTraceReport = {
 	kind: "holtburger-portal-work-trace",
 	landblockIds: options.landblockIds,
@@ -359,6 +366,7 @@ const report: PortalWorkTraceReport = {
 			archive.content,
 			currentPlanner,
 			candidatePlanner,
+			scopeAtlasPlanner,
 			options.drawingBuffer,
 		),
 	),
@@ -1114,6 +1122,41 @@ function createTracePoses(
 	return poses;
 }
 
+/** Deterministically spread a bounded trace across settled and crossing-motion camera strata. */
+function selectTracePoses(
+	poses: readonly TracePose[],
+	maximumPoseCount: number,
+): TracePose[] {
+	const buckets = new Map<string, TracePose[]>();
+	for (const pose of poses.toSorted((left, right) =>
+		left.id.localeCompare(right.id),
+	)) {
+		const sample = pose.id.startsWith("indoor-settled/")
+			? "indoor-settled"
+			: `motion/${pose.id.slice(pose.id.lastIndexOf("/") + 1)}`;
+		const stratum = `${sample}/${pose.rootScope.kind}`;
+		const bucket = buckets.get(stratum) ?? [];
+		bucket.push(pose);
+		buckets.set(stratum, bucket);
+	}
+	const orderedBuckets = [...buckets.entries()].sort(([left], [right]) =>
+		left.localeCompare(right),
+	);
+	const selected: TracePose[] = [];
+	for (let ordinal = 0; selected.length < maximumPoseCount; ordinal += 1) {
+		let appended = false;
+		for (const [, bucket] of orderedBuckets) {
+			const pose = bucket[ordinal];
+			if (!pose) continue;
+			selected.push(pose);
+			appended = true;
+			if (selected.length === maximumPoseCount) break;
+		}
+		if (!appended) break;
+	}
+	return selected;
+}
+
 function crossingFacingTarget(
 	crossing: ScenePortalCrossingInput,
 	position: Vec3,
@@ -1521,6 +1564,9 @@ function publicAtlasPlan(snapshot: AtlasPlanSnapshot) {
 		selectedCrossingCount: snapshot.selectedCrossingIds.length,
 		selectedCrossingGeometry: snapshot.selectedCrossingGeometry,
 		selectedScopeCount: snapshot.selectedScopeTiles.length,
+		selectedScopeKeys: snapshot.selectedScopeTiles.map(
+			({ scopeKey }) => scopeKey,
+		),
 		status: snapshot.status,
 		visibilityWork: snapshot.visibilityWork,
 	};
@@ -1674,6 +1720,7 @@ function tracePose(
 	content: ArchiveContentArtifacts,
 	currentPlanner: PortalRenderGraphPlanner,
 	candidatePlanner: PortalPathViewPlanner,
+	scopeAtlasPlanner: PortalScopeAtlasPlanner,
 	drawingBuffer: TraceDrawingBuffer,
 ) {
 	const common = createTraceCameraProjection(pose, drawingBuffer);
@@ -1698,56 +1745,131 @@ function tracePose(
 			minimumPixelArea: 0,
 		},
 	};
-	const current = currentPlanner.plan(topology, currentInput);
-	const pathReplayReference = candidatePlanner.plan(topology, candidateInput);
-	const dryWorkload = createDrySceneWorkload(content, pose);
-	const pathReplaySchedule = createPortalPathViewDrySchedule(
-		pathReplayReference,
-		dryWorkload,
+	const scopeAtlasResource = atlasResource(
+		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas,
+		drawingBuffer,
+		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumCrossingTriangleVertexCount,
 	);
+	let scopeAtlasFrame: PortalScopeAtlasFrameView;
+	try {
+		scopeAtlasFrame = scopeAtlasPlanner.plan(
+			topology,
+			{
+				...common,
+				portalFootprint: { drawingBuffer, minimumPixelArea: 0 },
+			},
+			scopeAtlasResource,
+		);
+	} catch (cause) {
+		throw new Error(`Portal scope-atlas candidate failed pose ${pose.id}.`, {
+			cause,
+		});
+	}
+	const currentOutcome = captureReferencePlannerOutcome(
+		"legacy-render-graph",
+		pose.id,
+		() => currentPlanner.plan(topology, currentInput),
+	);
+	const pathReplayOutcome = captureReferencePlannerOutcome(
+		"path-replay-reference",
+		pose.id,
+		() => candidatePlanner.plan(topology, candidateInput),
+	);
+	const scopeAtlasPlanning = snapshotAtlasPlan(
+		scopeAtlasFrame,
+		scopeAtlasResource,
+	);
+	const dryWorkload = createDrySceneWorkload(content, pose);
+	const scopeAtlasDrySchedule = createPortalArrivalStateDryScheduleTrace(
+		snapshotPortalArrivalStateDryPlan(scopeAtlasFrame),
+		dryWorkload,
+		drawingBuffer,
+	);
+	const expectedTargetBytes =
+		portalScopeAtlasTargetByteLength(scopeAtlasResource);
+	if (scopeAtlasDrySchedule.portalTargetBytes !== expectedTargetBytes) {
+		throw new Error(
+			`Portal scope-atlas dry target bytes ${scopeAtlasDrySchedule.portalTargetBytes} disagree with production allocation ${expectedTargetBytes}.`,
+		);
+	}
+	const scopeAtlasExecutor = compilePortalScopeAtlasWebGLCalls({
+		crossingVertexCount: scopeAtlasFrame.trace.crossingTriangleVertexCount,
+		metadataBindingPoint: PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT,
+		scopeCount: scopeAtlasFrame.visibility.selectedScopeCount,
+		traversalDepth: scopeAtlasFrame.commands.traversalDepth,
+	});
+	const current =
+		currentOutcome.kind === "completed" ? currentOutcome.result : null;
+	const pathReplayReference =
+		pathReplayOutcome.kind === "completed" ? pathReplayOutcome.result : null;
+	const pathReplaySchedule = pathReplayReference
+		? createPortalPathViewDrySchedule(pathReplayReference, dryWorkload)
+		: null;
 	return {
-		candidate:
-			current.kind === "planned"
-				? {
-						drySchedule: createPortalArrivalStateDryScheduleTrace(
-							current.plan,
-							dryWorkload,
-							topology.crossings,
-							candidateInput.budget.maximumPathDepth,
-							drawingBuffer,
-						),
-						family: "arrival-state-scope-atlas" as const,
-						visibility: current.plan.diagnostics,
-					}
-				: {
-						failure: current,
-						family: "arrival-state-scope-atlas" as const,
-					},
-		current:
-			current.kind === "planned"
-				? {
-						kind: "planned" as const,
-						diagnostics: current.plan.diagnostics,
-						drySchedule: createCurrentPortalDryScheduleTrace(
-							current.plan,
-							dryWorkload,
-						),
-						nodeCount: current.plan.nodes.length,
-						renderLayerCount: current.plan.renderLayers.length,
-					}
-				: current,
-		id: pose.id,
-		pathReplayReference: {
-			contentDomainCount: pathReplayReference.contentDomainIds.length,
-			exteriorCacheEligible: pathReplayReference.exteriorCacheDomainId !== null,
-			ownershipLabelCount: pathReplayReference.ownershipLabelCount,
-			pathViewCount: pathReplayReference.views.length,
-			drySchedule: pathReplaySchedule.trace,
-			trace: pathReplayReference.trace,
-			truncation: pathReplayReference.truncation,
+		candidate: {
+			drySchedule: scopeAtlasDrySchedule,
+			executor: scopeAtlasExecutor.trace,
+			family: "arrival-state-scope-atlas" as const,
+			planning: publicAtlasPlan(scopeAtlasPlanning),
 		},
+		current:
+			current === null
+				? currentOutcome
+				: current.kind === "planned"
+					? {
+							kind: "planned" as const,
+							diagnostics: current.plan.diagnostics,
+							drySchedule: createCurrentPortalDryScheduleTrace(
+								current.plan,
+								dryWorkload,
+							),
+							nodeCount: current.plan.nodes.length,
+							renderLayerCount: current.plan.renderLayers.length,
+							selectedScopeKeys: current.plan.selectedScopes.map(scopeKey),
+						}
+					: current,
+		id: pose.id,
+		pathReplayReference:
+			pathReplayReference === null || pathReplaySchedule === null
+				? pathReplayOutcome
+				: {
+						contentDomainCount: pathReplayReference.contentDomainIds.length,
+						exteriorCacheEligible:
+							pathReplayReference.exteriorCacheDomainId !== null,
+						ownershipLabelCount: pathReplayReference.ownershipLabelCount,
+						pathViewCount: pathReplayReference.views.length,
+						drySchedule: pathReplaySchedule.trace,
+						trace: pathReplayReference.trace,
+						truncation: pathReplayReference.truncation,
+					},
 		rootScope: scopeKey(pose.rootScope),
 	};
+}
+
+/** Keep a broken historical comparator visible without suppressing candidate evidence for a pose. */
+function captureReferencePlannerOutcome<Result>(
+	planner: "legacy-render-graph" | "path-replay-reference",
+	poseId: string,
+	run: () => Result,
+):
+	| { readonly kind: "completed"; readonly result: Result }
+	| {
+			readonly kind: "planner-exception";
+			readonly message: string;
+			readonly planner: typeof planner;
+			readonly poseId: string;
+	  } {
+	try {
+		return { kind: "completed", result: run() };
+	} catch (cause) {
+		return {
+			kind: "planner-exception",
+			message: cause instanceof Error ? cause.message : String(cause),
+			planner,
+			poseId,
+		};
+	}
 }
 
 interface MutableDryScopeWorkload {

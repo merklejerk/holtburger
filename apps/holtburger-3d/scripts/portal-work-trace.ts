@@ -283,7 +283,6 @@ interface ArchiveParticleTrace {
 	readonly cohortCount: number;
 	readonly dynamicResidentCount: number;
 	readonly instanceCount: number;
-	readonly lifetime: ArchiveParticleLifetimeTrace;
 	readonly simulationTimeSeconds: number;
 }
 
@@ -352,7 +351,10 @@ if (options.mode === "particle-lifetime") {
 			{
 				kind: "holtburger-particle-lifetime-trace",
 				landblockIds: options.landblockIds,
-				particles: particleTrace(archive.content),
+				particles: {
+					...particleTrace(archive.content),
+					lifetime: archive.content.particleLifetime,
+				},
 			},
 			null,
 			2,
@@ -368,7 +370,9 @@ for (const artifact of archive.artifacts) {
 }
 const topology = graph.getPortalTopologyView();
 const poses = selectTracePoses(
-	createTracePoses(topology, archive.artifacts),
+	createTracePoses(topology, archive.artifacts).filter(
+		(pose) => options.poseId === null || pose.id === options.poseId,
+	),
 	options.maximumPoseCount,
 );
 if (poses.length === 0) {
@@ -442,6 +446,8 @@ function parseArguments(arguments_: readonly string[]):
 			readonly landblockIds: readonly LandblockId[];
 			readonly maximumPoseCount: number;
 			readonly mode: "atlas-capacity" | "particle-lifetime" | "workload";
+			/** Optional exact deterministic camera identity retained for a focused trace. */
+			readonly poseId: string | null;
 	  }
 	| { readonly kind: "census" } {
 	if (arguments_.length === 1 && arguments_[0] === "--census") {
@@ -452,6 +458,7 @@ function parseArguments(arguments_: readonly string[]):
 	let drawingBuffer: TraceDrawingBuffer = DEFAULT_DRAWING_BUFFER;
 	let mode: "atlas-capacity" | "particle-lifetime" | "workload" = "workload";
 	let maximumPoseCount = 128;
+	let poseId: string | null = null;
 	for (let index = 0; index < arguments_.length; index += 1) {
 		const argument = arguments_[index]!;
 		if (argument === "--atlas-capacity") {
@@ -476,6 +483,15 @@ function parseArguments(arguments_: readonly string[]):
 			index += 1;
 			continue;
 		}
+		if (argument === "--pose-id") {
+			const raw = arguments_[index + 1];
+			if (!raw) {
+				throw new Error("--pose-id requires a deterministic trace pose id.");
+			}
+			poseId = raw;
+			index += 1;
+			continue;
+		}
 		if (argument === "--archive-records") {
 			archiveRecordsPath = arguments_[index + 1] ?? null;
 			if (!archiveRecordsPath) {
@@ -491,7 +507,7 @@ function parseArguments(arguments_: readonly string[]):
 	}
 	if (landblockIds.length === 0) {
 		throw new Error(
-			"usage: npm run trace:portals -- <landblock-id> [landblock-id ...] [--max-poses N] [--atlas-capacity | --particle-lifetime] [--drawing-buffer WIDTHxHEIGHT]",
+			"usage: npm run trace:portals -- <landblock-id> [landblock-id ...] [--max-poses N] [--pose-id ID] [--atlas-capacity | --particle-lifetime] [--drawing-buffer WIDTHxHEIGHT]",
 		);
 	}
 	if (!Number.isSafeInteger(maximumPoseCount) || maximumPoseCount <= 0) {
@@ -504,6 +520,7 @@ function parseArguments(arguments_: readonly string[]):
 		landblockIds: Object.freeze([...new Set(landblockIds)].sort()),
 		maximumPoseCount,
 		mode,
+		poseId,
 	};
 }
 
@@ -1201,7 +1218,6 @@ function particleTrace(content: ArchiveContentArtifacts): ArchiveParticleTrace {
 			(total, cohort) => total + cohort.instanceCount,
 			0,
 		),
-		lifetime: content.particleLifetime,
 		simulationTimeSeconds: PARTICLE_TRACE_TIME_SECONDS,
 	};
 }
@@ -1939,6 +1955,7 @@ function tracePose(
 		traversalDepth: scopeAtlasFrame.commands.traversalDepth,
 	});
 	return {
+		camera: traceCameraEvidence(pose),
 		execution: {
 			drySchedule: scopeAtlasDrySchedule,
 			executor: scopeAtlasExecutor.trace,
@@ -1948,6 +1965,20 @@ function tracePose(
 		id: pose.id,
 		rootScope: scopeKey(pose.rootScope),
 	};
+}
+
+/** Convert one anchor-local trace pose into the canonical coordinates accepted by the harness. */
+function traceCameraEvidence(pose: TracePose) {
+	const origin = createLandblockWorldOrigin(pose.anchorLandblockId);
+	return Object.freeze({
+		pitchDegrees: (pose.pitch * 180) / Math.PI,
+		position: Object.freeze([
+			origin.x + pose.position.x,
+			origin.y + pose.position.y,
+			origin.z + pose.position.z,
+		] as const),
+		yawDegrees: (pose.yaw * 180) / Math.PI,
+	});
 }
 
 interface MutableDryScopeWorkload {

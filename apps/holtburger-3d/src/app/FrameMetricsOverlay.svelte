@@ -5,7 +5,7 @@
 	export interface FrameMetrics {
 		/** Total milliseconds spent in the runtime tick phase. */
 		readonly tickMs: number;
-		/** Total milliseconds spent in the renderer frame update phase. */
+		/** Total milliseconds spent advancing GameRuntime state and drawing it. */
 		readonly updateFrameMs: number;
 		/** Total measured frontend frame work in milliseconds. */
 		readonly frameMs: number;
@@ -74,7 +74,7 @@
 
 {#if smoothedMetrics !== null}
 	<aside class="frame-metrics-overlay" aria-label="Frame metrics">
-		{displayFps} fps | tick {formatMs(smoothedMetrics.tickMs)} ms | draw {formatMs(
+		{displayFps} fps | tick {formatMs(smoothedMetrics.tickMs)} ms | update+draw {formatMs(
 			smoothedMetrics.updateFrameMs,
 		)} ms | frame {formatMs(smoothedMetrics.frameMs)} ms
 	</aside>

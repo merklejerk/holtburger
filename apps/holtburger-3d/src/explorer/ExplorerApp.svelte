@@ -438,15 +438,15 @@
 						);
 					}
 					cameraLocation = residencySync.location;
-					const drawStartedAt = performance.now();
+					const updateAndDrawStartedAt = performance.now();
 					if (residencySync.renderable) {
 						gameRuntime.render(performance.now() / 1_000);
 					}
 					const frameFinishedAt = performance.now();
 
 					frameMetrics = {
-						tickMs: drawStartedAt - tickStartedAt,
-						updateFrameMs: frameFinishedAt - drawStartedAt,
+						tickMs: updateAndDrawStartedAt - tickStartedAt,
+						updateFrameMs: frameFinishedAt - updateAndDrawStartedAt,
 						frameMs: frameFinishedAt - tickStartedAt,
 					};
 					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {

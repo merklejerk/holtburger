@@ -14,7 +14,8 @@ export type WebGL2GpuFramePhase =
 	| "terrain"
 	| "opaque"
 	| "blended"
-	| "particle";
+	| "particle"
+	| "portalComposition";
 
 /** Non-overlapping CPU spans recorded only while an explicit profiling session is active. */
 export type WebGL2CpuFramePhase =
@@ -32,6 +33,7 @@ export type WebGL2CpuFramePhase =
 	| "opaqueSubmission"
 	| "blendedSubmission"
 	| "particleSubmission"
+	| "portalComposition"
 	| "finalization";
 
 /**
@@ -70,6 +72,7 @@ const CPU_TIMING_KEYS = [
 	"opaqueSubmissionMs",
 	"otherMs",
 	"particleSubmissionMs",
+	"portalCompositionMs",
 	"portalPlanningMs",
 	"sceneQueryMs",
 	"sceneContributionResolutionMs",
@@ -298,6 +301,7 @@ export class WebGL2GpuFrameProfiler {
 		let opaqueMs = 0;
 		let blendedMs = 0;
 		let particleMs = 0;
+		let portalCompositionMs = 0;
 		for (const range of frame.ranges) {
 			const durationMs = milliseconds(range.query);
 			switch (range.phase) {
@@ -315,6 +319,9 @@ export class WebGL2GpuFrameProfiler {
 					break;
 				case "particle":
 					particleMs += durationMs;
+					break;
+				case "portalComposition":
+					portalCompositionMs += durationMs;
 			}
 		}
 		return {
@@ -323,13 +330,20 @@ export class WebGL2GpuFrameProfiler {
 			kind: "available",
 			opaqueMs,
 			particleMs,
+			portalCompositionMs,
 			pendingFrameCount: this.#pending.length,
 			skyMs,
 			terrainMs,
 			// The sum of what was measured, not wall-clock from first to last command. Elapsed
 			// queries cannot nest, so unattributed GPU work between phases is unmeasurable and is
 			// deliberately absent rather than reported as a zero.
-			totalMs: skyMs + terrainMs + opaqueMs + blendedMs + particleMs,
+			totalMs:
+				skyMs +
+				terrainMs +
+				opaqueMs +
+				blendedMs +
+				particleMs +
+				portalCompositionMs,
 		};
 	}
 
@@ -366,6 +380,7 @@ export class WebGL2FrameProfileCapture {
 		objectPreparationMs: 0,
 		opaqueSubmissionMs: 0,
 		portalPlanningMs: 0,
+		portalCompositionMs: 0,
 		sceneQueryMs: 0,
 		sceneContributionResolutionMs: 0,
 		setupMs: 0,
@@ -435,9 +450,11 @@ export class WebGL2FrameProfileCapture {
 			this.#cpu.instanceRunPreparationMs +
 			this.#cpu.instanceUploadMs +
 			this.#cpu.portalPlanningMs +
+			this.#cpu.portalCompositionMs +
 			this.#cpu.terrainSubmissionMs +
 			this.#cpu.opaqueSubmissionMs +
 			this.#cpu.blendedSubmissionMs +
+			this.#cpu.particleSubmissionMs +
 			this.#cpu.finalizationMs +
 			this.#cpu.generatedInstanceCullingMs;
 		this.#owner.finishFrame({
@@ -516,6 +533,7 @@ function summarizeCpuFrames(
 		opaqueSubmissionMs: 0,
 		otherMs: 0,
 		portalPlanningMs: 0,
+		portalCompositionMs: 0,
 		sceneQueryMs: 0,
 		sceneContributionResolutionMs: 0,
 		setupMs: 0,
@@ -543,6 +561,7 @@ function summarizeCpuFrames(
 		otherMs: totals.otherMs / sampleCount,
 		particleSubmissionMs: totals.particleSubmissionMs / sampleCount,
 		portalPlanningMs: totals.portalPlanningMs / sampleCount,
+		portalCompositionMs: totals.portalCompositionMs / sampleCount,
 		sceneQueryMs: totals.sceneQueryMs / sampleCount,
 		sceneContributionResolutionMs:
 			totals.sceneContributionResolutionMs / sampleCount,

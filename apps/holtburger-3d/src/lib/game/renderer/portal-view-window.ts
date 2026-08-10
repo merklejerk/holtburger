@@ -97,7 +97,9 @@ export type PortalWindowPrimitiveKind =
 	| "ndcClipVertexEdgeTestCount"
 	| "normalizationVertexVisitCount"
 	| "polygonBoundsVertexVisitCount"
-	| "polygonIdentityVertexVisitCount";
+	| "polygonIdentityVertexVisitCount"
+	| "projectionCacheFragmentWriteCount"
+	| "projectionCacheVertexWriteCount";
 
 /** Validated per-view projection reused across every aperture traversal in one plan. */
 export class PortalWindowProjector {
@@ -164,6 +166,8 @@ interface PortalWindowProjectionDiagnostics {
 	readonly outputVertexCount: number;
 	readonly polygonBoundsVertexVisitCount: number;
 	readonly polygonIdentityVertexVisitCount: number;
+	readonly projectionCacheFragmentWriteCount: number;
+	readonly projectionCacheVertexWriteCount: number;
 }
 
 /** Explicit empty/visible result from one or more sequential aperture intersections. */
@@ -215,6 +219,8 @@ interface MutablePortalWindowProjectionDiagnostics {
 	normalizationVertexVisitCount: number;
 	polygonBoundsVertexVisitCount: number;
 	polygonIdentityVertexVisitCount: number;
+	projectionCacheFragmentWriteCount: number;
+	projectionCacheVertexWriteCount: number;
 }
 
 type HomogeneousClipDistance = (vertex: ClipVertex) => number;
@@ -1208,6 +1214,8 @@ function createDiagnostics(
 		normalizationVertexVisitCount: 0,
 		polygonBoundsVertexVisitCount: 0,
 		polygonIdentityVertexVisitCount: 0,
+		projectionCacheFragmentWriteCount: 0,
+		projectionCacheVertexWriteCount: 0,
 	};
 }
 
@@ -1274,6 +1282,10 @@ function finishDiagnostics(
 		polygonBoundsVertexVisitCount: diagnostics.polygonBoundsVertexVisitCount,
 		polygonIdentityVertexVisitCount:
 			diagnostics.polygonIdentityVertexVisitCount,
+		projectionCacheFragmentWriteCount:
+			diagnostics.projectionCacheFragmentWriteCount,
+		projectionCacheVertexWriteCount:
+			diagnostics.projectionCacheVertexWriteCount,
 	};
 }
 

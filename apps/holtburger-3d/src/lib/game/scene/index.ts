@@ -41,7 +41,7 @@ export interface SceneEnvCellScopeInput {
 	readonly structureToLandblock: Mat4;
 	/** Render-scheduling component joined only through proven depth-continuous seams. */
 	readonly visibilityIslandId: SceneVisibilityIslandId;
-	/** Source-provided coarse visibility set used to prune later portal traversal. */
+	/** Source PVS provenance retained for preload and offline policy evaluation. */
 	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
 	/**
 	 * Authored SeenOutside flag (EnvCell flag 0x01).

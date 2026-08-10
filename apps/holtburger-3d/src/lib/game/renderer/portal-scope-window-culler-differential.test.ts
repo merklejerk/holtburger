@@ -74,6 +74,8 @@ interface ScopeWindowSnapshot {
 interface DifferentialOutput {
 	/** Arena implementation's normalized selected windows. */
 	readonly arena: readonly ScopeWindowSnapshot[];
+	/** Ordinary third-or-later projections served by the lazy fixed cache. */
+	readonly cacheHitCount: number;
 	/** Deepest complete arena traversal frontier. */
 	readonly completedDepth: number;
 	/** Immutable admitted-state count, used to prove fan-in occurred. */
@@ -184,6 +186,65 @@ describe("portal scope-window culler differential", () => {
 				(_, ordinal) => alternate.selectedCrossing(ordinal).id,
 			),
 		).toEqual(["portal-crossing:sparse-unselected-0"]);
+	});
+
+	it("reuses an ordinary projected aperture after three independent routes", () => {
+		const first = envCellScope("cache-first");
+		const second = envCellScope("cache-second");
+		const third = envCellScope("cache-third");
+		const fourth = envCellScope("cache-fourth");
+		const middle = envCellScope("cache-middle");
+		const leaf = envCellScope("cache-leaf");
+		const fullAperture = rectangleAperture(-0.98, -0.9, 0.98, 0.9);
+		const fixture = differentialCase(
+			"fan-in",
+			999,
+			planInput(OUTDOOR_SCOPE),
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(first, "cache-first"),
+				topologyScope(second, "cache-second"),
+				topologyScope(third, "cache-third"),
+				topologyScope(fourth, "cache-fourth"),
+				topologyScope(middle, "cache-middle"),
+				topologyScope(leaf, "cache-leaf"),
+			],
+			[
+				crossing(
+					"cache-root-first",
+					OUTDOOR_SCOPE,
+					first,
+					rectangleAperture(-0.95, -0.8, -0.25, 0.8),
+				),
+				crossing(
+					"cache-root-second",
+					OUTDOOR_SCOPE,
+					second,
+					rectangleAperture(-0.4, -0.8, 0.4, 0.8),
+				),
+				crossing(
+					"cache-root-third",
+					OUTDOOR_SCOPE,
+					third,
+					rectangleAperture(0.25, -0.8, 0.95, 0.8),
+				),
+				crossing(
+					"cache-root-fourth",
+					OUTDOOR_SCOPE,
+					fourth,
+					rectangleAperture(-0.8, -0.6, 0.8, 0.6),
+				),
+				crossing("cache-first-middle", first, middle, fullAperture),
+				crossing("cache-second-middle", second, middle, fullAperture),
+				crossing("cache-third-middle", third, middle, fullAperture),
+				crossing("cache-fourth-middle", fourth, middle, fullAperture),
+				crossing("cache-middle-leaf", middle, leaf, fullAperture),
+			],
+			90_001,
+		);
+
+		const output = assertDifferential(fixture);
+		expect(output.cacheHitCount).toBeGreaterThan(0);
 	});
 });
 
@@ -625,6 +686,23 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 		arenaFrame.trace.selectedCrossingInputCount,
 		`${fixture.label} selected-crossing inputs`,
 	).toBeLessThanOrEqual(fixture.topology.crossings.length);
+	expect(
+		arenaFrame.trace.nearClipClassificationCount,
+		`${fixture.label} near-clip classifications`,
+	).toBeLessThanOrEqual(arenaFrame.trace.outgoingCrossingInputCount);
+	expect(
+		arenaFrame.trace.facingTestCount,
+		`${fixture.label} facing tests`,
+	).toBeLessThanOrEqual(arenaFrame.trace.nearClipClassificationCount);
+	expect(
+		arenaFrame.trace.routeProjectionCount,
+		`${fixture.label} route projections`,
+	).toBeLessThanOrEqual(arenaFrame.trace.nearClipClassificationCount);
+	expect(
+		arenaFrame.trace.ordinaryRouteProjectionCount +
+			arenaFrame.trace.nearPlaneRouteProjectionCount,
+		`${fixture.label} classified route projections`,
+	).toBe(arenaFrame.trace.routeProjectionCount);
 	if (arenaFrame.trace.selectedCrossingMarkerWordInputCount > 0) {
 		expect(
 			arenaFrame.trace.selectedCrossingInputCount +
@@ -634,6 +712,7 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 	}
 	return {
 		arena: actual,
+		cacheHitCount: arenaFrame.trace.projectionCacheHitCount,
 		completedDepth: arenaFrame.completedDepth,
 		immutableAdmittedStateCount: immutableResult.diagnostics.admittedStateCount,
 		immutableNearPlaneSeedCount: immutableResult.diagnostics.nearPlaneSeedCount,

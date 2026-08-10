@@ -76,12 +76,19 @@ import {
 	type PortalDrySceneWorkload,
 } from "../src/lib/game/renderer/portal-arrival-state-dry-schedule";
 import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "../src/lib/game/renderer/portal-scope-atlas-metadata-glsl";
-import { ParticleSystem } from "../src/lib/game/systems/particle-system";
+import {
+	ParticleSystem,
+	type ParticleSystemDiagnostics,
+} from "../src/lib/game/systems/particle-system";
 import { PhysicsScriptSystem } from "../src/lib/game/systems/physics-script-system";
 
 const CAMERA = Object.freeze({ far: 10_000, fov: 70, near: 0.1 });
 const DEFAULT_DRAWING_BUFFER = Object.freeze({ height: 1_080, width: 1_920 });
 const PARTICLE_TRACE_TIME_SECONDS = 1;
+/** Deterministic update cadence used to expose lifetime growth without measuring CPU duration. */
+const PARTICLE_LIFETIME_TRACE_STEPS_PER_SECOND = 60;
+/** Covers the 15-second field profile twice, exposing steady growth versus bounded turnover. */
+const PARTICLE_LIFETIME_TRACE_DURATION_SECONDS = 30;
 /** Largest relative atlas dimension evaluated by the offline fixed-capacity policy search. */
 const MAXIMUM_ATLAS_POLICY_MULTIPLIER = 4;
 /** Logical no-cutoff capacity used to isolate atlas extent from arrival-id experiments. */
@@ -246,18 +253,24 @@ interface PortalAtlasCapacityTraceReport {
 	readonly topology: ReturnType<typeof topologyDistribution>;
 }
 
-/** Exact CPU artifacts prepared from the same decoded real source records as production. */
-interface ArchiveContentArtifacts {
+/** Exact non-particle CPU artifacts prepared from the same decoded real source records as production. */
+interface ArchivePreparedContentArtifacts {
 	/** Authored dynamic residents whose scripts can create the live particle workload. */
 	readonly dynamics: readonly AuthoredDynamicSource[];
 	/** Environment shells paired with their published scope topology. */
 	readonly environments: readonly EnvCellLayerArtifact[];
-	/** Fixed-time production cohorts reduced to dry-scheduler facts by physical scope. */
-	readonly particles: readonly ArchiveScopedParticleWorkload[];
 	/** Prepared outdoor and interior-resident static draw artifacts. */
 	readonly statics: readonly StaticObjectLayerArtifact[];
 	/** Terrain sources represented as one resolved draw domain per resident landblock. */
 	readonly terrainLandblockIds: readonly LandblockId[];
+}
+
+/** Complete archive workload after deterministic particle lifetime execution. */
+interface ArchiveContentArtifacts extends ArchivePreparedContentArtifacts {
+	/** Fixed-time production cohorts reduced to dry-scheduler facts by physical scope. */
+	readonly particles: readonly ArchiveScopedParticleWorkload[];
+	/** Event- and second-sampled particle ownership evidence over the field-profile horizon. */
+	readonly particleLifetime: ArchiveParticleLifetimeTrace;
 }
 
 /** One exact production cohort assigned to its owning authored scene scope. */
@@ -270,7 +283,54 @@ interface ArchiveParticleTrace {
 	readonly cohortCount: number;
 	readonly dynamicResidentCount: number;
 	readonly instanceCount: number;
+	readonly lifetime: ArchiveParticleLifetimeTrace;
 	readonly simulationTimeSeconds: number;
+}
+
+/** One deterministic lifetime observation plus the retired and current presentation work models. */
+interface ArchiveParticleLifetimeSnapshot extends ParticleSystemDiagnostics {
+	/** One owner aggregate lookup per dynamic presentation publication. */
+	readonly ownerAggregateLookupCountPerPresentation: number;
+	/** Authored owners whose derived production envelope changed at this retained snapshot. */
+	readonly ownerEnvelopeChanges: readonly ArchiveParticleOwnerEnvelopeSnapshot[];
+	/** All-emitter inspections the retired lookup performed for the same population. */
+	readonly retiredEmitterInspectionCountPerPresentation: number;
+	/** Authored simulation time represented by this snapshot. */
+	readonly timeSeconds: number;
+}
+
+/** Trace-only identity and derived envelope for one authored dynamic resident. */
+interface ArchiveParticleOwnerEnvelopeSnapshot {
+	/** Current owner-relative conservative radius returned by the production aggregate. */
+	readonly envelopeRadius: number;
+	/** Stable authored resident identity from the archive. */
+	readonly sourceId: string;
+	/** Synthetic runtime target identity assigned by this deterministic trace. */
+	readonly targetId: string;
+}
+
+/** Bounded real-content lifetime evidence independent from browser frame timing. */
+interface ArchiveParticleLifetimeTrace {
+	/** Authored-time horizon simulated by the trace. */
+	readonly durationSeconds: number;
+	/** Maximum simultaneous emitter population observed over the horizon. */
+	readonly peakEmitterCount: number;
+	/** Maximum simultaneous live-particle population observed over the horizon. */
+	readonly peakParticleCount: number;
+	/** Worst retired all-emitter work for one presentation over the horizon. */
+	readonly peakRetiredEmitterInspectionCountPerPresentation: number;
+	/** Whole-second observations plus intervening lifetime transitions. */
+	readonly snapshots: readonly ArchiveParticleLifetimeSnapshot[];
+	/** Deterministic authored-time advancement interval. */
+	readonly stepSeconds: number;
+}
+
+/** Particle cohorts and their independent lifetime evidence from one production simulation. */
+interface ArchiveParticleArtifacts {
+	/** Authored-time population and ownership evidence. */
+	readonly lifetime: ArchiveParticleLifetimeTrace;
+	/** One-second physical particle workload used by the portal dry schedule. */
+	readonly workload: readonly ArchiveScopedParticleWorkload[];
 }
 
 const options = parseArguments(process.argv.slice(2));
@@ -286,6 +346,20 @@ const archive = await loadArchiveArtifacts(
 	options.landblockIds,
 	options.archiveRecordsPath,
 );
+if (options.mode === "particle-lifetime") {
+	process.stdout.write(
+		`${JSON.stringify(
+			{
+				kind: "holtburger-particle-lifetime-trace",
+				landblockIds: options.landblockIds,
+				particles: particleTrace(archive.content),
+			},
+			null,
+			2,
+		)}\n`,
+	);
+	process.exit(0);
+}
 const graph = new SceneGraph();
 for (const artifact of archive.artifacts) {
 	for (const scope of artifact.scopes) graph.upsertEnvCellScope(scope);
@@ -367,7 +441,7 @@ function parseArguments(arguments_: readonly string[]):
 			readonly kind: "workload";
 			readonly landblockIds: readonly LandblockId[];
 			readonly maximumPoseCount: number;
-			readonly mode: "atlas-capacity" | "workload";
+			readonly mode: "atlas-capacity" | "particle-lifetime" | "workload";
 	  }
 	| { readonly kind: "census" } {
 	if (arguments_.length === 1 && arguments_[0] === "--census") {
@@ -376,12 +450,16 @@ function parseArguments(arguments_: readonly string[]):
 	const landblockIds: LandblockId[] = [];
 	let archiveRecordsPath: string | null = null;
 	let drawingBuffer: TraceDrawingBuffer = DEFAULT_DRAWING_BUFFER;
-	let mode: "atlas-capacity" | "workload" = "workload";
+	let mode: "atlas-capacity" | "particle-lifetime" | "workload" = "workload";
 	let maximumPoseCount = 128;
 	for (let index = 0; index < arguments_.length; index += 1) {
 		const argument = arguments_[index]!;
 		if (argument === "--atlas-capacity") {
 			mode = "atlas-capacity";
+			continue;
+		}
+		if (argument === "--particle-lifetime") {
+			mode = "particle-lifetime";
 			continue;
 		}
 		if (argument === "--drawing-buffer") {
@@ -413,7 +491,7 @@ function parseArguments(arguments_: readonly string[]):
 	}
 	if (landblockIds.length === 0) {
 		throw new Error(
-			"usage: npm run trace:portals -- <landblock-id> [landblock-id ...] [--max-poses N] [--atlas-capacity] [--drawing-buffer WIDTHxHEIGHT]",
+			"usage: npm run trace:portals -- <landblock-id> [landblock-id ...] [--max-poses N] [--atlas-capacity | --particle-lifetime] [--drawing-buffer WIDTHxHEIGHT]",
 		);
 	}
 	if (!Number.isSafeInteger(maximumPoseCount) || maximumPoseCount <= 0) {
@@ -505,20 +583,24 @@ async function loadArchiveArtifacts(
 		rootScriptIds.length === 0
 			? { particleEmitters: [], physicsScripts: [] }
 			: runArchiveBehaviorAdapter(appDirectory, rootScriptIds);
-	const particles = await createArchiveParticleWorkload(
+	const particleArtifacts = await createArchiveParticleArtifacts(
 		preparedContent.dynamics,
 		behavior,
 	);
 	return {
 		artifacts: environments,
-		content: { ...preparedContent, particles },
+		content: {
+			...preparedContent,
+			particleLifetime: particleArtifacts.lifetime,
+			particles: particleArtifacts.workload,
+		},
 	};
 }
 
 function prepareArchiveContentArtifacts(
 	sources: readonly ReturnType<typeof decodeLandblockSourceBatch>[],
 	environments: readonly EnvCellLayerArtifact[],
-): ArchiveContentArtifacts {
+): ArchivePreparedContentArtifacts {
 	const dynamics: AuthoredDynamicSource[] = [];
 	const statics: StaticObjectLayerArtifact[] = [];
 	const terrainLandblockIds: LandblockId[] = [];
@@ -562,7 +644,6 @@ function prepareArchiveContentArtifacts(
 	return {
 		dynamics,
 		environments,
-		particles: [],
 		statics,
 		terrainLandblockIds,
 	};
@@ -820,10 +901,10 @@ function uniqueRiskSelections(
 	);
 }
 
-async function createArchiveParticleWorkload(
+async function createArchiveParticleArtifacts(
 	dynamics: readonly AuthoredDynamicSource[],
 	behavior: ArchiveBehaviorExport,
-): Promise<readonly ArchiveScopedParticleWorkload[]> {
+): Promise<ArchiveParticleArtifacts> {
 	const scripts = new Map(
 		behavior.physicsScripts.map((record) => [
 			record.id,
@@ -900,8 +981,9 @@ async function createArchiveParticleWorkload(
 		return { dynamic, target };
 	});
 	let scriptSystem: PhysicsScriptSystem<string> | null = null;
+	let timeSeconds = 0;
 	const particles = new ParticleSystem({
-		clock: () => PARTICLE_TRACE_TIME_SECONDS,
+		clock: () => timeSeconds,
 		partFrameOf: (target, partIndex) =>
 			partTargets.get(`${target.targetId}\0${partIndex}`) ?? null,
 		renderAnchorOrigin: () => sceneVector3([0, 0, 0]),
@@ -952,26 +1034,86 @@ async function createArchiveParticleWorkload(
 			}
 			scriptSystem.install(dynamic.identity.sourceId, target, closure, 0);
 		}
-		scriptSystem.advance(PARTICLE_TRACE_TIME_SECONDS);
-		particles.advance(PARTICLE_TRACE_TIME_SECONDS);
-		return Object.freeze(
-			particles
-				.collectCohorts(({ targetId }) => sceneNodeIdOf(targetId))
-				.map((cohort) => {
-					const key = scopeByTargetId.get(cohort.renderOwner);
-					if (!key) {
-						throw new Error(
-							`Particle cohort owner ${cohort.renderOwner} has no authored scope.`,
-						);
-					}
-					return Object.freeze({
-						batchKey: `${cohort.hwGfxObjId}\0${cohort.motionType}`,
-						instanceCount: cohort.particles.length,
-						scopeKey: key,
-						sourceKey: `${cohort.renderOwner}\0${cohort.hwGfxObjId}\0${cohort.motionType}`,
-					});
-				}),
-		);
+		const snapshots: ArchiveParticleLifetimeSnapshot[] = [];
+		const previousOwnerEnvelopeRadii = new Map<string, number>();
+		let previousLifetimeSignature = "";
+		let peakEmitterCount = 0;
+		let peakParticleCount = 0;
+		let peakRetiredEmitterInspectionCountPerPresentation = 0;
+		let workload: readonly ArchiveScopedParticleWorkload[] | null = null;
+		const stepCount =
+			PARTICLE_LIFETIME_TRACE_DURATION_SECONDS *
+			PARTICLE_LIFETIME_TRACE_STEPS_PER_SECOND;
+		for (let step = 0; step <= stepCount; step += 1) {
+			timeSeconds = step / PARTICLE_LIFETIME_TRACE_STEPS_PER_SECOND;
+			scriptSystem.advance(timeSeconds);
+			particles.advance(timeSeconds);
+			const diagnostics = particles.getDiagnostics();
+			const retiredEmitterInspectionCountPerPresentation =
+				dynamics.length * diagnostics.emitterCount;
+			peakEmitterCount = Math.max(peakEmitterCount, diagnostics.emitterCount);
+			peakParticleCount = Math.max(
+				peakParticleCount,
+				diagnostics.particleCount,
+			);
+			peakRetiredEmitterInspectionCountPerPresentation = Math.max(
+				peakRetiredEmitterInspectionCountPerPresentation,
+				retiredEmitterInspectionCountPerPresentation,
+			);
+			const lifetimeSignature = particleLifetimeSignature(diagnostics);
+			if (
+				step % PARTICLE_LIFETIME_TRACE_STEPS_PER_SECOND === 0 ||
+				lifetimeSignature !== previousLifetimeSignature
+			) {
+				const ownerEnvelopeChanges = residentTargets.flatMap(
+					({ dynamic, target }) => {
+						const envelopeRadius = particles.envelopeRadiusFor(target.targetId);
+						if (
+							previousOwnerEnvelopeRadii.get(target.targetId) === envelopeRadius
+						) {
+							return [];
+						}
+						previousOwnerEnvelopeRadii.set(target.targetId, envelopeRadius);
+						return [
+							Object.freeze({
+								envelopeRadius,
+								sourceId: dynamic.identity.sourceId,
+								targetId: target.targetId,
+							}),
+						];
+					},
+				);
+				snapshots.push(
+					Object.freeze({
+						...diagnostics,
+						ownerAggregateLookupCountPerPresentation: dynamics.length,
+						ownerEnvelopeChanges: Object.freeze(ownerEnvelopeChanges),
+						retiredEmitterInspectionCountPerPresentation,
+						timeSeconds,
+					}),
+				);
+				previousLifetimeSignature = lifetimeSignature;
+			}
+			if (timeSeconds === PARTICLE_TRACE_TIME_SECONDS) {
+				workload = snapshotArchiveParticleWorkload(particles, scopeByTargetId);
+			}
+		}
+		if (workload === null) {
+			throw new Error(
+				"Particle lifetime trace did not reach its workload time.",
+			);
+		}
+		return Object.freeze({
+			lifetime: Object.freeze({
+				durationSeconds: PARTICLE_LIFETIME_TRACE_DURATION_SECONDS,
+				peakEmitterCount,
+				peakParticleCount,
+				peakRetiredEmitterInspectionCountPerPresentation,
+				snapshots: Object.freeze(snapshots),
+				stepSeconds: 1 / PARTICLE_LIFETIME_TRACE_STEPS_PER_SECOND,
+			}),
+			workload,
+		});
 	} finally {
 		scriptSystem.destroy();
 		for (const closure of closures.values()) closure.release();
@@ -979,6 +1121,49 @@ async function createArchiveParticleWorkload(
 		scriptRepository.destroy();
 		emitterRepository.destroy();
 	}
+}
+
+/** Lifetime facts whose changes deserve a snapshot between whole-second observations. */
+function particleLifetimeSignature(
+	diagnostics: ParticleSystemDiagnostics,
+): string {
+	return [
+		diagnostics.createdEmitterTotal,
+		diagnostics.destroyedEmitterTotal,
+		diagnostics.emitterCount,
+		diagnostics.emitterOwnerCount,
+		diagnostics.explicitlyStoppedEmitterTotal,
+		diagnostics.lostTargetEmitterTotal,
+		diagnostics.maximumEmitterCountPerOwner,
+		diagnostics.ownerAggregateRepairTotal,
+		diagnostics.reapedEmitterCount,
+		diagnostics.replacedEmitterTotal,
+	].join("/");
+}
+
+/** Copy reused production cohort storage into immutable archive work facts at one trace instant. */
+function snapshotArchiveParticleWorkload(
+	particles: ParticleSystem,
+	scopeByTargetId: ReadonlyMap<string, string>,
+): readonly ArchiveScopedParticleWorkload[] {
+	return Object.freeze(
+		particles
+			.collectCohorts(({ targetId }) => sceneNodeIdOf(targetId))
+			.map((cohort) => {
+				const key = scopeByTargetId.get(cohort.renderOwner);
+				if (!key) {
+					throw new Error(
+						`Particle cohort owner ${cohort.renderOwner} has no authored scope.`,
+					);
+				}
+				return Object.freeze({
+					batchKey: `${cohort.hwGfxObjId}\0${cohort.motionType}`,
+					instanceCount: cohort.particles.length,
+					scopeKey: key,
+					sourceKey: `${cohort.renderOwner}\0${cohort.hwGfxObjId}\0${cohort.motionType}`,
+				});
+			}),
+	);
 }
 
 function dynamicSceneOrigin(dynamic: AuthoredDynamicSource): SceneVector3 {
@@ -1016,6 +1201,7 @@ function particleTrace(content: ArchiveContentArtifacts): ArchiveParticleTrace {
 			(total, cohort) => total + cohort.instanceCount,
 			0,
 		),
+		lifetime: content.particleLifetime,
 		simulationTimeSeconds: PARTICLE_TRACE_TIME_SECONDS,
 	};
 }

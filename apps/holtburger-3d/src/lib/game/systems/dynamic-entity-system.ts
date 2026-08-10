@@ -157,9 +157,15 @@ export class DynamicEntitySystem<
 	>();
 	#destroyed = false;
 	#lastPresentationPublicationDurationMs = 0;
+	/** Entities visited by the last complete presentation sweep. */
+	#lastPresentationEntityVisitCount = 0;
 	#lastPublishedPresentationCount = 0;
 	/** Publications for residents with behavior but no playback, which animation cannot cover. */
 	#lastEffectOnlyPresentationCount = 0;
+	/** Envelope lookups whose result changed the owner radius during the last publication. */
+	#lastParticleEnvelopeChangeCount = 0;
+	/** Owner-aggregate lookups performed during the last publication. */
+	#lastParticleEnvelopeQueryCount = 0;
 
 	constructor(
 		scene: SceneGraph,
@@ -460,8 +466,11 @@ export class DynamicEntitySystem<
 			entityCount: this.#entities.size,
 			lastPresentationPublicationDurationMs:
 				this.#lastPresentationPublicationDurationMs,
+			lastPresentationEntityVisitCount: this.#lastPresentationEntityVisitCount,
 			lastPublishedPresentationCount: this.#lastPublishedPresentationCount,
 			lastEffectOnlyPresentationCount: this.#lastEffectOnlyPresentationCount,
+			lastParticleEnvelopeChangeCount: this.#lastParticleEnvelopeChangeCount,
+			lastParticleEnvelopeQueryCount: this.#lastParticleEnvelopeQueryCount,
 			staticFallbackEntityCount: prepared.filter(
 				(animation) => animation?.kind === "retain-static-presentation",
 			).length,
@@ -473,6 +482,8 @@ export class DynamicEntitySystem<
 	publishPresentation(samples: readonly DynamicPresentationSample[]): void {
 		const startedAt = performance.now();
 		const publishedNodeIds = new Set<SceneNodeId>();
+		let particleEnvelopeChangeCount = 0;
+		let particleEnvelopeQueryCount = 0;
 		const publications = samples.map((sample) => {
 			if (publishedNodeIds.has(sample.nodeId))
 				throw new Error(
@@ -485,6 +496,10 @@ export class DynamicEntitySystem<
 			return { entity, sample };
 		});
 		for (const { entity, sample } of publications) {
+			particleEnvelopeQueryCount += 1;
+			if (this.#refreshParticleEnvelope(entity)) {
+				particleEnvelopeChangeCount += 1;
+			}
 			this.#applySample(entity, sample);
 		}
 		let effectOnlyCount = 0;
@@ -498,7 +513,9 @@ export class DynamicEntitySystem<
 			// envelope is not idle, though: emitters start and stop independently of effect state,
 			// and skipping on effects alone left the envelope out of the bounds entirely, so a
 			// swarm vanished the moment its owner's mesh left the frustum.
+			particleEnvelopeQueryCount += 1;
 			const envelopeChanged = this.#refreshParticleEnvelope(entity);
+			if (envelopeChanged) particleEnvelopeChangeCount += 1;
 			if (!this.#effects.needsPresentation(nodeId) && !envelopeChanged) {
 				continue;
 			}
@@ -512,8 +529,11 @@ export class DynamicEntitySystem<
 			effectOnlyCount += 1;
 		}
 		this.#lastPresentationPublicationDurationMs = performance.now() - startedAt;
+		this.#lastPresentationEntityVisitCount = this.#entities.size;
 		this.#lastPublishedPresentationCount = samples.length + effectOnlyCount;
 		this.#lastEffectOnlyPresentationCount = effectOnlyCount;
+		this.#lastParticleEnvelopeChangeCount = particleEnvelopeChangeCount;
+		this.#lastParticleEnvelopeQueryCount = particleEnvelopeQueryCount;
 	}
 
 	/** Grow presentation bounds to contain whatever this entity is currently emitting. */
@@ -764,7 +784,10 @@ export class DynamicEntitySystem<
 			// Assigned before the first sample so every `#applySample` can publish an envelope.
 			entity.cullingBounds = animation.localBounds;
 			this.#publishCullingBounds(entity);
-			if (sample) this.#applySample(entity, sample);
+			if (sample) {
+				this.#refreshParticleEnvelope(entity);
+				this.#applySample(entity, sample);
+			}
 			samples.delete(entity.rootNodeId);
 		}
 		if (samples.size > 0)
@@ -814,7 +837,6 @@ export class DynamicEntitySystem<
 				);
 			return { part, renderState, transform };
 		});
-		this.#refreshParticleEnvelope(entity);
 		const publishedPresentationBounds = expandBounds(
 			presentationBoundsForSample(
 				updatedParts,

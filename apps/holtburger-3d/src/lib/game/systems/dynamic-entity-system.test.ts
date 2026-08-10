@@ -298,7 +298,12 @@ describe("DynamicEntitySystem authored ownership", () => {
 			instance: { color: { a: 1 } },
 			transparentSort: null,
 		});
-		expect(system.getDiagnostics().lastPublishedPresentationCount).toBe(1);
+		expect(system.getDiagnostics()).toMatchObject({
+			lastParticleEnvelopeChangeCount: 0,
+			lastParticleEnvelopeQueryCount: 1,
+			lastPresentationEntityVisitCount: 2,
+			lastPublishedPresentationCount: 1,
+		});
 	});
 
 	it("publishes pose-local bounds without changing swept scene bounds", async () => {
@@ -396,6 +401,11 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
 			expandBounds(poseBounds, 5),
 		);
+		expect(system.getDiagnostics()).toMatchObject({
+			lastParticleEnvelopeChangeCount: 1,
+			lastParticleEnvelopeQueryCount: 1,
+			lastPresentationEntityVisitCount: 1,
+		});
 	});
 
 	it("activates a blocked visual clip as valid static presentation", async () => {

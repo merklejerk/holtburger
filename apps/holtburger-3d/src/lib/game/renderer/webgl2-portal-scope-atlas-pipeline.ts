@@ -17,14 +17,15 @@ import {
 	type PortalScopeAtlasResource,
 } from "./portal-scope-atlas-planner";
 import type { PortalScopeWindowCullInput } from "./portal-scope-window-culler";
+import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "./portal-scope-atlas-metadata-glsl";
+import type { WebGL2PortalDeferredVisibilityUniforms } from "./portal-deferred-visibility-glsl";
+import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
 import { WebGL2PortalScopeAtlasExecutor } from "./webgl2-portal-scope-atlas-executor";
 import {
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetDiagnostics,
 	type WebGL2PortalScopeAtlasTargetSet,
 } from "./webgl2-portal-scope-atlas-targets";
-
-const METADATA_BINDING_POINT = 0;
 
 /** Complete non-retained planning state for the current synchronous portal camera. */
 export interface WebGL2PortalScopeAtlasFrame extends SceneScopeSelection {
@@ -126,7 +127,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 			gl,
 			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
 				.maximumCrossingTriangleVertexCount,
-			METADATA_BINDING_POINT,
+			PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT,
 		);
 	}
 
@@ -186,6 +187,14 @@ export class WebGL2PortalScopeAtlasPipeline {
 		if (ordinal !== null) this.#bindTile(ordinal, clipTransform);
 	}
 
+	/** Route exterior-global opaque work, such as celestial sky, to the outdoor tile. */
+	routeOutdoorOpaqueSubmission(clipTransform: WebGLUniformLocation): void {
+		this.#bindTile(
+			this.#requireFrame().atlas.tileOrdinalForRenderScopeKey("outdoor"),
+			clipTransform,
+		);
+	}
+
 	/** Route one already-formed scope-homogeneous object draw without changing its boundary. */
 	routeObjectSubmission(
 		renderScopeKey: string,
@@ -207,6 +216,34 @@ export class WebGL2PortalScopeAtlasPipeline {
 			targets: frame.targets,
 			traversalDepth: frame.atlas.commands.traversalDepth,
 		});
+	}
+
+	/** Bind the resolved output and one immutable scope-envelope texture for deferred draws. */
+	beginDeferredScene(outputFramebuffer: WebGLFramebuffer | null): void {
+		const frame = this.#requireFrame();
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, outputFramebuffer);
+		gl.viewport(
+			0,
+			0,
+			this.#drawingBufferExtent.width,
+			this.#drawingBufferExtent.height,
+		);
+		const unit = PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth;
+		gl.bindSampler(unit, null);
+		gl.activeTexture(gl.TEXTURE0 + unit);
+		gl.bindTexture(gl.TEXTURE_2D, frame.targets.envelope.depth);
+		gl.activeTexture(gl.TEXTURE0);
+	}
+
+	/** Select one authored scope envelope without changing the caller's physical draw boundary. */
+	routeDeferredSubmission(
+		renderScopeKey: string,
+		uniforms: WebGL2PortalDeferredVisibilityUniforms,
+	): void {
+		const ordinal =
+			this.#requireFrame().atlas.tileOrdinalForRenderScopeKey(renderScopeKey);
+		this.#gl.uniform1ui(uniforms.scope, ordinal);
 	}
 
 	getDiagnostics(): WebGL2PortalScopeAtlasTargetDiagnostics {

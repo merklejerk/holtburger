@@ -17,6 +17,11 @@ const PARTICLE_INSTANCE_ATTRIBUTES = [
 	{ componentCount: 4, floatOffset: 17, location: 8 },
 ] as const;
 
+/** One physical particle batch contributing records to the shared frame stream. */
+export interface ParticleInstancePopulation {
+	readonly particles: readonly ParticleInstanceRecord[];
+}
+
 /**
  * Per-frame instance storage for particle spawn constants.
  *
@@ -30,6 +35,7 @@ export class WebGL2ParticleInstanceBuffer {
 	readonly #buffer: WebGLBuffer;
 	#staging = new Float32Array(0);
 	#capacity = 0;
+	#populatedInstanceCount = 0;
 	#destroyed = false;
 
 	constructor(gl: WebGL2RenderingContext) {
@@ -41,15 +47,24 @@ export class WebGL2ParticleInstanceBuffer {
 	}
 
 	/**
-	 * Upload one cohort's particles, returning how many instances to draw.
+	 * Pack and upload every physical batch once, returning the complete frame population.
 	 *
 	 * Capacity grows by doubling and never shrinks: particle counts oscillate every frame, so
 	 * releasing storage would reallocate almost immediately.
 	 */
-	upload(records: readonly ParticleInstanceRecord[]): number {
+	prepareFrame(populations: readonly ParticleInstancePopulation[]): number {
 		this.#requireAlive();
-		if (records.length > this.#capacity) {
-			while (this.#capacity < records.length)
+		let recordCount = 0;
+		for (const population of populations) {
+			recordCount += population.particles.length;
+		}
+		if (!Number.isSafeInteger(recordCount)) {
+			throw new Error(
+				"Particle frame population exceeds safe integer capacity.",
+			);
+		}
+		if (recordCount > this.#capacity) {
+			while (this.#capacity < recordCount)
 				this.#capacity = Math.max(16, this.#capacity * 2);
 			this.#staging = new Float32Array(
 				this.#capacity * PARTICLE_INSTANCE_FLOAT_COUNT,
@@ -62,20 +77,32 @@ export class WebGL2ParticleInstanceBuffer {
 			);
 			this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, null);
 		}
-		if (records.length === 0) return 0;
+		this.#populatedInstanceCount = recordCount;
+		if (recordCount === 0) return 0;
 		let offset = 0;
-		for (const record of records) {
-			offset = writeParticleInstance(this.#staging, offset, record);
+		for (const population of populations) {
+			for (const record of population.particles) {
+				offset = writeParticleInstance(this.#staging, offset, record);
+			}
 		}
 		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, this.#buffer);
 		this.#gl.bufferSubData(this.#gl.ARRAY_BUFFER, 0, this.#staging, 0, offset);
 		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, null);
-		return records.length;
+		return recordCount;
 	}
 
-	/** Point the bound vertex array at this buffer's per-instance attributes. */
-	bindAttributes(): void {
+	/** Point the bound vertex array at one contiguous range in the prepared frame stream. */
+	bindAttributes(firstInstance: number): void {
 		this.#requireAlive();
+		if (
+			!Number.isSafeInteger(firstInstance) ||
+			firstInstance < 0 ||
+			firstInstance > this.#populatedInstanceCount
+		) {
+			throw new Error(
+				`Particle frame range starts at invalid instance ${firstInstance}.`,
+			);
+		}
 		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, this.#buffer);
 		for (const attribute of PARTICLE_INSTANCE_ATTRIBUTES) {
 			this.#gl.enableVertexAttribArray(attribute.location);
@@ -85,7 +112,8 @@ export class WebGL2ParticleInstanceBuffer {
 				this.#gl.FLOAT,
 				false,
 				PARTICLE_INSTANCE_STRIDE_BYTES,
-				attribute.floatOffset * Float32Array.BYTES_PER_ELEMENT,
+				firstInstance * PARTICLE_INSTANCE_STRIDE_BYTES +
+					attribute.floatOffset * Float32Array.BYTES_PER_ELEMENT,
 			);
 			this.#gl.vertexAttribDivisor(attribute.location, 1);
 		}

@@ -1,41 +1,21 @@
 import { PORTAL_QUERY_EPSILON } from "../scene/planar-aperture";
-import {
-	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
-	PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT,
-} from "./portal-arrival-metadata";
+import { PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE } from "./portal-arrival-metadata";
 import { PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL } from "./portal-crossing-triangle-stream";
-import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
 import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
+import {
+	bindPortalScopeAtlasMetadataBlock,
+	PORTAL_SCOPE_ATLAS_METADATA_GLSL,
+} from "./portal-scope-atlas-metadata-glsl";
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "./webgl2-shader-utils";
 
-const METADATA_BLOCK_NAME = "PortalScopeAtlasMetadata";
-
-const METADATA_GLSL = `
-struct PortalArrivalMetadata {
-	vec4 entryPlane;
-	uvec4 route;
-};
-
-struct PortalScopeMetadata {
-	uvec4 atlasAndScreenOrigin;
-	uvec4 extentAndReserved;
-};
-
-layout(std140) uniform ${METADATA_BLOCK_NAME} {
-	mat4 uClipFromAnchor;
-	PortalArrivalMetadata uArrivals[${PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT}];
-	PortalScopeMetadata uScopes[${PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT}];
-};
-`;
-
 const PROPAGATION_VERTEX_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
 
-${METADATA_GLSL}
+${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in uint aOutputArrival;
@@ -61,7 +41,7 @@ precision highp float;
 precision highp int;
 precision highp sampler2D;
 
-${METADATA_GLSL}
+${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
 uniform sampler2D uSceneDepth;
 flat out uint vScope;
@@ -91,7 +71,7 @@ precision highp int;
 precision highp usampler2D;
 precision highp sampler2D;
 
-${METADATA_GLSL}
+${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
 uniform highp usampler2D uFrontier0;
 uniform highp usampler2D uFrontier1;
@@ -142,7 +122,7 @@ const RESOLVE_VERTEX_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
 
-${METADATA_GLSL}
+${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
 flat out uint vScope;
 
@@ -170,7 +150,7 @@ precision highp float;
 precision highp int;
 precision highp sampler2D;
 
-${METADATA_GLSL}
+${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
 uniform sampler2D uSceneColor;
 uniform sampler2D uSceneDepth;
@@ -251,7 +231,7 @@ export function createWebGL2PortalScopeAtlasPrograms(
 		programs.push(resolve);
 
 		for (const program of programs) {
-			bindMetadataBlock(gl, program, metadataBindingPoint);
+			bindPortalScopeAtlasMetadataBlock(gl, program, metadataBindingPoint);
 		}
 		configurePropagationSamplers(gl, propagationRoot, null);
 		configurePropagationSamplers(
@@ -340,7 +320,7 @@ precision highp int;
 precision highp usampler2D;
 precision highp sampler2D;
 
-${METADATA_GLSL}
+${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
 uniform sampler2D uSceneDepth;
 ${currentDeclaration}
@@ -395,30 +375,6 @@ function configurePropagationSamplers(
 			currentFrontierUnit,
 		);
 	}
-}
-
-function bindMetadataBlock(
-	gl: WebGL2RenderingContext,
-	program: WebGLProgram,
-	bindingPoint: number,
-): void {
-	const block = gl.getUniformBlockIndex(program, METADATA_BLOCK_NAME);
-	if (block === gl.INVALID_INDEX) {
-		throw new Error(
-			`Portal scope-atlas program is missing ${METADATA_BLOCK_NAME}.`,
-		);
-	}
-	const byteLength = gl.getActiveUniformBlockParameter(
-		program,
-		block,
-		gl.UNIFORM_BLOCK_DATA_SIZE,
-	) as number;
-	if (byteLength !== PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES) {
-		throw new Error(
-			`Portal scope-atlas metadata block is ${byteLength} bytes; expected ${PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES}.`,
-		);
-	}
-	gl.uniformBlockBinding(program, block, bindingPoint);
 }
 
 function linkProgram(

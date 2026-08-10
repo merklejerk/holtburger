@@ -2,10 +2,12 @@ import { acVector3, renderVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { DatAssetId } from "../game-types";
 import type { ParticleDrawBatch } from "./particle-render-routing";
+import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
 import {
 	WebGL2ParticlePass,
 	type ParticleDrawGeometry,
 } from "./webgl2-particle-pass";
+import { createParticleFragmentShader } from "./webgl2-particle-program";
 
 const MESH = "0x01000ff4" as DatAssetId;
 
@@ -53,6 +55,7 @@ function fakeGl() {
 	const draws: number[] = [];
 	const blendFuncs: Array<[number, number]> = [];
 	const intUniforms: Array<[string, number]> = [];
+	const bufferSubData = vi.fn();
 	const gl = {
 		ARRAY_BUFFER: 1,
 		BLEND: 2,
@@ -61,12 +64,14 @@ function fakeGl() {
 		DYNAMIC_DRAW: 5,
 		FLOAT: 6,
 		FRAGMENT_SHADER: 7,
+		INVALID_INDEX: 0xffff_ffff,
 		LINK_STATUS: 8,
 		TEXTURE0: 9,
 		TEXTURE1: 10,
 		TEXTURE_2D: 11,
 		TRIANGLES: 12,
 		UNSIGNED_INT: 13,
+		UNIFORM_BLOCK_DATA_SIZE: 18,
 		VERTEX_SHADER: 14,
 		ONE: 15,
 		ONE_MINUS_SRC_ALPHA: 16,
@@ -79,7 +84,7 @@ function fakeGl() {
 		blendFunc: (source: number, destination: number) =>
 			blendFuncs.push([source, destination]),
 		bufferData: () => undefined,
-		bufferSubData: () => undefined,
+		bufferSubData,
 		compileShader: () => undefined,
 		createBuffer: () => ({}) as WebGLBuffer,
 		createProgram: () => ({}) as WebGLProgram,
@@ -104,19 +109,24 @@ function fakeGl() {
 		getShaderParameter: () => true,
 		getUniformLocation: (_p: WebGLProgram, name: string) =>
 			({ name }) as unknown as WebGLUniformLocation,
+		getUniformBlockIndex: () => 0,
+		getActiveUniformBlockParameter: () =>
+			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 		linkProgram: () => undefined,
 		shaderSource: () => undefined,
 		uniform1f: () => undefined,
 		uniform1i: (location: { name: string }, value: number) =>
 			intUniforms.push([location.name, value]),
+		uniform1ui: () => undefined,
 		uniform3f: () => undefined,
 		uniform4f: () => undefined,
 		uniformMatrix4fv: () => undefined,
 		useProgram: () => undefined,
+		uniformBlockBinding: () => undefined,
 		vertexAttribDivisor: () => undefined,
 		vertexAttribPointer: () => undefined,
 	} as unknown as WebGL2RenderingContext;
-	return { calls: { blendFuncs }, draws, gl, intUniforms };
+	return { calls: { blendFuncs, bufferSubData }, draws, gl, intUniforms };
 }
 
 const context = (gl: WebGL2RenderingContext) => ({
@@ -129,13 +139,14 @@ const context = (gl: WebGL2RenderingContext) => ({
 
 describe("WebGL2ParticlePass", () => {
 	it("draws one instanced call per batch", () => {
-		const { draws, gl } = fakeGl();
+		const { calls, draws, gl } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
 		pass.draw(context(gl), [batch(2, 3), batch(5, 7)]);
 
 		// One call per batch regardless of particle count; retail's per-part ceiling is not inherited.
 		expect(draws).toEqual([3, 7]);
+		expect(calls.bufferSubData).toHaveBeenCalledTimes(1);
 		expect(pass.getDiagnostics()).toMatchObject({
 			drawnBatchCount: 2,
 			drawnParticleCount: 10,
@@ -150,6 +161,41 @@ describe("WebGL2ParticlePass", () => {
 
 		expect(intUniforms).toContainEqual(["uMotionType", 6]);
 		expect(intUniforms).toContainEqual(["uOrientation", 1]);
+	});
+
+	it("routes scoped batches without splitting their one frame upload", () => {
+		const { calls, draws, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		const routedScopes: string[] = [];
+
+		pass.drawScoped(
+			context(gl),
+			new Map([
+				["outdoor", [batch(2, 3)]],
+				["env-cell:0101/01010001", [batch(5, 7)]],
+			]),
+			{
+				routeDeferredSubmission: (renderScopeKey) =>
+					routedScopes.push(renderScopeKey),
+			},
+		);
+
+		expect(draws).toEqual([3, 7]);
+		expect(routedScopes).toEqual(["outdoor", "env-cell:0101/01010001"]);
+		expect(calls.bufferSubData).toHaveBeenCalledTimes(1);
+	});
+
+	it("rejects portal-hidden fragments before particle material sampling", () => {
+		const shader = createParticleFragmentShader(true);
+		const visibilityIndex = shader.indexOf(
+			"if (!portalDeferredFragmentVisible()) discard;",
+		);
+
+		expect(shader).toContain("uniform uint uPortalScope");
+		expect(visibilityIndex).toBeGreaterThanOrEqual(0);
+		expect(visibilityIndex).toBeLessThan(
+			shader.indexOf("vec4 color = sampleMaterial()"),
+		);
 	});
 
 	it("selects a blend mode per batch instead of inheriting one", () => {
@@ -176,6 +222,7 @@ describe("WebGL2ParticlePass", () => {
 	it("does not create a program for an empty frame", () => {
 		const { gl } = fakeGl();
 		const createProgram = vi.spyOn(gl, "createProgram");
+		const createBuffer = vi.spyOn(gl, "createBuffer");
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
 		pass.draw(context(gl), []);
@@ -183,6 +230,7 @@ describe("WebGL2ParticlePass", () => {
 
 		// A scene with no live particles must cost nothing, including no lazy GPU allocation.
 		expect(createProgram).not.toHaveBeenCalled();
+		expect(createBuffer).not.toHaveBeenCalled();
 		expect(pass.getDiagnostics().drawnBatchCount).toBe(0);
 	});
 });

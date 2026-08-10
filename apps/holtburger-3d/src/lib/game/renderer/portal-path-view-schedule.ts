@@ -6,6 +6,10 @@ import type {
 	PortalPathViewPlan,
 } from "./portal-path-view-planner";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
+import {
+	orderTransparentObjectRanges,
+	type TransparentObjectOrderingTrace,
+} from "./object-rendering-policy";
 
 /** Stable resolved opaque compatibility consumed without rediscovering material policy. */
 export interface PortalDryOpaqueBatch {
@@ -19,8 +23,8 @@ export interface PortalDryOpaqueBatch {
 export interface PortalDryDeferredSubmission {
 	/** Final adjacent-run compatibility after blend/material/program policy resolution. */
 	readonly batchKey: string;
-	/** Deterministic camera-distance rank; greater values draw first for alpha blending. */
-	readonly distanceRank: number;
+	/** Squared camera distance consumed by the production bounded-band ordering policy. */
+	readonly distanceSquared: number;
 	/** Blend-order family already resolved by the renderer-neutral material planner. */
 	readonly kind: "additive" | "transparent";
 	/** Physical identity shared by every portal appearance of this source. */
@@ -111,7 +115,7 @@ export interface PortalPathViewDryScheduleTrace {
 	readonly particleInstancePackCount: number;
 	/** Physical particle sources routed exactly once. */
 	readonly particleSourceCount: number;
-	/** Particle frame-stream uploads; one per compatible non-empty batch. */
+	/** Contiguous particle frame-stream uploads; zero or one for the selected population. */
 	readonly particleUploadCount: number;
 	/** Maximum retained cardinality among schedule-owned maps/arrays. */
 	readonly peakLiveRecordCount: number;
@@ -119,8 +123,14 @@ export interface PortalPathViewDryScheduleTrace {
 	readonly sceneResolutionCount: number;
 	/** Selected scopes supplied across the domain-batched scene resolutions. */
 	readonly sceneResolutionScopeInputCount: number;
-	/** Exact comparisons performed by the deterministic stable alpha merge sort. */
-	readonly transparentComparisonCount: number;
+	/** Stable cohort-key evaluations performed by transparent ordering. */
+	readonly transparentBatchKeyEvaluationCount: number;
+	/** Far/near classifications performed by transparent ordering. */
+	readonly transparentDepthBandClassificationCount: number;
+	/** Fixed bounded-band slots visited while emitting transparent work. */
+	readonly transparentDepthBucketVisitCount: number;
+	/** Square roots performed for near transparent candidates. */
+	readonly transparentNearSquareRootCount: number;
 	/** Adjacent compatible runs in globally ordered alpha submissions. */
 	readonly transparentRunCount: number;
 	/** Scope-appearance records reduced into visibility envelopes. */
@@ -171,7 +181,7 @@ export interface PortalArrivalStateDryScheduleTrace {
 	readonly particleInstancePackCount: number;
 	/** Physical particle sources routed once. */
 	readonly particleSourceCount: number;
-	/** One upload per compatible non-empty physical particle batch. */
+	/** One contiguous upload when the selected physical particle population is non-empty. */
 	readonly particleUploadCount: number;
 	/** Physical selected scope queries, independent from arrival state count. */
 	readonly sceneResolutionScopeCount: number;
@@ -193,8 +203,14 @@ export interface PortalArrivalStateDryScheduleTrace {
 	readonly scopeVisibilityEnvelopeReductionCommandCount: number;
 	/** GPU scope-tile instances evaluated across all completed frontiers. */
 	readonly scopeVisibilityEnvelopeReductionInstanceCount: number;
-	/** Exact comparisons performed by deterministic global alpha sorting. */
-	readonly transparentComparisonCount: number;
+	/** Stable cohort-key evaluations performed by transparent ordering. */
+	readonly transparentBatchKeyEvaluationCount: number;
+	/** Far/near classifications performed by transparent ordering. */
+	readonly transparentDepthBandClassificationCount: number;
+	/** Fixed bounded-band slots visited while emitting transparent work. */
+	readonly transparentDepthBucketVisitCount: number;
+	/** Square roots performed for near transparent candidates. */
+	readonly transparentNearSquareRootCount: number;
 	/** Adjacent compatible physical alpha runs after sorting. */
 	readonly transparentRunCount: number;
 	/** Selected physical crossings with a selected source scope. */
@@ -247,7 +263,7 @@ export function createPortalArrivalStateDryScheduleTrace(
 		({ submissionKey }) => submissionKey,
 		"arrival-state deferred submission",
 	);
-	const transparent = stableOrderTransparent(
+	const transparent = orderPhysicalTransparent(
 		deferred.filter(({ kind }) => kind === "transparent"),
 	);
 	const additiveRunCount = new Set(
@@ -293,7 +309,7 @@ export function createPortalArrivalStateDryScheduleTrace(
 			0,
 		),
 		particleSourceCount: particles.length,
-		particleUploadCount: particleBatchCount,
+		particleUploadCount: hasLiveParticleInstances(particles) ? 1 : 0,
 		scopeWindowBoundedLayerColorDepthBytes:
 			scopeWindowBoundedLayerPixelCount * 8,
 		scopeWindowBoundedLayerPixelCount,
@@ -305,7 +321,12 @@ export function createPortalArrivalStateDryScheduleTrace(
 		scopeVisibilityEnvelopeReductionCommandCount: traversalDepth,
 		scopeVisibilityEnvelopeReductionInstanceCount:
 			traversalDepth * selectedScopeKeys.size,
-		transparentComparisonCount: transparent.comparisonCount,
+		transparentBatchKeyEvaluationCount:
+			transparent.trace.batchKeyEvaluationCount,
+		transparentDepthBandClassificationCount:
+			transparent.trace.depthBandClassificationCount,
+		transparentDepthBucketVisitCount: transparent.trace.depthBucketVisitCount,
+		transparentNearSquareRootCount: transparent.trace.nearSquareRootCount,
 		transparentRunCount: adjacentRunCount(
 			transparent.values.map(({ batchKey }) => batchKey),
 		),
@@ -346,7 +367,7 @@ export function createPortalPathViewDrySchedule(
 		({ kind }) => kind === "transparent",
 	);
 	const additive = deferredByKey.filter(({ kind }) => kind === "additive");
-	const orderedTransparent = stableOrderTransparent(transparent);
+	const orderedTransparent = orderPhysicalTransparent(transparent);
 	const particlesInput = selectedWorkloads.flatMap((scope) => scope.particles);
 	const particles = uniqueByKey(
 		particlesInput,
@@ -379,7 +400,7 @@ export function createPortalPathViewDrySchedule(
 			0,
 		),
 		particleSourceCount: particles.length,
-		particleUploadCount: particleBatchKeys.size,
+		particleUploadCount: hasLiveParticleInstances(particles) ? 1 : 0,
 		peakLiveRecordCount: Math.max(
 			workloadByScope.size,
 			opaque.submissions.length,
@@ -389,7 +410,14 @@ export function createPortalPathViewDrySchedule(
 		),
 		sceneResolutionCount: plan.contentDomainIds.length,
 		sceneResolutionScopeInputCount: selectedScopeKeys.size,
-		transparentComparisonCount: orderedTransparent.comparisonCount,
+		transparentBatchKeyEvaluationCount:
+			orderedTransparent.trace.batchKeyEvaluationCount,
+		transparentDepthBandClassificationCount:
+			orderedTransparent.trace.depthBandClassificationCount,
+		transparentDepthBucketVisitCount:
+			orderedTransparent.trace.depthBucketVisitCount,
+		transparentNearSquareRootCount:
+			orderedTransparent.trace.nearSquareRootCount,
 		transparentRunCount,
 		visibilityEnvelopeInputCount: plan.views.length,
 		visibilitySubmissionCount: envelopes.length,
@@ -459,7 +487,10 @@ export function createCurrentPortalDryScheduleTrace(
 	let deferredPreparationInputCount = 0;
 	let opaqueSubmissionCount = 0;
 	let particleUploadCount = 0;
-	let transparentComparisonCount = 0;
+	let transparentBatchKeyEvaluationCount = 0;
+	let transparentDepthBandClassificationCount = 0;
+	let transparentDepthBucketVisitCount = 0;
+	let transparentNearSquareRootCount = 0;
 	let transparentRunCount = 0;
 	let peakLiveRecordCount = nodeScopes.size;
 	for (const group of groups) {
@@ -477,10 +508,14 @@ export function createCurrentPortalDryScheduleTrace(
 			({ submissionKey }) => submissionKey,
 			"current deferred submission",
 		);
-		const ordered = stableOrderTransparent(
+		const ordered = orderPhysicalTransparent(
 			deferred.filter(({ kind }) => kind === "transparent"),
 		);
-		transparentComparisonCount += ordered.comparisonCount;
+		transparentBatchKeyEvaluationCount += ordered.trace.batchKeyEvaluationCount;
+		transparentDepthBandClassificationCount +=
+			ordered.trace.depthBandClassificationCount;
+		transparentDepthBucketVisitCount += ordered.trace.depthBucketVisitCount;
+		transparentNearSquareRootCount += ordered.trace.nearSquareRootCount;
 		transparentRunCount += adjacentRunCount(
 			ordered.values.map(({ batchKey }) => batchKey),
 		);
@@ -494,8 +529,7 @@ export function createCurrentPortalDryScheduleTrace(
 			({ sourceKey }) => sourceKey,
 			"current particle source",
 		);
-		particleUploadCount += new Set(particles.map(({ batchKey }) => batchKey))
-			.size;
+		if (hasLiveParticleInstances(particles)) particleUploadCount += 1;
 		peakLiveRecordCount = Math.max(
 			peakLiveRecordCount,
 			opaque.length,
@@ -535,7 +569,10 @@ export function createCurrentPortalDryScheduleTrace(
 		peakLiveRecordCount,
 		sceneResolutionCount: plan.nodes.length,
 		sceneResolutionScopeInputCount: selectedScopes.length,
-		transparentComparisonCount,
+		transparentBatchKeyEvaluationCount,
+		transparentDepthBandClassificationCount,
+		transparentDepthBucketVisitCount,
+		transparentNearSquareRootCount,
 		transparentRunCount,
 		visibilityEnvelopeInputCount: 0,
 		visibilitySubmissionCount: 0,
@@ -552,6 +589,12 @@ function uniqueOpaquePhysicalBatchCount(
 			),
 		),
 	).size;
+}
+
+function hasLiveParticleInstances(
+	sources: readonly PortalDryParticleSource[],
+): boolean {
+	return sources.some(({ instanceCount }) => instanceCount > 0);
 }
 
 function requireNodeScopes(
@@ -571,6 +614,17 @@ function indexWorkload(
 	for (const scope of workload.scopes) {
 		if (byScope.has(scope.scopeKey)) {
 			throw new Error(`Portal dry workload repeats scope ${scope.scopeKey}.`);
+		}
+		for (const deferred of scope.deferred) {
+			if (
+				deferred.kind === "transparent" &&
+				(!Number.isFinite(deferred.distanceSquared) ||
+					deferred.distanceSquared < 0)
+			) {
+				throw new Error(
+					`Transparent submission ${deferred.submissionKey} has invalid squared camera distance.`,
+				);
+			}
 		}
 		for (const particle of scope.particles) {
 			if (
@@ -719,41 +773,26 @@ function uniqueByKey<Value>(
 	return [...byKey.values()];
 }
 
-function stableOrderTransparent(
+function orderPhysicalTransparent(
 	values: readonly PortalDryDeferredSubmission[],
 ): {
-	readonly comparisonCount: number;
+	readonly trace: TransparentObjectOrderingTrace;
 	readonly values: readonly PortalDryDeferredSubmission[];
 } {
-	let comparisonCount = 0;
-	const compare = (
-		left: PortalDryDeferredSubmission,
-		right: PortalDryDeferredSubmission,
-	) => {
-		comparisonCount += 1;
-		return (
-			right.distanceRank - left.distanceRank ||
-			left.submissionKey.localeCompare(right.submissionKey)
-		);
+	const ordered = orderTransparentObjectRanges(
+		values.map((range) => ({
+			distanceSquared: range.distanceSquared,
+			range,
+		})),
+		({ batchKey }) => batchKey,
+	);
+	return {
+		trace: ordered.trace,
+		values: [
+			...ordered.far.map(({ range }) => range),
+			...ordered.near.map(({ range }) => range),
+		],
 	};
-	const mergeSort = (
-		input: readonly PortalDryDeferredSubmission[],
-	): PortalDryDeferredSubmission[] => {
-		if (input.length < 2) return [...input];
-		const middle = Math.floor(input.length / 2);
-		const left = mergeSort(input.slice(0, middle));
-		const right = mergeSort(input.slice(middle));
-		const output: PortalDryDeferredSubmission[] = [];
-		let leftIndex = 0;
-		let rightIndex = 0;
-		while (leftIndex < left.length && rightIndex < right.length) {
-			if (compare(left[leftIndex]!, right[rightIndex]!) <= 0)
-				output.push(left[leftIndex++]!);
-			else output.push(right[rightIndex++]!);
-		}
-		return [...output, ...left.slice(leftIndex), ...right.slice(rightIndex)];
-	};
-	return { comparisonCount, values: mergeSort(values) };
 }
 
 function adjacentRunCount(keys: readonly string[]): number {

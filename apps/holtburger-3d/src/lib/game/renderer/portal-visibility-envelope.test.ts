@@ -13,6 +13,7 @@ import { composePortalReferenceFrame } from "./portal-reference-compositor";
 import {
 	composePortalDeferredFromEnvelopes,
 	createPortalScopeVisibilityEnvelopes,
+	filterPortalDeferredSequenceFromEnvelopes,
 } from "./portal-visibility-envelope";
 
 describe("portal scope visibility envelopes", () => {
@@ -69,6 +70,43 @@ describe("portal scope visibility envelopes", () => {
 				envelopes,
 			)[0]?.alphaBlended.map(({ fragmentId }) => fragmentId),
 		).toEqual(["visible-after-return", "before-first-door"]);
+	});
+
+	it("filters an arbitrary physical deferred sequence without changing its order", () => {
+		const corpus = enumeratePortalModelCorpus({
+			maximumCrossingCount: 3,
+			maximumScopeCount: 3,
+		});
+		for (const scene of corpus.scenes) {
+			const reference = composePortalReferenceFrame(scene);
+			const envelopes = createPortalScopeVisibilityEnvelopes(scene, reference);
+			// Reverse authored storage order on purpose. The portal predicate must remain a stable
+			// filter even when the renderer's physical order is unrelated to symbolic depth order.
+			const physicalSequence = scene.domains
+				.flatMap((domain) => domain.fragments)
+				.reverse();
+			const actual = filterPortalDeferredSequenceFromEnvelopes(
+				reference,
+				envelopes,
+				physicalSequence,
+			);
+			for (const pixel of reference.pixels) {
+				const visibleIds = new Set(
+					[...pixel.alphaBlended, ...pixel.additive].map(
+						({ fragmentId }) => fragmentId,
+					),
+				);
+				const expected = physicalSequence
+					.filter(
+						(fragment) =>
+							fragment.pixel === pixel.pixel && visibleIds.has(fragment.id),
+					)
+					.map(({ id }) => id);
+				expect(actual[pixel.pixel]?.fragments.map(({ id }) => id)).toEqual(
+					expected,
+				);
+			}
+		}
 	});
 
 	it("preserves deferred results in the larger seeded corpus", () => {

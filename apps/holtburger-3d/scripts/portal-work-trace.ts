@@ -1904,7 +1904,7 @@ function appendDryDraw(
 	const z = input.center.z + offset.z - input.pose.position.z;
 	target.deferred.push({
 		batchKey: input.batchKey,
-		distanceRank: x * x + y * y + z * z,
+		distanceSquared: x * x + y * y + z * z,
 		kind: input.ordering,
 		submissionKey: input.physicalKey,
 	});

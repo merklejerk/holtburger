@@ -47,7 +47,7 @@
 	import type {
 		PortalExecutionProbeResult,
 		PortalRenderGraphProbeResult,
-		PortalScopeAtlasOpaqueExecutionProbeResult,
+		PortalScopeAtlasExecutionProbeResult,
 		WebGL2Renderer,
 	} from "../../lib/game/renderer/webgl2-renderer";
 	import {
@@ -222,13 +222,13 @@
 			cameraPitchDegrees: number,
 			safetyWorkItemLimit: number,
 		) => PortalExecutionProbeResult;
-		/** Execute replacement scope-atlas terrain and opaque geometry without frame shadowing. */
-		readonly probePortalScopeAtlasOpaqueExecution: (
+		/** Execute the replacement scope-atlas compositor without frame shadowing. */
+		readonly probePortalScopeAtlasExecution: (
 			envCellId: string,
 			position: readonly [number, number, number],
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
-		) => PortalScopeAtlasOpaqueExecutionProbeResult;
+		) => PortalScopeAtlasExecutionProbeResult;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => BrowserHarnessState;
 	}
@@ -809,12 +809,12 @@
 		);
 	}
 
-	function probePortalScopeAtlasOpaqueExecution(
+	function probePortalScopeAtlasExecution(
 		rawEnvCellId: string,
 		position: readonly [number, number, number],
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
-	): PortalScopeAtlasOpaqueExecutionProbeResult {
+	): PortalScopeAtlasExecutionProbeResult {
 		if (!renderer) throw new Error("Browser harness renderer is not ready.");
 		if (
 			position.length !== 3 ||
@@ -827,7 +827,7 @@
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "scope atlas");
 		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
-		return renderer.probePortalScopeAtlasOpaqueExecution(
+		return renderer.probePortalScopeAtlasExecution(
 			landblockId,
 			{
 				cameraInsideSealedCell: false,
@@ -1012,7 +1012,7 @@
 					focusExplorerOutdoor,
 					probePortalExecution,
 					probePortalRenderGraph,
-					probePortalScopeAtlasOpaqueExecution,
+					probePortalScopeAtlasExecution,
 					requestSceneInterest,
 					setCameraLandblock,
 					setEnvCellCamera,

@@ -17,6 +17,43 @@ export interface OrderedTransparentObjectRanges<T> {
 	readonly far: readonly TransparentObjectRange<T>[];
 	/** Candidates inside the near-policy radius, ordered by coarse back-to-front bands. */
 	readonly near: readonly TransparentObjectRange<T>[];
+	/** Exact structural work performed by the bounded production ordering policy. */
+	readonly trace: TransparentObjectOrderingTrace;
+}
+
+/** Primitive CPU work performed while ordering one transparent population. */
+export interface TransparentObjectOrderingTrace {
+	/** Stable cohort-key evaluations; exactly one per physical candidate. */
+	readonly batchKeyEvaluationCount: number;
+	/** Far/near classifications; exactly one per physical candidate. */
+	readonly depthBandClassificationCount: number;
+	/** Fixed bounded-band slots visited when emitting the near phase. */
+	readonly depthBucketVisitCount: number;
+	/** Square roots needed only for candidates inside the near-policy radius. */
+	readonly nearSquareRootCount: number;
+}
+
+/** Renderer-resolved ordering class consumed by the frame submission partition. */
+export interface ObjectSubmissionOrderingInput {
+	readonly ordering: "additive" | "alpha-test" | "opaque" | "transparent";
+}
+
+/**
+ * One prepared object population partitioned into its depth-writing and deferred phases.
+ *
+ * The arrays contain the original prepared values. Visibility remains an outer submission
+ * predicate and is deliberately absent from material/run compatibility.
+ */
+export interface ObjectSubmissionPhases<T> {
+	/** Additive work submitted after ordered alpha under the final opaque depth buffer. */
+	readonly additive: readonly T[];
+	/** Opaque and passing-alpha-test candidates that participate in depth resolution. */
+	readonly opaque: readonly T[];
+	/** Far batchable and near camera-ordered alpha phases. */
+	readonly transparent: {
+		readonly far: readonly T[];
+		readonly near: readonly T[];
+	};
 }
 
 /** One phase-ordered transparent submission after adjacent frame cohorts are identified. */
@@ -181,11 +218,13 @@ export function orderTransparentObjectRanges<T>(
 		{ length: FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount },
 		() => [] as TransparentObjectRange<T>[],
 	);
+	let nearSquareRootCount = 0;
 	for (const range of ranges) {
 		if (range.distanceSquared > TRANSPARENT_NEAR_DISTANCE_SQUARED) {
 			far.push(range);
 			continue;
 		}
+		nearSquareRootCount += 1;
 		const bucket = Math.min(
 			FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount - 1,
 			Math.floor(
@@ -212,7 +251,68 @@ export function orderTransparentObjectRanges<T>(
 			near.push(range);
 		}
 	}
-	return { far: groupTransparentRanges(far, batchKey), near };
+	return {
+		far: groupTransparentRanges(far, batchKey),
+		near,
+		trace: {
+			batchKeyEvaluationCount: ranges.length,
+			depthBandClassificationCount: ranges.length,
+			depthBucketVisitCount: nearBuckets.length,
+			nearSquareRootCount,
+		},
+	};
+}
+
+/**
+ * Partition one already-prepared physical object population without rediscovering material facts.
+ *
+ * Every input is inspected once. Only transparent values pay for camera-distance evaluation and
+ * the existing bounded far/near ordering policy. Callers may then route the opaque array into the
+ * scope atlas and defer the other arrays without preparing the source objects again.
+ */
+export function createObjectSubmissionPhases<
+	T extends ObjectSubmissionOrderingInput,
+>(
+	objects: readonly T[],
+	transparentDistanceSquared: (object: T) => number,
+	transparentBatchKey: (object: T) => string | null,
+): ObjectSubmissionPhases<T> {
+	const opaque: T[] = [];
+	const transparent: TransparentObjectRange<T>[] = [];
+	const additive: T[] = [];
+	for (const object of objects) {
+		switch (object.ordering) {
+			case "opaque":
+			case "alpha-test":
+				opaque.push(object);
+				break;
+			case "transparent": {
+				const distanceSquared = transparentDistanceSquared(object);
+				if (!Number.isFinite(distanceSquared) || distanceSquared < 0) {
+					throw new Error(
+						"Transparent object camera distance must be finite and non-negative.",
+					);
+				}
+				transparent.push({ distanceSquared, range: object });
+				break;
+			}
+			case "additive":
+				additive.push(object);
+				break;
+		}
+	}
+	const ordered = orderTransparentObjectRanges(
+		transparent,
+		transparentBatchKey,
+	);
+	return {
+		additive,
+		opaque,
+		transparent: {
+			far: ordered.far.map(({ range }) => range),
+			near: ordered.near.map(({ range }) => range),
+		},
+	};
 }
 
 /** Group repeated cohorts in first-seen order; null keys remain singleton submissions. */

@@ -2312,13 +2312,15 @@ export class WebGL2Renderer implements Renderer {
 					object.drawKind === "instanced"
 						? this.#instancedObjectProgram
 						: this.#objectProgram;
-				if (this.#objectState.applyProgram(program.program)) {
+				const programChanged = this.#objectState.applyProgram(program.program);
+				if (programChanged) {
 					this.#activateObjectProgram(program, view, shading);
 				}
 				this.#applyObjectLighting(program, object, shading);
 				portalPipeline?.routeObjectSubmission(
 					object.renderScopeKey,
 					program.uniforms.clipTransform,
+					programChanged,
 				);
 				this.#drawObjectRange(program, object);
 			}

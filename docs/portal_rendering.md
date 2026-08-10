@@ -202,6 +202,12 @@ render-domain tile:
 - local depth remains independent between tiles; and
 - the same physical batch is not split merely because a scope has multiple portal appearances.
 
+Packed-tile routing retains only immediately live device state. Consecutive draws targeting the
+same render domain reuse the current viewport, and the clip transform is rewritten only when the
+tile changes or ordinary program setup has overwritten that program's uniform. Adjacent draws from
+the same authored scope also reuse their scalar scope-to-domain lookup. This state suppression does
+not reorder submissions or create a material, scope, or domain batch key.
+
 Depth-continuous member-cell crossings constrain CPU traversal but do not enter GPU propagation.
 Ordinary shared depth already composes their geometry, so retaining those crossings would
 manufacture internal compositor seams and consume arrival-state work with no ownership transition.

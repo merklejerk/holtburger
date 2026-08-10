@@ -2827,6 +2827,13 @@ commit is a pre-teleport reproduction setup and must not be assumed to identify 
 - A resteering decision that accepts, rejects, or postpones each avenue before production edits.
 - Focused implementations and equivalence coverage only for the accepted, non-dominated avenues.
 
+### Execution Order
+
+Phase 12 begins with the bounded 12C command/routing audit before the broader PVS census. The
+corrected dungeon baseline can prove immediate state-submission reductions without changing
+visibility policy, while PVS repair or regeneration remains a larger asset-semantics decision.
+Results from this opening slice may resteer which 12A traces remain worth producing.
+
 ### Task Checklist
 
 #### 12A. Establish the PVS evidence
@@ -2904,13 +2911,20 @@ commit is a pre-teleport reproduction setup and must not be assumed to identify 
 - [ ] Compare the current final all-crossing scan with enumeration through the already-packed
       outgoing ranges of selected scopes, filtering selected targets. Prove identical stable
       crossing order and reciprocal-arrival IDs before replacing the `O(E)` pass.
-- [ ] Count scope-ordinal transitions in the already-formed physical opaque submission order. The
-      current router performs one lookup, `viewport`, and clip-transform update for every draw;
-      evaluate retaining the active tile only for adjacent same-scope draws. Do not reorder physical
-      draws, add a scope material key, or create more draw batches to improve this counter.
-- [ ] Classify the exact 282-entry compositor command sequence into required transitions and
-      redundant repeated state. Remove only calls proved redundant by the command-model state
-      machine and concrete WebGL executor tests; do not let driver timing define state correctness.
+- [x] Retain immediately live packed-tile state across the existing opaque draw sequence. Viewport
+      changes now occur only when the render-domain ordinal changes; clip-transform writes occur
+      only when the tile changes or ordinary program setup overwrites that program's uniform; and
+      adjacent identical authored scopes reuse one scalar tile resolution. The state owner creates
+      no frame records and cannot reorder, split, or duplicate a draw.
+- [ ] Extend the deterministic archive workload with exact authored-scope and render-domain
+      transitions in the already-formed physical opaque submission order. The first corrected
+      `0x00070100` settled trace already proves the important one-domain case independently of
+      ordering: 27 opaque submissions require one routed viewport update, down from 27.
+- [x] Classify the exact 282-entry compositor command sequence into required transitions and
+      redundant repeated state. The command-state proof finds zero repeated assignments inside
+      executor ownership at every accepted depth: each 15-call round alternates framebuffer,
+      viewport, program, depth comparison, and vertex array around two required clears and draws.
+      No executor command was deleted.
 - [ ] Trace atlas bound reads, sort comparisons, placement attempts, and retained packing order.
       Evaluate counting/radix or retained-order packing only if a real dimension improves without
       increasing committed pixels or camera-time heap work.
@@ -2984,6 +2998,25 @@ commit is a pre-teleport reproduction setup and must not be assumed to identify 
   that cell shares a visibility island.
 - 2026-08-10: Small GC churn remains acceptable on exceptional capacity or malformed-asset paths.
   The optimization target is repeated normal-path CPU work, not a ceremonial zero-allocation claim.
+- 2026-08-10: Phase 12 execution starts with 12C rather than the larger PVS census. This ordering
+  follows the corrected dungeon evidence and does not prejudge whether authored PVS is safe or
+  valuable.
+- 2026-08-10: Visibility-island ownership invalidated the earlier `0x00070100` compositor baseline.
+  Across six deterministic poses rooted in that cell, four now select one render domain, zero
+  cross-domain crossings, and the 30-call root-only executor; the two portal-motion poses select
+  four domains, six crossings, and 132 calls. Deeper dungeon poses still reach the 282-call cap, so
+  round-bound research remains relevant but no longer explains the corrected large-room pose.
+- 2026-08-10: The offline atlas snapshot still conflated authored scopes with packed tiles after
+  render-domain collapse. The repaired trace records both cell-granular selected scope keys and
+  domain tiles with their member scopes; this was trace-only contract drift, not a production
+  rendering defect.
+- 2026-08-10: Complete CPU scope-window depth is rejected as a propagation-round bound. A ray may
+  leave a scope, re-enter it through another arrival plane, and exit again after conservative scope
+  coverage has converged. The selected-crossing bound remains until a cheaper arrival-graph bound is
+  proved against cyclic symbolic scenes.
+- 2026-08-10: The command-state audit finds no removable repeated assignment inside the 282-call
+  executor envelope. The accepted first optimization instead suppresses redundant per-draw packed
+  viewport, clip-transform, and adjacent scope-resolution work without changing physical batches.
 
 ## Risks and Mitigations
 

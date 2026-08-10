@@ -11,7 +11,7 @@ interface PortalScopeAtlasOpaqueRoutingTrace {
 	readonly portalOwnedFrameHeapRecordCreationCount: 0;
 	/** Existing terrain draws sharing the single outdoor tile selected for the pass. */
 	readonly terrainSubmissionCount: number;
-	/** Scope-to-tile resolutions: one terrain pass plus one per final object draw. */
+	/** Scope-to-tile resolutions after adjacent identical object scopes reuse one scalar result. */
 	readonly tileResolutionCount: number;
 }
 
@@ -39,13 +39,15 @@ class MutablePortalScopeAtlasOpaqueRoutingFrameView implements PortalScopeAtlasO
 /**
  * Resolve final scope-homogeneous draws directly to atlas tiles without creating another schedule.
  *
- * Terrain resolves the outdoor tile once for its whole pass. Object routing performs exactly one
- * lookup for each already-formed opaque or alpha-test draw and returns a scalar tile ordinal for
- * immediate uniform application. The API cannot split, reorder, retain, or duplicate a draw.
+ * Terrain resolves the outdoor tile once for its whole pass. Object routing reuses only the
+ * immediately previous authored-scope result, then returns a scalar tile ordinal for immediate
+ * device-state application. The API cannot split, reorder, retain, or duplicate a draw.
  */
 export class PortalScopeAtlasOpaqueRouter {
 	readonly #frame = new MutablePortalScopeAtlasOpaqueRoutingFrameView();
 	#lookup: PortalScopeAtlasOpaqueTileLookup | null = null;
+	#previousObjectRenderScopeKey: string | null = null;
+	#previousObjectTileOrdinal = -1;
 	#terrainPassRouted = false;
 
 	/** Start one synchronous route pass and reset only scalar diagnostics. */
@@ -53,6 +55,8 @@ export class PortalScopeAtlasOpaqueRouter {
 		lookup: PortalScopeAtlasOpaqueTileLookup,
 	): PortalScopeAtlasOpaqueRoutingFrameView {
 		this.#lookup = lookup;
+		this.#previousObjectRenderScopeKey = null;
+		this.#previousObjectTileOrdinal = -1;
 		this.#terrainPassRouted = false;
 		this.#frame.trace.objectSubmissionCount = 0;
 		this.#frame.trace.terrainSubmissionCount = 0;
@@ -82,10 +86,16 @@ export class PortalScopeAtlasOpaqueRouter {
 
 	/** Resolve one existing final object draw; the caller retains and submits the original record. */
 	routeObjectSubmission(renderScopeKey: string): number {
-		const lookup = this.#requireLookup();
 		this.#frame.trace.objectSubmissionCount += 1;
+		if (this.#previousObjectRenderScopeKey === renderScopeKey) {
+			return this.#previousObjectTileOrdinal;
+		}
+		const lookup = this.#requireLookup();
 		this.#frame.trace.tileResolutionCount += 1;
-		return lookup.tileOrdinalForRenderScopeKey(renderScopeKey);
+		const ordinal = lookup.tileOrdinalForRenderScopeKey(renderScopeKey);
+		this.#previousObjectRenderScopeKey = renderScopeKey;
+		this.#previousObjectTileOrdinal = ordinal;
+		return ordinal;
 	}
 
 	#requireLookup(): PortalScopeAtlasOpaqueTileLookup {

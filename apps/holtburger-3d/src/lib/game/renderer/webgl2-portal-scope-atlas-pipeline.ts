@@ -26,6 +26,7 @@ import {
 	type WebGL2PortalScopeAtlasTargetDiagnostics,
 	type WebGL2PortalScopeAtlasTargetSet,
 } from "./webgl2-portal-scope-atlas-targets";
+import { WebGL2PortalTileStateApplicator } from "./webgl2-portal-tile-state-applicator";
 
 /** Complete non-retained planning state for the current synchronous portal camera. */
 export interface WebGL2PortalScopeAtlasFrame extends SceneScopeSelection {
@@ -106,6 +107,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumCrossingTriangleVertexCount,
 	);
 	readonly #targetOwner: WebGL2PortalScopeAtlasTargets;
+	readonly #tileState: WebGL2PortalTileStateApplicator;
 	readonly #resource: PortalScopeAtlasResource = {
 		atlas: this.#atlasExtent,
 		drawingBuffer: this.#drawingBufferExtent,
@@ -119,6 +121,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
+		this.#tileState = new WebGL2PortalTileStateApplicator(gl);
 		this.#targetOwner = new WebGL2PortalScopeAtlasTargets(
 			gl,
 			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumTargetByteLength,
@@ -160,6 +163,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 		clearColor: readonly [number, number, number, number],
 	): void {
 		const frame = this.#requireFrame();
+		this.#tileState.beginFrame(frame.atlas);
 		const gl = this.#gl;
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, frame.targets.scene.framebuffer);
 		gl.viewport(
@@ -184,7 +188,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 		clipTransform: WebGLUniformLocation,
 	): void {
 		const ordinal = this.#router.routeTerrainPass(submissionCount);
-		if (ordinal !== null) this.#bindTile(ordinal, clipTransform);
+		if (ordinal !== null) this.#bindTile(ordinal, clipTransform, true);
 	}
 
 	/** Route exterior-global opaque work, such as celestial sky, to the outdoor tile. */
@@ -192,6 +196,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 		this.#bindTile(
 			this.#requireFrame().atlas.tileOrdinalForRenderScopeKey("outdoor"),
 			clipTransform,
+			true,
 		);
 	}
 
@@ -199,10 +204,12 @@ export class WebGL2PortalScopeAtlasPipeline {
 	routeObjectSubmission(
 		renderScopeKey: string,
 		clipTransform: WebGLUniformLocation,
+		clipTransformInvalidated: boolean,
 	): void {
 		this.#bindTile(
 			this.#router.routeObjectSubmission(renderScopeKey),
 			clipTransform,
+			clipTransformInvalidated,
 		);
 	}
 
@@ -256,22 +263,12 @@ export class WebGL2PortalScopeAtlasPipeline {
 		this.#frame.clear();
 	}
 
-	#bindTile(ordinal: number, clipTransform: WebGLUniformLocation): void {
-		const frame = this.#requireFrame();
-		const atlas = frame.atlas;
-		this.#gl.viewport(
-			atlas.tileX(ordinal),
-			atlas.tileY(ordinal),
-			atlas.tileWidth(ordinal),
-			atlas.tileHeight(ordinal),
-		);
-		this.#gl.uniform4f(
-			clipTransform,
-			atlas.tileClipScaleX(ordinal),
-			atlas.tileClipScaleY(ordinal),
-			atlas.tileClipOffsetX(ordinal),
-			atlas.tileClipOffsetY(ordinal),
-		);
+	#bindTile(
+		ordinal: number,
+		clipTransform: WebGLUniformLocation,
+		clipTransformInvalidated: boolean,
+	): void {
+		this.#tileState.apply(ordinal, clipTransform, clipTransformInvalidated);
 	}
 
 	#requireFrame(): WebGL2PortalScopeAtlasFrame {

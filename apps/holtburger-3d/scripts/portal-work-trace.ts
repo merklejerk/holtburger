@@ -1437,9 +1437,12 @@ interface AtlasPlanSnapshot {
 		/** Vertex records uploaded once and reused by every propagation round. */
 		readonly triangleVertexCount: number;
 	};
-	readonly selectedScopeTiles: readonly {
+	/** Canonical authored scopes retained by cell-granular traversal. */
+	readonly selectedScopeKeys: readonly string[];
+	/** Packed render domains after depth-continuous visibility-island collapse. */
+	readonly selectedRenderDomainTiles: readonly {
 		readonly height: number;
-		readonly scopeKey: string;
+		readonly memberScopeKeys: readonly string[];
 		readonly width: number;
 	}[];
 	readonly status: "complete" | "truncated";
@@ -1559,16 +1562,16 @@ function traceAtlasCapacityPose(
 		planner.plan(topology, input, selectedResource),
 		selectedResource,
 	);
-	const baselineTileWidths = baseline.selectedScopeTiles.map(
+	const baselineTileWidths = baseline.selectedRenderDomainTiles.map(
 		({ width }) => width,
 	);
-	const baselineTileHeights = baseline.selectedScopeTiles.map(
+	const baselineTileHeights = baseline.selectedRenderDomainTiles.map(
 		({ height }) => height,
 	);
 	return {
 		baseline: {
 			...publicAtlasPlan(baseline),
-			selectedScopeTiles: baseline.selectedScopeTiles,
+			selectedRenderDomainTiles: baseline.selectedRenderDomainTiles,
 			singleShelfExtent: {
 				height: baselineTileHeights.reduce(
 					(maximum, height) => Math.max(maximum, height),
@@ -1602,7 +1605,9 @@ function compareAtlasPlan(
 		candidate.completedDepth > baseline.completedDepth ||
 		candidate.selectedCrossingIds.length >
 			baseline.selectedCrossingIds.length ||
-		candidate.selectedScopeTiles.length > baseline.selectedScopeTiles.length
+		candidate.selectedScopeKeys.length > baseline.selectedScopeKeys.length ||
+		candidate.selectedRenderDomainTiles.length >
+			baseline.selectedRenderDomainTiles.length
 	) {
 		throw new Error(
 			`Portal atlas policy ${id} expanded the guaranteed baseline for ${poseId}.`,
@@ -1621,8 +1626,11 @@ function compareAtlasPlan(
 		selectedCrossingLoss:
 			baseline.selectedCrossingIds.length -
 			candidate.selectedCrossingIds.length,
+		selectedRenderDomainLoss:
+			baseline.selectedRenderDomainTiles.length -
+			candidate.selectedRenderDomainTiles.length,
 		selectedScopeLoss:
-			baseline.selectedScopeTiles.length - candidate.selectedScopeTiles.length,
+			baseline.selectedScopeKeys.length - candidate.selectedScopeKeys.length,
 		targetBytes: portalScopeAtlasTargetByteLength(resource),
 	};
 }
@@ -1668,11 +1676,25 @@ function snapshotAtlasPlan(
 	frame: PortalScopeAtlasFrameView,
 	resource: PortalScopeAtlasResource,
 ): AtlasPlanSnapshot {
-	const selectedScopeTiles = Array.from(
+	const selectedScopeKeys = Array.from(
 		{ length: frame.visibility.selectedScopeCount },
-		(_, ordinal) => ({
+		(_, ordinal) => scopeKey(frame.visibility.selectedScope(ordinal)),
+	);
+	const memberScopeKeysByRenderDomain = Array.from(
+		{ length: frame.tileCount },
+		() => [] as string[],
+	);
+	for (let ordinal = 0; ordinal < selectedScopeKeys.length; ordinal += 1) {
+		const renderDomainOrdinal =
+			frame.visibility.selectedScopeRenderDomainOrdinal(ordinal);
+		memberScopeKeysByRenderDomain[renderDomainOrdinal]!.push(
+			selectedScopeKeys[ordinal]!,
+		);
+	}
+	const selectedRenderDomainTiles = memberScopeKeysByRenderDomain.map(
+		(memberScopeKeys, ordinal) => ({
 			height: frame.tileHeight(ordinal),
-			scopeKey: scopeKey(frame.visibility.selectedScope(ordinal)),
+			memberScopeKeys: Object.freeze(memberScopeKeys),
 			width: frame.tileWidth(ordinal),
 		}),
 	);
@@ -1723,7 +1745,8 @@ function snapshotAtlasPlan(
 			triangleCount: triangleVertexCount / 3,
 			triangleVertexCount,
 		},
-		selectedScopeTiles,
+		selectedRenderDomainTiles,
+		selectedScopeKeys,
 		status: frame.visibility.status,
 		visibilityWork: {
 			projectionPrimitiveCount: frame.visibility.trace.projectionPrimitiveCount,
@@ -1751,10 +1774,12 @@ function publicAtlasPlan(snapshot: AtlasPlanSnapshot) {
 		packing: snapshot.packing,
 		selectedCrossingCount: snapshot.selectedCrossingIds.length,
 		selectedCrossingGeometry: snapshot.selectedCrossingGeometry,
-		selectedScopeCount: snapshot.selectedScopeTiles.length,
-		selectedScopeKeys: snapshot.selectedScopeTiles.map(
-			({ scopeKey }) => scopeKey,
+		selectedRenderDomainCount: snapshot.selectedRenderDomainTiles.length,
+		selectedRenderDomainScopeKeys: snapshot.selectedRenderDomainTiles.map(
+			({ memberScopeKeys }) => memberScopeKeys,
 		),
+		selectedScopeCount: snapshot.selectedScopeKeys.length,
+		selectedScopeKeys: snapshot.selectedScopeKeys,
 		status: snapshot.status,
 		visibilityWork: snapshot.visibilityWork,
 	};
@@ -1769,13 +1794,14 @@ function sameAtlasSelection(
 		baseline.completedDepth === candidate.completedDepth &&
 		baseline.declinedDepth === candidate.declinedDepth &&
 		sameStrings(baseline.selectedCrossingIds, candidate.selectedCrossingIds) &&
-		baseline.selectedScopeTiles.length ===
-			candidate.selectedScopeTiles.length &&
-		baseline.selectedScopeTiles.every((tile, ordinal) => {
-			const other = candidate.selectedScopeTiles[ordinal];
+		sameStrings(baseline.selectedScopeKeys, candidate.selectedScopeKeys) &&
+		baseline.selectedRenderDomainTiles.length ===
+			candidate.selectedRenderDomainTiles.length &&
+		baseline.selectedRenderDomainTiles.every((tile, ordinal) => {
+			const other = candidate.selectedRenderDomainTiles[ordinal];
 			return (
 				other !== undefined &&
-				tile.scopeKey === other.scopeKey &&
+				sameStrings(tile.memberScopeKeys, other.memberScopeKeys) &&
 				tile.width === other.width &&
 				tile.height === other.height
 			);
@@ -1894,6 +1920,9 @@ function summarizeAtlasTraces(
 				({ selectedCrossingGeometry }) =>
 					selectedCrossingGeometry.triangleVertexCount,
 			),
+		),
+		selectedRenderDomainLoss: distribution(
+			traces.map(({ selectedRenderDomainLoss }) => selectedRenderDomainLoss),
 		),
 		selectedScopeLoss: distribution(
 			traces.map(({ selectedScopeLoss }) => selectedScopeLoss),

@@ -173,6 +173,26 @@ describe("portal scope-atlas WebGL call model", () => {
 		}
 	});
 
+	it("contains no repeated state assignment within executor ownership", () => {
+		for (
+			let traversalDepth = 0;
+			traversalDepth <= PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
+			traversalDepth += 1
+		) {
+			const plan = compilePortalScopeAtlasWebGLCalls({
+				crossingVertexCount: traversalDepth === 0 ? 0 : 3,
+				metadataBindingPoint: METADATA_BINDING_POINT,
+				renderDomainCount: traversalDepth + 1,
+				traversalDepth,
+			});
+
+			expect(
+				findRedundantStateAssignments(plan.calls),
+				`redundant state at traversal depth ${traversalDepth}`,
+			).toEqual([]);
+		}
+	});
+
 	it("changes only instance counts when selected render-domain count changes", () => {
 		const shallow = compilePortalScopeAtlasWebGLCalls({
 			crossingVertexCount: 3,
@@ -381,4 +401,72 @@ function countCalls(
 		if (kinds.includes(call.kind)) count += 1;
 	}
 	return count;
+}
+
+/** Identify device-state writes whose value is already live inside the closed command sequence. */
+function findRedundantStateAssignments(
+	calls: readonly PortalScopeAtlasWebGLCall[],
+): readonly PortalScopeAtlasWebGLCall[] {
+	let activeTextureUnit = -1;
+	const valueByState = new Map<string, string>();
+	const redundant: PortalScopeAtlasWebGLCall[] = [];
+	const assign = (
+		state: string,
+		value: string,
+		call: PortalScopeAtlasWebGLCall,
+	): void => {
+		if (valueByState.get(state) === value) redundant.push(call);
+		valueByState.set(state, value);
+	};
+	for (const call of calls) {
+		switch (call.kind) {
+			case "active-texture":
+				assign("active-texture", String(call.unit), call);
+				activeTextureUnit = call.unit;
+				break;
+			case "bind-buffer":
+				assign(`buffer:${call.target}`, String(call.buffer), call);
+				break;
+			case "bind-buffer-base":
+				assign(`buffer-base:${call.bindingPoint}`, call.buffer, call);
+				break;
+			case "bind-framebuffer":
+				assign("framebuffer", call.target, call);
+				break;
+			case "bind-sampler":
+				assign(`sampler:${call.unit}`, "null", call);
+				break;
+			case "bind-texture-2d":
+				assign(`texture:${activeTextureUnit}`, call.texture, call);
+				break;
+			case "bind-vertex-array":
+				assign("vertex-array", call.vertexArray, call);
+				break;
+			case "color-mask":
+				assign("color-mask", String(call.write), call);
+				break;
+			case "depth-function":
+				assign("depth-function", call.compare, call);
+				break;
+			case "depth-mask":
+				assign("depth-mask", String(call.write), call);
+				break;
+			case "set-capability":
+				assign(`capability:${call.capability}`, String(call.enabled), call);
+				break;
+			case "uniform-reduction-depth":
+				assign("uniform-reduction-depth", String(call.depth), call);
+				break;
+			case "uniform-reduction-round":
+				assign("uniform-reduction-round", String(call.round), call);
+				break;
+			case "use-program":
+				assign("program", call.program, call);
+				break;
+			case "viewport":
+				assign("viewport", call.target, call);
+				break;
+		}
+	}
+	return redundant;
 }

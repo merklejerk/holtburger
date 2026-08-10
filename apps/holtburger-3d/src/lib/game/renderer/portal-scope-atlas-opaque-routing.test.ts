@@ -114,6 +114,23 @@ describe("portal scope-atlas opaque routing", () => {
 		expect(frame.trace.tileResolutionCount).toBe(0);
 	});
 
+	it("reuses an adjacent authored-scope resolution without retaining submissions", () => {
+		const router = new PortalScopeAtlasOpaqueRouter();
+		const lookup = new TestTileLookup();
+		const frame = router.beginFrame(lookup);
+
+		expect(router.routeObjectSubmission("indoor-a")).toBe(FIRST_INDOOR_TILE);
+		expect(router.routeObjectSubmission("indoor-a")).toBe(FIRST_INDOOR_TILE);
+		expect(router.routeObjectSubmission("indoor-b")).toBe(SECOND_INDOOR_TILE);
+
+		expect(lookup.requestedKeys).toEqual(["indoor-a", "indoor-b"]);
+		expect(frame.trace).toMatchObject({
+			objectSubmissionCount: 3,
+			portalOwnedFrameHeapRecordCreationCount: 0,
+			tileResolutionCount: 2,
+		});
+	});
+
 	it("reuses its frame record and rejects invalid call order", () => {
 		const router = new PortalScopeAtlasOpaqueRouter();
 		expect(() => router.routeObjectSubmission("outdoor")).toThrow(

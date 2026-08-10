@@ -132,6 +132,59 @@ describe("portal scope-window culler differential", () => {
 			}
 		}
 	});
+
+	it("materializes sparse selected crossings through canonical packed markers", () => {
+		const selected = envCellScope("sparse-selected");
+		const alternateRoot = envCellScope("sparse-source-0");
+		const scopes: SceneTopologyScope[] = [
+			topologyScope(OUTDOOR_SCOPE, null),
+			topologyScope(selected, "sparse-selected"),
+		];
+		const crossings: ScenePortalCrossingInput[] = [
+			crossing(
+				"sparse-selected",
+				OUTDOOR_SCOPE,
+				selected,
+				rectangleAperture(-0.8, -0.8, 0.8, 0.8),
+			),
+		];
+		for (let ordinal = 0; ordinal < 64; ordinal += 1) {
+			const source = envCellScope(`sparse-source-${ordinal}`);
+			const target = envCellScope(`sparse-target-${ordinal}`);
+			scopes.push(
+				topologyScope(source, `sparse-source-${ordinal}`),
+				topologyScope(target, `sparse-target-${ordinal}`),
+			);
+			crossings.push(
+				crossing(
+					`sparse-unselected-${ordinal}`,
+					source,
+					target,
+					rectangleAperture(-0.5, -0.5, 0.5, 0.5),
+				),
+			);
+		}
+		const culler = new PortalScopeWindowCuller(cullerCapacity());
+		const graph = topology(scopes, crossings, 90_000);
+		const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
+
+		expect(
+			Array.from(
+				{ length: frame.selectedCrossingCount },
+				(_, ordinal) => frame.selectedCrossing(ordinal).id,
+			),
+		).toEqual(["portal-crossing:sparse-selected"]);
+		expect(frame.trace.selectedCrossingInputCount).toBe(1);
+		expect(frame.trace.selectedCrossingMarkerWordInputCount).toBe(3);
+
+		const alternate = culler.cull(graph, planInput(alternateRoot));
+		expect(
+			Array.from(
+				{ length: alternate.selectedCrossingCount },
+				(_, ordinal) => alternate.selectedCrossing(ordinal).id,
+			),
+		).toEqual(["portal-crossing:sparse-unselected-0"]);
+	});
 });
 
 function linearTriangleCase(
@@ -570,8 +623,15 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 	);
 	expect(
 		arenaFrame.trace.selectedCrossingInputCount,
-		`${fixture.label} selected-crossing scan`,
-	).toBe(fixture.topology.crossings.length);
+		`${fixture.label} selected-crossing inputs`,
+	).toBeLessThanOrEqual(fixture.topology.crossings.length);
+	if (arenaFrame.trace.selectedCrossingMarkerWordInputCount > 0) {
+		expect(
+			arenaFrame.trace.selectedCrossingInputCount +
+				arenaFrame.trace.selectedCrossingMarkerWordInputCount,
+			`${fixture.label} selected-crossing sparse materialization`,
+		).toBeLessThan(fixture.topology.crossings.length);
+	}
 	return {
 		arena: actual,
 		completedDepth: arenaFrame.completedDepth,

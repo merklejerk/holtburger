@@ -30,6 +30,9 @@ import {
 } from "./portal-window-arena";
 
 const NO_CROSSING = -1;
+const CROSSING_MARKER_BITS_PER_WORD = 32;
+const CROSSING_MARKER_WORD_SHIFT = 5;
+const CROSSING_MARKER_WORD_BIT_MASK = CROSSING_MARKER_BITS_PER_WORD - 1;
 
 /** Fixed camera-time storage policy; changing it is an explicit capacity event. */
 export interface PortalScopeWindowCullerCapacity {
@@ -67,6 +70,8 @@ interface PortalScopeWindowArenaTrace {
 	readonly projectionPrimitiveCount: number;
 	/** Topology crossings inspected while materializing final selected-crossing streams. */
 	readonly selectedCrossingInputCount: number;
+	/** Packed marker words inspected to preserve canonical crossing order after adjacency filtering. */
+	readonly selectedCrossingMarkerWordInputCount: number;
 	/** Number of topology/capacity rebuilds since construction. */
 	readonly topologyBuildCount: number;
 	/** Normal-path portal-owned records created by one camera update. */
@@ -90,6 +95,7 @@ interface MutablePortalScopeWindowArenaTrace {
 	projectionPrimitiveCount: number;
 	queueHighWaterCount: number;
 	selectedCrossingInputCount: number;
+	selectedCrossingMarkerWordInputCount: number;
 	topologyBuildCount: number;
 	portalOwnedFrameHeapRecordCreationCount: 0;
 	windowFragmentHighWaterCount: number;
@@ -160,6 +166,8 @@ interface IndexedCrossing {
 /** Topology-event allocations and integer adjacency; no camera fact is retained here. */
 class PortalScopeWindowTopologyIndex {
 	readonly crossings: readonly IndexedCrossing[];
+	/** Largest topology-stable outgoing range; used to choose a non-regressing materialization path. */
+	readonly maximumOutgoingCrossingCount: number;
 	readonly outgoingCrossingIds: Uint32Array;
 	readonly outgoingOffsets: Uint32Array;
 	/** Stable reciprocal crossing id, or -1 when the directed crossing has no reciprocal. */
@@ -292,6 +300,14 @@ class PortalScopeWindowTopologyIndex {
 			this.outgoingCrossingIds[cursor] = crossingId;
 			cursors[sourceScopeId] = cursor + 1;
 		}
+		let maximumOutgoingCrossingCount = 0;
+		for (let scopeId = 0; scopeId < this.scopes.length; scopeId += 1) {
+			maximumOutgoingCrossingCount = Math.max(
+				maximumOutgoingCrossingCount,
+				this.outgoingOffsets[scopeId + 1]! - this.outgoingOffsets[scopeId]!,
+			);
+		}
+		this.maximumOutgoingCrossingCount = maximumOutgoingCrossingCount;
 	}
 
 	findScopeId(scope: SceneScope): number {
@@ -323,8 +339,8 @@ class PortalScopeWindowArena {
 	readonly queueWindows: Uint32Array;
 	readonly selectedByScopeId: Uint8Array;
 	readonly selectedByRenderDomainId: Uint8Array;
-	/** Selection marker indexed by topology-stable crossing id. */
-	readonly selectedByCrossingId: Uint8Array;
+	/** Packed selection markers indexed by topology-stable crossing id. */
+	readonly selectedCrossingMarkerWords: Uint32Array;
 	/** Retained-route straddle marker indexed by topology-stable crossing id. */
 	readonly selectedNearPlaneByCrossingId: Uint8Array;
 	readonly selectedCrossingIds: Uint32Array;
@@ -364,7 +380,9 @@ class PortalScopeWindowArena {
 		this.queueWindows.fill(NO_PORTAL_ARENA_WINDOW);
 		this.selectedByScopeId = new Uint8Array(scopeCount);
 		this.selectedByRenderDomainId = new Uint8Array(renderDomainCount);
-		this.selectedByCrossingId = new Uint8Array(crossingCount);
+		this.selectedCrossingMarkerWords = new Uint32Array(
+			Math.ceil(crossingCount / CROSSING_MARKER_BITS_PER_WORD),
+		);
 		this.selectedNearPlaneByCrossingId = new Uint8Array(crossingCount);
 		this.selectedCrossingIds = new Uint32Array(crossingCount);
 		this.selectedOrdinalByCrossingId = new Uint32Array(crossingCount);
@@ -389,7 +407,7 @@ class PortalScopeWindowArena {
 			this.queueWindows.byteLength +
 			this.selectedByScopeId.byteLength +
 			this.selectedByRenderDomainId.byteLength +
-			this.selectedByCrossingId.byteLength +
+			this.selectedCrossingMarkerWords.byteLength +
 			this.selectedNearPlaneByCrossingId.byteLength +
 			this.selectedCrossingIds.byteLength +
 			this.selectedOrdinalByCrossingId.byteLength +
@@ -398,6 +416,33 @@ class PortalScopeWindowArena {
 			this.selectedRenderDomainIds.byteLength +
 			this.selectedScopeIds.byteLength +
 			this.windows.trace.capacityBytes;
+	}
+
+	/** Test one packed selection bit without expanding camera-time marker storage. */
+	isCrossingSelected(crossingId: number): boolean {
+		const word =
+			this.selectedCrossingMarkerWords[
+				crossingId >>> CROSSING_MARKER_WORD_SHIFT
+			]!;
+		return (word & (1 << (crossingId & CROSSING_MARKER_WORD_BIT_MASK))) !== 0;
+	}
+
+	/** Set one packed selection bit after both endpoint scopes pass materialization policy. */
+	selectCrossing(crossingId: number): void {
+		const wordIndex = crossingId >>> CROSSING_MARKER_WORD_SHIFT;
+		this.selectedCrossingMarkerWords[wordIndex] =
+			(this.selectedCrossingMarkerWords[wordIndex]! |
+				(1 << (crossingId & CROSSING_MARKER_WORD_BIT_MASK))) >>>
+			0;
+	}
+
+	/** Clear one previously selected bit through the retained crossing-id stream. */
+	clearCrossingSelection(crossingId: number): void {
+		const wordIndex = crossingId >>> CROSSING_MARKER_WORD_SHIFT;
+		this.selectedCrossingMarkerWords[wordIndex] =
+			(this.selectedCrossingMarkerWords[wordIndex]! &
+				~(1 << (crossingId & CROSSING_MARKER_WORD_BIT_MASK))) >>>
+			0;
 	}
 }
 
@@ -416,6 +461,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		projectionPrimitiveCount: 0,
 		queueHighWaterCount: 0,
 		selectedCrossingInputCount: 0,
+		selectedCrossingMarkerWordInputCount: 0,
 		topologyBuildCount: 0,
 		portalOwnedFrameHeapRecordCreationCount: 0,
 		windowFragmentHighWaterCount: 0,
@@ -496,7 +542,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 			this.index!.reciprocalCrossingIds[this.#selectedCrossingId(ordinal)]!;
 		if (reciprocalCrossingId < 0) return 0;
 		const arena = this.#requireArena();
-		return arena.selectedByCrossingId[reciprocalCrossingId] === 0
+		return !arena.isCrossingSelected(reciprocalCrossingId)
 			? 0
 			: arena.selectedOrdinalByCrossingId[reciprocalCrossingId]! + 2;
 	}
@@ -662,6 +708,7 @@ export class PortalScopeWindowCuller {
 	#queueCount = 0;
 	#queueHighWaterCount = 0;
 	#selectedCrossingInputCount = 0;
+	#selectedCrossingMarkerWordInputCount = 0;
 	#selectedRenderDomainCount = 0;
 	#selectedScopeCount = 0;
 	#topologyBuildCount = 0;
@@ -760,6 +807,8 @@ export class PortalScopeWindowCuller {
 		this.#frame.trace.queueHighWaterCount = this.#queueHighWaterCount;
 		this.#frame.trace.selectedCrossingInputCount =
 			this.#selectedCrossingInputCount;
+		this.#frame.trace.selectedCrossingMarkerWordInputCount =
+			this.#selectedCrossingMarkerWordInputCount;
 		this.#frame.trace.topologyBuildCount = this.#topologyBuildCount;
 		this.#frame.trace.windowFragmentHighWaterCount =
 			arena.windows.trace.fragmentHighWaterCount;
@@ -803,6 +852,8 @@ export class PortalScopeWindowCuller {
 		this.#refreshSelectedCrossings(this.#arena, this.#index);
 		this.#frame.trace.selectedCrossingInputCount =
 			this.#selectedCrossingInputCount;
+		this.#frame.trace.selectedCrossingMarkerWordInputCount =
+			this.#selectedCrossingMarkerWordInputCount;
 		return true;
 	}
 
@@ -828,6 +879,7 @@ export class PortalScopeWindowCuller {
 		this.#queueCount = 0;
 		this.#queueHighWaterCount = 0;
 		this.#selectedCrossingInputCount = 0;
+		this.#selectedCrossingMarkerWordInputCount = 0;
 		this.#selectedRenderDomainCount = 0;
 		this.#selectedScopeCount = 0;
 		this.#frame.trace.exceptionalDiagnosticHeapRecordCreationCount = 0;
@@ -868,34 +920,68 @@ export class PortalScopeWindowCuller {
 			ordinal += 1
 		) {
 			const crossingId = arena.selectedCrossingIds[ordinal]!;
-			arena.selectedByCrossingId[crossingId] = 0;
+			arena.clearCrossingSelection(crossingId);
 			arena.selectedNearPlaneByCrossingId[crossingId] = 0;
 		}
 		let selectedCrossingCount = 0;
-		for (
-			let crossingId = 0;
-			crossingId < index.crossings.length;
-			crossingId += 1
-		) {
-			const crossing = index.crossings[crossingId]!;
-			if (
-				arena.selectedByScopeId[crossing.sourceScopeId] === 0 ||
-				arena.selectedByScopeId[crossing.targetScopeId] === 0
+		const markerWordCount = arena.selectedCrossingMarkerWords.length;
+		const adjacencyIterationBound =
+			this.#selectedScopeCount * (index.maximumOutgoingCrossingCount + 1) +
+			markerWordCount;
+		if (adjacencyIterationBound < index.crossings.length) {
+			for (
+				let selectedScopeOrdinal = 0;
+				selectedScopeOrdinal < this.#selectedScopeCount;
+				selectedScopeOrdinal += 1
 			) {
-				continue;
+				const sourceScopeId = arena.selectedScopeIds[selectedScopeOrdinal]!;
+				const start = index.outgoingOffsets[sourceScopeId]!;
+				const end = index.outgoingOffsets[sourceScopeId + 1]!;
+				for (let offset = start; offset < end; offset += 1) {
+					const crossingId = index.outgoingCrossingIds[offset]!;
+					const crossing = index.crossings[crossingId]!;
+					this.#selectedCrossingInputCount += 1;
+					if (
+						arena.selectedByScopeId[crossing.targetScopeId] === 0 ||
+						this.#sharesRenderDomain(index, crossing)
+					) {
+						continue;
+					}
+					arena.selectCrossing(crossingId);
+				}
 			}
-			// Member-cell portals constrain CPU traversal but ordinary depth already joins their
-			// visibility island. Sending them to the GPU would manufacture a compositor seam.
-			if (
-				index.renderDomainIdByScopeId[crossing.sourceScopeId] ===
-				index.renderDomainIdByScopeId[crossing.targetScopeId]
+			for (let wordIndex = 0; wordIndex < markerWordCount; wordIndex += 1) {
+				let word = arena.selectedCrossingMarkerWords[wordIndex]!;
+				this.#selectedCrossingMarkerWordInputCount += 1;
+				while (word !== 0) {
+					const bit = 31 - Math.clz32(word & -word);
+					const crossingId = wordIndex * CROSSING_MARKER_BITS_PER_WORD + bit;
+					arena.selectedCrossingIds[selectedCrossingCount] = crossingId;
+					arena.selectedOrdinalByCrossingId[crossingId] = selectedCrossingCount;
+					selectedCrossingCount += 1;
+					word = (word & (word - 1)) >>> 0;
+				}
+			}
+		} else {
+			for (
+				let crossingId = 0;
+				crossingId < index.crossings.length;
+				crossingId += 1
 			) {
-				continue;
+				const crossing = index.crossings[crossingId]!;
+				this.#selectedCrossingInputCount += 1;
+				if (
+					arena.selectedByScopeId[crossing.sourceScopeId] === 0 ||
+					arena.selectedByScopeId[crossing.targetScopeId] === 0 ||
+					this.#sharesRenderDomain(index, crossing)
+				) {
+					continue;
+				}
+				arena.selectedCrossingIds[selectedCrossingCount] = crossingId;
+				arena.selectCrossing(crossingId);
+				arena.selectedOrdinalByCrossingId[crossingId] = selectedCrossingCount;
+				selectedCrossingCount += 1;
 			}
-			arena.selectedCrossingIds[selectedCrossingCount] = crossingId;
-			arena.selectedByCrossingId[crossingId] = 1;
-			arena.selectedOrdinalByCrossingId[crossingId] = selectedCrossingCount;
-			selectedCrossingCount += 1;
 		}
 		for (let queueIndex = 1; queueIndex < this.#queueCount; queueIndex += 1) {
 			if (arena.queueNearPlaneStraddles[queueIndex] === 0) continue;
@@ -906,11 +992,22 @@ export class PortalScopeWindowCuller {
 				);
 			}
 			// A near-plane straddle within one render island affects traversal only.
-			if (arena.selectedByCrossingId[crossingId] === 0) continue;
+			if (!arena.isCrossingSelected(crossingId)) continue;
 			arena.selectedNearPlaneByCrossingId[crossingId] = 1;
 		}
-		this.#selectedCrossingInputCount += index.crossings.length;
 		this.#frame.selectedCrossingCount = selectedCrossingCount;
+	}
+
+	#sharesRenderDomain(
+		index: PortalScopeWindowTopologyIndex,
+		crossing: IndexedCrossing,
+	): boolean {
+		// Member-cell portals constrain CPU traversal but ordinary depth already joins their
+		// visibility island. Sending them to the GPU would manufacture a compositor seam.
+		return (
+			index.renderDomainIdByScopeId[crossing.sourceScopeId] ===
+			index.renderDomainIdByScopeId[crossing.targetScopeId]
+		);
 	}
 
 	#expand(

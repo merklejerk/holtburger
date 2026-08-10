@@ -1268,14 +1268,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellRenderMode",
 					[mode],
 				);
-				await delay(250);
-				modeCycleStates.push(
-					await evaluate(
-						client,
-						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
-						[],
-					),
-				);
+				modeCycleStates.push(await waitForFrameMode(client, mode));
 			}
 		} else if (options.frameMode !== null) {
 			await evaluate(
@@ -1733,6 +1726,28 @@ async function waitForEnvCellPublication(client, requestedLandblockId) {
 	}
 	throw new Error(
 		`Timed out awaiting EnvCell publication for landblock 0x${expectedId}ffff.`,
+	);
+}
+
+/** Wait until a rendered frame, rather than only frontend settings, observes one mode change. */
+async function waitForFrameMode(client, expectedMode) {
+	const timeoutAt = Date.now() + 30_000;
+	while (Date.now() < timeoutAt) {
+		const state = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+			[],
+		);
+		if (state.error) {
+			throw new Error(
+				`Browser harness failed while awaiting ${expectedMode} mode: ${state.error}`,
+			);
+		}
+		if (state.metrics?.envCellRenderMode === expectedMode) return state;
+		await delay(50);
+	}
+	throw new Error(
+		`Browser harness renderer did not observe ${expectedMode} mode within 30 seconds.`,
 	);
 }
 

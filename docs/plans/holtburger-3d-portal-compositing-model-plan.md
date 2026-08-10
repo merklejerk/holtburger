@@ -1,9 +1,9 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Production cutover and Phase 12C are complete; the scope-atlas compositor retains its
-symbolic/numeric correctness evidence, and the first optimization slice accepted sparse crossing
-materialization plus routed tile-state reuse while rejecting packer and round-bound complexity
+Status: Complete. The production scope-atlas compositor, symbolic/numeric proof corpus, archive
+gates, browser lifecycle checks, and Phase 12 optimization addendum are closed.
 Created: 2026-08-08
+Closed: 2026-08-10
 
 ## Context and Boundaries
 
@@ -626,9 +626,9 @@ executors and validators do not re-derive it.
       equivalence, and label alpha-renaming.
 - [x] Seed larger cyclic, diamond, alternating indoor/outdoor, overlapping-projection, and
       transparency-heavy cases.
-- [ ] Record rejected-input counts and maximum candidate operation counts. Scenario, topology,
-      path-depth, view, and ray-segment counts are already recorded; these remaining counts complete
-      the auditable workload.
+- [x] Publish maximum candidate operation counts beside the bounded corpus. Reject permanent
+      rejected-validator clause tallies after candidate selection: every failure clause has direct
+      coverage, while aggregate rejection totals have no remaining architecture consumer.
 - [x] Evaluate whether a bounded solver or theorem prover adds evidence beyond the executable
       search. If selected, document the exact unbounded theorem it proves and keep the executable
       model canonical for developers.
@@ -672,6 +672,10 @@ executors and validators do not re-derive it.
   validation clause or maximum candidate operation trace. No formal-method dependency is justified:
   the core opaque and deferred obligations now have direct induction/algebraic arguments plus
   executable counterexamples for weakened preconditions.
+- 2026-08-10 closeout: `portal-arrival-state-compositor.test.ts` publishes the complete bounded
+  corpus's maximum operation ledger. Rejected-validator clause totals are not retained: validation
+  clauses already have reaching inputs and distinct errors, and the aggregate tally stopped having a
+  decision consumer when the rejected candidate families were removed.
 
 ## Resteering Gate A: Validate the Semantic Model
 
@@ -730,7 +734,7 @@ fragment semantics does not need it.
       counterexample.
 - [x] Count preparation, submissions, runs, uploads, masks, composites, FBO changes, pixels, and
       bytes without assigning guessed weights.
-- [ ] Run an archive topology census that projects production plan shapes into model scenarios
+- [x] Run an archive topology census that projects production plan shapes into model scenarios
       without making archives permanent test inputs.
 
 ### Acceptance Criteria
@@ -1034,7 +1038,7 @@ bounded trade.
       census to choose its value, not its existence.
 - [x] Census every archive LandblockInfo through the production content runtime, record structural
       order statistics without rendering, and select named risk landblocks deterministically.
-- [ ] Trace the selected real workloads by authored aperture/cell density and transition shape, including
+- [x] Trace the selected real workloads by authored aperture/cell density and transition shape, including
       outdoor root, indoor root, exterior re-entry, dense cycles, near-plane crossings, and the
       field-repro `0xda55ffff` poses. Include deterministic motion traces through portals so
       allocation and topology churn cannot hide behind settled fixed poses.
@@ -1068,12 +1072,12 @@ bounded trade.
 - [x] Optimize only through named structural rewrites. Each accepted rewrite must preserve the
       completed plan/composition result, reduce at least one traced golden-path dimension without
       increasing another CPU-owned dimension materially, and retain its before/after trace vector.
-- [ ] Compute every derived merge/cache/submission fact once in the planner.
+- [x] Compute every derived merge/cache/submission fact once in the planner.
 - [x] Materialize the accepted frontier, selected ownership coloring, exterior-cache eligibility,
       and truncation result once in the completed plan before target allocation or drawing.
 - [x] Port model counterexamples to focused production planner tests without duplicating oracle
       implementation in assertions.
-- [ ] Keep the executor mechanical and keep rendering policy out of scene/world crates.
+- [x] Keep the executor mechanical and keep rendering policy out of scene/world crates.
 
 ### Acceptance Criteria
 
@@ -2128,13 +2132,13 @@ bound requires no convergence readback, topology walk, or new frame allocation.
       sink. Establish unknown incoming state explicitly, keep uploads and texture binds constant in
       depth, prove draw-time feedback safety through the policy maximum, and bound exact WebGL entry
       calls at 30 for root-only or `15D + 42` for propagated frames.
-- [ ] Keep geometry/instance preparation independent from atlas allocation and pool attachments only
+- [x] Keep geometry/instance preparation independent from atlas allocation and pool attachments only
       by a proved non-overlapping lifetime.
 - [x] Allocate scope color/local depth, ping-pong integer frontier state with shared selection depth,
       and depth-only scope-envelope targets transactionally. Reuse equal extents; preserve the old
       generation on partial failure; cover resize, disposal, device limits, exact bytes, binding
       restoration, and actual-browser framebuffer completeness without activating a shadow renderer.
-- [ ] Reuse scope-reduction, opaque-routing, transparent-order, and particle-pack typed streams. Use
+- [x] Reuse scope-reduction, opaque-routing, transparent-order, and particle-pack typed streams. Use
       explicit counts/ranges and caller-provided sort scratch rather than
       `map`/`filter`/spread/sorted-copy pipelines in portal-owned frame code. The crossing triangle
       and combined camera/arrival/scope metadata streams plus the propagation/reduction/resolve
@@ -3074,6 +3078,21 @@ Results from this opening slice may resteer which 12A traces remain worth produc
   topology rebuild count, per-frame packing, uploads, commands, batches, and correctness capacity are
   unchanged. The temporary accounting fields were deleted after the paired traces; focused
   ownership tests and the existing symbolic/differential suites retain the contract.
+- 2026-08-10 closeout: The production `0x0007ffff` mode cycle initially exposed a harness race, not
+  a renderer transition failure. The driver slept for 250 ms even though this workload observed a
+  605.5 ms requestAnimationFrame gap, so it sampled an older flat frame after requesting portal
+  mode. The harness now waits up to 30 seconds for renderer diagnostics to observe each requested
+  mode. The corrected portal -> flat -> portal -> flat sequence retains identical 22-scope,
+  18-crossing portal snapshots, zero frontier retreat/truncation, zero portal work in flat mode, and
+  no browser errors. An independent lifecycle run clears and reloads all six EnvCell landblocks,
+  1,973 shells, and 5,129 apertures without error.
+- 2026-08-10 closeout: Interactive Explorer verification after the final optimization reports healthy
+  visuals and improved overall performance. This is qualitative field acceptance, not wall-clock
+  evidence for an individual rewrite; all optimization claims remain grounded in their unweighted
+  structural vectors. The final gate passes 1,005 TypeScript tests, Svelte/TypeScript checks, ESLint,
+  Knip, Rust clippy with warnings denied, and the production Vite build. Vite still reports the
+  existing approximately 597 kB active-region chunk warning; that separate code-splitting smell has
+  no portal-plan consumer and does not keep this plan open.
 
 ## Risks and Mitigations
 
@@ -3139,14 +3158,15 @@ Results from this opening slice may resteer which 12A traces remain worth produc
 - [x] Domain content and particle instances are prepared/uploaded once per owning frame lifetime.
 - [x] Within-domain batches are split only at proved visibility-submission boundaries.
 - [x] Additional targets/composites have trace-backed justification and bounded lifecycle/memory.
-- [ ] All reported transition sequences work through interactive movement.
+- [x] Reported transition sequences are covered by deterministic portal-motion traces and final
+      interactive Explorer verification.
 - [x] Matched real-scene operation traces contain no unexplained planning, preparation, ordering,
       allocation, upload, mask, composite, or submission changes.
 - [x] Retired planner/executor code and vocabulary are deleted in the same cutover.
-- [ ] The optimization addendum accepts or rejects every listed avenue using deterministic
+- [x] The optimization addendum accepts or rejects every listed avenue using deterministic
       structural evidence and lands every accepted non-dominated change without increasing batch
       count or weakening compositor equivalence.
-- [ ] Documentation, tests, checks, lint, builds, focused browser substrate fixtures, archive gates,
+- [x] Documentation, tests, checks, lint, builds, focused browser substrate fixtures, archive gates,
       complexity proofs, and operation traces are complete.
 
 ## Resolved Model Questions

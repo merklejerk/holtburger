@@ -2838,72 +2838,63 @@ Results from this opening slice may resteer which 12A traces remain worth produc
 
 #### 12A. Establish the PVS evidence
 
-- [ ] Resolve the Facility Hub portal-gem destination from authoritative content, identify the
+- [x] Resolve the Facility Hub portal-gem destination from authoritative content, identify the
       staircase and room-after-door EnvCell DIDs, and record both directed authored PVS lists plus
-      their direct portal relationship. Do not infer the pair from ACE's pre-teleport setup cell.
-- [ ] Extend the existing browser-free archive census with, per landblock and per source seed:
+      their shortest portal-graph relationship. Do not infer the pair from ACE's pre-teleport setup
+      cell.
+- [x] Extend the existing browser-free archive census with, per landblock and per source seed:
   - authored PVS cell count versus internal portal-connected-component cell count;
   - directed crossings retained by the authored PVS versus all crossings in that component;
-  - depth-continuous visibility-island membership, including PVS omissions of direct
-    depth-continuous neighbors and PVS sets containing only a proper subset of an island;
-  - dangling, duplicate, self, cross-landblock, and absent-immediate-neighbor references;
+  - dangling, duplicate, self, and absent-immediate-neighbor references;
   - asymmetric authored pairs, reported separately from proven malformed immediate neighbors;
-  - building-portal `stab_list` size, target inclusion, and internal-island comparison; and
-  - min/median/p90/max distributions plus named worst and representative records.
-- [ ] Extend deterministic portal work traces with the exact current candidate dimensions:
-      outgoing-crossing inspections, near-volume classifications, facing checks, unique physical
-      crossings projected, total crossing projections, window-admission primitives, and the final
-      selected-crossing materialization scan.
-- [ ] Evaluate a counterfactual root-seed PVS predicate before near-volume/projection work. Indoor
-      roots use the camera EnvCell list; each outdoor-to-indoor entry uses that building portal's
-      `stab_list`; returning to outdoor terminates the indoor seed instead of connecting every
-      building through one outdoor component.
-- [ ] Keep that predicate cell-granular: never union PVS lists from members of one depth-continuous
+  - building-portal `stab_list` size, target inclusion, and internal-component comparison; and
+  - min/median/p90/max distributions plus the named Facility Hub fixture.
+- [x] Extend deterministic portal work traces with the exact current candidate dimensions:
+      outgoing-crossing inspections, near-volume classifications, facing checks, total route
+      projections, window-admission primitives, and both final selected-crossing materialization
+      inputs. Unique physical projection reuse remains the separate Phase 12B question.
+- [x] Evaluate a counterfactual root-seed PVS predicate before near-volume/projection work for
+      indoor roots using the camera EnvCell list. Outdoor roots explicitly report unavailable
+      because building `stab_list` is not published to frontend topology; do not invent a trace-only
+      operational contract. The archive census measures that source data structurally instead.
+- [x] Keep that predicate cell-granular: never union PVS lists from members of one depth-continuous
       visibility island and never admit an unlisted EnvCell merely because a listed cell shares its
       render-scheduling island. Moving the camera across a depth-continuous seam changes the retail
       root EnvCell and therefore changes the applicable authored list.
-- [ ] Report selected scopes/crossings outside the applicable authored PVS as correctness
+- [x] Report selected scopes/crossings outside the applicable authored PVS as correctness
       counterexamples, not merely lost optimization opportunities. Preserve replayable landblock,
       root, camera, and crossing identity.
-- [ ] Compare four explicit policies:
+- [x] Compare four explicit policies:
   1. trust structurally valid authored PVS exactly, matching retail working-set behavior;
   2. repair only census-proven defect signatures in the host and otherwise trust authored PVS; and
   3. regenerate a conservative camera-independent PVS in the host and union it with authored
      references; and
-  4. retain PVS as preload/ordering provenance with no hard rejection.
-- [ ] Prototype regenerated PVS as static portal flow, not camera sampling: union each source
-      EnvCell's directed entry-portal flows, carry a conservative separating-plane/anti-penumbra
-      volume through internal portal chains, clip candidate portal polygons, and retain distinct
-      path volumes only while neither conservatively contains the other. Over-admission is allowed;
-      an uncertain or exhausted flow falls back to the source's whole internal portal component.
-- [ ] Count source cells, entry flows, retained flow states, portal polygon clips, generated
-      separator planes, containment/dominance comparisons, peak scratch bytes, output references,
-      and component fallbacks. Compare typical topologies with the shipped maximum of 4,213 cells,
-      9,798 directed portals, and per-cell fan-out 27 before deciding whether assembly latency is
-      acceptable.
-- [ ] If regenerated PVS remains a candidate, key its cached packed result by immutable content
-      identity and generator version. Do not repeat the bake on camera motion or materialize dense
-      JavaScript sets. The effective candidate set is `authored union generated`, so regeneration
-      repairs omissions without discarding authored preload/compatibility over-admission.
-- [ ] If repair remains a candidate, model its fallback as one `internalPortalComponentId` rather
-      than allocating generated per-cell lists. Keep that identity distinct from the narrower
-      depth-continuous `visibilityIslandId`. State whether the observable correction is a
-      `RETAIL DIVERGENCE` and include the required decompile citation and archive census.
-- [ ] Replace the contradictory scene-contract comments that currently describe authored PVS as
+  4. retain PVS as preload/ordering provenance with no hard rejection. This is selected: the exact
+     and targeted-repair policies have unexplained selected-scope losses, while regeneration is not
+     justified after safe traces exposed no repeated traversal/projection reduction.
+- [x] Resteer away from the regenerated-PVS prototype. The hard-filter counterfactual's meaningful
+      traversal reductions occur in strata that lose selected scopes; selection-preserving Facility
+      Hub and large-dungeon traces remove no outgoing, near-volume, facing, route-projection, or
+      projection-primitive work. Do not build a static portal-flow generator without a surviving
+      measured consumer.
+- [x] Reject a generic component fallback or targeted asymmetry repair for this optimization pass.
+      All direct portal neighbors are present archive-wide, the Facility pair is 12 directed portal
+      steps apart, and 294,751 asymmetric authored references provide no narrow defect signature.
+- [x] Replace the contradictory scene-contract comments that currently describe authored PVS as
       both a future traversal prune and as never traversal rejection, but only after the policy is
       selected.
 
 #### 12B. Inspect route-independent projection reuse
 
-- [ ] Split each crossing's camera-dependent aperture work into route-independent projection and
+- [x] Split each crossing's camera-dependent aperture work into route-independent projection and
       route-dependent inherited-window intersection in the cost model. Count unique projected
       crossings versus total route projections over every deterministic trace.
-- [ ] Evaluate a fixed-capacity, generation-stamped per-camera projection cache indexed by topology
+- [x] Evaluate a fixed-capacity, generation-stamped per-camera projection cache indexed by topology
       crossing ID. It must reuse arena storage, allocate no accepted-frame records, preserve the
       atomic projection budget, and remain differentially equivalent to the immutable reference.
-- [ ] Account separately for ordinary and near-plane-straddling projected forms. Reject caching if
+- [x] Account separately for ordinary and near-plane-straddling projected forms. Reject caching if
       copying or retained polygon capacity dominates the saved projection primitives.
-- [ ] Preserve existing topology-event aperture preparation; do not introduce a third representation
+- [x] Preserve existing topology-event aperture preparation; do not introduce a third representation
       of the same static polygon merely to call it a cache.
 
 #### 12C. Remove avoidable whole-topology and packing work
@@ -3030,6 +3021,39 @@ Results from this opening slice may resteer which 12A traces remain worth produc
   tile-state optimization: it removes redundant routing/state work without reordering or changing a
   physical batch. The packer and propagation-round candidates are rejected by the measured bounds
   above rather than implemented speculatively.
+- 2026-08-10: The Phase 12A archive census covers 5,346 landblocks with zero decode failures. It
+  finds 56,140,539 authored visible-cell references, 294,751 directional asymmetries, and zero
+  dangling, duplicate, self, or missing-direct-portal-neighbor references. Authored PVS retains
+  153,203,258 of 995,465,560 source-component directed-portal instances. Building portals contribute
+  16,937 `stab_list`s with no missing targets, dangling ids, or duplicates, while omitting 18,326
+  cells from their targets' internal components.
+- 2026-08-10: Authoritative ACE world content resolves Facility Hub Recall spell 5175 to
+  `0x8A020212`, confirming landblock `0x8A02`. The known staircase/door asymmetry is
+  `0x8A02010C -> 0x8A0201C2` absent and the reverse present; the cells are 12 directed portal steps
+  apart, not direct neighbors. Facility's effective PVS has median 101 of 279 component cells and
+  retains median 314 of 712 directed component portals.
+- 2026-08-10: The cell-granular hard-PVS counterfactual covers 576 deterministic poses across the
+  eight retained risk landblocks plus Facility Hub. Of 456 indoor poses, 364 preserve the exact
+  atlas selection; the remainder lose 220 selected-scope and 2,153 selected-crossing occurrences.
+  The selection-preserving Facility and large-dungeon strata remove no outgoing, near-volume,
+  facing, route-projection, or projection-primitive work. The largest work reductions coincide with
+  selection loss, so hard authored PVS, generic asymmetry repair, and regenerated PVS are rejected
+  for this pass. Authored PVS remains preload/ordering provenance with no traversal rejection.
+- 2026-08-10: The Phase 12B measurement pass finds 43,041 route projections but only 14,487
+  physical crossing forms across the nine separate 64-pose traces. `0xEC0E` owns 27,144 of the
+  28,554 repeats. No near-plane-straddling form repeats, so only ordinary projection remains a cache
+  candidate; inherited-window intersection stays route-dependent.
+- 2026-08-10: Second-use promotion is rejected. It reserves topology-shaped payload storage (up to
+  2,261,288 bytes in `0x00D1`) and regresses `0xDA55` by 312 primitive writes because all 88 of its
+  repeats have no third consumer. The selected cache promotes on the third ordinary attempt, caps
+  payload at 256 crossing forms / 256 fragments / 1,024 vertices, and resumes uncached projection
+  if that performance-only storage fills.
+- 2026-08-10: Paired cache-disabled and selected-cache replays remove 1,017,924 of 6,449,807
+  executed projection primitives (15.782%) across the nine retained traces. `0xEC0E` contributes
+  1,002,977; Facility Hub 8,098; `0x00D1` 4,564; `0x200F` 1,008; `0x0007` 918; and `0x3F32` 359.
+  `0x599B`, `0xA092`, and `0xDA55` are exactly flat. Cache storage is 19--90 KiB, no retained pose
+  exhausts it, near-plane projection remains uncached, the prior complete-frontier cutoff is charged
+  compatibly, and the immutable/arena differential corpus remains equivalent.
 
 ## Risks and Mitigations
 
@@ -3055,7 +3079,7 @@ Results from this opening slice may resteer which 12A traces remain worth produc
 | A “zero-GC” claim hides exceptional diagnostics or arena/GPU-resource growth.     | Guarantee zero owned records only for accepted fixed-capacity plans; trace one allowed cutoff error separately from arena growth, topology/capacity, and resize allocation. |
 | Gate C's depth 16 becomes duplicated substrate folklore.                          | Give the complete production capacity policy one `maximumPathDepth` owner; derive culler depth, propagation rounds, diagnostics, and ordinary fixtures from that field.     |
 | Historical tests preserve dead architecture.                                      | Port only live semantic cases, then delete tests whose only purpose is old contract shape or call order.                                                                    |
-| Authored PVS is treated as complete because retail consumes it.                   | Census direct defects and counterfactual selected misses; make trust, repair, or hint-only behavior an explicit parity decision with the required retail marker.            |
+| Authored PVS is treated as complete because retail consumes it.                   | Census direct defects and counterfactual selected misses; keep the selected hint-only policy explicit rather than claiming a content-safe retail divergence.                |
 | Host preprocessing moves rather than removes CPU work.                            | Count host assembly, transferred bytes, browser validation/copies, topology rebuilds, and camera-frame work independently before changing the boundary.                     |
 
 ## Definition of Done

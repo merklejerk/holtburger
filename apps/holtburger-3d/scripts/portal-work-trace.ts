@@ -95,6 +95,16 @@ const MAXIMUM_ATLAS_POLICY_MULTIPLIER = 4;
 const GUARANTEED_ARRIVAL_STATE_CAPACITY = 0xffff_ffff;
 /** Logical no-cutoff capacity used to isolate atlas extent from triangle-stream experiments. */
 const GUARANTEED_CROSSING_TRIANGLE_VERTEX_CAPACITY = 0xffff_ffff;
+/** Camera-stage work counters compared by the authored-PVS counterfactual. */
+const PVS_WORK_COUNTERS = [
+	"outgoingCrossingInputCount",
+	"nearClipClassificationCount",
+	"facingTestCount",
+	"routeProjectionCount",
+	"projectionPrimitiveCount",
+	"selectedCrossingInputCount",
+	"selectedCrossingMarkerWordInputCount",
+] as const satisfies readonly (keyof AtlasPlanSnapshot["visibilityWork"])[];
 
 interface TraceDrawingBuffer {
 	readonly height: number;
@@ -142,9 +152,36 @@ interface ArchivePortalCensusExport {
 
 /** One landblock's structural topology dimensions before camera projection. */
 interface ArchivePortalCensusLandblock {
+	readonly authoredVisibleReferenceCount: number;
+	readonly asymmetricVisibleReferenceCount: number;
+	readonly buildingComponentOmissionCount: number;
+	readonly buildingPortalCount: number;
+	readonly buildingStabMissingTargetCount: number;
+	readonly buildingStabReferenceCount: number;
+	readonly danglingBuildingStabReferenceCount: number;
+	readonly danglingVisibleReferenceCount: number;
 	readonly directedPortalCount: number;
+	readonly duplicateBuildingStabReferenceCount: number;
+	readonly duplicateVisibleReferenceCount: number;
+	readonly effectiveBuildingStabCellCount: ArchivePortalCensusDistribution;
+	readonly effectivePvsCellCount: ArchivePortalCensusDistribution;
 	readonly envCellCount: number;
 	readonly environmentCount: number;
+	readonly facilityHubFixture: null | {
+		readonly roomAfterDoorEnvCellId: string;
+		readonly roomAfterDoorListsStaircase: boolean;
+		readonly roomToStaircasePortalDistance: number | null;
+		readonly staircaseEnvCellId: string;
+		readonly staircaseListsRoomAfterDoor: boolean;
+		readonly staircaseToRoomPortalDistance: number | null;
+	};
+	readonly immediateNeighborOmissionCount: number;
+	readonly immediateNeighborOmissions: readonly {
+		readonly sourceEnvCellId: string;
+		readonly targetEnvCellId: string;
+	}[];
+	readonly internalComponentCellCount: ArchivePortalCensusDistribution;
+	readonly internalComponentPortalCount: ArchivePortalCensusDistribution;
 	readonly internalPortalCount: number;
 	readonly landblockId: LandblockId;
 	readonly maximumIndoorDistanceFromOutside: number;
@@ -152,10 +189,21 @@ interface ArchivePortalCensusLandblock {
 	readonly maximumSourceApertureVertexCount: number;
 	readonly outsidePortalCount: number;
 	readonly outsideTransitionCellCount: number;
+	readonly pvsRetainedInternalPortalCount: ArchivePortalCensusDistribution;
 	readonly seenOutsideCellCount: number;
+	readonly selfVisibleReferenceCount: number;
 	readonly sourceApertureTriangleCount: number;
 	readonly sourceApertureVertexCount: number;
 	readonly unreachableFromOutsideCellCount: number;
+}
+
+/** Exact per-owner integer distribution emitted by the archive adapter. */
+interface ArchivePortalCensusDistribution {
+	readonly maximum: number;
+	readonly median: number;
+	readonly minimum: number;
+	readonly p90: number;
+	readonly total: number;
 }
 
 /** Exact order statistics retained without assigning guessed CPU weights. */
@@ -193,7 +241,40 @@ interface ArchivePortalCensusReport {
 	readonly failureCount: number;
 	readonly kind: "holtburger-portal-archive-census";
 	readonly landblockCount: number;
+	readonly pvs: ArchivePortalPvsCensusReport;
 	readonly riskSelections: readonly ArchivePortalRiskSelection[];
+}
+
+/** Compact archive-wide PVS evidence plus the authoritative Facility Hub fixture. */
+interface ArchivePortalPvsCensusReport {
+	readonly authoredVisibleReferenceCount: number;
+	readonly asymmetricVisibleReferenceCount: number;
+	readonly buildingComponentOmissionCount: number;
+	readonly buildingPortalCount: number;
+	readonly buildingStabMissingTargetCount: number;
+	readonly buildingStabReferenceCount: number;
+	readonly danglingBuildingStabReferenceCount: number;
+	readonly danglingVisibleReferenceCount: number;
+	readonly duplicateBuildingStabReferenceCount: number;
+	readonly duplicateVisibleReferenceCount: number;
+	readonly effectiveBuildingStabCellCount: number;
+	readonly effectivePvsCellCount: number;
+	readonly facilityHub: {
+		readonly effectivePvsCellCount: ArchivePortalCensusDistribution;
+		readonly fixture: NonNullable<
+			ArchivePortalCensusLandblock["facilityHubFixture"]
+		>;
+		readonly immediateNeighborOmissions: ArchivePortalCensusLandblock["immediateNeighborOmissions"];
+		readonly internalComponentCellCount: ArchivePortalCensusDistribution;
+		readonly pvsRetainedInternalPortalCount: ArchivePortalCensusDistribution;
+		readonly internalComponentPortalCount: ArchivePortalCensusDistribution;
+	};
+	readonly immediateNeighborOmissionCount: number;
+	readonly immediateNeighborOmissionLandblockCount: number;
+	readonly internalComponentCellCount: number;
+	readonly internalComponentPortalCount: number;
+	readonly pvsRetainedInternalPortalCount: number;
+	readonly selfVisibleReferenceCount: number;
 }
 
 /** One deterministic camera/root-scope input shared by both compared planners. */
@@ -212,6 +293,15 @@ interface TracePose {
 	readonly pitch: number;
 }
 
+/** One immutable indoor-root topology filtered by that root cell's authored PVS. */
+interface PvsCounterfactualTopology {
+	/** Resident EnvCell scope keys admitted by the source cell plus its authored PVS. */
+	readonly allowedEnvCellScopeKeys: ReadonlySet<string>;
+	/** Number of authored PVS ids before intersecting with currently resident topology. */
+	readonly authoredPvsCellCount: number;
+	readonly topology: SceneTopologyView;
+}
+
 /** Browser-free trace output; every count is deterministic and unweighted. */
 interface PortalWorkTraceReport {
 	/** Canonical schema identity for disposable reports. */
@@ -220,6 +310,10 @@ interface PortalWorkTraceReport {
 	readonly landblockIds: readonly LandblockId[];
 	/** Deterministic live authored-particle population supplied to every dry schedule. */
 	readonly particles: ArchiveParticleTrace;
+	/** Route-independent projection reuse ceiling from the unchanged production plan. */
+	readonly projectionReuse: ReturnType<typeof summarizeProjectionReuse>;
+	/** Aggregate authored-PVS counterfactual evidence emitted before verbose pose records. */
+	readonly pvsCounterfactual: ReturnType<typeof summarizePvsCounterfactuals>;
 	/** Per-pose production planning and execution traces. */
 	readonly poses: readonly ReturnType<typeof tracePose>[];
 	/** Structural source distribution independent from camera placement. */
@@ -421,19 +515,28 @@ if (options.mode === "atlas-capacity") {
 const scopeAtlasPlanner = new PortalScopeAtlasPlanner(
 	PORTAL_RENDER_CAPACITY_POLICY.culler,
 );
+const pvsCounterfactualPlanner = new PortalScopeAtlasPlanner(
+	PORTAL_RENDER_CAPACITY_POLICY.culler,
+);
+const pvsTopologiesByRoot = new Map<string, PvsCounterfactualTopology>();
+const tracedPoses = poses.map((pose) =>
+	tracePose(
+		topology,
+		pose,
+		archive.content,
+		scopeAtlasPlanner,
+		pvsCounterfactualPlanner,
+		pvsTopologiesByRoot,
+		options.drawingBuffer,
+	),
+);
 const report: PortalWorkTraceReport = {
 	kind: "holtburger-portal-work-trace",
 	landblockIds: options.landblockIds,
 	particles: particleTrace(archive.content),
-	poses: poses.map((pose) =>
-		tracePose(
-			topology,
-			pose,
-			archive.content,
-			scopeAtlasPlanner,
-			options.drawingBuffer,
-		),
-	),
+	projectionReuse: summarizeProjectionReuse(tracedPoses),
+	pvsCounterfactual: summarizePvsCounterfactuals(tracedPoses),
+	poses: tracedPoses,
 	topology: topologyDistribution(topology),
 };
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -794,6 +897,95 @@ function createCensusReport(
 	if (!fieldRepro) {
 		throw new Error("Portal archive census lost field repro 0xda55ffff.");
 	}
+	const facilityHub = census.landblocks.find(
+		({ landblockId }) => landblockId === "0x8a02ffff",
+	);
+	if (!facilityHub) {
+		throw new Error("Portal archive census lost Facility Hub 0x8a02ffff.");
+	}
+	if (!facilityHub.facilityHubFixture) {
+		throw new Error("Portal archive census lost the Facility Hub PVS fixture.");
+	}
+	if (
+		facilityHub.facilityHubFixture.staircaseListsRoomAfterDoor ||
+		!facilityHub.facilityHubFixture.roomAfterDoorListsStaircase
+	) {
+		throw new Error(
+			"Facility Hub no longer matches the authoritative staircase/door PVS asymmetry.",
+		);
+	}
+	const sum = (
+		select: (record: ArchivePortalCensusLandblock) => number,
+	): number =>
+		census.landblocks.reduce((total, record) => total + select(record), 0);
+	const pvs = Object.freeze({
+		authoredVisibleReferenceCount: sum(
+			({ authoredVisibleReferenceCount }) => authoredVisibleReferenceCount,
+		),
+		asymmetricVisibleReferenceCount: sum(
+			({ asymmetricVisibleReferenceCount }) => asymmetricVisibleReferenceCount,
+		),
+		buildingComponentOmissionCount: sum(
+			({ buildingComponentOmissionCount }) => buildingComponentOmissionCount,
+		),
+		buildingPortalCount: sum(({ buildingPortalCount }) => buildingPortalCount),
+		buildingStabMissingTargetCount: sum(
+			({ buildingStabMissingTargetCount }) => buildingStabMissingTargetCount,
+		),
+		buildingStabReferenceCount: sum(
+			({ buildingStabReferenceCount }) => buildingStabReferenceCount,
+		),
+		danglingBuildingStabReferenceCount: sum(
+			({ danglingBuildingStabReferenceCount }) =>
+				danglingBuildingStabReferenceCount,
+		),
+		danglingVisibleReferenceCount: sum(
+			({ danglingVisibleReferenceCount }) => danglingVisibleReferenceCount,
+		),
+		duplicateBuildingStabReferenceCount: sum(
+			({ duplicateBuildingStabReferenceCount }) =>
+				duplicateBuildingStabReferenceCount,
+		),
+		duplicateVisibleReferenceCount: sum(
+			({ duplicateVisibleReferenceCount }) => duplicateVisibleReferenceCount,
+		),
+		effectiveBuildingStabCellCount: sum(
+			({ effectiveBuildingStabCellCount }) =>
+				effectiveBuildingStabCellCount.total,
+		),
+		effectivePvsCellCount: sum(
+			({ effectivePvsCellCount }) => effectivePvsCellCount.total,
+		),
+		facilityHub: Object.freeze({
+			effectivePvsCellCount: facilityHub.effectivePvsCellCount,
+			fixture: facilityHub.facilityHubFixture,
+			immediateNeighborOmissions: facilityHub.immediateNeighborOmissions,
+			internalComponentCellCount: facilityHub.internalComponentCellCount,
+			internalComponentPortalCount: facilityHub.internalComponentPortalCount,
+			pvsRetainedInternalPortalCount:
+				facilityHub.pvsRetainedInternalPortalCount,
+		}),
+		immediateNeighborOmissionCount: sum(
+			({ immediateNeighborOmissionCount }) => immediateNeighborOmissionCount,
+		),
+		immediateNeighborOmissionLandblockCount: census.landblocks.filter(
+			({ immediateNeighborOmissionCount }) =>
+				immediateNeighborOmissionCount > 0,
+		).length,
+		internalComponentCellCount: sum(
+			({ internalComponentCellCount }) => internalComponentCellCount.total,
+		),
+		internalComponentPortalCount: sum(
+			({ internalComponentPortalCount }) => internalComponentPortalCount.total,
+		),
+		pvsRetainedInternalPortalCount: sum(
+			({ pvsRetainedInternalPortalCount }) =>
+				pvsRetainedInternalPortalCount.total,
+		),
+		selfVisibleReferenceCount: sum(
+			({ selfVisibleReferenceCount }) => selfVisibleReferenceCount,
+		),
+	}) satisfies ArchivePortalPvsCensusReport;
 	const riskSelections = uniqueRiskSelections([
 		selectQuantile(
 			outdoorTransitions,
@@ -838,6 +1030,7 @@ function createCensusReport(
 		failureCount: census.failures.length,
 		kind: "holtburger-portal-archive-census",
 		landblockCount: census.landblocks.length,
+		pvs,
 		riskSelections,
 	});
 }
@@ -1447,8 +1640,24 @@ interface AtlasPlanSnapshot {
 	}[];
 	readonly status: "complete" | "truncated";
 	readonly visibilityWork: {
+		readonly executedProjectionPrimitiveCount: number;
+		readonly facingTestCount: number;
+		readonly nearClipClassificationCount: number;
+		readonly nearPlaneRouteProjectionCount: number;
+		readonly projectionPrimitiveExecutionDelta: number;
+		readonly ordinaryRouteProjectionCount: number;
+		readonly outgoingCrossingInputCount: number;
+		readonly projectionCacheCapacityBytes: number;
+		readonly projectionCacheCapacityBypassCount: number;
+		readonly projectionCacheColdBypassCount: number;
+		readonly projectionCacheDeclinedPromotionCount: number;
+		readonly projectionCacheFragmentHighWaterCount: number;
+		readonly projectionCacheHitCount: number;
+		readonly projectionCachePromotionCount: number;
+		readonly projectionCacheVertexHighWaterCount: number;
 		readonly projectionPrimitiveCount: number;
 		readonly queueHighWaterCount: number;
+		readonly routeProjectionCount: number;
 		readonly selectedCrossingInputCount: number;
 		readonly selectedCrossingMarkerWordInputCount: number;
 		readonly windowFragmentHighWaterCount: number;
@@ -1751,8 +1960,37 @@ function snapshotAtlasPlan(
 		selectedScopeKeys,
 		status: frame.visibility.status,
 		visibilityWork: {
+			executedProjectionPrimitiveCount:
+				frame.visibility.trace.executedProjectionPrimitiveCount,
+			facingTestCount: frame.visibility.trace.facingTestCount,
+			nearClipClassificationCount:
+				frame.visibility.trace.nearClipClassificationCount,
+			nearPlaneRouteProjectionCount:
+				frame.visibility.trace.nearPlaneRouteProjectionCount,
+			projectionPrimitiveExecutionDelta:
+				frame.visibility.trace.projectionPrimitiveExecutionDelta,
+			ordinaryRouteProjectionCount:
+				frame.visibility.trace.ordinaryRouteProjectionCount,
+			outgoingCrossingInputCount:
+				frame.visibility.trace.outgoingCrossingInputCount,
+			projectionCacheCapacityBytes:
+				frame.visibility.trace.projectionCacheCapacityBytes,
+			projectionCacheCapacityBypassCount:
+				frame.visibility.trace.projectionCacheCapacityBypassCount,
+			projectionCacheColdBypassCount:
+				frame.visibility.trace.projectionCacheColdBypassCount,
+			projectionCacheDeclinedPromotionCount:
+				frame.visibility.trace.projectionCacheDeclinedPromotionCount,
+			projectionCacheFragmentHighWaterCount:
+				frame.visibility.trace.projectionCacheFragmentHighWaterCount,
+			projectionCacheHitCount: frame.visibility.trace.projectionCacheHitCount,
+			projectionCachePromotionCount:
+				frame.visibility.trace.projectionCachePromotionCount,
+			projectionCacheVertexHighWaterCount:
+				frame.visibility.trace.projectionCacheVertexHighWaterCount,
 			projectionPrimitiveCount: frame.visibility.trace.projectionPrimitiveCount,
 			queueHighWaterCount: frame.visibility.trace.queueHighWaterCount,
+			routeProjectionCount: frame.visibility.trace.routeProjectionCount,
 			selectedCrossingInputCount:
 				frame.visibility.trace.selectedCrossingInputCount,
 			selectedCrossingMarkerWordInputCount:
@@ -1823,6 +2061,274 @@ function sameStrings(
 		left.length === right.length &&
 		left.every((value, index) => value === right[index])
 	);
+}
+
+function tracePvsCounterfactual(
+	topology: SceneTopologyView,
+	pose: TracePose,
+	projection: ReturnType<typeof createTraceCameraProjection>,
+	resource: PortalScopeAtlasResource,
+	baseline: AtlasPlanSnapshot,
+	planner: PortalScopeAtlasPlanner,
+	topologiesByRoot: Map<string, PvsCounterfactualTopology>,
+) {
+	if (pose.rootScope.kind === "outdoor") {
+		return Object.freeze({
+			kind: "unavailable" as const,
+			reason: "building-stab-list-not-published" as const,
+		});
+	}
+	const filtered = getPvsCounterfactualTopology(
+		topology,
+		pose.rootScope,
+		topologiesByRoot,
+	);
+	const candidate = snapshotAtlasPlan(
+		planner.plan(
+			filtered.topology,
+			{
+				...projection,
+				portalFootprint: {
+					drawingBuffer: resource.drawingBuffer,
+					minimumPixelArea: 0,
+				},
+			},
+			resource,
+		),
+		resource,
+	);
+	const workDelta = Object.fromEntries(
+		PVS_WORK_COUNTERS.map((counter) => {
+			const baselineMinusCandidate =
+				baseline.visibilityWork[counter] - candidate.visibilityWork[counter];
+			return [counter, baselineMinusCandidate];
+		}),
+	) as Readonly<Record<(typeof PVS_WORK_COUNTERS)[number], number>>;
+	const candidateCrossingIds = new Set(candidate.selectedCrossingIds);
+	const selectedScopeKeysOutsidePvs = baseline.selectedScopeKeys.filter(
+		(key) => key !== "outdoor" && !filtered.allowedEnvCellScopeKeys.has(key),
+	);
+	return Object.freeze({
+		applicableResidentEnvCellCount: filtered.allowedEnvCellScopeKeys.size,
+		authoredPvsCellCount: filtered.authoredPvsCellCount,
+		baselineSelectedCrossingIdsRejected: Object.freeze(
+			baseline.selectedCrossingIds.filter(
+				(id) => !candidateCrossingIds.has(id),
+			),
+		),
+		baselineSelectedScopeKeysOutsidePvs: Object.freeze(
+			selectedScopeKeysOutsidePvs,
+		),
+		candidate: publicAtlasPlan(candidate),
+		kind: "indoor-root-authored-pvs" as const,
+		selectedCrossingLoss:
+			baseline.selectedCrossingIds.length -
+			candidate.selectedCrossingIds.length,
+		selectedScopeLoss:
+			baseline.selectedScopeKeys.length - candidate.selectedScopeKeys.length,
+		selectionPreserved: sameAtlasSelection(baseline, candidate),
+		/** Positive values remove work; negative values expose a stage regression. */
+		workDelta,
+	});
+}
+
+function getPvsCounterfactualTopology(
+	topology: SceneTopologyView,
+	rootScope: Extract<SceneScope, { readonly kind: "env-cell" }>,
+	cache: Map<string, PvsCounterfactualTopology>,
+): PvsCounterfactualTopology {
+	const rootKey = scopeKey(rootScope);
+	const cached = cache.get(rootKey);
+	if (cached) return cached;
+	const root = topology.scopes.find(({ scope }) => scopeKey(scope) === rootKey);
+	if (!root || root.scope.kind !== "env-cell") {
+		throw new Error(`Authored PVS root scope ${rootKey} is unavailable.`);
+	}
+	const residentEnvCellScopeKeys = new Set(
+		topology.scopes.flatMap(({ scope }) =>
+			scope.kind === "env-cell" ? [scopeKey(scope)] : [],
+		),
+	);
+	const allowedEnvCellScopeKeys = new Set<string>([rootKey]);
+	for (const envCellId of root.potentiallyVisibleEnvCellIds) {
+		if (residentEnvCellScopeKeys.has(envCellId)) {
+			allowedEnvCellScopeKeys.add(envCellId);
+		}
+	}
+	const scopes = topology.scopes.filter(
+		({ scope }) =>
+			scope.kind === "outdoor" || allowedEnvCellScopeKeys.has(scopeKey(scope)),
+	);
+	const crossings = topology.crossings.flatMap((crossing) => {
+		if (crossing.source.kind === "outdoor") return [];
+		if (!allowedEnvCellScopeKeys.has(scopeKey(crossing.source))) return [];
+		if (
+			crossing.target.kind === "env-cell" &&
+			!allowedEnvCellScopeKeys.has(scopeKey(crossing.target))
+		) {
+			return [];
+		}
+		if (
+			crossing.target.kind === "outdoor" &&
+			crossing.reciprocalCrossingId !== null
+		) {
+			return [{ ...crossing, reciprocalCrossingId: null }];
+		}
+		return [crossing];
+	});
+	const outgoingByScope = new Map<string, ScenePortalCrossingInput[]>();
+	for (const crossing of crossings) {
+		const key = scopeKey(crossing.source);
+		const outgoing = outgoingByScope.get(key);
+		if (outgoing) outgoing.push(crossing);
+		else outgoingByScope.set(key, [crossing]);
+	}
+	const frozenOutgoing = new Map(
+		[...outgoingByScope].map(([key, outgoing]) => [
+			key,
+			Object.freeze(
+				outgoing.toSorted((left, right) => left.id.localeCompare(right.id)),
+			),
+		]),
+	);
+	const filteredTopology: SceneTopologyView = {
+		crossings: Object.freeze(crossings),
+		outgoing: (scope) => frozenOutgoing.get(scopeKey(scope)) ?? [],
+		revision: topology.revision + cache.size + 1,
+		scopes: Object.freeze(scopes),
+	};
+	const result = Object.freeze({
+		allowedEnvCellScopeKeys,
+		authoredPvsCellCount: root.potentiallyVisibleEnvCellIds.size,
+		topology: filteredTopology,
+	});
+	cache.set(rootKey, result);
+	return result;
+}
+
+function summarizePvsCounterfactuals(
+	poses: readonly ReturnType<typeof tracePose>[],
+) {
+	const workDeltaTotals = Object.fromEntries(
+		PVS_WORK_COUNTERS.map((counter) => [counter, 0]),
+	) as Record<(typeof PVS_WORK_COUNTERS)[number], number>;
+	const counterexamplePoseIds: string[] = [];
+	let indoorPoseCount = 0;
+	let outdoorUnavailablePoseCount = 0;
+	let selectedCrossingLoss = 0;
+	let selectedScopeLoss = 0;
+	let selectionPreservingPoseCount = 0;
+	for (const pose of poses) {
+		const counterfactual = pose.pvsCounterfactual;
+		if (counterfactual.kind === "unavailable") {
+			outdoorUnavailablePoseCount += 1;
+			continue;
+		}
+		indoorPoseCount += 1;
+		selectedCrossingLoss += counterfactual.selectedCrossingLoss;
+		selectedScopeLoss += counterfactual.selectedScopeLoss;
+		if (counterfactual.selectionPreserved) selectionPreservingPoseCount += 1;
+		if (counterfactual.baselineSelectedScopeKeysOutsidePvs.length > 0) {
+			counterexamplePoseIds.push(pose.id);
+		}
+		for (const counter of PVS_WORK_COUNTERS) {
+			workDeltaTotals[counter] += counterfactual.workDelta[counter];
+		}
+	}
+	return Object.freeze({
+		counterexamplePoseIds: Object.freeze(counterexamplePoseIds),
+		selectedScopeCounterexamplePoseCount: counterexamplePoseIds.length,
+		indoorPoseCount,
+		outdoorUnavailablePoseCount,
+		selectedCrossingLoss,
+		selectedScopeLoss,
+		selectionPreservingPoseCount,
+		/** Positive values remove work; negative values expose a stage regression. */
+		workDeltaTotals: Object.freeze(workDeltaTotals),
+	});
+}
+
+function summarizeProjectionReuse(
+	poses: readonly ReturnType<typeof tracePose>[],
+) {
+	const replayablePoses = poses
+		.map((pose) => {
+			const work = pose.execution.planning.visibilityWork;
+			return {
+				cacheHitCount: work.projectionCacheHitCount,
+				id: pose.id,
+				projectionPrimitiveExecutionDelta:
+					work.projectionPrimitiveExecutionDelta,
+				promotionCount: work.projectionCachePromotionCount,
+				rootScope: pose.rootScope,
+				routeProjectionCount: work.routeProjectionCount,
+			};
+		})
+		.filter(
+			({ cacheHitCount, promotionCount }) =>
+				cacheHitCount > 0 || promotionCount > 0,
+		)
+		.toSorted(
+			(left, right) =>
+				right.projectionPrimitiveExecutionDelta -
+					left.projectionPrimitiveExecutionDelta ||
+				left.id.localeCompare(right.id),
+		);
+	const totals = poses.reduce(
+		(result, pose) => {
+			const work = pose.execution.planning.visibilityWork;
+			result.nearPlaneRouteProjectionCount +=
+				work.nearPlaneRouteProjectionCount;
+			result.executedProjectionPrimitiveCount +=
+				work.executedProjectionPrimitiveCount;
+			result.projectionPrimitiveExecutionDelta +=
+				work.projectionPrimitiveExecutionDelta;
+			result.ordinaryRouteProjectionCount += work.ordinaryRouteProjectionCount;
+			result.projectionCacheCapacityBytes = Math.max(
+				result.projectionCacheCapacityBytes,
+				work.projectionCacheCapacityBytes,
+			);
+			result.projectionCacheCapacityBypassCount +=
+				work.projectionCacheCapacityBypassCount;
+			result.projectionCacheColdBypassCount +=
+				work.projectionCacheColdBypassCount;
+			result.projectionCacheDeclinedPromotionCount +=
+				work.projectionCacheDeclinedPromotionCount;
+			result.projectionCacheFragmentWriteCount +=
+				work.projectionCacheFragmentHighWaterCount;
+			result.projectionCacheHitCount += work.projectionCacheHitCount;
+			result.projectionCachePromotionCount +=
+				work.projectionCachePromotionCount;
+			result.projectionCacheVertexWriteCount +=
+				work.projectionCacheVertexHighWaterCount;
+			result.projectionPrimitiveCount += work.projectionPrimitiveCount;
+			return result;
+		},
+		{
+			executedProjectionPrimitiveCount: 0,
+			nearPlaneRouteProjectionCount: 0,
+			projectionPrimitiveExecutionDelta: 0,
+			ordinaryRouteProjectionCount: 0,
+			projectionCacheCapacityBytes: 0,
+			projectionCacheCapacityBypassCount: 0,
+			projectionCacheColdBypassCount: 0,
+			projectionCacheDeclinedPromotionCount: 0,
+			projectionCacheFragmentWriteCount: 0,
+			projectionCacheHitCount: 0,
+			projectionCachePromotionCount: 0,
+			projectionCacheVertexWriteCount: 0,
+			projectionPrimitiveCount: 0,
+		},
+	);
+	const routeProjectionCount =
+		totals.ordinaryRouteProjectionCount + totals.nearPlaneRouteProjectionCount;
+	return Object.freeze({
+		...totals,
+		poseCount: poses.length,
+		posesWithProjectionCacheReuse: replayablePoses.length,
+		replayableMaximums: Object.freeze(replayablePoses.slice(0, 16)),
+		routeProjectionCount,
+	});
 }
 
 function atlasResource(
@@ -1942,6 +2448,8 @@ function tracePose(
 	pose: TracePose,
 	content: ArchiveContentArtifacts,
 	scopeAtlasPlanner: PortalScopeAtlasPlanner,
+	pvsCounterfactualPlanner: PortalScopeAtlasPlanner,
+	pvsTopologiesByRoot: Map<string, PvsCounterfactualTopology>,
 	drawingBuffer: TraceDrawingBuffer,
 ) {
 	const common = createTraceCameraProjection(pose, drawingBuffer);
@@ -1969,6 +2477,15 @@ function tracePose(
 	const scopeAtlasPlanning = snapshotAtlasPlan(
 		scopeAtlasFrame,
 		scopeAtlasResource,
+	);
+	const pvsCounterfactual = tracePvsCounterfactual(
+		topology,
+		pose,
+		common,
+		scopeAtlasResource,
+		scopeAtlasPlanning,
+		pvsCounterfactualPlanner,
+		pvsTopologiesByRoot,
 	);
 	const dryWorkload = createDrySceneWorkload(content, pose);
 	const scopeAtlasDrySchedule = createPortalArrivalStateDryScheduleTrace(
@@ -1998,6 +2515,7 @@ function tracePose(
 			planning: publicAtlasPlan(scopeAtlasPlanning),
 		},
 		id: pose.id,
+		pvsCounterfactual,
 		rootScope: scopeKey(pose.rootScope),
 	};
 }

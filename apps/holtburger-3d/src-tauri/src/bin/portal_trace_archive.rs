@@ -5,7 +5,7 @@ use holtburger_3d::{
     load_particle_emitter_bytes, load_physics_script_bytes,
 };
 use holtburger_content::{
-    ContentRepository, LandblockInteriorSystemAsset, LandblockPortalEndpoint,
+    ContentRepository, LandblockAsset, LandblockInteriorSystemAsset, LandblockPortalEndpoint,
 };
 use holtburger_core::{ContentAsset, ContentAssetRequest};
 use holtburger_dat::EOR_CELL_NAMESPACE;
@@ -14,6 +14,9 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 const CENSUS_CONCURRENCY: usize = 16;
+const FACILITY_HUB_LANDBLOCK_ID: u32 = 0x8a02_ffff;
+const FACILITY_HUB_STAIRCASE_CELL_ID: u32 = 0x8a02_010c;
+const FACILITY_HUB_ROOM_AFTER_DOOR_CELL_ID: u32 = 0x8a02_01c2;
 
 /// One canonical source batch encoded for the browser-free TypeScript trace evaluator.
 #[derive(Serialize)]
@@ -99,6 +102,96 @@ struct PortalCensusLandblock {
     source_aperture_triangle_count: usize,
     /// Largest source polygon vertex count on one directed portal.
     maximum_source_aperture_vertex_count: usize,
+    /// Raw authored visible-cell references, including malformed duplicates and dangling ids.
+    authored_visible_reference_count: usize,
+    /// Per-source effective PVS size after adding the source and deduplicating valid references.
+    effective_pvs_cell_count: PortalCensusDistribution,
+    /// Per-source size of the weak internal portal component containing that source.
+    internal_component_cell_count: PortalCensusDistribution,
+    /// Directed component portals retained when both endpoints belong to one source's effective PVS.
+    pvs_retained_internal_portal_count: PortalCensusDistribution,
+    /// Directed internal portals in each source's weak portal component before PVS filtering.
+    internal_component_portal_count: PortalCensusDistribution,
+    /// Authored visible-cell references that do not resolve to a resident EnvCell.
+    dangling_visible_reference_count: usize,
+    /// Repeated visible-cell references after their first occurrence in one source list.
+    duplicate_visible_reference_count: usize,
+    /// Source cells that explicitly include themselves in their authored visible list.
+    self_visible_reference_count: usize,
+    /// Directed internal portals whose target is absent from the source's effective PVS.
+    immediate_neighbor_omission_count: usize,
+    /// Replayable identity for every immediate-neighbor omission in this landblock.
+    immediate_neighbor_omissions: Vec<PortalCensusCellPair>,
+    /// Directed authored PVS references whose inverse reference is absent.
+    asymmetric_visible_reference_count: usize,
+    /// Named malformed pair retained only for the authoritative Facility Hub landblock.
+    facility_hub_fixture: Option<FacilityHubPvsFixture>,
+    /// Authored building transition records carrying a stab list.
+    building_portal_count: usize,
+    /// Raw authored building stab-list references.
+    building_stab_reference_count: usize,
+    /// Building stab-list references that do not resolve to a resident EnvCell.
+    dangling_building_stab_reference_count: usize,
+    /// Repeated building stab-list references after their first occurrence.
+    duplicate_building_stab_reference_count: usize,
+    /// Building portals whose stab list omits the portal's own target EnvCell.
+    building_stab_missing_target_count: usize,
+    /// Component cells omitted after adding the building portal target to its valid stab list.
+    building_component_omission_count: usize,
+    /// Per-building-portal effective candidate count after adding the target and deduplicating.
+    effective_building_stab_cell_count: PortalCensusDistribution,
+}
+
+/// Exact integer order statistics retained without assigning guessed weights.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PortalCensusDistribution {
+    minimum: usize,
+    median: usize,
+    p90: usize,
+    maximum: usize,
+    total: usize,
+}
+
+/// One directed authored portal whose target is absent from the source PVS.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortalCensusCellPair {
+    source_env_cell_id: String,
+    target_env_cell_id: String,
+}
+
+/// Authoritative Facility Hub asymmetry identified from the ACE repro and current EOR archive.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FacilityHubPvsFixture {
+    staircase_env_cell_id: String,
+    room_after_door_env_cell_id: String,
+    staircase_lists_room_after_door: bool,
+    room_after_door_lists_staircase: bool,
+    staircase_to_room_portal_distance: Option<usize>,
+    room_to_staircase_portal_distance: Option<usize>,
+}
+
+struct PortalPvsCensus {
+    authored_visible_reference_count: usize,
+    effective_pvs_cell_count: PortalCensusDistribution,
+    internal_component_cell_count: PortalCensusDistribution,
+    pvs_retained_internal_portal_count: PortalCensusDistribution,
+    internal_component_portal_count: PortalCensusDistribution,
+    dangling_visible_reference_count: usize,
+    duplicate_visible_reference_count: usize,
+    self_visible_reference_count: usize,
+    immediate_neighbor_omissions: Vec<PortalCensusCellPair>,
+    asymmetric_visible_reference_count: usize,
+    facility_hub_fixture: Option<FacilityHubPvsFixture>,
+    building_portal_count: usize,
+    building_stab_reference_count: usize,
+    dangling_building_stab_reference_count: usize,
+    duplicate_building_stab_reference_count: usize,
+    building_stab_missing_target_count: usize,
+    building_component_omission_count: usize,
+    effective_building_stab_cell_count: PortalCensusDistribution,
 }
 
 /// One archive record that could not participate in the structural census.
@@ -208,12 +301,7 @@ async fn export_portal_census(
             .map(|landblock_id| {
                 let runtime = runtime.clone();
                 tokio::spawn(async move {
-                    let result = runtime
-                        .load(ContentAssetRequest::LandblockInteriorSystem(landblock_id))
-                        .await
-                        .with_context(|| {
-                            format!("Could not load portal census landblock 0x{landblock_id:08X}")
-                        });
+                    let result = load_census_landblock(&runtime, landblock_id).await;
                     (landblock_id, result)
                 })
             })
@@ -221,19 +309,12 @@ async fn export_portal_census(
         for handle in handles {
             let (landblock_id, result) = handle.await.context("Portal census worker panicked")?;
             match result {
-                Ok(ContentAsset::LandblockInteriorSystem(Some(interior))) => {
-                    landblocks.push(census_landblock(&interior)?);
-                }
-                Ok(ContentAsset::LandblockInteriorSystem(None)) => {
-                    failures.push(PortalCensusFailure {
-                        landblock_id: format!("0x{landblock_id:08x}"),
-                        detail: "LandblockInfo index entry resolved without a CellLandblock."
-                            .to_string(),
-                    })
-                }
-                Ok(_) => unreachable!(
-                    "LandblockInteriorSystem request must return a LandblockInteriorSystem"
-                ),
+                Ok(Some(record)) => landblocks.push(record),
+                Ok(None) => failures.push(PortalCensusFailure {
+                    landblock_id: format!("0x{landblock_id:08x}"),
+                    detail: "LandblockInfo index entry resolved without a CellLandblock."
+                        .to_string(),
+                }),
                 Err(error) => failures.push(PortalCensusFailure {
                     landblock_id: format!("0x{landblock_id:08x}"),
                     detail: format!("{error:#}"),
@@ -249,7 +330,35 @@ async fn export_portal_census(
     })
 }
 
+async fn load_census_landblock(
+    runtime: &holtburger_core::ContentAssetRuntime,
+    landblock_id: u32,
+) -> anyhow::Result<Option<PortalCensusLandblock>> {
+    let landblock = runtime
+        .load(ContentAssetRequest::Landblock(landblock_id))
+        .await
+        .with_context(|| format!("Could not load portal census landblock 0x{landblock_id:08X}"))?;
+    let ContentAsset::Landblock(landblock) = landblock else {
+        unreachable!("Landblock request must return a Landblock")
+    };
+    let Some(landblock) = landblock else {
+        return Ok(None);
+    };
+    let interior = runtime
+        .load(ContentAssetRequest::LandblockInteriorSystem(landblock_id))
+        .await
+        .with_context(|| format!("Could not load portal census interior 0x{landblock_id:08X}"))?;
+    let ContentAsset::LandblockInteriorSystem(interior) = interior else {
+        unreachable!("LandblockInteriorSystem request must return a LandblockInteriorSystem")
+    };
+    let interior = interior.with_context(|| {
+        format!("Portal census landblock 0x{landblock_id:08X} lost its promised interior")
+    })?;
+    Ok(Some(census_landblock(&landblock, &interior)?))
+}
+
 fn census_landblock(
+    landblock: &LandblockAsset,
     interior: &LandblockInteriorSystemAsset,
 ) -> anyhow::Result<PortalCensusLandblock> {
     let cells_by_id = interior
@@ -333,6 +442,8 @@ fn census_landblock(
             maximum_source_aperture_vertex_count.max(vertex_count);
     }
     let distances = indoor_distances_from_outside(&outside_cells, &internal_targets);
+    let pvs = census_pvs(landblock, interior, &internal_targets);
+    let immediate_neighbor_omission_count = pvs.immediate_neighbor_omissions.len();
     Ok(PortalCensusLandblock {
         landblock_id: format!("0x{:08x}", interior.landblock_id),
         env_cell_count: interior.cells.len(),
@@ -356,7 +467,309 @@ fn census_landblock(
         source_aperture_vertex_count,
         source_aperture_triangle_count,
         maximum_source_aperture_vertex_count,
+        authored_visible_reference_count: pvs.authored_visible_reference_count,
+        effective_pvs_cell_count: pvs.effective_pvs_cell_count,
+        internal_component_cell_count: pvs.internal_component_cell_count,
+        pvs_retained_internal_portal_count: pvs.pvs_retained_internal_portal_count,
+        internal_component_portal_count: pvs.internal_component_portal_count,
+        dangling_visible_reference_count: pvs.dangling_visible_reference_count,
+        duplicate_visible_reference_count: pvs.duplicate_visible_reference_count,
+        self_visible_reference_count: pvs.self_visible_reference_count,
+        immediate_neighbor_omission_count,
+        immediate_neighbor_omissions: pvs.immediate_neighbor_omissions,
+        asymmetric_visible_reference_count: pvs.asymmetric_visible_reference_count,
+        facility_hub_fixture: pvs.facility_hub_fixture,
+        building_portal_count: pvs.building_portal_count,
+        building_stab_reference_count: pvs.building_stab_reference_count,
+        dangling_building_stab_reference_count: pvs.dangling_building_stab_reference_count,
+        duplicate_building_stab_reference_count: pvs.duplicate_building_stab_reference_count,
+        building_stab_missing_target_count: pvs.building_stab_missing_target_count,
+        building_component_omission_count: pvs.building_component_omission_count,
+        effective_building_stab_cell_count: pvs.effective_building_stab_cell_count,
     })
+}
+
+fn census_pvs(
+    landblock: &LandblockAsset,
+    interior: &LandblockInteriorSystemAsset,
+    internal_targets: &BTreeMap<u32, Vec<u32>>,
+) -> PortalPvsCensus {
+    let cell_ids = interior
+        .cells
+        .iter()
+        .map(|cell| cell.env_cell_id)
+        .collect::<BTreeSet<_>>();
+    let mut authored_by_cell = BTreeMap::<u32, BTreeSet<u32>>::new();
+    let mut effective_by_cell = BTreeMap::<u32, BTreeSet<u32>>::new();
+    let mut authored_visible_reference_count = 0;
+    let mut dangling_visible_reference_count = 0;
+    let mut duplicate_visible_reference_count = 0;
+    let mut self_visible_reference_count = 0;
+    for cell in &interior.cells {
+        authored_visible_reference_count += cell.visible_cell_ids.len();
+        let mut authored = BTreeSet::new();
+        for target in &cell.visible_cell_ids {
+            if !authored.insert(*target) {
+                duplicate_visible_reference_count += 1;
+                continue;
+            }
+            if *target == cell.env_cell_id {
+                self_visible_reference_count += 1;
+            }
+            if !cell_ids.contains(target) {
+                dangling_visible_reference_count += 1;
+            }
+        }
+        let mut effective = authored
+            .iter()
+            .filter(|target| cell_ids.contains(target))
+            .copied()
+            .collect::<BTreeSet<_>>();
+        effective.insert(cell.env_cell_id);
+        authored_by_cell.insert(cell.env_cell_id, authored);
+        effective_by_cell.insert(cell.env_cell_id, effective);
+    }
+
+    let component_by_cell = internal_components(&cell_ids, internal_targets);
+    let mut component_members = BTreeMap::<u32, BTreeSet<u32>>::new();
+    for (cell_id, component_id) in &component_by_cell {
+        component_members
+            .entry(*component_id)
+            .or_default()
+            .insert(*cell_id);
+    }
+    let mut component_portal_counts = BTreeMap::<u32, usize>::new();
+    for (source, targets) in internal_targets {
+        let component_id = component_by_cell[source];
+        for target in targets {
+            if component_by_cell.get(target) == Some(&component_id) {
+                *component_portal_counts.entry(component_id).or_default() += 1;
+            }
+        }
+    }
+
+    let mut effective_pvs_cell_counts = Vec::with_capacity(interior.cells.len());
+    let mut internal_component_cell_counts = Vec::with_capacity(interior.cells.len());
+    let mut retained_internal_portal_counts = Vec::with_capacity(interior.cells.len());
+    let mut internal_component_portal_counts = Vec::with_capacity(interior.cells.len());
+    for cell in &interior.cells {
+        let effective = &effective_by_cell[&cell.env_cell_id];
+        let component_id = component_by_cell[&cell.env_cell_id];
+        effective_pvs_cell_counts.push(effective.len());
+        internal_component_cell_counts.push(component_members[&component_id].len());
+        retained_internal_portal_counts.push(
+            effective
+                .iter()
+                .map(|source| {
+                    internal_targets
+                        .get(source)
+                        .into_iter()
+                        .flatten()
+                        .filter(|target| effective.contains(target))
+                        .count()
+                })
+                .sum(),
+        );
+        internal_component_portal_counts.push(
+            component_portal_counts
+                .get(&component_id)
+                .copied()
+                .unwrap_or(0),
+        );
+    }
+
+    let mut immediate_neighbor_omissions = Vec::new();
+    for (source, targets) in internal_targets {
+        let effective = &effective_by_cell[source];
+        for target in targets {
+            if !effective.contains(target) {
+                immediate_neighbor_omissions.push(PortalCensusCellPair {
+                    source_env_cell_id: format!("0x{source:08x}"),
+                    target_env_cell_id: format!("0x{target:08x}"),
+                });
+            }
+        }
+    }
+    immediate_neighbor_omissions.sort_by(|left, right| {
+        left.source_env_cell_id
+            .cmp(&right.source_env_cell_id)
+            .then_with(|| left.target_env_cell_id.cmp(&right.target_env_cell_id))
+    });
+    let mut asymmetric_visible_reference_count = 0;
+    for (source, targets) in &authored_by_cell {
+        for target in targets {
+            if *target == *source
+                || authored_by_cell
+                    .get(target)
+                    .is_none_or(|inverse| inverse.contains(source))
+            {
+                continue;
+            }
+            asymmetric_visible_reference_count += 1;
+        }
+    }
+    let facility_hub_fixture = (landblock.landblock_id == FACILITY_HUB_LANDBLOCK_ID).then(|| {
+        let staircase = &authored_by_cell[&FACILITY_HUB_STAIRCASE_CELL_ID];
+        let room_after_door = &authored_by_cell[&FACILITY_HUB_ROOM_AFTER_DOOR_CELL_ID];
+        FacilityHubPvsFixture {
+            staircase_env_cell_id: format!("0x{FACILITY_HUB_STAIRCASE_CELL_ID:08x}"),
+            room_after_door_env_cell_id: format!("0x{FACILITY_HUB_ROOM_AFTER_DOOR_CELL_ID:08x}"),
+            staircase_lists_room_after_door: staircase
+                .contains(&FACILITY_HUB_ROOM_AFTER_DOOR_CELL_ID),
+            room_after_door_lists_staircase: room_after_door
+                .contains(&FACILITY_HUB_STAIRCASE_CELL_ID),
+            staircase_to_room_portal_distance: shortest_portal_distance(
+                internal_targets,
+                FACILITY_HUB_STAIRCASE_CELL_ID,
+                FACILITY_HUB_ROOM_AFTER_DOOR_CELL_ID,
+            ),
+            room_to_staircase_portal_distance: shortest_portal_distance(
+                internal_targets,
+                FACILITY_HUB_ROOM_AFTER_DOOR_CELL_ID,
+                FACILITY_HUB_STAIRCASE_CELL_ID,
+            ),
+        }
+    });
+
+    let mut building_portal_count = 0;
+    let mut building_stab_reference_count = 0;
+    let mut dangling_building_stab_reference_count = 0;
+    let mut duplicate_building_stab_reference_count = 0;
+    let mut building_stab_missing_target_count = 0;
+    let mut building_component_omission_count = 0;
+    let mut effective_building_stab_cell_counts = Vec::new();
+    for portal in landblock
+        .buildings
+        .iter()
+        .flat_map(|building| &building.portals)
+    {
+        building_portal_count += 1;
+        building_stab_reference_count += portal.linked_env_cell_ids.len();
+        let mut authored = BTreeSet::new();
+        for target in &portal.linked_env_cell_ids {
+            if !authored.insert(*target) {
+                duplicate_building_stab_reference_count += 1;
+                continue;
+            }
+            if !cell_ids.contains(target) {
+                dangling_building_stab_reference_count += 1;
+            }
+        }
+        let target_env_cell_id =
+            (landblock.landblock_id & 0xffff_0000) | u32::from(portal.other_cell_id);
+        if !authored.contains(&target_env_cell_id) {
+            building_stab_missing_target_count += 1;
+        }
+        let mut effective = authored
+            .iter()
+            .filter(|target| cell_ids.contains(target))
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if cell_ids.contains(&target_env_cell_id) {
+            effective.insert(target_env_cell_id);
+            let component_id = component_by_cell[&target_env_cell_id];
+            building_component_omission_count += component_members[&component_id]
+                .iter()
+                .filter(|cell_id| !effective.contains(cell_id))
+                .count();
+        }
+        effective_building_stab_cell_counts.push(effective.len());
+    }
+
+    PortalPvsCensus {
+        authored_visible_reference_count,
+        effective_pvs_cell_count: census_distribution(effective_pvs_cell_counts),
+        internal_component_cell_count: census_distribution(internal_component_cell_counts),
+        pvs_retained_internal_portal_count: census_distribution(retained_internal_portal_counts),
+        internal_component_portal_count: census_distribution(internal_component_portal_counts),
+        dangling_visible_reference_count,
+        duplicate_visible_reference_count,
+        self_visible_reference_count,
+        immediate_neighbor_omissions,
+        asymmetric_visible_reference_count,
+        facility_hub_fixture,
+        building_portal_count,
+        building_stab_reference_count,
+        dangling_building_stab_reference_count,
+        duplicate_building_stab_reference_count,
+        building_stab_missing_target_count,
+        building_component_omission_count,
+        effective_building_stab_cell_count: census_distribution(
+            effective_building_stab_cell_counts,
+        ),
+    }
+}
+
+fn internal_components(
+    cell_ids: &BTreeSet<u32>,
+    internal_targets: &BTreeMap<u32, Vec<u32>>,
+) -> BTreeMap<u32, u32> {
+    let mut parents = cell_ids
+        .iter()
+        .map(|cell_id| (*cell_id, *cell_id))
+        .collect::<BTreeMap<_, _>>();
+    for (source, targets) in internal_targets {
+        for target in targets {
+            let source_root = component_root(&parents, *source);
+            let target_root = component_root(&parents, *target);
+            if source_root == target_root {
+                continue;
+            }
+            let first = source_root.min(target_root);
+            let second = source_root.max(target_root);
+            parents.insert(second, first);
+        }
+    }
+    cell_ids
+        .iter()
+        .map(|cell_id| (*cell_id, component_root(&parents, *cell_id)))
+        .collect()
+}
+
+fn component_root(parents: &BTreeMap<u32, u32>, cell_id: u32) -> u32 {
+    let mut root = cell_id;
+    loop {
+        let parent = parents[&root];
+        if parent == root {
+            return root;
+        }
+        root = parent;
+    }
+}
+
+fn shortest_portal_distance(
+    internal_targets: &BTreeMap<u32, Vec<u32>>,
+    source: u32,
+    target: u32,
+) -> Option<usize> {
+    let mut visited = BTreeSet::from([source]);
+    let mut pending = VecDeque::from([(source, 0)]);
+    while let Some((cell_id, distance)) = pending.pop_front() {
+        if cell_id == target {
+            return Some(distance);
+        }
+        for neighbor in internal_targets.get(&cell_id).into_iter().flatten() {
+            if visited.insert(*neighbor) {
+                pending.push_back((*neighbor, distance + 1));
+            }
+        }
+    }
+    None
+}
+
+fn census_distribution(mut values: Vec<usize>) -> PortalCensusDistribution {
+    if values.is_empty() {
+        return PortalCensusDistribution::default();
+    }
+    values.sort_unstable();
+    let last = values.len() - 1;
+    PortalCensusDistribution {
+        minimum: values[0],
+        median: values[last / 2],
+        p90: values[last * 90 / 100],
+        maximum: values[last],
+        total: values.iter().sum(),
+    }
 }
 
 fn indoor_distances_from_outside(

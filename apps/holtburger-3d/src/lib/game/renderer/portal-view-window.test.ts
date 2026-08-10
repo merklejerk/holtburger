@@ -468,6 +468,7 @@ describe("portal window arena", () => {
 				fixture.projection,
 				preparePortalApertureProjectionInput(fixture.aperture),
 				fixture.near,
+				null,
 				0,
 				null,
 			);
@@ -499,6 +500,7 @@ describe("portal window arena", () => {
 				IDENTITY_PROJECTION,
 				preparePortalApertureProjectionInput(coverageInput),
 				false,
+				null,
 				0,
 				null,
 			),
@@ -559,6 +561,7 @@ describe("portal window arena", () => {
 				IDENTITY_PROJECTION,
 				preparePortalApertureProjectionInput(candidate),
 				false,
+				null,
 				0,
 				null,
 			);
@@ -596,6 +599,7 @@ describe("portal window arena", () => {
 				IDENTITY_PROJECTION,
 				preparePortalApertureProjectionInput(aperture(points, indices)),
 				false,
+				null,
 				0,
 				null,
 			);
@@ -626,6 +630,7 @@ describe("portal window arena", () => {
 					IDENTITY_PROJECTION,
 					preparePortalApertureProjectionInput(inheritedInput),
 					false,
+					null,
 					0,
 					null,
 				)
@@ -638,6 +643,7 @@ describe("portal window arena", () => {
 				IDENTITY_PROJECTION,
 				preparePortalApertureProjectionInput(candidateInput),
 				false,
+				null,
 				0,
 				null,
 			);
@@ -650,15 +656,23 @@ describe("portal window arena", () => {
 });
 
 function arenaFixture(): PortalWindowArena {
-	return new PortalWindowArena({
-		maximumApertureVertexCount: 64,
-		maximumFragmentCount: 1_024,
-		maximumTemporaryFragmentCount: 128,
-		maximumTemporaryVertexCount: 8_192,
-		maximumVertexCount: 8_192,
-		maximumVerticesPerFragment: 64,
-		maximumWindowCount: 256,
-	});
+	return new PortalWindowArena(
+		{
+			maximumApertureVertexCount: 64,
+			maximumFragmentCount: 1_024,
+			maximumTemporaryFragmentCount: 128,
+			maximumTemporaryVertexCount: 8_192,
+			maximumVertexCount: 8_192,
+			maximumVerticesPerFragment: 64,
+			maximumWindowCount: 256,
+		},
+		{
+			crossingCount: 0,
+			maximumEntryCount: 0,
+			maximumFragmentCount: 0,
+			maximumVertexCount: 0,
+		},
+	);
 }
 
 function arenaWindowSnapshot(

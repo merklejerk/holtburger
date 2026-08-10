@@ -40,6 +40,30 @@ export interface PortalWindowArenaCapacity {
 	readonly maximumWindowCount: number;
 }
 
+/** Fixed storage for ordinary per-camera projected aperture forms. */
+export interface PortalProjectedApertureCacheCapacity {
+	/** Stable directed crossings addressable by the cache. */
+	readonly crossingCount: number;
+	/** Maximum crossing forms retained by the performance-only cache. */
+	readonly maximumEntryCount: number;
+	/** Maximum normalized fragments retained by the performance-only cache. */
+	readonly maximumFragmentCount: number;
+	/** Maximum normalized vertices retained by the performance-only cache. */
+	readonly maximumVertexCount: number;
+}
+
+/**
+ * Trace-selected cache storage; exhaustion only resumes ordinary projection.
+ *
+ * The retained risk corpus reached 149 fragments and 483 vertices in one pose. Binary-rounded
+ * headroom keeps this optimization independent from correctness capacity and topology size.
+ */
+export const PORTAL_PROJECTED_APERTURE_CACHE_STORAGE_CAPACITY = Object.freeze({
+	maximumEntryCount: 256,
+	maximumFragmentCount: 256,
+	maximumVertexCount: 1_024,
+});
+
 /** Arena exhaustion is handled only at the culler's complete-frontier transaction boundary. */
 export class PortalWindowArenaCapacityExceeded extends Error {
 	/** Capacity dimension whose fixed backing store could not accept the operation. */
@@ -63,10 +87,40 @@ export interface PortalArenaWindowReader {
 	vertexY(window: number, fragment: number, vertex: number): number;
 }
 
+/** Convex NDC fragments accepted by inherited-window intersection. */
+interface PortalProjectedApertureReader {
+	readonly fragmentCount: number;
+	fragmentVertexCount(fragment: number): number;
+	vertexX(fragment: number, vertex: number): number;
+	vertexY(fragment: number, vertex: number): number;
+	writeBounds(
+		fragment: number,
+		target: Float64Array,
+		offset: number,
+		meter: PortalWindowPrimitiveMeter | null,
+	): void;
+}
+
+/** Projection meter that preserves the pre-cache cutoff while counting executed work separately. */
+export interface PortalProjectionCacheMeter extends PortalWindowPrimitiveMeter {
+	/** Primitive operations actually executed by the current camera plan. */
+	executedPrimitiveCount(): number;
+	/** Charge skipped projection work only to the compatibility cutoff budget. */
+	consumeCachedProjectionBudget(count: number): void;
+}
+
 /** High-water and backing-store facts updated without producing frame records. */
 export interface PortalWindowArenaTrace {
 	readonly capacityBytes: number;
 	readonly fragmentHighWaterCount: number;
+	readonly projectionCacheCapacityBytes: number;
+	readonly projectionCacheColdBypassCount: number;
+	readonly projectionCacheCapacityBypassCount: number;
+	readonly projectionCacheDeclinedPromotionCount: number;
+	readonly projectionCacheFragmentHighWaterCount: number;
+	readonly projectionCacheHitCount: number;
+	readonly projectionCachePromotionCount: number;
+	readonly projectionCacheVertexHighWaterCount: number;
 	readonly temporaryFragmentHighWaterCount: number;
 	readonly temporaryVertexHighWaterCount: number;
 	readonly vertexHighWaterCount: number;
@@ -76,10 +130,243 @@ export interface PortalWindowArenaTrace {
 interface MutablePortalWindowArenaTrace {
 	capacityBytes: number;
 	fragmentHighWaterCount: number;
+	projectionCacheCapacityBytes: number;
+	projectionCacheColdBypassCount: number;
+	projectionCacheCapacityBypassCount: number;
+	projectionCacheDeclinedPromotionCount: number;
+	projectionCacheFragmentHighWaterCount: number;
+	projectionCacheHitCount: number;
+	projectionCachePromotionCount: number;
+	projectionCacheVertexHighWaterCount: number;
 	temporaryFragmentHighWaterCount: number;
 	temporaryVertexHighWaterCount: number;
 	vertexHighWaterCount: number;
 	windowHighWaterCount: number;
+}
+
+const PROJECTION_CACHE_COLD = 0;
+const PROJECTION_CACHE_HIT = 1;
+const PROJECTION_CACHE_PROMOTE = 2;
+
+const PROJECTION_CACHE_OBSERVED_ONCE = 1;
+const PROJECTION_CACHE_OBSERVED_TWICE = 2;
+const PROJECTION_CACHE_RETAINED = 3;
+const PROJECTION_CACHE_DECLINED = 4;
+
+/** Generation-stamped ordinary projection cache with lazy third-use promotion. */
+class PortalProjectedApertureCache implements PortalProjectedApertureReader {
+	readonly #entryByCrossing: Uint16Array;
+	readonly #entryFirstFragment: Uint32Array;
+	readonly #entryFragmentCount: Uint32Array;
+	readonly #entryProjectionPrimitiveCount: Uint32Array;
+	readonly #fragmentFirstVertex: Uint32Array;
+	readonly #fragmentVertexCount: Uint32Array;
+	readonly #generationByCrossing: Uint32Array;
+	readonly #stateByCrossing: Uint8Array;
+	readonly #trace: MutablePortalWindowArenaTrace;
+	readonly #vertexX: Float64Array;
+	readonly #vertexY: Float64Array;
+	#activeFirstFragment = 0;
+	#entryTail = 0;
+	fragmentCount = 0;
+	#fragmentTail = 0;
+	#generation = 0;
+	projectedPrimitiveCount = 0;
+	#vertexTail = 0;
+
+	constructor(
+		capacity: PortalProjectedApertureCacheCapacity,
+		trace: MutablePortalWindowArenaTrace,
+	) {
+		validateProjectionCacheCapacity(capacity);
+		this.#entryByCrossing = new Uint16Array(capacity.crossingCount);
+		this.#entryFirstFragment = new Uint32Array(capacity.maximumEntryCount);
+		this.#entryFragmentCount = new Uint32Array(capacity.maximumEntryCount);
+		this.#entryProjectionPrimitiveCount = new Uint32Array(
+			capacity.maximumEntryCount,
+		);
+		this.#fragmentFirstVertex = new Uint32Array(capacity.maximumFragmentCount);
+		this.#fragmentVertexCount = new Uint32Array(capacity.maximumFragmentCount);
+		this.#generationByCrossing = new Uint32Array(capacity.crossingCount);
+		this.#stateByCrossing = new Uint8Array(capacity.crossingCount);
+		this.#vertexX = new Float64Array(capacity.maximumVertexCount);
+		this.#vertexY = new Float64Array(capacity.maximumVertexCount);
+		this.#trace = trace;
+		trace.projectionCacheCapacityBytes = typedArrayBytes([
+			this.#entryByCrossing,
+			this.#entryFirstFragment,
+			this.#entryFragmentCount,
+			this.#entryProjectionPrimitiveCount,
+			this.#fragmentFirstVertex,
+			this.#fragmentVertexCount,
+			this.#generationByCrossing,
+			this.#stateByCrossing,
+			this.#vertexX,
+			this.#vertexY,
+		]);
+	}
+
+	beginFrame(): void {
+		this.#generation = (this.#generation + 1) >>> 0;
+		if (this.#generation === 0) {
+			this.#generationByCrossing.fill(0);
+			this.#generation = 1;
+		}
+		this.#entryTail = 0;
+		this.#fragmentTail = 0;
+		this.#vertexTail = 0;
+		this.#activeFirstFragment = 0;
+		this.fragmentCount = 0;
+		this.projectedPrimitiveCount = 0;
+		this.#trace.projectionCacheColdBypassCount = 0;
+		this.#trace.projectionCacheCapacityBypassCount = 0;
+		this.#trace.projectionCacheDeclinedPromotionCount = 0;
+		this.#trace.projectionCacheFragmentHighWaterCount = 0;
+		this.#trace.projectionCacheHitCount = 0;
+		this.#trace.projectionCachePromotionCount = 0;
+		this.#trace.projectionCacheVertexHighWaterCount = 0;
+	}
+
+	prepare(crossingId: number): 0 | 1 | 2 {
+		if (this.#generationByCrossing[crossingId] !== this.#generation) {
+			this.#generationByCrossing[crossingId] = this.#generation;
+			this.#stateByCrossing[crossingId] = PROJECTION_CACHE_OBSERVED_ONCE;
+			this.#trace.projectionCacheColdBypassCount += 1;
+			return PROJECTION_CACHE_COLD;
+		}
+		const state = this.#stateByCrossing[crossingId]!;
+		if (state === PROJECTION_CACHE_RETAINED) {
+			this.#activate(crossingId);
+			this.#trace.projectionCacheHitCount += 1;
+			return PROJECTION_CACHE_HIT;
+		}
+		if (state === PROJECTION_CACHE_DECLINED) {
+			this.#trace.projectionCacheCapacityBypassCount += 1;
+			return PROJECTION_CACHE_COLD;
+		}
+		if (state === PROJECTION_CACHE_OBSERVED_ONCE) {
+			this.#stateByCrossing[crossingId] = PROJECTION_CACHE_OBSERVED_TWICE;
+			this.#trace.projectionCacheColdBypassCount += 1;
+			return PROJECTION_CACHE_COLD;
+		}
+		if (state === PROJECTION_CACHE_OBSERVED_TWICE) {
+			this.#trace.projectionCachePromotionCount += 1;
+			return PROJECTION_CACHE_PROMOTE;
+		}
+		throw new Error(
+			`Portal projection cache crossing ${crossingId} has invalid state ${state}.`,
+		);
+	}
+
+	store(
+		crossingId: number,
+		source: PortalProjectedApertureReader,
+		projectedPrimitiveCount: number,
+		meter: PortalWindowPrimitiveMeter | null,
+	): void {
+		if (this.#stateByCrossing[crossingId] !== PROJECTION_CACHE_OBSERVED_TWICE) {
+			throw new Error(
+				`Portal projection cache crossing ${crossingId} was stored from an invalid state.`,
+			);
+		}
+		if (
+			!Number.isSafeInteger(projectedPrimitiveCount) ||
+			projectedPrimitiveCount < 0 ||
+			projectedPrimitiveCount > 0xffff_ffff
+		) {
+			throw new Error(
+				`Portal projection cache received invalid primitive count ${projectedPrimitiveCount}.`,
+			);
+		}
+		let requiredVertexCount = 0;
+		for (let fragment = 0; fragment < source.fragmentCount; fragment += 1) {
+			requiredVertexCount += source.fragmentVertexCount(fragment);
+		}
+		if (
+			this.#entryTail >= this.#entryFirstFragment.length ||
+			this.#fragmentTail + source.fragmentCount >
+				this.#fragmentFirstVertex.length ||
+			this.#vertexTail + requiredVertexCount > this.#vertexX.length
+		) {
+			this.#stateByCrossing[crossingId] = PROJECTION_CACHE_DECLINED;
+			this.#trace.projectionCacheDeclinedPromotionCount += 1;
+			return;
+		}
+		const entry = this.#entryTail;
+		const firstFragment = this.#fragmentTail;
+		this.#entryByCrossing[crossingId] = entry;
+		this.#entryFirstFragment[entry] = firstFragment;
+		this.#entryFragmentCount[entry] = source.fragmentCount;
+		this.#entryProjectionPrimitiveCount[entry] = projectedPrimitiveCount;
+		for (let fragment = 0; fragment < source.fragmentCount; fragment += 1) {
+			const vertexCount = source.fragmentVertexCount(fragment);
+			charge(meter, "projectionCacheFragmentWriteCount", 1);
+			charge(meter, "projectionCacheVertexWriteCount", vertexCount);
+			this.#fragmentFirstVertex[this.#fragmentTail] = this.#vertexTail;
+			this.#fragmentVertexCount[this.#fragmentTail] = vertexCount;
+			for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+				this.#vertexX[this.#vertexTail] = source.vertexX(fragment, vertex);
+				this.#vertexY[this.#vertexTail] = source.vertexY(fragment, vertex);
+				this.#vertexTail += 1;
+			}
+			this.#fragmentTail += 1;
+		}
+		this.#entryTail += 1;
+		this.#stateByCrossing[crossingId] = PROJECTION_CACHE_RETAINED;
+		this.#trace.projectionCacheFragmentHighWaterCount = this.#fragmentTail;
+		this.#trace.projectionCacheVertexHighWaterCount = this.#vertexTail;
+		this.#activeFirstFragment = firstFragment;
+		this.fragmentCount = source.fragmentCount;
+		this.projectedPrimitiveCount = projectedPrimitiveCount;
+	}
+
+	fragmentVertexCount(fragment: number): number {
+		return this.#fragmentVertexCount[this.#activeFirstFragment + fragment]!;
+	}
+
+	vertexX(fragment: number, vertex: number): number {
+		const cachedFragment = this.#activeFirstFragment + fragment;
+		return this.#vertexX[this.#fragmentFirstVertex[cachedFragment]! + vertex]!;
+	}
+
+	vertexY(fragment: number, vertex: number): number {
+		const cachedFragment = this.#activeFirstFragment + fragment;
+		return this.#vertexY[this.#fragmentFirstVertex[cachedFragment]! + vertex]!;
+	}
+
+	writeBounds(
+		fragment: number,
+		target: Float64Array,
+		offset: number,
+		meter: PortalWindowPrimitiveMeter | null,
+	): void {
+		const count = this.fragmentVertexCount(fragment);
+		charge(meter, "polygonBoundsVertexVisitCount", 1);
+		let minX = this.vertexX(fragment, 0);
+		let minY = this.vertexY(fragment, 0);
+		let maxX = minX;
+		let maxY = minY;
+		for (let vertex = 1; vertex < count; vertex += 1) {
+			charge(meter, "polygonBoundsVertexVisitCount", 1);
+			const x = this.vertexX(fragment, vertex);
+			const y = this.vertexY(fragment, vertex);
+			minX = Math.min(minX, x);
+			minY = Math.min(minY, y);
+			maxX = Math.max(maxX, x);
+			maxY = Math.max(maxY, y);
+		}
+		target[offset] = minX;
+		target[offset + 1] = minY;
+		target[offset + 2] = maxX;
+		target[offset + 3] = maxY;
+	}
+
+	#activate(crossingId: number): void {
+		const entry = this.#entryByCrossing[crossingId]!;
+		this.#activeFirstFragment = this.#entryFirstFragment[entry]!;
+		this.fragmentCount = this.#entryFragmentCount[entry]!;
+		this.projectedPrimitiveCount = this.#entryProjectionPrimitiveCount[entry]!;
+	}
 }
 
 /**
@@ -110,6 +397,7 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 	readonly #ndcAy: Float64Array;
 	readonly #ndcBx: Float64Array;
 	readonly #ndcBy: Float64Array;
+	readonly #projectionCache: PortalProjectedApertureCache;
 	readonly #trace: MutablePortalWindowArenaTrace;
 	readonly #vertexX: Float64Array;
 	readonly #vertexY: Float64Array;
@@ -121,7 +409,10 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 	#vertexCount = 0;
 	#windowCount = 0;
 
-	constructor(capacity: PortalWindowArenaCapacity) {
+	constructor(
+		capacity: PortalWindowArenaCapacity,
+		projectionCacheCapacity: PortalProjectedApertureCacheCapacity,
+	) {
 		validateCapacity(capacity);
 		this.#capacity = capacity;
 		this.#apertureX = new Float64Array(capacity.maximumApertureVertexCount);
@@ -177,11 +468,24 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 				this.#builderA.capacityBytes +
 				this.#builderB.capacityBytes,
 			fragmentHighWaterCount: 0,
+			projectionCacheCapacityBytes: 0,
+			projectionCacheColdBypassCount: 0,
+			projectionCacheCapacityBypassCount: 0,
+			projectionCacheDeclinedPromotionCount: 0,
+			projectionCacheFragmentHighWaterCount: 0,
+			projectionCacheHitCount: 0,
+			projectionCachePromotionCount: 0,
+			projectionCacheVertexHighWaterCount: 0,
 			temporaryFragmentHighWaterCount: 0,
 			temporaryVertexHighWaterCount: 0,
 			vertexHighWaterCount: 0,
 			windowHighWaterCount: 0,
 		};
+		this.#projectionCache = new PortalProjectedApertureCache(
+			projectionCacheCapacity,
+			this.#trace,
+		);
+		this.#trace.capacityBytes += this.#trace.projectionCacheCapacityBytes;
 	}
 
 	get admittedCoverage(): number {
@@ -208,6 +512,7 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 		this.#vertexCount = 0;
 		this.#admittedCoverage = NO_PORTAL_ARENA_WINDOW;
 		this.#admittedDelta = NO_PORTAL_ARENA_WINDOW;
+		this.#projectionCache.beginFrame();
 		this.#builderA.reset();
 		this.#builderB.reset();
 		this.#trace.fragmentHighWaterCount = 0;
@@ -339,8 +644,9 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 		projection: PreparedPortalProjection,
 		aperture: PreparedPortalApertureProjectionInput,
 		nearClipRays: boolean,
+		ordinaryProjectionCacheCrossingId: number | null,
 		minimumNdcArea: number,
-		meter: PortalWindowPrimitiveMeter | null,
+		meter: PortalProjectionCacheMeter | null,
 	): boolean {
 		this.#requireWindow(inherited);
 		if (coverage !== NO_PORTAL_ARENA_WINDOW) this.#requireWindow(coverage);
@@ -348,9 +654,38 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 		this.#admittedDelta = NO_PORTAL_ARENA_WINDOW;
 		this.#builderA.reset();
 		this.#builderB.reset();
-		this.#projectAperture(projection, aperture, nearClipRays, meter);
-		if (this.#builderA.fragmentCount === 0) return false;
-		this.#intersectWindow(inherited, this.#builderA, this.#builderB, meter);
+		let projected: PortalProjectedApertureReader = this.#builderA;
+		let cacheState = PROJECTION_CACHE_COLD;
+		if (ordinaryProjectionCacheCrossingId !== null) {
+			cacheState = this.#projectionCache.prepare(
+				ordinaryProjectionCacheCrossingId,
+			);
+			if (cacheState === PROJECTION_CACHE_HIT) {
+				projected = this.#projectionCache;
+				meter?.consumeCachedProjectionBudget(
+					this.#projectionCache.projectedPrimitiveCount,
+				);
+			}
+		}
+		if (cacheState !== PROJECTION_CACHE_HIT) {
+			const executedBeforeProjection = meter?.executedPrimitiveCount() ?? 0;
+			this.#projectAperture(projection, aperture, nearClipRays, meter);
+			const projectedPrimitiveCount =
+				(meter?.executedPrimitiveCount() ?? 0) - executedBeforeProjection;
+			if (
+				cacheState === PROJECTION_CACHE_PROMOTE &&
+				ordinaryProjectionCacheCrossingId !== null
+			) {
+				this.#projectionCache.store(
+					ordinaryProjectionCacheCrossingId,
+					this.#builderA,
+					projectedPrimitiveCount,
+					meter,
+				);
+			}
+		}
+		if (projected.fragmentCount === 0) return false;
+		this.#intersectWindow(inherited, projected, this.#builderB, meter);
 		if (this.#builderB.fragmentCount === 0) return false;
 		if (this.#builderB.ndcArea() < minimumNdcArea) return false;
 		if (coverage === NO_PORTAL_ARENA_WINDOW) {
@@ -508,7 +843,7 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 
 	#intersectWindow(
 		window: number,
-		clip: PolygonBuilder,
+		clip: PortalProjectedApertureReader,
 		output: PolygonBuilder,
 		meter: PortalWindowPrimitiveMeter | null,
 	): void {
@@ -1765,5 +2100,22 @@ function validateCapacity(capacity: PortalWindowArenaCapacity): void {
 				`Portal window arena ${name} must be an integer at least ${minimum}.`,
 			);
 		}
+	}
+}
+
+function validateProjectionCacheCapacity(
+	capacity: PortalProjectedApertureCacheCapacity,
+): void {
+	for (const [name, value] of Object.entries(capacity)) {
+		if (!Number.isSafeInteger(value) || value < 0) {
+			throw new Error(
+				`Portal projection cache capacity ${name} must be a non-negative safe integer.`,
+			);
+		}
+	}
+	if (capacity.maximumEntryCount > 0x1_0000) {
+		throw new Error(
+			"Portal projection cache maximumEntryCount exceeds Uint16 entry storage.",
+		);
 	}
 }

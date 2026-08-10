@@ -236,15 +236,23 @@ describe("finite portal near-clip-volume intersection", () => {
 });
 
 function nearClassifierArena(): PortalWindowArena {
-	return new PortalWindowArena({
-		maximumApertureVertexCount: 16,
-		maximumFragmentCount: 16,
-		maximumTemporaryFragmentCount: 16,
-		maximumTemporaryVertexCount: 128,
-		maximumVertexCount: 128,
-		maximumVerticesPerFragment: 16,
-		maximumWindowCount: 16,
-	});
+	return new PortalWindowArena(
+		{
+			maximumApertureVertexCount: 16,
+			maximumFragmentCount: 16,
+			maximumTemporaryFragmentCount: 16,
+			maximumTemporaryVertexCount: 128,
+			maximumVertexCount: 128,
+			maximumVerticesPerFragment: 16,
+			maximumWindowCount: 16,
+		},
+		{
+			crossingCount: 0,
+			maximumEntryCount: 0,
+			maximumFragmentCount: 0,
+			maximumVertexCount: 0,
+		},
+	);
 }
 
 function triangleAperture(

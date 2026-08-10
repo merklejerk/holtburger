@@ -118,6 +118,20 @@ The EnvCell `visible_cells` list is preserved as potentially-visible source data
 preload or candidate provenance, but it is not a hard rejection filter for portal traversal.
 Runtime visibility follows proven directed topology and per-view aperture windows.
 
+Retail does apply these authored lists as a hard working-set bound before following portals
+(`CEnvCell::grab_visible_cells`, `acclient.c:335978-335986`, and `PView::ClipPortals`,
+`acclient.c:441813-441858`). Holtburger evaluated that policy rather than assuming the lists were
+complete. An archive census found no missing direct portal neighbors, but it found 294,751
+directional PVS asymmetries. The authoritative Facility Hub omission is twelve portal steps from
+its inverse-listed cell, so direct-neighbor closure cannot repair it.
+
+Across 576 deterministic camera poses, hard authored filtering preserved the exact atlas selection
+for 364 of 456 indoor poses and removed 220 selected-scope occurrences in the remainder. The
+selection-preserving Facility and large-dungeon strata removed no traversal or projection work.
+Consequently hard PVS rejection is neither a no-regression optimization nor a demonstrated Pareto
+improvement. Building-portal `stab_list` remains host-side source data and was censused separately;
+it is not synthesized into the frontend topology solely for this experiment.
+
 ## Runtime Spatial Queries
 
 Point lookup is deliberately not a first-match operation:
@@ -172,6 +186,20 @@ Production uses typed-array topology indexes, queues, and polygon arenas. At fix
 capacity an accepted camera update creates no portal-owned JavaScript records and grows no arena.
 A separate readable immutable traversal is retained only as a differential oracle. It shares
 projection inputs and tolerances with production, but not clipping/admission control flow.
+
+Ordinary crossings split camera-dependent aperture projection from route-dependent inherited-window
+intersection. A generation-stamped cache indexed by stable crossing id retains the normalized NDC
+aperture only when traversal attempts the same crossing for a third route in one camera plan; any
+fourth and later routes intersect that retained aperture directly. Waiting until the third attempt
+avoids the measured second-use case where a cache write had no later consumer. Near-plane-straddling
+forms bypass the cache because the retained corpus found no repeated near-plane projection form.
+
+The cache is performance-only fixed storage: at most 256 crossing forms, 256 fragments, and 1,024
+vertices. Its topology-lifetime crossing metadata and payload consumed 19--90 KiB across the
+retained landblocks. Exhaustion declines only that promotion and resumes ordinary projection; it
+cannot truncate visibility, grow an arena, or allocate a frame record. Cache hits still charge the
+original projection cost to the established cutoff budget, so reuse cannot admit a deeper complete
+frontier merely by making projection cheaper.
 
 Final crossing materialization is adaptive. Sparse selections enumerate only the already-packed
 outgoing ranges of selected scopes, mark accepted crossings in a one-bit-per-crossing buffer, and

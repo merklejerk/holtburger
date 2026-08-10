@@ -566,6 +566,24 @@ describe("SceneGraph", () => {
 		expect(changed.outgoing(one)).toEqual([]);
 	});
 
+	it("owns one defensive aperture copy per immutable producer aperture", () => {
+		const scene = new SceneGraph();
+		const aperture = portalAperture("shared");
+		const outdoor = outdoorScope();
+		const cell = envCellScope("0x0001ffff", "cell");
+		upsertCrossing(scene, "first", outdoor, cell, aperture);
+		upsertCrossing(scene, "second", cell, outdoor, aperture);
+
+		aperture.vertices[0] = 100;
+		const [first, second] = scene.getPortalTopologyView().crossings;
+		if (!first || !second) throw new Error("Expected two portal crossings.");
+
+		expect(first.sourceAperture).not.toBe(aperture);
+		expect(first.sourceAperture).toBe(first.visibilityAperture);
+		expect(first.sourceAperture).toBe(second.sourceAperture);
+		expect(first.sourceAperture.vertices[0]).toBe(0);
+	});
+
 	it("flat selection includes every resident scope and performs zero portal work", () => {
 		const scene = new SceneGraph();
 		const outdoor = createBoundedRoot(scene, "0x0001ffff", null);
@@ -728,15 +746,8 @@ function upsertCrossing(
 	id: string,
 	source: SceneScope,
 	target: SceneScope,
+	aperture = portalAperture(id),
 ): void {
-	const aperture = {
-		id: `portal-aperture:${id}` as const,
-		indices: new Uint32Array(),
-		landblockId: "0x0001ffff" as const,
-		landblockBounds: AABB3.zero(),
-		plane: { d: 0, normal: new Vec3(1, 0, 0) },
-		vertices: new Float32Array(),
-	};
 	const crossing: ScenePortalCrossingInput = {
 		acceptedSide: "positive",
 		exactMatch: true,
@@ -753,6 +764,19 @@ function upsertCrossing(
 		visibilityAperture: aperture,
 	};
 	scene.upsertPortalCrossing(crossing);
+}
+
+function portalAperture(
+	id: string,
+): ScenePortalCrossingInput["sourceAperture"] {
+	return {
+		id: `portal-aperture:${id}` as const,
+		indices: new Uint32Array([0, 1, 2]),
+		landblockId: "0x0001ffff" as const,
+		landblockBounds: AABB3.zero(),
+		plane: { d: 0, normal: new Vec3(1, 0, 0) },
+		vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+	};
 }
 
 describe("SceneGraph attachment dry run", () => {

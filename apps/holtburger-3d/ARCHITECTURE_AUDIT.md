@@ -256,6 +256,12 @@ This preprocessing occurs once at the app-local host boundary. The renderer cons
 directly; it does not recompute reciprocal intersections per frame. Effective apertures constrain
 visibility and masks only. They do not alter containment, collision, or portal-crossing queries.
 
+The browser realizer projects each indexed authored or synthesized aperture into one producer
+object shared by its directed crossing references. `SceneGraph` retains one defensive copy per
+producer object, so topology preparation can reuse aperture identity without surrendering the
+scene boundary's ownership guarantee. This does not add an aperture registry or change the host
+record: the weak copy association expires with its producer artifact.
+
 Indoor reciprocal seams join one visibility island only when the host proves exact reciprocal
 identity, `ExactMatch` on both sides, equivalent apertures, opposed accepted half-spaces, and cell
 bounds separated by the portal plane. Any failed proof remains an explicit topology boundary.

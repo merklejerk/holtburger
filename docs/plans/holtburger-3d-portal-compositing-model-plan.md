@@ -2930,32 +2930,32 @@ Results from this opening slice may resteer which 12A traces remain worth produc
 
 #### 12D. Inspect topology/load-time preparation
 
-- [ ] Itemize topology-event work currently repeated in the browser: scope/crossing sorting, dense
+- [x] Itemize topology-event work currently repeated in the browser: scope/crossing sorting, dense
       ID assignment, reciprocal resolution, outgoing CSR construction, landblock coordinate
       projection inputs, aperture fan expansion, and selected crossing-stream packing.
-- [ ] Compare keeping that work in the renderer against emitting a versioned packed topology index
+- [x] Compare keeping that work in the renderer against emitting a versioned packed topology index
       from the host assembler. Count transferred bytes, decode validation, retained copies, and
       topology rebuild operations; do not move work across the boundary without a net structural
       reduction.
-- [ ] Evaluate prepacked static crossing triangles or indexable aperture ranges only if WebGL2 can
+- [x] Evaluate prepacked static crossing triangles or indexable aperture ranges only if WebGL2 can
       consume the result without submitting all unselected crossings or creating a draw per portal.
-- [ ] Inspect preassembled scope-to-static-contribution ranges as a way to reduce per-frame scene
+- [x] Inspect preassembled scope-to-static-contribution ranges as a way to reduce per-frame scene
       resolution while preserving existing material/mesh batch coalescing. Reject any representation
       that creates more within-domain batches.
-- [ ] Do not add caching for additional scene domains in this phase. The exterior is already drawn
+- [x] Do not add caching for additional scene domains in this phase. The exterior is already drawn
       once into its selected outdoor tile; any cross-frame exterior reuse requires a separate camera,
       depth, weather, and dynamic-content invalidation proof.
 
 #### 12E. Resteer, implement, and clean up
 
-- [ ] Rank avenues by removed CPU-owned primitive operations, comparisons, scans, and accepted-frame
+- [x] Rank avenues by removed CPU-owned primitive operations, comparisons, scans, and accepted-frame
       allocations, with GPU commands, transferred bytes, retained memory, and batch count as
       independent veto dimensions.
-- [ ] Implement one accepted avenue at a time, re-run immutable/arena differential corpora and
+- [x] Implement one accepted avenue at a time, re-run immutable/arena differential corpora and
       deterministic archive traces, and retain before/after operation vectors in this phase.
-- [ ] Delete any diagnostic field, counterfactual evaluator, or candidate representation that has no
+- [x] Delete any diagnostic field, counterfactual evaluator, or candidate representation that has no
       remaining decision consumer after resteering.
-- [ ] Update `docs/portal_rendering.md`, the architecture audit, and this ledger with the selected
+- [x] Update `docs/portal_rendering.md`, the architecture audit, and this ledger with the selected
       optimization contracts and rejected alternatives.
 
 ### Acceptance Criteria
@@ -3054,6 +3054,26 @@ Results from this opening slice may resteer which 12A traces remain worth produc
   `0x599B`, `0xA092`, and `0xDA55` are exactly flat. Cache storage is 19--90 KiB, no retained pose
   exhausts it, near-plane projection remains uncached, the prior complete-frontier cutoff is charged
   compatibly, and the immutable/arena differential corpus remains equivalent.
+- 2026-08-10: Phase 12D keeps dynamic global topology indexing in the browser. The host emits closed
+  per-landblock records, while the renderer indexes the asynchronously changing union with one
+  outdoor scope; a versioned packed host chunk would still require browser stitching, global dense
+  ids, reciprocal and outgoing-index validation, and topology-revision rebuilds while adding bytes
+  to the measured 29,060,774-byte nine-landblock source-batch transfer. Renderer-side canonical
+  sorting also remains because `SceneTopologyView` deliberately admits storage-order-independent
+  producers and the differential corpus exercises that metamorphism; adding a second branded fast
+  view is not justified by a surviving consumer. Prepacked crossing triangles are also rejected
+  because the one selected stream would become either an all-crossing upload or a portal-granular
+  draw schedule. Preassembled scope-to-static ranges cannot replace exact node frustum selection and
+  would either over-submit residents or encode scope into otherwise compatible physical batches.
+- 2026-08-10: The selected Phase 12D ownership collapse interns scene apertures at EnvCell
+  realization and shares one `SceneGraph` defensive copy per producer aperture. Across the combined
+  nine-landblock risk set, retained graph aperture geometry falls from 4,354,800 to 2,289,000 bytes
+  (47.4%) and distinct aperture objects from 35,732 to the 18,562 authored identities. Projection
+  preparation falls from 17,866 to 17,065 aperture forms, removing 21,879 convexity vertex tests and
+  78,794 merge edge-pair tests. Topology dimensions (7,688 scopes and 17,866 crossings), transfer,
+  topology rebuild count, per-frame packing, uploads, commands, batches, and correctness capacity are
+  unchanged. The temporary accounting fields were deleted after the paired traces; focused
+  ownership tests and the existing symbolic/differential suites retain the contract.
 
 ## Risks and Mitigations
 

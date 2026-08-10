@@ -6,6 +6,8 @@ import { AABB3, Mat4, Vec3 } from "../math/types";
 import type {
 	ResolvedEnvCellLayerSource,
 	ResolvedEnvCellPresentation,
+	ResolvedPortalAperture,
+	ResolvedPortalCrossing,
 } from "../resolution/landblock-layer";
 import type {
 	ResolvedGeometry,
@@ -13,7 +15,10 @@ import type {
 	ResolvedObjectPresentation,
 } from "../resolution/presentation";
 import { LandblockLayerKind } from "../runtime/scene-interest";
-import { EnvCellGeometryPreparer } from "../runtime/env-cell-realization";
+import {
+	createEnvCellEnvironmentArtifact,
+	EnvCellGeometryPreparer,
+} from "../runtime/env-cell-realization";
 import { prepareStaticObjectGeometry } from "./static-object-geometry-worker";
 import { assembleStaticObjectArtifact } from "./static-object-artifact";
 import { planEnvCellMaterialization } from "./env-cell-materialization";
@@ -212,6 +217,37 @@ describe("planEnvCellMaterialization", () => {
 		).toThrow(/material count does not match/);
 	});
 
+	it("realizes one scene aperture object for all indexed crossing references", () => {
+		const aperture: ResolvedPortalAperture = {
+			id: "portal-aperture:shared",
+			kind: "env-cell",
+			landblockBounds: bounds(),
+			plane: { d: 0, normal: new Vec3(1, 0, 0) },
+			polygonIds: [1],
+			positions: new Float32Array([0, 0, 0, 0, 1, 0, 0, 0, 1]),
+			triangleIndices: new Uint32Array([0, 1, 2]),
+		};
+		const cellScope = {
+			envCellId: "0x00010100",
+			kind: "env-cell",
+			landblockId: LANDBLOCK_ID,
+		} as const;
+		const crossings: ResolvedPortalCrossing[] = [
+			portalCrossing("outside", { kind: "outdoor" }, cellScope),
+			portalCrossing("inside", cellScope, { kind: "outdoor" }),
+		];
+		const artifact = createEnvCellEnvironmentArtifact(
+			planEnvCellMaterialization(
+				layer([cell("0x00010100", Mat4.identity(), [])], [aperture], crossings),
+			),
+		);
+		const [outside, inside] = artifact.crossings;
+		if (!outside || !inside) throw new Error("Expected two portal crossings.");
+
+		expect(outside.sourceAperture).toBe(outside.visibilityAperture);
+		expect(outside.sourceAperture).toBe(inside.sourceAperture);
+	});
+
 	it("omits retail no-texture surfaces from EnvCell shell draw ranges", () => {
 		const sourceCell = cell("0x00010100", Mat4.identity(), []);
 		const shellGeometry = twoTriangleGeometry();
@@ -260,13 +296,15 @@ describe("planEnvCellMaterialization", () => {
 
 function layer(
 	cells: readonly ResolvedEnvCellPresentation[],
+	portalApertures: readonly ResolvedPortalAperture[] = [],
+	portalCrossings: readonly ResolvedPortalCrossing[] = [],
 ): ResolvedEnvCellLayerSource {
 	return {
 		kind: LandblockLayerKind.EnvCells,
 		landblockId: LANDBLOCK_ID,
 		cells,
-		portalApertures: [],
-		portalCrossings: [],
+		portalApertures,
+		portalCrossings,
 		diagnostics: {
 			unresolvedOutsideEndpoints: [],
 			unresolvedVisibilityReciprocals: [],
@@ -276,6 +314,36 @@ function layer(
 				synthesizedIntersectionGeometries: 0,
 			},
 		},
+	};
+}
+
+function portalCrossing(
+	id: string,
+	source: ResolvedPortalCrossing["source"],
+	target: ResolvedPortalCrossing["target"],
+): ResolvedPortalCrossing {
+	return {
+		acceptedSide: "positive",
+		exactMatch: true,
+		id: `portal-crossing:${id}`,
+		maskDepthPolicy: "allow-equal-depth",
+		reciprocalCrossingIndex: null,
+		source,
+		sourceApertureIndex: 0,
+		sourcePortal: {
+			envCellId: "0x00010100",
+			flags: 0,
+			kind: "env-cell",
+			polygonId: 1,
+			portalIndex: 0,
+		},
+		spatialRelationship: {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		},
+		target,
+		visibilityApertureIndex: 0,
+		visibilityProvenance: { kind: "authored-source" },
 	};
 }
 

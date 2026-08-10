@@ -187,6 +187,13 @@ capacity an accepted camera update creates no portal-owned JavaScript records an
 A separate readable immutable traversal is retained only as a differential oracle. It shares
 projection inputs and tolerances with production, but not clipping/admission control flow.
 
+EnvCell realization creates one scene aperture object per authored aperture index. Crossings refer
+to those objects, and `SceneGraph` retains one defensive geometry copy per producer object rather
+than copying source and visibility geometry into every directed crossing. The topology-lifetime
+projection preparation cache therefore also runs once per distinct visibility aperture. This is a
+browser ownership collapse only: host records, topology identities, selected crossing streams, GPU
+uploads, and physical draw batches are unchanged.
+
 Ordinary crossings split camera-dependent aperture projection from route-dependent inherited-window
 intersection. A generation-stamped cache indexed by stable crossing id retains the normalized NDC
 aperture only when traversal attempts the same crossing for a third route in one camera plan; any

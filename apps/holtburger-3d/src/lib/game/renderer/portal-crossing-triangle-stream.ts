@@ -53,8 +53,8 @@ interface PortalCrossingTriangleStreamTrace {
 	readonly propagationMetadataCapacityBytes: number;
 	/** Root plus selected crossing records populated by this preparation. */
 	readonly arrivalMetadataStateWriteCount: number;
-	/** Selected scope-tile records populated by this preparation. */
-	readonly scopeMetadataStateWriteCount: number;
+	/** Selected render-domain tile records populated by this preparation. */
+	readonly renderDomainMetadataStateWriteCount: number;
 	/** Camera-time backing-store growth; fixed storage makes this structurally zero. */
 	readonly arenaGrowthCount: 0;
 	/** Selected crossings inspected exactly once while expanding retained geometry. */
@@ -82,7 +82,7 @@ interface MutablePortalCrossingTriangleStreamTrace extends PortalCrossingTriangl
 	triangleIndexReadCount: number;
 	positionScalarReadCount: number;
 	reciprocalArrivalStateReadCount: number;
-	scopeMetadataStateWriteCount: number;
+	renderDomainMetadataStateWriteCount: number;
 	vertexHighWaterCount: number;
 }
 
@@ -99,7 +99,7 @@ export interface PortalPropagationMetadataStreamView {
 	/** Complete guaranteed-size uniform block uploaded without slicing. */
 	readonly propagationMetadataBytes: Uint8Array;
 	readonly arrivalMetadataStateCount: number;
-	readonly scopeMetadataStateCount: number;
+	readonly renderDomainMetadataStateCount: number;
 	readonly usedPropagationMetadataByteLength: number;
 }
 
@@ -127,7 +127,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 	readonly #metadataUintSlots: Uint32Array;
 	readonly #uintSlots: Uint32Array;
 	arrivalMetadataStateCount = 0;
-	scopeMetadataStateCount = 0;
+	renderDomainMetadataStateCount = 0;
 	usedByteLength = 0;
 	usedPropagationMetadataByteLength = 0;
 	vertexCount = 0;
@@ -164,7 +164,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 			positionScalarReadCount: 0,
 			propagationMetadataCapacityBytes: metadataArena.byteLength,
 			reciprocalArrivalStateReadCount: 0,
-			scopeMetadataStateWriteCount: 0,
+			renderDomainMetadataStateWriteCount: 0,
 			triangleIndexReadCount: 0,
 			triangleCapacityBytes: arena.byteLength,
 			vertexHighWaterCount: 0,
@@ -184,7 +184,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		}
 		this.vertexCount = 0;
 		this.arrivalMetadataStateCount = 0;
-		this.scopeMetadataStateCount = 0;
+		this.renderDomainMetadataStateCount = 0;
 		this.usedByteLength = 0;
 		this.usedPropagationMetadataByteLength = 0;
 		this.trace.arrivalMetadataStateWriteCount = 0;
@@ -192,7 +192,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		this.trace.crossingInputCount = 0;
 		this.trace.positionScalarReadCount = 0;
 		this.trace.reciprocalArrivalStateReadCount = 0;
-		this.trace.scopeMetadataStateWriteCount = 0;
+		this.trace.renderDomainMetadataStateWriteCount = 0;
 		this.trace.triangleIndexReadCount = 0;
 		this.trace.vertexHighWaterCount = 0;
 		mat4ToFloat32Array(clipFromAnchor, this.#metadataFloatSlots);
@@ -211,29 +211,30 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 				"Portal propagation scope records exceed fixed metadata.",
 			);
 		}
-		const scopeMetadataUintOffset =
+		const renderDomainMetadataUintOffset =
 			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES /
 			Uint32Array.BYTES_PER_ELEMENT;
-		const scopeMetadataRecordSlots =
+		const renderDomainMetadataRecordSlots =
 			PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES / Uint32Array.BYTES_PER_ELEMENT;
 		for (
-			let scopeOrdinal = 0;
-			scopeOrdinal < frame.tileCount;
-			scopeOrdinal += 1
+			let renderDomainOrdinal = 0;
+			renderDomainOrdinal < frame.tileCount;
+			renderDomainOrdinal += 1
 		) {
 			writePortalScopeTileMetadata(
 				this.#metadataUintSlots,
-				scopeMetadataUintOffset + scopeOrdinal * scopeMetadataRecordSlots,
-				frame.tileX(scopeOrdinal),
-				frame.tileY(scopeOrdinal),
-				frame.tileScreenX(scopeOrdinal),
-				frame.tileScreenY(scopeOrdinal),
-				frame.tileWidth(scopeOrdinal),
-				frame.tileHeight(scopeOrdinal),
+				renderDomainMetadataUintOffset +
+					renderDomainOrdinal * renderDomainMetadataRecordSlots,
+				frame.tileX(renderDomainOrdinal),
+				frame.tileY(renderDomainOrdinal),
+				frame.tileScreenX(renderDomainOrdinal),
+				frame.tileScreenY(renderDomainOrdinal),
+				frame.tileWidth(renderDomainOrdinal),
+				frame.tileHeight(renderDomainOrdinal),
 			);
 		}
-		this.scopeMetadataStateCount = frame.tileCount;
-		// The culler always selects the root first, so its destination scope ordinal is zero.
+		this.renderDomainMetadataStateCount = frame.tileCount;
+		// The culler always selects the root first, so its destination domain ordinal is zero.
 		this.#writeArrivalRoute(0, 0, 0, 0);
 		this.arrivalMetadataStateCount = 1;
 		for (
@@ -245,10 +246,10 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 			const aperture = crossing.visibilityAperture;
 			const outputArrivalStateId =
 				FIRST_CROSSING_ARRIVAL_STATE_ID + crossingOrdinal;
-			const sourceScopeOrdinal =
-				visibility.selectedCrossingSourceScopeOrdinal(crossingOrdinal);
-			const targetScopeOrdinal =
-				visibility.selectedCrossingTargetScopeOrdinal(crossingOrdinal);
+			const sourceRenderDomainOrdinal =
+				visibility.selectedCrossingSourceRenderDomainOrdinal(crossingOrdinal);
+			const targetRenderDomainOrdinal =
+				visibility.selectedCrossingTargetRenderDomainOrdinal(crossingOrdinal);
 			const reciprocalArrivalStateId =
 				visibility.selectedCrossingReciprocalArrivalStateId(crossingOrdinal);
 			const packedPolicy =
@@ -289,7 +290,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 			);
 			this.#writeArrivalRoute(
 				arrivalRecordOrdinal,
-				targetScopeOrdinal,
+				targetRenderDomainOrdinal,
 				reciprocalArrivalStateId,
 				PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
 			);
@@ -308,7 +309,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 				this.#floatSlots[outputSlot + 2] =
 					aperture.vertices[sourceSlot + 2]! + offsetZ;
 				this.#uintSlots[outputSlot + 3] = outputArrivalStateId;
-				this.#uintSlots[outputSlot + 4] = sourceScopeOrdinal;
+				this.#uintSlots[outputSlot + 4] = sourceRenderDomainOrdinal;
 				this.#uintSlots[outputSlot + 5] = packedPolicy;
 				this.vertexCount += 1;
 			}
@@ -328,14 +329,15 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		this.usedPropagationMetadataByteLength =
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES;
 		this.trace.arrivalMetadataStateWriteCount = this.arrivalMetadataStateCount;
-		this.trace.scopeMetadataStateWriteCount = this.scopeMetadataStateCount;
+		this.trace.renderDomainMetadataStateWriteCount =
+			this.renderDomainMetadataStateCount;
 		this.trace.vertexHighWaterCount = this.vertexCount;
 		return this;
 	}
 
 	#writeArrivalRoute(
 		recordOrdinal: number,
-		scopeOrdinal: number,
+		renderDomainOrdinal: number,
 		reciprocalArrivalStateId: number,
 		flags: number,
 	): void {
@@ -345,7 +347,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		this.#metadataUintSlots[
 			(byteOffset + PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES) /
 				Uint32Array.BYTES_PER_ELEMENT
-		] = scopeOrdinal;
+		] = renderDomainOrdinal;
 		this.#metadataUintSlots[
 			(byteOffset + PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES) /
 				Uint32Array.BYTES_PER_ELEMENT

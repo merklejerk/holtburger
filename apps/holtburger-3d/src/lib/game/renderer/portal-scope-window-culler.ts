@@ -106,6 +106,8 @@ export interface PortalScopeWindowFrameView {
 	/** First frontier declined atomically because a configured budget was exhausted. */
 	readonly declinedDepth: number | null;
 	readonly selectedCrossingCount: number;
+	/** Selected render domains after collapsing depth-continuous visibility islands. */
+	readonly selectedRenderDomainCount: number;
 	readonly selectedScopeCount: number;
 	readonly status: "complete" | "truncated";
 	readonly topologyRevision: number;
@@ -114,12 +116,16 @@ export interface PortalScopeWindowFrameView {
 	selectedScope(ordinal: number): SceneScope;
 	/** Resolve an existing renderer scope key to its selected ordinal, or null when culled. */
 	selectedScopeOrdinal(renderScopeKey: string): number | null;
+	/** Resolve a selected renderer scope key to its visibility-island render ordinal. */
+	selectedRenderDomainOrdinal(renderScopeKey: string): number | null;
+	/** Return one selected scope's visibility-island render ordinal. */
+	selectedScopeRenderDomainOrdinal(ordinal: number): number;
 	/** Return one selected persistent directed crossing without constructing a frame record. */
 	selectedCrossing(ordinal: number): ScenePortalCrossingInput;
-	/** Return the selected source-scope ordinal for one directed crossing. */
-	selectedCrossingSourceScopeOrdinal(ordinal: number): number;
-	/** Return the selected target-scope ordinal for one directed crossing. */
-	selectedCrossingTargetScopeOrdinal(ordinal: number): number;
+	/** Return the selected source render-domain ordinal for one directed crossing. */
+	selectedCrossingSourceRenderDomainOrdinal(ordinal: number): number;
+	/** Return the selected target render-domain ordinal for one directed crossing. */
+	selectedCrossingTargetRenderDomainOrdinal(ordinal: number): number;
 	/** Return the selected reciprocal's arrival id, or zero when no selected reciprocal exists. */
 	selectedCrossingReciprocalArrivalStateId(ordinal: number): number;
 	/** Whether one retained route admitted this crossing through the camera near volume. */
@@ -159,7 +165,10 @@ class PortalScopeWindowTopologyIndex {
 	/** Stable reciprocal crossing id, or -1 when the directed crossing has no reciprocal. */
 	readonly reciprocalCrossingIds: Int32Array;
 	readonly revision: number;
-	/** Canonical renderer scope keys resolved to topology-stable integer ids. */
+	/** Visibility-island render domain indexed by topology-stable scope id. */
+	readonly renderDomainIdByScopeId: Uint32Array;
+	readonly renderDomainCount: number;
+	/** Canonical authored scope keys resolved to topology-stable integer ids. */
 	readonly scopeIdByRenderKey: ReadonlyMap<string, number>;
 	readonly scopes: readonly SceneScope[];
 	readonly view: SceneTopologyView;
@@ -167,23 +176,44 @@ class PortalScopeWindowTopologyIndex {
 	constructor(topology: SceneTopologyView) {
 		this.view = topology;
 		this.revision = topology.revision;
-		this.scopes = Object.freeze(
-			[...topology.scopes]
-				.sort((left, right) =>
-					scopeKey(left.scope).localeCompare(scopeKey(right.scope)),
-				)
-				.map(({ scope }) => scope),
+		const topologyScopes = [...topology.scopes].sort((left, right) =>
+			scopeKey(left.scope).localeCompare(scopeKey(right.scope)),
 		);
+		this.scopes = Object.freeze(topologyScopes.map(({ scope }) => scope));
 		const scopeIdByRenderKey = new Map<string, number>();
+		const renderDomainIdByKey = new Map<string, number>();
+		this.renderDomainIdByScopeId = new Uint32Array(this.scopes.length);
 		for (let scopeId = 0; scopeId < this.scopes.length; scopeId += 1) {
-			const key = scopeKey(this.scopes[scopeId]!);
+			const topologyScope = topologyScopes[scopeId]!;
+			const key = scopeKey(topologyScope.scope);
 			if (scopeIdByRenderKey.has(key)) {
 				throw new Error(
-					`Portal topology has duplicate render scope key ${key}.`,
+					`Portal topology has duplicate authored scope key ${key}.`,
 				);
 			}
 			scopeIdByRenderKey.set(key, scopeId);
+			let renderDomainKey: string;
+			if (topologyScope.scope.kind === "outdoor") {
+				if (topologyScope.visibilityIslandId !== null) {
+					throw new Error(
+						"Outdoor scope cannot belong to a visibility island.",
+					);
+				}
+				renderDomainKey = "outdoor";
+			} else {
+				if (topologyScope.visibilityIslandId === null) {
+					throw new Error(`EnvCell scope ${key} has no visibility island.`);
+				}
+				renderDomainKey = topologyScope.visibilityIslandId;
+			}
+			let renderDomainId = renderDomainIdByKey.get(renderDomainKey);
+			if (renderDomainId === undefined) {
+				renderDomainId = renderDomainIdByKey.size;
+				renderDomainIdByKey.set(renderDomainKey, renderDomainId);
+			}
+			this.renderDomainIdByScopeId[scopeId] = renderDomainId;
 		}
+		this.renderDomainCount = renderDomainIdByKey.size;
 		this.scopeIdByRenderKey = scopeIdByRenderKey;
 		const crossingInputs = [...topology.crossings].sort((left, right) =>
 			left.id.localeCompare(right.id),
@@ -281,6 +311,8 @@ class PortalScopeWindowArena {
 	/** Numeric-window tails paired with the frontier mutation checkpoints. */
 	readonly frontierWindowCheckpoints: Uint32Array;
 	readonly mutationPreviousCoverage: Uint32Array;
+	/** Whether the mutated scope's render domain was selected before the mutation. */
+	readonly mutationPreviousRenderDomainSelection: Uint8Array;
 	readonly mutationPreviousSelection: Uint8Array;
 	readonly mutationScopeIds: Uint32Array;
 	readonly queueCrossingIds: Int32Array;
@@ -290,6 +322,7 @@ class PortalScopeWindowArena {
 	readonly queueScopeIds: Uint32Array;
 	readonly queueWindows: Uint32Array;
 	readonly selectedByScopeId: Uint8Array;
+	readonly selectedByRenderDomainId: Uint8Array;
 	/** Selection marker indexed by topology-stable crossing id. */
 	readonly selectedByCrossingId: Uint8Array;
 	/** Retained-route straddle marker indexed by topology-stable crossing id. */
@@ -299,12 +332,15 @@ class PortalScopeWindowArena {
 	readonly selectedOrdinalByCrossingId: Uint32Array;
 	/** Selected ordinal indexed by stable scope id; valid only while selectedByScopeId is set. */
 	readonly selectedOrdinalByScopeId: Uint32Array;
+	readonly selectedOrdinalByRenderDomainId: Uint32Array;
+	readonly selectedRenderDomainIds: Uint32Array;
 	readonly selectedScopeIds: Uint32Array;
 	readonly typedCapacityBytes: number;
 	readonly windows: PortalWindowArena;
 
 	constructor(
 		scopeCount: number,
+		renderDomainCount: number,
 		crossingCount: number,
 		workItemCount: number,
 		maximumDepth: number,
@@ -317,6 +353,7 @@ class PortalScopeWindowArena {
 		this.frontierWindowCheckpoints = new Uint32Array(maximumDepth);
 		this.mutationPreviousCoverage = new Uint32Array(workItemCount);
 		this.mutationPreviousCoverage.fill(NO_PORTAL_ARENA_WINDOW);
+		this.mutationPreviousRenderDomainSelection = new Uint8Array(workItemCount);
 		this.mutationPreviousSelection = new Uint8Array(workItemCount);
 		this.mutationScopeIds = new Uint32Array(workItemCount);
 		this.queueCrossingIds = new Int32Array(workItemCount);
@@ -326,11 +363,14 @@ class PortalScopeWindowArena {
 		this.queueWindows = new Uint32Array(workItemCount);
 		this.queueWindows.fill(NO_PORTAL_ARENA_WINDOW);
 		this.selectedByScopeId = new Uint8Array(scopeCount);
+		this.selectedByRenderDomainId = new Uint8Array(renderDomainCount);
 		this.selectedByCrossingId = new Uint8Array(crossingCount);
 		this.selectedNearPlaneByCrossingId = new Uint8Array(crossingCount);
 		this.selectedCrossingIds = new Uint32Array(crossingCount);
 		this.selectedOrdinalByCrossingId = new Uint32Array(crossingCount);
 		this.selectedOrdinalByScopeId = new Uint32Array(scopeCount);
+		this.selectedOrdinalByRenderDomainId = new Uint32Array(renderDomainCount);
+		this.selectedRenderDomainIds = new Uint32Array(renderDomainCount);
 		this.selectedScopeIds = new Uint32Array(scopeCount);
 		this.windows = new PortalWindowArena(windowCapacity);
 		this.typedCapacityBytes =
@@ -339,6 +379,7 @@ class PortalScopeWindowArena {
 			this.frontierQueueCheckpoints.byteLength +
 			this.frontierWindowCheckpoints.byteLength +
 			this.mutationPreviousCoverage.byteLength +
+			this.mutationPreviousRenderDomainSelection.byteLength +
 			this.mutationPreviousSelection.byteLength +
 			this.mutationScopeIds.byteLength +
 			this.queueCrossingIds.byteLength +
@@ -347,11 +388,14 @@ class PortalScopeWindowArena {
 			this.queueScopeIds.byteLength +
 			this.queueWindows.byteLength +
 			this.selectedByScopeId.byteLength +
+			this.selectedByRenderDomainId.byteLength +
 			this.selectedByCrossingId.byteLength +
 			this.selectedNearPlaneByCrossingId.byteLength +
 			this.selectedCrossingIds.byteLength +
 			this.selectedOrdinalByCrossingId.byteLength +
 			this.selectedOrdinalByScopeId.byteLength +
+			this.selectedOrdinalByRenderDomainId.byteLength +
+			this.selectedRenderDomainIds.byteLength +
 			this.selectedScopeIds.byteLength +
 			this.windows.trace.capacityBytes;
 	}
@@ -362,6 +406,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	declinedDepth: number | null = null;
 	index: PortalScopeWindowTopologyIndex | null = null;
 	selectedCrossingCount = 0;
+	selectedRenderDomainCount = 0;
 	selectedScopeCount = 0;
 	status: "complete" | "truncated" = "complete";
 	readonly trace: MutablePortalScopeWindowArenaTrace = {
@@ -404,16 +449,46 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 			: arena.selectedOrdinalByScopeId[scopeId]!;
 	}
 
+	selectedRenderDomainOrdinal(renderScopeKey: string): number | null {
+		const arena = this.#requireArena();
+		const scopeId = this.index!.scopeIdByRenderKey.get(renderScopeKey);
+		if (scopeId === undefined) {
+			throw new Error(
+				`Portal renderer scope key ${renderScopeKey} is unavailable in this topology.`,
+			);
+		}
+		if (arena.selectedByScopeId[scopeId] === 0) return null;
+		const renderDomainId = this.index!.renderDomainIdByScopeId[scopeId]!;
+		if (arena.selectedByRenderDomainId[renderDomainId] === 0) {
+			throw new Error(
+				`Selected portal scope ${renderScopeKey} lost its render domain.`,
+			);
+		}
+		return arena.selectedOrdinalByRenderDomainId[renderDomainId]!;
+	}
+
+	selectedScopeRenderDomainOrdinal(ordinal: number): number {
+		const scopeId = this.#selectedScopeId(ordinal);
+		const renderDomainId = this.index!.renderDomainIdByScopeId[scopeId]!;
+		const arena = this.#requireArena();
+		if (arena.selectedByRenderDomainId[renderDomainId] === 0) {
+			throw new Error(
+				`Selected portal scope ${scopeId} lost its render domain.`,
+			);
+		}
+		return arena.selectedOrdinalByRenderDomainId[renderDomainId]!;
+	}
+
 	selectedCrossing(ordinal: number): ScenePortalCrossingInput {
 		return this.#selectedIndexedCrossing(ordinal).crossing;
 	}
 
-	selectedCrossingSourceScopeOrdinal(ordinal: number): number {
-		return this.#selectedCrossingScopeOrdinal(ordinal, "sourceScopeId");
+	selectedCrossingSourceRenderDomainOrdinal(ordinal: number): number {
+		return this.#selectedCrossingRenderDomainOrdinal(ordinal, "sourceScopeId");
 	}
 
-	selectedCrossingTargetScopeOrdinal(ordinal: number): number {
-		return this.#selectedCrossingScopeOrdinal(ordinal, "targetScopeId");
+	selectedCrossingTargetRenderDomainOrdinal(ordinal: number): number {
+		return this.#selectedCrossingRenderDomainOrdinal(ordinal, "targetScopeId");
 	}
 
 	selectedCrossingReciprocalArrivalStateId(ordinal: number): number {
@@ -452,7 +527,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		return this.#selectedIndexedCrossing(ordinal).sourceLandblockY;
 	}
 
-	#selectedCrossingScopeOrdinal(
+	#selectedCrossingRenderDomainOrdinal(
 		ordinal: number,
 		field: "sourceScopeId" | "targetScopeId",
 	): number {
@@ -461,7 +536,13 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		if (arena.selectedByScopeId[scopeId] === 0) {
 			throw new Error(`Selected portal crossing has an unselected ${field}.`);
 		}
-		return arena.selectedOrdinalByScopeId[scopeId]!;
+		const renderDomainId = this.index!.renderDomainIdByScopeId[scopeId]!;
+		if (arena.selectedByRenderDomainId[renderDomainId] === 0) {
+			throw new Error(
+				`Selected portal crossing has an unselected render domain.`,
+			);
+		}
+		return arena.selectedOrdinalByRenderDomainId[renderDomainId]!;
 	}
 
 	#selectedIndexedCrossing(ordinal: number): IndexedCrossing {
@@ -581,6 +662,7 @@ export class PortalScopeWindowCuller {
 	#queueCount = 0;
 	#queueHighWaterCount = 0;
 	#selectedCrossingInputCount = 0;
+	#selectedRenderDomainCount = 0;
 	#selectedScopeCount = 0;
 	#topologyBuildCount = 0;
 
@@ -664,6 +746,7 @@ export class PortalScopeWindowCuller {
 		this.#frame.completedDepth = completedDepth;
 		this.#frame.declinedDepth = declinedDepth;
 		this.#frame.index = index;
+		this.#frame.selectedRenderDomainCount = this.#selectedRenderDomainCount;
 		this.#frame.selectedScopeCount = this.#selectedScopeCount;
 		this.#frame.status = declinedDepth === null ? "complete" : "truncated";
 		this.#refreshSelectedCrossings(arena, index);
@@ -671,7 +754,8 @@ export class PortalScopeWindowCuller {
 			arena.typedCapacityBytes +
 			index.outgoingCrossingIds.byteLength +
 			index.outgoingOffsets.byteLength +
-			index.reciprocalCrossingIds.byteLength;
+			index.reciprocalCrossingIds.byteLength +
+			index.renderDomainIdByScopeId.byteLength;
 		this.#frame.trace.projectionPrimitiveCount = this.#projectionPrimitiveCount;
 		this.#frame.trace.queueHighWaterCount = this.#queueHighWaterCount;
 		this.#frame.trace.selectedCrossingInputCount =
@@ -713,6 +797,7 @@ export class PortalScopeWindowCuller {
 		);
 		this.#frame.completedDepth = retainedDepth;
 		this.#frame.declinedDepth = declinedDepth;
+		this.#frame.selectedRenderDomainCount = this.#selectedRenderDomainCount;
 		this.#frame.selectedScopeCount = this.#selectedScopeCount;
 		this.#frame.status = "truncated";
 		this.#refreshSelectedCrossings(this.#arena, this.#index);
@@ -734,11 +819,16 @@ export class PortalScopeWindowCuller {
 			arena.selectedByScopeId[scopeId] = 0;
 			arena.coverageByScopeId[scopeId] = NO_PORTAL_ARENA_WINDOW;
 		}
+		for (let index = 0; index < this.#selectedRenderDomainCount; index += 1) {
+			const renderDomainId = arena.selectedRenderDomainIds[index]!;
+			arena.selectedByRenderDomainId[renderDomainId] = 0;
+		}
 		this.#mutationCount = 0;
 		this.#projectionPrimitiveCount = 0;
 		this.#queueCount = 0;
 		this.#queueHighWaterCount = 0;
 		this.#selectedCrossingInputCount = 0;
+		this.#selectedRenderDomainCount = 0;
 		this.#selectedScopeCount = 0;
 		this.#frame.trace.exceptionalDiagnosticHeapRecordCreationCount = 0;
 		return arena.windows.reset();
@@ -755,6 +845,7 @@ export class PortalScopeWindowCuller {
 		this.#index = index;
 		this.#arena = new PortalScopeWindowArena(
 			index.scopes.length,
+			index.renderDomainCount,
 			index.crossings.length,
 			this.#capacity.maximumWorkItemCount,
 			this.#capacity.maximumDepth,
@@ -793,6 +884,14 @@ export class PortalScopeWindowCuller {
 			) {
 				continue;
 			}
+			// Member-cell portals constrain CPU traversal but ordinary depth already joins their
+			// visibility island. Sending them to the GPU would manufacture a compositor seam.
+			if (
+				index.renderDomainIdByScopeId[crossing.sourceScopeId] ===
+				index.renderDomainIdByScopeId[crossing.targetScopeId]
+			) {
+				continue;
+			}
 			arena.selectedCrossingIds[selectedCrossingCount] = crossingId;
 			arena.selectedByCrossingId[crossingId] = 1;
 			arena.selectedOrdinalByCrossingId[crossingId] = selectedCrossingCount;
@@ -801,11 +900,13 @@ export class PortalScopeWindowCuller {
 		for (let queueIndex = 1; queueIndex < this.#queueCount; queueIndex += 1) {
 			if (arena.queueNearPlaneStraddles[queueIndex] === 0) continue;
 			const crossingId = arena.queueCrossingIds[queueIndex]!;
-			if (crossingId < 0 || arena.selectedByCrossingId[crossingId] === 0) {
+			if (crossingId < 0) {
 				throw new Error(
 					"Retained near-plane portal work has no selected crossing.",
 				);
 			}
+			// A near-plane straddle within one render island affects traversal only.
+			if (arena.selectedByCrossingId[crossingId] === 0) continue;
 			arena.selectedNearPlaneByCrossingId[crossingId] = 1;
 		}
 		this.#selectedCrossingInputCount += index.crossings.length;
@@ -950,6 +1051,9 @@ export class PortalScopeWindowCuller {
 		recordMutation: boolean,
 	): void {
 		const wasSelected = arena.selectedByScopeId[scopeId];
+		const renderDomainId = this.#index!.renderDomainIdByScopeId[scopeId]!;
+		const wasRenderDomainSelected =
+			arena.selectedByRenderDomainId[renderDomainId];
 		if (recordMutation) {
 			if (this.#mutationCount >= arena.mutationScopeIds.length) {
 				throw new WorkItemCapacityExceeded(
@@ -959,6 +1063,8 @@ export class PortalScopeWindowCuller {
 			}
 			arena.mutationScopeIds[this.#mutationCount] = scopeId;
 			arena.mutationPreviousSelection[this.#mutationCount] = wasSelected;
+			arena.mutationPreviousRenderDomainSelection[this.#mutationCount] =
+				wasRenderDomainSelected;
 			arena.mutationPreviousCoverage[this.#mutationCount] =
 				arena.coverageByScopeId[scopeId];
 			this.#mutationCount += 1;
@@ -968,6 +1074,14 @@ export class PortalScopeWindowCuller {
 			arena.selectedOrdinalByScopeId[scopeId] = this.#selectedScopeCount;
 			arena.selectedScopeIds[this.#selectedScopeCount] = scopeId;
 			this.#selectedScopeCount += 1;
+			if (wasRenderDomainSelected === 0) {
+				arena.selectedByRenderDomainId[renderDomainId] = 1;
+				arena.selectedOrdinalByRenderDomainId[renderDomainId] =
+					this.#selectedRenderDomainCount;
+				arena.selectedRenderDomainIds[this.#selectedRenderDomainCount] =
+					renderDomainId;
+				this.#selectedRenderDomainCount += 1;
+			}
 		}
 		arena.coverageByScopeId[scopeId] = coverage;
 	}
@@ -993,6 +1107,20 @@ export class PortalScopeWindowCuller {
 				}
 				arena.selectedByScopeId[scopeId] = 0;
 				this.#selectedScopeCount = selectedIndex;
+				if (arena.mutationPreviousRenderDomainSelection[index] === 0) {
+					const renderDomainId = this.#index!.renderDomainIdByScopeId[scopeId]!;
+					const selectedRenderDomainIndex = this.#selectedRenderDomainCount - 1;
+					if (
+						arena.selectedRenderDomainIds[selectedRenderDomainIndex] !==
+						renderDomainId
+					) {
+						throw new Error(
+							"Portal frontier rollback lost render-domain selection order.",
+						);
+					}
+					arena.selectedByRenderDomainId[renderDomainId] = 0;
+					this.#selectedRenderDomainCount = selectedRenderDomainIndex;
+				}
 			}
 		}
 		this.#mutationCount = mutationCheckpoint;

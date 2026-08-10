@@ -143,7 +143,7 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 			executePortalScopeAtlasWebGLCalls(this, {
 				crossingVertexCount: input.stream.vertexCount,
 				metadataBindingPoint: this.#metadataBindingPoint,
-				scopeCount: input.stream.scopeMetadataStateCount,
+				renderDomainCount: input.stream.renderDomainMetadataStateCount,
 				traversalDepth: input.traversalDepth,
 			});
 		} finally {
@@ -359,7 +359,7 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 	}
 
 	drawReduction(
-		...[next, scopeCount, terminal]: SinkMethod<"drawReduction">
+		...[next, renderDomainCount, terminal]: SinkMethod<"drawReduction">
 	): void {
 		this.#requireFramebuffer("envelope");
 		if (
@@ -368,12 +368,12 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		) {
 			throw new Error("Portal scope-atlas reduction schedule is inconsistent.");
 		}
-		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, scopeCount);
+		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, renderDomainCount);
 	}
 
-	drawResolve(...[scopeCount]: SinkMethod<"drawResolve">): void {
+	drawResolve(...[renderDomainCount]: SinkMethod<"drawResolve">): void {
 		this.#requireFramebuffer("output");
-		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, scopeCount);
+		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, renderDomainCount);
 	}
 
 	#input(): WebGL2PortalScopeAtlasExecutionInput {
@@ -469,8 +469,8 @@ function validateExecutionInput(
 		stream.propagationMetadataBytes.byteLength <
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES ||
 		stream.arrivalMetadataStateCount < 1 ||
-		stream.scopeMetadataStateCount < 1 ||
-		stream.scopeMetadataStateCount > stream.arrivalMetadataStateCount
+		stream.renderDomainMetadataStateCount < 1 ||
+		stream.renderDomainMetadataStateCount > stream.arrivalMetadataStateCount
 	) {
 		throw new Error("Portal scope-atlas metadata stream is inconsistent.");
 	}

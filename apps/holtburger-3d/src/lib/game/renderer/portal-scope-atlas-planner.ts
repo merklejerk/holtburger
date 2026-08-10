@@ -112,7 +112,7 @@ export interface PortalScopeAtlasFrameView {
 	readonly tileCount: number;
 	readonly trace: PortalScopeAtlasPlanTrace;
 	readonly visibility: PortalScopeWindowFrameView;
-	/** Resolve an already-formed renderer run directly to its selected-scope tile. */
+	/** Resolve an already-formed renderer run directly to its visibility-island tile. */
 	tileOrdinalForRenderScopeKey(renderScopeKey: string): number;
 	/** Horizontal clip-space scale routing ordinary camera projection into this tile. */
 	tileClipScaleX(ordinal: number): number;
@@ -122,13 +122,13 @@ export interface PortalScopeAtlasFrameView {
 	tileClipOffsetX(ordinal: number): number;
 	/** Vertical clip-space offset paired with `tileClipScaleY`. */
 	tileClipOffsetY(ordinal: number): number;
-	/** Integer atlas viewport height for one selected-scope ordinal. */
+	/** Integer atlas viewport height for one selected render-domain ordinal. */
 	tileHeight(ordinal: number): number;
-	/** Integer atlas viewport width for one selected-scope ordinal. */
+	/** Integer atlas viewport width for one selected render-domain ordinal. */
 	tileWidth(ordinal: number): number;
-	/** Integer atlas viewport x origin for one selected-scope ordinal. */
+	/** Integer atlas viewport x origin for one selected render-domain ordinal. */
 	tileX(ordinal: number): number;
-	/** Integer atlas viewport y origin for one selected-scope ordinal. */
+	/** Integer atlas viewport y origin for one selected render-domain ordinal. */
 	tileY(ordinal: number): number;
 	/** Drawing-buffer x origin represented by the tile's first texel. */
 	tileScreenX(ordinal: number): number;
@@ -136,7 +136,7 @@ export interface PortalScopeAtlasFrameView {
 	tileScreenY(ordinal: number): number;
 }
 
-/** Fixed structure-of-arrays storage for scope bounds, placements, transforms, and sort scratch. */
+/** Fixed structure-of-arrays storage for domain bounds, placements, transforms, and sort scratch. */
 class PortalScopeAtlasArena {
 	readonly clipOffsetX: Float32Array;
 	readonly clipOffsetY: Float32Array;
@@ -229,7 +229,7 @@ class MutablePortalScopeAtlasFrameView implements PortalScopeAtlasFrameView {
 	}
 
 	tileOrdinalForRenderScopeKey(renderScopeKey: string): number {
-		const ordinal = this.visibility.selectedScopeOrdinal(renderScopeKey);
+		const ordinal = this.visibility.selectedRenderDomainOrdinal(renderScopeKey);
 		if (ordinal === null) {
 			throw new Error(
 				`Portal renderer scope key ${renderScopeKey} has no selected atlas tile.`,
@@ -353,10 +353,14 @@ export class PortalScopeAtlasPlanner {
 			this.#frame.trace.packingAttemptCount += 1;
 			this.#deriveTileBounds(visibility, resource);
 			const sortedOrdinals = this.#sortTileOrdinals(
-				visibility.selectedScopeCount,
+				visibility.selectedRenderDomainCount,
 			);
 			if (
-				this.#packTiles(sortedOrdinals, visibility.selectedScopeCount, resource)
+				this.#packTiles(
+					sortedOrdinals,
+					visibility.selectedRenderDomainCount,
+					resource,
+				)
 			) {
 				break;
 			}
@@ -371,7 +375,7 @@ export class PortalScopeAtlasPlanner {
 				this.#countCrossingTriangleVertices(visibility);
 		}
 		this.#frame.trace.crossingTriangleVertexCount = crossingTriangleVertexCount;
-		this.#frame.tileCount = visibility.selectedScopeCount;
+		this.#frame.tileCount = visibility.selectedRenderDomainCount;
 		this.#writeCommandLedger(visibility);
 		return this.#frame;
 	}
@@ -426,22 +430,33 @@ export class PortalScopeAtlasPlanner {
 		const drawingHeight = resource.drawingBuffer.height;
 		for (
 			let ordinal = 0;
-			ordinal < visibility.selectedScopeCount;
+			ordinal < visibility.selectedRenderDomainCount;
 			ordinal += 1
+		) {
+			this.#arena.minimumX[ordinal] = drawingWidth;
+			this.#arena.minimumY[ordinal] = drawingHeight;
+			this.#arena.width[ordinal] = 0;
+			this.#arena.height[ordinal] = 0;
+			this.#arena.sortOrdinals[ordinal] = ordinal;
+		}
+		for (
+			let scopeOrdinal = 0;
+			scopeOrdinal < visibility.selectedScopeCount;
+			scopeOrdinal += 1
 		) {
 			let minimumNdcX = Number.POSITIVE_INFINITY;
 			let minimumNdcY = Number.POSITIVE_INFINITY;
 			let maximumNdcX = Number.NEGATIVE_INFINITY;
 			let maximumNdcY = Number.NEGATIVE_INFINITY;
-			const fragmentCount = visibility.selectedFragmentCount(ordinal);
+			const fragmentCount = visibility.selectedFragmentCount(scopeOrdinal);
 			for (let fragment = 0; fragment < fragmentCount; fragment += 1) {
 				const vertexCount = visibility.selectedFragmentVertexCount(
-					ordinal,
+					scopeOrdinal,
 					fragment,
 				);
 				for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-					const x = visibility.selectedVertexX(ordinal, fragment, vertex);
-					const y = visibility.selectedVertexY(ordinal, fragment, vertex);
+					const x = visibility.selectedVertexX(scopeOrdinal, fragment, vertex);
+					const y = visibility.selectedVertexY(scopeOrdinal, fragment, vertex);
 					minimumNdcX = Math.min(minimumNdcX, x);
 					minimumNdcY = Math.min(minimumNdcY, y);
 					maximumNdcX = Math.max(maximumNdcX, x);
@@ -451,7 +466,7 @@ export class PortalScopeAtlasPlanner {
 			}
 			if (!Number.isFinite(minimumNdcX) || !Number.isFinite(minimumNdcY)) {
 				throw new Error(
-					`Portal selected scope ${ordinal} has an empty window.`,
+					`Portal selected scope ${scopeOrdinal} has an empty window.`,
 				);
 			}
 			const minimumX = clampPixel(
@@ -470,11 +485,49 @@ export class PortalScopeAtlasPlanner {
 				Math.ceil(((maximumNdcY + 1) * drawingHeight) / 2),
 				drawingHeight,
 			);
-			this.#arena.minimumX[ordinal] = minimumX;
-			this.#arena.minimumY[ordinal] = minimumY;
-			this.#arena.width[ordinal] = Math.max(1, maximumX - minimumX);
-			this.#arena.height[ordinal] = Math.max(1, maximumY - minimumY);
-			this.#arena.sortOrdinals[ordinal] = ordinal;
+			const renderDomainOrdinal =
+				visibility.selectedScopeRenderDomainOrdinal(scopeOrdinal);
+			const previousMinimumX = this.#arena.minimumX[renderDomainOrdinal]!;
+			const previousMinimumY = this.#arena.minimumY[renderDomainOrdinal]!;
+			const previousWidth = this.#arena.width[renderDomainOrdinal]!;
+			const previousHeight = this.#arena.height[renderDomainOrdinal]!;
+			if (previousWidth === 0 || previousHeight === 0) {
+				this.#arena.minimumX[renderDomainOrdinal] = minimumX;
+				this.#arena.minimumY[renderDomainOrdinal] = minimumY;
+				this.#arena.width[renderDomainOrdinal] = Math.max(
+					1,
+					maximumX - minimumX,
+				);
+				this.#arena.height[renderDomainOrdinal] = Math.max(
+					1,
+					maximumY - minimumY,
+				);
+				continue;
+			}
+			const previousMaximumX = previousMinimumX + previousWidth;
+			const previousMaximumY = previousMinimumY + previousHeight;
+			const domainMinimumX = Math.min(previousMinimumX, minimumX);
+			const domainMinimumY = Math.min(previousMinimumY, minimumY);
+			this.#arena.minimumX[renderDomainOrdinal] = domainMinimumX;
+			this.#arena.minimumY[renderDomainOrdinal] = domainMinimumY;
+			this.#arena.width[renderDomainOrdinal] =
+				Math.max(previousMaximumX, maximumX) - domainMinimumX;
+			this.#arena.height[renderDomainOrdinal] =
+				Math.max(previousMaximumY, maximumY) - domainMinimumY;
+		}
+		for (
+			let ordinal = 0;
+			ordinal < visibility.selectedRenderDomainCount;
+			ordinal += 1
+		) {
+			if (
+				this.#arena.width[ordinal] === 0 ||
+				this.#arena.height[ordinal] === 0
+			) {
+				throw new Error(
+					`Portal render domain ${ordinal} has no selected window.`,
+				);
+			}
 		}
 	}
 
@@ -596,12 +649,12 @@ export class PortalScopeAtlasPlanner {
 		this.#frame.commands.maskPropagationInstanceCount =
 			traversalDepth * visibility.selectedCrossingCount;
 		this.#frame.commands.opaqueCompositeCommandCount =
-			visibility.selectedScopeCount === 0 ? 0 : 1;
+			visibility.selectedRenderDomainCount === 0 ? 0 : 1;
 		this.#frame.commands.opaqueCompositeInstanceCount =
-			visibility.selectedScopeCount;
+			visibility.selectedRenderDomainCount;
 		this.#frame.commands.scopeEnvelopeReductionCommandCount = traversalDepth;
 		this.#frame.commands.scopeEnvelopeReductionInstanceCount =
-			traversalDepth * visibility.selectedScopeCount;
+			traversalDepth * visibility.selectedRenderDomainCount;
 		this.#frame.commands.traversalDepth = traversalDepth;
 	}
 }

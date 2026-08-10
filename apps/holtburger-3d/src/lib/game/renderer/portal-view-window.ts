@@ -10,6 +10,8 @@ import {
 
 /** Shared normalization tolerance for normalized-device-coordinate portal geometry. */
 export const PORTAL_WINDOW_NDC_EPSILON = 0.000_001;
+/** Signed-turn tolerance used only for winding-inverting residue after convex clipping. */
+export const PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON = 0.000_01;
 
 /** One convex NDC polygon retained independently from the aperture's other triangles. */
 interface PortalViewWindowFragment {
@@ -994,13 +996,43 @@ function normalizeConvexPolygon(
 		return null;
 	}
 	if (signedArea < 0) deduplicated.reverse();
+	// Half-space clipping preserves convexity. Remove only subpixel inward residue after winding is
+	// canonical; tiny outward turns remain real visibility and must survive exact intersection.
+	changed = true;
+	while (changed && deduplicated.length >= 3) {
+		changed = false;
+		for (let index = 0; index < deduplicated.length; index += 1) {
+			charge(diagnostics, "normalizationVertexVisitCount", 1);
+			const previous =
+				deduplicated[(index + deduplicated.length - 1) % deduplicated.length]!;
+			const current = deduplicated[index]!;
+			const next = deduplicated[(index + 1) % deduplicated.length]!;
+			const turn = edgeDistance(previous, current, next);
+			const forwardDot =
+				(current.x - previous.x) * (next.x - current.x) +
+				(current.y - previous.y) * (next.y - current.y);
+			if (
+				turn < -PORTAL_WINDOW_NDC_EPSILON &&
+				turn >= -PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON &&
+				forwardDot >= -PORTAL_WINDOW_NDC_EPSILON
+			) {
+				deduplicated.splice(index, 1);
+				changed = true;
+				break;
+			}
+		}
+	}
+	if (deduplicated.length < 3) return null;
 	for (let index = 0; index < deduplicated.length; index += 1) {
 		charge(diagnostics, "normalizationVertexVisitCount", 1);
 		const first = deduplicated[index]!;
 		const second = deduplicated[(index + 1) % deduplicated.length]!;
 		const third = deduplicated[(index + 2) % deduplicated.length]!;
-		if (edgeDistance(first, second, third) < -PORTAL_WINDOW_NDC_EPSILON) {
-			throw new Error("Portal-window fragment must be convex.");
+		const turn = edgeDistance(first, second, third);
+		if (turn < -PORTAL_WINDOW_NDC_EPSILON) {
+			throw new Error(
+				`Portal-window fragment must be convex; turn ${index} is ${turn} across (${first.x}, ${first.y}), (${second.x}, ${second.y}), (${third.x}, ${third.y}).`,
+			);
 		}
 	}
 	let firstIndex = 0;

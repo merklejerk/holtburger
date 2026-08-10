@@ -32,6 +32,7 @@ describe("packed portal arrival-state model", () => {
 		});
 		for (const [sceneIndex, scene] of corpus.scenes.entries()) {
 			assertEquivalent(scene, sceneIndex % 4);
+			assertSelectedCrossingDepthBound(scene);
 		}
 	});
 
@@ -44,6 +45,7 @@ describe("packed portal arrival-state model", () => {
 		});
 		for (const scene of scenes) {
 			assertEquivalent(scene, PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth);
+			assertSelectedCrossingDepthBound(scene);
 			assertEquivalent(
 				createPortalModelScene({
 					...scene,
@@ -117,6 +119,22 @@ describe("packed portal arrival-state model", () => {
 		assertEquivalent(scene, 2);
 	});
 });
+
+function assertSelectedCrossingDepthBound(scene: PortalModelScene): void {
+	const policyDepth = PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
+	const boundedDepth = Math.min(policyDepth, scene.crossings.length);
+	const full = executePackedPortalArrivalStateModel(scene, policyDepth);
+	const bounded = executePackedPortalArrivalStateModel(scene, boundedDepth);
+	expect(
+		bounded.envelopes,
+		JSON.stringify(
+			{ bounded, boundedDepth, full, policyDepth, scene },
+			null,
+			2,
+		),
+	).toEqual(full.envelopes);
+	expect(bounded.diagnostics.repeatedArrivalStatePixelCount).toBe(0);
+}
 
 function assertEquivalent(
 	scene: PortalModelScene,

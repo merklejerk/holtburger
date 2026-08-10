@@ -6,6 +6,7 @@ import { scopeKey } from "../scene/scope";
 import {
 	createPortalArrivalStateDryScheduleTrace,
 	createPortalPathViewDrySchedule,
+	type PortalArrivalStateDryPlan,
 	type PortalDrySceneWorkload,
 } from "./portal-path-view-schedule";
 import type {
@@ -13,7 +14,6 @@ import type {
 	PortalPathView,
 	PortalPathViewPlan,
 } from "./portal-path-view-planner";
-import type { PortalRenderWorkPlan } from "./portal-render-graph";
 import { createEmptyCameraNearClipDiagnostics } from "./portal-near-plane";
 import {
 	createEmptyPortalWindowProjectionDiagnostics,
@@ -171,12 +171,23 @@ describe("createPortalPathViewDrySchedule", () => {
 
 describe("createPortalArrivalStateDryScheduleTrace", () => {
 	it("quotients reference paths while retaining physical batches and one upload stream", () => {
-		const referencePlan = portalPlan([
-			view("root", OUTDOOR, EXTERIOR, 0, 0),
-			view("inside", INDOOR, INTERIOR, 1, 1),
-			view("outside-again", OUTDOOR, EXTERIOR, 2, 2),
-		]);
-		const plan = scopeWindowPlan(referencePlan.views);
+		const plan: PortalArrivalStateDryPlan = {
+			atlasPixelCapacity: 10_000,
+			commands: {
+				crossingInstancePreparationCount: 2,
+				frontierClearCommandCount: 2,
+				maskPropagationCommandCount: 2,
+				maskPropagationInstanceCount: 4,
+				opaqueCompositeCommandCount: 1,
+				opaqueCompositeInstanceCount: 2,
+				scopeEnvelopeReductionCommandCount: 2,
+				scopeEnvelopeReductionInstanceCount: 4,
+				traversalDepth: 2,
+			},
+			selectedCrossingCount: 2,
+			selectedScopeKeys: [scopeKey(OUTDOOR), scopeKey(INDOOR)],
+			tilePixelCount: 10_000,
+		};
 		const workload: PortalDrySceneWorkload = {
 			scopes: [
 				{
@@ -210,24 +221,18 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			],
 		};
 
-		const trace = createPortalArrivalStateDryScheduleTrace(
-			plan,
-			workload,
-			[
-				{ source: OUTDOOR, target: INDOOR },
-				{ source: INDOOR, target: OUTDOOR },
-			],
-			2,
-			{ height: 50, width: 100 },
-		);
+		const trace = createPortalArrivalStateDryScheduleTrace(plan, workload, {
+			height: 50,
+			width: 100,
+		});
 
 		expect(trace).toMatchObject({
 			arrivalStateCount: 3,
 			batchFormationInputCount: 2,
-			contentPreparationCount: 2,
-			frontierStateAttachmentBytes: 40_000,
-			fullScreenScopeLayerColorDepthBytes: 80_000,
-			fullScreenScopeVisibilityEnvelopeBytes: 40_000,
+			contentPreparationCount: 1,
+			frontierDepthAttachmentBytes: 20_000,
+			frontierStateAttachmentBytes: 10_000,
+			framebufferTargetCount: 4,
 			maskInstancePreparationCount: 2,
 			maskPropagationCommandCount: 2,
 			maskPropagationInstanceCount: 4,
@@ -235,13 +240,15 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			opaqueCompositeCommandCount: 1,
 			opaqueCompositeInstanceCount: 2,
 			opaqueSubmissionCount: 2,
-			scopeWindowBoundedLayerColorDepthBytes: 80_000,
-			scopeWindowBoundedLayerPixelCount: 10_000,
-			scopeWindowBoundedVisibilityEnvelopeBytes: 40_000,
 			particleBatchCount: 2,
 			particleInstancePackCount: 15,
 			particleSourceCount: 2,
 			particleUploadCount: 1,
+			portalTargetBytes: 150_000,
+			scopeAtlasPixelCapacity: 10_000,
+			scopeAtlasSceneAttachmentBytes: 80_000,
+			scopeAtlasTilePixelCount: 10_000,
+			scopeAtlasVisibilityEnvelopeBytes: 40_000,
 			scopeVisibilityEnvelopeCount: 2,
 			scopeVisibilityEnvelopeInputCount: 3,
 			scopeVisibilityEnvelopeReductionCommandCount: 2,
@@ -253,7 +260,6 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			transparentDepthBucketVisitCount:
 				FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount,
 			transparentNearSquareRootCount: 1,
-			visibilityFramebufferChangeCount: 4,
 		});
 	});
 });
@@ -307,63 +313,6 @@ function portalPlan(
 		},
 		truncation: null,
 		views,
-	};
-}
-
-function scopeWindowPlan(
-	views: readonly PortalPathView[],
-): PortalRenderWorkPlan {
-	const domainIds = [...new Set(views.map(({ domainId }) => domainId))];
-	const rootDomainId = domainIds[0];
-	if (!rootDomainId) {
-		throw new Error("Scope-window test plan requires at least one view.");
-	}
-	const scopeByKey = new Map(
-		views.map((view) => [scopeKey(view.scope), view] as const),
-	);
-	return {
-		capacity: {
-			maximumAvailableStencilValue: 255,
-			maximumRenderLayer: 0,
-			requiredMaximumStencilValue: 0,
-		},
-		diagnostics: {
-			admittedScopeWindowStateCount: views.length,
-			attemptedCrossingCount: 0,
-			componentCount: domainIds.length,
-			cyclicComponentCount: 0,
-			duplicateOrSubsumedWindowStateCount: 0,
-			emptyWindowCount: 0,
-			maximumRetainedFragmentsPerScope: 1,
-			nearPlaneSeedCount: 0,
-			projection: createEmptyPortalWindowProjectionDiagnostics(),
-			rejectedFacingCrossingCount: 0,
-			rejectedPortalFootprintCount: 0,
-			retainedMaskEdgeCount: 0,
-			retainedRenderNodeCount: domainIds.length,
-			sameDomainBoundaryCrossingCount: 0,
-			workItemCount: 0,
-		},
-		exteriorTransitions: [],
-		maskEdges: [],
-		nodes: domainIds.map((domainId, index) => ({
-			id: `portal-render-node:${domainId}`,
-			incomingMaskEdgeIds: [],
-			kind: index === 0 ? "outdoor" : "indoor-visibility-island",
-			renderLayer: 0,
-			scopes: views
-				.filter((view) => view.domainId === domainId)
-				.map(({ scope }) => scope),
-		})),
-		renderLayers: [],
-		rootNodeId: `portal-render-node:${rootDomainId}`,
-		selectedScopes: [...scopeByKey.values()].map(({ scope }) => scope),
-		scopeWindows: [...scopeByKey.values()].map(({ bounds, scope, window }) => ({
-			bounds,
-			scope,
-			window,
-		})),
-		topologyRevision: 1,
 	};
 }
 

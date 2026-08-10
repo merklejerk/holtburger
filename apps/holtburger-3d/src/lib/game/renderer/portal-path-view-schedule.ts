@@ -1,11 +1,11 @@
 import { scopeKey } from "../scene/scope";
-import type { ScenePortalCrossingInput } from "../scene";
 import type {
 	PortalContentDomainId,
 	PortalPathViewId,
 	PortalPathViewPlan,
 } from "./portal-path-view-planner";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
+import type { PortalScopeAtlasFrameView } from "./portal-scope-atlas-planner";
 import {
 	orderTransparentObjectRanges,
 	type TransparentObjectOrderingTrace,
@@ -145,6 +145,61 @@ export interface PortalArrivalStateDrawingBuffer {
 	readonly width: number;
 }
 
+/** Immutable offline snapshot of the production arena frame consumed by the dry scheduler. */
+export interface PortalArrivalStateDryPlan {
+	/** Fixed atlas pixel capacity backing every packed scope tile. */
+	readonly atlasPixelCapacity: number;
+	/** Exact command counts emitted by the production atlas planner. */
+	readonly commands: Pick<
+		PortalScopeAtlasFrameView["commands"],
+		| "crossingInstancePreparationCount"
+		| "frontierClearCommandCount"
+		| "maskPropagationCommandCount"
+		| "maskPropagationInstanceCount"
+		| "opaqueCompositeCommandCount"
+		| "opaqueCompositeInstanceCount"
+		| "scopeEnvelopeReductionCommandCount"
+		| "scopeEnvelopeReductionInstanceCount"
+		| "traversalDepth"
+	>;
+	/** Canonical physical scopes retained by the production culler. */
+	readonly selectedScopeKeys: readonly string[];
+	/** Selected directed crossings encoded into arrival states. */
+	readonly selectedCrossingCount: number;
+	/** Sum of committed packed scope-tile areas, excluding atlas gaps. */
+	readonly tilePixelCount: number;
+}
+
+/** Copy one non-retained production frame into an owned offline scheduling contract. */
+export function snapshotPortalArrivalStateDryPlan(
+	frame: PortalScopeAtlasFrameView,
+): PortalArrivalStateDryPlan {
+	const selectedScopeKeys = Array.from(
+		{ length: frame.visibility.selectedScopeCount },
+		(_, ordinal) => scopeKey(frame.visibility.selectedScope(ordinal)),
+	);
+	return Object.freeze({
+		atlasPixelCapacity: frame.trace.atlasPixelCapacity,
+		commands: Object.freeze({
+			crossingInstancePreparationCount:
+				frame.commands.crossingInstancePreparationCount,
+			frontierClearCommandCount: frame.commands.frontierClearCommandCount,
+			maskPropagationCommandCount: frame.commands.maskPropagationCommandCount,
+			maskPropagationInstanceCount: frame.commands.maskPropagationInstanceCount,
+			opaqueCompositeCommandCount: frame.commands.opaqueCompositeCommandCount,
+			opaqueCompositeInstanceCount: frame.commands.opaqueCompositeInstanceCount,
+			scopeEnvelopeReductionCommandCount:
+				frame.commands.scopeEnvelopeReductionCommandCount,
+			scopeEnvelopeReductionInstanceCount:
+				frame.commands.scopeEnvelopeReductionInstanceCount,
+			traversalDepth: frame.commands.traversalDepth,
+		}),
+		selectedCrossingCount: frame.visibility.selectedCrossingCount,
+		selectedScopeKeys: Object.freeze(selectedScopeKeys),
+		tilePixelCount: frame.trace.tilePixelCount,
+	});
+}
+
 /** Structural schedule for the path-free arrival-state/scope-atlas candidate. */
 export interface PortalArrivalStateDryScheduleTrace {
 	/** Root plus one conservatively reserved state for each selected directed crossing. */
@@ -153,13 +208,15 @@ export interface PortalArrivalStateDryScheduleTrace {
 	readonly additiveRunCount: number;
 	/** Unique physical opaque/alpha-test batches inspected once. */
 	readonly batchFormationInputCount: number;
-	/** Reusable physical content domains resolved once. */
+	/** One global selected-scope scene resolution and contribution-preparation pass. */
 	readonly contentPreparationCount: number;
 	/** Physical deferred submissions inspected once before global ordering. */
 	readonly deferredPreparationInputCount: number;
-	/** Two ping-pong full-screen 32-bit frontier-state planes. */
+	/** Shared full-screen nearest-crossing `DEPTH_COMPONENT24` plane. */
+	readonly frontierDepthAttachmentBytes: number;
+	/** Two ping-pong full-screen `R8UI` frontier-state planes. */
 	readonly frontierStateAttachmentBytes: number;
-	/** Fixed main target plus one logical scope-layer atlas. */
+	/** Four portal-owned framebuffers: scene, two frontiers, and envelope. */
 	readonly framebufferTargetCount: number;
 	/** Selected physical crossings encoded once into the reusable propagation batch. */
 	readonly maskInstancePreparationCount: number;
@@ -183,18 +240,18 @@ export interface PortalArrivalStateDryScheduleTrace {
 	readonly particleSourceCount: number;
 	/** One contiguous upload when the selected physical particle population is non-empty. */
 	readonly particleUploadCount: number;
-	/** Physical selected scope queries, independent from arrival state count. */
+	/** Exact fixed attachment bytes for the accepted drawing-buffer generation. */
+	readonly portalTargetBytes: number;
+	/** Physical selected scopes supplied to the one scene resolution. */
 	readonly sceneResolutionScopeCount: number;
-	/** Immediately implementable RGBA8 plus depth/stencil upper bound: one full plane per scope. */
-	readonly fullScreenScopeLayerColorDepthBytes: number;
-	/** Immediately implementable 32-bit envelope upper bound: one full plane per scope. */
-	readonly fullScreenScopeVisibilityEnvelopeBytes: number;
-	/** Sum of path-free scope-window bounding tiles in physical pixels. */
-	readonly scopeWindowBoundedLayerPixelCount: number;
-	/** RGBA8 plus depth/stencil bytes over the scope-window-bounded tiles. */
-	readonly scopeWindowBoundedLayerColorDepthBytes: number;
-	/** 32-bit envelope bytes over the scope-window-bounded tiles. */
-	readonly scopeWindowBoundedVisibilityEnvelopeBytes: number;
+	/** Fixed atlas pixel capacity, including gaps between packed scope tiles. */
+	readonly scopeAtlasPixelCapacity: number;
+	/** Packed `RGBA8` color plus `DEPTH_COMPONENT24` local-depth bytes. */
+	readonly scopeAtlasSceneAttachmentBytes: number;
+	/** Sum of committed packed scope-tile areas, excluding atlas gaps. */
+	readonly scopeAtlasTilePixelCount: number;
+	/** Fixed atlas `DEPTH_COMPONENT32F` scope-envelope bytes. */
+	readonly scopeAtlasVisibilityEnvelopeBytes: number;
 	/** Completed authored-scope envelopes. */
 	readonly scopeVisibilityEnvelopeCount: number;
 	/** Arrival states reduced into the completed authored-scope envelopes. */
@@ -215,31 +272,19 @@ export interface PortalArrivalStateDryScheduleTrace {
 	readonly transparentRunCount: number;
 	/** Selected physical crossings with a selected source scope. */
 	readonly traversalCrossingCount: number;
-	/** Configured complete-frontier depth when at least one selected crossing exists. */
+	/** Proven propagation-round bound emitted by the production planner. */
 	readonly traversalDepth: number;
-	/** Propagation/envelope framebuffer switches before the final main-target resolve. */
-	readonly visibilityFramebufferChangeCount: number;
 }
 
-/** Materialize arrival-state execution from the path-free scope-window culling plan. */
+/** Materialize arrival-state execution from a snapshot of the production scope-atlas plan. */
 export function createPortalArrivalStateDryScheduleTrace(
-	plan: PortalRenderWorkPlan,
+	plan: PortalArrivalStateDryPlan,
 	workload: PortalDrySceneWorkload,
-	topologyCrossings: readonly Pick<
-		ScenePortalCrossingInput,
-		"source" | "target"
-	>[],
-	maximumPathDepth: number,
 	drawingBuffer: PortalArrivalStateDrawingBuffer,
 ): PortalArrivalStateDryScheduleTrace {
 	validateDrawingBuffer(drawingBuffer);
-	if (!Number.isSafeInteger(maximumPathDepth) || maximumPathDepth < 0) {
-		throw new Error(
-			"Portal arrival-state maximum path depth must be a non-negative safe integer.",
-		);
-	}
 	const workloadByScope = indexWorkload(workload);
-	const selectedScopeKeys = new Set(plan.selectedScopes.map(scopeKey));
+	const selectedScopeKeys = new Set(plan.selectedScopeKeys);
 	const selectedWorkloads = [...selectedScopeKeys].sort().map((key) => {
 		const scope = workloadByScope.get(key);
 		if (!scope) {
@@ -249,12 +294,8 @@ export function createPortalArrivalStateDryScheduleTrace(
 		}
 		return scope;
 	});
-	const traversalCrossingCount = topologyCrossings.filter(
-		({ source, target }) =>
-			selectedScopeKeys.has(scopeKey(source)) &&
-			selectedScopeKeys.has(scopeKey(target)),
-	).length;
-	const traversalDepth = traversalCrossingCount === 0 ? 0 : maximumPathDepth;
+	const traversalCrossingCount = plan.selectedCrossingCount;
+	const traversalDepth = plan.commands.traversalDepth;
 	const opaquePhysicalBatchCount =
 		uniqueOpaquePhysicalBatchCount(selectedWorkloads);
 	const deferredInput = selectedWorkloads.flatMap((scope) => scope.deferred);
@@ -279,29 +320,27 @@ export function createPortalArrivalStateDryScheduleTrace(
 	);
 	const particleBatchCount = new Set(particles.map(({ batchKey }) => batchKey))
 		.size;
-	const scopeWindowBoundedLayerPixelCount = scopeWindowLayerBoundingPixelCount(
-		plan,
-		drawingBuffer,
-	);
 	const fullScreenPixelCount = drawingBuffer.width * drawingBuffer.height;
-	const fullScreenScopePixelCount =
-		fullScreenPixelCount * selectedScopeKeys.size;
+	const scopeAtlasSceneAttachmentBytes = plan.atlasPixelCapacity * 8;
+	const scopeAtlasVisibilityEnvelopeBytes = plan.atlasPixelCapacity * 4;
+	const frontierDepthAttachmentBytes = fullScreenPixelCount * 4;
+	const frontierStateAttachmentBytes = fullScreenPixelCount * 2;
 	return Object.freeze({
 		additiveRunCount,
 		arrivalStateCount: 1 + traversalCrossingCount,
 		batchFormationInputCount: opaquePhysicalBatchCount,
-		contentPreparationCount: plan.nodes.length,
+		contentPreparationCount: 1,
 		deferredPreparationInputCount: deferredInput.length,
-		frontierStateAttachmentBytes: fullScreenPixelCount * 4 * 2,
-		framebufferTargetCount: 2,
-		fullScreenScopeLayerColorDepthBytes: fullScreenScopePixelCount * 8,
-		fullScreenScopeVisibilityEnvelopeBytes: fullScreenScopePixelCount * 4,
-		maskInstancePreparationCount: traversalCrossingCount,
-		maskPropagationCommandCount: traversalDepth,
-		maskPropagationInstanceCount: traversalDepth * traversalCrossingCount,
-		nextFrontierClearCommandCount: traversalDepth,
-		opaqueCompositeCommandCount: selectedScopeKeys.size === 0 ? 0 : 1,
-		opaqueCompositeInstanceCount: selectedScopeKeys.size,
+		frontierDepthAttachmentBytes,
+		frontierStateAttachmentBytes,
+		framebufferTargetCount: 4,
+		maskInstancePreparationCount:
+			plan.commands.crossingInstancePreparationCount,
+		maskPropagationCommandCount: plan.commands.maskPropagationCommandCount,
+		maskPropagationInstanceCount: plan.commands.maskPropagationInstanceCount,
+		nextFrontierClearCommandCount: plan.commands.frontierClearCommandCount,
+		opaqueCompositeCommandCount: plan.commands.opaqueCompositeCommandCount,
+		opaqueCompositeInstanceCount: plan.commands.opaqueCompositeInstanceCount,
 		opaqueSubmissionCount: opaquePhysicalBatchCount,
 		particleBatchCount,
 		particleInstancePackCount: particles.reduce(
@@ -310,17 +349,22 @@ export function createPortalArrivalStateDryScheduleTrace(
 		),
 		particleSourceCount: particles.length,
 		particleUploadCount: hasLiveParticleInstances(particles) ? 1 : 0,
-		scopeWindowBoundedLayerColorDepthBytes:
-			scopeWindowBoundedLayerPixelCount * 8,
-		scopeWindowBoundedLayerPixelCount,
-		scopeWindowBoundedVisibilityEnvelopeBytes:
-			scopeWindowBoundedLayerPixelCount * 4,
+		portalTargetBytes:
+			scopeAtlasSceneAttachmentBytes +
+			scopeAtlasVisibilityEnvelopeBytes +
+			frontierDepthAttachmentBytes +
+			frontierStateAttachmentBytes,
 		sceneResolutionScopeCount: selectedScopeKeys.size,
+		scopeAtlasPixelCapacity: plan.atlasPixelCapacity,
+		scopeAtlasSceneAttachmentBytes,
+		scopeAtlasTilePixelCount: plan.tilePixelCount,
+		scopeAtlasVisibilityEnvelopeBytes,
 		scopeVisibilityEnvelopeCount: selectedScopeKeys.size,
 		scopeVisibilityEnvelopeInputCount: 1 + traversalCrossingCount,
-		scopeVisibilityEnvelopeReductionCommandCount: traversalDepth,
+		scopeVisibilityEnvelopeReductionCommandCount:
+			plan.commands.scopeEnvelopeReductionCommandCount,
 		scopeVisibilityEnvelopeReductionInstanceCount:
-			traversalDepth * selectedScopeKeys.size,
+			plan.commands.scopeEnvelopeReductionInstanceCount,
 		transparentBatchKeyEvaluationCount:
 			transparent.trace.batchKeyEvaluationCount,
 		transparentDepthBandClassificationCount:
@@ -332,7 +376,6 @@ export function createPortalArrivalStateDryScheduleTrace(
 		),
 		traversalCrossingCount,
 		traversalDepth,
-		visibilityFramebufferChangeCount: traversalDepth * 2,
 	});
 }
 
@@ -715,31 +758,6 @@ function createOpaqueSubmissions(
 				left.batchKey.localeCompare(right.batchKey),
 		),
 	};
-}
-
-function scopeWindowLayerBoundingPixelCount(
-	plan: PortalRenderWorkPlan,
-	drawingBuffer: PortalArrivalStateDrawingBuffer,
-): number {
-	let pixelCount = 0;
-	for (const { bounds } of plan.scopeWindows) {
-		const minX = Math.floor(
-			((Math.max(-1, Math.min(1, bounds.min.x)) + 1) * drawingBuffer.width) / 2,
-		);
-		const maxX = Math.ceil(
-			((Math.max(-1, Math.min(1, bounds.max.x)) + 1) * drawingBuffer.width) / 2,
-		);
-		const minY = Math.floor(
-			((Math.max(-1, Math.min(1, bounds.min.y)) + 1) * drawingBuffer.height) /
-				2,
-		);
-		const maxY = Math.ceil(
-			((Math.max(-1, Math.min(1, bounds.max.y)) + 1) * drawingBuffer.height) /
-				2,
-		);
-		pixelCount += Math.max(0, maxX - minX) * Math.max(0, maxY - minY);
-	}
-	return pixelCount;
 }
 
 function validateDrawingBuffer(

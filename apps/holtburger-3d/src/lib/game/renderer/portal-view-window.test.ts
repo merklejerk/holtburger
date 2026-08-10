@@ -53,6 +53,36 @@ describe("portal view windows", () => {
 		]);
 	});
 
+	it("collapses subpixel clipping residue without accepting material concavity", () => {
+		const first = new Vec2(0.31240598138303627, 0.5553944646273098);
+		const residue = new Vec2(-0.31240598138303627, -0.5553944646273098);
+		const boundary = new Vec2(-0.5624999961124848, -0.9999999999999998);
+		const lowerRight = new Vec2(0.5625, -1);
+		const upperRight = new Vec2(1, 1);
+
+		const window = createPortalViewWindow([
+			[first, residue, boundary, lowerRight, upperRight],
+		]);
+
+		expect(window?.fragments[0]?.vertices).toEqual([
+			boundary,
+			lowerRight,
+			upperRight,
+			first,
+		]);
+		expect(() =>
+			createPortalViewWindow([
+				[
+					new Vec2(0, 1),
+					new Vec2(-0.25, 0),
+					new Vec2(-1, -1),
+					new Vec2(1, -1),
+					new Vec2(1, 1),
+				],
+			]),
+		).toThrow("must be convex");
+	});
+
 	it("rejects inherited geometry outside normalized device space", () => {
 		expect(() =>
 			createPortalViewWindow([

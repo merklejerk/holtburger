@@ -8,6 +8,7 @@ import {
 } from "./portal-near-plane";
 import {
 	PORTAL_WINDOW_NDC_EPSILON,
+	PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON,
 	type PortalWindowPrimitiveKind,
 	type PortalWindowPrimitiveMeter,
 	type PreparedPortalApertureProjectionInput,
@@ -1294,19 +1295,61 @@ function normalizePolygon(
 		return 0;
 	}
 	if (twiceArea < 0) reversePolygon(scratchX, scratchY, count);
-	for (let vertex = 0; vertex < count; vertex += 1) {
-		charge(meter, "normalizationVertexVisitCount", 1);
-		if (
-			edgeDistance(
+	// Half-space clipping preserves convexity. Remove only subpixel inward residue after winding is
+	// canonical; tiny outward turns remain real visibility and must survive exact intersection.
+	changed = true;
+	while (changed && count >= 3) {
+		changed = false;
+		for (let vertex = 0; vertex < count; vertex += 1) {
+			charge(meter, "normalizationVertexVisitCount", 1);
+			const previous = (vertex + count - 1) % count;
+			const next = (vertex + 1) % count;
+			const turn = edgeDistance(
+				scratchX[previous]!,
+				scratchY[previous]!,
 				scratchX[vertex]!,
 				scratchY[vertex]!,
-				scratchX[(vertex + 1) % count]!,
-				scratchY[(vertex + 1) % count]!,
-				scratchX[(vertex + 2) % count]!,
-				scratchY[(vertex + 2) % count]!,
-			) < -PORTAL_WINDOW_NDC_EPSILON
-		) {
-			throw new Error("Portal-window fragment must be convex.");
+				scratchX[next]!,
+				scratchY[next]!,
+			);
+			const forwardDot =
+				(scratchX[vertex]! - scratchX[previous]!) *
+					(scratchX[next]! - scratchX[vertex]!) +
+				(scratchY[vertex]! - scratchY[previous]!) *
+					(scratchY[next]! - scratchY[vertex]!);
+			if (
+				turn < -PORTAL_WINDOW_NDC_EPSILON &&
+				turn >= -PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON &&
+				forwardDot >= -PORTAL_WINDOW_NDC_EPSILON
+			) {
+				for (let shift = vertex; shift + 1 < count; shift += 1) {
+					scratchX[shift] = scratchX[shift + 1]!;
+					scratchY[shift] = scratchY[shift + 1]!;
+				}
+				count -= 1;
+				changed = true;
+				break;
+			}
+		}
+	}
+	if (count < 3) return 0;
+	for (let vertex = 0; vertex < count; vertex += 1) {
+		charge(meter, "normalizationVertexVisitCount", 1);
+		const first = vertex;
+		const second = (vertex + 1) % count;
+		const third = (vertex + 2) % count;
+		const turn = edgeDistance(
+			scratchX[first]!,
+			scratchY[first]!,
+			scratchX[second]!,
+			scratchY[second]!,
+			scratchX[third]!,
+			scratchY[third]!,
+		);
+		if (turn < -PORTAL_WINDOW_NDC_EPSILON) {
+			throw new Error(
+				`Portal-window fragment must be convex; turn ${vertex} is ${turn} across (${scratchX[first]}, ${scratchY[first]}), (${scratchX[second]}, ${scratchY[second]}), (${scratchX[third]}, ${scratchY[third]}).`,
+			);
 		}
 	}
 	let first = 0;

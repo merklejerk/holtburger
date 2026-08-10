@@ -1390,6 +1390,39 @@ describe("portal scope-window culler bridge", () => {
 		]);
 	});
 
+	it("reports the first unexpanded frontier when fixed traversal depth is reached", () => {
+		const middle = envCellScope("middle");
+		const leaf = envCellScope("leaf");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(middle, "middle"),
+				topologyScope(leaf, "leaf"),
+			],
+			[
+				crossing("middle", OUTDOOR_SCOPE, middle),
+				crossing("leaf", middle, leaf),
+			],
+		);
+		const culler = new PortalScopeWindowCuller({
+			maximumDepth: 1,
+			maximumProjectionPrimitiveCount: 100_000,
+			maximumWorkItemCount: 8,
+			windowArena: scopeWindowArenaCapacity(),
+		});
+
+		const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
+
+		expect(frame.status).toBe("truncated");
+		expect(frame.completedDepth).toBe(1);
+		expect(frame.declinedDepth).toBe(2);
+		expect(frame.trace.exceptionalDiagnosticHeapRecordCreationCount).toBe(0);
+		expect(scopeWindowSnapshot(frame).map(({ scope }) => scope)).toEqual([
+			scopeIdentity(middle),
+			"outdoor",
+		]);
+	});
+
 	it("declines a whole frontier when committed polygon capacity is exhausted", () => {
 		const child = envCellScope("child");
 		const graph = topology(
@@ -1884,7 +1917,7 @@ describe("portal scope-atlas planning", () => {
 		).toBe(leftToRightOrdinal + 2);
 	});
 
-	it("uses the configured fixed propagation depth and reuses its frame records", () => {
+	it("bounds propagation by selected crossings and reuses its frame records", () => {
 		const child = envCellScope("child");
 		const graph = topology(
 			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
@@ -1910,13 +1943,9 @@ describe("portal scope-atlas planning", () => {
 		expect(second).toBe(first);
 		expect(second.commands).toBe(commands);
 		expect(second.trace).toBe(trace);
-		expect(second.commands.traversalDepth).toBe(TEST_ATLAS_MAXIMUM_PATH_DEPTH);
-		expect(second.commands.maskPropagationCommandCount).toBe(
-			TEST_ATLAS_MAXIMUM_PATH_DEPTH,
-		);
-		expect(second.commands.scopeEnvelopeReductionCommandCount).toBe(
-			TEST_ATLAS_MAXIMUM_PATH_DEPTH,
-		);
+		expect(second.commands.traversalDepth).toBe(1);
+		expect(second.commands.maskPropagationCommandCount).toBe(1);
+		expect(second.commands.scopeEnvelopeReductionCommandCount).toBe(1);
 	});
 
 	it("keeps a dense deterministic tile corpus in bounds without overlap", () => {

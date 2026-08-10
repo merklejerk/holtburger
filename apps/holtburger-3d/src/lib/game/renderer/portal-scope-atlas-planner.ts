@@ -579,12 +579,16 @@ export class PortalScopeAtlasPlanner {
 	}
 
 	#writeCommandLedger(visibility: PortalScopeWindowFrameView): void {
-		const traversalDepth =
-			visibility.selectedCrossingCount === 0
-				? 0
-				: visibility.status === "complete"
-					? this.#maximumPathDepth
-					: visibility.completedDepth;
+		const retainedDepthLimit =
+			visibility.status === "complete"
+				? this.#maximumPathDepth
+				: visibility.completedDepth;
+		// Strict per-pixel entry depth prevents a directed crossing from recurring. Crossing count is
+		// therefore a universal propagation bound without a convergence readback or topology walk.
+		const traversalDepth = Math.min(
+			retainedDepthLimit,
+			visibility.selectedCrossingCount,
+		);
 		this.#frame.commands.crossingInstancePreparationCount =
 			visibility.selectedCrossingCount;
 		this.#frame.commands.frontierClearCommandCount = traversalDepth;

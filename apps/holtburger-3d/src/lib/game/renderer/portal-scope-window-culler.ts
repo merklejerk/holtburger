@@ -607,6 +607,8 @@ export class PortalScopeWindowCuller {
 			const depth = arena.queueDepths[cursor]!;
 			if (depth >= this.#capacity.maximumDepth) {
 				completedDepth = Math.max(completedDepth, depth);
+				// The retained depth is executable, but proving no descendant exists would cross the CPU cap.
+				declinedDepth = depth + 1;
 				break;
 			}
 			const frontierEnd = this.#frontierEnd(arena, cursor, depth);
@@ -817,8 +819,9 @@ export class PortalScopeWindowCuller {
 						input.portalFootprint.drawingBuffer.height) /
 						4);
 			const coverage = arena.coverageByScopeId[indexed.targetScopeId]!;
-			if (
-				!arena.windows.projectAndAdmit(
+			let admitted: boolean;
+			try {
+				admitted = arena.windows.projectAndAdmit(
 					inherited,
 					coverage,
 					input,
@@ -826,8 +829,20 @@ export class PortalScopeWindowCuller {
 					nearPlaneStraddle,
 					minimumNdcArea,
 					this.#projectionMeter,
-				)
-			) {
+				);
+			} catch (cause) {
+				if (
+					cause instanceof ProjectionCapacityExceeded ||
+					cause instanceof PortalWindowArenaCapacityExceeded
+				) {
+					throw cause;
+				}
+				throw new Error(
+					`Portal crossing ${crossing.id} failed scope-window projection.`,
+					{ cause },
+				);
+			}
+			if (!admitted) {
 				continue;
 			}
 			this.#select(

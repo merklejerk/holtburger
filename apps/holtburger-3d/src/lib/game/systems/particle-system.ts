@@ -152,6 +152,8 @@ interface LiveParticle {
 
 interface EmitterInstance {
 	readonly emitter: DrawableParticleEmitter;
+	/** Owner-relative conservative extent, computed once because no emitter property changes live. */
+	readonly envelopeRadius: number;
 	/**
 	 * Owning entity: what this emitter's identity, visibility, and culling envelope belong to.
 	 *
@@ -188,6 +190,17 @@ interface EmitterInstance {
 	particles: LiveParticle[];
 }
 
+/** Derived owner facts read by presentation culling without scanning the global emitter sequence. */
+interface ParticleOwnerAggregate {
+	/** Current emitters owned by this target, used to remove the aggregate exactly at zero. */
+	emitterCount: number;
+	/** Maximum conservative extent of those emitters, or absent with the aggregate itself. */
+	envelopeRadius: number;
+}
+
+/** Every path that removes an emitter, kept explicit so lifetime diagnostics remain exhaustive. */
+type EmitterRemovalReason = "destroyed" | "reaped" | "replaced" | "target-lost";
+
 /** Exterior-owned effects are routed through the selected outdoor scope envelope. */
 export const EXTERIOR_PARTICLE_RENDER_OWNER = "particle-render-owner:exterior";
 
@@ -214,10 +227,28 @@ export interface ParticleSample {
 }
 
 export interface ParticleSystemDiagnostics {
+	/** Emitters created over this system's lifetime, including later replacements. */
+	readonly createdEmitterTotal: number;
+	/** Emitters removed immediately by an authored destroy command. */
+	readonly destroyedEmitterTotal: number;
 	readonly emitterCount: number;
+	/** Targets currently owning at least one emitter. */
+	readonly emitterOwnerCount: number;
 	readonly particleCount: number;
 	readonly emittedTotal: number;
+	/** Emitters halted by an explicit stop command and left to drain. */
+	readonly explicitlyStoppedEmitterTotal: number;
+	/** Emitters removed because their target stopped publishing a transform. */
+	readonly lostTargetEmitterTotal: number;
+	/** Largest current emitter population owned by one target. */
+	readonly maximumEmitterCountPerOwner: number;
+	/** Emitters inspected while rebuilding a removed owner's cold-path maximum. */
+	readonly ownerAggregateRepairEmitterInspectionTotal: number;
+	/** Removals of a widest emitter that required rebuilding its surviving owner's maximum. */
+	readonly ownerAggregateRepairTotal: number;
 	readonly reapedEmitterCount: number;
+	/** Emitters removed when a nonzero authored identity was recreated. */
+	readonly replacedEmitterTotal: number;
 }
 
 /**
@@ -231,7 +262,13 @@ export interface ParticleSystemDiagnostics {
 export class ParticleSystem {
 	readonly #dependencies: ParticleSystemDependencies;
 	readonly #roll: UniformRoll;
+	/** Authoritative global lifetime and render-order sequence. */
 	readonly #instances: EmitterInstance[] = [];
+	/** Derived culling aggregate maintained only at emitter lifetime mutation boundaries. */
+	readonly #ownerAggregates = new Map<
+		BehaviorTargetId,
+		ParticleOwnerAggregate
+	>();
 	/** Reused across frames so cohort grouping does not allocate in the renderer's hot path. */
 	readonly #cohortScratch = new Map<string, ParticleSourceCohort>();
 	/** Current-frame keys used to release scratch belonging to streamed-out owners. */
@@ -248,8 +285,22 @@ export class ParticleSystem {
 	 */
 	readonly #recordPool: MutableParticleInstanceRecord[] = [];
 	#recordsUsed = 0;
+	/** Lifetime creates, including an authored identity that replaces a predecessor. */
+	#createdEmitterTotal = 0;
+	/** Immediate authored destroy removals. */
+	#destroyedEmitterTotal = 0;
 	#emittedTotal = 0;
+	/** First explicit stop transition per live emitter. */
+	#explicitlyStoppedEmitterTotal = 0;
+	/** Removals caused by loss of the target transform. */
+	#lostTargetEmitterTotal = 0;
+	/** Authoritative emitters inspected while repairing cold-path owner maxima. */
+	#ownerAggregateRepairEmitterInspectionTotal = 0;
+	/** Widest-emitter removals that required a surviving owner maximum repair. */
+	#ownerAggregateRepairTotal = 0;
 	#reapedEmitterCount = 0;
+	/** Nonzero authored identity replacements. */
+	#replacedEmitterTotal = 0;
 
 	constructor(dependencies: ParticleSystemDependencies) {
 		this.#dependencies = dependencies;
@@ -319,12 +370,14 @@ export class ParticleSystem {
 					instance.emitterId === emitterId &&
 					instance.target.targetId === target.targetId,
 			);
-			if (existing >= 0) this.#instances.splice(existing, 1);
+			if (existing >= 0) this.#removeEmitter(existing, "replaced");
 		}
+		const envelopeRadius = Math.hypot(...hookOffset) + emitter.envelopeRadius;
 		const instance: EmitterInstance = {
 			emittedCount: 0,
 			emitter,
 			emitterId,
+			envelopeRadius,
 			frameTarget,
 			hookOffset,
 			hiddenSince: null,
@@ -335,6 +388,17 @@ export class ParticleSystem {
 			target,
 		};
 		this.#instances.push(instance);
+		this.#createdEmitterTotal += 1;
+		const owner = this.#ownerAggregates.get(target.targetId);
+		if (owner) {
+			owner.emitterCount += 1;
+			owner.envelopeRadius = Math.max(owner.envelopeRadius, envelopeRadius);
+		} else {
+			this.#ownerAggregates.set(target.targetId, {
+				emitterCount: 1,
+				envelopeRadius,
+			});
+		}
 		// Retail releases `initial_particles` immediately at Init, before any interval applies.
 		for (let index = 0; index < emitter.info.initialParticles; index += 1) {
 			this.#emit(instance, timeSeconds, parentOrigin);
@@ -348,6 +412,7 @@ export class ParticleSystem {
 				instance.target.targetId === target.targetId &&
 				(emitterId === 0 || instance.emitterId === emitterId)
 			) {
+				if (!instance.stopped) this.#explicitlyStoppedEmitterTotal += 1;
 				instance.stopped = true;
 			}
 		}
@@ -361,7 +426,7 @@ export class ParticleSystem {
 				instance.target.targetId === target.targetId &&
 				(emitterId === 0 || instance.emitterId === emitterId)
 			) {
-				this.#instances.splice(index, 1);
+				this.#removeEmitter(index, "destroyed");
 			}
 		}
 	}
@@ -383,7 +448,7 @@ export class ParticleSystem {
 			);
 			// A target that no longer publishes a transform has gone away underneath us.
 			if (parentOrigin === null) {
-				this.#instances.splice(index, 1);
+				this.#removeEmitter(index, "target-lost");
 				continue;
 			}
 			if (!isVisible(instance.target)) {
@@ -400,8 +465,7 @@ export class ParticleSystem {
 			if (!instance.stopped) this.#emitDue(instance, timeSeconds, parentOrigin);
 			// A stopped emitter with nothing left alive has finished its whole job.
 			if (instance.stopped && instance.particles.length === 0) {
-				this.#instances.splice(index, 1);
-				this.#reapedEmitterCount += 1;
+				this.#removeEmitter(index, "reaped");
 			}
 		}
 	}
@@ -535,30 +599,40 @@ export class ParticleSystem {
 	 * unconditionally. This is what lets emitters ride the existing visibility path instead of
 	 * needing a parallel culling system: an owner's bounds simply grow to cover what it emits.
 	 *
-	 * Deliberately per-emitter, never per-particle. GPU evaluation means the CPU does not know
-	 * individual particle positions, and re-deriving them to cull would reintroduce exactly the
-	 * per-particle CPU ceiling this design exists to avoid.
+	 * Computed at emitter lifetime boundaries, never from particles or during presentation. GPU
+	 * evaluation means the CPU does not know individual particle positions, and re-deriving them to
+	 * cull would reintroduce exactly the per-particle CPU ceiling this design exists to avoid.
 	 */
 	envelopeRadiusFor(targetId: BehaviorTargetId): number {
-		let radius = 0;
-		for (const instance of this.#instances) {
-			if (instance.target.targetId !== targetId) continue;
-			// The hook offset displaces the whole emitter, so it extends the owner's bound too.
-			const offsetLength = Math.hypot(...instance.hookOffset);
-			radius = Math.max(radius, offsetLength + instance.emitter.envelopeRadius);
-		}
-		return radius;
+		return this.#ownerAggregates.get(targetId)?.envelopeRadius ?? 0;
 	}
 
 	getDiagnostics(): ParticleSystemDiagnostics {
+		let maximumEmitterCountPerOwner = 0;
+		for (const owner of this.#ownerAggregates.values()) {
+			maximumEmitterCountPerOwner = Math.max(
+				maximumEmitterCountPerOwner,
+				owner.emitterCount,
+			);
+		}
 		return {
+			createdEmitterTotal: this.#createdEmitterTotal,
+			destroyedEmitterTotal: this.#destroyedEmitterTotal,
 			emittedTotal: this.#emittedTotal,
 			emitterCount: this.#instances.length,
+			emitterOwnerCount: this.#ownerAggregates.size,
+			explicitlyStoppedEmitterTotal: this.#explicitlyStoppedEmitterTotal,
+			lostTargetEmitterTotal: this.#lostTargetEmitterTotal,
+			maximumEmitterCountPerOwner,
+			ownerAggregateRepairEmitterInspectionTotal:
+				this.#ownerAggregateRepairEmitterInspectionTotal,
+			ownerAggregateRepairTotal: this.#ownerAggregateRepairTotal,
 			particleCount: this.#instances.reduce(
 				(total, instance) => total + instance.particles.length,
 				0,
 			),
 			reapedEmitterCount: this.#reapedEmitterCount,
+			replacedEmitterTotal: this.#replacedEmitterTotal,
 		};
 	}
 
@@ -609,6 +683,7 @@ export class ParticleSystem {
 
 	/** A finite emitter stops once it exhausts its particle budget or its authored duration. */
 	#applyAutoStop(instance: EmitterInstance, timeSeconds: number): void {
+		if (instance.stopped) return;
 		const info = instance.emitter.info;
 		if (info.isPersistent) return;
 		if (info.totalParticles > 0 && instance.emittedCount >= info.totalParticles)
@@ -619,6 +694,64 @@ export class ParticleSystem {
 		) {
 			instance.stopped = true;
 		}
+	}
+
+	/** Remove one authoritative instance and repair only its owner's derived culling aggregate. */
+	#removeEmitter(index: number, reason: EmitterRemovalReason): void {
+		const instance = this.#instances[index];
+		if (!instance) throw new Error(`Particle emitter ${index} does not exist.`);
+		this.#instances.splice(index, 1);
+		switch (reason) {
+			case "destroyed":
+				this.#destroyedEmitterTotal += 1;
+				break;
+			case "reaped":
+				this.#reapedEmitterCount += 1;
+				break;
+			case "replaced":
+				this.#replacedEmitterTotal += 1;
+				break;
+			case "target-lost":
+				this.#lostTargetEmitterTotal += 1;
+				break;
+		}
+		this.#repairOwnerAggregateAfterRemoval(instance);
+	}
+
+	/**
+	 * Repair a cold-path maximum after one removal.
+	 *
+	 * The normal presentation path is one map lookup. Re-scanning the authoritative sequence is
+	 * deliberately paid only when the removed emitter owned the maximum; retaining owner membership
+	 * as a second mutable collection would make every lifetime operation harder to keep correct.
+	 */
+	#repairOwnerAggregateAfterRemoval(removed: EmitterInstance): void {
+		const targetId = removed.target.targetId;
+		const owner = this.#ownerAggregates.get(targetId);
+		if (!owner) {
+			throw new Error(`Particle owner ${targetId} has no aggregate to remove.`);
+		}
+		owner.emitterCount -= 1;
+		if (owner.emitterCount === 0) {
+			this.#ownerAggregates.delete(targetId);
+			return;
+		}
+		if (removed.envelopeRadius < owner.envelopeRadius) return;
+		this.#ownerAggregateRepairTotal += 1;
+		let envelopeRadius = 0;
+		let emitterCount = 0;
+		for (const instance of this.#instances) {
+			this.#ownerAggregateRepairEmitterInspectionTotal += 1;
+			if (instance.target.targetId !== targetId) continue;
+			emitterCount += 1;
+			envelopeRadius = Math.max(envelopeRadius, instance.envelopeRadius);
+		}
+		if (emitterCount !== owner.emitterCount) {
+			throw new Error(
+				`Particle owner ${targetId} aggregate expected ${owner.emitterCount} emitters, found ${emitterCount}.`,
+			);
+		}
+		owner.envelopeRadius = envelopeRadius;
 	}
 
 	/**

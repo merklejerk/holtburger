@@ -2479,6 +2479,391 @@ bound requires no convergence readback, topology walk, or new frame allocation.
 - Full repository `prettier --check` remains red on 31 untouched pre-existing files. Every file in
   this cutover is formatted; unrelated formatting churn is deliberately excluded from this change.
 
+## Phase 11: Dungeon Performance and White-Dot Triage
+
+The compositor cutover exposed a separate field failure in dungeon `0x0007ffff`, rooted at EnvCell
+`0x00070100`: the Explorer reported approximately 26 frames per second with `0.22 ms` in its tick
+bucket and `37.62 ms` in its draw bucket, while small white fragments appeared throughout the large
+room. This phase identifies the owners before the planner optimization addendum begins. The two
+symptoms remain separate defects until one mechanism proves that it owns both.
+
+The Explorer HUD does not isolate renderer submission or GPU execution. `ExplorerApp.svelte` starts
+its displayed draw interval before `GameRuntime.render`, and that method advances scripts,
+particles, animation, presentation publication, cohort collection, and only then calls
+`renderer.drawFrame`. A JavaScript sampling profile of the field reproduction attributes about
+`157.5 ms` of one captured `222.1 ms` sample to
+`DynamicEntitySystem.#refreshParticleEnvelope -> ParticleSystem.envelopeRadiusFor`. The source
+explains the result: presentation publication visits every dynamic entity and each envelope query
+linearly scans every current emitter, making this normal-path work `Theta(D * E)` for `D` dynamic
+entities and `E` emitter instances even when almost every query returns zero.
+
+The browser-free archive trace provides a useful control. Its retired one-step simulation reported
+52 particles at one second, but that jump did not reproduce the production update cadence. The
+revised 60 Hz lifetime trace reports 16 dynamic residents, 33 emitters, 32 live particle cohorts,
+and 197 particles at one second; particle population peaks at 312 over 30 seconds. The same archive
+contains 206 scopes and 476 directed crossings. Representative `0x00070100` poses select 2--18
+scopes, inspect 222--5,514 projection primitives, and compile 72--282 WebGL calls. Those facts do
+not clear the compositor of all GPU cost, but they reject topology size alone as an explanation for
+the profiled JavaScript stall. They also make unbounded runtime emitter growth, rather than authored
+particle population, an explicit hypothesis to test.
+
+### Deliverables
+
+- A code-derived CPU complexity ledger for dynamic presentation publication, particle lifetime,
+  envelope ownership, cohort formation, portal planning, and renderer submission.
+- A deterministic `0x0007ffff` lifetime trace that records emitter creation, replacement, stop,
+  destruction, reap, owner cardinality, particle count, and envelope-query work over authored script
+  time without launching a browser or measuring wall-clock duration.
+- A structural correction that removes any accepted quadratic normal-path particle work, with exact
+  before/after operation counts and unchanged retail particle-lifetime behavior.
+- A numeric classification of the white fragments as authored particle samples, source-geometry
+  gaps, scope-atlas coverage gaps, atlas sampling leaks, or depth/raster disagreement.
+- A resteering decision that identifies which Phase 12 optimization lanes remain material after the
+  dungeon failure is corrected.
+
+### Task Checklist
+
+#### 11A. Prove the particle CPU owner
+
+- [x] Extend the deterministic behavior trace beyond its current one-second snapshot and record at
+      authored lifetime transitions and whole seconds: live emitter count, emitters
+      created/replaced/stopped/destroyed or reaped, live particle count, owner count, maximum emitters
+      per owner, and each authored target's derived envelope radius. The 30-second trace advances at
+      a deterministic 60 Hz solely to execute authored time; acceptance uses event and operation
+      counts, never elapsed CPU time.
+- [x] Determine whether emitter count remains bounded by authored lifetime rules or grows because an
+      auto-ID `CreateParticle` is legitimately repeated. Compare `0x0007ffff` against the production
+      diagnostic snapshot's current `emitterCount`, `particleCount`, `emittedTotal`, and
+      `reapedEmitterCount`; do not infer a leak from the one-second trace.
+- [x] Record the current presentation cost as dynamic-entity visits, envelope queries, emitter
+      inspections, radius changes, culling-bound publications, sampled entities, and effect-only
+      publications. The existing structure predicts exactly `D * E` emitter inspections for the
+      idle-entity envelope pass; prove or reject that prediction with counters at the owning loops.
+- [x] Replace the all-emitter lookup with a particle-system-owned owner aggregate after the prediction
+      holds. `envelopeRadiusFor(targetId)` is one map lookup, while create, replace, destroy, target
+      loss, and reap update the one owner aggregate that changed. Keep the flat sequence authoritative
+      for lifetime and global alpha order; the index stores only emitter count and maximum envelope,
+      not duplicate emitter membership that can drift.
+- [x] Preserve every guarantee currently supplied by the flat emitter array: stable particle cohort
+      formation, auto-ID independence, nonzero-ID replacement, reverse-safe removal, hidden-emitter
+      reconciliation, finite-emitter draining, target-loss cleanup, diagnostics, and deterministic
+      iteration. Name each replacement before deleting the array.
+- [x] Prove the corrected normal-path bound from code and trace it as `Theta(D + E + P)` for
+      presentation, emitter advance, and live-particle traversal, with expected `O(1)` envelope
+      lookup; `P` is live particle count. Small allocation or recomputation on exceptional removal
+      of an owner's widest emitter is acceptable; do not complicate the hot path to eliminate
+      exceptional GC churn.
+- [x] Keep envelope radius a particle-system-owned derived fact. Dynamic presentation consumers read
+      it and never reconstruct emitter membership or motion bounds.
+
+#### 11B. Separate particle lifetime from portal and GPU work
+
+- [ ] Explain and rename the HUD `draw` label or its documentation so it cannot be read as a pure
+      renderer/GPU duration. It currently covers the entire `GameRuntime.render` update-and-draw
+      phase; retain the more precise runtime and renderer profilers for ownership.
+- [ ] Capture the existing renderer frame profile for the reproduction after the CPU correction:
+      portal planning, contribution resolution, object preparation, uploads, submissions, GPU phase
+      queries, selected scopes/crossings, atlas pixels, propagation draws, scene draws, triangles,
+      particle batches, and particle instances. Timer queries are attribution evidence, not an
+      optimization acceptance benchmark.
+- [ ] Compare identical camera and layer state in portal and flat EnvCell modes. A cost that remains
+      in flat mode is not charged to portal planning or atlas propagation; a scope-dependent change
+      must retain its exact operation vector.
+- [ ] Use layer isolation only to assign existing work: EnvCell shells, residents, dynamic objects,
+      particles, and exterior contributions. Do not let a diagnostic toggle become a production
+      scheduling abstraction.
+- [ ] Rank remaining CPU and GPU owners only after the particle correction. Phase 12 must not optimize
+      PVS traversal or atlas packing to compensate for work demonstrably owned by particle lifetime.
+
+#### 11C. Classify the white portal-seam fragments numerically
+
+- [ ] Treat the white fragments as an independent portal-boundary defect. Preserve a stable camera
+      showing their alignment with authored portal seams, compare flat and portal modes, and capture
+      deterministic pixel readback at affected coordinates. Screenshots may locate a repro but are
+      not the acceptance oracle.
+- [ ] Disable authored particles at the existing diagnostic boundary as a control while preserving
+      camera, content, portal mode, and environment. A negative result closes the particle
+      explanation; a positive result requires identifying the owning emitter, particle
+      mesh/material, motion law, and retail appearance before changing portal code.
+- [ ] For portal-only fragments, label atlas clear pixels, arrival ownership, reduced scope envelope,
+      scene color, and scene depth with distinct numeric sentinels in a focused probe. Determine
+      whether each bad pixel is uncovered, samples outside its tile, fails source-depth ownership,
+      or resolves an unintended scope.
+- [ ] Test the leading coverage-disagreement hypothesis directly. The production path clears every
+      atlas scene texel to the fog/background color, independently rasterizes portal envelopes and
+      scope geometry, and resolves admitted scene color even when scene depth remains `1.0`. Prove
+      whether each white fragment is an envelope-admitted texel at untouched scene depth rather
+      than inferring that result from its color.
+- [ ] Verify integer ownership sampling, scene-depth sampling precision, `NEAREST`/clamp state, tile
+      bounds, and resolve-coordinate arithmetic. The current path uses exact `texelFetch` rather
+      than framebuffer blits or filtered UV samples, so adjacent-tile bleed is rejected unless the
+      coordinate or metadata proof itself fails. Do not add padding, epsilon, dilation, or altered
+      filtering until one failed invariant identifies it as the owner.
+- [ ] For fragments present in flat mode, compare adjacent depth-continuous EnvCell shell edge
+      positions after their authored transforms. Distinguish exact shared edges, T-junctions,
+      noncoplanar gaps, and raster precision from the visibility-island relationship; the compositor
+      still gives every authored EnvCell its own scope even when load-time scheduling groups a
+      depth-continuous island.
+- [ ] Add the smallest asset-independent numeric fixture protecting the diagnosed invariant, then
+      remove temporary debug colors, readback hooks, and counters that have no continuing consumer.
+
+### Acceptance Criteria
+
+- The `0x0007ffff` particle lifetime trace explains whether production emitter count is bounded or
+  growing and identifies every event responsible for a count change.
+- Normal presentation work no longer performs emitter inspections proportional to
+  `dynamic entities * emitters`; the corrected operation vector and code-derived complexity are
+  retained without relying on wall-clock measurements.
+- The remaining renderer workload is attributed with structural counters and asynchronous GPU
+  phase queries, with HUD update time no longer mistaken for GPU time.
+- Every white fragment in the retained minimal reproduction has a named data owner and failed
+  invariant. No portal seam workaround is accepted merely because it hides the pixels.
+- Phase 12 begins from the corrected dungeon baseline and records whether its PVS, projection,
+  packing, host-preparation, or exterior-reuse avenues still dominate meaningful CPU work.
+
+### Decisions and Course Corrections
+
+- 2026-08-10: Field evidence inserted this triage phase before optimization. Correctness and
+  performance failures in a representative dungeon take precedence over speculative planner wins.
+- 2026-08-10: The sampled `envelopeRadiusFor` stall is explained by a source-proven quadratic
+  ownership lookup. The completed lifetime trace rejects growth over twice the field-profile
+  horizon before the structural correction is accepted.
+- 2026-08-10: Subsequent field observation identifies the white fragments as aligned with portal
+  seams, so they remain a separate correctness investigation from the particle CPU stall. Exact
+  integer atlas fetches and nearest/clamped textures make ordinary packing bleed unlikely; the
+  leading testable hypothesis is an envelope-admitted pixel whose independently rasterized scene
+  geometry left the clear-color texel untouched. Particles remain one control, not the primary
+  theory.
+- 2026-08-10: Wall-clock CPU measurements remain outside optimization acceptance. The sampling
+  profile selects the loop to audit; code-derived bounds and deterministic operation counts prove
+  the correction. GPU timer queries may identify a remaining hardware phase but do not substitute
+  for its command, pixel, and geometry ledger.
+- 2026-08-10: The 30-second `0x0007ffff` archive trace starts with 33 emitters across 16 owners,
+  observes two nonzero-ID replacements and one finite-emitter reap, ends with 32 emitters, and
+  performs zero cold aggregate repairs. The peak retired presentation would inspect 528 emitters;
+  the corrected path performs 16 owner lookups, a 33x structural reduction. This is bounded field-
+  horizon evidence, not a claim about arbitrary future script time.
+- 2026-08-10: The host-published browser scene intentionally has a different residency population:
+  15 dynamics, 32 executed create commands, 32 emitters, and 15 owners. Its idle presentation pass
+  reports 15 entity visits, 15 envelope queries, zero radius changes, zero effect-only publications,
+  and therefore zero culling-bound republications. Under the retired lookup the same pass would
+  perform exactly `15 * 32 = 480` emitter inspections. Browser timing and SwiftShader output are not
+  optimization evidence; this run verifies production wiring and structural counters only.
+- 2026-08-10: The authoritative global emitter sequence remains because it supplies creation-order
+  particle cohort formation and alpha ordering. A derived owner aggregate stores only count and
+  maximum radius. Removing a non-maximum emitter is constant work; removing a surviving owner's
+  maximum scans the authoritative sequence once to repair that owner. This cold path keeps the hot
+  lookup allocation-free and avoids a second mutable membership collection.
+- 2026-08-10: Presentation publication now owns exactly one envelope refresh per applicable entity.
+  The previous effect-only path refreshed once to decide whether to publish and again while applying
+  the same sample. Culling-bound publication occurs inside the changed-envelope branch, so its count
+  is exactly the envelope-change count; a duplicate diagnostic would add no independent fact.
+
+## Phase 12: Optimization Addendum
+
+The compositor cutover is a correctness checkpoint, not the end of this plan. This addendum will
+reduce CPU-owned planning and composition work without changing portal semantics, capacity
+behavior, transparent ordering, particle routing, or physical batch identity. It will use
+code-derived complexity and deterministic operation counts rather than wall-clock timing,
+screenshots, or browser settling.
+
+### Current Baseline
+
+`PortalScopeWindowTopologyIndex` currently sorts every retained crossing and builds packed
+source-scope outgoing adjacency when topology changes. For each admitted scope-window work item,
+`PortalScopeWindowCuller.#expand` scans only that source scope's outgoing range, rejects an immediate
+reciprocal return, then performs near-volume classification, facing, exact aperture projection, and
+window admission. There is no authored-PVS filter or separate coarse global portal candidate list.
+
+After traversal, `#refreshSelectedCrossings` scans all retained topology crossings and keeps the
+crossings whose source and target scopes were selected. This final `O(E)` pass is independent from
+the earlier outgoing-adjacency work and is an explicit optimization candidate.
+
+Depth-continuous visibility islands do not replace authored EnvCell scope identity in the selected
+scope atlas. `buildVisibilityIslands` groups cells only after proving reciprocal exact-match,
+coplanarity, opposed half-spaces, and bounds separation; the culler, atlas tile lookup, scene query,
+opaque routing, particles, and deferred envelopes still select and route each EnvCell scope by its
+own renderer key. Physical preparation may preserve batching across compatible work, but it does not
+authorize lifting a cell-level PVS decision to the whole visibility island.
+
+Retail has stronger authored-PVS behavior than the initial integration contract preserved:
+
+- `CEnvCell::grab_visible_cells` adds the camera cell plus its authored cell list
+  (`acclient.c:335978-335986`);
+- `PView::DrawInside` pushes that list before `ConstructView` follows actual portal links
+  (`acclient.c:442014-442037`);
+- `PView::ClipPortals` can enter only targets present in `CEnvCell::visible_cell_table`
+  (`acclient.c:441813-441858`); and
+- `PView::DrawPortal` similarly pushes the selected building portal's authored `stab_list` before
+  entering from outdoors (`acclient.c:442102-442132`).
+
+Hard PVS pruning would therefore move Explorer closer to retail's working-set behavior. It would
+also reproduce any observable authored omission unless the host deliberately repairs it. ACE names
+one Facility Hub staircase/door asymmetry in
+`Source/ACE.Server/Command/Handlers/PlayerCommands.cs:343-346`, introduced by ACE commit
+`7171e35c`, but does not identify either EnvCell DID. The `0x8A0201C2` telelocation elsewhere in the
+commit is a pre-teleport reproduction setup and must not be assumed to identify the malformed pair.
+
+### Deliverables
+
+- An archive-wide authored-PVS census and a targeted Facility Hub malformed-pair fixture.
+- A deterministic counterfactual comparison of current outgoing-adjacency work against PVS-filtered
+  work over the retained real-scene camera traces.
+- A code-derived cost and memory ledger for each optimization avenue below.
+- A resteering decision that accepts, rejects, or postpones each avenue before production edits.
+- Focused implementations and equivalence coverage only for the accepted, non-dominated avenues.
+
+### Task Checklist
+
+#### 12A. Establish the PVS evidence
+
+- [ ] Resolve the Facility Hub portal-gem destination from authoritative content, identify the
+      staircase and room-after-door EnvCell DIDs, and record both directed authored PVS lists plus
+      their direct portal relationship. Do not infer the pair from ACE's pre-teleport setup cell.
+- [ ] Extend the existing browser-free archive census with, per landblock and per source seed:
+  - authored PVS cell count versus internal portal-connected-component cell count;
+  - directed crossings retained by the authored PVS versus all crossings in that component;
+  - depth-continuous visibility-island membership, including PVS omissions of direct
+    depth-continuous neighbors and PVS sets containing only a proper subset of an island;
+  - dangling, duplicate, self, cross-landblock, and absent-immediate-neighbor references;
+  - asymmetric authored pairs, reported separately from proven malformed immediate neighbors;
+  - building-portal `stab_list` size, target inclusion, and internal-island comparison; and
+  - min/median/p90/max distributions plus named worst and representative records.
+- [ ] Extend deterministic portal work traces with the exact current candidate dimensions:
+      outgoing-crossing inspections, near-volume classifications, facing checks, unique physical
+      crossings projected, total crossing projections, window-admission primitives, and the final
+      selected-crossing materialization scan.
+- [ ] Evaluate a counterfactual root-seed PVS predicate before near-volume/projection work. Indoor
+      roots use the camera EnvCell list; each outdoor-to-indoor entry uses that building portal's
+      `stab_list`; returning to outdoor terminates the indoor seed instead of connecting every
+      building through one outdoor component.
+- [ ] Keep that predicate cell-granular: never union PVS lists from members of one depth-continuous
+      visibility island and never admit an unlisted EnvCell merely because a listed cell shares its
+      render-scheduling island. Moving the camera across a depth-continuous seam changes the retail
+      root EnvCell and therefore changes the applicable authored list.
+- [ ] Report selected scopes/crossings outside the applicable authored PVS as correctness
+      counterexamples, not merely lost optimization opportunities. Preserve replayable landblock,
+      root, camera, and crossing identity.
+- [ ] Compare four explicit policies:
+  1. trust structurally valid authored PVS exactly, matching retail working-set behavior;
+  2. repair only census-proven defect signatures in the host and otherwise trust authored PVS; and
+  3. regenerate a conservative camera-independent PVS in the host and union it with authored
+     references; and
+  4. retain PVS as preload/ordering provenance with no hard rejection.
+- [ ] Prototype regenerated PVS as static portal flow, not camera sampling: union each source
+      EnvCell's directed entry-portal flows, carry a conservative separating-plane/anti-penumbra
+      volume through internal portal chains, clip candidate portal polygons, and retain distinct
+      path volumes only while neither conservatively contains the other. Over-admission is allowed;
+      an uncertain or exhausted flow falls back to the source's whole internal portal component.
+- [ ] Count source cells, entry flows, retained flow states, portal polygon clips, generated
+      separator planes, containment/dominance comparisons, peak scratch bytes, output references,
+      and component fallbacks. Compare typical topologies with the shipped maximum of 4,213 cells,
+      9,798 directed portals, and per-cell fan-out 27 before deciding whether assembly latency is
+      acceptable.
+- [ ] If regenerated PVS remains a candidate, key its cached packed result by immutable content
+      identity and generator version. Do not repeat the bake on camera motion or materialize dense
+      JavaScript sets. The effective candidate set is `authored union generated`, so regeneration
+      repairs omissions without discarding authored preload/compatibility over-admission.
+- [ ] If repair remains a candidate, model its fallback as one `internalPortalComponentId` rather
+      than allocating generated per-cell lists. Keep that identity distinct from the narrower
+      depth-continuous `visibilityIslandId`. State whether the observable correction is a
+      `RETAIL DIVERGENCE` and include the required decompile citation and archive census.
+- [ ] Replace the contradictory scene-contract comments that currently describe authored PVS as
+      both a future traversal prune and as never traversal rejection, but only after the policy is
+      selected.
+
+#### 12B. Inspect route-independent projection reuse
+
+- [ ] Split each crossing's camera-dependent aperture work into route-independent projection and
+      route-dependent inherited-window intersection in the cost model. Count unique projected
+      crossings versus total route projections over every deterministic trace.
+- [ ] Evaluate a fixed-capacity, generation-stamped per-camera projection cache indexed by topology
+      crossing ID. It must reuse arena storage, allocate no accepted-frame records, preserve the
+      atomic projection budget, and remain differentially equivalent to the immutable reference.
+- [ ] Account separately for ordinary and near-plane-straddling projected forms. Reject caching if
+      copying or retained polygon capacity dominates the saved projection primitives.
+- [ ] Preserve existing topology-event aperture preparation; do not introduce a third representation
+      of the same static polygon merely to call it a cache.
+
+#### 12C. Remove avoidable whole-topology and packing work
+
+- [ ] Compare the current final all-crossing scan with enumeration through the already-packed
+      outgoing ranges of selected scopes, filtering selected targets. Prove identical stable
+      crossing order and reciprocal-arrival IDs before replacing the `O(E)` pass.
+- [ ] Trace atlas bound reads, sort comparisons, placement attempts, and retained packing order.
+      Evaluate counting/radix or retained-order packing only if a real dimension improves without
+      increasing committed pixels or camera-time heap work.
+- [ ] Investigate whether the accepted propagation round count can be derived more tightly from the
+      selected arrival graph than from completed culler depth. Reject GPU readback or polling; a
+      tighter bound must be computed from already-owned integer topology with fewer operations than
+      it removes.
+- [ ] Keep the fixed-capacity early-stop contract. Optimization may reduce work before a limit but
+      may not turn a complete-frontier cutoff into partial rendering or a fallback compositor.
+
+#### 12D. Inspect topology/load-time preparation
+
+- [ ] Itemize topology-event work currently repeated in the browser: scope/crossing sorting, dense
+      ID assignment, reciprocal resolution, outgoing CSR construction, landblock coordinate
+      projection inputs, aperture fan expansion, and selected crossing-stream packing.
+- [ ] Compare keeping that work in the renderer against emitting a versioned packed topology index
+      from the host assembler. Count transferred bytes, decode validation, retained copies, and
+      topology rebuild operations; do not move work across the boundary without a net structural
+      reduction.
+- [ ] Evaluate prepacked static crossing triangles or indexable aperture ranges only if WebGL2 can
+      consume the result without submitting all unselected crossings or creating a draw per portal.
+- [ ] Inspect preassembled scope-to-static-contribution ranges as a way to reduce per-frame scene
+      resolution while preserving existing material/mesh batch coalescing. Reject any representation
+      that creates more within-domain batches.
+- [ ] Do not add caching for additional scene domains in this phase. The exterior is already drawn
+      once into its selected outdoor tile; any cross-frame exterior reuse requires a separate camera,
+      depth, weather, and dynamic-content invalidation proof.
+
+#### 12E. Resteer, implement, and clean up
+
+- [ ] Rank avenues by removed CPU-owned primitive operations, comparisons, scans, and accepted-frame
+      allocations, with GPU commands, transferred bytes, retained memory, and batch count as
+      independent veto dimensions.
+- [ ] Implement one accepted avenue at a time, re-run immutable/arena differential corpora and
+      deterministic archive traces, and retain before/after operation vectors in this phase.
+- [ ] Delete any diagnostic field, counterfactual evaluator, or candidate representation that has no
+      remaining decision consumer after resteering.
+- [ ] Update `docs/portal_rendering.md`, the architecture audit, and this ledger with the selected
+      optimization contracts and rejected alternatives.
+
+### Acceptance Criteria
+
+- The census quantifies whether authored PVS removes meaningful current candidate work rather than
+  merely containing fewer cells than a connectivity island.
+- Any hard PVS rejection has an explicit retail-parity policy, a known-malformation policy, and no
+  unexplained selected-scope counterexample in the retained archive traces.
+- Any regenerated PVS is camera-independent, conservative by construction, explicitly falls back
+  when its proof capacity is exhausted, and records assembly work separately from camera-frame work.
+- PVS selection remains cell-granular across depth-continuous seams; render-island batching neither
+  broadens candidate visibility nor leaks geometry from an unselected island member.
+- Accepted optimizations strictly reduce at least one measured CPU-owned structural dimension and
+  do not increase draw batches, per-frame uploads, normal-path heap records, or correctness capacity.
+- Every planner/compositor result remains equivalent to the existing symbolic and numeric oracles;
+  no screenshot or wall-clock evidence is required for acceptance.
+- The plan remains open until the addendum's accepted avenues are implemented and its rejected
+  avenues are recorded with evidence.
+
+### Decisions and Course Corrections
+
+- 2026-08-10: Phase 10 completed the production cutover and deletion checkpoint in commit
+  `2eb2770d`; it does not close the plan. Optimization work is isolated here so the proved compositor
+  remains the comparison baseline.
+- 2026-08-10: Retail's PVS trust makes hard authored pruning a parity candidate, not an automatic
+  correctness theorem. The archive census and the known Facility Hub defect decide whether to trust,
+  repair, or reject it.
+- 2026-08-10: PVS value will be measured against the actual outgoing-adjacency culler and its exact
+  operation ledger. Internal portal-component size alone is not an acceptable performance proxy.
+- 2026-08-10: Depth-continuous visibility islands and conservative internal portal components are
+  separate facts. The former preserve render scheduling across proven empty-space seams; the latter
+  are a possible malformed-PVS fallback. Authored PVS remains rooted in one camera EnvCell even when
+  that cell shares a visibility island.
+- 2026-08-10: Small GC churn remains acceptable on exceptional capacity or malformed-asset paths.
+  The optimization target is repeated normal-path CPU work, not a ceremonial zero-allocation claim.
+
 ## Risks and Mitigations
 
 | Risk                                                                              | Mitigation                                                                                                                                                                  |
@@ -2503,6 +2888,8 @@ bound requires no convergence readback, topology walk, or new frame allocation.
 | A “zero-GC” claim hides exceptional diagnostics or arena/GPU-resource growth.     | Guarantee zero owned records only for accepted fixed-capacity plans; trace one allowed cutoff error separately from arena growth, topology/capacity, and resize allocation. |
 | Gate C's depth 16 becomes duplicated substrate folklore.                          | Give the complete production capacity policy one `maximumPathDepth` owner; derive culler depth, propagation rounds, diagnostics, and ordinary fixtures from that field.     |
 | Historical tests preserve dead architecture.                                      | Port only live semantic cases, then delete tests whose only purpose is old contract shape or call order.                                                                    |
+| Authored PVS is treated as complete because retail consumes it.                   | Census direct defects and counterfactual selected misses; make trust, repair, or hint-only behavior an explicit parity decision with the required retail marker.            |
+| Host preprocessing moves rather than removes CPU work.                            | Count host assembly, transferred bytes, browser validation/copies, topology rebuilds, and camera-frame work independently before changing the boundary.                     |
 
 ## Definition of Done
 
@@ -2545,6 +2932,9 @@ bound requires no convergence readback, topology walk, or new frame allocation.
 - [x] Matched real-scene operation traces contain no unexplained planning, preparation, ordering,
       allocation, upload, mask, composite, or submission changes.
 - [x] Retired planner/executor code and vocabulary are deleted in the same cutover.
+- [ ] The optimization addendum accepts or rejects every listed avenue using deterministic
+      structural evidence and lands every accepted non-dominated change without increasing batch
+      count or weakening compositor equivalence.
 - [ ] Documentation, tests, checks, lint, builds, focused browser substrate fixtures, archive gates,
       complexity proofs, and operation traces are complete.
 

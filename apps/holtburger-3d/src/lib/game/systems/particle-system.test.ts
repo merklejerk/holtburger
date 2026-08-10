@@ -215,9 +215,12 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 		drained.stop(TARGET, 0);
+		drained.stop(TARGET, 0);
 		drained.advance(1);
 		// Stopped emitters keep their live particles until each finishes its own lifespan.
 		expect(drained.getDiagnostics().particleCount).toBe(2);
+		// Repeating the same stop does not manufacture a second lifetime transition.
+		expect(drained.getDiagnostics().explicitlyStoppedEmitterTotal).toBe(1);
 
 		const destroyed = runtime();
 		destroyed.create(
@@ -229,7 +232,11 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 		destroyed.destroy(TARGET, 0);
-		expect(destroyed.getDiagnostics().particleCount).toBe(0);
+		expect(destroyed.getDiagnostics()).toMatchObject({
+			destroyedEmitterTotal: 1,
+			emitterOwnerCount: 0,
+			particleCount: 0,
+		});
 	});
 
 	it("replaces a live emitter that shares a nonzero authored id", () => {
@@ -251,8 +258,12 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		expect(particles.getDiagnostics().emitterCount).toBe(1);
-		expect(particles.getDiagnostics().particleCount).toBe(1);
+		expect(particles.getDiagnostics()).toMatchObject({
+			createdEmitterTotal: 2,
+			emitterCount: 1,
+			particleCount: 1,
+			replacedEmitterTotal: 1,
+		});
 	});
 
 	it("keeps auto-id emitters independent of one another", () => {
@@ -328,7 +339,10 @@ describe("ParticleSystem", () => {
 		published = false;
 		particles.advance(1);
 
-		expect(particles.getDiagnostics().emitterCount).toBe(0);
+		expect(particles.getDiagnostics()).toMatchObject({
+			emitterCount: 0,
+			lostTargetEmitterTotal: 1,
+		});
 	});
 
 	it("freezes a hidden persistent emitter's particle ages instead of expiring them unseen", () => {
@@ -534,6 +548,25 @@ describe("ParticleSystem", () => {
 		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(30);
 	});
 
+	it("repairs only a removed widest emitter's owner aggregate", () => {
+		const particles = runtime();
+		particles.create(TARGET, prepared(), NO_OFFSET, 1, 0, ORIGIN);
+		particles.create(SECOND_TARGET, prepared(), NO_OFFSET, 1, 0, ORIGIN);
+		particles.create(TARGET, prepared(), acVector3([0, 0, 20]), 2, 0, ORIGIN);
+
+		particles.destroy(TARGET, 2);
+
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(10);
+		expect(particles.envelopeRadiusFor(SECOND_TARGET.targetId)).toBeCloseTo(10);
+		expect(particles.getDiagnostics()).toMatchObject({
+			emitterOwnerCount: 2,
+			maximumEmitterCountPerOwner: 1,
+			// Both surviving global entries are inspected once on this cold removal path.
+			ownerAggregateRepairEmitterInspectionTotal: 2,
+			ownerAggregateRepairTotal: 1,
+		});
+	});
+
 	it("groups particles into cohorts by mesh and motion type", () => {
 		const particles = runtime();
 		particles.create(
@@ -582,6 +615,35 @@ describe("ParticleSystem", () => {
 		);
 
 		expect(particles.collectCohorts()).toHaveLength(1);
+	});
+
+	it("preserves global creation order when owner aggregates interleave", () => {
+		const particles = runtime();
+		const emitter = prepared({
+			a: acVector3([0, 0, 0]),
+			initialParticles: 1,
+		});
+		particles.create(TARGET, emitter, NO_OFFSET, 0, 0, sceneVector3([1, 0, 0]));
+		particles.create(
+			SECOND_TARGET,
+			emitter,
+			NO_OFFSET,
+			0,
+			0,
+			sceneVector3([2, 0, 0]),
+		);
+		particles.create(TARGET, emitter, NO_OFFSET, 0, 0, sceneVector3([3, 0, 0]));
+
+		const cohorts = particles.collectCohorts();
+
+		expect(cohorts).toHaveLength(1);
+		expect(cohorts[0]!.particles.map(({ origin }) => origin[0])).toEqual([
+			1, 2, 3,
+		]);
+		expect(particles.getDiagnostics()).toMatchObject({
+			emitterOwnerCount: 2,
+			maximumEmitterCountPerOwner: 2,
+		});
 	});
 
 	it("retains render owners until renderer-owned domain batching", () => {

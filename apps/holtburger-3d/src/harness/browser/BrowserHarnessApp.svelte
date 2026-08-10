@@ -47,6 +47,7 @@
 	import type {
 		PortalExecutionProbeResult,
 		PortalRenderGraphProbeResult,
+		PortalScopeAtlasOpaqueExecutionProbeResult,
 		WebGL2Renderer,
 	} from "../../lib/game/renderer/webgl2-renderer";
 	import {
@@ -221,6 +222,13 @@
 			cameraPitchDegrees: number,
 			safetyWorkItemLimit: number,
 		) => PortalExecutionProbeResult;
+		/** Execute replacement scope-atlas terrain and opaque geometry without frame shadowing. */
+		readonly probePortalScopeAtlasOpaqueExecution: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => PortalScopeAtlasOpaqueExecutionProbeResult;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => BrowserHarnessState;
 	}
@@ -801,6 +809,44 @@
 		);
 	}
 
+	function probePortalScopeAtlasOpaqueExecution(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): PortalScopeAtlasOpaqueExecutionProbeResult {
+		if (!renderer) throw new Error("Browser harness renderer is not ready.");
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
+		) {
+			throw new Error(
+				"Browser harness scope-atlas probe requires a finite position and orientation.",
+			);
+		}
+		const envCellId = parseEnvCellId(rawEnvCellId, "scope atlas");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		return renderer.probePortalScopeAtlasOpaqueExecution(
+			landblockId,
+			{
+				cameraInsideSealedCell: false,
+				camera: {
+					far: CAMERA_FAR,
+					fov: CAMERA_FOV_DEGREES,
+					near: CAMERA_NEAR,
+					placement: {
+						envCellId,
+						landblockId,
+						position: sceneVec3(new Vec3(...position)),
+						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
+					},
+				},
+			},
+			{ envCellId, kind: "env-cell", landblockId },
+		);
+	}
+
 	function parseEnvCellId(rawEnvCellId: string, operation: string): EnvCellId {
 		const match = /^(?:0x)?([0-9a-f]{8})$/i.exec(rawEnvCellId.trim());
 		if (!match) {
@@ -966,6 +1012,7 @@
 					focusExplorerOutdoor,
 					probePortalExecution,
 					probePortalRenderGraph,
+					probePortalScopeAtlasOpaqueExecution,
 					requestSceneInterest,
 					setCameraLandblock,
 					setEnvCellCamera,

@@ -98,6 +98,9 @@ describe("RenderWorld", () => {
 					calls.push("scene-scopes");
 					return VISIBLE_SCENE;
 				},
+				queryScopeSelectionFrustum: () => {
+					throw new Error("not used");
+				},
 				queryFlatFrustum: () => {
 					calls.push("scene-flat");
 					return VISIBLE_SCENE;

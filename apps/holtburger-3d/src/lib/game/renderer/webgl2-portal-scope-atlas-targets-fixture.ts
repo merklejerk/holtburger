@@ -4,6 +4,7 @@ import {
 	type WebGL2PortalScopeAtlasTargetSet,
 } from "./webgl2-portal-scope-atlas-targets";
 import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "./portal-arrival-metadata";
+import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
 
 const INITIAL_EXTENTS = {
 	atlas: { height: 8, width: 8 },
@@ -38,7 +39,10 @@ export function runWebGL2PortalScopeAtlasTargetsFixture(
 	gl: WebGL2RenderingContext,
 ): WebGL2PortalScopeAtlasTargetsFixtureResult {
 	requireNoWebGL2Error(gl, "before portal scope-atlas target fixture");
-	const targets = new WebGL2PortalScopeAtlasTargets(gl);
+	const targets = new WebGL2PortalScopeAtlasTargets(
+		gl,
+		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumTargetByteLength,
+	);
 	try {
 		const initial = targets.resize(INITIAL_EXTENTS);
 		const initialDiagnostics = targets.getDiagnostics();

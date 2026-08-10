@@ -58,6 +58,9 @@ layout(location = ${OBJECT_BAKED_LIGHT_ATTRIBUTE}) in vec3 aBakedLight;
 uniform mat4 uProjection;
 uniform mat4 uView;
 uniform vec3 uLandblockOffset;
+// Maps ordinary camera clip coordinates into the active scope-atlas tile. Flat rendering uses
+// (1, 1, 0, 0); the viewport supplies the tile's hard raster boundary in portal mode.
+uniform vec4 uClipTransform;
 ${transformDeclarations}
 ${fogDeclarations}
 
@@ -80,7 +83,10 @@ void main() {
 		aBakedLight
 	);
 	${fogCalculation}
-	gl_Position = uProjection * uView * vec4(anchoredPosition, 1.0);
+	vec4 clipPosition = uProjection * uView * vec4(anchoredPosition, 1.0);
+	clipPosition.xy = clipPosition.xy * uClipTransform.xy
+		+ clipPosition.ww * uClipTransform.zw;
+	gl_Position = clipPosition;
 }
 `;
 }
@@ -282,6 +288,7 @@ interface WebGL2ObjectProgramBase {
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
 		readonly baseRect: WebGLUniformLocation;
+		readonly clipTransform: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
 		readonly detailRect: WebGLUniformLocation;
 		readonly detailTiling: WebGLUniformLocation;
@@ -426,6 +433,7 @@ export function createWebGL2ObjectProgram(
 			ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 			base: requireWebGL2Uniform(gl, program, "uBase"),
 			baseRect: requireWebGL2Uniform(gl, program, "uBaseRect"),
+			clipTransform: requireWebGL2Uniform(gl, program, "uClipTransform"),
 			detail: requireWebGL2Uniform(gl, program, "uDetail"),
 			detailRect: requireWebGL2Uniform(gl, program, "uDetailRect"),
 			detailTiling: requireWebGL2Uniform(gl, program, "uDetailTiling"),

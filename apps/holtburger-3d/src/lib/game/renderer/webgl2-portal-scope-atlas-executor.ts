@@ -240,6 +240,10 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		this.#gl.bindTexture(this.#gl.TEXTURE_2D, handle);
 	}
 
+	bindSampler(...[unit, sampler]: SinkMethod<"bindSampler">): void {
+		this.#gl.bindSampler(unit, sampler);
+	}
+
 	setCapability(...[capability, enabled]: SinkMethod<"setCapability">): void {
 		const glCapability =
 			capability === "blend"

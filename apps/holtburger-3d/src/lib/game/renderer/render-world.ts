@@ -6,6 +6,7 @@ import type {
 	ResolvedSceneBounds,
 	SceneNodeId,
 	SceneScope,
+	SceneScopeSelection,
 	SceneTopologyView,
 	VisibleScene,
 	SceneCullingGroupFilter,
@@ -56,6 +57,12 @@ interface RenderWorldSystems {
 			frustum: Frustum,
 			anchorLandblockId: LandblockId,
 			scopes: readonly SceneScope[],
+			cullingGroupFilter: SceneCullingGroupFilter,
+		): VisibleScene;
+		queryScopeSelectionFrustum(
+			frustum: Frustum,
+			anchorLandblockId: LandblockId,
+			scopes: SceneScopeSelection,
 			cullingGroupFilter: SceneCullingGroupFilter,
 		): VisibleScene;
 		queryFlatFrustum(
@@ -189,6 +196,20 @@ export class RenderWorld {
 		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
 		return this.#systems.scene.queryScopesFrustum(
+			frustum,
+			anchorLandblockId,
+			scopes,
+			cullingGroupFilter,
+		);
+	}
+
+	queryScopeSelectionScene(
+		frustum: Frustum,
+		anchorLandblockId: LandblockId,
+		scopes: SceneScopeSelection,
+		cullingGroupFilter: SceneCullingGroupFilter,
+	): VisibleScene {
+		return this.#systems.scene.queryScopeSelectionFrustum(
 			frustum,
 			anchorLandblockId,
 			scopes,

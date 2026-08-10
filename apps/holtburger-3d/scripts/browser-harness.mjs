@@ -75,6 +75,8 @@ try {
 						filteringCycleStates: result.filteringCycleStates,
 						modeCycleStates: result.modeCycleStates,
 						portalExecution: result.portalExecution,
+						portalScopeAtlasOpaqueExecution:
+							result.portalScopeAtlasOpaqueExecution,
 						portalRenderGraph: result.portalRenderGraph,
 						portalContextLossPolicy: result.state.portalContextLossPolicy,
 						portalSubstrate: result.state.portalSubstrate,
@@ -169,6 +171,7 @@ function parseArgs(args) {
 		offscreenAnimationSampleIntervalMs: null,
 		probePortalGraph: false,
 		executePortal: false,
+		executeScopeAtlasOpaque: false,
 		frameMode: null,
 		timeOfDay: null,
 		dayGroup: null,
@@ -394,6 +397,9 @@ function parseArgs(args) {
 			case "--execute-portal":
 				parsed.executePortal = true;
 				break;
+			case "--execute-scope-atlas-opaque":
+				parsed.executeScopeAtlasOpaque = true;
+				break;
 			case "--capture-frame": {
 				const value = Number(requireValue(args, ++index, arg));
 				if (!Number.isInteger(value) || value <= 0) {
@@ -607,11 +613,13 @@ function parseArgs(args) {
 		);
 	}
 	if (
-		(parsed.executePortal || parsed.probePortalGraph) &&
+		(parsed.executePortal ||
+			parsed.executeScopeAtlasOpaque ||
+			parsed.probePortalGraph) &&
 		envCellCameraOptionCount !== 2
 	) {
 		throw new Error(
-			"--execute-portal and --probe-portal-graph require an EnvCell camera and position.",
+			"Portal execution and graph probes require an EnvCell camera and position.",
 		);
 	}
 	return parsed;
@@ -692,6 +700,8 @@ Options:
   --probe-portal-graph   Run the one-shot pure portal graph diagnostic.
   --execute-portal
                          Execute the complete planned graph through production GPU passes.
+  --execute-scope-atlas-opaque
+                         Execute replacement atlas terrain/opaque passes as a one-shot probe.
   --particle-seed <n>   Seed particle emission randomness so runs repeat exactly. Required for any
                          screenshot comparison of a scene containing particles.
   --capture-frame <n>   Freeze runtime time at frame n, so the captured instant is identical no
@@ -819,6 +829,8 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 	for (const field of [
 		"frontierMatchesOracle",
 		"opaqueOcclusionMatchesOracle",
+		"productionPackedHostileSamplerResolveMatchesOracle",
+		"productionPackedResolveMatchesOracle",
 		"propagatedResolveMatchesOracle",
 		"rootOnlyResolveMatchesOracle",
 	]) {
@@ -917,6 +929,7 @@ function briefHarnessReport(result) {
 		frameProfile: result.state.frameProfile,
 		tickProfile: result.state.tickProfile,
 		frameSettings: result.state.frameSettings,
+		portalScopeAtlasOpaqueExecution: result.portalScopeAtlasOpaqueExecution,
 		initialMetrics: result.initialState.metrics,
 		initialCamera: result.initialState.camera,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
@@ -1596,6 +1609,43 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					],
 				)
 			: null;
+		let scopeAtlasOpaqueScreenshot = null;
+		let portalScopeAtlasOpaqueExecution = null;
+		if (options.executeScopeAtlasOpaque) {
+			const args = [
+				options.envCellCameraId,
+				options.envCellCameraPosition,
+				options.cameraYawDegrees,
+				options.cameraPitchDegrees,
+			];
+			if (options.screenshotPath) {
+				// The probe is intentionally one-shot. Copy its canvas in the same browser task so the
+				// continuous render loop cannot replace the evidence before Page.captureScreenshot.
+				const capture = await evaluateExpression(
+					client,
+					`(() => {
+						const execution = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__
+							.probePortalScopeAtlasOpaqueExecution(...${JSON.stringify(args)});
+						const canvas = document.querySelector("canvas");
+						if (!(canvas instanceof HTMLCanvasElement)) {
+							throw new Error("Browser harness renderer canvas is unavailable.");
+						}
+						return {
+							execution,
+							screenshot: canvas.toDataURL("image/png").slice("data:image/png;base64,".length),
+						};
+					})()`,
+				);
+				portalScopeAtlasOpaqueExecution = capture.execution;
+				scopeAtlasOpaqueScreenshot = capture.screenshot;
+			} else {
+				portalScopeAtlasOpaqueExecution = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalScopeAtlasOpaqueExecution",
+					args,
+				);
+			}
+		}
 		let lifecycleState = null;
 		if (options.lifecycle) {
 			await evaluate(
@@ -1741,10 +1791,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
-		const screenshot = await client.send("Page.captureScreenshot", {
-			captureBeyondViewport: false,
-			format: "png",
-		});
+		const screenshot = scopeAtlasOpaqueScreenshot
+			? { data: scopeAtlasOpaqueScreenshot }
+			: await client.send("Page.captureScreenshot", {
+					captureBeyondViewport: false,
+					format: "png",
+				});
 		return {
 			glRenderer,
 			consoleMessages,
@@ -1755,6 +1807,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			lifecycleState,
 			portalRenderGraph,
 			portalExecution,
+			portalScopeAtlasOpaqueExecution,
 			portalTrace,
 			relocationState,
 			screenshot: screenshot.data,

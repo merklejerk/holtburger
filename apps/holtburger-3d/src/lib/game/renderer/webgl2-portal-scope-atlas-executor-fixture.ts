@@ -12,7 +12,20 @@ import {
 	type PortalModelScene,
 	type PortalModelScopeId,
 } from "./portal-model";
+import { getLandblockCoordinates } from "../landblocks";
+import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
+import type {
+	ScenePortalCrossingInput,
+	SceneScope,
+	SceneTopologyScope,
+	SceneTopologyView,
+} from "../scene";
+import type { PlanarAperture } from "../scene/planar-aperture";
 import { composePortalReferenceFrameThroughPathDepth } from "./portal-reference-compositor";
+import {
+	createPortalRenderCapacityPolicy,
+	PORTAL_RENDER_CAPACITY_POLICY,
+} from "./portal-render-capacity-policy";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
@@ -22,6 +35,7 @@ import {
 import {
 	PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+	PortalPropagationStreamArena,
 	type PortalCrossingTriangleStreamView,
 	type PortalPropagationMetadataStreamView,
 } from "./portal-crossing-triangle-stream";
@@ -31,6 +45,11 @@ import {
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
 } from "./portal-propagation-metadata";
 import { writePortalScopeTileMetadata } from "./portal-scope-tile-metadata";
+import { createCameraNearClipVolume } from "./portal-near-plane";
+import {
+	PortalScopeAtlasPlanner,
+	type PortalScopeAtlasFrameView,
+} from "./portal-scope-atlas-planner";
 import { WebGL2PortalScopeAtlasExecutor } from "./webgl2-portal-scope-atlas-executor";
 import {
 	WebGL2PortalScopeAtlasTargets,
@@ -46,11 +65,33 @@ const DEEP_COLOR = [26, 204, 204, 255] as const;
 const LEAF_COLOR = [51, 204, 51, 255] as const;
 const CLEAR_COLOR = [26, 51, 204, 255] as const;
 const CENTER_PIXELS = new Set([5, 6, 9, 10]);
+const FIXTURE_LANDBLOCK_ID = "0x0001ffff";
+const FIXTURE_ROOT_SCOPE = { kind: "outdoor" } as const satisfies SceneScope;
+const FIXTURE_CHILD_SCOPE = {
+	envCellId: "scope-atlas-packed-child",
+	kind: "env-cell",
+	landblockId: FIXTURE_LANDBLOCK_ID,
+} as const satisfies SceneScope;
+const PRODUCTION_PACKED_FIXTURE_POLICY = createPortalRenderCapacityPolicy({
+	maximumAuthoredApertureVertexCount: 4,
+	maximumPathDepth: 1,
+	maximumProjectionPrimitiveCount: 256,
+	maximumScopeWindowWorkItemCount: 4,
+	scopeAtlas: {
+		columnCount: 4,
+		maximumArrivalStateCount: 2,
+		maximumCrossingTriangleVertexCount: 6,
+		maximumTargetByteLength: 1_024,
+		rowCount: 1,
+	},
+});
 
 /** Numeric real-GPU evidence for the shader substrate against the independent ray oracle. */
 export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
 	readonly frontierMatchesOracle: boolean;
 	readonly opaqueOcclusionMatchesOracle: boolean;
+	readonly productionPackedHostileSamplerResolveMatchesOracle: boolean;
+	readonly productionPackedResolveMatchesOracle: boolean;
 	readonly propagatedResolveMatchesOracle: boolean;
 	readonly rootOnlyResolveMatchesOracle: boolean;
 	readonly propagatedPixels: readonly number[];
@@ -68,7 +109,10 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		throw new Error("Portal shader fixture requires a 4x4 drawing buffer.");
 	}
 	const state = captureState(gl, METADATA_BINDING_POINT);
-	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
+	const targetOwner = new WebGL2PortalScopeAtlasTargets(
+		gl,
+		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumTargetByteLength,
+	);
 	const executor = new WebGL2PortalScopeAtlasExecutor(
 		gl,
 		18,
@@ -115,6 +159,43 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			traversalDepth: 0,
 		});
 		const rootOnlyPixels = readOutput(gl);
+
+		const productionPackedFrame = createProductionPackedFrame();
+		const productionPackedStream = new PortalPropagationStreamArena(6).prepare(
+			productionPackedFrame,
+			getLandblockCoordinates(FIXTURE_LANDBLOCK_ID),
+			Mat4.identity(),
+		);
+		seedProductionPackedSceneAtlas(gl, targets, productionPackedFrame);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream: productionPackedStream,
+			targets,
+			traversalDepth: productionPackedFrame.commands.traversalDepth,
+		});
+		const productionPackedPixels = readOutput(gl);
+		const expectedProductionPackedPixels = solidPixels(ROOT_COLOR);
+		for (const pixel of CENTER_PIXELS) {
+			expectedProductionPackedPixels.set(LEAF_COLOR, pixel * 4);
+		}
+
+		seedProductionPackedSceneAtlas(gl, targets, productionPackedFrame);
+		clearOutput(gl);
+		const productionPackedHostileSampler = executeWithHostileSamplers(
+			gl,
+			() => {
+				executor.execute({
+					outputExtent: DRAWING_EXTENT,
+					outputFramebuffer: null,
+					stream: productionPackedStream,
+					targets,
+					traversalDepth: productionPackedFrame.commands.traversalDepth,
+				});
+				return readOutput(gl);
+			},
+		);
 		requireNoWebGL2Error(gl, "after portal scope-atlas shader execution");
 
 		return {
@@ -126,6 +207,16 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				occludedPixels,
 				expectedOccludedPixels,
 			),
+			productionPackedResolveMatchesOracle: pixelsMatch(
+				productionPackedPixels,
+				expectedProductionPackedPixels,
+			),
+			productionPackedHostileSamplerResolveMatchesOracle:
+				productionPackedHostileSampler.error === gl.NO_ERROR &&
+				pixelsMatch(
+					productionPackedHostileSampler.pixels,
+					expectedProductionPackedPixels,
+				),
 			propagatedPixels: [...propagatedPixels],
 			propagatedResolveMatchesOracle: pixelsMatch(
 				propagatedPixels,
@@ -141,6 +232,157 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		targetOwner.destroy();
 		restoreState(gl, state, METADATA_BINDING_POINT);
 	}
+}
+
+/** Build the smallest real planner-to-arena stream containing a conservative child tile. */
+function createProductionPackedFrame(): PortalScopeAtlasFrameView {
+	const planner = new PortalScopeAtlasPlanner(
+		PRODUCTION_PACKED_FIXTURE_POLICY.culler,
+	);
+	const input = createProductionPackedInput();
+	const frame = planner.plan(createProductionPackedTopology(), input, {
+		atlas: ATLAS_EXTENT,
+		drawingBuffer: DRAWING_EXTENT,
+		maximumArrivalStateCount:
+			PRODUCTION_PACKED_FIXTURE_POLICY.scopeAtlas.maximumArrivalStateCount,
+		maximumCrossingTriangleVertexCount:
+			PRODUCTION_PACKED_FIXTURE_POLICY.scopeAtlas
+				.maximumCrossingTriangleVertexCount,
+	});
+	if (
+		frame.tileCount !== 2 ||
+		frame.visibility.selectedCrossingCount !== 1 ||
+		frame.tileScreenX(1) !== 1 ||
+		frame.tileScreenY(1) !== 1 ||
+		frame.tileWidth(1) !== 2 ||
+		frame.tileHeight(1) !== 2
+	) {
+		throw new Error(
+			"Production-packed fixture did not retain its 2x2 child tile.",
+		);
+	}
+	return frame;
+}
+
+function createProductionPackedInput() {
+	return {
+		anchorCoordinates: getLandblockCoordinates(FIXTURE_LANDBLOCK_ID),
+		clipFromAnchor: Mat4.identity(),
+		nearClipVolume: createCameraNearClipVolume(
+			{ fov: 90, near: 0.5 },
+			{ position: new Vec3(0, 0, 1), rotation: Quat.identity() },
+			1,
+		),
+		portalFootprint: { drawingBuffer: DRAWING_EXTENT, minimumPixelArea: 0 },
+		rootScope: FIXTURE_ROOT_SCOPE,
+	};
+}
+
+function createProductionPackedTopology(): SceneTopologyView {
+	const crossing = createFixtureCrossing(
+		"scope-atlas-packed-child",
+		FIXTURE_ROOT_SCOPE,
+		FIXTURE_CHILD_SCOPE,
+		0,
+	);
+	const scopes: readonly SceneTopologyScope[] = [
+		{
+			potentiallyVisibleEnvCellIds: new Set(),
+			scope: FIXTURE_ROOT_SCOPE,
+			visibilityIslandId: null,
+		},
+		{
+			potentiallyVisibleEnvCellIds: new Set(),
+			scope: FIXTURE_CHILD_SCOPE,
+			visibilityIslandId: "env-cell-island:scope-atlas-packed-child",
+		},
+	];
+	return {
+		crossings: [crossing],
+		outgoing: (scope) => (scope.kind === "outdoor" ? [crossing] : []),
+		revision: 1,
+		scopes,
+	};
+}
+
+function createFixtureCrossing(
+	id: string,
+	source: SceneScope,
+	target: SceneScope,
+	z: number,
+): ScenePortalCrossingInput {
+	const aperture = rectangleAperture(-0.5, -0.5, 0.5, 0.5, z);
+	const sceneAperture = {
+		id: `portal-aperture:${id}` as const,
+		indices: aperture.indices,
+		landblockBounds: boundsForAperture(aperture),
+		landblockId: FIXTURE_LANDBLOCK_ID,
+		plane: aperture.plane,
+		vertices: aperture.vertices,
+	};
+	return {
+		acceptedSide: "positive",
+		exactMatch: true,
+		id: `portal-crossing:${id}`,
+		maskDepthPolicy: "allow-equal-depth",
+		reciprocalCrossingId: null,
+		source,
+		sourceAperture: sceneAperture,
+		spatialRelationship: {
+			kind: "indoor-topology-boundary",
+			reason: "synthetic-boundary",
+		},
+		target,
+		visibilityAperture: sceneAperture,
+	};
+}
+
+function rectangleAperture(
+	minimumX: number,
+	minimumY: number,
+	maximumX: number,
+	maximumY: number,
+	z: number,
+): PlanarAperture {
+	return {
+		indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+		plane: { d: -z, normal: new Vec3(0, 0, 1) },
+		vertices: new Float32Array([
+			minimumX,
+			minimumY,
+			z,
+			maximumX,
+			minimumY,
+			z,
+			maximumX,
+			maximumY,
+			z,
+			minimumX,
+			maximumY,
+			z,
+		]),
+	};
+}
+
+function boundsForAperture(aperture: PlanarAperture): AABB3 {
+	const minimum = new Vec3(
+		aperture.vertices[0]!,
+		aperture.vertices[1]!,
+		aperture.vertices[2]!,
+	);
+	const bounds = new AABB3(minimum.clone(), minimum.clone());
+	for (let index = 3; index < aperture.vertices.length; index += 3) {
+		const x = aperture.vertices[index]!;
+		const y = aperture.vertices[index + 1]!;
+		const z = aperture.vertices[index + 2]!;
+		bounds.min.x = Math.min(bounds.min.x, x);
+		bounds.min.y = Math.min(bounds.min.y, y);
+		bounds.min.z = Math.min(bounds.min.z, z);
+		bounds.max.x = Math.max(bounds.max.x, x);
+		bounds.max.y = Math.max(bounds.max.y, y);
+		bounds.max.z = Math.max(bounds.max.z, z);
+	}
+	return bounds;
 }
 
 function createPropagationStream(): PortalCrossingTriangleStreamView &
@@ -293,6 +535,35 @@ function seedSceneAtlas(
 	gl.disable(gl.SCISSOR_TEST);
 }
 
+function seedProductionPackedSceneAtlas(
+	gl: WebGL2RenderingContext,
+	targets: WebGL2PortalScopeAtlasTargetSet,
+	frame: PortalScopeAtlasFrameView,
+): void {
+	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
+	gl.viewport(0, 0, ATLAS_EXTENT.width, ATLAS_EXTENT.height);
+	gl.enable(gl.SCISSOR_TEST);
+	clearPlannedTile(gl, frame, 0, ROOT_COLOR, 0.8);
+	clearPlannedTile(gl, frame, 1, LEAF_COLOR, 0.6);
+	gl.disable(gl.SCISSOR_TEST);
+}
+
+function clearPlannedTile(
+	gl: WebGL2RenderingContext,
+	frame: PortalScopeAtlasFrameView,
+	ordinal: number,
+	color: readonly [number, number, number, number],
+	depth: number,
+): void {
+	gl.scissor(
+		frame.tileX(ordinal),
+		frame.tileY(ordinal),
+		frame.tileWidth(ordinal),
+		frame.tileHeight(ordinal),
+	);
+	clearCurrentTile(gl, color, depth);
+}
+
 function clearTile(
 	gl: WebGL2RenderingContext,
 	x: number,
@@ -300,6 +571,14 @@ function clearTile(
 	depth: number,
 ): void {
 	gl.scissor(x, 0, 4, 4);
+	clearCurrentTile(gl, color, depth);
+}
+
+function clearCurrentTile(
+	gl: WebGL2RenderingContext,
+	color: readonly [number, number, number, number],
+	depth: number,
+): void {
 	gl.clearBufferfv(
 		gl.COLOR,
 		0,
@@ -336,6 +615,36 @@ function readOutput(gl: WebGL2RenderingContext): Uint8Array {
 		pixels,
 	);
 	return pixels;
+}
+
+function executeWithHostileSamplers(
+	gl: WebGL2RenderingContext,
+	execute: () => Uint8Array,
+): { readonly error: GLenum; readonly pixels: Uint8Array } {
+	const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as GLenum;
+	const previousSamplers = Array.from({ length: 6 }, (_, unit) => {
+		gl.activeTexture(gl.TEXTURE0 + unit);
+		return gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
+	});
+	gl.activeTexture(activeTexture);
+	const hostileSampler = gl.createSampler();
+	if (!hostileSampler) {
+		throw new Error("Failed to allocate the portal hostile-sampler fixture.");
+	}
+	gl.samplerParameteri(hostileSampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	gl.samplerParameteri(hostileSampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+	try {
+		for (let unit = 0; unit < previousSamplers.length; unit += 1) {
+			gl.bindSampler(unit, hostileSampler);
+		}
+		const pixels = execute();
+		return { error: gl.getError(), pixels };
+	} finally {
+		for (const [unit, sampler] of previousSamplers.entries()) {
+			gl.bindSampler(unit, sampler);
+		}
+		gl.deleteSampler(hostileSampler);
+	}
 }
 
 function readFrontier(
@@ -503,6 +812,7 @@ interface CapturedState {
 	readonly readBuffer: GLenum;
 	readonly readFramebuffer: WebGLFramebuffer | null;
 	readonly scissorTest: boolean;
+	readonly samplers: readonly (WebGLSampler | null)[];
 	readonly stencilTest: boolean;
 	readonly textures: readonly (WebGLTexture | null)[];
 	readonly uniformBuffer: WebGLBuffer | null;
@@ -516,11 +826,13 @@ function captureState(
 ): CapturedState {
 	const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as GLenum;
 	const textures: (WebGLTexture | null)[] = [];
+	const samplers: (WebGLSampler | null)[] = [];
 	for (let unit = 0; unit <= 5; unit += 1) {
 		gl.activeTexture(gl.TEXTURE0 + unit);
 		textures.push(
 			gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null,
 		);
+		samplers.push(gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null);
 	}
 	gl.activeTexture(activeTexture);
 	return {
@@ -545,6 +857,7 @@ function captureState(
 		readFramebuffer: gl.getParameter(
 			gl.READ_FRAMEBUFFER_BINDING,
 		) as WebGLFramebuffer | null,
+		samplers,
 		scissorTest: gl.isEnabled(gl.SCISSOR_TEST),
 		stencilTest: gl.isEnabled(gl.STENCIL_TEST),
 		textures,
@@ -566,6 +879,9 @@ function restoreState(
 	for (const [unit, texture] of state.textures.entries()) {
 		gl.activeTexture(gl.TEXTURE0 + unit);
 		gl.bindTexture(gl.TEXTURE_2D, texture);
+	}
+	for (const [unit, sampler] of state.samplers.entries()) {
+		gl.bindSampler(unit, sampler);
 	}
 	gl.activeTexture(state.activeTexture);
 	gl.bindBuffer(gl.ARRAY_BUFFER, state.arrayBuffer);

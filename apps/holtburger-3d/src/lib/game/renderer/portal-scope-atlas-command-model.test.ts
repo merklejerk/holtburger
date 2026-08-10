@@ -21,7 +21,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			traversalDepth: 3,
 		});
 
-		expect(plan.trace).toEqual({ totalWebGLCallCount: 81 });
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 87 });
 		expect(countCalls(plan.calls, "active-texture")).toBe(6);
 		expect(countCalls(plan.calls, "bind-buffer")).toBe(4);
 		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(2);
@@ -47,6 +47,7 @@ describe("portal scope-atlas WebGL call model", () => {
 		expect(countCalls(plan.calls, "bind-buffer-base")).toBe(1);
 		expect(countCalls(plan.calls, "use-program")).toBe(7);
 		expect(countCalls(plan.calls, "bind-texture-2d")).toBe(6);
+		expect(countCalls(plan.calls, "bind-sampler")).toBe(6);
 		expect(
 			countCalls(
 				plan.calls,
@@ -99,7 +100,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			traversalDepth: 0,
 		});
 
-		expect(plan.trace).toEqual({ totalWebGLCallCount: 27 });
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 30 });
 		expect(countCalls(plan.calls, "active-texture")).toBe(3);
 		expect(countCalls(plan.calls, "bind-buffer")).toBe(2);
 		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(1);
@@ -111,6 +112,7 @@ describe("portal scope-atlas WebGL call model", () => {
 		expect(countCalls(plan.calls, "bind-buffer-base")).toBe(1);
 		expect(countCalls(plan.calls, "use-program")).toBe(1);
 		expect(countCalls(plan.calls, "bind-texture-2d")).toBe(3);
+		expect(countCalls(plan.calls, "bind-sampler")).toBe(3);
 		expect(countCalls(plan.calls, "bind-vertex-array")).toBe(1);
 		expect(countCalls(plan.calls, "viewport")).toBe(2);
 		expect(plan.calls).toContainEqual({
@@ -161,8 +163,9 @@ describe("portal scope-atlas WebGL call model", () => {
 				traversalDepth,
 			});
 
-			expect(plan.trace.totalWebGLCallCount).toBe(15 * traversalDepth + 36);
+			expect(plan.trace.totalWebGLCallCount).toBe(15 * traversalDepth + 42);
 			expect(countCalls(plan.calls, "bind-texture-2d")).toBe(6);
+			expect(countCalls(plan.calls, "bind-sampler")).toBe(6);
 			expect(countCalls(plan.calls, "buffer-sub-data")).toBe(2);
 		}
 	});

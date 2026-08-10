@@ -40,6 +40,8 @@ import { createSceneNodeId } from "./utils";
 const EMPTY_PORTAL_CROSSINGS: readonly ScenePortalCrossingInput[] =
 	Object.freeze([]);
 
+type ScenePortalAperture = ScenePortalCrossingInput["sourceAperture"];
+
 type SceneNodeRecord = {
 	cullingGroup: string;
 	id: SceneNodeId;
@@ -90,6 +92,11 @@ export class SceneGraph {
 	readonly #portalCrossings = new Map<
 		PortalCrossingId,
 		ScenePortalCrossingInput
+	>();
+	/** Defensive aperture copies shared by crossings from the same immutable producer artifact. */
+	readonly #portalApertureCopies = new WeakMap<
+		ScenePortalAperture,
+		ScenePortalAperture
 	>();
 	/** Directed topology indexed once at publication rather than scanned during traversal. */
 	readonly #outgoingCrossings = new Map<
@@ -308,7 +315,7 @@ export class SceneGraph {
 			this.#removeOutgoingCrossing(existing);
 			this.#removeUnavailableExteriorBoundary(existing);
 		}
-		const crossing = copyPortalCrossing(input);
+		const crossing = copyPortalCrossing(input, this.#portalApertureCopies);
 		this.#portalCrossings.set(input.id, crossing);
 		const sourceKey = scopeKey(crossing.source);
 		const outgoing =
@@ -868,6 +875,7 @@ function copyResolvedPlacement(
 
 function copyPortalCrossing(
 	crossing: ScenePortalCrossingInput,
+	apertureCopies: WeakMap<ScenePortalAperture, ScenePortalAperture>,
 ): ScenePortalCrossingInput {
 	return {
 		acceptedSide: crossing.acceptedSide,
@@ -876,17 +884,23 @@ function copyPortalCrossing(
 		maskDepthPolicy: crossing.maskDepthPolicy,
 		reciprocalCrossingId: crossing.reciprocalCrossingId,
 		source: { ...crossing.source },
-		sourceAperture: copyPortalAperture(crossing.sourceAperture),
+		sourceAperture: copyPortalAperture(crossing.sourceAperture, apertureCopies),
 		spatialRelationship: { ...crossing.spatialRelationship },
 		target: { ...crossing.target },
-		visibilityAperture: copyPortalAperture(crossing.visibilityAperture),
+		visibilityAperture: copyPortalAperture(
+			crossing.visibilityAperture,
+			apertureCopies,
+		),
 	};
 }
 
 function copyPortalAperture(
-	aperture: ScenePortalCrossingInput["sourceAperture"],
-): ScenePortalCrossingInput["sourceAperture"] {
-	return {
+	aperture: ScenePortalAperture,
+	copies: WeakMap<ScenePortalAperture, ScenePortalAperture>,
+): ScenePortalAperture {
+	const retained = copies.get(aperture);
+	if (retained) return retained;
+	const copy: ScenePortalAperture = {
 		...aperture,
 		indices: new Uint32Array(aperture.indices),
 		landblockBounds: aperture.landblockBounds.clone(),
@@ -896,6 +910,8 @@ function copyPortalAperture(
 		},
 		vertices: new Float32Array(aperture.vertices),
 	};
+	copies.set(aperture, copy);
+	return copy;
 }
 
 function unavailableExteriorBoundaryId(

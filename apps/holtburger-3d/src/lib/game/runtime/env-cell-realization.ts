@@ -7,6 +7,7 @@ import type {
 import type { EnvCellMaterializationPlan } from "../commit/env-cell-materialization";
 import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import { Vec3 } from "../math/types";
+import type { ScenePortalCrossingInput } from "../scene";
 import {
 	qualifyPortalApertureId,
 	qualifyPortalCrossingId,
@@ -89,6 +90,15 @@ export function createEnvCellEnvironmentArtifact(
 		`portal-aperture:${string}`,
 		PortalDrawUnit
 	>();
+	const sceneApertures: readonly ScenePortalCrossingInput["sourceAperture"][] =
+		plan.apertures.map((aperture) => ({
+			id: qualifyPortalApertureId(plan.landblockId, aperture.id),
+			indices: aperture.triangleIndices,
+			landblockBounds: aperture.landblockBounds,
+			landblockId: plan.landblockId,
+			plane: aperture.plane,
+			vertices: aperture.positions,
+		}));
 	for (const aperture of plan.apertures) {
 		const geometry = apertureGeometry.get(aperture.id);
 		if (!geometry) {
@@ -148,14 +158,14 @@ export function createEnvCellEnvironmentArtifact(
 				`env-cell-island:${scope.scope.landblockId}/${scope.scope.envCellId}`,
 		})),
 		crossings: plan.crossings.map((crossing) => {
-			const sourceAperture = plan.apertures[crossing.sourceApertureIndex];
+			const sourceAperture = sceneApertures[crossing.sourceApertureIndex];
 			if (!sourceAperture) {
 				throw new Error(
 					`Portal crossing ${crossing.id} lost source aperture ${crossing.sourceApertureIndex}.`,
 				);
 			}
 			const visibilityAperture =
-				plan.apertures[crossing.visibilityApertureIndex];
+				sceneApertures[crossing.visibilityApertureIndex];
 			if (!visibilityAperture) {
 				throw new Error(
 					`Portal crossing ${crossing.id} lost visibility aperture ${crossing.visibilityApertureIndex}.`,
@@ -179,22 +189,8 @@ export function createEnvCellEnvironmentArtifact(
 					crossing.spatialRelationship,
 				),
 				target: crossing.target,
-				sourceAperture: {
-					id: qualifyPortalApertureId(plan.landblockId, sourceAperture.id),
-					landblockId: plan.landblockId,
-					landblockBounds: sourceAperture.landblockBounds,
-					plane: sourceAperture.plane,
-					vertices: sourceAperture.positions,
-					indices: sourceAperture.triangleIndices,
-				},
-				visibilityAperture: {
-					id: qualifyPortalApertureId(plan.landblockId, visibilityAperture.id),
-					landblockId: plan.landblockId,
-					landblockBounds: visibilityAperture.landblockBounds,
-					plane: visibilityAperture.plane,
-					vertices: visibilityAperture.positions,
-					indices: visibilityAperture.triangleIndices,
-				},
+				sourceAperture,
+				visibilityAperture,
 			};
 		}),
 	};

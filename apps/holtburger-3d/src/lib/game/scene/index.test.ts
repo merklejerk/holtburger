@@ -161,6 +161,35 @@ describe("SceneGraph", () => {
 		expect(second.entries).toEqual([nodeId]);
 	});
 
+	it("queries a reusable indexed scope selection without requiring an array", () => {
+		const scene = new SceneGraph();
+		const nodeId = createGroupedRoot(scene, "static");
+		const selection = {
+			count: 1,
+			scopeAt: (ordinal: number) => {
+				if (ordinal !== 0) throw new Error("unexpected scope ordinal");
+				return outdoorScope();
+			},
+		};
+
+		expect(
+			scene.queryScopeSelectionFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				selection,
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
+		).toEqual([nodeId]);
+		expect(() =>
+			scene.queryScopeSelectionFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				{ ...selection, count: 0 },
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			),
+		).toThrow("at least one scope");
+	});
+
 	it("rebuilds dirty culling-group bounds after member changes", () => {
 		const scene = new SceneGraph();
 		const visible = scene.createNode({

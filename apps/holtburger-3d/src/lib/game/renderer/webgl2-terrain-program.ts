@@ -16,6 +16,9 @@ uniform mat4 uView;
 uniform mat4 uLocalToLandblock;
 uniform vec3 uLandblockOffset;
 uniform vec3 uCameraPosition;
+// Maps ordinary camera clip coordinates into the active scope-atlas tile. Flat rendering uses
+// (1, 1, 0, 0); the viewport supplies the tile's hard raster boundary in portal mode.
+uniform vec4 uClipTransform;
 
 ${WEBGL2_SCENE_LIGHTING_GLSL}
 
@@ -46,7 +49,10 @@ void main() {
 	vAmbientSun = evaluateAmbientAndSun(mat3(uLocalToLandblock) * aNormal);
 	vAnchoredPosition = anchoredPosition;
 	vSurfaceNormal = mat3(uLocalToLandblock) * aNormal;
-	gl_Position = uProjection * viewPosition;
+	vec4 clipPosition = uProjection * viewPosition;
+	clipPosition.xy = clipPosition.xy * uClipTransform.xy
+		+ clipPosition.ww * uClipTransform.zw;
+	gl_Position = clipPosition;
 }
 `;
 
@@ -295,6 +301,7 @@ export interface WebGL2TerrainProgram {
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly blendMasks: WebGLUniformLocation;
 		readonly cameraPosition: WebGLUniformLocation;
+		readonly clipTransform: WebGLUniformLocation;
 		readonly colors: WebGLUniformLocation;
 		readonly composition: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
@@ -382,6 +389,7 @@ export function createWebGL2TerrainProgram(
 				ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 				blendMasks: requireWebGL2Uniform(gl, program, "uBlendMasks"),
 				cameraPosition: requireWebGL2Uniform(gl, program, "uCameraPosition"),
+				clipTransform: requireWebGL2Uniform(gl, program, "uClipTransform"),
 				colors: requireWebGL2Uniform(gl, program, "uColors"),
 				composition: requireWebGL2Uniform(gl, program, "uComposition"),
 				detail: requireWebGL2Uniform(gl, program, "uDetail"),

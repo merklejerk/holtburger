@@ -138,6 +138,7 @@ import {
 	WebGL2PortalSubstrate,
 } from "./webgl2-portal-substrate";
 import type { PreparedPortalProjection } from "./portal-view-window";
+import type { PortalScopeWindowCullInput } from "./portal-scope-window-culler";
 import {
 	executePortalGraph,
 	type PortalFrameDiagnostics,
@@ -177,6 +178,7 @@ import {
 	WebGL2FrameProfiler,
 	type WebGL2FrameProfileCapture,
 } from "./webgl2-gpu-frame-profiler";
+import { WebGL2PortalScopeAtlasPipeline } from "./webgl2-portal-scope-atlas-pipeline";
 
 /** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
 const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
@@ -373,6 +375,18 @@ export interface PortalExecutionProbeResult {
 	readonly selectionMetrics: FrameSelectionMetrics | null;
 }
 
+/** Explicit production-geometry evidence for the replacement opaque scope-atlas path. */
+export interface PortalScopeAtlasOpaqueExecutionProbeResult {
+	readonly crossingCount: number;
+	readonly objectSubmissionCount: number;
+	readonly planningDurationMs: number;
+	readonly scopeCount: number;
+	readonly selectionMetrics: FrameSelectionMetrics;
+	readonly targetBytes: number;
+	readonly terrainSubmissionCount: number;
+	readonly traversalDepth: number;
+}
+
 /** Mutable backing state copied only when Explorer samples renderer diagnostics. */
 interface MutableFrameSelectionMetrics {
 	envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"];
@@ -486,6 +500,8 @@ export class WebGL2Renderer implements Renderer {
 	readonly #objectState: WebGL2ObjectStateApplicator;
 	/** Lazy portal mechanics; construction allocates no GPU target or shader resource. */
 	readonly #portalSubstrate: WebGL2PortalSubstrate;
+	/** Replacement portal owner, created only by an explicit scope-atlas execution. */
+	#portalScopeAtlasPipeline: WebGL2PortalScopeAtlasPipeline | null = null;
 	/** Pure planner retaining only the immutable index for the active topology revision. */
 	readonly #portalRenderGraphPlanner = new PortalRenderGraphPlanner();
 	readonly #visibleStaticLayers = new Set<string>();
@@ -1039,12 +1055,91 @@ export class WebGL2Renderer implements Renderer {
 		};
 	}
 
+	/**
+	 * Execute the replacement opaque path explicitly without shadowing continuous production frames.
+	 *
+	 * Transparencies and particles remain on the legacy compositor until Phase 8 can cut the whole
+	 * portal mode over atomically; this probe renders only terrain plus opaque/alpha-test objects.
+	 */
+	probePortalScopeAtlasOpaqueExecution(
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+		viewInput: FrameViewInput,
+		rootScope: SceneScope,
+	): PortalScopeAtlasOpaqueExecutionProbeResult {
+		this.#assertDeviceReady();
+		this.#resizeCanvasForDpr();
+		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
+		const pipeline = (this.#portalScopeAtlasPipeline ??=
+			new WebGL2PortalScopeAtlasPipeline(this.#gl));
+		const planningStartedAt = performance.now();
+		const frame = pipeline.prepare(
+			this.#world.getPortalTopologyView(),
+			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
+			prepared.anchorCoordinates,
+			prepared.clipFromAnchor,
+			this.#frameWidth,
+			this.#frameHeight,
+		);
+		const planningDurationMs = performance.now() - planningStartedAt;
+		this.#resetFrameSelectionMetrics(1, "portal");
+		const visible = this.#world.queryScopeSelectionScene(
+			prepared.frustum,
+			prepared.anchorLandblockId,
+			frame,
+			INCLUDE_ALL_SCENE_CULLING_GROUPS,
+		);
+		const contributions = this.#resolveSceneContributions(
+			prepared,
+			visible.entries,
+			DEFAULT_FRAME_SETTINGS,
+			null,
+		);
+		const clearColor = [
+			FRONTEND_TUNING.rendering.clearColor.red,
+			FRONTEND_TUNING.rendering.clearColor.green,
+			FRONTEND_TUNING.rendering.clearColor.blue,
+			FRONTEND_TUNING.rendering.clearColor.alpha,
+		] as const;
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
+		gl.clearDepth(1);
+		gl.clearColor(...clearColor);
+		gl.colorMask(true, true, true, true);
+		gl.depthMask(true);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		pipeline.beginOpaqueScene(clearColor);
+		const view = { ...prepared, ...contributions };
+		this.#drawTerrain(view, PROBE_SHADING, pipeline);
+		this.#drawOpaqueObjects(view, PROBE_SHADING, null, pipeline);
+		pipeline.execute(null);
+		this.#beginObjectPhase();
+		const targetDiagnostics = pipeline.getDiagnostics();
+		this.#frameSelectionMetrics.sceneDomainTargetCount =
+			targetDiagnostics.extents === null ? 0 : 1;
+		this.#frameSelectionMetrics.sceneDomainTargetBytes =
+			targetDiagnostics.activeBytes;
+		this.#finishFrameSelectionMetrics();
+		return {
+			crossingCount: frame.atlas.visibility.selectedCrossingCount,
+			objectSubmissionCount: frame.opaqueRouting.trace.objectSubmissionCount,
+			planningDurationMs,
+			scopeCount: frame.count,
+			selectionMetrics: { ...this.#frameSelectionMetrics },
+			targetBytes: targetDiagnostics.activeBytes,
+			terrainSubmissionCount: frame.opaqueRouting.trace.terrainSubmissionCount,
+			traversalDepth: frame.atlas.commands.traversalDepth,
+		};
+	}
+
 	async destroy(): Promise<void> {
 		this.#frameProfiler?.destroy();
 		this.#frameProfiler = null;
 		this.#textureSamplers.destroy();
 		destroyWebGL2TerrainLightMaskTexture(this.#gl, this.#terrainLightMask);
 		this.#portalSubstrate.destroy();
+		this.#portalScopeAtlasPipeline?.destroy();
+		this.#portalScopeAtlasPipeline = null;
 		this.#skyPass?.destroy();
 		this.#skyPass = null;
 		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
@@ -1127,34 +1222,47 @@ export class WebGL2Renderer implements Renderer {
 		rootScope: SceneScope,
 		safetyWorkItemLimit: number,
 	): PortalRenderGraphPlanResult {
-		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
-		const nearClipVolume = createCameraNearClipVolume(
-			viewInput.camera,
-			// Anchor-relative, matching the view matrix this volume is compared against. It used to
-			// be smuggled through a synthesized `CameraPlacement`, whose position is canonical.
-			{
-				position: prepared.cameraPosition,
-				rotation: viewInput.camera.placement.rotation,
-			},
-			aspectRatio,
-		);
 		return this.#portalRenderGraphPlanner.plan(
 			this.#world.getPortalTopologyView(),
 			{
-				...prepared,
+				...this.#createPortalScopeWindowCullInput(
+					prepared,
+					viewInput,
+					rootScope,
+				),
 				maximumStencilValue: MAXIMUM_PORTAL_RENDER_LAYER,
-				nearClipVolume,
-				portalFootprint: {
-					drawingBuffer: {
-						height: this.#frameHeight,
-						width: this.#frameWidth,
-					},
-					minimumPixelArea: this.#minimumPortalFootprintPixelArea,
-				},
-				rootScope,
 				safetyWorkItemLimit,
 			},
 		);
+	}
+
+	#createPortalScopeWindowCullInput(
+		prepared: PreparedViewGeometry,
+		viewInput: FrameViewInput,
+		rootScope: SceneScope,
+	): PortalScopeWindowCullInput {
+		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
+		return {
+			...prepared,
+			nearClipVolume: createCameraNearClipVolume(
+				viewInput.camera,
+				// Anchor-relative, matching the view matrix this volume is compared against. It used to
+				// be smuggled through a synthesized `CameraPlacement`, whose position is canonical.
+				{
+					position: prepared.cameraPosition,
+					rotation: viewInput.camera.placement.rotation,
+				},
+				aspectRatio,
+			),
+			portalFootprint: {
+				drawingBuffer: {
+					height: this.#frameHeight,
+					width: this.#frameWidth,
+				},
+				minimumPixelArea: this.#minimumPortalFootprintPixelArea,
+			},
+			rootScope,
+		};
 	}
 
 	/** Resolve each unique graph node through the shared explicit-scope scene query exactly once. */
@@ -1919,8 +2027,8 @@ export class WebGL2Renderer implements Renderer {
 		domain: SceneRenderDomain,
 	): void {
 		if (domain === "exterior") this.#drawSky(view, shading, "before-world");
-		this.#drawTerrain(view, shading);
-		this.#drawOpaqueObjects(view, shading, null);
+		this.#drawTerrain(view, shading, null);
+		this.#drawOpaqueObjects(view, shading, null, null);
 		// Retail's after-landscape weather: drawn once the landblock loop is down but before the
 		// deferred translucent flush, which is legitimately allowed to cover it (acclient.c:296725,
 		// 441068).
@@ -1952,7 +2060,7 @@ export class WebGL2Renderer implements Renderer {
 		const terrainGpu = profile.beginGpuPhase("terrain");
 		const terrainStartedAt = profile.beginCpuPhase();
 		try {
-			this.#drawTerrain(view, shading);
+			this.#drawTerrain(view, shading, null);
 		} finally {
 			profile.finishCpuPhase("terrainSubmission", terrainStartedAt);
 			terrainGpu?.finish();
@@ -1960,7 +2068,7 @@ export class WebGL2Renderer implements Renderer {
 
 		const opaqueGpu = profile.beginGpuPhase("opaque");
 		try {
-			this.#drawOpaqueObjects(view, shading, profile);
+			this.#drawOpaqueObjects(view, shading, profile, null);
 		} finally {
 			opaqueGpu?.finish();
 		}
@@ -1992,8 +2100,18 @@ export class WebGL2Renderer implements Renderer {
 		this.#beginObjectPhase();
 	}
 
-	#drawTerrain(view: PreparedView, shading: SceneShading): void {
-		if (view.terrain.length === 0) return;
+	#drawTerrain(
+		view: PreparedView,
+		shading: SceneShading,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+	): void {
+		if (view.terrain.length === 0) {
+			portalPipeline?.routeTerrainPass(
+				0,
+				this.#terrainProgram.uniforms.clipTransform,
+			);
+			return;
+		}
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
@@ -2002,6 +2120,11 @@ export class WebGL2Renderer implements Renderer {
 		gl.enable(gl.POLYGON_OFFSET_FILL);
 		gl.polygonOffset(TERRAIN_DEPTH_OFFSET.factor, TERRAIN_DEPTH_OFFSET.units);
 		gl.useProgram(this.#terrainProgram.program);
+		gl.uniform4f(this.#terrainProgram.uniforms.clipTransform, 1, 1, 0, 0);
+		portalPipeline?.routeTerrainPass(
+			view.terrain.length,
+			this.#terrainProgram.uniforms.clipTransform,
+		);
 		gl.uniformMatrix4fv(
 			this.#terrainProgram.uniforms.projection,
 			false,
@@ -2244,6 +2367,7 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		const candidates = view.objects.filter(
 			({ ordering }) => ordering === "opaque" || ordering === "alpha-test",
@@ -2270,6 +2394,10 @@ export class WebGL2Renderer implements Renderer {
 					this.#activateObjectProgram(program, view, shading);
 				}
 				this.#applyObjectLighting(program, object, shading);
+				portalPipeline?.routeObjectSubmission(
+					object.renderScopeKey,
+					program.uniforms.clipTransform,
+				);
 				this.#drawObjectRange(program, object);
 			}
 		} finally {
@@ -2755,6 +2883,7 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const gl = this.#gl;
 		this.#frameSelectionMetrics.objectProgramChanges += 1;
+		gl.uniform4f(program.uniforms.clipTransform, 1, 1, 0, 0);
 		gl.uniformMatrix4fv(
 			program.uniforms.projection,
 			false,

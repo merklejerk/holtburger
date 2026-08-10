@@ -78,6 +78,8 @@ export interface PortalScopeAtlasWebGLSink {
 	activeTexture(unit: number): void;
 	/** Bind one owned two-dimensional texture on the active unit. */
 	bindTexture2D(texture: PortalScopeAtlasTexture): void;
+	/** Remove inherited sampler policy so owned nearest-filter texture parameters take effect. */
+	bindSampler(unit: number, sampler: null): void;
 	/** Establish one required boolean fixed-function state. */
 	setCapability(capability: PortalScopeAtlasCapability, enabled: boolean): void;
 	/** Enable every color channel for integer-state and final color writes. */
@@ -137,6 +139,11 @@ export type PortalScopeAtlasWebGLCall =
 	| {
 			readonly kind: "bind-texture-2d";
 			readonly texture: PortalScopeAtlasTexture;
+	  }
+	| {
+			readonly kind: "bind-sampler";
+			readonly sampler: null;
+			readonly unit: number;
 	  }
 	| {
 			readonly capability: PortalScopeAtlasCapability;
@@ -382,6 +389,7 @@ function bindTexture(
 	unit: number,
 	texture: PortalScopeAtlasTexture,
 ): void {
+	sink.bindSampler(unit, null);
 	sink.activeTexture(unit);
 	sink.bindTexture2D(texture);
 }
@@ -397,6 +405,8 @@ function createRecordingSink(
 			calls.push({ bindingPoint, buffer, kind: "bind-buffer-base" }),
 		bindFramebuffer: (target) =>
 			calls.push({ kind: "bind-framebuffer", target }),
+		bindSampler: (unit, sampler) =>
+			calls.push({ kind: "bind-sampler", sampler, unit }),
 		bindTexture2D: (texture) =>
 			calls.push({ kind: "bind-texture-2d", texture }),
 		bindVertexArray: (vertexArray) =>

@@ -1,7 +1,7 @@
 # Holtburger 3D Portal Compositing Model Plan
 
-Status: Phase 7 CPU contracts, combined propagation metadata, bounded crossing stream, exact WebGL
-call loop, and target lifecycle proved; propagation/reduction shader wiring remains
+Status: Phase 7 opaque backend accepted after proving and fixing inherited WebGL sampler state;
+Phase 8 deferred transparency and particle integration is next
 Created: 2026-08-08
 
 ## Context and Boundaries
@@ -1408,7 +1408,8 @@ propagation in `O(D)` commands, the substrate is rejected without reopening path
 
 ## Phase 7: Implement and Prove the Selected Opaque Backend
 
-Status: shader substrate complete; production opaque-atlas routing remains
+Status: accepted; a production-packer differential and hostile-sampler fixture close the
+multi-scope integration defect before Phase 8
 
 ### Scope-Routing Entry Audit — Accepted 2026-08-09
 
@@ -1891,8 +1892,11 @@ path.
 
 The loop begins from unknown external WebGL state and explicitly establishes depth testing, disabled
 blend/cull/polygon-offset/scissor/stencil state, color/depth writes, all required texture bindings,
-and the metadata UBO binding. Root-only execution uploads metadata, binds only scene color/depth and
-envelope depth, clears the envelope to unbounded, and resolves without touching either frontier.
+null sampler bindings on every compositor texture unit, and the metadata UBO binding. Clearing an
+inherited sampler is required even when the owned texture already has nearest filtering: production
+material draws leave sampler objects bound, and a linear sampler makes an integer `R8UI` frontier
+unsampleable. Root-only execution uploads metadata, binds only scene color/depth and envelope depth,
+clears the envelope to unbounded, and resolves without touching either frontier.
 A propagated frame binds both frontier textures once, along with local scene depth, shared crossing
 depth, scene color, and envelope depth. Texture binds and buffer uploads are therefore constant in
 retained depth.
@@ -1912,15 +1916,15 @@ pixels with no outgoing crossing write uncovered state zero. Reduction must stil
 scope unbounded, so it genuinely needs the current frontier. The spare field remains zero rather
 than encoding a fact that cannot replace its proposed consumer.
 
-With unknown incoming state, root-only execution performs exactly 27 WebGL entry calls. Any nonzero
-retained depth `D` performs exactly `15D + 36`: two uploads, six texture binds, and the fixed-size
-metadata transfer remain constant, while each round contributes two framebuffer binds, two
+With unknown incoming state, root-only execution performs exactly 30 WebGL entry calls. Any nonzero
+retained depth `D` performs exactly `15D + 42`: two uploads, six texture binds, six sampler clears,
+and the fixed-size metadata transfer remain constant, while each round contributes two framebuffer binds, two
 viewports, two clears, two program selections, one reduction uniform, two depth-function changes,
-two VAO binds, and two draws. The absolute depth-16 ceiling is therefore 276 calls. Changing selected
+two VAO binds, and two draws. The absolute depth-16 ceiling is therefore 282 calls. Changing selected
 scope count from one to 255 changes reduction/resolve instance counts, not upload bytes, call order,
 or call count. This is an exact structural CPU-call bound, not a wall-clock or driver-cost claim.
 
-The 276-call ceiling is bounded but not assumed cheap. Most of its depth slope is the unavoidable
+The 282-call ceiling is bounded but not assumed cheap. Most of its depth slope is the unavoidable
 alternation between drawing-buffer propagation and atlas reduction. Phase 9 must combine this formula
 with the real-scene retained-depth distribution before cutover; a shader implementation that adds
 per-scope calls, per-round texture binds, convergence readback, or state restoration ceremony fails
@@ -1942,6 +1946,74 @@ resolve, and exact `R8UI` frontier ids. Numeric color and integer readback match
 oracle on the real GPU path (ANGLE/Vulkan, AMD Radeon RX 7900 XT), with no screenshot comparison,
 SwiftShader semantic claim, timing sample, or WebGL error. This proves shader/substrate refinement;
 it does not yet prove production geometry routing or transparent/particle integration.
+
+### Production Opaque Routing Checkpoint — 2026-08-09
+
+The replacement path now has one lazy renderer-lifetime owner for its arena culler, atlas planner,
+crossing/metadata stream, opaque router, fixed targets, and GLSL executor. It is exercised through
+an explicit one-shot production probe rather than shadowing continuous frames. Public portal mode
+remains entirely on the legacy compositor until Phase 8 can move transparent objects and particles
+with the opaque path; running two compositors continuously or temporarily letting unmasked blends
+leak across the new opaque result were both rejected.
+
+Terrain and object vertex programs now accept one `uClipTransform`. Flat draws bind identity.
+Scope-atlas terrain resolves the outdoor tile once; every already-formed opaque or alpha-test
+object draw resolves its retained `renderScopeKey` once. Routing then applies one tile viewport and
+one `uniform4f` before submitting the unchanged draw. The viewport is not optional bookkeeping: it
+is the hard raster boundary that prevents geometry outside a conservative scope window from
+writing neighboring packed tiles. The earlier routing ledger counted only topology lookups and was
+therefore incomplete as a WebGL-call claim. The honest incremental CPU submission is one lookup,
+one viewport, and one transform uniform per final object draw, plus the same pair of WebGL calls
+once for a non-empty terrain pass. It creates no draw, route record, regrouping pass, or per-instance
+field.
+
+Scene selection gained an indexed scope-query port so the non-retained culler frame can feed the
+existing spatial query without materializing a selected-scope array. The pipeline also reuses its
+frame wrapper, extent records, resource contract, opaque-routing diagnostics, and typed streams.
+Target generations remain allocation events only on extent changes.
+
+The production capacity policy now admits at most 256 MiB of fixed attachments. That is the
+smallest ordinary binary budget above the traced 2560x1080 generation's 215,654,400 bytes; it
+rejects untraced 4K/high-DPI generations before allocating any texture. There is no silent
+resolution scale or compositor fallback.
+
+The documented hybrid `0x7d640113` real-content camera ran the one-shot path at 690x852 on
+ANGLE/Vulkan with an AMD Radeon RX 7900 XT. It selected five scopes and eight crossings, routed four
+existing terrain draws and 162 existing object draws, uploaded the existing one 20,960-byte frame
+instance stream, executed depth 16, allocated exactly 45,854,640 attachment bytes, and reported no
+browser or WebGL errors. Those facts remain production geometry/submission evidence, not a pixel
+correctness claim.
+
+A later same-task canvas capture invalidated the stronger backend conclusion. At 690x852, the same
+five-scope/eight-crossing camera populated 587,776 non-clear atlas pixels, including 478,865 in the
+full-screen root tile, but resolved zero non-clear output pixels with no WebGL error. Forcing the
+same camera to a one-scope/root-only plan populated and resolved the same 478,865 root pixels. A
+temporary stage bisect was removed after localizing the failure: geometry selection, routing, tile
+placement, and root-only resolve work; the failure begins when multi-scope metadata is consumed by
+the executor schedule.
+
+The asset-independent reproducer first passed real planner/arena packing for a conservative 2x2
+child tile and a three-crossing nested chain, ruling out tile transforms, arrival-plane packing,
+UBO layout, and ordinary multi-round GLSL. It then prebound legal linear sampler objects on the six
+texture units before executing the identical packed stream. That case reproduced the clear output:
+the executor rebound textures but inherited material sampler policy, making its integer `R8UI`
+frontiers invalid to sample. The command model now clears the sampler binding on every compositor
+unit before binding its owned nearest-filter texture. This adds six constant WebGL calls, no
+allocation, draw, batch, scope-dependent work, or depth-dependent slope. The hostile-sampler case
+fails before this change and matches the numeric oracle after it.
+
+The documented real AMD camera then selected the same five scopes/eight crossings, routed the same
+four terrain and 162 object submissions, executed depth 16, and produced a non-clear same-task
+capture with the exterior and far indoor doorway visible. This capture is integration evidence,
+not the semantic oracle; the durable regression is the production-packer-to-executor numeric fixture.
+
+The depth-16 result is deliberately conservative, not evidence that this camera traversed sixteen
+portals. A complete culler frontier proves the selected windows but does not currently produce a
+smaller safe propagation-round bound, so any frame with a retained crossing schedules the policy
+maximum and therefore the exact 282-call executor envelope. This is the clearest remaining CPU
+pressure point. Phase 9 must trace this structural call count over real camera paths; reducing it
+requires a symbolically proved per-frame upper bound, not convergence readback or a timing-driven
+heuristic.
 
 ### Task Checklist
 
@@ -1973,7 +2045,7 @@ it does not yet prove production geometry routing or transparent/particle integr
       depth value `16` one named `maximumPathDepth` owner and derive culler `maximumDepth` plus
       ordinary test and trace fixtures from it. Keep policy out of the culler kernel and do not
       create a depth-only constants file.
-- [ ] Feed the same `maximumPathDepth` field into the production atlas propagation rounds and their
+- [x] Feed the same `maximumPathDepth` field into the production atlas propagation rounds and their
       diagnostics when that synchronous consumer is implemented.
 - [x] Index topology-stable scopes, crossings, apertures, and adjacency with persistent integer ids.
       Do not construct scope-key strings, `Map`, `Set`, `Vec2`, polygon objects, or work-item objects
@@ -2008,12 +2080,17 @@ it does not yet prove production geometry routing or transparent/particle integr
       Prove screen/atlas inversion and instanced tile placement, keep reduction to one instanced
       draw per round, and pack the shared camera matrix into the exact 16 KiB block to retain one
       fixed-size metadata upload and one binding across all shader variants.
-- [ ] Route each scope-homogeneous opaque submission to its tile with one shader-visible uniform;
-      retain the existing run boundaries and prove that routing adds no submission. Do not add a
-      per-instance scope attribute unless a later, separately traced cross-scope consolidation wins.
-- [ ] Render and retain production scope-local depth before propagation. The shader fixture already
-      proves that a nearer opaque wall blocks a farther portal without clipping target geometry that
-      legitimately protrudes in front of its entry plane; production opaque routing remains.
+- [x] Route each scope-homogeneous opaque submission to its tile with one shader-visible transform
+      and one tile viewport; retain the existing run boundaries and prove through the explicit
+      production probe that routing adds no submission. Do not add a per-instance scope attribute
+      unless a later, separately traced cross-scope consolidation wins.
+- [x] Reproduce the populated-atlas/clear-output failure with the smallest production-shaped
+      multi-scope metadata fixture, correct the inherited sampler/texture boundary, and require non-clear
+      same-task output readback before claiming production opaque execution.
+- [x] Render and retain production scope-local depth before propagation. The shader fixture proves
+      that a nearer opaque wall blocks a farther portal without clipping target geometry that
+      legitimately protrudes in front of its entry plane; the real-scene probe exercises the same
+      target and executor with production terrain and object draws.
 - [x] Encode one arrival state per pixel in ping-pong integer frontier attachments, select the
       nearest valid outgoing portal with depth, and accumulate one scope envelope per round. Execute
       root and both frontier-parity shaders through a depth-three numeric real-GPU fixture.
@@ -2024,7 +2101,7 @@ it does not yet prove production geometry routing or transparent/particle integr
 - [x] Refine the attachment ledger into one allocation-free scalar executor loop and proof-recording
       sink. Establish unknown incoming state explicitly, keep uploads and texture binds constant in
       depth, prove draw-time feedback safety through the policy maximum, and bound exact WebGL entry
-      calls at 27 for root-only or `15D + 36` for propagated frames.
+      calls at 30 for root-only or `15D + 42` for propagated frames.
 - [ ] Keep geometry/instance preparation independent from atlas allocation and pool attachments only
       by a proved non-overlapping lifetime.
 - [x] Allocate scope color/local depth, ping-pong integer frontier state with shared selection depth,
@@ -2076,7 +2153,7 @@ it does not yet prove production geometry routing or transparent/particle integr
 - GPU command counts match the accepted `O(D)` ledger. Logical propagation work is bounded by
   `D * X` crossing evaluations, physical propagation work by `D * I` expanded triangle vertices,
   and scope reduction by `D * S` instances.
-- CPU WebGL submission is exactly 27 entry calls for root-only execution and `15D + 36` for nonzero
+- CPU WebGL submission is exactly 30 entry calls for root-only execution and `15D + 42` for nonzero
   retained depth from unknown incoming state. Scope count changes instance counts, not upload bytes
   or entry-call count; accepted-path executor scheduling allocates no command records.
 - Focused synthetic readback matches abstract opaque identities and occlusion for canonical
@@ -2274,7 +2351,7 @@ it does not yet prove production geometry routing or transparent/particle integr
 - [x] The complete arena culler is differentially equivalent to the immutable planner over retained
       fixtures, existing seeds, hundreds of expanded topology/camera cases, and storage-order
       metamorphisms, with replayable seed/case failures.
-- [ ] One production capacity-policy contract owns Gate C's `maximumPathDepth: 16`; culler,
+- [x] One production capacity-policy contract owns Gate C's `maximumPathDepth: 16`; culler,
       propagation, arena derivation, diagnostics, and ordinary tests contain no duplicate literal.
 - [x] The selected backend refines the modeled executor and passes numeric real-GPU substrate
       fixtures through depth three, local opaque occlusion, protrusion, and root-only resolve.
@@ -2315,9 +2392,7 @@ it does not yet prove production geometry routing or transparent/particle integr
 
 ## Remaining Production Questions
 
-1. What explicit drawing-buffer pixel/byte budget admits the fixed `2x3` target without allowing a
-   high-DPI or 4K viewport to consume an unreasonable share of GPU memory?
-2. Can any atlas/frontier attachment lifetime be pooled with an existing renderer target without
+1. Can any atlas/frontier attachment lifetime be pooled with an existing renderer target without
    adding framebuffer reattachment commands or coupling unrelated resize/context-loss ownership?
-3. If later traces justify a more complex atlas packer or route-key cache, which explicit CPU-owned
+2. If later traces justify a more complex atlas packer or route-key cache, which explicit CPU-owned
    operation count pays for that added mechanism?

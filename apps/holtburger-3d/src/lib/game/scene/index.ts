@@ -24,6 +24,12 @@ export type SceneScope =
 			readonly envCellId: EnvCellId;
 	  };
 
+/** Indexed scope source for hot-path queries that cannot materialize a temporary array. */
+export interface SceneScopeSelection {
+	readonly count: number;
+	scopeAt(ordinal: number): SceneScope;
+}
+
 /** Canonical env-cell scope data projected from prepared host topology. */
 export interface SceneEnvCellScopeInput {
 	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;

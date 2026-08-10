@@ -19,6 +19,7 @@ import type {
 	ScenePortalTraceQuery,
 	ScenePortalTraceResult,
 	SceneScope,
+	SceneScopeSelection,
 	SceneTopologyScope,
 	SceneTopologyView,
 	PortalCrossingId,
@@ -363,6 +364,26 @@ export class SceneGraph {
 	): VisibleScene {
 		this.#selectedScopeKeys.clear();
 		for (const scope of scopes) {
+			this.#requireResidentScope(scope);
+			this.#selectedScopeKeys.add(scopeKey(scope));
+		}
+		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter);
+		return this.#visibleScene;
+	}
+
+	/** Select bounded nodes from an indexed scope view without allocating a scope array. */
+	queryScopeSelectionFrustum(
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
+		scopes: SceneScopeSelection,
+		cullingGroupFilter: SceneCullingGroupFilter,
+	): VisibleScene {
+		if (!Number.isSafeInteger(scopes.count) || scopes.count < 1) {
+			throw new Error("Scene scope selection must contain at least one scope.");
+		}
+		this.#selectedScopeKeys.clear();
+		for (let ordinal = 0; ordinal < scopes.count; ordinal += 1) {
+			const scope = scopes.scopeAt(ordinal);
 			this.#requireResidentScope(scope);
 			this.#selectedScopeKeys.add(scopeKey(scope));
 		}

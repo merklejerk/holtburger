@@ -129,6 +129,9 @@ describe("portal scope-atlas WebGL call model", () => {
 		expect(plan.calls.filter((call) => call.kind.startsWith("draw-"))).toEqual([
 			{ kind: "draw-resolve", scopeCount: 1 },
 		]);
+		expect(plan.calls.filter((call) => call.kind === "depth-function")).toEqual(
+			[{ compare: "less-equal", kind: "depth-function" }],
+		);
 	});
 
 	it("keeps every sampled texture disjoint from the active draw attachments", () => {

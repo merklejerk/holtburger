@@ -25,16 +25,6 @@ export interface CameraNearClipVolume {
 	readonly eye: Vec3;
 }
 
-const PREPARED_CAMERA_NEAR_CLIP_APERTURE: unique symbol = Symbol(
-	"prepared-camera-near-clip-aperture",
-);
-
-/** Validated aperture accepted by the checked camera-time near-clip classifier. */
-export interface PreparedCameraNearClipAperture extends PlanarAperture {
-	/** Constructor-owned brand preventing camera planning from bypassing checked preparation. */
-	readonly [PREPARED_CAMERA_NEAR_CLIP_APERTURE]: true;
-}
-
 /** Camera-dependent primitive dimensions consumed by near-clip aperture classification. */
 export type CameraNearClipPrimitiveKind =
 	| "apertureVertexReadCount"
@@ -45,67 +35,10 @@ export type CameraNearClipPrimitiveKind =
 	| "triangleTestCount"
 	| "vertexPlaneTestCount";
 
-/** Exact checked work performed across one or more near-clip aperture classifications. */
-export type CameraNearClipDiagnostics = Readonly<
-	Record<CameraNearClipPrimitiveKind, number>
->;
-
 /** Checked operation sink shared with the planner's atomic projection budget. */
 export interface CameraNearClipPrimitiveMeter {
 	/** Charge a positive operation count before the associated work occurs. */
 	consume(kind: CameraNearClipPrimitiveKind, count: number): void;
-}
-
-/** Allocate a zeroed near-clip aggregate for one camera plan. */
-export function createEmptyCameraNearClipDiagnostics(): CameraNearClipDiagnostics {
-	return Object.freeze({
-		apertureVertexReadCount: 0,
-		coordinateValidationCount: 0,
-		createdPolygonCount: 0,
-		createdVertexCount: 0,
-		indexValidationCount: 0,
-		triangleTestCount: 0,
-		vertexPlaneTestCount: 0,
-	});
-}
-
-/** Sum exactly the near-clip dimensions charged to the planner's projection budget. */
-export function cameraNearClipPrimitiveCount(
-	diagnostics: CameraNearClipDiagnostics,
-): number {
-	return (
-		diagnostics.apertureVertexReadCount +
-		diagnostics.coordinateValidationCount +
-		diagnostics.createdPolygonCount +
-		diagnostics.createdVertexCount +
-		diagnostics.indexValidationCount +
-		diagnostics.triangleTestCount +
-		diagnostics.vertexPlaneTestCount
-	);
-}
-
-/** Validate an aperture while charging every data-dependent validation loop before execution. */
-export function prepareCameraNearClipAperture(
-	aperture: PlanarAperture,
-	meter: CameraNearClipPrimitiveMeter,
-): PreparedCameraNearClipAperture {
-	if (
-		aperture.indices.length === 0 ||
-		aperture.indices.length % 3 !== 0 ||
-		aperture.vertices.length === 0 ||
-		aperture.vertices.length % 3 !== 0
-	) {
-		// Preserve the authored-geometry failure rather than reporting a zero-sized trace charge.
-		validatePlanarAperture(aperture);
-		throw new Error("Portal aperture shape validation returned unexpectedly.");
-	}
-	meter.consume("indexValidationCount", aperture.indices.length);
-	meter.consume("coordinateValidationCount", aperture.vertices.length);
-	validatePlanarAperture(aperture);
-	return {
-		...aperture,
-		[PREPARED_CAMERA_NEAR_CLIP_APERTURE]: true,
-	};
 }
 
 /** Build the exact finite near-clip pyramid in canonical world coordinates. */
@@ -172,28 +105,12 @@ export function apertureIntersectsCameraNearClipVolume(
 	aperture: PlanarAperture,
 ): boolean {
 	validatePlanarAperture(aperture);
-	return intersectsPreparedCameraNearClipVolume(
-		volume,
-		{
-			...aperture,
-			[PREPARED_CAMERA_NEAR_CLIP_APERTURE]: true,
-		},
-		null,
-	);
-}
-
-/** Test one already-validated aperture while charging every camera-dependent primitive. */
-export function preparedApertureIntersectsCameraNearClipVolume(
-	volume: CameraNearClipVolume,
-	aperture: PreparedCameraNearClipAperture,
-	meter: CameraNearClipPrimitiveMeter,
-): boolean {
-	return intersectsPreparedCameraNearClipVolume(volume, aperture, meter);
+	return intersectsPreparedCameraNearClipVolume(volume, aperture, null);
 }
 
 function intersectsPreparedCameraNearClipVolume(
 	volume: CameraNearClipVolume,
-	aperture: PreparedCameraNearClipAperture,
+	aperture: PlanarAperture,
 	meter: CameraNearClipPrimitiveMeter | null,
 ): boolean {
 	const points = readVertices(aperture, meter);

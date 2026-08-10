@@ -122,6 +122,8 @@ export interface PortalScopeWindowFrameView {
 	selectedCrossingTargetScopeOrdinal(ordinal: number): number;
 	/** Return the selected reciprocal's arrival id, or zero when no selected reciprocal exists. */
 	selectedCrossingReciprocalArrivalStateId(ordinal: number): number;
+	/** Whether one retained route admitted this crossing through the camera near volume. */
+	selectedCrossingNearPlaneStraddle(ordinal: number): boolean;
 	/** Return the visibility aperture's topology-owned landblock x coordinate. */
 	selectedCrossingVisibilityLandblockX(ordinal: number): number;
 	/** Return the visibility aperture's topology-owned landblock y coordinate. */
@@ -283,11 +285,15 @@ class PortalScopeWindowArena {
 	readonly mutationScopeIds: Uint32Array;
 	readonly queueCrossingIds: Int32Array;
 	readonly queueDepths: Uint16Array;
+	/** Camera-dependent near-plane fact paired with each retained work item. */
+	readonly queueNearPlaneStraddles: Uint8Array;
 	readonly queueScopeIds: Uint32Array;
 	readonly queueWindows: Uint32Array;
 	readonly selectedByScopeId: Uint8Array;
 	/** Selection marker indexed by topology-stable crossing id. */
 	readonly selectedByCrossingId: Uint8Array;
+	/** Retained-route straddle marker indexed by topology-stable crossing id. */
+	readonly selectedNearPlaneByCrossingId: Uint8Array;
 	readonly selectedCrossingIds: Uint32Array;
 	/** Selected ordinal indexed by stable crossing id while its marker is set. */
 	readonly selectedOrdinalByCrossingId: Uint32Array;
@@ -315,11 +321,13 @@ class PortalScopeWindowArena {
 		this.mutationScopeIds = new Uint32Array(workItemCount);
 		this.queueCrossingIds = new Int32Array(workItemCount);
 		this.queueDepths = new Uint16Array(workItemCount);
+		this.queueNearPlaneStraddles = new Uint8Array(workItemCount);
 		this.queueScopeIds = new Uint32Array(workItemCount);
 		this.queueWindows = new Uint32Array(workItemCount);
 		this.queueWindows.fill(NO_PORTAL_ARENA_WINDOW);
 		this.selectedByScopeId = new Uint8Array(scopeCount);
 		this.selectedByCrossingId = new Uint8Array(crossingCount);
+		this.selectedNearPlaneByCrossingId = new Uint8Array(crossingCount);
 		this.selectedCrossingIds = new Uint32Array(crossingCount);
 		this.selectedOrdinalByCrossingId = new Uint32Array(crossingCount);
 		this.selectedOrdinalByScopeId = new Uint32Array(scopeCount);
@@ -335,10 +343,12 @@ class PortalScopeWindowArena {
 			this.mutationScopeIds.byteLength +
 			this.queueCrossingIds.byteLength +
 			this.queueDepths.byteLength +
+			this.queueNearPlaneStraddles.byteLength +
 			this.queueScopeIds.byteLength +
 			this.queueWindows.byteLength +
 			this.selectedByScopeId.byteLength +
 			this.selectedByCrossingId.byteLength +
+			this.selectedNearPlaneByCrossingId.byteLength +
 			this.selectedCrossingIds.byteLength +
 			this.selectedOrdinalByCrossingId.byteLength +
 			this.selectedOrdinalByScopeId.byteLength +
@@ -414,6 +424,14 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		return arena.selectedByCrossingId[reciprocalCrossingId] === 0
 			? 0
 			: arena.selectedOrdinalByCrossingId[reciprocalCrossingId]! + 2;
+	}
+
+	selectedCrossingNearPlaneStraddle(ordinal: number): boolean {
+		return (
+			this.#requireArena().selectedNearPlaneByCrossingId[
+				this.#selectedCrossingId(ordinal)
+			] === 1
+		);
 	}
 
 	selectedCrossingVisibilityLandblockX(ordinal: number): number {
@@ -599,7 +617,7 @@ export class PortalScopeWindowCuller {
 		const rootWindow = this.#beginFrame(arena);
 		const rootScopeId = index.findScopeId(input.rootScope);
 		this.#select(arena, rootScopeId, rootWindow, false);
-		this.#push(arena, rootScopeId, NO_CROSSING, 0, rootWindow);
+		this.#push(arena, rootScopeId, NO_CROSSING, 0, rootWindow, false);
 		let cursor = 0;
 		let completedDepth = 0;
 		let declinedDepth: number | null = null;
@@ -706,6 +724,7 @@ export class PortalScopeWindowCuller {
 	#beginFrame(arena: PortalScopeWindowArena): number {
 		for (let index = 0; index < this.#queueCount; index += 1) {
 			arena.queueWindows[index] = NO_PORTAL_ARENA_WINDOW;
+			arena.queueNearPlaneStraddles[index] = 0;
 		}
 		for (let index = 0; index < this.#mutationCount; index += 1) {
 			arena.mutationPreviousCoverage[index] = NO_PORTAL_ARENA_WINDOW;
@@ -757,7 +776,9 @@ export class PortalScopeWindowCuller {
 			);
 			ordinal += 1
 		) {
-			arena.selectedByCrossingId[arena.selectedCrossingIds[ordinal]!] = 0;
+			const crossingId = arena.selectedCrossingIds[ordinal]!;
+			arena.selectedByCrossingId[crossingId] = 0;
+			arena.selectedNearPlaneByCrossingId[crossingId] = 0;
 		}
 		let selectedCrossingCount = 0;
 		for (
@@ -776,6 +797,16 @@ export class PortalScopeWindowCuller {
 			arena.selectedByCrossingId[crossingId] = 1;
 			arena.selectedOrdinalByCrossingId[crossingId] = selectedCrossingCount;
 			selectedCrossingCount += 1;
+		}
+		for (let queueIndex = 1; queueIndex < this.#queueCount; queueIndex += 1) {
+			if (arena.queueNearPlaneStraddles[queueIndex] === 0) continue;
+			const crossingId = arena.queueCrossingIds[queueIndex]!;
+			if (crossingId < 0 || arena.selectedByCrossingId[crossingId] === 0) {
+				throw new Error(
+					"Retained near-plane portal work has no selected crossing.",
+				);
+			}
+			arena.selectedNearPlaneByCrossingId[crossingId] = 1;
 		}
 		this.#selectedCrossingInputCount += index.crossings.length;
 		this.#frame.selectedCrossingCount = selectedCrossingCount;
@@ -857,6 +888,7 @@ export class PortalScopeWindowCuller {
 				crossingId,
 				arena.queueDepths[queueIndex]! + 1,
 				arena.windows.admittedDelta,
+				nearPlaneStraddle,
 			);
 		}
 	}
@@ -891,6 +923,7 @@ export class PortalScopeWindowCuller {
 		crossingId: number,
 		depth: number,
 		window: number,
+		nearPlaneStraddle: boolean,
 	): void {
 		if (this.#queueCount >= arena.queueScopeIds.length) {
 			throw new WorkItemCapacityExceeded(arena.queueScopeIds.length, "queue");
@@ -901,6 +934,7 @@ export class PortalScopeWindowCuller {
 		arena.queueScopeIds[index] = scopeId;
 		arena.queueCrossingIds[index] = crossingId;
 		arena.queueDepths[index] = depth;
+		arena.queueNearPlaneStraddles[index] = nearPlaneStraddle ? 1 : 0;
 		arena.queueWindows[index] = window;
 		this.#queueCount += 1;
 		this.#queueHighWaterCount = Math.max(

@@ -5,8 +5,7 @@ import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation
 export const PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT = 0;
 
 /** Link-visible name of the fixed scope-atlas metadata block. */
-export const PORTAL_SCOPE_ATLAS_METADATA_BLOCK_NAME =
-	"PortalScopeAtlasMetadata";
+const PORTAL_SCOPE_ATLAS_METADATA_BLOCK_NAME = "PortalScopeAtlasMetadata";
 
 /** std140 declarations shared verbatim by every scope-atlas shader family. */
 export const PORTAL_SCOPE_ATLAS_METADATA_GLSL = `

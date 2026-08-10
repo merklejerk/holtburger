@@ -12,13 +12,13 @@ import type { PlanarAperture } from "../scene/planar-aperture";
 import { scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import {
-	PortalRenderGraphPlanner,
-	type PortalRenderGraphPlanInput,
-} from "./portal-render-graph";
-import {
 	PortalScopeWindowCuller,
 	type PortalScopeWindowCullerCapacity,
 } from "./portal-scope-window-culler";
+import {
+	cullPortalScopeWindowsReference,
+	type PortalScopeWindowReferenceInput,
+} from "./portal-scope-window-reference";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
 import {
 	PORTAL_WINDOW_NDC_EPSILON,
@@ -55,7 +55,7 @@ type Metamorphism = "combined" | "storage-order" | "triangle-order";
 /** One replayable topology/camera input shared by both implementations. */
 interface DifferentialCase {
 	/** Shared camera and budget facts consumed by both implementations. */
-	readonly input: PortalRenderGraphPlanInput;
+	readonly input: PortalScopeWindowReferenceInput;
 	/** Replay coordinates and structural facts attached to every assertion. */
 	readonly label: string;
 	/** Shared topology input; neither implementation contributes fixture logic. */
@@ -439,7 +439,7 @@ function expandedCase(
 function differentialCase(
 	family: ExpandedFamily,
 	ordinal: number,
-	input: PortalRenderGraphPlanInput,
+	input: PortalScopeWindowReferenceInput,
 	scopes: readonly SceneTopologyScope[],
 	crossings: readonly ScenePortalCrossingInput[],
 	revision: number,
@@ -529,19 +529,14 @@ function reorderSceneAperture(
 }
 
 function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
-	const immutableResult = new PortalRenderGraphPlanner().plan(
+	const immutableResult = cullPortalScopeWindowsReference(
 		fixture.topology,
 		fixture.input,
 	);
-	if (immutableResult.kind !== "planned") {
-		throw new Error(
-			`${fixture.label}: immutable planner failed ${immutableResult.reason}.`,
-		);
-	}
 	const culler = new PortalScopeWindowCuller(cullerCapacity());
 	const arenaFrame = culler.cull(fixture.topology, fixture.input);
 	expect(arenaFrame.status, fixture.label).toBe("complete");
-	const expected = immutableResult.plan.scopeWindows
+	const expected = immutableResult.selections
 		.map(({ scope, window }) => ({
 			scope: scopeIdentity(scope),
 			window: immutableWindowSnapshot(window),
@@ -580,12 +575,10 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 	return {
 		arena: actual,
 		completedDepth: arenaFrame.completedDepth,
-		immutableAdmittedStateCount:
-			immutableResult.plan.diagnostics.admittedScopeWindowStateCount,
-		immutableNearPlaneSeedCount:
-			immutableResult.plan.diagnostics.nearPlaneSeedCount,
+		immutableAdmittedStateCount: immutableResult.diagnostics.admittedStateCount,
+		immutableNearPlaneSeedCount: immutableResult.diagnostics.nearPlaneSeedCount,
 		immutableRejectedFootprintCount:
-			immutableResult.plan.diagnostics.rejectedPortalFootprintCount,
+			immutableResult.diagnostics.rejectedPortalFootprintCount,
 		immutable: expected,
 	};
 }
@@ -755,12 +748,11 @@ function compareScopeWindows(
 
 function planInput(
 	rootScope: SceneScope,
-	overrides: Partial<PortalRenderGraphPlanInput> = {},
-): PortalRenderGraphPlanInput {
+	overrides: Partial<PortalScopeWindowReferenceInput> = {},
+): PortalScopeWindowReferenceInput {
 	return {
 		anchorCoordinates: getLandblockCoordinates(ANCHOR_LANDBLOCK_ID),
 		clipFromAnchor: Mat4.identity(),
-		maximumStencilValue: 0xff,
 		nearClipVolume: createCameraNearClipVolume(
 			{ fov: 90, near: 0.5 },
 			{ position: new Vec3(0, 0, 1), rotation: Quat.identity() },

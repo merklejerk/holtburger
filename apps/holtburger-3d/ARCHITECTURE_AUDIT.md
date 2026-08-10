@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-09_
 
 ## Tech Lead North Stars
 
@@ -17,9 +17,8 @@ _Last updated: 2026-08-03_
   state; entity publication applies the complete sample.
 - Keep explorer camera policy in the explorer. Shared runtime APIs expose facts and directed query
   primitives rather than implementing a future game client's movement controller.
-- Make portal rendering correct by construction: scope-local traversal, one unique owner for each
-  render domain, and one explicit schedule that distinguishes node identity from contribution
-  occurrences.
+- Make portal rendering correct by construction: fixed-capacity scope-window traversal, path-free
+  arrival propagation, one packed tile per selected authored scope, and deferred scope envelopes.
 
 ## 1. Current System Shape
 
@@ -42,10 +41,10 @@ flowchart TD
     Dynamic --> World
     Systems --> World[read-only RenderWorld]
     World --> Flat[flat scope selection]
-    World --> Portal[portal graph planning]
+    World --> Portal[scope-atlas planning]
     Flat --> Renderer[WebGL2 renderer]
     Portal --> Renderer
-    Renderer --> Device[resource managers, programs, portal substrate]
+    Renderer --> Device[resource managers, programs, scope-atlas targets]
 ```
 
 `LandblockSourceBatchSource` is an app-local acquisition capability, not an outdoor scene type. It
@@ -59,27 +58,27 @@ commit, revision, owner, publication, and eviction lifecycle.
 
 ## 2. Load-Bearing Bones
 
-| Boundary                                            | Owned invariant                                                                                                                                         |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src-tauri/src/landblock_source_batch.rs`           | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
-| `src-tauri/src/env_cell_source.rs`                  | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
-| `src-tauri/src/cell_struct_projection.rs`           | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
-| `src/lib/assets/decode-env-cell-record.ts`          | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
-| `game/commit/env-cell-materialization.ts`           | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
-| `game/runtime/static-layer-realizer.ts`             | Revision currentness, geometry/atlas rendezvous, publication ordering, and stale-work withdrawal.                                                       |
-| `game/runtime/env-cell-realization.ts`              | Reuses the static preparer for residents, builds proof-backed visibility islands, and creates one environment artifact.                                 |
-| `game/systems/env-cell-system.ts`                   | Failure-atomic ownership of scopes, crossings, shell nodes, aperture geometry, and rollback.                                                            |
-| `game/systems/dynamic-entity-system.ts`             | Owner-atomic dynamic trees, staged activation, complete presentation publication, rigid-part contributions, and static visual fallback.                 |
-| `game/systems/object-visual-template-repository.ts` | Content-addressed immutable preparation plus staged geometry and atlas residency shared across dynamic owners.                                          |
-| `game/systems/animation-system.ts`                  | Independent deterministic playback clocks, retail semantic traversal, discontinuity handling, and fractional rigid-pose sampling.                       |
-| `game/systems/effect-system.ts`                     | Persistent `SetOmega` and per-part translucency state, deterministic timelines, bounded provenance, and fractional effect sampling.                     |
-| `game/scene/scene-graph.ts`                         | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
-| `game/renderer/render-world.ts`                     | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
-| `game/renderer/portal-view-window.ts`               | Exact normalized window construction, convex source decomposition, scope-coverage admission, projection, and clipping.                                  |
-| `game/renderer/portal-render-graph.ts`              | Scope-local traversal, unique render domains, mask edges, explicit contributions, exterior scheduling, and capacity preflight.                          |
-| `game/renderer/portal-render-plan-validation.ts`    | Pure validation and indexing of the completed planner contract before any GPU resource resolution.                                                      |
-| `game/renderer/webgl2-portal-executor.ts`           | Stateless execution of the completed graph; it invents no topology or second contribution schedule.                                                     |
-| `game/renderer/webgl2-portal-substrate.ts`          | One extent-keyed scene-domain target and explicit WebGL color/depth/stencil state transitions.                                                          |
+| Boundary                                              | Owned invariant                                                                                                                                         |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/src/landblock_source_batch.rs`             | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
+| `src-tauri/src/env_cell_source.rs`                    | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
+| `src-tauri/src/cell_struct_projection.rs`             | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
+| `src/lib/assets/decode-env-cell-record.ts`            | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
+| `game/commit/env-cell-materialization.ts`             | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
+| `game/runtime/static-layer-realizer.ts`               | Revision currentness, geometry/atlas rendezvous, publication ordering, and stale-work withdrawal.                                                       |
+| `game/runtime/env-cell-realization.ts`                | Reuses the static preparer for residents, builds proof-backed visibility islands, and creates one environment artifact.                                 |
+| `game/systems/env-cell-system.ts`                     | Failure-atomic ownership of scopes, crossings, shell nodes, aperture geometry, and rollback.                                                            |
+| `game/systems/dynamic-entity-system.ts`               | Owner-atomic dynamic trees, staged activation, complete presentation publication, rigid-part contributions, and static visual fallback.                 |
+| `game/systems/object-visual-template-repository.ts`   | Content-addressed immutable preparation plus staged geometry and atlas residency shared across dynamic owners.                                          |
+| `game/systems/animation-system.ts`                    | Independent deterministic playback clocks, retail semantic traversal, discontinuity handling, and fractional rigid-pose sampling.                       |
+| `game/systems/effect-system.ts`                       | Persistent `SetOmega` and per-part translucency state, deterministic timelines, bounded provenance, and fractional effect sampling.                     |
+| `game/scene/scene-graph.ts`                           | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
+| `game/renderer/render-world.ts`                       | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
+| `game/renderer/portal-view-window.ts`                 | Readable exact normalized window construction, convex source decomposition, projection, clipping, and immutable proof admission.                        |
+| `game/renderer/portal-scope-window-culler.ts`         | Fixed-capacity, arena-backed breadth-first traversal with atomic whole-frontier cutoff and reusable non-retained frame views.                           |
+| `game/renderer/portal-scope-atlas-planner.ts`         | Conservative scope-tile packing, arrival metadata, bounded propagation depth, and mechanical GPU command counts.                                        |
+| `game/renderer/webgl2-portal-scope-atlas-executor.ts` | Batched arrival propagation, authored-scope envelope reduction, and opaque resolve without CPU path reconstruction.                                     |
+| `game/renderer/webgl2-portal-scope-atlas-targets.ts`  | Transactional ownership of the packed scene atlas, R8UI frontier planes, depth planes, scope envelopes, and framebuffers.                               |
 
 ## 3. Environment-Cell Source and Ownership Flow
 
@@ -332,13 +331,13 @@ imports shared behavior through an outdoor-owned module.
   environment, and object roles as one generation.
 - Apertures have `PortalGeometryKey`/`PortalDrawUnit` resources and no textured material ranges.
 - HBEC has one live version, v2. No v1 decoder or compatibility path remains.
-- Paired renderer apertures, scratch stencil values, increment/decrement mask stacks, and
-  push/pop-mask contracts are absent from production and tests.
+- Paired renderer apertures, stencil labels, and domain-owned contribution schedules are absent
+  from production and tests.
 - `visibilityProvenance` is source-validation evidence. Runtime diagnostics aggregate the resulting
   authored/intersection counts instead of carrying provenance into every frame.
 - Static texture-fact compatibility and owner-ID parsing each have one runtime implementation.
-- Portal-plan topology, contribution roles, labels, masks, transitions, and exterior facts are
-  validated before the WebGL executor resolves masks or allocates targets.
+- The scope-atlas pipeline validates topology/capacity, packs complete frontiers, and prepares the
+  reusable crossing stream before the WebGL executor mutates propagation targets.
 - Dynamic presentation has one `ObjectVisualTemplateRepository`, one `AnimationSystem`, one
   `EffectSystem`, and one `DynamicEntitySystem`. There is no `EntityTemplateCache`, `HookSystem`, or
   `PoseSystem` compatibility path.
@@ -347,15 +346,15 @@ imports shared behavior through an outdoor-owned module.
 
 Current large-file concentration:
 
-| File                               | Approx. lines | Assessment                                                                                                                                                                                 |
-| ---------------------------------- | ------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `renderer/webgl2-renderer.ts`      |         1,898 | Largest active debt. Contribution assembly, frame metrics, harness probes, and device drawing are coherent but crowded. Extract a measured seam before adding another rendering subsystem. |
-| `src-tauri/src/env_cell_source.rs` |         1,169 | Large but cohesive source projection. Binary-section encoding is now shared; visibility preprocessing is the clearest future split if the format evolves.                                  |
-| `src-tauri/src/lib.rs`             |         1,292 | Broad Tauri composition hub; split by command family when next materially touched.                                                                                                         |
-| `runtime/game-runtime.ts`          |         1,219 | Legitimate composition root. Typed owner parsing and texture merging are now delegated; keep feature policy in planners, realizers, and systems.                                           |
-| `assets/decode-env-cell-record.ts` |         1,140 | Strict semantic validation remains dense after shared binary-section and static-presentation decoding were extracted.                                                                      |
-| `renderer/portal-render-graph.ts`  |         1,179 | Complex domain algorithm with strong pure-test coverage. Keep traversal, scheduling, and capacity here; avoid mixing GPU commands into it.                                                 |
-| `renderer/portal-view-window.ts`   |           983 | Exact geometry hot path. Convex decomposition and normalization are cohesive but performance-sensitive; preserve archive timing gates when changing it.                                    |
+| File                                     | Approx. lines | Assessment                                                                                                                                                                                |
+| ---------------------------------------- | ------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `renderer/webgl2-renderer.ts`            |         2,945 | Largest active debt. Contribution assembly, frame metrics, scope routing, and device drawing are coherent but crowded. Extract a measured seam before adding another rendering subsystem. |
+| `src-tauri/src/env_cell_source.rs`       |         1,210 | Large but cohesive source projection. Binary-section encoding is now shared; visibility preprocessing is the clearest future split if the format evolves.                                 |
+| `src-tauri/src/lib.rs`                   |         1,550 | Broad Tauri composition hub; split by command family when next materially touched.                                                                                                        |
+| `runtime/game-runtime.ts`                |         2,053 | Legitimate composition root. Typed owner parsing and texture merging are delegated; keep feature policy in planners, realizers, and systems.                                              |
+| `assets/decode-env-cell-record.ts`       |         1,141 | Strict semantic validation remains dense after shared binary-section and static-presentation decoding were extracted.                                                                     |
+| `renderer/portal-scope-window-culler.ts` |         1,058 | Packed zero-record camera-time traversal. Keep it differentially paired with the immutable reference and do not add object-shaped frame state.                                            |
+| `renderer/portal-view-window.ts`         |         1,287 | Readable exact geometry/proof path. It may allocate because production uses the arena kernel; preserve differential corpora when changing either implementation.                          |
 
 There is no evidence-backed duplicate material or portal renderer to delete. The main risk is
 future accretion into the renderer and host serializer hubs. The correct next refactor trigger is a
@@ -365,11 +364,10 @@ Known concessions:
 
 - Flat mode intentionally renders all resident EnvCells, so it is an inspection mode rather than a
   scalable gameplay visibility policy.
-- Same-domain topology boundaries remain query-visible and propagate clipped scope reachability,
-  but cannot create a useful stencil separation after their endpoints map to one proven render
-  domain.
+- Same-island topology boundaries remain query-visible and propagate clipped scope reachability;
+  each reached authored scope still receives its own visibility envelope and packed tile.
 - Portal targets remain allocated after returning to flat mode to make mode changes cheap. They
-  are released on resize/destroy, and their bytes are reported.
+  are transactionally replaced on resize, released on destroy, and their bytes are reported.
 - Explorer residency is best effort and has no portal-crossing history. That is correct for the
   explorer and deliberately insufficient for a future authoritative client controller.
 

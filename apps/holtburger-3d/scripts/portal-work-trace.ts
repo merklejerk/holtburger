@@ -58,14 +58,6 @@ import { scopeFor } from "../src/lib/game/scene/scope";
 import { createSceneNodeId, sceneNodeIdOf } from "../src/lib/game/scene/utils";
 import type { AuthoredDynamicSource } from "../src/lib/game/resolution/landblock-layer";
 import { createCameraNearClipVolume } from "../src/lib/game/renderer/portal-near-plane";
-import {
-	PortalPathViewPlanner,
-	type PortalPathViewPlanInput,
-} from "../src/lib/game/renderer/portal-path-view-planner";
-import {
-	PortalRenderGraphPlanner,
-	type PortalRenderGraphPlanInput,
-} from "../src/lib/game/renderer/portal-render-graph";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "../src/lib/game/renderer/portal-render-capacity-policy";
 import { compilePortalScopeAtlasWebGLCalls } from "../src/lib/game/renderer/portal-scope-atlas-command-model";
 import {
@@ -77,14 +69,12 @@ import type { PortalScopeWindowCullInput } from "../src/lib/game/renderer/portal
 import { portalScopeAtlasTargetByteLength } from "../src/lib/game/renderer/webgl2-portal-scope-atlas-targets";
 import {
 	createPortalArrivalStateDryScheduleTrace,
-	createCurrentPortalDryScheduleTrace,
-	createPortalPathViewDrySchedule,
 	snapshotPortalArrivalStateDryPlan,
 	type PortalDryDeferredSubmission,
 	type PortalDryOpaqueBatch,
 	type PortalDryParticleSource,
 	type PortalDrySceneWorkload,
-} from "../src/lib/game/renderer/portal-path-view-schedule";
+} from "../src/lib/game/renderer/portal-arrival-state-dry-schedule";
 import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "../src/lib/game/renderer/portal-scope-atlas-metadata-glsl";
 import { ParticleSystem } from "../src/lib/game/systems/particle-system";
 import { PhysicsScriptSystem } from "../src/lib/game/systems/physics-script-system";
@@ -223,7 +213,7 @@ interface PortalWorkTraceReport {
 	readonly landblockIds: readonly LandblockId[];
 	/** Deterministic live authored-particle population supplied to every dry schedule. */
 	readonly particles: ArchiveParticleTrace;
-	/** Per-pose matched current/candidate traces. */
+	/** Per-pose production planning and execution traces. */
 	readonly poses: readonly ReturnType<typeof tracePose>[];
 	/** Structural source distribution independent from camera placement. */
 	readonly topology: {
@@ -350,8 +340,6 @@ if (options.mode === "atlas-capacity") {
 	process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 	process.exit(0);
 }
-const currentPlanner = new PortalRenderGraphPlanner();
-const candidatePlanner = new PortalPathViewPlanner();
 const scopeAtlasPlanner = new PortalScopeAtlasPlanner(
 	PORTAL_RENDER_CAPACITY_POLICY.culler,
 );
@@ -364,8 +352,6 @@ const report: PortalWorkTraceReport = {
 			topology,
 			pose,
 			archive.content,
-			currentPlanner,
-			candidatePlanner,
 			scopeAtlasPlanner,
 			options.drawingBuffer,
 		),
@@ -1718,33 +1704,10 @@ function tracePose(
 	topology: SceneTopologyView,
 	pose: TracePose,
 	content: ArchiveContentArtifacts,
-	currentPlanner: PortalRenderGraphPlanner,
-	candidatePlanner: PortalPathViewPlanner,
 	scopeAtlasPlanner: PortalScopeAtlasPlanner,
 	drawingBuffer: TraceDrawingBuffer,
 ) {
 	const common = createTraceCameraProjection(pose, drawingBuffer);
-	const currentInput: PortalRenderGraphPlanInput = {
-		...common,
-		maximumStencilValue: 0xff,
-		portalFootprint: { drawingBuffer, minimumPixelArea: 0 },
-		safetyWorkItemLimit: 100_000,
-	};
-	const candidateInput: PortalPathViewPlanInput = {
-		...common,
-		budget: {
-			maximumConflictPrimitiveCount: 10_000_000,
-			maximumOwnershipLabelCount: 0x100,
-			maximumPathDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
-			maximumPathViewCount: 8_192,
-			maximumProjectionPrimitiveCount: 10_000_000,
-		},
-		portalFootprint: {
-			drawingBufferHeight: drawingBuffer.height,
-			drawingBufferWidth: drawingBuffer.width,
-			minimumPixelArea: 0,
-		},
-	};
 	const scopeAtlasResource = atlasResource(
 		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas,
 		drawingBuffer,
@@ -1762,20 +1725,10 @@ function tracePose(
 			scopeAtlasResource,
 		);
 	} catch (cause) {
-		throw new Error(`Portal scope-atlas candidate failed pose ${pose.id}.`, {
+		throw new Error(`Portal scope-atlas planner failed pose ${pose.id}.`, {
 			cause,
 		});
 	}
-	const currentOutcome = captureReferencePlannerOutcome(
-		"legacy-render-graph",
-		pose.id,
-		() => currentPlanner.plan(topology, currentInput),
-	);
-	const pathReplayOutcome = captureReferencePlannerOutcome(
-		"path-replay-reference",
-		pose.id,
-		() => candidatePlanner.plan(topology, candidateInput),
-	);
 	const scopeAtlasPlanning = snapshotAtlasPlan(
 		scopeAtlasFrame,
 		scopeAtlasResource,
@@ -1799,77 +1752,16 @@ function tracePose(
 		scopeCount: scopeAtlasFrame.visibility.selectedScopeCount,
 		traversalDepth: scopeAtlasFrame.commands.traversalDepth,
 	});
-	const current =
-		currentOutcome.kind === "completed" ? currentOutcome.result : null;
-	const pathReplayReference =
-		pathReplayOutcome.kind === "completed" ? pathReplayOutcome.result : null;
-	const pathReplaySchedule = pathReplayReference
-		? createPortalPathViewDrySchedule(pathReplayReference, dryWorkload)
-		: null;
 	return {
-		candidate: {
+		execution: {
 			drySchedule: scopeAtlasDrySchedule,
 			executor: scopeAtlasExecutor.trace,
 			family: "arrival-state-scope-atlas" as const,
 			planning: publicAtlasPlan(scopeAtlasPlanning),
 		},
-		current:
-			current === null
-				? currentOutcome
-				: current.kind === "planned"
-					? {
-							kind: "planned" as const,
-							diagnostics: current.plan.diagnostics,
-							drySchedule: createCurrentPortalDryScheduleTrace(
-								current.plan,
-								dryWorkload,
-							),
-							nodeCount: current.plan.nodes.length,
-							renderLayerCount: current.plan.renderLayers.length,
-							selectedScopeKeys: current.plan.selectedScopes.map(scopeKey),
-						}
-					: current,
 		id: pose.id,
-		pathReplayReference:
-			pathReplayReference === null || pathReplaySchedule === null
-				? pathReplayOutcome
-				: {
-						contentDomainCount: pathReplayReference.contentDomainIds.length,
-						exteriorCacheEligible:
-							pathReplayReference.exteriorCacheDomainId !== null,
-						ownershipLabelCount: pathReplayReference.ownershipLabelCount,
-						pathViewCount: pathReplayReference.views.length,
-						drySchedule: pathReplaySchedule.trace,
-						trace: pathReplayReference.trace,
-						truncation: pathReplayReference.truncation,
-					},
 		rootScope: scopeKey(pose.rootScope),
 	};
-}
-
-/** Keep a broken historical comparator visible without suppressing candidate evidence for a pose. */
-function captureReferencePlannerOutcome<Result>(
-	planner: "legacy-render-graph" | "path-replay-reference",
-	poseId: string,
-	run: () => Result,
-):
-	| { readonly kind: "completed"; readonly result: Result }
-	| {
-			readonly kind: "planner-exception";
-			readonly message: string;
-			readonly planner: typeof planner;
-			readonly poseId: string;
-	  } {
-	try {
-		return { kind: "completed", result: run() };
-	} catch (cause) {
-		return {
-			kind: "planner-exception",
-			message: cause instanceof Error ? cause.message : String(cause),
-			planner,
-			poseId,
-		};
-	}
 }
 
 interface MutableDryScopeWorkload {

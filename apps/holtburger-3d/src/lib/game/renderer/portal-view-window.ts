@@ -69,7 +69,7 @@ export interface PreparedPortalApertureProjectionInput extends PortalAperturePro
 }
 
 /** Immutable aperture-preparation work, excluded from every per-camera planner bound. */
-export interface PortalAperturePreparationTrace {
+interface PortalAperturePreparationTrace {
 	readonly convexityVertexTestCount: number;
 	readonly mergeEdgePairTestCount: number;
 	readonly triangleCount: number;
@@ -141,7 +141,7 @@ export class PortalWindowProjector {
 }
 
 /** Consumed algorithmic cost facts for Gate E and focused geometry tests. */
-export interface PortalWindowProjectionDiagnostics {
+interface PortalWindowProjectionDiagnostics {
 	readonly apertureVertexTransformCount: number;
 	readonly broadPhaseRejectedPairCount: number;
 	readonly createdClipVertexCount: number;
@@ -164,34 +164,6 @@ export interface PortalWindowProjectionDiagnostics {
 	readonly outputVertexCount: number;
 	readonly polygonBoundsVertexVisitCount: number;
 	readonly polygonIdentityVertexVisitCount: number;
-}
-
-/** Allocate a zeroed aggregate for callers that combine multiple projection results. */
-export function createEmptyPortalWindowProjectionDiagnostics(): PortalWindowProjectionDiagnostics {
-	return finishDiagnostics(createDiagnostics(null), null);
-}
-
-/** Sum exactly the camera-time dimensions charged by `PortalWindowPrimitiveMeter`. */
-export function portalWindowProjectionPrimitiveCount(
-	diagnostics: PortalWindowProjectionDiagnostics,
-): number {
-	return (
-		diagnostics.apertureVertexTransformCount +
-		diagnostics.createdClipVertexCount +
-		diagnostics.createdNdcVertexCount +
-		diagnostics.createdPolygonCount +
-		diagnostics.exactIntersectionPairCount +
-		diagnostics.fragmentSortComparisonCount +
-		diagnostics.homogeneousClipVertexVisitCount +
-		diagnostics.homogeneousFiniteVertexTestCount +
-		diagnostics.mergeBoundaryVertexVisitCount +
-		diagnostics.mergeConvexityVertexTestCount +
-		diagnostics.mergeEdgePairTestCount +
-		diagnostics.ndcClipVertexEdgeTestCount +
-		diagnostics.normalizationVertexVisitCount +
-		diagnostics.polygonBoundsVertexVisitCount +
-		diagnostics.polygonIdentityVertexVisitCount
-	);
 }
 
 /** Explicit empty/visible result from one or more sequential aperture intersections. */

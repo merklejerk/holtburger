@@ -1,6 +1,10 @@
 import { PORTAL_QUERY_EPSILON } from "../scene/planar-aperture";
+import { PORTAL_WINDOW_NDC_EPSILON } from "./portal-view-window";
 import { PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE } from "./portal-arrival-metadata";
-import { PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL } from "./portal-crossing-triangle-stream";
+import {
+	PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
+	PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG,
+} from "./portal-crossing-triangle-stream";
 import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
 import {
 	bindPortalScopeAtlasMetadataBlock,
@@ -20,19 +24,25 @@ ${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in uint aOutputArrival;
 layout(location = 2) in uint aSourceScope;
-layout(location = 3) in uint aDepthPolicy;
+layout(location = 3) in uint aPolicy;
 
 out vec3 vAnchorPosition;
 flat out uint vOutputArrival;
 flat out uint vSourceScope;
-flat out uint vDepthPolicy;
+flat out uint vPolicy;
 
 void main() {
 	vAnchorPosition = aPosition;
 	vOutputArrival = aOutputArrival;
 	vSourceScope = aSourceScope;
-	vDepthPolicy = aDepthPolicy;
-	gl_Position = uClipFromAnchor * vec4(aPosition, 1.0);
+	vPolicy = aPolicy;
+	vec4 clipPosition = uClipFromAnchor * vec4(aPosition, 1.0);
+	if ((aPolicy & ${PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG}u) != 0u) {
+		// Keeping z at the positive epsilon makes canonical clipping retain exactly the
+		// w >= epsilon and x/y side planes used by the CPU eye-ray projection.
+		clipPosition.z = ${PORTAL_WINDOW_NDC_EPSILON};
+	}
+	gl_Position = clipPosition;
 }
 `;
 
@@ -327,7 +337,7 @@ ${currentDeclaration}
 in vec3 vAnchorPosition;
 flat in uint vOutputArrival;
 flat in uint vSourceScope;
-flat in uint vDepthPolicy;
+flat in uint vPolicy;
 layout(location = 0) out uint outState;
 
 void main() {
@@ -349,11 +359,13 @@ void main() {
 	}
 	ivec2 atlasPixel = ivec2(scope.atlasAndScreenOrigin.xy)
 		+ screenPixel - ivec2(screenOrigin);
-	float localOpaqueDepth = texelFetch(uSceneDepth, atlasPixel, 0).r;
-	bool occluded = vDepthPolicy == ${PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL}u
-		? gl_FragCoord.z >= localOpaqueDepth
-		: gl_FragCoord.z > localOpaqueDepth;
-	if (occluded) discard;
+	if ((vPolicy & ${PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG}u) == 0u) {
+		float localOpaqueDepth = texelFetch(uSceneDepth, atlasPixel, 0).r;
+		bool occluded = vPolicy == ${PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL}u
+			? gl_FragCoord.z >= localOpaqueDepth
+			: gl_FragCoord.z > localOpaqueDepth;
+		if (occluded) discard;
+	}
 	outState = vOutputArrival;
 }
 `;

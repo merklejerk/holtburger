@@ -153,17 +153,15 @@
 							>
 						</div>
 						<div class="ac-param-row">
-							<span class="ac-param-key">Contribution resolve / merge</span>
+							<span class="ac-param-key">Contribution resolve</span>
 							<code
-								>{profile.cpu.mean.sceneContributionResolutionMs.toFixed(2)} / {profile.cpu.mean.contributionMergeMs.toFixed(
-									2,
-								)} ms</code
+								>{profile.cpu.mean.sceneContributionResolutionMs.toFixed(2)} ms</code
 							>
 						</div>
 						<div class="ac-param-row">
 							<span class="ac-param-key">Portal plan / object prepare</span>
 							<code
-								>{profile.cpu.mean.portalGraphPlanningMs.toFixed(2)} / {profile.cpu.mean.objectPreparationMs.toFixed(
+								>{profile.cpu.mean.portalPlanningMs.toFixed(2)} / {profile.cpu.mean.objectPreparationMs.toFixed(
 									2,
 								)} ms</code
 							>
@@ -196,7 +194,7 @@
 					</div>
 				</details>
 				<details class="explorer-frame-details">
-					<summary>Contribution reuse</summary>
+					<summary>Contribution preparation</summary>
 					<div class="ac-param-panel">
 						<div class="ac-param-row">
 							<span class="ac-param-key">Static / dynamic prepared</span>
@@ -204,30 +202,6 @@
 								>{profile.cpu.contribution.mean.staticObjectPreparationCount.toFixed(
 									1,
 								)} / {profile.cpu.contribution.mean.dynamicObjectPreparationCount.toFixed(
-									1,
-								)}</code
-							>
-						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Nodes prepared / used / reused</span>
-							<code
-								>{profile.cpu.contribution.mean.portalNodePreparationCount.toFixed(
-									1,
-								)} / {profile.cpu.contribution.mean.portalNodeUseCount.toFixed(
-									1,
-								)} / {profile.cpu.contribution.mean.repeatedPortalNodeUseCount.toFixed(
-									1,
-								)}</code
-							>
-						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Sets / uses / reused</span>
-							<code
-								>{profile.cpu.contribution.mean.portalContributionSetCount.toFixed(
-									1,
-								)} / {profile.cpu.contribution.mean.portalContributionSetUseCount.toFixed(
-									1,
-								)} / {profile.cpu.contribution.mean.repeatedPortalContributionSetUseCount.toFixed(
 									1,
 								)}</code
 							>
@@ -389,35 +363,33 @@
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Node submissions / nodes</span>
+					<span class="ac-param-key">Selected scopes / crossings</span>
 					<code
-						>{metrics.portalSubmittedRenderNodeCount} / {metrics.portalRenderNodeCount}</code
+						>{metrics.portalSelectedScopeCount} / {metrics.portalSelectedCrossingCount}</code
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Layers / mask edges / aperture draws</span>
+					<span class="ac-param-key">Cull depth / propagation draws</span>
 					<code
-						>{metrics.portalRenderLayerCount} / {metrics.portalMaskEdgeCount} / {metrics.submittedPortalApertureDrawCount}</code
+						>{metrics.portalCompletedCullDepth} / {metrics.portalPropagationDrawCount}</code
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key"
-						>Scope-window states / exterior renders</span
-					>
+					<span class="ac-param-key">Projection work / atlas pixels</span>
 					<code
-						>{metrics.portalAdmittedScopeWindowStateCount} / {metrics.portalExteriorRenderCount}</code
+						>{metrics.portalProjectionPrimitiveCount} / {metrics.portalAtlasTilePixelCount}</code
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Facing / footprint rejects</span>
+					<span class="ac-param-key">Truncated views / frontier retreats</span>
 					<code
-						>{metrics.portalRejectedFacingCrossingCount} / {metrics.portalRejectedFootprintCount}</code
+						>{metrics.portalTruncatedViewCount} / {metrics.portalFrontierRetreatCount}</code
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Retained targets / bytes</span>
+					<span class="ac-param-key">Portal framebuffers / bytes</span>
 					<code
-						>{metrics.sceneDomainTargetCount} / {metrics.sceneDomainTargetBytes}</code
+						>{metrics.portalFramebufferCount} / {metrics.portalTargetBytes}</code
 					>
 				</div>
 			</div>

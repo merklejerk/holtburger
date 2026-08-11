@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	AMBIENT_OCCLUSION_SAMPLE_KERNEL,
+	AMBIENT_OCCLUSION_DISTANCE_FADE,
 	DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
 	ambientOcclusionDistanceWeight,
 	createAmbientOcclusionDistanceFade,
@@ -10,12 +11,10 @@ import {
 	linearizeWebGLDepth,
 	resolveEffectiveAmbientOcclusionPolicy,
 } from "./ambient-occlusion-policy";
-import type { ResolvedDistanceFog } from "../environment/scene-environment";
 
 const CAMERA_NEAR = 0.5;
 const CAMERA_FAR = 2_000;
 const MID_DEPTH_DISTANCE = 10;
-const FOG_COLOR = { red: 0, green: 0, blue: 0, alpha: 1 } as const;
 
 function depthForLinearDistance(
 	distance: number,
@@ -25,10 +24,6 @@ function depthForLinearDistance(
 	const normalizedDeviceDepth =
 		(far + near - (2 * near * far) / distance) / (far - near);
 	return (normalizedDeviceDepth + 1) / 2;
-}
-
-function fogStartingAt(near: number): ResolvedDistanceFog {
-	return { near, far: near * 2, color: FOG_COLOR };
 }
 
 describe("ambient occlusion policy", () => {
@@ -46,59 +41,27 @@ describe("ambient occlusion policy", () => {
 		);
 	});
 
-	it("preserves the configured fade without fog", () => {
+	it("retains the renderer-owned fade when enabled", () => {
 		const policy = resolveEffectiveAmbientOcclusionPolicy(
 			enabledSettings,
-			FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth,
-			null,
+			AMBIENT_OCCLUSION_DISTANCE_FADE,
 		);
 
 		expect(policy).toEqual({
 			kind: "enabled",
 			parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
-			distanceFade: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS.distanceFade,
+			distanceFade: AMBIENT_OCCLUSION_DISTANCE_FADE,
 		});
 		if (policy.kind !== "enabled") throw new Error("Expected enabled policy.");
 		expect(policy.parameters).toBe(DEFAULT_AMBIENT_OCCLUSION_PARAMETERS);
 	});
 
-	it("caps the fade at fog near and preserves its minimum width", () => {
-		const minimumFadeWidth =
-			FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth;
-		const fogNear =
-			DEFAULT_AMBIENT_OCCLUSION_PARAMETERS.distanceFade.fullStrengthUntil +
-			minimumFadeWidth / 2;
-		const policy = resolveEffectiveAmbientOcclusionPolicy(
-			enabledSettings,
-			minimumFadeWidth,
-			fogStartingAt(fogNear),
-		);
-
-		expect(policy).toEqual({
-			kind: "enabled",
-			parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
-			distanceFade: {
-				fullStrengthUntil: fogNear - minimumFadeWidth,
-				disabledAt: fogNear,
-			},
-		});
-	});
-
-	it("disables AO when fog cannot retain the minimum fade", () => {
-		const minimumFadeWidth =
-			FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth;
-		const disabledByFog = resolveEffectiveAmbientOcclusionPolicy(
-			enabledSettings,
-			minimumFadeWidth,
-			fogStartingAt(minimumFadeWidth / 2),
-		);
+	it("disables AO only when the user setting is off", () => {
 		const disabledBySetting = resolveEffectiveAmbientOcclusionPolicy(
 			{ ...enabledSettings, enabled: false },
-			minimumFadeWidth,
-			null,
+			AMBIENT_OCCLUSION_DISTANCE_FADE,
 		);
-		expect(disabledByFog).toEqual({ kind: "disabled" });
-		expect(disabledBySetting).toBe(disabledByFog);
+		expect(disabledBySetting).toEqual({ kind: "disabled" });
 	});
 
 	it("linearizes WebGL depth at the camera planes and an interior distance", () => {
@@ -118,7 +81,7 @@ describe("ambient occlusion policy", () => {
 	});
 
 	it("weights the configured fade with a smooth neutral boundary", () => {
-		const fade = DEFAULT_AMBIENT_OCCLUSION_PARAMETERS.distanceFade;
+		const fade = AMBIENT_OCCLUSION_DISTANCE_FADE;
 		const midpoint = (fade.fullStrengthUntil + fade.disabledAt) / 2;
 		expect(ambientOcclusionDistanceWeight(0, fade)).toBe(1);
 		expect(ambientOcclusionDistanceWeight(fade.fullStrengthUntil, fade)).toBe(

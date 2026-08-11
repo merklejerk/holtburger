@@ -169,6 +169,7 @@ import {
 } from "./webgl2-flat-scene-target";
 import { WebGL2FlatScenePresentation } from "./webgl2-flat-scene-presentation";
 import {
+	AMBIENT_OCCLUSION_DISTANCE_FADE,
 	resolveEffectiveAmbientOcclusionPolicy,
 	type EffectiveAmbientOcclusionPolicy,
 } from "./ambient-occlusion-policy";
@@ -756,18 +757,17 @@ export class WebGL2Renderer implements Renderer {
 			: null;
 		// RETAIL DIVERGENCE: Retail draws before-landscape sky, opaque landblocks, then the
 		// after-landscape weather overlay and deferred alpha work with no screen-space obscurance
-		// stage (acclient.c:296701-296729, 297381-297434, 441096). This optional, default-off
+		// stage (acclient.c:296701-296729, 297381-297434, 441096). This default-on
 		// presentation adds near-field grounding before weather; removing it as a retail
 		// "correction" loses that enabled visual benefit, while moving it later would incorrectly
-		// attenuate weather/transparency. The DA55 portal census measured 938,104 opaque committed
-		// tile pixels: 510,685 (54.4%) full/fading and 427,419 neutral after distance policy, plus
-		// 10,780 clear pixels excluded from the denominator. Authored rainy fog capped the range to
-		// 12.8-28.8 units and made all 910,842 overview opaque pixels neutral, proving shipped
-		// distant/fog presentation is outside the divergence.
+		// attenuate weather/transparency. The retained DA55 portal census measured 102,140 opaque
+		// committed tile pixels: 204 (0.2%) full/fading and 101,936 neutral after distance policy,
+		// plus 819,696 clear pixels excluded from the denominator. The fixed 128-unit cutoff bounds the
+		// divergence independently of authored time-of-day fog; minor overlap with fog is an accepted
+		// first-version concession.
 		const ambientOcclusion = resolveEffectiveAmbientOcclusionPolicy(
 			input.frameSettings.ambientOcclusion,
-			FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth,
-			fog,
+			AMBIENT_OCCLUSION_DISTANCE_FADE,
 		);
 		if (ambientOcclusion.kind === "disabled") this.#saoPass?.disable();
 		if (ambientOcclusion.kind === "enabled") {

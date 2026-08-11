@@ -294,13 +294,13 @@ Exterior sky and authored weather are rendered into the outdoor render-domain ti
 inside/outside weather gate remains camera-residency policy and is independent from portal
 compositing.
 
-### Optional near-field ambient occlusion
+### User-switchable near-field ambient occlusion
 
-Ambient occlusion is an optional renderer-owned consumer of the already-complete opaque scene;
+Ambient occlusion is a renderer-owned consumer of the already-complete opaque scene;
 it is not a second portal compositor or a render-graph stage. When enabled, one screen-space pass
-reads the atlas color and local depth after terrain and opaque/alpha-tested objects. Planner-owned
-render-domain tile rectangles are the complete sampling boundary, so filtering cannot cross into
-another scope tile or an atlas packing gap. The pass writes the shaded color back into the same
+reads local depth after terrain and opaque/alpha-tested objects. Exact instanced quads restrict
+rasterization to planner-owned render-domain tile rectangles; evaluation rejects unavailable
+off-tile taps and filtering remains tile-local. The pass writes the shaded color back into the same
 atlas, invalidates the compositor's immediately-live opaque-tile binding cache, and leaves portal
 planning, propagation, resolve, and deferred routing unchanged.
 
@@ -309,17 +309,18 @@ targets. The targets are allocated lazily, reused at the same extent, replaced o
 resize allocation, and released when ambient occlusion is disabled or the renderer is destroyed.
 Disabled frames allocate no ambient-occlusion targets and submit no ambient-occlusion draws.
 
-Explorer snapshots enablement, strength, world-space radius, bias, bilateral edge threshold, and
-the configured full-strength/cutoff distances with the rest of each frame's display settings. These
-values update shader uniforms without reallocating scratch targets or selecting another render
-schedule. Scratch resolution and kernel sample count remain immutable quality choices because they
-change allocation and performance contracts rather than presentation alone.
+Explorer snapshots enablement, strength, world-space radius, bias, and bilateral edge threshold
+with the rest of each frame's display settings. These appearance values update shader uniforms
+without reallocating scratch targets or selecting another render schedule. Distance eligibility is
+a read-only diagnostic owned entirely by renderer tuning. Scratch resolution
+and kernel sample count remain immutable quality choices because they change allocation and
+performance contracts rather than presentation alone.
 
-Only pixels with opaque depth receive occlusion, and the effect fades to neutral before the
-effective authored fog start. Clear-depth sky remains neutral. After-landscape sky/weather,
+Only pixels with opaque depth receive occlusion, and the effect fades to neutral across its fixed
+64-to-128-unit near-field range independently of authored fog. Clear-depth sky remains neutral. After-landscape sky/weather,
 transparent objects, additive effects, and particles retain their existing order after the pass
-and therefore neither cast nor receive ambient occlusion. The feature remains disabled by default
-because it deliberately diverges from retail presentation.
+and therefore neither cast nor receive ambient occlusion. The feature defaults on after passing its
+visual, motion, and performance gates, while the user switch can restore retail presentation.
 
 ### Targets and lifecycle
 

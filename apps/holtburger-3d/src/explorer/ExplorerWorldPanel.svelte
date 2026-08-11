@@ -21,7 +21,6 @@
 		type TextureFilteringPolicy,
 	} from "../lib/game/renderer/texture-filtering-policy";
 	import {
-		createAmbientOcclusionDistanceFade,
 		createAmbientOcclusionParameters,
 		type AmbientOcclusionParameters,
 		type AmbientOcclusionSettings,
@@ -44,7 +43,7 @@
 		) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
-		/** Optional near-field ambient-occlusion presentation, disabled by default. */
+		/** User-switchable near-field ambient-occlusion presentation. */
 		readonly ambientOcclusion: AmbientOcclusionSettings;
 		readonly viewerLightEnabled: boolean;
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
@@ -166,35 +165,13 @@
 		});
 	}
 
-	type AmbientOcclusionScalarParameter = Exclude<
-		keyof AmbientOcclusionParameters,
-		"distanceFade"
-	>;
-
 	function updateAmbientOcclusionParameter(
-		field: AmbientOcclusionScalarParameter,
+		field: keyof AmbientOcclusionParameters,
 		event: Event,
 	): void {
 		const parameters = createAmbientOcclusionParameters({
 			...ambientOcclusion.parameters,
 			[field]: Number((event.currentTarget as HTMLInputElement).value),
-		});
-		updateAmbientOcclusionSettings({ ...ambientOcclusion, parameters });
-	}
-
-	function updateAmbientOcclusionFade(
-		field: "fullStrengthUntil" | "disabledAt",
-		event: Event,
-	): void {
-		const value = Number((event.currentTarget as HTMLInputElement).value);
-		const current = ambientOcclusion.parameters.distanceFade;
-		const distanceFade = createAmbientOcclusionDistanceFade(
-			field === "fullStrengthUntil" ? value : current.fullStrengthUntil,
-			field === "disabledAt" ? value : current.disabledAt,
-		);
-		const parameters = createAmbientOcclusionParameters({
-			...ambientOcclusion.parameters,
-			distanceFade,
 		});
 		updateAmbientOcclusionSettings({ ...ambientOcclusion, parameters });
 	}
@@ -551,39 +528,6 @@
 				value={ambientOcclusion.parameters.bilateralDepthThreshold}
 				oninput={(event) =>
 					updateAmbientOcclusionParameter("bilateralDepthThreshold", event)}
-			/>
-		</label>
-		<label class="explorer-environment-field">
-			<span
-				>Full AO distance ({ambientOcclusion.parameters.distanceFade.fullStrengthUntil.toFixed(
-					0,
-				)})</span
-			>
-			<input
-				max={ambientOcclusion.parameters.distanceFade.disabledAt -
-					FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth}
-				min="0"
-				step="1"
-				type="range"
-				value={ambientOcclusion.parameters.distanceFade.fullStrengthUntil}
-				oninput={(event) =>
-					updateAmbientOcclusionFade("fullStrengthUntil", event)}
-			/>
-		</label>
-		<label class="explorer-environment-field">
-			<span
-				>AO cutoff ({ambientOcclusion.parameters.distanceFade.disabledAt.toFixed(
-					0,
-				)})</span
-			>
-			<input
-				max="256"
-				min={ambientOcclusion.parameters.distanceFade.fullStrengthUntil +
-					FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth}
-				step="1"
-				type="range"
-				value={ambientOcclusion.parameters.distanceFade.disabledAt}
-				oninput={(event) => updateAmbientOcclusionFade("disabledAt", event)}
 			/>
 		</label>
 		<label class="explorer-environment-field">

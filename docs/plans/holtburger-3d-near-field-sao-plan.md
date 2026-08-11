@@ -1,6 +1,6 @@
 # Holtburger 3D Near-Field SAO Plan
 
-Status: Active
+Status: Completed
 Branch: `feat/holtburger-3d-sao`
 Created: 2026-08-11
 
@@ -9,7 +9,8 @@ Created: 2026-08-11
 ### Goal
 
 Add a renderer-local, near-field Scalable Ambient Obscurance pass that gives nearby opaque geometry
-stable contact shading in both flat and portal views without darkening authored distance fog.
+stable contact shading in both flat and portal views with a bounded, visually acceptable overlap
+with authored distance fog.
 
 ### In Scope
 
@@ -19,7 +20,7 @@ stable contact shading in both flat and portal views without darkening authored 
 - Depth-reconstructed view-space positions and normals; no geometry normal attachment in the first
   version.
 - Full-resolution obscurance, depth-aware separable blur, and a full-resolution presentation pass.
-- A smooth camera-distance fade whose disabled distance is capped at the effective fog start.
+- A smooth renderer-owned camera-distance fade independent of authored fog.
 - The same SAO algorithm for flat opaque output and every selected portal scope-atlas tile.
 - Occlusion casting and receiving by terrain and every opaque or alpha-tested object submission,
   including static geometry and dynamic entities.
@@ -88,9 +89,10 @@ DIVERGENCE:` comment with:
 - the relevant `acclient.c` render-schedule citations;
 - the visible consequence of removing SAO;
 - a screen-coverage census from the representative harness captures, reporting the fraction of
-  non-sky pixels eligible for AO before and after the distance/fog cap.
+  non-sky pixels eligible for AO before and after the renderer-owned distance fade.
 
-Until that evidence and the real-GPU gate are complete, the default remains disabled.
+That evidence, the real-GPU gate, and the transition-portal motion gate are complete. SAO is now
+enabled by default while retaining an explicit user disable switch.
 
 ## North Stars
 
@@ -100,12 +102,12 @@ Until that evidence and the real-GPU gate are complete, the default remains disa
    and alpha-tested submission, including dynamic entities, but before weather or deferred work.
 3. Nearby contact shading is the product goal. Distant pixels should be cheap, stable, and
    indistinguishable from SAO-disabled output.
-4. Fog owns distant visibility. SAO reaches full transparency no later than effective fog start and
-   never darkens the fog field beyond it.
+4. SAO owns one stable near-field range independently of authored fog. Minor multiplication of
+   already-fogged opaque color is accepted for v1; fog must never disable nearby contact shading.
 5. Preserve depth exactly across presentation. Deferred objects and particles must observe the same
    static and dynamic opaque depth they observe without SAO.
-6. Keep invalid settings unrepresentable. The full-strength and disabled distances travel as one
-   validated fade-range value rather than independent nullable fields.
+6. Keep invalid settings unrepresentable. Renderer-owned full-strength and disabled distances
+   travel as one validated fade rather than frontend-authored scalar fields.
 7. Keep one render schedule in each mode. The flat-scene target is unconditional; only SAO scratch
    resources and work are conditional, transactionally resized, and explicitly torn down.
 8. Prefer a deterministic spatial kernel over temporal machinery. Camera motion must not introduce
@@ -118,18 +120,15 @@ Until that evidence and the real-GPU gate are complete, the default remains disa
 
 ### Frame Policy
 
-- Add one explicit ambient-occlusion presentation choice to `FrameSettings` and the Explorer
-  control path.
+- Add one explicit ambient-occlusion enablement choice plus appearance parameters to `FrameSettings`
+  and the Explorer control path.
 - Keep shader tuning in one composite `FRONTEND_TUNING.rendering.ambientOcclusion` value. Its fields
   must have named shader, allocation, distance-resolution, or diagnostic consumers.
-- Represent distance eligibility as a validated pair:
+- Keep distance eligibility in one renderer-owned validated policy:
   - `fullStrengthUntil`: AO is not distance-attenuated before this linear view distance;
   - `disabledAt`: AO smoothly reaches zero at this linear view distance.
-- Resolve the effective `disabledAt` once per frame as the lesser of configured `disabledAt` and
-  the effective fog near distance. Represent the result as `disabled` or an enabled validated fade
-  range: if fog leaves less than the explicit minimum fade width, disable AO for that frame instead
-  of manufacturing a negative start or hard cutoff. Otherwise clamp `fullStrengthUntil` to remain
-  strictly below `disabledAt` by that minimum width.
+- Use the validated renderer-owned fade unchanged on every enabled frame. Authored fog does not
+  reshape AO eligibility or disable its scratch resources.
 - The AO sample radius remains a separate world-space quantity. It controls neighborhood scale,
   not camera-distance eligibility.
 
@@ -168,7 +167,8 @@ Until that evidence and the real-GPU gate are complete, the default remains disa
    opaque/alpha-tested object submission into its selected scope tile.
 3. When enabled, before after-landscape weather, evaluate and filter SAO for every selected scope
    tile. Consume planner-owned atlas and screen rectangles for tile-local view-position
-   reconstruction and clamp every neighborhood sample to its owning tile.
+   reconstruction; reject evaluation samples outside their owning tile and clamp the fixed blur
+   footprint within it.
 4. When enabled, multiply each tile's filtered factor into the existing atlas scene color without
    sampling that color attachment.
 5. Draw the existing after-landscape sky/weather pass into the outdoor tile.
@@ -204,7 +204,7 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
   - a dynamic opaque entity contacting terrain and interior geometry;
   - an indoor-root portal view containing outdoor and indoor scopes;
   - an outdoor-root portal view containing an interior;
-  - authored fog beginning near enough to exercise the distance cap;
+  - authored near fog to assess the accepted AO/fog overlap;
   - emissive geometry, alpha-tested geometry, transparent objects, particles, and weather.
 - Capture SAO-disabled screenshots and renderer profiles at fixed drawing-buffer dimensions and DPR.
 - Record target bytes and mean GPU phase timings on SwiftShader for deterministic regression
@@ -289,7 +289,7 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
     denominator. Report clear-depth sky separately rather than diluting the eligible denominator.
   - Portal mode counts each selected tile's own opaque pixels once and excludes atlas packing gaps.
     The before/after figure required by the divergence marker is the opaque-depth denominator
-    before distance policy versus full-strength plus fading pixels after the effective fog cap.
+    before distance policy versus full-strength plus fading pixels after the configured fade.
 - The Phase 2 profiled/unprofiled schedule collapse is a prerequisite, not opportunistic cleanup:
   SAO must be inserted into one physical schedule so profiling cannot preserve or create a second
   renderer path.
@@ -298,19 +298,19 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 
 #### Deliverables
 
-- Add a colocated type and pure resolver for the configured/effective AO distance fade.
+- Add a colocated validated type and pure enablement resolver for the renderer-owned AO distance fade.
 - Extend the immutable frame settings snapshot with one enablement choice.
 - Add discoverable initial tuning for resolution scale, sample radius, bias, intensity, sample
-  count, bilateral depth threshold, configured distance fade, and minimum fade width.
-- Add a shared CPU reference for depth linearization, distance weighting, and fog capping used by
+  count, bilateral depth threshold, and renderer-owned distance fade.
+- Add a shared CPU reference for depth linearization and distance weighting used by
   focused tests and harness expectations.
 - Define a deterministic sample kernel whose orientation does not vary with frame time.
 
 #### Acceptance Criteria
 
 - Invalid or zero-width fade ranges fail loudly before reaching WebGL.
-- With no fog, configured AO distance is preserved; with fog, AO is neutral no later than fog near.
-- Fog that leaves no valid fade span resolves to an explicit disabled effective policy.
+- The configured AO distance is preserved regardless of authored fog.
+- Only explicit user disablement resolves to a disabled effective policy.
 - Distance weight is exactly full before `fullStrengthUntil`, smooth inside the fade, and neutral at
   and beyond `disabledAt`.
 - Sample radius and camera-distance eligibility remain independent facts.
@@ -319,8 +319,8 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 #### Task Checklist
 
 - [x] Add the composite distance-fade type and validation.
-- [x] Add the pure effective-range resolver using resolved frame fog.
-- [x] Add the single frame enablement field and default-disabled tuning.
+- [x] Add the pure enablement resolver using the validated renderer-owned fade.
+- [x] Add the single frame enablement field and validated default tuning.
 - [x] Add pure depth/fade/kernel tests without duplicating runtime constants as test literals.
 - [x] Update runtime fakes and fixtures through a clean contract cutover.
 
@@ -330,18 +330,23 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 - `ambient-occlusion-policy.ts` owns the validated branded distance fade, effective enabled/disabled
   policy, WebGL depth-linearization reference, smooth distance weight, and fixed concentric-spiral
   sample kernel. Rendering code cannot structurally manufacture a validated fade.
-- The effective resolver accepts the already-resolved frame fog. It therefore treats disabled fog
-  as absent and never re-derives terrain-coverage or frontend fog policy.
-- Fog caps only `disabledAt`. When necessary, `fullStrengthUntil` moves inward to retain the
-  configured minimum fade width; if even that span cannot fit, the effective policy is explicitly
-  disabled.
+- Post-completion live review proved the earlier fog coupling disabled AO during a nighttime window:
+  authored fog moved nearer than the 16-unit minimum fade width, so an enabled user setting still
+  resolved to a disabled pass with zero scratch bytes. The coupling and its now-unused minimum-width
+  wrapper were removed. Fog no longer participates in AO policy resolution. At time-of-day zero,
+  the pre-retune flat regression harness retained its fixed 40-96 range and 1,843,200 active scratch bytes;
+  the transition-portal harness retained the same range, six scopes/four crossings, four dynamic
+  opaque draws, and 11,059,200 active scratch bytes. Both emitted no browser console messages.
+  After the final 64-128 retune, the time-of-day-zero flat harness again retained 1,843,200 active
+  scratch bytes and emitted no browser console messages.
 - Initial tuning is deliberately conservative and provisional: half resolution, 12 fixed taps, a
   2-world-unit radius, 0.05 bias, 1.0 intensity, 0.75 bilateral depth threshold, a 40-to-96-unit
-  configured distance fade, and a 16-unit minimum fade width. Phase 4 evidence owns changes to
+  configured distance fade. Phase 4 evidence owns changes to
   these values; their presence here is not a claim that they are visually final.
 - `FrameSettings.ambientOcclusion` is a required immutable frame choice containing enablement and
-  validated runtime parameters; enablement defaults false. The runtime forwarding test changes the
-  complete choice and proves it reaches the renderer without scene publication or reconstruction.
+  validated appearance parameters. The distance policy remains renderer-owned and is never
+  frontend-authored. Enablement now defaults true after the completed visual/performance gates; the
+  runtime forwarding test changes the complete choice without scene publication or reconstruction.
 - Focused policy/runtime tests pass (15 tests), `npm run check` reports no TypeScript or Svelte
   diagnostics, and focused ESLint reports no findings.
 
@@ -488,7 +493,7 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 
 - Completed 2026-08-11.
 - `WebGL2SaoPass` batches flat or planner-owned portal rectangles through one metadata UBO and one
-  instanced fullscreen-triangle schedule. Evaluation reconstructs view positions and conservative
+  instanced exact-tile-quad schedule. Evaluation reconstructs view positions and conservative
   local normals from D24 depth, rejects clear/far/malformed pixels before the fixed 12-tap loop,
   then runs separable five-tap depth-bilateral filtering in two configured-resolution R8 targets.
 - The plan's proposed "vertical blur and multiplicative application" draw was split into vertical
@@ -501,7 +506,8 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
   enter the sampled depth nor receive the multiplicative attenuation. Portal planning, resolve,
   propagation, command routing, and executor contracts retain no SAO concept; the pipeline exposes
   only a narrow opaque-tile-state invalidation after its external atlas consumer.
-- Scratch ownership is lazy, transactional, and default-off: same extents reuse one generation;
+- Scratch ownership is lazy and transactional: disabled frames own no generation, same extents
+  reuse one generation;
   resize publishes only two complete R8 targets; allocation failure preserves the prior generation
   and caller framebuffer/texture bindings; disable and destroy release the active generation.
   Focused tests cover exact extent/bytes and enable/resize/failure/disable/destroy behavior.
@@ -522,7 +528,7 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 
 #### Deliverables
 
-- Add an Explorer ambient-occlusion toggle under render quality, disabled by default.
+- Add an Explorer ambient-occlusion toggle under render quality, enabled by default.
 - Surface effective distance range, active target bytes, and AO GPU time using existing diagnostics
   boundaries; do not add metrics without a scenario where they differ from an existing metric.
 - Add an optional harness-only AO visualization/coverage mode showing neutral, faded, and
@@ -555,7 +561,7 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 - [x] Run the complete screenshot/motion/performance matrix.
 - [x] Record coverage census and retail-divergence evidence.
 - [x] Decide whether depth-derived normals satisfy the first-version quality bar.
-- [x] Decide whether default-disabled remains appropriate.
+- [x] Decide and verify the default enablement policy.
 - [x] Dry-run the cleanup phase against the accepted implementation shape.
 
 #### Decisions and Course Corrections
@@ -577,13 +583,17 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
   separately. DA55 portal census: 938,104 opaque pixels, with 26,948 full-strength, 483,737 fading,
   and 427,419 neutral, plus 10,780 clear. Their sum is exactly the planner's 948,884 committed tile
   pixels, proving atlas gaps and unselected scopes are excluded.
-- Authored rainy DA55 fog at day group 3/time 0.5 caps the configured 40-96 range to 12.8-28.8.
-  All 910,842 opaque overview pixels then classify distance-neutral; particles/weather remain
-  naturally colored over the coverage visualization, independently proving they are outside SAO.
+- After the retained defaults were retuned to 64-128, a fresh DA55 outdoor-root portal census
+  measured 102,140 opaque pixels across fourteen scopes/eight crossings: 204 full-strength, zero
+  fading, and 101,936 distance-neutral, plus 819,696 clear pixels. The counts sum exactly to the
+  planner's 921,836 committed tile pixels.
+- Authored fog remains useful for visually assessing AO/fog overlap, but it no longer changes the
+  coverage categories. Particles and weather remain naturally colored over the coverage
+  visualization, independently proving they are outside SAO.
 - The production `RETAIL DIVERGENCE` marker cites `acclient.c:296701-296729`,
   `297381-297434`, and `441096`, states the enabled visual/order consequence, and includes the
-  portal/fog census. The feature remains default-off, so authored content retains retail
-  presentation unless the user explicitly opts into the divergence.
+  portal/fog census. After the visual, performance, and transition-motion gates passed, the feature
+  became default-on while retaining an explicit user disable switch for retail presentation.
 - Depth-derived normals pass the first-version quality bar. Matched sealed-interior portal captures
   have 3.32% normalized RMSE and add broad, stable grounding at the bed, doorway, and wall/ceiling
   contacts without silhouette halos. Hybrid indoor/outdoor captures have 2.76% normalized RMSE and
@@ -696,50 +706,61 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
   fixture fails in generated transparent compaction, and the renderer has a latent multi-view
   diagnostics-semantics mismatch. Neither changes SAO scheduling or the accepted authored-content
   evidence. Opaque emissive attenuation and depth-derived normals remain recorded v1 concessions;
-  default-off avoids silently changing retail presentation.
+  the user disable switch restores retail presentation when requested.
 - Post-completion review removed the feature's avoidable render-loop GC churn. Flat tile metadata
   now writes directly into the retained UBO staging array; flat and scratch owners accept scalar
   dimensions and allocate extent records only for a replacement generation; SAO consumes the
   existing camera plus projection; lifecycle metrics read scalar getters instead of allocating
   defensive target snapshots; the effective-fade metrics record is retained; and disabled/configured
   fade policy identities are shared. Ordinary profiling-off disabled frames now add no source-level
-  per-frame allocation. Enabled frames retain one immutable policy record when the configured fade
-  survives, or two when authored fog creates a distinct capped fade. Explorer's 4 Hz diagnostic
+  per-frame allocation. Enabled frames retain one immutable policy record referencing the shared
+  distance fade. Explorer's 4 Hz diagnostic
   snapshot still copies its nested AO record intentionally so callers cannot retain mutable renderer
   state; harness-only coverage readback remains deliberately allocation-heavy and outside
   production.
 - Post-review portal motion exposed a subtle soft dark band moving through indoor/outdoor portal
   apertures as the camera distance changed. The same geometry was stable when it became the camera
-  domain. Full-resolution scratch made the band and AO sharper but did not remove the band, which
-  falsifies half-resolution tile quantization as its root cause. Full resolution remains retained
-  for the improved AO definition while the band's cause stays open. The pass, atlas ownership, and
-  portal schedule remain unchanged. At 1920x1080 on the RX 7900 XT, a confirmation run measured
+  domain. Full-resolution scratch made the band and AO sharper but did not remove it, falsifying
+  half-resolution tile quantization. Raw-evaluation and blur checkpoints proved the corruption
+  already existed before filtering. The decisive clue was a blemish-free diagonal frontier that
+  expanded from one aperture corner as the camera approached: every packed tile instance emitted
+  the fullscreen oversized triangle `(0,0), (2,0), (0,2)` into one atlas-wide viewport, so its
+  unclipped wings rasterized over neighboring tiles with the wrong flat tile ordinal. Replacing it
+  with an exact six-vertex quad removed both the diagonal frontier and all bands in the user's live
+  motion test. Evaluation also now rejects unavailable off-tile kernel samples instead of
+  duplicating border depth. All temporary scope/stage visualizations were removed after proof.
+  Full resolution remains retained for improved AO definition. At 1920x1080 on the RX 7900 XT, the
+  earlier confirmation run measured
   0.078 ms and 4,147,200 scratch bytes in flat mode, and 0.738 ms and 24,883,200 bytes in the
   six-scope/four-crossing hybrid portal view. Both remain below the 2 ms gate. A 1280x720
   SwiftShader hybrid-portal smoke retained all six scopes and four crossings without console errors
   and reported the exact 11,059,200-byte full-atlas scratch footprint. The harness cannot sweep an
   EnvCell-resident camera without changing the domain under test, so removal of the user-observed
   moving band remains a live-motion acceptance check rather than a still-image claim.
-- Explorer now exposes the appearance parameters that can change through shader uniforms: strength,
-  world-space radius, bias, bilateral edge threshold, and configured full-strength/cutoff distances.
-  They travel as one validated `FrameSettings` composite and do not reallocate scratch targets.
-  Resolution and sample count remain immutable quality settings because they change resource and
-  performance contracts. The typed transition-portal harness smoke retained six scopes/four
-  crossings, reported the complete settings snapshot, and emitted no browser console messages.
+- Explorer now exposes only appearance parameters that change through shader uniforms: strength,
+  world-space radius, bias, and bilateral edge threshold. They travel as one validated
+  `FrameSettings` composite and do not reallocate scratch targets. Full-strength/cutoff distances
+  are read-only facts from renderer tuning. Resolution and sample count
+  remain immutable quality settings because they change resource and performance contracts. The
+  untouched flat harness default enabled AO with the 64-128-unit range and 1,843,200 active
+  scratch bytes; the explicit-off harness reported a null effective range and zero active bytes.
+  The default-on transition-portal smoke retained six scopes/four crossings, reported 11,059,200
+  active scratch bytes, included four dynamic opaque draws plus the later particle batches, and
+  emitted no browser console messages.
 
 ## Risks and Mitigations
 
 | Risk                                                                                                 | Mitigation                                                                                                                                                                                                 |
 | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Depth-derived normals halo at silhouettes or thin geometry.                                          | Choose local derivatives across the smaller depth discontinuity, use depth-aware filtering, keep AO near-field and low-frequency, and gate acceptance on motion sweeps rather than still images alone.     |
-| AO darkens already-fogged color.                                                                     | Resolve one effective distance fade per frame and force neutral AO no later than fog near; verify using authored fog rather than a synthetic color alone.                                                  |
+| AO darkens already-fogged color.                                                                     | Accept the subtle bounded overlap for v1 and verify it under authored near fog; if it becomes material, preserve the fog contribution during composition rather than disabling nearby AO.                  |
 | AO darkens emissive opaque materials because the forward scene color has no material classification. | Treat emissive attenuation as an explicit Phase 4 gate. Keep default disabled or resteer toward a proven classification attachment if the artifact is material; do not guess a material mask from color.   |
-| Portal AO samples cross a scope tile or atlas packing gap.                                           | Consume planner-owned tile rectangles, clamp every reconstruction/filter sample to its owning tile, and use boundary-heavy portal fixtures.                                                                |
+| Portal AO samples cross a scope tile or atlas packing gap.                                           | Consume planner-owned tile rectangles, rasterize exact per-tile quads, reject unavailable evaluation taps, clamp only the fixed blur footprint, and use boundary-heavy portal fixtures.                    |
 | Per-scope portal AO work scales poorly with visible scope count.                                     | Attribute the complete AO phase, compare time against selected scope and tile-pixel metrics, and prefer batched tile draws over one independently synchronized pass per scope.                             |
 | Flat presentation loses depth precision through its new color/depth copy.                            | Retain D24, write sampled depth explicitly, extend the existing projected-depth browser fixture, and verify deferred objects/particles against the flat target path.                                       |
 | The unconditional flat target adds memory and presentation cost even with SAO disabled.              | Baseline target bytes and copy GPU time before SAO, use the existing RGBA8/D24 formats, and reject the cutover if representative real-GPU evidence makes the structural simplification an unjustified tax. |
 | The flat-schedule collapse changes profiled and unprofiled behavior.                                 | Route both through nullable-profile helpers and assert identical submissions, counters, and screenshots with profiling toggled; profiling may differ only in clocks and GPU queries.                       |
-| AO bands or leaks across portal-tile edges.                                                          | Use deterministic sampling and tile-clamped bilateral filtering. Full resolution sharpened but did not remove the observed transition-domain band; use runtime parameters to isolate its dependency.       |
+| AO bands or leaks across portal-tile edges.                                                          | Use exact instanced tile quads, reject off-tile evaluation taps, and keep bilateral filtering tile-local. The live transition-domain motion test proved the former oversized-triangle overlap is removed.  |
 | Fullscreen work exceeds its GPU budget despite distant early exits.                                  | Profile the AO phase independently on a real GPU; tune resolution/sample count from evidence. Early exits save sampling cost, not raster coverage.                                                         |
 | Lazy target allocation leaks or churns during toggles/resizes.                                       | Follow transactional portal-target ownership, retain same extents, report generations/bytes, and test enable/disable/resize/destroy sequences.                                                             |
 | Texture/program state contaminates later transparent passes.                                         | Make the pass restore or explicitly establish every state its next consumer needs; validate with transparent and particle fixtures rather than relying only on `getError`.                                 |
@@ -753,9 +774,9 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
       compatibility route remains.
 - [x] Flat rendering has one nullable-profile phase schedule; profiling cannot change submitted
       scene work or ordering.
-- [ ] Depth-reconstructed full-resolution AO produces stable nearby contact shading; the exact
-      user-observed transition-portal motion path awaits live confirmation.
-- [x] AO smoothly fades out and is neutral no later than effective fog start.
+- [x] Depth-reconstructed full-resolution AO produces stable nearby contact shading; the exact
+      user-observed transition-portal motion path is band-free after exact tile rasterization.
+- [x] AO smoothly fades out across its fixed renderer-owned near-field range.
 - [x] Terrain plus static and dynamic opaque/alpha-tested objects cast and receive AO.
 - [x] Sky, weather, far-field geometry, transparent objects, particles, and disabled mode preserve
       their expected output and ordering.
@@ -765,8 +786,8 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 - [x] Explorer control and renderer diagnostics expose only actionable policy and evidence.
 - [x] The retail divergence marker contains a decompile citation, visible consequence, and coverage
       census.
-- [ ] Deterministic visual cases and real-GPU profiles satisfy the recorded quality/performance
-      gates; performance is accepted, but the reported transition-portal motion case remains open.
+- [x] Deterministic visual cases and real-GPU profiles satisfy the recorded quality/performance
+      gates, including the user-confirmed transition-portal motion case.
 - [x] Changed-file formatting, type checking, linting, unit tests, browser harness, and GPU harness
       are green; the unrelated repository-wide Prettier baseline is recorded above.
 - [x] The plan records final decisions, concessions, measurements, and remaining debt.
@@ -774,16 +795,17 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 ## Resolved Questions
 
 - The retained first-version defaults are a 1.0 resolution scale, 12-sample deterministic kernel,
-  2-unit radius, 0.05 bias, 1.0 intensity, 0.75 bilateral threshold, and configured 40-96-unit
-  distance fade with a 16-unit minimum width. Explorer can tune every appearance value in that list;
-  resolution and sample count remain immutable quality settings. Authored fog may only shorten or
-  disable the configured fade.
+  2-unit radius, 0.05 bias, 1.5 intensity, 0.75 bilateral threshold, and configured 64-128-unit
+  distance fade. Explorer can tune radius, bias, intensity, and the bilateral threshold.
+  Resolution, sample count, and distance eligibility remain renderer-owned quality policy;
+  authored fog does not reshape or disable the fade.
 - The 2 ms 1920x1080 budget holds on the RX 7900 XT. Initial half-resolution Phase 4 stress medians
   were 0.128 ms flat and 0.250 ms portal; retained full-resolution confirmation measured 0.078 ms
   flat and 0.738 ms in the six-scope hybrid portal view.
-- Emissive attenuation is acceptable for an opt-in v1 and does not justify a material-classification
-  attachment. It remains an explicit concession.
-- Depth-derived normals meet the still and existing outdoor-motion quality bar. The exact
-  indoor/outdoor transition motion case still needs live confirmation; a normal attachment remains
-  deferred because the observed domain-specific band implicates resolution quantization instead.
-- SAO remains opt-in/default-off because it is a deliberate retail presentation divergence.
+- Emissive attenuation is acceptable for v1 and does not justify a material-classification
+  attachment. It remains an explicit concession with a user disable switch.
+- Depth-derived normals meet the still and motion quality bar. The indoor/outdoor transition band
+  was packed-tile raster overlap rather than a normal-reconstruction or precision defect, so a
+  normal attachment remains unnecessary for v1.
+- SAO defaults on after passing the recorded quality/performance gates. It remains user-switchable
+  because it is a deliberate retail presentation divergence.

@@ -193,7 +193,7 @@
 		readonly resetTiming: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
 		readonly setFrameProfiling: (enabled: boolean) => void;
-		/** Toggle optional near-field ambient occlusion without rebuilding content. */
+		/** Toggle near-field ambient occlusion without rebuilding content. */
 		readonly setAmbientOcclusion: (enabled: boolean) => void;
 		/** Toggle the harness-only AO distance-category view and one-shot depth census. */
 		readonly setAmbientOcclusionCoverageVisualization: (

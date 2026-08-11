@@ -144,7 +144,7 @@ export interface FrameSelectionMetrics {
 		readonly allocatedGenerationCount: number;
 		/** Replaced, disabled, or destroyed scratch generations released. */
 		readonly disposedGenerationCount: number;
-		/** Effective frame fade after enablement and authored-fog capping. */
+		/** Renderer-owned distance fade when AO is enabled for the frame. */
 		readonly effectiveDistanceFade: {
 			readonly disabledAt: number;
 			readonly fullStrengthUntil: number;

@@ -20,6 +20,12 @@
 		textureFilteringPolicyLabel,
 		type TextureFilteringPolicy,
 	} from "../lib/game/renderer/texture-filtering-policy";
+	import {
+		createAmbientOcclusionDistanceFade,
+		createAmbientOcclusionParameters,
+		type AmbientOcclusionParameters,
+		type AmbientOcclusionSettings,
+	} from "../lib/game/renderer/ambient-occlusion-policy";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -38,6 +44,8 @@
 		) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
+		/** Optional near-field ambient-occlusion presentation, disabled by default. */
+		readonly ambientOcclusion: AmbientOcclusionSettings;
 		readonly viewerLightEnabled: boolean;
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
 		readonly weatherEnabled: boolean;
@@ -49,6 +57,9 @@
 		readonly ambientVolume: number;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
+		readonly updateAmbientOcclusionSettings: (
+			settings: AmbientOcclusionSettings,
+		) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateWeather: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
@@ -80,6 +91,7 @@
 		dayGroupNames,
 		updateEnvironment,
 		distanceFogEnabled,
+		ambientOcclusion,
 		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
@@ -90,6 +102,7 @@
 		updateEffectVolume,
 		updateAmbientVolume,
 		updateDistanceFog,
+		updateAmbientOcclusionSettings,
 		updateViewerLight,
 		updateWeather,
 		updateClockFollowing,
@@ -144,6 +157,46 @@
 
 	function handleDistanceFogChange(event: Event): void {
 		updateDistanceFog((event.currentTarget as HTMLInputElement).checked);
+	}
+
+	function handleAmbientOcclusionChange(event: Event): void {
+		updateAmbientOcclusionSettings({
+			...ambientOcclusion,
+			enabled: (event.currentTarget as HTMLInputElement).checked,
+		});
+	}
+
+	type AmbientOcclusionScalarParameter = Exclude<
+		keyof AmbientOcclusionParameters,
+		"distanceFade"
+	>;
+
+	function updateAmbientOcclusionParameter(
+		field: AmbientOcclusionScalarParameter,
+		event: Event,
+	): void {
+		const parameters = createAmbientOcclusionParameters({
+			...ambientOcclusion.parameters,
+			[field]: Number((event.currentTarget as HTMLInputElement).value),
+		});
+		updateAmbientOcclusionSettings({ ...ambientOcclusion, parameters });
+	}
+
+	function updateAmbientOcclusionFade(
+		field: "fullStrengthUntil" | "disabledAt",
+		event: Event,
+	): void {
+		const value = Number((event.currentTarget as HTMLInputElement).value);
+		const current = ambientOcclusion.parameters.distanceFade;
+		const distanceFade = createAmbientOcclusionDistanceFade(
+			field === "fullStrengthUntil" ? value : current.fullStrengthUntil,
+			field === "disabledAt" ? value : current.disabledAt,
+		);
+		const parameters = createAmbientOcclusionParameters({
+			...ambientOcclusion.parameters,
+			distanceFade,
+		});
+		updateAmbientOcclusionSettings({ ...ambientOcclusion, parameters });
 	}
 
 	function handleViewerLightChange(event: Event): void {
@@ -434,13 +487,110 @@
 	{/if}
 	<fieldset
 		class="explorer-section explorer-environment-controls"
-		disabled={!runtimeReady || maximumTextureAnisotropy === null}
+		disabled={!runtimeReady}
 	>
 		<legend>Render quality</legend>
+		<label class="explorer-toggle">
+			<input
+				checked={ambientOcclusion.enabled}
+				type="checkbox"
+				onchange={handleAmbientOcclusionChange}
+			/>
+			<span>Near-field ambient occlusion</span>
+			<strong>{ambientOcclusion.enabled ? "On" : "Off"}</strong>
+		</label>
+		<label class="explorer-environment-field">
+			<span
+				>AO strength ({ambientOcclusion.parameters.intensity.toFixed(2)})</span
+			>
+			<input
+				max="8"
+				min="0"
+				step="0.1"
+				type="range"
+				value={ambientOcclusion.parameters.intensity}
+				oninput={(event) => updateAmbientOcclusionParameter("intensity", event)}
+			/>
+		</label>
+		<label class="explorer-environment-field">
+			<span
+				>AO radius ({ambientOcclusion.parameters.sampleRadius.toFixed(2)})</span
+			>
+			<input
+				max="8"
+				min={ambientOcclusion.parameters.bias + 0.05}
+				step="0.05"
+				type="range"
+				value={ambientOcclusion.parameters.sampleRadius}
+				oninput={(event) =>
+					updateAmbientOcclusionParameter("sampleRadius", event)}
+			/>
+		</label>
+		<label class="explorer-environment-field">
+			<span>AO bias ({ambientOcclusion.parameters.bias.toFixed(2)})</span>
+			<input
+				max={ambientOcclusion.parameters.sampleRadius - 0.05}
+				min="0"
+				step="0.01"
+				type="range"
+				value={ambientOcclusion.parameters.bias}
+				oninput={(event) => updateAmbientOcclusionParameter("bias", event)}
+			/>
+		</label>
+		<label class="explorer-environment-field">
+			<span
+				>Edge threshold ({ambientOcclusion.parameters.bilateralDepthThreshold.toFixed(
+					2,
+				)})</span
+			>
+			<input
+				max="4"
+				min="0.05"
+				step="0.05"
+				type="range"
+				value={ambientOcclusion.parameters.bilateralDepthThreshold}
+				oninput={(event) =>
+					updateAmbientOcclusionParameter("bilateralDepthThreshold", event)}
+			/>
+		</label>
+		<label class="explorer-environment-field">
+			<span
+				>Full AO distance ({ambientOcclusion.parameters.distanceFade.fullStrengthUntil.toFixed(
+					0,
+				)})</span
+			>
+			<input
+				max={ambientOcclusion.parameters.distanceFade.disabledAt -
+					FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth}
+				min="0"
+				step="1"
+				type="range"
+				value={ambientOcclusion.parameters.distanceFade.fullStrengthUntil}
+				oninput={(event) =>
+					updateAmbientOcclusionFade("fullStrengthUntil", event)}
+			/>
+		</label>
+		<label class="explorer-environment-field">
+			<span
+				>AO cutoff ({ambientOcclusion.parameters.distanceFade.disabledAt.toFixed(
+					0,
+				)})</span
+			>
+			<input
+				max="256"
+				min={ambientOcclusion.parameters.distanceFade.fullStrengthUntil +
+					FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth}
+				step="1"
+				type="range"
+				value={ambientOcclusion.parameters.distanceFade.disabledAt}
+				oninput={(event) => updateAmbientOcclusionFade("disabledAt", event)}
+			/>
+		</label>
 		<label class="explorer-environment-field">
 			<span>Texture filtering</span>
 			<select
 				class="explorer-control explorer-control--select"
+				disabled={maximumTextureAnisotropy === null}
 				value={textureFiltering}
 				onchange={(event) =>
 					updateTextureFiltering(

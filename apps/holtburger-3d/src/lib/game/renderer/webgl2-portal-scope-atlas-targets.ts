@@ -1,6 +1,7 @@
 import {
 	type WebGL2RenderExtent,
 	validateWebGL2RenderExtent,
+	withPreservedWebGL2AllocationBindings,
 } from "./webgl2-render-target";
 
 const RGBA8_BYTES_PER_PIXEL = 4;
@@ -58,14 +59,6 @@ export interface WebGL2PortalScopeAtlasTargetDiagnostics {
 	readonly extents: PortalScopeAtlasTargetExtents | null;
 }
 
-interface WebGL2AllocationBindings {
-	readonly activeTexture: GLenum;
-	readonly activeTextureBinding: WebGLTexture | null;
-	readonly drawFramebuffer: WebGLFramebuffer | null;
-	readonly readFramebuffer: WebGLFramebuffer | null;
-	readonly texture0Binding: WebGLTexture | null;
-}
-
 /**
  * Renderer-owned fixed attachment lifecycle for arrival-state scope-atlas composition.
  *
@@ -107,13 +100,9 @@ export class WebGL2PortalScopeAtlasTargets {
 			return current;
 		}
 		this.#validateDeviceCapacity(extents);
-		const bindings = captureAllocationBindings(this.#gl);
-		let replacement: WebGL2PortalScopeAtlasTargetSet;
-		try {
-			replacement = allocateTargetSet(this.#gl, extents);
-		} finally {
-			restoreAllocationBindings(this.#gl, bindings);
-		}
+		const replacement = withPreservedWebGL2AllocationBindings(this.#gl, () =>
+			allocateTargetSet(this.#gl, extents),
+		);
 		const previous = this.#targets;
 		this.#targets = replacement;
 		this.#allocatedGenerationCount += 1;
@@ -469,41 +458,4 @@ function requirePositiveDeviceLimit(value: unknown, name: string): number {
 		throw new Error(`WebGL2 ${name} must be a positive safe integer.`);
 	}
 	return value;
-}
-
-function captureAllocationBindings(
-	gl: WebGL2RenderingContext,
-): WebGL2AllocationBindings {
-	const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as GLenum;
-	const activeTextureBinding = gl.getParameter(
-		gl.TEXTURE_BINDING_2D,
-	) as WebGLTexture | null;
-	gl.activeTexture(gl.TEXTURE0);
-	const texture0Binding = gl.getParameter(
-		gl.TEXTURE_BINDING_2D,
-	) as WebGLTexture | null;
-	gl.activeTexture(activeTexture);
-	return {
-		activeTexture,
-		activeTextureBinding,
-		drawFramebuffer: gl.getParameter(
-			gl.DRAW_FRAMEBUFFER_BINDING,
-		) as WebGLFramebuffer | null,
-		readFramebuffer: gl.getParameter(
-			gl.READ_FRAMEBUFFER_BINDING,
-		) as WebGLFramebuffer | null,
-		texture0Binding,
-	};
-}
-
-function restoreAllocationBindings(
-	gl: WebGL2RenderingContext,
-	bindings: WebGL2AllocationBindings,
-): void {
-	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, bindings.drawFramebuffer);
-	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, bindings.readFramebuffer);
-	gl.activeTexture(gl.TEXTURE0);
-	gl.bindTexture(gl.TEXTURE_2D, bindings.texture0Binding);
-	gl.activeTexture(bindings.activeTexture);
-	gl.bindTexture(gl.TEXTURE_2D, bindings.activeTextureBinding);
 }

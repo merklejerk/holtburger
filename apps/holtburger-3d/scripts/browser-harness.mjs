@@ -51,6 +51,16 @@ try {
 			Buffer.from(result.screenshot, "base64"),
 		);
 	}
+	if (options.screenshotPath && result.cameraSweepScreenshots) {
+		for (const [label, screenshot] of Object.entries(
+			result.cameraSweepScreenshots,
+		)) {
+			await writeFile(
+				`${options.screenshotPath}.sweep-${label}.png`,
+				Buffer.from(screenshot, "base64"),
+			);
+		}
+	}
 	process.stdout.write(
 		`${JSON.stringify(
 			options.brief
@@ -70,6 +80,8 @@ try {
 						frameMode: options.frameMode,
 						frameSettings: result.state.frameSettings,
 						frameProfile: result.state.frameProfile,
+						ambientOcclusionCoverageCensus:
+							result.state.ambientOcclusionCoverageCensus,
 						textureFiltering: options.textureFiltering,
 						filteringCycleStates: result.filteringCycleStates,
 						modeCycleStates: result.modeCycleStates,
@@ -136,6 +148,7 @@ function parseArgs(args) {
 		cameraYawDegrees: 0,
 		cameraHeight: 600,
 		cameraPosition: null,
+		cameraSweepPosition: null,
 		cameraEndPitchDegrees: null,
 		cameraEndYawDegrees: null,
 		explorerFocus: false,
@@ -162,6 +175,9 @@ function parseArgs(args) {
 		modeCycle: false,
 		filteringCycle: false,
 		gpu: false,
+		ambientOcclusion: false,
+		ambientOcclusionCycle: false,
+		ambientOcclusionCoverage: false,
 		vitePort: DEFAULT_VITE_PORT,
 		staticLights: true,
 		weather: true,
@@ -281,6 +297,12 @@ function parseArgs(args) {
 				break;
 			case "--camera-position":
 				parsed.cameraPosition = parsePoint(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				break;
+			case "--camera-sweep-position":
+				parsed.cameraSweepPosition = parsePoint(
 					requireValue(args, ++index, arg),
 					arg,
 				);
@@ -442,6 +464,16 @@ function parseArgs(args) {
 			case "--gpu":
 				parsed.gpu = true;
 				break;
+			case "--ambient-occlusion":
+				parsed.ambientOcclusion = true;
+				break;
+			case "--ambient-occlusion-coverage":
+				parsed.ambientOcclusion = true;
+				parsed.ambientOcclusionCoverage = true;
+				break;
+			case "--ambient-occlusion-cycle":
+				parsed.ambientOcclusionCycle = true;
+				break;
 			case "--vite-port":
 				parsed.vitePort = Number(requireValue(args, ++index, arg));
 				break;
@@ -576,6 +608,14 @@ function parseArgs(args) {
 			"--camera-end-yaw and --camera-end-pitch require --camera-position.",
 		);
 	}
+	if (parsed.cameraSweepPosition !== null && parsed.cameraPosition === null) {
+		throw new Error("--camera-sweep-position requires --camera-position.");
+	}
+	if (parsed.cameraSweepPosition !== null && cameraEndOptionCount !== 0) {
+		throw new Error(
+			"--camera-sweep-position cannot be combined with end-orientation options.",
+		);
+	}
 	const traceOptionCount = [
 		parsed.traceAnchorCellId,
 		parsed.traceStart,
@@ -651,6 +691,9 @@ Options:
   --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
   --camera-position <x,y,z>
                          Explicit canonical outdoor camera position.
+  --camera-sweep-position <x,y,z>
+                         After AO setup, capture the start, move here, then return and capture;
+                         requires --camera-position and a frozen simulation for image comparison.
   --camera-end-yaw <degrees>
   --camera-end-pitch <degrees>
                          Apply a second orientation after settlement; requires --camera-position.
@@ -690,7 +733,13 @@ Options:
                          harness default of group 0. Shipped groups run 0-19; 3, 7, 9 and 15-19
                          are Rainy and 12-14 Cloudy.
   --frame-mode <flat|portal>
+  --ambient-occlusion   Enable optional near-field screen-space ambient occlusion.
                          Change continuous rendering policy without reloading content.
+  --ambient-occlusion-coverage
+                         Replace AO with harness-only distance categories and report a one-shot
+                         full-resolution opaque-depth census. Implies --ambient-occlusion.
+  --ambient-occlusion-cycle
+                         Exercise on, off, on policy and scratch ownership without reloading.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
   --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
   --gpu                  Render on the real GPU adapter instead of SwiftShader. Required for
@@ -849,6 +898,7 @@ function briefHarnessReport(result) {
 		),
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
+		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
 		frameProfile: result.state.frameProfile,
 		tickProfile: result.state.tickProfile,
 		frameSettings: result.state.frameSettings,
@@ -857,6 +907,9 @@ function briefHarnessReport(result) {
 		initialMetrics: result.initialState.metrics,
 		initialCamera: result.initialState.camera,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
+		ambientOcclusionCycleMetrics: result.ambientOcclusionCycleStates.map(
+			(state) => state.metrics,
+		),
 		filteringCycle: result.filteringCycleStates.map(
 			({ frameSettings }) => frameSettings.quality.textureFiltering,
 		),
@@ -1240,6 +1293,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 		}
 		const modeCycleStates = [];
+		const ambientOcclusionCycleStates = [];
 		const filteringCycleStates = [];
 		if (options.filteringCycle) {
 			const maximum =
@@ -1277,6 +1331,73 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[options.frameMode],
 			);
 			await delay(250);
+		}
+		if (options.ambientOcclusionCycle) {
+			for (const enabled of [true, false, true]) {
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setAmbientOcclusion",
+					[enabled],
+				);
+				await delay(250);
+				ambientOcclusionCycleStates.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+						[],
+					),
+				);
+			}
+		} else if (options.ambientOcclusion) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setAmbientOcclusion",
+				[true],
+			);
+			await delay(250);
+		}
+		if (options.ambientOcclusionCoverage) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setAmbientOcclusionCoverageVisualization",
+				[true],
+			);
+			await delay(500);
+		}
+		let cameraSweepScreenshots = null;
+		if (options.cameraSweepPosition !== null) {
+			const capture = async () =>
+				(
+					await client.send("Page.captureScreenshot", {
+						captureBeyondViewport: false,
+						format: "png",
+					})
+				).data;
+			const start = await capture();
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setOutdoorCamera",
+				[
+					options.landblockId,
+					options.cameraSweepPosition,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
+			);
+			await delay(250);
+			const end = await capture();
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setOutdoorCamera",
+				[
+					options.landblockId,
+					options.cameraPosition,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
+			);
+			await delay(250);
+			cameraSweepScreenshots = { end, returned: await capture(), start };
 		}
 		const portalTrace = options.traceAnchorCellId
 			? await evaluate(
@@ -1486,6 +1607,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					format: "png",
 				});
 		return {
+			ambientOcclusionCycleStates,
+			cameraSweepScreenshots,
 			glRenderer,
 			consoleMessages,
 			generatedDisabledState,

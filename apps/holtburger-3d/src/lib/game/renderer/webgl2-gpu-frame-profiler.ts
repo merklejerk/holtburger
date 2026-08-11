@@ -10,11 +10,13 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** GPU phases whose timestamp intervals are aggregated across every view in one frame. */
 export type WebGL2GpuFramePhase =
+	| "ambientOcclusion"
 	| "sky"
 	| "terrain"
 	| "opaque"
 	| "blended"
 	| "particle"
+	| "presentation"
 	| "portalComposition";
 
 /** Non-overlapping CPU spans recorded only while an explicit profiling session is active. */
@@ -296,15 +298,20 @@ export class WebGL2GpuFrameProfiler {
 		const milliseconds = (query: WebGLQuery): number =>
 			(this.#gl.getQueryParameter(query, this.#gl.QUERY_RESULT) as number) /
 			NANOSECONDS_PER_MILLISECOND;
+		let ambientOcclusionMs = 0;
 		let skyMs = 0;
 		let terrainMs = 0;
 		let opaqueMs = 0;
 		let blendedMs = 0;
 		let particleMs = 0;
+		let presentationMs = 0;
 		let portalCompositionMs = 0;
 		for (const range of frame.ranges) {
 			const durationMs = milliseconds(range.query);
 			switch (range.phase) {
+				case "ambientOcclusion":
+					ambientOcclusionMs += durationMs;
+					break;
 				case "sky":
 					skyMs += durationMs;
 					break;
@@ -320,16 +327,21 @@ export class WebGL2GpuFrameProfiler {
 				case "particle":
 					particleMs += durationMs;
 					break;
+				case "presentation":
+					presentationMs += durationMs;
+					break;
 				case "portalComposition":
 					portalCompositionMs += durationMs;
 			}
 		}
 		return {
+			ambientOcclusionMs,
 			blendedMs,
 			frameNumber: frame.frameNumber,
 			kind: "available",
 			opaqueMs,
 			particleMs,
+			presentationMs,
 			portalCompositionMs,
 			pendingFrameCount: this.#pending.length,
 			skyMs,
@@ -338,11 +350,13 @@ export class WebGL2GpuFrameProfiler {
 			// queries cannot nest, so unattributed GPU work between phases is unmeasurable and is
 			// deliberately absent rather than reported as a zero.
 			totalMs:
+				ambientOcclusionMs +
 				skyMs +
 				terrainMs +
 				opaqueMs +
 				blendedMs +
 				particleMs +
+				presentationMs +
 				portalCompositionMs,
 		};
 	}

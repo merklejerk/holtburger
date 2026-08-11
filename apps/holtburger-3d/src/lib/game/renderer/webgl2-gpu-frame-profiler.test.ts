@@ -31,8 +31,10 @@ describe("WebGL2GpuFrameProfiler", () => {
 
 		frame.beginPhase("terrain").finish();
 		frame.beginPhase("terrain").finish();
+		frame.beginPhase("ambientOcclusion").finish();
 		frame.beginPhase("opaque").finish();
 		frame.beginPhase("particle").finish();
+		frame.beginPhase("presentation").finish();
 		frame.beginPhase("portalComposition").finish();
 		frame.beginPhase("portalComposition").finish();
 		frame.finish();
@@ -44,11 +46,13 @@ describe("WebGL2GpuFrameProfiler", () => {
 		harness.resultsAvailable = true;
 		profiler.poll();
 		expect(profiler.getProfile()).toEqual({
+			ambientOcclusionMs: 1,
 			blendedMs: 0,
 			frameNumber: 7,
 			kind: "available",
 			opaqueMs: 1,
 			particleMs: 1,
+			presentationMs: 1,
 			pendingFrameCount: 0,
 			portalCompositionMs: 2,
 			// This frame drives no sky pass, so its span stays zero rather than being absent.
@@ -56,10 +60,10 @@ describe("WebGL2GpuFrameProfiler", () => {
 			// Two terrain phases at 1 ms each aggregate; total is their sum, since elapsed queries
 			// cannot nest and no query spans the frame.
 			terrainMs: 2,
-			totalMs: 6,
+			totalMs: 8,
 		});
 		// One query per phase, where the timestamp profiler needed a pair plus a frame pair.
-		expect(harness.deleteQuery).toHaveBeenCalledTimes(6);
+		expect(harness.deleteQuery).toHaveBeenCalledTimes(8);
 	});
 
 	it("refuses to nest elapsed queries, which WebGL permits only one of", () => {

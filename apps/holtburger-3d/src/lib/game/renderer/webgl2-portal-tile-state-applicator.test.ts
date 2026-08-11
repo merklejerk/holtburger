@@ -36,6 +36,18 @@ describe("WebGL2PortalTileStateApplicator", () => {
 		expect(fixture.calls.slice(0, 2)).toEqual(fixture.calls.slice(2));
 	});
 
+	it("reapplies complete tile state after an external atlas consumer", () => {
+		const fixture = createFixture();
+		const state = new WebGL2PortalTileStateApplicator(fixture.gl);
+
+		state.beginFrame(fixture.atlas);
+		state.apply(0, fixture.uniformA, true);
+		state.invalidate();
+		state.apply(0, fixture.uniformA, false);
+
+		expect(fixture.calls.slice(0, 2)).toEqual(fixture.calls.slice(2));
+	});
+
 	it("fails loudly when routing starts outside an opaque atlas pass", () => {
 		const fixture = createFixture();
 		const state = new WebGL2PortalTileStateApplicator(fixture.gl);
@@ -43,6 +55,7 @@ describe("WebGL2PortalTileStateApplicator", () => {
 		expect(() => state.apply(0, fixture.uniformA, false)).toThrow(
 			"no active atlas frame",
 		);
+		expect(() => state.invalidate()).toThrow("no active atlas frame");
 	});
 });
 

@@ -28,6 +28,16 @@ export class WebGL2PortalTileStateApplicator {
 		this.#viewportTileOrdinal = NO_TILE_ORDINAL;
 	}
 
+	/** Forget viewport and clip state changed by an external atlas consumer. */
+	invalidate(): void {
+		if (!this.#atlas) {
+			throw new Error("Portal tile state has no active atlas frame.");
+		}
+		this.#clipTransformLocation = null;
+		this.#clipTransformTileOrdinal = NO_TILE_ORDINAL;
+		this.#viewportTileOrdinal = NO_TILE_ORDINAL;
+	}
+
 	/** Apply only tile state that differs from the state proven live on the WebGL context. */
 	apply(
 		ordinal: number,

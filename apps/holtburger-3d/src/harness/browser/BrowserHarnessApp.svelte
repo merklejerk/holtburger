@@ -193,6 +193,12 @@
 		readonly resetTiming: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
 		readonly setFrameProfiling: (enabled: boolean) => void;
+		/** Toggle optional near-field ambient occlusion without rebuilding content. */
+		readonly setAmbientOcclusion: (enabled: boolean) => void;
+		/** Toggle the harness-only AO distance-category view and one-shot depth census. */
+		readonly setAmbientOcclusionCoverageVisualization: (
+			enabled: boolean,
+		) => void;
 		/** Toggle authored outdoor lamps, to measure their cost against an identical scene. */
 		readonly setStaticLights: (enabled: boolean) => void;
 		/** Toggle authored weather, mirroring retail's `DisableMostWeatherEffects` player option. */
@@ -222,6 +228,9 @@
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
+		readonly ambientOcclusionCoverageCensus: ReturnType<
+			WebGL2Renderer["getAmbientOcclusionCoverageCensus"]
+		>;
 		/** Latest explicit renderer profile, or null while profiling is disabled. */
 		readonly frameProfile: RendererFrameProfile | null;
 		readonly tickProfile: ReturnType<GameRuntime["getTickProfile"]> | null;
@@ -635,6 +644,20 @@
 		runtime.setRendererFrameProfilingEnabled(enabled);
 	}
 
+	function setAmbientOcclusion(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			ambientOcclusion: { ...frameSettings.ambientOcclusion, enabled },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setAmbientOcclusionCoverageVisualization(enabled: boolean): void {
+		if (!renderer) throw new Error("Browser harness renderer is not ready.");
+		renderer.setAmbientOcclusionCoverageVisualizationEnabled(enabled);
+	}
+
 	function setStaticLights(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		frameSettings = { ...frameSettings, staticLightsEnabled: enabled };
@@ -909,6 +932,8 @@
 					setEnvCellRenderMode,
 					setLayerVisibility,
 					setOutdoorCamera,
+					setAmbientOcclusion,
+					setAmbientOcclusionCoverageVisualization,
 					setFrameProfiling,
 					setStaticLights,
 					setWeather,
@@ -924,6 +949,8 @@
 						const frameDiagnostics =
 							runtime?.getRendererFrameDiagnostics() ?? null;
 						return {
+							ambientOcclusionCoverageCensus:
+								renderer?.getAmbientOcclusionCoverageCensus() ?? null,
 							authoredDynamics:
 								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
 							tickProfile: runtime?.getTickProfile() ?? null,

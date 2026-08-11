@@ -17,9 +17,7 @@ type EnvelopeClassifier = (
 	input: ObjectFootprintProjectionInput,
 ) => ObjectFootprintVisibility;
 type MutableGeneratedInstanceProjectionInput = {
-	-readonly [
-		Key in keyof ObjectFootprintProjectionInput
-	]: ObjectFootprintProjectionInput[Key];
+	-readonly [Key in keyof ObjectFootprintProjectionInput]: ObjectFootprintProjectionInput[Key];
 };
 
 /** Per-view selector that reuses index storage and caches one result per immutable stream. */

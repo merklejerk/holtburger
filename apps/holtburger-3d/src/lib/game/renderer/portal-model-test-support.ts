@@ -24,7 +24,9 @@ interface PortalModelTestCrossingInput {
 	readonly depth: number;
 	readonly id: string;
 	readonly relationship?:
-		"depth-continuous" | "exterior-boundary" | "indoor-boundary";
+		| "depth-continuous"
+		| "exterior-boundary"
+		| "indoor-boundary";
 	readonly source: string;
 	readonly target: string;
 }
@@ -65,8 +67,13 @@ export function portalModelTestScene(
 		domains: domainIds.map((domainId) => ({
 			fragments: scopeInputs.flatMap((scope) => {
 				if (portalModelDomainId(scope.domain) !== domainId) return [];
-				return scope.fragments.map((fragment): PortalModelFragment =>
-					placeFragment(fragment, requiredScope(scopeById, scope.scope), pixel),
+				return scope.fragments.map(
+					(fragment): PortalModelFragment =>
+						placeFragment(
+							fragment,
+							requiredScope(scopeById, scope.scope),
+							pixel,
+						),
 				);
 			}),
 			id: domainId,

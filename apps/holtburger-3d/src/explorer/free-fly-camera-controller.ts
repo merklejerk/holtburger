@@ -5,7 +5,15 @@ import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 type DragMode = "pan" | "rotate";
 type MovementKey =
-	"a" | "c" | "d" | "pagedown" | "pageup" | "s" | "space" | "w" | "z";
+	| "a"
+	| "c"
+	| "d"
+	| "pagedown"
+	| "pageup"
+	| "s"
+	| "space"
+	| "w"
+	| "z";
 
 interface ActiveDrag {
 	readonly lastX: number;

@@ -11,7 +11,10 @@ import {
 
 /** Renderer-neutral ordering constraint derived from retail surface facts. */
 export type ObjectMaterialOrdering =
-	"opaque" | "alpha-test" | "transparent" | "additive";
+	| "opaque"
+	| "alpha-test"
+	| "transparent"
+	| "additive";
 
 /** Stable source-local plan for one complete object material binding. */
 export interface ObjectMaterialPlan {

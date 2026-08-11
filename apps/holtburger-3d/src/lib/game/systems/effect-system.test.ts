@@ -192,9 +192,9 @@ describe("EffectSystem", () => {
 		).toBeCloseTo(2);
 
 		advance(effects, 0.5);
-		expect(
-			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
-		).toBe(3);
+		expect(effects.samplePresentation(NODE_ID).rootTransformModifier.m11).toBe(
+			3,
+		);
 	});
 
 	it("continues a mid-flight scale ramp from the current scale, as retail does", () => {
@@ -216,9 +216,9 @@ describe("EffectSystem", () => {
 
 		effects.applyScale(TARGET, { durationSeconds: 0, end: 2 });
 
-		expect(
-			effects.samplePresentation(NODE_ID).rootTransformModifier.m11,
-		).toBe(2);
+		expect(effects.samplePresentation(NODE_ID).rootTransformModifier.m11).toBe(
+			2,
+		);
 	});
 
 	it("interpolates a scale ramp across the sub-step without committing it", () => {

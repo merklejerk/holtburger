@@ -68,11 +68,14 @@ export type TerrainCompositionTextureKey = `terrain-composition:${string}` & {
 
 /** Stable identity for a generated two-dimensional texture resource. */
 export type GeneratedTextureKey =
-	TerrainSurfaceTextureKey | TerrainCompositionTextureKey;
+	| TerrainSurfaceTextureKey
+	| TerrainCompositionTextureKey;
 
 /** Logical identity for an atlas entry, asset texture, array, or generated texture. */
 export type TextureKey =
-	AssetTextureKey | TextureArrayKey | GeneratedTextureKey;
+	| AssetTextureKey
+	| TextureArrayKey
+	| GeneratedTextureKey;
 
 /** Complete source identity for one immutable texture-array resource. */
 export interface TextureArrayFact {

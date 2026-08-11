@@ -1,4 +1,8 @@
-import { acVector3, acVectorToRender, sceneVector3 } from "../../assets/ac-frame";
+import {
+	acVector3,
+	acVectorToRender,
+	sceneVector3,
+} from "../../assets/ac-frame";
 import { behaviorTargetId } from "../behavior/behavior-event-router";
 import { skyObjectOrigin } from "./sky-state";
 import type { AcRotation, SceneVector3 } from "../../assets/ac-frame";

@@ -200,6 +200,12 @@ export class WebGL2PortalScopeAtlasPipeline {
 		);
 	}
 
+	/** Invalidate only cached opaque tile state after an external atlas consumer changes it. */
+	invalidateOpaqueTileState(): void {
+		this.#requireFrame();
+		this.#tileState.invalidate();
+	}
+
 	/** Route one already-formed scope-homogeneous object draw without changing its boundary. */
 	routeObjectSubmission(
 		renderScopeKey: string,

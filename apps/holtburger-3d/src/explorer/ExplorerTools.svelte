@@ -18,9 +18,15 @@
 	import type { RenderLayerVisibility } from "../lib/game/renderer/renderer";
 	import type { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
+	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
 
 	type ExplorerTabId =
-		"world" | "frame" | "textures" | "assets" | "entities" | "logs";
+		| "world"
+		| "frame"
+		| "textures"
+		| "assets"
+		| "entities"
+		| "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -47,6 +53,7 @@
 		) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
+		readonly ambientOcclusion: AmbientOcclusionSettings;
 		readonly viewerLightEnabled: boolean;
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
@@ -55,6 +62,9 @@
 		readonly ambientVolume: number;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
+		readonly updateAmbientOcclusionSettings: (
+			settings: AmbientOcclusionSettings,
+		) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateWeather: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
@@ -98,6 +108,7 @@
 		dayGroupNames,
 		updateEnvironment,
 		distanceFogEnabled,
+		ambientOcclusion,
 		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
@@ -105,6 +116,7 @@
 		effectVolume,
 		ambientVolume,
 		updateDistanceFog,
+		updateAmbientOcclusionSettings,
 		updateViewerLight,
 		updateWeather,
 		updateClockFollowing,
@@ -228,6 +240,7 @@
 								{dayGroupNames}
 								{updateEnvironment}
 								{distanceFogEnabled}
+								{ambientOcclusion}
 								{viewerLightEnabled}
 								{weatherEnabled}
 								{clockFollowing}
@@ -235,6 +248,7 @@
 								{effectVolume}
 								{ambientVolume}
 								{updateDistanceFog}
+								{updateAmbientOcclusionSettings}
 								{updateViewerLight}
 								{updateWeather}
 								{updateClockFollowing}

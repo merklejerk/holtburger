@@ -32,6 +32,7 @@
 		type EnvCellRenderMode,
 		type RendererFrameDiagnosticsSnapshot,
 	} from "../lib/game/renderer/renderer";
+	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
 	import {
 		ExplorerCameraCoordinator,
 		type ExplorerCameraFocusStatus,
@@ -164,6 +165,13 @@
 
 	function updateDistanceFog(enabled: boolean): void {
 		frameSettings = { ...frameSettings, distanceFogEnabled: enabled };
+		applyFrameSettings();
+	}
+
+	function updateAmbientOcclusionSettings(
+		ambientOcclusion: AmbientOcclusionSettings,
+	): void {
+		frameSettings = { ...frameSettings, ambientOcclusion };
 		applyFrameSettings();
 	}
 
@@ -513,6 +521,7 @@
 			) ?? []}
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
+			ambientOcclusion={frameSettings.ambientOcclusion}
 			{clockFollowing}
 			{audioFollowsCamera}
 			{effectVolume}
@@ -522,6 +531,7 @@
 			{updateAmbientVolume}
 			{updateClockFollowing}
 			{updateDistanceFog}
+			{updateAmbientOcclusionSettings}
 			{updateViewerLight}
 			viewerLightEnabled={frameSettings.viewerLightEnabled}
 			{updateWeather}

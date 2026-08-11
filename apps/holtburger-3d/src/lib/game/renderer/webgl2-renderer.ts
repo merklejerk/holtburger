@@ -163,6 +163,16 @@ import {
 	WebGL2PortalScopeAtlasPipeline,
 	type WebGL2PortalScopeAtlasFrame,
 } from "./webgl2-portal-scope-atlas-pipeline";
+import {
+	WebGL2FlatSceneTarget,
+	type WebGL2FlatSceneTargetSet,
+} from "./webgl2-flat-scene-target";
+import { WebGL2FlatScenePresentation } from "./webgl2-flat-scene-presentation";
+import {
+	resolveEffectiveAmbientOcclusionPolicy,
+	type EffectiveAmbientOcclusionPolicy,
+} from "./ambient-occlusion-policy";
+import { WebGL2SaoPass, type WebGL2SaoCoverageCensus } from "./webgl2-sao-pass";
 
 /** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
 const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
@@ -192,6 +202,8 @@ function anchorRelativePosition(
 }
 
 interface SceneShading {
+	/** Effective optional near-field presentation policy resolved once for this frame. */
+	readonly ambientOcclusion: EffectiveAmbientOcclusionPolicy;
 	readonly fog: FrameInput["environment"]["distanceFog"];
 	/** Resolved sky for this frame, celestial and weather, or null when the region authors none. */
 	readonly sky: FrameInput["environment"]["sky"];
@@ -217,6 +229,7 @@ interface SceneShading {
  * resolved frame environment. Fog stays disabled exactly as this probe path always had it.
  */
 const PROBE_SHADING: SceneShading = {
+	ambientOcclusion: { kind: "disabled" },
 	fog: null,
 	// Probe views measure world draws only; the sky contributes no depth and no selection.
 	sky: null,
@@ -355,6 +368,15 @@ export interface PortalExecutionProbeResult {
 
 /** Mutable backing state copied only when Explorer samples renderer diagnostics. */
 interface MutableFrameSelectionMetrics {
+	ambientOcclusion: {
+		activeBytes: number;
+		allocatedGenerationCount: number;
+		disposedGenerationCount: number;
+		effectiveDistanceFade: {
+			disabledAt: number;
+			fullStrengthUntil: number;
+		} | null;
+	};
 	envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"];
 	viewCount: number;
 	visibleSceneEntries: number;
@@ -384,6 +406,10 @@ interface MutableFrameSelectionMetrics {
 	portalTruncatedViewCount: number;
 	portalFramebufferCount: number;
 	portalTargetBytes: number;
+	flatSceneFramebufferCount: number;
+	flatSceneTargetBytes: number;
+	flatSceneAllocatedGenerationCount: number;
+	flatSceneDisposedGenerationCount: number;
 	submittedStaticObjectDrawCount: number;
 	submittedStaticObjectTriangleCount: number;
 	submittedBakedStaticObjectDrawCount: number;
@@ -468,6 +494,14 @@ export class WebGL2Renderer implements Renderer {
 	readonly #objectState: WebGL2ObjectStateApplicator;
 	/** Portal owner created lazily when the first portal frame needs GPU resources. */
 	#portalScopeAtlasPipeline: WebGL2PortalScopeAtlasPipeline | null = null;
+	/** Unconditional flat-scene attachments, allocated lazily on the first flat frame. */
+	#flatSceneTarget: WebGL2FlatSceneTarget | null = null;
+	/** Flat color/depth presenter, compiled lazily with the first flat frame. */
+	#flatScenePresentation: WebGL2FlatScenePresentation | null = null;
+	/** Optional SAO programs and scratch ownership, created only by the first enabled frame. */
+	#saoPass: WebGL2SaoPass | null = null;
+	/** Harness-only category view; production never enables synchronous depth census work. */
+	#saoCoverageVisualizationEnabled = false;
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
 	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
@@ -498,8 +532,19 @@ export class WebGL2Renderer implements Renderer {
 	#minimumObjectFootprintPixelArea = 0;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
+	/** Reused metrics record for the frame's effective AO distance interval. */
+	readonly #ambientOcclusionDistanceFadeMetrics = {
+		disabledAt: 0,
+		fullStrengthUntil: 0,
+	};
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
 	readonly #frameSelectionMetrics: MutableFrameSelectionMetrics = {
+		ambientOcclusion: {
+			activeBytes: 0,
+			allocatedGenerationCount: 0,
+			disposedGenerationCount: 0,
+			effectiveDistanceFade: null,
+		},
 		envCellRenderMode: "flat",
 		terrainFrameInputs: 0,
 		viewCount: 0,
@@ -526,6 +571,10 @@ export class WebGL2Renderer implements Renderer {
 		portalTruncatedViewCount: 0,
 		portalFramebufferCount: 0,
 		portalTargetBytes: 0,
+		flatSceneFramebufferCount: 0,
+		flatSceneTargetBytes: 0,
+		flatSceneAllocatedGenerationCount: 0,
+		flatSceneDisposedGenerationCount: 0,
 		visibleSceneEntries: 0,
 		visibleStaticLayerCount: 0,
 		visibleStaticNodeCount: 0,
@@ -635,7 +684,19 @@ export class WebGL2Renderer implements Renderer {
 			snapshot: () => ({
 				profile: this.#frameProfiler?.getProfile() ?? null,
 				profilingEnabled: this.#frameProfiler !== null,
-				selectionMetrics: { ...this.#frameSelectionMetrics },
+				selectionMetrics: {
+					...this.#frameSelectionMetrics,
+					ambientOcclusion: {
+						...this.#frameSelectionMetrics.ambientOcclusion,
+						effectiveDistanceFade: this.#frameSelectionMetrics.ambientOcclusion
+							.effectiveDistanceFade
+							? {
+									...this.#frameSelectionMetrics.ambientOcclusion
+										.effectiveDistanceFade,
+								}
+							: null,
+					},
+				},
 			}),
 			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
 		};
@@ -663,6 +724,17 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
+	/** Toggle the harness-only AO category view without widening production frame settings. */
+	setAmbientOcclusionCoverageVisualizationEnabled(enabled: boolean): void {
+		this.#saoCoverageVisualizationEnabled = enabled;
+		this.#saoPass?.setCoverageVisualizationEnabled(enabled);
+	}
+
+	/** Read the latest one-shot harness census, if a visualized AO frame completed. */
+	getAmbientOcclusionCoverageCensus(): WebGL2SaoCoverageCensus | null {
+		return this.#saoPass?.getCoverageCensus() ?? null;
+	}
+
 	#drawFrameContent(
 		input: FrameInput,
 		profile: WebGL2FrameProfileCapture | null,
@@ -682,6 +754,32 @@ export class WebGL2Renderer implements Renderer {
 		const fog = input.frameSettings.distanceFogEnabled
 			? input.environment.distanceFog
 			: null;
+		// RETAIL DIVERGENCE: Retail draws before-landscape sky, opaque landblocks, then the
+		// after-landscape weather overlay and deferred alpha work with no screen-space obscurance
+		// stage (acclient.c:296701-296729, 297381-297434, 441096). This optional, default-off
+		// presentation adds near-field grounding before weather; removing it as a retail
+		// "correction" loses that enabled visual benefit, while moving it later would incorrectly
+		// attenuate weather/transparency. The DA55 portal census measured 938,104 opaque committed
+		// tile pixels: 510,685 (54.4%) full/fading and 427,419 neutral after distance policy, plus
+		// 10,780 clear pixels excluded from the denominator. Authored rainy fog capped the range to
+		// 12.8-28.8 units and made all 910,842 overview opaque pixels neutral, proving shipped
+		// distant/fog presentation is outside the divergence.
+		const ambientOcclusion = resolveEffectiveAmbientOcclusionPolicy(
+			input.frameSettings.ambientOcclusion,
+			FRONTEND_TUNING.rendering.ambientOcclusion.minimumFadeWidth,
+			fog,
+		);
+		if (ambientOcclusion.kind === "disabled") this.#saoPass?.disable();
+		if (ambientOcclusion.kind === "enabled") {
+			this.#ambientOcclusionDistanceFadeMetrics.disabledAt =
+				ambientOcclusion.distanceFade.disabledAt;
+			this.#ambientOcclusionDistanceFadeMetrics.fullStrengthUntil =
+				ambientOcclusion.distanceFade.fullStrengthUntil;
+			this.#frameSelectionMetrics.ambientOcclusion.effectiveDistanceFade =
+				this.#ambientOcclusionDistanceFadeMetrics;
+		} else {
+			this.#frameSelectionMetrics.ambientOcclusion.effectiveDistanceFade = null;
+		}
 		// Dynamic lights are frame-global and reach every draw, so they are assembled once here
 		// rather than per role. Positions stay in canonical scene space; the bind rebases them.
 		const camera = input.views[0]?.camera.placement.position ?? null;
@@ -703,6 +801,7 @@ export class WebGL2Renderer implements Renderer {
 		);
 		this.#frameSelectionMetrics.droppedLights += selectedDynamic.dropped;
 		const shading: SceneShading = {
+			ambientOcclusion,
 			fog,
 			sky: input.environment.sky,
 			weatherEnabled: input.frameSettings.weatherEnabled,
@@ -724,35 +823,25 @@ export class WebGL2Renderer implements Renderer {
 		}
 		if (input.frameSettings.envCellRenderMode === "flat") {
 			for (const view of input.views) {
-				if (profile) {
-					const preparationStartedAt = profile.beginCpuPhase();
-					const geometry = this.#prepareViewGeometry(
-						input.anchorLandblockId,
-						view,
-					);
+				const preparationStartedAt = profile?.beginCpuPhase();
+				const geometry = this.#prepareViewGeometry(
+					input.anchorLandblockId,
+					view,
+				);
+				if (profile && preparationStartedAt !== undefined) {
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
-					const contributions = this.#collectScene(
-						geometry,
-						input.frameSettings,
-						profile,
-					);
-					this.#drawProfiledView(
-						{ ...geometry, ...contributions },
-						shading,
-						"exterior",
-						profile,
-					);
-				} else {
-					this.#drawView(
-						this.#prepareView(
-							input.anchorLandblockId,
-							view,
-							input.frameSettings,
-						),
-						shading,
-						"exterior",
-					);
 				}
+				const contributions = this.#collectScene(
+					geometry,
+					input.frameSettings,
+					profile,
+				);
+				this.#drawFlatView(
+					{ ...geometry, ...contributions },
+					shading,
+					"exterior",
+					profile,
+				);
 			}
 		} else {
 			const clear = fog?.color ?? input.environment.backgroundColor;
@@ -782,7 +871,7 @@ export class WebGL2Renderer implements Renderer {
 			}
 		}
 		const finalizationStartedAt = profile?.beginCpuPhase();
-		this.#updatePortalTargetMetrics();
+		this.#updateRenderTargetMetrics();
 		this.#finishFrameSelectionMetrics();
 		if (profile && finalizationStartedAt !== undefined) {
 			profile.finishCpuPhase("finalization", finalizationStartedAt);
@@ -856,13 +945,30 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	/** Copy renderer-lifetime target ownership into the current diagnostics snapshot. */
-	#updatePortalTargetMetrics(): void {
+	#updateRenderTargetMetrics(): void {
 		const diagnostics =
 			this.#portalScopeAtlasPipeline?.getDiagnostics() ?? null;
 		this.#frameSelectionMetrics.portalFramebufferCount =
 			diagnostics?.activeFramebufferCount ?? 0;
 		this.#frameSelectionMetrics.portalTargetBytes =
 			diagnostics?.activeBytes ?? 0;
+		const flatTarget = this.#flatSceneTarget;
+		this.#frameSelectionMetrics.flatSceneFramebufferCount =
+			flatTarget?.activeFramebufferCount ?? 0;
+		this.#frameSelectionMetrics.flatSceneTargetBytes =
+			flatTarget?.activeBytes ?? 0;
+		this.#frameSelectionMetrics.flatSceneAllocatedGenerationCount =
+			flatTarget?.allocatedGenerationCount ?? 0;
+		this.#frameSelectionMetrics.flatSceneDisposedGenerationCount =
+			flatTarget?.disposedGenerationCount ?? 0;
+		const saoPass = this.#saoPass;
+		const ambientOcclusionMetrics =
+			this.#frameSelectionMetrics.ambientOcclusion;
+		ambientOcclusionMetrics.activeBytes = saoPass?.activeBytes ?? 0;
+		ambientOcclusionMetrics.allocatedGenerationCount =
+			saoPass?.allocatedGenerationCount ?? 0;
+		ambientOcclusionMetrics.disposedGenerationCount =
+			saoPass?.disposedGenerationCount ?? 0;
 	}
 
 	/**
@@ -906,7 +1012,7 @@ export class WebGL2Renderer implements Renderer {
 			null,
 			pipeline,
 		);
-		this.#updatePortalTargetMetrics();
+		this.#updateRenderTargetMetrics();
 		this.#finishFrameSelectionMetrics();
 		return {
 			crossingCount: frame.atlas.visibility.selectedCrossingCount,
@@ -999,6 +1105,24 @@ export class WebGL2Renderer implements Renderer {
 			profile,
 			pipeline,
 		);
+		if (shading.ambientOcclusion.kind === "enabled") {
+			const ambientOcclusionGpu =
+				profile?.beginGpuPhase("ambientOcclusion") ?? null;
+			try {
+				this.#getSaoPass().applyPortal(
+					frame.targets.scene,
+					frame.targets.extents.atlas,
+					frame.targets.extents.drawingBuffer,
+					frame.atlas,
+					view.camera,
+					view.projection,
+					shading.ambientOcclusion,
+				);
+				pipeline.invalidateOpaqueTileState();
+			} finally {
+				ambientOcclusionGpu?.finish();
+			}
+		}
 		if (hasOutdoorScope) {
 			this.#submitSkyPhase(view, shading, "after-landscape", profile, pipeline);
 		}
@@ -1025,6 +1149,12 @@ export class WebGL2Renderer implements Renderer {
 		destroyWebGL2TerrainLightMaskTexture(this.#gl, this.#terrainLightMask);
 		this.#portalScopeAtlasPipeline?.destroy();
 		this.#portalScopeAtlasPipeline = null;
+		this.#flatSceneTarget?.destroy();
+		this.#flatSceneTarget = null;
+		this.#flatScenePresentation?.destroy();
+		this.#flatScenePresentation = null;
+		this.#saoPass?.destroy();
+		this.#saoPass = null;
 		this.#skyPass?.destroy();
 		this.#skyPass = null;
 		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
@@ -1067,19 +1197,6 @@ export class WebGL2Renderer implements Renderer {
 		gl.disable(gl.BLEND);
 		gl.disable(gl.CULL_FACE);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-	}
-
-	#prepareView(
-		anchorLandblockId: FrameInput["anchorLandblockId"],
-		input: FrameViewInput,
-		frameSettings: FrameSettings,
-	): PreparedView {
-		const prepared = this.#prepareViewGeometry(anchorLandblockId, input);
-		const collected = this.#collectScene(prepared, frameSettings, null);
-		return {
-			...prepared,
-			...collected,
-		};
 	}
 
 	#prepareViewGeometry(
@@ -1563,6 +1680,10 @@ export class WebGL2Renderer implements Renderer {
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
 	): void {
 		const metrics = this.#frameSelectionMetrics;
+		metrics.ambientOcclusion.activeBytes = 0;
+		metrics.ambientOcclusion.allocatedGenerationCount = 0;
+		metrics.ambientOcclusion.disposedGenerationCount = 0;
+		metrics.ambientOcclusion.effectiveDistanceFade = null;
 		metrics.envCellRenderMode = envCellRenderMode;
 		metrics.terrainFrameInputs = 0;
 		metrics.viewCount = viewCount;
@@ -1589,6 +1710,10 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalTruncatedViewCount = 0;
 		metrics.portalFramebufferCount = 0;
 		metrics.portalTargetBytes = 0;
+		metrics.flatSceneFramebufferCount = 0;
+		metrics.flatSceneTargetBytes = 0;
+		metrics.flatSceneAllocatedGenerationCount = 0;
+		metrics.flatSceneDisposedGenerationCount = 0;
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
 		this.#visibleEnvCellScopes.clear();
@@ -1837,57 +1962,86 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	/** Draw one scene-domain contribution, including exterior-global passes only for outdoors. */
-	#drawView(
+	/** Draw one flat view through the single nullable-profile physical schedule. */
+	#drawFlatView(
 		view: PreparedView,
 		shading: SceneShading,
 		domain: SceneRenderDomain,
+		profile: WebGL2FrameProfileCapture | null,
 	): void {
-		const objectPhases = this.#createObjectSubmissionPhases(view, null);
-		if (domain === "exterior") {
-			this.#drawSky(view, shading, "before-world", null);
-		}
-		this.#drawTerrain(view, shading, null);
-		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, null, null);
-		// Retail's after-landscape weather: drawn once the landblock loop is down but before the
-		// deferred translucent flush, which is legitimately allowed to cover it (acclient.c:296725,
-		// 441068).
-		if (domain === "exterior") {
-			this.#drawSky(view, shading, "after-landscape", null);
-		}
-		this.#drawBlendedObjects(view, objectPhases, shading, null, null);
-		// After the blended pass: particles are transparent and must not occlude the geometry they
-		// sort against.
-		this.#drawParticles(view, null, null, null);
-		this.#gl.bindVertexArray(null);
-		this.#beginObjectPhase();
-	}
-
-	/** Draw one view through opt-in CPU spans and non-blocking GPU timestamp intervals. */
-	#drawProfiledView(
-		view: PreparedView,
-		shading: SceneShading,
-		domain: SceneRenderDomain,
-		profile: WebGL2FrameProfileCapture,
-	): void {
+		const targetOwner = (this.#flatSceneTarget ??= new WebGL2FlatSceneTarget(
+			this.#gl,
+		));
+		const target = targetOwner.resizeDimensions(
+			this.#frameWidth,
+			this.#frameHeight,
+		);
+		this.#beginFlatOpaqueScene(target);
 		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
 		if (domain === "exterior") {
 			this.#submitSkyPhase(view, shading, "before-world", profile, null);
 		}
 		this.#submitTerrainPhase(view, shading, profile, null);
 		this.#submitOpaquePhase(view, objectPhases.opaque, shading, profile, null);
+		if (shading.ambientOcclusion.kind === "enabled") {
+			const ambientOcclusionGpu =
+				profile?.beginGpuPhase("ambientOcclusion") ?? null;
+			try {
+				this.#getSaoPass().applyFlat(
+					target,
+					view.camera,
+					view.projection,
+					shading.ambientOcclusion,
+				);
+			} finally {
+				ambientOcclusionGpu?.finish();
+			}
+		}
+		// Retail's after-landscape weather: drawn once the landblock loop is down but before the
+		// deferred translucent flush, which is legitimately allowed to cover it (acclient.c:296725,
+		// 441068).
 		if (domain === "exterior") {
-			// Both sky passes share one aggregate phase because elapsed queries cannot nest.
 			this.#submitSkyPhase(view, shading, "after-landscape", profile, null);
 		}
+		const presentationGpu = profile?.beginGpuPhase("presentation") ?? null;
+		try {
+			(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
+				this.#gl,
+			)).present(target);
+		} finally {
+			presentationGpu?.finish();
+		}
+		// Presentation changes program and texture bindings outside the object-state mirror.
+		this.#beginObjectPhase();
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, null);
-
-		// Profiling must not change what is drawn. This path previously omitted particles entirely,
-		// so every profile measured a scene missing them and reported their cost as zero.
+		// After the blended pass: particles are transparent and must not occlude the geometry they
+		// sort against.
 		this.#drawParticles(view, profile, null, null);
-
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
+	}
+
+	/** Bind and clear one complete flat-scene target before any world submission. */
+	#beginFlatOpaqueScene(target: WebGL2FlatSceneTargetSet): void {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
+		gl.viewport(0, 0, target.extent.width, target.extent.height);
+		gl.colorMask(true, true, true, true);
+		gl.depthMask(true);
+		gl.disable(gl.BLEND);
+		gl.disable(gl.CULL_FACE);
+		gl.disable(gl.SCISSOR_TEST);
+		gl.disable(gl.STENCIL_TEST);
+		gl.clearDepth(1);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+	}
+
+	#getSaoPass(): WebGL2SaoPass {
+		if (this.#saoPass) return this.#saoPass;
+		const pass = new WebGL2SaoPass(this.#gl);
+		pass.setCoverageVisualizationEnabled(this.#saoCoverageVisualizationEnabled);
+		this.#saoPass = pass;
+		return pass;
 	}
 
 	/** Submit one sky pass while preserving the caller's portal routing and optional GPU span. */

@@ -96,6 +96,27 @@ export const FRONTEND_TUNING = {
 	rendering: {
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },
+		/** Immutable quality choices and initial runtime values for near-field ambient occlusion. */
+		ambientOcclusion: {
+			/** Optional modern presentation divergence; disabled until explicitly selected. */
+			enabledByDefault: false,
+			/** Linear resolution multiplier applied independently to both scratch-target axes. */
+			resolutionScale: 1,
+			/** World-space neighborhood radius sampled around each receiving surface. */
+			sampleRadius: 2,
+			/** Minimum view-space separation required before a sample can occlude. */
+			bias: 0.05,
+			/** Strength applied to accumulated obscurance before composition. */
+			intensity: 1,
+			/** Number of deterministic spiral taps evaluated for each eligible pixel. */
+			sampleCount: 12,
+			/** View-space depth separation at which bilateral neighbors stop contributing. */
+			bilateralDepthThreshold: 0.75,
+			/** Configured camera-distance interval before the effective fog cap is applied. */
+			distanceFade: { fullStrengthUntil: 40, disabledAt: 96 },
+			/** Smallest smooth fade retained when fog moves the disabled distance inward. */
+			minimumFadeWidth: 16,
+		},
 		/** Authored weather presentation, which is ours to shape rather than inherit. */
 		weather: {
 			/**

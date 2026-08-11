@@ -174,11 +174,19 @@
 						</div>
 						{#if profile.gpu.kind === "available"}
 							<div class="ac-param-row">
-								<span class="ac-param-key">GPU portal / opaque / particle</span>
+								<span class="ac-param-key">GPU ambient occlusion</span>
+								<code>{profile.gpu.ambientOcclusionMs.toFixed(2)} ms</code>
+							</div>
+							<div class="ac-param-row">
+								<span class="ac-param-key"
+									>GPU portal / opaque / present / particle</span
+								>
 								<code
 									>{profile.gpu.portalCompositionMs.toFixed(2)} / {profile.gpu.opaqueMs.toFixed(
 										2,
-									)} / {profile.gpu.particleMs.toFixed(2)} ms</code
+									)} / {profile.gpu.presentationMs.toFixed(2)} / {profile.gpu.particleMs.toFixed(
+										2,
+									)} ms</code
 								>
 							</div>
 							<div class="ac-param-row">
@@ -423,6 +431,34 @@
 					<span class="ac-param-key">Portal framebuffers / bytes</span>
 					<code
 						>{metrics.portalFramebufferCount} / {metrics.portalTargetBytes}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Flat framebuffers / bytes</span>
+					<code
+						>{metrics.flatSceneFramebufferCount} / {metrics.flatSceneTargetBytes}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Flat target allocations / disposals</span>
+					<code
+						>{metrics.flatSceneAllocatedGenerationCount} / {metrics.flatSceneDisposedGenerationCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">AO bytes / allocations / disposals</span>
+					<code
+						>{metrics.ambientOcclusion.activeBytes} / {metrics.ambientOcclusion
+							.allocatedGenerationCount} / {metrics.ambientOcclusion
+							.disposedGenerationCount}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">AO effective full / disabled</span>
+					<code
+						>{metrics.ambientOcclusion.effectiveDistanceFade
+							? `${metrics.ambientOcclusion.effectiveDistanceFade.fullStrengthUntil} / ${metrics.ambientOcclusion.effectiveDistanceFade.disabledAt}`
+							: "disabled"}</code
 					>
 				</div>
 			</div>

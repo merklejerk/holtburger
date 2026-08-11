@@ -294,6 +294,33 @@ Exterior sky and authored weather are rendered into the outdoor render-domain ti
 inside/outside weather gate remains camera-residency policy and is independent from portal
 compositing.
 
+### Optional near-field ambient occlusion
+
+Ambient occlusion is an optional renderer-owned consumer of the already-complete opaque scene;
+it is not a second portal compositor or a render-graph stage. When enabled, one screen-space pass
+reads the atlas color and local depth after terrain and opaque/alpha-tested objects. Planner-owned
+render-domain tile rectangles are the complete sampling boundary, so filtering cannot cross into
+another scope tile or an atlas packing gap. The pass writes the shaded color back into the same
+atlas, invalidates the compositor's immediately-live opaque-tile binding cache, and leaves portal
+planning, propagation, resolve, and deferred routing unchanged.
+
+The pass derives normals from depth and uses two transactional full-resolution `R8` scratch
+targets. The targets are allocated lazily, reused at the same extent, replaced only after a complete
+resize allocation, and released when ambient occlusion is disabled or the renderer is destroyed.
+Disabled frames allocate no ambient-occlusion targets and submit no ambient-occlusion draws.
+
+Explorer snapshots enablement, strength, world-space radius, bias, bilateral edge threshold, and
+the configured full-strength/cutoff distances with the rest of each frame's display settings. These
+values update shader uniforms without reallocating scratch targets or selecting another render
+schedule. Scratch resolution and kernel sample count remain immutable quality choices because they
+change allocation and performance contracts rather than presentation alone.
+
+Only pixels with opaque depth receive occlusion, and the effect fades to neutral before the
+effective authored fog start. Clear-depth sky remains neutral. After-landscape sky/weather,
+transparent objects, additive effects, and particles retain their existing order after the pass
+and therefore neither cast nor receive ambient occlusion. The feature remains disabled by default
+because it deliberately diverges from retail presentation.
+
 ### Targets and lifecycle
 
 One lazy renderer-owned target generation contains four framebuffers and six textures:
@@ -315,7 +342,17 @@ cached across mode switches and is destroyed with the renderer.
 
 Flat mode remains permanently selectable in the explorer. It selects outdoor plus every resident
 EnvCell scope, then runs the same culling-group and exact-node frustum tests as portal mode. It
-issues no portal planning, stencil masks, or offscreen rendering.
+issues no portal planning or stencil masks.
+
+Every flat frame uses one renderer-owned full-drawing-buffer `RGBA8` color/
+`DEPTH_COMPONENT24` scene target, regardless of whether ambient occlusion or profiling is enabled.
+Terrain and opaque/alpha-tested objects draw into that target, optional ambient occlusion consumes
+its completed opaque color/depth, and after-landscape sky/weather draws afterward. One presentation
+draw then copies exact scene color and sampled depth to the output framebuffer before transparent
+objects and particles run there. This single schedule preserves depth for deferred work without a
+direct-to-output compatibility path. The flat target is resized transactionally, retained across
+same-extent frames, and destroyed with the renderer; context loss still requires a whole-renderer
+restart.
 
 CellStruct shell ranges receive a flat-mode back-face culling override so a bird's-eye view can see
 interiors rather than opaque cell shells. Residents and outdoor objects retain their authored

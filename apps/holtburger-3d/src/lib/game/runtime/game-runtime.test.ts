@@ -93,6 +93,12 @@ describe("GameRuntime view and interest control", () => {
 		const requestedLayers: LandblockIdLayer[] = [];
 		const frames: Parameters<Renderer["drawFrame"]>[0][] = [];
 		const frameSelectionMetrics: FrameSelectionMetrics = {
+			ambientOcclusion: {
+				activeBytes: 0,
+				allocatedGenerationCount: 0,
+				disposedGenerationCount: 0,
+				effectiveDistanceFade: null,
+			},
 			envCellRenderMode: "portal",
 			envCellShellCullOverrideCount: 0,
 			portalSelectedScopeCount: 0,
@@ -105,6 +111,10 @@ describe("GameRuntime view and interest control", () => {
 			portalTruncatedViewCount: 0,
 			portalFramebufferCount: 0,
 			portalTargetBytes: 0,
+			flatSceneFramebufferCount: 0,
+			flatSceneTargetBytes: 0,
+			flatSceneAllocatedGenerationCount: 0,
+			flatSceneDisposedGenerationCount: 0,
 			submittedEnvCellResidentDrawCount: 0,
 			submittedEnvCellResidentTriangleCount: 0,
 			submittedEnvCellShellDrawCount: 0,
@@ -230,6 +240,7 @@ describe("GameRuntime view and interest control", () => {
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
 		expect(frames[0]?.frameSettings).toEqual({
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
+			ambientOcclusion: DEFAULT_FRAME_SETTINGS.ambientOcclusion,
 			distanceFogEnabled: true,
 			viewerLightEnabled:
 				FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
@@ -250,6 +261,14 @@ describe("GameRuntime view and interest control", () => {
 		});
 		runtime.setFrameSettings({
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
+			ambientOcclusion: {
+				...DEFAULT_FRAME_SETTINGS.ambientOcclusion,
+				enabled: true,
+				parameters: {
+					...DEFAULT_FRAME_SETTINGS.ambientOcclusion.parameters,
+					intensity: 2,
+				},
+			},
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -264,6 +283,14 @@ describe("GameRuntime view and interest control", () => {
 		runtime.render(2);
 		expect(frames[1]?.frameSettings).toEqual({
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
+			ambientOcclusion: {
+				...DEFAULT_FRAME_SETTINGS.ambientOcclusion,
+				enabled: true,
+				parameters: {
+					...DEFAULT_FRAME_SETTINGS.ambientOcclusion.parameters,
+					intensity: 2,
+				},
+			},
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,

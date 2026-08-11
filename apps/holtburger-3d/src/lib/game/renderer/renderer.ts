@@ -16,6 +16,10 @@ import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
 import type { ParticleSourceCohort } from "../systems/particle-system";
 import type { TexturePreparer } from "../textures/texture-preparer";
+import {
+	DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
+	type AmbientOcclusionSettings,
+} from "./ambient-occlusion-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -39,6 +43,8 @@ interface RenderQualitySettings {
 export interface FrameSettings {
 	/** Materialized landblock layers that may contribute work and draws to this frame. */
 	readonly layerVisibility: RenderLayerVisibility;
+	/** Optional nearby opaque-geometry occlusion and its runtime-adjustable presentation values. */
+	readonly ambientOcclusion: AmbientOcclusionSettings;
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
@@ -74,6 +80,10 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 		[LandblockLayerKind.Objects]: true,
 		[LandblockLayerKind.Generated]: true,
 		[LandblockLayerKind.EnvCells]: true,
+	},
+	ambientOcclusion: {
+		enabled: FRONTEND_TUNING.rendering.ambientOcclusion.enabledByDefault,
+		parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
 	},
 	distanceFogEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
@@ -126,6 +136,20 @@ export interface FrameInput {
 
 /** Latest renderer-side selection counts, aggregated across every view in one frame. */
 export interface FrameSelectionMetrics {
+	/** Optional near-field AO policy and scratch-target facts for this frame. */
+	readonly ambientOcclusion: {
+		/** Live bytes owned by the two R8 scratch textures. */
+		readonly activeBytes: number;
+		/** Scratch generations allocated over this renderer lifetime. */
+		readonly allocatedGenerationCount: number;
+		/** Replaced, disabled, or destroyed scratch generations released. */
+		readonly disposedGenerationCount: number;
+		/** Effective frame fade after enablement and authored-fog capping. */
+		readonly effectiveDistanceFade: {
+			readonly disabledAt: number;
+			readonly fullStrengthUntil: number;
+		} | null;
+	};
 	readonly envCellRenderMode: EnvCellRenderMode;
 	/** Number of camera or portal views rendered into this frame. */
 	readonly viewCount: number;
@@ -176,6 +200,14 @@ export interface FrameSelectionMetrics {
 	readonly portalFramebufferCount: number;
 	/** Exact live bytes owned by the current portal target generation. */
 	readonly portalTargetBytes: number;
+	/** Live framebuffer owned by the unconditional flat-scene target generation. */
+	readonly flatSceneFramebufferCount: number;
+	/** Exact live color/depth texture bytes owned by the flat-scene target generation. */
+	readonly flatSceneTargetBytes: number;
+	/** Complete flat-scene target generations allocated over this renderer lifetime. */
+	readonly flatSceneAllocatedGenerationCount: number;
+	/** Replaced or destroyed flat-scene target generations released over this renderer lifetime. */
+	readonly flatSceneDisposedGenerationCount: number;
 	/** All static-object draw calls submitted to the backend this frame. */
 	readonly submittedStaticObjectDrawCount: number;
 	/** Triangles submitted by all static-object draws, including instance multiplication. */
@@ -347,6 +379,8 @@ export type RendererGpuFrameProfile =
 			readonly pendingFrameCount: number;
 	  }
 	| {
+			/** GPU elapsed-time span covering evaluation, filtering, and AO composition. */
+			readonly ambientOcclusionMs: number;
 			/** GPU elapsed-time span covering blended object commands. */
 			readonly blendedMs: number;
 			/** Renderer frame identifier associated with this delayed result. */
@@ -362,6 +396,8 @@ export type RendererGpuFrameProfile =
 			 * rename the buffer or wait.
 			 */
 			readonly particleMs: number;
+			/** GPU elapsed-time span covering flat color/depth presentation. */
+			readonly presentationMs: number;
 			/** GPU elapsed-time spans covering portal target setup and composition commands. */
 			readonly portalCompositionMs: number;
 			/** Submitted GPU frames whose timing results are not yet readable. */

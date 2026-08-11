@@ -1,5 +1,4 @@
 import { FRONTEND_TUNING } from "../../frontend-tuning";
-import type { ResolvedDistanceFog } from "../environment/scene-environment";
 
 declare const ambientOcclusionDistanceFadeBrand: unique symbol;
 
@@ -20,8 +19,6 @@ export interface AmbientOcclusionParameters {
 	readonly intensity: number;
 	/** View-space depth separation at which bilateral neighbors stop contributing. */
 	readonly bilateralDepthThreshold: number;
-	/** Configured camera-distance interval before the effective fog cap is applied. */
-	readonly distanceFade: AmbientOcclusionDistanceFade;
 }
 
 /** Complete optional AO presentation choice snapshotted with every frame. */
@@ -30,14 +27,14 @@ export interface AmbientOcclusionSettings {
 	readonly parameters: AmbientOcclusionParameters;
 }
 
-/** Per-frame ambient-occlusion distance policy after enablement and fog are resolved. */
+/** Per-frame ambient-occlusion policy after user enablement is resolved. */
 export type EffectiveAmbientOcclusionPolicy =
 	| { readonly kind: "disabled" }
 	| {
 			readonly kind: "enabled";
 			/** Validated user values retained without per-frame copying. */
 			readonly parameters: AmbientOcclusionParameters;
-			/** One effective fade after authored fog caps the configured parameters. */
+			/** Renderer-owned near-field fade shared by every enabled frame. */
 			readonly distanceFade: AmbientOcclusionDistanceFade;
 	  };
 
@@ -64,20 +61,12 @@ function validateAmbientOcclusionResourceTuning(
 		bias: tuning.bias,
 		intensity: tuning.intensity,
 		bilateralDepthThreshold: tuning.bilateralDepthThreshold,
-		distanceFade: createAmbientOcclusionDistanceFade(
-			tuning.distanceFade.fullStrengthUntil,
-			tuning.distanceFade.disabledAt,
-		),
 	});
+	createAmbientOcclusionDistanceFade(
+		tuning.distanceFade.fullStrengthUntil,
+		tuning.distanceFade.disabledAt,
+	);
 	createAmbientOcclusionSampleKernel(tuning.sampleCount);
-	if (
-		!Number.isFinite(tuning.minimumFadeWidth) ||
-		tuning.minimumFadeWidth <= 0
-	) {
-		throw new Error(
-			"Ambient-occlusion minimum fade width must be finite and positive.",
-		);
-	}
 }
 
 /** Validate and retain one complete runtime-adjustable SAO parameter set. */
@@ -114,10 +103,6 @@ export function createAmbientOcclusionParameters(
 			"Ambient-occlusion bilateral depth threshold must be finite and positive.",
 		);
 	}
-	validateAmbientOcclusionDistanceFade(
-		parameters.distanceFade.fullStrengthUntil,
-		parameters.distanceFade.disabledAt,
-	);
 	return parameters;
 }
 
@@ -153,35 +138,14 @@ function validateAmbientOcclusionDistanceFade(
 /** Resolve the one effective near-field policy consumed by rendering and diagnostics. */
 export function resolveEffectiveAmbientOcclusionPolicy(
 	settings: AmbientOcclusionSettings,
-	minimumFadeWidth: number,
-	fog: ResolvedDistanceFog | null,
+	distanceFade: AmbientOcclusionDistanceFade,
 ): EffectiveAmbientOcclusionPolicy {
-	if (!Number.isFinite(minimumFadeWidth) || minimumFadeWidth <= 0) {
-		throw new Error(
-			"Ambient-occlusion minimum fade width must be finite and positive.",
-		);
-	}
-	const configured = createAmbientOcclusionParameters(settings.parameters);
+	const parameters = createAmbientOcclusionParameters(settings.parameters);
 	if (!settings.enabled) return DISABLED_AMBIENT_OCCLUSION_POLICY;
-
-	const disabledAt = Math.min(
-		configured.distanceFade.disabledAt,
-		fog?.near ?? Infinity,
-	);
-	if (disabledAt < minimumFadeWidth) return DISABLED_AMBIENT_OCCLUSION_POLICY;
-	const fullStrengthUntil = Math.min(
-		configured.distanceFade.fullStrengthUntil,
-		disabledAt - minimumFadeWidth,
-	);
-
 	return {
 		kind: "enabled",
-		parameters: configured,
-		distanceFade:
-			fullStrengthUntil === configured.distanceFade.fullStrengthUntil &&
-			disabledAt === configured.distanceFade.disabledAt
-				? configured.distanceFade
-				: createAmbientOcclusionDistanceFade(fullStrengthUntil, disabledAt),
+		parameters,
+		distanceFade,
 	};
 }
 
@@ -261,11 +225,14 @@ export const DEFAULT_AMBIENT_OCCLUSION_PARAMETERS =
 		bias: tuning.bias,
 		intensity: tuning.intensity,
 		bilateralDepthThreshold: tuning.bilateralDepthThreshold,
-		distanceFade: createAmbientOcclusionDistanceFade(
-			tuning.distanceFade.fullStrengthUntil,
-			tuning.distanceFade.disabledAt,
-		),
 	});
+
+/** Validated renderer-owned near-field fade shared by every enabled frame. */
+export const AMBIENT_OCCLUSION_DISTANCE_FADE =
+	createAmbientOcclusionDistanceFade(
+		tuning.distanceFade.fullStrengthUntil,
+		tuning.distanceFade.disabledAt,
+	);
 
 /** Fixed spatial kernel shared by flat and portal SAO evaluation. */
 export const AMBIENT_OCCLUSION_SAMPLE_KERNEL =

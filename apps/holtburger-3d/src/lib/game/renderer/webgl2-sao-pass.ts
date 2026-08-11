@@ -19,6 +19,8 @@ import {
 const MAXIMUM_SAO_TILE_COUNT = 0xff;
 const SAO_TILE_METADATA_BINDING_POINT = 1;
 const SAO_TILE_UINT32_COUNT = 8;
+/** Exact quad coverage keeps instanced packed tiles from rasterizing into their neighbors. */
+const SAO_TILE_VERTEX_COUNT = 6;
 const SAO_TEXTURE_UNIT = 0;
 const SCENE_DEPTH_TEXTURE_UNIT = 1;
 const R8_BYTES_PER_PIXEL = 1;
@@ -46,10 +48,13 @@ uniform float uOutputScale;
 flat out uint vTileOrdinal;
 
 vec2 unitVertex(int vertex) {
-	const vec2 vertices[3] = vec2[3](
+	const vec2 vertices[${SAO_TILE_VERTEX_COUNT}] = vec2[${SAO_TILE_VERTEX_COUNT}](
 		vec2(0.0, 0.0),
-		vec2(2.0, 0.0),
-		vec2(0.0, 2.0)
+		vec2(1.0, 0.0),
+		vec2(1.0, 1.0),
+		vec2(0.0, 0.0),
+		vec2(1.0, 1.0),
+		vec2(0.0, 1.0)
 	);
 	return vertices[vertex];
 }
@@ -184,11 +189,13 @@ void main() {
 	for (int index = 0; index < ${AMBIENT_OCCLUSION_SAMPLE_KERNEL.length / 2}; index += 1) {
 		vec2 screenOffset = rotationMatrix * uKernel[index]
 			* uSampleRadius * samplePixelsPerWorldUnit;
-		ivec2 sampleLocal = clamp(
-			fullLocal + ivec2(round(screenOffset)),
-			ivec2(0),
-			ivec2(tile.atlasRect.zw) - 1
-		);
+		ivec2 sampleLocal = fullLocal + ivec2(round(screenOffset));
+		// An unavailable neighbor contributes no occlusion. Clamping would duplicate a
+		// portal tile's border depth across every kernel tap that leaves its screen window.
+		if (any(lessThan(sampleLocal, ivec2(0)))
+			|| any(greaterThanEqual(sampleLocal, ivec2(tile.atlasRect.zw)))) {
+			continue;
+		}
 		ivec2 sampleAtlasPixel = ivec2(tile.atlasRect.xy) + sampleLocal;
 		float sampleDepth = texelFetch(uSceneDepth, sampleAtlasPixel, 0).r;
 		if (sampleDepth >= 1.0) continue;
@@ -686,7 +693,7 @@ export class WebGL2SaoPass {
 			scratch.extent,
 			FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
 		);
-		gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, tileCount);
+		gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		if (this.#coverageCensusRequested) {
 			this.#coverageCensus = this.#captureCoverageCensus(
 				sceneDepth,
@@ -711,7 +718,7 @@ export class WebGL2SaoPass {
 				1,
 				0,
 			);
-			gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, tileCount);
+			gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 
 			this.#prepareScratchDraw(scratch.first.framebuffer, scratch.extent);
 			this.#bindBlur(
@@ -723,11 +730,11 @@ export class WebGL2SaoPass {
 				0,
 				1,
 			);
-			gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, tileCount);
+			gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		}
 
 		this.#bindComposite(sceneFramebuffer, sceneExtent, scratch.first.texture);
-		gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, tileCount);
+		gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		gl.disable(gl.BLEND);
 		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 		gl.colorMask(true, true, true, true);
@@ -895,7 +902,7 @@ export class WebGL2SaoPass {
 				sceneExtent,
 				1,
 			);
-			gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, tileCount);
+			gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, coverage.framebuffer);
 			for (let ordinal = 0; ordinal < tileCount; ordinal += 1) {
 				const offset = ordinal * SAO_TILE_UINT32_COUNT;

@@ -175,7 +175,7 @@ function parseArgs(args) {
 		modeCycle: false,
 		filteringCycle: false,
 		gpu: false,
-		ambientOcclusion: false,
+		ambientOcclusion: null,
 		ambientOcclusionCycle: false,
 		ambientOcclusionCoverage: false,
 		vitePort: DEFAULT_VITE_PORT,
@@ -467,6 +467,9 @@ function parseArgs(args) {
 			case "--ambient-occlusion":
 				parsed.ambientOcclusion = true;
 				break;
+			case "--no-ambient-occlusion":
+				parsed.ambientOcclusion = false;
+				break;
 			case "--ambient-occlusion-coverage":
 				parsed.ambientOcclusion = true;
 				parsed.ambientOcclusionCoverage = true;
@@ -733,7 +736,9 @@ Options:
                          harness default of group 0. Shipped groups run 0-19; 3, 7, 9 and 15-19
                          are Rainy and 12-14 Cloudy.
   --frame-mode <flat|portal>
-  --ambient-occlusion   Enable optional near-field screen-space ambient occlusion.
+  --ambient-occlusion   Explicitly enable near-field screen-space ambient occlusion.
+  --no-ambient-occlusion
+                         Disable the default near-field screen-space ambient occlusion.
                          Change continuous rendering policy without reloading content.
   --ambient-occlusion-coverage
                          Replace AO with harness-only distance categories and report a one-shot
@@ -1348,11 +1353,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					),
 				);
 			}
-		} else if (options.ambientOcclusion) {
+		} else if (options.ambientOcclusion !== null) {
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setAmbientOcclusion",
-				[true],
+				[options.ambientOcclusion],
 			);
 			await delay(250);
 		}

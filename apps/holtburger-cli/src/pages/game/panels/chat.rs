@@ -758,13 +758,23 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::cell::RefCell;
     use std::sync::Once;
 
     struct TestLogger;
 
     static TEST_LOGGER: TestLogger = TestLogger;
     static INIT_LOGGER: Once = Once::new();
-    static CAPTURED_LOGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    thread_local! {
+        /// Captured log records for the currently running test.
+        ///
+        /// The `log` facade allows exactly one process-wide logger, but capture must not be
+        /// process-wide: the test harness runs tests in parallel on separate threads, so a shared
+        /// buffer lets one test observe another's records. Keying capture to the emitting thread
+        /// gives each test its own view without serializing the suite.
+        static CAPTURED_LOGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
 
     impl log::Log for TestLogger {
         fn enabled(&self, metadata: &log::Metadata) -> bool {
@@ -773,10 +783,9 @@ mod tests {
 
         fn log(&self, record: &log::Record) {
             if self.enabled(record.metadata()) {
-                CAPTURED_LOGS
-                    .lock()
-                    .expect("test logger should lock")
-                    .push(format!("[{}] {}", record.level(), record.args()));
+                CAPTURED_LOGS.with_borrow_mut(|captured| {
+                    captured.push(format!("[{}] {}", record.level(), record.args()));
+                });
             }
         }
 
@@ -789,10 +798,12 @@ mod tests {
             log::set_max_level(log::LevelFilter::Info);
         });
 
-        CAPTURED_LOGS
-            .lock()
-            .expect("test logger should lock")
-            .clear();
+        CAPTURED_LOGS.with_borrow_mut(Vec::clear);
+    }
+
+    /// Snapshot this test's captured log records.
+    fn captured_logs() -> Vec<String> {
+        CAPTURED_LOGS.with_borrow(Clone::clone)
     }
 
     #[test]
@@ -1172,13 +1183,12 @@ mod tests {
         let mut chat = ChatState::new(None);
         chat.log(ChatMessageTags::chat(), "echo this chat line".to_string());
 
-        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        let captured = captured_logs();
         assert!(
             captured
                 .iter()
                 .any(|message| message.contains("echo this chat line")),
-            "expected chat line to be echoed into the debug log, got {:?}",
-            *captured
+            "expected chat line to be echoed into the debug log, got {captured:?}"
         );
     }
 
@@ -1192,11 +1202,10 @@ mod tests {
             None,
         );
 
-        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        let captured = captured_logs();
         assert!(
             captured.is_empty(),
-            "expected no echoed debug log entries, got {:?}",
-            *captured
+            "expected no echoed debug log entries, got {captured:?}"
         );
     }
 
@@ -1210,11 +1219,10 @@ mod tests {
             "captured logger line".to_string(),
         );
 
-        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        let captured = captured_logs();
         assert!(
             captured.is_empty(),
-            "expected no echoed debug log entries, got {:?}",
-            *captured
+            "expected no echoed debug log entries, got {captured:?}"
         );
     }
 }

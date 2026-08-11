@@ -201,7 +201,10 @@ describe("resolveSkyState", () => {
 	it("offsets only a height-clamped weather object away from the viewer", () => {
 		const viewerHeight = 42;
 		expect(
-			skyObjectOrigin({ kind: "celestial", pass: "before-world" }, viewerHeight),
+			skyObjectOrigin(
+				{ kind: "celestial", pass: "before-world" },
+				viewerHeight,
+			),
 		).toEqual([0, 0, 0]);
 		expect(
 			skyObjectOrigin(

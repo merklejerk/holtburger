@@ -90,7 +90,8 @@ function resolvePlacement(properties: number): SkyPlacement {
 		(properties & AFTER_LANDSCAPE_PROPERTY_BIT) === 0
 			? "before-world"
 			: "after-landscape";
-	if ((properties & WEATHER_PROPERTY_BIT) === 0) return { kind: "celestial", pass };
+	if ((properties & WEATHER_PROPERTY_BIT) === 0)
+		return { kind: "celestial", pass };
 	return {
 		kind: "weather",
 		pass,

@@ -1,6 +1,6 @@
 # Holtburger 3D Host Physics and Physical Camera Recovery Plan
 
-Status: Proposed — recovery branch created; execution not started
+Status: In progress — Phase 0 complete; Phase 1 not started
 Created: 2026-08-11
 Canonical implementation base: `3d-next` at `41b164ab`
 Recovery branch: `fix/host-physics-recovery`
@@ -43,13 +43,16 @@ This plan therefore:
 2. Physical fly maps the camera's full view-relative basis, including pitch and explicit vertical
    input, into world-space intent. Grounded walk derives planar intent from the camera heading and
    leaves vertical motion to the grounded controller.
-3. The Explorer physical-fly camera uses one fixed app-owned sphere. Grounded walk uses an
-   app-owned two-sphere body with distinct lower/support and upper/constraint roles, selected from
-   measured authored human geometry. Selectable body dimensions are deferred until a concrete
-   inspection workflow requires them.
-4. Creature-protection variation remains a harness control. The Explorer walk mode uses the selected
-   grounded policy and does not expose diagnostics as ordinary UX.
+3. The Explorer physical-fly camera uses one fixed app-owned sphere. Grounded walk uses the authored
+   human pair: a lower/support sphere centered 0.475 m above the body reference with radius 0.480 m,
+   and an upper/constraint sphere centered 1.350 m above the body reference with radius 0.480 m.
+   Selectable body dimensions are deferred until a concrete inspection workflow requires them.
+4. Creature-protection variation remains a harness control. Explorer grounded walk enables
+   creature-style ledge protection by default and does not expose the variation as ordinary UX.
 5. Missing coverage holds the last safe physical pose in both modes.
+6. Explorer grounded walk presents the camera 1.500 m above the grounded body reference. This is
+   retail's first-person human pivot height and lies inside the authored 1.835 m human body extent;
+   it is not the support-sphere center or the top of the authored body.
 
 ### Problem Statement
 
@@ -358,27 +361,244 @@ The host and frontend consume these facts; they do not re-derive them.
 
 #### Task Checklist
 
-- [ ] Run canonical Rust, frontend, and browser-harness baselines without running the TUI.
-- [ ] Verify donor reference citations used by the first two implementation phases.
-- [ ] Enumerate every production field planned for the collision artifact and name its consumer.
-- [ ] Decide the simplest adequate broad phase from measured content rather than donor structure.
-- [ ] Verify the recorded 5,935-setup sphere-count census and human body dimensions against the
+- [x] Run canonical Rust, frontend, and browser-harness baselines without running the TUI.
+- [x] Clear the canonical frontend Prettier debt before Phase 1 implementation.
+- [x] Reproduce and isolate the donor-recorded parallel CLI test failure before Phase 1.
+- [x] Verify donor reference citations used by the first two implementation phases.
+- [x] Enumerate every production field planned for the collision artifact and name its consumer.
+- [x] Decide the simplest adequate broad phase from measured content rather than donor structure.
+- [x] Verify the recorded 5,935-setup sphere-count census and human body dimensions against the
       assets used for implementation.
-- [ ] Update the donor disposition table when any artifact changes category.
+- [x] Update the donor disposition table when any artifact changes category.
 
 #### Acceptance Criteria
 
-- [ ] Every planned shared field and query names the phase and production path that first consume it;
+- [x] Every planned shared field and query names the phase and production path that first consume it;
       Phase 1 lands no dormant two-sphere fields ahead of the grounded implementation.
-- [ ] Every guarantee of the rejected donor solvers has a replacement phase or an explicit
+- [x] Every guarantee of the rejected donor solvers has a replacement phase or an explicit
       out-of-scope decision.
-- [ ] The one-or-two-sphere limit and asymmetric sphere roles have attributable retail and content
+- [x] The one-or-two-sphere limit and asymmetric sphere roles have attributable retail and content
       evidence.
-- [ ] No implementation code has been transplanted before the evidence and consumer audit closes.
+- [x] No implementation code has been transplanted before the evidence and consumer audit closes.
 
 #### Decisions and Course Corrections
 
-To be filled during execution.
+##### Canonical baseline
+
+The baseline was run from recovery commit `11115558` over canonical `3d-next` commit `41b164ab`.
+The only recovery-branch source change before these checks was this plan; the existing `ACE`
+submodule worktree drift was not touched. The interactive TUI was not run.
+
+| Check | Result | Evidence or baseline debt |
+| --- | --- | --- |
+| `cargo fmt --all --check` | Pass | No Rust formatting drift. |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Pass | No warnings. |
+| `cargo test --workspace` | Pass after test isolation | The sandbox initially denied the scripting tests' local listener; the unrestricted rerun passed. The intermittent CLI failure described below was separately reproduced and fixed. |
+| `npm run format:check` in `apps/holtburger-3d` | Pass after cleanup | The initial check reported 30 files; `npm run format` corrected them and the exact check then passed. |
+| `npm run check` | Pass | Zero errors and zero warnings. |
+| `npm run lint` | Pass | TypeScript lint, `knip`, and Rust clippy passed. |
+| `npm run test:ts` | Pass | 150 files and 1,022 tests passed. |
+| `npm run build` | Pass | Build passed; the existing greater-than-500-kB chunk advisory remains. |
+| Browser harness over landblock `0xda55ffff` | Pass | Product content reached `ready: true`, loaded all nine requested source batches, matched 299 expected/299 loaded EnvCells, and emitted no console messages. |
+
+The browser harness used one-block content radii, a 3-second settle, a 1-second measurement window,
+and deterministic Vite port 14831. The sandbox denied its local HTTP listener, so the same command
+was rerun unrestricted. The measured tick mean was 10.74 ms and the render-frame mean was 6.03 ms
+under SwiftShader; these are environment baselines, not physics budgets. A canonical symbol census
+found no physical-fly controller, grounded-walk controller, host camera body, or retained collision
+probe path in `apps` or `crates`.
+
+The initial frontend format failure was promoted to a Phase 0 prerequisite before implementation.
+The app-owned formatter changed exactly the 30 reported files: 135 inserted and 60 removed lines of
+wrapping and indentation. Diff review found no import reordering, value changes, generated files, or
+files outside `apps/holtburger-3d/src`. The post-format `format:check`, Svelte/TypeScript checks,
+ESLint/`knip`/Rust clippy lint chain, 1,022 TypeScript tests, and production build all passed. The
+existing greater-than-500-kB build advisory remains non-blocking and unchanged.
+
+The donor also recorded an unrelated pre-existing `holtburger-cli` test flake in commit `2b00a694`.
+Canonical reproduced it on the fifth run of a planned 12-run CLI-library stress check: the
+`rust_log_messages_do_not_re_echo_into_debug_log` assertion observed `"[INFO] chat 3"` from another
+parallel test, then its panic poisoned the process-global capture mutex and produced 43 collateral
+`PoisonError` failures. The production logger was not at fault; the test harness incorrectly used one
+process-global `Mutex<Vec<String>>` both as the facade's capture sink and as each test's private
+assertion state.
+
+The isolated donor correction was adapted in
+`apps/holtburger-cli/src/pages/game/panels/chat.rs`: the `log` facade still owns one process-wide
+logger, while captured records are now thread-local to the emitting test. No production chat path or
+TUI binary behavior changed. The 18 focused chat tests passed, followed by 12 consecutive full
+358-test CLI-library runs, workspace clippy with warnings denied, and the full workspace test suite.
+The donor's unrelated `tui.rs` physics rename, dependency updates, and lockfile churn were not taken.
+
+##### Donor pacing evidence
+
+Gate A evidence from the synchronized `claude` donor was rechecked. Predicted solved segments are
+the retained transport shape and 30 Hz is the host target; 20 Hz remains an acceptable measured
+floor, not the default.
+
+| Run | Delivery | Host rate | Segments | Dropped/starved | Latency p50/p95/max | Correction p50/p95 |
+| --- | --- | ---: | ---: | --- | --- | --- |
+| A | Predicted segment | 60 Hz | 601 | 0/0 | 9/18/19 ms | 0.3/6.7 cm |
+| B | Per-frame pose | 20 Hz | 201 | 0/0 | 25/50/51 ms | 20.0/20.0 cm |
+| C | Predicted segment | 20 Hz | 201 | 0/0 | 24/47/50 ms | 4.4/25.4 cm |
+| D | Predicted segment | 30 Hz | 301 | 0/0 | 18/31/34 ms | 4.9/16.2 cm |
+
+All 1,505 segments across the four recorded runs arrived without a drop or starvation event; measured
+transport overhead stayed below 1.02 ms. Phase 1c retains the diagnostic sequence/gap counters but
+does not add protocol ordering machinery. Corrections snap for the first slice; visual blending stays
+deferred until a product trace shows snap artifacts. These figures exclude the recovered solver cost,
+so Phase R1 must decide acceleration from the real host tick attribution rather than these numbers.
+
+##### Retail movement and query census
+
+The following conclusions were checked directly against `acclient.c`:
+
+- `CPhysicsObj::update_object` at `acclient.c:311146` partitions elapsed time into bounded quanta and
+  invokes `UpdateObjectInternal`; `UpdateObjectInternal` at `acclient.c:310815` integrates the
+  requested pose, runs transition when a sphere body moved, computes achieved velocity from the
+  solved displacement, and commits only the successful pose.
+- `CTransition::find_transitional_position` at `acclient.c:301820` owns bounded substeps and resets
+  per-substep collision state. `transitional_insert` at `acclient.c:301488` distinguishes ordinary
+  collision, step-down/support, edge slide, negative-polygon/step-up, placement confirmation, and
+  other-cell checks. The recovery retains the observable ordering as explicit finite phases, not the
+  donor's flags or retail's recursive retry topology.
+- `BSPTREE::find_collisions` at `acclient.c:346347` dispatches placement, walkability, step-down,
+  grounded lower-sphere step-up, grounded upper-sphere slide/back-face, and ordinary movement through
+  distinct paths. `step_sphere_up` at `acclient.c:346113` and `step_sphere_down` at
+  `acclient.c:346231` are not interchangeable generic sphere casts.
+- `SPHEREPATH::init_sphere` at `acclient.c:302241` caps motion at the first two authored spheres and
+  derives the body low point from sphere zero. `cache_global_sphere` at `acclient.c:302345` transforms
+  both retained centers. The upper-sphere negative-polygon producers are confined to the two-sphere
+  branches at `acclient.c:346504` and `acclient.c:346510`.
+- `CObjCell::find_cell_list` at `acclient.c:332969` tests the full retained sphere set and preserves
+  previous-cell context. `CEnvCell::find_visible_child_cell` at `acclient.c:335547` prefers the
+  current cell and then bounded child/portal traversal. Candidate cell selection and pose therefore
+  form one commit.
+- `SmartBox::set_viewer_home` at `acclient.c:138168` gives the player pivot a 1.500 m vertical offset;
+  `CameraManager::QueryPivotPosition` at `acclient.c:141105` transforms that offset from the player
+  pose. `CameraSet::SetInHead` at `acclient.c:142853` also authors a separate 0.180 m forward viewer
+  offset. Explorer adopts the evidenced 1.500 m human eye height only; forward framing remains a
+  separate app-camera concern with no current requirement.
+
+##### Authored body census
+
+The census decoded all 5,935 setup models in `dats/assets.hba` without failure. Ordinary sphere counts
+are `{0: 2325, 1: 3000, 2: 579, 3: 11, 4: 14, 5: 6}`; cylsphere counts are
+`{0: 5257, 1: 547, 2: 105, 3: 12, 4: 10, 5: 1, 7: 3}`. Three hundred eight setups have at least one
+non-unit default-part scale, so placed collision transforms must retain authored scale even though the
+representative landblocks below are overwhelmingly unit scale.
+
+ACE identifies human male `0x02000001` and human female `0x0200004e`; both assets author the same
+motion body: height 1.835 m, radius 0.679 m, step-up 0.600 m, step-down 1.500 m, no cylspheres, and the
+following two ordinary spheres:
+
+| Role | Local center | Radius | Vertical extent |
+| --- | --- | ---: | --- |
+| Lower/support | `(0, 0, 0.475)` m | 0.480 m | -0.005 to 0.955 m |
+| Upper/constraint | `(0, 0, 1.350)` m | 0.480 m | 0.870 to 1.830 m |
+
+This independently confirms the retail cap and asymmetry while sizing Explorer's fixed grounded body.
+The authored step reaches remain inputs to the Phase 2 behavior audit rather than being inferred as
+camera collision geometry.
+
+##### Representative collision distributions
+
+The donor diagnostic assembly was temporarily instrumented and run against four deliberately
+different landblocks from `dats/assets.hba`. It decodes the same terrain, outdoor, generated, and
+interior records but does not establish product-path parity; that remains a Phase 1/6 requirement.
+BSP values are min/p50/p95/max per placed shape. Broad-phase rejection is the fraction of
+placement/probe pairs rejected by the existing placed-shape bounding sphere before BSP traversal.
+
+| Landblock | Placements (distinct shapes) | Buildings | Cell volumes | BSP nodes | BSP depth | Scale | Bounds radius | Broad rejection |
+| --- | ---: | ---: | ---: | --- | --- | --- | --- | ---: |
+| `da55` | 575 (208) | 42 | 236 | 11/13/137/695 | 6/7/19/30 | 1/1/1/1 | 0.375/1.438/12.117/18.655 m | 99.14% |
+| `7d64` | 293 (103) | 8 | 116 | 11/19/83/527 | 6/10/13/63 | 1/1/1/1.065 | 0.508/1.446/7.675/13.826 m | 98.45% |
+| `1a73` | 649 (72) | 1 | 518 | 9/13/25/133 | 5/7/13/18 | 1/1/1/1 | 0.535/4.863/9.654/11.782 m | 99.56% |
+| `3f32` | 147 (73) | 2 | 52 | 13/13/39/695 | 7/7/19/27 | 1/1/1/1 | 0.508/1.660/8.304/18.566 m | 95.21% |
+
+The corresponding BSP leaf maxima were 348, 264, 67, and 348; resolved-polygon maxima were 309,
+262, 51, and 310. No sampled cell volume had a degenerate portal spine. This is enough structure to
+justify BSP traversal after broad-phase admission, but only 147-649 placed colliders per sampled
+landblock and 95.21-99.56% rejection from the existing bounds test. Phase 1 therefore starts with a
+linear placement scan plus per-collider bounding spheres. No second spatial index lands until Phase R1
+host tick attribution demonstrates a product bottleneck.
+
+##### Phase 1 field and query consumer ledger
+
+The public Phase 1 artifact is deliberately narrower than the donor artifact. Grounded-only support,
+walkability, water, edge, step, sphere-role, and retained-contact facts do not land in Phase 1 merely
+because decoded content can provide them.
+
+| Planned fact | First phase | First production consumer |
+| --- | --- | --- |
+| Landblock owner key and completeness | 1a | `ContentAssetService::resolve_collision` atomically assembles one residency unit. |
+| Terrain collision triangles with authored diagonal and bounds | 1a/1b | Physical-fly obstruction query blocks floor, wall, and terrain crossings. |
+| Placed shape transform and authored scale | 1a/1b | Physical-fly query transforms a candidate sphere into BSP object space. |
+| Shape BSP and polygon geometry | 1a/1b | Physical-fly obstruction and separation return the first usable static contact. |
+| Shape bounding sphere | 1a/1b | Linear broad phase rejects placements before BSP traversal. |
+| Shape source identity and building-shell classification | 1a/1b | Contact diagnostics attribute a hit; candidate-cell context controls shell suppression. |
+| Cell selector, containment planes, placement, and portal-neighbor selectors | 1a/1b | Prior-cell-aware transit selects the cell committed with the physical-fly pose. |
+| Explicit coverage result | 1b | Physical-fly solve and Phase 1c residency hold the last safe pose on a gap. |
+| Obstruction contact normal, separation, source, and travel fraction | 1b | Bounded physical-fly separation and multi-plane slide compute one solved result. |
+| Placement result | 1b | Physical-fly registration/handoff rejects an embedded starting pose without inventing support. |
+| Candidate interior cell | 1b | Atomic physical-fly pose/cell commit and building-shell decision. |
+| Solved pose, achieved motion, contacts, cell, coverage, and finite-budget outcome | 1b/1c | Host predicted segment and Explorer diagnostics/presentation. |
+| Physical-fly sphere radius and body-reference offset | 1c | App-local registration configures the Explorer camera body consumed by the host solver. |
+| Registered body id, last safe pose, intent sequence, validity horizon, and tick timestamp | 1c | Host camera driver and frontend predicted-segment session. |
+
+Phase 2 specifies grounded facts; Phase 3 is the first production consumer for support sphere roles,
+gravity, walkability, support/contact memory, and the authored lower/upper pair. Phase 4 first consumes
+step, negative-polygon, edge-protection, and pair-aware grounded transit facts. These fields must be
+added with those consumers, not preloaded into the Phase 1 public contract. Decoded source records may
+remain lossless inside `holtburger-content`; lossless parsing is not permission to expose dormant
+world-motion fields.
+
+The required Phase 1 query families and their consumers are coverage lookup (1b physical-fly hold),
+movement obstruction (1b physical-fly slide), placement confirmation (1b registration/handoff), and
+prior-cell-aware transit (1b atomic pose/cell commit). Support/step-down is specified in Phase 2 and
+first becomes public with the Phase 3 implementation. Query roles remain separate composite request
+types; there is no boolean mode product.
+
+##### Guarantee replacement ledger
+
+| Rejected or reshaped guarantee | Replacement owner and phase |
+| --- | --- |
+| Coverage hold and gravity suspension | Phase 1b returns explicit `MissingCoverage`; physical fly holds the last safe pose. Phase 3 applies the same gate before grounded integration, so gravity and requested motion do not accumulate through a gap. Phase 1c/5 expose the state. |
+| Landblock crossing | Existing `Position` crossing primitives plus Phase 1c collision residency load every landblock touched by the swept body bounds before Phase 1b solves. Incomplete coverage takes the hold path. Phase 4 extends the swept set to both grounded spheres. |
+| Collision isolation and eviction | Phase 1a makes one complete landblock artifact the insertion/removal unit. Phase 1c owns collision residency separately from render interest and evicts terrain, shapes, and volumes together by owner key. |
+| Building-shell suppression | Phase 1b derives suppression from the interior candidate reached by transit, never the previously committed camera cell alone, and atomically commits the candidate pose and cell. |
+| Support selection | Explicitly out of the physical-fly response. Phase 2 attributes the rule; Phase 3 chooses reachable lower-sphere support relative to the prior solved pose from lossless contacts. Upper-sphere contacts may constrain but never provide support. |
+| Cell transit | Phase 1b checks the prior cell and portal neighbors first, then the explicitly bounded outdoor-entry path, over the full physical body coverage. Pose and cell commit together. Phase 4 adds the grounded pair scenarios. |
+| Bounded sliding | Phase 1b owns finite substep/contact budgets and iterative multi-plane physical-fly sliding. Phase 3 composes grounded wall/upper-sphere response into the same bounded driver. No operation re-enters the top-level solver. |
+| Free-fly mode handoff | Phase 1c's app coordinator seeds the registered physical body from the presented free-fly pose; exit seeds frontend free fly from the presented solved pose and clears incompatible physical state. Phase 5 applies the same explicit reseat among all three modes. |
+
+Dynamic body collision, restitution, jumping, swimming, and animation-root motion remain explicitly out
+of scope; no rejected donor guarantee for those mechanisms is replaced here.
+
+##### Donor disposition after audit
+
+No selected file changed its top-level category, but the adaptation boundary narrowed:
+
+- `terrain_topology.rs`, `object_collision.rs`, landblock/interior assembly, and
+  `LandblockColliders::absorb` remain selective reimplementations against current content types.
+- `terrain_collision.rs` contributes Phase 1 obstruction geometry only. Water/support/edge-facing
+  public fields wait for an attributed grounded consumer.
+- `bsp_query.rs` and `collision.rs` remain selective reimplementations, but the donor's combined
+  query flags, singleton sphere assumptions, independent partial merges, and current-cell building
+  suppression are rejected. Linear placed-shape broad phase is retained until measured otherwise.
+- Host pacing and predicted-segment concepts remain selective; donor Explorer files are not
+  transplanted over the canonical SAO-era coordinator and runtime.
+- `collision_scene_probe` remains useful evidence to adapt to the product assembly path. The temporary
+  Phase 0 setup and distribution instrumentation has no continuing production consumer and is removed
+  after this ledger is recorded.
+- The donor's `chat.rs` captured-log isolation fix was independently reproduced and selectively
+  adapted as Phase 0 test-harness maintenance. Its neighboring TUI rename and dependency churn remain
+  rejected.
+
+Phase 0 transplanted no physics or product implementation code; the only adapted donor code is the
+independently reproduced test-harness isolation fix above. Phase 1 may now begin at 1a without a
+blocking design decision; the final maintainer-selected outdoor/interior verification route remains a
+Phase 6 product verification input, not an implementation blocker.
 
 ### Phase 1: Physical-Fly End-to-End Vertical Slice
 
@@ -390,7 +610,8 @@ physical camera consumes them through the product path in 1c.
 
 ##### Deliverables
 
-- Typed terrain topology and support surfaces in `holtburger-content`.
+- Typed terrain topology and obstruction triangles in `holtburger-content`; grounded support facts
+  are added only with their Phase 3 consumer.
 - Typed placed collision shapes for explicit objects, generated scenery, buildings, EnvCell shells,
   and indoor statics.
 - Cell volumes and portal-neighbor facts required for later atomic cell transit.
@@ -783,9 +1004,5 @@ and tuning files wholesale.
 
 ## Open Questions
 
-1. Should Explorer grounded walk enable creature-style ledge protection by default? The harness and
-   solver retain both protected and unprotected behavior either way.
-2. What presentation eye transform should grounded walk apply relative to the app-owned grounded
-   body reference frame?
-3. Which representative outdoor and interior locations should form the maintainer's final Explorer
+1. Which representative outdoor and interior locations should form the maintainer's final Explorer
    verification route?

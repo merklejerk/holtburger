@@ -120,11 +120,14 @@ export class SkyScriptSystem {
 		for (const object of sky?.objects ?? []) {
 			if (object.particleEffectId === NO_SCRIPT_ID) continue;
 			if (object.placement.kind === "weather" && !weatherEnabled) continue;
-			desired.set(skyBehaviorTargetId(sky!.dayGroupIndex, object.authoredIndex), {
-				scriptId: object.particleEffectId as DatAssetId,
-				placement: object.placement,
-				orientation: object.orientation,
-			});
+			desired.set(
+				skyBehaviorTargetId(sky!.dayGroupIndex, object.authoredIndex),
+				{
+					scriptId: object.particleEffectId as DatAssetId,
+					placement: object.placement,
+					orientation: object.orientation,
+				},
+			);
 		}
 
 		for (const [targetId, active] of [...this.#active]) {

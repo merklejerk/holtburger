@@ -38,7 +38,10 @@ export const FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES =
 
 /** Geometry strategies observed for one static-object preparation attempt. */
 export type StaticObjectGeometryStrategy =
-	"empty" | "baked" | "instanced" | "mixed";
+	| "empty"
+	| "baked"
+	| "instanced"
+	| "mixed";
 
 /** Strategy-neutral geometry-worker facts retained beside a materialized static layer artifact. */
 export interface StaticObjectGeometryDiagnostics {
@@ -136,7 +139,8 @@ export interface InstancedStaticDrawUnit {
 
 /** Logical immutable-object draw contribution retained beside its spatial node. */
 export type StaticObjectDrawUnit =
-	BakedStaticDrawUnit | InstancedStaticDrawUnit;
+	| BakedStaticDrawUnit
+	| InstancedStaticDrawUnit;
 
 /**
  * Immutable transparent instance retained on the CPU so the renderer can order it for each view.

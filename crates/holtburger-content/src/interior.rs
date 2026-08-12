@@ -576,6 +576,7 @@ mod tests {
                 height_indices: vec![0; 81],
                 heights: vec![0.0; 81],
                 terrain_samples: vec![0; 81],
+                cell_diagonals: crate::TerrainCellDiagonals::for_landblock(0xda55_ffff),
             },
             explicit_objects: Vec::new(),
             buildings: Vec::new(),

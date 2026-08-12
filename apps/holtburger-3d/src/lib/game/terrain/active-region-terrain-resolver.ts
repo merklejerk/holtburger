@@ -1,6 +1,7 @@
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { DatAssetId, LandblockId } from "../game-types";
 import {
+	OUTDOOR_TERRAIN_GRID_CELLS,
 	OUTDOOR_TERRAIN_GRID_SIZE,
 	OUTDOOR_TERRAIN_TILE_SIZE,
 } from "../landblocks";
@@ -32,6 +33,8 @@ export interface RawOutdoorTerrainSource {
 	readonly heightIndices: Uint8Array;
 	readonly heights: Float32Array;
 	readonly terrainSamples: Uint16Array;
+	/** Host-computed retail per-cell triangulation diagonals. */
+	readonly cellDiagonals: Uint8Array;
 }
 
 /** Resolve renderer-facing terrain facts from one raw landblock and installed active-region data. */
@@ -49,6 +52,11 @@ export function resolveOutdoorTerrainLayer(
 			`Outdoor terrain ${raw.landblockId} must contain ${expectedCount} height indices and terrain samples.`,
 		);
 	}
+	if (raw.cellDiagonals.length !== OUTDOOR_TERRAIN_GRID_CELLS ** 2) {
+		throw new Error(
+			`Outdoor terrain ${raw.landblockId} must contain ${OUTDOOR_TERRAIN_GRID_CELLS ** 2} cell diagonals.`,
+		);
+	}
 	const presentation = resolveActiveRegionTerrainPresentation(activeRegion);
 	for (const height of raw.heights) {
 		if (!Number.isFinite(height)) {
@@ -61,6 +69,7 @@ export function resolveOutdoorTerrainLayer(
 		kind: LandblockLayerKind.Terrain,
 		landblockId: raw.landblockId,
 		generation: {
+			cellDiagonals: raw.cellDiagonals,
 			gridSize: OUTDOOR_TERRAIN_GRID_SIZE,
 			heightIndices: raw.heightIndices,
 			heights: raw.heights,

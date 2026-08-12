@@ -25,6 +25,8 @@
 		type AmbientOcclusionParameters,
 		type AmbientOcclusionSettings,
 	} from "../lib/game/renderer/ambient-occlusion-policy";
+	import type { PhysicalCameraStatus } from "./physical-camera-session";
+	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-camera-path";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -36,6 +38,11 @@
 		) => void;
 		/** Current automatic camera-placement lifecycle state. */
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
+		readonly cameraMode: ExplorerCameraMode;
+		readonly cameraModePending: boolean;
+		readonly physicalCameraStatus: PhysicalCameraStatus | null;
+		readonly physicalCameraError: string | null;
+		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
 		readonly environmentSelection: ExplorerEnvironmentSelection;
 		readonly dayGroupNames: readonly string[];
 		readonly updateEnvironment: (
@@ -86,6 +93,11 @@
 		runtimeReady,
 		requestSceneInterest,
 		cameraFocusStatus,
+		cameraMode,
+		cameraModePending,
+		physicalCameraStatus,
+		physicalCameraError,
+		updateCameraMode,
 		environmentSelection,
 		dayGroupNames,
 		updateEnvironment,
@@ -190,6 +202,12 @@
 
 	function handleAudioFollowsCameraChange(event: Event): void {
 		updateAudioFollowsCamera((event.currentTarget as HTMLInputElement).checked);
+	}
+
+	function handleCameraModeChange(event: Event): void {
+		updateCameraMode(
+			(event.currentTarget as HTMLSelectElement).value as ExplorerCameraMode,
+		);
 	}
 
 	const requestStatus = $derived(
@@ -330,6 +348,42 @@
 			<p>{requestStatus}</p>
 		</fieldset>
 	</form>
+	<fieldset
+		class="explorer-section"
+		disabled={!runtimeReady || cameraModePending}
+	>
+		<legend>Camera navigation</legend>
+		<label class="explorer-form-field">
+			<span>Position authority</span>
+			<select
+				class="explorer-control explorer-control--select"
+				value={cameraMode}
+				onchange={handleCameraModeChange}
+			>
+				<option value="free-fly">Frontend free fly</option>
+				<option value="physical-fly">Host physical fly</option>
+				<option value="grounded-walk">Host grounded walk</option>
+			</select>
+		</label>
+		<p>
+			{cameraModePending
+				? "Loading collision coverage and placing the physical camera."
+				: cameraMode !== "free-fly"
+					? `Host ${physicalCameraStatus?.mode ?? cameraMode}: ${physicalCameraStatus?.tick ?? "awaiting-first-segment"}; cell ${physicalCameraStatus?.cellId ?? "outdoor"}; ${physicalCameraStatus?.grounded ? "grounded" : "airborne"}; ${physicalCameraStatus?.constraintCount ?? 0} solve constraints; ${physicalCameraStatus?.solveDurationMs.toFixed(2) ?? "0.00"} ms; ${physicalCameraStatus?.substeps ?? 0} substeps; ${physicalCameraStatus?.contactPasses ?? 0} contact passes; ${physicalCameraStatus?.droppedSegments ?? 0} dropped.`
+					: "Free fly bypasses collision and remains the recovery mode."}
+		</p>
+		{#if physicalCameraStatus?.tick === "missing-coverage"}
+			<p class="invalid">
+				Coverage hold:
+				{physicalCameraStatus.outsideWorld
+					? "outside AC world bounds"
+					: physicalCameraStatus.missingLandblocks.join(", ")}
+			</p>
+		{/if}
+		{#if physicalCameraError !== null}
+			<p class="invalid">Physical camera failed: {physicalCameraError}</p>
+		{/if}
+	</fieldset>
 	{#if dayGroupNames.length > 0}
 		<fieldset
 			class="explorer-section explorer-environment-controls"

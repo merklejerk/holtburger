@@ -3,6 +3,7 @@ import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
+import type { PhysicalCameraPlacement } from "../lib/game/motion/host-physical-camera-path";
 import type { SceneInterestRevision } from "../lib/game/runtime/scene-availability";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
@@ -48,14 +49,17 @@ export type ExplorerCameraFocusStatus =
 	| "Initial camera placement applied."
 	| "Initial camera placement cancelled by manual control."
 	| "Camera position is outside canonical world bounds."
+	| "Waiting for first host camera placement."
 	| `Camera residency is ambiguous across EnvCells: ${string}.`
+	| `Camera residency follows host placement ${string}.`
+	| `Host-selected EnvCell ${string} is unavailable for camera rendering.`
 	| `Initial camera placement is outside selected EnvCell ${string}.`
 	| `Initial camera placement failed: ${string}`;
 
 /** Post-tick camera reconciliation consumed before attempting the matching render. */
 export interface ExplorerCameraResidencySync {
 	/** Exact pose and point-resolution result exposed by the Explorer HUD. */
-	readonly location: ExplorerCameraLocation;
+	readonly location: ExplorerCameraLocation | null;
 	/** Whether the runtime camera now owns a scope present in the current scene topology. */
 	readonly renderable: boolean;
 }
@@ -75,6 +79,12 @@ export class ExplorerCameraCoordinator {
 	readonly #unsubscribeAvailability: () => void;
 	#pending: PendingFocus | null = null;
 	#lastResidency: SceneResidency | null = null;
+	/** Exact position/residency most recently applied to the runtime camera. */
+	#presentedPlacement: PhysicalCameraPlacement | null = null;
+	/** Last host placement announced to the Explorer status panel. */
+	#lastReportedHostResidency: SceneResidency | null = null;
+	/** One host-owned residency carried across the physical-to-free-fly authority handoff. */
+	#pendingFreeFlyResidency: SceneResidency | null = null;
 	/** Last unresolved point issue already surfaced, preventing per-frame status churn. */
 	#lastResolutionIssue: ExplorerCameraFocusStatus | null = null;
 
@@ -141,9 +151,20 @@ export class ExplorerCameraCoordinator {
 		}
 	}
 
-	/** Re-resolve the controller pose after runtime mutations and update the render camera once. */
-	syncCameraResidency(): ExplorerCameraResidencySync {
+	/** Re-resolve a frontend-owned free-fly pose and update the render camera once. */
+	syncFreeFlyCamera(): ExplorerCameraResidencySync {
+		this.#lastReportedHostResidency = null;
 		const state = this.#controller.snapshotState();
+		const handoffResidency = this.#pendingFreeFlyResidency;
+		this.#pendingFreeFlyResidency = null;
+		if (handoffResidency !== null) {
+			return this.#syncKnownResidency(
+				state,
+				state.position,
+				handoffResidency,
+				"physical-handoff",
+			);
+		}
 		const resolution = resolveExplorerPointResidency(
 			this.#runtime.queryWorldPointResidencyCandidates(state.position),
 		);
@@ -182,6 +203,87 @@ export class ExplorerCameraCoordinator {
 		return { location, renderable: false };
 	}
 
+	/** Apply one host-owned physical placement without re-deriving its portal residency. */
+	syncPhysicalCamera(
+		placement: PhysicalCameraPlacement | null,
+	): ExplorerCameraResidencySync {
+		if (placement === null) {
+			this.#reportResolutionIssue("Waiting for first host camera placement.");
+			return { location: null, renderable: false };
+		}
+		const state = this.#controller.snapshotState();
+		const position = placement.position;
+		return this.#syncKnownResidency(
+			state,
+			position,
+			placement.residency,
+			"host-physical-camera",
+		);
+	}
+
+	/** Seed exactly the first frontend-owned frame from the last host placement. */
+	seedFreeFlyResidency(residency: SceneResidency): void {
+		this.#pendingFreeFlyResidency = { ...residency };
+	}
+
+	/** Copy the exact placement currently applied to the renderer for an authority handoff. */
+	presentedPlacement(): PhysicalCameraPlacement | null {
+		const placement = this.#presentedPlacement;
+		return placement === null
+			? null
+			: {
+					position: sceneVec3(placement.position.clone()),
+					residency: { ...placement.residency },
+				};
+	}
+
+	#syncKnownResidency(
+		state: FreeFlyCameraState,
+		position: Vec3,
+		residency: SceneResidency,
+		source: "host-physical-camera" | "physical-handoff",
+	): ExplorerCameraResidencySync {
+		if (
+			residency.envCellId !== null &&
+			!this.#runtime.hasEnvCellScope(residency)
+		) {
+			this.#reportResolutionIssue(
+				`Host-selected EnvCell ${residency.envCellId} is unavailable for camera rendering.`,
+			);
+			return {
+				location: {
+					position,
+					residency: {
+						kind: "topology-unavailable",
+						landblockId: residency.landblockId,
+					},
+				},
+				renderable: false,
+			};
+		}
+		const resolution: ExplorerResidencyResolution = {
+			kind: "resolved",
+			residency,
+			source,
+		};
+		const resolvedAnIssue = this.#lastResolutionIssue !== null;
+		this.#lastResolutionIssue = null;
+		this.#lastResidency = residency;
+		this.#applyCamera(createCamera(residency, { ...state, position }));
+		const hostPlacementChanged =
+			source === "host-physical-camera" &&
+			!sameResidency(this.#lastReportedHostResidency, residency);
+		if (source === "host-physical-camera") {
+			this.#lastReportedHostResidency = residency;
+		}
+		if (resolvedAnIssue || hostPlacementChanged) {
+			this.#onStatus(
+				`Camera residency follows host placement ${formatResidency(residency)}.`,
+			);
+		}
+		return { location: { position, residency: resolution }, renderable: true };
+	}
+
 	/**
 	 * Choose whether the audio listener rides the explorer's free camera.
 	 *
@@ -196,12 +298,18 @@ export class ExplorerCameraCoordinator {
 
 	#applyCamera(camera: Camera): void {
 		this.#runtime.setPrimaryCamera(camera);
+		this.#presentedPlacement = {
+			position: sceneVec3(camera.placement.position.clone()),
+			residency: {
+				envCellId: camera.placement.envCellId,
+				landblockId: camera.placement.landblockId,
+			},
+		};
 		if (!this.#audioFollowsCamera) return;
 		const { position, rotation } = camera.placement;
 		this.#runtime.setAudioListener({
-			// The free-fly controller works in canonical scene coordinates: this is the same value
-			// handed to `queryWorldPointResidencyCandidates` to resolve which landblock and EnvCell
-			// the camera occupies, so it is scene-frame by construction.
+			// Both frontend and host presentation positions enter this method in canonical scene
+			// coordinates, so the retained listener position is scene-frame by construction.
 			position: sceneVector3([position.x, position.y, position.z]),
 			rotation,
 		});
@@ -210,6 +318,9 @@ export class ExplorerCameraCoordinator {
 	dispose(): void {
 		this.#unsubscribeAvailability();
 		this.#pending = null;
+		this.#lastReportedHostResidency = null;
+		this.#pendingFreeFlyResidency = null;
+		this.#presentedPlacement = null;
 	}
 
 	#handleSceneAvailability(event: SceneAvailabilityEvent): void {
@@ -375,4 +486,19 @@ function pendingLayer(pending: PendingFocus): LandblockLayerKind {
 	return pending.kind === "outdoor"
 		? LandblockLayerKind.Terrain
 		: LandblockLayerKind.EnvCells;
+}
+
+function formatResidency(residency: SceneResidency): string {
+	return residency.envCellId ?? `outdoor ${residency.landblockId}`;
+}
+
+function sameResidency(
+	left: SceneResidency | null,
+	right: SceneResidency,
+): boolean {
+	return (
+		left !== null &&
+		left.landblockId === right.landblockId &&
+		left.envCellId === right.envCellId
+	);
 }

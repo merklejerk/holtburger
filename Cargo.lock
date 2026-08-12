@@ -2247,6 +2247,7 @@ dependencies = [
  "holtburger-content",
  "holtburger-core",
  "holtburger-dat",
+ "holtburger-world",
  "serde",
  "serde_json",
  "tauri",
@@ -2369,6 +2370,7 @@ dependencies = [
  "holtburger-content",
  "holtburger-core",
  "holtburger-dat",
+ "holtburger-world",
  "log",
  "tokio",
 ]

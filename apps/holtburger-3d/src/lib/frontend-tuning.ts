@@ -42,6 +42,10 @@ export const FRONTEND_TUNING = {
 	explorer: {
 		camera: {
 			controls: {
+				/** Explorer-owned horizontal speed for host grounded precision walk. */
+				groundedSlowWalkSpeed: 4,
+				/** Explorer-owned horizontal speed for ordinary host grounded travel. */
+				groundedWalkSpeed: 12,
 				/** Seconds over which held keyboard movement reaches full speed. */
 				keyboardAccelerationSeconds: 2,
 				/** Starting fraction of full speed for held keyboard movement. */
@@ -60,7 +64,7 @@ export const FRONTEND_TUNING = {
 				pointerPitchRadiansPerPixel: 0.005,
 				/** Horizontal rotation applied per pointer pixel. */
 				pointerYawRadiansPerPixel: 0.006,
-				/** Movement multiplier while the precision modifier is active. */
+				/** Free-fly movement multiplier while the precision modifier is active. */
 				shiftSlowMultiplier: 0.05,
 				/** Largest browser wheel delta consumed by one camera event. */
 				wheelDeltaClamp: 900,

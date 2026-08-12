@@ -22,6 +22,13 @@ interface ActiveDrag {
 	readonly pointerId: number;
 }
 
+/** Dimensionless local translation input shared with the host-solved camera adapter. */
+export interface CameraLocalMovement {
+	readonly forward: number;
+	readonly right: number;
+	readonly up: number;
+}
+
 /** Explorer-owned camera pose, independent of runtime residency and camera framing. */
 export interface FreeFlyCameraPose {
 	readonly pitchRadians: number;
@@ -64,6 +71,8 @@ export class FreeFlyCameraController {
 	#linearMovementStartedAt: number | null = null;
 	#movementFrame: number | null = null;
 	#shiftActive = false;
+	/** False while the host owns camera position; orientation remains frontend-owned. */
+	#localTranslationEnabled = true;
 	#state: FreeFlyCameraState = DEFAULT_STATE;
 
 	constructor(options: FreeFlyCameraControllerOptions) {
@@ -90,6 +99,41 @@ export class FreeFlyCameraController {
 	setAutomaticPose(pose: FreeFlyCameraPose): void {
 		this.#stopMovement();
 		this.#setState({ ...pose, hasManualControl: false });
+	}
+
+	/** Applies a host-presented position without turning it into fresh user input. */
+	applyPresentedPosition(position: Vec3): void {
+		this.#state = { ...this.#state, position };
+	}
+
+	/** Seeds frontend free fly from the exact physical pose presented on the prior frame. */
+	adoptPresentedPose(pose: FreeFlyCameraPose): void {
+		this.#stopMovement();
+		this.#state = { ...pose, hasManualControl: true };
+	}
+
+	/** Transfers position authority while retaining the existing rotation controls. */
+	setLocalTranslationEnabled(enabled: boolean): void {
+		if (this.#localTranslationEnabled === enabled) return;
+		this.#stopMovement();
+		this.#localTranslationEnabled = enabled;
+	}
+
+	/** Current local input, camera basis, and precision modifier for physical-camera policy. */
+	physicalFlyInput(): {
+		readonly basis: {
+			readonly forward: Vec3;
+			readonly right: Vec3;
+			readonly up: Vec3;
+		};
+		readonly movement: CameraLocalMovement;
+		readonly precision: boolean;
+	} {
+		return {
+			basis: cameraAxes(this.#state),
+			movement: this.#movementVector(),
+			precision: this.#shiftActive,
+		};
 	}
 
 	/** Copy the latest controller state for frame-ordered residency resolution. */
@@ -149,7 +193,7 @@ export class FreeFlyCameraController {
 					this.#state.yawRadians -
 					deltaX * CAMERA_CONTROL_TUNING.pointerYawRadiansPerPixel * speed,
 			});
-		} else {
+		} else if (this.#localTranslationEnabled) {
 			const { right, up } = cameraAxes(this.#state);
 			this.#setManualState({
 				...this.#state,
@@ -179,6 +223,10 @@ export class FreeFlyCameraController {
 	};
 
 	readonly #handleWheel = (event: WheelEvent): void => {
+		if (!this.#localTranslationEnabled) {
+			event.preventDefault();
+			return;
+		}
 		const { up } = cameraAxes(this.#state);
 		const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
 		const distance =
@@ -199,22 +247,40 @@ export class FreeFlyCameraController {
 	readonly #handleKeyDown = (event: KeyboardEvent): void => {
 		this.#shiftActive = event.shiftKey;
 		const key = movementKey(event.key);
-		if (!key) return;
+		if (!key) {
+			if (event.key === "Shift" && !this.#localTranslationEnabled)
+				this.#onChange(this.#state);
+			return;
+		}
 		this.#pressedKeys.add(key);
 		this.#startMovement();
+		if (!this.#localTranslationEnabled) this.#onChange(this.#state);
 		event.preventDefault();
 	};
 
 	readonly #handleKeyUp = (event: KeyboardEvent): void => {
 		this.#shiftActive = event.key === "Shift" ? false : event.shiftKey;
 		const key = movementKey(event.key);
-		if (!key) return;
+		if (!key) {
+			if (event.key === "Shift" && !this.#localTranslationEnabled)
+				this.#onChange(this.#state);
+			return;
+		}
 		this.#pressedKeys.delete(key);
-		if (this.#pressedKeys.size === 0) this.#stopMovement();
+		if (this.#pressedKeys.size === 0) {
+			// Preserve the empty held set long enough for the physical adapter to send a stop intent.
+			if (!this.#localTranslationEnabled) this.#onChange(this.#state);
+			this.#stopMovement();
+		} else if (!this.#localTranslationEnabled) {
+			this.#onChange(this.#state);
+		}
 		event.preventDefault();
 	};
 
-	readonly #handleBlur = (): void => this.#stopMovement();
+	readonly #handleBlur = (): void => {
+		this.#stopMovement();
+		if (!this.#localTranslationEnabled) this.#onChange(this.#state);
+	};
 
 	#finishDrag(pointerId: number): boolean {
 		const drag = this.#activeDrag;
@@ -257,7 +323,9 @@ export class FreeFlyCameraController {
 		this.#lastMovementAt = frameAt;
 		if (deltaSeconds === 0) return;
 
-		const movement = this.#movementVector();
+		const movement = this.#localTranslationEnabled
+			? this.#movementVector()
+			: { forward: 0, right: 0, up: 0 };
 		let next = this.#state;
 		if (movement.right !== 0 || movement.up !== 0 || movement.forward !== 0) {
 			this.#linearMovementStartedAt ??= frameAt;
@@ -290,11 +358,7 @@ export class FreeFlyCameraController {
 		this.#setManualState(next);
 	};
 
-	#movementVector(): {
-		readonly forward: number;
-		readonly right: number;
-		readonly up: number;
-	} {
+	#movementVector(): CameraLocalMovement {
 		return {
 			forward:
 				(this.#pressedKeys.has("w") ? 1 : 0) -

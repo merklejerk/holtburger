@@ -6,9 +6,12 @@ pub mod interior;
 pub mod landblock;
 pub mod material_capabilities;
 pub mod material_graph;
+pub mod object_collision;
 pub mod repository;
 pub mod soul_emote;
 mod source_reader;
+pub mod terrain_collision;
+pub mod terrain_topology;
 #[cfg(test)]
 mod test_support;
 pub mod texture_pixels;
@@ -44,6 +47,15 @@ pub use material_graph::{
     ResolvedTerrainMaterialTable, ResolvedTerrainMaterialType, ResolvedTerrainRoadAlphaMap,
     ResolvedTextureChange, ResolvedTextureMaterial,
 };
+pub use object_collision::{
+    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
+    CollisionPolygon, CollisionShape, LandblockColliderAssembler, LandblockColliders,
+    LandblockCollisionAsset, OutdoorBuildingTransit, PlacedCollider, StaticColliderPlacement,
+};
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};
+pub use terrain_collision::{
+    TerrainCollisionCell, TerrainCollisionSurface, TerrainCollisionTriangle,
+};
+pub use terrain_topology::{TERRAIN_GRID_CELLS, TerrainCellDiagonals};
 pub use texture_pixels::{ResolvedSurfaceTexturePixels, TexturePixelFormat};

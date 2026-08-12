@@ -49,6 +49,19 @@ describe("generateTerrain", () => {
 		);
 	});
 
+	it("uses the transported topology bit for mesh indices", () => {
+		const northwestToSoutheast = createSource();
+		const southwestToNortheast = createSource();
+		southwestToNortheast.cellDiagonals[0] = 1;
+
+		expect([
+			...generateTerrain(northwestToSoutheast).geometry.indices.slice(0, 6),
+		]).toEqual([0, 1, 9, 10, 9, 1]);
+		expect([
+			...generateTerrain(southwestToNortheast).geometry.indices.slice(0, 6),
+		]).toEqual([0, 1, 10, 0, 10, 9]);
+	});
+
 	it("adapts the canonical south-to-north grid once and stitches facing stride edges", () => {
 		const source = createSource();
 		for (let column = 0; column < 9; column += 1) {
@@ -213,6 +226,7 @@ describe("generateTerrain", () => {
 
 function createSource(landblockId = "0xda55ffff") {
 	return {
+		cellDiagonals: new Uint8Array(64),
 		gridSize: 9,
 		heightIndices: new Uint8Array(81),
 		heights: new Float32Array(81),

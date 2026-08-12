@@ -181,9 +181,41 @@ impl Quaternion {
             z,
         }
     }
+
+    /// Returns the inverse rotation for a unit quaternion.
+    pub fn conjugate(&self) -> Self {
+        Self {
+            w: self.w,
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+        }
+    }
+
+    /// Rotates one vector without allocating a matrix.
+    pub fn rotate_vector(&self, vector: Vector3) -> Vector3 {
+        let axis = Vector3::new(self.x, self.y, self.z);
+        let first = axis.cross(&vector);
+        let second = axis.cross(&first);
+        Vector3::new(
+            vector.x + 2.0 * (self.w * first.x + second.x),
+            vector.y + 2.0 * (self.w * first.y + second.y),
+            vector.z + 2.0 * (self.w * first.z + second.z),
+        )
+    }
+
+    /// Composes rotations so the result applies `other` first, then `self`.
+    pub fn multiply(&self, other: &Self) -> Self {
+        Self {
+            w: self.w * other.w - self.x * other.x - self.y * other.y - self.z * other.z,
+            x: self.w * other.x + self.x * other.w + self.y * other.z - self.z * other.y,
+            y: self.w * other.y - self.x * other.z + self.y * other.w + self.z * other.x,
+            z: self.w * other.z + self.x * other.y - self.y * other.x + self.z * other.w,
+        }
+    }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, BinRead, BinWrite)]
 #[br(little)]
 #[bw(little)]
 pub struct Plane {

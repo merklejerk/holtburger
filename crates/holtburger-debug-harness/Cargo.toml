@@ -11,6 +11,7 @@ holtburger-common.workspace = true
 holtburger-content.workspace = true
 holtburger-core.workspace = true
 holtburger-dat.workspace = true
+holtburger-world.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 clap.workspace = true

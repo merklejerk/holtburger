@@ -3,7 +3,7 @@ use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_dat::landblock::{CellLandblock, Frame, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, ResourceKey};
 
-use crate::{ActiveRegionData, ContentDecodeCache, ContentRepository};
+use crate::{ActiveRegionData, ContentDecodeCache, ContentRepository, TerrainCellDiagonals};
 
 const LANDBLOCK_GRID_SIZE: usize = 9;
 const LANDBLOCK_TILE_SIZE: f32 = 24.0;
@@ -43,6 +43,8 @@ pub struct LandblockTerrain {
     pub heights: Vec<f32>,
     /// Authored packed terrain samples corresponding to the height vertices.
     pub terrain_samples: Vec<u16>,
+    /// Retail's canonical triangle diagonal for each of the 8x8 terrain cells.
+    pub cell_diagonals: TerrainCellDiagonals,
 }
 
 /// One explicit outdoor object placement.
@@ -117,6 +119,15 @@ pub struct LandblockPlacement {
     pub origin: Vector3,
     /// Local rotation.
     pub orientation: Quaternion,
+}
+
+impl LandblockPlacement {
+    /// Transforms a landblock-local point into the placed asset's authored coordinate space.
+    pub fn to_local_space(&self, landblock_point: Vector3) -> Vector3 {
+        self.orientation
+            .conjugate()
+            .rotate_vector(landblock_point - self.origin)
+    }
 }
 
 /// Coarse identity family for an authored outdoor object DID.
@@ -250,6 +261,7 @@ fn assemble_terrain(
         height_indices,
         heights,
         terrain_samples,
+        cell_diagonals: TerrainCellDiagonals::for_landblock(landblock.id),
     })
 }
 

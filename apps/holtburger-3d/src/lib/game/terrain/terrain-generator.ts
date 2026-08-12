@@ -154,7 +154,7 @@ function generateVariant(
 			const southeast = southwest + 1;
 			const northwest = southwest + sideVertices;
 			const northeast = northwest + 1;
-			if (usesSouthwestToNortheastCut(source.landblockId, column, row)) {
+			if (usesSouthwestToNortheastCut(source, column, row)) {
 				indices.push(
 					southwest,
 					southeast,
@@ -512,6 +512,7 @@ function validateSource(source: TerrainGenerationSource): void {
 	getLandblockCoordinates(source.landblockId);
 	const expected = source.gridSize * source.gridSize;
 	if (
+		source.cellDiagonals.length !== TERRAIN_GRID_CELLS ** 2 ||
 		source.heightIndices.length !== expected ||
 		source.heights.length !== expected ||
 		source.terrainSamples.length !== expected

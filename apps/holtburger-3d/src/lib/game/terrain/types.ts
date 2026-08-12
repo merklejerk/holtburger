@@ -73,7 +73,7 @@ export interface TerrainCompositionFacts {
 
 /** Canonical landblock facts sufficient for one complete terrain-generation job. */
 export interface TerrainGenerationSource {
-	/** Outdoor landblock identity used by retail's deterministic generated-cell topology hash. */
+	/** Outdoor landblock identity. */
 	readonly landblockId: LandblockId;
 	/** Number of authored vertices on each terrain-grid axis. */
 	readonly gridSize: number;
@@ -85,6 +85,8 @@ export interface TerrainGenerationSource {
 	readonly heights: Float32Array;
 	/** Raw CellLandblock 9x9 terrain samples, including terrain and road pcode bits. */
 	readonly terrainSamples: Uint16Array;
+	/** Host-computed retail diagonal bits for the row-major 8x8 authored cell grid. */
+	readonly cellDiagonals: Uint8Array;
 }
 
 /** Stable regional texture identities required by one terrain source. */

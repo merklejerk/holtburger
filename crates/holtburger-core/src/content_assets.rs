@@ -8,9 +8,10 @@ use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ActiveRegionData, ContentDecodeCache, ContentRepository, GeneratedSceneryAsset,
     GeneratedSceneryAssetAssembler, LandblockAsset, LandblockAssetAssembler,
-    LandblockInteriorSystemAssembler, LandblockInteriorSystemAsset, MaterialAppearanceInput,
-    ResolvedMaterialRecipe, ResolvedRegionRenderProfile, ResolvedSetupAppearance,
-    ResolvedSurfaceTexture, ResolvedSurfaceTexturePixels, ResolvedTerrainMaterialTable,
+    LandblockColliderAssembler, LandblockCollisionAsset, LandblockInteriorSystemAssembler,
+    LandblockInteriorSystemAsset, MaterialAppearanceInput, ResolvedMaterialRecipe,
+    ResolvedRegionRenderProfile, ResolvedSetupAppearance, ResolvedSurfaceTexture,
+    ResolvedSurfaceTexturePixels, ResolvedTerrainMaterialTable, TerrainCollisionSurface,
     TexturePixelFormat,
 };
 use holtburger_dat::file_type::{
@@ -214,6 +215,55 @@ impl ContentAssetService {
         self.load_landblock(landblock_id)?
             .as_deref()
             .map(|landblock| self.resolve_generated_scenery(landblock))
+            .transpose()
+    }
+
+    /// Resolves the complete static collision product over the caller's exact foundation.
+    ///
+    /// The merge stays here so app and diagnostic callers cannot accidentally omit generated
+    /// scenery, building shells, indoor objects, or cell containment volumes.
+    pub fn resolve_collision(&self, landblock: &LandblockAsset) -> Result<LandblockCollisionAsset> {
+        let scenery = self.resolve_generated_scenery(landblock)?;
+        let generated = scenery
+            .objects
+            .iter()
+            .map(|object| {
+                (
+                    object.source_did,
+                    object.source_family,
+                    object.placement,
+                    object.scale,
+                )
+            })
+            .collect::<Vec<_>>();
+        let interior = self.resolve_interior_system(landblock)?;
+        let static_geometry = LandblockColliderAssembler
+            .assemble(
+                &self.content,
+                &self.decode_cache,
+                landblock,
+                &generated,
+                &interior,
+            )
+            .with_context(|| {
+                format!(
+                    "Could not assemble complete collision for 0x{:08X}",
+                    landblock.landblock_id
+                )
+            })?;
+
+        Ok(LandblockCollisionAsset {
+            landblock_id: landblock.landblock_id,
+            terrain: TerrainCollisionSurface::from_terrain(&landblock.terrain)?,
+            static_geometry,
+        })
+    }
+
+    /// Loads the shared foundation and resolves its complete static collision product.
+    pub fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
+        self.load_landblock(landblock_id)?
+            .as_deref()
+            .map(|landblock| self.resolve_collision(landblock))
             .transpose()
     }
 

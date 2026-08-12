@@ -204,8 +204,4 @@ export interface SceneTopologyView {
 	outgoing(scope: SceneScope): readonly ScenePortalCrossingInput[];
 }
 
-export type {
-	ScenePortalTraceQuery,
-	ScenePortalTraceResult,
-} from "./portal-trace";
 export { SceneGraph } from "./scene-graph";

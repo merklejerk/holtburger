@@ -6,9 +6,9 @@ use holtburger_common::{Guid, Vector3};
 
 use super::collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
-    GroundedObstruction, GroundedObstructionRequest, MissingCoverage, PlacementRequest,
-    StaticContact, SupportRequest, anchor_point_to_outdoor_position, landblock_key,
-    separating_displacement,
+    GroundedObstruction, GroundedObstructionRequest, MissingCoverage, MotionWaypoint,
+    PlacementRequest, StaticContact, SupportRequest, anchor_point_to_outdoor_position,
+    landblock_key, separating_displacement,
 };
 
 /// Explicit limits and grounded-response policy for one solve.
@@ -114,6 +114,8 @@ pub enum GroundedOutcome {
         body: GroundedBody,
         /// Achieved world-space velocity derived from committed displacement.
         achieved_velocity: Vector3,
+        /// Ordered accepted substep endpoints spanning the normalized solve interval.
+        motion: Vec<MotionWaypoint>,
         /// Anti-tunneling substeps evaluated.
         substeps: usize,
         /// Contact passes evaluated across all substeps.
@@ -248,6 +250,7 @@ pub fn solve_grounded(
     // Diagnostics retain distinct planes encountered by this solve, but never feed motion.
     let mut encountered_constraints = Vec::new();
     let mut current = start;
+    let mut motion = Vec::with_capacity(required_substeps);
     let mut contact_passes = 0;
 
     'substeps: for completed_substeps in 0..required_substeps {
@@ -312,6 +315,11 @@ pub fn solve_grounded(
                         );
                         body.fall_velocity = 0.0;
                         body.support = Some(stepped.support);
+                        motion.push(MotionWaypoint {
+                            center: current,
+                            end_fraction: (completed_substeps + 1) as f32
+                                / required_substeps as f32,
+                        });
                         continue 'substeps;
                     }
                     CollisionQuery::Complete(_) => {}
@@ -471,11 +479,16 @@ pub fn solve_grounded(
             reference_pose,
             candidate_placement.committed_cell(),
         );
+        motion.push(MotionWaypoint {
+            center: current,
+            end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
+        });
     }
 
     Ok(GroundedOutcome::Solved {
         achieved_velocity: (current - start) / request.delta_seconds,
         body,
+        motion,
         substeps: required_substeps,
         contact_passes,
         constraint_count: encountered_constraints.len(),
@@ -1529,7 +1542,12 @@ mod tests {
         colliders.extend(box_obstacle(4, 11.0, 12.0, 0.6));
         colliders.extend(box_obstacle(6, 12.0, 20.0, 0.6));
         let scene = scene(colliders);
-        let (crossed, achieved, _) = solved_with_constraint_count(solve(
+        let GroundedOutcome::Solved {
+            body: crossed,
+            achieved_velocity: achieved,
+            motion,
+            ..
+        } = solve(
             &scene,
             body(
                 Vector3::new(8.5, 20.0, 0.0),
@@ -1538,7 +1556,10 @@ mod tests {
             pair(),
             Vector3::new(5.0, 0.0, 0.0),
             1.0,
-        ));
+        )
+        else {
+            panic!("expected solved grounded staircase traversal");
+        };
         assert!(
             crossed.pose.coords.x > 13.0,
             "body stopped before crossing the stair crest: {crossed:?}"
@@ -1548,6 +1569,15 @@ mod tests {
             "body did not retain top support: {crossed:?}"
         );
         assert!(achieved.x > 4.5, "stair crest consumed forward travel");
+        assert!(
+            motion.windows(2).any(|pair| {
+                pair[1].center.x > pair[0].center.x && pair[1].center.z > pair[0].center.z
+            }),
+            "accepted path omitted the stair step-up bend: {motion:?}"
+        );
+        let final_waypoint = motion.last().expect("solved motion path was empty");
+        assert_eq!(final_waypoint.end_fraction, 1.0);
+        assert!((final_waypoint.center - crossed.pose.coords).length() < EPSILON);
     }
 
     #[test]

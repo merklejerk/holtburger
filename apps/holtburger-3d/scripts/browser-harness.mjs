@@ -76,7 +76,6 @@ try {
 						generatedObjectRadius: options.generatedObjectRadius,
 						cameraLandblockId: options.cameraLandblockId,
 						relocateLandblockId: options.relocateLandblockId,
-						portalTrace: result.portalTrace,
 						frameMode: options.frameMode,
 						frameSettings: result.state.frameSettings,
 						frameProfile: result.state.frameProfile,
@@ -160,9 +159,6 @@ function parseArgs(args) {
 		excludeAuthoredDynamics: false,
 		cameraLandblockId: null,
 		relocateLandblockId: null,
-		traceAnchorCellId: null,
-		traceStart: null,
-		traceEndpoint: null,
 		envCellCameraId: null,
 		envCellCameraPosition: null,
 		minimumPortalFootprintPixelArea: null,
@@ -345,18 +341,6 @@ function parseArgs(args) {
 				break;
 			case "--lifecycle":
 				parsed.lifecycle = true;
-				break;
-			case "--trace-anchor-cell":
-				parsed.traceAnchorCellId = requireValue(args, ++index, arg);
-				break;
-			case "--trace-start":
-				parsed.traceStart = parsePoint(requireValue(args, ++index, arg), arg);
-				break;
-			case "--trace-end":
-				parsed.traceEndpoint = parsePoint(
-					requireValue(args, ++index, arg),
-					arg,
-				);
 				break;
 			case "--env-cell-camera":
 				parsed.envCellCameraId = requireValue(args, ++index, arg);
@@ -619,16 +603,6 @@ function parseArgs(args) {
 			"--camera-sweep-position cannot be combined with end-orientation options.",
 		);
 	}
-	const traceOptionCount = [
-		parsed.traceAnchorCellId,
-		parsed.traceStart,
-		parsed.traceEndpoint,
-	].filter((value) => value !== null).length;
-	if (traceOptionCount !== 0 && traceOptionCount !== 3) {
-		throw new Error(
-			"--trace-anchor-cell, --trace-start, and --trace-end must be supplied together.",
-		);
-	}
 	const envCellCameraOptionCount = [
 		parsed.envCellCameraId,
 		parsed.envCellCameraPosition,
@@ -707,10 +681,6 @@ Options:
   --camera-landblock <hex>  Move only the camera after the initial request.
   --relocate-landblock <hex> Replace scene interest and camera at a new landblock.
   --lifecycle           Clear and reload the requested neighborhood before capture.
-  --trace-anchor-cell <hex>
-                         Authoritative EnvCell DID for a production portal trace.
-  --trace-start <x,y,z> Trace anchor in canonical world coordinates.
-  --trace-end <x,y,z>   Desired endpoint in canonical world coordinates.
   --env-cell-camera <hex>
                          Authoritative EnvCell residency for the continuous camera.
   --env-cell-position <x,y,z>
@@ -1404,17 +1374,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(250);
 			cameraSweepScreenshots = { end, returned: await capture(), start };
 		}
-		const portalTrace = options.traceAnchorCellId
-			? await evaluate(
-					client,
-					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.tracePortalSegment",
-					[
-						options.traceAnchorCellId,
-						options.traceStart,
-						options.traceEndpoint,
-					],
-				)
-			: null;
 		let portalScreenshot = null;
 		let portalExecution = null;
 		if (options.executePortal) {
@@ -1622,7 +1581,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			modeCycleStates,
 			lifecycleState,
 			portalExecution,
-			portalTrace,
 			relocationState,
 			screenshot: screenshot.data,
 			state,

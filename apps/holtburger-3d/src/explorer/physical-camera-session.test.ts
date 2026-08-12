@@ -1,27 +1,40 @@
 import { describe, expect, it } from "vitest";
 import { sceneVec3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
-import type { HostPhysicalCameraSegment } from "../lib/game/motion/host-physical-camera-path";
+import type { HostPhysicalCameraPath } from "../lib/game/motion/host-physical-camera-path";
 import type { PhysicalCameraPlacement } from "../lib/game/motion/host-physical-camera-path";
 import {
 	PhysicalCameraSession,
 	type PhysicalCameraTransport,
 } from "./physical-camera-session";
 
-function segment(
-	overrides: Partial<HostPhysicalCameraSegment> = {},
-): HostPhysicalCameraSegment {
+function path(
+	overrides: Partial<HostPhysicalCameraPath> = {},
+): HostPhysicalCameraPath {
 	return {
 		session: 7,
 		sequence: 0,
 		mode: "physical-fly",
-		residency: {
-			envCellId: null,
-			landblockId: "0xda55ffff",
+		durationMs: 1000 / 30,
+		initial: {
+			residency: {
+				envCellId: null,
+				landblockId: "0xda55ffff",
+			},
+			origin: [96, 96, 20],
 		},
-		origin: [96, 96, 20],
-		velocity: [0, 0, 0],
-		horizonMs: 1000 / 30,
+		legs: [
+			{
+				endFraction: 1,
+				end: {
+					residency: {
+						envCellId: null,
+						landblockId: "0xda55ffff",
+					},
+					origin: [96, 96, 20],
+				},
+			},
+		],
 		status: "solved",
 		grounded: false,
 		constraintCount: 0,
@@ -34,9 +47,27 @@ function segment(
 	};
 }
 
+function movingPath(
+	sequence: number,
+	startX: number,
+	endX: number,
+): HostPhysicalCameraPath {
+	const residency = { envCellId: null, landblockId: "0xda55ffff" };
+	return path({
+		sequence,
+		initial: { origin: [startX, 96, 20], residency },
+		legs: [
+			{
+				endFraction: 1,
+				end: { origin: [endX, 96, 20], residency },
+			},
+		],
+	});
+}
+
 function harness() {
 	const calls: { command: string; args?: Record<string, unknown> }[] = [];
-	let handler: ((segment: HostPhysicalCameraSegment) => void) | null = null;
+	let handler: ((path: HostPhysicalCameraPath) => void) | null = null;
 	let now = 0;
 	const transport: PhysicalCameraTransport = {
 		invoke: async (command, args) => {
@@ -52,7 +83,7 @@ function harness() {
 	return {
 		calls,
 		transport,
-		deliver: (next: HostPhysicalCameraSegment) => handler?.(next),
+		deliver: (next: HostPhysicalCameraPath) => handler?.(next),
 		advance: (milliseconds: number) => (now += milliseconds),
 	};
 }
@@ -71,7 +102,7 @@ function placement(
 }
 
 describe("PhysicalCameraSession", () => {
-	it("listens before registration and evaluates the first da55 segment", async () => {
+	it("listens before registration and evaluates the first da55 path", async () => {
 		const test = harness();
 		const session = new PhysicalCameraSession(test.transport);
 		await session.start(placement(), [0, 1, 0], "physical-fly");
@@ -83,29 +114,84 @@ describe("PhysicalCameraSession", () => {
 			viewDirection: [0, 1, 0],
 		});
 
-		test.deliver(segment({ velocity: [3, 0, 0] }));
+		test.deliver(movingPath(0, 96, 96.1));
 		test.advance(1000 / 30);
 		expect(session.placement()?.position.x).toBeCloseTo(0xda * 192 + 96.1);
 	});
 
-	it("ignores old sessions and out-of-order segments", async () => {
+	it("ignores old sessions and out-of-order paths", async () => {
 		const test = harness();
 		const session = new PhysicalCameraSession(test.transport);
 		await session.start(placement(), [0, 1, 0], "physical-fly");
-		test.deliver(segment({ session: 6, origin: [1, 1, 1] }));
-		test.deliver(segment({ sequence: 4, origin: [4, 4, 4] }));
-		test.deliver(segment({ sequence: 2, origin: [2, 2, 2] }));
+		test.deliver(path({ session: 6 }));
+		test.deliver(movingPath(4, 4, 5));
+		test.deliver(movingPath(2, 2, 3));
 		expect(session.placement()?.position.x).toBe(0xda * 192 + 4);
 	});
 
-	it("counts sequence gaps as dropped even if an old segment arrives later", async () => {
+	it("counts sequence gaps and resynchronizes from the received initial point", async () => {
 		const test = harness();
 		const session = new PhysicalCameraSession(test.transport);
 		await session.start(placement(), [0, 1, 0], "physical-fly");
-		test.deliver(segment({ sequence: 0 }));
-		test.deliver(segment({ sequence: 3 }));
-		test.deliver(segment({ sequence: 2 }));
-		expect(session.status().droppedSegments).toBe(2);
+		test.deliver(movingPath(0, 96, 97));
+		test.advance(10);
+		test.deliver(movingPath(3, 50, 51));
+		test.deliver(movingPath(2, 2, 3));
+		expect(session.status().droppedPaths).toBe(2);
+		expect(session.placement()?.position.x).toBe(0xda * 192 + 50);
+	});
+
+	it("plays one pending successor without resetting the session timeline", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+		test.deliver(movingPath(0, 96, 97));
+		test.advance(20);
+		test.deliver(movingPath(1, 97, 98));
+		test.advance(20);
+		expect(session.placement()?.position.x).toBeCloseTo(0xda * 192 + 97.2);
+	});
+
+	it("holds the exact endpoint when the host stream is late", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+		test.deliver(movingPath(0, 96, 97));
+		test.advance(1_000);
+		expect(session.placement()?.position.x).toBe(0xda * 192 + 97);
+	});
+
+	it("plays a late successor for a full tick from its explicit initial point", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+		test.deliver(movingPath(0, 96, 97));
+		test.advance(1_000);
+		test.deliver(movingPath(1, 97, 98));
+		expect(session.placement()?.position.x).toBe(0xda * 192 + 97);
+		test.advance(1000 / 60);
+		expect(session.placement()?.position.x).toBeCloseTo(0xda * 192 + 97.5);
+	});
+
+	it("collapses stale playback when a third path arrives while rendering is suspended", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+		test.deliver(movingPath(0, 96, 97));
+		test.deliver(movingPath(1, 97, 98));
+		test.deliver(movingPath(2, 98, 99));
+		expect(session.placement()?.position.x).toBe(0xda * 192 + 98);
+	});
+
+	it("discards two expired buffered ticks when callbacks resume after suspension", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+		test.deliver(movingPath(0, 96, 97));
+		test.deliver(movingPath(1, 97, 98));
+		test.advance(1_000);
+		test.deliver(movingPath(2, 98, 99));
+		expect(session.placement()?.position.x).toBe(0xda * 192 + 98);
 	});
 
 	it("surfaces the exact missing collision owner", async () => {
@@ -116,7 +202,7 @@ describe("PhysicalCameraSession", () => {
 			registration: expect.objectContaining({ mode: "grounded-walk" }),
 		});
 		test.deliver(
-			segment({
+			path({
 				mode: "grounded-walk",
 				status: "missing-coverage",
 				missingLandblocks: ["0xdb55ffff"],

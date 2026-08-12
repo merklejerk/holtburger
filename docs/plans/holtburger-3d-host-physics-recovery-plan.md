@@ -1,6 +1,6 @@
 # Holtburger 3D Host Physics and Physical Camera Recovery Plan
 
-Status: In progress — world-owned placement-aware motion-path cutover approved; implementation pending
+Status: In progress — placement-aware motion-path cutover and automated gates complete; live acceptance pending
 Created: 2026-08-11
 Canonical implementation base: `3d-next` at `41b164ab`
 Recovery branch: `fix/host-physics-recovery`
@@ -2115,30 +2115,30 @@ continuous placement path without copying retail's 1999 object topology.
 
 #### Acceptance Criteria
 
-- [ ] One synthetic multi-portal route proves that every evaluated point is paired with the leg
+- [x] One synthetic multi-portal route proves that every evaluated point is paired with the leg
       placement valid at that point, including the exact shared boundary between adjacent legs and a
       tick whose initial and final cells match but whose path enters and exits a thin intermediate
       cell.
-- [ ] The world path types and transit API contain no camera/viewer vocabulary. A focused non-camera
+- [x] The world path types and transit API contain no camera/viewer vocabulary. A focused non-camera
       sphere-mover test consumes the same primitive used by the host viewer adapter.
-- [ ] Outdoor entry/exit, internal transit, overlapping EnvCells, cross-landblock transit, and a
+- [x] Outdoor entry/exit, internal transit, overlapping EnvCells, cross-landblock transit, and a
       stationary body whose 0.18-meter view offset crosses a portal all produce deterministic paths
       from prior-cell history without point-containment fallback.
-- [ ] The path's final viewer placement is exactly the `ActiveCamera.viewer` committed for the next
+- [x] The path's final viewer placement is exactly the `ActiveCamera.viewer` committed for the next
       tick; no second endpoint traversal or frontend reconciliation exists.
-- [ ] Missing coverage holds the prior composite camera and emits no partial path. Missing or
+- [x] Missing coverage holds the prior composite camera and emits no partial path. Missing or
       out-of-order event sequences cannot bridge motion with guessed position or placement. A third
       queued event after renderer suspension discards stale playback and resumes only from an
       explicit placed point in the newest received path.
-- [ ] Frontend presentation consumes the ordered host legs with one active path and at most one
+- [x] Frontend presentation consumes the ordered host legs with one active path and at most one
       pending path, holds the final endpoint on starvation, and contains no physical-camera
       extrapolation factor, achieved-velocity evaluator, or portal-placement traversal.
-- [ ] A consumer and vocabulary sweep removes obsolete validity-horizon, extrapolation, correction,
+- [x] A consumer and vocabulary sweep removes obsolete validity-horizon, extrapolation, correction,
       and frontend camera-trace symbols from runtime code, tests, metrics, UI, and current plan
       language while preserving explicitly historical donor measurements in this execution record.
-- [ ] Focused CE94 and DA55 product traces record placement-leg transitions for both grounded and
+- [x] Focused CE94 and DA55 product traces record placement-leg transitions for both grounded and
       physical-fly viewers through the existing named portals without changing collision outcomes.
-- [ ] Rust and frontend unit suites, formatting, clippy with warnings denied, type checks, lint,
+- [x] Rust and frontend unit suites, formatting, clippy with warnings denied, type checks, lint,
       production build, DA55 aggregate probes, and the isolated CE94 browser compositor run pass.
 - [ ] Live Explorer acceptance crosses CE94 and DA55 portals repeatedly in both physical modes with
       no flash, wrong-domain frame, correction snap, cell flicker, or latency beyond the accepted
@@ -2146,14 +2146,14 @@ continuous placement path without copying retail's 1999 object topology.
 
 #### Task Checklist
 
-- [ ] Add the world placement-path result and prove exact boundary ordering with synthetic cells.
-- [ ] Replace the host viewer's endpoint-only transit use with the camera-agnostic path operation,
+- [x] Add the world placement-path result and prove exact boundary ordering with synthetic cells.
+- [x] Replace the host viewer's endpoint-only transit use with the camera-agnostic path operation,
       then adapt its result into viewer state and the Tauri event contract; retain endpoint transit
       only for named candidate-solve consumers.
-- [ ] Replace arrival-relative frontend extrapolation with active-plus-one-pending path playback.
-- [ ] Census and delete frontend actor-placement traversal, stale transport fields, and vocabulary.
-- [ ] Extend CE94/DA55 probes, run all repository gates, and record queue/timing evidence.
-- [ ] Hand the named live portal and latency routes back to the maintainer for final acceptance.
+- [x] Replace arrival-relative frontend extrapolation with active-plus-one-pending path playback.
+- [x] Census and delete frontend actor-placement traversal, stale transport fields, and vocabulary.
+- [x] Extend CE94/DA55 probes, run all repository gates, and record queue/timing evidence.
+- [x] Hand the named live portal and latency routes back to the maintainer for final acceptance.
 
 #### Decisions and Course Corrections
 
@@ -2180,6 +2180,80 @@ through the camera's independently transited viewer sphere and one non-camera sp
 future players, creatures, missiles, and spells can consume the same ordered position/placement
 contract without inheriting Explorer eye offsets, viewer constants, Tauri cadence, or frontend UX.
 
+#### Implementation Record (2026-08-12)
+
+The cutover landed as `MotionWaypoint`, `PlacedMotionPathRequest`, `PlacedMotionPoint`,
+`PlacedMotionLeg`, and `PlacedMotionPath` in `holtburger-world`. `CollisionScene` validates a
+non-empty normalized accepted path, retains one anchor, inserts exact directed portal-plane
+boundaries from prior-cell history, and derives a complete collision placement for every retained
+point. Missing coverage rejects the whole request without publishing a prefix. Focused fixtures
+cover outdoor entry and exit, linked interiors, overlapping EnvCells, cross-landblock anchoring,
+accepted bends, a thin intermediate cell whose initial and final domains match, and every invalid
+waypoint-timing shape.
+
+An implementation audit found that feeding the placement operation only the tick's final body pose
+would replace accepted wall slides, stair steps, and other collision response with a false straight
+chord. Both physical-fly and grounded solved outcomes therefore now expose their ordered accepted
+substep endpoints. The host maps those endpoints to the app-owned viewer offset and lets the world
+operation add placement-only splits. Rejected collision candidates and internal contact-separation
+attempts are intentionally absent: they were never committed motion and must not become visible
+presentation geometry. The resulting allocation is one bounded `Vec` per solve, with capacity fixed
+from the existing substep budget; no generic compound-body or entity-stream abstraction was added.
+
+`PhysicalCameraMotionPath` replaces the old velocity/horizon event. Its initial point and non-empty
+legs serialize position and residency together, and `ActiveCamera.viewer` commits from the same
+path's final placement. Registration similarly transits from the exact frontend-supplied viewer
+point to the registered body presentation, closing the mode-handoff seam. Endpoint `transit_cell`
+remains only in candidate body solving and registration checks, where an endpoint classification is
+the named consumer; it no longer drives viewer presentation.
+
+Frontend playback now owns one active path and at most one pending successor. A normally early
+successor begins at the active tick boundary; a late successor begins at its explicit initial point
+on arrival after the held endpoint; a missing sequence resynchronizes without a bridge; and a third
+early or doubly expired buffered path discards stale playback in favor of the newest explicit point.
+Evaluation clamps at the final endpoint and applies each starting placement over its half-open leg
+interval, switching to the endpoint placement exactly at the supplied boundary. The physical-camera
+velocity evaluator, validity horizon, extrapolation factor, correction vocabulary, and frontend
+actor-placement traversal were removed. Renderer portal visibility traversal remains because it
+answers which scopes are visible from an already authoritative placement.
+
+The product probe now consumes the same placed-motion operation and records `tick@fraction` cell
+changes. The DA55 canonical route records physical fly as
+`outdoor -> 0xDA550100 -> 0xDA550103` and grounded viewer as the same ordered transition; the reverse
+physical-fly route records `0xDA550103 -> 0xDA550100 -> outdoor`. The CE94 slim-cell route records
+`outdoor -> 0xCE94010B -> 0xCE94010A` in both modes, with the corresponding reverse physical-fly
+sequence. The aggregate remains 36/36 physical-fly traversals and 31/31 two-sphere grounded
+traversals without a rejected valid trace.
+
+The probe briefly exposed an apparent body/path endpoint disagreement on reverse-seeded doorway
+attempts. Investigation showed that those seeds intentionally begin with outdoor history in
+overlapping interior geometry: endpoint body classification may select an overlapping cell before
+the continuously traversed viewer reaches its portal. This is not reconciled away. Body collision
+placement and render-viewer placement have separate named owners, just as grounded eye offset can
+keep them different for multiple ticks; the probe now records their mismatch duration and requires
+the authored route to converge instead of asserting false equality.
+
+A final invariant audit found one view-direction timing defect before handoff. Grounded movement can
+produce several accepted body substeps in one tick, but the first implementation added the new
+0.18-meter first-person forward offset to every endpoint. A turn therefore compressed the entire
+old-to-new viewer-offset change into the first substep instead of spanning the fixed tick. The host
+now interpolates that app-owned offset at each solver waypoint's normalized fraction, preserving both
+the collision-accepted body bends and smooth viewer motion. A focused two-substep turn test proves
+the midpoint carries the halfway offset and the final point carries the complete offset. This adds no
+new world field or camera policy to the shared path primitive.
+
+Final automated verification is green: Rust formatting; workspace clippy with warnings denied; the
+full workspace test suite, rerun outside the network sandbox because the scripting crate's seven
+tests require a loopback listener; 81 app Rust tests; 220 world tests; 1,040 frontend tests across
+152 files; Svelte/TypeScript checks; ESLint; Knip; Prettier; and the production build. The existing
+greater-than-500-kB build advisory remains unchanged. The DA55 aggregate reports 36/36 physical-fly
+and 31/31 two-sphere grounded traversals with no rejected valid trace. The focused CE94 probe records
+both physical modes through `0xCE94010B -> 0xCE94010A` with no rejected trace. An isolated CE94
+browser run on port 14843 reached `ready: true`, loaded 130 EnvCells from nine source batches,
+executed 13 portal scopes and 18 crossings, and emitted no page-console messages. Chrome's GCM
+deprecation and zygote shutdown lines are external non-failing diagnostics. The browser harness does
+not exercise the Tauri event stream, so it cannot close the remaining perceptual acceptance.
+
 ### Phase 7: Cleanup, Cutover, and Roadmap Reconciliation
 
 #### Deliverables
@@ -2196,15 +2270,15 @@ contract without inheriting Explorer eye offsets, viewer constants, Tauri cadenc
 
 #### Acceptance Criteria
 
-- [ ] No rejected donor mechanism or stale vocabulary survives in code, tests, UI, metrics, or
+- [x] No rejected donor mechanism or stale vocabulary survives in code, tests, UI, metrics, or
       current documentation.
-- [ ] No frontend actor-placement transition machinery survives solely for a harness or diagnostic
+- [x] No frontend actor-placement transition machinery survives solely for a harness or diagnostic
       consumer.
 - [x] No test depends on ignored runtime assets.
-- [ ] Rust formatting, clippy with warnings denied, workspace tests, frontend formatting, lint,
+- [x] Rust formatting, clippy with warnings denied, workspace tests, frontend formatting, lint,
       type checks, unit tests, and required browser/Tauri harnesses pass.
 - [x] The final diff contains no unrelated dependency refresh or generated-schema churn.
-- [ ] The parent roadmap honestly records the placement-aware path cutover and remaining live
+- [x] The parent roadmap honestly records the placement-aware path cutover and remaining live
       acceptance.
 
 #### Decisions and Course Corrections
@@ -2350,36 +2424,30 @@ and tuning files wholesale.
       justify.
 - [x] Real-content probes consume the product assembly path and remain regression detectors rather
       than design drivers.
-- [ ] Host physical-camera events describe non-empty solved placement legs whose position and
+- [x] Host physical-camera events describe non-empty solved placement legs whose position and
       residency are evaluated together across every portal boundary.
-- [ ] The placed-motion path is camera-agnostic in `holtburger-world`; the app-local adapter is the
+- [x] The placed-motion path is camera-agnostic in `holtburger-world`; the app-local adapter is the
       only layer that introduces viewer geometry, camera cadence, or Tauri transport.
-- [ ] Frontend physical-camera presentation contains no forward extrapolation or independent portal
+- [x] Frontend physical-camera presentation contains no forward extrapolation or independent portal
       placement traversal and holds the last authoritative endpoint on starvation.
 - [ ] The real Explorer passes maintainer verification in both physical modes within the accepted
       motion-boundary envelope.
 - [x] Shared crates contain no camera UX policy and the frontend contains no collision solving.
 - [x] No dormant fields, unused public transition types, accidental dependency upgrades, or
       permanent runtime-asset tests remain.
-- [ ] All repository-required static, unit, browser, Tauri, formatting, and lint checks pass after
+- [x] All repository-required static, unit, browser, Tauri, formatting, and lint checks pass after
       the placement-aware presentation-path cutover.
 - [x] The dynamic-entity roadmap and spawned plan consume the landed topology honestly.
 
 ## Open Questions
 
-None. The remaining work has named structural and live-acceptance gates.
+None. The remaining work is the named live-acceptance gate only.
 
 ## Remaining Acceptance
 
-The earlier 2026-08-12 audit concluded that every remaining unchecked criterion required only a live
-Tauri Explorer session. The portal-flash report supersedes that conclusion: one implementation
-contract remains open. The world must produce an ordered camera-agnostic placed-motion path, the host
-must use it to commit and serialize the viewer's exact path, and the frontend must play it without
-extrapolation or independent placement traversal. Focused world/host/frontend tests and the
-repository gates can close those structural criteria; they may not be deferred to manual
-acceptance.
-
-After that cutover, the retained content/browser harness still cannot invoke
+The ordered camera-agnostic placed-motion path, host serialization/commit, bounded frontend playback,
+probe coverage, cleanup, and repository gates are complete. The retained content/browser harness
+still cannot invoke
 `tauriPhysicalCameraTransport`, receive the host's real event stream, judge control latency, or
 observe a one-frame flash in the interactive Explorer authority handoff. Product-path collision
 probes likewise cannot establish visible pose continuity. Those final perceptual boxes require the
@@ -2412,3 +2480,35 @@ internal crossings, and exit; continue holding movement after each crossing to e
 snap. Verify that starvation or a deliberately paused host stream holds the last coherent frame and
 that solved-path playback adds no trailing latency beyond the accepted 30 Hz tick and one pending
 successor. Cadence changes are out of scope for this recovery.
+
+The bounded-playback unit suite already proves late delivery, starvation hold, missing sequences,
+and renderer-suspension collapse with an injected clock. The live session need not manufacture a
+host pause; its distinct job is to judge visible crossing continuity and ordinary control latency.
+
+### Final Maintainer Test Card
+
+The live handoff is intentionally short enough to run as one focused session while retaining every
+distinct acceptance mechanism:
+
+1. In DA55, cross the `0xDA550100 <-> 0xDA550103` route repeatedly in grounded walk and physical fly.
+   Test entry, internal crossing, and reverse outdoor exit while looking both with and against travel.
+   Expected: no one-frame flash, wrong-domain frame, cell flicker, correction snap, or perceptible
+   trailing queue latency. Switching either physical mode to frontend free fly while stationary must
+   preserve the displayed pose and cell.
+2. Still in DA55 grounded walk, press diagonally into a wall in both directions, pass its finite end,
+   cross a stair crest, step off a short raised object, and compare ordinary movement with Shift.
+   Expected: continuous tangent slide, immediate release without backing up, no stair-top invisible
+   wall, a short drop is allowed, ordinary movement is faster, and Shift is the precision speed.
+3. Enter recessed-floor cell `0xDA5501E9` portal 1 near `(107.525, 127.035, 22.000)` toward
+   `(-0.696, 0.718)`. Expected: settle about 1.85 meters lower in `0xDA5501E8`; outdoor terrain and
+   outdoor objects neither support nor obstruct the indoor body.
+4. In CE94, traverse `0xCE94010B <-> 0xCE94010A` repeatedly in both physical modes, looking toward
+   and away from travel, then switch modes without moving. Expected: exterior compositing remains
+   continuous with no near-empty-frame FPS spike, flash, or cell change caused only by mode switch.
+5. Traverse `0xCE94010A -> 0xCE940108 -> 0xCE940109` in grounded walk. Expected: host diagnostics,
+   viewport HUD, renderer, and scene-interest status converge on `0xCE940109`; overlapping
+   `0xCE940102` never reports as the active or ambiguous cell.
+
+The prior unchecked phase boxes are historical aliases for these same live observations, not
+additional implementation work. They remain unchecked until the maintainer reports this card's
+result. No automated result is used as a substitute.

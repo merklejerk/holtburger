@@ -4,7 +4,7 @@ Status: Queued — prerequisites complete; host-physics reconciliation recorded
 Created: 2026-07-31
 Rewritten: 2026-08-01 from the convergence world/feed audit
 Refined: 2026-08-01 after recovery-scope review
-Reconciled: 2026-08-11 after host physical-camera implementation
+Reconciled: 2026-08-12 after the placement-aware host physical-camera cutover
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Prerequisites:
 
@@ -21,7 +21,7 @@ Prerequisites:
 | Claude one-feed/two-drivers topology      | Donor-proven at `c938a438`                                        | Preserve one world/event contract, not donor machinery           |
 | World/entity/spatial/attachment semantics | Audited on `3d-next` on 2026-08-01                                | Extend existing `WorldState`; do not duplicate                   |
 | Current `ClientViewEvent` recovery        | Initial entity snapshot is incomplete                             | Extend `InitialViewState`; retain the existing ordered broadcast |
-| Static collision and body response        | Implemented in `holtburger-world`                                 | Reuse only for concrete spawned physical prediction scenarios   |
+| Static collision, body response, and placed-motion paths | Implemented in `holtburger-world`                    | Reuse only for concrete spawned physical prediction scenarios   |
 | Explorer physical camera host             | Implemented app-locally; maintainer acceptance pending            | Do not generalize camera session or controls into spawned feed   |
 | Spawned runtime implementation            | Not started                                                       | Execute the phases below in order                                |
 
@@ -73,8 +73,10 @@ a spawned mutation bus and must not be stretched into one.
   sparse correction, teleport, reset, pause, resume, and deterministic step scenarios.
 - Shared frontend template, animation, script, effect, renderer, and resource-lifetime systems.
 - Host-resolved motion selection and frontend smooth presentation between sparse authoritative samples.
-- Reuse of the landed typed collision coverage, static-query, and bounded body-response contracts
-  only when a named spawned scenario requires host-local physical prediction.
+- Reuse of the landed typed collision coverage, static-query, bounded body-response, and
+  camera-agnostic placed-motion contracts only when a named spawned scenario requires host-local
+  physical prediction. A solved entity path preserves accepted response bends and host-owned portal
+  placement; it does not inherit the Explorer camera session or transport.
 - Animated parent-part attachment following with ancestor-derived authoritative residency.
 - `PhysicsScriptTable` decode, transport, and intensity selection — inherited from the effects
   plan by its 2026-08-06 scope ratification. Retail proved the mechanism is exclusively
@@ -105,7 +107,7 @@ a spawned mutation bus and must not be stretched into one.
 - Frontend motion-table decoding or semantic motion selection.
 - A second template cache, animation system, effect dispatcher, placement authority, or entity feed.
 - Reusing the Explorer physical-camera session, app-owned camera body dimensions, input mapping, or
-  predicted-camera transport as a spawned-entity runtime.
+  fixed-tick camera transport as a spawned-entity runtime.
 - Compatibility shims for the superseded spawned commit-bundle proposal.
 
 ## Ground Truth and Existing Precedent
@@ -149,7 +151,6 @@ a spawned mutation bus and must not be stretched into one.
 - `apps/holtburger-3d/src/lib/game/systems/dynamic-entity-system.ts`
 - `apps/holtburger-3d/src/lib/game/systems/animation-system.ts`
 - `apps/holtburger-3d/src/lib/game/systems/effect-system.ts`
-- `apps/holtburger-3d/src/lib/game/scene/portal-trace.ts`
 
 ## Final Ownership Model
 
@@ -159,13 +160,14 @@ a spawned mutation bus and must not be stretched into one.
 | Semantic appearance                                | `holtburger-world`                               | Complete snapshot and visual-template staging                 |
 | Attachment and inherited residency                 | `holtburger-world`                               | Complete snapshot/deltas, then frontend attachment projection |
 | Accepted body placement and correction kind        | `holtburger-world`                               | Sparse placement projection                                   |
+| Collision-accepted geometry and portal placement   | `holtburger-world` placed-motion path            | First concrete host-local physical prediction scenario         |
 | Semantic motion state and resolved selection       | `holtburger-world` using a content-built catalog | Spatial projection and frontend motion-plan playback          |
 | Complete initial entity snapshot                   | `holtburger-core` view contract                  | Existing client and Tauri consumers                           |
 | Broadcast lag detection                            | Each Rust `ClientViewEvent` receiver             | Stop forwarding and request a fresh snapshot                  |
 | Explorer scenarios and deterministic controls      | App-local Rust driver                            | Shared world mutation APIs                                    |
 | Tauri serialization, listener handshake, and relay | App-local Tauri adapter                          | Frontend entity mirror                                        |
 | Async presentation freshness                       | Existing frontend owner/staging generations      | Template, animation, and behavior activation                  |
-| Predicted rendered placement/residency             | Frontend `PlacementSystem`                       | Scene projection and renderer submission                      |
+| Render-time position along a host-placed path       | Frontend `PlacementSystem`                       | Scene projection and renderer submission                      |
 | Final scene-node transform                         | Frontend presentation projection                 | Renderer-facing dynamic nodes                                 |
 | WebGL batching                                     | Renderer                                         | Dynamic draw submission                                       |
 
@@ -407,8 +409,12 @@ the frontend receives only the presentation facts required to predict the same t
 - Add frontend `PlacementSystem` as the sole owner of `PresentationPlacement` and root-node writes.
 - Predict from absolute anchor/plan time, apply named decaying continuous correction, and snap on
   complete replacement, forced reposition, teleport, incompatible residency, or timeline reset.
-- Generalize portal tracing for a moving entity across multiple dense cells; normalize outdoor
-  endpoints and retain the last proven residency when topology is missing or ambiguous.
+- For a named host-local physical prediction scenario, serialize the existing world-owned
+  `PlacedMotionPath` with its accepted geometry. Evaluate its supplied placement-stable legs at
+  render cadence; do not restore frontend actor portal traversal or infer residency from endpoints.
+- Keep sparse server-authoritative placement as an explicit anchor until the Phase 4 retail/network
+  evidence names the host-side geometry that can safely become a placed path. Missing topology
+  holds the last proven placement and never falls back to frontend containment.
 - Keep server-authoritative pose available only as diagnostics if a real diagnostic view consumes it.
 
 #### Acceptance Criteria
@@ -417,7 +423,7 @@ the frontend receives only the presentation facts required to predict the same t
   drift.
 - An ordinary correction converges continuously; a forced correction snaps on the first eligible
   presentation sample.
-- One large sample can cross multiple portals, and unavailable topology never guesses residency.
+- One placed path can cross multiple portals, and unavailable topology never guesses residency.
 - Animation, effects, and renderer code do not write root placement independently.
 - Clear, complete replacement, and resnapshot remove all prediction/correction state.
 

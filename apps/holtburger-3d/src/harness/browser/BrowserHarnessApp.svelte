@@ -205,12 +205,6 @@
 		readonly setWeather: (enabled: boolean) => void;
 		/** Withdraw every requested scene layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
-		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
-		readonly tracePortalSegment: (
-			envCellId: string,
-			start: readonly [number, number, number],
-			endpoint: readonly [number, number, number],
-		) => ReturnType<GameRuntime["tracePortalSegment"]>;
 		/** Exercise the public portal compositor without changing continuous frame settings. */
 		readonly probePortalExecution: (
 			envCellId: string,
@@ -706,32 +700,6 @@
 		};
 	}
 
-	function tracePortalSegment(
-		rawEnvCellId: string,
-		start: readonly [number, number, number],
-		endpoint: readonly [number, number, number],
-	): ReturnType<GameRuntime["tracePortalSegment"]> {
-		if (!runtime) throw new Error("Browser harness runtime is not ready.");
-		const envCellId = parseEnvCellId(rawEnvCellId, "trace");
-		if (
-			start.length !== 3 ||
-			endpoint.length !== 3 ||
-			![...start, ...endpoint].every(Number.isFinite)
-		) {
-			throw new Error(
-				"Browser harness portal trace points must be finite xyz tuples.",
-			);
-		}
-		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
-		return runtime.tracePortalSegment({
-			anchor: {
-				position: sceneVec3(new Vec3(...start)),
-				residency: { envCellId, landblockId },
-			},
-			endpoint: sceneVec3(new Vec3(...endpoint)),
-		});
-	}
-
 	function probePortalExecution(
 		rawEnvCellId: string,
 		position: readonly [number, number, number],
@@ -942,7 +910,6 @@
 					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,
 					resetTiming,
-					tracePortalSegment,
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;

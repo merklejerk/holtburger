@@ -6,7 +6,7 @@ use holtburger_common::{Guid, Vector3};
 
 use super::collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
-    MissingCoverage, MovementObstructionRequest, PlacementRequest,
+    MissingCoverage, MotionWaypoint, MovementObstructionRequest, PlacementRequest,
     anchor_point_to_outdoor_position, landblock_key, separating_displacement,
 };
 
@@ -61,6 +61,8 @@ pub enum PhysicalFlyOutcome {
         body: PhysicalFlyBody,
         /// Actual world-space displacement from the request's starting pose.
         achieved_displacement: Vector3,
+        /// Ordered accepted substep endpoints spanning the normalized solve interval.
+        motion: Vec<MotionWaypoint>,
         /// Anti-tunneling substeps evaluated.
         substeps: usize,
         /// Contact passes evaluated across all substeps.
@@ -127,6 +129,7 @@ pub fn solve_physical_fly(
     let substep = request.displacement / required_substeps as f32;
     let mut body = request.body;
     let mut current = start;
+    let mut motion = Vec::with_capacity(required_substeps);
     let mut contact_passes = 0usize;
     for completed_substeps in 0..required_substeps {
         let mut candidate = current + substep;
@@ -190,11 +193,16 @@ pub fn solve_physical_fly(
             request.body.pose,
             candidate_placement.committed_cell(),
         );
+        motion.push(MotionWaypoint {
+            center: current,
+            end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
+        });
     }
 
     Ok(PhysicalFlyOutcome::Solved {
         body,
         achieved_displacement: current - start,
+        motion,
         substeps: required_substeps,
         contact_passes,
     })
@@ -516,15 +524,30 @@ mod tests {
 
     #[test]
     fn open_motion_preserves_full_three_dimensional_intent() {
-        let body = solved(solve(
+        let displacement = Vector3::new(2.0, -3.0, 4.0);
+        let PhysicalFlyOutcome::Solved { body, motion, .. } = solve(
             &scene(Vec::new()),
             body(Vector3::new(50.0, 50.0, 10.0)),
-            Vector3::new(2.0, -3.0, 4.0),
-        ));
+            displacement,
+        ) else {
+            panic!("expected solved physical fly");
+        };
         assert!(
             (body.pose.coords - Vector3::new(52.0, 47.0, 14.0)).length() < 1e-4,
             "{body:?}"
         );
+        let expected_substeps =
+            (displacement.length() / config().maximum_substep_distance).ceil() as usize;
+        assert_eq!(motion.len(), expected_substeps);
+        assert!(
+            motion
+                .windows(2)
+                .all(|pair| pair[0].end_fraction < pair[1].end_fraction),
+            "accepted path fractions were not strictly ordered: {motion:?}"
+        );
+        let final_waypoint = motion.last().expect("solved motion path was empty");
+        assert_eq!(final_waypoint.end_fraction, 1.0);
+        assert!((final_waypoint.center - body.pose.coords).length() < 1e-4);
     }
 
     #[test]

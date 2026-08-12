@@ -14,8 +14,9 @@ use holtburger_dat::physics::BspNode;
 use holtburger_world::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, EdgeProtection,
     GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest,
-    GroundedSphere, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,
-    PlacementRequest, solve_grounded, solve_physical_fly,
+    GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome,
+    PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, solve_grounded,
+    solve_physical_fly,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -466,12 +467,84 @@ struct PhysicalFlyPortalTrace {
     body: PhysicalFlyBody,
     /// First EnvCell committed during the drive, when entry occurred.
     entered_cell: Option<Guid>,
+    /// Final camera-viewer cell from continuous placed-motion traversal.
+    viewer_cell: Option<Guid>,
+    /// Ticks where endpoint body classification and continuous viewer placement differ.
+    viewer_mismatch_ticks: usize,
     /// Initial camera-sphere elevation used to detect grounded-policy leakage.
     start_z: f32,
     /// Total bounded collision substeps used across the drive.
     substeps: usize,
     /// Total contact-separation passes used across the drive.
     contact_passes: usize,
+    /// Ordered placement changes emitted by the shared placed-motion primitive.
+    placement_transitions: Vec<PlacementLegTransition>,
+}
+
+/// One authoritative placement change inside a solved fixed tick.
+#[derive(Clone, Debug)]
+struct PlacementLegTransition {
+    tick: usize,
+    end_fraction: f32,
+    from: Option<Guid>,
+    to: Option<Guid>,
+}
+
+fn append_placed_motion_transitions(
+    scene: &CollisionScene,
+    tick: usize,
+    request: PlacedMotionPathRequest<'_>,
+    transitions: &mut Vec<PlacementLegTransition>,
+) -> Result<Option<Guid>> {
+    let previous_cell = request.previous_cell;
+    let path = match scene.transit_motion_path(request)? {
+        CollisionQuery::Complete(path) => path,
+        CollisionQuery::MissingCoverage(missing) => {
+            anyhow::bail!("placed-motion trace lost collision coverage: {missing:?}")
+        }
+    };
+    let initial_cell = path.initial().placement().committed_cell();
+    ensure!(
+        initial_cell == previous_cell,
+        "placed-motion trace changed its initial committed cell"
+    );
+    let mut cell = initial_cell;
+    for leg in path.legs() {
+        let next = leg.end().placement().committed_cell();
+        if next != cell {
+            transitions.push(PlacementLegTransition {
+                tick,
+                end_fraction: leg.end_fraction(),
+                from: cell,
+                to: next,
+            });
+        }
+        cell = next;
+    }
+    Ok(cell)
+}
+
+fn format_placement_transitions(transitions: &[PlacementLegTransition]) -> String {
+    if transitions.is_empty() {
+        return "none".to_owned();
+    }
+    transitions
+        .iter()
+        .map(|transition| {
+            format!(
+                "{}@{:.6}:{}>{}",
+                transition.tick,
+                transition.end_fraction,
+                format_cell(transition.from),
+                format_cell(transition.to),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_cell(cell: Option<Guid>) -> String {
+    cell.map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0))
 }
 
 /// Separates invalid diagnostic setup from a valid physical-fly solver trace.
@@ -553,10 +626,15 @@ fn probe_physical_fly_outside_portals(
     });
     let selected = canonical.or_else(|| traversals.first());
     if let Some((waypoint, direction, trace)) = selected {
-        let exited = exit_physical_fly_portal(scene, trace.body, *direction)?;
+        let (exited, exited_viewer_cell, reverse_mismatch_ticks, reverse_transitions) =
+            exit_physical_fly_portal(scene, trace.body, trace.viewer_cell, *direction)?;
         ensure!(
             exited.cell.is_none(),
             "selected physical-fly route did not reverse outdoors"
+        );
+        ensure!(
+            exited_viewer_cell.is_none(),
+            "selected physical-fly viewer path did not reverse outdoors"
         );
         if waypoint.cell == 0xda55_0100 && waypoint.portal_index == 1 && direction.x < -0.9 {
             ensure!(
@@ -565,7 +643,7 @@ fn probe_physical_fly_outside_portals(
             );
         }
         println!(
-            "physical_fly_route cell=0x{:08X} portal={} direction=({:.3},{:.3}) start_z={:.3} entered=0x{:08X} final_cell={} final=({:.3},{:.3},{:.3}) vertical_drift={:.4} substeps={} contact_passes={} reverse_cell={} reverse_final=({:.3},{:.3},{:.3})",
+            "physical_fly_route cell=0x{:08X} portal={} direction=({:.3},{:.3}) start_z={:.3} entered=0x{:08X} final_cell={} viewer_cell={} viewer_mismatch_ticks={} final=({:.3},{:.3},{:.3}) vertical_drift={:.4} substeps={} contact_passes={} placement_legs={} reverse_cell={} reverse_viewer_cell={} reverse_viewer_mismatch_ticks={} reverse_final=({:.3},{:.3},{:.3}) reverse_placement_legs={}",
             waypoint.cell,
             waypoint.portal_index,
             direction.x,
@@ -576,18 +654,24 @@ fn probe_physical_fly_outside_portals(
                 .body
                 .cell
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
+            format_cell(trace.viewer_cell),
+            trace.viewer_mismatch_ticks,
             trace.body.pose.coords.x,
             trace.body.pose.coords.y,
             trace.body.pose.coords.z,
             trace.body.pose.coords.z - trace.start_z,
             trace.substeps,
             trace.contact_passes,
+            format_placement_transitions(&trace.placement_transitions),
             exited
                 .cell
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
+            format_cell(exited_viewer_cell),
+            reverse_mismatch_ticks,
             exited.pose.coords.x,
             exited.pose.coords.y,
             exited.pose.coords.z,
+            format_placement_transitions(&reverse_transitions),
         );
     }
     if landblock_id == 0xda55_ffff && portal_cell.is_none() && portal_index.is_none() {
@@ -657,16 +741,23 @@ fn traverse_physical_fly_portal(
         return Ok(PhysicalFlyPortalAttempt::Trace(PhysicalFlyPortalTrace {
             body,
             entered_cell: None,
+            viewer_cell: body.cell,
+            viewer_mismatch_ticks: 0,
             start_z,
             substeps: 0,
             contact_passes: 0,
+            placement_transitions: Vec::new(),
         }));
     }
 
     let mut entered_cell = None;
     let mut substeps = 0;
     let mut contact_passes = 0;
+    let mut viewer_cell = body.cell;
+    let mut viewer_mismatch_ticks = 0;
+    let mut placement_transitions = Vec::new();
     for tick in 0..30 {
+        let previous = body;
         let solved = solved_physical_fly(solve_physical_fly(
             scene,
             PHYSICAL_FLY_CONFIG,
@@ -676,6 +767,20 @@ fn traverse_physical_fly_portal(
             },
         )?)
         .with_context(|| format!("drive tick {tick}"))?;
+        let path_cell = append_placed_motion_transitions(
+            scene,
+            tick,
+            PlacedMotionPathRequest {
+                previous_cell: viewer_cell,
+                anchor: Guid(landblock_id),
+                start: previous.pose.coords,
+                radius: previous.radius,
+                waypoints: &solved.motion,
+            },
+            &mut placement_transitions,
+        )?;
+        viewer_cell = path_cell;
+        viewer_mismatch_ticks += usize::from(viewer_cell != solved.body.cell);
         body = solved.body;
         substeps += solved.substeps;
         contact_passes += solved.contact_passes;
@@ -684,9 +789,12 @@ fn traverse_physical_fly_portal(
     Ok(PhysicalFlyPortalAttempt::Trace(PhysicalFlyPortalTrace {
         body,
         entered_cell,
+        viewer_cell,
+        viewer_mismatch_ticks,
         start_z,
         substeps,
         contact_passes,
+        placement_transitions,
     }))
 }
 
@@ -698,12 +806,15 @@ struct SolvedPhysicalFly {
     substeps: usize,
     /// Contact-separation passes consumed by the solve.
     contact_passes: usize,
+    /// Ordered collision-accepted endpoints produced by the solver.
+    motion: Vec<MotionWaypoint>,
 }
 
 fn solved_physical_fly(outcome: PhysicalFlyOutcome) -> Result<SolvedPhysicalFly> {
     match outcome {
         PhysicalFlyOutcome::Solved {
             body,
+            motion,
             substeps,
             contact_passes,
             ..
@@ -711,6 +822,7 @@ fn solved_physical_fly(outcome: PhysicalFlyOutcome) -> Result<SolvedPhysicalFly>
             body,
             substeps,
             contact_passes,
+            motion,
         }),
         PhysicalFlyOutcome::MissingCoverage { missing, .. } => {
             anyhow::bail!("physical-fly portal trace lost collision coverage: {missing:?}")
@@ -734,10 +846,20 @@ fn solved_physical_fly(outcome: PhysicalFlyOutcome) -> Result<SolvedPhysicalFly>
 fn exit_physical_fly_portal(
     scene: &CollisionScene,
     mut body: PhysicalFlyBody,
+    mut viewer_cell: Option<Guid>,
     entry_direction: Vector3,
-) -> Result<PhysicalFlyBody> {
+) -> Result<(
+    PhysicalFlyBody,
+    Option<Guid>,
+    usize,
+    Vec<PlacementLegTransition>,
+)> {
+    let anchor = Guid(body.pose.landblock_id.0 & 0xffff_0000 | 0x0000_ffff);
+    let mut viewer_mismatch_ticks = 0;
+    let mut placement_transitions = Vec::new();
     for tick in 0..60 {
-        body = solved_physical_fly(solve_physical_fly(
+        let previous = body;
+        let solved = solved_physical_fly(solve_physical_fly(
             scene,
             PHYSICAL_FLY_CONFIG,
             PhysicalFlyRequest {
@@ -745,10 +867,29 @@ fn exit_physical_fly_portal(
                 displacement: entry_direction * -WALK_SPEED * HOST_TICK_SECONDS,
             },
         )?)
-        .with_context(|| format!("reverse tick {tick}"))?
-        .body;
+        .with_context(|| format!("reverse tick {tick}"))?;
+        let path_cell = append_placed_motion_transitions(
+            scene,
+            tick,
+            PlacedMotionPathRequest {
+                previous_cell: viewer_cell,
+                anchor,
+                start: previous.pose.coords,
+                radius: previous.radius,
+                waypoints: &solved.motion,
+            },
+            &mut placement_transitions,
+        )?;
+        viewer_cell = path_cell;
+        viewer_mismatch_ticks += usize::from(viewer_cell != solved.body.cell);
+        body = solved.body;
     }
-    Ok(body)
+    Ok((
+        body,
+        viewer_cell,
+        viewer_mismatch_ticks,
+        placement_transitions,
+    ))
 }
 
 fn probe_grounded_outside_portals(
@@ -887,7 +1028,7 @@ fn probe_grounded_outside_portals(
     {
         let exited = exit_outside_portal(scene, trace.body.clone(), *direction, production_pair())?;
         println!(
-            "grounded_route pair cell=0x{:08X} portal={} center=({:.3},{:.3},{:.3}) direction=({:.3},{:.3}) entered=0x{:08X} final_cell={} viewer_cell={} viewer_heading={} viewer_mismatch_ticks={} final=({:.3},{:.3},{:.3}) grounded={} constraints={} reverse_cell={} reverse_final=({:.3},{:.3},{:.3}) reverse_grounded={}",
+            "grounded_route pair cell=0x{:08X} portal={} center=({:.3},{:.3},{:.3}) direction=({:.3},{:.3}) entered=0x{:08X} final_cell={} viewer_cell={} viewer_heading={} viewer_mismatch_ticks={} viewer_placement_legs={} final=({:.3},{:.3},{:.3}) grounded={} constraints={} reverse_cell={} reverse_final=({:.3},{:.3},{:.3}) reverse_grounded={}",
             waypoint.cell,
             waypoint.portal_index,
             waypoint.center.x,
@@ -905,6 +1046,7 @@ fn probe_grounded_outside_portals(
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
             trace.viewer_heading,
             trace.viewer_mismatch_ticks,
+            format_placement_transitions(&trace.viewer_placement_transitions),
             trace.body.pose.coords.x,
             trace.body.pose.coords.y,
             trace.body.pose.coords.z,
@@ -978,6 +1120,7 @@ fn exit_outside_portal(
     spheres: GroundedBodySpheres,
 ) -> Result<SolvedGrounded> {
     let mut constraint_count = 0;
+    let mut motion = Vec::new();
     for _ in 0..60 {
         let solved = solved_grounded(solve_grounded(
             scene,
@@ -991,10 +1134,12 @@ fn exit_outside_portal(
         )?)?;
         body = solved.body;
         constraint_count = solved.constraint_count;
+        motion = solved.motion;
     }
     Ok(SolvedGrounded {
         body,
         constraint_count,
+        motion,
     })
 }
 
@@ -1087,15 +1232,17 @@ struct GroundedPortalTrace {
     viewer_cell: Option<Guid>,
     viewer_heading: &'static str,
     viewer_mismatch_ticks: usize,
+    viewer_placement_transitions: Vec<PlacementLegTransition>,
     constraint_count: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct GroundedViewerTrace {
     label: &'static str,
     direction: Vector3,
     cell: Option<Guid>,
     mismatch_ticks: usize,
+    placement_transitions: Vec<PlacementLegTransition>,
 }
 
 enum GroundedPortalAttempt {
@@ -1106,6 +1253,7 @@ enum GroundedPortalAttempt {
 struct SolvedGrounded {
     body: GroundedBody,
     constraint_count: usize,
+    motion: Vec<MotionWaypoint>,
 }
 
 fn traverse_outside_portal(
@@ -1151,6 +1299,7 @@ fn traverse_outside_portal(
     let mut constraint_count = 0;
     let mut viewer_traces = grounded_viewer_traces(direction);
     for tick in 0..4 {
+        let previous = body.clone();
         let solved = solved_grounded(solve_grounded(
             scene,
             GROUNDED_CONFIG,
@@ -1164,7 +1313,15 @@ fn traverse_outside_portal(
         .with_context(|| format!("settle tick {tick}"))?;
         body = solved.body;
         constraint_count = solved.constraint_count;
-        transit_grounded_viewers(scene, landblock_id, &body, &mut viewer_traces)?;
+        transit_grounded_viewers(
+            scene,
+            landblock_id,
+            tick,
+            &previous,
+            &solved.motion,
+            &body,
+            &mut viewer_traces,
+        )?;
     }
     if body.cell.is_some() {
         let viewer = most_divergent_viewer(viewer_traces);
@@ -1174,12 +1331,14 @@ fn traverse_outside_portal(
             viewer_cell: viewer.cell,
             viewer_heading: viewer.label,
             viewer_mismatch_ticks: viewer.mismatch_ticks,
+            viewer_placement_transitions: viewer.placement_transitions,
             constraint_count,
         }));
     }
 
     let mut entered_cell = None;
     for tick in 0..30 {
+        let previous = body.clone();
         let solved = solved_grounded(solve_grounded(
             scene,
             GROUNDED_CONFIG,
@@ -1194,7 +1353,15 @@ fn traverse_outside_portal(
         body = solved.body;
         constraint_count = solved.constraint_count;
         entered_cell = entered_cell.or(body.cell);
-        transit_grounded_viewers(scene, landblock_id, &body, &mut viewer_traces)?;
+        transit_grounded_viewers(
+            scene,
+            landblock_id,
+            tick + 4,
+            &previous,
+            &solved.motion,
+            &body,
+            &mut viewer_traces,
+        )?;
     }
     let viewer = most_divergent_viewer(viewer_traces);
     Ok(GroundedPortalAttempt::Trace(GroundedPortalTrace {
@@ -1203,6 +1370,7 @@ fn traverse_outside_portal(
         viewer_cell: viewer.cell,
         viewer_heading: viewer.label,
         viewer_mismatch_ticks: viewer.mismatch_ticks,
+        viewer_placement_transitions: viewer.placement_transitions,
         constraint_count,
     }))
 }
@@ -1215,24 +1383,28 @@ fn grounded_viewer_traces(travel_direction: Vector3) -> [GroundedViewerTrace; 4]
             direction: travel_direction,
             cell: None,
             mismatch_ticks: 0,
+            placement_transitions: Vec::new(),
         },
         GroundedViewerTrace {
             label: "opposite",
             direction: travel_direction * -1.0,
             cell: None,
             mismatch_ticks: 0,
+            placement_transitions: Vec::new(),
         },
         GroundedViewerTrace {
             label: "left",
             direction: left,
             cell: None,
             mismatch_ticks: 0,
+            placement_transitions: Vec::new(),
         },
         GroundedViewerTrace {
             label: "right",
             direction: left * -1.0,
             cell: None,
             mismatch_ticks: 0,
+            placement_transitions: Vec::new(),
         },
     ]
 }
@@ -1240,12 +1412,34 @@ fn grounded_viewer_traces(travel_direction: Vector3) -> [GroundedViewerTrace; 4]
 fn transit_grounded_viewers(
     scene: &CollisionScene,
     landblock_id: u32,
+    tick: usize,
+    previous_body: &GroundedBody,
+    motion: &[MotionWaypoint],
     body: &GroundedBody,
     traces: &mut [GroundedViewerTrace],
 ) -> Result<()> {
     for trace in traces {
-        trace.cell =
-            transit_grounded_viewer(scene, landblock_id, body, trace.cell, trace.direction)?;
+        let offset = Vector3::new(0.0, 0.0, FIRST_PERSON_EYE_HEIGHT)
+            + trace.direction * FIRST_PERSON_FORWARD_OFFSET;
+        let viewer_waypoints = motion
+            .iter()
+            .map(|waypoint| MotionWaypoint {
+                center: waypoint.center + offset,
+                end_fraction: waypoint.end_fraction,
+            })
+            .collect::<Vec<_>>();
+        trace.cell = append_placed_motion_transitions(
+            scene,
+            tick,
+            PlacedMotionPathRequest {
+                previous_cell: trace.cell,
+                anchor: Guid(landblock_id),
+                start: previous_body.pose.coords + offset,
+                radius: VIEWER_SPHERE_RADIUS,
+                waypoints: &viewer_waypoints,
+            },
+            &mut trace.placement_transitions,
+        )?;
         trace.mismatch_ticks += usize::from(body.cell != trace.cell);
     }
     Ok(())
@@ -1256,29 +1450,6 @@ fn most_divergent_viewer(traces: [GroundedViewerTrace; 4]) -> GroundedViewerTrac
         .into_iter()
         .max_by_key(|trace| trace.mismatch_ticks)
         .expect("four canonical viewer headings")
-}
-
-fn transit_grounded_viewer(
-    scene: &CollisionScene,
-    landblock_id: u32,
-    body: &GroundedBody,
-    previous_cell: Option<Guid>,
-    direction: Vector3,
-) -> Result<Option<Guid>> {
-    let center = body.pose.coords
-        + Vector3::new(0.0, 0.0, FIRST_PERSON_EYE_HEIGHT)
-        + direction * FIRST_PERSON_FORWARD_OFFSET;
-    match scene.transit_cell(CellTransitRequest {
-        previous_cell,
-        anchor: Guid(landblock_id),
-        center,
-        radius: VIEWER_SPHERE_RADIUS,
-    })? {
-        CollisionQuery::Complete(placement) => Ok(placement.committed_cell()),
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("grounded viewer trace lost collision coverage: {missing:?}")
-        }
-    }
 }
 
 fn initial_placement_contacts(
@@ -1320,10 +1491,12 @@ fn solved_grounded(outcome: GroundedOutcome) -> Result<SolvedGrounded> {
         GroundedOutcome::Solved {
             body,
             constraint_count,
+            motion,
             ..
         } => Ok(SolvedGrounded {
             body,
             constraint_count,
+            motion,
         }),
         GroundedOutcome::MissingCoverage { missing, .. } => {
             anyhow::bail!("grounded portal trace lost collision coverage: {missing:?}")

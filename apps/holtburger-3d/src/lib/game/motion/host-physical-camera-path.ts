@@ -20,22 +20,39 @@ export type PhysicalCameraMode = "physical-fly" | "grounded-walk";
 /** Every Explorer camera authority mode. */
 export type ExplorerCameraMode = "free-fly" | PhysicalCameraMode;
 
-/** One short-lived, host-solved prediction segment in AC axes. */
-export interface HostPhysicalCameraSegment {
-	/** Runtime generation; segments from an earlier handoff are stale. */
-	readonly session: number;
-	/** Monotonic segment counter within the session. */
-	readonly sequence: number;
-	/** Physical response that produced this segment. */
-	readonly mode: PhysicalCameraMode;
-	/** Portal-seeded viewer placement committed atomically with the solved body pose. */
+/** One authoritative viewer point in landblock-local AC axes. */
+interface HostPhysicalCameraPathPoint {
+	/** Portal-seeded placement that becomes authoritative with this point. */
 	readonly residency: SceneResidency;
-	/** Presented viewer origin in landblock-local AC `[east, north, up]`. */
+	/** Presented viewer origin in `residency.landblockId` local `[east, north, up]`. */
 	readonly origin: readonly [number, number, number];
-	/** Achieved AC-world velocity used only for presentation prediction. */
-	readonly velocity: readonly [number, number, number];
-	/** Constant-velocity validity interval in milliseconds. */
-	readonly horizonMs: number;
+}
+
+/** One placement-stable motion leg ending at an authoritative point. */
+interface HostPhysicalCameraPathLeg {
+	/** Monotonic normalized fixed-tick fraction at this boundary. */
+	readonly endFraction: number;
+	/** Point and residency that become authoritative at the exact boundary. */
+	readonly end: HostPhysicalCameraPathPoint;
+}
+
+/** One fixed-tick, host-solved placed-motion path in AC axes. */
+export interface HostPhysicalCameraPath {
+	/** Runtime generation; paths from an earlier handoff are stale. */
+	readonly session: number;
+	/** Monotonic path counter within the session. */
+	readonly sequence: number;
+	/** Physical response that produced this path. */
+	readonly mode: PhysicalCameraMode;
+	/** Positive fixed-tick playback duration. */
+	readonly durationMs: number;
+	/** Authoritative point at normalized tick fraction zero. */
+	readonly initial: HostPhysicalCameraPathPoint;
+	/** Non-empty accepted geometry and placement transitions. */
+	readonly legs: readonly [
+		HostPhysicalCameraPathLeg,
+		...HostPhysicalCameraPathLeg[],
+	];
 	readonly status: PhysicalCameraTickStatus;
 	/** Whether grounded response retained walkable lower-sphere support. */
 	readonly grounded: boolean;
@@ -53,45 +70,101 @@ export interface HostPhysicalCameraSegment {
 	readonly solveDurationMs: number;
 }
 
-/** Canonical presented position and authoritative residency evaluated from one host segment. */
+/** Canonical presented position and authoritative residency evaluated from one host path. */
 export interface PhysicalCameraPlacement {
-	/** Predicted camera position retained in canonical scene space. */
+	/** Camera position retained in canonical scene space. */
 	readonly position: SceneVec3;
-	/** Host-committed portal placement paired atomically with the solved position. */
+	/** Host-supplied portal placement paired atomically with the path position. */
 	readonly residency: SceneResidency;
 }
 
-/** Maximum prediction age relative to one host validity horizon. */
-export const MAX_EXTRAPOLATION_FACTOR = 2;
-
 /**
- * Evaluates the latest host path without allowing a starved frontend to drift indefinitely.
+ * Evaluates one host path without extending it or independently classifying portal placement.
  *
  * AC axes are `[east, north, up]`; canonical render-scene axes are `[east, up, south]`.
  */
-export function evaluateHostPhysicalCameraSegment(
-	segment: HostPhysicalCameraSegment,
+export function evaluateHostPhysicalCameraPath(
+	path: HostPhysicalCameraPath,
 	elapsedMs: number,
 ): PhysicalCameraPlacement {
-	const elapsedSeconds =
-		Math.min(
-			Math.max(elapsedMs, 0),
-			segment.horizonMs * MAX_EXTRAPOLATION_FACTOR,
-		) / 1_000;
-	const owner = getLandblockCoordinates(segment.residency.landblockId);
-	const acX =
-		owner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE +
-		segment.origin[0] +
-		segment.velocity[0] * elapsedSeconds;
-	const acY =
-		owner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE +
-		segment.origin[1] +
-		segment.velocity[1] * elapsedSeconds;
-	const acZ = segment.origin[2] + segment.velocity[2] * elapsedSeconds;
+	validateHostPhysicalCameraPath(path);
+	const progress = Math.min(Math.max(elapsedMs / path.durationMs, 0), 1);
+	let start = path.initial;
+	let startFraction = 0;
+	for (const leg of path.legs) {
+		if (progress < leg.endFraction) {
+			const localProgress =
+				(progress - startFraction) / (leg.endFraction - startFraction);
+			return interpolatePathPoints(start, leg.end, localProgress);
+		}
+		if (progress === leg.endFraction) return pathPointPlacement(leg.end);
+		start = leg.end;
+		startFraction = leg.endFraction;
+	}
+	return pathPointPlacement(start);
+}
+
+/** Reject malformed host paths at the transport boundary instead of sampling incoherent state. */
+export function validateHostPhysicalCameraPath(
+	path: HostPhysicalCameraPath,
+): void {
+	if (!Number.isFinite(path.durationMs) || path.durationMs <= 0) {
+		throw new Error(
+			"Host physical-camera path duration must be positive and finite.",
+		);
+	}
+	if (path.legs.length === 0) {
+		throw new Error("Host physical-camera path must contain at least one leg.");
+	}
+	let previous = 0;
+	for (const leg of path.legs) {
+		if (
+			!Number.isFinite(leg.endFraction) ||
+			leg.endFraction <= previous ||
+			leg.endFraction > 1
+		) {
+			throw new Error(
+				"Host physical-camera path fractions must increase through (0, 1].",
+			);
+		}
+		previous = leg.endFraction;
+	}
+	if (previous !== 1) {
+		throw new Error("Host physical-camera path must end at tick fraction one.");
+	}
+}
+
+function interpolatePathPoints(
+	start: HostPhysicalCameraPathPoint,
+	end: HostPhysicalCameraPathPoint,
+	fraction: number,
+): PhysicalCameraPlacement {
+	const startPosition = pathPointPosition(start);
+	const endPosition = pathPointPosition(end);
 	return {
-		position: sceneVec3(new Vec3(acX, acZ, -acY)),
-		residency: segment.residency,
+		position: sceneVec3(
+			new Vec3(
+				startPosition.x + (endPosition.x - startPosition.x) * fraction,
+				startPosition.y + (endPosition.y - startPosition.y) * fraction,
+				startPosition.z + (endPosition.z - startPosition.z) * fraction,
+			),
+		),
+		// The start placement owns the half-open leg interval. The exact endpoint is handled above.
+		residency: start.residency,
 	};
+}
+
+function pathPointPlacement(
+	point: HostPhysicalCameraPathPoint,
+): PhysicalCameraPlacement {
+	return { position: pathPointPosition(point), residency: point.residency };
+}
+
+function pathPointPosition(point: HostPhysicalCameraPathPoint): SceneVec3 {
+	const owner = getLandblockCoordinates(point.residency.landblockId);
+	const acX = owner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + point.origin[0];
+	const acY = owner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + point.origin[1];
+	return sceneVec3(new Vec3(acX, point.origin[2], -acY));
 }
 
 /** Explorer camera axes in canonical scene coordinates. */

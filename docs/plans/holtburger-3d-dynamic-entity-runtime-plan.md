@@ -6,7 +6,7 @@ Created: 2026-07-31
 Evidence pass: 2026-07-31
 Roadmap split: 2026-07-31
 Convergence review: 2026-08-01
-Host-physics reconciliation: 2026-08-11
+Host-physics reconciliation: 2026-08-12
 
 ## Goal
 
@@ -23,7 +23,7 @@ by explorer scenarios or a future network client.
 | Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`     |
 | Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                       |
 | Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day     |
-| Host physical camera topology     | Implemented 2026-08-11    | Shared static queries/solvers landed; maintainer acceptance pending |
+| Host physical camera topology     | Implemented 2026-08-12    | Shared static queries, solvers, and placed-motion paths landed; flash acceptance pending |
 | Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; next mainline plan |
 
 ## Why This Roadmap Is Split
@@ -108,7 +108,7 @@ authority requirements.
 Plan: [holtburger-3d-spawned-entity-explorer-runtime-plan.md](holtburger-3d-spawned-entity-explorer-runtime-plan.md)
 
 Progress: Queued — next mainline plan now that the authored-effects plan is complete; convergence
-audit and rewrite complete (2026-08-01), host-physics reconciliation recorded (2026-08-11).
+audit and rewrite complete (2026-08-01), host-physics path reconciliation recorded (2026-08-12).
 
 Outcome:
 
@@ -117,6 +117,8 @@ Outcome:
 - Spawned lifecycle and mutations cross Tauri through the existing view-event path with a complete
   initial snapshot and explicit resnapshot after detected receiver lag.
 - World state owns canonical appearance, lifecycle operations, placement, attachment, and motion facts.
+- Host-local physical prediction can reuse the world-owned placed-motion path, preserving accepted
+  solver bends and ordered portal placement without inheriting camera cadence, dimensions, or UX.
 - Spawned attach/detach provides the concrete lifecycle consumer for shared animated parent-part
   following.
 - `MotionCatalog` and `MotionResolver` produce shared `ResolvedMotionPlan` values in Rust.

@@ -47,6 +47,30 @@ pub enum CollisionQueryError {
     /// A bounded probe distance is non-finite or negative.
     #[error("collision query distance must be finite and non-negative")]
     InvalidDistance,
+    /// A placed-motion request supplied no accepted geometric leg.
+    #[error("placed-motion path must contain at least one waypoint")]
+    EmptyMotionPath,
+    /// A waypoint fraction contains NaN or infinity.
+    #[error("placed-motion waypoint fraction must be finite")]
+    NonFiniteMotionFraction,
+    /// A waypoint fraction does not lie inside the normalized fixed-tick interval.
+    #[error("placed-motion waypoint fraction must be greater than zero and at most one")]
+    MotionFractionOutOfRange,
+    /// Waypoint fractions do not advance strictly through the fixed tick.
+    #[error("placed-motion waypoint fractions must be strictly increasing")]
+    NonIncreasingMotionFraction,
+    /// The final accepted waypoint does not close the fixed tick.
+    #[error("placed-motion path must end at normalized tick fraction one")]
+    IncompleteMotionPath,
+    /// Directed portal traversal cycled instead of advancing through distinct boundaries.
+    #[error("placed-motion path exceeded the resident portal-transition bound")]
+    MotionTransitionLimitExceeded,
+    /// A supplied prior cell is not present in the authoritative collision scene.
+    #[error("placed-motion EnvCell 0x{cell:08X} is absent from the collision scene")]
+    UnknownMotionCell {
+        /// Full missing EnvCell DID.
+        cell: u32,
+    },
 }
 
 /// Invalid collision facts or residency changes rejected before scene state commits.
@@ -248,11 +272,114 @@ pub struct CellTransitRequest {
     pub radius: f32,
 }
 
+/// One accepted geometric endpoint within a normalized fixed-tick motion path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionWaypoint {
+    /// Anchor-local sphere center at this accepted endpoint.
+    pub center: Vector3,
+    /// Strictly increasing completion fraction in `(0, 1]`; the final waypoint must be `1`.
+    pub end_fraction: f32,
+}
+
+/// Camera-agnostic request to attach authoritative placement to accepted motion geometry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlacedMotionPathRequest<'a> {
+    /// Interior cell committed with the initial point, or `None` while outdoors.
+    pub previous_cell: Option<Guid>,
+    /// Normalized landblock whose local frame contains every waypoint center.
+    pub anchor: Guid,
+    /// Anchor-local initial sphere center.
+    pub start: Vector3,
+    /// Positive mover radius used for coverage and reached collision domains.
+    pub radius: f32,
+    /// Ordered collision-accepted geometry; portal crossings are inserted between these endpoints.
+    pub waypoints: &'a [MotionWaypoint],
+}
+
+/// One position paired with the complete collision placement valid at that position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedMotionPoint {
+    center: Vector3,
+    placement: CollisionPlacement,
+}
+
+impl PlacedMotionPoint {
+    /// Anchor-local mover center.
+    pub fn center(&self) -> Vector3 {
+        self.center
+    }
+
+    /// Authoritative cell and collision domains at `center`.
+    pub fn placement(&self) -> &CollisionPlacement {
+        &self.placement
+    }
+}
+
+/// One placement-stable path leg ending at an authoritative point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedMotionLeg {
+    end_fraction: f32,
+    end: PlacedMotionPoint,
+}
+
+impl PlacedMotionLeg {
+    /// Monotonic normalized fixed-tick fraction at this leg boundary.
+    pub fn end_fraction(&self) -> f32 {
+        self.end_fraction
+    }
+
+    /// Position and placement that become authoritative at the exact boundary.
+    pub fn end(&self) -> &PlacedMotionPoint {
+        &self.end
+    }
+}
+
+/// Non-empty accepted motion whose position and placement transitions cannot be sampled apart.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedMotionPath {
+    anchor: Guid,
+    initial: PlacedMotionPoint,
+    legs: Vec<PlacedMotionLeg>,
+}
+
+impl PlacedMotionPath {
+    /// Normalized landblock frame shared by every retained point.
+    pub fn anchor(&self) -> Guid {
+        self.anchor
+    }
+
+    /// Authoritative point at normalized tick fraction zero.
+    pub fn initial(&self) -> &PlacedMotionPoint {
+        &self.initial
+    }
+
+    /// Non-empty ordered path legs, including accepted bends and placement-only splits.
+    pub fn legs(&self) -> &[PlacedMotionLeg] {
+        &self.legs
+    }
+
+    /// Authoritative point committed for the next fixed tick.
+    pub fn final_point(&self) -> &PlacedMotionPoint {
+        &self
+            .legs
+            .last()
+            .expect("placed-motion paths are constructed non-empty")
+            .end
+    }
+}
+
 /// Stable reference to a collider that remains owned by its source landblock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct ColliderReference {
     owner: Guid,
     collider_index: usize,
+}
+
+/// One exact directed portal crossing along a single accepted geometric leg.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PlacementTransition {
+    fraction: f32,
+    target_cell: Option<Guid>,
 }
 
 /// Scene-derived equivalent of retail's outdoor and EnvCell static shadow lists.
@@ -868,6 +995,319 @@ impl CollisionScene {
         Ok(CollisionQuery::Complete(placement))
     }
 
+    /// Attaches exact, prior-cell-seeded placement transitions to accepted geometric motion.
+    ///
+    /// This operation does not solve collision or predict future motion. Callers provide every
+    /// accepted bend. The scene only inserts directed portal boundaries and derives the complete
+    /// collision placement valid at each retained point.
+    pub fn transit_motion_path(
+        &self,
+        request: PlacedMotionPathRequest<'_>,
+    ) -> Result<CollisionQuery<PlacedMotionPath>, CollisionQueryError> {
+        validate_motion_waypoints(request.waypoints)?;
+        let initial_placement = match self.placement_for_committed_cell(
+            request.anchor,
+            request.start,
+            request.radius,
+            request.previous_cell,
+        )? {
+            CollisionQuery::Complete(placement) => placement,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+        let mut path = PlacedMotionPath {
+            anchor: landblock_key(request.anchor),
+            initial: PlacedMotionPoint {
+                center: request.start,
+                placement: initial_placement,
+            },
+            legs: Vec::new(),
+        };
+        let mut geometric_start = request.start;
+        let mut geometric_start_fraction = 0.0;
+        let mut current_cell = request.previous_cell;
+
+        for waypoint in request.waypoints {
+            let sweep = CoverageRequest {
+                anchor: request.anchor,
+                start: geometric_start,
+                end: waypoint.center,
+                radius: request.radius,
+            };
+            let touched = match self.coverage(sweep)? {
+                CollisionQuery::Complete(touched) => touched,
+                CollisionQuery::MissingCoverage(missing) => {
+                    return Ok(CollisionQuery::MissingCoverage(missing));
+                }
+            };
+            let transition_limit = self
+                .landblocks
+                .values()
+                .map(|asset| {
+                    asset
+                        .static_geometry
+                        .cell_volumes
+                        .iter()
+                        .map(|volume| volume.portals.len())
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
+                .max(1);
+            let mut transition_count = 0;
+            let mut cursor = 0.0;
+            while let Some(transition) = self.next_placement_transition(
+                request.anchor,
+                geometric_start,
+                waypoint.center,
+                cursor,
+                current_cell,
+                &touched,
+            )? {
+                transition_count += 1;
+                if transition_count > transition_limit {
+                    return Err(CollisionQueryError::MotionTransitionLimitExceeded);
+                }
+                let center =
+                    interpolate_point(geometric_start, waypoint.center, transition.fraction);
+                let placement = match self.placement_for_committed_cell(
+                    request.anchor,
+                    center,
+                    request.radius,
+                    transition.target_cell,
+                )? {
+                    CollisionQuery::Complete(placement) => placement,
+                    CollisionQuery::MissingCoverage(missing) => {
+                        return Ok(CollisionQuery::MissingCoverage(missing));
+                    }
+                };
+                let end_fraction = geometric_start_fraction
+                    + (waypoint.end_fraction - geometric_start_fraction) * transition.fraction;
+                append_motion_leg(
+                    &mut path,
+                    end_fraction,
+                    PlacedMotionPoint { center, placement },
+                );
+                current_cell = transition.target_cell;
+                cursor = transition.fraction;
+            }
+
+            let placement = match self.placement_for_committed_cell(
+                request.anchor,
+                waypoint.center,
+                request.radius,
+                current_cell,
+            )? {
+                CollisionQuery::Complete(placement) => placement,
+                CollisionQuery::MissingCoverage(missing) => {
+                    return Ok(CollisionQuery::MissingCoverage(missing));
+                }
+            };
+            append_motion_leg(
+                &mut path,
+                waypoint.end_fraction,
+                PlacedMotionPoint {
+                    center: waypoint.center,
+                    placement,
+                },
+            );
+            geometric_start = waypoint.center;
+            geometric_start_fraction = waypoint.end_fraction;
+        }
+
+        Ok(CollisionQuery::Complete(path))
+    }
+
+    fn placement_for_committed_cell(
+        &self,
+        anchor: Guid,
+        center: Vector3,
+        radius: f32,
+        committed_cell: Option<Guid>,
+    ) -> Result<CollisionQuery<CollisionPlacement>, CollisionQueryError> {
+        if let Some(cell) = committed_cell {
+            let owner = landblock_key(cell);
+            let has_cell = self.landblocks.get(&owner).is_some_and(|asset| {
+                asset
+                    .static_geometry
+                    .cell_volumes
+                    .iter()
+                    .any(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
+            });
+            if !has_cell {
+                return Err(CollisionQueryError::UnknownMotionCell { cell: cell.0 });
+            }
+        }
+        let mut placement = match self.transit_cell(CellTransitRequest {
+            previous_cell: committed_cell,
+            anchor,
+            center,
+            radius,
+        })? {
+            CollisionQuery::Complete(placement) => placement,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+        placement.committed_cell = committed_cell;
+        match committed_cell {
+            Some(cell) => {
+                if !placement.reached_interior_cells.contains(&cell) {
+                    placement.reached_interior_cells.push(cell);
+                }
+            }
+            None => placement.reaches_outdoors = true,
+        }
+        Ok(CollisionQuery::Complete(placement))
+    }
+
+    fn next_placement_transition(
+        &self,
+        anchor: Guid,
+        start: Vector3,
+        end: Vector3,
+        cursor: f32,
+        current_cell: Option<Guid>,
+        touched: &[Guid],
+    ) -> Result<Option<PlacementTransition>, CollisionQueryError> {
+        let segment_length = start.distance(&end);
+        if segment_length <= f32::EPSILON {
+            return Ok(None);
+        }
+        let minimum_advance = CELL_PLANE_TOLERANCE / segment_length;
+        let mut selected: Option<PlacementTransition> = None;
+
+        if let Some(cell) = current_cell {
+            let owner = landblock_key(cell);
+            let asset = self
+                .landblocks
+                .get(&owner)
+                .ok_or(CollisionQueryError::UnknownMotionCell { cell: cell.0 })?;
+            let source = asset
+                .static_geometry
+                .cell_volumes
+                .iter()
+                .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
+                .ok_or(CollisionQueryError::UnknownMotionCell { cell: cell.0 })?;
+            let local_start = source
+                .placement
+                .to_local_space(anchor_to_landblock(start, anchor, owner));
+            let local_end = source
+                .placement
+                .to_local_space(anchor_to_landblock(end, anchor, owner));
+            for portal in &source.portals {
+                let Some(fraction) = directed_plane_crossing_fraction(
+                    portal.plane.distance_to_point(&local_start),
+                    portal.plane.distance_to_point(&local_end),
+                    portal.positive_side,
+                    cursor,
+                    minimum_advance,
+                ) else {
+                    continue;
+                };
+                let target_cell = match portal.target {
+                    CellCollisionPortalTarget::Outdoor => None,
+                    CellCollisionPortalTarget::EnvCell(selector) => {
+                        let target = Guid((owner.0 & 0xffff_0000) | u32::from(selector));
+                        if !self.target_contains_after_crossing(
+                            anchor,
+                            start,
+                            end,
+                            fraction,
+                            minimum_advance,
+                            target,
+                        )? {
+                            continue;
+                        }
+                        Some(target)
+                    }
+                };
+                select_earlier_transition(
+                    &mut selected,
+                    PlacementTransition {
+                        fraction,
+                        target_cell,
+                    },
+                );
+            }
+        } else {
+            for owner in touched {
+                let Some(asset) = self.landblocks.get(owner) else {
+                    continue;
+                };
+                let landblock_start = anchor_to_landblock(start, anchor, *owner);
+                let landblock_end = anchor_to_landblock(end, anchor, *owner);
+                for source in &asset.static_geometry.cell_volumes {
+                    let local_start = source.placement.to_local_space(landblock_start);
+                    let local_end = source.placement.to_local_space(landblock_end);
+                    for portal in &source.portals {
+                        if portal.target != CellCollisionPortalTarget::Outdoor {
+                            continue;
+                        }
+                        let Some(fraction) = directed_plane_crossing_fraction(
+                            portal.plane.distance_to_point(&local_start),
+                            portal.plane.distance_to_point(&local_end),
+                            !portal.positive_side,
+                            cursor,
+                            minimum_advance,
+                        ) else {
+                            continue;
+                        };
+                        let target_cell =
+                            Guid((owner.0 & 0xffff_0000) | u32::from(source.cell_selector));
+                        if !self.target_contains_after_crossing(
+                            anchor,
+                            start,
+                            end,
+                            fraction,
+                            minimum_advance,
+                            target_cell,
+                        )? {
+                            continue;
+                        }
+                        select_earlier_transition(
+                            &mut selected,
+                            PlacementTransition {
+                                fraction,
+                                target_cell: Some(target_cell),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        Ok(selected)
+    }
+
+    fn target_contains_after_crossing(
+        &self,
+        anchor: Guid,
+        start: Vector3,
+        end: Vector3,
+        fraction: f32,
+        minimum_advance: f32,
+        target_cell: Guid,
+    ) -> Result<bool, CollisionQueryError> {
+        let owner = landblock_key(target_cell);
+        let target = self
+            .landblocks
+            .get(&owner)
+            .and_then(|asset| {
+                asset
+                    .static_geometry
+                    .cell_volumes
+                    .iter()
+                    .find(|volume| volume.cell_selector == (target_cell.0 & 0xffff) as u16)
+            })
+            .ok_or(CollisionQueryError::UnknownMotionCell {
+                cell: target_cell.0,
+            })?;
+        let probe_fraction = (fraction + minimum_advance).min(1.0);
+        let probe =
+            anchor_to_landblock(interpolate_point(start, end, probe_fraction), anchor, owner);
+        Ok(volume_reaches(target, probe, 0.0))
+    }
+
     fn contacts(
         &self,
         touched: &[Guid],
@@ -1293,6 +1733,90 @@ fn volume_reaches(
         .all(|plane| plane.distance_to_point(&local) >= -(CELL_PLANE_TOLERANCE + radius.max(0.0)))
 }
 
+fn validate_motion_waypoints(waypoints: &[MotionWaypoint]) -> Result<(), CollisionQueryError> {
+    if waypoints.is_empty() {
+        return Err(CollisionQueryError::EmptyMotionPath);
+    }
+    let mut previous = 0.0;
+    for waypoint in waypoints {
+        if !waypoint.end_fraction.is_finite() {
+            return Err(CollisionQueryError::NonFiniteMotionFraction);
+        }
+        if waypoint.end_fraction <= 0.0 || waypoint.end_fraction > 1.0 {
+            return Err(CollisionQueryError::MotionFractionOutOfRange);
+        }
+        if waypoint.end_fraction <= previous {
+            return Err(CollisionQueryError::NonIncreasingMotionFraction);
+        }
+        previous = waypoint.end_fraction;
+    }
+    if previous != 1.0 {
+        return Err(CollisionQueryError::IncompleteMotionPath);
+    }
+    Ok(())
+}
+
+fn directed_plane_crossing_fraction(
+    start_distance: f32,
+    end_distance: f32,
+    target_is_positive: bool,
+    cursor: f32,
+    minimum_advance: f32,
+) -> Option<f32> {
+    let oriented_start = if target_is_positive {
+        start_distance
+    } else {
+        -start_distance
+    };
+    let oriented_end = if target_is_positive {
+        end_distance
+    } else {
+        -end_distance
+    };
+    let delta = oriented_end - oriented_start;
+    if delta <= f32::EPSILON {
+        return None;
+    }
+    let fraction = -oriented_start / delta;
+    if fraction <= cursor + minimum_advance || fraction > 1.0 + f32::EPSILON {
+        return None;
+    }
+    Some(fraction.clamp(0.0, 1.0))
+}
+
+fn interpolate_point(start: Vector3, end: Vector3, fraction: f32) -> Vector3 {
+    start + (end - start) * fraction
+}
+
+fn select_earlier_transition(
+    selected: &mut Option<PlacementTransition>,
+    candidate: PlacementTransition,
+) {
+    if selected
+        .as_ref()
+        .is_none_or(|current| candidate.fraction < current.fraction - f32::EPSILON)
+    {
+        *selected = Some(candidate);
+    }
+}
+
+fn append_motion_leg(path: &mut PlacedMotionPath, end_fraction: f32, end: PlacedMotionPoint) {
+    if let Some(last) = path.legs.last_mut()
+        && (last.end_fraction - end_fraction).abs() <= f32::EPSILON
+    {
+        // Multiple zero-duration topology boundaries collapse to the final authoritative placement
+        // at that instant. A non-zero-width intermediate cell still receives its own leg.
+        last.end = end;
+        return;
+    }
+    debug_assert!(
+        path.legs
+            .last()
+            .is_none_or(|last| end_fraction > last.end_fraction)
+    );
+    path.legs.push(PlacedMotionLeg { end_fraction, end });
+}
+
 fn validate_coverage(request: CoverageRequest) -> Result<(), CollisionQueryError> {
     if !request.start.x.is_finite()
         || !request.start.y.is_finite()
@@ -1506,6 +2030,43 @@ mod tests {
         scene
     }
 
+    fn placement_scene(cell_volumes: Vec<CellVolume>) -> CollisionScene {
+        let mut center_volumes = Some(cell_volumes);
+        let mut scene = CollisionScene::new();
+        for x in 0xd8..=0xdc {
+            for y in 0x53..=0x57 {
+                let center = x == 0xda && y == 0x55;
+                scene
+                    .insert(LandblockCollisionAsset {
+                        landblock_id: (x << 24) | (y << 16) | 0xffff,
+                        terrain: TerrainCollisionSurface { cells: Vec::new() },
+                        static_geometry: LandblockColliders {
+                            colliders: Vec::new(),
+                            cell_volumes: if center {
+                                center_volumes.take().unwrap()
+                            } else {
+                                Vec::new()
+                            },
+                        },
+                    })
+                    .unwrap();
+            }
+        }
+        scene
+    }
+
+    fn portal(normal_x: f32, d: f32, target: CellCollisionPortalTarget) -> CellCollisionPortal {
+        CellCollisionPortal {
+            plane: Plane {
+                normal: Vector3::new(normal_x, 0.0, 0.0),
+                d,
+            },
+            positive_side: true,
+            target,
+            outdoor_building: None,
+        }
+    }
+
     fn references(indices: impl IntoIterator<Item = usize>) -> Vec<ColliderReference> {
         indices
             .into_iter()
@@ -1567,6 +2128,264 @@ mod tests {
             }),
             Err(CollisionQueryError::InvalidDistance)
         );
+    }
+
+    #[test]
+    fn placed_motion_validation_names_each_invalid_timing_shape() {
+        let scene = CollisionScene::new();
+        fn request(waypoints: &[MotionWaypoint]) -> PlacedMotionPathRequest<'_> {
+            PlacedMotionPathRequest {
+                previous_cell: None,
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::zero(),
+                radius: 0.3,
+                waypoints,
+            }
+        }
+
+        assert_eq!(
+            scene.transit_motion_path(request(&[])),
+            Err(CollisionQueryError::EmptyMotionPath)
+        );
+        assert_eq!(
+            scene.transit_motion_path(request(&[MotionWaypoint {
+                center: Vector3::zero(),
+                end_fraction: f32::NAN,
+            }])),
+            Err(CollisionQueryError::NonFiniteMotionFraction)
+        );
+        assert_eq!(
+            scene.transit_motion_path(request(&[MotionWaypoint {
+                center: Vector3::zero(),
+                end_fraction: 1.1,
+            }])),
+            Err(CollisionQueryError::MotionFractionOutOfRange)
+        );
+        assert_eq!(
+            scene.transit_motion_path(request(&[
+                MotionWaypoint {
+                    center: Vector3::zero(),
+                    end_fraction: 0.5,
+                },
+                MotionWaypoint {
+                    center: Vector3::zero(),
+                    end_fraction: 0.5,
+                },
+            ])),
+            Err(CollisionQueryError::NonIncreasingMotionFraction)
+        );
+        assert_eq!(
+            scene.transit_motion_path(request(&[MotionWaypoint {
+                center: Vector3::zero(),
+                end_fraction: 0.5,
+            }])),
+            Err(CollisionQueryError::IncompleteMotionPath)
+        );
+    }
+
+    #[test]
+    fn non_camera_sphere_path_keeps_thin_cell_entry_and_exit_with_matching_end_domains() {
+        let thin_cell = Guid(0xda55_010b);
+        let scene = placement_scene(vec![CellVolume {
+            cell_selector: 0x010b,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            planes: vec![
+                Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -100.0,
+                },
+                Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 100.2,
+                },
+            ],
+            portals: vec![
+                portal(-1.0, 100.0, CellCollisionPortalTarget::Outdoor),
+                portal(1.0, -100.2, CellCollisionPortalTarget::Outdoor),
+            ],
+        }]);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: None,
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.4, 10.0, 20.0),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(path.anchor(), Guid(0xda55_ffff));
+        assert_eq!(path.initial().placement().committed_cell(), None);
+        assert_eq!(path.legs().len(), 3);
+        assert!((path.legs()[0].end_fraction() - 1.0 / 3.0).abs() < 0.000_1);
+        assert_eq!(
+            path.legs()[0].end().placement().committed_cell(),
+            Some(thin_cell),
+            "the target placement becomes authoritative at the exact entry boundary"
+        );
+        assert!((path.legs()[1].end_fraction() - 2.0 / 3.0).abs() < 0.000_1);
+        assert_eq!(path.legs()[1].end().placement().committed_cell(), None);
+        assert_eq!(path.legs()[2].end_fraction(), 1.0);
+        assert_eq!(path.final_point().center(), Vector3::new(100.4, 10.0, 20.0));
+        assert_eq!(path.final_point().placement().committed_cell(), None);
+    }
+
+    #[test]
+    fn placed_motion_path_preserves_accepted_bends_before_adding_portal_splits() {
+        let scene = placement_scene(Vec::new());
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: None,
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(96.0, 96.0, 20.0),
+                radius: 0.3,
+                waypoints: &[
+                    MotionWaypoint {
+                        center: Vector3::new(97.0, 96.0, 20.0),
+                        end_fraction: 0.25,
+                    },
+                    MotionWaypoint {
+                        center: Vector3::new(97.0, 98.0, 20.0),
+                        end_fraction: 1.0,
+                    },
+                ],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(path.legs().len(), 2);
+        assert_eq!(path.legs()[0].end_fraction(), 0.25);
+        assert_eq!(
+            path.legs()[0].end().center(),
+            Vector3::new(97.0, 96.0, 20.0)
+        );
+        assert_eq!(path.legs()[1].end_fraction(), 1.0);
+    }
+
+    #[test]
+    fn placed_motion_path_uses_portal_history_when_cell_volumes_overlap() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        let scene = placement_scene(vec![
+            CellVolume {
+                cell_selector: 0x010a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                // The source deliberately contains the entire path, so endpoint containment alone
+                // cannot select the target cell.
+                planes: Vec::new(),
+                portals: vec![portal(
+                    1.0,
+                    -100.0,
+                    CellCollisionPortalTarget::EnvCell(0x010b),
+                )],
+            },
+            CellVolume {
+                cell_selector: 0x010b,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -100.0,
+                }],
+                portals: vec![portal(
+                    -1.0,
+                    100.0,
+                    CellCollisionPortalTarget::EnvCell(0x010a),
+                )],
+            },
+        ]);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(
+            path.initial().placement().committed_cell(),
+            Some(source_cell)
+        );
+        assert_eq!(path.legs().len(), 2);
+        assert_eq!(
+            path.legs()[0].end().placement().committed_cell(),
+            Some(target_cell)
+        );
+        assert_eq!(
+            path.final_point().placement().committed_cell(),
+            Some(target_cell),
+            "overlapping source containment overrode directed portal history"
+        );
+    }
+
+    #[test]
+    fn outdoor_placed_motion_path_keeps_one_anchor_across_a_landblock_boundary() {
+        let scene = placement_scene(Vec::new());
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: None,
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(191.8, 96.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(192.2, 96.0, 20.0),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(path.anchor(), Guid(0xda55_ffff));
+        assert_eq!(path.legs().len(), 1);
+        assert_eq!(path.final_point().center().x, 192.2);
+        assert_eq!(path.final_point().placement().committed_cell(), None);
+    }
+
+    #[test]
+    fn placed_motion_path_returns_missing_coverage_without_a_partial_result() {
+        let scene = CollisionScene::new();
+        let result = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: None,
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(96.0, 96.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(97.0, 96.0, 20.0),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap();
+
+        assert!(matches!(result, CollisionQuery::MissingCoverage(_)));
     }
 
     #[test]

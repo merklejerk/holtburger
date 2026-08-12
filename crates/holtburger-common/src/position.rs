@@ -1,6 +1,7 @@
 use crate::guid::Guid;
 use crate::math::{Quaternion, Vector3};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 pub const METERS_PER_LANDBLOCK: f32 = 192.0;
 pub const METERS_PER_MAP_DEGREE: f32 = 240.0;
@@ -12,7 +13,34 @@ pub struct WorldPosition {
     pub rotation: Quaternion,
 }
 
-impl WorldPosition {}
+/// Invalid target supplied to exact landblock reanchoring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldPositionReanchorError {
+    /// A null source has no meaningful outdoor landblock frame.
+    NullSource,
+    /// The target must identify a normalized `0xFFFF` landblock owner.
+    InvalidTargetOwner(Guid),
+    /// Reanchoring local coordinates would leave AC's representable outdoor grid.
+    OutsideWorld,
+}
+
+impl fmt::Display for WorldPositionReanchorError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NullSource => formatter.write_str("cannot reanchor a null world position"),
+            Self::InvalidTargetOwner(owner) => write!(
+                formatter,
+                "world-position reanchor target 0x{:08X} is not a normalized landblock owner",
+                owner.0
+            ),
+            Self::OutsideWorld => {
+                formatter.write_str("world-position reanchor leaves the outdoor world grid")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WorldPositionReanchorError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum WorldCoordinates {
@@ -62,6 +90,54 @@ impl std::fmt::Display for WorldCoordinates {
 }
 
 impl WorldPosition {
+    /// Expresses the exact same world point in one normalized outdoor landblock frame.
+    ///
+    /// This is coordinate representation only: it neither reads collision content nor selects an
+    /// EnvCell. Callers retain and validate interior placement as separate topology state.
+    pub fn reanchor_to_landblock_owner(
+        self,
+        target_owner: Guid,
+    ) -> Result<Self, WorldPositionReanchorError> {
+        if self.landblock_id == Guid::NULL {
+            return Err(WorldPositionReanchorError::NullSource);
+        }
+        if target_owner.0 & 0xffff != 0xffff {
+            return Err(WorldPositionReanchorError::InvalidTargetOwner(target_owner));
+        }
+
+        let (source_x, source_y) = self.landblock_coords();
+        let target_x = ((target_owner.0 >> 24) & 0xff) as u8;
+        let target_y = ((target_owner.0 >> 16) & 0xff) as u8;
+        Ok(Self {
+            landblock_id: Guid(target_owner.0 & 0xffff_0000),
+            coords: Vector3::new(
+                self.coords.x
+                    + (i32::from(source_x) - i32::from(target_x)) as f32 * METERS_PER_LANDBLOCK,
+                self.coords.y
+                    + (i32::from(source_y) - i32::from(target_y)) as f32 * METERS_PER_LANDBLOCK,
+                self.coords.z,
+            ),
+            rotation: self.rotation,
+        }
+        .normalize_outdoor_cell())
+    }
+
+    /// Reanchors outdoor local coordinates into the landblock that contains the same point.
+    pub fn normalize_outdoor_landblock_frame(self) -> Result<Self, WorldPositionReanchorError> {
+        if self.landblock_id == Guid::NULL {
+            return Err(WorldPositionReanchorError::NullSource);
+        }
+        let (source_x, source_y) = self.landblock_coords();
+        let target_x = i32::from(source_x) + (self.coords.x / METERS_PER_LANDBLOCK).floor() as i32;
+        let target_y = i32::from(source_y) + (self.coords.y / METERS_PER_LANDBLOCK).floor() as i32;
+        if !(0..=255).contains(&target_x) || !(0..=255).contains(&target_y) {
+            return Err(WorldPositionReanchorError::OutsideWorld);
+        }
+        self.reanchor_to_landblock_owner(Guid(
+            ((target_x as u32) << 24) | ((target_y as u32) << 16) | 0xffff,
+        ))
+    }
+
     pub fn global_coords(&self) -> Vector3 {
         let (landblock_x, landblock_y) = self.landblock_coords();
 
@@ -193,6 +269,55 @@ impl WorldPosition {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn landblock_reanchoring_preserves_the_exact_world_point_without_content() {
+        let original = WorldPosition {
+            landblock_id: Guid(0xda55_010a),
+            coords: Vector3::new(193.25, -0.5, 17.0),
+            rotation: Quaternion::from_heading(1.0),
+        };
+
+        let reanchored = original
+            .reanchor_to_landblock_owner(Guid(0xdb54_ffff))
+            .unwrap();
+
+        assert_eq!(reanchored.global_coords(), original.global_coords());
+        assert_eq!(reanchored.coords, Vector3::new(1.25, 191.5, 17.0));
+        assert_eq!(reanchored.rotation, original.rotation);
+        assert!(!reanchored.is_indoors());
+    }
+
+    #[test]
+    fn landblock_reanchoring_rejects_non_owner_targets() {
+        let position = WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(
+            position.reanchor_to_landblock_owner(Guid(0xdb55_0100)),
+            Err(WorldPositionReanchorError::InvalidTargetOwner(Guid(
+                0xdb55_0100
+            )))
+        );
+    }
+
+    #[test]
+    fn outdoor_frame_normalization_tracks_the_body_reference_across_a_seam() {
+        let original = WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::new(192.25, -0.25, 4.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let normalized = original.normalize_outdoor_landblock_frame().unwrap();
+
+        assert_eq!(normalized.global_coords(), original.global_coords());
+        assert_eq!(normalized.landblock_coords(), (0xdb, 0x54));
+        assert_eq!(normalized.coords, Vector3::new(0.25, 191.75, 4.0));
+    }
 
     #[test]
     fn test_indoor_format() {

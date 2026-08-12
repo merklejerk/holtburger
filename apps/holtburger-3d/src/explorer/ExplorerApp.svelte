@@ -51,6 +51,8 @@
 		type PhysicalCameraStatus,
 	} from "./physical-camera-session";
 	import { tauriPhysicalCameraTransport } from "./physical-camera-transport";
+	import { SimulationInterestController } from "./simulation-interest";
+	import { tauriSimulationInterestTransport } from "./simulation-interest-transport";
 	import { Vec3 } from "../lib/game/math/types";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import {
@@ -86,6 +88,8 @@
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let physicalCameraSession: PhysicalCameraSession | undefined;
+	let simulationInterestController: SimulationInterestController | undefined;
+	let physicalSimulationAnchor: string | null = null;
 	let cameraMode = $state<ExplorerCameraMode>("free-fly");
 	let cameraModePending = $state(false);
 	let physicalCameraStatus = $state<PhysicalCameraStatus | null>(null);
@@ -299,11 +303,50 @@
 		// Automatic focus is an explicit teleport. Return position authority to free fly before the
 		// coordinator applies it instead of letting the host overwrite the new pose next frame.
 		if (physicalCameraSession) void leavePhysicalCamera(false);
+		void requestSimulationInterest(residency.landblockId).catch(
+			(error: unknown) => {
+				physicalCameraError = errorMessage(error);
+			},
+		);
 		cameraCoordinator?.requestSceneInterest(residency, lod);
 		sceneInterest = {
 			lod: { ...lod },
 			residency: { ...residency },
 		};
+	}
+
+	async function requestSimulationInterest(
+		anchorLandblockId: string,
+	): Promise<void> {
+		const controller = simulationInterestController;
+		if (!controller) {
+			throw new Error("Simulation-interest policy is not initialized.");
+		}
+		const receipt = await controller.request(anchorLandblockId);
+		// A newer application anchor superseding this request is ordinary asynchronous currentness.
+		if (!receipt.committed) return;
+		if (
+			receipt.unavailableLandblockIds.some(
+				(owner) => owner.toLowerCase() === anchorLandblockId.toLowerCase(),
+			)
+		) {
+			throw new Error(
+				`Collision content is unavailable for ${anchorLandblockId}.`,
+			);
+		}
+	}
+
+	function followPhysicalSimulationInterest(anchorLandblockId: string): void {
+		if (physicalSimulationAnchor === anchorLandblockId) return;
+		physicalSimulationAnchor = anchorLandblockId;
+		void requestSimulationInterest(anchorLandblockId).catch(
+			(error: unknown) => {
+				if (physicalSimulationAnchor === anchorLandblockId) {
+					physicalSimulationAnchor = null;
+				}
+				physicalCameraError = errorMessage(error);
+			},
+		);
 	}
 
 	function physicalCameraInput(
@@ -545,6 +588,8 @@
 			cameraCoordinator = undefined;
 			cameraController = undefined;
 			physicalCameraSession = undefined;
+			simulationInterestController = undefined;
+			physicalSimulationAnchor = null;
 			cameraMode = "free-fly";
 			cameraModePending = false;
 			physicalCameraStatus = null;
@@ -649,6 +694,9 @@
 					cameraController,
 					(status) => (cameraFocusStatus = status),
 				);
+				simulationInterestController = new SimulationInterestController(
+					tauriSimulationInterestTransport(),
+				);
 				runtimeReady = true;
 
 				const step = (): void => {
@@ -665,6 +713,9 @@
 					if (physicalPlacement && cameraController) {
 						cameraController.applyPresentedPosition(physicalPlacement.position);
 						physicalCameraStatus = physicalCameraSession?.status() ?? null;
+						followPhysicalSimulationInterest(
+							physicalPlacement.residency.landblockId,
+						);
 					}
 					gameRuntime.tick();
 					const residencySync =

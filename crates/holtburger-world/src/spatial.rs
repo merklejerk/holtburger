@@ -1,6 +1,7 @@
 mod bsp_query;
 mod collision;
 mod grounded;
+mod physical_body;
 mod physical_fly;
 mod physics;
 mod scene;
@@ -28,6 +29,12 @@ pub use collision::{
 pub use grounded::{
     EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
     GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere, solve_grounded,
+};
+pub use physical_body::{
+    InvalidPhysicalBodyPlacement, PhysicalBodyActivity, PhysicalBodyDefinition,
+    PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyResponseState, PhysicalBodyState,
+    PhysicalBodyTickOutcome, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalSphereSet,
+    evaluate_physical_body_activity, initial_physical_body_activity, resolve_physical_body_cell,
 };
 pub use physical_fly::{
     PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,

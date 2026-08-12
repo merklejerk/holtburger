@@ -138,7 +138,7 @@ sequenceDiagram
     Core->>Content: resolve over cached foundation
     Content->>DAT: EnvCells + deduplicated Environments
     Content-->>App: canonical cells + directed topology
-    App->>Core: Collision(id), when host collision residency requires it
+    App->>Core: Collision(id), when explicit simulation interest requires it
     Core->>Content: resolve terrain + all placed static collision families
     Content-->>Core: atomic collision artifact
     App->>App: presentation enrichment and layer-bundle serialization

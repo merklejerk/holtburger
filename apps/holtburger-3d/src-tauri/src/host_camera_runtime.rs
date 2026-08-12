@@ -2,7 +2,7 @@
 //!
 //! The world crate owns collision queries and mode-specific solving. This module owns the concrete
 //! Explorer policy: a 30 Hz camera tick, fixed fly and human grounded bodies, collision residency,
-//! mode handoff, and the predicted-segment transport consumed between host ticks.
+//! mode handoff, and the fixed-tick placed-motion transport consumed between host ticks.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,8 +17,9 @@ use holtburger_core::ContentAssetService;
 use holtburger_world::{
     CellTransitRequest, CollisionQuery, CollisionScene, EdgeProtection, GroundedBody,
     GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome, GroundedRequest,
-    GroundedSphere, PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome,
-    PhysicalFlyRequest, PlacementRequest, solve_grounded, solve_physical_fly,
+    GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig,
+    PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath, PlacedMotionPathRequest,
+    PlacedMotionPoint, PlacementRequest, solve_grounded, solve_physical_fly,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -26,7 +27,7 @@ use tauri::{AppHandle, Emitter};
 /// Gate A's ratified host cadence.
 pub const HOST_TICK_HZ: f64 = 30.0;
 
-/// Event carrying one newly solved, short-lived prediction segment.
+/// Event carrying one authoritative fixed-tick placed-motion path.
 pub const CAMERA_MOTION_EVENT: &str = "host://physical-camera-motion";
 
 /// Explorer-owned physical-fly sphere radius in meters.
@@ -123,7 +124,7 @@ impl Default for PhysicalCameraIntent {
     }
 }
 
-/// Observable outcome attached to a predicted segment.
+/// Observable outcome attached to a solved fixed-tick path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhysicalCameraTickStatus {
@@ -161,25 +162,43 @@ pub struct PhysicalCameraRegistration {
     pub mode: PhysicalCameraMode,
 }
 
-/// One fixed-tick result evaluated by the frontend on every render frame.
+/// One frontend point whose position and portal residency become authoritative together.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PhysicalCameraMotionSegment {
+pub struct PhysicalCameraPathPoint {
+    /// Portal-seeded placement valid at this exact point.
+    pub residency: PhysicalCameraResidency,
+    /// Presented viewer origin in `residency.landblock_id` local AC axes.
+    pub origin: [f32; 3],
+}
+
+/// One placement-stable frontend leg ending at an authoritative point.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhysicalCameraPathLeg {
+    /// Monotonic normalized fixed-tick fraction at this boundary.
+    pub end_fraction: f32,
+    /// Point and residency that become authoritative at the exact boundary.
+    pub end: PhysicalCameraPathPoint,
+}
+
+/// One fixed-tick path evaluated by the frontend on every render frame.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhysicalCameraMotionPath {
     /// Runtime generation. Events from an older handoff are ignored by the frontend.
     pub session: u64,
-    /// Monotonic counter within `session`; gaps remain diagnostic evidence.
+    /// Monotonic path counter within `session`; gaps remain diagnostic evidence.
     pub sequence: u64,
-    /// Physical response that produced this segment.
+    /// Physical response that produced this path.
     pub mode: PhysicalCameraMode,
-    /// Portal-seeded viewer placement committed atomically with the solved body pose.
-    pub residency: PhysicalCameraResidency,
-    /// Presented first-person viewer origin in landblock-local AC axes.
-    pub origin: [f32; 3],
-    /// Achieved velocity in AC world axes, used only for bounded presentation prediction.
-    pub velocity: [f32; 3],
-    /// Duration for which the constant-velocity prediction is valid.
-    pub horizon_ms: f64,
-    /// Why the segment moved or held.
+    /// Fixed host-tick duration used to time the normalized legs.
+    pub duration_ms: f64,
+    /// Authoritative viewer placement at normalized tick fraction zero.
+    pub initial: PhysicalCameraPathPoint,
+    /// Non-empty accepted motion and placement transitions through the fixed tick.
+    pub legs: Vec<PhysicalCameraPathLeg>,
+    /// Why the path moved or held.
     pub status: PhysicalCameraTickStatus,
     /// Whether grounded response committed lower-sphere support.
     pub grounded: bool,
@@ -265,7 +284,7 @@ struct ActiveCamera {
 
 struct CameraSolveResult {
     body: CameraRuntimeBody,
-    achieved_velocity: Vector3,
+    motion: Vec<MotionWaypoint>,
     status: PhysicalCameraTickStatus,
     constraint_count: usize,
     substeps: usize,
@@ -338,9 +357,15 @@ impl HostCameraRuntime {
                 view_direction,
             )?),
         };
-        let viewer =
-            resolve_presented_viewer(&state.scene, &body, initial_viewer_cell, view_direction)
-                .context("could not register the first-person viewer placement")?;
+        let viewer = resolve_presented_viewer(
+            &state.scene,
+            owner,
+            pose.coords,
+            initial_viewer_cell,
+            &body,
+            view_direction,
+        )
+        .context("could not register the first-person viewer placement")?;
 
         // Invalidate the prior task while holding the body lock, immediately before replacement.
         let session = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -461,11 +486,7 @@ impl HostCameraRuntime {
         Ok(())
     }
 
-    fn tick(
-        &self,
-        session: u64,
-        dt: Duration,
-    ) -> Result<Option<(PhysicalCameraMotionSegment, Guid)>> {
+    fn tick(&self, session: u64, dt: Duration) -> Result<Option<(PhysicalCameraMotionPath, Guid)>> {
         if !self.is_current(session) {
             return Ok(None);
         }
@@ -490,54 +511,73 @@ impl HostCameraRuntime {
             velocity,
             dt.as_secs_f32(),
         )?;
-        let candidate_viewer = match transit_presented_viewer(
+        let (viewer_path, viewer_direction) = match transit_presented_viewer_path(
             &state.scene,
+            &previous,
             &result.body,
-            previous.viewer.cell,
+            &result.motion,
             view_direction,
         )? {
-            CollisionQuery::Complete(viewer) => viewer,
+            CollisionQuery::Complete(path) => (path, view_direction),
             CollisionQuery::MissingCoverage(missing) => {
                 // Body and viewer are one presented state. A solved body cannot advance while the
                 // renderer's exact portal placement is unavailable.
                 result.body = previous.body.clone();
-                result.achieved_velocity = Vector3::zero();
+                result.motion = hold_motion(&previous.body);
                 result.status = PhysicalCameraTickStatus::MissingCoverage;
                 result.constraint_count = 0;
                 result.substeps = 0;
                 result.contact_passes = 0;
                 result.missing_landblocks = missing_landblock_names(&missing.landblocks);
                 result.outside_world = missing.outside_world;
-                previous.viewer.clone()
+                let hold = match transit_presented_viewer_path(
+                    &state.scene,
+                    &previous,
+                    &previous.body,
+                    &result.motion,
+                    previous.viewer.direction,
+                )? {
+                    CollisionQuery::Complete(path) => path,
+                    CollisionQuery::MissingCoverage(hold_missing) => anyhow::bail!(
+                        "previous physical-camera viewer placement lost collision coverage: {hold_missing:?}"
+                    ),
+                };
+                (hold, previous.viewer.direction)
             }
         };
         let solve_duration_ms = solve_started_at.elapsed().as_secs_f64() * 1_000.0;
         let body = result.body;
+        let viewer = PresentedViewer {
+            cell: viewer_path.final_point().placement().committed_cell(),
+            direction: viewer_direction,
+        };
         let active = ActiveCamera {
             body: body.clone(),
-            viewer: candidate_viewer,
+            viewer,
         };
         state.active = Some(active.clone());
         let sequence = state.sequence;
         state.sequence += 1;
         let collision_owner = landblock_key(body.pose().landblock_id);
-        let (viewer_owner, origin) = presented_origin_in_owner(&active)?;
+        let initial = serialize_path_point(viewer_path.anchor(), viewer_path.initial())?;
+        let legs = viewer_path
+            .legs()
+            .iter()
+            .map(|leg| {
+                Ok(PhysicalCameraPathLeg {
+                    end_fraction: leg.end_fraction(),
+                    end: serialize_path_point(viewer_path.anchor(), leg.end())?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let grounded = body.is_grounded();
-        let segment = PhysicalCameraMotionSegment {
+        let path = PhysicalCameraMotionPath {
             session,
             sequence,
             mode: body.mode(),
-            residency: PhysicalCameraResidency {
-                landblock_id: format!("0x{:08x}", viewer_owner.0),
-                env_cell_id: active.viewer.cell.map(|cell| format!("0x{:08x}", cell.0)),
-            },
-            origin: [origin.x, origin.y, origin.z],
-            velocity: [
-                result.achieved_velocity.x,
-                result.achieved_velocity.y,
-                result.achieved_velocity.z,
-            ],
-            horizon_ms: dt.as_secs_f64() * 1_000.0,
+            duration_ms: dt.as_secs_f64() * 1_000.0,
+            initial,
+            legs,
             status: result.status,
             grounded,
             constraint_count: result.constraint_count,
@@ -547,7 +587,7 @@ impl HostCameraRuntime {
             contact_passes: result.contact_passes,
             solve_duration_ms,
         };
-        Ok(Some((segment, collision_owner)))
+        Ok(Some((path, collision_owner)))
     }
 }
 
@@ -722,50 +762,114 @@ fn scene_point_to_residency_pose(
 
 fn resolve_presented_viewer(
     scene: &CollisionScene,
-    body: &CameraRuntimeBody,
+    initial_anchor: Guid,
+    initial_center: Vector3,
     previous_cell: Option<Guid>,
+    body: &CameraRuntimeBody,
     direction: Vector3,
 ) -> Result<PresentedViewer> {
-    match transit_presented_viewer(scene, body, previous_cell, direction)? {
-        CollisionQuery::Complete(viewer) => Ok(viewer),
+    let body_anchor = landblock_key(body.pose().landblock_id);
+    let end = reanchor_point(
+        body.presented_origin(direction),
+        body_anchor,
+        initial_anchor,
+    );
+    match transit_presented_path(scene, initial_anchor, initial_center, previous_cell, end)? {
+        CollisionQuery::Complete(path) => Ok(PresentedViewer {
+            cell: path.final_point().placement().committed_cell(),
+            direction,
+        }),
         CollisionQuery::MissingCoverage(missing) => {
             anyhow::bail!("first-person viewer placement lacks collision coverage: {missing:?}")
         }
     }
 }
 
-fn transit_presented_viewer(
+fn transit_presented_viewer_path(
     scene: &CollisionScene,
-    body: &CameraRuntimeBody,
-    previous_cell: Option<Guid>,
+    previous: &ActiveCamera,
+    candidate_body: &CameraRuntimeBody,
+    body_motion: &[MotionWaypoint],
     direction: Vector3,
-) -> Result<CollisionQuery<PresentedViewer>> {
-    let anchor = landblock_key(body.pose().landblock_id);
-    let center = body.presented_origin(direction);
-    Ok(
-        match scene.transit_cell(CellTransitRequest {
-            previous_cell,
-            anchor,
-            center,
-            radius: VIEWER_SPHERE_RADIUS,
-        })? {
-            CollisionQuery::Complete(placement) => CollisionQuery::Complete(PresentedViewer {
-                cell: placement.committed_cell(),
-                direction,
-            }),
-            CollisionQuery::MissingCoverage(missing) => CollisionQuery::MissingCoverage(missing),
-        },
-    )
+) -> Result<CollisionQuery<PlacedMotionPath>> {
+    let anchor = landblock_key(previous.body.pose().landblock_id);
+    let start = previous.body.presented_origin(previous.viewer.direction);
+    let initial_viewer_offset = viewer_offset(&previous.body, previous.viewer.direction);
+    let final_viewer_offset = viewer_offset(candidate_body, direction);
+    let waypoints = body_motion
+        .iter()
+        .map(|waypoint| MotionWaypoint {
+            // Body response may bend several times during one tick, while a view-direction change
+            // moves the first-person offset over that entire tick. Interpolating the offset at the
+            // solver's own fractions preserves both facts instead of concentrating a turn into the
+            // first substep.
+            center: waypoint.center
+                + initial_viewer_offset
+                + (final_viewer_offset - initial_viewer_offset) * waypoint.end_fraction,
+            end_fraction: waypoint.end_fraction,
+        })
+        .collect::<Vec<_>>();
+    Ok(scene.transit_motion_path(PlacedMotionPathRequest {
+        previous_cell: previous.viewer.cell,
+        anchor,
+        start,
+        radius: VIEWER_SPHERE_RADIUS,
+        waypoints: &waypoints,
+    })?)
 }
 
-fn presented_origin_in_owner(active: &ActiveCamera) -> Result<(Guid, Vector3)> {
-    let anchor = landblock_key(active.body.pose().landblock_id);
-    let origin = active.body.presented_origin(active.viewer.direction);
-    let owner = match active.viewer.cell {
+fn viewer_offset(body: &CameraRuntimeBody, direction: Vector3) -> Vector3 {
+    match body {
+        CameraRuntimeBody::PhysicalFly(_) => Vector3::zero(),
+        CameraRuntimeBody::Grounded(_) => grounded_viewer_offset(direction),
+    }
+}
+
+fn transit_presented_path(
+    scene: &CollisionScene,
+    anchor: Guid,
+    start: Vector3,
+    previous_cell: Option<Guid>,
+    end: Vector3,
+) -> Result<CollisionQuery<PlacedMotionPath>> {
+    Ok(scene.transit_motion_path(PlacedMotionPathRequest {
+        previous_cell,
+        anchor,
+        start,
+        radius: VIEWER_SPHERE_RADIUS,
+        waypoints: &[MotionWaypoint {
+            center: end,
+            end_fraction: 1.0,
+        }],
+    })?)
+}
+
+fn hold_motion(body: &CameraRuntimeBody) -> Vec<MotionWaypoint> {
+    vec![MotionWaypoint {
+        center: body.pose().coords,
+        end_fraction: 1.0,
+    }]
+}
+
+fn serialize_path_point(
+    anchor: Guid,
+    point: &PlacedMotionPoint,
+) -> Result<PhysicalCameraPathPoint> {
+    let owner = match point.placement().committed_cell() {
         Some(cell) => landblock_key(cell),
-        None => owner_for_anchor_point(anchor, origin)?,
+        None => owner_for_anchor_point(anchor, point.center())?,
     };
-    Ok((owner, reanchor_point(origin, anchor, owner)))
+    let origin = reanchor_point(point.center(), anchor, owner);
+    Ok(PhysicalCameraPathPoint {
+        residency: PhysicalCameraResidency {
+            landblock_id: format!("0x{:08x}", owner.0),
+            env_cell_id: point
+                .placement()
+                .committed_cell()
+                .map(|cell| format!("0x{:08x}", cell.0)),
+        },
+        origin: [origin.x, origin.y, origin.z],
+    })
 }
 
 fn owner_for_anchor_point(anchor: Guid, point: Vector3) -> Result<Guid> {
@@ -815,13 +919,14 @@ fn solve_camera_body(
             Ok(match outcome {
                 GroundedOutcome::Solved {
                     body,
-                    achieved_velocity,
+                    motion,
                     substeps,
                     contact_passes,
                     constraint_count,
+                    ..
                 } => CameraSolveResult {
                     body: CameraRuntimeBody::Grounded(body),
-                    achieved_velocity,
+                    motion,
                     status: PhysicalCameraTickStatus::Solved,
                     constraint_count,
                     substeps,
@@ -830,8 +935,8 @@ fn solve_camera_body(
                     outside_world: false,
                 },
                 GroundedOutcome::MissingCoverage { body, missing } => CameraSolveResult {
+                    motion: hold_motion(&CameraRuntimeBody::Grounded(body.clone())),
                     body: CameraRuntimeBody::Grounded(body),
-                    achieved_velocity: Vector3::zero(),
                     status: PhysicalCameraTickStatus::MissingCoverage,
                     constraint_count: 0,
                     substeps: 0,
@@ -846,8 +951,8 @@ fn solve_camera_body(
                     contact_passes,
                     constraint_count,
                 } => CameraSolveResult {
+                    motion: hold_motion(&CameraRuntimeBody::Grounded(body.clone())),
                     body: CameraRuntimeBody::Grounded(body),
-                    achieved_velocity: Vector3::zero(),
                     status: grounded_budget_status(budget),
                     constraint_count,
                     substeps,
@@ -877,12 +982,13 @@ fn solve_physical_camera_body(
     Ok(match outcome {
         PhysicalFlyOutcome::Solved {
             body,
-            achieved_displacement,
+            motion,
             substeps,
             contact_passes,
+            ..
         } => CameraSolveResult {
             body: CameraRuntimeBody::PhysicalFly(body),
-            achieved_velocity: achieved_displacement / delta_seconds,
+            motion,
             status: PhysicalCameraTickStatus::Solved,
             constraint_count: 0,
             substeps,
@@ -891,8 +997,8 @@ fn solve_physical_camera_body(
             outside_world: false,
         },
         PhysicalFlyOutcome::MissingCoverage { body, missing } => CameraSolveResult {
+            motion: hold_motion(&CameraRuntimeBody::PhysicalFly(body)),
             body: CameraRuntimeBody::PhysicalFly(body),
-            achieved_velocity: Vector3::zero(),
             status: PhysicalCameraTickStatus::MissingCoverage,
             constraint_count: 0,
             substeps: 0,
@@ -906,8 +1012,8 @@ fn solve_physical_camera_body(
             substeps,
             contact_passes,
         } => CameraSolveResult {
+            motion: hold_motion(&CameraRuntimeBody::PhysicalFly(body)),
             body: CameraRuntimeBody::PhysicalFly(body),
-            achieved_velocity: Vector3::zero(),
             status: physical_fly_budget_status(budget),
             constraint_count: 0,
             substeps,
@@ -983,7 +1089,7 @@ pub fn spawn_tick_loop(app: AppHandle, runtime: Arc<HostCameraRuntime>, session:
                     break;
                 }
             };
-            let (segment, owner) = tick;
+            let (path, owner) = tick;
             if resident_center != Some(owner) {
                 resident_center = Some(owner);
                 let residency_runtime = Arc::clone(&runtime);
@@ -1000,7 +1106,7 @@ pub fn spawn_tick_loop(app: AppHandle, runtime: Arc<HostCameraRuntime>, session:
                     );
                 }
             }
-            if app.emit(CAMERA_MOTION_EVENT, segment).is_err() {
+            if app.emit(CAMERA_MOTION_EVENT, path).is_err() {
                 break;
             }
         }
@@ -1075,6 +1181,36 @@ mod tests {
         }
     }
 
+    struct MissingFarEastCollisionSource;
+
+    impl CollisionSource for MissingFarEastCollisionSource {
+        fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
+            if landblock_id == 0xdc55_ffff {
+                return Ok(None);
+            }
+            FlatCollisionSource::default().load_collision(landblock_id)
+        }
+    }
+
+    struct ThinCollisionSource;
+
+    impl CollisionSource for ThinCollisionSource {
+        fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
+            Ok(Some(LandblockCollisionAsset {
+                landblock_id,
+                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: if landblock_id == 0xda55_ffff {
+                        thin_viewer_volumes(false)
+                    } else {
+                        Vec::new()
+                    },
+                },
+            }))
+        }
+    }
+
     struct GroundCollisionSource;
 
     impl CollisionSource for GroundCollisionSource {
@@ -1125,7 +1261,15 @@ mod tests {
         }
     }
 
-    fn thin_viewer_scene(overlap_first_cell: bool) -> CollisionScene {
+    fn final_path_point(path: &PhysicalCameraMotionPath) -> &PhysicalCameraPathPoint {
+        &path
+            .legs
+            .last()
+            .expect("host camera paths are non-empty")
+            .end
+    }
+
+    fn thin_viewer_volumes(overlap_first_cell: bool) -> Vec<CellVolume> {
         let volume = |cell_selector, planes, portals| CellVolume {
             cell_selector,
             placement: LandblockPlacement {
@@ -1144,7 +1288,7 @@ mod tests {
             target,
             outdoor_building: None,
         };
-        let mut center_volumes = Some(vec![
+        vec![
             volume(
                 0x010a,
                 if overlap_first_cell {
@@ -1179,7 +1323,11 @@ mod tests {
                     CellCollisionPortalTarget::EnvCell(0x010a),
                 )],
             ),
-        ]);
+        ]
+    }
+
+    fn thin_viewer_scene(overlap_first_cell: bool) -> CollisionScene {
+        let mut center_volumes = Some(thin_viewer_volumes(overlap_first_cell));
         let mut scene = CollisionScene::new();
         for x in 0xd9..=0xdb {
             for y in 0x54..=0x56 {
@@ -1240,8 +1388,10 @@ mod tests {
 
         let viewer = resolve_presented_viewer(
             &scene,
-            &body,
+            Guid(0xda55_ffff),
+            Vector3::new(99.9, 10.0, 21.5),
             Some(Guid(0xda55_010a)),
+            &body,
             Vector3::new(1.0, 0.0, 0.0),
         )
         .unwrap();
@@ -1250,6 +1400,108 @@ mod tests {
         assert!((body.presented_origin(viewer.direction).x - 100.08).abs() < 0.000_1);
         assert_eq!(VIEWER_SPHERE_RADIUS, 0.3);
         assert_eq!(PHYSICAL_FLY_RADIUS, 0.25);
+    }
+
+    #[test]
+    fn stationary_grounded_body_publishes_a_view_offset_portal_crossing() {
+        let scene = thin_viewer_scene(false);
+        let body = CameraRuntimeBody::Grounded(GroundedBody {
+            pose: WorldPosition {
+                landblock_id: Guid(0xda55_010a),
+                coords: Vector3::new(99.9, 10.0, 20.0),
+                rotation: Quaternion::identity(),
+            },
+            cell: Some(Guid(0xda55_010a)),
+            fall_velocity: 0.0,
+            support: None,
+        });
+        let previous = ActiveCamera {
+            body: body.clone(),
+            viewer: PresentedViewer {
+                cell: Some(Guid(0xda55_010a)),
+                direction: Vector3::new(-1.0, 0.0, 0.0),
+            },
+        };
+
+        let CollisionQuery::Complete(path) = transit_presented_viewer_path(
+            &scene,
+            &previous,
+            &body,
+            &hold_motion(&body),
+            Vector3::new(1.0, 0.0, 0.0),
+        )
+        .unwrap() else {
+            panic!("resident viewer rotation unexpectedly lacked coverage");
+        };
+
+        assert_eq!(path.initial().center().x, 99.72);
+        assert_eq!(
+            path.initial().placement().committed_cell(),
+            Some(Guid(0xda55_010a))
+        );
+        assert_eq!(path.legs().len(), 2);
+        assert_eq!(
+            path.legs()[0].end().placement().committed_cell(),
+            Some(Guid(0xda55_010b))
+        );
+        assert_eq!(path.final_point().center().x, 100.08);
+        assert_eq!(
+            path.final_point().placement().committed_cell(),
+            Some(Guid(0xda55_010b))
+        );
+    }
+
+    #[test]
+    fn grounded_view_offset_turn_spans_every_accepted_substep() {
+        let scene = thin_viewer_scene(false);
+        let body = CameraRuntimeBody::Grounded(GroundedBody {
+            pose: WorldPosition {
+                landblock_id: Guid(0xda55_010a),
+                coords: Vector3::new(90.0, 10.0, 20.0),
+                rotation: Quaternion::identity(),
+            },
+            cell: Some(Guid(0xda55_010a)),
+            fall_velocity: 0.0,
+            support: None,
+        });
+        let previous = ActiveCamera {
+            body: body.clone(),
+            viewer: PresentedViewer {
+                cell: Some(Guid(0xda55_010a)),
+                direction: Vector3::new(-1.0, 0.0, 0.0),
+            },
+        };
+        let CameraRuntimeBody::Grounded(mut candidate) = body else {
+            unreachable!("test fixture is grounded")
+        };
+        candidate.pose.coords.x = 90.5;
+        let candidate_body = CameraRuntimeBody::Grounded(candidate);
+        let motion = [
+            MotionWaypoint {
+                center: Vector3::new(90.25, 10.0, 20.0),
+                end_fraction: 0.5,
+            },
+            MotionWaypoint {
+                center: Vector3::new(90.5, 10.0, 20.0),
+                end_fraction: 1.0,
+            },
+        ];
+
+        let CollisionQuery::Complete(path) = transit_presented_viewer_path(
+            &scene,
+            &previous,
+            &candidate_body,
+            &motion,
+            Vector3::new(1.0, 0.0, 0.0),
+        )
+        .unwrap() else {
+            panic!("resident viewer turn unexpectedly lacked coverage");
+        };
+
+        assert!((path.initial().center().x - 89.82).abs() < 0.000_1);
+        assert_eq!(path.legs().len(), 2);
+        assert!((path.legs()[0].end().center().x - 90.25).abs() < 0.000_1);
+        assert!((path.final_point().center().x - 90.68).abs() < 0.000_1);
     }
 
     #[test]
@@ -1273,7 +1525,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_tick_moves_the_registered_body_and_publishes_achieved_velocity() {
+    fn fixed_tick_publishes_the_complete_accepted_motion() {
         let source = Arc::new(FlatCollisionSource::default());
         let runtime = HostCameraRuntime::new(source.clone());
         let pose = scene_point_to_pose([
@@ -1289,18 +1541,94 @@ mod tests {
             .set_intent(intent(session, 0, [3.0, 0.0, 0.0]))
             .unwrap();
 
-        let (segment, _) = runtime
+        let (path, _) = runtime
             .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
             .unwrap()
             .unwrap();
 
-        assert_eq!(segment.status, PhysicalCameraTickStatus::Solved);
-        assert_eq!(segment.mode, PhysicalCameraMode::PhysicalFly);
-        assert_eq!(segment.residency.landblock_id, "0xda55ffff");
-        assert_eq!(segment.residency.env_cell_id, None);
-        assert!((segment.origin[0] - 96.1).abs() < 0.001);
-        assert!((segment.velocity[0] - 3.0).abs() < 0.001);
+        assert_eq!(path.status, PhysicalCameraTickStatus::Solved);
+        assert_eq!(path.mode, PhysicalCameraMode::PhysicalFly);
+        assert!((path.duration_ms - 1_000.0 / HOST_TICK_HZ).abs() < 0.001);
+        assert_eq!(path.initial.residency.landblock_id, "0xda55ffff");
+        assert_eq!(path.initial.residency.env_cell_id, None);
+        assert!((path.initial.origin[0] - 96.0).abs() < 0.001);
+        assert_eq!(path.legs.len(), 1);
+        assert_eq!(path.legs[0].end_fraction, 1.0);
+        assert!((final_path_point(&path).origin[0] - 96.1).abs() < 0.001);
         assert_eq!(source.loaded.lock().unwrap().len(), 25);
+    }
+
+    #[test]
+    fn tick_commits_exactly_the_viewer_placement_at_the_path_endpoint() {
+        let runtime = HostCameraRuntime::new(Arc::new(ThinCollisionSource));
+        let pose = WorldPosition {
+            landblock_id: Guid(0xda55_010a),
+            coords: Vector3::new(99.8, 10.0, 20.0),
+            rotation: Quaternion::identity(),
+        };
+        let session = runtime
+            .start(registration(pose, PhysicalCameraMode::PhysicalFly))
+            .unwrap();
+        runtime
+            .set_intent(intent(session, 0, [9.0, 0.0, 0.0]))
+            .unwrap();
+
+        let (path, _) = runtime
+            .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            path.initial.residency.env_cell_id.as_deref(),
+            Some("0xda55010a")
+        );
+        let first_interior_leg = path
+            .legs
+            .iter()
+            .find(|leg| leg.end.residency.env_cell_id.as_deref() == Some("0xda55010b"))
+            .expect("accepted path never entered the destination cell");
+        assert!(first_interior_leg.end_fraction < 1.0);
+        assert_eq!(
+            final_path_point(&path).residency.env_cell_id.as_deref(),
+            Some("0xda55010b")
+        );
+        let state = runtime.state.lock().unwrap();
+        assert_eq!(
+            state.active.as_ref().unwrap().viewer.cell,
+            Some(Guid(0xda55_010b))
+        );
+    }
+
+    #[test]
+    fn missing_candidate_coverage_publishes_only_an_authoritative_hold_path() {
+        let runtime = HostCameraRuntime::new(Arc::new(MissingFarEastCollisionSource));
+        let pose = scene_point_to_pose([
+            0xda as f32 * 192.0 + 190.0,
+            20.0,
+            -(0x55 as f32 * 192.0 + 96.0),
+        ])
+        .unwrap();
+        let session = runtime
+            .start(registration(pose, PhysicalCameraMode::PhysicalFly))
+            .unwrap();
+        runtime
+            .set_intent(intent(session, 0, [150.0, 0.0, 0.0]))
+            .unwrap();
+
+        let (path, _) = runtime
+            .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(path.status, PhysicalCameraTickStatus::MissingCoverage);
+        assert_eq!(path.missing_landblocks, ["0xdc55ffff"]);
+        assert_eq!(path.legs.len(), 1);
+        assert_eq!(path.initial.origin, final_path_point(&path).origin);
+        assert_eq!(path.initial.residency.landblock_id, "0xda55ffff");
+        assert_eq!(
+            path.initial.residency.landblock_id,
+            final_path_point(&path).residency.landblock_id
+        );
     }
 
     #[test]
@@ -1319,18 +1647,17 @@ mod tests {
             .set_intent(intent(session, 0, [3.0, 0.0, 0.0]))
             .unwrap();
 
-        let (segment, _) = runtime
+        let (path, _) = runtime
             .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
             .unwrap()
             .unwrap();
 
-        assert_eq!(segment.mode, PhysicalCameraMode::GroundedWalk);
-        assert_eq!(segment.status, PhysicalCameraTickStatus::Solved);
-        assert!(segment.grounded);
-        assert_eq!(segment.constraint_count, 0);
-        assert!((segment.origin[0] - 96.1).abs() < 0.001);
-        assert!((segment.origin[2] - (HUMAN_EYE_HEIGHT + 0.005)).abs() < 0.001);
-        assert!((segment.velocity[0] - 3.0).abs() < 0.001);
+        assert_eq!(path.mode, PhysicalCameraMode::GroundedWalk);
+        assert_eq!(path.status, PhysicalCameraTickStatus::Solved);
+        assert!(path.grounded);
+        assert_eq!(path.constraint_count, 0);
+        assert!((final_path_point(&path).origin[0] - 96.1).abs() < 0.001);
+        assert!((final_path_point(&path).origin[2] - (HUMAN_EYE_HEIGHT + 0.005)).abs() < 0.001);
     }
 
     #[test]
@@ -1423,11 +1750,11 @@ mod tests {
             .set_intent(intent(old_session, 99, [30.0, 0.0, 0.0]))
             .unwrap();
 
-        let (segment, _) = runtime
+        let (path, _) = runtime
             .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
             .unwrap()
             .unwrap();
-        assert!((segment.velocity[0] - 3.0).abs() < 0.001);
+        assert!((final_path_point(&path).origin[0] - 96.1).abs() < 0.001);
     }
 
     #[test]

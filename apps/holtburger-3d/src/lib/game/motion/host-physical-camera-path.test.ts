@@ -1,28 +1,40 @@
 import { describe, expect, it } from "vitest";
 import { Vec3 } from "../math/types";
 import {
-	evaluateHostPhysicalCameraSegment,
-	MAX_EXTRAPOLATION_FACTOR,
+	evaluateHostPhysicalCameraPath,
 	resolveGroundedWalkVelocity,
 	resolvePhysicalCameraViewDirection,
 	resolvePhysicalFlyVelocity,
-	type HostPhysicalCameraSegment,
+	type HostPhysicalCameraPath,
 } from "./host-physical-camera-path";
 
-function segment(
-	overrides: Partial<HostPhysicalCameraSegment> = {},
-): HostPhysicalCameraSegment {
+function path(
+	overrides: Partial<HostPhysicalCameraPath> = {},
+): HostPhysicalCameraPath {
 	return {
 		session: 1,
 		sequence: 0,
 		mode: "physical-fly",
-		residency: {
-			envCellId: null,
-			landblockId: "0xda55ffff",
+		durationMs: 100,
+		initial: {
+			residency: {
+				envCellId: null,
+				landblockId: "0xda55ffff",
+			},
+			origin: [10, 20, 30],
 		},
-		origin: [10, 20, 30],
-		velocity: [0, 0, 0],
-		horizonMs: 100,
+		legs: [
+			{
+				endFraction: 1,
+				end: {
+					residency: {
+						envCellId: null,
+						landblockId: "0xda55ffff",
+					},
+					origin: [10, 20, 30],
+				},
+			},
+		],
 		status: "solved",
 		grounded: false,
 		constraintCount: 0,
@@ -35,15 +47,29 @@ function segment(
 	};
 }
 
-describe("evaluateHostPhysicalCameraSegment", () => {
-	it("converts da55 landblock-local AC motion into canonical scene space", () => {
-		const placement = evaluateHostPhysicalCameraSegment(
-			segment({
-				residency: {
-					envCellId: "0xda550103",
-					landblockId: "0xda55ffff",
+describe("evaluateHostPhysicalCameraPath", () => {
+	it("interpolates da55 landblock-local AC motion in canonical scene space", () => {
+		const placement = evaluateHostPhysicalCameraPath(
+			path({
+				initial: {
+					residency: {
+						envCellId: "0xda550103",
+						landblockId: "0xda55ffff",
+					},
+					origin: [10, 20, 30],
 				},
-				velocity: [2, 4, 6],
+				legs: [
+					{
+						endFraction: 1,
+						end: {
+							residency: {
+								envCellId: "0xda550103",
+								landblockId: "0xda55ffff",
+							},
+							origin: [10.2, 20.4, 30.6],
+						},
+					},
+				],
 			}),
 			50,
 		);
@@ -56,22 +82,95 @@ describe("evaluateHostPhysicalCameraSegment", () => {
 		});
 	});
 
-	it("bounds extrapolation when the event stream is starved", () => {
-		const moving = segment({ velocity: [10, 0, 0] });
-		const atCap = evaluateHostPhysicalCameraSegment(
-			moving,
-			moving.horizonMs * MAX_EXTRAPOLATION_FACTOR,
-		);
-		const stale = evaluateHostPhysicalCameraSegment(moving, 10_000);
-		expect(stale).toEqual(atCap);
+	it("switches residency atomically at a host-supplied thin-cell boundary", () => {
+		const crossing = path({
+			legs: [
+				{
+					endFraction: 0.25,
+					end: {
+						residency: {
+							envCellId: "0xda55010b",
+							landblockId: "0xda55ffff",
+						},
+						origin: [10.25, 20, 30],
+					},
+				},
+				{
+					endFraction: 0.75,
+					end: {
+						residency: {
+							envCellId: null,
+							landblockId: "0xda55ffff",
+						},
+						origin: [10.75, 20, 30],
+					},
+				},
+				{
+					endFraction: 1,
+					end: {
+						residency: {
+							envCellId: null,
+							landblockId: "0xda55ffff",
+						},
+						origin: [11, 20, 30],
+					},
+				},
+			],
+		});
+		expect(evaluateHostPhysicalCameraPath(crossing, 24.999).residency).toEqual({
+			envCellId: null,
+			landblockId: "0xda55ffff",
+		});
+		expect(evaluateHostPhysicalCameraPath(crossing, 25).residency).toEqual({
+			envCellId: "0xda55010b",
+			landblockId: "0xda55ffff",
+		});
+		expect(evaluateHostPhysicalCameraPath(crossing, 75).residency).toEqual({
+			envCellId: null,
+			landblockId: "0xda55ffff",
+		});
 	});
 
-	it("does not rewind before the solved origin", () => {
-		const origin = evaluateHostPhysicalCameraSegment(
-			segment({ velocity: [10, 0, 0] }),
-			-1_000,
+	it("holds exact endpoints during starvation and never rewinds", () => {
+		const moving = path({
+			legs: [
+				{
+					endFraction: 1,
+					end: {
+						residency: {
+							envCellId: null,
+							landblockId: "0xdb55ffff",
+						},
+						origin: [1, 20, 30],
+					},
+				},
+			],
+		});
+		expect(evaluateHostPhysicalCameraPath(moving, -1_000).position.x).toBe(
+			0xda * 192 + 10,
 		);
-		expect(origin.position.x).toBe(0xda * 192 + 10);
+		expect(evaluateHostPhysicalCameraPath(moving, 10_000)).toEqual(
+			evaluateHostPhysicalCameraPath(moving, 100),
+		);
+	});
+
+	it("rejects malformed paths before presentation", () => {
+		expect(() =>
+			evaluateHostPhysicalCameraPath(path({ durationMs: 0 }), 0),
+		).toThrow("duration");
+		expect(() =>
+			evaluateHostPhysicalCameraPath(
+				path({
+					legs: [
+						{
+							endFraction: 0.5,
+							end: path().initial,
+						},
+					],
+				}),
+				0,
+			),
+		).toThrow("end at tick fraction one");
 	});
 });
 

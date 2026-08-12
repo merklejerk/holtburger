@@ -1,9 +1,10 @@
 import {
-	evaluateHostPhysicalCameraSegment,
-	type HostPhysicalCameraSegment,
+	evaluateHostPhysicalCameraPath,
+	type HostPhysicalCameraPath,
 	type PhysicalCameraMode,
 	type PhysicalCameraPlacement,
 	type PhysicalCameraTickStatus,
+	validateHostPhysicalCameraPath,
 } from "../lib/game/motion/host-physical-camera-path";
 import type { EnvCellId } from "../lib/game/game-types";
 
@@ -12,7 +13,7 @@ export interface PhysicalCameraTransport {
 	invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
 	listen(
 		event: string,
-		handler: (segment: HostPhysicalCameraSegment) => void,
+		handler: (path: HostPhysicalCameraPath) => void,
 	): Promise<() => void>;
 	now(): number;
 }
@@ -20,11 +21,11 @@ export interface PhysicalCameraTransport {
 /** Explorer-visible diagnostics for the current host session. */
 export interface PhysicalCameraStatus {
 	readonly mode: PhysicalCameraMode | null;
-	readonly tick: PhysicalCameraTickStatus | "awaiting-first-segment";
+	readonly tick: PhysicalCameraTickStatus | "awaiting-first-path";
 	readonly cellId: EnvCellId | null;
 	readonly grounded: boolean;
 	readonly constraintCount: number;
-	readonly droppedSegments: number;
+	readonly droppedPaths: number;
 	readonly missingLandblocks: readonly string[];
 	readonly outsideWorld: boolean;
 	readonly substeps: number;
@@ -32,16 +33,18 @@ export interface PhysicalCameraStatus {
 	readonly solveDurationMs: number;
 }
 
-/** Owns transport ordering and bounded prediction for one physical-camera handoff. */
+/** Owns transport ordering and bounded fixed-tick playback for one physical-camera handoff. */
 export class PhysicalCameraSession {
 	readonly #transport: PhysicalCameraTransport;
 	#unlisten: (() => void) | null = null;
 	#session: number | null = null;
-	#pendingSegment: HostPhysicalCameraSegment | null = null;
-	#segment: HostPhysicalCameraSegment | null = null;
-	#segmentArrivedAt = 0;
+	#preRegistrationPath: HostPhysicalCameraPath | null = null;
+	#activePath: HostPhysicalCameraPath | null = null;
+	#pendingPath: HostPhysicalCameraPath | null = null;
+	#activeStartedAt = 0;
+	#latestPath: HostPhysicalCameraPath | null = null;
 	#highestSequence = -1;
-	#droppedSegments = 0;
+	#droppedPaths = 0;
 	#intentSequence = 0;
 	#lastIntent: PhysicalCameraInput | null = null;
 
@@ -49,7 +52,7 @@ export class PhysicalCameraSession {
 		this.#transport = transport;
 	}
 
-	/** Registers the listener before starting the host so the first segment cannot be missed. */
+	/** Registers the listener before starting the host so the first path cannot be missed. */
 	async start(
 		placement: PhysicalCameraPlacement,
 		viewDirection: readonly [number, number, number],
@@ -58,7 +61,7 @@ export class PhysicalCameraSession {
 		if (this.#unlisten !== null) return;
 		this.#unlisten = await this.#transport.listen(
 			"host://physical-camera-motion",
-			(segment) => this.#receiveSegment(segment),
+			(path) => this.#receivePath(path),
 		);
 		try {
 			const result = await this.#transport.invoke("start_physical_camera", {
@@ -81,9 +84,9 @@ export class PhysicalCameraSession {
 				throw new Error("Host returned an invalid physical-camera session id.");
 			}
 			this.#session = result;
-			const pending = this.#pendingSegment;
-			this.#pendingSegment = null;
-			if (pending?.session === this.#session) this.#acceptSegment(pending);
+			const pending = this.#preRegistrationPath;
+			this.#preRegistrationPath = null;
+			if (pending?.session === this.#session) this.#acceptPath(pending);
 		} catch (error) {
 			this.#unlisten();
 			this.#unlisten = null;
@@ -138,53 +141,110 @@ export class PhysicalCameraSession {
 	}
 
 	placement(): PhysicalCameraPlacement | null {
-		if (this.#segment === null) return null;
-		return evaluateHostPhysicalCameraSegment(
-			this.#segment,
-			this.#transport.now() - this.#segmentArrivedAt,
+		const now = this.#transport.now();
+		this.#advancePlayback(now);
+		if (this.#activePath === null) return null;
+		return evaluateHostPhysicalCameraPath(
+			this.#activePath,
+			now - this.#activeStartedAt,
 		);
 	}
 
 	status(): PhysicalCameraStatus {
+		const latest = this.#latestPath;
 		return {
-			mode: this.#segment?.mode ?? null,
-			tick: this.#segment?.status ?? "awaiting-first-segment",
-			cellId: this.#segment?.residency.envCellId ?? null,
-			grounded: this.#segment?.grounded ?? false,
-			constraintCount: this.#segment?.constraintCount ?? 0,
-			droppedSegments: this.#droppedSegments,
-			missingLandblocks: this.#segment?.missingLandblocks ?? [],
-			outsideWorld: this.#segment?.outsideWorld ?? false,
-			substeps: this.#segment?.substeps ?? 0,
-			contactPasses: this.#segment?.contactPasses ?? 0,
-			solveDurationMs: this.#segment?.solveDurationMs ?? 0,
+			mode: latest?.mode ?? null,
+			tick: latest?.status ?? "awaiting-first-path",
+			cellId: latest?.legs.at(-1)?.end.residency.envCellId ?? null,
+			grounded: latest?.grounded ?? false,
+			constraintCount: latest?.constraintCount ?? 0,
+			droppedPaths: this.#droppedPaths,
+			missingLandblocks: latest?.missingLandblocks ?? [],
+			outsideWorld: latest?.outsideWorld ?? false,
+			substeps: latest?.substeps ?? 0,
+			contactPasses: latest?.contactPasses ?? 0,
+			solveDurationMs: latest?.solveDurationMs ?? 0,
 		};
 	}
 
-	#receiveSegment(segment: HostPhysicalCameraSegment): void {
+	#receivePath(path: HostPhysicalCameraPath): void {
 		if (this.#session === null) {
-			this.#pendingSegment = segment;
+			this.#preRegistrationPath = path;
 			return;
 		}
-		if (segment.session !== this.#session) return;
-		this.#acceptSegment(segment);
+		if (path.session !== this.#session) return;
+		this.#acceptPath(path);
 	}
 
-	#acceptSegment(segment: HostPhysicalCameraSegment): void {
-		if (segment.sequence <= this.#highestSequence) return;
-		this.#droppedSegments += segment.sequence - this.#highestSequence - 1;
-		this.#highestSequence = segment.sequence;
-		this.#segment = segment;
-		this.#segmentArrivedAt = this.#transport.now();
+	#acceptPath(path: HostPhysicalCameraPath): void {
+		if (path.sequence <= this.#highestSequence) return;
+		validateHostPhysicalCameraPath(path);
+		const gap = path.sequence - this.#highestSequence - 1;
+		this.#droppedPaths += gap;
+		this.#highestSequence = path.sequence;
+		this.#latestPath = path;
+		const now = this.#transport.now();
+		if (this.#activePath === null || gap > 0) {
+			this.#activePath = path;
+			this.#pendingPath = null;
+			this.#activeStartedAt = now;
+			return;
+		}
+
+		const activeEndsAt = this.#activeStartedAt + this.#activePath.durationMs;
+		if (now >= activeEndsAt) {
+			const pending = this.#pendingPath;
+			if (pending === null) {
+				// A late successor owns a fresh fixed-tick interval from its explicit initial point.
+				this.#activePath = path;
+				this.#activeStartedAt = now;
+				return;
+			}
+			const pendingEndsAt = activeEndsAt + pending.durationMs;
+			if (now >= pendingEndsAt) {
+				// Both retained ticks are stale after suspension. Resume from the newest host point.
+				this.#activePath = path;
+				this.#pendingPath = null;
+				this.#activeStartedAt = now;
+				return;
+			}
+			this.#activePath = pending;
+			this.#pendingPath = path;
+			this.#activeStartedAt = activeEndsAt;
+			return;
+		}
+
+		if (this.#pendingPath === null) {
+			this.#pendingPath = path;
+			return;
+		}
+		// More than one pending tick means the renderer stopped consuming. Resume from an explicit
+		// host point rather than accumulating input latency or fabricating a bridge.
+		this.#activePath = path;
+		this.#pendingPath = null;
+		this.#activeStartedAt = now;
+	}
+
+	#advancePlayback(now: number): void {
+		const active = this.#activePath;
+		if (active === null || now - this.#activeStartedAt < active.durationMs)
+			return;
+		const pending = this.#pendingPath;
+		if (pending === null) return;
+		this.#activeStartedAt += active.durationMs;
+		this.#activePath = pending;
+		this.#pendingPath = null;
 	}
 
 	#reset(): void {
 		this.#unlisten = null;
 		this.#session = null;
-		this.#pendingSegment = null;
-		this.#segment = null;
+		this.#preRegistrationPath = null;
+		this.#activePath = null;
+		this.#pendingPath = null;
+		this.#latestPath = null;
 		this.#highestSequence = -1;
-		this.#droppedSegments = 0;
+		this.#droppedPaths = 0;
 		this.#intentSequence = 0;
 		this.#lastIntent = null;
 	}

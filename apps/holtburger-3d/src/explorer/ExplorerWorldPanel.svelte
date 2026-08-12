@@ -369,7 +369,7 @@
 			{cameraModePending
 				? "Loading collision coverage and placing the physical camera."
 				: cameraMode !== "free-fly"
-					? `Host ${physicalCameraStatus?.mode ?? cameraMode}: ${physicalCameraStatus?.tick ?? "awaiting-first-segment"}; cell ${physicalCameraStatus?.cellId ?? "outdoor"}; ${physicalCameraStatus?.grounded ? "grounded" : "airborne"}; ${physicalCameraStatus?.constraintCount ?? 0} solve constraints; ${physicalCameraStatus?.solveDurationMs.toFixed(2) ?? "0.00"} ms; ${physicalCameraStatus?.substeps ?? 0} substeps; ${physicalCameraStatus?.contactPasses ?? 0} contact passes; ${physicalCameraStatus?.droppedSegments ?? 0} dropped.`
+					? `Host ${physicalCameraStatus?.mode ?? cameraMode}: ${physicalCameraStatus?.tick ?? "awaiting-first-path"}; cell ${physicalCameraStatus?.cellId ?? "outdoor"}; ${physicalCameraStatus?.grounded ? "grounded" : "airborne"}; ${physicalCameraStatus?.constraintCount ?? 0} solve constraints; ${physicalCameraStatus?.solveDurationMs.toFixed(2) ?? "0.00"} ms; ${physicalCameraStatus?.substeps ?? 0} substeps; ${physicalCameraStatus?.contactPasses ?? 0} contact passes; ${physicalCameraStatus?.droppedPaths ?? 0} dropped paths.`
 					: "Free fly bypasses collision and remains the recovery mode."}
 		</p>
 		{#if physicalCameraStatus?.tick === "missing-coverage"}

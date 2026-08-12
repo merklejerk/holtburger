@@ -16,8 +16,6 @@ import type {
 	ScenePlacement,
 	SceneEnvCellScopeInput,
 	ScenePortalCrossingInput,
-	ScenePortalTraceQuery,
-	ScenePortalTraceResult,
 	SceneScope,
 	SceneScopeSelection,
 	SceneTopologyScope,
@@ -31,10 +29,6 @@ import type {
 	SceneCullingGroupFilter,
 } from ".";
 import { cellContainsLandblockPoint } from "./cell-containment";
-import {
-	traceScenePortalSegment,
-	type SceneUnavailablePortalBoundary,
-} from "./portal-trace";
 import { scopeFor, sameScope, scopeKey } from "./scope";
 import { createSceneNodeId } from "./utils";
 
@@ -103,11 +97,6 @@ export class SceneGraph {
 	readonly #outgoingCrossings = new Map<
 		string,
 		Map<PortalCrossingId, ScenePortalCrossingInput>
-	>();
-	/** Outdoor-side blockers synthesized only for unclaimed one-way exterior endpoints. */
-	readonly #unavailableExteriorBoundaries = new Map<
-		string,
-		Map<string, SceneUnavailablePortalBoundary>
 	>();
 	/** Reused by every visibility query; contains only primitive selections. */
 	readonly #visibleEntries: SceneNodeId[] = [];
@@ -314,7 +303,6 @@ export class SceneGraph {
 		const existing = this.#portalCrossings.get(input.id);
 		if (existing) {
 			this.#removeOutgoingCrossing(existing);
-			this.#removeUnavailableExteriorBoundary(existing);
 		}
 		const crossing = copyPortalCrossing(input, this.#portalApertureCopies);
 		this.#portalCrossings.set(input.id, crossing);
@@ -324,7 +312,6 @@ export class SceneGraph {
 			new Map<PortalCrossingId, ScenePortalCrossingInput>();
 		outgoing.set(crossing.id, crossing);
 		this.#outgoingCrossings.set(sourceKey, outgoing);
-		this.#upsertUnavailableExteriorBoundary(crossing);
 		this.#markTopologyChanged();
 	}
 
@@ -332,30 +319,9 @@ export class SceneGraph {
 		const crossing = this.#portalCrossings.get(crossingId);
 		if (crossing) {
 			this.#removeOutgoingCrossing(crossing);
-			this.#removeUnavailableExteriorBoundary(crossing);
 			this.#portalCrossings.delete(crossingId);
 			this.#markTopologyChanged();
 		}
-	}
-
-	/** Trace a future camera endpoint from caller-supplied authoritative actor residency. */
-	tracePortalSegment(query: ScenePortalTraceQuery): ScenePortalTraceResult {
-		return traceScenePortalSegment(query, {
-			isScopeAvailable: (scope) => {
-				if (scope.kind === "outdoor") return true;
-				const installed = this.#envCellScopes.get(scope.envCellId);
-				return installed !== undefined && sameScope(installed.scope, scope);
-			},
-			maximumCrossingCount: this.#portalCrossings.size,
-			outgoing: (scope) => [
-				...(this.#outgoingCrossings.get(scopeKey(scope))?.values() ?? []),
-			],
-			unavailableBoundaries: (scope) => [
-				...(this.#unavailableExteriorBoundaries
-					.get(scopeKey(scope))
-					?.values() ?? []),
-			],
-		});
 	}
 
 	/**
@@ -776,40 +742,6 @@ export class SceneGraph {
 		if (outgoing?.size === 0) this.#outgoingCrossings.delete(sourceKey);
 	}
 
-	#upsertUnavailableExteriorBoundary(crossing: ScenePortalCrossingInput): void {
-		if (
-			crossing.source.kind !== "env-cell" ||
-			crossing.target.kind !== "outdoor" ||
-			crossing.reciprocalCrossingId !== null ||
-			crossing.spatialRelationship.kind !== "exterior-transition"
-		) {
-			return;
-		}
-		const source: SceneScope = { kind: "outdoor" };
-		const sourceKey = scopeKey(source);
-		const boundaries =
-			this.#unavailableExteriorBoundaries.get(sourceKey) ??
-			new Map<string, SceneUnavailablePortalBoundary>();
-		const id = unavailableExteriorBoundaryId(crossing);
-		boundaries.set(id, {
-			acceptedSide:
-				crossing.acceptedSide === "positive" ? "negative" : "positive",
-			aperture: crossing.sourceAperture,
-			id,
-			source,
-		});
-		this.#unavailableExteriorBoundaries.set(sourceKey, boundaries);
-	}
-
-	#removeUnavailableExteriorBoundary(crossing: ScenePortalCrossingInput): void {
-		const sourceKey = scopeKey({ kind: "outdoor" });
-		const boundaries = this.#unavailableExteriorBoundaries.get(sourceKey);
-		boundaries?.delete(unavailableExteriorBoundaryId(crossing));
-		if (boundaries?.size === 0) {
-			this.#unavailableExteriorBoundaries.delete(sourceKey);
-		}
-	}
-
 	#frustumIntersectsEntry(
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
@@ -927,10 +859,4 @@ function copyPortalAperture(
 	};
 	copies.set(aperture, copy);
 	return copy;
-}
-
-function unavailableExteriorBoundaryId(
-	crossing: ScenePortalCrossingInput,
-): string {
-	return `portal-unavailable:${crossing.id}/reverse`;
 }

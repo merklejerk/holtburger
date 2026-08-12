@@ -21,7 +21,8 @@ mod tests;
 pub use collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionQueryError, CollisionScene,
     CollisionSceneUpdateError, CoverageRequest, GroundedObstruction, GroundedObstructionRequest,
-    MissingCoverage, MovementObstructionRequest, PlacementRequest, StaticContact, SupportContact,
+    MissingCoverage, MotionWaypoint, MovementObstructionRequest, PlacedMotionLeg, PlacedMotionPath,
+    PlacedMotionPathRequest, PlacedMotionPoint, PlacementRequest, StaticContact, SupportContact,
     SupportRequest,
 };
 pub use grounded::{

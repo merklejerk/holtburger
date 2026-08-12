@@ -1395,13 +1395,6 @@ export class GameRuntime {
 		return this.#scene.hasEnvCellScope(residency);
 	}
 
-	/** Trace a desired endpoint from a caller-supplied authoritative actor anchor. */
-	tracePortalSegment(
-		query: import("../scene").ScenePortalTraceQuery,
-	): import("../scene").ScenePortalTraceResult {
-		return this.#scene.tracePortalSegment(query);
-	}
-
 	/** Sample canonical outdoor terrain as soon as its source commits, before GPU realization. */
 	queryOutdoorTerrainSurface(point: Vec3): TerrainSurfaceSample | null {
 		return this.#terrain.querySurfaceAtWorldPoint(point);

@@ -227,17 +227,16 @@ EnvCell residents, and anchored authored dynamics apply it per atomic presentati
 contribution expansion. Terrain, EnvCell shells, generated transparent/additive streams, and future
 runtime-authored actors are explicitly ineligible. Near-plane-straddling bounds remain retained.
 
-The runtime exposes three distinct query contracts:
+The runtime exposes two frontend placement-query contracts:
 
 - `queryWorldPointResidencyCandidates` returns the outdoor result plus every EnvCell whose AABB is
   hit, together with its exact Cell BSP containment verdict. It preserves overlapping ambiguity.
 - `queryEnvCellPointContainment` tests one caller-selected resident EnvCell.
-- `tracePortalSegment` starts from caller-supplied authoritative residency and follows the earliest
-  directed finite-aperture crossing. It does not infer residency from overlap.
 
-The explorer uses candidate containment for best-effort initial/free-fly placement. It retains the
-last resolved residency when overlap is ambiguous. No player movement, authoritative portal
-history, third-person camera residency, or client controller policy has been implemented.
+The explorer uses candidate containment only for best-effort initial/free-fly placement. Physical
+camera and future actor placement paths are solved by the host against `holtburger-world` collision
+topology; frontend scene code does not maintain a second actor portal traversal. Renderer visibility
+still consumes the retained directed aperture topology from an already-known placement.
 
 ## 6. Authored and Effective Apertures
 

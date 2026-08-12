@@ -1390,6 +1390,11 @@ export class GameRuntime {
 		return this.#scene.hasEnvCellTopology(landblockId);
 	}
 
+	/** Whether the exact host-selected EnvCell scope is available to the renderer. */
+	hasEnvCellScope(residency: SceneResidency): boolean {
+		return this.#scene.hasEnvCellScope(residency);
+	}
+
 	/** Trace a desired endpoint from a caller-supplied authoritative actor anchor. */
 	tracePortalSegment(
 		query: import("../scene").ScenePortalTraceQuery,

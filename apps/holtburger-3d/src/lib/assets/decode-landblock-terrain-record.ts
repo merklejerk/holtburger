@@ -2,13 +2,20 @@ import type { ActiveRegionSource } from "./active-region-source";
 import { resolveOutdoorTerrainLayer } from "../game/terrain/active-region-terrain-resolver";
 import type { ResolvedTerrainLayerSource } from "../game/resolution/landblock-layer";
 import type { LandblockId } from "../game/game-types";
-import { OUTDOOR_TERRAIN_GRID_SIZE } from "../game/landblocks";
+import {
+	OUTDOOR_TERRAIN_GRID_CELLS,
+	OUTDOOR_TERRAIN_GRID_SIZE,
+} from "../game/landblocks";
 
 const HEADER_LENGTH = 12;
 const MAGIC = "HBTR";
 
 interface BinarySection {
-	readonly name: "heightIndices" | "resolvedHeights" | "terrainSamples";
+	readonly name:
+		| "heightIndices"
+		| "resolvedHeights"
+		| "terrainSamples"
+		| "cellDiagonals";
 	readonly scalarType: "u8" | "u16" | "f32";
 	readonly elementCount: number;
 	readonly byteOffset: number;
@@ -80,7 +87,7 @@ export function decodeLandblockTerrainRecord(
 	const sections = new Map(
 		manifest.sections.map((section) => [section.name, section]),
 	);
-	if (sections.size !== 3 || sections.size !== manifest.sections.length) {
+	if (sections.size !== 4 || sections.size !== manifest.sections.length) {
 		throw new Error(
 			"Landblock terrain record must contain each raw grid section exactly once.",
 		);
@@ -104,8 +111,20 @@ export function decodeLandblockTerrainRecord(
 		requireSection(sections, "terrainSamples", "u16", expectedCount),
 		Uint16Array,
 	);
+	const cellDiagonals = readSection(
+		response,
+		sectionDataOffset,
+		requireSection(
+			sections,
+			"cellDiagonals",
+			"u8",
+			OUTDOOR_TERRAIN_GRID_CELLS ** 2,
+		),
+		Uint8Array,
+	);
 	return resolveOutdoorTerrainLayer(
 		{
+			cellDiagonals,
 			heightIndices,
 			heights,
 			landblockId: manifest.landblockId,

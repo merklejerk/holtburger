@@ -26,6 +26,7 @@ import type {
 	ResolvedScenePlacement,
 	ResolvedSceneBounds,
 	ScenePointResidencyCandidates,
+	SceneResidency,
 	VisibleScene,
 	SceneCullingGroupFilter,
 } from ".";
@@ -570,6 +571,20 @@ export class SceneGraph {
 			if (scope.landblockId === landblockId) return true;
 		}
 		return false;
+	}
+
+	/** Whether the exact EnvCell scope named by an authoritative placement is resident. */
+	hasEnvCellScope(residency: SceneResidency): boolean {
+		if (residency.envCellId === null) return false;
+		const installed = this.#envCellScopes.get(residency.envCellId);
+		return (
+			installed !== undefined &&
+			sameScope(installed.scope, {
+				kind: "env-cell",
+				landblockId: residency.landblockId,
+				envCellId: residency.envCellId,
+			})
+		);
 	}
 
 	/** Return the current world-space bounds for one installed environment-cell scope. */

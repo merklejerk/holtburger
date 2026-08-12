@@ -6,8 +6,10 @@ canonical DAT-derived queries.
 ## Core Principles
 
 - **Interpret content, not presentation**: this crate may decode, join, normalize, and derive
-  source-domain facts. It must not produce renderer coordinates, triangles, bounds, aperture
-  meshes, batching, culling structures, or frontend LoD policy.
+  source-domain facts. Authored collision polygons, terrain obstruction triangles, and conservative
+  collision bounds are source-domain geometry because host behavior consumes them. Renderer
+  coordinates, presentation triangulation, aperture meshes, batching, culling structures, and
+  frontend LoD policy remain outside this crate.
 - **Cheap foundations, explicit fanout**: a complete shallow landblock load is safe at a wide
   interest radius. Generated scenery and interiors are separate resolutions because they open
   materially larger dependency graphs.
@@ -67,6 +69,28 @@ survive. In-range reciprocal internal links additionally receive a validated cro
 links may be enriched by one matching LandblockInfo building portal. No GfxObj aperture geometry,
 CellStruct triangulation, render bounds, or BVH is produced.
 
+### Static Collision Assembly
+
+[`src/terrain_topology.rs`](src/terrain_topology.rs) owns retail's deterministic terrain-cell
+diagonal rule. The diagonal grid travels with `LandblockTerrain`; both host obstruction triangles
+and the frontend stride-one mesh consume it rather than maintaining separate hashes.
+
+[`src/object_collision.rs`](src/object_collision.rs) resolves authored physics BSPs and polygons
+for explicit objects, generated scenery, building shells, EnvCell structures, and indoor statics.
+Shapes remain shared through the resolved-asset cache while placements retain component-wise
+SetupModel part scales. Each placed part retains a stable authored-placement identity and
+object-local vertex box so the resident world can reproduce retail's multipart static-shadow
+traversal without cloning geometry. Interior containment volumes derive from the distinct cell BSP,
+retain portal neighbors, and preserve the matched building index/origin on outside portals.
+`LandblockColliders` is the atomic merge unit for placed shapes and volumes.
+
+These artifacts deliberately contain no grounding, walkability, step, edge, movement-response, or
+residency policy. They also do not bake cross-cell memberships: that fact depends on the complete
+resident scene because shipped outdoor placements can enter a neighbor-owned building. The world
+derives those shadow references transactionally from independently assembled landblock artifacts.
+`ContentAssetService::resolve_collision` in `holtburger-core` is the sole complete product
+composition path.
+
 ## Ownership Boundary
 
 ### What Belongs Here
@@ -76,6 +100,8 @@ CellStruct triangulation, render bounds, or BVH is produced.
 - canonical terrain, object, building, restriction, generated-scenery, and interior facts
 - retail-derived generated-scenery population semantics
 - portal topology and stable source references required for later enrichment
+- authored collision BSPs/polygons, conservative bounds, terrain obstruction triangles, and cell
+  containment volumes
 - reusable material, appearance, and texture-data queries
 
 ### What Does Not Belong Here
@@ -83,7 +109,7 @@ CellStruct triangulation, render bounds, or BVH is produced.
 - runtime world mutation or gameplay rules
 - app interest radii, requested-layer selection, or retry policy
 - render-coordinate conversion and polygon-side expansion
-- GfxObj/SetupModel presentation closure, triangulation, or render bounds
+- GfxObj/SetupModel presentation closure, presentation triangulation, or render bounds
 - aperture meshes, draw ranges, batching, atlases, culling trees, or portal traversal policy
 - durable success diagnostics, source-attempt ledgers, or renderer snapshots
 
@@ -112,6 +138,9 @@ sequenceDiagram
     Core->>Content: resolve over cached foundation
     Content->>DAT: EnvCells + deduplicated Environments
     Content-->>App: canonical cells + directed topology
+    App->>Core: Collision(id), when host collision residency requires it
+    Core->>Content: resolve terrain + all placed static collision families
+    Content-->>Core: atomic collision artifact
     App->>App: presentation enrichment and layer-bundle serialization
 ```
 

@@ -78,7 +78,7 @@ Files: [src/entity.rs](src/entity.rs), [src/hydration.rs](src/hydration.rs)
     property updates arrive over time.
 
 ### Spatial / Physics helpers
-Files: [src/spatial.rs](src/spatial.rs), [src/state/physics.rs](src/state/physics.rs)
+Files: [src/spatial.rs](src/spatial.rs), [src/spatial](src/spatial)
 
 These modules own movement-facing invariants:
 
@@ -93,10 +93,51 @@ sampling behavior lives inside it via `BodySamplingStore`, and that world-owned 
 the canonical runtime body model for the client. Any app-facing cache in `holtburger-core` or a
 frontend is derived read state only; it must not independently advance runtime bodies.
 
-Shared world no longer performs automatic local collision or local velocity integration during
-`tick()`. Those semantics are intentionally deferred until a future client can define a real
-client-side physics or prediction model, but when constraint-aware runtime advancement does land it
-belongs here on the world-owned runtime body path rather than in a parallel core/frontend cache.
+Shared world does not perform automatic local collision or local velocity integration during
+`tick()`. Constraint-aware advancement is an explicit solve operation on the world-owned runtime
+path rather than an implicit side effect or a parallel core/frontend cache.
+
+The host-physics recovery adds an explicit static-collision subsystem without changing that
+existing implicit `tick()` policy:
+
+- `CollisionScene` owns complete landblock collision artifacts and one derived resident static-shadow
+  index. Geometry remains owned once by its source artifact; outdoor and EnvCell buckets contain
+  stable source references, including the rare shipped placements that cross an owner boundary.
+  Batched insertion/replacement/eviction rebuilds the index transactionally, so terrain, placed
+  shapes, volumes, and every derived shadow change atomically.
+- Coverage, movement obstruction, lower-sphere support, placement confirmation, and prior-cell
+  transit are separate typed query families. Queries return geometry facts without choosing
+  grounded policy, and missing coverage is a result rather than a collision miss.
+- `CollisionPlacement` carries the lower-center-committed EnvCell, every EnvCell reached by the
+  retained sphere set, and outdoor reach. All query families select terrain, outdoor objects,
+  building shells, EnvCell shells, and indoor statics from that one contract; they never infer a
+  collision domain independently.
+- Static-shadow bounds can cross at most one source owner in the shipped-content census. Coverage
+  therefore requires a one-landblock source halo around every owner touched by a swept sphere. The
+  app host keeps a 5x5 collision ring so a sweep touching its first neighbor still has that complete
+  source halo; render interest remains a separate policy.
+- BSP planes and polygons transform into landblock-local query space. The body sphere remains
+  spherical even for non-uniformly scaled SetupModel parts.
+- `solve_physical_fly` is an explicit bounded operation over one requested displacement. It owns no
+  gravity, support, walkability, step, slope, or ledge behavior and does not run from `tick()` until
+  the app-local Phase 1c host registers and drives a camera body.
+- `solve_grounded` is a separate bounded response over one required lower/support sphere and one
+  optional upper/constraint sphere. It alone owns gravity, walkability, committed support, one
+  next-substep sliding normal, and achieved velocity. A solve-local set counts distinct encountered
+  planes for diagnostics but cannot influence motion. The upper sphere participates in obstruction
+  and placement but cannot become support or choose the committed cell.
+- Grounded step-up and step-down are separate, non-recursive operations over a shared vertical
+  settle/placement primitive. A raised candidate is confirmed against both spheres before commit;
+  a failed candidate cannot leak pose or contact state.
+- Finite support may carry an inward boundary normal. Creature edge protection consumes it to
+  preserve elevation and tangent motion, while unprotected response accepts the unsupported pose.
+- Grounded cell transit queries both spheres through the previous-cell/portal-neighbor rule, but the
+  lower sphere alone selects the committed cell. Back-face polygons produce approach-side contacts;
+  no retail transition flag is retained when sphere role already determines the response.
+
+Collision integration uses an anchor landblock's local coordinates across one solve. It does not
+accumulate large absolute-world `f32` coordinates; doing so produced measurable centimeter-scale
+drift at `0xDA55FFFF`. Owner-local conversion occurs only at collision lookup and pose commit.
 
 ### Lifecycle / retention helpers
 Files: [src/state/liveness.rs](src/state/liveness.rs), [src/state/mutations.rs](src/state/mutations.rs)

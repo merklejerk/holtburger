@@ -22,6 +22,7 @@ mod binary_source_record;
 pub mod cell_struct_projection;
 mod env_cell_source;
 pub mod gfx_obj_geometry;
+mod host_camera_runtime;
 pub mod interior_seam;
 mod landblock_source_batch;
 mod object_resource_closure;
@@ -68,6 +69,8 @@ const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
 #[derive(Clone)]
 struct HostContentState {
     runtime: ContentAssetRuntime,
+    /// Shared synchronous service used by app-local host behaviors such as collision residency.
+    service: Arc<ContentAssetService>,
 }
 
 impl HostContentState {
@@ -80,7 +83,8 @@ impl HostContentState {
     fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
         let service = ContentAssetService::new(repository, Arc::new(ContentDecodeCache::new()));
         Ok(Self {
-            runtime: ContentAssetRuntime::new(service),
+            runtime: ContentAssetRuntime::new(service.clone()),
+            service: Arc::new(service),
         })
     }
 }
@@ -714,6 +718,41 @@ fn format_error(error: anyhow::Error) -> String {
     format!("{error:#}")
 }
 
+/// Registers one host-owned physical camera body at the currently presented Explorer pose.
+#[tauri::command]
+async fn start_physical_camera(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
+    registration: host_camera_runtime::PhysicalCameraRegistration,
+) -> Result<u64, String> {
+    let runtime = Arc::clone(&runtime);
+    let registration_runtime = Arc::clone(&runtime);
+    let session = tokio::task::spawn_blocking(move || registration_runtime.start(registration))
+        .await
+        .map_err(|error| format!("physical camera registration task failed: {error}"))?
+        .map_err(format_error)?;
+    host_camera_runtime::spawn_tick_loop(app, runtime, session);
+    Ok(session)
+}
+
+/// Replaces the world-space velocity consumed by the next fixed host tick.
+#[tauri::command]
+fn set_physical_camera_intent(
+    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
+    intent: host_camera_runtime::PhysicalCameraIntent,
+) -> Result<(), String> {
+    runtime.set_intent(intent).map_err(format_error)
+}
+
+/// Returns position authority to frontend free fly and invalidates the old tick generation.
+#[tauri::command]
+fn stop_physical_camera(
+    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
+    session: u64,
+) {
+    runtime.stop(session);
+}
+
 fn surface_texture_asset_id(texture_id: u32) -> String {
     format!("surface-texture/0x{texture_id:08x}")
 }
@@ -992,6 +1031,8 @@ fn terrain_sections(terrain: &LandblockTerrain) -> Vec<BinarySectionManifest> {
     let terrain_samples_offset =
         align_binary_section_offset(heights_offset + heights_length, std::mem::align_of::<u16>());
     let terrain_samples_length = terrain.terrain_samples.len() * std::mem::size_of::<u16>();
+    let cell_diagonals_offset = terrain_samples_offset + terrain_samples_length;
+    let cell_diagonals_length = terrain.cell_diagonals.to_cell_bytes().len();
     vec![
         BinarySectionManifest {
             name: "heightIndices",
@@ -1013,6 +1054,13 @@ fn terrain_sections(terrain: &LandblockTerrain) -> Vec<BinarySectionManifest> {
             element_count: terrain.terrain_samples.len(),
             byte_offset: terrain_samples_offset,
             byte_length: terrain_samples_length,
+        },
+        BinarySectionManifest {
+            name: "cellDiagonals",
+            scalar_type: "u8",
+            element_count: cell_diagonals_length,
+            byte_offset: cell_diagonals_offset,
+            byte_length: cell_diagonals_length,
         },
     ]
 }
@@ -1060,6 +1108,7 @@ fn serialize_terrain_source_binary(
                         chunk.copy_from_slice(&sample.to_le_bytes());
                     }
                 }
+                "cellDiagonals" => target.copy_from_slice(&terrain.cell_diagonals.to_cell_bytes()),
                 _ => unreachable!("terrain sections are fixed"),
             }
         }
@@ -1109,10 +1158,19 @@ fn serialize_texture_pixels_binary(
 pub fn run() {
     let content_state = HostContentState::discover()
         .expect("failed to initialize Holtburger 3D content repository from configured content");
+    let collision_source: Arc<dyn host_camera_runtime::CollisionSource> =
+        content_state.service.clone();
+    let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
+        collision_source,
+    ));
     tauri::Builder::default()
         .manage(content_state)
+        .manage(camera_runtime)
         .invoke_handler(tauri::generate_handler![
             host_status,
+            start_physical_camera,
+            set_physical_camera_intent,
+            stop_physical_camera,
             load_active_region_data,
             load_animation,
             load_audio,
@@ -1147,6 +1205,7 @@ mod tests {
             height_indices: (0..9).collect(),
             heights: (0..9).map(|value| value as f32 + 0.5).collect(),
             terrain_samples: (10..19).collect(),
+            cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(0x0102_ffff),
         };
         let manifest = TerrainSourceManifest {
             transport: "holtburger-landblock-terrain-record",
@@ -1173,11 +1232,13 @@ mod tests {
         let sections = decoded_manifest["sections"]
             .as_array()
             .expect("manifest should describe binary sections");
-        assert_eq!(sections.len(), 3);
+        assert_eq!(sections.len(), 4);
         assert_eq!(sections[1]["name"], "resolvedHeights");
         assert_eq!(sections[1]["byteOffset"], 12);
         assert_eq!(sections[2]["name"], "terrainSamples");
         assert_eq!(sections[2]["byteOffset"], 48);
+        assert_eq!(sections[3]["name"], "cellDiagonals");
+        assert_eq!(sections[3]["byteOffset"], 66);
         assert_eq!(bytes[section_data_offset], 0);
         assert_eq!(bytes[section_data_offset + 9], 0);
         assert_eq!(
@@ -1189,6 +1250,11 @@ mod tests {
             0.5
         );
         assert_eq!(bytes[section_data_offset + 48], 10);
+        let expected_diagonals = terrain.cell_diagonals.to_cell_bytes();
+        assert_eq!(
+            &bytes[section_data_offset + 66..section_data_offset + 66 + expected_diagonals.len()],
+            expected_diagonals
+        );
     }
 
     #[test]

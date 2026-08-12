@@ -6,6 +6,7 @@ Created: 2026-07-31
 Evidence pass: 2026-07-31
 Roadmap split: 2026-07-31
 Convergence review: 2026-08-01
+Host-physics reconciliation: 2026-08-11
 
 ## Goal
 
@@ -22,6 +23,7 @@ by explorer scenarios or a future network client.
 | Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`     |
 | Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                       |
 | Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day     |
+| Host physical camera topology     | Implemented 2026-08-11    | Shared static queries/solvers landed; maintainer acceptance pending |
 | Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; next mainline plan |
 
 ## Why This Roadmap Is Split
@@ -106,7 +108,7 @@ authority requirements.
 Plan: [holtburger-3d-spawned-entity-explorer-runtime-plan.md](holtburger-3d-spawned-entity-explorer-runtime-plan.md)
 
 Progress: Queued — next mainline plan now that the authored-effects plan is complete; convergence
-audit and rewrite complete (2026-08-01).
+audit and rewrite complete (2026-08-01), host-physics reconciliation recorded (2026-08-11).
 
 Outcome:
 
@@ -123,6 +125,9 @@ Outcome:
 - Spawned entities reuse the authored visual, behavior, effect, presentation, and renderer systems.
 - App-local explorer and client composition remain policy boundaries over shared world/core mechanics,
   with no second authoritative runtime or speculative base-runtime hierarchy.
+- Spawned motion may consume the landed `holtburger-world` collision queries and bounded body
+  solvers when a concrete scenario requires local physical prediction. It does not consume the
+  Explorer camera session, camera dimensions, input mapping, or camera transport.
 
 This plan establishes a durable growth seam for later explorer physics demonstrations, which require
 a separate concrete scenario and plan.

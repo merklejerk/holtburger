@@ -18,4 +18,5 @@ pub use content_assets::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
     SetupAppearanceRequest, SurfaceTexturePixelsRequest,
 };
+pub use holtburger_content::LandblockCollisionAsset;
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

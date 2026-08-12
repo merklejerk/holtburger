@@ -1,3 +1,7 @@
+mod bsp_query;
+mod collision;
+mod grounded;
+mod physical_fly;
 mod physics;
 mod scene;
 mod types;
@@ -14,3 +18,17 @@ pub(crate) use physics::project_pose_by_velocity;
 
 #[cfg(test)]
 mod tests;
+pub use collision::{
+    CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionQueryError, CollisionScene,
+    CollisionSceneUpdateError, CoverageRequest, GroundedObstruction, GroundedObstructionRequest,
+    MissingCoverage, MovementObstructionRequest, PlacementRequest, StaticContact, SupportContact,
+    SupportRequest,
+};
+pub use grounded::{
+    EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
+    GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere, solve_grounded,
+};
+pub use physical_fly::{
+    PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,
+    solve_physical_fly,
+};

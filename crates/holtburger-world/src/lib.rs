@@ -33,12 +33,19 @@ pub use attachment::{AttachmentError, PhysicsAttachment};
 pub use bootstrap::WorldBootstrap;
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{
-    AuthoritativeBodySync, BasicSpatialPhysics, ContactState, LocalDriveControl, LocalDriveGait,
-    NoopSpatialPhysics, RuntimeBodyResetCause, RuntimeSpatialBodyView,
-    SelfPlayerDriveProjectionState, SolveBodyInput, SolveProjectionBasis, SolvedBodyKinematics,
-    SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialPhysics,
-    SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
-    SpatialSolveBatch, SpatialSolveRequest, advance_body_kinematics, project_pose_forward_distance,
+    AuthoritativeBodySync, BasicSpatialPhysics, CellTransitRequest, CollisionPlacement,
+    CollisionQuery, CollisionQueryError, CollisionScene, CollisionSceneUpdateError, ContactState,
+    CoverageRequest, EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres,
+    GroundedBudget, GroundedConfig, GroundedObstruction, GroundedObstructionRequest,
+    GroundedOutcome, GroundedRequest, GroundedSphere, LocalDriveControl, LocalDriveGait,
+    MissingCoverage, MovementObstructionRequest, NoopSpatialPhysics, PhysicalFlyBody,
+    PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacementRequest,
+    RuntimeBodyResetCause, RuntimeSpatialBodyView, SelfPlayerDriveProjectionState, SolveBodyInput,
+    SolveProjectionBasis, SolvedBodyKinematics, SpatialBody, SpatialBodyEvent, SpatialBodyId,
+    SpatialEntitySample, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
+    SpatialSamplingState, SpatialScene, SpatialSolveBatch, SpatialSolveRequest, StaticContact,
+    SupportContact, SupportRequest, advance_body_kinematics, project_pose_forward_distance,
+    solve_grounded, solve_physical_fly,
 };
 pub use state::{
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,

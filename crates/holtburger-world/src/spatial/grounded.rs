@@ -1,0 +1,2220 @@
+//! Bounded grounded motion for an authored lower sphere and optional upper sphere.
+
+use anyhow::{Result, ensure};
+use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Vector3};
+
+use super::collision::{
+    CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
+    GroundedObstruction, GroundedObstructionRequest, MissingCoverage, PlacementRequest,
+    StaticContact, SupportRequest, anchor_point_to_outdoor_position, landblock_key,
+    separating_displacement,
+};
+
+/// Explicit limits and grounded-response policy for one solve.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundedConfig {
+    /// Downward world acceleration in meters per second squared.
+    pub gravity: f32,
+    /// Minimum upward normal component that may support the lower sphere.
+    pub walkable_normal_z: f32,
+    /// Maximum non-recursive rise used by a lower-sphere step attempt.
+    pub step_up_height: f32,
+    /// Maximum vertical distance used to retain or acquire support after movement.
+    pub step_down_height: f32,
+    /// Whether a previously supported body may leave its footing.
+    pub edge_protection: EdgeProtection,
+    /// Maximum world-meter length of one collision substep.
+    pub maximum_substep_distance: f32,
+    /// Maximum number of substeps accepted for one tick.
+    pub maximum_substeps: usize,
+    /// Maximum separation passes per substep.
+    pub maximum_contact_passes: usize,
+    /// Small outward displacement added after contact separation.
+    pub separation_epsilon: f32,
+}
+
+/// Grounded response when requested motion leaves the current footing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeProtection {
+    /// Accept the unsupported candidate and begin falling.
+    None,
+    /// Preserve the last supported pose when no supported edge slide is available.
+    Creature,
+}
+
+/// One sphere center authored relative to the body's pose.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundedSphere {
+    /// Body-local center transformed by the pose rotation for every candidate.
+    pub center: Vector3,
+    /// Positive sphere radius in meters.
+    pub radius: f32,
+}
+
+/// The asymmetric authored body shape consumed by grounded response.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundedBodySpheres {
+    /// Required lower sphere; this sphere alone may support or choose the committed cell.
+    pub support: GroundedSphere,
+    /// Optional upper sphere; it constrains placement but never provides support.
+    pub upper: Option<GroundedSphere>,
+}
+
+/// Retained walkable support selected by the grounded response.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundSupport {
+    /// Authored outward-facing unit normal.
+    pub normal: Vector3,
+    /// Horizontal inward normal while support comes from a finite surface edge.
+    pub boundary_normal: Option<Vector3>,
+}
+
+/// Last safely committed grounded body state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroundedBody {
+    /// Current solved pose of the authored body reference point.
+    pub pose: WorldPosition,
+    /// Current interior cell, or `None` while outdoors.
+    pub cell: Option<Guid>,
+    /// Current downward or upward velocity owned by grounded response.
+    pub fall_velocity: f32,
+    /// Current lower-sphere support committed with `pose`.
+    pub support: Option<GroundSupport>,
+}
+
+/// One desired grounded-motion tick.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroundedRequest {
+    /// Last safely committed body state.
+    pub body: GroundedBody,
+    /// Authored lower and optional upper sphere pair.
+    pub spheres: GroundedBodySpheres,
+    /// Desired world-space horizontal velocity; vertical drive is rejected.
+    pub drive_velocity: Vector3,
+    /// Positive simulation interval in seconds.
+    pub delta_seconds: f32,
+}
+
+/// Which finite grounded-solver budget refused a request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroundedBudget {
+    /// The requested tick requires too many anti-tunneling substeps.
+    Substeps,
+    /// Contact separation did not converge inside one substep's pass budget.
+    Contacts,
+}
+
+/// Observable result of one grounded solve.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GroundedOutcome {
+    /// The tick completed and all body state was committed atomically.
+    Solved {
+        /// New safely committed state.
+        body: GroundedBody,
+        /// Achieved world-space velocity derived from committed displacement.
+        achieved_velocity: Vector3,
+        /// Anti-tunneling substeps evaluated.
+        substeps: usize,
+        /// Contact passes evaluated across all substeps.
+        contact_passes: usize,
+        /// Distinct non-walkable planes encountered during this solve.
+        constraint_count: usize,
+    },
+    /// Collision coverage was incomplete; the exact prior state is held.
+    MissingCoverage {
+        /// Last safely committed body state.
+        body: GroundedBody,
+        /// Exact missing coverage reason.
+        missing: MissingCoverage,
+    },
+    /// A finite safety budget was reached; the last safe state is held.
+    BudgetExceeded {
+        /// Last safely committed body state.
+        body: GroundedBody,
+        /// Budget that stopped the solve.
+        budget: GroundedBudget,
+        /// Completed substeps before the stop.
+        substeps: usize,
+        /// Contact passes evaluated before the stop.
+        contact_passes: usize,
+        /// Distinct non-walkable planes encountered before the stop.
+        constraint_count: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SphereRole {
+    Support,
+    Upper,
+}
+
+#[derive(Debug)]
+struct RoleContacts {
+    role: SphereRole,
+    contacts: Vec<GroundedObstruction>,
+}
+
+#[derive(Debug, Clone)]
+struct SupportedPlacement {
+    body_center: Vector3,
+    placement: CollisionPlacement,
+    support: GroundSupport,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GroundedSolveContext<'a> {
+    scene: &'a CollisionScene,
+    config: GroundedConfig,
+    anchor: Guid,
+    pose: WorldPosition,
+    spheres: GroundedBodySpheres,
+}
+
+/// Advances one bounded grounded tick.
+pub fn solve_grounded(
+    scene: &CollisionScene,
+    config: GroundedConfig,
+    request: GroundedRequest,
+) -> Result<GroundedOutcome> {
+    validate(config, &request)?;
+
+    let anchor = landblock_key(request.body.pose.landblock_id);
+    let start = request.body.pose.coords;
+    let reference_pose = request.body.pose;
+    let context = GroundedSolveContext {
+        scene,
+        config,
+        anchor,
+        pose: reference_pose,
+        spheres: request.spheres,
+    };
+    let supported = request.body.support.is_some();
+    let vertical_displacement = if supported || request.body.fall_velocity.abs() <= f32::EPSILON {
+        0.0
+    } else {
+        request.body.fall_velocity * request.delta_seconds
+            + 0.5 * config.gravity * request.delta_seconds * request.delta_seconds
+    };
+    let next_fall_velocity = if supported {
+        0.0
+    } else {
+        request.body.fall_velocity + config.gravity * request.delta_seconds
+    };
+
+    let mut displacement = request.drive_velocity * request.delta_seconds;
+    displacement.z = vertical_displacement;
+    if let Some(support) = request.body.support {
+        displacement = project_into_plane(displacement, support.normal);
+    }
+    if let Some(missing) = pair_coverage(
+        scene,
+        anchor,
+        start,
+        displacement,
+        reference_pose,
+        request.spheres,
+    )? {
+        return Ok(GroundedOutcome::MissingCoverage {
+            body: request.body,
+            missing,
+        });
+    }
+
+    let distance = displacement.length();
+    let required_substeps = if distance <= f32::EPSILON {
+        1
+    } else {
+        (distance / config.maximum_substep_distance).ceil() as usize
+    };
+    if required_substeps > config.maximum_substeps {
+        return Ok(GroundedOutcome::BudgetExceeded {
+            body: request.body,
+            budget: GroundedBudget::Substeps,
+            substeps: 0,
+            contact_passes: 0,
+            constraint_count: 0,
+        });
+    }
+
+    let substep = displacement / required_substeps as f32;
+    let original = request.body.clone();
+    let mut body = request.body;
+    body.fall_velocity = next_fall_velocity;
+    // Retail carries one collision normal into the next substep, then clears it before collision
+    // is recomputed (`acclient.c:301897-301919`). Keeping an arbitrary plane set for the whole
+    // solve wedges finite walls and stair risers long after their authored geometry has ended.
+    let mut sliding_normal = None;
+    // Diagnostics retain distinct planes encountered by this solve, but never feed motion.
+    let mut encountered_constraints = Vec::new();
+    let mut current = start;
+    let mut contact_passes = 0;
+
+    'substeps: for completed_substeps in 0..required_substeps {
+        let prior_support = body.support;
+        let constrained_substep = apply_sliding_normal(substep, sliding_normal.take());
+        let mut candidate = current + constrained_substep;
+        let mut candidate_placement = match transit_pair(
+            scene,
+            anchor,
+            &body,
+            reference_pose,
+            request.spheres,
+            candidate,
+        )? {
+            CollisionQuery::Complete(cells) => cells,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(GroundedOutcome::MissingCoverage {
+                    body: original,
+                    missing,
+                });
+            }
+        };
+        let mut role_contacts = match movement_contacts(
+            scene,
+            anchor,
+            current,
+            candidate,
+            reference_pose,
+            request.spheres,
+            &candidate_placement,
+        )? {
+            CollisionQuery::Complete(contacts) => contacts,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(GroundedOutcome::MissingCoverage {
+                    body: original,
+                    missing,
+                });
+            }
+        };
+        let mut converged = false;
+
+        for _ in 0..config.maximum_contact_passes {
+            contact_passes += 1;
+            if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
+                converged = true;
+                break;
+            }
+
+            let lower_blocked = role_contacts
+                .iter()
+                .any(|entry| entry.role == SphereRole::Support && !entry.contacts.is_empty());
+            if lower_blocked && body.support.is_some() && config.step_up_height > 0.0 {
+                match step_up_candidate(context, &body, current, candidate)? {
+                    CollisionQuery::Complete(Some(stepped)) => {
+                        current = stepped.body_center;
+                        body.cell = stepped.placement.committed_cell();
+                        body.pose = pose_for_commit(
+                            anchor,
+                            current,
+                            reference_pose,
+                            stepped.placement.committed_cell(),
+                        );
+                        body.fall_velocity = 0.0;
+                        body.support = Some(stepped.support);
+                        continue 'substeps;
+                    }
+                    CollisionQuery::Complete(_) => {}
+                    CollisionQuery::MissingCoverage(missing) => {
+                        return Ok(GroundedOutcome::MissingCoverage {
+                            body: original,
+                            missing,
+                        });
+                    }
+                }
+            }
+
+            remember_encountered_constraints(
+                &mut encountered_constraints,
+                &role_contacts,
+                config.walkable_normal_z,
+            );
+            remember_next_sliding_normal(
+                &mut sliding_normal,
+                &role_contacts,
+                config.walkable_normal_z,
+                constrained_substep,
+            );
+            let contacts = role_contacts
+                .iter()
+                .flat_map(|entry| {
+                    entry.contacts.iter().map(|contact| StaticContact {
+                        normal: contact.normal,
+                        depth: contact.depth,
+                    })
+                })
+                .collect::<Vec<_>>();
+            candidate = candidate + separating_displacement(&contacts, config.separation_epsilon);
+            candidate_placement = match transit_pair(
+                scene,
+                anchor,
+                &body,
+                reference_pose,
+                request.spheres,
+                candidate,
+            )? {
+                CollisionQuery::Complete(cells) => cells,
+                CollisionQuery::MissingCoverage(missing) => {
+                    return Ok(GroundedOutcome::MissingCoverage {
+                        body: original,
+                        missing,
+                    });
+                }
+            };
+            role_contacts = match placement_contacts(
+                scene,
+                anchor,
+                candidate,
+                reference_pose,
+                request.spheres,
+                &candidate_placement,
+            )? {
+                CollisionQuery::Complete(contacts) => contacts,
+                CollisionQuery::MissingCoverage(missing) => {
+                    return Ok(GroundedOutcome::MissingCoverage {
+                        body: original,
+                        missing,
+                    });
+                }
+            };
+            if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
+                converged = true;
+                break;
+            }
+        }
+
+        if !converged {
+            return Ok(GroundedOutcome::BudgetExceeded {
+                body: original,
+                budget: GroundedBudget::Contacts,
+                substeps: completed_substeps,
+                contact_passes,
+                constraint_count: encountered_constraints.len(),
+            });
+        }
+
+        match step_down_candidate(context, &body, candidate)? {
+            CollisionQuery::Complete(Some(settled)) => {
+                candidate = settled.body_center;
+                candidate_placement = settled.placement;
+                body.fall_velocity = 0.0;
+                body.support = Some(settled.support);
+            }
+            CollisionQuery::Complete(None)
+                if config.edge_protection == EdgeProtection::Creature =>
+            {
+                // Support is meaningful only in the placement domain that produced it. A portal
+                // commit must reacquire support before creature edge protection may preserve the
+                // old footing; otherwise outdoor terrain can survive as an invisible indoor floor.
+                let retained_support = (body.cell == candidate_placement.committed_cell())
+                    .then_some(prior_support)
+                    .flatten();
+                if let Some(prior_support) = retained_support {
+                    match edge_slide_candidate(
+                        context,
+                        &body,
+                        current,
+                        constrained_substep,
+                        prior_support,
+                    )? {
+                        CollisionQuery::Complete(Some(slid)) => {
+                            candidate = slid.body_center;
+                            candidate_placement = slid.placement;
+                            body.fall_velocity = 0.0;
+                            body.support = Some(slid.support);
+                        }
+                        CollisionQuery::Complete(None) => {
+                            candidate = current;
+                            candidate_placement = match transit_pair(
+                                scene,
+                                anchor,
+                                &body,
+                                reference_pose,
+                                request.spheres,
+                                current,
+                            )? {
+                                CollisionQuery::Complete(placement) => placement,
+                                CollisionQuery::MissingCoverage(missing) => {
+                                    return Ok(GroundedOutcome::MissingCoverage {
+                                        body: original,
+                                        missing,
+                                    });
+                                }
+                            };
+                            body.support = Some(prior_support);
+                        }
+                        CollisionQuery::MissingCoverage(missing) => {
+                            return Ok(GroundedOutcome::MissingCoverage {
+                                body: original,
+                                missing,
+                            });
+                        }
+                    }
+                } else {
+                    body.support = None;
+                }
+            }
+            CollisionQuery::Complete(None) => body.support = None,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(GroundedOutcome::MissingCoverage {
+                    body: original,
+                    missing,
+                });
+            }
+        }
+
+        current = candidate;
+        body.cell = candidate_placement.committed_cell();
+        body.pose = pose_for_commit(
+            anchor,
+            current,
+            reference_pose,
+            candidate_placement.committed_cell(),
+        );
+    }
+
+    Ok(GroundedOutcome::Solved {
+        achieved_velocity: (current - start) / request.delta_seconds,
+        body,
+        substeps: required_substeps,
+        contact_passes,
+        constraint_count: encountered_constraints.len(),
+    })
+}
+
+fn settle_candidate(
+    context: GroundedSolveContext<'_>,
+    body: &GroundedBody,
+    candidate: Vector3,
+    maximum_drop: f32,
+) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+    let candidate_placement = match transit_pair(
+        context.scene,
+        context.anchor,
+        body,
+        context.pose,
+        context.spheres,
+        candidate,
+    )? {
+        CollisionQuery::Complete(cells) => cells,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    let support_center = sphere_center(candidate, context.pose, context.spheres.support);
+    let supports = match context.scene.support_contacts(SupportRequest {
+        anchor: context.anchor,
+        center: support_center,
+        radius: context.spheres.support.radius,
+        maximum_drop,
+        placement: &candidate_placement,
+    })? {
+        CollisionQuery::Complete(supports) => supports,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    let Some(support) = supports
+        .into_iter()
+        .filter(|contact| contact.normal.z >= context.config.walkable_normal_z)
+        .min_by(|left, right| left.drop.total_cmp(&right.drop))
+    else {
+        return Ok(CollisionQuery::Complete(None));
+    };
+    let settled = candidate - Vector3::new(0.0, 0.0, support.drop);
+    let settled_cells = match transit_pair(
+        context.scene,
+        context.anchor,
+        body,
+        context.pose,
+        context.spheres,
+        settled,
+    )? {
+        CollisionQuery::Complete(cells) => cells,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    let confirmation = match placement_contacts(
+        context.scene,
+        context.anchor,
+        settled,
+        context.pose,
+        context.spheres,
+        &settled_cells,
+    )? {
+        CollisionQuery::Complete(contacts) => contacts,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    if confirmation.iter().any(|entry| !entry.contacts.is_empty()) {
+        return Ok(CollisionQuery::Complete(None));
+    }
+    Ok(CollisionQuery::Complete(Some(SupportedPlacement {
+        body_center: settled,
+        placement: settled_cells,
+        support: GroundSupport {
+            normal: support.normal,
+            boundary_normal: support.boundary_normal,
+        },
+    })))
+}
+
+fn step_up_candidate(
+    context: GroundedSolveContext<'_>,
+    body: &GroundedBody,
+    current: Vector3,
+    candidate: Vector3,
+) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+    let raised = candidate + Vector3::new(0.0, 0.0, context.config.step_up_height);
+    match settle_candidate(context, body, raised, context.config.step_up_height)? {
+        CollisionQuery::Complete(Some(stepped))
+            if stepped.body_center.z - current.z
+                <= context.config.step_up_height + context.config.separation_epsilon =>
+        {
+            Ok(CollisionQuery::Complete(Some(stepped)))
+        }
+        CollisionQuery::Complete(_) => Ok(CollisionQuery::Complete(None)),
+        CollisionQuery::MissingCoverage(missing) => Ok(CollisionQuery::MissingCoverage(missing)),
+    }
+}
+
+fn step_down_candidate(
+    context: GroundedSolveContext<'_>,
+    body: &GroundedBody,
+    candidate: Vector3,
+) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+    settle_candidate(context, body, candidate, context.config.step_down_height)
+}
+
+/// Applies retail's precipice ordering after the ordinary step-down path found no support
+/// (`acclient.c:301550-301599`).
+fn edge_slide_candidate(
+    context: GroundedSolveContext<'_>,
+    body: &GroundedBody,
+    current: Vector3,
+    requested_substep: Vector3,
+    prior_support: GroundSupport,
+) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+    let Some(boundary_normal) = prior_support.boundary_normal else {
+        return Ok(CollisionQuery::Complete(None));
+    };
+    let edge_slide = project_into_plane(requested_substep, boundary_normal);
+    if edge_slide.length_squared() <= f32::EPSILON {
+        return Ok(CollisionQuery::Complete(None));
+    }
+    settle_candidate(
+        context,
+        body,
+        current + edge_slide,
+        context.config.step_down_height,
+    )
+}
+
+fn pair_coverage(
+    scene: &CollisionScene,
+    anchor: Guid,
+    body_start: Vector3,
+    displacement: Vector3,
+    pose: WorldPosition,
+    spheres: GroundedBodySpheres,
+) -> Result<Option<MissingCoverage>> {
+    let mut missing_landblocks = Vec::new();
+    let mut outside_world = false;
+    for sphere in sphere_entries(spheres) {
+        let start = sphere_center(body_start, pose, sphere);
+        match scene.coverage(CoverageRequest {
+            anchor,
+            start,
+            end: start + displacement,
+            radius: sphere.radius,
+        })? {
+            CollisionQuery::Complete(_) => {}
+            CollisionQuery::MissingCoverage(missing) => {
+                missing_landblocks.extend(missing.landblocks);
+                outside_world |= missing.outside_world;
+            }
+        }
+    }
+    missing_landblocks.sort_unstable();
+    missing_landblocks.dedup();
+    if missing_landblocks.is_empty() && !outside_world {
+        Ok(None)
+    } else {
+        Ok(Some(MissingCoverage {
+            landblocks: missing_landblocks,
+            outside_world,
+        }))
+    }
+}
+
+fn movement_contacts(
+    scene: &CollisionScene,
+    anchor: Guid,
+    body_start: Vector3,
+    body_end: Vector3,
+    pose: WorldPosition,
+    spheres: GroundedBodySpheres,
+    placement: &CollisionPlacement,
+) -> Result<CollisionQuery<Vec<RoleContacts>>> {
+    let mut result = Vec::new();
+    for (role, sphere) in role_spheres(spheres) {
+        let offset = pose.rotation.rotate_vector(sphere.center);
+        let contacts = match scene.grounded_obstructions(GroundedObstructionRequest {
+            sweep: CoverageRequest {
+                anchor,
+                start: body_start + offset,
+                end: body_end + offset,
+                radius: sphere.radius,
+            },
+            placement,
+        })? {
+            CollisionQuery::Complete(contacts) => contacts,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+        result.push(RoleContacts { role, contacts });
+    }
+    Ok(CollisionQuery::Complete(result))
+}
+
+fn placement_contacts(
+    scene: &CollisionScene,
+    anchor: Guid,
+    body_center: Vector3,
+    pose: WorldPosition,
+    spheres: GroundedBodySpheres,
+    placement: &CollisionPlacement,
+) -> Result<CollisionQuery<Vec<RoleContacts>>> {
+    let mut result = Vec::new();
+    for (role, sphere) in role_spheres(spheres) {
+        let contacts = match scene.placement_contacts(PlacementRequest {
+            anchor,
+            center: sphere_center(body_center, pose, sphere),
+            radius: sphere.radius,
+            placement,
+        })? {
+            CollisionQuery::Complete(contacts) => contacts
+                .into_iter()
+                .map(|contact| GroundedObstruction {
+                    normal: contact.normal,
+                    depth: contact.depth,
+                })
+                .collect(),
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+        result.push(RoleContacts { role, contacts });
+    }
+    Ok(CollisionQuery::Complete(result))
+}
+
+fn remember_encountered_constraints(
+    encountered: &mut Vec<Vector3>,
+    contacts: &[RoleContacts],
+    walkable_normal_z: f32,
+) {
+    for entry in contacts {
+        for contact in &entry.contacts {
+            if entry.role == SphereRole::Support && contact.normal.z >= walkable_normal_z {
+                continue;
+            }
+            if !encountered
+                .iter()
+                .any(|normal| normal.dot(&contact.normal) > 0.999)
+            {
+                encountered.push(contact.normal);
+            }
+        }
+    }
+}
+
+/// Selects the one obstruction normal that may redirect the next substep.
+///
+/// Retail exposes one `sliding_normal`, not a persistent manifold. When one collision pass sees
+/// several planes, the most opposing plane is the deterministic equivalent for this aggregate
+/// contact query; simultaneous penetration is still resolved from every contact above.
+fn remember_next_sliding_normal(
+    sliding_normal: &mut Option<Vector3>,
+    contacts: &[RoleContacts],
+    walkable_normal_z: f32,
+    displacement: Vector3,
+) {
+    for entry in contacts {
+        for contact in &entry.contacts {
+            if entry.role == SphereRole::Support && contact.normal.z >= walkable_normal_z {
+                continue;
+            }
+            let opposition = displacement.dot(&contact.normal);
+            if opposition > 0.0 {
+                continue;
+            }
+            if sliding_normal.is_none_or(|current| opposition < displacement.dot(&current)) {
+                *sliding_normal = Some(contact.normal);
+            }
+        }
+    }
+}
+
+fn apply_sliding_normal(displacement: Vector3, sliding_normal: Option<Vector3>) -> Vector3 {
+    match sliding_normal {
+        Some(normal) if displacement.dot(&normal) < 0.0 => project_into_plane(displacement, normal),
+        _ => displacement,
+    }
+}
+
+fn project_into_plane(vector: Vector3, normal: Vector3) -> Vector3 {
+    vector - normal * vector.dot(&normal)
+}
+
+fn transit_pair(
+    scene: &CollisionScene,
+    anchor: Guid,
+    body: &GroundedBody,
+    pose: WorldPosition,
+    spheres: GroundedBodySpheres,
+    body_center: Vector3,
+) -> Result<CollisionQuery<CollisionPlacement>> {
+    let lower = match scene.transit_cell(CellTransitRequest {
+        previous_cell: body.cell,
+        anchor,
+        center: sphere_center(body_center, pose, spheres.support),
+        radius: spheres.support.radius,
+    })? {
+        CollisionQuery::Complete(placement) => placement,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    let placement = if let Some(upper) = spheres.upper {
+        match scene.transit_cell(CellTransitRequest {
+            previous_cell: body.cell,
+            anchor,
+            center: sphere_center(body_center, pose, upper),
+            radius: upper.radius,
+        })? {
+            CollisionQuery::Complete(upper_placement) => lower.merge_reached(upper_placement),
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        }
+    } else {
+        lower
+    };
+    Ok(CollisionQuery::Complete(placement))
+}
+
+fn sphere_center(body_center: Vector3, pose: WorldPosition, sphere: GroundedSphere) -> Vector3 {
+    body_center + pose.rotation.rotate_vector(sphere.center)
+}
+
+fn sphere_entries(spheres: GroundedBodySpheres) -> impl Iterator<Item = GroundedSphere> {
+    std::iter::once(spheres.support).chain(spheres.upper)
+}
+
+fn role_spheres(
+    spheres: GroundedBodySpheres,
+) -> impl Iterator<Item = (SphereRole, GroundedSphere)> {
+    std::iter::once((SphereRole::Support, spheres.support))
+        .chain(spheres.upper.map(|sphere| (SphereRole::Upper, sphere)))
+}
+
+fn pose_for_commit(
+    anchor: Guid,
+    point: Vector3,
+    original: WorldPosition,
+    cell: Option<Guid>,
+) -> WorldPosition {
+    let mut pose = anchor_point_to_outdoor_position(anchor, point, original.rotation);
+    if let Some(cell) = cell {
+        pose.landblock_id = cell;
+    }
+    pose
+}
+
+fn validate(config: GroundedConfig, request: &GroundedRequest) -> Result<()> {
+    for sphere in sphere_entries(request.spheres) {
+        ensure!(
+            sphere.radius.is_finite() && sphere.radius > 0.0,
+            "grounded sphere radius must be finite and positive"
+        );
+        ensure!(
+            sphere.center.x.is_finite()
+                && sphere.center.y.is_finite()
+                && sphere.center.z.is_finite(),
+            "grounded sphere center must be finite"
+        );
+    }
+    ensure!(
+        request.drive_velocity.x.is_finite()
+            && request.drive_velocity.y.is_finite()
+            && request.drive_velocity.z.is_finite(),
+        "grounded drive velocity must be finite"
+    );
+    ensure!(
+        request.drive_velocity.z.abs() <= f32::EPSILON,
+        "grounded drive velocity must be horizontal"
+    );
+    ensure!(
+        request.body.fall_velocity.is_finite(),
+        "grounded fall velocity must be finite"
+    );
+    ensure!(
+        request.delta_seconds.is_finite() && request.delta_seconds > 0.0,
+        "grounded delta seconds must be finite and positive"
+    );
+    ensure!(
+        config.gravity.is_finite() && config.gravity < 0.0,
+        "grounded gravity must be finite and negative"
+    );
+    ensure!(
+        config.walkable_normal_z.is_finite()
+            && config.walkable_normal_z > 0.0
+            && config.walkable_normal_z <= 1.0,
+        "grounded walkable normal threshold must be in (0, 1]"
+    );
+    ensure!(
+        config.step_up_height.is_finite() && config.step_up_height >= 0.0,
+        "grounded step-up height must be finite and non-negative"
+    );
+    ensure!(
+        config.step_down_height.is_finite() && config.step_down_height >= 0.0,
+        "grounded step-down height must be finite and non-negative"
+    );
+    ensure!(
+        config.maximum_substep_distance.is_finite() && config.maximum_substep_distance > 0.0,
+        "grounded maximum substep distance must be finite and positive"
+    );
+    ensure!(
+        config.maximum_substeps > 0,
+        "grounded solve requires at least one substep"
+    );
+    ensure!(
+        config.maximum_contact_passes > 0,
+        "grounded solve requires at least one contact pass"
+    );
+    ensure!(
+        config.separation_epsilon.is_finite() && config.separation_epsilon > 0.0,
+        "grounded separation epsilon must be finite and positive"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use holtburger_common::{Plane, Quaternion, Sphere};
+    use holtburger_content::{
+        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
+        CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
+        LandblockPlacement, LandblockTerrain, PlacedCollider, StaticColliderPlacement,
+        TerrainCellDiagonals, TerrainCollisionSurface,
+    };
+    use holtburger_dat::physics::{BspLeaf, BspNode};
+
+    use super::*;
+
+    const LANDBLOCK: u32 = 0xda55_ffff;
+    const EAST: u32 = 0xdb55_ffff;
+    const EPSILON: f32 = 0.003;
+
+    fn config() -> GroundedConfig {
+        GroundedConfig {
+            gravity: -9.8,
+            walkable_normal_z: 0.7,
+            step_up_height: 0.6,
+            step_down_height: 0.2,
+            edge_protection: EdgeProtection::None,
+            maximum_substep_distance: 0.25,
+            maximum_substeps: 128,
+            maximum_contact_passes: 8,
+            separation_epsilon: 0.000_5,
+        }
+    }
+
+    fn pose(coords: Vector3) -> WorldPosition {
+        WorldPosition {
+            landblock_id: Guid(LANDBLOCK),
+            coords,
+            rotation: Quaternion::identity(),
+        }
+        .normalize_outdoor_cell()
+    }
+
+    fn lower_sphere() -> GroundedSphere {
+        GroundedSphere {
+            center: Vector3::new(0.0, 0.0, 0.5),
+            radius: 0.5,
+        }
+    }
+
+    fn pair() -> GroundedBodySpheres {
+        GroundedBodySpheres {
+            support: lower_sphere(),
+            upper: Some(GroundedSphere {
+                center: Vector3::new(0.0, 0.0, 2.0),
+                radius: 0.5,
+            }),
+        }
+    }
+
+    fn body(coords: Vector3, support: Option<Vector3>) -> GroundedBody {
+        GroundedBody {
+            pose: pose(coords),
+            cell: None,
+            fall_velocity: 0.0,
+            support: support.map(|normal| GroundSupport {
+                normal,
+                boundary_normal: None,
+            }),
+        }
+    }
+
+    fn polygon(id: u16, vertices: Vec<Vector3>, normal: Vector3, bounds: Sphere) -> PlacedCollider {
+        let d = -normal.dot(&vertices[0]);
+        let box_bounds = CollisionBox::from_points(vertices.iter().copied()).unwrap();
+        let shape = Arc::new(CollisionShape {
+            bsp: BspNode::Leaf(BspLeaf {
+                index: 0,
+                solid: 0,
+                sphere: Some(bounds),
+                poly_ids: vec![id],
+            }),
+            bounds,
+            box_bounds,
+            polygons: HashMap::from([(
+                id,
+                CollisionPolygon {
+                    vertices,
+                    normal,
+                    d,
+                },
+            )]),
+        });
+        PlacedCollider {
+            shape,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            scale: ColliderScale::uniform(1.0).unwrap(),
+            bounds_center: bounds.center,
+            bounds_radius: bounds.radius,
+            source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+        }
+    }
+
+    fn floor() -> PlacedCollider {
+        floor_region(1, 0.0, 192.0)
+    }
+
+    fn floor_region(id: u16, minimum_x: f32, maximum_x: f32) -> PlacedCollider {
+        polygon(
+            id,
+            vec![
+                Vector3::new(minimum_x, 0.0, 0.0),
+                Vector3::new(maximum_x, 0.0, 0.0),
+                Vector3::new(maximum_x, 192.0, 0.0),
+                Vector3::new(minimum_x, 192.0, 0.0),
+            ],
+            Vector3::new(0.0, 0.0, 1.0),
+            Sphere {
+                center: Vector3::new((minimum_x + maximum_x) * 0.5, 96.0, 0.0),
+                radius: 192.0,
+            },
+        )
+    }
+
+    fn wall_x(id: u16, x: f32, minimum_z: f32, maximum_z: f32) -> PlacedCollider {
+        wall_x_region(id, x, 0.0, 192.0, minimum_z, maximum_z)
+    }
+
+    fn wall_x_region(
+        id: u16,
+        x: f32,
+        minimum_y: f32,
+        maximum_y: f32,
+        minimum_z: f32,
+        maximum_z: f32,
+    ) -> PlacedCollider {
+        let middle_z = (minimum_z + maximum_z) * 0.5;
+        polygon(
+            id,
+            vec![
+                Vector3::new(x, minimum_y, minimum_z),
+                Vector3::new(x, minimum_y, maximum_z),
+                Vector3::new(x, maximum_y, maximum_z),
+                Vector3::new(x, maximum_y, minimum_z),
+            ],
+            Vector3::new(-1.0, 0.0, 0.0),
+            Sphere {
+                center: Vector3::new(x, (minimum_y + maximum_y) * 0.5, middle_z),
+                radius: Vector3::new(
+                    0.0,
+                    (maximum_y - minimum_y) * 0.5,
+                    (maximum_z - minimum_z) * 0.5,
+                )
+                .length(),
+            },
+        )
+    }
+
+    fn wall_y(id: u16, y: f32, minimum_z: f32, maximum_z: f32) -> PlacedCollider {
+        let middle_z = (minimum_z + maximum_z) * 0.5;
+        polygon(
+            id,
+            vec![
+                Vector3::new(192.0, y, minimum_z),
+                Vector3::new(192.0, y, maximum_z),
+                Vector3::new(0.0, y, maximum_z),
+                Vector3::new(0.0, y, minimum_z),
+            ],
+            Vector3::new(0.0, -1.0, 0.0),
+            Sphere {
+                center: Vector3::new(96.0, y, middle_z),
+                radius: 97.0,
+            },
+        )
+    }
+
+    fn wall_segment(
+        id: u16,
+        start: Vector3,
+        end: Vector3,
+        minimum_z: f32,
+        maximum_z: f32,
+    ) -> PlacedCollider {
+        let tangent = end - start;
+        let normal = Vector3::new(-tangent.y, tangent.x, 0.0).normalize();
+        let center = (start + end) * 0.5 + Vector3::new(0.0, 0.0, (minimum_z + maximum_z) * 0.5);
+        polygon(
+            id,
+            vec![
+                Vector3::new(start.x, start.y, minimum_z),
+                Vector3::new(start.x, start.y, maximum_z),
+                Vector3::new(end.x, end.y, maximum_z),
+                Vector3::new(end.x, end.y, minimum_z),
+            ],
+            normal,
+            Sphere {
+                center,
+                radius: Vector3::new(
+                    tangent.x * 0.5,
+                    tangent.y * 0.5,
+                    (maximum_z - minimum_z) * 0.5,
+                )
+                .length(),
+            },
+        )
+    }
+
+    fn box_obstacle(first_id: u16, x0: f32, x1: f32, height: f32) -> Vec<PlacedCollider> {
+        vec![
+            wall_x(first_id, x0, 0.0, height),
+            polygon(
+                first_id + 1,
+                vec![
+                    Vector3::new(x0, 0.0, height),
+                    Vector3::new(x1, 0.0, height),
+                    Vector3::new(x1, 192.0, height),
+                    Vector3::new(x0, 192.0, height),
+                ],
+                Vector3::new(0.0, 0.0, 1.0),
+                Sphere {
+                    center: Vector3::new((x0 + x1) * 0.5, 96.0, height),
+                    radius: 97.0,
+                },
+            ),
+        ]
+    }
+
+    fn ramp(id: u16, x0: f32, x1: f32, y0: f32, y1: f32, rise: f32) -> PlacedCollider {
+        let run = x1 - x0;
+        let normal = Vector3::new(-rise / run, 0.0, 1.0).normalize();
+        polygon(
+            id,
+            vec![
+                Vector3::new(x0, y0, 0.0),
+                Vector3::new(x1, y0, rise),
+                Vector3::new(x1, y1, rise),
+                Vector3::new(x0, y1, 0.0),
+            ],
+            normal,
+            Sphere {
+                center: Vector3::new((x0 + x1) * 0.5, (y0 + y1) * 0.5, rise * 0.5),
+                radius: 30.0,
+            },
+        )
+    }
+
+    fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
+        let mut scene = CollisionScene::new();
+        insert_test_halo(&mut scene, &[LANDBLOCK]);
+        scene
+            .insert(artifact(LANDBLOCK, colliders, Vec::new()))
+            .unwrap();
+        scene
+    }
+
+    fn test_halo_owners(touched: &[u32]) -> Vec<u32> {
+        let mut owners = Vec::new();
+        for owner in touched {
+            let x = ((owner >> 24) & 0xff) as i32;
+            let y = ((owner >> 16) & 0xff) as i32;
+            for offset_x in -1..=1 {
+                for offset_y in -1..=1 {
+                    owners.push(
+                        (((x + offset_x) as u32) << 24) | (((y + offset_y) as u32) << 16) | 0xffff,
+                    );
+                }
+            }
+        }
+        owners.sort_unstable();
+        owners.dedup();
+        owners
+    }
+
+    fn insert_test_halo(scene: &mut CollisionScene, touched: &[u32]) {
+        for owner in test_halo_owners(touched) {
+            scene
+                .insert(artifact(owner, Vec::new(), Vec::new()))
+                .unwrap();
+        }
+    }
+
+    fn artifact(
+        landblock_id: u32,
+        colliders: Vec<PlacedCollider>,
+        cell_volumes: Vec<holtburger_content::CellVolume>,
+    ) -> LandblockCollisionAsset {
+        LandblockCollisionAsset {
+            landblock_id,
+            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            static_geometry: LandblockColliders {
+                colliders,
+                cell_volumes,
+            },
+        }
+    }
+
+    fn solve(
+        scene: &CollisionScene,
+        body: GroundedBody,
+        spheres: GroundedBodySpheres,
+        drive_velocity: Vector3,
+        delta_seconds: f32,
+    ) -> GroundedOutcome {
+        solve_with_config(
+            scene,
+            config(),
+            body,
+            spheres,
+            drive_velocity,
+            delta_seconds,
+        )
+    }
+
+    fn solve_with_config(
+        scene: &CollisionScene,
+        config: GroundedConfig,
+        body: GroundedBody,
+        spheres: GroundedBodySpheres,
+        drive_velocity: Vector3,
+        delta_seconds: f32,
+    ) -> GroundedOutcome {
+        solve_grounded(
+            scene,
+            config,
+            GroundedRequest {
+                body,
+                spheres,
+                drive_velocity,
+                delta_seconds,
+            },
+        )
+        .unwrap()
+    }
+
+    fn solved(outcome: GroundedOutcome) -> (GroundedBody, Vector3) {
+        let (body, achieved_velocity, _) = solved_with_constraint_count(outcome);
+        (body, achieved_velocity)
+    }
+
+    fn solved_with_constraint_count(outcome: GroundedOutcome) -> (GroundedBody, Vector3, usize) {
+        match outcome {
+            GroundedOutcome::Solved {
+                body,
+                achieved_velocity,
+                constraint_count,
+                ..
+            } => (body, achieved_velocity, constraint_count),
+            other => panic!("expected solved grounded body, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn airborne_integration_acquires_velocity_before_displacement() {
+        let scene = scene(Vec::new());
+        let original = body(Vector3::new(50.0, 50.0, 10.0), None);
+        let (first, first_achieved) = solved(solve(
+            &scene,
+            original,
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::zero(),
+            0.1,
+        ));
+        assert_eq!(
+            first.pose.coords.z, 10.0,
+            "first gravity tick moved the pose"
+        );
+        assert_eq!(first_achieved.z, 0.0, "first gravity tick reported motion");
+        assert!((first.fall_velocity + 0.98).abs() < EPSILON);
+
+        let (second, second_achieved) = solved(solve(
+            &scene,
+            first,
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::zero(),
+            0.1,
+        ));
+        assert!(
+            second.pose.coords.z < 10.0,
+            "second gravity tick did not fall"
+        );
+        assert!(
+            second_achieved.z < 0.0,
+            "second gravity tick reported no fall"
+        );
+    }
+
+    #[test]
+    fn lower_sphere_lands_and_reports_achieved_vertical_motion() {
+        let scene = scene(vec![floor()]);
+        let spheres = GroundedBodySpheres {
+            support: lower_sphere(),
+            upper: None,
+        };
+        let mut current = body(Vector3::new(50.0, 50.0, 3.0), None);
+        let mut landing_velocities = None;
+        for _ in 0..20 {
+            let requested_vertical_velocity = if current.fall_velocity.abs() <= f32::EPSILON {
+                0.0
+            } else {
+                current.fall_velocity + 0.5 * config().gravity * 0.1
+            };
+            let (next, achieved) = solved(solve(&scene, current, spheres, Vector3::zero(), 0.1));
+            current = next;
+            if current.support.is_some() {
+                landing_velocities = Some((requested_vertical_velocity, achieved.z));
+                break;
+            }
+        }
+        assert!(
+            current.support.is_some(),
+            "lower sphere never acquired support"
+        );
+        assert!(
+            current.pose.coords.z.abs() < EPSILON,
+            "landing did not seat the body"
+        );
+        let (requested, achieved) = landing_velocities.expect("landing tick was not observed");
+        assert!(
+            achieved > requested,
+            "landing reported requested fall velocity {requested} instead of achieved {achieved}"
+        );
+    }
+
+    #[test]
+    fn retained_support_remains_exact_at_rest() {
+        let scene = scene(vec![floor()]);
+        let spheres = GroundedBodySpheres {
+            support: lower_sphere(),
+            upper: None,
+        };
+        let mut current = body(
+            Vector3::new(50.0, 50.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let landed = current.pose;
+        for _ in 0..100 {
+            (current, _) = solved(solve(&scene, current, spheres, Vector3::zero(), 0.1));
+        }
+        assert!(
+            (current.pose.coords - landed.coords).length() < EPSILON,
+            "retained support drifted from rest: {current:?}"
+        );
+        assert_eq!(current.fall_velocity, 0.0);
+    }
+
+    #[test]
+    fn flat_drive_preserves_support_and_requested_horizontal_motion() {
+        let scene = scene(vec![floor()]);
+        let (moved, achieved) = solved(solve(
+            &scene,
+            body(
+                Vector3::new(20.0, 20.0, 0.0),
+                Some(Vector3::new(0.0, 0.0, 1.0)),
+            ),
+            pair(),
+            Vector3::new(3.0, 4.0, 0.0),
+            1.0,
+        ));
+        assert!((moved.pose.coords - Vector3::new(23.0, 24.0, 0.0)).length() < EPSILON);
+        assert!((achieved - Vector3::new(3.0, 4.0, 0.0)).length() < EPSILON);
+        assert!(moved.support.is_some());
+    }
+
+    #[test]
+    fn wall_stops_normal_motion_preserves_slide_and_releases_on_retreat() {
+        let scene = scene(vec![floor(), wall_x(2, 10.0, 0.0, 4.0)]);
+        let supported = body(
+            Vector3::new(7.0, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let (blocked, achieved, blocked_constraints) = solved_with_constraint_count(solve(
+            &scene,
+            supported,
+            pair(),
+            Vector3::new(6.0, 4.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            (blocked.pose.coords.x - 9.5).abs() < EPSILON,
+            "wall did not block: {blocked:?}"
+        );
+        assert!(
+            (blocked.pose.coords.y - 24.0).abs() < EPSILON,
+            "wall ate tangent motion"
+        );
+        assert!(achieved.x < 3.0 && (achieved.y - 4.0).abs() < EPSILON);
+        assert!(blocked_constraints > 0);
+
+        let (slid_again, repeated_achieved, repeated_constraints) = solved_with_constraint_count(
+            solve(&scene, blocked, pair(), Vector3::new(6.0, 4.0, 0.0), 1.0),
+        );
+        assert!(
+            (slid_again.pose.coords.x - 9.5).abs() < EPSILON,
+            "repeated angled intent penetrated the wall: {slid_again:?}"
+        );
+        assert!(
+            (slid_again.pose.coords.y - 28.0).abs() < EPSILON,
+            "repeated wall contact lost tangent motion: {slid_again:?}"
+        );
+        assert!((repeated_achieved.y - 4.0).abs() < EPSILON);
+        assert!(repeated_constraints > 0);
+
+        let (retreated, _) = solved(solve(
+            &scene,
+            slid_again,
+            pair(),
+            Vector3::new(-2.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!((retreated.pose.coords.x - 7.5).abs() < EPSILON);
+    }
+
+    #[test]
+    fn angled_intent_clears_a_finite_wall_without_a_retreat_tick() {
+        let scene = scene(vec![floor(), wall_x_region(2, 10.0, 20.0, 21.0, 0.0, 4.0)]);
+        let mut current = body(
+            Vector3::new(9.5, 20.5, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let mut saw_constraint = false;
+        let mut released_constraint = false;
+        for _ in 0..8 {
+            let (next, _, constraint_count) = solved_with_constraint_count(solve(
+                &scene,
+                current,
+                pair(),
+                Vector3::new(2.0, 2.0, 0.0),
+                0.25,
+            ));
+            saw_constraint |= constraint_count > 0;
+            released_constraint |= saw_constraint && constraint_count == 0;
+            current = next;
+        }
+        assert!(saw_constraint, "finite wall never constrained the body");
+        assert!(
+            released_constraint,
+            "wall constraint survived after the authored polygon ended"
+        );
+        assert!(
+            current.pose.coords.x > 10.0,
+            "body never cleared the finite wall without retreat: {current:?}"
+        );
+    }
+
+    #[test]
+    fn angled_intent_clears_a_finite_wall_within_one_multistep_solve() {
+        let scene = scene(vec![floor(), wall_x_region(2, 10.0, 20.0, 22.0, 0.0, 4.0)]);
+        let (cleared, achieved, constraint_count) = solved_with_constraint_count(solve(
+            &scene,
+            body(
+                Vector3::new(9.5, 20.5, 0.0),
+                Some(Vector3::new(0.0, 0.0, 1.0)),
+            ),
+            pair(),
+            Vector3::new(2.0, 4.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            constraint_count > 0,
+            "finite wall never constrained the body"
+        );
+        assert!(
+            cleared.pose.coords.x > 10.5,
+            "wall plane survived later substeps after its polygon ended: {cleared:?}"
+        );
+        assert!(
+            achieved.y > 3.9,
+            "finite wall incorrectly consumed tangent travel: {achieved:?}"
+        );
+    }
+
+    #[test]
+    fn near_parallel_motion_does_not_wedge_on_divergent_wall_segments() {
+        let scene = scene(vec![
+            floor(),
+            wall_segment(
+                2,
+                Vector3::new(10.0, 0.0, 0.0),
+                Vector3::new(11.2, 20.0, 0.0),
+                0.0,
+                4.0,
+            ),
+            wall_segment(
+                3,
+                Vector3::new(11.2, 20.0, 0.0),
+                Vector3::new(10.0, 40.0, 0.0),
+                0.0,
+                4.0,
+            ),
+        ]);
+        let (slid, achieved, constraint_count) = solved_with_constraint_count(solve(
+            &scene,
+            body(
+                Vector3::new(10.68, 18.0, 0.0),
+                Some(Vector3::new(0.0, 0.0, 1.0)),
+            ),
+            pair(),
+            Vector3::new(0.5, 4.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            constraint_count >= 2,
+            "wall seam did not exercise both planes"
+        );
+        assert!(
+            achieved.y > 3.5,
+            "slightly divergent wall planes accumulated into a wedge: {slid:?}"
+        );
+    }
+
+    #[test]
+    fn multistep_staircase_reaches_and_crosses_its_top_support() {
+        let mut colliders = vec![floor()];
+        colliders.extend(box_obstacle(2, 10.0, 11.0, 0.3));
+        colliders.extend(box_obstacle(4, 11.0, 12.0, 0.6));
+        colliders.extend(box_obstacle(6, 12.0, 20.0, 0.6));
+        let scene = scene(colliders);
+        let (crossed, achieved, _) = solved_with_constraint_count(solve(
+            &scene,
+            body(
+                Vector3::new(8.5, 20.0, 0.0),
+                Some(Vector3::new(0.0, 0.0, 1.0)),
+            ),
+            pair(),
+            Vector3::new(5.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            crossed.pose.coords.x > 13.0,
+            "body stopped before crossing the stair crest: {crossed:?}"
+        );
+        assert!(
+            (crossed.pose.coords.z - 0.6).abs() < EPSILON,
+            "body did not retain top support: {crossed:?}"
+        );
+        assert!(achieved.x > 4.5, "stair crest consumed forward travel");
+    }
+
+    #[test]
+    fn shallow_ramp_is_support_while_steep_face_is_only_a_constraint() {
+        let shallow = ramp(2, 20.0, 30.0, 10.0, 30.0, 2.0);
+        let shallow_normal = shallow.shape.polygons[&2].normal;
+        let shallow_scene = scene(vec![shallow]);
+        let starting_height =
+            0.2 + lower_sphere().radius / shallow_normal.z - lower_sphere().center.z;
+        let supported = body(
+            Vector3::new(21.0, 20.0, starting_height),
+            Some(shallow_normal),
+        );
+        let (uphill, _) = solved(solve(
+            &shallow_scene,
+            supported,
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::new(4.0, 0.0, 0.0),
+            1.0,
+        ));
+        let expected_height = 0.2 * (uphill.pose.coords.x - 20.0)
+            + lower_sphere().radius / shallow_normal.z
+            - lower_sphere().center.z;
+        let expected_x = 21.0 + project_into_plane(Vector3::new(4.0, 0.0, 0.0), shallow_normal).x;
+        assert!(
+            (uphill.pose.coords.x - expected_x).abs() < EPSILON,
+            "support plane did not redirect uphill intent: {uphill:?}"
+        );
+        assert!(
+            (uphill.pose.coords.z - expected_height).abs() < EPSILON,
+            "body left shallow ramp: {uphill:?}"
+        );
+        assert_eq!(
+            uphill.support.map(|support| support.normal),
+            Some(shallow_normal)
+        );
+        let (downhill, _) = solved(solve(
+            &shallow_scene,
+            uphill,
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::new(-4.0, 0.0, 0.0),
+            1.0,
+        ));
+        let expected_height = 0.2 * (downhill.pose.coords.x - 20.0)
+            + lower_sphere().radius / shallow_normal.z
+            - lower_sphere().center.z;
+        assert!(
+            (downhill.pose.coords.x - 21.0).abs() < EPSILON,
+            "support plane did not redirect downhill intent: {downhill:?}"
+        );
+        assert!(
+            (downhill.pose.coords.z - expected_height).abs() < EPSILON,
+            "body left shallow ramp downhill: {downhill:?}"
+        );
+
+        let steep = ramp(3, 40.0, 42.0, 10.0, 30.0, 4.0);
+        let steep_normal = steep.shape.polygons[&3].normal;
+        assert!(steep_normal.z < config().walkable_normal_z);
+        let steep_scene = scene(vec![steep]);
+        let (constrained, _, constraint_count) = solved_with_constraint_count(solve(
+            &steep_scene,
+            body(Vector3::new(39.0, 20.0, 0.0), None),
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::new(4.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            constrained.support.is_none(),
+            "steep face fabricated support"
+        );
+        assert!(constraint_count > 0, "steep face did not constrain motion");
+    }
+
+    #[test]
+    fn upper_only_wall_constrains_pair_but_never_becomes_support() {
+        let scene = scene(vec![floor(), wall_x(2, 10.0, 1.25, 3.0)]);
+        let supported = body(
+            Vector3::new(7.0, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let (single, _) = solved(solve(
+            &scene,
+            supported.clone(),
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::new(6.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            (single.pose.coords.x - 13.0).abs() < EPSILON,
+            "one-sphere baseline was blocked"
+        );
+
+        let (blocked, _) = solved(solve(
+            &scene,
+            supported,
+            pair(),
+            Vector3::new(6.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            (blocked.pose.coords.x - 9.5).abs() < EPSILON,
+            "upper sphere did not veto pose"
+        );
+        assert_eq!(
+            blocked.support.map(|support| support.normal),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+            "upper sphere replaced lower support"
+        );
+        let (retreated, _) = solved(solve(
+            &scene,
+            blocked,
+            pair(),
+            Vector3::new(-2.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!((retreated.pose.coords.x - 7.5).abs() < EPSILON);
+    }
+
+    #[test]
+    fn upper_polygon_back_face_slides_and_releases_without_step_routing() {
+        let scene = scene(vec![floor(), wall_x(2, 10.0, 1.25, 3.0)]);
+        let supported = body(
+            Vector3::new(13.0, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let (single, _) = solved(solve(
+            &scene,
+            supported.clone(),
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::new(-6.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            (single.pose.coords.x - 7.0).abs() < EPSILON,
+            "one-sphere back-face baseline was blocked"
+        );
+
+        let (blocked, _) = solved(solve(
+            &scene,
+            supported,
+            pair(),
+            Vector3::new(-6.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            (blocked.pose.coords.x - 10.5).abs() < EPSILON,
+            "upper back face was discarded"
+        );
+        assert!(
+            blocked.pose.coords.z.abs() < EPSILON,
+            "upper back face routed to step-up"
+        );
+        assert_eq!(
+            blocked.support.map(|support| support.normal),
+            Some(Vector3::new(0.0, 0.0, 1.0))
+        );
+        let (retreated, _) = solved(solve(
+            &scene,
+            blocked,
+            pair(),
+            Vector3::new(2.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!((retreated.pose.coords.x - 12.5).abs() < EPSILON);
+    }
+
+    #[test]
+    fn lower_sphere_steps_low_box_but_failed_high_step_restores_footing() {
+        let mut low_colliders = vec![floor()];
+        low_colliders.extend(box_obstacle(2, 10.0, 14.0, 0.4));
+        let low_scene = scene(low_colliders);
+        let supported = body(
+            Vector3::new(9.0, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let (stepped, _) = solved(solve(
+            &low_scene,
+            supported.clone(),
+            pair(),
+            Vector3::new(2.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            stepped.pose.coords.x > 10.5,
+            "lower sphere did not step over the low face"
+        );
+        assert!(
+            (stepped.pose.coords.z - 0.4).abs() < EPSILON,
+            "step did not settle on box top: {stepped:?}"
+        );
+        assert!(stepped.support.is_some());
+
+        let mut high_colliders = vec![floor()];
+        high_colliders.extend(box_obstacle(4, 10.0, 14.0, 0.8));
+        let high_scene = scene(high_colliders);
+        let (blocked, _) = solved(solve(
+            &high_scene,
+            supported,
+            pair(),
+            Vector3::new(2.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            blocked.pose.coords.x < 9.5 + EPSILON,
+            "high step retained an invalid candidate: {blocked:?}"
+        );
+        assert!(
+            blocked.pose.coords.z.abs() < EPSILON,
+            "failed step lifted the body"
+        );
+        let blocked_x = blocked.pose.coords.x;
+        let (retreated, _) = solved(solve(
+            &high_scene,
+            blocked,
+            pair(),
+            Vector3::new(-1.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            (retreated.pose.coords.x - (blocked_x - 1.0)).abs() < EPSILON,
+            "failed step prevented retreat"
+        );
+    }
+
+    #[test]
+    fn creature_edge_protection_preserves_footing_and_tangent_slide() {
+        let scene = scene(vec![floor_region(1, 0.0, 10.0)]);
+        let supported = body(
+            Vector3::new(8.5, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let mut unprotected = config();
+        unprotected.edge_protection = EdgeProtection::None;
+        let (walked_off, _) = solved(solve_with_config(
+            &scene,
+            unprotected,
+            supported.clone(),
+            pair(),
+            Vector3::new(3.0, 1.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            walked_off.pose.coords.x > 11.0,
+            "unprotected body did not leave the ledge"
+        );
+        assert!(walked_off.support.is_none());
+
+        let mut protected = config();
+        protected.edge_protection = EdgeProtection::Creature;
+        let (held, _) = solved(solve_with_config(
+            &scene,
+            protected,
+            supported,
+            pair(),
+            Vector3::new(3.0, 1.0, 0.0),
+            1.0,
+        ));
+        assert!(
+            held.pose.coords.x <= 10.5 + EPSILON,
+            "protected body crossed the ledge: {held:?}"
+        );
+        assert!(
+            (held.pose.coords.y - 21.0).abs() < EPSILON,
+            "edge protection ate tangent motion: {held:?}"
+        );
+        assert!(held.support.is_some());
+    }
+
+    #[test]
+    fn creature_edge_protection_accepts_a_short_step_down_before_protecting_the_edge() {
+        let mut colliders = vec![floor()];
+        colliders.extend(box_obstacle(2, 10.0, 14.0, 0.15));
+        let scene = scene(colliders);
+        let supported = body(
+            Vector3::new(12.0, 20.0, 0.15),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let mut protected = config();
+        protected.edge_protection = EdgeProtection::Creature;
+
+        let (stepped_down, _) = solved(solve_with_config(
+            &scene,
+            protected,
+            supported,
+            pair(),
+            Vector3::new(3.0, 0.0, 0.0),
+            1.0,
+        ));
+
+        assert!(
+            stepped_down.pose.coords.x > 14.5,
+            "short drop was mistaken for a protected precipice: {stepped_down:?}"
+        );
+        assert!(
+            stepped_down.pose.coords.z.abs() < EPSILON,
+            "short drop did not settle on the lower floor: {stepped_down:?}"
+        );
+        assert!(stepped_down.support.is_some());
+    }
+
+    #[test]
+    fn portal_commit_expires_outdoor_support_and_settles_to_recessed_interior_floor() {
+        let cell_id = 0xda55_0100;
+        let volume = CellVolume {
+            cell_selector: 0x0100,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            planes: vec![Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -10.0,
+            }],
+            portals: vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -10.0,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::Outdoor,
+                outdoor_building: None,
+            }],
+        };
+        let mut interior_floor = floor();
+        interior_floor.placement.origin.z = -1.0;
+        interior_floor.bounds_center.z -= 1.0;
+        interior_floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id };
+        let terrain = TerrainCollisionSurface::from_terrain(&LandblockTerrain {
+            grid_size: 9,
+            tile_size: 24.0,
+            height_indices: vec![0; 81],
+            heights: vec![0.0; 81],
+            terrain_samples: vec![0; 81],
+            cell_diagonals: TerrainCellDiagonals::for_landblock(LANDBLOCK),
+        })
+        .unwrap();
+        let mut collision = CollisionScene::new();
+        insert_test_halo(&mut collision, &[LANDBLOCK]);
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: LANDBLOCK,
+                terrain,
+                static_geometry: LandblockColliders {
+                    colliders: vec![interior_floor],
+                    cell_volumes: vec![volume],
+                },
+            })
+            .unwrap();
+
+        let start = body(
+            Vector3::new(8.0, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let (mut solved_body, _) = solved(solve(
+            &collision,
+            start,
+            pair(),
+            Vector3::new(4.0, 0.0, 0.0),
+            1.0,
+        ));
+
+        assert_eq!(solved_body.cell, Some(Guid(cell_id)));
+        assert_eq!(solved_body.pose.landblock_id, Guid(cell_id));
+        assert!(solved_body.support.is_none());
+        for _ in 0..60 {
+            (solved_body, _) = solved(solve(
+                &collision,
+                solved_body,
+                pair(),
+                Vector3::zero(),
+                1.0 / 30.0,
+            ));
+            if solved_body.support.is_some() {
+                break;
+            }
+        }
+        assert!(
+            (solved_body.pose.coords.z + 1.0).abs() < EPSILON,
+            "recessed interior settle ended at ({}, {}, {}) with support {:?}",
+            solved_body.pose.coords.x,
+            solved_body.pose.coords.y,
+            solved_body.pose.coords.z,
+            solved_body.support
+        );
+        assert!(solved_body.support.is_some());
+    }
+
+    #[test]
+    fn intersecting_grounded_constraints_converge_and_release_independently() {
+        let scene = scene(vec![
+            floor(),
+            wall_x(2, 10.0, 0.0, 4.0),
+            wall_y(3, 10.0, 0.0, 4.0),
+        ]);
+        let supported = body(
+            Vector3::new(9.25, 9.25, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let mut corner_config = config();
+        corner_config.maximum_substep_distance = 10.0;
+        let (corner, _, corner_constraint_count) = solved_with_constraint_count(solve_with_config(
+            &scene,
+            corner_config,
+            supported,
+            pair(),
+            Vector3::new(0.5, 0.5, 0.0),
+            1.0,
+        ));
+        assert!(
+            (corner.pose.coords.x - 9.5).abs() < EPSILON,
+            "first corner plane was penetrated"
+        );
+        assert!(
+            (corner.pose.coords.y - 9.5).abs() < EPSILON,
+            "second corner plane was penetrated"
+        );
+        assert_eq!(corner_constraint_count, 2);
+
+        let (retreated, _, retreat_constraint_count) =
+            solved_with_constraint_count(solve_with_config(
+                &scene,
+                corner_config,
+                corner,
+                pair(),
+                Vector3::new(-2.0, 0.0, 0.0),
+                1.0,
+            ));
+        assert!((retreated.pose.coords.x - 7.5).abs() < EPSILON);
+        assert!((retreated.pose.coords.y - 9.5).abs() < EPSILON);
+        assert_eq!(retreat_constraint_count, 0);
+    }
+
+    #[test]
+    fn grounded_pair_crosses_owners_with_complete_source_halo() {
+        let mut resident = CollisionScene::new();
+        insert_test_halo(&mut resident, &[LANDBLOCK, EAST]);
+        resident
+            .insert(artifact(LANDBLOCK, vec![floor()], Vec::new()))
+            .unwrap();
+        resident
+            .insert(artifact(EAST, vec![floor()], Vec::new()))
+            .unwrap();
+        let supported = body(
+            Vector3::new(191.0, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        let (crossed, _) = solved(solve(
+            &resident,
+            supported,
+            pair(),
+            Vector3::new(2.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert_eq!(
+            crossed.pose.landblock_id.0 & 0xffff_0000,
+            EAST & 0xffff_0000
+        );
+        assert!((crossed.pose.coords.x - 1.0).abs() < EPSILON);
+        assert!(crossed.support.is_some());
+
+        let mut falling = body(Vector3::new(191.0, 20.0, 3.0), None);
+        falling.fall_velocity = -1.0;
+        let (crossed, _) = solved(solve(
+            &resident,
+            falling,
+            pair(),
+            Vector3::new(2.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert_eq!(
+            crossed.pose.landblock_id.0 & 0xffff_0000,
+            EAST & 0xffff_0000
+        );
+        assert!(crossed.pose.coords.z < 3.0);
+    }
+
+    #[test]
+    fn missing_coverage_holds_all_grounded_state_and_resumes_without_hidden_gravity() {
+        let original = GroundedBody {
+            pose: pose(Vector3::new(191.0, 20.0, 3.0)),
+            cell: None,
+            fall_velocity: -1.0,
+            support: None,
+        };
+        let mut incomplete = CollisionScene::new();
+        for owner in test_halo_owners(&[LANDBLOCK, EAST]) {
+            if owner != EAST {
+                incomplete
+                    .insert(artifact(owner, Vec::new(), Vec::new()))
+                    .unwrap();
+            }
+        }
+        incomplete
+            .insert(artifact(LANDBLOCK, vec![floor()], Vec::new()))
+            .unwrap();
+        match solve(
+            &incomplete,
+            original.clone(),
+            pair(),
+            Vector3::new(20.0, 0.0, 0.0),
+            0.1,
+        ) {
+            GroundedOutcome::MissingCoverage { body, missing } => {
+                assert_eq!(body, original, "coverage hold mutated grounded state");
+                assert_eq!(missing.landblocks, vec![Guid(EAST)]);
+            }
+            other => panic!("missing owner did not hold the body: {other:?}"),
+        }
+
+        incomplete
+            .insert(artifact(EAST, vec![floor()], Vec::new()))
+            .unwrap();
+        let (resumed, _) = solved(solve(
+            &incomplete,
+            original,
+            pair(),
+            Vector3::new(20.0, 0.0, 0.0),
+            0.1,
+        ));
+        assert!((resumed.fall_velocity + 1.98).abs() < EPSILON);
+        assert!(
+            resumed.pose.coords.z < 3.0,
+            "restored coverage did not resume gravity"
+        );
+    }
+
+    #[test]
+    fn lower_sphere_commits_linked_cells_while_upper_sphere_can_veto_transit() {
+        let first = CellVolume {
+            cell_selector: 0x0100,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            planes: vec![
+                Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: 0.0,
+                },
+                Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 10.0,
+                },
+            ],
+            portals: vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -10.0,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::EnvCell(0x0101),
+                outdoor_building: None,
+            }],
+        };
+        let second = CellVolume {
+            cell_selector: 0x0101,
+            placement: first.placement,
+            planes: vec![
+                Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -10.0,
+                },
+                Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 20.0,
+                },
+            ],
+            portals: vec![
+                CellCollisionPortal {
+                    plane: Plane {
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                        d: 10.0,
+                    },
+                    positive_side: true,
+                    target: CellCollisionPortalTarget::EnvCell(0x0100),
+                    outdoor_building: None,
+                },
+                CellCollisionPortal {
+                    plane: Plane {
+                        normal: Vector3::new(1.0, 0.0, 0.0),
+                        d: -20.0,
+                    },
+                    positive_side: true,
+                    target: CellCollisionPortalTarget::Outdoor,
+                    outdoor_building: None,
+                },
+            ],
+        };
+        let mut first_floor = floor();
+        first_floor.source_placement = StaticColliderPlacement::EnvCellShell {
+            cell_id: 0xda55_0100,
+        };
+        let mut second_floor = floor();
+        second_floor.source_placement = StaticColliderPlacement::EnvCellShell {
+            cell_id: 0xda55_0101,
+        };
+        let mut upper_wall = wall_x(2, 10.0, 1.25, 3.0);
+        upper_wall.source_placement = StaticColliderPlacement::EnvCellShell {
+            cell_id: 0xda55_0100,
+        };
+        let mut collision = CollisionScene::new();
+        insert_test_halo(&mut collision, &[LANDBLOCK]);
+        collision
+            .insert(artifact(
+                LANDBLOCK,
+                vec![first_floor, second_floor, upper_wall],
+                vec![first, second],
+            ))
+            .unwrap();
+        let mut in_first = body(
+            Vector3::new(8.0, 20.0, 0.0),
+            Some(Vector3::new(0.0, 0.0, 1.0)),
+        );
+        in_first.cell = Some(Guid(0xda55_0100));
+        in_first.pose.landblock_id = Guid(0xda55_0100);
+
+        let (lower_only, _) = solved(solve(
+            &collision,
+            in_first.clone(),
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::new(4.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert_eq!(lower_only.cell, Some(Guid(0xda55_0101)));
+        assert_eq!(lower_only.pose.landblock_id, Guid(0xda55_0101));
+
+        let (outside, _) = solved(solve(
+            &collision,
+            lower_only,
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            Vector3::new(10.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert_eq!(outside.cell, None);
+        assert!(outside.pose.landblock_id.0 & 0xffff < 0x0100);
+
+        let (pair_blocked, _) = solved(solve(
+            &collision,
+            in_first,
+            pair(),
+            Vector3::new(4.0, 0.0, 0.0),
+            1.0,
+        ));
+        assert_eq!(pair_blocked.cell, Some(Guid(0xda55_0100)));
+        assert_eq!(pair_blocked.pose.landblock_id, Guid(0xda55_0100));
+        assert!((pair_blocked.pose.coords.x - 9.5).abs() < EPSILON);
+        assert!(pair_blocked.support.is_some());
+    }
+}

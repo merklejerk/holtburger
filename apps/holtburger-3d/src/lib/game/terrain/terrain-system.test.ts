@@ -243,6 +243,7 @@ function createInstallation(landblockId = "0x1111ffff") {
 	} as const;
 	return {
 		generation: {
+			cellDiagonals: new Uint8Array(64),
 			gridSize: 9,
 			heightIndices: new Uint8Array(81),
 			heights: new Float32Array(81),

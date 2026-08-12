@@ -1,4 +1,3 @@
-import { getLandblockCoordinates } from "../landblocks";
 import { TERRAIN_GRID_CELLS, type TerrainGenerationSource } from "./types";
 
 /** One authoritative terrain height sampled from an installed outdoor source. */
@@ -45,7 +44,7 @@ export function sampleTerrainSurface(
 		);
 	}
 
-	const height = usesSouthwestToNortheastCut(source.landblockId, column, row)
+	const height = usesSouthwestToNortheastCut(source, column, row)
 		? sampleSouthwestToNortheast(
 				southwest,
 				southeast,
@@ -65,20 +64,20 @@ export function sampleTerrainSurface(
 	return { height, landblockId: source.landblockId };
 }
 
-/** Retail's deterministic diagonal choice for one canonical terrain cell. */
+/** Reads retail's host-computed diagonal choice for one canonical terrain cell. */
 export function usesSouthwestToNortheastCut(
-	landblockId: TerrainGenerationSource["landblockId"],
+	source: Pick<TerrainGenerationSource, "cellDiagonals">,
 	cellColumn: number,
 	cellRow: number,
 ): boolean {
-	const coordinates = getLandblockCoordinates(landblockId);
-	const globalCellX = (coordinates.x * TERRAIN_GRID_CELLS + cellColumn) >>> 0;
-	const globalCellY = (coordinates.y * TERRAIN_GRID_CELLS + cellRow) >>> 0;
-	const magicA = (Math.imul(globalCellX, 214_614_067) + 1_813_693_831) >>> 0;
-	const magicB = Math.imul(globalCellX, 1_109_124_029) >>> 0;
-	const splitDirection =
-		(Math.imul(globalCellY, magicA) - magicB - 1_369_149_221) >>> 0;
-	return splitDirection >= 0x80000000;
+	const diagonal =
+		source.cellDiagonals[cellRow * TERRAIN_GRID_CELLS + cellColumn];
+	if (diagonal === undefined) {
+		throw new Error(
+			`Terrain cell (${cellColumn}, ${cellRow}) is outside the authored diagonal grid.`,
+		);
+	}
+	return diagonal !== 0;
 }
 
 function sampleSouthwestToNortheast(

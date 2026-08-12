@@ -465,6 +465,24 @@ describe("SceneGraph", () => {
 		);
 
 		expect(scene.queryEnvCellPointContainment("0x01020001", point)).toBe(true);
+		expect(
+			scene.hasEnvCellScope({
+				envCellId: "0x01020001",
+				landblockId: "0x0102ffff",
+			}),
+		).toBe(true);
+		expect(
+			scene.hasEnvCellScope({
+				envCellId: "0x01020001",
+				landblockId: "0x0202ffff",
+			}),
+		).toBe(false);
+		expect(
+			scene.hasEnvCellScope({
+				envCellId: null,
+				landblockId: "0x0102ffff",
+			}),
+		).toBe(false);
 	});
 
 	it("broad-phases spatially overlapping cells without assuming outdoor landblock identity", () => {

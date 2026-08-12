@@ -1,15 +1,17 @@
 # Holtburger 3D Spawned Entity and Explorer Runtime Plan
 
-Status: Queued — execute after the authored-effects plan
+Status: Queued — prerequisites complete; host-physics reconciliation recorded
 Created: 2026-07-31
 Rewritten: 2026-08-01 from the convergence world/feed audit
 Refined: 2026-08-01 after recovery-scope review
+Reconciled: 2026-08-11 after host physical-camera implementation
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Prerequisites:
 
 - `docs/plans/holtburger-3d-static-authored-animation-runtime-plan.md`
 - `docs/plans/holtburger-3d-static-authored-effects-runtime-plan.md`
 - `docs/plans/holtburger-3d-dynamic-entity-architecture-convergence-plan.md`
+- `docs/plans/holtburger-3d-host-physics-recovery-plan.md`
 
 ## Provenance and Execution Status
 
@@ -19,6 +21,8 @@ Prerequisites:
 | Claude one-feed/two-drivers topology      | Donor-proven at `c938a438`                                        | Preserve one world/event contract, not donor machinery           |
 | World/entity/spatial/attachment semantics | Audited on `3d-next` on 2026-08-01                                | Extend existing `WorldState`; do not duplicate                   |
 | Current `ClientViewEvent` recovery        | Initial entity snapshot is incomplete                             | Extend `InitialViewState`; retain the existing ordered broadcast |
+| Static collision and body response        | Implemented in `holtburger-world`                                 | Reuse only for concrete spawned physical prediction scenarios   |
+| Explorer physical camera host             | Implemented app-locally; maintainer acceptance pending            | Do not generalize camera session or controls into spawned feed   |
 | Spawned runtime implementation            | Not started                                                       | Execute the phases below in order                                |
 
 The previous sequence was unexecuted and is superseded by this refinement. The audit finding remains
@@ -49,7 +53,8 @@ The missing pieces are narrower than the earlier plan claimed:
   it currently has no complete entity snapshot to request in response.
 - Reduced `MotionKinematics` resolves velocity/omega profiles but omits animation selections, ranges,
   rates, links, and modifiers.
-- The Tauri host exposes content exploration only; it has no world driver or spawned entity relay.
+- The Tauri host exposes content exploration plus an app-local physical-camera driver backed by a
+  3x3 collision-residency ring. It still has no spawned world driver or entity relay.
 - The frontend has no complete entity mirror, presentation-placement owner, runtime attachment
   consumer, or motion-plan consumer.
 
@@ -68,6 +73,8 @@ a spawned mutation bus and must not be stretched into one.
   sparse correction, teleport, reset, pause, resume, and deterministic step scenarios.
 - Shared frontend template, animation, script, effect, renderer, and resource-lifetime systems.
 - Host-resolved motion selection and frontend smooth presentation between sparse authoritative samples.
+- Reuse of the landed typed collision coverage, static-query, and bounded body-response contracts
+  only when a named spawned scenario requires host-local physical prediction.
 - Animated parent-part attachment following with ancestor-derived authoritative residency.
 - `PhysicsScriptTable` decode, transport, and intensity selection — inherited from the effects
   plan by its 2026-08-06 scope ratification. Retail proved the mechanism is exclusively
@@ -97,6 +104,8 @@ a spawned mutation bus and must not be stretched into one.
 - Per-render-frame host transform streaming.
 - Frontend motion-table decoding or semantic motion selection.
 - A second template cache, animation system, effect dispatcher, placement authority, or entity feed.
+- Reusing the Explorer physical-camera session, app-owned camera body dimensions, input mapping, or
+  predicted-camera transport as a spawned-entity runtime.
 - Compatibility shims for the superseded spawned commit-bundle proposal.
 
 ## Ground Truth and Existing Precedent
@@ -127,11 +136,15 @@ a spawned mutation bus and must not be stretched into one.
 - `crates/holtburger-world/src/state/mutations.rs`
 - `crates/holtburger-world/src/state/motion_resolution.rs`
 - `crates/holtburger-world/src/spatial/`
+- `crates/holtburger-world/src/spatial/collision.rs`
+- `crates/holtburger-world/src/spatial/grounded.rs`
+- `crates/holtburger-world/src/spatial/physical_fly.rs`
 - `crates/holtburger-core/src/client/runtime.rs`
 - `crates/holtburger-core/src/client/runtime_body_view_cache.rs`
 - `crates/holtburger-core/src/client/types.rs`
 - `crates/holtburger-content/src/`
 - `apps/holtburger-3d/src-tauri/src/lib.rs`
+- `apps/holtburger-3d/src-tauri/src/host_camera_runtime.rs`
 - `apps/holtburger-3d/src/lib/game/runtime/game-runtime.ts`
 - `apps/holtburger-3d/src/lib/game/systems/dynamic-entity-system.ts`
 - `apps/holtburger-3d/src/lib/game/systems/animation-system.ts`

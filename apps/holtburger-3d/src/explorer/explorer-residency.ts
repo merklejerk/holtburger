@@ -8,7 +8,12 @@ export type ExplorerResidencyResolution =
 	| {
 			readonly kind: "resolved";
 			readonly residency: SceneResidency;
-			readonly source: "cell-containment" | "explicit-env-cell" | "outdoor";
+			readonly source:
+				| "cell-containment"
+				| "explicit-env-cell"
+				| "host-physical-camera"
+				| "outdoor"
+				| "physical-handoff";
 	  }
 	| {
 			readonly kind: "ambiguous";

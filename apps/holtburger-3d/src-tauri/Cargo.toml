@@ -20,6 +20,7 @@ holtburger-content.workspace = true
 holtburger-common.workspace = true
 holtburger-core.workspace = true
 holtburger-dat.workspace = true
+holtburger-world.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }

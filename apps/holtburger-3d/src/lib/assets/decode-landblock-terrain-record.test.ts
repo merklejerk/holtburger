@@ -171,6 +171,10 @@ function terrainResponse(
 	const heightIndices = Uint8Array.from({ length: 81 }, (_, index) => index);
 	const heights = Float32Array.from({ length: 81 }, (_, index) => index + 0.5);
 	const terrainSamples = Uint16Array.from({ length: 81 }, (_, index) => index);
+	const cellDiagonals = Uint8Array.from(
+		{ length: 64 },
+		(_, index) => index % 2,
+	);
 	const heightsOffset =
 		Math.ceil(heightIndices.byteLength / Float32Array.BYTES_PER_ELEMENT) *
 		Float32Array.BYTES_PER_ELEMENT;
@@ -179,11 +183,15 @@ function terrainResponse(
 			(heightsOffset + heights.byteLength) / Uint16Array.BYTES_PER_ELEMENT,
 		) * Uint16Array.BYTES_PER_ELEMENT;
 	const sectionBytes = new Uint8Array(
-		terrainSamplesOffset + terrainSamples.byteLength,
+		terrainSamplesOffset + terrainSamples.byteLength + cellDiagonals.byteLength,
 	);
 	sectionBytes.set(heightIndices, 0);
 	sectionBytes.set(new Uint8Array(heights.buffer), heightsOffset);
 	sectionBytes.set(new Uint8Array(terrainSamples.buffer), terrainSamplesOffset);
+	sectionBytes.set(
+		cellDiagonals,
+		terrainSamplesOffset + terrainSamples.byteLength,
+	);
 	const manifest = new TextEncoder().encode(
 		JSON.stringify({
 			byteOrder: "little-endian",
@@ -210,6 +218,13 @@ function terrainResponse(
 					elementCount: terrainSamples.length,
 					name: "terrainSamples",
 					scalarType: "u16",
+				},
+				{
+					byteLength: cellDiagonals.byteLength,
+					byteOffset: terrainSamplesOffset + terrainSamples.byteLength,
+					elementCount: cellDiagonals.length,
+					name: "cellDiagonals",
+					scalarType: "u8",
 				},
 			],
 			terrainAvailability: options.terrainAvailability ?? "available",

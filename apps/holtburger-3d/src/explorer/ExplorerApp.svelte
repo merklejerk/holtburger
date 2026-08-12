@@ -39,6 +39,21 @@
 	} from "./explorer-camera-coordinator";
 	import { FreeFlyCameraController } from "./free-fly-camera-controller";
 	import {
+		resolveGroundedWalkVelocity,
+		resolvePhysicalFlyVelocity,
+		resolvePhysicalCameraViewDirection,
+		type ExplorerCameraMode,
+		type PhysicalCameraMode,
+		type PhysicalCameraLocalMovement,
+	} from "../lib/game/motion/host-physical-camera-path";
+	import {
+		PhysicalCameraSession,
+		type PhysicalCameraStatus,
+	} from "./physical-camera-session";
+	import { tauriPhysicalCameraTransport } from "./physical-camera-transport";
+	import { Vec3 } from "../lib/game/math/types";
+	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+	import {
 		resolveSceneEnvironment,
 		type ExplorerEnvironmentSelection,
 	} from "../lib/game/environment/scene-environment";
@@ -70,6 +85,11 @@
 	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
+	let physicalCameraSession: PhysicalCameraSession | undefined;
+	let cameraMode = $state<ExplorerCameraMode>("free-fly");
+	let cameraModePending = $state(false);
+	let physicalCameraStatus = $state<PhysicalCameraStatus | null>(null);
+	let physicalCameraError = $state<string | null>(null);
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
 		$state(null);
@@ -110,6 +130,10 @@
 					textureFilteringCapabilities,
 				),
 	);
+
+	function errorMessage(error: unknown): string {
+		return error instanceof Error ? error.message : String(error);
+	}
 
 	function updateEnvironment(selection: ExplorerEnvironmentSelection): void {
 		environmentSelection = selection;
@@ -272,11 +296,200 @@
 		residency: SceneResidency,
 		lod: LoDConfig,
 	): void {
+		// Automatic focus is an explicit teleport. Return position authority to free fly before the
+		// coordinator applies it instead of letting the host overwrite the new pose next frame.
+		if (physicalCameraSession) void leavePhysicalCamera(false);
 		cameraCoordinator?.requestSceneInterest(residency, lod);
 		sceneInterest = {
 			lod: { ...lod },
 			residency: { ...residency },
 		};
+	}
+
+	function physicalCameraInput(
+		controller: FreeFlyCameraController,
+		mode: PhysicalCameraMode,
+	): {
+		readonly viewDirection: [number, number, number];
+		readonly worldVelocity: [number, number, number];
+	} {
+		const { basis, movement, precision } = controller.physicalFlyInput();
+		const tuple = (vector: Vec3): [number, number, number] => [
+			vector.x,
+			vector.y,
+			vector.z,
+		];
+		const cameraBasis = {
+			forward: tuple(basis.forward),
+			right: tuple(basis.right),
+			up: tuple(basis.up),
+		};
+		const worldVelocity =
+			mode === "grounded-walk"
+				? resolveGroundedWalkVelocity(
+						movement as PhysicalCameraLocalMovement,
+						cameraBasis,
+						precision
+							? FRONTEND_TUNING.explorer.camera.controls.groundedSlowWalkSpeed
+							: FRONTEND_TUNING.explorer.camera.controls.groundedWalkSpeed,
+					)
+				: resolvePhysicalFlyVelocity(
+						movement as PhysicalCameraLocalMovement,
+						cameraBasis,
+						FRONTEND_TUNING.explorer.camera.controls.moveSpeed *
+							(precision
+								? FRONTEND_TUNING.explorer.camera.controls.shiftSlowMultiplier
+								: 1),
+					);
+		return {
+			viewDirection: resolvePhysicalCameraViewDirection(cameraBasis),
+			worldVelocity,
+		};
+	}
+
+	function sendPhysicalCameraIntent(): void {
+		const session = physicalCameraSession;
+		const controller = cameraController;
+		if (!session?.running || !controller) return;
+		const mode =
+			session.status().mode ?? (cameraMode === "free-fly" ? null : cameraMode);
+		if (mode === null) return;
+		const input = physicalCameraInput(controller, mode);
+		void session
+			.setIntent(input.worldVelocity, input.viewDirection)
+			.catch((error: unknown) => {
+				physicalCameraError = errorMessage(error);
+			});
+	}
+
+	async function enterPhysicalCamera(mode: PhysicalCameraMode): Promise<void> {
+		const controller = cameraController;
+		if (!controller || physicalCameraSession || cameraModePending) return;
+		const placement = cameraCoordinator?.presentedPlacement() ?? null;
+		if (placement === null) {
+			physicalCameraError =
+				"Physical camera requires a currently rendered camera placement.";
+			return;
+		}
+		cameraModePending = true;
+		physicalCameraError = null;
+		controller.setLocalTranslationEnabled(false);
+		const session = new PhysicalCameraSession(tauriPhysicalCameraTransport());
+		try {
+			await session.start(
+				placement,
+				physicalCameraInput(controller, mode).viewDirection,
+				mode,
+			);
+			if (cameraController !== controller || !runtimeReady) {
+				await session.stop();
+				controller.setLocalTranslationEnabled(true);
+				cameraMode = "free-fly";
+				return;
+			}
+			physicalCameraSession = session;
+			cameraMode = mode;
+			sendPhysicalCameraIntent();
+		} catch (error) {
+			controller.setLocalTranslationEnabled(true);
+			physicalCameraError = errorMessage(error);
+		} finally {
+			cameraModePending = false;
+		}
+	}
+
+	async function leavePhysicalCamera(
+		preserveResidency: boolean,
+	): Promise<void> {
+		const session = physicalCameraSession;
+		const controller = cameraController;
+		if (!session || !controller) return;
+		const lastHostResidency =
+			cameraCoordinator?.presentedPlacement()?.residency ??
+			session.placement()?.residency ??
+			null;
+		// Detach presentation first: no late segment can move the frontend pose after handoff.
+		physicalCameraSession = undefined;
+		const presented = controller.snapshotState();
+		controller.adoptPresentedPose(presented);
+		if (preserveResidency && lastHostResidency !== null) {
+			cameraCoordinator?.seedFreeFlyResidency(lastHostResidency);
+		}
+		controller.setLocalTranslationEnabled(true);
+		cameraMode = "free-fly";
+		physicalCameraStatus = null;
+		try {
+			await session.stop();
+		} catch (error) {
+			physicalCameraError = errorMessage(error);
+		}
+	}
+
+	async function replacePhysicalCamera(
+		mode: PhysicalCameraMode,
+	): Promise<void> {
+		const oldSession = physicalCameraSession;
+		const controller = cameraController;
+		if (!oldSession || !controller || cameraModePending) return;
+		cameraModePending = true;
+		physicalCameraError = null;
+		const lastHostPlacement =
+			cameraCoordinator?.presentedPlacement() ?? oldSession.placement() ?? null;
+		const lastHostResidency = lastHostPlacement?.residency ?? null;
+		physicalCameraSession = undefined;
+		controller.adoptPresentedPose(controller.snapshotState());
+		controller.setLocalTranslationEnabled(false);
+		physicalCameraStatus = null;
+		try {
+			await oldSession.stop();
+			if (cameraController !== controller || !runtimeReady) {
+				controller.setLocalTranslationEnabled(true);
+				cameraMode = "free-fly";
+				return;
+			}
+			const nextSession = new PhysicalCameraSession(
+				tauriPhysicalCameraTransport(),
+			);
+			if (lastHostPlacement === null) {
+				throw new Error(
+					"Physical camera replacement lost its presented placement.",
+				);
+			}
+			await nextSession.start(
+				lastHostPlacement,
+				physicalCameraInput(controller, mode).viewDirection,
+				mode,
+			);
+			if (cameraController !== controller || !runtimeReady) {
+				await nextSession.stop();
+				controller.setLocalTranslationEnabled(true);
+				cameraMode = "free-fly";
+				return;
+			}
+			physicalCameraSession = nextSession;
+			cameraMode = mode;
+			sendPhysicalCameraIntent();
+		} catch (error) {
+			if (lastHostResidency !== null) {
+				cameraCoordinator?.seedFreeFlyResidency(lastHostResidency);
+			}
+			controller.setLocalTranslationEnabled(true);
+			cameraMode = "free-fly";
+			physicalCameraError = errorMessage(error);
+		} finally {
+			cameraModePending = false;
+		}
+	}
+
+	function updateCameraMode(mode: ExplorerCameraMode): void {
+		if (mode === cameraMode || cameraModePending) return;
+		if (mode === "free-fly") {
+			void leavePhysicalCamera(true);
+		} else if (physicalCameraSession) {
+			void replacePhysicalCamera(mode);
+		} else {
+			void enterPhysicalCamera(mode);
+		}
 	}
 
 	function readTextureAtlasPage(pageId: TexturePageId): Texture2DReadback {
@@ -314,6 +527,7 @@
 			const detailOwner = staticDetailOwner;
 			const coordinator = cameraCoordinator;
 			const controller = cameraController;
+			const physicalSession = physicalCameraSession;
 			gameRuntime = undefined;
 			runtimeReady = false;
 			cameraLocation = null;
@@ -330,21 +544,29 @@
 			activeRegion = undefined;
 			cameraCoordinator = undefined;
 			cameraController = undefined;
+			physicalCameraSession = undefined;
+			cameraMode = "free-fly";
+			cameraModePending = false;
+			physicalCameraStatus = null;
 			teardown = (async () => {
 				stopFrameLoop();
 				coordinator?.dispose();
 				controller?.dispose();
 				try {
-					await runtime?.destroy();
+					await physicalSession?.stop();
 				} finally {
 					try {
-						await pipeline?.destroy();
+						await runtime?.destroy();
 					} finally {
 						try {
-							await device?.destroy();
+							await pipeline?.destroy();
 						} finally {
-							detailOwner?.teardown();
-							regionSource?.destroy();
+							try {
+								await device?.destroy();
+							} finally {
+								detailOwner?.teardown();
+								regionSource?.destroy();
+							}
 						}
 					}
 				}
@@ -419,6 +641,7 @@
 						if (cameraCoordinator) {
 							cameraCoordinator.handleCameraState(state);
 						}
+						sendPhysicalCameraIntent();
 					},
 				});
 				cameraCoordinator = new ExplorerCameraCoordinator(
@@ -438,8 +661,16 @@
 					}
 
 					const tickStartedAt = performance.now();
+					const physicalPlacement = physicalCameraSession?.placement() ?? null;
+					if (physicalPlacement && cameraController) {
+						cameraController.applyPresentedPosition(physicalPlacement.position);
+						physicalCameraStatus = physicalCameraSession?.status() ?? null;
+					}
 					gameRuntime.tick();
-					const residencySync = cameraCoordinator?.syncCameraResidency();
+					const residencySync =
+						physicalCameraSession || cameraModePending
+							? cameraCoordinator?.syncPhysicalCamera(physicalPlacement)
+							: cameraCoordinator?.syncFreeFlyCamera();
 					if (!residencySync) {
 						throw new Error(
 							"Explorer camera coordinator is unavailable during rendering.",
@@ -515,6 +746,11 @@
 			{runtimeReady}
 			{requestSceneInterest}
 			{cameraFocusStatus}
+			{cameraMode}
+			{cameraModePending}
+			{physicalCameraStatus}
+			{physicalCameraError}
+			{updateCameraMode}
 			{environmentSelection}
 			dayGroupNames={activeRegion?.data.sky?.dayGroups.map(
 				({ dayName }) => dayName,

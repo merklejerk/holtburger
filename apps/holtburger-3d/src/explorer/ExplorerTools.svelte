@@ -19,6 +19,8 @@
 	import type { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
 	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
+	import type { PhysicalCameraStatus } from "./physical-camera-session";
+	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-camera-path";
 
 	type ExplorerTabId =
 		| "world"
@@ -46,6 +48,11 @@
 			lod: LoDConfig,
 		) => void;
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
+		readonly cameraMode: ExplorerCameraMode;
+		readonly cameraModePending: boolean;
+		readonly physicalCameraStatus: PhysicalCameraStatus | null;
+		readonly physicalCameraError: string | null;
+		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
 		readonly environmentSelection: ExplorerEnvironmentSelection;
 		readonly dayGroupNames: readonly string[];
 		readonly updateEnvironment: (
@@ -104,6 +111,11 @@
 		runtimeReady,
 		requestSceneInterest,
 		cameraFocusStatus,
+		cameraMode,
+		cameraModePending,
+		physicalCameraStatus,
+		physicalCameraError,
+		updateCameraMode,
 		environmentSelection,
 		dayGroupNames,
 		updateEnvironment,
@@ -233,9 +245,14 @@
 						<p class="ac-section-label">{activeTab.label}</p>
 						{#if activeTab.id === "world"}
 							<ExplorerWorldPanel
-								{runtimeReady}
+								runtimeReady={runtimeReady && !cameraModePending}
 								{requestSceneInterest}
 								{cameraFocusStatus}
+								{cameraMode}
+								{cameraModePending}
+								{physicalCameraStatus}
+								{physicalCameraError}
+								{updateCameraMode}
 								{environmentSelection}
 								{dayGroupNames}
 								{updateEnvironment}

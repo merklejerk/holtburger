@@ -4,7 +4,7 @@ Status: Queued — prerequisites complete; host-physics reconciliation recorded
 Created: 2026-07-31
 Rewritten: 2026-08-01 from the convergence world/feed audit
 Refined: 2026-08-01 after recovery-scope review
-Reconciled: 2026-08-12 after the placement-aware host physical-camera cutover
+Reconciled: 2026-08-12 after the generic host physical-body and simulation-interest cutover
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Prerequisites:
 
@@ -15,15 +15,16 @@ Prerequisites:
 
 ## Provenance and Execution Status
 
-| Concern                                   | Status                                                            | Treatment                                                        |
-| ----------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Canonical frontend dynamic foundation     | Complete on `3d-next` at `c09eb3c2`, then extended by convergence | Preserve and extend                                              |
-| Claude one-feed/two-drivers topology      | Donor-proven at `c938a438`                                        | Preserve one world/event contract, not donor machinery           |
-| World/entity/spatial/attachment semantics | Audited on `3d-next` on 2026-08-01                                | Extend existing `WorldState`; do not duplicate                   |
-| Current `ClientViewEvent` recovery        | Initial entity snapshot is incomplete                             | Extend `InitialViewState`; retain the existing ordered broadcast |
-| Static collision, body response, and placed-motion paths | Implemented in `holtburger-world`                    | Reuse only for concrete spawned physical prediction scenarios   |
-| Explorer physical camera host             | Implemented app-locally; maintainer acceptance pending            | Do not generalize camera session or controls into spawned feed   |
-| Spawned runtime implementation            | Not started                                                       | Execute the phases below in order                                |
+| Concern                                                  | Status                                                                     | Treatment                                                        |
+| -------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Canonical frontend dynamic foundation                    | Complete on `3d-next` at `c09eb3c2`, then extended by convergence          | Preserve and extend                                              |
+| Claude one-feed/two-drivers topology                     | Donor-proven at `c938a438`                                                 | Preserve one world/event contract, not donor machinery           |
+| World/entity/spatial/attachment semantics                | Audited on `3d-next` on 2026-08-01                                         | Extend existing `WorldState`; do not duplicate                   |
+| Current `ClientViewEvent` recovery                       | Initial entity snapshot is incomplete                                      | Extend `InitialViewState`; retain the existing ordered broadcast |
+| Static collision, generic bodies, and placed paths       | Implemented in `holtburger-world`                                          | Reuse the existing body store and lifecycle for physical scenarios |
+| Explicit host simulation interest                       | Implemented app-locally                                                    | Scenario/application policy supplies coverage; bodies never stream |
+| Explorer physical camera adapter                        | Implemented app-locally; final live acceptance remains                     | Camera projection and controls remain outside spawned simulation   |
+| Spawned runtime implementation                           | Not started                                                                | Execute the phases below in order                                |
 
 The previous sequence was unexecuted and is superseded by this refinement. The audit finding remains
 valid: the current initial-state request cannot reconstruct spawned entity presentation. The selected
@@ -53,8 +54,9 @@ The missing pieces are narrower than the earlier plan claimed:
   it currently has no complete entity snapshot to request in response.
 - Reduced `MotionKinematics` resolves velocity/omega profiles but omits animation selections, ranges,
   rates, links, and modifiers.
-- The Tauri host exposes content exploration plus an app-local physical-camera driver backed by a
-  3x3 collision-residency ring. It still has no spawned world driver or entity relay.
+- The Tauri host exposes explicit revisioned simulation interest, one generic physical-body runtime,
+  and an app-local physical-camera adapter over an `Ephemeral` body. It still has no spawned world
+  driver or entity relay.
 - The frontend has no complete entity mirror, presentation-placement owner, runtime attachment
   consumer, or motion-plan consumer.
 
@@ -73,10 +75,14 @@ a spawned mutation bus and must not be stretched into one.
   sparse correction, teleport, reset, pause, resume, and deterministic step scenarios.
 - Shared frontend template, animation, script, effect, renderer, and resource-lifetime systems.
 - Host-resolved motion selection and frontend smooth presentation between sparse authoritative samples.
-- Reuse of the landed typed collision coverage, static-query, bounded body-response, and
-  camera-agnostic placed-motion contracts only when a named spawned scenario requires host-local
-  physical prediction. A solved entity path preserves accepted response bends and host-owned portal
-  placement; it does not inherit the Explorer camera session or transport.
+- Reuse of the landed typed collision coverage, generic `SpatialBody` physical composite, bounded
+  response, and camera-agnostic placed-motion contracts only when a named spawned scenario requires
+  host-local prediction. A setup-backed server body and an explicit frontend body resolve through
+  the same geometry-plus-response validator. A solved entity path preserves accepted response bends
+  and host-owned portal placement; it does not inherit the Explorer camera adapter or transport.
+- Explicit scenario/application simulation interest supplies collision coverage independently from
+  render LoD and body placement. An uncovered body remains registered and dormant, and its activity
+  transition may inform policy without automatically loading content.
 - Animated parent-part attachment following with ancestor-derived authoritative residency.
 - `PhysicsScriptTable` decode, transport, and intensity selection — inherited from the effects
   plan by its 2026-08-06 scope ratification. Retail proved the mechanism is exclusively
@@ -108,6 +114,8 @@ a spawned mutation bus and must not be stretched into one.
 - A second template cache, animation system, effect dispatcher, placement authority, or entity feed.
 - Reusing the Explorer physical-camera session, app-owned camera body dimensions, input mapping, or
   fixed-tick camera transport as a spawned-entity runtime.
+- A second physical-body registry, spawned-only collider profile enum, or body-driven collision
+  loading path parallel to the landed generic runtime.
 - Compatibility shims for the superseded spawned commit-bundle proposal.
 
 ## Ground Truth and Existing Precedent
@@ -139,13 +147,16 @@ a spawned mutation bus and must not be stretched into one.
 - `crates/holtburger-world/src/state/motion_resolution.rs`
 - `crates/holtburger-world/src/spatial/`
 - `crates/holtburger-world/src/spatial/collision.rs`
+- `crates/holtburger-world/src/spatial/physical_body.rs`
 - `crates/holtburger-world/src/spatial/grounded.rs`
 - `crates/holtburger-world/src/spatial/physical_fly.rs`
+- `crates/holtburger-core/src/physical_body_definition.rs`
 - `crates/holtburger-core/src/client/runtime.rs`
 - `crates/holtburger-core/src/client/runtime_body_view_cache.rs`
 - `crates/holtburger-core/src/client/types.rs`
 - `crates/holtburger-content/src/`
 - `apps/holtburger-3d/src-tauri/src/lib.rs`
+- `apps/holtburger-3d/src-tauri/src/host_simulation_runtime.rs`
 - `apps/holtburger-3d/src-tauri/src/host_camera_runtime.rs`
 - `apps/holtburger-3d/src/lib/game/runtime/game-runtime.ts`
 - `apps/holtburger-3d/src/lib/game/systems/dynamic-entity-system.ts`
@@ -160,14 +171,16 @@ a spawned mutation bus and must not be stretched into one.
 | Semantic appearance                                | `holtburger-world`                               | Complete snapshot and visual-template staging                 |
 | Attachment and inherited residency                 | `holtburger-world`                               | Complete snapshot/deltas, then frontend attachment projection |
 | Accepted body placement and correction kind        | `holtburger-world`                               | Sparse placement projection                                   |
-| Collision-accepted geometry and portal placement   | `holtburger-world` placed-motion path            | First concrete host-local physical prediction scenario         |
+| Physical geometry, response, and coverage activity | `holtburger-world::SpatialBody`                  | First concrete host-local physical prediction scenario        |
+| Collision-accepted geometry and portal placement   | `holtburger-world` placed-motion path            | First concrete host-local physical prediction scenario        |
+| Collision simulation-interest owner set            | Application policy and app-local host service    | Explorer scenario physical-prediction coverage                 |
 | Semantic motion state and resolved selection       | `holtburger-world` using a content-built catalog | Spatial projection and frontend motion-plan playback          |
 | Complete initial entity snapshot                   | `holtburger-core` view contract                  | Existing client and Tauri consumers                           |
 | Broadcast lag detection                            | Each Rust `ClientViewEvent` receiver             | Stop forwarding and request a fresh snapshot                  |
 | Explorer scenarios and deterministic controls      | App-local Rust driver                            | Shared world mutation APIs                                    |
 | Tauri serialization, listener handshake, and relay | App-local Tauri adapter                          | Frontend entity mirror                                        |
 | Async presentation freshness                       | Existing frontend owner/staging generations      | Template, animation, and behavior activation                  |
-| Render-time position along a host-placed path       | Frontend `PlacementSystem`                       | Scene projection and renderer submission                      |
+| Render-time position along a host-placed path      | Frontend `PlacementSystem`                       | Scene projection and renderer submission                      |
 | Final scene-node transform                         | Frontend presentation projection                 | Renderer-facing dynamic nodes                                 |
 | WebGL batching                                     | Renderer                                         | Dynamic draw submission                                       |
 
@@ -195,6 +208,25 @@ demonstrate out-of-order or undetectable loss. They are not an eager correctness
   behavior. If it permits undetectable loss while a listener is alive, stop for review and add the
   minimum proven sequencing contract there rather than prepaying for epochs everywhere.
 
+### 2026-08-12 Physical-Body Reconciliation
+
+- `SpatialBodyStore` is the only spatial-body registry. Its `SpatialBody` may retain a validated
+  `PhysicalBodyState` containing geometry, response-only memory, and exhaustive active,
+  awaiting-coverage, or invalid-placement activity. Spawned execution extends that body; it does not
+  create a spawned collision-body cache.
+- Physical definitions are source-neutral. Server hydration resolves setup motion spheres plus an
+  authoritative response policy under `SpatialBodyId::Entity`; frontend-local spawns submit explicit
+  geometry plus policy and receive `Ephemeral` identity. Both enter the same validator and retained
+  definition, while setup lookup and identity allocation stay outside simulation.
+- Simulation interest is an explicit, revisioned application request realized by the app-local host
+  service. Neither registration nor ticking may load, evict, or replace collision coverage. Missing
+  coverage freezes all retained body state and emits exact missing owners for policy to consume.
+- `HostCameraRuntime` is evidence that an app-local controller can adapt generic body motion into a
+  presentation path. Its viewer offset, camera cadence, diagnostics, and Tauri event are not reusable
+  spawned-entity contracts.
+- This reconciliation records reusable landed primitives only. It does not claim that decoded server
+  spawns, entity physical-definition attachment, or spawned fixed-tick scheduling are implemented.
+
 ## Target Runtime Shape
 
 ```text
@@ -202,8 +234,11 @@ explorer scenario commands ----\
                                 -> one holtburger-world WorldState
 future network client events --/      |- identity + lifecycle
                                        |- semantic appearance + attachment
-                                       |- authoritative body + residency
+                                       |- authoritative spatial/physical body
                                        `- semantic motion state
+                                                    |
+                    generic physical tick consumes app-requested
+                         immutable collision coverage when used
                                                     |
                          holtburger-core ClientViewEvent projection
                          complete snapshot + existing ordered deltas
@@ -410,8 +445,13 @@ the frontend receives only the presentation facts required to predict the same t
 - Predict from absolute anchor/plan time, apply named decaying continuous correction, and snap on
   complete replacement, forced reposition, teleport, incompatible residency, or timeline reset.
 - For a named host-local physical prediction scenario, serialize the existing world-owned
-  `PlacedMotionPath` with its accepted geometry. Evaluate its supplied placement-stable legs at
-  render cadence; do not restore frontend actor portal traversal or infer residency from endpoints.
+  `PlacedMotionPath` with its accepted geometry. Attach the setup-resolved definition to the
+  scenario's existing `SpatialBodyId::Entity` and tick it through the generic body runtime; do not
+  introduce a scenario/camera profile or another body store. Evaluate supplied placement-stable legs
+  at render cadence; do not restore frontend actor portal traversal or infer residency from endpoints.
+- Have scenario/application policy request the collision owner set needed by that physical scenario.
+  Awaiting-coverage activity holds the exact prior state and may prompt a later explicit interest
+  replacement, but the body itself never loads content.
 - Keep sparse server-authoritative placement as an explicit anchor until the Phase 4 retail/network
   evidence names the host-side geometry that can safely become a placed path. Missing topology
   holds the last proven placement and never falls back to frontend containment.
@@ -424,6 +464,8 @@ the frontend receives only the presentation facts required to predict the same t
 - An ordinary correction converges continuously; a forced correction snaps on the first eligible
   presentation sample.
 - One placed path can cross multiple portals, and unavailable topology never guesses residency.
+- The physical scenario and an explicit frontend-owned body resolve equivalent geometry/response
+  payloads identically; neither registration nor tick changes simulation interest.
 - Animation, effects, and renderer code do not write root placement independently.
 - Clear, complete replacement, and resnapshot remove all prediction/correction state.
 

@@ -1,3 +1,4 @@
+use super::PhysicalBodyState;
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
@@ -146,6 +147,8 @@ pub struct SpatialBody {
     pub motion_state: Option<EntityMotionSnapshot>,
     pub contact: ContactState,
     pub sampling: SpatialSamplingState,
+    /// Optional static-collision response attached without duplicating body identity or pose.
+    pub physical: Option<PhysicalBodyState>,
 }
 
 impl SpatialBody {
@@ -159,6 +162,7 @@ impl SpatialBody {
             motion_state: None,
             contact: ContactState::Unknown,
             sampling: SpatialSamplingState::authoritative(now),
+            physical: None,
         }
     }
 
@@ -172,6 +176,7 @@ impl SpatialBody {
             motion_state: None,
             contact: ContactState::Unknown,
             sampling: SpatialSamplingState::authoritative(now),
+            physical: None,
         }
     }
 
@@ -256,7 +261,7 @@ pub struct SolvedBodyKinematics {
     pub projection_state: Option<SelfPlayerDriveProjectionState>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SpatialBodyEvent {
     ContactChanged {
         body_id: SpatialBodyId,
@@ -265,6 +270,13 @@ pub enum SpatialBodyEvent {
     ForcedReposition {
         body_id: SpatialBodyId,
         pose: WorldPosition,
+    },
+    /// A registered physical body entered a distinct collision-availability state.
+    PhysicalActivityChanged {
+        /// Stable generic body identity.
+        body_id: SpatialBodyId,
+        /// Newly authoritative coverage/placement activity.
+        activity: super::PhysicalBodyActivity,
     },
 }
 

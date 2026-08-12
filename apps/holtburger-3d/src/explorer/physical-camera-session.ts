@@ -8,6 +8,96 @@ import {
 } from "../lib/game/motion/host-physical-camera-path";
 import type { EnvCellId } from "../lib/game/game-types";
 
+interface PhysicalSphereDefinition {
+	/** Body-local AC-axis center in meters. */
+	readonly center: readonly [number, number, number];
+	/** Positive collision radius in meters. */
+	readonly radius: number;
+}
+
+interface PhysicalBodyDefinition {
+	/** Ordered role-bearing geometry supplied to the generic host validator. */
+	readonly spheres: readonly PhysicalSphereDefinition[];
+	/** Implemented response semantics and finite solve configuration. */
+	readonly response:
+		| {
+				/** Unrestricted three-dimensional single-sphere response. */
+				readonly kind: "free-sphere";
+				/** Physical-fly solver limits. */
+				readonly config: PhysicalFlyResponseConfig;
+		  }
+		| {
+				/** Gravity, support, step, and edge response. */
+				readonly kind: "grounded";
+				/** Grounded solver and response policy. */
+				readonly config: GroundedResponseConfig;
+		  };
+}
+
+interface PhysicalFlyResponseConfig {
+	/** Maximum distance covered by one anti-tunneling subdivision. */
+	readonly maximumSubstepDistance: number;
+	/** Finite subdivision budget for one host tick. */
+	readonly maximumSubsteps: number;
+	/** Finite contact-separation budget across one host tick. */
+	readonly maximumContactPasses: number;
+	/** Small outward separation after an accepted contact. */
+	readonly separationEpsilon: number;
+}
+
+interface GroundedResponseConfig extends PhysicalFlyResponseConfig {
+	/** Downward acceleration while airborne. */
+	readonly gravity: number;
+	/** Minimum upward normal component accepted as support. */
+	readonly walkableNormalZ: number;
+	/** Maximum step-up rise in meters. */
+	readonly stepUpHeight: number;
+	/** Maximum downward support search in meters. */
+	readonly stepDownHeight: number;
+	/** Policy for retaining support near finite authored edges. */
+	readonly edgeProtection: "none" | "creature";
+}
+
+/** Explorer product policy for its explicit generic camera bodies. */
+function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
+	if (mode === "physical-fly") {
+		return {
+			spheres: [{ center: [0, 0, 0], radius: 0.25 }],
+			response: {
+				kind: "free-sphere",
+				config: {
+					maximumSubstepDistance: 0.25,
+					maximumSubsteps: 32,
+					maximumContactPasses: 8,
+					separationEpsilon: 0.000_5,
+				},
+			},
+		};
+	}
+	return {
+		// Retail's authored human setup pair, projected in source order by SPHEREPATH::init_sphere
+		// (`acclient.c:302241-302291`). These are app factory data, not simulator profiles.
+		spheres: [
+			{ center: [0, 0, 0.475], radius: 0.48 },
+			{ center: [0, 0, 1.35], radius: 0.48 },
+		],
+		response: {
+			kind: "grounded",
+			config: {
+				gravity: -9.8,
+				walkableNormalZ: 0.707_106_77,
+				stepUpHeight: 0.6,
+				stepDownHeight: 1.5,
+				edgeProtection: "creature",
+				maximumSubstepDistance: 0.24,
+				maximumSubsteps: 32,
+				maximumContactPasses: 8,
+				separationEpsilon: 0.000_5,
+			},
+		},
+	};
+}
+
 /** Injectable Tauri boundary for one host-solved camera session. */
 export interface PhysicalCameraTransport {
 	invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -66,6 +156,7 @@ export class PhysicalCameraSession {
 		try {
 			const result = await this.#transport.invoke("start_physical_camera", {
 				registration: {
+					body: physicalCameraBody(mode),
 					mode,
 					residency: placement.residency,
 					scenePosition: [

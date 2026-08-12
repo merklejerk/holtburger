@@ -108,6 +108,18 @@ describe("PhysicalCameraSession", () => {
 		await session.start(placement(), [0, 1, 0], "physical-fly");
 		expect(test.calls[0]?.command).toBe("start_physical_camera");
 		expect(test.calls[0]?.args?.registration).toEqual({
+			body: {
+				response: {
+					config: {
+						maximumContactPasses: 8,
+						maximumSubstepDistance: 0.25,
+						maximumSubsteps: 32,
+						separationEpsilon: 0.000_5,
+					},
+					kind: "free-sphere",
+				},
+				spheres: [{ center: [0, 0, 0], radius: 0.25 }],
+			},
 			mode: "physical-fly",
 			residency: { envCellId: null, landblockId: "0xda55ffff" },
 			scenePosition: [0xda * 192 + 96, 20, -(0x55 * 192 + 96)],

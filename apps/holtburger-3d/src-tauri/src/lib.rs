@@ -23,6 +23,7 @@ pub mod cell_struct_projection;
 mod env_cell_source;
 pub mod gfx_obj_geometry;
 mod host_camera_runtime;
+mod host_simulation_runtime;
 pub mod interior_seam;
 mod landblock_source_batch;
 mod object_resource_closure;
@@ -69,7 +70,7 @@ const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
 #[derive(Clone)]
 struct HostContentState {
     runtime: ContentAssetRuntime,
-    /// Shared synchronous service used by app-local host behaviors such as collision residency.
+    /// Shared synchronous service used to realize explicitly requested simulation collision.
     service: Arc<ContentAssetService>,
 }
 
@@ -753,6 +754,65 @@ fn stop_physical_camera(
     runtime.stop(session);
 }
 
+/// Replaces the complete frontend-owned collision simulation interest.
+#[tauri::command]
+async fn replace_simulation_interest(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
+    request: host_simulation_runtime::SimulationInterestRequest,
+) -> Result<host_simulation_runtime::SimulationInterestReceipt, String> {
+    let runtime = Arc::clone(&runtime);
+    let receipt = tokio::task::spawn_blocking({
+        let runtime = Arc::clone(&runtime);
+        move || runtime.replace_interest(request)
+    })
+    .await
+    .map_err(|error| format!("simulation-interest replacement task failed: {error}"))?
+    .map_err(format_error)?;
+    host_simulation_runtime::emit_body_activity_events(&app, &runtime).map_err(format_error)?;
+    Ok(receipt)
+}
+
+/// Opens one frontend simulation-interest lifetime with host-ordered currentness.
+#[tauri::command]
+fn start_simulation_interest_session(
+    runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
+) -> u64 {
+    runtime.reserve_interest_session()
+}
+
+/// Registers one arbitrary frontend-owned physical body without presentation policy.
+#[tauri::command]
+async fn register_frontend_physical_body(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
+    registration: host_simulation_runtime::FrontendPhysicalBodyRegistration,
+) -> Result<host_simulation_runtime::HostSpatialBodyId, String> {
+    let runtime_for_registration = Arc::clone(&runtime);
+    let body_id = tokio::task::spawn_blocking(move || {
+        runtime_for_registration
+            .register_frontend_physical_body(&registration, std::time::Instant::now())
+    })
+    .await
+    .map_err(|error| format!("physical-body registration task failed: {error}"))?
+    .map_err(format_error)?;
+    host_simulation_runtime::emit_body_activity_events(&app, &runtime).map_err(format_error)?;
+    Ok(body_id.into())
+}
+
+/// Removes exactly one host-allocated frontend-owned physical body.
+#[tauri::command]
+fn unregister_frontend_physical_body(
+    runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
+    body_id: u64,
+) -> Result<(), String> {
+    runtime
+        .remove_body(holtburger_world::SpatialBodyId::Ephemeral(body_id))
+        .with_context(|| format!("frontend physical body {body_id} is not registered"))
+        .map(|_| ())
+        .map_err(format_error)
+}
+
 fn surface_texture_asset_id(texture_id: u32) -> String {
     format!("surface-texture/0x{texture_id:08x}")
 }
@@ -1158,16 +1218,22 @@ fn serialize_texture_pixels_binary(
 pub fn run() {
     let content_state = HostContentState::discover()
         .expect("failed to initialize Holtburger 3D content repository from configured content");
-    let collision_source: Arc<dyn host_camera_runtime::CollisionSource> =
+    let collision_source: Arc<dyn host_simulation_runtime::CollisionSource> =
         content_state.service.clone();
     let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
         collision_source,
     ));
+    let simulation = camera_runtime.simulation_runtime();
     tauri::Builder::default()
         .manage(content_state)
+        .manage(simulation)
         .manage(camera_runtime)
         .invoke_handler(tauri::generate_handler![
             host_status,
+            start_simulation_interest_session,
+            replace_simulation_interest,
+            register_frontend_physical_body,
+            unregister_frontend_physical_body,
             start_physical_camera,
             set_physical_camera_intent,
             stop_physical_camera,

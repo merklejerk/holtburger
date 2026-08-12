@@ -1,6 +1,6 @@
 # Holtburger 3D Host Physics and Physical Camera Recovery Plan
 
-Status: In progress — placement-aware motion-path cutover and automated gates complete; live acceptance pending
+Status: In progress — cutover, cleanup, and automated verification complete; final live acceptance pending
 Created: 2026-08-11
 Canonical implementation base: `3d-next` at `41b164ab`
 Recovery branch: `fix/host-physics-recovery`
@@ -57,6 +57,24 @@ This plan therefore:
 7. Landblock `0xda55ffff` is the primary maintainer verification environment. Phase 6 selects an
    exact outdoor-to-interior route within `da55` from product-path traces and adds another landblock
    only when `da55` cannot exercise a named mechanism.
+8. Bodies do not own, enlarge, or evict collision residency. Explorer policy submits explicit
+   simulation interest independently from render interest, and the host collision service realizes
+   that requested owner set.
+9. A body whose required collision owners are absent remains registered at its last exact pose and
+   placement in an observable awaiting-coverage state. It does not tick, fall, relabel an EnvCell as
+   outdoors, or synchronously load content on its own behalf.
+10. Physical fly and grounded walk are parameterized generic physical models, not camera body
+    classes or closed named profiles. Setup-backed server bodies, setup-backed frontend bodies, and
+    explicit frontend-owned bodies resolve to the same role-bearing definition before simulation.
+    The logical Explorer camera supplies one such explicit definition when it hands off between a
+    free three-dimensional sphere and the authored grounded support/constraint pair.
+11. The generic simulator publishes authoritative body motion and body placement only. The
+    app-local camera adapter derives the first-person viewer trajectory and submits it to the
+    camera-agnostic world path tracer; neither the simulator nor shared body state owns a viewer or
+    presentation-probe registry.
+12. Landblock reanchoring is exact coordinate representation work and requires no collision asset.
+    EnvCell membership is separate topology state and resumes only after the retained cell can be
+    validated against restored coverage.
 
 ### Problem Statement
 
@@ -90,8 +108,14 @@ explicit response policies, and no field or transition state that exists only be
 - Atomic pose, contact, and interior-cell commit.
 - A camera-agnostic world motion-path contract that preserves ordered position and placement changes
   within one fixed solve tick.
-- An app-local host camera driver, collision residency policy, typed intent commands, and physical-
-  camera events adapting that shared path for frontend presentation.
+- An app-local host simulation adapter consuming explicit simulation interest, plus a physical-
+  camera adapter, typed intent commands, and camera events adapting shared body and path results for
+  frontend presentation.
+- Observable inactive-body behavior when explicit simulation interest does not cover a retained or
+  requested physical placement.
+- One resolved, parameterized physical-body definition consumed by existing server/local-player and
+  ephemeral/frontend `SpatialBody` identities. Source-specific adapters may derive it from setup
+  data or validate an explicit frontend-owned definition; provenance does not fork simulation.
 - Explorer controls for physical fly and grounded walk alongside the existing frontend free-fly
   controller.
 - Synthetic scenario fixtures derived from retail behavior and product-path diagnostic probes over
@@ -106,11 +130,13 @@ explicit response policies, and no field or transition state that exists only be
 - A generic entity event stream, replication policy, or missile/creature/player controller built in
   anticipation of future consumers; this recovery lands only the shared placed-motion primitive.
 - Network transport, login, or protocol changes.
-- Runtime player-body sizing from setup models; the Explorer camera keeps app-owned dimensions
-  measured against authored human geometry.
+- Replacing the Explorer camera's explicit dimensions with a player setup or implementing the queued
+  network/spawn feed. Phase 8 makes setup-resolved `Entity` bodies representable and testable, while
+  the Explorer camera keeps app-owned dimensions measured against authored human geometry.
 - Jumping, swimming, or animation-root motion.
-- Cylsphere collision, arbitrary compound bodies, and support for more than retail's first two
-  authored motion spheres.
+- Cylsphere collision, physical response over more than retail's first two authored motion spheres,
+  and accepting a shape or response that the simulator cannot honestly execute. Lossless authored
+  arrays remain available to content and inspection consumers independently from the motion body.
 - Reproducing retail class topology, state-bit layout, numeric transition enums, or retry structure.
 - Making physical fly retail-compatible; it is Explorer product behavior.
 - Replacing or relocating the existing frontend free-fly controller.
@@ -355,6 +381,8 @@ placement changes. Consumers do not re-derive these facts.
 9. Shared motion and placement contracts land with a concrete physical-camera consumer and remain
    reusable by future dynamic entities; camera offsets, cadence, transport, and UX remain app-local.
 10. The existing frontend free-fly controller remains an independent, reliable escape path.
+11. Bodies consume collision coverage selected by application policy; they never become implicit
+    streaming authorities.
 
 ## Phased Implementation
 
@@ -522,6 +550,16 @@ This independently confirms the retail cap and asymmetry while sizing Explorer's
 The authored step reaches remain inputs to the Phase 2 behavior audit rather than being inferred as
 camera collision geometry.
 
+The Phase 8 setup-projection audit additionally classified all 4,277 ordinary motion spheres in the
+same 5,935 setups: every authored radius is finite and positive, and none of the first two retained
+spheres has radius zero. The 2,325 sphere-less setups are behaviorally distinct. Retail
+`CPhysicsObj::transition` passes the object's uniform `m_scale` to `SPHEREPATH::init_sphere`, which
+scales every retained center component and radius and caps the list at two
+(`acclient.c:308350-308369`, `:302241-302291`). When no authored sphere exists, retail substitutes
+the global dummy sphere centered at `(0, 0, 0.1)` with radius `0.1` at scale one
+(`acclient.c:308364-308369`, `:749275-749278`). The setup-backed definition producer reproduces this
+normal motion-shape fallback; it does not borrow sorting/selection spheres or per-part render scales.
+
 ##### Representative collision distributions
 
 The donor diagnostic assembly was temporarily instrumented and run against four deliberately
@@ -687,7 +725,7 @@ physical camera consumes them through the product path in 1c.
 
 ##### Acceptance Criteria
 
-- [ ] The real Explorer can enter physical fly, collide and slide against outdoor and interior
+- [x] The real Explorer can enter physical fly, collide and slide against outdoor and interior
       geometry, and return to frontend free fly without a pose jump.
 - [x] Pitch-relative flight remains Explorer policy; `holtburger-world` receives world-space intent.
 - [x] Collision coverage follows the camera independently of render scene interest.
@@ -858,7 +896,7 @@ Phase 1c debt and remaining acceptance:
 
 #### Acceptance Criteria
 
-- [ ] Physical fly is a complete, usable vertical slice rather than scaffolding for walk mode.
+- [x] Physical fly is a complete, usable vertical slice rather than scaffolding for walk mode.
 - [x] Every shared contract has a current product consumer.
 - [x] The grounded plan can be expressed as an additional response policy over the landed kernel.
 - [x] No public world-state or query contract assumes that every future physical body has exactly
@@ -1317,7 +1355,7 @@ acceptance item.
       alone and matches the cited retail outcome.
 - [x] Aggregate probes do not regress from their recorded recovery baseline without an attributable
       scenario.
-- [ ] The maintainer confirms both physical modes in the real Explorer.
+- [x] The maintainer confirms both physical modes in the real Explorer.
 
 #### Decisions and Course Corrections
 
@@ -1425,7 +1463,7 @@ small `0.05` inspection multiplier.
       explicit slower grounded walk rate.
 - [x] Existing stair, obstruction, two-sphere, and no-support edge-protection scenarios remain
       green.
-- [ ] The maintainer rechecks door exit, stair traversal, raised-object descent, and both grounded
+- [x] The maintainer rechecks door exit, stair traversal, raised-object descent, and both grounded
       speeds in the real Explorer.
 
 #### Decisions and Course Corrections
@@ -1484,7 +1522,7 @@ further. Do not add spatial timeouts, retreat heuristics, or approximate constra
 - [x] Host and harness diagnostics consume the derived per-solve constraint count without
       re-deriving it.
 - [x] The prior portal, short-drop, stair, two-sphere, and true-cliff scenarios remain green.
-- [ ] The maintainer rechecks bidirectional wall sliding and the disappearing-wall sequence in the
+- [x] The maintainer rechecks bidirectional wall sliding and the disappearing-wall sequence in the
       real Explorer.
 
 #### Decisions and Course Corrections
@@ -1545,7 +1583,7 @@ substep.
       motion.
 - [x] Existing portal, short-drop, two-sphere, true-cliff, wall, and failed-step fixtures remain
       green.
-- [ ] The maintainer rechecks near-parallel wall travel and the observed stair crest in the real
+- [x] The maintainer rechecks near-parallel wall travel and the observed stair crest in the real
       Explorer.
 
 #### Decisions and Course Corrections
@@ -1653,7 +1691,7 @@ only a generally useful probe when it has a continuing reverse-engineering consu
       category switch or collision decision is added to the frontend.
 - [x] Existing wall-slide, stair-crest, short-drop, cliff, missing-coverage, and 31/31 da55 portal
       regressions remain green.
-- [ ] The maintainer verifies the recessed-floor route and outdoor/interior collision separation in
+- [x] The maintainer verifies the recessed-floor route and outdoor/interior collision separation in
       the real Explorer.
 
 #### Decisions and Course Corrections
@@ -1889,7 +1927,7 @@ authoritative placement.
 
 - [x] Host physical-fly and grounded-walk segments have one typed frontend consumer for their
       composite position/residency placement; committed EnvCell identity is not diagnostics-only.
-- [ ] In the CE94 route, the host, renderer, HUD, and scene-interest status all report
+- [x] In the CE94 route, the host, renderer, HUD, and scene-interest status all report
       `0xCE940109`; unrelated overlapping `0xCE940102` does not cause ambiguity or a held stale frame.
 - [x] Missing or evicted topology for the host-selected EnvCell produces a visible hold and cannot
       fall back to another containing cell or outdoors.
@@ -2140,7 +2178,7 @@ continuous placement path without copying retail's 1999 object topology.
       physical-fly viewers through the existing named portals without changing collision outcomes.
 - [x] Rust and frontend unit suites, formatting, clippy with warnings denied, type checks, lint,
       production build, DA55 aggregate probes, and the isolated CE94 browser compositor run pass.
-- [ ] Live Explorer acceptance crosses CE94 and DA55 portals repeatedly in both physical modes with
+- [x] Live Explorer acceptance crosses CE94 and DA55 portals repeatedly in both physical modes with
       no flash, wrong-domain frame, correction snap, cell flicker, or latency beyond the accepted
       30 Hz solved-path baseline and one pending successor.
 
@@ -2385,6 +2423,38 @@ cadence, serialization, interpolation session state, and handoff UX remain app-l
 non-camera sphere-mover test, but do not invent a generic entity transport or lifecycle without a
 production consumer.
 
+### A physical body becomes a collision-streaming authority
+
+Mitigation: accept complete, revisioned simulation-interest replacements from app policy and make
+the collision service the only owner of load, staged compilation, atomic scene replacement, and
+eviction. A solve may report exact missing owners, but it cannot schedule them. Keep render-interest
+LoD and simulation interest as separate requests so a visual slider cannot silently remove physics.
+
+### Missing coverage destroys or silently relocates a body
+
+Mitigation: retain identity, typed physical model, exact pose, support memory, velocity, and prior
+EnvCell while the body is awaiting coverage. Suspend ticks without hidden time accumulation and emit
+one explicit availability transition containing the missing owners. Restored coverage must validate
+the retained placement; an invalid retained EnvCell is a loud runtime failure, never an outdoor
+fallback.
+
+### Generic simulation acquires presentation probes
+
+Mitigation: the simulator emits body motion and authoritative body placement only. The app-local
+camera adapter owns eye offsets, viewer radius, view-direction interpolation, and Tauri transport,
+then calls the existing camera-agnostic world path tracer. Do not add `viewer`, `camera`,
+`presentation`, or a persistent probe registry to shared body state.
+
+### Generality becomes an untyped compound-collider contract
+
+Mitigation: allow frontend-owned bodies to provide arbitrary finite centers and radii inside a
+supported response-bearing definition, while setup-backed server and frontend spawns resolve to the
+same internal type. Encode one free three-dimensional sphere or one grounded support sphere plus its
+optional upper constraint as tagged variants; a serialized array is validated and collapsed at the
+boundary rather than retained as an unbounded `Vec<Sphere>` in world state. Named human or camera
+profiles are factories only, never the simulator ABI. Reject unsupported counts or response/shape
+combinations loudly instead of accepting geometry the solver will ignore.
+
 ### Visibility traversal is confused with camera placement traversal
 
 Mitigation: retain renderer portal traversal only for selecting visible scopes from a known camera
@@ -2430,7 +2500,7 @@ and tuning files wholesale.
       only layer that introduces viewer geometry, camera cadence, or Tauri transport.
 - [x] Frontend physical-camera presentation contains no forward extrapolation or independent portal
       placement traversal and holds the last authoritative endpoint on starvation.
-- [ ] The real Explorer passes maintainer verification in both physical modes within the accepted
+- [x] The real Explorer passes maintainer verification in both physical modes within the accepted
       motion-boundary envelope.
 - [x] Shared crates contain no camera UX policy and the frontend contains no collision solving.
 - [x] No dormant fields, unused public transition types, accidental dependency upgrades, or
@@ -2438,22 +2508,35 @@ and tuning files wholesale.
 - [x] All repository-required static, unit, browser, Tauri, formatting, and lint checks pass after
       the placement-aware presentation-path cutover.
 - [x] The dynamic-entity roadmap and spawned plan consume the landed topology honestly.
+- [x] Collision residency is controlled only by explicit simulation-interest revisions and is
+      independent from render-interest LoD and every simulated body.
+- [x] Registered bodies remain observable and motionless while required collision coverage is
+      absent, then resume from the exact retained state only after placement validation.
+- [x] The host body runtime consumes one parameterized free-sphere/grounded-pair definition for
+      setup-resolved and explicit frontend-owned bodies, without a camera-specific class, closed
+      entity-profile enum, or ignored collider fields.
+- [x] Shared simulation state contains no viewer or presentation probe; the app-local camera adapter
+      traces its derived viewer trajectory through the camera-agnostic world path operation.
+- [x] Landblock reanchoring is shared exact coordinate math, while retained EnvCell membership never
+      falls back to outdoor placement merely because its collision owner was evicted.
 
 ## Open Questions
 
-None. The remaining work is the named live-acceptance gate only.
+None. Phase 8 records the ratified simulation-interest, inactive-body, generic-body, and app-local
+camera-projection cutover. Its final live checks include the outstanding landblock-seam recheck.
 
-## Remaining Acceptance
+## Final Acceptance Record
 
 The ordered camera-agnostic placed-motion path, host serialization/commit, bounded frontend playback,
-probe coverage, cleanup, and repository gates are complete. The retained content/browser harness
-still cannot invoke
+explicit simulation-interest/generic-body cutover, probe coverage, cleanup, and repository gates are
+complete. On 2026-08-12, the maintainer reported the final live Explorer execution successful and
+collision behavior consistent with the pre-cutover Explorer behavior. That observation supplies the
+perceptual evidence the content/browser harness cannot provide: it cannot invoke
 `tauriPhysicalCameraTransport`, receive the host's real event stream, judge control latency, or
-observe a one-frame flash in the interactive Explorer authority handoff. Product-path collision
-probes likewise cannot establish visible pose continuity. Those final perceptual boxes require the
-maintainer's live session and must not be checked from synthetic, host-only, or browser-only evidence.
+observe a one-frame flash in the interactive Explorer authority handoff.
 
-The maintainer must verify both physical modes in the real Explorer. The primary grounded route is
+The completed maintainer protocol covered both physical modes in the real Explorer. The primary
+grounded route was
 EnvCell `0xDA550100`, portal 1, from landblock-local `(129.000, 180.355, 21.600)` toward
 `(-1.000, -0.002)`; the focused seam regressions are `0xDA55013E` portal 0 and `0xDA55014E` portal 0
 toward `-X`. Confirm physical-fly collision/slide and recovery to frontend free fly, then grounded
@@ -2509,6 +2592,516 @@ distinct acceptance mechanism:
    viewport HUD, renderer, and scene-interest status converge on `0xCE940109`; overlapping
    `0xCE940102` never reports as the active or ambiguous cell.
 
-The prior unchecked phase boxes are historical aliases for these same live observations, not
-additional implementation work. They remain unchecked until the maintainer reports this card's
-result. No automated result is used as a substitute.
+The prior phase boxes are historical aliases for these same live observations, not additional
+implementation work. The maintainer's successful live report closes them; no automated result is
+used as a substitute.
+
+#### Live-Criterion Completion Audit — 2026-08-12
+
+All 13 live-observation boxes in this plan map to the card above; none names additional code,
+documentation, probe, or automated-gate work. The maintainer's successful Explorer regression report
+closes the complete set:
+
+- Card items 1 and 4 close the Phase 1c usable physical-fly slice, the R1 complete-vertical-slice
+  gate, the Phase 4 both-modes gate, the placed-path CE94/DA55 continuity gate, the Definition of
+  Done real-Explorer gate, and the final no-flash/no-snap physical-mode criterion.
+- Card item 1 specifically closes the reopened outdoor landblock-seam pause criterion in both
+  physical modes.
+- Card item 2 closes the door-exit/stair/raised-object/speed recheck, bidirectional and finite-wall
+  release recheck, and near-parallel wall/stair-crest recheck.
+- Card item 3 closes the recessed-floor and outdoor/interior collision-domain recheck.
+- Card item 5 closes the overlapping CE94 `0xCE940109` authority recheck; card item 4 independently
+  closes the slim-cell compositing and stationary mode-handoff recheck.
+- Completing all five items closes the Phase 8d maintainer-card task and its combined acceptance
+  criterion. A failed observation reopens only the mechanism it contradicts and must be diagnosed
+  from a focused trace before another implementation change.
+
+### Final Acceptance Reopen: Landblock-Seam Residency Scheduling
+
+The maintainer's 2026-08-12 Explorer pass accepted the placement-path result: neither physical mode
+showed a portal flash, and presenting accepted substep paths also removed the previous hard snapback
+when motion stopped. The same pass exposed one remaining shared-host defect: both physical fly and
+grounded walk pause for several rendered frames at an outdoor landblock boundary, then continue.
+
+The host control flow proves the cause without attributing it to collision response or frontend
+interpolation. `spawn_tick_loop` solved the boundary-crossing tick against the already complete 5x5
+overlap ring, then awaited `ensure_residency` before emitting that valid path. Loading the five newly
+entering collision products and rebuilding the scene-global static-shadow index therefore created a
+producer gap. The frontend correctly held the last authoritative endpoint during that gap, making
+the synchronous residency work visible as a movement stall. Both response modes share this exact
+tick scheduler, matching the observed mode-independent symptom.
+
+#### Required Cutover
+
+- Emit the solved boundary-crossing path before beginning collision-residency maintenance.
+- Load newly entering products and compile the replacement static-shadow index without holding or
+  delaying the simulation-state lock.
+- Commit the complete replacement scene atomically; ticks continue querying the prior complete
+  overlap ring until the replacement is ready.
+- Order refreshes by session and residency revision. A delayed request from an old mode, session, or
+  crossed-back owner cannot replace a newer target.
+- Preserve explicit missing-coverage holds if sustained loading actually exhausts the overlap ring;
+  do not extrapolate, skip collision, enlarge the cache, or change the accepted 30 Hz cadence.
+- Keep this mechanism body-agnostic. Camera event timing triggers the present consumer, but static
+  collision residency is shared infrastructure for future physical entities.
+
+#### Acceptance Criteria
+
+- [x] A valid solved path is emitted before the owner-change residency refresh is scheduled.
+- [x] Collision products load and the complete replacement shadow index compiles outside the
+      simulation-state lock.
+- [x] Resident landblock products are immutable and shared between staged scene snapshots; the
+      complete owner map and derived index commit with one pointer swap.
+- [x] A focused concurrency test proves that a newer physical-camera session rejects an older
+      background residency request.
+- [x] Existing conservative missing-coverage behavior and the radius-two overlap ring remain
+      unchanged.
+- [x] The maintainer crosses outdoor landblock seams repeatedly in grounded walk and physical fly
+      without a multi-frame movement pause.
+
+#### Decisions, Concessions, and Debt
+
+`CollisionScene` now stores each immutable `LandblockCollisionAsset` behind an `Arc` and exposes a
+staged residency update. This is an internal ownership correction, not a second cache: the same 25
+canonical products remain resident, while old and replacement scene snapshots briefly share the 20
+retained products during an owner transition. The existing mutating update API now stages and swaps
+through the same atomic path, deleting its manual rollback bookkeeping.
+
+The host reserves a session and its first residency revision together. Every later owner refresh is
+tagged with that session and a monotonic revision; stale work is discarded both before expensive
+index compilation and before commit. The initial registration still loads synchronously because no
+safe collision body exists before its first complete ring. Stable ticks still perform no assembly or
+index rebuild.
+
+Phase 8 supersedes that registration and ownership decision. The immutable product sharing, staged
+scene construction, and atomic snapshot swap remain useful; the camera-session residency target,
+fixed ring computation, and body-triggered refresh do not.
+
+No prefetch distance, larger residency ring, streaming priority system, or new timing metric was
+added. The existing radius-two ring already supplies safe overlap while one adjacent-owner refresh
+runs. If a real load can outlast that runway at maximum physical-fly speed, the existing observable
+missing-coverage hold is the honest failure and becomes separate measured evidence for a broader
+streaming design.
+
+Post-cutover verification passes `cargo fmt --all --check`, workspace clippy with warnings denied,
+and the complete workspace test suite: the app host has 82 tests and `holtburger-world` has 221. The
+canonical DA55 product probe still assembles 575 colliders and 236 cell volumes, completes 36/36
+physical-fly portal traversals and 31 production-pair grounded traversals with zero rejected traces,
+and preserves the named outdoor/internal/reverse and recessed-floor outcomes. The final unchecked
+criterion is perceptual because neither a unit emitter nor the product probe contains Tauri's live
+event cadence and rendered-frame clock.
+
+### Phase 8: Explicit Simulation Interest and Generic Body Runtime Cutover
+
+The landblock-seam fix removed synchronous loading from the emitted-path critical section, but its
+trigger still makes the physical camera an implicit collision-streaming authority. That shape will
+not survive a second body: cameras, players, creatures, missiles, and spells cannot each replace one
+global collision scene around themselves, and eviction cannot destroy or silently relocate bodies
+whose placement remains authoritative.
+
+This phase cleanly separates four owners:
+
+```text
+Explorer/application policy
+    |- render interest ----------> frontend scene realization
+    `- simulation interest ------> host collision-scene service
+                                         |
+                                         v
+                                  generic body simulation
+                                         |
+                                         +--> placed body motion
+                                         `--> app-local camera adapter
+                                                  |
+                                                  v
+                                      generic world path tracing
+                                                  |
+                                                  v
+                                         placed viewer motion
+```
+
+The word "host" is not itself a layer. The Tauri host may contain an app-local camera adapter because
+that adapter needs host collision topology; the generic simulator may not contain camera viewer,
+rendering, or presentation-probe concepts.
+
+#### Ground Truth and Existing Seams
+
+- `apps/holtburger-3d/src/lib/game/runtime/scene-interest.ts` and
+  `explorer/explorer-camera-coordinator.ts` already establish explicit frontend interest policy and
+  revisioned replacement semantics for rendered content. Simulation interest is a separate
+  projection owned beside that policy, not another render layer or LoD slider.
+- `apps/holtburger-3d/src-tauri/src/host_camera_runtime.rs` currently owns the body, viewer adapter,
+  fixed collision ring, asynchronous residency target, scene snapshot, and tick. This concentration
+  is the mechanism being cut apart.
+- `crates/holtburger-world/src/spatial/collision.rs` already provides immutable landblock products,
+  staged complete-scene construction, explicit `MissingCoverage`, and the camera-agnostic
+  `transit_motion_path` operation. Reuse those facts rather than adding a streaming cache or probe
+  registry.
+- `crates/holtburger-world/src/spatial/physical_fly.rs` and `grounded.rs` already encode the two
+  legal response-bearing physical models. The grounded support sphere and optional upper constraint
+  are asymmetric by retail evidence; they are not an arbitrary compound collider.
+- `crates/holtburger-world/src/spatial/types.rs` already defines `SpatialBodyId::{Entity,
+  LocalPlayer, Ephemeral}` and `SpatialBody`; `spatial/scene.rs` already owns those bodies in
+  `BodySamplingStore`. This phase extends and, if necessary, honestly renames that authority. It does
+  not create a second collision-body registry for the camera.
+- `crates/holtburger-dat/src/file_type/setup_model.rs` losslessly decodes authored sphere arrays.
+  Setup-backed server and frontend spawn adapters project those facts into a supported physical
+  shape. Runtime/controller state supplies the response policy; setup geometry alone does not decide
+  whether a body flies, grounds, or uses a future response. Explicit frontend-owned spawns may
+  provide both inputs, and every source converges on the same resolved definition.
+- `crates/holtburger-common/src/position.rs` owns canonical AC `WorldPosition` math. Exact
+  landblock reanchoring belongs with that coordinate model; EnvCell validation remains a collision-
+  topology operation.
+- The retail and shipped-content evidence recorded in Phases 1 and 2 remains the behavior authority
+  for one/two-sphere roles. This phase changes ownership and lifecycle, not collision outcomes.
+
+#### Phase 8a: Explicit Simulation Interest and Collision-Scene Service
+
+##### Deliverables
+
+- Add a typed Tauri request that replaces the complete simulation-interest owner set. A host-issued
+  frontend-lifetime session orders webview restarts, and revisions order replacements within that
+  session. The request contains collision landblock owners only; it does not reuse render-layer kinds.
+- Add an app-local simulation-interest projection beside Explorer render-interest policy. The
+  initial policy may retain the proven radius-two owner neighborhood, but the frontend explicitly
+  requests it from the focused/presented anchor.
+- Keep simulation interest independent from render LoD. Requesting/focusing content updates both
+  projections; changing terrain, building, object, or EnvCell render radii changes only rendering.
+- Split collision asset realization and the current `Arc<CollisionScene>` snapshot out of
+  `HostCameraRuntime` into one host collision-scene service.
+- Stage product loads and derived static-shadow compilation outside the simulation lock, then commit
+  a complete replacement snapshot and body-availability reevaluation atomically.
+- Reject stale interest revisions before expensive work when possible and again before commit.
+- Delete `COLLISION_RESIDENCY_RING`, `CollisionResidencyRequest`, `CollisionResidencyTarget`,
+  `ensure_residency`, and every registration/tick path that schedules collision loading from a body
+  owner.
+
+##### Acceptance Criteria
+
+- [x] A focused test proves body registration, movement, and owner crossing never call the collision
+      product source or mutate simulation interest.
+- [x] Complete simulation-interest replacements add and evict exactly the requested owners through
+      one staged scene swap; retained immutable products are shared between snapshots.
+- [x] A stale frontend interest revision cannot compile or commit over a newer complete request.
+- [x] A reloaded frontend obtains a newer host session, may restart its revision at one, and rejects
+      delayed work from the retired frontend lifetime.
+- [x] A render-LoD-only change produces no simulation-interest request or collision eviction.
+- [x] A scene commit and body-availability reevaluation are atomic with respect to fixed ticks; no
+      tick observes a partially updated owner set.
+
+##### Implementation Record — 2026-08-12
+
+- `HostSimulationRuntime` now owns the current immutable collision snapshot, the canonical
+  `SpatialScene`, staged interest currentness, and typed availability events. Product loading and
+  static-shadow compilation remain outside its state lock; the final scene swap and physical-body
+  reevaluation occur together under that lock. A generic fixed tick returns the exact `Arc` snapshot
+  it used so app-local derived queries cannot accidentally run against a newer topology epoch.
+- Explorer policy submits a fixed radius-two owner square through
+  `replace_simulation_interest`. Its controller accepts only a landblock anchor, so render LoD is
+  structurally unable to alter collision interest; changing the same anchor reuses the existing
+  request promise and revision.
+- The Tauri transport reserves one host-ordered interest session per frontend lifetime and injects it
+  into every replacement. This lets revisions restart after a webview reload without allowing a
+  delayed request from the retired page to replace current collision coverage.
+- Camera registration, fixed ticks, and a DA55-to-DB55 owner crossing perform no collision-source
+  load. The former camera-owned ring, target revision, loader, and eviction path are deleted.
+- **Course correction:** initial body registration and retained-body restoration use distinct
+  validation transitions. A new grounded body may acquire support on its first ordinary solve; an
+  already-safe dormant body must validate byte-for-byte on restoration and may not settle or relabel
+  itself. Reusing restoration validation for registration incorrectly rejected valid grounded starts.
+- **Cleanup correction:** a bare revision was process-scoped in the host but page-scoped in the
+  frontend. After a webview reload, revision one would otherwise remain stale forever. The explicit
+  interest session repairs that lifetime mismatch without reviving camera-owned residency state.
+
+#### Phase 8b: Generic Body Identity, Models, and Coverage Lifecycle
+
+##### Deliverables
+
+- Extend the existing `SpatialBody` and `BodySamplingStore` authority in `holtburger-world` to retain
+  the resolved physical definition and coverage activity. Rename `BodySamplingStore` if its broader
+  responsibility makes that name dishonest, sweeping the old vocabulary in the same change. Body
+  identity remains independent from response-specific state and stable while collision coverage is
+  absent; no second camera collision-body store lands. The app host retains only async content
+  realization, fixed-tick scheduling, Tauri commands/events, and camera adaptation.
+- Reuse `SpatialBodyId::Entity` for authoritative/server entities, `LocalPlayer` for the player, and
+  `Ephemeral` for frontend-owned synthetic bodies such as the Explorer camera. Do not encode spawn
+  provenance in collision response or create a parallel ID space.
+- Define one resolved, parameterized physical-body contract with explicit response-bearing variants:
+  a free three-dimensional sphere, and a grounded support sphere with its optional upper constraint.
+  Every center and radius is supplied data, not a named-profile constant. Grounded-only velocity and
+  support state stay inside the grounded variant; no optional-field god struct lands.
+- Compose the resolved definition from two explicit inputs: physical shape and response policy. A
+  setup-backed shape resolver projects the first two retail motion spheres and runtime scale from
+  content; runtime/controller state supplies the response. Frontend-owned synthetic spawns may
+  submit both through an explicit serialized definition. Validate finite centers, positive radii,
+  supported cardinality, and response/shape compatibility at that boundary, then store only the
+  resolved response-bearing variant. A raw or lossless `Vec<Sphere>` never becomes runtime body
+  state. Wiring decoded server spawn events to these producers remains in the queued spawned-entity
+  plan.
+- Make the registration boundary source-neutral and data-driven. Its semantic payload is an ordered
+  sphere array plus a response definition/configuration; it contains no camera, creature, player,
+  missile, or named-profile discriminator. The registering authority supplies identity separately:
+  server hydration selects `SpatialBodyId::Entity`, local-player ownership selects `LocalPlayer`,
+  and a frontend-local spawn receives an allocated `Ephemeral` identity. All three payloads pass
+  through the same validator and resolved-definition constructor.
+- Treat server and frontend creation as producers of the same input rather than separate body APIs:
+  a server spawn resolves setup geometry plus authoritative response policy, while a frontend spawn
+  submits explicit geometry plus response policy. Identity allocation and source-specific lookup
+  happen before the shared validator; the retained simulator definition contains neither source
+  provenance nor a profile name.
+- Accept arbitrary finite sphere centers and positive radii from explicit callers rather than
+  requiring a preset. "Arbitrary" describes geometry, not unsupported physics semantics: physical
+  fly currently requires exactly one sphere, while grounded movement requires an ordered support
+  sphere and permits one upper constraint sphere. Reject any array/response combination outside
+  those implemented models instead of silently truncating it. Only the setup-backed retail adapter
+  deliberately retains the first two authored spheres, because that truncation is evidenced retail
+  projection behavior rather than a generic registration rule.
+- Match the evidenced setup projection exactly: apply the runtime uniform object scale to authored
+  centers and radii, retain at most the first two ordinary spheres in source order, and substitute
+  retail's scale-one 0.1-meter dummy sphere when a setup authors none. Reject non-finite or
+  non-positive runtime scale before projection.
+- Keep named human/camera constructors as app/content factories over the resolved definition, not
+  variants in the shared contract. The Explorer camera uses its current measured constants through
+  the explicit-body path; setup-backed entities retain their authored dimensions.
+- Keep Explorer camera dimensions and controller tuning app-owned. Authoritative and frontend-local
+  setup-backed entities derive the same generic model from setup/runtime data without inheriting
+  camera constants.
+- Model body activity as an exhaustive state such as active, awaiting collision coverage with exact
+  required owners, or invalid retained placement. The final names are selected during
+  implementation, but missing coverage may not be represented only by a log string or zero motion.
+- On absent current or swept coverage, retain the exact body pose, response-specific velocity,
+  support memory, and prior EnvCell; suspend fixed ticks and hidden elapsed-time integration.
+- Emit an availability transition containing body identity and exact missing owners. The event is
+  information for application policy: the simulator does not automatically expand interest, and
+  the frontend is free to request content, keep the body dormant, change authority, or surface an
+  error.
+- Reevaluate dormant bodies after every committed collision-scene replacement. Resume on the next
+  ordinary fixed tick only after the retained shape and prior placement validate against the new
+  snapshot. A retained EnvCell that cannot be validated fails loudly and never falls back outdoors.
+- Move exact same-world-point landblock reanchoring into shared coordinate math and use it for body
+  and path representations without consulting collision content. Keep EnvCell portal transit and
+  placement selection separate.
+- Make the body solver's reusable output contain the accepted body-reference motion and the
+  authoritative placement changes chosen during solving. Do not serialize or publish one redundant
+  motion path per physical sphere; per-sphere positions and contacts remain optional diagnostics
+  with no product transport field.
+
+##### Acceptance Criteria
+
+- [x] One `SpatialBodyId::Entity` with a setup-resolved body and one `SpatialBodyId::Ephemeral` with
+      an explicit frontend-owned body coexist in the existing world store without changing the
+      collision owner set or sharing response-only fields.
+- [x] Resolving a setup-backed shape with a response policy and submitting the equivalent explicit
+      frontend definition produce equal internal physical-body definitions; source provenance is
+      absent from the solver input.
+- [x] Setup projection tests cover one sphere, two spheres, more-than-two truncation, uniform center
+      and radius scaling, the sphere-less dummy fallback, and invalid runtime scale using the cited
+      retail constants rather than duplicated test literals.
+- [x] Two explicit frontend bodies may use different valid sphere centers and radii within the same
+      response variant; no human or camera preset is required by the registration contract.
+- [x] The same explicit geometry/response payload resolves identically when registered under an
+      authority-owned `Entity`, `LocalPlayer`, or `Ephemeral` identity; provenance and identity
+      allocation are absent from the physical-definition validator.
+- [x] Explicit registration rejects a third grounded sphere rather than applying the setup-backed
+      retail truncation rule, proving that authored-content projection and generic body validation
+      are separate boundaries.
+- [x] With the current owner removed, a body remains registered at the byte-for-byte same retained
+      state, emits one awaiting-coverage transition, and receives no tick or hidden gravity.
+- [x] Restoring coverage validates and resumes the exact retained body on the next fixed tick; no
+      catch-up displacement or accumulated fall velocity occurs.
+- [x] A focused EnvCell case preserves its prior cell across owner eviction/restoration, and a
+      deliberately incompatible restored topology produces one explicit invalid-placement failure
+      rather than outdoor relabeling.
+- [x] Outdoor seam reanchoring preserves exact global position without loading either owner.
+- [x] The type surface cannot construct a grounded upper sphere without its support sphere or attach
+      grounded support to a free sphere. Boundary validation rejects non-finite geometry,
+      non-positive radii, unsupported counts, and response/shape combinations the solver cannot
+      execute.
+- [x] A thin-cell body route preserves ordered placement entry and exit even when the tick begins
+      and ends in the same cell.
+
+##### Implementation Record — 2026-08-12
+
+- `BodySamplingStore` became `SpatialBodyStore`; the existing `SpatialBody` now optionally owns one
+  composite `PhysicalBodyState`. `SpatialBody.pose` remains the sole pose. The physical composite
+  contains a validated response-bearing definition, response-only memory, and an exhaustive active,
+  awaiting-coverage, or invalid-placement lifecycle.
+- The generic world tick accepts a body ID, desired velocity, interval, and collision snapshot. It
+  publishes one body-reference `PlacedMotionPath`; sphere-center paths are internal mechanics. Free
+  spheres with nonzero body-local centers reanchor correctly across outdoor seams, and the grounded
+  support sphere remains the placement authority for its optional upper constraint.
+- `WorldPosition::{reanchor_to_landblock_owner, normalize_outdoor_landblock_frame}` now own exact
+  same-point coordinate representation without consulting content. EnvCell retention and topology
+  validation remain separate collision facts.
+- The setup producer in `holtburger-core` reproduces retail's first-two, uniform-scale, and
+  scale-one dummy behavior. Tests prove that setup-resolved and equivalent explicit geometry become
+  equal `PhysicalBodyDefinition` values and coexist under `Entity` and `Ephemeral` identities.
+- The app host exposes a source-neutral explicit body request: an ordered sphere array plus free or
+  grounded response configuration. It accepts arbitrary finite centers/radii, rejects a third
+  explicit grounded sphere rather than truncating it, allocates frontend `Ephemeral` IDs, and emits
+  typed availability transitions. Setup truncation remains confined to the evidenced setup adapter.
+- **Concession:** generic dynamic body-versus-body response, autonomous interest policy, and decoded
+  server-spawn wiring remain outside this recovery. The landed primitive is intentionally limited to
+  the two static-collision response models the solver can execute honestly.
+
+#### Phase 8c: App-Local Physical Camera and Viewer Projection
+
+##### Deliverables
+
+- Retain one logical Explorer physical-camera session/controller that registers an explicit
+  `SpatialBodyId::Ephemeral` definition: a parameterized free-sphere body in physical-fly mode and a
+  parameterized grounded pair in walk mode. This is an ordinary frontend-owned body registration,
+  not a camera-only physical profile API.
+- Keep view-relative input mapping, 30 Hz cadence, physical-camera mode handoff, first-person eye
+  height, forward offset, viewer radius, direction interpolation, diagnostics, and Tauri transport
+  in the app-local camera adapter.
+- Consume accepted body motion in that adapter, derive the viewer trajectory, and call the existing
+  camera-agnostic world path tracer using the adapter's prior viewer cell. The shared simulator and
+  registered body store contain no `viewer`, `camera`, `presentation`, or persistent probe entry.
+- Preserve the current placed-viewer event contract and bounded frontend playback unless the body-
+  availability state requires one explicit additive transport variant. The frontend never portal-
+  traverses physical motion and never identifies a collider sphere as the camera.
+- When the camera body awaits coverage, hold the last placed viewer endpoint and surface the exact
+  unavailable owners through existing Explorer diagnostics. Entering a physical mode may register a
+  dormant body immediately; registration no longer blocks on collision loading.
+- Keep frontend free fly independent and able to recover from an inactive or invalid physical body.
+
+##### Acceptance Criteria
+
+- [x] Physical fly uses the generic free-sphere model and grounded walk uses the generic authored
+      pair; neither generic type mentions the camera.
+- [x] The viewer continues to traverse independently from grounded support placement through the
+      cited slim and overlapping CE94 cells.
+- [x] A source search finds no viewer/presentation-probe state in shared body or simulation types;
+      camera facts remain confined to the app adapter and frontend.
+- [x] Missing camera-body coverage holds one coherent rendered endpoint, produces actionable
+      diagnostics, and neither snaps to free fly nor silently requests collision content.
+- [x] Mode switches preserve the displayed pose and placement through the same validated explicit-
+      body registration available to other frontend-owned dynamic entities; no closed camera-profile
+      command is required.
+- [x] Existing no-flash, starvation-hold, direction-interpolation, and one-pending-successor tests
+      remain green without a frontend physical portal-traversal implementation.
+
+##### Implementation Record — 2026-08-12
+
+- `HostCameraRuntime` retains only an app-local controller/session record containing the generic
+  `Ephemeral` body ID, camera mode, view input, fixed-tick sequencing, and presented viewer state.
+  Its body solve goes through `HostSimulationRuntime`; its independent viewer offset and 0.3-meter
+  retail placement sphere go through the camera-agnostic placed-path tracer.
+- The frontend now supplies the Explorer camera's exact sphere geometry and response configuration.
+  The host validates that UI mode agrees with the supplied response but contains no human/camera
+  profile selector or hidden body dimensions. The same validator backs the generic
+  `register_frontend_physical_body` command.
+- Physical mode registration succeeds while collision coverage is absent. The generic body remains
+  dormant, fixed ticks publish a coherent held viewer endpoint with exact missing owners, and only
+  explicit Explorer simulation-interest policy may load coverage.
+- **Course correction:** the camera adapter consumes the immutable collision snapshot returned with
+  the generic tick. Fetching a second “current” snapshot after the solve allowed an interest commit
+  to pair body motion from topology A with viewer traversal against topology B.
+
+#### Phase 8d: Cutover Cleanup and Final Verification
+
+##### Task Checklist
+
+- [x] Delete the camera-residency vocabulary, locks, revisions, tests, metrics, and comments after
+      their guarantees have replacements in the explicit-interest service.
+- [x] Audit every body field and event field for a named non-diagnostic consumer; delete speculative
+      entity transport and probe abstractions discovered during the cutover.
+- [x] Update the dynamic-entity roadmap and spawned-entity plan to consume the generic body
+      lifecycle and explicit simulation-interest boundary without claiming spawned simulation.
+- [x] Run Rust formatting, workspace clippy with warnings denied, the complete workspace suite,
+      frontend formatting/lint/type/unit/dead-export checks, and the supported browser harnesses.
+- [x] Rerun DA55 collision aggregates and the recessed-floor, overlapping-cell, and slim-cell CE94
+      routes against the same product assembly path.
+- [x] Perform the real Explorer seam, portal, mode-handoff, wall-slide, stair-crest, and short-drop
+      maintainer card after the ownership cutover.
+
+##### Acceptance Criteria
+
+- [x] No physical body initiates collision loading, eviction, or interest replacement.
+- [x] No render setting can remove simulation collision coverage as an incidental side effect.
+- [x] No body is deleted, advanced, or relabeled because its collision owner is absent.
+- [x] No generic simulator or world type contains app presentation policy.
+- [x] The staged immutable-scene implementation has one owner and one currentness protocol; the
+      obsolete camera-session residency scheduler is gone.
+- [x] Both physical camera modes cross outdoor landblock seams without a visible pause and cross the
+      named portals without a flash, correction snap, or placement flicker.
+- [x] All repository-required automated checks pass and the plan records final concessions and debt.
+
+#### Decisions, Course Corrections, and Concessions
+
+- **Ratified:** simulation interest and render interest are separate application-policy projections.
+  They may currently share a focus anchor, but neither request is derived from the other and render
+  LoD controls never acquire physics authority.
+- **Ratified:** a solver may report missing owners but may not request them. The frontend/application
+  decides whether that evidence changes simulation interest.
+- **Ratified:** missing coverage suspends retained bodies rather than rejecting registration,
+  deleting state, treating absent geometry as empty, or synchronously loading on demand.
+- **Ratified:** the camera is a controller over the same resolved, parameterized body definition used
+  by other `SpatialBody` identities. Setup-backed server/frontend spawns and explicit frontend-owned
+  spawns converge before simulation; named human or camera profiles are convenience factories only.
+- **Ratified:** explicit frontend geometry is supported within an implemented response-bearing
+  variant. Generality currently stops at the proven free sphere and asymmetric grounded pair;
+  unsupported sphere counts, cylspheres, and response models remain out of scope until a concrete
+  simulator consumer proves their semantics.
+- **Ratified:** registration identity and physical definition are orthogonal. The authority that
+  owns a spawn chooses or allocates its `SpatialBodyId`; the shared physical validator receives only
+  geometry and response data. Server and frontend spawn paths therefore converge without leaking
+  presentation provenance into the host or granting frontend callers arbitrary server-entity IDs.
+- **Ratified:** explicit registration never names a profile and never silently applies a preset or
+  retail setup truncation. Presets are optional producer-side factories; setup truncation belongs
+  only to the evidenced setup projection adapter.
+- **Ratified:** viewer placement is an app-local derived world query, not a simulator component. The
+  existing generic placed-path operation is the reusable abstraction; no host presentation-probe
+  registry lands.
+- **Retained implementation:** immutable `Arc` landblock products, off-lock staged collision-scene
+  compilation, and atomic snapshot replacement survive the cutover.
+- **Concession:** the Explorer frontend remains the only simulation-interest policy consumer in this
+  phase. The host contract is generic and revisioned, but no server-driven or autonomous interest
+  manager is invented before another product needs one.
+- **Concession:** fixed 30 Hz ticking and the existing bounded viewer playback remain unchanged.
+  Cadence, multi-body scheduling fairness, and network replication belong to the parent dynamic-
+  entity roadmap, not this ownership repair.
+
+##### Implementation Record — 2026-08-12
+
+- The vocabulary sweep removed the host/camera collision-ring names from production comments,
+  architecture docs, and the product probe. `CollisionScene` retains generic asset-residency
+  terminology because immutable product residency remains its actual responsibility; no camera
+  session, body owner, or render LoD participates in that API.
+- The field audit deleted `body_id` from per-body tick outcomes: the tick call already selects one
+  stable body, while activity events remain the identity-bearing multi-body stream. It also deleted
+  `achieved_velocity` from `PhysicalBodyMotion`; the committed `SpatialBody.velocity` is the sole
+  authoritative value returned in the same atomic tick epoch. The explicit generic frontend
+  registration and activity event remain because they are the ratified application contract, not a
+  speculative entity feed.
+- **Course correction:** simulation-interest revision state survives in the Tauri host, but the
+  original frontend revision counter restarted after a webview reload. A host-issued interest
+  session now orders frontend lifetimes, allows each new page to restart revisions at one, and
+  rejects delayed replacements from a retired page. Superseded currentness is an ordinary result;
+  only transport/content failures reach Explorer error state, and a failed physical follow request
+  may retry the same anchor.
+- The dynamic-entity roadmap and spawned-entity plan now require reuse of `SpatialBodyStore`, the
+  source-neutral geometry-plus-response definition, exhaustive coverage activity, and explicit
+  application simulation interest. They explicitly reject a spawned-only registry, collider profile
+  enum, body-driven loader, or reuse of the app-local camera adapter, and they do not claim decoded
+  spawned simulation exists.
+- Automated gates pass: Rust formatting, workspace Clippy with warnings denied, the complete
+  workspace suite (rerun outside the socket sandbox for the scripting listener), 88 app-host tests,
+  229 world tests, Svelte/TypeScript checks, ESLint, Knip, Prettier, 1,046 frontend tests across 154
+  files, and the production build. The existing greater-than-500-kB chunk advisory and ineffective
+  Tauri dynamic-import advisory remain non-failing frontend build debt unrelated to this cutover.
+- The canonical DA55 product assembly remains 575 colliders and 236 cell volumes, with 36/36
+  physical-fly and 31/31 grounded-pair traversals and zero rejected traces. The recessed
+  `0xDA5501E9 -> 0xDA5501E8` route still drops 1.853 meters onto interior support. The focused CE94
+  slim route preserves `outdoor -> 0xCE94010B -> 0xCE94010A` in both physical modes and reverses
+  outdoors without a rejected trace. The exact overlapping-cell authority remains covered by the
+  focused world/app tests and the production CE94 compositor run.
+- Browser harnesses are green on isolated ports: the DA55 radius-two lifecycle run reached
+  `ready: true` with 323 EnvCells and no page-console messages; the CE94 authoritative
+  `0xCE94010A` portal run reached `ready: true`, loaded 130 EnvCells from nine source batches, and
+  executed 13 scopes and 18 crossings with no page-console messages. Chrome registration and
+  Fontconfig messages are external process diagnostics, not page-console failures.
+- **Final live acceptance:** the browser harness does not execute Tauri's physical-body input/event
+  loop, so the maintainer repeated the named real-Explorer regression card. On 2026-08-12, the
+  maintainer reported execution successful and collision behavior consistent with the pre-cutover
+  Explorer behavior. This closes the last acceptance gate.

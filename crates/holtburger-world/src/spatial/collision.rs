@@ -1,6 +1,7 @@
 //! Resident static collision geometry and explicit query families.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Vector3};
@@ -366,6 +367,15 @@ impl PlacedMotionPath {
             .expect("placed-motion paths are constructed non-empty")
             .end
     }
+
+    /// Translates every geometric center while preserving authoritative placement transitions.
+    pub fn translated(mut self, offset: Vector3) -> Self {
+        self.initial.center = self.initial.center + offset;
+        for leg in &mut self.legs {
+            leg.end.center = leg.end.center + offset;
+        }
+        self
+    }
 }
 
 /// Stable reference to a collider that remains owned by its source landblock.
@@ -383,7 +393,7 @@ struct PlacementTransition {
 }
 
 /// Scene-derived equivalent of retail's outdoor and EnvCell static shadow lists.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct StaticShadowIndex {
     outdoor_colliders: HashMap<Guid, Vec<ColliderReference>>,
     building_shells: HashMap<Guid, Vec<ColliderReference>>,
@@ -392,7 +402,7 @@ struct StaticShadowIndex {
 
 impl StaticShadowIndex {
     fn compile(
-        landblocks: &HashMap<Guid, LandblockCollisionAsset>,
+        landblocks: &HashMap<Guid, Arc<LandblockCollisionAsset>>,
     ) -> Result<Self, CollisionSceneUpdateError> {
         let mut index = Self::default();
         let mut outdoor_placements = Vec::new();
@@ -596,7 +606,7 @@ impl StaticShadowIndex {
 /// Static collision geometry resident by atomic landblock owner.
 #[derive(Debug, Default)]
 pub struct CollisionScene {
-    landblocks: HashMap<Guid, LandblockCollisionAsset>,
+    landblocks: HashMap<Guid, Arc<LandblockCollisionAsset>>,
     shadows: StaticShadowIndex,
 }
 
@@ -610,39 +620,36 @@ impl CollisionScene {
     pub fn insert(
         &mut self,
         asset: LandblockCollisionAsset,
-    ) -> Result<Option<LandblockCollisionAsset>, CollisionSceneUpdateError> {
-        let owner = landblock_key(Guid(asset.landblock_id));
-        let previous = self.landblocks.insert(owner, asset);
-        match StaticShadowIndex::compile(&self.landblocks) {
-            Ok(shadows) => {
-                self.shadows = shadows;
-                Ok(previous)
-            }
-            Err(error) => {
-                match previous {
-                    Some(previous) => {
-                        self.landblocks.insert(owner, previous);
-                    }
-                    None => {
-                        self.landblocks.remove(&owner);
-                    }
-                }
-                Err(error)
-            }
-        }
+    ) -> Result<(), CollisionSceneUpdateError> {
+        self.apply_residency_change(vec![asset], &[])
     }
 
     /// Atomically applies a resident-set delta and rebuilds static shadows exactly once.
-    ///
-    /// Returned assets were displaced by replacement or eviction. On error, both source assets and
-    /// the prior shadow index remain unchanged.
     pub fn apply_residency_change(
         &mut self,
         insertions: Vec<LandblockCollisionAsset>,
         removals: &[Guid],
-    ) -> Result<Vec<LandblockCollisionAsset>, CollisionSceneUpdateError> {
+    ) -> Result<(), CollisionSceneUpdateError> {
+        let next = self.staged_residency_change(insertions, removals)?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Builds an independent resident scene while the current snapshot remains queryable.
+    ///
+    /// Landblock products are immutable and shared between snapshots. Only the small owner map and
+    /// its derived shadow index are rebuilt, allowing a runtime to prepare residency off its
+    /// simulation lock and commit the complete scene with one pointer swap.
+    pub fn staged_residency_change(
+        &self,
+        insertions: Vec<LandblockCollisionAsset>,
+        removals: &[Guid],
+    ) -> Result<Self, CollisionSceneUpdateError> {
         if insertions.is_empty() && removals.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Self {
+                landblocks: self.landblocks.clone(),
+                shadows: self.shadows.clone(),
+            });
         }
 
         let mut insertions_by_owner = BTreeMap::new();
@@ -667,46 +674,26 @@ impl CollisionScene {
             return Err(CollisionSceneUpdateError::ConflictingChange { owner: owner.0 });
         }
 
-        let mut removed = Vec::new();
+        let mut landblocks = self.landblocks.clone();
         for owner in removal_owners {
-            if let Some(asset) = self.landblocks.remove(&owner) {
-                removed.push((owner, asset));
-            }
+            landblocks.remove(&owner);
         }
-        let mut replaced = Vec::new();
         for (owner, asset) in insertions_by_owner {
-            replaced.push((owner, self.landblocks.insert(owner, asset)));
+            landblocks.insert(owner, Arc::new(asset));
         }
-
-        match StaticShadowIndex::compile(&self.landblocks) {
-            Ok(shadows) => {
-                self.shadows = shadows;
-                Ok(removed
-                    .into_iter()
-                    .map(|(_, asset)| asset)
-                    .chain(replaced.into_iter().filter_map(|(_, asset)| asset))
-                    .collect())
-            }
-            Err(error) => {
-                for (owner, previous) in replaced {
-                    self.landblocks.remove(&owner);
-                    if let Some(previous) = previous {
-                        self.landblocks.insert(owner, previous);
-                    }
-                }
-                for (owner, asset) in removed {
-                    self.landblocks.insert(owner, asset);
-                }
-                Err(error)
-            }
-        }
+        let shadows = StaticShadowIndex::compile(&landblocks)?;
+        Ok(Self {
+            landblocks,
+            shadows,
+        })
     }
 
     /// Atomically evicts one landblock's terrain, shapes, and cell volumes.
-    pub fn remove(&mut self, landblock_id: Guid) -> Option<LandblockCollisionAsset> {
-        let removed = self.landblocks.remove(&landblock_key(landblock_id));
-        if removed.is_some() {
-            self.shadows = StaticShadowIndex::compile(&self.landblocks)
+    pub fn remove(&mut self, landblock_id: Guid) -> bool {
+        let owner = landblock_key(landblock_id);
+        let removed = self.landblocks.contains_key(&owner);
+        if removed {
+            self.apply_residency_change(Vec::new(), &[owner])
                 .expect("eviction cannot invalidate independently validated collision assets");
         }
         removed
@@ -731,6 +718,22 @@ impl CollisionScene {
         } else {
             Ok(CollisionQuery::Complete(touched))
         }
+    }
+
+    /// Whether the current immutable snapshot contains one exact authored EnvCell.
+    pub fn contains_env_cell(&self, cell: Guid) -> bool {
+        if cell.0 & 0xffff < 0x0100 {
+            return false;
+        }
+        self.landblocks
+            .get(&landblock_key(cell))
+            .is_some_and(|asset| {
+                asset
+                    .static_geometry
+                    .cell_volumes
+                    .iter()
+                    .any(|volume| u32::from(volume.cell_selector) == cell.0 & 0xffff)
+            })
     }
 
     /// Returns every directional obstruction at the candidate sphere position.
@@ -2597,5 +2600,31 @@ mod tests {
             references([0]),
             "failed rebuild replaced the previously committed shadow index"
         );
+    }
+
+    #[test]
+    fn staged_residency_shares_retained_products_without_mutating_the_live_scene() {
+        let retained_owner = Guid(0xda55_ffff);
+        let inserted_owner = Guid(0xdb55_ffff);
+        let scene = scene(Vec::new(), Vec::new());
+        let retained_product = Arc::clone(&scene.landblocks[&retained_owner]);
+
+        let staged = scene
+            .staged_residency_change(
+                vec![LandblockCollisionAsset {
+                    landblock_id: inserted_owner.0,
+                    terrain: TerrainCollisionSurface { cells: Vec::new() },
+                    static_geometry: LandblockColliders::default(),
+                }],
+                &[],
+            )
+            .unwrap();
+
+        assert!(!scene.landblocks.contains_key(&inserted_owner));
+        assert!(staged.landblocks.contains_key(&inserted_owner));
+        assert!(Arc::ptr_eq(
+            &retained_product,
+            &staged.landblocks[&retained_owner]
+        ));
     }
 }

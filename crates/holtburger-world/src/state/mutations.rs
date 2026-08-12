@@ -235,44 +235,53 @@ impl WorldState {
     }
 
     pub fn apply_spatial_body_event(&mut self, event: &SpatialBodyEvent) -> Vec<WorldEvent> {
-        match *event {
+        match event {
             SpatialBodyEvent::ContactChanged { body_id, contact } => {
-                if !self.ensure_runtime_body(body_id) {
+                if !self.ensure_runtime_body(*body_id) {
                     return Vec::new();
                 }
 
-                if !self.scene.apply_runtime_body_contact(body_id, contact) {
+                if !self.scene.apply_runtime_body_contact(*body_id, *contact) {
                     return Vec::new();
                 }
 
                 let mut events = Vec::new();
-                Self::emit_runtime_body_changed(&mut events, body_id);
+                Self::emit_runtime_body_changed(&mut events, *body_id);
 
                 if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-                    self.apply_player_contact_state(contact, &mut events);
+                    self.apply_player_contact_state(*contact, &mut events);
                     events
                 } else {
                     events
                 }
             }
             SpatialBodyEvent::ForcedReposition { body_id, pose } => {
-                if !self.ensure_runtime_body(body_id) {
+                if !self.ensure_runtime_body(*body_id) {
                     return Vec::new();
                 }
 
                 self.scene
-                    .apply_forced_reposition_reset(body_id, pose, Instant::now());
+                    .apply_forced_reposition_reset(*body_id, *pose, Instant::now());
 
                 body_id.authoritative_guid().map_or_else(Vec::new, |guid| {
                     vec![
-                        WorldEvent::RuntimeBodyChanged { body_id },
+                        WorldEvent::RuntimeBodyChanged { body_id: *body_id },
                         WorldEvent::ForcedReposition {
                             guid,
-                            pos: pose,
+                            pos: *pose,
                             sequence: 0,
                         },
                     ]
                 })
+            }
+            SpatialBodyEvent::PhysicalActivityChanged { body_id, activity } => {
+                if !self
+                    .scene
+                    .apply_physical_body_activity(*body_id, activity.clone())
+                {
+                    return Vec::new();
+                }
+                vec![WorldEvent::RuntimeBodyChanged { body_id: *body_id }]
             }
         }
     }

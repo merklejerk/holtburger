@@ -32,8 +32,8 @@ const SUPPORT_CENTER_Z: f32 = 0.475;
 const UPPER_CENTER_Z: f32 = 1.350;
 const HUMAN_RADIUS: f32 = 0.480;
 const FOOT_CLEARANCE: f32 = HUMAN_RADIUS - SUPPORT_CENTER_Z;
-/// Mirrors the Explorer host's 5x5 collision residency around the active owner.
-const COLLISION_RESIDENCY_RING: i32 = 2;
+/// Mirrors Explorer's radius-two application simulation-interest policy.
+const SIMULATION_INTEREST_RADIUS: i32 = 2;
 const PHYSICAL_FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
     maximum_substep_distance: PHYSICAL_FLY_RADIUS,
     maximum_substeps: 32,
@@ -231,7 +231,7 @@ fn main() -> Result<()> {
         }
     }
     let mut scene = CollisionScene::new();
-    insert_collision_ring(&service, collision, &mut scene)?;
+    insert_simulation_interest_neighborhood(&service, collision, &mut scene)?;
     let high_altitude_contacts = match scene.placement_contacts(PlacementRequest {
         anchor: Guid(landblock.landblock_id),
         center: Vector3::new(96.0, 96.0, 600.0),
@@ -421,7 +421,7 @@ fn append_source_provenance(
     Ok(())
 }
 
-fn insert_collision_ring(
+fn insert_simulation_interest_neighborhood(
     service: &ContentAssetService,
     center_asset: holtburger_content::LandblockCollisionAsset,
     scene: &mut CollisionScene,
@@ -430,8 +430,8 @@ fn insert_collision_ring(
     let center_x = ((center >> 24) & 0xff) as i32;
     let center_y = ((center >> 16) & 0xff) as i32;
     let mut insertions = vec![center_asset];
-    for offset_x in -COLLISION_RESIDENCY_RING..=COLLISION_RESIDENCY_RING {
-        for offset_y in -COLLISION_RESIDENCY_RING..=COLLISION_RESIDENCY_RING {
+    for offset_x in -SIMULATION_INTEREST_RADIUS..=SIMULATION_INTEREST_RADIUS {
+        for offset_y in -SIMULATION_INTEREST_RADIUS..=SIMULATION_INTEREST_RADIUS {
             if offset_x == 0 && offset_y == 0 {
                 continue;
             }

@@ -114,8 +114,9 @@ existing implicit `tick()` policy:
   collision domain independently.
 - Static-shadow bounds can cross at most one source owner in the shipped-content census. Coverage
   therefore requires a one-landblock source halo around every owner touched by a swept sphere. The
-  app host keeps a 5x5 collision ring so a sweep touching its first neighbor still has that complete
-  source halo; render interest remains a separate policy.
+  Explorer currently requests a radius-two simulation-interest neighborhood so a sweep touching its
+  first neighbor still has that complete source halo. Application policy owns that request; render
+  interest and registered bodies cannot alter it.
 - BSP planes and polygons transform into landblock-local query space. The body sphere remains
   spherical even for non-uniformly scaled SetupModel parts.
 - `solve_physical_fly` is an explicit bounded operation over one requested displacement. It owns no

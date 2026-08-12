@@ -16,15 +16,15 @@ by explorer scenarios or a future network client.
 
 ## Convergence Provenance
 
-| Concern                           | Status                    | Evidence or owner                                                   |
-| --------------------------------- | ------------------------- | ------------------------------------------------------------------- |
-| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                          |
-| Donor first slice                 | Complete on `claude` only | `c938a438`                                                          |
-| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`     |
-| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                       |
-| Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day     |
-| Host physical camera topology     | Implemented 2026-08-12    | Shared static queries, solvers, and placed-motion paths landed; flash acceptance pending |
-| Spawned execution                 | Queued                    | Rewritten and dry-run by convergence Phases 6-7; next mainline plan |
+| Concern                           | Status                    | Evidence or owner                                                                                                                                |
+| --------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                                                                                                       |
+| Donor first slice                 | Complete on `claude` only | `c938a438`                                                                                                                                       |
+| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`                                                                                  |
+| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                                                                                                    |
+| Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day                                                                                  |
+| Host physical-body topology       | Implemented 2026-08-12    | Explicit simulation interest, generic retained bodies, coverage lifecycle, and placed paths landed; app-local camera acceptance remains         |
+| Spawned execution                 | Queued                    | Must consume the existing generic body/store and source-neutral definition boundary; no second spawned physics registry                         |
 
 ## Why This Roadmap Is Split
 
@@ -117,8 +117,10 @@ Outcome:
 - Spawned lifecycle and mutations cross Tauri through the existing view-event path with a complete
   initial snapshot and explicit resnapshot after detected receiver lag.
 - World state owns canonical appearance, lifecycle operations, placement, attachment, and motion facts.
-- Host-local physical prediction can reuse the world-owned placed-motion path, preserving accepted
-  solver bends and ordered portal placement without inheriting camera cadence, dimensions, or UX.
+- Host-local physical prediction reuses the existing `SpatialBody` physical composite, coverage
+  lifecycle, and world-owned placed-motion path. A server spawn resolves setup geometry plus
+  response policy into the same definition accepted from an explicit frontend spawn; source
+  provenance does not fork simulation.
 - Spawned attach/detach provides the concrete lifecycle consumer for shared animated parent-part
   following.
 - `MotionCatalog` and `MotionResolver` produce shared `ResolvedMotionPlan` values in Rust.
@@ -127,9 +129,11 @@ Outcome:
 - Spawned entities reuse the authored visual, behavior, effect, presentation, and renderer systems.
 - App-local explorer and client composition remain policy boundaries over shared world/core mechanics,
   with no second authoritative runtime or speculative base-runtime hierarchy.
-- Spawned motion may consume the landed `holtburger-world` collision queries and bounded body
-  solvers when a concrete scenario requires local physical prediction. It does not consume the
-  Explorer camera session, camera dimensions, input mapping, or camera transport.
+- Spawned motion may consume the landed `holtburger-world` collision queries and generic physical-
+  body tick when a concrete scenario requires local prediction. Bodies remain dormant when explicit
+  application simulation interest does not cover them; they report missing owners but never load or
+  evict collision themselves. Spawned entities do not consume the Explorer camera adapter, camera
+  dimensions, input mapping, or camera transport.
 
 This plan establishes a durable growth seam for later explorer physics demonstrations, which require
 a separate concrete scenario and plan.
@@ -159,6 +163,11 @@ These contracts survive every roadmap stage:
     initial snapshot plus the existing ordered focused deltas.
 14. Feed epochs, global entity sequences, permanent generation tombstones, and a stateful projector
     require measured need; they are not roadmap prerequisites.
+15. Application policy owns simulation interest. Physical bodies consume the resulting immutable
+    collision snapshot and cannot load, retain, or evict collision content.
+16. Server-owned, local-player, and frontend-owned bodies share one validated geometry-plus-response
+    definition and one `SpatialBody` store; identity allocation and setup lookup remain producer
+    concerns.
 
 ## Shared Evidence
 

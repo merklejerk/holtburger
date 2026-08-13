@@ -919,7 +919,7 @@ fn vector_is_finite(vector: Vector3) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EdgeProtection, GroundedConfig, PhysicalFlyConfig};
+    use crate::{EdgeProtection, GroundedConfig, PhysicalFlyConfig, RETAIL_WALKABLE_NORMAL_Z};
 
     const FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
         maximum_substep_distance: 0.25,
@@ -929,7 +929,7 @@ mod tests {
     };
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
-        walkable_normal_z: 0.7,
+        walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,

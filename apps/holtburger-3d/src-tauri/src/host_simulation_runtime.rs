@@ -783,7 +783,9 @@ mod tests {
     use super::*;
     use holtburger_common::{Quaternion, Sphere};
     use holtburger_content::{LandblockColliders, TerrainCollisionSurface};
-    use holtburger_world::{PhysicalBodyDefinition, PhysicalFlyConfig, PhysicalSphereSet};
+    use holtburger_world::{
+        PhysicalBodyDefinition, PhysicalFlyConfig, PhysicalSphereSet, RETAIL_WALKABLE_NORMAL_Z,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
 
@@ -965,7 +967,7 @@ mod tests {
             response: PhysicalResponseRequest::Grounded {
                 config: GroundedConfigRequest {
                     gravity: -9.8,
-                    walkable_normal_z: 0.7,
+                    walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
                     step_up_height: 0.6,
                     step_down_height: 1.5,
                     edge_protection: EdgeProtectionRequest::Creature,

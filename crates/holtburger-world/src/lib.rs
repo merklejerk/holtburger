@@ -44,7 +44,7 @@ pub use spatial::{
     PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalFlyBody, PhysicalFlyBudget,
     PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PhysicalSphereSet, PlacedMotionLeg,
     PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery,
-    PlacementRequest, RuntimeBodyResetCause, RuntimeSpatialBodyView,
+    PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, RuntimeBodyResetCause, RuntimeSpatialBodyView,
     SelfPlayerDriveProjectionState, SolveBodyInput, SolveProjectionBasis, SolvedBodyKinematics,
     SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialPhysics,
     SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,

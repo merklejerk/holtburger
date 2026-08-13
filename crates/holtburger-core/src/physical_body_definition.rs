@@ -66,14 +66,14 @@ mod tests {
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{Guid, Quaternion};
     use holtburger_world::{
-        CollisionScene, EdgeProtection, GroundedConfig, PhysicalBodyDefinition, SpatialBody,
-        SpatialBodyId, SpatialScene,
+        CollisionScene, EdgeProtection, GroundedConfig, PhysicalBodyDefinition,
+        RETAIL_WALKABLE_NORMAL_Z, SpatialBody, SpatialBodyId, SpatialScene,
     };
     use std::time::Instant;
 
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
-        walkable_normal_z: 0.7,
+        walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,

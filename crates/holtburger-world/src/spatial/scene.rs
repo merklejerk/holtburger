@@ -547,7 +547,7 @@ mod physical_body_tests {
     use crate::{
         EdgeProtection, GroundedConfig, InvalidPhysicalBodyPlacement, PhysicalBodyActivity,
         PhysicalBodyDefinition, PhysicalBodyTickOutcome, PhysicalBodyTickStatus, PhysicalFlyConfig,
-        PhysicalSphereSet,
+        PhysicalSphereSet, RETAIL_WALKABLE_NORMAL_Z,
     };
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
@@ -564,7 +564,7 @@ mod physical_body_tests {
     };
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
-        walkable_normal_z: 0.707_106_77,
+        walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,

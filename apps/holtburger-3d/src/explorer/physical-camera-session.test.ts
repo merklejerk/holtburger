@@ -236,6 +236,22 @@ describe("PhysicalCameraSession", () => {
 		});
 	});
 
+	it("registers grounded walk with retail's floor-normal threshold", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "grounded-walk");
+		expect(test.calls[0]?.args?.registration).toMatchObject({
+			body: {
+				response: {
+					kind: "grounded",
+					config: {
+						walkableNormalZ: Math.fround(Math.cos(3437.746770784939)),
+					},
+				},
+			},
+		});
+	});
+
 	it("sequences distinct intents and suppresses duplicates", async () => {
 		const test = harness();
 		const session = new PhysicalCameraSession(test.transport);

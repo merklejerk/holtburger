@@ -9,6 +9,15 @@ import {
 import type { EnvCellId } from "../lib/game/game-types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
+/**
+ * Retail's minimum upward surface-normal component for walkable support.
+ *
+ * This is the TypeScript boundary mirror of `holtburger_world::RETAIL_WALKABLE_NORMAL_Z`.
+ * Retail initializes `RETAIL_WALKABLE_NORMAL_Z` with this expression and applies it in retail
+ * object is valid walkable.
+ */
+const RETAIL_WALKABLE_NORMAL_Z = Math.fround(Math.cos(3437.746770784939));
+
 interface PhysicalSphereDefinition {
 	/** Body-local AC-axis center in meters. */
 	readonly center: readonly [number, number, number];
@@ -115,7 +124,7 @@ function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
 			kind: "grounded",
 			config: {
 				gravity: -9.8,
-				walkableNormalZ: 0.707_106_77,
+				walkableNormalZ: RETAIL_WALKABLE_NORMAL_Z,
 				stepUpHeight: 0.6,
 				stepDownHeight: 1.5,
 				edgeProtection: "creature",

@@ -123,6 +123,11 @@ describe("PhysicalCameraSession", () => {
 			mode: "physical-fly",
 			residency: { envCellId: null, landblockId: "0xda55ffff" },
 			scenePosition: [0xda * 192 + 96, 20, -(0x55 * 192 + 96)],
+			speedEnvelope: {
+				kind: "linear-ramp",
+				accelerationSeconds: 2,
+				initialSpeedMultiplier: 0.125,
+			},
 			viewDirection: [0, 1, 0],
 		});
 
@@ -211,7 +216,10 @@ describe("PhysicalCameraSession", () => {
 		const session = new PhysicalCameraSession(test.transport);
 		await session.start(placement(), [0, 1, 0], "grounded-walk");
 		expect(test.calls[0]?.args).toEqual({
-			registration: expect.objectContaining({ mode: "grounded-walk" }),
+			registration: expect.objectContaining({
+				mode: "grounded-walk",
+				speedEnvelope: { kind: "instant" },
+			}),
 		});
 		test.deliver(
 			path({
@@ -242,24 +250,43 @@ describe("PhysicalCameraSession", () => {
 		expect(intents).toHaveLength(3);
 		expect(intents.map(({ args }) => args?.intent)).toEqual([
 			{
+				movementEpoch: 1,
 				session: 7,
 				sequence: 0,
 				viewDirection: [0, 1, 0],
 				worldVelocity: [1, 2, 3],
 			},
 			{
+				movementEpoch: 1,
 				session: 7,
 				sequence: 1,
 				viewDirection: [1, 0, 0],
 				worldVelocity: [1, 2, 3],
 			},
 			{
+				movementEpoch: 1,
 				session: 7,
 				sequence: 2,
 				viewDirection: [1, 0, 0],
 				worldVelocity: [3, 2, 1],
 			},
 		]);
+	});
+
+	it("starts a new movement epoch after an immediate stop", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+		await session.setIntent([1, 0, 0], [0, 1, 0]);
+		await session.setIntent([0, 0, 0], [0, 1, 0]);
+		await session.setIntent([-1, 0, 0], [0, 1, 0]);
+
+		const epochs = test.calls
+			.filter(({ command }) => command === "set_physical_camera_intent")
+			.map(
+				({ args }) => (args?.intent as { movementEpoch: number }).movementEpoch,
+			);
+		expect(epochs).toEqual([1, 1, 2]);
 	});
 
 	it("stops only its registered generation", async () => {

@@ -7,6 +7,7 @@ import {
 	validateHostPhysicalCameraPath,
 } from "../lib/game/motion/host-physical-camera-path";
 import type { EnvCellId } from "../lib/game/game-types";
+import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 interface PhysicalSphereDefinition {
 	/** Body-local AC-axis center in meters. */
@@ -56,6 +57,34 @@ interface GroundedResponseConfig extends PhysicalFlyResponseConfig {
 	readonly stepDownHeight: number;
 	/** Policy for retaining support near finite authored edges. */
 	readonly edgeProtection: "none" | "creature";
+}
+
+type PhysicalCameraSpeedEnvelope =
+	| {
+			/** Apply requested speed immediately. */
+			readonly kind: "instant";
+	  }
+	| {
+			/** Linearly ramp a held nonzero request from an initial fraction to full speed. */
+			readonly kind: "linear-ramp";
+			/** Seconds of uninterrupted movement input required to reach full speed. */
+			readonly accelerationSeconds: number;
+			/** Fraction of requested speed applied when movement begins. */
+			readonly initialSpeedMultiplier: number;
+	  };
+
+/** Explorer translation feel applied by the host before generic physical-body solving. */
+function physicalCameraSpeedEnvelope(
+	mode: PhysicalCameraMode,
+): PhysicalCameraSpeedEnvelope {
+	if (mode === "grounded-walk") return { kind: "instant" };
+	return {
+		kind: "linear-ramp",
+		accelerationSeconds:
+			FRONTEND_TUNING.explorer.camera.controls.keyboardAccelerationSeconds,
+		initialSpeedMultiplier:
+			FRONTEND_TUNING.explorer.camera.controls.keyboardInitialSpeedMultiplier,
+	};
 }
 
 /** Explorer product policy for its explicit generic camera bodies. */
@@ -136,6 +165,8 @@ export class PhysicalCameraSession {
 	#highestSequence = -1;
 	#droppedPaths = 0;
 	#intentSequence = 0;
+	#movementEpoch = 0;
+	#movementActive = false;
 	#lastIntent: PhysicalCameraInput | null = null;
 
 	constructor(transport: PhysicalCameraTransport) {
@@ -164,6 +195,7 @@ export class PhysicalCameraSession {
 						placement.position.y,
 						placement.position.z,
 					],
+					speedEnvelope: physicalCameraSpeedEnvelope(mode),
 					viewDirection,
 				},
 			});
@@ -210,17 +242,24 @@ export class PhysicalCameraSession {
 		viewDirection: readonly [number, number, number],
 	): Promise<void> {
 		const session = this.#session;
+		if (session === null) return;
 		const input = { viewDirection, worldVelocity };
-		if (
-			session === null ||
-			(this.#lastIntent !== null && inputsEqual(input, this.#lastIntent))
-		)
+		const movementActive = worldVelocity.some((component) => component !== 0);
+		if (movementActive && !this.#movementActive) this.#movementEpoch += 1;
+		this.#movementActive = movementActive;
+		if (this.#lastIntent !== null && inputsEqual(input, this.#lastIntent))
 			return;
 		this.#lastIntent = input;
 		const sequence = this.#intentSequence++;
 		try {
 			await this.#transport.invoke("set_physical_camera_intent", {
-				intent: { session, sequence, viewDirection, worldVelocity },
+				intent: {
+					movementEpoch: this.#movementEpoch,
+					session,
+					sequence,
+					viewDirection,
+					worldVelocity,
+				},
 			});
 		} catch (error) {
 			// Permit an identical input event to retry, but do not roll back over a newer intent.
@@ -337,6 +376,8 @@ export class PhysicalCameraSession {
 		this.#highestSequence = -1;
 		this.#droppedPaths = 0;
 		this.#intentSequence = 0;
+		this.#movementEpoch = 0;
+		this.#movementActive = false;
 		this.#lastIntent = null;
 	}
 }

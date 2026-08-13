@@ -58,6 +58,44 @@ pub enum PhysicalCameraMode {
     GroundedWalk,
 }
 
+/// Explorer-owned translation response applied before generic physical-body solving.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PhysicalCameraSpeedEnvelope {
+    /// Apply requested speed immediately.
+    Instant,
+    /// Linearly ramp a held nonzero request from an initial fraction to full speed.
+    LinearRamp {
+        /// Seconds of uninterrupted movement input required to reach full speed.
+        #[serde(rename = "accelerationSeconds")]
+        acceleration_seconds: f32,
+        /// Fraction of requested speed applied when movement begins.
+        #[serde(rename = "initialSpeedMultiplier")]
+        initial_speed_multiplier: f32,
+    },
+}
+
+impl PhysicalCameraSpeedEnvelope {
+    fn validate(self) -> Result<Self> {
+        if let Self::LinearRamp {
+            acceleration_seconds,
+            initial_speed_multiplier,
+        } = self
+        {
+            ensure!(
+                acceleration_seconds.is_finite() && acceleration_seconds > 0.0,
+                "physical camera acceleration duration must be finite and positive"
+            );
+            ensure!(
+                initial_speed_multiplier.is_finite()
+                    && (0.0..=1.0).contains(&initial_speed_multiplier),
+                "physical camera initial speed multiplier must be finite and within [0, 1]"
+            );
+        }
+        Ok(self)
+    }
+}
+
 /// World-space velocity requested by Explorer policy, expressed in AC axes.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +104,8 @@ pub struct PhysicalCameraIntent {
     pub session: u64,
     /// Monotonic input revision within `session`; stale async commands are ignored.
     pub sequence: u64,
+    /// Monotonic nonzero-input generation used to preserve stop/start across async reordering.
+    pub movement_epoch: u64,
     /// Desired AC-world velocity `[east, north, up]` in meters per second.
     pub world_velocity: [f32; 3],
     /// Unit first-person view direction in AC world axes.
@@ -77,6 +117,7 @@ impl Default for PhysicalCameraIntent {
         Self {
             session: 0,
             sequence: 0,
+            movement_epoch: 0,
             world_velocity: [0.0; 3],
             view_direction: [0.0, 1.0, 0.0],
         }
@@ -119,6 +160,8 @@ pub struct PhysicalCameraRegistration {
     pub view_direction: [f32; 3],
     /// Physical response to register after validating the presented placement.
     pub mode: PhysicalCameraMode,
+    /// Explorer translation response applied to concrete velocity intent by the host tick.
+    pub speed_envelope: PhysicalCameraSpeedEnvelope,
     /// Explicit source-neutral geometry and response configuration for the generic body.
     pub body: PhysicalBodyDefinitionRequest,
 }
@@ -183,6 +226,41 @@ struct CameraBodyController {
     body_id: SpatialBodyId,
     /// Presentation/control policy layered over the generic response.
     mode: PhysicalCameraMode,
+    /// Translation response selected by the registering application.
+    speed_envelope: PhysicalCameraSpeedEnvelope,
+    /// Elapsed uninterrupted nonzero movement input, saturated at the ramp duration.
+    movement_elapsed_seconds: f32,
+    /// Latest frontend movement generation applied to this controller.
+    movement_epoch: u64,
+}
+
+impl CameraBodyController {
+    fn requested_velocity_for_tick(
+        &mut self,
+        target_velocity: Vector3,
+        delta_seconds: f32,
+    ) -> Vector3 {
+        if target_velocity.length_squared() <= f32::EPSILON {
+            self.movement_elapsed_seconds = 0.0;
+            return Vector3::zero();
+        }
+        let PhysicalCameraSpeedEnvelope::LinearRamp {
+            acceleration_seconds,
+            initial_speed_multiplier,
+        } = self.speed_envelope
+        else {
+            return target_velocity;
+        };
+        let start = self.movement_elapsed_seconds;
+        let end = start + delta_seconds;
+        self.movement_elapsed_seconds = end.min(acceleration_seconds);
+        let average_progress = (linear_ramp_area(end, acceleration_seconds)
+            - linear_ramp_area(start, acceleration_seconds))
+            / delta_seconds;
+        let multiplier =
+            initial_speed_multiplier + (1.0 - initial_speed_multiplier) * average_progress;
+        target_velocity * multiplier
+    }
 }
 
 /// Host-retained render viewer state, independent from collision-body placement.
@@ -240,6 +318,7 @@ impl HostCameraRuntime {
         let mut presented_pose =
             scene_point_to_residency_pose(registration.scene_position, owner, initial_viewer_cell)?;
         let view_direction = normalized_view_direction(registration.view_direction)?;
+        let speed_envelope = registration.speed_envelope.validate()?;
         let scene = self.simulation.snapshot();
         let mut state = self.state.lock().expect("camera runtime lock poisoned");
         let mut body_pose = presented_pose;
@@ -294,6 +373,9 @@ impl HostCameraRuntime {
             body: CameraBodyController {
                 body_id,
                 mode: registration.mode,
+                speed_envelope,
+                movement_elapsed_seconds: 0.0,
+                movement_epoch: 0,
             },
             viewer,
         }) {
@@ -302,6 +384,7 @@ impl HostCameraRuntime {
         state.intent = PhysicalCameraIntent {
             session,
             sequence: 0,
+            movement_epoch: 0,
             world_velocity: [0.0; 3],
             view_direction: [view_direction.x, view_direction.y, view_direction.z],
         };
@@ -338,6 +421,24 @@ impl HostCameraRuntime {
                 intent.world_velocity[2].abs() <= f32::EPSILON,
                 "grounded camera intent must be horizontal"
             );
+        }
+        if let Some(active) = state.active.as_ref() {
+            ensure!(
+                intent.movement_epoch >= active.body.movement_epoch,
+                "physical camera movement epoch must not regress"
+            );
+        }
+        if let Some(active) = state.active.as_mut()
+            && (intent.movement_epoch != active.body.movement_epoch
+                || intent
+                    .world_velocity
+                    .iter()
+                    .all(|component| component.abs() <= f32::EPSILON))
+        {
+            // A release followed by a press may arrive between fixed ticks. Reset at command time
+            // so the held-input envelope cannot miss that responsive stop/start boundary.
+            active.body.movement_elapsed_seconds = 0.0;
+            active.body.movement_epoch = intent.movement_epoch;
         }
         state.intent = intent;
         state.last_intent_sequence = Some(intent.sequence);
@@ -376,11 +477,14 @@ impl HostCameraRuntime {
         let Some(previous) = state.active.clone() else {
             return Ok(None);
         };
-        let velocity = Vector3::new(
+        let target_velocity = Vector3::new(
             state.intent.world_velocity[0],
             state.intent.world_velocity[1],
             state.intent.world_velocity[2],
         );
+        let mut body_controller = previous.body;
+        let velocity =
+            body_controller.requested_velocity_for_tick(target_velocity, dt.as_secs_f32());
         let view_direction = normalized_view_direction(state.intent.view_direction)?;
         let solve_started_at = Instant::now();
         let solved = self.simulation.tick_physical_body(
@@ -464,7 +568,7 @@ impl HostCameraRuntime {
             }
         };
         state.active = Some(ActiveCamera {
-            body: previous.body,
+            body: body_controller,
             viewer,
         });
         let sequence = state.sequence;
@@ -472,7 +576,7 @@ impl HostCameraRuntime {
         let path = PhysicalCameraMotionPath {
             session,
             sequence,
-            mode: previous.body.mode,
+            mode: body_controller.mode,
             duration_ms: dt.as_secs_f64() * 1_000.0,
             initial,
             legs,
@@ -516,6 +620,15 @@ fn normalized_view_direction(direction: [f32; 3]) -> Result<Vector3> {
         "physical camera view direction must be non-zero"
     );
     Ok(direction.normalize())
+}
+
+/// Integral of `min(elapsed / duration, 1)` from zero through `elapsed`.
+fn linear_ramp_area(elapsed: f32, duration: f32) -> f32 {
+    if elapsed <= duration {
+        elapsed * elapsed / (2.0 * duration)
+    } else {
+        elapsed - duration / 2.0
+    }
 }
 
 fn grounded_viewer_offset(view_direction: Vector3) -> Vector3 {
@@ -999,6 +1112,7 @@ mod tests {
             },
             view_direction: [0.0, 1.0, 0.0],
             mode,
+            speed_envelope: PhysicalCameraSpeedEnvelope::Instant,
             body: body_request(mode),
         }
     }
@@ -1051,6 +1165,7 @@ mod tests {
         PhysicalCameraIntent {
             session,
             sequence,
+            movement_epoch: u64::from(world_velocity != [0.0; 3]),
             world_velocity,
             view_direction: [0.0, 1.0, 0.0],
         }
@@ -1062,6 +1177,19 @@ mod tests {
             .last()
             .expect("host camera paths are non-empty")
             .end
+    }
+
+    fn ramped_camera_body() -> CameraBodyController {
+        CameraBodyController {
+            body_id: SpatialBodyId::Ephemeral(1),
+            mode: PhysicalCameraMode::PhysicalFly,
+            speed_envelope: PhysicalCameraSpeedEnvelope::LinearRamp {
+                acceleration_seconds: 2.0,
+                initial_speed_multiplier: 0.125,
+            },
+            movement_elapsed_seconds: 0.0,
+            movement_epoch: 1,
+        }
     }
 
     fn thin_viewer_volumes(overlap_first_cell: bool) -> Vec<CellVolume> {
@@ -1158,6 +1286,104 @@ mod tests {
     }
 
     #[test]
+    fn physical_fly_ramp_matches_the_free_fly_two_second_envelope() {
+        let mut body = ramped_camera_body();
+        let delta_seconds = 1.0 / HOST_TICK_HZ as f32;
+        let target = Vector3::new(150.0, 0.0, 0.0);
+        let first = body.requested_velocity_for_tick(target, delta_seconds);
+        let mut distance = first.x * delta_seconds;
+        for _ in 1..60 {
+            distance += body.requested_velocity_for_tick(target, delta_seconds).x * delta_seconds;
+        }
+        let full = body.requested_velocity_for_tick(target, delta_seconds);
+
+        // Integral of a 0.125-to-1.0 linear multiplier over two seconds at 150 m/s.
+        assert!((distance - 168.75).abs() < 0.001);
+        assert!((first.x - 19.843_75).abs() < 0.001);
+        assert!((full.x - 150.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn physical_fly_ramp_stops_immediately_but_keeps_progress_across_direction_changes() {
+        let mut body = ramped_camera_body();
+        let first = body.requested_velocity_for_tick(Vector3::new(150.0, 0.0, 0.0), 0.5);
+        let turned = body.requested_velocity_for_tick(Vector3::new(0.0, 75.0, 0.0), 0.5);
+        let stopped = body.requested_velocity_for_tick(Vector3::zero(), 0.5);
+        let restarted = body.requested_velocity_for_tick(Vector3::new(-150.0, 0.0, 0.0), 0.5);
+
+        assert_eq!(first.y, 0.0);
+        assert!(turned.y / 75.0 > first.x / 150.0);
+        assert_eq!(stopped, Vector3::zero());
+        assert!((restarted.x + first.x).abs() < 0.001);
+    }
+
+    #[test]
+    fn new_movement_epoch_restarts_the_host_tick_ramp_without_a_received_stop() {
+        let runtime = runtime_with_da55_interest(Arc::new(FlatCollisionSource::default()));
+        let pose = scene_point_to_pose([
+            0xda as f32 * 192.0 + 96.0,
+            20.0,
+            -(0x55 as f32 * 192.0 + 96.0),
+        ])
+        .unwrap();
+        let mut request = registration(pose, PhysicalCameraMode::PhysicalFly);
+        request.speed_envelope = PhysicalCameraSpeedEnvelope::LinearRamp {
+            acceleration_seconds: 2.0,
+            initial_speed_multiplier: 0.125,
+        };
+        let session = runtime.start(request).unwrap();
+        runtime
+            .set_intent(PhysicalCameraIntent {
+                movement_epoch: 1,
+                ..intent(session, 0, [150.0, 0.0, 0.0])
+            })
+            .unwrap();
+        let first = runtime
+            .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+            .unwrap()
+            .unwrap();
+        let first_distance = final_path_point(&first).origin[0] - first.initial.origin[0];
+
+        // The newer press can overtake its release at the async command boundary. Its epoch still
+        // carries the restart fact, so the omitted zero intent cannot leak the old held duration.
+        runtime
+            .set_intent(PhysicalCameraIntent {
+                movement_epoch: 2,
+                ..intent(session, 2, [-150.0, 0.0, 0.0])
+            })
+            .unwrap();
+        let restarted = runtime
+            .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+            .unwrap()
+            .unwrap();
+        let restarted_distance =
+            restarted.initial.origin[0] - final_path_point(&restarted).origin[0];
+
+        assert!((first_distance - restarted_distance).abs() < 0.001);
+    }
+
+    #[test]
+    fn physical_camera_speed_envelope_rejects_each_invalid_parameter() {
+        let invalid_duration = PhysicalCameraSpeedEnvelope::LinearRamp {
+            acceleration_seconds: 0.0,
+            initial_speed_multiplier: 0.125,
+        };
+        let invalid_multiplier = PhysicalCameraSpeedEnvelope::LinearRamp {
+            acceleration_seconds: 2.0,
+            initial_speed_multiplier: 1.1,
+        };
+
+        assert_eq!(
+            invalid_duration.validate().unwrap_err().to_string(),
+            "physical camera acceleration duration must be finite and positive"
+        );
+        assert_eq!(
+            invalid_multiplier.validate().unwrap_err().to_string(),
+            "physical camera initial speed multiplier must be finite and within [0, 1]"
+        );
+    }
+
+    #[test]
     fn registration_and_owner_crossing_never_load_collision_products() {
         let source = Arc::new(FlatCollisionSource::default());
         let runtime = runtime_with_da55_interest(source.clone());
@@ -1195,6 +1421,9 @@ mod tests {
             body: CameraBodyController {
                 body_id: SpatialBodyId::Ephemeral(1),
                 mode: PhysicalCameraMode::GroundedWalk,
+                speed_envelope: PhysicalCameraSpeedEnvelope::Instant,
+                movement_elapsed_seconds: 0.0,
+                movement_epoch: 0,
             },
             viewer: PresentedViewer {
                 pose: WorldPosition {
@@ -1250,6 +1479,9 @@ mod tests {
             body: CameraBodyController {
                 body_id: SpatialBodyId::Ephemeral(1),
                 mode: PhysicalCameraMode::GroundedWalk,
+                speed_envelope: PhysicalCameraSpeedEnvelope::Instant,
+                movement_elapsed_seconds: 0.0,
+                movement_epoch: 0,
             },
             viewer: PresentedViewer {
                 pose: WorldPosition {

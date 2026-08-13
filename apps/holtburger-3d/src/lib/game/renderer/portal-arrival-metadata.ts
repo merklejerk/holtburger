@@ -20,6 +20,8 @@ export const PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES = 16;
 export const PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES = 20;
 /** Byte offset of the bit field distinguishing root from crossing arrivals. */
 export const PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES = 24;
+/** Byte offset of the scene-global junction group; zero means no junction. */
+export const PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES = 28;
 /** Record flag indicating that the float vector contains an entry plane. */
 export const PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE = 1;
 

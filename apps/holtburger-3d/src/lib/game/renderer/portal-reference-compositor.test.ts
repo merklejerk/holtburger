@@ -21,6 +21,112 @@ import {
 import { composePortalReferenceFrame } from "./portal-reference-compositor";
 
 describe("portal reference compositor", () => {
+	it("rejects equal-depth same-scope crossings at scene construction", () => {
+		// This is the tie guard the junction exemption leans on: within one scope's candidate set
+		// strict depth comparison is total, so no silent first-wins ordering can exist.
+		expect(() =>
+			linearScene(
+				[
+					{ domain: "root", fragments: [], scope: "root" },
+					{ domain: "left", fragments: [], scope: "x" },
+					{ domain: "right", fragments: [], scope: "y" },
+				],
+				[
+					{ depth: 4, id: "root-x", source: "root", target: "x" },
+					{ depth: 4, id: "root-y", source: "root", target: "y" },
+				],
+			),
+		).toThrow(/depth tie at scope/);
+	});
+
+	it("blocks a zero-thickness transit without a junction id", () => {
+		// The archive shape: cell A chained to cell B through a zero-thickness outdoor slab, both
+		// crossings on one plane. Without host-proven junction ids the equal-depth advance is
+		// backtracking as far as this model can know, so the ray strands in the outdoor domain —
+		// exactly the artifact the compositor showed at coincident junctions.
+		const scene = linearScene(
+			[
+				{ domain: "cell-a", fragments: [], scope: "a" },
+				{ domain: "outdoor", fragments: [opaque("grass", 8)], scope: "out" },
+				{ domain: "cell-b", fragments: [opaque("wall", 6)], scope: "b" },
+			],
+			[
+				{ depth: 4, id: "a-out", source: "a", target: "out" },
+				{ depth: 4, id: "out-b", source: "out", target: "b" },
+			],
+		);
+
+		const frame = composePortalReferenceFrame(scene);
+
+		expect(frame.pixels[0]?.opaque?.fragmentId).toBe(
+			portalModelFragmentId("grass"),
+		);
+	});
+
+	it("admits a zero-thickness transit through one shared junction id", () => {
+		const scene = linearScene(
+			[
+				{ domain: "cell-a", fragments: [], scope: "a" },
+				{ domain: "outdoor", fragments: [opaque("grass", 8)], scope: "out" },
+				{ domain: "cell-b", fragments: [opaque("wall", 6)], scope: "b" },
+			],
+			[
+				{
+					depth: 4,
+					id: "a-out",
+					junctionGroupId: 7,
+					source: "a",
+					target: "out",
+				},
+				{
+					depth: 4,
+					id: "out-b",
+					junctionGroupId: 7,
+					source: "out",
+					target: "b",
+				},
+			],
+		);
+
+		const frame = composePortalReferenceFrame(scene);
+
+		expect(frame.pixels[0]?.opaque?.fragmentId).toBe(
+			portalModelFragmentId("wall"),
+		);
+	});
+
+	it("keeps rejecting equal depth across distinct junction ids", () => {
+		const scene = linearScene(
+			[
+				{ domain: "cell-a", fragments: [], scope: "a" },
+				{ domain: "outdoor", fragments: [opaque("grass", 8)], scope: "out" },
+				{ domain: "cell-b", fragments: [opaque("wall", 6)], scope: "b" },
+			],
+			[
+				{
+					depth: 4,
+					id: "a-out",
+					junctionGroupId: 7,
+					source: "a",
+					target: "out",
+				},
+				{
+					depth: 4,
+					id: "out-b",
+					junctionGroupId: 9,
+					source: "out",
+					target: "b",
+				},
+			],
+		);
+
+		const frame = composePortalReferenceFrame(scene);
+
+		expect(frame.pixels[0]?.opaque?.fragmentId).toBe(
+			portalModelFragmentId("grass"),
+		);
+	});
+
 	it("keeps outdoor root and outdoor re-entry as distinct views sharing one domain", () => {
 		const scene = linearScene(
 			[
@@ -245,6 +351,7 @@ describe("portal reference compositor", () => {
 						{ depth: portalModelDepth(2), pixel: portalModelPixel(1, 2) },
 					]),
 					id: portalModelCrossingId("door"),
+					junctionGroupId: null,
 					reciprocalCrossingId: null,
 					relationship: "indoor-boundary",
 					sourceScopeId: rootScope,

@@ -27,9 +27,11 @@ import {
 	createPortalRenderCapacityPolicy,
 	PORTAL_RENDER_CAPACITY_POLICY,
 } from "./portal-render-capacity-policy";
+import { PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS } from "./portal-envelope-sampling-glsl";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
+	PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES,
 } from "./portal-arrival-metadata";
@@ -70,8 +72,11 @@ import {
 } from "./webgl2-shader-utils";
 import { createParticleFragmentShader } from "./webgl2-particle-program";
 
-const DRAWING_EXTENT = { height: 4, width: 4 } as const;
-const ATLAS_EXTENT = { height: 4, width: 16 } as const;
+// Tile interiors must exceed the resolve shader's 2-texel envelope gutter or confinement becomes
+// untestable: on the original 4x4 tiles the gutter's 5x5 search spanned every texel, so every
+// domain leaked everywhere and the nearest tile won the whole screen.
+const DRAWING_EXTENT = { height: 12, width: 12 } as const;
+const ATLAS_EXTENT = { height: 12, width: 48 } as const;
 const METADATA_BINDING_POINT = 0;
 const ROOT_COLOR = [204, 51, 26, 255] as const;
 const MIDDLE_COLOR = [204, 204, 26, 255] as const;
@@ -79,7 +84,19 @@ const DEEP_COLOR = [26, 204, 204, 255] as const;
 const LEAF_COLOR = [51, 204, 51, 255] as const;
 const WEATHER_COLOR = [77, 128, 230, 255] as const;
 const CLEAR_COLOR = [26, 51, 204, 255] as const;
-const CENTER_PIXELS = new Set([5, 6, 9, 10]);
+/** Screen pixels covered by the fixture crossings' NDC [-0.5, 0.5] quad. */
+const CENTER_PIXELS = new Set(
+	Array.from(
+		{ length: DRAWING_EXTENT.width * DRAWING_EXTENT.height },
+		(_, pixel) => pixel,
+	).filter((pixel) => {
+		const x = pixel % DRAWING_EXTENT.width;
+		const y = Math.floor(pixel / DRAWING_EXTENT.width);
+		const low = DRAWING_EXTENT.width / 4;
+		const high = (DRAWING_EXTENT.width * 3) / 4 - 1;
+		return x >= low && x <= high && y >= low && y <= high;
+	}),
+);
 const FIXTURE_LANDBLOCK_ID = "0x0001ffff";
 const STRADDLE_CLIP_FROM_ANCHOR = createPerspectiveMat4(90, 1, 0.5, 100);
 const FIXTURE_ROOT_SCOPE = { kind: "outdoor" } as const satisfies SceneScope;
@@ -108,6 +125,16 @@ export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
 	readonly deferredPixels: readonly number[];
 	readonly exteriorWeatherComposesBehindChildOpaque: boolean;
 	readonly frontierMatchesOracle: boolean;
+	/** Shared junction ids license the zero-thickness A->exterior->B advance at equal depth. */
+	readonly junctionZeroThicknessTransitMatchesOracle: boolean;
+	readonly junctionPixels: readonly number[];
+	readonly expectedJunctionPixels: readonly number[];
+	/** Without a junction id, the same equal-depth advance stays rejected (today's behavior). */
+	readonly junctionAbsentEqualDepthIsRejected: boolean;
+	readonly strictPixels: readonly number[];
+	readonly expectedStrictPixels: readonly number[];
+	readonly straddlePixels: readonly number[];
+	readonly expectedStraddlePixels: readonly number[];
 	readonly opaqueOcclusionMatchesOracle: boolean;
 	readonly nearPlaneStraddleMatchesOracle: boolean;
 	readonly nearPlaneStraddleOrdinaryPolicyIsRejected: boolean;
@@ -130,7 +157,9 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		gl.drawingBufferWidth < DRAWING_EXTENT.width ||
 		gl.drawingBufferHeight < DRAWING_EXTENT.height
 	) {
-		throw new Error("Portal shader fixture requires a 4x4 drawing buffer.");
+		throw new Error(
+			`Portal shader fixture requires a ${DRAWING_EXTENT.width}x${DRAWING_EXTENT.height} drawing buffer.`,
+		);
 	}
 	const state = captureState(gl, METADATA_BINDING_POINT);
 	const targetOwner = new WebGL2PortalScopeAtlasTargets(
@@ -184,6 +213,32 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		});
 		const rootOnlyPixels = readOutput(gl);
 
+		const junctionStream = createJunctionStream(true);
+		seedJunctionSceneAtlas(gl, targets);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream: junctionStream,
+			targets,
+			traversalDepth: 2,
+		});
+		const junctionPixels = readOutput(gl);
+		const expectedJunctionPixels = expectedWinnerPixels(DEEP_COLOR, null);
+
+		const strictStream = createJunctionStream(false);
+		seedJunctionSceneAtlas(gl, targets);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream: strictStream,
+			targets,
+			traversalDepth: 2,
+		});
+		const strictPixels = readOutput(gl);
+		const expectedStrictPixels = expectedWinnerPixels(MIDDLE_COLOR, null);
+
 		const productionPackedFrame = createProductionPackedFrame();
 		const productionPackedStream = new PortalPropagationStreamArena(6).prepare(
 			productionPackedFrame,
@@ -212,7 +267,10 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			STRADDLE_CLIP_FROM_ANCHOR,
 		);
 		setNearClipRayPolicy(straddleStream, false);
-		seedProductionPackedSceneAtlas(gl, targets, straddleFrame, 0.2);
+		// Root opaque sits behind the aperture. The ordinary-policy control is blocked by near-plane
+		// clipping of the straddling aperture, not by source-depth occlusion; a nearer root seed
+		// would win the resolve outright and make the straddle result indistinguishable from it.
+		seedProductionPackedSceneAtlas(gl, targets, straddleFrame);
 		clearOutput(gl);
 		executor.execute({
 			outputExtent: DRAWING_EXTENT,
@@ -223,7 +281,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		});
 		const ordinaryPolicyStraddlePixels = readOutput(gl);
 		setNearClipRayPolicy(straddleStream, true);
-		seedProductionPackedSceneAtlas(gl, targets, straddleFrame, 0.2);
+		seedProductionPackedSceneAtlas(gl, targets, straddleFrame);
 		clearOutput(gl);
 		executor.execute({
 			outputExtent: DRAWING_EXTENT,
@@ -233,6 +291,12 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			traversalDepth: straddleFrame.commands.traversalDepth,
 		});
 		const straddlePixels = readOutput(gl);
+		const expectedStraddlePixels = expectedWinnerPixels(LEAF_COLOR, {
+			height: straddleFrame.tileHeight(1),
+			width: straddleFrame.tileWidth(1),
+			x: straddleFrame.tileScreenX(1),
+			y: straddleFrame.tileScreenY(1),
+		});
 
 		seedProductionPackedSceneAtlas(gl, targets, productionPackedFrame);
 		clearOutput(gl);
@@ -287,14 +351,28 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			frontierMatchesOracle: frontier.every(
 				(value, pixel) => value === (CENTER_PIXELS.has(pixel) ? 4 : 0),
 			),
+			junctionZeroThicknessTransitMatchesOracle: pixelsMatch(
+				junctionPixels,
+				expectedJunctionPixels,
+			),
+			junctionPixels: [...junctionPixels],
+			expectedJunctionPixels: [...expectedJunctionPixels],
+			junctionAbsentEqualDepthIsRejected: pixelsMatch(
+				strictPixels,
+				expectedStrictPixels,
+			),
+			strictPixels: [...strictPixels],
+			expectedStrictPixels: [...expectedStrictPixels],
 			opaqueOcclusionMatchesOracle: pixelsMatch(
 				occludedPixels,
 				expectedOccludedPixels,
 			),
 			nearPlaneStraddleMatchesOracle: pixelsMatch(
 				straddlePixels,
-				expectedProductionPackedPixels,
+				expectedStraddlePixels,
 			),
+			straddlePixels: [...straddlePixels],
+			expectedStraddlePixels: [...expectedStraddlePixels],
 			nearPlaneStraddleOrdinaryPolicyIsRejected: pixelsMatch(
 				ordinaryPolicyStraddlePixels,
 				solidPixels(ROOT_COLOR),
@@ -349,16 +427,28 @@ function createProductionPackedFrame(
 			PRODUCTION_PACKED_FIXTURE_POLICY.scopeAtlas
 				.maximumCrossingTriangleVertexCount,
 	});
+	// The two variants have different child-tile contracts. Ordinary admission projects the
+	// aperture to a tight window; near-plane-straddle admission cannot project a polygon crossing
+	// the eye plane and instead admits conservatively through the finite near-clip volume, which
+	// yields a wider origin-anchored window. Both are asserted exactly so culler drift in either
+	// path fails loudly here rather than surfacing as a silent pixel change.
+	const expectedTile =
+		kind === "near-plane-straddle"
+			? { screenX: 2, screenY: 2, size: 7 }
+			: { screenX: 3, screenY: 3, size: 6 };
 	if (
 		frame.tileCount !== 2 ||
 		frame.visibility.selectedCrossingCount !== 1 ||
-		frame.tileScreenX(1) !== 1 ||
-		frame.tileScreenY(1) !== 1 ||
-		frame.tileWidth(1) !== 2 ||
-		frame.tileHeight(1) !== 2
+		frame.tileScreenX(1) !== expectedTile.screenX ||
+		frame.tileScreenY(1) !== expectedTile.screenY ||
+		frame.tileWidth(1) !== expectedTile.size ||
+		frame.tileHeight(1) !== expectedTile.size
 	) {
 		throw new Error(
-			"Production-packed fixture did not retain its 2x2 child tile.",
+			`Production-packed fixture did not retain its ${expectedTile.size}x${expectedTile.size} child tile: ` +
+				`tiles=${frame.tileCount} crossings=${frame.visibility.selectedCrossingCount} ` +
+				`screen=(${frame.tileScreenX(1)},${frame.tileScreenY(1)}) ` +
+				`extent=${frame.tileWidth(1)}x${frame.tileHeight(1)}.`,
 		);
 	}
 	return frame;
@@ -441,6 +531,7 @@ function createFixtureCrossing(
 		acceptedSide: "positive",
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
+		junctionGroupId: null,
 		maskDepthPolicy: "allow-equal-depth",
 		reciprocalCrossingId: null,
 		source,
@@ -539,6 +630,79 @@ function createPropagationStream(): PortalCrossingTriangleStreamView &
 	};
 }
 
+/** Seed the shared atlas, then order the junction chain's tiles by strictly decreasing depth. */
+function seedJunctionSceneAtlas(
+	gl: WebGL2RenderingContext,
+	targets: WebGL2PortalScopeAtlasTargetSet,
+): void {
+	seedSceneAtlas(gl, targets);
+	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
+	gl.viewport(0, 0, ATLAS_EXTENT.width, ATLAS_EXTENT.height);
+	gl.enable(gl.SCISSOR_TEST);
+	clearTile(gl, DRAWING_EXTENT.width, MIDDLE_COLOR, 0.7);
+	clearTile(gl, DRAWING_EXTENT.width * 2, DEEP_COLOR, 0.5);
+	gl.disable(gl.SCISSOR_TEST);
+}
+
+/**
+ * Two crossings on one shared plane: scope0 -> scope1 and scope1 -> scope2, both at NDC depth
+ * zero — the archive's zero-thickness junction. `tagJunction` stamps one shared junction group on
+ * both arrival records; without it the second advance measures zero entry-plane progress and the
+ * strict test must reject it.
+ */
+function createJunctionStream(
+	tagJunction: boolean,
+): PortalCrossingTriangleStreamView & PortalPropagationMetadataStreamView {
+	const arena = new ArrayBuffer(
+		12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+	);
+	const floats = new Float32Array(arena);
+	const uints = new Uint32Array(arena);
+	const slotsPerVertex =
+		PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES /
+		Uint32Array.BYTES_PER_ELEMENT;
+	for (let crossing = 0; crossing < 2; crossing += 1) {
+		const positions = crossingPositions(0);
+		for (const [localVertex, position] of positions.entries()) {
+			const vertex = crossing * positions.length + localVertex;
+			const output = vertex * slotsPerVertex;
+			const [x, y, z] = position;
+			floats[output] = x;
+			floats[output + 1] = y;
+			floats[output + 2] = z;
+			uints[output + 3] = crossing + 2;
+			uints[output + 4] = crossing;
+			uints[output + 5] = PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL;
+		}
+	}
+	const metadata = createMetadata(4);
+	const metadataUints = new Uint32Array(metadata.buffer);
+	// Both arrivals cross the same z = 0 plane; rewrite record 1's plane from the chain default.
+	const metadataFloats = new Float32Array(metadata.buffer);
+	writeArrivalPlane(metadataFloats, 1, 0);
+	if (tagJunction) {
+		const junction = 7;
+		for (const record of [1, 2]) {
+			metadataUints[
+				(PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES +
+					record * 32 +
+					PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES) /
+					Uint32Array.BYTES_PER_ELEMENT
+			] = junction;
+		}
+	}
+	return {
+		arrivalMetadataStateCount: 3,
+		bytes: new Uint8Array(arena),
+		propagationMetadataBytes: metadata,
+		renderDomainMetadataStateCount: 3,
+		usedByteLength: arena.byteLength,
+		usedPropagationMetadataByteLength:
+			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+		vertexCount: 12,
+	};
+}
+
 function crossingPositions(depth: number) {
 	return [
 		[-0.5, -0.5, depth],
@@ -604,18 +768,27 @@ function createMetadata(scopeCount: 1 | 4): Uint8Array {
 	const scopeOffset =
 		PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES /
 		Uint32Array.BYTES_PER_ELEMENT;
-	writePortalScopeTileMetadata(uints, scopeOffset, 0, 0, 0, 0, 4, 4);
+	writePortalScopeTileMetadata(
+		uints,
+		scopeOffset,
+		0,
+		0,
+		0,
+		0,
+		DRAWING_EXTENT.width,
+		DRAWING_EXTENT.height,
+	);
 	if (scopeCount === 4) {
 		for (let scope = 1; scope < scopeCount; scope += 1) {
 			writePortalScopeTileMetadata(
 				uints,
 				scopeOffset + scope * 8,
-				scope * 4,
+				scope * DRAWING_EXTENT.width,
 				0,
 				0,
 				0,
-				4,
-				4,
+				DRAWING_EXTENT.width,
+				DRAWING_EXTENT.height,
 			);
 		}
 	}
@@ -666,9 +839,9 @@ function seedSceneAtlas(
 	gl.viewport(0, 0, ATLAS_EXTENT.width, ATLAS_EXTENT.height);
 	gl.enable(gl.SCISSOR_TEST);
 	clearTile(gl, 0, ROOT_COLOR, rootDepth);
-	clearTile(gl, 4, MIDDLE_COLOR, 0.8);
-	clearTile(gl, 8, DEEP_COLOR, 0.8);
-	clearTile(gl, 12, LEAF_COLOR, 0.6);
+	clearTile(gl, DRAWING_EXTENT.width, MIDDLE_COLOR, 0.8);
+	clearTile(gl, DRAWING_EXTENT.width * 2, DEEP_COLOR, 0.8);
+	clearTile(gl, DRAWING_EXTENT.width * 3, LEAF_COLOR, 0.6);
 	gl.disable(gl.SCISSOR_TEST);
 }
 
@@ -734,7 +907,7 @@ function clearTile(
 	color: readonly [number, number, number, number],
 	depth: number,
 ): void {
-	gl.scissor(x, 0, 4, 4);
+	gl.scissor(x, 0, DRAWING_EXTENT.width, DRAWING_EXTENT.height);
 	clearCurrentTile(gl, color, depth);
 }
 
@@ -1155,11 +1328,76 @@ function expectedPixelsFromOracle(rootDepth: number): Uint8Array {
 		createOracleScene(rootDepth),
 		3,
 	);
-	const pixels = new Uint8Array(frame.pixels.length * 4);
+	const leafPixels = new Set<number>();
 	for (const result of frame.pixels) {
-		const fragment = result.opaque?.fragmentId;
-		const color = fragment?.startsWith("leaf-") ? LEAF_COLOR : ROOT_COLOR;
-		pixels.set(color, result.pixel * 4);
+		if (result.opaque?.fragmentId?.startsWith("leaf-")) {
+			leafPixels.add(result.pixel);
+		}
+	}
+	// The reference oracle models exact envelope confinement. Production resolve additionally
+	// applies the envelope gutter, which lets a domain win pixels up to the gutter radius outside
+	// its exact region wherever its content is nearest and its declared window admits the pixel.
+	// The chain scenario declares full-screen windows, so the gutter's whole dilation is visible.
+	const winnable = dilatePixels(
+		leafPixels,
+		PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS,
+	);
+	const pixels = new Uint8Array(
+		DRAWING_EXTENT.width * DRAWING_EXTENT.height * 4,
+	);
+	for (let pixel = 0; pixel < pixels.length / 4; pixel += 1) {
+		pixels.set(winnable.has(pixel) ? LEAF_COLOR : ROOT_COLOR, pixel * 4);
+	}
+	return pixels;
+}
+
+/** Chebyshev-dilate a screen pixel set by the envelope gutter radius, clipped to the screen. */
+function dilatePixels(base: ReadonlySet<number>, radius: number): Set<number> {
+	const dilated = new Set<number>();
+	for (const pixel of base) {
+		const pixelX = pixel % DRAWING_EXTENT.width;
+		const pixelY = Math.floor(pixel / DRAWING_EXTENT.width);
+		for (let y = pixelY - radius; y <= pixelY + radius; y += 1) {
+			for (let x = pixelX - radius; x <= pixelX + radius; x += 1) {
+				if (
+					x >= 0 &&
+					y >= 0 &&
+					x < DRAWING_EXTENT.width &&
+					y < DRAWING_EXTENT.height
+				) {
+					dilated.add(y * DRAWING_EXTENT.width + x);
+				}
+			}
+		}
+	}
+	return dilated;
+}
+
+/** Expected solid-tile output for one gutter-dilated winner clipped by its declared window. */
+function expectedWinnerPixels(
+	winner: readonly [number, number, number, number],
+	window: { x: number; y: number; width: number; height: number } | null,
+): Uint8Array {
+	const winnable = dilatePixels(
+		CENTER_PIXELS,
+		PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS,
+	);
+	const pixels = new Uint8Array(
+		DRAWING_EXTENT.width * DRAWING_EXTENT.height * 4,
+	);
+	for (let pixel = 0; pixel < pixels.length / 4; pixel += 1) {
+		const x = pixel % DRAWING_EXTENT.width;
+		const y = Math.floor(pixel / DRAWING_EXTENT.width);
+		const insideWindow =
+			window === null ||
+			(x >= window.x &&
+				y >= window.y &&
+				x < window.x + window.width &&
+				y < window.y + window.height);
+		pixels.set(
+			winnable.has(pixel) && insideWindow ? winner : ROOT_COLOR,
+			pixel * 4,
+		);
 	}
 	return pixels;
 }
@@ -1225,6 +1463,7 @@ function oracleCrossing(
 			})),
 		),
 		id: portalModelCrossingId(id),
+		junctionGroupId: null,
 		reciprocalCrossingId: null,
 		relationship: "indoor-boundary" as const,
 		sourceScopeId,

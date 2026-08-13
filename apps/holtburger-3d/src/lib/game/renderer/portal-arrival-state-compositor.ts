@@ -11,6 +11,7 @@ import {
 	type PortalModelPixel,
 	type PortalModelScene,
 	type PortalModelScopeId,
+	portalEntryAdvanceAdmitted,
 } from "./portal-model";
 import type {
 	PortalReferenceFragment,
@@ -337,7 +338,15 @@ function processStatePixel(
 				diagnostics.transitionCrossingTestCount += 1;
 				if (crossing.id === reciprocalId) return nearest;
 				const depth = crossing.aperture.depthByPixel[pixel];
-				if (depth === null || (entryDepth !== null && depth <= entryDepth)) {
+				if (
+					depth === null ||
+					!portalEntryAdvanceAdmitted(
+						state.incomingCrossing,
+						entryDepth,
+						crossing,
+						depth,
+					)
+				) {
 					return nearest;
 				}
 				const nearestDepth =

@@ -772,6 +772,8 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 		"deferredCompositionMatchesOracle",
 		"exteriorWeatherComposesBehindChildOpaque",
 		"frontierMatchesOracle",
+		"junctionZeroThicknessTransitMatchesOracle",
+		"junctionAbsentEqualDepthIsRejected",
 		"nearPlaneStraddleMatchesOracle",
 		"nearPlaneStraddleOrdinaryPolicyIsRejected",
 		"opaqueOcclusionMatchesOracle",

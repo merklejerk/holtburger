@@ -68,6 +68,8 @@ interface EnvCellScopeMaterializationPlan {
 	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
 	/** Authored SeenOutside flag, which decides whether a camera inside forces interior ambient. */
 	readonly seenOutside: boolean;
+	/** Host-derived depth-continuous island ordinal, dense within the owning record. */
+	readonly visibilityIslandOrdinal: number;
 }
 
 /** One worker-ready resident source partition that cannot span EnvCell scopes. */
@@ -208,6 +210,7 @@ export function planEnvCellMaterialization(
 			containmentPlanes: cell.structure.containmentPlanes,
 			potentiallyVisibleEnvCellIds: cell.potentiallyVisibleEnvCellIds,
 			seenOutside: (cell.flags & ENV_CELL_SEEN_OUTSIDE_FLAG) !== 0,
+			visibilityIslandOrdinal: cell.visibilityIslandOrdinal,
 		});
 
 		const residents = cell.residents.map(resolveResident);

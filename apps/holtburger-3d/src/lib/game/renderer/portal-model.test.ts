@@ -104,6 +104,7 @@ describe("portal compositor finite model", () => {
 			crossings: [
 				{
 					...crossing,
+					junctionGroupId: null,
 					reciprocalCrossingId: portalModelCrossingId("missing-return"),
 				},
 			],
@@ -129,6 +130,7 @@ function validScene(): PortalModelScene {
 					},
 				]),
 				id: portalModelCrossingId("root-next"),
+				junctionGroupId: null,
 				reciprocalCrossingId: null,
 				relationship: "depth-continuous",
 				sourceScopeId: rootScopeId,

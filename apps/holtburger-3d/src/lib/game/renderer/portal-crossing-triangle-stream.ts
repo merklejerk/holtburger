@@ -8,6 +8,7 @@ import type { ScenePortalCrossingInput } from "../scene";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
+	PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
 	PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES,
@@ -235,7 +236,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		}
 		this.renderDomainMetadataStateCount = frame.tileCount;
 		// The culler always selects the root first, so its destination domain ordinal is zero.
-		this.#writeArrivalRoute(0, 0, 0, 0);
+		this.#writeArrivalRoute(0, 0, 0, 0, 0);
 		this.arrivalMetadataStateCount = 1;
 		for (
 			let crossingOrdinal = 0;
@@ -293,6 +294,8 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 				targetRenderDomainOrdinal,
 				reciprocalArrivalStateId,
 				PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
+				// Null means "no junction"; zero is its GPU sentinel.
+				crossing.junctionGroupId === null ? 0 : crossing.junctionGroupId,
 			);
 			this.arrivalMetadataStateCount += 1;
 			for (let cursor = 0; cursor < aperture.indices.length; cursor += 1) {
@@ -340,6 +343,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		renderDomainOrdinal: number,
 		reciprocalArrivalStateId: number,
 		flags: number,
+		junctionGroup: number,
 	): void {
 		const byteOffset =
 			PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES +
@@ -356,6 +360,13 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 			(byteOffset + PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES) /
 				Uint32Array.BYTES_PER_ELEMENT
 		] = flags;
+		// The metadata arena is reused across frames; an unconditional write is a correctness
+		// requirement, not tidiness. Stale equal ordinals would satisfy the shader's same-junction
+		// test and admit an equal-depth advance the convergence bound assumes cannot happen.
+		this.#metadataUintSlots[
+			(byteOffset + PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES) /
+				Uint32Array.BYTES_PER_ELEMENT
+		] = junctionGroup;
 	}
 }
 

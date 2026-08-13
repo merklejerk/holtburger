@@ -10,6 +10,7 @@ import {
 	type PortalModelScene,
 	type PortalModelScopeId,
 	type PortalModelViewId,
+	portalEntryAdvanceAdmitted,
 } from "./portal-model";
 
 /** One CPU-planned scope appearance before opaque depth rejects portal pixels. */
@@ -80,7 +81,15 @@ export function createPortalPotentialViewPlan(
 			for (const crossing of crossingsByScope.get(scopeId) ?? []) {
 				if (crossing.id === reciprocalId) continue;
 				const depth = crossing.aperture.depthByPixel[pixel];
-				if (depth === null || (entryDepth !== null && depth <= entryDepth)) {
+				if (
+					depth === null ||
+					!portalEntryAdvanceAdmitted(
+						incomingCrossing,
+						entryDepth,
+						crossing,
+						depth,
+					)
+				) {
 					continue;
 				}
 				visit(crossing.targetScopeId, depth, crossing, [

@@ -346,7 +346,15 @@ void main() {
 	if (current == 0u) discard;
 	PortalArrivalMetadata arrival = uArrivals[current - 1u];
 	if (arrival.route.x != vSourceScope || arrival.route.y == vOutputArrival) discard;
-	if ((arrival.route.z & ${PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE}u) != 0u
+	// A host-proven coincident junction licenses a zero-thickness advance: when the arrival and the
+	// candidate crossing share one junction group, equal entry-plane depth is authored geometry,
+	// not backtracking. Reciprocal suppression above still rejects the immediate return, and the
+	// host bounds same-domain junction exits at two, so exactly one same-junction candidate can
+	// survive here.
+	bool sameJunction = arrival.route.w != 0u
+		&& arrival.route.w == uArrivals[vOutputArrival - 1u].route.w;
+	if (!sameJunction
+		&& (arrival.route.z & ${PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE}u) != 0u
 		&& dot(arrival.entryPlane, vec4(vAnchorPosition, 1.0)) <= ${PORTAL_QUERY_EPSILON}) {
 		discard;
 	}

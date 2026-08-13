@@ -10,6 +10,7 @@ import {
 	type PortalModelPixel,
 	type PortalModelScene,
 	type PortalModelScopeId,
+	portalEntryAdvanceAdmitted,
 } from "./portal-model";
 import type {
 	PortalReferenceFragment,
@@ -330,7 +331,10 @@ function executeDomainRay(
 	).reduce<PortalModelCrossing | null>((nearest, crossing) => {
 		if (crossing.id === reciprocalId) return nearest;
 		const depth = crossing.aperture.depthByPixel[pixel];
-		if (depth === null || (entryDepth !== null && depth <= entryDepth)) {
+		if (
+			depth === null ||
+			!portalEntryAdvanceAdmitted(incomingCrossing, entryDepth, crossing, depth)
+		) {
 			return nearest;
 		}
 		const nearestDepth =
@@ -439,7 +443,10 @@ function executeRecursiveRay(
 	).reduce<PortalModelCrossing | null>((nearest, crossing) => {
 		if (crossing.id === reciprocalId) return nearest;
 		const depth = crossing.aperture.depthByPixel[pixel];
-		if (depth === null || (entryDepth !== null && depth <= entryDepth)) {
+		if (
+			depth === null ||
+			!portalEntryAdvanceAdmitted(incomingCrossing, entryDepth, crossing, depth)
+		) {
 			return nearest;
 		}
 		const nearestDepth =

@@ -132,6 +132,7 @@ function envCellRecord(
 		["cellFlags", "u32", [0]],
 		["cellAuthoredIds", "u32", [0x100]],
 		["cellStructureIndices", "u32", [0]],
+		["cellIslandIndices", "u32", [0]],
 		["cellPlacements", "f32", [0, 0, 0, 1, 0, 0, 0]],
 		["cellBounds", "f32", [0, 0, 0, 1, 1, 1]],
 		["cellSurfaceRanges", "u32", [0, 1]],
@@ -221,7 +222,7 @@ function envCellRecord(
 function baseManifest(availability: "present" | "absent"): MutableManifest {
 	return {
 		transport: "holtburger-env-cell-record",
-		version: 2,
+		version: 3,
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
 		landblockId: LAND_BLOCK_ID,
@@ -290,6 +291,7 @@ function installReciprocalVisibilityFixture(manifest: MutableManifest): void {
 		acceptedSide: "positive",
 		exactMatch: false,
 		maskDepthPolicy: "allow-equal-depth",
+		junctionGroupId: null,
 		reciprocalCrossingIndex: 1 - index,
 		sourcePortal: {
 			kind: "env-cell",
@@ -353,7 +355,7 @@ function serializeRecord(
 	const result = new Uint8Array(16 + manifestLength + sectionBytes.length);
 	result.set(encoder.encode("HBEC"), 0);
 	const view = new DataView(result.buffer);
-	view.setUint16(4, 2, true);
+	view.setUint16(4, 3, true);
 	view.setUint16(6, 0, true);
 	view.setUint32(8, manifestLength, true);
 	view.setUint32(12, result.length, true);

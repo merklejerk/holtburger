@@ -771,6 +771,7 @@ function upsertCrossing(
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
 		maskDepthPolicy: "allow-equal-depth",
+		junctionGroupId: null,
 		reciprocalCrossingId: null,
 		source,
 		sourceAperture: aperture,

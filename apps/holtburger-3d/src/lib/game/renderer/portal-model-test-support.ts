@@ -23,6 +23,7 @@ interface PortalModelTestScopeInput {
 interface PortalModelTestCrossingInput {
 	readonly depth: number;
 	readonly id: string;
+	readonly junctionGroupId?: number | null;
 	readonly relationship?:
 		| "depth-continuous"
 		| "exterior-boundary"
@@ -59,6 +60,7 @@ export function portalModelTestScene(
 				{ depth: portalModelDepth(crossing.depth), pixel },
 			]),
 			id: portalModelCrossingId(crossing.id),
+			junctionGroupId: crossing.junctionGroupId ?? null,
 			reciprocalCrossingId: null,
 			relationship: crossing.relationship ?? "indoor-boundary",
 			sourceScopeId: requiredScope(scopeById, crossing.source),

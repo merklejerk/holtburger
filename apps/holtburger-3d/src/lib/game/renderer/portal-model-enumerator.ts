@@ -187,6 +187,7 @@ function createEnumeratedScene(
 				id: portalModelCrossingId(
 					`crossing-${edge.sourceIndex}-${edge.targetIndex}`,
 				),
+				junctionGroupId: null,
 				reciprocalCrossingId: null,
 				relationship:
 					partition[edge.sourceIndex] === partition[edge.targetIndex]

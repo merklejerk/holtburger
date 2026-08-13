@@ -286,6 +286,7 @@ function disjointSharedBatchScene(): PortalModelScene {
 				},
 			]),
 			id: portalModelCrossingId(`door-${pixelValue}`),
+			junctionGroupId: null,
 			reciprocalCrossingId: null,
 			relationship: "indoor-boundary" as const,
 			sourceScopeId: rootScopeId,

@@ -33,7 +33,7 @@ import {
 import { acFrameTransform, renderScale } from "./ac-frame";
 
 const MAGIC = "HBEC";
-const VERSION = 2;
+const VERSION = 3;
 const HEADER_LENGTH = 16;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
@@ -140,6 +140,7 @@ const crossingSchema = z.object({
 	acceptedSide: z.enum(["positive", "negative"]),
 	exactMatch: z.boolean(),
 	maskDepthPolicy: z.enum(["allow-equal-depth", "reject-equal-depth"]),
+	junctionGroupId: z.number().int().positive().nullable(),
 	reciprocalCrossingIndex: z.number().int().nonnegative().nullable(),
 	sourcePortal,
 	spatialRelationship,
@@ -201,6 +202,7 @@ const REQUIRED_SECTIONS = {
 	cellFlags: "u32",
 	cellAuthoredIds: "u32",
 	cellStructureIndices: "u32",
+	cellIslandIndices: "u32",
 	cellPlacements: "f32",
 	cellBounds: "f32",
 	cellSurfaceRanges: "u32",
@@ -453,6 +455,7 @@ interface CellArrays {
 	readonly cellFlags: Uint32Array;
 	readonly authoredIds: Uint32Array;
 	readonly structureIndices: Uint32Array;
+	readonly islandIndices: Uint32Array;
 	readonly placements: Float32Array;
 	readonly bounds: Float32Array;
 	readonly surfaceRanges: Uint32Array;
@@ -499,6 +502,14 @@ function decodeCellArrays(
 			sectionDataOffset,
 			sections,
 			"cellStructureIndices",
+			Uint32Array,
+			cellCount,
+		),
+		islandIndices: readWhole(
+			response,
+			sectionDataOffset,
+			sections,
+			"cellIslandIndices",
 			Uint32Array,
 			cellCount,
 		),
@@ -651,6 +662,7 @@ function decodeCells(
 	);
 	return Array.from({ length: manifest.cellCount }, (_, cellIndex) => {
 		const id = datIdFromU32(arrays.cellIds[cellIndex]!) as EnvCellId;
+		const visibilityIslandOrdinal = arrays.islandIndices[cellIndex]!;
 		const structure = structures[arrays.structureIndices[cellIndex]!];
 		if (!structure) {
 			throw new Error(`EnvCell ${id} references an invalid structure index.`);
@@ -723,6 +735,7 @@ function decodeCells(
 			id,
 			flags: arrays.cellFlags[cellIndex]!,
 			authoredCellId: arrays.authoredIds[cellIndex]!,
+			visibilityIslandOrdinal,
 			structure,
 			structureToLandblock: {
 				landblockId,

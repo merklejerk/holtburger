@@ -27,6 +27,7 @@ tauri = { version = "2", features = [] }
 tokio.workspace = true
 geo = "0.33.1"
 hex.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

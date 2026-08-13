@@ -998,6 +998,7 @@ function crossing(
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
 		maskDepthPolicy: "allow-equal-depth",
+		junctionGroupId: null,
 		reciprocalCrossingId: options.reciprocalCrossingId ?? null,
 		source,
 		sourceAperture: sceneAperture,

@@ -9,6 +9,7 @@ import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-la
 import { Vec3 } from "../math/types";
 import type { ScenePortalCrossingInput } from "../scene";
 import {
+	qualifyJunctionGroupId,
 	qualifyPortalApertureId,
 	qualifyPortalCrossingId,
 } from "../resolution/portal-scene-identity";
@@ -79,7 +80,6 @@ export class EnvCellGeometryPreparer {
 export function createEnvCellEnvironmentArtifact(
 	plan: EnvCellMaterializationPlan,
 ): EnvCellLayerArtifact {
-	const visibilityIslands = buildVisibilityIslands(plan);
 	const apertureGeometry = new Map(
 		plan.apertures.map((aperture, index) => [
 			aperture.id,
@@ -153,9 +153,7 @@ export function createEnvCellEnvironmentArtifact(
 			potentiallyVisibleEnvCellIds: scope.potentiallyVisibleEnvCellIds,
 			seenOutside: scope.seenOutside,
 			structureToLandblock: scope.structureToLandblock,
-			visibilityIslandId:
-				visibilityIslands.get(scope.scope.envCellId) ??
-				`env-cell-island:${scope.scope.landblockId}/${scope.scope.envCellId}`,
+			visibilityIslandId: `env-cell-island:${scope.scope.landblockId}/${scope.visibilityIslandOrdinal}`,
 		})),
 		crossings: plan.crossings.map((crossing) => {
 			const sourceAperture = sceneApertures[crossing.sourceApertureIndex];
@@ -175,6 +173,10 @@ export function createEnvCellEnvironmentArtifact(
 				acceptedSide: crossing.acceptedSide,
 				exactMatch: crossing.exactMatch,
 				id: qualifyPortalCrossingId(plan.landblockId, crossing.id),
+				junctionGroupId: qualifyJunctionGroupId(
+					plan.landblockId,
+					crossing.junctionGroupId,
+				),
 				maskDepthPolicy: crossing.maskDepthPolicy,
 				reciprocalCrossingId:
 					crossing.reciprocalCrossingIndex === null
@@ -194,46 +196,6 @@ export function createEnvCellEnvironmentArtifact(
 			};
 		}),
 	};
-}
-
-function buildVisibilityIslands(
-	plan: EnvCellMaterializationPlan,
-): ReadonlyMap<string, `env-cell-island:${string}`> {
-	const parents = new Map<string, string>(
-		plan.scopes.map(({ scope }) => [scope.envCellId, scope.envCellId]),
-	);
-	const find = (id: string): string => {
-		const parent = parents.get(id);
-		if (parent === undefined) {
-			throw new Error(`Visibility island references missing EnvCell ${id}.`);
-		}
-		if (parent === id) return id;
-		const root = find(parent);
-		parents.set(id, root);
-		return root;
-	};
-	for (const crossing of plan.crossings) {
-		if (
-			crossing.spatialRelationship.kind !== "indoor-depth-continuous" ||
-			crossing.source.kind !== "env-cell" ||
-			crossing.target.kind !== "env-cell"
-		) {
-			continue;
-		}
-		const sourceRoot = find(crossing.source.envCellId);
-		const targetRoot = find(crossing.target.envCellId);
-		if (sourceRoot === targetRoot) continue;
-		const first =
-			sourceRoot.localeCompare(targetRoot) <= 0 ? sourceRoot : targetRoot;
-		const second = first === sourceRoot ? targetRoot : sourceRoot;
-		parents.set(second, first);
-	}
-	return new Map(
-		[...parents.keys()].map((envCellId) => [
-			envCellId,
-			`env-cell-island:${plan.landblockId}/${find(envCellId)}`,
-		]),
-	);
 }
 
 function resolveReciprocalCrossingId(

@@ -56,6 +56,58 @@ describe("packed portal arrival-state model", () => {
 		}
 	});
 
+	it("agrees with both compositors across a zero-thickness junction", () => {
+		const junctionScene = (junctionGroupId: number | null) =>
+			portalModelTestScene(
+				[
+					{ domain: "cell-a", fragments: [], scope: "a" },
+					{
+						domain: "outdoor",
+						fragments: [opaqueFragment("grass", 8)],
+						scope: "out",
+					},
+					{
+						domain: "cell-b",
+						fragments: [opaqueFragment("wall", 6)],
+						scope: "b",
+					},
+				],
+				[
+					{
+						depth: 4,
+						id: "a-out",
+						junctionGroupId,
+						source: "a",
+						target: "out",
+					},
+					{
+						depth: 4,
+						id: "out-b",
+						junctionGroupId,
+						source: "out",
+						target: "b",
+					},
+				],
+			);
+
+		for (const junctionGroupId of [null, 7]) {
+			assertEquivalent(
+				junctionScene(junctionGroupId),
+				PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
+			);
+		}
+		const admitted = executePackedPortalArrivalStateModel(
+			junctionScene(7),
+			PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
+		);
+		expect(admitted.diagnostics.junctionAdmittedCount).toBeGreaterThan(0);
+		const strict = executePackedPortalArrivalStateModel(
+			junctionScene(null),
+			PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
+		);
+		expect(strict.diagnostics.junctionAdmittedCount).toBe(0);
+	});
+
 	it("folds a newly reached terminal frontier into the final reduction command", () => {
 		const scene = portalModelTestScene(
 			[

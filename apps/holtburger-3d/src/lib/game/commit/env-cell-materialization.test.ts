@@ -327,6 +327,7 @@ function portalCrossing(
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
 		maskDepthPolicy: "allow-equal-depth",
+		junctionGroupId: null,
 		reciprocalCrossingIndex: null,
 		source,
 		sourceApertureIndex: 0,
@@ -355,6 +356,7 @@ function cell(
 	return {
 		id,
 		flags: 0,
+		visibilityIslandOrdinal: 0,
 		authoredCellId: 0x100,
 		structure: {
 			id: "shared-structure",

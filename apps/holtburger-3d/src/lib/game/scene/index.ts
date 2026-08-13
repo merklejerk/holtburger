@@ -95,6 +95,11 @@ export interface ScenePortalCrossingInput {
 	readonly exactMatch: boolean;
 	/** Equal-depth mask ownership resolved from the authored source portal surface. */
 	readonly maskDepthPolicy: "allow-equal-depth" | "reject-equal-depth";
+	/**
+	 * Host-proven coincident-junction identity shared by every crossing on one coplanar
+	 * overlapping footprint, or null. Equal ids license the compositor's equal-depth advance.
+	 */
+	readonly junctionGroupId: number | null;
 	/** Stable reciprocal crossing, when the host proved one. */
 	readonly reciprocalCrossingId: PortalCrossingId | null;
 	/** Host-classified seam semantics retained for later rendering policy. */

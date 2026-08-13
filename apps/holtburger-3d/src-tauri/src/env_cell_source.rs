@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
@@ -30,12 +31,13 @@ use crate::portal_geometry::{
     transform_render_bounds,
 };
 use crate::portal_visibility::{
-    VisibilityApertureIntersectionEvidence, intersect_visibility_apertures,
+    JunctionCandidate, VisibilityApertureIntersectionEvidence, intersect_visibility_apertures,
+    resolve_junction_groups,
 };
 use crate::source_projection::{dat_id, render_aabb_json};
 
 const ENV_CELL_RECORD_MAGIC: &[u8; 4] = b"HBEC";
-const ENV_CELL_RECORD_VERSION: u16 = 2;
+const ENV_CELL_RECORD_VERSION: u16 = 3;
 const ENV_CELL_RECORD_HEADER_LENGTH: usize = 16;
 
 /// Build one independently decodable environment-cell record.
@@ -357,6 +359,7 @@ pub(crate) async fn serialize_env_cell_source_record(
                     exact_match: (portal.flags & 0x01) != 0,
                     mask_depth_policy,
                     reciprocal_index: None,
+                    junction_group: None,
                     source: json!({
                         "kind": "env-cell",
                         "envCellId": dat_id(portal.source.env_cell_id),
@@ -391,6 +394,7 @@ pub(crate) async fn serialize_env_cell_source_record(
                     exact_match: (portal.flags & 0x01) != 0,
                     mask_depth_policy,
                     reciprocal_index: None,
+                    junction_group: None,
                     source: json!({
                         "kind": "env-cell",
                         "envCellId": dat_id(portal.source.env_cell_id),
@@ -398,10 +402,9 @@ pub(crate) async fn serialize_env_cell_source_record(
                         "polygonId": portal.polygon_id,
                         "flags": portal.flags,
                     }),
-                    relationship: json!({
-                        "kind": "exterior-transition",
-                        "exteriorLandblockId": dat_id(interior.landblock_id),
-                    }),
+                    relationship: CrossingRelationship::ExteriorTransition {
+                        exterior_landblock_id: interior.landblock_id,
+                    },
                 });
                 if let Some(building_ref) = building_portal {
                     let reverse_aperture = resolve_building_aperture(
@@ -427,6 +430,7 @@ pub(crate) async fn serialize_env_cell_source_record(
                         exact_match: (building_portal.flags & 0x01) != 0,
                         mask_depth_policy: reverse_aperture.mask_depth_policy,
                         reciprocal_index: Some(crossing_index),
+                        junction_group: None,
                         source: json!({
                             "kind": "building-transition",
                             "buildingIndex": building_ref.building_index,
@@ -434,10 +438,9 @@ pub(crate) async fn serialize_env_cell_source_record(
                             "portalIndex": building_ref.portal_index,
                             "flags": building_portal.flags,
                         }),
-                        relationship: json!({
-                            "kind": "exterior-transition",
-                            "exteriorLandblockId": dat_id(interior.landblock_id),
-                        }),
+                        relationship: CrossingRelationship::ExteriorTransition {
+                            exterior_landblock_id: interior.landblock_id,
+                        },
                     });
                 } else {
                     unresolved_outside.push(json!({
@@ -463,6 +466,15 @@ pub(crate) async fn serialize_env_cell_source_record(
         }
     }
     let visibility_diagnostics = resolve_visibility_apertures(&mut crossings, &mut apertures)?;
+
+    let cell_island_ordinals = resolve_cell_island_ordinals(prepared_cells.len(), &crossings);
+    writer.append_u32("cellIslandIndices", cell_island_ordinals.iter().copied());
+    resolve_crossing_junction_groups(
+        interior.landblock_id,
+        &mut crossings,
+        &apertures,
+        &cell_island_ordinals,
+    )?;
 
     let SerializedApertures {
         manifests: aperture_manifests,
@@ -530,8 +542,41 @@ struct CrossingProjection {
     exact_match: bool,
     mask_depth_policy: MaskDepthPolicy,
     reciprocal_index: Option<usize>,
+    junction_group: Option<NonZeroU32>,
     source: Value,
-    relationship: Value,
+    relationship: CrossingRelationship,
+}
+
+/// Host-classified seam semantics, kept typed so island and junction derivation can read them.
+///
+/// Serialized to manifest JSON only at assembly; producing `Value` here would force every later
+/// consumer to string-match on `"kind"`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CrossingRelationship {
+    IndoorDepthContinuous { reciprocal_aperture_index: usize },
+    IndoorTopologyBoundary(IndoorTopologyBoundaryReason),
+    ExteriorTransition { exterior_landblock_id: u32 },
+}
+
+fn relationship_json(relationship: CrossingRelationship) -> Value {
+    match relationship {
+        CrossingRelationship::IndoorDepthContinuous {
+            reciprocal_aperture_index,
+        } => json!({
+            "kind": "indoor-depth-continuous",
+            "reciprocalApertureIndex": reciprocal_aperture_index,
+        }),
+        CrossingRelationship::IndoorTopologyBoundary(reason) => json!({
+            "kind": "indoor-topology-boundary",
+            "reason": boundary_reason_name(reason),
+        }),
+        CrossingRelationship::ExteriorTransition {
+            exterior_landblock_id,
+        } => json!({
+            "kind": "exterior-transition",
+            "exteriorLandblockId": dat_id(exterior_landblock_id),
+        }),
+    }
 }
 
 /// Equal-depth ownership selected from the authored source portal's visible shell role.
@@ -581,9 +626,9 @@ fn classify_internal_relationship(
     portal: &LandblockPortal,
     validated_target: Option<LandblockEnvCellPortalRef>,
     context: &InternalRelationshipContext<'_>,
-) -> Result<Value> {
+) -> Result<CrossingRelationship> {
     let Some(target_ref) = validated_target else {
-        return Ok(boundary_relationship(
+        return Ok(CrossingRelationship::IndoorTopologyBoundary(
             IndoorTopologyBoundaryReason::MissingReciprocalIdentity,
         ));
     };
@@ -606,11 +651,12 @@ fn classify_internal_relationship(
         target_cell_bounds: Some(context.cell_bounds[target_cell_index]),
     });
     Ok(match classification {
-        IndoorSeamClassification::DepthContinuous => json!({
-            "kind": "indoor-depth-continuous",
-            "reciprocalApertureIndex": target_aperture_index,
-        }),
-        IndoorSeamClassification::TopologyBoundary(reason) => boundary_relationship(reason),
+        IndoorSeamClassification::DepthContinuous => CrossingRelationship::IndoorDepthContinuous {
+            reciprocal_aperture_index: target_aperture_index,
+        },
+        IndoorSeamClassification::TopologyBoundary(reason) => {
+            CrossingRelationship::IndoorTopologyBoundary(reason)
+        }
     })
 }
 
@@ -685,6 +731,96 @@ async fn resolve_building_aperture(
     };
     aperture_cache.insert((reference.building_index, reference.portal_index), resolved);
     Ok(resolved)
+}
+
+/// Group cells into depth-continuous visibility islands and return one compact ordinal per cell.
+///
+/// Islands are the render domains the compositor's per-pixel walk actually moves between, so the
+/// junction exemption bound below must be counted per island, not per authored cell: an island's
+/// exit set is the union of its member cells' exits. Ordinals are dense, assigned in first-seen
+/// cell order, and are meaningful only within this record.
+fn resolve_cell_island_ordinals(cell_count: usize, crossings: &[CrossingProjection]) -> Vec<u32> {
+    let mut parents: Vec<usize> = (0..cell_count).collect();
+    fn find(parents: &mut Vec<usize>, index: usize) -> usize {
+        if parents[index] != index {
+            let root = find(parents, parents[index]);
+            parents[index] = root;
+        }
+        parents[index]
+    }
+    for crossing in crossings {
+        if !matches!(
+            crossing.relationship,
+            CrossingRelationship::IndoorDepthContinuous { .. }
+        ) {
+            continue;
+        }
+        let (Some(source), Some(target)) = (crossing.source_cell_index, crossing.target_cell_index)
+        else {
+            continue;
+        };
+        let source_root = find(&mut parents, source);
+        let target_root = find(&mut parents, target);
+        if source_root != target_root {
+            parents[source_root] = target_root;
+        }
+    }
+    let mut ordinal_by_root = HashMap::new();
+    (0..cell_count)
+        .map(|cell| {
+            let root = find(&mut parents, cell);
+            let next = ordinal_by_root.len() as u32;
+            *ordinal_by_root.entry(root).or_insert(next)
+        })
+        .collect()
+}
+
+/// Assign shared junction ids to coplanar-overlapping crossing groups, degrading loudly on shapes
+/// outside the exemption's soundness bound.
+fn resolve_crossing_junction_groups(
+    landblock_id: u32,
+    crossings: &mut [CrossingProjection],
+    apertures: &SerializedApertures,
+    cell_island_ordinals: &[u32],
+) -> Result<()> {
+    // Outdoor is domain zero; islands shift up by one.
+    let candidates = crossings
+        .iter()
+        .map(|crossing| JunctionCandidate {
+            aperture: &apertures.geometries[crossing.source_aperture_index],
+            source_domain: match crossing.source_cell_index {
+                None => 0,
+                Some(cell) => cell_island_ordinals[cell] + 1,
+            },
+            reciprocal: crossing.reciprocal_index,
+        })
+        .collect::<Vec<_>>();
+    let resolution = resolve_junction_groups(&candidates)?;
+    for oversized in &resolution.oversized {
+        log::warn!(
+            "landblock 0x{landblock_id:08X} declines a portal junction: {} crossings share plane \
+             (({:.4},{:.4},{:.4})|{:.4}) and one render domain contributes {}; members keep the \
+             strict entry test: {}",
+            oversized.members.len(),
+            oversized.plane.normal.x,
+            oversized.plane.normal.y,
+            oversized.plane.normal.z,
+            oversized.plane.d,
+            oversized.largest_domain_member_count,
+            oversized
+                .members
+                .iter()
+                .map(|member| {
+                    apertures.identities[crossings[*member].source_aperture_index].as_str()
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
+    for (crossing, assignment) in crossings.iter_mut().zip(resolution.assignments) {
+        crossing.junction_group = assignment;
+    }
+    Ok(())
 }
 
 /// Resolve each directed crossing's rendering aperture without changing authored query geometry.
@@ -847,7 +983,8 @@ fn crossing_json(index: usize, crossing: &CrossingProjection) -> Value {
         },
         "reciprocalCrossingIndex": crossing.reciprocal_index,
         "sourcePortal": crossing.source,
-        "spatialRelationship": crossing.relationship,
+        "spatialRelationship": relationship_json(crossing.relationship),
+        "junctionGroupId": crossing.junction_group.map(NonZeroU32::get),
     })
 }
 
@@ -867,13 +1004,6 @@ fn visibility_provenance_json(provenance: VisibilityApertureProvenance) -> Value
             "componentCount": evidence.component_count,
         }),
     }
-}
-
-fn boundary_relationship(reason: IndoorTopologyBoundaryReason) -> Value {
-    json!({
-        "kind": "indoor-topology-boundary",
-        "reason": boundary_reason_name(reason),
-    })
 }
 
 fn boundary_reason_name(reason: IndoorTopologyBoundaryReason) -> &'static str {
@@ -1156,12 +1286,77 @@ mod tests {
             exact_match,
             mask_depth_policy: MaskDepthPolicy::AllowEqualDepth,
             reciprocal_index,
+            junction_group: None,
             source: json!({ "kind": "test" }),
-            relationship: json!({
-                "kind": "indoor-topology-boundary",
-                "reason": "source-not-exact-match",
-            }),
+            relationship: CrossingRelationship::IndoorTopologyBoundary(
+                IndoorTopologyBoundaryReason::SourceIsNotExactMatch,
+            ),
         }
+    }
+
+    #[test]
+    fn depth_continuous_crossings_union_cells_into_islands() {
+        let mut apertures = SerializedApertures::default();
+        let seam = square_aperture(0.0, 0.0, 2.0, 2.0, 0.0);
+        let seam_index = append_test_aperture(&mut apertures, "seam", &seam);
+        let mut continuous = test_crossing(seam_index, true, Some(1));
+        continuous.source_cell_index = Some(0);
+        continuous.target_cell_index = Some(1);
+        continuous.relationship = CrossingRelationship::IndoorDepthContinuous {
+            reciprocal_aperture_index: seam_index,
+        };
+        let mut boundary = test_crossing(seam_index, false, None);
+        boundary.source_cell_index = Some(1);
+        boundary.target_cell_index = Some(2);
+
+        let ordinals = resolve_cell_island_ordinals(3, &[continuous, boundary]);
+
+        assert_eq!(ordinals, vec![0, 0, 1]);
+    }
+
+    #[test]
+    fn coincident_junction_crossings_share_one_group_id() {
+        let mut apertures = SerializedApertures::default();
+        let footprint = square_aperture(0.0, 0.0, 2.0, 2.0, 0.0);
+        let elsewhere = square_aperture(10.0, 0.0, 12.0, 2.0, 0.0);
+        let footprint_index = append_test_aperture(&mut apertures, "footprint", &footprint);
+        let elsewhere_index = append_test_aperture(&mut apertures, "elsewhere", &elsewhere);
+
+        // Cells 0 and 1 in distinct islands, chained through a zero-thickness outdoor slab.
+        let mut crossings = vec![
+            exterior_crossing(footprint_index, Some(0), None, Some(1)),
+            exterior_crossing(footprint_index, None, Some(0), Some(0)),
+            exterior_crossing(footprint_index, Some(1), None, Some(3)),
+            exterior_crossing(footprint_index, None, Some(1), Some(2)),
+            exterior_crossing(elsewhere_index, Some(0), None, None),
+        ];
+        let ordinals = resolve_cell_island_ordinals(2, &crossings);
+
+        resolve_crossing_junction_groups(0x0001_ffff, &mut crossings, &apertures, &ordinals)
+            .unwrap();
+
+        let group = crossings[0].junction_group.expect("junction id assigned");
+        assert!(
+            crossings[..4]
+                .iter()
+                .all(|crossing| crossing.junction_group == Some(group))
+        );
+        assert_eq!(crossings[4].junction_group, None);
+    }
+
+    fn exterior_crossing(
+        source_aperture_index: usize,
+        source_cell_index: Option<usize>,
+        target_cell_index: Option<usize>,
+        reciprocal_index: Option<usize>,
+    ) -> CrossingProjection {
+        let mut crossing = test_crossing(source_aperture_index, false, reciprocal_index);
+        crossing.source_cell_index = source_cell_index;
+        crossing.target_cell_index = target_cell_index;
+        crossing.relationship = CrossingRelationship::ExteriorTransition {
+            exterior_landblock_id: 0x0001_ffff,
+        };
+        crossing
     }
 
     fn square_aperture(

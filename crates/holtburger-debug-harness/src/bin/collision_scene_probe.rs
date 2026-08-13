@@ -552,6 +552,10 @@ fn append_placed_motion_transitions(
             anyhow::bail!("placed-motion trace lost collision coverage: {missing:?}")
         }
     };
+    ensure!(
+        !path.has_recovery(),
+        "ordinary placed-motion probe unexpectedly required placement recovery"
+    );
     let initial_cell = path.initial().placement().committed_cell();
     ensure!(
         initial_cell == previous_cell,
@@ -571,6 +575,49 @@ fn append_placed_motion_transitions(
         cell = next;
     }
     Ok(cell)
+}
+
+fn append_physical_fly_viewer_transitions(
+    scene: &CollisionScene,
+    tick: usize,
+    previous_cell: Option<Guid>,
+    anchor: Guid,
+    start: Vector3,
+    body_motion: &[MotionWaypoint],
+    transitions: &mut Vec<PlacementLegTransition>,
+) -> Result<Option<Guid>> {
+    let body_path = match scene.transit_motion_path(PlacedMotionPathRequest {
+        previous_cell,
+        anchor,
+        start,
+        radius: PHYSICAL_FLY_RADIUS,
+        waypoints: body_motion,
+    })? {
+        CollisionQuery::Complete(path) => path,
+        CollisionQuery::MissingCoverage(missing) => {
+            anyhow::bail!("physical-fly body path lost collision coverage: {missing:?}")
+        }
+    };
+    let viewer_motion = body_path
+        .legs()
+        .iter()
+        .map(|leg| MotionWaypoint {
+            center: leg.end().center(),
+            end_fraction: leg.end_fraction(),
+        })
+        .collect::<Vec<_>>();
+    append_placed_motion_transitions(
+        scene,
+        tick,
+        PlacedMotionPathRequest {
+            previous_cell,
+            anchor,
+            start,
+            radius: VIEWER_SPHERE_RADIUS,
+            waypoints: &viewer_motion,
+        },
+        transitions,
+    )
 }
 
 fn format_placement_transitions(transitions: &[PlacementLegTransition]) -> String {
@@ -816,16 +863,13 @@ fn traverse_physical_fly_portal(
             },
         )?)
         .with_context(|| format!("drive tick {tick}"))?;
-        let path_cell = append_placed_motion_transitions(
+        let path_cell = append_physical_fly_viewer_transitions(
             scene,
             tick,
-            PlacedMotionPathRequest {
-                previous_cell: viewer_cell,
-                anchor: Guid(landblock_id),
-                start: previous.pose.coords,
-                radius: previous.radius,
-                waypoints: &solved.motion,
-            },
+            viewer_cell,
+            Guid(landblock_id),
+            previous.pose.coords,
+            &solved.motion,
             &mut placement_transitions,
         )?;
         viewer_cell = path_cell;
@@ -917,16 +961,13 @@ fn exit_physical_fly_portal(
             },
         )?)
         .with_context(|| format!("reverse tick {tick}"))?;
-        let path_cell = append_placed_motion_transitions(
+        let path_cell = append_physical_fly_viewer_transitions(
             scene,
             tick,
-            PlacedMotionPathRequest {
-                previous_cell: viewer_cell,
-                anchor,
-                start: previous.pose.coords,
-                radius: previous.radius,
-                waypoints: &solved.motion,
-            },
+            viewer_cell,
+            anchor,
+            previous.pose.coords,
+            &solved.motion,
             &mut placement_transitions,
         )?;
         viewer_cell = path_cell;

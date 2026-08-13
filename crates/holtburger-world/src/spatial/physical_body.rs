@@ -426,14 +426,17 @@ fn solve_free_sphere_tick(
             substeps,
             contact_passes,
         } => {
-            let pose = body_reference_pose(solved.pose, solved.cell, offset)?;
             let path = trace_body_reference_path(scene, body.pose, cell, sphere, &motion, true)?;
+            let committed_cell = path.final_point().placement().committed_cell();
+            let pose = body_reference_pose(solved.pose, committed_cell, offset)?;
             let achieved_velocity = achieved_displacement / delta_seconds;
             Ok(PhysicalBodyTickCommit {
                 pose,
                 velocity: achieved_velocity,
                 contact: ContactState::Airborne,
-                response: PhysicalBodyResponseState::FreeSphere { cell: solved.cell },
+                response: PhysicalBodyResponseState::FreeSphere {
+                    cell: committed_cell,
+                },
                 activity: PhysicalBodyActivity::Active,
                 outcome: PhysicalBodyTickOutcome::Motion(PhysicalBodyMotion {
                     path,
@@ -513,9 +516,15 @@ fn solve_grounded_body_tick(
                 &motion,
                 false,
             )?;
-            let grounded = solved.support.is_some();
+            let committed_cell = path.final_point().placement().committed_cell();
+            let recovered = path.has_recovery();
+            let pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
+            // Support identity belongs to the collision domain that produced it. A recovered
+            // placement deliberately drops that memory so the next ordinary tick reacquires it.
+            let support = if recovered { None } else { solved.support };
+            let grounded = support.is_some();
             Ok(PhysicalBodyTickCommit {
-                pose: solved.pose,
+                pose,
                 velocity: achieved_velocity,
                 contact: if grounded {
                     ContactState::Grounded
@@ -523,9 +532,9 @@ fn solve_grounded_body_tick(
                     ContactState::Airborne
                 },
                 response: PhysicalBodyResponseState::Grounded {
-                    cell: solved.cell,
+                    cell: committed_cell,
                     fall_velocity: solved.fall_velocity,
-                    support: solved.support,
+                    support,
                 },
                 activity: PhysicalBodyActivity::Active,
                 outcome: PhysicalBodyTickOutcome::Motion(PhysicalBodyMotion {
@@ -616,16 +625,42 @@ fn held_motion_commit(
         }],
         false,
     )?;
+    let committed_cell = path.final_point().placement().committed_cell();
+    let recovered = path.has_recovery();
+    let pose = if recovered {
+        body_reference_pose(body.pose, committed_cell, Vector3::zero())?
+    } else {
+        body.pose
+    };
+    let response = match response {
+        PhysicalBodyResponseState::FreeSphere { .. } => PhysicalBodyResponseState::FreeSphere {
+            cell: committed_cell,
+        },
+        PhysicalBodyResponseState::Grounded {
+            fall_velocity,
+            support,
+            ..
+        } => PhysicalBodyResponseState::Grounded {
+            cell: committed_cell,
+            fall_velocity,
+            support: if recovered { None } else { support },
+        },
+    };
+    let grounded = diagnostics.grounded && !recovered;
     Ok(PhysicalBodyTickCommit {
-        pose: body.pose,
+        pose,
         velocity: Vector3::zero(),
-        contact: body.contact,
+        contact: if recovered {
+            ContactState::Airborne
+        } else {
+            body.contact
+        },
         response,
         activity: PhysicalBodyActivity::Active,
         outcome: PhysicalBodyTickOutcome::Motion(PhysicalBodyMotion {
             path,
             status: diagnostics.status,
-            grounded: diagnostics.grounded,
+            grounded,
             constraint_count: diagnostics.constraint_count,
             substeps: diagnostics.substeps,
             contact_passes: diagnostics.contact_passes,

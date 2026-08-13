@@ -12,9 +12,10 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_world::{
-    CollisionQuery, CollisionScene, MotionWaypoint, PhysicalBodyActivity, PhysicalBodyTickOutcome,
-    PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus, PlacedMotionPath,
-    PlacedMotionPathRequest, PlacedMotionPoint, SpatialBodyId, resolve_physical_body_cell,
+    CellTransitRequest, CollisionQuery, CollisionScene, MotionWaypoint, PhysicalBodyActivity,
+    PhysicalBodyTickOutcome, PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus,
+    PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint, SpatialBodyId,
+    resolve_physical_body_cell,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -22,6 +23,7 @@ use tauri::{AppHandle, Emitter};
 use crate::host_simulation_runtime::{
     CollisionSource, FrontendPhysicalBodyRegistration, HostSimulationRuntime,
     PhysicalBodyDefinitionRequest, PhysicalBodyPoseRequest, PhysicalResponseRequest,
+    report_placed_motion_recoveries,
 };
 
 /// Gate A's ratified host cadence.
@@ -111,11 +113,11 @@ pub struct PhysicalCameraResidency {
 pub struct PhysicalCameraRegistration {
     /// Canonical scene position `[east, up, south]` currently applied to the renderer.
     pub scene_position: [f32; 3],
-    /// Exact residency currently applied to the renderer.
+    /// Portal-history seed currently applied to the renderer and revalidated against host topology.
     pub residency: PhysicalCameraResidency,
     /// Unit first-person view direction in AC world axes.
     pub view_direction: [f32; 3],
-    /// Physical response to register without reclassifying the presented placement.
+    /// Physical response to register after validating the presented placement.
     pub mode: PhysicalCameraMode,
     /// Explicit source-neutral geometry and response configuration for the generic body.
     pub body: PhysicalBodyDefinitionRequest,
@@ -232,10 +234,10 @@ impl HostCameraRuntime {
         Arc::clone(&self.simulation)
     }
 
-    /// Registers one physical response from the exact placement currently applied to the renderer.
+    /// Registers one physical response after validating the renderer's placement-history seed.
     pub fn start(&self, registration: PhysicalCameraRegistration) -> Result<u64> {
         let (owner, initial_viewer_cell) = parse_registration_residency(&registration.residency)?;
-        let presented_pose =
+        let mut presented_pose =
             scene_point_to_residency_pose(registration.scene_position, owner, initial_viewer_cell)?;
         let view_direction = normalized_view_direction(registration.view_direction)?;
         let scene = self.simulation.snapshot();
@@ -256,9 +258,13 @@ impl HostCameraRuntime {
                 // supplied placement is retained as topology history and validated on restoration.
                 CollisionQuery::MissingCoverage(_) => initial_viewer_cell,
             };
-        if let Some(cell) = body_cell {
-            body_pose.landblock_id = cell;
-        }
+        body_pose = pose_with_cell(body_pose, body_cell)?;
+        let viewer_cell = match resolve_viewer_cell(&scene, presented_pose, initial_viewer_cell)? {
+            CollisionQuery::Complete(cell) => cell,
+            // Viewer placement follows the same dormant-history rule as its physical body.
+            CollisionQuery::MissingCoverage(_) => initial_viewer_cell,
+        };
+        presented_pose = pose_with_cell(presented_pose, viewer_cell)?;
         let body_id = self.simulation.register_frontend_physical_body(
             &FrontendPhysicalBodyRegistration {
                 pose: PhysicalBodyPoseRequest {
@@ -278,7 +284,7 @@ impl HostCameraRuntime {
         )?;
         let viewer = PresentedViewer {
             pose: presented_pose,
-            cell: initial_viewer_cell,
+            cell: viewer_cell,
             direction: view_direction,
         };
 
@@ -439,6 +445,7 @@ impl HostCameraRuntime {
         let solve_duration_ms = solve_started_at.elapsed().as_secs_f64() * 1_000.0;
         let (initial, legs, viewer) = match viewer_path {
             Some((path, direction)) => {
+                report_placed_motion_recoveries("physical camera viewer", &path);
                 let initial = serialize_path_point(path.anchor(), path.initial())?;
                 let legs = serialize_path_legs(&path)?;
                 let viewer = presented_viewer_from_path(&path, direction)?;
@@ -571,6 +578,40 @@ fn scene_point_to_residency_pose(
         pose.landblock_id = cell;
     }
     Ok(pose)
+}
+
+/// Resolves the render viewer independently from the response body's primary sphere.
+fn resolve_viewer_cell(
+    scene: &CollisionScene,
+    pose: WorldPosition,
+    seed_cell: Option<Guid>,
+) -> Result<CollisionQuery<Option<Guid>>> {
+    let placement = scene.transit_cell(CellTransitRequest {
+        previous_cell: seed_cell,
+        anchor: landblock_key(pose.landblock_id),
+        center: pose.coords,
+        radius: VIEWER_SPHERE_RADIUS,
+    })?;
+    Ok(match placement {
+        CollisionQuery::Complete(placement) => CollisionQuery::Complete(placement.committed_cell()),
+        CollisionQuery::MissingCoverage(missing) => CollisionQuery::MissingCoverage(missing),
+    })
+}
+
+/// Makes the pose frame agree with the independently resolved portal-history cell.
+fn pose_with_cell(mut pose: WorldPosition, cell: Option<Guid>) -> Result<WorldPosition> {
+    if let Some(cell) = cell {
+        ensure!(
+            landblock_key(cell) == landblock_key(pose.landblock_id),
+            "resolved EnvCell does not belong to the pose owner"
+        );
+        pose.landblock_id = cell;
+        return Ok(pose);
+    }
+
+    // Clear a stale EnvCell selector before normalization; low words >= 0x0100 identify interiors.
+    pose.landblock_id = Guid(pose.landblock_id.0 & 0xffff_0000);
+    Ok(pose.normalize_outdoor_landblock_frame()?)
 }
 
 fn transit_presented_viewer_path(
@@ -1071,11 +1112,10 @@ mod tests {
                         d: 100.2,
                     },
                 ],
-                vec![portal(
-                    -1.0,
-                    100.0,
-                    CellCollisionPortalTarget::EnvCell(0x010a),
-                )],
+                vec![
+                    portal(-1.0, 100.0, CellCollisionPortalTarget::EnvCell(0x010a)),
+                    portal(1.0, -100.2, CellCollisionPortalTarget::Outdoor),
+                ],
             ),
         ]
     }
@@ -1270,6 +1310,32 @@ mod tests {
         .unwrap();
 
         assert_eq!(cell, CollisionQuery::Complete(Some(Guid(0xda55_010b))));
+    }
+
+    #[test]
+    fn physical_camera_registration_rejects_a_stale_interior_cell_outdoors() {
+        let pose = WorldPosition {
+            // The frontend still reports 10B after its point has passed that cell's outside portal.
+            landblock_id: Guid(0xda55_010b),
+            coords: Vector3::new(100.5, 10.0, 20.0),
+            rotation: Quaternion::identity(),
+        };
+        for mode in [
+            PhysicalCameraMode::PhysicalFly,
+            PhysicalCameraMode::GroundedWalk,
+        ] {
+            let runtime = runtime_with_da55_interest(Arc::new(ThinCollisionSource));
+            let session = runtime.start(registration(pose, mode)).unwrap();
+
+            let path = runtime
+                .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+                .unwrap()
+                .expect("active session must produce a path");
+
+            assert_eq!(path.initial.residency.landblock_id, "0xda55ffff");
+            assert_eq!(path.initial.residency.env_cell_id, None);
+            assert_eq!(final_path_point(&path).residency.env_cell_id, None);
+        }
     }
 
     #[test]

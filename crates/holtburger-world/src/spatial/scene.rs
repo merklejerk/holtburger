@@ -979,4 +979,132 @@ mod physical_body_tests {
         assert_eq!(motion.path.final_point().placement().committed_cell(), None);
         assert!((motion.path.final_point().center().x - 100.4).abs() < 0.000_1);
     }
+
+    #[test]
+    fn generic_body_commits_the_placement_repaired_by_its_motion_path() {
+        let cell = Guid(0xda55_0100);
+        let mut collision = collision_scene(None);
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0xda55_ffff,
+                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: vec![CellVolume {
+                        cell_selector: 0x0100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: vec![Plane {
+                            normal: Vector3::new(-1.0, 0.0, 0.0),
+                            d: 100.0,
+                        }],
+                        portals: Vec::new(),
+                    }],
+                },
+            })
+            .unwrap();
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let id = scene.register_ephemeral_body(
+            WorldPosition {
+                landblock_id: cell,
+                ..pose(Vector3::new(99.8, 10.0, 20.0))
+            },
+            now,
+        );
+        scene
+            .attach_physical_body(
+                id,
+                free_definition(Vector3::zero(), 0.1),
+                Some(cell),
+                &collision,
+            )
+            .unwrap();
+
+        let result = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                Vector3::new(0.4, 0.0, 0.0),
+                1.0,
+                now + Duration::from_secs(1),
+            )
+            .unwrap();
+        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
+            panic!("covered recovery tick unexpectedly became inactive")
+        };
+        let committed = scene.body(id).unwrap();
+
+        assert_eq!(motion.path.final_point().placement().committed_cell(), None);
+        assert!(motion.path.final_point().recovery().is_some());
+        assert!(!committed.pose.is_indoors());
+        assert_eq!(committed.physical.as_ref().unwrap().response.cell(), None);
+    }
+
+    #[test]
+    fn held_body_commits_placement_only_recovery_without_geometric_motion() {
+        let cell = Guid(0xda55_0100);
+        let mut collision = collision_scene(None);
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0xda55_ffff,
+                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: vec![CellVolume {
+                        cell_selector: 0x0100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: vec![Plane {
+                            normal: Vector3::new(-1.0, 0.0, 0.0),
+                            d: 100.0,
+                        }],
+                        portals: Vec::new(),
+                    }],
+                },
+            })
+            .unwrap();
+        let now = Instant::now();
+        let start = Vector3::new(100.2, 10.0, 20.0);
+        let mut scene = SpatialScene::new();
+        let id = scene.register_ephemeral_body(
+            WorldPosition {
+                landblock_id: cell,
+                ..pose(start)
+            },
+            now,
+        );
+        scene
+            .attach_physical_body(
+                id,
+                free_definition(Vector3::zero(), 0.1),
+                Some(cell),
+                &collision,
+            )
+            .unwrap();
+
+        let result = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                Vector3::new(100.0, 0.0, 0.0),
+                1.0,
+                now + Duration::from_secs(1),
+            )
+            .unwrap();
+        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
+            panic!("covered held tick unexpectedly became inactive")
+        };
+        let committed = scene.body(id).unwrap();
+
+        assert_eq!(motion.status, PhysicalBodyTickStatus::SubstepBudgetExceeded);
+        assert!(motion.path.has_recovery());
+        assert_eq!(committed.pose.coords, start);
+        assert!(!committed.pose.is_indoors());
+        assert_eq!(committed.physical.as_ref().unwrap().response.cell(), None);
+    }
 }

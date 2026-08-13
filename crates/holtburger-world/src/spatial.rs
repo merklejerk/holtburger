@@ -22,9 +22,10 @@ mod tests;
 pub use collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionQueryError, CollisionScene,
     CollisionSceneUpdateError, CoverageRequest, GroundedObstruction, GroundedObstructionRequest,
-    MissingCoverage, MotionWaypoint, MovementObstructionRequest, PlacedMotionLeg, PlacedMotionPath,
-    PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery, PlacementRequest, StaticContact,
-    SupportContact, SupportFeature, SupportRequest,
+    MissingCoverage, MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
+    PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint,
+    PlacementRecovery, PlacementRequest, StaticContact, SupportContact, SupportFeature,
+    SupportRequest,
 };
 pub use grounded::{
     EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,

@@ -196,6 +196,7 @@ pub fn solve_physical_fly(
         motion.push(MotionWaypoint {
             center: current,
             end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
+            placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
         });
     }
 

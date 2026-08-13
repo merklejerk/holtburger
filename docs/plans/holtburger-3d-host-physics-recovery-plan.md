@@ -3587,6 +3587,32 @@ goldens; traversal count, committed cell, and focused differential behavior rema
   The canonical DA55 aggregate retains 36/36 physical-fly, 32 grounded-lower, and 31 grounded-pair
   portal traversals with zero rejected traces.
 
+##### Edge/Wall Corner Reopen — 2026-08-13
+
+The next maintainer observation isolated a two-constraint failure at EnvCell `0x40D80126`: creature
+edge protection could catch the body at a drop, but diagonal input into the adjoining wall could
+still commit `0x40D8011A` at the old elevation and become wedged. An exact product replay from
+body reference `(87.066673, 81.813828, -43.595)` reproduced the transition on its first driven tick.
+The lower and upper spheres both reached the finite wall endpoint; aggregate radial separation
+moved the candidate around that endpoint, and the ordinary step probe then accepted same-height
+support in the neighboring cell before precipice response ran.
+
+Retail orders this case differently. A lower-sphere polygon obstruction attempts step-up; a failed
+step restores the saved check pose, applies the authored wall normal through `slide_sphere`, and
+retries the transition before `precipice_slide` handles the remaining edge component
+(`acclient.c:301457-301489`, `:301550-301630`, `:302548-302607`, `:346436-346492`). Production now
+performs the same restore/project/retry when a failed lower step also changed the candidate's
+containing cell. Same-cell wall contacts retain the existing radial separation path, preserving
+their exact tangent and multi-plane behavior.
+
+The asset-independent differential composes a finite wall, raised safe floor, lower neighboring
+floor, linked cell volumes, and the production two-sphere body. It independently computes retail's
+wall-slide then precipice-slide result, proves diagonal pressure preserves the saved cell and pose,
+and proves the mirrored inward component escapes immediately. Removing the retry reproduces the
+wrong cell transition. The exact `40D8` route now remains in `0x40D80126`; all 252 world tests pass.
+Maintainer Explorer acceptance confirms the original `0x40D80126` edge/wall corner now holds and
+releases consistently without the prior wedge.
+
 #### Risks and Mitigations
 
 - **Decompiler ambiguity creates a false oracle.** Cross-check control flow with callers and

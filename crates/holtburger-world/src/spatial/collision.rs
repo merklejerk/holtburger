@@ -305,6 +305,17 @@ pub struct MotionWaypoint {
     pub center: Vector3,
     /// Strictly increasing completion fraction in `(0, 1]`; the final waypoint must be `1`.
     pub end_fraction: f32,
+    /// Whether traversal derives this endpoint's cell or preserves a solver commitment.
+    pub placement: MotionWaypointPlacement,
+}
+
+/// Placement authority attached to one accepted motion endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionWaypointPlacement {
+    /// Derive placement by directed portal traversal, as for a presentation offset.
+    Traverse,
+    /// Preserve the cell already accepted by collision response, including outdoors.
+    Committed(Option<Guid>),
 }
 
 /// Camera-agnostic request to attach authoritative placement to accepted motion geometry.
@@ -1121,6 +1132,7 @@ impl CollisionScene {
         let mut current_cell = path.initial.placement.committed_cell;
 
         for waypoint in request.waypoints {
+            let segment_leg_start = path.legs.len();
             let sweep = CoverageRequest {
                 anchor: request.anchor,
                 start: geometric_start,
@@ -1188,7 +1200,7 @@ impl CollisionScene {
                 cursor = transition.fraction;
             }
 
-            let (placement, recovery) = match self.placement_for_committed_cell(
+            let inferred = match self.placement_for_committed_cell(
                 request.anchor,
                 waypoint.center,
                 request.radius,
@@ -1197,6 +1209,31 @@ impl CollisionScene {
                 CollisionQuery::Complete(placement) => placement,
                 CollisionQuery::MissingCoverage(missing) => {
                     return Ok(CollisionQuery::MissingCoverage(missing));
+                }
+            };
+            let (placement, recovery) = match waypoint.placement {
+                MotionWaypointPlacement::Traverse => inferred,
+                MotionWaypointPlacement::Committed(cell) if inferred.0.committed_cell() == cell => {
+                    // Preserve explicit containment recovery when it agrees with collision
+                    // response; this is the graceful escape path for an invalid retained cell.
+                    inferred
+                }
+                MotionWaypointPlacement::Committed(cell) => {
+                    // Collision response already validated this endpoint and its placement. A
+                    // contradictory ordinary traversal is a numerical portal graze, so none of
+                    // that segment's inferred transitions may leak into the authoritative path.
+                    path.legs.truncate(segment_leg_start);
+                    match self.placement_for_committed_cell(
+                        request.anchor,
+                        waypoint.center,
+                        request.radius,
+                        cell,
+                    )? {
+                        CollisionQuery::Complete(placement) => placement,
+                        CollisionQuery::MissingCoverage(missing) => {
+                            return Ok(CollisionQuery::MissingCoverage(missing));
+                        }
+                    }
                 }
             };
             append_motion_leg(
@@ -2399,6 +2436,7 @@ mod tests {
             scene.transit_motion_path(request(&[MotionWaypoint {
                 center: Vector3::zero(),
                 end_fraction: f32::NAN,
+                placement: MotionWaypointPlacement::Traverse,
             }])),
             Err(CollisionQueryError::NonFiniteMotionFraction)
         );
@@ -2406,6 +2444,7 @@ mod tests {
             scene.transit_motion_path(request(&[MotionWaypoint {
                 center: Vector3::zero(),
                 end_fraction: 1.1,
+                placement: MotionWaypointPlacement::Traverse,
             }])),
             Err(CollisionQueryError::MotionFractionOutOfRange)
         );
@@ -2414,10 +2453,12 @@ mod tests {
                 MotionWaypoint {
                     center: Vector3::zero(),
                     end_fraction: 0.5,
+                    placement: MotionWaypointPlacement::Traverse,
                 },
                 MotionWaypoint {
                     center: Vector3::zero(),
                     end_fraction: 0.5,
+                    placement: MotionWaypointPlacement::Traverse,
                 },
             ])),
             Err(CollisionQueryError::NonIncreasingMotionFraction)
@@ -2426,6 +2467,7 @@ mod tests {
             scene.transit_motion_path(request(&[MotionWaypoint {
                 center: Vector3::zero(),
                 end_fraction: 0.5,
+                placement: MotionWaypointPlacement::Traverse,
             }])),
             Err(CollisionQueryError::IncompleteMotionPath)
         );
@@ -2465,6 +2507,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(100.4, 10.0, 20.0),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap()
@@ -2514,6 +2557,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(100.2, 10.0, 20.0),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap()
@@ -2571,6 +2615,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(100.2, 10.0, 20.0),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap()
@@ -2631,6 +2676,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(100.2, 10.0, 20.0),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap()
@@ -2698,6 +2744,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(78.26, 46.33, 21.25),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap()
@@ -2711,6 +2758,7 @@ mod tests {
             .map(|leg| MotionWaypoint {
                 center: leg.end().center(),
                 end_fraction: leg.end_fraction(),
+                placement: MotionWaypointPlacement::Traverse,
             })
             .collect::<Vec<_>>();
 
@@ -2741,6 +2789,75 @@ mod tests {
     }
 
     #[test]
+    fn committed_endpoint_rejects_a_rounded_cell_portal_graze() {
+        const ROUNDED_DAT_QUARTER_TURN_COMPONENT: f32 = 707_107.0 / 1_000_000.0;
+        let source_cell = Guid(0xda55_0126);
+        let target_cell = Guid(0xda55_011a);
+        let scene = placement_scene(vec![
+            CellVolume {
+                cell_selector: 0x0126,
+                placement: LandblockPlacement {
+                    origin: Vector3::new(92.0, 83.0, -43.6),
+                    // DAT-authored quarter turns use rounded components. Quaternion magnitude
+                    // must not tilt the transformed portal plane into tangential motion.
+                    orientation: Quaternion {
+                        w: ROUNDED_DAT_QUARTER_TURN_COMPONENT,
+                        x: 0.0,
+                        y: 0.0,
+                        z: -ROUNDED_DAT_QUARTER_TURN_COMPONENT,
+                    },
+                },
+                planes: Vec::new(),
+                portals: vec![CellCollisionPortal {
+                    plane: Plane {
+                        normal: Vector3::new(0.0, 1.0, 0.0),
+                        d: 5.0,
+                    },
+                    positive_side: false,
+                    target: CellCollisionPortalTarget::EnvCell(0x011a),
+                    outdoor_building: None,
+                }],
+            },
+            CellVolume {
+                cell_selector: 0x011a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: Vec::new(),
+                portals: Vec::new(),
+            },
+        ]);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(87.000_1, 81.813_83, -43.12),
+                radius: 0.48,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(87.000_1, 81.877_45, -43.12),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Committed(Some(source_cell)),
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(
+            path.final_point().placement().committed_cell(),
+            Some(source_cell)
+        );
+        assert_eq!(path.legs().len(), 1);
+        assert_ne!(
+            path.initial().placement().committed_cell(),
+            Some(target_cell)
+        );
+    }
+
+    #[test]
     fn placed_motion_path_preserves_accepted_bends_before_adding_portal_splits() {
         let scene = placement_scene(Vec::new());
         let CollisionQuery::Complete(path) = scene
@@ -2753,10 +2870,12 @@ mod tests {
                     MotionWaypoint {
                         center: Vector3::new(97.0, 96.0, 20.0),
                         end_fraction: 0.25,
+                        placement: MotionWaypointPlacement::Traverse,
                     },
                     MotionWaypoint {
                         center: Vector3::new(97.0, 98.0, 20.0),
                         end_fraction: 1.0,
+                        placement: MotionWaypointPlacement::Traverse,
                     },
                 ],
             })
@@ -2821,6 +2940,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(100.2, 10.0, 20.0),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap()
@@ -2856,6 +2976,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(192.2, 96.0, 20.0),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap()
@@ -2881,6 +3002,7 @@ mod tests {
                 waypoints: &[MotionWaypoint {
                     center: Vector3::new(97.0, 96.0, 20.0),
                     end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
                 }],
             })
             .unwrap();

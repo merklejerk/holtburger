@@ -428,6 +428,11 @@ fn solve_free_sphere_tick(
         } => {
             let path = trace_body_reference_path(scene, body.pose, cell, sphere, &motion, true)?;
             let committed_cell = path.final_point().placement().committed_cell();
+            ensure!(
+                committed_cell == solved.cell || path.has_recovery(),
+                "free-sphere placed path ended in {committed_cell:?}, but collision response committed {:?}",
+                solved.cell
+            );
             let pose = body_reference_pose(solved.pose, committed_cell, offset)?;
             let achieved_velocity = achieved_displacement / delta_seconds;
             Ok(PhysicalBodyTickCommit {
@@ -518,6 +523,11 @@ fn solve_grounded_body_tick(
             )?;
             let committed_cell = path.final_point().placement().committed_cell();
             let recovered = path.has_recovery();
+            ensure!(
+                committed_cell == solved.cell || recovered,
+                "grounded placed path ended in {committed_cell:?}, but collision response committed {:?}",
+                solved.cell
+            );
             let pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
             // Support identity belongs to the collision domain that produced it. A recovered
             // placement deliberately drops that memory so the next ordinary tick reacquires it.
@@ -590,6 +600,7 @@ fn trace_body_reference_path(
             .map(|waypoint| MotionWaypoint {
                 center: waypoint.center + offset,
                 end_fraction: waypoint.end_fraction,
+                placement: waypoint.placement,
             })
             .collect()
     };
@@ -622,6 +633,7 @@ fn held_motion_commit(
         &[MotionWaypoint {
             center: body.pose.coords,
             end_fraction: 1.0,
+            placement: super::collision::MotionWaypointPlacement::Committed(response.cell()),
         }],
         false,
     )?;

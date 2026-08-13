@@ -161,6 +161,13 @@ struct RoleContacts {
     contacts: Vec<GroundedObstruction>,
 }
 
+/// One tentative grounded move with its inseparable placement and obstruction facts.
+struct MovementCandidate {
+    center: Vector3,
+    placement: CollisionPlacement,
+    contacts: Vec<RoleContacts>,
+}
+
 #[derive(Debug, Clone)]
 struct SupportedPlacement {
     body_center: Vector3,
@@ -270,34 +277,13 @@ pub fn solve_grounded(
 
     'substeps: for completed_substeps in 0..required_substeps {
         let prior_support = body.support;
-        let constrained_substep = apply_sliding_normal(substep, sliding_normal.take());
-        let mut candidate = current + constrained_substep;
-        let mut candidate_placement = match transit_pair(
-            scene,
-            anchor,
-            &body,
-            reference_pose,
-            request.spheres,
-            candidate,
-        )? {
-            CollisionQuery::Complete(cells) => cells,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(GroundedOutcome::MissingCoverage {
-                    body: original,
-                    missing,
-                });
-            }
-        };
-        let mut role_contacts = match movement_contacts(
-            scene,
-            anchor,
-            current,
-            candidate,
-            reference_pose,
-            request.spheres,
-            &candidate_placement,
-        )? {
-            CollisionQuery::Complete(contacts) => contacts,
+        let mut constrained_substep = apply_sliding_normal(substep, sliding_normal.take());
+        let MovementCandidate {
+            center: mut candidate,
+            placement: mut candidate_placement,
+            contacts: mut role_contacts,
+        } = match movement_candidate(context, &body, current, constrained_substep)? {
+            CollisionQuery::Complete(candidate) => candidate,
             CollisionQuery::MissingCoverage(missing) => {
                 return Ok(GroundedOutcome::MissingCoverage {
                     body: original,
@@ -306,6 +292,7 @@ pub fn solve_grounded(
             }
         };
         let mut converged = false;
+        let mut lower_step_retried = false;
 
         for _ in 0..config.maximum_contact_passes {
             contact_passes += 1;
@@ -317,7 +304,11 @@ pub fn solve_grounded(
             let lower_blocked = role_contacts
                 .iter()
                 .any(|entry| entry.role == SphereRole::Support && !entry.contacts.is_empty());
-            if lower_blocked && body.support.is_some() && config.step_up_height > 0.0 {
+            if lower_blocked
+                && !lower_step_retried
+                && body.support.is_some()
+                && config.step_up_height > 0.0
+            {
                 match step_up_candidate(context, &body, current, candidate)? {
                     CollisionQuery::Complete(Some(stepped)) => {
                         current = stepped.body_center;
@@ -334,6 +325,9 @@ pub fn solve_grounded(
                             center: current,
                             end_fraction: (completed_substeps + 1) as f32
                                 / required_substeps as f32,
+                            placement: super::collision::MotionWaypointPlacement::Committed(
+                                body.cell,
+                            ),
                         });
                         continue 'substeps;
                     }
@@ -344,6 +338,47 @@ pub fn solve_grounded(
                             missing,
                         });
                     }
+                }
+
+                let mut retry_normal = None;
+                remember_next_sliding_normal(
+                    &mut retry_normal,
+                    &role_contacts,
+                    config.walkable_normal_z,
+                    constrained_substep,
+                );
+                let retry_substep = apply_sliding_normal(constrained_substep, retry_normal);
+                // Retail restores the pre-step pose before applying the lower collision normal,
+                // then retries the transition (`CTransition::step_up` and
+                // `BSPTREE::step_sphere_up`, acclient.c:301457-301489, :346436-346492). The
+                // aggregate endpoint solver needs this ordering only when the failed trial also
+                // selected another containing cell; ordinary same-cell walls retain radial
+                // separation so their exact tangent remains stable.
+                if candidate_placement.committed_cell() != body.cell
+                    && retry_substep != constrained_substep
+                {
+                    remember_encountered_constraints(
+                        &mut encountered_constraints,
+                        &role_contacts,
+                        config.walkable_normal_z,
+                    );
+                    sliding_normal = retry_normal;
+                    lower_step_retried = true;
+                    constrained_substep = retry_substep;
+                    match movement_candidate(context, &body, current, retry_substep)? {
+                        CollisionQuery::Complete(retry) => {
+                            candidate = retry.center;
+                            candidate_placement = retry.placement;
+                            role_contacts = retry.contacts;
+                        }
+                        CollisionQuery::MissingCoverage(missing) => {
+                            return Ok(GroundedOutcome::MissingCoverage {
+                                body: original,
+                                missing,
+                            });
+                        }
+                    };
+                    continue;
                 }
             }
 
@@ -445,13 +480,11 @@ pub fn solve_grounded(
             CollisionQuery::Complete(
                 result @ (SettleResult::Edge { .. } | SettleResult::Unsupported),
             ) if config.edge_protection == EdgeProtection::Creature => {
-                // Support is meaningful only in the placement domain that produced it. A portal
-                // commit must reacquire support before creature edge protection may preserve the
-                // old footing; otherwise outdoor terrain can survive as an invisible indoor floor.
-                let retained_support = (body.cell == candidate_placement.committed_cell())
-                    .then_some(prior_support)
-                    .flatten();
-                if let Some(prior_support) = retained_support {
+                // Retail restores both the saved check position and saved cell before precipice
+                // response (`CTransition::edge_slide`, acclient.c:301354-301440). Rolling back the
+                // whole candidate keeps protection independent of whether this substep happened
+                // to cross a portal before support failed.
+                if let Some(prior_support) = prior_support {
                     let inward_normal = match result {
                         SettleResult::Edge { inward_normal } => Some(inward_normal),
                         SettleResult::Unsupported => None,
@@ -523,6 +556,7 @@ pub fn solve_grounded(
         motion.push(MotionWaypoint {
             center: current,
             end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
+            placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
         });
     }
 
@@ -772,6 +806,47 @@ fn pair_coverage(
             outside_world,
         }))
     }
+}
+
+fn movement_candidate(
+    context: GroundedSolveContext<'_>,
+    body: &GroundedBody,
+    current: Vector3,
+    displacement: Vector3,
+) -> Result<CollisionQuery<MovementCandidate>> {
+    let center = current + displacement;
+    let placement = match transit_pair(
+        context.scene,
+        context.anchor,
+        body,
+        context.pose,
+        context.spheres,
+        center,
+    )? {
+        CollisionQuery::Complete(placement) => placement,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    let contacts = match movement_contacts(
+        context.scene,
+        context.anchor,
+        current,
+        center,
+        context.pose,
+        context.spheres,
+        &placement,
+    )? {
+        CollisionQuery::Complete(contacts) => contacts,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    Ok(CollisionQuery::Complete(MovementCandidate {
+        center,
+        placement,
+        contacts,
+    }))
 }
 
 fn movement_contacts(

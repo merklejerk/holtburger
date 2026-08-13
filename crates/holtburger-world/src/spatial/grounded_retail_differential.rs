@@ -218,6 +218,17 @@ fn retail_crossed_edge_normal(polygon: RetailPolygon<'_>, center: Vector3) -> Op
     })
 }
 
+/// Semantic composition of retail's failed lower-sphere step slide and subsequent precipice slide
+/// (`acclient.c:346436-346492`, `:301457-301489`, `:301550-301630`, `:302548-302607`).
+fn retail_wall_precipice_offset(
+    offset: Vector3,
+    wall_normal: Vector3,
+    precipice_inward_normal: Vector3,
+) -> Vector3 {
+    let wall_slide = retail_adjust_offset(offset, retail_sliding_normal(wall_normal));
+    retail_adjust_offset(wall_slide, Some(precipice_inward_normal))
+}
+
 #[test]
 fn retail_sliding_response_matches_production_across_edge_normal_matrix() {
     let collision_normals = [
@@ -809,6 +820,285 @@ fn zero_adjustment_edge_routes_to_retail_precipice_slide_instead_of_ratcheting_d
 }
 
 #[test]
+fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
+    const FIRST_CELL: u32 = 0xda55_0100;
+    const SECOND_CELL: u32 = 0xda55_0101;
+    const EDGE_X: f32 = 10.0;
+
+    let first = CellVolume {
+        cell_selector: FIRST_CELL as u16,
+        placement: LandblockPlacement {
+            origin: Vector3::zero(),
+            orientation: Quaternion::identity(),
+        },
+        planes: vec![
+            Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: 0.0,
+            },
+            Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                d: EDGE_X,
+            },
+        ],
+        portals: vec![CellCollisionPortal {
+            plane: Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -EDGE_X,
+            },
+            positive_side: true,
+            target: CellCollisionPortalTarget::EnvCell(SECOND_CELL as u16),
+            outdoor_building: None,
+        }],
+    };
+    let second = CellVolume {
+        cell_selector: SECOND_CELL as u16,
+        placement: first.placement,
+        planes: vec![
+            Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -EDGE_X,
+            },
+            Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                d: 20.0,
+            },
+        ],
+        portals: vec![CellCollisionPortal {
+            plane: Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                d: EDGE_X,
+            },
+            positive_side: true,
+            target: CellCollisionPortalTarget::EnvCell(FIRST_CELL as u16),
+            outdoor_building: None,
+        }],
+    };
+    let mut floor = placed_polygon(1, horizontal_quad(0.0, EDGE_X, 0.0));
+    floor.source_placement = StaticColliderPlacement::EnvCellShell {
+        cell_id: FIRST_CELL,
+    };
+    let scene = scene_with_volumes(vec![floor], vec![first, second]);
+
+    for speed in [0.5, 1.5, 4.0] {
+        let mut body = GroundedBody {
+            pose: WorldPosition {
+                landblock_id: Guid(FIRST_CELL),
+                coords: Vector3::new(9.8, 20.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+            cell: Some(Guid(FIRST_CELL)),
+            fall_velocity: 0.0,
+            support: Some(GroundSupport {
+                normal: Vector3::new(0.0, 0.0, 1.0),
+            }),
+        };
+        let mut held = false;
+        let mut config = grounded_config();
+        config.edge_protection = EdgeProtection::Creature;
+        config.step_down_height = 1.5;
+        for _ in 0..60 {
+            let start_x = body.pose.coords.x;
+            let outcome = solve_grounded(
+                &scene,
+                config,
+                GroundedRequest {
+                    body,
+                    spheres: grounded_pair(),
+                    drive_velocity: Vector3::new(speed, 0.0, 0.0),
+                    delta_seconds: 1.0 / 30.0,
+                },
+            )
+            .unwrap();
+            let GroundedOutcome::Solved { body: solved, .. } = outcome else {
+                panic!("precipice approach did not solve at speed {speed}: {outcome:?}");
+            };
+            body = solved;
+            if (body.pose.coords.x - start_x).abs() <= TEST_EPSILON {
+                held = true;
+                break;
+            }
+        }
+        assert!(
+            held,
+            "precipice was not protected at speed {speed}: {body:?}"
+        );
+        assert_eq!(body.cell, Some(Guid(FIRST_CELL)));
+        assert!(body.support.is_some());
+
+        let held_x = body.pose.coords.x;
+        let retreated = solve_grounded(
+            &scene,
+            config,
+            GroundedRequest {
+                body,
+                spheres: grounded_pair(),
+                drive_velocity: Vector3::new(-1.0, 0.0, 0.0),
+                delta_seconds: 1.0 / 30.0,
+            },
+        )
+        .unwrap();
+        let GroundedOutcome::Solved {
+            body: retreated, ..
+        } = retreated
+        else {
+            panic!("precipice retreat did not solve at speed {speed}: {retreated:?}");
+        };
+        assert!(
+            retreated.pose.coords.x < held_x - 0.02,
+            "precipice hold trapped retreat at speed {speed}: {retreated:?}"
+        );
+        assert_eq!(retreated.cell, Some(Guid(FIRST_CELL)));
+        assert!(retreated.support.is_some());
+    }
+}
+
+#[test]
+fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
+    const SAFE_CELL: u32 = 0xda55_0100;
+    const DROP_CELL: u32 = 0xda55_0101;
+    const CLIFF_X: f32 = 10.5;
+
+    let safe = CellVolume {
+        cell_selector: SAFE_CELL as u16,
+        placement: LandblockPlacement {
+            origin: Vector3::zero(),
+            orientation: Quaternion::identity(),
+        },
+        planes: vec![Plane {
+            normal: Vector3::new(1.0, 0.0, 0.0),
+            d: -CLIFF_X,
+        }],
+        portals: vec![CellCollisionPortal {
+            plane: Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                d: CLIFF_X,
+            },
+            positive_side: true,
+            target: CellCollisionPortalTarget::EnvCell(DROP_CELL as u16),
+            outdoor_building: None,
+        }],
+    };
+    let drop = CellVolume {
+        cell_selector: DROP_CELL as u16,
+        placement: safe.placement,
+        planes: vec![Plane {
+            normal: Vector3::new(-1.0, 0.0, 0.0),
+            d: CLIFF_X,
+        }],
+        portals: vec![CellCollisionPortal {
+            plane: Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -CLIFF_X,
+            },
+            positive_side: true,
+            target: CellCollisionPortalTarget::EnvCell(SAFE_CELL as u16),
+            outdoor_building: None,
+        }],
+    };
+    let mut safe_floor = placed_polygon(1, horizontal_quad(CLIFF_X, 30.0, 0.0));
+    safe_floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id: SAFE_CELL };
+    // The neighboring support begins around the wall endpoint: radial separation can manufacture
+    // reach, while the retail wall-normal retry cannot.
+    let mut drop_floor = placed_polygon(
+        2,
+        vec![
+            Vector3::new(0.0, 10.55, 0.0),
+            Vector3::new(CLIFF_X, 10.55, 0.0),
+            Vector3::new(CLIFF_X, 30.0, 0.0),
+            Vector3::new(0.0, 30.0, 0.0),
+        ],
+    );
+    drop_floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id: DROP_CELL };
+    let mut wall = placed_polygon_with_normal(
+        3,
+        vertical_quad_y(CLIFF_X + 0.01, 30.0, 10.0, 0.0, 1.2),
+        Vector3::new(0.0, 1.0, 0.0),
+    );
+    wall.source_placement = StaticColliderPlacement::EnvCellShell { cell_id: SAFE_CELL };
+    let scene = scene_with_volumes(vec![safe_floor, drop_floor, wall], vec![safe, drop]);
+
+    let start = Vector3::new(CLIFF_X + 0.066_673, 10.5, 0.0);
+    let drive_velocity = Vector3::new(-2.828, -2.828, 0.0);
+    let delta_seconds = 1.0 / 30.0;
+    let expected_offset = retail_wall_precipice_offset(
+        drive_velocity * delta_seconds,
+        Vector3::new(0.0, 1.0, 0.0),
+        Vector3::new(1.0, 0.0, 0.0),
+    );
+    assert_vector_close(expected_offset, Vector3::zero(), "retail corner response");
+
+    let mut config = grounded_config();
+    config.edge_protection = EdgeProtection::Creature;
+    config.step_down_height = 1.5;
+    let outcome = solve_grounded(
+        &scene,
+        config,
+        GroundedRequest {
+            body: GroundedBody {
+                pose: WorldPosition {
+                    landblock_id: Guid(SAFE_CELL),
+                    coords: start,
+                    rotation: Quaternion::identity(),
+                },
+                cell: Some(Guid(SAFE_CELL)),
+                fall_velocity: 0.0,
+                support: Some(GroundSupport {
+                    normal: Vector3::new(0.0, 0.0, 1.0),
+                }),
+            },
+            spheres: grounded_pair(),
+            drive_velocity,
+            delta_seconds,
+        },
+    )
+    .unwrap();
+    let GroundedOutcome::Solved { body, .. } = outcome else {
+        panic!("wall/precipice corner did not solve: {outcome:?}");
+    };
+    assert_vector_close(
+        body.pose.coords - start,
+        expected_offset,
+        "production corner response",
+    );
+    assert_eq!(body.cell, Some(Guid(SAFE_CELL)));
+    assert!(body.support.is_some());
+
+    let retreat_velocity = Vector3::new(2.828, -2.828, 0.0);
+    let expected_retreat = retail_wall_precipice_offset(
+        retreat_velocity * delta_seconds,
+        Vector3::new(0.0, 1.0, 0.0),
+        Vector3::new(1.0, 0.0, 0.0),
+    );
+    let retreated = solve_grounded(
+        &scene,
+        config,
+        GroundedRequest {
+            body,
+            spheres: grounded_pair(),
+            drive_velocity: retreat_velocity,
+            delta_seconds,
+        },
+    )
+    .unwrap();
+    let GroundedOutcome::Solved {
+        body: retreated, ..
+    } = retreated
+    else {
+        panic!("wall/precipice corner trapped a retail-valid retreat: {retreated:?}");
+    };
+    let actual_retreat = retreated.pose.coords - start;
+    assert!(
+        (actual_retreat.x - expected_retreat.x).abs() < TEST_EPSILON
+            && actual_retreat.y.abs() <= config.separation_epsilon + TEST_EPSILON
+            && actual_retreat.z.abs() < TEST_EPSILON,
+        "production corner retreat differs beyond contact separation: actual={actual_retreat:?} expected={expected_retreat:?}"
+    );
+    assert_eq!(retreated.cell, Some(Guid(SAFE_CELL)));
+    assert!(retreated.support.is_some());
+}
+
+#[test]
 fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_authored_order() {
     const LOWER_HEIGHT: f32 = 0.02;
     const UPPER_HEIGHT: f32 = 0.08;
@@ -1224,6 +1514,21 @@ fn vertical_quad_x(x: f32, minimum_z: f32, maximum_z: f32) -> Vec<Vector3> {
     ]
 }
 
+fn vertical_quad_y(
+    minimum_x: f32,
+    maximum_x: f32,
+    y: f32,
+    minimum_z: f32,
+    maximum_z: f32,
+) -> Vec<Vector3> {
+    vec![
+        Vector3::new(minimum_x, y, minimum_z),
+        Vector3::new(minimum_x, y, maximum_z),
+        Vector3::new(maximum_x, y, maximum_z),
+        Vector3::new(maximum_x, y, minimum_z),
+    ]
+}
+
 fn placed_polygon(id: u16, vertices: Vec<Vector3>) -> PlacedCollider {
     placed_polygon_with_normal(id, vertices, Vector3::new(0.0, 0.0, 1.0))
 }
@@ -1280,6 +1585,13 @@ fn placed_polygon_with_normal(id: u16, vertices: Vec<Vector3>, normal: Vector3) 
 }
 
 fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
+    scene_with_volumes(colliders, Vec::new())
+}
+
+fn scene_with_volumes(
+    colliders: Vec<PlacedCollider>,
+    cell_volumes: Vec<CellVolume>,
+) -> CollisionScene {
     let mut scene = CollisionScene::new();
     let anchor_x = ((LANDBLOCK >> 24) & 0xff) as i32;
     let anchor_y = ((LANDBLOCK >> 16) & 0xff) as i32;
@@ -1291,7 +1603,16 @@ fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
             scene.insert(artifact(owner, Vec::new())).unwrap();
         }
     }
-    scene.insert(artifact(LANDBLOCK, colliders)).unwrap();
+    scene
+        .insert(LandblockCollisionAsset {
+            landblock_id: LANDBLOCK,
+            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            static_geometry: LandblockColliders {
+                colliders,
+                cell_volumes,
+            },
+        })
+        .unwrap();
     scene
 }
 

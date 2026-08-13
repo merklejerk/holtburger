@@ -270,6 +270,7 @@ describe("PhysicalCameraSession", () => {
 				session: 7,
 				sequence: 0,
 				viewDirection: [0, 1, 0],
+				worldDisplacementTotal: [0, 0, 0],
 				worldVelocity: [1, 2, 3],
 			},
 			{
@@ -277,6 +278,7 @@ describe("PhysicalCameraSession", () => {
 				session: 7,
 				sequence: 1,
 				viewDirection: [1, 0, 0],
+				worldDisplacementTotal: [0, 0, 0],
 				worldVelocity: [1, 2, 3],
 			},
 			{
@@ -284,8 +286,31 @@ describe("PhysicalCameraSession", () => {
 				session: 7,
 				sequence: 2,
 				viewDirection: [1, 0, 0],
+				worldDisplacementTotal: [0, 0, 0],
 				worldVelocity: [3, 2, 1],
 			},
+		]);
+	});
+
+	it("carries cumulative wheel displacement across later input replacements", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+		await session.addDisplacement([0, 0, 2], [0, 0, 0], [0, 1, 0]);
+		await session.addDisplacement([0, 0, -0.5], [0, 0, 0], [0, 1, 0]);
+		await session.setIntent([1, 0, 0], [0, 1, 0]);
+
+		const totals = test.calls
+			.filter(({ command }) => command === "set_physical_camera_intent")
+			.map(
+				({ args }) =>
+					(args?.intent as { worldDisplacementTotal: number[] })
+						.worldDisplacementTotal,
+			);
+		expect(totals).toEqual([
+			[0, 0, 2],
+			[0, 0, 1.5],
+			[0, 0, 1.5],
 		]);
 	});
 

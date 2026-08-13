@@ -5,6 +5,7 @@ import {
 	resolveGroundedWalkVelocity,
 	resolvePhysicalCameraViewDirection,
 	resolvePhysicalFlyVelocity,
+	resolvePhysicalFlyWheelDisplacement,
 	type HostPhysicalCameraPath,
 } from "./host-physical-camera-path";
 
@@ -197,6 +198,22 @@ describe("resolvePhysicalFlyVelocity", () => {
 			10,
 		);
 		expect(Math.hypot(...velocity)).toBeCloseTo(10);
+	});
+});
+
+describe("resolvePhysicalFlyWheelDisplacement", () => {
+	it("preserves wheel distance along the pitched local-up axis", () => {
+		const displacement = resolvePhysicalFlyWheelDisplacement(
+			{
+				forward: [0, 0.8, -0.6],
+				right: [1, 0, 0],
+				up: [0, 0.6, 0.8],
+			},
+			5,
+		);
+
+		expect(displacement).toEqual([0, -4, 3]);
+		expect(Math.hypot(...displacement)).toBe(5);
 	});
 });
 

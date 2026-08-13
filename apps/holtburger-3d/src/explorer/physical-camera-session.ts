@@ -177,6 +177,7 @@ export class PhysicalCameraSession {
 	#movementEpoch = 0;
 	#movementActive = false;
 	#lastIntent: PhysicalCameraInput | null = null;
+	#worldDisplacementTotal: [number, number, number] = [0, 0, 0];
 
 	constructor(transport: PhysicalCameraTransport) {
 		this.#transport = transport;
@@ -267,6 +268,7 @@ export class PhysicalCameraSession {
 					session,
 					sequence,
 					viewDirection,
+					worldDisplacementTotal: this.#worldDisplacementTotal,
 					worldVelocity,
 				},
 			});
@@ -277,6 +279,19 @@ export class PhysicalCameraSession {
 			}
 			throw error;
 		}
+	}
+
+	/** Queues one collision-solved displacement without replacing held velocity. */
+	async addDisplacement(
+		worldDisplacement: readonly [number, number, number],
+		worldVelocity: readonly [number, number, number],
+		viewDirection: readonly [number, number, number],
+	): Promise<void> {
+		this.#worldDisplacementTotal = this.#worldDisplacementTotal.map(
+			(component, index) => component + worldDisplacement[index],
+		) as [number, number, number];
+		this.#lastIntent = null;
+		await this.setIntent(worldVelocity, viewDirection);
 	}
 
 	placement(): PhysicalCameraPlacement | null {
@@ -388,6 +403,7 @@ export class PhysicalCameraSession {
 		this.#movementEpoch = 0;
 		this.#movementActive = false;
 		this.#lastIntent = null;
+		this.#worldDisplacementTotal = [0, 0, 0];
 	}
 }
 

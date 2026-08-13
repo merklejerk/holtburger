@@ -40,8 +40,9 @@
 	import { FreeFlyCameraController } from "./free-fly-camera-controller";
 	import {
 		resolveGroundedWalkVelocity,
-		resolvePhysicalFlyVelocity,
 		resolvePhysicalCameraViewDirection,
+		resolvePhysicalFlyVelocity,
+		resolvePhysicalFlyWheelDisplacement,
 		type ExplorerCameraMode,
 		type PhysicalCameraMode,
 		type PhysicalCameraLocalMovement,
@@ -353,6 +354,11 @@
 		controller: FreeFlyCameraController,
 		mode: PhysicalCameraMode,
 	): {
+		readonly basis: {
+			readonly forward: [number, number, number];
+			readonly right: [number, number, number];
+			readonly up: [number, number, number];
+		};
 		readonly viewDirection: [number, number, number];
 		readonly worldVelocity: [number, number, number];
 	} {
@@ -385,6 +391,7 @@
 								: 1),
 					);
 		return {
+			basis: cameraBasis,
 			viewDirection: resolvePhysicalCameraViewDirection(cameraBasis),
 			worldVelocity,
 		};
@@ -400,6 +407,25 @@
 		const input = physicalCameraInput(controller, mode);
 		void session
 			.setIntent(input.worldVelocity, input.viewDirection)
+			.catch((error: unknown) => {
+				physicalCameraError = errorMessage(error);
+			});
+	}
+
+	function sendPhysicalCameraWheel(localUpDistance: number): void {
+		const session = physicalCameraSession;
+		const controller = cameraController;
+		if (!session?.running || !controller) return;
+		const mode =
+			session.status().mode ?? (cameraMode === "free-fly" ? null : cameraMode);
+		if (mode !== "physical-fly") return;
+		const input = physicalCameraInput(controller, mode);
+		void session
+			.addDisplacement(
+				resolvePhysicalFlyWheelDisplacement(input.basis, localUpDistance),
+				input.worldVelocity,
+				input.viewDirection,
+			)
 			.catch((error: unknown) => {
 				physicalCameraError = errorMessage(error);
 			});
@@ -688,6 +714,7 @@
 						}
 						sendPhysicalCameraIntent();
 					},
+					onPhysicalWheel: sendPhysicalCameraWheel,
 				});
 				cameraCoordinator = new ExplorerCameraCoordinator(
 					gameRuntime,

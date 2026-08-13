@@ -18,9 +18,9 @@ use holtburger_dat::physics::{BspLeaf, BspNode};
 
 use super::{
     GroundSupport, GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedObstruction,
-    GroundedOutcome, GroundedRequest, GroundedSolveContext, GroundedSphere, RoleContacts,
-    SettleResult, SphereRole, horizontal_response_normal, remember_next_sliding_normal,
-    settle_candidate, solve_grounded, step_up_candidate,
+    GroundedOutcome, GroundedRequest, GroundedSolveContext, GroundedSphere,
+    RETAIL_WALKABLE_NORMAL_Z, RoleContacts, SettleResult, SphereRole, horizontal_response_normal,
+    remember_next_sliding_normal, settle_candidate, solve_grounded, step_up_candidate,
 };
 use crate::spatial::collision::CollisionScene;
 use crate::{
@@ -168,6 +168,12 @@ fn retail_walkable_height_delta(plane: RetailPolygon<'_>, center: Vector3, radiu
     }
 }
 
+/// Literal retail floor classification (`PhysicsGlobals::floor_z` initialization and
+/// `CPhysicsObj::is_valid_walkable`, `acclient.c:765983-765986`, `:304992-304995`).
+fn retail_is_valid_walkable(normal: Vector3) -> bool {
+    normal.z >= (3_437.746_770_784_939_f64.cos() as f32)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct RetailStepSemantic {
     selected_surface: usize,
@@ -253,6 +259,70 @@ fn retail_sliding_response_matches_production_across_edge_normal_matrix() {
             let expected_offset = retail_adjust_offset(offset, expected_active);
             assert_vector_close(actual_offset, expected_offset, "adjusted offset");
         }
+    }
+}
+
+#[test]
+fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
+    const SHALLOW_NORMAL_Z: f32 = 0.682_300;
+    const STEEP_NORMAL_Z: f32 = 0.613_462;
+
+    let retail_threshold = 3_437.746_770_784_939_f64.cos() as f32;
+    assert_eq!(RETAIL_WALKABLE_NORMAL_Z, retail_threshold);
+
+    for (polygon_id, normal_z, expected_walkable) in
+        [(1, SHALLOW_NORMAL_Z, true), (2, STEEP_NORMAL_Z, false)]
+    {
+        let horizontal = (1.0 - normal_z * normal_z).sqrt();
+        let normal = Vector3::new(-horizontal, 0.0, normal_z);
+        assert_eq!(retail_is_valid_walkable(normal), expected_walkable);
+
+        let collider = placed_polygon_with_normal(
+            polygon_id,
+            inclined_quad(10.0, 20.0, horizontal / normal_z),
+            normal,
+        );
+        let scene = scene(vec![collider]);
+        let candidate = Vector3::new(
+            15.0,
+            20.0,
+            5.0 * horizontal / normal_z + grounded_pair().support.radius / normal_z
+                - grounded_pair().support.center.z,
+        );
+        let body = GroundedBody {
+            pose: WorldPosition {
+                landblock_id: Guid(LANDBLOCK),
+                coords: candidate,
+                rotation: Quaternion::identity(),
+            }
+            .normalize_outdoor_cell(),
+            cell: None,
+            fall_velocity: 0.0,
+            support: None,
+        };
+        let mut config = grounded_config();
+        config.walkable_normal_z = RETAIL_WALKABLE_NORMAL_Z;
+        let settled = settle_candidate(
+            GroundedSolveContext {
+                scene: &scene,
+                config,
+                anchor: Guid(LANDBLOCK),
+                pose: body.pose,
+                spheres: grounded_pair(),
+            },
+            &body,
+            candidate,
+            config.step_down_height,
+        )
+        .unwrap();
+        let CollisionQuery::Complete(settled) = settled else {
+            panic!("mound threshold fixture unexpectedly lacks coverage");
+        };
+        assert_eq!(
+            matches!(settled, SettleResult::Supported(_)),
+            expected_walkable,
+            "production floor classification diverged at normal.z={normal_z}: {settled:?}"
+        );
     }
 }
 
@@ -870,6 +940,96 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
 }
 
 #[test]
+fn zero_step_retains_mound_slope_beside_edge_reached_face() {
+    let upper_vertices = vec![
+        Vector3::new(125.201_65, 60.5, 6.2),
+        Vector3::new(127.749_84, 65.002_6, 6.2),
+        Vector3::new(125.636_7, 66.615_05, 5.9),
+    ];
+    let retained_vertices = vec![
+        Vector3::new(127.749_84, 65.002_6, 6.2),
+        Vector3::new(132.023_56, 69.018_66, 5.9),
+        Vector3::new(125.636_7, 66.615_05, 5.9),
+    ];
+    let upper_normal = Vector3::new(-0.098_513_98, 0.055_752_654, 0.993_572_65);
+    let retained_normal = Vector3::new(-0.046_481_5, 0.123_510_51, 0.991_254_1);
+    let scene = scene(vec![
+        placed_polygon_with_normal(7, upper_vertices, upper_normal),
+        placed_polygon_with_normal(19, retained_vertices.clone(), retained_normal),
+    ]);
+    let spheres = GroundedBodySpheres {
+        support: GroundedSphere {
+            center: Vector3::new(0.0, 0.0, 0.475),
+            radius: 0.48,
+        },
+        upper: Some(GroundedSphere {
+            center: Vector3::new(0.0, 0.0, 1.35),
+            radius: 0.48,
+        }),
+    };
+    let high = Vector3::new(126.277_214, 66.652_67, 5.969_501);
+    let mut body = GroundedBody {
+        pose: WorldPosition {
+            landblock_id: Guid(LANDBLOCK),
+            coords: high,
+            rotation: Quaternion::identity(),
+        }
+        .normalize_outdoor_cell(),
+        cell: None,
+        fall_velocity: 0.0,
+        support: Some(GroundSupport {
+            normal: upper_normal,
+        }),
+    };
+    let mut config = grounded_config();
+    config.step_down_height = 1.5;
+    let context = GroundedSolveContext {
+        scene: &scene,
+        config,
+        anchor: Guid(LANDBLOCK),
+        pose: body.pose,
+        spheres,
+    };
+    let first = settle_candidate(context, &body, high, config.step_down_height).unwrap();
+    let CollisionQuery::Complete(SettleResult::Supported(first)) = first else {
+        panic!("mound fixture did not acquire the retained slope: {first:?}");
+    };
+    assert!(
+        first.body_center.z < high.z - 0.03,
+        "fixture never reproduced the initial seam correction: {first:?}"
+    );
+
+    body.pose.coords = first.body_center;
+    body.support = Some(first.support);
+    let second = solve_grounded(
+        &scene,
+        config,
+        GroundedRequest {
+            body,
+            spheres,
+            drive_velocity: Vector3::zero(),
+            delta_seconds: 1.0 / 30.0,
+        },
+    )
+    .unwrap();
+    let GroundedOutcome::Solved { body: second, .. } = second else {
+        panic!("retained mound slope was lost: {second:?}");
+    };
+    // Retail's zero-step transitional path preserves the current pose without reacquiring a
+    // higher nearby walkable (`CTransition::find_transitional_position`, acclient.c:301820-301996).
+    assert_vector_close(
+        second.pose.coords,
+        first.body_center,
+        "retained mound slope fixed point",
+    );
+    assert_vector_close(
+        second.support.expect("retained mound support").normal,
+        retained_normal,
+        "retained mound slope normal",
+    );
+}
+
+#[test]
 fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
     let mut step_geometry = vec![placed_polygon(1, horizontal_quad(0.0, 30.0, 0.0))];
     step_geometry.push(placed_polygon(2, horizontal_quad(10.0, 14.0, 0.4)));
@@ -1013,7 +1173,7 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
 fn grounded_config() -> GroundedConfig {
     GroundedConfig {
         gravity: -9.8,
-        walkable_normal_z: 0.7,
+        walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
         step_up_height: 0.6,
         step_down_height: 0.2,
         edge_protection: EdgeProtection::None,
@@ -1043,6 +1203,15 @@ fn horizontal_quad(minimum_x: f32, maximum_x: f32, z: f32) -> Vec<Vector3> {
         Vector3::new(maximum_x, 10.0, z),
         Vector3::new(maximum_x, 30.0, z),
         Vector3::new(minimum_x, 30.0, z),
+    ]
+}
+
+fn inclined_quad(minimum_x: f32, maximum_x: f32, rise_per_x: f32) -> Vec<Vector3> {
+    vec![
+        Vector3::new(minimum_x, 10.0, 0.0),
+        Vector3::new(maximum_x, 10.0, rise_per_x * (maximum_x - minimum_x)),
+        Vector3::new(maximum_x, 30.0, rise_per_x * (maximum_x - minimum_x)),
+        Vector3::new(minimum_x, 30.0, 0.0),
     ]
 }
 

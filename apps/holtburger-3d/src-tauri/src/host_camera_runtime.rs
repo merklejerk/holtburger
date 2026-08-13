@@ -986,6 +986,7 @@ mod tests {
         LandblockCollisionAsset, LandblockPlacement, LandblockTerrain, TerrainCellDiagonals,
         TerrainCollisionSurface,
     };
+    use holtburger_world::RETAIL_WALKABLE_NORMAL_Z;
 
     use super::*;
 
@@ -1147,7 +1148,7 @@ mod tests {
                 response: PhysicalResponseRequest::Grounded {
                     config: GroundedConfigRequest {
                         gravity: -9.8,
-                        walkable_normal_z: 0.707_106_77,
+                        walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
                         step_up_height: 0.6,
                         step_down_height: 1.5,
                         edge_protection: EdgeProtectionRequest::Creature,

@@ -11,6 +11,12 @@ use super::collision::{
     anchor_point_to_outdoor_position, landblock_key, separating_displacement,
 };
 
+/// Retail's minimum upward surface-normal component for walkable support.
+///
+/// `PhysicsGlobals::floor_z` is initialized once and consumed by
+/// `CPhysicsObj::is_valid_walkable` (`acclient.c:765983-765986`, `:304992-304995`).
+pub const RETAIL_WALKABLE_NORMAL_Z: f32 = 0.664_174_14;
+
 /// Explicit limits and grounded-response policy for one solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundedConfig {
@@ -410,7 +416,26 @@ pub fn solve_grounded(
             });
         }
 
-        match step_down_candidate(context, &body, candidate)? {
+        // Retail's zero-step transitional path rebuilds placement but does not run step-down
+        // (`CTransition::find_transitional_position`, acclient.c:301820-301996). Reacquiring
+        // support at rest makes adjacent authored faces alternately win at seams. Retain the
+        // committed support only when neither collision response nor placement traversal moved
+        // the body; both changes require ordinary support validation below.
+        let stationary_support = prior_support.filter(|_| {
+            constrained_substep.length_squared() <= f32::EPSILON
+                && (candidate - current).length_squared() <= f32::EPSILON
+                && body.cell == candidate_placement.committed_cell()
+        });
+        let settle_result = if let Some(support) = stationary_support {
+            CollisionQuery::Complete(SettleResult::Supported(SupportedPlacement {
+                body_center: current,
+                placement: candidate_placement.clone(),
+                support,
+            }))
+        } else {
+            step_down_candidate(context, &body, candidate)?
+        };
+        match settle_result {
             CollisionQuery::Complete(SettleResult::Supported(settled)) => {
                 candidate = settled.body_center;
                 candidate_placement = settled.placement;
@@ -1042,7 +1067,7 @@ mod tests {
     fn config() -> GroundedConfig {
         GroundedConfig {
             gravity: -9.8,
-            walkable_normal_z: 0.7,
+            walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
             step_up_height: 0.6,
             step_down_height: 0.2,
             edge_protection: EdgeProtection::None,

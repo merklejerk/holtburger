@@ -15,8 +15,8 @@ use holtburger_world::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, EdgeProtection,
     GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest,
     GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome,
-    PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, solve_grounded,
-    solve_physical_fly,
+    PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
+    solve_grounded, solve_physical_fly,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -42,7 +42,7 @@ const PHYSICAL_FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
 };
 const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
     gravity: -9.8,
-    walkable_normal_z: 0.707_106_77,
+    walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
     step_up_height: 0.6,
     step_down_height: 1.5,
     edge_protection: EdgeProtection::Creature,

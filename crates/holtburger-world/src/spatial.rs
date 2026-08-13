@@ -28,7 +28,8 @@ pub use collision::{
 };
 pub use grounded::{
     EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
-    GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere, solve_grounded,
+    GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere, RETAIL_WALKABLE_NORMAL_Z,
+    solve_grounded,
 };
 pub use physical_body::{
     InvalidPhysicalBodyPlacement, PhysicalBodyActivity, PhysicalBodyDefinition,

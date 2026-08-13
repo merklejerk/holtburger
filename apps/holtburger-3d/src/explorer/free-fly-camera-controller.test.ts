@@ -18,9 +18,11 @@ function controllerHarness() {
 		releasePointerCapture: vi.fn(),
 	} as unknown as HTMLCanvasElement;
 	const changes = vi.fn();
+	const physicalWheel = vi.fn();
 	const controller = new FreeFlyCameraController({
 		canvas,
 		onChange: changes,
+		onPhysicalWheel: physicalWheel,
 		requestAnimationFrame: () => 1,
 		cancelAnimationFrame: vi.fn(),
 	});
@@ -30,7 +32,7 @@ function controllerHarness() {
 			...event,
 		} as unknown as Event);
 	};
-	return { changes, controller, dispatch };
+	return { changes, controller, dispatch, physicalWheel };
 }
 
 describe("FreeFlyCameraController physical handoff", () => {
@@ -54,6 +56,17 @@ describe("FreeFlyCameraController physical handoff", () => {
 		expect(test.controller.snapshotState().position).toEqual(
 			new Vec3(10, 20, 30),
 		);
+		expect(test.changes).not.toHaveBeenCalled();
+	});
+
+	it("routes wheel distance to host policy while host position authority is active", () => {
+		const test = controllerHarness();
+		test.controller.setLocalTranslationEnabled(false);
+
+		test.dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
+
+		expect(test.physicalWheel).toHaveBeenCalledWith(2.5);
+		expect(test.controller.snapshotState().position).toEqual(Vec3.zero());
 		expect(test.changes).not.toHaveBeenCalled();
 	});
 });

@@ -44,6 +44,8 @@ export interface FreeFlyCameraState extends FreeFlyCameraPose {
 export interface FreeFlyCameraControllerOptions {
 	readonly canvas: HTMLCanvasElement;
 	readonly onChange: (state: FreeFlyCameraState) => void;
+	/** Sends wheel translation to the current host-owned camera policy. */
+	readonly onPhysicalWheel: (localUpDistance: number) => void;
 	readonly requestAnimationFrame?: (callback: FrameRequestCallback) => number;
 	readonly cancelAnimationFrame?: (handle: number) => void;
 }
@@ -63,6 +65,7 @@ const CAMERA_CONTROL_TUNING = FRONTEND_TUNING.explorer.camera.controls;
 export class FreeFlyCameraController {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onChange: (state: FreeFlyCameraState) => void;
+	readonly #onPhysicalWheel: (localUpDistance: number) => void;
 	readonly #requestAnimationFrame: (callback: FrameRequestCallback) => number;
 	readonly #cancelAnimationFrame: (handle: number) => void;
 	readonly #pressedKeys = new Set<MovementKey>();
@@ -78,6 +81,7 @@ export class FreeFlyCameraController {
 	constructor(options: FreeFlyCameraControllerOptions) {
 		this.#canvas = options.canvas;
 		this.#onChange = options.onChange;
+		this.#onPhysicalWheel = options.onPhysicalWheel;
 		this.#requestAnimationFrame =
 			options.requestAnimationFrame ??
 			window.requestAnimationFrame.bind(window);
@@ -223,11 +227,6 @@ export class FreeFlyCameraController {
 	};
 
 	readonly #handleWheel = (event: WheelEvent): void => {
-		if (!this.#localTranslationEnabled) {
-			event.preventDefault();
-			return;
-		}
-		const { up } = cameraAxes(this.#state);
 		const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
 		const distance =
 			-clamp(
@@ -237,6 +236,12 @@ export class FreeFlyCameraController {
 			) *
 			CAMERA_CONTROL_TUNING.wheelLocalUpUnitsPerDelta *
 			this.#speedMultiplier(event.shiftKey);
+		if (!this.#localTranslationEnabled) {
+			if (distance !== 0) this.#onPhysicalWheel(distance);
+			event.preventDefault();
+			return;
+		}
+		const { up } = cameraAxes(this.#state);
 		this.#setManualState({
 			...this.#state,
 			position: this.#state.position.add(scaleVec3(up, distance)),

@@ -220,6 +220,16 @@ export function resolvePhysicalFlyVelocity(
 	return [sceneX * scale, north === 0 ? 0 : north, sceneY * scale];
 }
 
+/** Converts one local-up wheel distance into an AC-world displacement. */
+export function resolvePhysicalFlyWheelDisplacement(
+	basis: PhysicalCameraBasis,
+	distance: number,
+): [number, number, number] {
+	const east = basis.up[0] * distance;
+	const north = -basis.up[2] * distance;
+	return [east, north === 0 ? 0 : north, basis.up[1] * distance];
+}
+
 /**
  * Converts Explorer input into yaw-relative, horizontal AC-world walking velocity.
  *

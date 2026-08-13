@@ -106,6 +106,8 @@ pub struct PhysicalCameraIntent {
     pub sequence: u64,
     /// Monotonic nonzero-input generation used to preserve stop/start across async reordering.
     pub movement_epoch: u64,
+    /// Cumulative one-shot AC-world displacement requested during this session.
+    pub world_displacement_total: [f32; 3],
     /// Desired AC-world velocity `[east, north, up]` in meters per second.
     pub world_velocity: [f32; 3],
     /// Unit first-person view direction in AC world axes.
@@ -118,6 +120,7 @@ impl Default for PhysicalCameraIntent {
             session: 0,
             sequence: 0,
             movement_epoch: 0,
+            world_displacement_total: [0.0; 3],
             world_velocity: [0.0; 3],
             view_direction: [0.0, 1.0, 0.0],
         }
@@ -232,6 +235,8 @@ struct CameraBodyController {
     movement_elapsed_seconds: f32,
     /// Latest frontend movement generation applied to this controller.
     movement_epoch: u64,
+    /// Maximum displacement that the registered free-sphere response can subdivide in one tick.
+    maximum_displacement_per_tick: f32,
 }
 
 impl CameraBodyController {
@@ -263,6 +268,17 @@ impl CameraBodyController {
     }
 }
 
+/// Drains one-shot displacement without exceeding the registered subdivision envelope.
+fn bounded_pending_displacement(pending: Vector3, available_distance: f32) -> Vector3 {
+    if pending.length() <= available_distance {
+        pending
+    } else if available_distance > 0.0 {
+        pending.normalize() * available_distance
+    } else {
+        Vector3::zero()
+    }
+}
+
 /// Host-retained render viewer state, independent from collision-body placement.
 #[derive(Debug, Clone)]
 struct PresentedViewer {
@@ -286,6 +302,8 @@ struct CameraRuntimeState {
     active: Option<ActiveCamera>,
     intent: PhysicalCameraIntent,
     last_intent_sequence: Option<u64>,
+    /// Portion of the current session's cumulative displacement already submitted to simulation.
+    applied_world_displacement_total: Vector3,
     sequence: u64,
 }
 
@@ -330,6 +348,16 @@ impl HostCameraRuntime {
             "physical camera mode does not match its explicit body response"
         );
         let definition = registration.body.resolve()?;
+        let maximum_displacement_per_tick = match registration.body.response {
+            PhysicalResponseRequest::FreeSphere { config } => {
+                config.maximum_substep_distance * config.maximum_substeps as f32
+            }
+            PhysicalResponseRequest::Grounded { .. } => 0.0,
+        };
+        ensure!(
+            maximum_displacement_per_tick.is_finite(),
+            "physical camera displacement budget must be finite"
+        );
         let body_cell =
             match resolve_physical_body_cell(&scene, body_pose, definition, initial_viewer_cell)? {
                 CollisionQuery::Complete(cell) => cell,
@@ -376,6 +404,7 @@ impl HostCameraRuntime {
                 speed_envelope,
                 movement_elapsed_seconds: 0.0,
                 movement_epoch: 0,
+                maximum_displacement_per_tick,
             },
             viewer,
         }) {
@@ -385,10 +414,12 @@ impl HostCameraRuntime {
             session,
             sequence: 0,
             movement_epoch: 0,
+            world_displacement_total: [0.0; 3],
             world_velocity: [0.0; 3],
             view_direction: [view_direction.x, view_direction.y, view_direction.z],
         };
         state.last_intent_sequence = None;
+        state.applied_world_displacement_total = Vector3::zero();
         state.sequence = 0;
         Ok(session)
     }
@@ -401,6 +432,13 @@ impl HostCameraRuntime {
                 .iter()
                 .all(|component| component.is_finite()),
             "physical camera intent must be finite"
+        );
+        ensure!(
+            intent
+                .world_displacement_total
+                .iter()
+                .all(|component| component.is_finite()),
+            "physical camera displacement total must be finite"
         );
         let direction = normalized_view_direction(intent.view_direction)?;
         intent.view_direction = [direction.x, direction.y, direction.z];
@@ -420,6 +458,13 @@ impl HostCameraRuntime {
             ensure!(
                 intent.world_velocity[2].abs() <= f32::EPSILON,
                 "grounded camera intent must be horizontal"
+            );
+            ensure!(
+                intent
+                    .world_displacement_total
+                    .iter()
+                    .all(|component| component.abs() <= f32::EPSILON),
+                "grounded camera intent cannot request one-shot displacement"
             );
         }
         if let Some(active) = state.active.as_ref() {
@@ -456,6 +501,7 @@ impl HostCameraRuntime {
         }
         let mut state = self.state.lock().expect("camera runtime lock poisoned");
         state.intent = PhysicalCameraIntent::default();
+        state.applied_world_displacement_total = Vector3::zero();
         if let Some(active) = state.active.take() {
             self.simulation.remove_body(active.body.body_id);
         }
@@ -485,6 +531,20 @@ impl HostCameraRuntime {
         let mut body_controller = previous.body;
         let velocity =
             body_controller.requested_velocity_for_tick(target_velocity, dt.as_secs_f32());
+        let requested_displacement_total = Vector3::new(
+            state.intent.world_displacement_total[0],
+            state.intent.world_displacement_total[1],
+            state.intent.world_displacement_total[2],
+        );
+        let pending_displacement =
+            requested_displacement_total - state.applied_world_displacement_total;
+        let available_displacement = (body_controller.maximum_displacement_per_tick
+            - velocity.length() * dt.as_secs_f32())
+        .max(0.0);
+        let consumes_all_pending = pending_displacement.length() <= available_displacement;
+        let consumed_displacement =
+            bounded_pending_displacement(pending_displacement, available_displacement);
+        let velocity = velocity + consumed_displacement / dt.as_secs_f32();
         let view_direction = normalized_view_direction(state.intent.view_direction)?;
         let solve_started_at = Instant::now();
         let solved = self.simulation.tick_physical_body(
@@ -503,6 +563,13 @@ impl HostCameraRuntime {
         let mut grounded = false;
         let viewer_path = match solved.result.outcome {
             PhysicalBodyTickOutcome::Motion(motion) => {
+                state.applied_world_displacement_total = if consumes_all_pending {
+                    // Exact assignment prevents a floating-point subtraction tail from becoming a
+                    // second microscopic displacement on the next tick.
+                    requested_displacement_total
+                } else {
+                    state.applied_world_displacement_total + consumed_displacement
+                };
                 status = camera_tick_status(motion.status);
                 constraint_count = motion.constraint_count;
                 substeps = motion.substeps;
@@ -1170,6 +1237,7 @@ mod tests {
             session,
             sequence,
             movement_epoch: u64::from(world_velocity != [0.0; 3]),
+            world_displacement_total: [0.0; 3],
             world_velocity,
             view_direction: [0.0, 1.0, 0.0],
         }
@@ -1193,6 +1261,7 @@ mod tests {
             },
             movement_elapsed_seconds: 0.0,
             movement_epoch: 1,
+            maximum_displacement_per_tick: 8.0,
         }
     }
 
@@ -1322,6 +1391,118 @@ mod tests {
     }
 
     #[test]
+    fn wheel_displacement_drains_without_exceeding_the_body_solve_budget() {
+        let pending = Vector3::new(0.0, 0.0, 22.5);
+
+        assert_eq!(bounded_pending_displacement(pending, 8.0).z, 8.0);
+        assert_eq!(bounded_pending_displacement(pending, 3.0).z, 3.0);
+        assert_eq!(bounded_pending_displacement(pending, 0.0), Vector3::zero());
+        assert_eq!(bounded_pending_displacement(pending, 30.0), pending);
+    }
+
+    #[test]
+    fn physical_fly_consumes_each_wheel_displacement_once() {
+        let runtime = runtime_with_da55_interest(Arc::new(FlatCollisionSource::default()));
+        let pose = scene_point_to_pose([
+            0xda as f32 * 192.0 + 96.0,
+            20.0,
+            -(0x55 as f32 * 192.0 + 96.0),
+        ])
+        .unwrap();
+        let session = runtime
+            .start(registration(pose, PhysicalCameraMode::PhysicalFly))
+            .unwrap();
+        runtime
+            .set_intent(PhysicalCameraIntent {
+                world_displacement_total: [0.0, 0.0, 2.5],
+                ..intent(session, 0, [0.0; 3])
+            })
+            .unwrap();
+
+        let first = runtime
+            .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+            .unwrap()
+            .unwrap();
+        let second = runtime
+            .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+            .unwrap()
+            .unwrap();
+
+        assert!((final_path_point(&first).origin[2] - 22.5).abs() < 0.001);
+        assert!((final_path_point(&second).origin[2] - 22.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn physical_fly_drains_large_wheel_displacement_across_bounded_ticks() {
+        let runtime = runtime_with_da55_interest(Arc::new(FlatCollisionSource::default()));
+        let pose = scene_point_to_pose([
+            0xda as f32 * 192.0 + 96.0,
+            20.0,
+            -(0x55 as f32 * 192.0 + 96.0),
+        ])
+        .unwrap();
+        let session = runtime
+            .start(registration(pose, PhysicalCameraMode::PhysicalFly))
+            .unwrap();
+        runtime
+            .set_intent(PhysicalCameraIntent {
+                world_displacement_total: [0.0, 0.0, 22.5],
+                ..intent(session, 0, [0.0; 3])
+            })
+            .unwrap();
+
+        let heights = (0..4)
+            .map(|_| {
+                let path = runtime
+                    .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
+                    .unwrap()
+                    .unwrap();
+                final_path_point(&path).origin[2]
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(heights, [28.0, 36.0, 42.5, 42.5]);
+    }
+
+    #[test]
+    fn physical_camera_rejects_invalid_wheel_displacement_by_mode_and_value() {
+        let runtime = runtime_with_da55_interest(Arc::new(FlatCollisionSource::default()));
+        let pose = scene_point_to_pose([
+            0xda as f32 * 192.0 + 96.0,
+            20.0,
+            -(0x55 as f32 * 192.0 + 96.0),
+        ])
+        .unwrap();
+        let fly_session = runtime
+            .start(registration(pose, PhysicalCameraMode::PhysicalFly))
+            .unwrap();
+        let non_finite = runtime
+            .set_intent(PhysicalCameraIntent {
+                world_displacement_total: [0.0, 0.0, f32::NAN],
+                ..intent(fly_session, 0, [0.0; 3])
+            })
+            .unwrap_err();
+        assert_eq!(
+            non_finite.to_string(),
+            "physical camera displacement total must be finite"
+        );
+
+        let grounded_session = runtime
+            .start(registration(pose, PhysicalCameraMode::GroundedWalk))
+            .unwrap();
+        let grounded = runtime
+            .set_intent(PhysicalCameraIntent {
+                world_displacement_total: [0.0, 0.0, 1.0],
+                ..intent(grounded_session, 0, [0.0; 3])
+            })
+            .unwrap_err();
+        assert_eq!(
+            grounded.to_string(),
+            "grounded camera intent cannot request one-shot displacement"
+        );
+    }
+
+    #[test]
     fn new_movement_epoch_restarts_the_host_tick_ramp_without_a_received_stop() {
         let runtime = runtime_with_da55_interest(Arc::new(FlatCollisionSource::default()));
         let pose = scene_point_to_pose([
@@ -1428,6 +1609,7 @@ mod tests {
                 speed_envelope: PhysicalCameraSpeedEnvelope::Instant,
                 movement_elapsed_seconds: 0.0,
                 movement_epoch: 0,
+                maximum_displacement_per_tick: 0.0,
             },
             viewer: PresentedViewer {
                 pose: WorldPosition {
@@ -1487,6 +1669,7 @@ mod tests {
                 speed_envelope: PhysicalCameraSpeedEnvelope::Instant,
                 movement_elapsed_seconds: 0.0,
                 movement_epoch: 0,
+                maximum_displacement_per_tick: 0.0,
             },
             viewer: PresentedViewer {
                 pose: WorldPosition {

@@ -11,7 +11,8 @@ use holtburger_core::ContentAssetService;
 use holtburger_world::{
     CollisionScene, EdgeProtection, GroundedConfig, InvalidPhysicalBodyPlacement,
     PhysicalBodyActivity, PhysicalBodyDefinition, PhysicalBodyTickResult, PhysicalFlyConfig,
-    PhysicalSphereSet, SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialScene,
+    PhysicalSphereSet, PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyEvent,
+    SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
@@ -470,6 +471,7 @@ impl HostSimulationRuntime {
             delta_seconds,
             now,
         )?;
+        report_body_placement_recoveries(body_id, &result);
         if let Some(event) = result.activity_event.clone() {
             state.body_events.push(event);
         }
@@ -618,6 +620,55 @@ impl HostSimulationRuntime {
             .lock()
             .expect("simulation interest target lock poisoned");
         target.session == session && target.revision == revision && target.owners == *owners
+    }
+}
+
+fn report_body_placement_recoveries(body_id: SpatialBodyId, result: &PhysicalBodyTickResult) {
+    let holtburger_world::PhysicalBodyTickOutcome::Motion(motion) = &result.outcome else {
+        return;
+    };
+    if !motion.path.has_recovery() {
+        return;
+    }
+    report_placed_motion_recoveries(&format!("physical body {body_id:?}"), &motion.path);
+}
+
+/// Reports an exceptional placement repair at the host boundary that owns runtime diagnostics.
+pub(crate) fn report_placed_motion_recoveries(subject: &str, path: &PlacedMotionPath) {
+    for (fraction, point) in std::iter::once((0.0, path.initial())).chain(
+        path.legs()
+            .iter()
+            .map(|leg| (leg.end_fraction(), leg.end())),
+    ) {
+        let Some(recovery) = point.recovery() else {
+            continue;
+        };
+        match recovery {
+            PlacementRecovery::Recovered {
+                previous_cell,
+                recovered_cell,
+            } => eprintln!(
+                "{subject} repaired placement at path fraction {fraction:.6}: 0x{:08x} -> {}",
+                previous_cell.0,
+                recovered_cell
+                    .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08x}", cell.0),),
+            ),
+            PlacementRecovery::Ambiguous {
+                previous_cell,
+                candidates,
+                selected_cell,
+            } => eprintln!(
+                "{subject} found ambiguous placement recovery at path fraction {fraction:.6} from 0x{:08x}; selected {}; candidates: {}",
+                previous_cell.0,
+                selected_cell
+                    .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08x}", cell.0),),
+                candidates
+                    .iter()
+                    .map(|cell| format!("0x{:08x}", cell.0))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+        }
     }
 }
 

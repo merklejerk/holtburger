@@ -322,11 +322,33 @@ pub struct PlacedMotionPathRequest<'a> {
     pub waypoints: &'a [MotionWaypoint],
 }
 
+/// Observable fallback used only when directed traversal leaves an invalid retained EnvCell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlacementRecovery {
+    /// Point containment found one unambiguous replacement placement.
+    Recovered {
+        /// Interior cell retained by directed traversal before validation failed.
+        previous_cell: Guid,
+        /// Unique containing EnvCell, or `None` when no resident EnvCell contains the point.
+        recovered_cell: Option<Guid>,
+    },
+    /// Several EnvCells contain the point, so portal history remains authoritative.
+    Ambiguous {
+        /// Interior cell retained by directed traversal before validation failed.
+        previous_cell: Guid,
+        /// Sorted containing EnvCells intentionally not resolved by iteration order.
+        candidates: Vec<Guid>,
+        /// Placement selected by topology-seeded transit, or outdoors when none was reached.
+        selected_cell: Option<Guid>,
+    },
+}
+
 /// One position paired with the complete collision placement valid at that position.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedMotionPoint {
     center: Vector3,
     placement: CollisionPlacement,
+    recovery: Option<PlacementRecovery>,
 }
 
 impl PlacedMotionPoint {
@@ -338,6 +360,11 @@ impl PlacedMotionPoint {
     /// Authoritative cell and collision domains at `center`.
     pub fn placement(&self) -> &CollisionPlacement {
         &self.placement
+    }
+
+    /// Exceptional placement repair attempted at this exact point, if any.
+    pub fn recovery(&self) -> Option<&PlacementRecovery> {
+        self.recovery.as_ref()
     }
 }
 
@@ -391,6 +418,11 @@ impl PlacedMotionPath {
             .last()
             .expect("placed-motion paths are constructed non-empty")
             .end
+    }
+
+    /// Whether any point required exceptional placement repair.
+    pub fn has_recovery(&self) -> bool {
+        self.initial.recovery.is_some() || self.legs.iter().any(|leg| leg.end.recovery.is_some())
     }
 
     /// Translates every geometric center while preserving authoritative placement transitions.
@@ -1064,7 +1096,7 @@ impl CollisionScene {
         request: PlacedMotionPathRequest<'_>,
     ) -> Result<CollisionQuery<PlacedMotionPath>, CollisionQueryError> {
         validate_motion_waypoints(request.waypoints)?;
-        let initial_placement = match self.placement_for_committed_cell(
+        let (initial_placement, initial_recovery) = match self.placement_for_committed_cell(
             request.anchor,
             request.start,
             request.radius,
@@ -1080,12 +1112,13 @@ impl CollisionScene {
             initial: PlacedMotionPoint {
                 center: request.start,
                 placement: initial_placement,
+                recovery: initial_recovery,
             },
             legs: Vec::new(),
         };
         let mut geometric_start = request.start;
         let mut geometric_start_fraction = 0.0;
-        let mut current_cell = request.previous_cell;
+        let mut current_cell = path.initial.placement.committed_cell;
 
         for waypoint in request.waypoints {
             let sweep = CoverageRequest {
@@ -1129,7 +1162,7 @@ impl CollisionScene {
                 }
                 let center =
                     interpolate_point(geometric_start, waypoint.center, transition.fraction);
-                let placement = match self.placement_for_committed_cell(
+                let (placement, recovery) = match self.placement_for_committed_cell(
                     request.anchor,
                     center,
                     request.radius,
@@ -1145,13 +1178,17 @@ impl CollisionScene {
                 append_motion_leg(
                     &mut path,
                     end_fraction,
-                    PlacedMotionPoint { center, placement },
+                    PlacedMotionPoint {
+                        center,
+                        placement,
+                        recovery,
+                    },
                 );
-                current_cell = transition.target_cell;
+                current_cell = path.final_point().placement.committed_cell;
                 cursor = transition.fraction;
             }
 
-            let placement = match self.placement_for_committed_cell(
+            let (placement, recovery) = match self.placement_for_committed_cell(
                 request.anchor,
                 waypoint.center,
                 request.radius,
@@ -1168,8 +1205,10 @@ impl CollisionScene {
                 PlacedMotionPoint {
                     center: waypoint.center,
                     placement,
+                    recovery,
                 },
             );
+            current_cell = path.final_point().placement.committed_cell;
             geometric_start = waypoint.center;
             geometric_start_fraction = waypoint.end_fraction;
         }
@@ -1183,7 +1222,8 @@ impl CollisionScene {
         center: Vector3,
         radius: f32,
         committed_cell: Option<Guid>,
-    ) -> Result<CollisionQuery<CollisionPlacement>, CollisionQueryError> {
+    ) -> Result<CollisionQuery<(CollisionPlacement, Option<PlacementRecovery>)>, CollisionQueryError>
+    {
         if let Some(cell) = committed_cell {
             let owner = landblock_key(cell);
             let has_cell = self.landblocks.get(&owner).is_some_and(|asset| {
@@ -1208,6 +1248,41 @@ impl CollisionScene {
                 return Ok(CollisionQuery::MissingCoverage(missing));
             }
         };
+        let recovery = if let Some(previous_cell) =
+            committed_cell.filter(|cell| placement.committed_cell != Some(*cell))
+        {
+            match self.recover_placement(
+                anchor,
+                center,
+                radius,
+                previous_cell,
+                placement.committed_cell,
+            )? {
+                CollisionQuery::Complete(recovery) => Some(recovery),
+                CollisionQuery::MissingCoverage(missing) => {
+                    return Ok(CollisionQuery::MissingCoverage(missing));
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(PlacementRecovery::Recovered { recovered_cell, .. }) = &recovery {
+            placement = match self.transit_cell(CellTransitRequest {
+                previous_cell: *recovered_cell,
+                anchor,
+                center,
+                radius,
+            })? {
+                CollisionQuery::Complete(placement) => placement,
+                CollisionQuery::MissingCoverage(missing) => {
+                    return Ok(CollisionQuery::MissingCoverage(missing));
+                }
+            };
+            return Ok(CollisionQuery::Complete((placement, recovery)));
+        }
+        if recovery.is_some() {
+            return Ok(CollisionQuery::Complete((placement, recovery)));
+        }
         placement.committed_cell = committed_cell;
         match committed_cell {
             Some(cell) => {
@@ -1217,7 +1292,64 @@ impl CollisionScene {
             }
             None => placement.reaches_outdoors = true,
         }
-        Ok(CollisionQuery::Complete(placement))
+        Ok(CollisionQuery::Complete((placement, recovery)))
+    }
+
+    fn recover_placement(
+        &self,
+        anchor: Guid,
+        center: Vector3,
+        radius: f32,
+        previous_cell: Guid,
+        transit_cell: Option<Guid>,
+    ) -> Result<CollisionQuery<PlacementRecovery>, CollisionQueryError> {
+        let touched = match self.coverage(CoverageRequest {
+            anchor,
+            start: center,
+            end: center,
+            radius,
+        })? {
+            CollisionQuery::Complete(touched) => touched,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+        let mut candidates = touched
+            .into_iter()
+            .flat_map(|owner| {
+                let local = anchor_to_landblock(center, anchor, owner);
+                self.landblocks
+                    .get(&owner)
+                    .into_iter()
+                    .flat_map(move |asset| {
+                        asset
+                            .static_geometry
+                            .cell_volumes
+                            .iter()
+                            .filter(move |volume| volume_reaches(volume, local, 0.0))
+                            .map(move |volume| {
+                                Guid((owner.0 & 0xffff_0000) | u32::from(volume.cell_selector))
+                            })
+                    })
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates.dedup();
+        Ok(CollisionQuery::Complete(match candidates.as_slice() {
+            [] => PlacementRecovery::Recovered {
+                previous_cell,
+                recovered_cell: None,
+            },
+            [cell] => PlacementRecovery::Recovered {
+                previous_cell,
+                recovered_cell: Some(*cell),
+            },
+            _ => PlacementRecovery::Ambiguous {
+                previous_cell,
+                candidates,
+                selected_cell: transit_cell,
+            },
+        }))
     }
 
     fn next_placement_transition(
@@ -1865,8 +1997,17 @@ fn directed_plane_crossing_fraction(
     if delta <= f32::EPSILON {
         return None;
     }
-    let fraction = -oriented_start / delta;
-    if fraction <= cursor + minimum_advance || fraction > 1.0 + f32::EPSILON {
+    let mut fraction = -oriented_start / delta;
+    if fraction > 1.0 {
+        // A prior placement pass may emit this exact portal boundary as a waypoint. Transforming
+        // that world point back into authored local space can leave it a few float ULPs short of
+        // the plane. Commit the endpoint crossing inside the same tolerance used by cell reach.
+        if oriented_end < -CELL_PLANE_TOLERANCE {
+            return None;
+        }
+        fraction = 1.0;
+    }
+    if fraction <= cursor + minimum_advance {
         return None;
     }
     Some(fraction.clamp(0.0, 1.0))
@@ -1888,12 +2029,15 @@ fn select_earlier_transition(
     }
 }
 
-fn append_motion_leg(path: &mut PlacedMotionPath, end_fraction: f32, end: PlacedMotionPoint) {
+fn append_motion_leg(path: &mut PlacedMotionPath, end_fraction: f32, mut end: PlacedMotionPoint) {
     if let Some(last) = path.legs.last_mut()
         && (last.end_fraction - end_fraction).abs() <= f32::EPSILON
     {
         // Multiple zero-duration topology boundaries collapse to the final authoritative placement
         // at that instant. A non-zero-width intermediate cell still receives its own leg.
+        if end.recovery.is_none() {
+            end.recovery = last.end.recovery.take();
+        }
         last.end = end;
         return;
     }
@@ -2342,6 +2486,258 @@ mod tests {
         assert_eq!(path.legs()[2].end_fraction(), 1.0);
         assert_eq!(path.final_point().center(), Vector3::new(100.4, 10.0, 20.0));
         assert_eq!(path.final_point().placement().committed_cell(), None);
+        assert!(path.legs().iter().all(|leg| leg.end().recovery().is_none()));
+    }
+
+    #[test]
+    fn placed_motion_repairs_an_escaped_cell_to_outdoors() {
+        let source_cell = Guid(0xda55_010a);
+        let scene = placement_scene(vec![CellVolume {
+            cell_selector: 0x010a,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            planes: vec![Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                d: 100.0,
+            }],
+            portals: Vec::new(),
+        }]);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("synthetic recovery path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(path.final_point().placement().committed_cell(), None);
+        assert_eq!(
+            path.final_point().recovery(),
+            Some(&PlacementRecovery::Recovered {
+                previous_cell: source_cell,
+                recovered_cell: None,
+            })
+        );
+    }
+
+    #[test]
+    fn placed_motion_repairs_an_escaped_cell_to_one_unique_cell() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        let scene = placement_scene(vec![
+            CellVolume {
+                cell_selector: 0x010a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 100.0,
+                }],
+                portals: Vec::new(),
+            },
+            CellVolume {
+                cell_selector: 0x010b,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -100.0,
+                }],
+                portals: Vec::new(),
+            },
+        ]);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("synthetic recovery path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(
+            path.final_point().placement().committed_cell(),
+            Some(target_cell)
+        );
+        assert_eq!(
+            path.final_point().recovery(),
+            Some(&PlacementRecovery::Recovered {
+                previous_cell: source_cell,
+                recovered_cell: Some(target_cell),
+            })
+        );
+    }
+
+    #[test]
+    fn ambiguous_placement_recovery_reports_candidates_without_iteration_order_selection() {
+        let source_cell = Guid(0xda55_010a);
+        let first_candidate = Guid(0xda55_010b);
+        let second_candidate = Guid(0xda55_010c);
+        let open_candidate = |cell_selector| CellVolume {
+            cell_selector,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            planes: Vec::new(),
+            portals: Vec::new(),
+        };
+        let scene = placement_scene(vec![
+            CellVolume {
+                cell_selector: 0x010a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 100.0,
+                }],
+                portals: Vec::new(),
+            },
+            open_candidate(0x010c),
+            open_candidate(0x010b),
+        ]);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("synthetic recovery path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(path.final_point().placement().committed_cell(), None);
+        assert_eq!(
+            path.final_point().recovery(),
+            Some(&PlacementRecovery::Ambiguous {
+                previous_cell: source_cell,
+                candidates: vec![first_candidate, second_candidate],
+                selected_cell: None,
+            })
+        );
+    }
+
+    #[test]
+    fn retransiting_transformed_portal_boundary_preserves_the_crossing() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        let scene = placement_scene(vec![
+            CellVolume {
+                cell_selector: 0x010a,
+                // CE95-style decimal translations make the world-space boundary a few float ULPs
+                // short when transformed back to local space on a second placement pass.
+                placement: LandblockPlacement {
+                    origin: Vector3::new(78.26, 40.68, 20.0),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(0.0, -1.0, 0.0),
+                    d: 5.6,
+                }],
+                portals: vec![CellCollisionPortal {
+                    plane: Plane {
+                        normal: Vector3::new(0.0, 1.0, 0.0),
+                        d: -5.6,
+                    },
+                    positive_side: true,
+                    target: CellCollisionPortalTarget::EnvCell(0x010b),
+                    outdoor_building: None,
+                }],
+            },
+            CellVolume {
+                cell_selector: 0x010b,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(0.0, 1.0, 0.0),
+                    d: -46.28,
+                }],
+                portals: Vec::new(),
+            },
+        ]);
+        let first = match scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(78.26, 46.23, 21.25),
+                radius: 0.25,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(78.26, 46.33, 21.25),
+                    end_fraction: 1.0,
+                }],
+            })
+            .unwrap()
+        {
+            CollisionQuery::Complete(path) => path,
+            CollisionQuery::MissingCoverage(_) => panic!("synthetic scene unexpectedly missing"),
+        };
+        let split_waypoints = first
+            .legs()
+            .iter()
+            .map(|leg| MotionWaypoint {
+                center: leg.end().center(),
+                end_fraction: leg.end_fraction(),
+            })
+            .collect::<Vec<_>>();
+
+        let second = match scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: first.initial().center(),
+                radius: 0.3,
+                waypoints: &split_waypoints,
+            })
+            .unwrap()
+        {
+            CollisionQuery::Complete(path) => path,
+            CollisionQuery::MissingCoverage(_) => panic!("synthetic scene unexpectedly missing"),
+        };
+        let placements = second
+            .legs()
+            .iter()
+            .map(|leg| leg.end().placement().committed_cell())
+            .collect::<Vec<_>>();
+
+        assert!(placements.contains(&Some(target_cell)));
+        assert_eq!(
+            second.final_point().placement().committed_cell(),
+            Some(target_cell)
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ use super::{
 };
 use crate::spatial::collision::CollisionScene;
 use crate::{
-    CollisionPlacement, CollisionQuery, CoverageRequest, EdgeProtection,
+    CellTransitRequest, CollisionPlacement, CollisionQuery, CoverageRequest, EdgeProtection,
     GroundedObstructionRequest, SupportRequest,
 };
 use holtburger_common::position::WorldPosition;
@@ -501,6 +501,144 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
     assert!(
         (settled.body_center.z - expected_lift).abs() < TEST_EPSILON,
         "production lift diverged from retail: expected={expected_lift} settled={settled:?}"
+    );
+}
+
+#[test]
+fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
+    const CELL: u32 = 0xda55_01e8;
+    const PORTAL_HEIGHT: f32 = -0.06;
+    const RAMP_HEIGHT: f32 = -0.10;
+
+    let ramp_vertices = horizontal_quad(10.0, 20.0, RAMP_HEIGHT);
+    let mut ramp = placed_polygon(1, ramp_vertices.clone());
+    ramp.source_placement = StaticColliderPlacement::EnvCellShell { cell_id: CELL };
+    let portal_plane = Plane {
+        normal: Vector3::new(0.0, 0.0, -1.0),
+        d: PORTAL_HEIGHT,
+    };
+    let volume = CellVolume {
+        cell_selector: CELL as u16,
+        placement: LandblockPlacement {
+            origin: Vector3::zero(),
+            orientation: Quaternion::identity(),
+        },
+        planes: vec![portal_plane],
+        portals: vec![CellCollisionPortal {
+            plane: portal_plane,
+            positive_side: true,
+            target: CellCollisionPortalTarget::Outdoor,
+            outdoor_building: None,
+        }],
+    };
+    let mut scene = scene(Vec::new());
+    scene
+        .insert(LandblockCollisionAsset {
+            landblock_id: LANDBLOCK,
+            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            static_geometry: LandblockColliders {
+                colliders: vec![ramp],
+                cell_volumes: vec![volume],
+            },
+        })
+        .unwrap();
+
+    let candidate = Vector3::new(15.0, 20.0, 0.0);
+    let body = GroundedBody {
+        pose: WorldPosition {
+            landblock_id: Guid(LANDBLOCK),
+            coords: candidate,
+            rotation: Quaternion::identity(),
+        }
+        .normalize_outdoor_cell(),
+        cell: None,
+        fall_velocity: 0.0,
+        support: Some(GroundSupport {
+            normal: Vector3::new(0.0, 0.0, 1.0),
+        }),
+    };
+    let spheres = grounded_pair();
+    let mut config = grounded_config();
+    config.step_down_height = 1.5;
+    config.edge_protection = EdgeProtection::Creature;
+
+    let candidate_center = candidate + spheres.support.center;
+    let candidate_placement = scene
+        .transit_cell(CellTransitRequest {
+            previous_cell: body.cell,
+            anchor: Guid(LANDBLOCK),
+            center: candidate_center,
+            radius: spheres.support.radius,
+        })
+        .unwrap();
+    let CollisionQuery::Complete(candidate_placement) = candidate_placement else {
+        panic!("horizontal-portal candidate unexpectedly lacks coverage");
+    };
+    assert!(
+        candidate_placement.reached_interior_cells().is_empty(),
+        "fixture candidate already reached the destination cell"
+    );
+
+    let lowered_placement = scene
+        .transit_cell(CellTransitRequest {
+            previous_cell: body.cell,
+            anchor: Guid(LANDBLOCK),
+            center: candidate_center - Vector3::new(0.0, 0.0, config.step_down_height),
+            radius: spheres.support.radius,
+        })
+        .unwrap();
+    let CollisionQuery::Complete(lowered_placement) = lowered_placement else {
+        panic!("horizontal-portal step-down endpoint unexpectedly lacks coverage");
+    };
+    assert_eq!(
+        lowered_placement.reached_interior_cells(),
+        &[Guid(CELL)],
+        "lowering the retail step-down transaction did not expose the destination cell"
+    );
+
+    let expected = retail_step_down_semantic(
+        &[RetailPolygon {
+            vertices: &ramp_vertices,
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            d: -RAMP_HEIGHT,
+        }],
+        candidate_center,
+        spheres.support.radius,
+        config.step_down_height,
+    )
+    .expect("retail oracle found no portal ramp support");
+    let settled = settle_candidate(
+        GroundedSolveContext {
+            scene: &scene,
+            config,
+            anchor: Guid(LANDBLOCK),
+            pose: body.pose,
+            spheres,
+        },
+        &body,
+        candidate,
+        config.step_down_height,
+    )
+    .unwrap();
+    let CollisionQuery::Complete(SettleResult::Supported(settled)) = settled else {
+        panic!("lowered placement rebuild lost portal ramp support: {settled:?}");
+    };
+    assert!(
+        (settled.body_center.z - (expected.adjusted_center.z - spheres.support.center.z)).abs()
+            < TEST_EPSILON,
+        "portal step-down diverged from retail: expected={expected:?} settled={settled:?}"
+    );
+    assert!(
+        settled
+            .placement
+            .reached_interior_cells()
+            .contains(&Guid(CELL)),
+        "the accepted ramp pose lost the destination collision domain"
+    );
+    assert_eq!(
+        settled.placement.committed_cell(),
+        None,
+        "probe-only portal reach prematurely committed authoritative residency"
     );
 }
 

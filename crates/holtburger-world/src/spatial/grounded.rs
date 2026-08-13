@@ -530,6 +530,25 @@ fn settle_candidate(
             return Ok(CollisionQuery::MissingCoverage(missing));
         }
     };
+    // Retail lowers the complete candidate body, invalidates its CELLARRAY, and rebuilds that
+    // collision-domain set before evaluating walkable surfaces (`CTransition::step_down`,
+    // acclient.c:301354-301437). The vertical transaction must retain the candidate domains as
+    // well: an upper sphere can expose outdoor terrain before the lowered endpoint reaches it.
+    let lowered = candidate - Vector3::new(0.0, 0.0, maximum_drop);
+    let lowered_placement = match transit_pair(
+        context.scene,
+        context.anchor,
+        body,
+        context.pose,
+        context.spheres,
+        lowered,
+    )? {
+        CollisionQuery::Complete(cells) => cells,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    let support_placement = candidate_placement.clone().merge_reached(lowered_placement);
     let support_center = sphere_center(candidate, context.pose, context.spheres.support);
     let supports = match context.scene.support_contacts(SupportRequest {
         anchor: context.anchor,
@@ -538,7 +557,7 @@ fn settle_candidate(
         maximum_drop,
         // Retail accepts negative `walk_interp` only down to -0.1 during step-down.
         maximum_rise: maximum_drop * 0.1,
-        placement: &candidate_placement,
+        placement: &support_placement,
     })? {
         CollisionQuery::Complete(supports) => supports,
         CollisionQuery::MissingCoverage(missing) => {

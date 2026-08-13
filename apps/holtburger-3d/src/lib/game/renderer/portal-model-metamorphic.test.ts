@@ -275,6 +275,7 @@ function crossing(
 			})),
 		),
 		id: portalModelCrossingId(id),
+		junctionGroupId: null,
 		reciprocalCrossingId: null,
 		relationship: "indoor-boundary" as const,
 		sourceScopeId: portalModelScopeId(source),

@@ -9,6 +9,7 @@ import {
 } from "./portal-model";
 import {
 	PORTAL_ARRIVAL_METADATA_CAPACITY_BYTES,
+	PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
 	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
@@ -28,6 +29,8 @@ const ROUTE_RECIPROCAL_STATE_SLOT =
 	Uint32Array.BYTES_PER_ELEMENT;
 const ROUTE_FLAGS_SLOT =
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const ROUTE_JUNCTION_SLOT =
+	PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
 const METADATA_UINT32_SLOT_COUNT =
 	PORTAL_ARRIVAL_METADATA_RECORD_BYTES / Uint32Array.BYTES_PER_ELEMENT;
 
@@ -51,6 +54,8 @@ interface PortalPackedArrivalStateDiagnostics {
 	readonly sourceScopeRejectionCount: number;
 	/** Candidates rejected because they do not lie strictly beyond the entry plane. */
 	readonly entryPlaneRejectionCount: number;
+	/** Equal-depth advances admitted because both crossings share one junction group. */
+	readonly junctionAdmittedCount: number;
 	/** Candidates rejected by explicit immediate-reciprocal suppression. */
 	readonly reciprocalRejectionCount: number;
 	/** Winning transitions rejected by nearer local opaque or passing alpha-test depth. */
@@ -119,6 +124,7 @@ export function executePackedPortalArrivalStateModel(
 		requireScopeOrdinal(scopeOrdinalById, scene.rootScopeId),
 		UNCOVERED_STATE_ID,
 		false,
+		0,
 	);
 	for (let ordinal = 0; ordinal < scene.crossings.length; ordinal += 1) {
 		const crossing = scene.crossings[ordinal]!;
@@ -135,6 +141,8 @@ export function executePackedPortalArrivalStateModel(
 			requireScopeOrdinal(scopeOrdinalById, crossing.targetScopeId),
 			reciprocalState,
 			true,
+			// Null means "no junction"; zero is its packed sentinel, exactly as uploaded to the GPU.
+			crossing.junctionGroupId === null ? 0 : crossing.junctionGroupId,
 		);
 	}
 
@@ -160,6 +168,7 @@ export function executePackedPortalArrivalStateModel(
 	let crossingApertureSampleReadCount = 0;
 	let envelopeSourcePixelReductionCount = 0;
 	let entryPlaneRejectionCount = 0;
+	let junctionAdmittedCount = 0;
 	let frontierPixelReadCount = 0;
 	let localOpaqueDepthRejectionCount = 0;
 	let nextFrontierStateWriteCount = 0;
@@ -222,8 +231,21 @@ export function executePackedPortalArrivalStateModel(
 					continue;
 				}
 				if (entryDepth !== null && depth <= entryDepth) {
-					entryPlaneRejectionCount += 1;
-					continue;
+					// Mirrors the propagation shader: a shared host-proven junction id licenses
+					// the equal-depth advance through a zero-thickness transit.
+					const junction = routeJunctionGroup(metadata, currentState);
+					const sameJunction =
+						junction !== 0 &&
+						junction ===
+							routeJunctionGroup(
+								metadata,
+								FIRST_CROSSING_STATE_ID + crossingOrdinal,
+							);
+					if (!sameJunction || depth < entryDepth) {
+						entryPlaneRejectionCount += 1;
+						continue;
+					}
+					junctionAdmittedCount += 1;
 				}
 				if (nearestCrossingDepth === null || depth < nearestCrossingDepth) {
 					nearestCrossingOrdinal = crossingOrdinal;
@@ -299,6 +321,7 @@ export function executePackedPortalArrivalStateModel(
 				propagationRoundCount * scene.crossings.length,
 			envelopeSourcePixelReductionCount,
 			entryPlaneRejectionCount,
+			junctionAdmittedCount,
 			frontierClearCommandCount: propagationRoundCount,
 			frontierPixelReadCount,
 			localOpaqueDepthRejectionCount,
@@ -327,6 +350,7 @@ function writeRoute(
 	scopeOrdinal: number,
 	reciprocalStateId: number,
 	hasEntryPlane: boolean,
+	junctionGroup: number,
 ): void {
 	const base = metadataRecordBase(stateId);
 	metadata[base + ROUTE_SCOPE_SLOT] = scopeOrdinal;
@@ -334,6 +358,11 @@ function writeRoute(
 	metadata[base + ROUTE_FLAGS_SLOT] = hasEntryPlane
 		? PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE
 		: 0;
+	metadata[base + ROUTE_JUNCTION_SLOT] = junctionGroup;
+}
+
+function routeJunctionGroup(metadata: Uint32Array, stateId: number): number {
+	return metadata[metadataRecordBase(stateId) + ROUTE_JUNCTION_SLOT]!;
 }
 
 function routeScope(metadata: Uint32Array, stateId: number): number {

@@ -112,6 +112,41 @@ queries.
 Malformed, non-coplanar, or over-tolerance reciprocal intersections fail source production rather
 than falling back to a larger leaky window.
 
+## Coincident Portal Junctions
+
+Some structures are authored as several adjacent buildings whose outdoor transition apertures
+coincide: one building's exit polygon and its neighbour's entry polygon occupy the same plane and
+overlap in area, chaining their cells through a zero-thickness slab of the outdoor domain. A census
+of `0xF418FFFF` found twelve such junctions; the arrangement recurs across the archive but is not
+common.
+
+At HBEC source production the host detects these pairs with the same planar machinery that
+synthesizes reciprocal visibility apertures: crossings whose source apertures are coplanar within
+tolerance and share interior area form one junction group. Groups are connected components over
+that pairwise predicate; each receives a record-local ordinal emitted as `junctionGroupId` on every
+member crossing. Pure reciprocal pairs — every ordinary doorway's two directed crossings — receive
+no id, because reciprocal suppression already covers them.
+
+The exemption this licenses is bounded. A component is declined, with a logged warning and no ids,
+when any single render domain contributes more than two member crossings; visibility islands are
+derived host-side (union-find over proven depth-continuous seams, emitted as the
+`cellIslandIndices` section) precisely so this bound counts per render domain rather than per
+authored cell. Within the bound, a same-depth walk can take at most one junction step —
+reciprocal suppression removes one of the two same-domain exits — before depth strictly increases
+again, so the compositor's convergence measure survives. An archive census never observed a
+component whose domain contributed more than two.
+
+The frontend qualifies record-local ids scene-globally (landblock grid packed above the ordinal)
+because outdoor is one render domain across landblocks. The propagation shader and every CPU model
+then admit an equal-depth advance exactly when the arrival and candidate crossings share one
+junction id; all other equal-or-shallower candidates remain rejected as backtracking.
+
+The strict entry test itself is Holtburger's construct, not retail compatibility: retail's
+`PView::ClipPortals` terminates indoor traversal at exterior endpoints and re-enters buildings from
+the outdoor pass (`acclient.c:441813-441942`, `:442040-442090`), so it never compares entry depths
+at all. The test exists here as the path-free propagation's convergence measure, and the junction
+fact is the host-proven exemption that keeps it from rejecting authored zero-thickness geometry.
+
 ## Potentially-Visible Lists
 
 The EnvCell `visible_cells` list is preserved as potentially-visible source data. It is useful as
@@ -364,6 +399,8 @@ culling behavior.
 Proven by synthetic tests and selected archive/browser fixtures:
 
 - arbitrary planar, non-axis-aligned apertures;
+- coincident-junction detection, the group-size degradation bound, and zero-thickness transit
+  through shared junction ids, on the GPU and in every CPU model;
 - authored/effective aperture separation;
 - reciprocal intersection preprocessing;
 - Cell BSP point containment;

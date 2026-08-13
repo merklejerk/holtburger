@@ -828,6 +828,7 @@ function copyPortalCrossing(
 		acceptedSide: crossing.acceptedSide,
 		exactMatch: crossing.exactMatch,
 		id: crossing.id,
+		junctionGroupId: crossing.junctionGroupId,
 		maskDepthPolicy: crossing.maskDepthPolicy,
 		reciprocalCrossingId: crossing.reciprocalCrossingId,
 		source: { ...crossing.source },

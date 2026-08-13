@@ -109,6 +109,11 @@ interface PortalModelScope {
 export interface PortalModelCrossing {
 	readonly aperture: PortalModelAperture;
 	readonly id: PortalModelCrossingId;
+	/**
+	 * Host-proven coincident-junction identity shared by every crossing on one coplanar
+	 * overlapping footprint, or null. Equal ids license an equal-depth advance.
+	 */
+	readonly junctionGroupId: number | null;
 	readonly reciprocalCrossingId: PortalModelCrossingId | null;
 	readonly relationship:
 		| "depth-continuous"
@@ -116,6 +121,27 @@ export interface PortalModelCrossing {
 		| "indoor-boundary";
 	readonly sourceScopeId: PortalModelScopeId;
 	readonly targetScopeId: PortalModelScopeId;
+}
+
+/**
+ * Whether one candidate crossing may advance a ray that entered its scope at `entryDepth`.
+ *
+ * Depth must strictly increase along a path — the models' convergence measure — except across a
+ * host-proven coincident junction, where equal depth is authored zero-thickness geometry rather
+ * than backtracking. This is the CPU statement of the propagation shader's entry test.
+ */
+export function portalEntryAdvanceAdmitted(
+	incomingCrossing: Pick<PortalModelCrossing, "junctionGroupId"> | null,
+	entryDepth: PortalModelDepth | null,
+	crossing: Pick<PortalModelCrossing, "junctionGroupId">,
+	depth: PortalModelDepth,
+): boolean {
+	if (entryDepth === null) return true;
+	const sameJunction =
+		incomingCrossing !== null &&
+		incomingCrossing.junctionGroupId !== null &&
+		incomingCrossing.junctionGroupId === crossing.junctionGroupId;
+	return sameJunction ? depth >= entryDepth : depth > entryDepth;
 }
 
 /** Validated, serializable input for all portal compositor models. */

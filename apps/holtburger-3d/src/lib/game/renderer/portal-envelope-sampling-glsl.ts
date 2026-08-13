@@ -2,7 +2,7 @@
  * Conservative atlas-envelope sampling radius. Zero keeps exact texel ownership; positive values
  * tolerate small raster disagreements at genuine portal boundaries without crossing tile edges.
  */
-const PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS: number = 2;
+export const PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS: number = 2;
 
 const gutterSampling =
 	PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS === 0

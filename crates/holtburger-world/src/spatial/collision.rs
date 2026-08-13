@@ -469,6 +469,21 @@ struct PlacementTransition {
     target_cell: Option<Guid>,
 }
 
+/// One coverage-proven geometric segment evaluated for authoritative placement changes.
+#[derive(Debug, Clone, Copy)]
+struct PlacementMotionSegment<'a> {
+    /// Normalized landblock whose local frame contains both endpoints.
+    anchor: Guid,
+    /// Anchor-local accepted segment start.
+    start: Vector3,
+    /// Anchor-local accepted segment end.
+    end: Vector3,
+    /// Sphere radius used for portal reach and far-side placement.
+    radius: f32,
+    /// Resident landblocks already proven to cover the complete swept sphere.
+    touched: &'a [Guid],
+}
+
 /// Scene-derived equivalent of retail's outdoor and EnvCell static shadow lists.
 #[derive(Debug, Clone, Default)]
 struct StaticShadowIndex {
@@ -1044,6 +1059,17 @@ impl CollisionScene {
             }
         };
 
+        Ok(CollisionQuery::Complete(
+            self.transit_cell_with_coverage(request, &touched),
+        ))
+    }
+
+    /// Resolves placement after the caller has proven collision coverage for `request.center`.
+    fn transit_cell_with_coverage(
+        &self,
+        request: CellTransitRequest,
+        touched: &[Guid],
+    ) -> CollisionPlacement {
         let mut placement = if request.previous_cell.is_some() {
             CollisionPlacement {
                 committed_cell: None,
@@ -1067,11 +1093,13 @@ impl CollisionScene {
                 placement.reached_interior_cells.push(previous_cell);
                 expand_reached_cells(asset, owner, local, request.radius, &mut placement);
                 placement.committed_cell = containing_reached_cell(asset, local, &placement);
-                return Ok(CollisionQuery::Complete(placement));
+                if !placement.reaches_outdoors {
+                    return placement;
+                }
             }
         }
 
-        for owner in touched {
+        for owner in touched.iter().copied() {
             let local = anchor_to_landblock(request.center, request.anchor, owner);
             let Some(asset) = self.landblocks.get(&owner) else {
                 continue;
@@ -1094,7 +1122,7 @@ impl CollisionScene {
                 placement.committed_cell = containing_reached_cell(asset, local, &placement);
             }
         }
-        Ok(CollisionQuery::Complete(placement))
+        placement
     }
 
     /// Attaches exact, prior-cell-seeded placement transitions to accepted geometric motion.
@@ -1160,14 +1188,16 @@ impl CollisionScene {
                 .max(1);
             let mut transition_count = 0;
             let mut cursor = 0.0;
-            while let Some(transition) = self.next_placement_transition(
-                request.anchor,
-                geometric_start,
-                waypoint.center,
-                cursor,
-                current_cell,
-                &touched,
-            )? {
+            let segment = PlacementMotionSegment {
+                anchor: request.anchor,
+                start: geometric_start,
+                end: waypoint.center,
+                radius: request.radius,
+                touched: &touched,
+            };
+            while let Some(transition) =
+                self.next_placement_transition(segment, cursor, current_cell)?
+            {
                 transition_count += 1;
                 if transition_count > transition_limit {
                     return Err(CollisionQueryError::MotionTransitionLimitExceeded);
@@ -1391,14 +1421,11 @@ impl CollisionScene {
 
     fn next_placement_transition(
         &self,
-        anchor: Guid,
-        start: Vector3,
-        end: Vector3,
+        segment: PlacementMotionSegment<'_>,
         cursor: f32,
         current_cell: Option<Guid>,
-        touched: &[Guid],
     ) -> Result<Option<PlacementTransition>, CollisionQueryError> {
-        let segment_length = start.distance(&end);
+        let segment_length = segment.start.distance(&segment.end);
         if segment_length <= f32::EPSILON {
             return Ok(None);
         }
@@ -1417,12 +1444,16 @@ impl CollisionScene {
                 .iter()
                 .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
                 .ok_or(CollisionQueryError::UnknownMotionCell { cell: cell.0 })?;
-            let local_start = source
-                .placement
-                .to_local_space(anchor_to_landblock(start, anchor, owner));
-            let local_end = source
-                .placement
-                .to_local_space(anchor_to_landblock(end, anchor, owner));
+            let local_start = source.placement.to_local_space(anchor_to_landblock(
+                segment.start,
+                segment.anchor,
+                owner,
+            ));
+            let local_end = source.placement.to_local_space(anchor_to_landblock(
+                segment.end,
+                segment.anchor,
+                owner,
+            ));
             for portal in &source.portals {
                 let Some(fraction) = directed_plane_crossing_fraction(
                     portal.plane.distance_to_point(&local_start),
@@ -1434,13 +1465,19 @@ impl CollisionScene {
                     continue;
                 };
                 let target_cell = match portal.target {
-                    CellCollisionPortalTarget::Outdoor => None,
+                    CellCollisionPortalTarget::Outdoor => self
+                        .coincident_outdoor_target_after_crossing(
+                            segment,
+                            fraction,
+                            minimum_advance,
+                            cell,
+                        ),
                     CellCollisionPortalTarget::EnvCell(selector) => {
                         let target = Guid((owner.0 & 0xffff_0000) | u32::from(selector));
                         if !self.target_contains_after_crossing(
-                            anchor,
-                            start,
-                            end,
+                            segment.anchor,
+                            segment.start,
+                            segment.end,
                             fraction,
                             minimum_advance,
                             target,
@@ -1459,12 +1496,12 @@ impl CollisionScene {
                 );
             }
         } else {
-            for owner in touched {
+            for owner in segment.touched {
                 let Some(asset) = self.landblocks.get(owner) else {
                     continue;
                 };
-                let landblock_start = anchor_to_landblock(start, anchor, *owner);
-                let landblock_end = anchor_to_landblock(end, anchor, *owner);
+                let landblock_start = anchor_to_landblock(segment.start, segment.anchor, *owner);
+                let landblock_end = anchor_to_landblock(segment.end, segment.anchor, *owner);
                 for source in &asset.static_geometry.cell_volumes {
                     let local_start = source.placement.to_local_space(landblock_start);
                     let local_end = source.placement.to_local_space(landblock_end);
@@ -1484,9 +1521,9 @@ impl CollisionScene {
                         let target_cell =
                             Guid((owner.0 & 0xffff_0000) | u32::from(source.cell_selector));
                         if !self.target_contains_after_crossing(
-                            anchor,
-                            start,
-                            end,
+                            segment.anchor,
+                            segment.start,
+                            segment.end,
                             fraction,
                             minimum_advance,
                             target_cell,
@@ -1505,6 +1542,77 @@ impl CollisionScene {
             }
         }
         Ok(selected)
+    }
+
+    /// Resolves an EnvCell reached through a zero-thickness outdoor transit, when unique.
+    ///
+    /// Retail adds outdoor land cells to the same `CELLARRAY` and continues expanding them into
+    /// building entries (`CEnvCell::find_transit_cells`, `acclient.c:334180-334430`). Our outdoor
+    /// domain is implicit, so a just-beyond placement query performs that same expansion and this
+    /// method collapses the two coincident boundaries into one authoritative placement change.
+    fn coincident_outdoor_target_after_crossing(
+        &self,
+        segment: PlacementMotionSegment<'_>,
+        fraction: f32,
+        minimum_advance: f32,
+        source_cell: Guid,
+    ) -> Option<Guid> {
+        let probe_fraction = (fraction + minimum_advance).min(1.0);
+        let probe = interpolate_point(segment.start, segment.end, probe_fraction);
+        let placement = self.transit_cell_with_coverage(
+            CellTransitRequest {
+                previous_cell: Some(source_cell),
+                anchor: segment.anchor,
+                center: probe,
+                radius: segment.radius,
+            },
+            segment.touched,
+        );
+        let mut candidates =
+            placement
+                .reached_interior_cells()
+                .iter()
+                .copied()
+                .filter(|cell| *cell != source_cell)
+                .filter(|cell| {
+                    let owner = landblock_key(*cell);
+                    let local = anchor_to_landblock(probe, segment.anchor, owner);
+                    let landblock_start = anchor_to_landblock(segment.start, segment.anchor, owner);
+                    let landblock_end = anchor_to_landblock(segment.end, segment.anchor, owner);
+                    self.landblocks.get(&owner).is_some_and(|asset| {
+                        asset
+                            .static_geometry
+                            .cell_volumes
+                            .iter()
+                            .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
+                            .is_some_and(|volume| {
+                                let local_start = volume.placement.to_local_space(landblock_start);
+                                let local_end = volume.placement.to_local_space(landblock_end);
+                                volume_reaches(volume, local, 0.0)
+                                    && volume.portals.iter().any(|portal| {
+                                        portal.target == CellCollisionPortalTarget::Outdoor
+                                            && directed_plane_crossing_fraction(
+                                                portal.plane.distance_to_point(&local_start),
+                                                portal.plane.distance_to_point(&local_end),
+                                                !portal.positive_side,
+                                                0.0,
+                                                0.0,
+                                            )
+                                            .is_some_and(|target_fraction| {
+                                                (target_fraction - fraction).abs()
+                                                    <= minimum_advance
+                                            })
+                                    })
+                            })
+                    })
+                })
+                .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates.dedup();
+        match candidates.as_slice() {
+            [target] => Some(*target),
+            _ => None,
+        }
     }
 
     fn target_contains_after_crossing(
@@ -2340,6 +2448,35 @@ mod tests {
         }
     }
 
+    fn coincident_outdoor_cells() -> Vec<CellVolume> {
+        vec![
+            CellVolume {
+                cell_selector: 0x010a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 100.0,
+                }],
+                portals: vec![portal(1.0, -100.0, CellCollisionPortalTarget::Outdoor)],
+            },
+            CellVolume {
+                cell_selector: 0x010b,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -100.0,
+                }],
+                portals: vec![portal(-1.0, 100.0, CellCollisionPortalTarget::Outdoor)],
+            },
+        ]
+    }
+
     fn references(indices: impl IntoIterator<Item = usize>) -> Vec<ColliderReference> {
         indices
             .into_iter()
@@ -2530,6 +2667,156 @@ mod tests {
         assert_eq!(path.final_point().center(), Vector3::new(100.4, 10.0, 20.0));
         assert_eq!(path.final_point().placement().committed_cell(), None);
         assert!(path.legs().iter().all(|leg| leg.end().recovery().is_none()));
+    }
+
+    #[test]
+    fn prior_cell_reach_continues_through_outdoors_into_a_coincident_cell() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        let scene = placement_scene(coincident_outdoor_cells());
+
+        let CollisionQuery::Complete(placement) = scene
+            .transit_cell(CellTransitRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                center: Vector3::new(100.2, 10.0, 20.0),
+                radius: 0.3,
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic placement unexpectedly lacked coverage");
+        };
+
+        assert_eq!(placement.committed_cell(), Some(target_cell));
+        assert!(placement.reaches_outdoors());
+        assert_eq!(
+            placement.reached_interior_cells(),
+            &[source_cell, target_cell]
+        );
+    }
+
+    #[test]
+    fn placed_motion_collapses_a_coincident_outdoor_junction() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        let scene = placement_scene(coincident_outdoor_cells());
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(
+            path.initial().placement().committed_cell(),
+            Some(source_cell)
+        );
+        assert_eq!(path.legs().len(), 2);
+        assert_eq!(
+            path.legs()[0].end().placement().committed_cell(),
+            Some(target_cell)
+        );
+        assert_eq!(
+            path.final_point().placement().committed_cell(),
+            Some(target_cell)
+        );
+        assert!(
+            path.legs()
+                .iter()
+                .all(|leg| leg.end().placement().committed_cell().is_some()),
+            "a zero-thickness junction exposed a synthetic outdoor placement"
+        );
+    }
+
+    #[test]
+    fn placed_motion_keeps_an_unpaired_outdoor_exit() {
+        let source_cell = Guid(0xda55_010a);
+        let mut cells = coincident_outdoor_cells();
+        cells.pop();
+        let scene = placement_scene(cells);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        assert_eq!(
+            path.initial().placement().committed_cell(),
+            Some(source_cell)
+        );
+        assert_eq!(path.legs()[0].end().placement().committed_cell(), None);
+        assert_eq!(path.final_point().placement().committed_cell(), None);
+    }
+
+    #[test]
+    fn placed_motion_does_not_choose_an_ambiguous_coincident_target() {
+        let source_cell = Guid(0xda55_010a);
+        let mut cells = coincident_outdoor_cells();
+        cells.push(CellVolume {
+            cell_selector: 0x010c,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            planes: vec![Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -100.0,
+            }],
+            portals: vec![portal(-1.0, 100.0, CellCollisionPortalTarget::Outdoor)],
+        });
+        let scene = placement_scene(cells);
+
+        let CollisionQuery::Complete(path) = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap()
+        else {
+            panic!("resident synthetic path unexpectedly lacked coverage");
+        };
+
+        let boundary = path.legs()[0].end().placement();
+        assert_eq!(boundary.committed_cell(), None);
+        assert!(
+            boundary
+                .reached_interior_cells()
+                .contains(&Guid(0xda55_010b))
+                && boundary
+                    .reached_interior_cells()
+                    .contains(&Guid(0xda55_010c))
+        );
+        assert_eq!(path.final_point().placement().committed_cell(), None);
     }
 
     #[test]

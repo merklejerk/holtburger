@@ -1,6 +1,6 @@
 # Coincident Portal Junction Transit Investigation
 
-Status: Finding, unowned
+Status: Resolved on `fix/host-physics-recovery`
 Created: 2026-08-13
 Found by: portal compositing work on `portal-compositing-fixes`; this is a collision-solver finding
 and is deliberately **not** in scope for that plan.
@@ -12,8 +12,8 @@ next one's, directed collision placement cannot cross the junction. A body that 
 into cell B through such a junction keeps `committed_cell = None` — the solver believes it is
 outdoors while it is standing inside B.
 
-Point containment is not the problem and recovers correctly on its own. The gap is in directed
-reachability expansion.
+Point containment was healthy. The gap was an early return in directed reachability expansion,
+followed by same-fraction motion segmentation that exposed the zero-thickness outdoor domain.
 
 ## Reproduce
 
@@ -28,9 +28,9 @@ owns only an `Outdoor` portal on that plane; the control joins them with an ordi
 ```
 == coincident outdoor junction
   initial   cell=0xDA550100
-  leg 0     fraction=0.5000 x=10.0  cell=None
-  leg 1     fraction=1.0000 x=15.0  cell=None
-  VERDICT   DID NOT reach cell B
+  leg 0     fraction=0.5000 x=10.0  cell=0xDA550101
+  leg 1     fraction=1.0000 x=15.0  cell=0xDA550101
+  VERDICT   reached cell B
 
 == direct reciprocal portal (control)
   leg 1     fraction=1.0000 x=15.0  cell=0xDA550101
@@ -39,7 +39,23 @@ owns only an `Outdoor` portal on that plane; the control joins them with an ordi
 
 At `x = 15` the body is five units inside cell B, whose volume spans `10 <= x <= 20`.
 
-## Mechanism
+The product replay is:
+
+```
+cargo run -p holtburger-debug-harness --bin collision_scene_probe -- \
+  --landblock 0xf418ffff \
+  --grounded-start 36.124,73.25,169.805 \
+  --grounded-drive 0,-4 \
+  --grounded-cell 0xf4180101 \
+  --grounded-settle-ticks 4 \
+  --grounded-ticks 30 \
+  --grounded-body pair
+```
+
+The route crosses from `0xF4180101` to `0xF4180104` at driven tick 9 and retains full requested
+horizontal progress and support.
+
+## Root Cause
 
 Containment is healthy. Seeded fresh, placement finds cell B at every sampled position:
 
@@ -49,10 +65,9 @@ transit_cell seeded outdoors at x=10.5       committed=0xDA550101      reached=[
 transit_cell seeded outdoors at x=11 .. 19   committed=0xDA550101      reached=["0xDA550101"]
 ```
 
-The difference is the seed. `CollisionScene::transit_cell`
-(`crates/holtburger-world/src/spatial/collision.rs:1036-1060`) takes an early return when
-`previous_cell` is present: it seeds `reached_interior_cells` with that cell, expands, commits by
-containment, and returns before the outdoor-entry scan at `:1063` ever runs.
+The difference was the seed. `CollisionScene::transit_cell` returned immediately after expanding a
+valid `previous_cell`, even when that expansion reached an outside portal. The existing
+outdoor-entry scan therefore never had a chance to add the adjacent building's EnvCell.
 
 Expansion is then the whole story. `expand_reached_cells` (`:1864-1871`) handles an `Outdoor` target
 by setting `reaches_outdoors = true` and nothing else:
@@ -66,27 +81,43 @@ CellCollisionPortalTarget::Outdoor => {
 }
 ```
 
-There is no far-side cell to add, because an `Outdoor` portal does not name one. Cell-to-cell
-reachability is expressed only through `EnvCell`-targeted portals, so a junction chained through
-Outdoor is not traversable by directed expansion at all — no matter how thin the outdoor slab is.
+The second failure was continuous path placement. It emitted the source cell's outside boundary,
+then rejected the adjacent building entry at the same segment fraction under the ordinary minimum-
+advance rule. Physical-fly body placement eventually recovered on a later endpoint query, but the
+viewer path remained outdoors. Grounded movement could not reach that later query: outdoor
+placement hid the target EnvCell floor, so creature edge protection treated the junction as a
+precipice and rolled back with zero collision constraints—the observed invisible wall.
 
-**Not** the advance rule. The first guess was `directed_plane_crossing_fraction`
-(`:2010`), which requires `fraction > cursor + minimum_advance` with
-`CELL_PLANE_TOLERANCE = 0.000_2`. That is a real structural analogue of the renderer's entry-plane
-test and shares its constant, but it is not what fails here.
+The old probe's `transit_motion_path(previous_cell=None)` versus direct `transit_cell` discrepancy
+was not another defect. Motion-path input carries authoritative committed placement; `None` means
+explicitly outdoors, so `placement_for_committed_cell` deliberately preserves it. Direct
+`transit_cell` is a discovery query and may classify the same point inside an EnvCell.
 
-## Unresolved discrepancy
+## Retail Evidence
 
-Worth a second pair of eyes, because it may be harness misuse rather than a defect:
+Retail performs this as ordinary reachability, not a special junction lookup:
 
-```
-transit_motion_path, previous_cell=None, start x=14   ->  initial cell = None
-transit_cell,        previous_cell=None,       x=14   ->  committed   = 0xDA550101
-```
+- `CEnvCell::find_transit_cells` marks an outside portal and calls
+  `CLandCell::add_all_outside_cells` (`acclient.c:334180-334430`).
+- `CObjCell::find_cell_list` continues iterating the same growing `CELLARRAY`
+  (`acclient.c:332969-333069`).
+- The reached `CLandCell` delegates to `CSortCell::find_transit_cells`, whose building registration
+  admits the adjacent EnvCell (`acclient.c:340793-340805`, `:341417-341447`).
 
-`transit_motion_path` computes its initial point through `placement_for_committed_cell(anchor,
-request.start, request.radius, request.previous_cell)` (`:1100`), which forwards straight to
-`transit_cell` with the same arguments. Reading both paths did not account for the difference.
+The zero-thickness case therefore needs the same expansion to continue through the implicit outdoor
+domain; it does not need renderer junction metadata or a synthetic direct portal.
+
+## Resolution
+
+- Placement expansion returns early from a prior EnvCell only while it remains wholly interior.
+  Once an outside portal is reached, it continues through the existing outdoor-entry scan.
+- Endpoint and motion probes share one post-coverage placement expansion function.
+- Continuous outside crossings probe just beyond the boundary using that same expansion. One unique
+  containing far-side EnvCell collapses the zero-thickness outdoor transit into a direct placement
+  change. No candidate preserves an ordinary outdoor exit; multiple candidates preserve outdoor
+  placement and expose all reached cells without selecting by iteration order.
+- Focused tests cover endpoint expansion, zero-thickness path collapse, ordinary outdoor exit, and
+  ambiguous far-side containment.
 
 ## Why it matters
 
@@ -99,20 +130,6 @@ interior versus exterior weather and ambient light, interior audio, and the rend
 
 ## Relationship to the renderer bug
 
-The renderer fails at the same junctions for an unrelated reason — an ordered per-pixel advance test
-that rejects a zero-distance step — and is being fixed under
-`holtburger-3d-coincident-portal-junction-plan.md`. That fix does not transfer here: it exempts a
-tolerance comparison, while this needs expansion to learn which cell lies across an `Outdoor` portal.
-
-The two do share an input. That plan's Phase 1 computes, host-side, exactly which crossing pairs form
-a coincident junction and therefore which cell sits on the far side of each such portal. If this
-finding is picked up, that pairing is available rather than needing a second derivation.
-
-Until both are addressed, solver and renderer disagree about the same authored geometry: the solver
-walks you through the junction while the renderer refuses to draw the far side.
-
-## Suggested direction, not prescribed
-
-The owning question is whether `CellCollisionPortal` should carry an optional far-side cell for
-junctions whose outdoor transit is provably zero-thickness, or whether expansion should consult the
-junction pairing separately. That is a call for whoever owns collision placement.
+The renderer failed at the same authored junction for a different reason: its per-pixel convergence
+test rejected equal-depth propagation. Renderer junction identities remain a compositor-local proof.
+Collision deliberately does not consume them; its fix follows retail's ordinary cell reachability.

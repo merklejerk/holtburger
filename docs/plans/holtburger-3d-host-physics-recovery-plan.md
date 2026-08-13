@@ -3613,6 +3613,32 @@ wrong cell transition. The exact `40D8` route now remains in `0x40D80126`; all 2
 Maintainer Explorer acceptance confirms the original `0x40D80126` edge/wall corner now holds and
 releases consistently without the prior wedge.
 
+##### Coincident Outdoor Junction Reopen — 2026-08-13
+
+The portal-compositing investigation identified a collision-side failure at the coincident outside
+portals joining EnvCells `0xF4180101` and `0xF4180104`. A production grounded replay advanced to the
+shared plane and then returned zero displacement with zero collision constraints. Placement had
+committed the implicit outdoor domain but failed to continue into the adjacent building, so support
+selection lost the target EnvCell floor and creature edge protection rolled the candidate back as a
+precipice. Physical fly eventually rediscovered `0xF4180104` at a later endpoint, while its
+continuously traversed viewer path remained outdoors.
+
+Retail grows one `CELLARRAY` from the source EnvCell through its outside portal, outdoor land cells,
+and the registered adjacent building (`acclient.c:332969-333069`, `:334180-334430`,
+`:340793-340805`, `:341417-341447`). Production now preserves that order: prior-cell placement
+continues through the existing outdoor-entry scan after reaching outdoors, and continuous motion
+collapses a same-position outdoor transit only when the just-beyond placement has one unique
+containing far-side EnvCell. Ordinary exits remain outdoors; ambiguous overlaps expose all reached
+cells without choosing one.
+
+The asset-independent regressions cover endpoint reachability, zero-thickness path placement,
+ordinary outside exits, and ambiguous far-side containment. The exact `0xF4180101` product route
+crosses into `0xF4180104` at driven tick 9, remains grounded, and retains full requested speed.
+Renderer junction metadata is intentionally not consumed by collision; the solver follows retail's
+ordinary reachability mechanism instead of maintaining a second junction topology.
+Maintainer Explorer acceptance confirms physical movement crosses the original `0xF4180101` junction
+without the invisible wall or erroneous outdoor camera placement.
+
 #### Risks and Mitigations
 
 - **Decompiler ambiguity creates a false oracle.** Cross-check control flow with callers and

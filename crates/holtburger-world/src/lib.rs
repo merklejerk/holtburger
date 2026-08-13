@@ -48,8 +48,9 @@ pub use spatial::{
     SolveProjectionBasis, SolvedBodyKinematics, SpatialBody, SpatialBodyEvent, SpatialBodyId,
     SpatialEntitySample, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
     SpatialSamplingState, SpatialScene, SpatialSolveBatch, SpatialSolveRequest, StaticContact,
-    SupportContact, SupportRequest, advance_body_kinematics, initial_physical_body_activity,
-    project_pose_forward_distance, resolve_physical_body_cell, solve_grounded, solve_physical_fly,
+    SupportContact, SupportFeature, SupportRequest, advance_body_kinematics,
+    initial_physical_body_activity, project_pose_forward_distance, resolve_physical_body_cell,
+    solve_grounded, solve_physical_fly,
 };
 pub use state::{
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,

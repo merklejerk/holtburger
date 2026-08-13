@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::{
@@ -52,7 +52,16 @@ const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
     separation_epsilon: 0.000_5,
 };
 
-#[derive(Parser)]
+/// Grounded collider roles exercised by one explicit diagnostic route.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum GroundedRouteBody {
+    /// Use only the authored lower/support sphere.
+    Lower,
+    /// Use the production lower/support and upper/constraint pair.
+    Pair,
+}
+
+#[derive(Debug, Parser)]
 #[command(about = "Probe canonical landblock collision assembly")]
 struct Args {
     /// Normalized or cell-qualified landblock DID.
@@ -70,10 +79,46 @@ struct Args {
     /// Print the source identity for a zero-based collider index in the assembled artifact.
     #[arg(long = "describe-collider")]
     describe_colliders: Vec<usize>,
+    /// Run one grounded route from anchor-local body-reference coordinates formatted as X,Y,Z.
+    #[arg(long, value_parser = parse_vector3, requires = "grounded_drive")]
+    grounded_start: Option<Vector3>,
+    /// Horizontal grounded velocity formatted as X,Y in meters per second.
+    #[arg(long, value_parser = parse_horizontal_vector, requires = "grounded_start")]
+    grounded_drive: Option<Vector3>,
+    /// Exact starting EnvCell DID; omit only for an explicitly outdoor start.
+    #[arg(long, value_parser = parse_did, requires = "grounded_start")]
+    grounded_cell: Option<u32>,
+    /// Number of zero-drive ticks used to acquire authored support before the route.
+    #[arg(long, default_value_t = 4)]
+    grounded_settle_ticks: usize,
+    /// Number of driven 30 Hz ticks emitted by the explicit route.
+    #[arg(long, default_value_t = 60)]
+    grounded_ticks: usize,
+    /// Grounded sphere roles used by the explicit route.
+    #[arg(long, value_enum, default_value_t = GroundedRouteBody::Pair)]
+    grounded_body: GroundedRouteBody,
+}
+
+/// One fully validated, deterministic grounded product-route replay.
+#[derive(Clone, Copy, Debug)]
+struct GroundedRouteSpec {
+    /// Body-reference start in the selected outdoor owner's local frame.
+    start: Vector3,
+    /// Horizontal requested velocity in meters per second.
+    drive_velocity: Vector3,
+    /// Authoritative starting EnvCell, or `None` for an explicitly outdoor body.
+    cell: Option<Guid>,
+    /// Zero-drive ticks used to acquire support before movement.
+    settle_ticks: usize,
+    /// Driven ticks emitted after support acquisition.
+    drive_ticks: usize,
+    /// Ordered grounded collider roles submitted to the production solver.
+    spheres: GroundedBodySpheres,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let explicit_grounded_route = grounded_route_spec(&args, args.landblock)?;
     let repository =
         Arc::new(ContentRepository::discover(args.content).context("content discovery failed")?);
     let decode_cache = Arc::new(ContentDecodeCache::new());
@@ -247,20 +292,24 @@ fn main() -> Result<()> {
         "world_query high_altitude_placement_contacts={}",
         high_altitude_contacts.len()
     );
-    probe_physical_fly_outside_portals(
-        &scene,
-        landblock.landblock_id,
-        &interior,
-        args.portal_cell,
-        args.portal_index,
-    )?;
-    probe_grounded_outside_portals(
-        &scene,
-        landblock.landblock_id,
-        &interior,
-        args.portal_cell,
-        args.portal_index,
-    )?;
+    if let Some(route) = explicit_grounded_route {
+        probe_explicit_grounded_route(&scene, landblock.landblock_id, route)?;
+    } else {
+        probe_physical_fly_outside_portals(
+            &scene,
+            landblock.landblock_id,
+            &interior,
+            args.portal_cell,
+            args.portal_index,
+        )?;
+        probe_grounded_outside_portals(
+            &scene,
+            landblock.landblock_id,
+            &interior,
+            args.portal_cell,
+            args.portal_index,
+        )?;
+    }
     Ok(())
 }
 
@@ -890,6 +939,207 @@ fn exit_physical_fly_portal(
         viewer_mismatch_ticks,
         placement_transitions,
     ))
+}
+
+/// Whether one explicit route tick may feed the next tick.
+enum GroundedRouteTick {
+    /// The solver committed a body that may continue the replay.
+    Solved(GroundedBody),
+    /// Coverage or a finite solver budget stopped the replay at its last safe state.
+    Stopped,
+}
+
+/// Correlated inputs for one explicit grounded replay tick.
+struct GroundedRouteTickRequest {
+    /// Stable replay phase label.
+    phase: &'static str,
+    /// Zero-based tick within `phase`.
+    tick: usize,
+    /// Last safely committed body supplied to the production solver.
+    body: GroundedBody,
+    /// Velocity submitted for this tick.
+    requested_velocity: Vector3,
+    /// Axis used only to report signed forward progress.
+    progress_axis: Vector3,
+}
+
+fn probe_explicit_grounded_route(
+    scene: &CollisionScene,
+    landblock_id: u32,
+    route: GroundedRouteSpec,
+) -> Result<()> {
+    let anchor = Guid(landblock_id);
+    let mut body = GroundedBody {
+        pose: WorldPosition {
+            landblock_id: route.cell.unwrap_or(anchor),
+            coords: route.start,
+            rotation: Quaternion::identity(),
+        },
+        cell: route.cell,
+        fall_velocity: 0.0,
+        support: None,
+    };
+    let support_center = route.start + route.spheres.support.center;
+    let placement = match scene.transit_cell(CellTransitRequest {
+        previous_cell: route.cell,
+        anchor,
+        center: support_center,
+        radius: route.spheres.support.radius,
+    })? {
+        CollisionQuery::Complete(placement) => placement,
+        CollisionQuery::MissingCoverage(missing) => {
+            anyhow::bail!("explicit grounded registration lacks collision coverage: {missing:?}")
+        }
+    };
+    ensure!(
+        placement.committed_cell() == route.cell,
+        "explicit grounded start requested cell {}, but portal traversal selected {}; pass --grounded-cell for an indoor start",
+        format_cell(route.cell),
+        format_cell(placement.committed_cell()),
+    );
+    let initial_contacts = initial_placement_contacts(scene, &body, route.spheres)?;
+    println!(
+        "grounded_explicit start=({:.6},{:.6},{:.6}) cell={} drive=({:.6},{:.6}) settle_ticks={} drive_ticks={} spheres={} initial_contacts={initial_contacts}",
+        route.start.x,
+        route.start.y,
+        route.start.z,
+        format_cell(route.cell),
+        route.drive_velocity.x,
+        route.drive_velocity.y,
+        route.settle_ticks,
+        route.drive_ticks,
+        usize::from(route.spheres.upper.is_some()) + 1,
+    );
+    for tick in 0..route.settle_ticks {
+        match emit_grounded_route_tick(
+            scene,
+            route.spheres,
+            GroundedRouteTickRequest {
+                phase: "settle",
+                tick,
+                body,
+                requested_velocity: Vector3::zero(),
+                progress_axis: route.drive_velocity,
+            },
+        )? {
+            GroundedRouteTick::Solved(solved) => body = solved,
+            GroundedRouteTick::Stopped => return Ok(()),
+        }
+    }
+    for tick in 0..route.drive_ticks {
+        match emit_grounded_route_tick(
+            scene,
+            route.spheres,
+            GroundedRouteTickRequest {
+                phase: "drive",
+                tick,
+                body,
+                requested_velocity: route.drive_velocity,
+                progress_axis: route.drive_velocity,
+            },
+        )? {
+            GroundedRouteTick::Solved(solved) => body = solved,
+            GroundedRouteTick::Stopped => return Ok(()),
+        }
+    }
+    Ok(())
+}
+
+fn emit_grounded_route_tick(
+    scene: &CollisionScene,
+    spheres: GroundedBodySpheres,
+    request: GroundedRouteTickRequest,
+) -> Result<GroundedRouteTick> {
+    let phase = request.phase;
+    let tick = request.tick;
+    let start = request.body.pose.coords;
+    let outcome = solve_grounded(
+        scene,
+        GROUNDED_CONFIG,
+        GroundedRequest {
+            body: request.body,
+            spheres,
+            drive_velocity: request.requested_velocity,
+            delta_seconds: HOST_TICK_SECONDS,
+        },
+    )?;
+    match outcome {
+        GroundedOutcome::Solved {
+            body,
+            achieved_velocity,
+            substeps,
+            contact_passes,
+            constraint_count,
+            ..
+        } => {
+            let displacement = body.pose.coords - start;
+            let forward = if request.progress_axis.length_squared() > f32::EPSILON {
+                displacement.dot(&request.progress_axis.normalize())
+            } else {
+                0.0
+            };
+            let support_normal = format_ground_support(&body);
+            println!(
+                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} grounded={} support_normal={support_normal} fall_velocity={:.6} constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                start.x,
+                start.y,
+                start.z,
+                body.pose.coords.x,
+                body.pose.coords.y,
+                body.pose.coords.z,
+                displacement.x,
+                displacement.y,
+                displacement.z,
+                achieved_velocity.x,
+                achieved_velocity.y,
+                achieved_velocity.z,
+                format_cell(body.cell),
+                body.support.is_some(),
+                body.fall_velocity,
+            );
+            Ok(GroundedRouteTick::Solved(body))
+        }
+        GroundedOutcome::MissingCoverage { body, missing } => {
+            println!(
+                "grounded_explicit phase={phase} tick={tick} status=missing_coverage final=({:.6},{:.6},{:.6}) cell={} missing_landblocks={:?} outside_world={}",
+                body.pose.coords.x,
+                body.pose.coords.y,
+                body.pose.coords.z,
+                format_cell(body.cell),
+                missing.landblocks,
+                missing.outside_world,
+            );
+            Ok(GroundedRouteTick::Stopped)
+        }
+        GroundedOutcome::BudgetExceeded {
+            body,
+            budget,
+            substeps,
+            contact_passes,
+            constraint_count,
+        } => {
+            println!(
+                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} grounded={} fall_velocity={:.6} constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                body.pose.coords.x,
+                body.pose.coords.y,
+                body.pose.coords.z,
+                format_cell(body.cell),
+                body.support.is_some(),
+                body.fall_velocity,
+            );
+            Ok(GroundedRouteTick::Stopped)
+        }
+    }
+}
+
+fn format_ground_support(body: &GroundedBody) -> String {
+    let Some(support) = body.support else {
+        return "none".to_owned();
+    };
+    format!(
+        "({:.6},{:.6},{:.6})",
+        support.normal.x, support.normal.y, support.normal.z
+    )
 }
 
 fn probe_grounded_outside_portals(
@@ -1612,7 +1862,143 @@ fn bsp_has_root_sphere(node: &BspNode) -> bool {
     }
 }
 
+fn grounded_route_spec(args: &Args, landblock_id: u32) -> Result<Option<GroundedRouteSpec>> {
+    let Some(start) = args.grounded_start else {
+        ensure!(
+            args.grounded_drive.is_none() && args.grounded_cell.is_none(),
+            "explicit grounded route options require --grounded-start"
+        );
+        return Ok(None);
+    };
+    let drive_velocity = args
+        .grounded_drive
+        .context("--grounded-start requires --grounded-drive")?;
+    ensure!(
+        drive_velocity.length_squared() > f32::EPSILON,
+        "explicit grounded drive must be non-zero"
+    );
+    ensure!(
+        args.grounded_ticks > 0,
+        "explicit grounded route requires at least one driven tick"
+    );
+    let cell = args.grounded_cell.map(Guid);
+    if let Some(cell) = cell {
+        ensure!(
+            cell.0 & 0xffff >= 0x0100,
+            "--grounded-cell must name a full EnvCell DID"
+        );
+        ensure!(
+            cell.0 & 0xffff_0000 == landblock_id & 0xffff_0000,
+            "--grounded-cell must belong to the selected route landblock"
+        );
+    }
+    let spheres = match args.grounded_body {
+        GroundedRouteBody::Lower => GroundedBodySpheres {
+            support: support_sphere(),
+            upper: None,
+        },
+        GroundedRouteBody::Pair => production_pair(),
+    };
+    Ok(Some(GroundedRouteSpec {
+        start,
+        drive_velocity,
+        cell,
+        settle_ticks: args.grounded_settle_ticks,
+        drive_ticks: args.grounded_ticks,
+        spheres,
+    }))
+}
+
+fn parse_vector3(value: &str) -> std::result::Result<Vector3, String> {
+    let components = parse_finite_components(value, 3)?;
+    Ok(Vector3::new(components[0], components[1], components[2]))
+}
+
+fn parse_horizontal_vector(value: &str) -> std::result::Result<Vector3, String> {
+    let components = parse_finite_components(value, 2)?;
+    Ok(Vector3::new(components[0], components[1], 0.0))
+}
+
+fn parse_finite_components(value: &str, expected: usize) -> std::result::Result<Vec<f32>, String> {
+    let components = value
+        .split(',')
+        .map(|component| {
+            component
+                .trim()
+                .parse::<f32>()
+                .map_err(|error| format!("invalid vector component: {error}"))
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if components.len() != expected {
+        return Err(format!(
+            "expected {expected} comma-separated components, received {}",
+            components.len()
+        ));
+    }
+    if components.iter().any(|component| !component.is_finite()) {
+        return Err("vector components must be finite".to_owned());
+    }
+    Ok(components)
+}
+
 fn parse_did(value: &str) -> std::result::Result<u32, String> {
     let value = value.strip_prefix("0x").unwrap_or(value);
     u32::from_str_radix(value, 16).map_err(|error| format!("invalid hexadecimal DID: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_probe_does_not_require_an_explicit_grounded_route() {
+        let args = Args::try_parse_from(["collision_scene_probe"]).unwrap();
+
+        assert!(args.grounded_start.is_none());
+        assert!(args.grounded_drive.is_none());
+        assert_eq!(args.grounded_settle_ticks, 4);
+        assert_eq!(args.grounded_ticks, 60);
+    }
+
+    #[test]
+    fn explicit_grounded_route_parses_composite_geometry_and_policy() {
+        let args = Args::try_parse_from([
+            "collision_scene_probe",
+            "--grounded-start",
+            "129.0,180.355,21.6",
+            "--grounded-drive=-4.0,-0.008",
+            "--grounded-cell",
+            "0xda550100",
+            "--grounded-settle-ticks",
+            "2",
+            "--grounded-ticks",
+            "10",
+            "--grounded-body",
+            "lower",
+        ])
+        .unwrap();
+        let route = grounded_route_spec(&args, 0xda55_ffff).unwrap().unwrap();
+
+        assert_eq!(route.start, Vector3::new(129.0, 180.355, 21.6));
+        assert_eq!(route.drive_velocity, Vector3::new(-4.0, -0.008, 0.0));
+        assert_eq!(route.cell, Some(Guid(0xda55_0100)));
+        assert_eq!(route.settle_ticks, 2);
+        assert_eq!(route.drive_ticks, 10);
+        assert!(route.spheres.upper.is_none());
+    }
+
+    #[test]
+    fn explicit_grounded_start_requires_a_drive_vector() {
+        let error = Args::try_parse_from([
+            "collision_scene_probe",
+            "--grounded-start",
+            "129.0,180.355,21.6",
+        ])
+        .unwrap_err();
+
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+    }
 }

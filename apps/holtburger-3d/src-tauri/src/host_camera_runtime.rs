@@ -12,10 +12,10 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_world::{
-    CellTransitRequest, CollisionQuery, CollisionScene, MotionWaypoint, PhysicalBodyActivity,
-    PhysicalBodyTickOutcome, PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus,
-    PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint, SpatialBodyId,
-    resolve_physical_body_cell,
+    CellTransitRequest, CollisionQuery, CollisionScene, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalBodyActivity, PhysicalBodyTickOutcome,
+    PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus, PlacedMotionPath,
+    PlacedMotionPathRequest, PlacedMotionPoint, SpatialBodyId, resolve_physical_body_cell,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -515,6 +515,7 @@ impl HostCameraRuntime {
                     .map(|leg| MotionWaypoint {
                         center: leg.end().center(),
                         end_fraction: leg.end_fraction(),
+                        placement: MotionWaypointPlacement::Traverse,
                     })
                     .collect::<Vec<_>>();
                 match transit_presented_viewer_path(
@@ -761,12 +762,14 @@ fn transit_presented_viewer_path(
                 + initial_viewer_offset
                 + (final_viewer_offset - initial_viewer_offset) * waypoint.end_fraction,
             end_fraction: waypoint.end_fraction,
+            placement: MotionWaypointPlacement::Traverse,
         })
         .collect::<Vec<_>>();
     let waypoints = if waypoints.is_empty() {
         vec![MotionWaypoint {
             center: candidate_body + final_viewer_offset,
             end_fraction: 1.0,
+            placement: MotionWaypointPlacement::Traverse,
         }]
     } else {
         waypoints
@@ -1444,6 +1447,7 @@ mod tests {
             &[MotionWaypoint {
                 center: body_pose.coords,
                 end_fraction: 1.0,
+                placement: MotionWaypointPlacement::Committed(Some(Guid(0xda55_010a))),
             }],
             Vector3::new(1.0, 0.0, 0.0),
         )
@@ -1499,10 +1503,12 @@ mod tests {
             MotionWaypoint {
                 center: Vector3::new(90.25, 10.0, 20.0),
                 end_fraction: 0.5,
+                placement: MotionWaypointPlacement::Traverse,
             },
             MotionWaypoint {
                 center: Vector3::new(90.5, 10.0, 20.0),
                 end_fraction: 1.0,
+                placement: MotionWaypointPlacement::Traverse,
             },
         ];
 

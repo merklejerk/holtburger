@@ -14,9 +14,9 @@ use holtburger_dat::physics::BspNode;
 use holtburger_world::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, EdgeProtection,
     GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest,
-    GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome,
-    PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
-    solve_grounded, solve_physical_fly,
+    GroundedSphere, MotionWaypoint, MotionWaypointPlacement, PhysicalFlyBody, PhysicalFlyConfig,
+    PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest,
+    RETAIL_WALKABLE_NORMAL_Z, solve_grounded, solve_physical_fly,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -604,6 +604,7 @@ fn append_physical_fly_viewer_transitions(
         .map(|leg| MotionWaypoint {
             center: leg.end().center(),
             end_fraction: leg.end_fraction(),
+            placement: MotionWaypointPlacement::Traverse,
         })
         .collect::<Vec<_>>();
     append_placed_motion_transitions(
@@ -1717,6 +1718,7 @@ fn transit_grounded_viewers(
             .map(|waypoint| MotionWaypoint {
                 center: waypoint.center + offset,
                 end_fraction: waypoint.end_fraction,
+                placement: MotionWaypointPlacement::Traverse,
             })
             .collect::<Vec<_>>();
         trace.cell = append_placed_motion_transitions(

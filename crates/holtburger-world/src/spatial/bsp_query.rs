@@ -24,19 +24,31 @@ pub struct BspContact {
 pub struct BspSupport {
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
-    /// Non-negative vertical distance from the requested center to tangency.
-    pub drop: f32,
-    /// Horizontal inward normal while support comes from a finite polygon edge.
-    pub boundary_normal: Option<Vector3>,
+    /// Signed vertical correction from the requested center to tangency; positive rises.
+    pub height_delta: f32,
+    /// Authored feature reached by the bounded vertical probe.
+    pub feature: BspSupportFeature,
+}
+
+/// Authored polygon feature reached by a support probe.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BspSupportFeature {
+    /// The finite polygon accepts an ordinary adjustment to its authored plane.
+    Surface,
+    /// The sphere reaches a finite edge but cannot adjust to the polygon plane.
+    Edge {
+        /// Horizontal normal pointing back across the reached edge.
+        inward_normal: Vector3,
+    },
 }
 
 /// Two-sided polygon obstruction used only by grounded response routing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BspPolygonObstruction {
-    /// Normal facing the sphere's approach side.
-    pub normal: Vector3,
-    /// Positive displacement required along `normal` to clear the polygon.
-    pub depth: f32,
+    /// Radial sphere-to-polygon contact used only to separate overlapping geometry.
+    pub separation: BspContact,
+    /// Authored polygon normal; grounded response decides which side faces the body.
+    pub polygon_normal: Vector3,
 }
 
 /// Returns contacts with solid BSP regions reached by a placed sphere.
@@ -44,6 +56,7 @@ pub fn placed_solid_contacts(
     collider: &PlacedCollider,
     center: Vector3,
     radius: f32,
+    center_solid: bool,
 ) -> Vec<BspContact> {
     let mut contacts = Vec::new();
     descend(
@@ -51,7 +64,7 @@ pub fn placed_solid_contacts(
         collider,
         center,
         radius,
-        true,
+        center_solid,
         &mut Vec::new(),
         &mut contacts,
     );
@@ -125,8 +138,8 @@ pub fn placed_polygon_obstructions(
                 polygon_sphere_contact(&vertices, plane.normal, plane.d, center, radius)
             {
                 contacts.push(BspPolygonObstruction {
-                    normal: contact.normal,
-                    depth: contact.depth,
+                    separation: contact,
+                    polygon_normal: plane.normal,
                 });
             }
         },
@@ -140,13 +153,14 @@ pub fn placed_supports(
     center: Vector3,
     radius: f32,
     maximum_drop: f32,
+    maximum_rise: f32,
 ) -> Vec<BspSupport> {
     let mut supports = Vec::new();
     visit_polygon_leaves(
         &collider.shape.bsp,
         collider,
         center,
-        radius + maximum_drop,
+        radius + maximum_drop.max(maximum_rise),
         &mut |polygon| {
             let vertices = polygon
                 .vertices
@@ -167,6 +181,7 @@ pub fn placed_supports(
                 center,
                 radius,
                 maximum_drop,
+                maximum_rise,
             ) {
                 supports.push(support);
             }
@@ -394,47 +409,72 @@ pub(super) fn support_on_polygon(
     center: Vector3,
     radius: f32,
     maximum_drop: f32,
+    maximum_rise: f32,
 ) -> Option<BspSupport> {
     if vertices.len() < 3 || normal.z <= CONTACT_EPSILON {
         return None;
     }
     let distance = normal.dot(&center) + plane_d;
-    let face_drop = (distance - radius) / normal.z;
+    let face_height_delta = (radius - distance) / normal.z;
+    let adjustment_in_range = face_height_delta >= -maximum_drop - CONTACT_EPSILON
+        && face_height_delta <= maximum_rise + CONTACT_EPSILON;
     let mut minimum_support = None;
-    if face_drop >= -CONTACT_EPSILON && face_drop <= maximum_drop + CONTACT_EPSILON {
-        let tangent_center = center - Vector3::new(0.0, 0.0, face_drop.max(0.0));
+    if adjustment_in_range {
+        // Retail's step-down transaction also lifts a lower sphere already below a newly visible
+        // walkable plane (`OBJECTINFO::validate_walkable`, acclient.c:302813-302835). Portal lips
+        // expose this path when outdoor terrain enters the body-wide collision cell array.
+        let tangent_center = center + Vector3::new(0.0, 0.0, face_height_delta);
         let contact_point = tangent_center - normal * radius;
         if (0..vertices.len()).all(|index| {
             let start = vertices[index];
             let end = vertices[(index + 1) % vertices.len()];
             (contact_point - start).dot(&normal.cross(&(end - start))) >= -CONTACT_EPSILON
         }) {
-            minimum_support = Some((face_drop.max(0.0), None));
+            // Boundary points remain surface support. Otherwise shared polygon and terrain-triangle
+            // seams would masquerade as precipices; the crossed-edge path begins only after the
+            // adjusted contact point leaves the finite face.
+            minimum_support = Some((face_height_delta, BspSupportFeature::Surface));
         }
     }
 
-    for index in 0..vertices.len() {
-        let start = vertices[index];
-        let end = vertices[(index + 1) % vertices.len()];
-        if let Some(drop) = vertical_capsule_hit(center, start, end, radius, maximum_drop) {
-            let hit_center = center - Vector3::new(0.0, 0.0, drop);
-            if normal.dot(&hit_center) + plane_d >= -CONTACT_EPSILON {
-                let closest = closest_point_on_segment(hit_center, start, end);
-                let outward = Vector3::new(hit_center.x - closest.x, hit_center.y - closest.y, 0.0);
-                let boundary_normal = (outward.length_squared() > CONTACT_EPSILON.powi(2))
-                    .then(|| outward.normalize() * -1.0);
-                if minimum_support.is_none_or(|(current, _)| drop < current) {
-                    minimum_support = Some((drop, boundary_normal));
+    if !matches!(minimum_support, Some((_, BspSupportFeature::Surface))) {
+        for index in 0..vertices.len() {
+            let start = vertices[index];
+            let end = vertices[(index + 1) % vertices.len()];
+            if let Some(drop) = vertical_capsule_hit(center, start, end, radius, maximum_drop) {
+                let hit_center = center - Vector3::new(0.0, 0.0, drop);
+                if normal.dot(&hit_center) + plane_d >= -CONTACT_EPSILON {
+                    let closest = closest_point_on_segment(hit_center, start, end);
+                    let outward =
+                        Vector3::new(hit_center.x - closest.x, hit_center.y - closest.y, 0.0);
+                    let Some(inward_normal) = (outward.length_squared() > CONTACT_EPSILON.powi(2))
+                        .then(|| outward.normalize() * -1.0)
+                    else {
+                        continue;
+                    };
+                    // An edge intersection may still be a valid ordinary walkable transaction.
+                    // Retail moves that candidate to the authored polygon plane; only a zero plane
+                    // adjustment remains a crossed-edge precipice candidate
+                    // (`CPolygon::adjust_sphere_to_plane`, acclient.c:344680-344734).
+                    let (height_delta, feature) =
+                        if adjustment_in_range && face_height_delta.abs() > CONTACT_EPSILON {
+                            (face_height_delta, BspSupportFeature::Surface)
+                        } else {
+                            (-drop, BspSupportFeature::Edge { inward_normal })
+                        };
+                    if minimum_support.is_none_or(|(current, _)| height_delta > current) {
+                        minimum_support = Some((height_delta, feature));
+                    }
                 }
             }
         }
     }
 
-    let (drop, boundary_normal) = minimum_support?;
+    let (height_delta, feature) = minimum_support?;
     Some(BspSupport {
         normal,
-        drop,
-        boundary_normal,
+        height_delta,
+        feature,
     })
 }
 
@@ -626,12 +666,16 @@ mod tests {
     fn radius_only_solid_leaf_reach_is_not_center_penetration() {
         let collider = split_solid();
         assert!(
-            placed_solid_contacts(&collider, Vector3::new(0.75, 0.0, 0.0), 1.0).is_empty(),
+            placed_solid_contacts(&collider, Vector3::new(0.75, 0.0, 0.0), 1.0, true).is_empty(),
             "radius-only traversal classified the empty-side center as solid"
         );
 
-        let inside = placed_solid_contacts(&collider, Vector3::new(-0.25, 0.0, 0.0), 1.0);
+        let inside = placed_solid_contacts(&collider, Vector3::new(-0.25, 0.0, 0.0), 1.0, true);
         assert_eq!(inside.len(), 1, "solid-side center lost its contact");
         assert_eq!(inside[0].normal, Vector3::new(1.0, 0.0, 0.0));
+        assert!(
+            placed_solid_contacts(&collider, Vector3::new(-0.25, 0.0, 0.0), 1.0, false).is_empty(),
+            "disabled center-solid classification still treated the leaf interior as obstruction"
+        );
     }
 }

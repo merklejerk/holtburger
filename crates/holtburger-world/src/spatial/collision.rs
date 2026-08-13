@@ -12,8 +12,8 @@ use holtburger_content::{
 use thiserror::Error;
 
 use super::bsp_query::{
-    placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts, placed_supports,
-    support_on_polygon,
+    BspSupportFeature, placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts,
+    placed_supports, support_on_polygon,
 };
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
@@ -121,9 +121,11 @@ pub struct StaticContact {
 /// Grounded movement obstruction with two-sided authored polygon response.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundedObstruction {
-    /// Outward-facing unit normal for separation and sliding.
-    pub normal: Vector3,
-    /// Positive world-meter displacement required along `normal`.
+    /// Radial unit normal used only to separate overlapping geometry.
+    pub separation_normal: Vector3,
+    /// Authored surface normal facing the body, used for grounded response decisions.
+    pub response_normal: Vector3,
+    /// Positive world-meter displacement required along `separation_normal`.
     pub depth: f32,
 }
 
@@ -132,10 +134,31 @@ pub struct GroundedObstruction {
 pub struct SupportContact {
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
-    /// Non-negative vertical distance from the requested center to tangency.
-    pub drop: f32,
-    /// Horizontal inward normal while support comes from a finite polygon edge.
-    pub boundary_normal: Option<Vector3>,
+    /// Signed vertical correction from the requested center to tangency; positive rises.
+    pub height_delta: f32,
+    /// Authored feature reached by the bounded vertical probe.
+    pub feature: SupportFeature,
+}
+
+/// Authored surface feature reached by a support query.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SupportFeature {
+    /// The finite polygon accepts an ordinary adjustment to its authored plane.
+    Surface,
+    /// The sphere reaches a finite edge but cannot adjust to the polygon plane.
+    Edge {
+        /// Horizontal normal pointing back across the reached edge.
+        inward_normal: Vector3,
+    },
+}
+
+impl From<BspSupportFeature> for SupportFeature {
+    fn from(feature: BspSupportFeature) -> Self {
+        match feature {
+            BspSupportFeature::Surface => Self::Surface,
+            BspSupportFeature::Edge { inward_normal } => Self::Edge { inward_normal },
+        }
+    }
 }
 
 /// Swept-sphere facts required to prove collision coverage.
@@ -256,6 +279,8 @@ pub struct SupportRequest<'a> {
     pub radius: f32,
     /// Maximum vertical distance the sphere may settle.
     pub maximum_drop: f32,
+    /// Maximum vertical distance a penetrated walkable plane may lift the sphere.
+    pub maximum_rise: f32,
     /// Candidate placement selecting the collision domains visible to this query.
     pub placement: &'a CollisionPlacement,
 }
@@ -383,6 +408,15 @@ impl PlacedMotionPath {
 struct ColliderReference {
     owner: Guid,
     collider_index: usize,
+}
+
+/// One selected static collider and the retail BSP leaf policy for this collision placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SelectedCollider {
+    /// Stable reference to source-owned collider geometry.
+    reference: ColliderReference,
+    /// Whether a center-containing solid BSP leaf obstructs this query.
+    center_solid: bool,
 }
 
 /// One exact directed portal crossing along a single accepted geometric leg.
@@ -585,9 +619,7 @@ impl StaticShadowIndex {
                 if let Some(colliders) = self.outdoor_colliders.get(&owner) {
                     selected.extend(colliders.iter().copied());
                 }
-                if !placement.reaches_interior_in(owner)
-                    && let Some(colliders) = self.building_shells.get(&owner)
-                {
+                if let Some(colliders) = self.building_shells.get(&owner) {
                     selected.extend(colliders.iter().copied());
                 }
             }
@@ -784,7 +816,8 @@ impl CollisionScene {
                             && movement.dot(&contact.normal) <= 0.0
                         {
                             contacts.push(GroundedObstruction {
-                                normal: contact.normal,
+                                separation_normal: contact.normal,
+                                response_normal: contact.normal,
                                 depth: contact.depth,
                             });
                         }
@@ -792,7 +825,8 @@ impl CollisionScene {
                 }
             }
         }
-        for reference in self.shadows.selected_colliders(&touched, request.placement) {
+        for selected in self.selected_colliders(&touched, request.placement) {
+            let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center =
@@ -803,21 +837,35 @@ impl CollisionScene {
                 continue;
             }
             contacts.extend(
-                placed_solid_contacts(collider, local_center, request.sweep.radius)
-                    .into_iter()
-                    .filter(|contact| movement.dot(&contact.normal) <= 0.0)
-                    .map(|contact| GroundedObstruction {
-                        normal: contact.normal,
-                        depth: contact.depth,
-                    }),
+                placed_solid_contacts(
+                    collider,
+                    local_center,
+                    request.sweep.radius,
+                    selected.center_solid,
+                )
+                .into_iter()
+                .filter(|contact| movement.dot(&contact.normal) <= 0.0)
+                .map(|contact| GroundedObstruction {
+                    separation_normal: contact.normal,
+                    response_normal: contact.normal,
+                    depth: contact.depth,
+                }),
             );
             contacts.extend(
                 placed_polygon_obstructions(collider, local_center, request.sweep.radius)
                     .into_iter()
-                    .filter(|contact| movement.dot(&contact.normal) <= 0.0)
-                    .map(|contact| GroundedObstruction {
-                        normal: contact.normal,
-                        depth: contact.depth,
+                    .filter_map(|contact| {
+                        let response_normal =
+                            if contact.polygon_normal.dot(&contact.separation.normal) >= 0.0 {
+                                contact.polygon_normal
+                            } else {
+                                contact.polygon_normal * -1.0
+                            };
+                        (movement.dot(&response_normal) <= 0.0).then_some(GroundedObstruction {
+                            separation_normal: contact.separation.normal,
+                            response_normal,
+                            depth: contact.separation.depth,
+                        })
                     }),
             );
         }
@@ -889,35 +937,43 @@ impl CollisionScene {
                             local_center,
                             request.radius,
                             request.maximum_drop,
+                            request.maximum_rise,
                         ) {
                             supports.push(SupportContact {
                                 normal: support.normal,
-                                drop: support.drop,
-                                boundary_normal: support.boundary_normal,
+                                height_delta: support.height_delta,
+                                feature: support.feature.into(),
                             });
                         }
                     }
                 }
             }
         }
-        for reference in self.shadows.selected_colliders(&touched, request.placement) {
+        for selected in self.selected_colliders(&touched, request.placement) {
+            let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
-            let vertical_reach = request.radius + request.maximum_drop;
+            let vertical_reach = request.radius + request.maximum_drop.max(request.maximum_rise);
             let separation = local_center - collider.bounds_center;
             let reach = vertical_reach + collider.bounds_radius;
             if separation.length_squared() > reach * reach {
                 continue;
             }
             supports.extend(
-                placed_supports(collider, local_center, request.radius, request.maximum_drop)
-                    .into_iter()
-                    .map(|support| SupportContact {
-                        normal: support.normal,
-                        drop: support.drop,
-                        boundary_normal: support.boundary_normal,
-                    }),
+                placed_supports(
+                    collider,
+                    local_center,
+                    request.radius,
+                    request.maximum_drop,
+                    request.maximum_rise,
+                )
+                .into_iter()
+                .map(|support| SupportContact {
+                    normal: support.normal,
+                    height_delta: support.height_delta,
+                    feature: support.feature.into(),
+                }),
             );
         }
         Ok(CollisionQuery::Complete(supports))
@@ -1341,7 +1397,8 @@ impl CollisionScene {
                 }
             }
         }
-        for reference in self.shadows.selected_colliders(touched, placement) {
+        for selected in self.selected_colliders(touched, placement) {
+            let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center = anchor_to_landblock(center, anchor, reference.owner);
@@ -1350,9 +1407,10 @@ impl CollisionScene {
             if separation.length_squared() > reach * reach {
                 continue;
             }
-            for contact in placed_solid_contacts(collider, local_center, radius)
-                .into_iter()
-                .chain(placed_polygon_contacts(collider, local_center, radius))
+            for contact in
+                placed_solid_contacts(collider, local_center, radius, selected.center_solid)
+                    .into_iter()
+                    .chain(placed_polygon_contacts(collider, local_center, radius))
             {
                 if movement.is_some_and(|delta| delta.dot(&contact.normal) >= 0.0) {
                     continue;
@@ -1364,6 +1422,33 @@ impl CollisionScene {
             }
         }
         contacts
+    }
+
+    fn selected_colliders(
+        &self,
+        touched: &[Guid],
+        placement: &CollisionPlacement,
+    ) -> Vec<SelectedCollider> {
+        self.shadows
+            .selected_colliders(touched, placement)
+            .into_iter()
+            .map(|reference| {
+                let collider = &self.landblocks[&reference.owner].static_geometry.colliders
+                    [reference.collider_index];
+                // Retail keeps a reached building in the cell array but disables its BSP
+                // center-solid test after any retained sphere reaches an EnvCell. Authored
+                // polygons remain eligible for walls and walkable support (`bldg_check` and
+                // `hits_interior_cell`, acclient.c:345874, 346397).
+                let center_solid = !matches!(
+                    collider.source_placement,
+                    StaticColliderPlacement::BuildingShell { .. }
+                ) || !placement.reaches_interior_in(reference.owner);
+                SelectedCollider {
+                    reference,
+                    center_solid,
+                }
+            })
+            .collect()
     }
 }
 
@@ -1843,7 +1928,11 @@ fn validate_probe(request: SupportRequest) -> Result<(), CollisionQueryError> {
         end: request.center,
         radius: request.radius,
     })?;
-    if !request.maximum_drop.is_finite() || request.maximum_drop < 0.0 {
+    if !request.maximum_drop.is_finite()
+        || request.maximum_drop < 0.0
+        || !request.maximum_rise.is_finite()
+        || request.maximum_rise < 0.0
+    {
         return Err(CollisionQueryError::InvalidDistance);
     }
     Ok(())
@@ -2127,6 +2216,18 @@ mod tests {
                 center: request.start,
                 radius: 1.0,
                 maximum_drop: -1.0,
+                maximum_rise: 0.0,
+                placement: &CollisionPlacement::outdoor(),
+            }),
+            Err(CollisionQueryError::InvalidDistance)
+        );
+        assert_eq!(
+            scene.support_contacts(SupportRequest {
+                anchor: request.anchor,
+                center: request.start,
+                radius: 1.0,
+                maximum_drop: 0.0,
+                maximum_rise: f32::NAN,
                 placement: &CollisionPlacement::outdoor(),
             }),
             Err(CollisionQueryError::InvalidDistance)
@@ -2443,7 +2544,28 @@ mod tests {
         let straddling = CollisionPlacement::outdoor().merge_reached(interior);
         assert_eq!(
             scene.shadows.selected_colliders(&[owner], &straddling),
-            references([0, 2, 3])
+            references([0, 1, 2, 3])
+        );
+        assert_eq!(
+            scene.selected_colliders(&[owner], &straddling),
+            vec![
+                SelectedCollider {
+                    reference: references([0])[0],
+                    center_solid: true,
+                },
+                SelectedCollider {
+                    reference: references([1])[0],
+                    center_solid: false,
+                },
+                SelectedCollider {
+                    reference: references([2])[0],
+                    center_solid: true,
+                },
+                SelectedCollider {
+                    reference: references([3])[0],
+                    center_solid: true,
+                },
+            ]
         );
     }
 

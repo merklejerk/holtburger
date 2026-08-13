@@ -743,9 +743,29 @@ mod tests {
     }
 
     #[test]
-    fn candidate_placement_suppresses_building_shell_and_commits_atomically() {
+    fn candidate_placement_disables_building_center_solid_and_commits_through_an_opening() {
         let mut building = wall_x(10.0);
         building.source_placement = StaticColliderPlacement::BuildingShell { source_index: 0 };
+        let opening_vertices = vec![
+            Vector3::new(10.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 20.0),
+            Vector3::new(10.0, 5.0, 20.0),
+            Vector3::new(10.0, 5.0, 0.0),
+        ];
+        building.shape = Arc::new(CollisionShape {
+            bsp: building.shape.bsp.clone(),
+            bounds: building.shape.bounds,
+            box_bounds: CollisionBox::from_points(opening_vertices.iter().copied())
+                .expect("synthetic boundary polygon has finite bounds"),
+            polygons: HashMap::from([(
+                1,
+                CollisionPolygon {
+                    vertices: opening_vertices,
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 10.0,
+                },
+            )]),
+        });
         let volume = CellVolume {
             cell_selector: 0x0100,
             placement: LandblockPlacement {

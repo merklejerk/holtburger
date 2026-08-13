@@ -803,9 +803,11 @@ Phase 1b completed on 2026-08-11 with these decisions and corrections:
   shells can have no solid leaves. Nearly parallel duplicate contacts collapse to the deepest
   constraint before separation, avoiding double correction where authored geometry exposes the same
   face through both mechanisms.
-- Each substep resolves the candidate cell before obstruction, so a building shell concedes only
-  with that candidate context. Pose and cell commit together after directionless placement
-  confirmation. The solver has explicit substep/contact budgets and contains no recursive entry.
+- Each substep resolves the candidate cell before obstruction. At this checkpoint the candidate
+  context made the entire building shell concede; the Phase 9d reopen later narrows that behavior
+  to retail's center-solid policy while retaining authored polygons. Pose and cell commit together
+  after directionless placement confirmation. The solver has explicit substep/contact budgets and
+  contains no recursive entry.
 - Synthetic public-entry scenarios cover open 3D motion, head-on wall impact, oblique slide, corner
   constraints, terrain floor, ceiling, polygon-only interior shell, immediate retreat, non-uniform
   scale, high-speed budget refusal, impossible-placement contact exhaustion, landblock crossing,
@@ -1233,9 +1235,10 @@ state machine.
 
 Grounded transit queries both transformed spheres through the prior-cell/portal-neighbor contract.
 Only the lower result selects the committed cell; either result may provide the landblock-level
-interior context that suppresses a building shell. Pair coverage likewise unions both spheres, and
-all post-separation query stages preserve explicit missing coverage rather than assuming preflight
-cannot change.
+interior context. At this checkpoint that context suppressed an entire building shell; the Phase 9d
+reopen later limits it to the building BSP's center-solid interpretation. Pair coverage likewise
+unions both spheres, and all post-separation query stages preserve explicit missing coverage rather
+than assuming preflight cannot change.
 
 Retail's explicit negative-polygon flag was removed during execution. It had no distinct reader in
 the equivalent solver: a two-sided polygon contact whose normal faces the sphere's approach side,
@@ -1683,8 +1686,10 @@ only a generally useful probe when it has a continuing reverse-engineering consu
       in an unrelated sibling cell.
 - [x] Portal entry, internal transit, and exit remain atomic for both one- and two-sphere bodies;
       neither a collision hole nor a one-tick mixture of stale placement domains is observable.
-- [x] The building shell blocks exterior walls, concedes at valid interior candidates, and resumes
-      outdoors without regressing the canonical `0xDA550100` reverse route.
+- [x] The building shell blocks exterior walls, disables its center-solid classification when a
+      valid candidate reaches an EnvCell, retains finite authored polygons during the straddle, and
+      resumes the outdoor interpretation without regressing the canonical `0xDA550100` reverse
+      route.
 - [x] The shipped-content census records whether any valid indoor static needs cross-cell
       membership, and the landed collider contract matches that evidence without an unused field.
 - [x] Physical fly and grounded walk consume the same placement-scoped static query selection; no
@@ -2522,8 +2527,11 @@ and tuning files wholesale.
 
 ## Open Questions
 
-None. Phase 8 records the ratified simulation-interest, inactive-body, generic-body, and app-local
-camera-projection cutover. Its final live checks include the outstanding landblock-seam recheck.
+The completed architecture phases have no open design decisions. Phase 9 has one evidence input:
+each remaining parity investigation needs a maintainer reproduction card containing the movement
+mode, starting placement or coordinates, input direction, Holtburger outcome, and retail outcome.
+The first card is the intermittent grounded stall at a stair crest; its exact authored location is
+still needed before the real-content capture can be minimized.
 
 ## Final Acceptance Record
 
@@ -3105,3 +3113,492 @@ rendering, or presentation-probe concepts.
   loop, so the maintainer repeated the named real-Explorer regression card. On 2026-08-12, the
   maintainer reported execution successful and collision behavior consistent with the pre-cutover
   Explorer behavior. This closes the last acceptance gate.
+
+### Phase 9: Observation-Led Retail Physics Differential Testing
+
+The recovery architecture is accepted, but live use still exposes grounded outcomes that differ
+from retail. Expand parity coverage at small behavior-bearing decision boundaries rather than
+reconstructing retail's mutable `CTransition` object as either production architecture or a
+monolithic test oracle.
+
+The initial stair-crest experiment establishes both the value and the limit of this technique. A
+literal oracle for `CPolygon::polygon_hits_sphere_precise`,
+`COLLISIONINFO::set_sliding_normal`, and the relevant branch of `CTransition::adjust_offset` proves
+that retail separates with the radial sphere/polygon contact but responds with the authored polygon
+plane. Production previously used the radial normal for both jobs. However, temporarily restoring
+that old response leaves the 225-case synthetic tread/landing matrix green. The primitive mismatch
+is real, while the observed stair stall is not yet reproduced. Retain the matrix only as regression
+coverage and do not present it as causal evidence.
+
+#### Goal and Boundaries
+
+Build an observation-led differential ladder that turns each remaining retail discrepancy into one
+attributed real-content trace, one minimized asset-independent fixture, and the smallest literal
+retail decision oracle capable of distinguishing the outcomes.
+
+In scope:
+
+- grounded motion against static terrain, authored BSP polygons, and placement-scoped statics;
+- lower/support and optional upper/constraint sphere routing;
+- walkable support selection, step-up and step-down transactions, collision-normal selection,
+  edge/precipice response, and shared BSP/polygon primitives when a reproduction reaches them;
+- targeted product-path capture in `collision_scene_probe`; and
+- self-contained numeric fixtures checked into `holtburger-world` tests.
+
+Out of scope:
+
+- a complete retail transition simulator or retail-shaped production state machine;
+- differential acceptance of Explorer physical-fly response policy, which is not specified by
+  retail, beyond its shared static-geometry queries;
+- dynamic body-versus-body response, cylspheres, or more-than-two-sphere response models;
+- permanent tests that depend on runtime DAT/HBA assets; and
+- unconstrained fuzzing or parameter matrices that lack a retail oracle and a mutation they can
+  detect.
+
+#### Ground Truth and Existing Seams
+
+- `acclient-eor-source/acclient.c:344680-344734` and `:349100-349128` define retail walkable
+  candidate adjustment: authored traversal mutates one candidate sphere and its `walk_interp`
+  winner. This is not presumptively equivalent to the current `settle_candidate` policy that
+  collects every support and selects minimum vertical drop.
+- `acclient-eor-source/acclient.c:301457-301484` and `:301488-301625` define step-up, step-down,
+  saved-position restoration, edge-slide ordering, and the transition result carried forward.
+- `acclient-eor-source/acclient.c:346347-346560` defines asymmetric lower/upper sphere dispatch,
+  including lower step-up, upper slide, and negative-polygon routing.
+- `acclient-eor-source/acclient.c:300478-300493` and `:300589-300730` define the one-normal
+  horizontal sliding response. The current aggregate query's "most opposing" plane is a
+  deterministic concession, not yet a proved retail equivalent when several contacts coexist.
+- `acclient-eor-source/acclient.c:301354-301437` and `:302548-302607` define edge, cliff, and
+  precipice response through the crossed edge of the retained walkable polygon.
+- `crates/holtburger-debug-harness/src/bin/collision_scene_probe.rs` already assembles canonical
+  product collision and maps collider indexes back to source provenance. Extend this diagnostic
+  rather than adding solver-owned logging or a second collision assembly path.
+- `crates/holtburger-world/src/spatial/grounded_retail_differential.rs` is the Phase 9 opening
+  experiment. Its independent literal helpers are the precedent; its broad staircase matrix is not
+  the reproduction gate.
+
+#### North Stars
+
+1. One observed discrepancy earns one focused trace before it earns solver policy.
+2. Differential oracles compare semantic decisions, not retail object layout or incidental mutable
+   fields.
+3. Oracle code remains independent from production helpers so a shared mistake cannot manufacture
+   parity.
+4. Every matrix must fail a named historical or temporary mutation; case count alone is not
+   evidence.
+5. Authored traversal order and sphere role remain explicit when retail makes them behavior-bearing.
+6. Product assets discover counterexamples; minimized checked-in geometry explains and preserves
+   them.
+7. A proved mismatch may remain unfixed until a consumer-visible consequence is established, but it
+   must not be mislabeled as parity.
+
+#### Phase 9a: Capture and Minimize the Stair-Crest Counterexample
+
+##### Deliverables
+
+- Close the opening experiment as its own checkpoint: retain the separation/response-normal split
+  only if its focused authored-plane oracle fails the prior radial-response mutation, record it as a
+  proved primitive parity correction rather than the stair fix, and keep or reduce the broad matrix
+  according to its regression value.
+- Add an opt-in grounded route to `collision_scene_probe` accepting a start placement or outdoor
+  coordinates, drive vector, tick count, and lower-only or production-pair body selection.
+- Keep the reusable route output at the tick contract: requested and accepted body positions,
+  placement, achieved motion, support state, and outcome. During attribution, use temporary targeted
+  instrumentation for the first failing tick and remove it after minimization; do not add a durable
+  solver observer or phase trace to production body contracts.
+- When collider or polygon identity is required, add an inspection-only projection at the existing
+  BSP traversal seam that reports collider owner/index, polygon identifier and plane, sphere role,
+  separation/response normals, support drop, and boundary. It must reuse the operational traversal
+  and contact math and erase provenance only when projecting into the existing operational contact
+  types; do not implement a second diagnostic collision algorithm or add provenance fields to every
+  production contact.
+- Capture the maintainer's failing stair in canonical product assembly and identify the first tick
+  and substep that loses meaningful forward progress.
+- Reduce the participating authored geometry to a self-contained numeric fixture that reproduces
+  the same production decision without loading runtime assets.
+
+##### Acceptance Criteria
+
+- [x] The opening authored-plane oracle fails when grounded response is temporarily reverted to the
+      radial separation normal, while the plan records that the broad stair matrix does not.
+- [x] The product trace reproduces the reported stall from an explicit start and input without
+      interactive Explorer execution.
+- [x] The first divergent decision names its query phase, sphere role, source geometry, and prior
+      support rather than inferring a cause from the final stopped pose. Terrain has no static
+      collider identifier, so the source is the reached outdoor terrain triangle rather than a
+      fabricated collider/polygon pair.
+- [x] Any retained inspection query is projection-equivalent to the operational contacts for normal,
+      depth/drop, and ordering; otherwise it is removed with the temporary instrumentation.
+- [x] A minimized checked-in fixture fails for the same semantic reason and contains no runtime
+      content dependency.
+- [x] Temporary per-contact solver logging is absent from the final diff.
+
+##### Implementation Record — 2026-08-12
+
+- Grounded polygon obstruction now carries separate radial separation and authored response normals.
+  Simultaneous overlap resolution consumes the radial normal; walkability, diagnostic constraint
+  identity, directional filtering, and the next-substep horizontal sliding normal consume the
+  authored plane facing the body. Solid BSP and terrain contacts retain one equal normal for both
+  roles.
+- The test-only oracle independently transliterates retail's finite polygon/sphere hit, horizontal
+  sliding-normal construction, and no-contact-plane offset adjustment. Reverting only polygon
+  response to the radial normal makes the focused authored-crest test fail with a measurable tilted
+  normal, while all 225 broad tread/landing combinations still pass. The former is the parity proof;
+  the latter remains a non-causal regression matrix.
+- Baseline verification passes all 232 `holtburger-world` library tests, crate Clippy with warnings
+  denied, and repository formatting. This checkpoint does not claim to reproduce or resolve the
+  intermittent authored stair stall.
+- `collision_scene_probe` now accepts one explicit grounded replay as anchor-local body-reference
+  coordinates, horizontal velocity, optional exact EnvCell, settle/drive tick counts, and lower-only
+  or production-pair geometry. It validates the requested starting placement, acquires support, and
+  prints requested versus accepted motion, forward progress, placement, support normal/boundary,
+  fall velocity, constraints, substeps, contact passes, and terminal outcome for every 30 Hz tick.
+- The canonical DA55 `0xDA550100` approach validates the new product route: it settles outdoors,
+  preserves 0.133332 meters of forward progress per driven tick, crosses
+  `outdoor -> 0xDA550100 -> 0xDA550103`, and exposes the sill's temporary vertical adjustment without
+  a rejected solve. Three CLI contract tests and harness Clippy with warnings denied pass.
+- **Deliberate deferral:** no attributed inspection query or durable solver observer has landed.
+  The operational contact projection currently erases collider/polygon identity, but adding a
+  diagnostic seam before the observed stair's first failing tick is known would be speculative. The
+  exact stair start and approach remain the evidence input for the next Phase 9a task.
+- The maintainer's DA55 report supplied that missing evidence. The canonical product replay from
+  body reference `(107.0, 127.58, 20.152)` in `0xDA5501E8`, driven by
+  `(2.784, -2.872)` at 30 Hz with the production sphere pair, reproduced deterministic zero
+  progress after four driven ticks at `(107.242401, 127.329788, 19.911154)`.
+- The first divergent decision occurs during step-down settlement, not movement obstruction or
+  portal traversal. The lower sphere remains supported by the authored EnvCell ramp with normal
+  `(-0.410083, 0.422619, 0.808223)`. The upper sphere admits the outdoor domain into retail's
+  body-wide reached-cell set; final placement confirmation then reports a `0.030388325`-meter
+  overlap between the lower sphere and the newly visible outdoor terrain triangle and rejects the
+  candidate. There is no wall constraint or building-shell contact at the stopped pose.
+- Retail deliberately uses one body-wide cell array too (`CObjCell::find_cell_list` and
+  `CEnvCell::find_transit_cells`, `acclient.c:332969-333069` and `:334139-334325`), so splitting
+  collision placement per sphere would be a false architectural fix. The behavioral difference is
+  downstream: terrain is evaluated from the lower sphere's low point and a penetrated walkable
+  plane raises the candidate during the step transaction (`CLandCell::find_env_collisions` and
+  `OBJECTINFO::validate_walkable`, `acclient.c:340351-340415` and `:302784-302835`). Production had
+  constrained support contacts to downward-only settlement and therefore converted that walkable
+  adjustment into a placement veto.
+- `SupportContact`/`BspSupport` now carry one signed `height_delta`, and the grounded transaction
+  selects the highest reachable walkable surface before confirming the adjusted pair placement.
+  This replaces the incomplete non-negative `drop` contract; no portal exception or per-sphere
+  collision domain was added. The real route now lifts onto the terrain lip, commits outdoors, and
+  continues through all 60 driven ticks.
+- The asset-independent differential fixture contains only an interior ramp, an upper-sphere
+  outside-portal reach, and terrain `0.03` meters above the lower sphere's prior tangent. Its literal
+  retail helper independently computes the walkable height correction. Reinstating the prior
+  down-only support condition makes the focused fixture fail with `Complete(None)`; the corrected
+  branch passes. Temporary settle logging was removed, while the reusable parameterized product
+  route remains for later observation-led captures.
+- Retail bounds that lift rather than treating `step_down_height` as a symmetric adjustment:
+  negative `walk_interp` is accepted only down to `-0.1` (`acclient.c:302824-302830`). The support
+  query therefore receives distinct maximum drop and maximum rise facts; production's 1.5-meter
+  probe permits the observed 3-centimeter lip but cannot become a 1.5-meter upward teleport.
+
+#### Phase 9b: Walkable Arbitration and Step Transaction Oracle
+
+##### Deliverables
+
+- Transliterate only the reached retail decisions from `walkable_hits_sphere`,
+  `check_small_walkable`, `adjust_sphere_to_plane`, `BSPLEAF::find_walkable`, `step_sphere_down`,
+  `step_sphere_up`, and the relevant `transitional_insert` branches.
+- Define a test-only semantic result containing the selected support polygon and plane, adjusted
+  support-sphere center, step disposition, committed or restored pose, upper-sphere veto, and next
+  collision normal. Omit retail fields that do not affect those comparisons.
+- Exercise terminal riser/landing seams, overlapping or nearly coplanar supports, small gaps and
+  overlaps, shallow ramp-to-floor joins, collider boundaries, traversal-order changes, and the
+  production lower/upper pair. Start with the minimized real counterexample, then expand only along
+  dimensions that change a retail branch.
+- If production's minimum-drop support arbitration disagrees, replace it with an explicit
+  behavior-equivalent selection contract. Do not preserve both policies or add a content-specific
+  stair tolerance.
+
+##### Acceptance Criteria
+
+- [x] The minimized portal-ramp fixture produces equal production and retail walkable-adjustment
+      results.
+- [x] Candidate support, pose restoration, and upper-sphere veto are independently distinguishable
+      by focused cases.
+- [x] Authored-order permutations either prove order independence or retain the exact order fact
+      required by retail; unordered aggregation is not declared equivalent by assertion.
+- [x] Temporarily restoring the pre-oracle down-only step behavior fails at least
+      one differential case.
+- [x] The original broad stair matrix remains green and is documented as regression coverage, not
+      causal proof.
+
+##### Implementation Record — 2026-08-12
+
+- A literal test-only step semantic projects retail's decreasing `walk_interp` winner into selected
+  surface and adjusted lower-sphere center. Two overlapping horizontal supports are tested in both
+  authored orders; production and retail select the same highest reached surface, proving this
+  branch order-independent without preserving incidental collection order.
+- Failed-step restoration and upper-sphere veto are separate fixtures. The rollback case proves the
+  raised trial pose and transient support do not escape before immediate retreat. The veto case
+  first proves a lower-only step candidate succeeds, then adds a correctly wound ceiling reached
+  only by the upper sphere and proves the same raised candidate is rejected.
+- No second support policy survives. The former unsigned `drop` vocabulary was swept from the
+  query contract and replaced with signed `height_delta`; maximum drop and retail-bounded maximum
+  rise remain distinct inputs. The original 225-case stair matrix stays green as non-causal
+  regression coverage.
+
+#### Phase 9c: Collision Arbitration and Two-Sphere Routing
+
+##### Deliverables
+
+- Differentially exercise retail's single collision-normal lifecycle against the current aggregate
+  contact query for one wall, adjacent nearly parallel polygons, a divergent seam, an interior
+  corner, and concurrent lower/upper contacts.
+- Compare contact producer, sphere role, transition classification, selected response normal, next
+  adjusted offset, and forward/tangent progress. Do not compare aggregate diagnostic counts.
+- Replace the current "most opposing" concession only if a focused counterexample proves it differs
+  from retail. Any replacement must derive the decision once at the collision-query owner and carry
+  it in a typed result; consumers may not reconstruct traversal order.
+- Add a minimized fixture for each maintainer-observed wall-slide or temporary-obstruction sequence
+  before changing arbitration policy.
+
+##### Acceptance Criteria
+
+- [x] Near-tangent and angled wall motion match retail's selected normal for a single producer and
+      retain forward/tangent
+      progress across consecutive substeps.
+- [x] Lower step-up, upper slide/veto, and negative-polygon routing each have one differential case.
+- [x] Contact order is either proved irrelevant for the covered branch or represented explicitly;
+      hash/map iteration cannot select motion behavior.
+- [x] A mutation back to the displaced radial-response rule fails the counterexample that justified the
+      change.
+
+##### Implementation Record — 2026-08-12
+
+- The independent collision semantic now distinguishes lower step, upper slide, lower back-face,
+  and upper back-face slide routing from the authored polygon normal and radial separation side. A
+  focused case compares each route's response normal and next adjusted offset with production.
+- Existing finite-wall, divergent-seam, corner, and two-sphere product-shaped tests remain the
+  observable motion gates. A focused aggregate case proves contact-vector order irrelevant when
+  opposition has one unique winner; `StaticShadowIndex` also sorts and deduplicates collider
+  references before queries, so hash-map iteration cannot select response behavior.
+- **Concession retained:** retail's winner among several simultaneous static producers emerges from
+  cell and BSP insertion order plus repeated transition attempts. Production intentionally resolves
+  every overlap in one bounded manifold and then chooses the uniquely most opposing non-walkable
+  plane for the next substep. No observed fixture currently distinguishes those semantics. The
+  plan therefore records this as deterministic and unproved—not as retail parity—and does not add
+  object-layout order to the production collision contract without a counterexample.
+- Temporarily restoring the prior radial polygon response still fails the authored-plane
+  differential that justified the production change. No additional collision-arbitration policy
+  change survived this cohort.
+
+#### Phase R3: Differential Value Gate
+
+After the stair and contact-arbitration cohorts, review the defect yield before broadening the
+oracle. Record which production mismatches were found, which caused live behavior, how many changes
+survived mutation testing, and whether the literal oracle remained smaller than the production seam
+it evaluated.
+
+- Continue to edge/precipice testing only for an observed drop or ledge discrepancy.
+- Continue to terrain-triangle or landblock-seam testing only for an observed outdoor collision
+  discrepancy; streaming availability and presentation cadence remain separate concerns.
+- Continue expanding shared BSP primitives when two or more reached behaviors depend on the same
+  primitive. Otherwise keep the oracle colocated with its one consumer.
+- Stop expanding if the cohorts produce only implementation differences with no semantic or
+  mutation-sensitive counterexample. Preserve the useful fixtures and return to observation-led
+  capture.
+
+##### Value-Gate Record — 2026-08-12
+
+- Phase 9 produced one new production mismatch with a live consequence: the downward-only support
+  contract rejected retail's bounded upward walkable adjustment at the DA55 portal/ramp lip. The
+  signed adjustment and authored-plane response split each survive a focused mutation test; the
+  distinct rise bound is covered as a reached retail constraint and validated query input.
+- The step cohort found no second production mismatch. Highest-support selection, authored-order
+  independence for that winner, failed-step restoration, and upper-sphere veto agree at the tested
+  semantic boundaries. The fixture work did catch and correct two invalid tests: a ceiling whose
+  winding contradicted its normal and a 0.2-meter synthetic probe incorrectly presented as the
+  production 1.5-meter profile.
+- The collision cohort found no second production mismatch. Single-producer role/back-face routing
+  and next-offset projection match retail; the current multi-producer most-opposing concession
+  remains deterministic but unproved because no observed case distinguishes it.
+- The literal oracle remains one local test module and does not reconstruct `CTransition`. On this
+  yield, broadening into edge, terrain-diagonal, or landblock-seam cohorts would violate the
+  observation-led gate. Phase 9d was therefore not executed at this checkpoint; future
+  discrepancies had to enter through the retained parameterized route and earn a focused cohort.
+
+##### Value-Gate Reopen — 2026-08-12
+
+Maintainer acceptance confirmed the original E8 ramp exit no longer stalls, then supplied the
+reverse observation: the same exterior portal remained difficult to enter. Reversing the retained
+product route from body reference `(112.102753, 122.315247, 20.004999)` toward
+`(-2.784, 2.872)` reproduced a deterministic stall. The body climbed building collider 68 through
+driven tick 43, first reached EnvCell `0xDA5501E8` while still committed outdoors at tick 44, fell
+0.127 meters to terrain, and made exactly zero horizontal progress from tick 45 onward.
+
+The capture disproved both candidate guesses. The portal did not obstruct the body, and choosing a
+different overlapping support could not recover geometry that the query had removed. Collider 68
+is a `BuildingShell`; `StaticShadowIndex` deleted the entire collider as soon as either retained
+sphere reached an EnvCell. Retail instead keeps the reached building in the collision cell array and
+uses `bldg_check && hits_interior_cell` only to disable the BSP center-solid classification
+(`acclient.c:345874`, `:346397`). Walkable and step-down branches continue to query the building's
+authored polygons (`:346405-346436`). The prior abstraction therefore conflated static membership
+with BSP interpretation and removed the portal ramp one tick too early.
+
+The landed contract keeps building shells selected for every portal-straddling placement that still
+reaches outdoors. One internal `SelectedCollider` computes the center-solid policy once: ordinary
+colliders retain it, while a building shell loses only that test after the body-wide placement
+reaches an EnvCell. Grounded obstruction, generic movement obstruction, and placement confirmation
+consume the same decision; support retains finite authored building polygons while the straddling
+placement still selects that building. No public or diagnostic-only field was added. A test-only
+product-independent support fixture detects deletion of the building ramp, the BSP primitive test
+detects failure to disable center-solid classification, and the physical-fly opening fixture proves
+the candidate still commits atomically.
+
+The exact reverse DA55 route now has positive progress on all 60 driven ticks, remains on the
+building-authored ramp through the straddling interval, commits `0xDA5501E8` at tick 48, and
+continues down the interior ramp. The original exit route still lifts onto terrain at tick 4,
+commits outdoors at tick 9, and finishes without a zero-progress tick. This reopen earns only the
+portal-straddling building cohort; it does not justify a general edge or terrain-diagonal expansion.
+
+#### Phase 9d: Conditional Edge, Terrain, and Shared-Primitive Cohorts
+
+**Status:** entered for the 2026-08-12 portal-straddling building-membership counterexample and the
+subsequent `0xDA550133` raised-porch precipice counterexample. The terrain-diagonal and
+landblock-boundary cohorts remain unentered.
+
+##### Deliverables
+
+- For ledge discrepancies, cover `find_crossed_edge`, `edge_slide`, `cliff_slide`, and
+  `precipice_slide` across short drops, true cliffs, polygon corners, approach angle, and retained
+  support changes.
+- For outdoor discrepancies, cover terrain triangle edges, diagonal splits, terrain/static joins,
+  and landblock boundaries while holding content availability constant.
+- Promote a literal polygon/BSP primitive into a shared test-only oracle module only when multiple
+  differential cohorts consume it. Production code must never call a test oracle.
+
+##### Acceptance Criteria
+
+- [x] Every added cohort cites a maintainer observation and a reached retail branch.
+- [x] Each retained case detects one named mutation or independently distinguishes two retail
+      outcomes.
+- [x] No test relies on installed runtime content, timing, unordered traversal, or debug text.
+- [x] Physical-fly tests consume only the shared geometry parity established here; they do not claim
+      full retail-response equivalence.
+
+##### Edge-Cohort Reopen — 2026-08-12
+
+Maintainer acceptance confirmed bidirectional movement through the DA55 E8 ramp portal. The next
+observation was intentionally narrower: grounded walk could leave the raised wraparound porch of
+the building attached to EnvCell `0xDA550133`, while retail creature movement could not walk off
+that edge. The Explorer HUD placed the report at approximately owner-local `(144, 72, 21.6)`.
+Replaying a westward pair-body route from that point reproduced the defect without the frontend:
+the first driven tick moved from `z=21.605` to `z=21.60384` while retaining a finite-edge boundary,
+then repeated edge tangencies ratcheted the body down to outdoor terrain at `z=20.005`.
+
+The cause was not portal membership or building-shell selection. `support_on_polygon` collapsed two
+different retail outcomes into one support record: an ordinary walkable adjustment to the authored
+polygon plane and reach of a finite polygon edge. `settle_candidate` therefore accepted the latter
+as committed ground before creature edge protection could run. Retail keeps those decisions
+separate: `BSPLEAF::find_walkable` requires `CPolygon::adjust_sphere_to_plane` to change the mutable
+step transaction (`acclient.c:344680-344734`, `:349100-349128`); failed ordinary step-down then
+routes the retained walkable polygon through `find_crossed_edge` and `precipice_slide`
+(`:301354-301437`, `:302548-302607`, `:345503-345573`).
+
+The landed support contract names that distinction as `SupportFeature::Surface` versus
+`SupportFeature::Edge`. Only a surface may settle the body. A zero-adjustment edge is consumed
+immediately by precipice response, which projects the requested substep along its inward boundary
+normal or restores the last committed footing. `GroundSupport` now retains only the authored
+support normal; the attempted move's edge normal no longer leaks into future ticks. The existing
+short-drop case remains valid by accepting a proved lower surface within the same bounded probe,
+so a 15-centimeter curb still steps down while the 1.6-meter porch drop does not.
+
+Points inside or exactly on a finite polygon boundary remain `Surface`; only a contact point that
+has left the face but can still reach an edge becomes `Edge`. This prevents authored triangle
+diagonals and adjacent polygon seams from becoming false precipices.
+
+The minimized independent oracle transliterates the reached `find_crossed_edge` semantic and the
+existing retail offset projection. Its high-platform/lower-floor fixture proves that oblique input
+loses only outward motion and keeps tangent motion. Temporarily restoring the old edge-as-support
+selection makes the case fail with displacement `(-1.0, 0.4, -0.5)` instead of retail's
+`(0.0, 0.4, 0.0)`. The exact westward DA55 product replay now remains at `z=21.605` for all 20
+driven ticks instead of descending to terrain. Other cardinal replays from the screenshot point
+were discarded as evidence because that coordinate lies on intersecting porch boundaries and does
+not isolate one edge.
+
+The shared support correction also invalidates four diagnostic recessed endpoints without changing
+their portal traversal outcomes. The two E8/E9 candidates finish at `z=18.951` and `z=18.858`
+instead of `z=18.920` and `z=18.826`; the equivalent 13E/14E candidates finish at `z=19.285`
+instead of `z=19.257`. An A/B that restored edge-capsule height as ordinary support restored every
+old endpoint, proving attribution. The new values come from moving nonzero-height walkable edge
+transactions to the authored polygon plane, matching `CPolygon::adjust_sphere_to_plane`, and are
+required for the short-step and staircase controls. These probe endpoints are observations, not
+goldens; traversal count, committed cell, and focused differential behavior remain the gates.
+
+#### Phase 9e: Cleanup and Verification
+
+##### Task Checklist
+
+- [x] Remove temporary capture code that has no continuing reverse-engineering consumer; keep the
+      parameterized product route only if it remains the canonical way to attribute later reports.
+- [x] Sweep comments and plan language so proved parity, deliberate divergence, and unresolved
+      implementation differences are named honestly.
+- [x] Add the required `RETAIL QUIRK` or `RETAIL DIVERGENCE` marker only for a deliberate observable
+      compatibility decision; ordinary faithful code does not need a marker.
+- [x] Run Rust formatting, workspace clippy with warnings denied, world and harness tests, the DA55
+      product probe, and focused product routes affected by any changed query contract.
+- [x] Repeat the minimized cases in the Explorer and retail at the same start and input, then record
+      the maintainer result.
+
+##### Definition of Done
+
+- [x] The observed DA55 ramp/edge discrepancies have attributed, minimized, mutation-sensitive
+      differential tests and match retail in the Explorer.
+- [x] Every other solver policy change in this phase is backed by the same observation-to-trace-to-
+      oracle chain.
+- [x] Differential test code remains smaller and more local than the production decisions it
+      evaluates; no parallel retail solver or transition object survives.
+- [x] No new production field exists only for diagnostics or test access.
+- [x] All required automated and maintainer acceptance gates pass, and unresolved discrepancies are
+      listed as future reproduction cards rather than implied complete.
+
+##### Verification Record — 2026-08-12
+
+- Removed the temporary zero-progress autopsy and all env-gated solver logging. Retained only the
+  typed explicit-route CLI and tick-contract output because it is the canonical capture path for
+  later observation-led reports.
+- Repository formatting, all 238 `holtburger-world` library tests, all three
+  `collision_scene_probe` CLI tests, and full workspace Clippy with warnings denied pass.
+- The full DA55 canonical assembly/probe reports 36/36 physical-fly portal traversals, 29 grounded
+  lower traversals, 28 grounded pair traversals, and zero rejected traces. The explicit 60-tick E8
+  route lifts onto the 3-centimeter terrain lip at driven tick 4, commits outdoors at tick 9, and
+  ends with full requested horizontal progress at tick 59.
+- After the reverse-entry reopen, the DA55 aggregate reports 36/36 physical-fly traversals, 32
+  grounded lower traversals, 31 grounded pair traversals, and zero rejected traces. The restored
+  three routes per grounded shape are valid building-opening traversals previously lost with the
+  whole-shell suppression. The broad probe's historical `0xDA5501E9` recessed candidate now ends at
+  `z=18.920` instead of `z=20.152`: the old elevation was caused by deleting its building-authored
+  ramp on first interior reach. The exact E8 bidirectional route and product-independent fixtures,
+  rather than that invalidated endpoint, are the acceptance discriminators for this fix.
+- Repository formatting, all 239 `holtburger-world` library tests, all three
+  `collision_scene_probe` CLI tests, full workspace Clippy with warnings denied, and
+  `git diff --check` pass after the shell-policy cutover. No temporary autopsy logging survives.
+- No compatibility marker was added: the production change follows proved retail behavior rather
+  than reproducing or deliberately correcting a retail defect.
+- Maintainer acceptance now confirms both directions of the exact DA55 E8 portal ramp match retail.
+- Maintainer acceptance confirms the `0xDA550133` porch now matches retail: ordinary outward walk
+  no longer descends from the raised porch, while edge-constrained movement remains usable.
+- After the precipice cutover, all 240 `holtburger-world` library tests, all three harness CLI tests,
+  repository formatting, full workspace Clippy with warnings denied, and `git diff --check` pass.
+  The canonical DA55 aggregate retains 36/36 physical-fly, 32 grounded-lower, and 31 grounded-pair
+  portal traversals with zero rejected traces.
+
+#### Risks and Mitigations
+
+- **Decompiler ambiguity creates a false oracle.** Cross-check control flow with callers and
+  ACE/ACViewer structure, cite exact retail ranges, and require a maintainer retail observation for
+  externally visible outcomes.
+- **Oracle and production share a bug.** Keep literal math and branching independent from production
+  helpers; compare semantic results at a public or narrow test seam.
+- **A real asset fixture becomes brittle or unavailable.** Use runtime assets only during capture,
+  then check in the minimal numeric geometry and source identifiers needed to explain provenance.
+- **Traversal order becomes accidental behavior.** Record authored order during capture and test
+  purposeful permutations; never depend on container iteration order.
+- **Matrices create confidence without sensitivity.** Require every matrix dimension to reach a
+  different retail decision and require a named mutation failure before retaining it.
+- **Diagnostics distort production contracts.** Confine provenance capture to the debug harness or
+  test-only adapters and delete temporary solver instrumentation after minimization.

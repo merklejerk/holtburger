@@ -7,8 +7,8 @@ use holtburger_common::{Guid, Vector3};
 use super::collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
     GroundedObstruction, GroundedObstructionRequest, MissingCoverage, MotionWaypoint,
-    PlacementRequest, StaticContact, SupportRequest, anchor_point_to_outdoor_position,
-    landblock_key, separating_displacement,
+    PlacementRequest, StaticContact, SupportContact, SupportFeature, SupportRequest,
+    anchor_point_to_outdoor_position, landblock_key, separating_displacement,
 };
 
 /// Explicit limits and grounded-response policy for one solve.
@@ -66,8 +66,6 @@ pub struct GroundedBodySpheres {
 pub struct GroundSupport {
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
-    /// Horizontal inward normal while support comes from a finite surface edge.
-    pub boundary_normal: Option<Vector3>,
 }
 
 /// Last safely committed grounded body state.
@@ -162,6 +160,17 @@ struct SupportedPlacement {
     body_center: Vector3,
     placement: CollisionPlacement,
     support: GroundSupport,
+}
+
+/// Result of retail's ordinary walkable step-down transaction.
+#[derive(Debug, Clone)]
+enum SettleResult {
+    /// A finite polygon face accepted the candidate and supplied a contact plane.
+    Supported(SupportedPlacement),
+    /// Only a finite edge was reachable, so creature response must use precipice sliding.
+    Edge { inward_normal: Vector3 },
+    /// No walkable face or edge was reachable within the configured probe.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -347,7 +356,7 @@ pub fn solve_grounded(
                 .iter()
                 .flat_map(|entry| {
                     entry.contacts.iter().map(|contact| StaticContact {
-                        normal: contact.normal,
+                        normal: contact.separation_normal,
                         depth: contact.depth,
                     })
                 })
@@ -402,15 +411,15 @@ pub fn solve_grounded(
         }
 
         match step_down_candidate(context, &body, candidate)? {
-            CollisionQuery::Complete(Some(settled)) => {
+            CollisionQuery::Complete(SettleResult::Supported(settled)) => {
                 candidate = settled.body_center;
                 candidate_placement = settled.placement;
                 body.fall_velocity = 0.0;
                 body.support = Some(settled.support);
             }
-            CollisionQuery::Complete(None)
-                if config.edge_protection == EdgeProtection::Creature =>
-            {
+            CollisionQuery::Complete(
+                result @ (SettleResult::Edge { .. } | SettleResult::Unsupported),
+            ) if config.edge_protection == EdgeProtection::Creature => {
                 // Support is meaningful only in the placement domain that produced it. A portal
                 // commit must reacquire support before creature edge protection may preserve the
                 // old footing; otherwise outdoor terrain can survive as an invisible indoor floor.
@@ -418,12 +427,17 @@ pub fn solve_grounded(
                     .then_some(prior_support)
                     .flatten();
                 if let Some(prior_support) = retained_support {
+                    let inward_normal = match result {
+                        SettleResult::Edge { inward_normal } => Some(inward_normal),
+                        SettleResult::Unsupported => None,
+                        SettleResult::Supported(_) => unreachable!(),
+                    };
                     match edge_slide_candidate(
                         context,
                         &body,
                         current,
                         constrained_substep,
-                        prior_support,
+                        inward_normal,
                     )? {
                         CollisionQuery::Complete(Some(slid)) => {
                             candidate = slid.body_center;
@@ -462,7 +476,9 @@ pub fn solve_grounded(
                     body.support = None;
                 }
             }
-            CollisionQuery::Complete(None) => body.support = None,
+            CollisionQuery::Complete(SettleResult::Edge { .. } | SettleResult::Unsupported) => {
+                body.support = None;
+            }
             CollisionQuery::MissingCoverage(missing) => {
                 return Ok(GroundedOutcome::MissingCoverage {
                     body: original,
@@ -500,7 +516,7 @@ fn settle_candidate(
     body: &GroundedBody,
     candidate: Vector3,
     maximum_drop: f32,
-) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+) -> Result<CollisionQuery<SettleResult>> {
     let candidate_placement = match transit_pair(
         context.scene,
         context.anchor,
@@ -520,6 +536,8 @@ fn settle_candidate(
         center: support_center,
         radius: context.spheres.support.radius,
         maximum_drop,
+        // Retail accepts negative `walk_interp` only down to -0.1 during step-down.
+        maximum_rise: maximum_drop * 0.1,
         placement: &candidate_placement,
     })? {
         CollisionQuery::Complete(supports) => supports,
@@ -527,14 +545,42 @@ fn settle_candidate(
             return Ok(CollisionQuery::MissingCoverage(missing));
         }
     };
-    let Some(support) = supports
+    let mut surface: Option<SupportContact> = None;
+    let mut edge: Option<SupportContact> = None;
+    for support in supports
         .into_iter()
         .filter(|contact| contact.normal.z >= context.config.walkable_normal_z)
-        .min_by(|left, right| left.drop.total_cmp(&right.drop))
-    else {
-        return Ok(CollisionQuery::Complete(None));
+    {
+        match support.feature {
+            SupportFeature::Surface
+                if surface
+                    .as_ref()
+                    .is_none_or(|current| support.height_delta > current.height_delta) =>
+            {
+                surface = Some(support);
+            }
+            SupportFeature::Edge { .. }
+                if edge
+                    .as_ref()
+                    .is_none_or(|current| support.height_delta > current.height_delta) =>
+            {
+                edge = Some(support);
+            }
+            _ => {}
+        }
+    }
+    let Some(support) = surface else {
+        return Ok(CollisionQuery::Complete(match edge {
+            Some(support) => {
+                let SupportFeature::Edge { inward_normal } = support.feature else {
+                    unreachable!();
+                };
+                SettleResult::Edge { inward_normal }
+            }
+            None => SettleResult::Unsupported,
+        }));
     };
-    let settled = candidate - Vector3::new(0.0, 0.0, support.drop);
+    let settled = candidate + Vector3::new(0.0, 0.0, support.height_delta);
     let settled_cells = match transit_pair(
         context.scene,
         context.anchor,
@@ -562,16 +608,32 @@ fn settle_candidate(
         }
     };
     if confirmation.iter().any(|entry| !entry.contacts.is_empty()) {
-        return Ok(CollisionQuery::Complete(None));
+        // Retail's single mutable step-down transaction can retain horizontal progress while a
+        // reached lower face is still momentarily occluded by the finite edge being left. Preserve
+        // that bridge at the candidate elevation only when the same bounded query proved a real
+        // surface below. Edge reach by itself must not become ratcheting support.
+        if let Some(edge) = edge {
+            return Ok(CollisionQuery::Complete(SettleResult::Supported(
+                SupportedPlacement {
+                    body_center: candidate,
+                    placement: candidate_placement,
+                    support: GroundSupport {
+                        normal: edge.normal,
+                    },
+                },
+            )));
+        }
+        return Ok(CollisionQuery::Complete(SettleResult::Unsupported));
     }
-    Ok(CollisionQuery::Complete(Some(SupportedPlacement {
-        body_center: settled,
-        placement: settled_cells,
-        support: GroundSupport {
-            normal: support.normal,
-            boundary_normal: support.boundary_normal,
+    Ok(CollisionQuery::Complete(SettleResult::Supported(
+        SupportedPlacement {
+            body_center: settled,
+            placement: settled_cells,
+            support: GroundSupport {
+                normal: support.normal,
+            },
         },
-    })))
+    )))
 }
 
 fn step_up_candidate(
@@ -582,7 +644,7 @@ fn step_up_candidate(
 ) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
     let raised = candidate + Vector3::new(0.0, 0.0, context.config.step_up_height);
     match settle_candidate(context, body, raised, context.config.step_up_height)? {
-        CollisionQuery::Complete(Some(stepped))
+        CollisionQuery::Complete(SettleResult::Supported(stepped))
             if stepped.body_center.z - current.z
                 <= context.config.step_up_height + context.config.separation_epsilon =>
         {
@@ -597,7 +659,7 @@ fn step_down_candidate(
     context: GroundedSolveContext<'_>,
     body: &GroundedBody,
     candidate: Vector3,
-) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+) -> Result<CollisionQuery<SettleResult>> {
     settle_candidate(context, body, candidate, context.config.step_down_height)
 }
 
@@ -608,21 +670,27 @@ fn edge_slide_candidate(
     body: &GroundedBody,
     current: Vector3,
     requested_substep: Vector3,
-    prior_support: GroundSupport,
+    inward_normal: Option<Vector3>,
 ) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
-    let Some(boundary_normal) = prior_support.boundary_normal else {
+    let Some(inward_normal) = inward_normal else {
         return Ok(CollisionQuery::Complete(None));
     };
-    let edge_slide = project_into_plane(requested_substep, boundary_normal);
+    let edge_slide = project_into_plane(requested_substep, inward_normal);
     if edge_slide.length_squared() <= f32::EPSILON {
         return Ok(CollisionQuery::Complete(None));
     }
-    settle_candidate(
+    match settle_candidate(
         context,
         body,
         current + edge_slide,
         context.config.step_down_height,
-    )
+    )? {
+        CollisionQuery::Complete(SettleResult::Supported(settled)) => {
+            Ok(CollisionQuery::Complete(Some(settled)))
+        }
+        CollisionQuery::Complete(_) => Ok(CollisionQuery::Complete(None)),
+        CollisionQuery::MissingCoverage(missing) => Ok(CollisionQuery::MissingCoverage(missing)),
+    }
 }
 
 fn pair_coverage(
@@ -712,7 +780,8 @@ fn placement_contacts(
             CollisionQuery::Complete(contacts) => contacts
                 .into_iter()
                 .map(|contact| GroundedObstruction {
-                    normal: contact.normal,
+                    separation_normal: contact.normal,
+                    response_normal: contact.normal,
                     depth: contact.depth,
                 })
                 .collect(),
@@ -732,14 +801,14 @@ fn remember_encountered_constraints(
 ) {
     for entry in contacts {
         for contact in &entry.contacts {
-            if entry.role == SphereRole::Support && contact.normal.z >= walkable_normal_z {
+            if entry.role == SphereRole::Support && contact.response_normal.z >= walkable_normal_z {
                 continue;
             }
             if !encountered
                 .iter()
-                .any(|normal| normal.dot(&contact.normal) > 0.999)
+                .any(|normal| normal.dot(&contact.response_normal) > 0.999)
             {
-                encountered.push(contact.normal);
+                encountered.push(contact.response_normal);
             }
         }
     }
@@ -758,18 +827,29 @@ fn remember_next_sliding_normal(
 ) {
     for entry in contacts {
         for contact in &entry.contacts {
-            if entry.role == SphereRole::Support && contact.normal.z >= walkable_normal_z {
+            if entry.role == SphereRole::Support && contact.response_normal.z >= walkable_normal_z {
                 continue;
             }
-            let opposition = displacement.dot(&contact.normal);
+            let Some(response_normal) = horizontal_response_normal(contact.response_normal) else {
+                continue;
+            };
+            let opposition = displacement.dot(&response_normal);
             if opposition > 0.0 {
                 continue;
             }
             if sliding_normal.is_none_or(|current| opposition < displacement.dot(&current)) {
-                *sliding_normal = Some(contact.normal);
+                *sliding_normal = Some(response_normal);
             }
         }
     }
+}
+
+/// Reproduces retail's horizontal-only durable sliding normal (`acclient.c:300478-300493`).
+fn horizontal_response_normal(normal: Vector3) -> Option<Vector3> {
+    const RETAIL_VECTOR_EPSILON: f32 = 0.000_2;
+
+    let horizontal = Vector3::new(normal.x, normal.y, 0.0);
+    (horizontal.length() >= RETAIL_VECTOR_EPSILON).then(|| horizontal.normalize())
 }
 
 fn apply_sliding_normal(displacement: Vector3, sliding_normal: Option<Vector3>) -> Vector3 {
@@ -782,6 +862,10 @@ fn apply_sliding_normal(displacement: Vector3, sliding_normal: Option<Vector3>) 
 fn project_into_plane(vector: Vector3, normal: Vector3) -> Vector3 {
     vector - normal * vector.dot(&normal)
 }
+
+#[cfg(test)]
+#[path = "grounded_retail_differential.rs"]
+mod retail_differential;
 
 fn transit_pair(
     scene: &CollisionScene,
@@ -981,10 +1065,7 @@ mod tests {
             pose: pose(coords),
             cell: None,
             fall_velocity: 0.0,
-            support: support.map(|normal| GroundSupport {
-                normal,
-                boundary_normal: None,
-            }),
+            support: support.map(|normal| GroundSupport { normal }),
         }
     }
 

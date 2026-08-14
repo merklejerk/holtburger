@@ -603,6 +603,8 @@ mod physical_body_tests {
         maximum_contact_passes: 8,
         separation_epsilon: 0.000_5,
     };
+    const WATER_TERRAIN_SAMPLE: u16 = 0x10 << 2;
+    const RETAIL_FULL_WATER_DEPTH: f32 = 0.9;
 
     fn pose(coords: Vector3) -> WorldPosition {
         WorldPosition {
@@ -687,6 +689,10 @@ mod physical_body_tests {
     }
 
     fn flat_collision_scene() -> CollisionScene {
+        flat_collision_scene_with_sample(0)
+    }
+
+    fn flat_collision_scene_with_sample(terrain_sample: u16) -> CollisionScene {
         let mut collision = collision_scene(None);
         collision
             .insert(LandblockCollisionAsset {
@@ -696,7 +702,7 @@ mod physical_body_tests {
                     tile_size: 24.0,
                     height_indices: vec![0; 81],
                     heights: vec![0.0; 81],
-                    terrain_samples: vec![0; 81],
+                    terrain_samples: vec![terrain_sample; 81],
                     cell_diagonals: TerrainCellDiagonals::for_landblock(0xda55_ffff),
                 })
                 .unwrap(),
@@ -1181,6 +1187,35 @@ mod physical_body_tests {
             assert_eq!(body.pose.coords, start);
             assert_eq!(body.velocity, Vector3::zero());
         }
+    }
+
+    #[test]
+    fn grounded_body_uses_the_generic_retail_water_adjusted_terrain_plane() {
+        let collision = flat_collision_scene_with_sample(WATER_TERRAIN_SAMPLE);
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let start = Vector3::new(96.0, 96.0, 0.005);
+        let id = scene.register_ephemeral_body(pose(start), now);
+        scene
+            .attach_physical_body(id, grounded_definition(), stable_policy(), None, &collision)
+            .unwrap();
+
+        let result = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                0.1,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
+            panic!("covered water contact unexpectedly became inactive")
+        };
+        let body = scene.body(id).unwrap();
+        assert!(motion.grounded);
+        assert_eq!(body.contact, ContactState::Grounded);
+        assert!((body.pose.coords.z - (start.z - RETAIL_FULL_WATER_DEPTH)).abs() < 0.002);
     }
 
     #[test]

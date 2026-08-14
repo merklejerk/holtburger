@@ -314,6 +314,8 @@ mod tests {
 
     const LANDBLOCK: u32 = 0xda55_ffff;
     const EAST: u32 = 0xdb55_ffff;
+    const WATER_TERRAIN_SAMPLE: u16 = 0x10 << 2;
+    const RETAIL_FULL_WATER_DEPTH: f32 = 0.9;
 
     fn config() -> PhysicalFlyConfig {
         PhysicalFlyConfig {
@@ -342,12 +344,16 @@ mod tests {
     }
 
     fn flat_terrain(landblock: u32) -> TerrainCollisionSurface {
+        terrain_with_sample(landblock, 0)
+    }
+
+    fn terrain_with_sample(landblock: u32, terrain_sample: u16) -> TerrainCollisionSurface {
         TerrainCollisionSurface::from_terrain(&LandblockTerrain {
             grid_size: 9,
             tile_size: 24.0,
             height_indices: vec![0; 81],
             heights: vec![0.0; 81],
-            terrain_samples: vec![0; 81],
+            terrain_samples: vec![terrain_sample; 81],
             cell_diagonals: TerrainCellDiagonals::for_landblock(landblock),
         })
         .unwrap()
@@ -686,6 +692,26 @@ mod tests {
         };
         assert!((ceiling.pose.coords.z - 9.0).abs() < 0.002);
         assert_eq!(collision_normal, Some(Vector3::new(0.0, 0.0, -1.0)));
+    }
+
+    #[test]
+    fn free_sphere_uses_the_generic_retail_water_adjusted_terrain_plane() {
+        let mut collision = scene(Vec::new());
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: LANDBLOCK,
+                terrain: terrain_with_sample(LANDBLOCK, WATER_TERRAIN_SAMPLE),
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+
+        let floor = solved(solve(
+            &collision,
+            body(Vector3::new(50.0, 50.0, 5.0)),
+            Vector3::new(0.0, 0.0, -8.0),
+        ));
+        let expected_center = 1.0 - RETAIL_FULL_WATER_DEPTH;
+        assert!((floor.pose.coords.z - expected_center).abs() < 0.002);
     }
 
     #[test]

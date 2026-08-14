@@ -6,8 +6,11 @@ import {
 	AmbientSystem,
 	type AmbientSystemDependencies,
 } from "./ambient-system";
-import type { AmbientDescriptor } from "./ambient-scan";
-import type { AmbientScanResult } from "./ambient-scan";
+import {
+	EMPTY_AMBIENT_SCAN_RESULT,
+	type AmbientDescriptor,
+	type AmbientScanResult,
+} from "./ambient-scan";
 import { AMBIENT_DIRECTION } from "./ambient-weighting";
 
 const TABLE = "0x20000017" as DatAssetId;
@@ -222,5 +225,15 @@ describe("AmbientSystem", () => {
 		system.advance(20);
 
 		expect(played[0]!.category).toBe("ambient");
+	});
+
+	it("retires all active scheduled sounds when refreshed with an empty scan result", () => {
+		const { system } = build();
+		system.refresh(scan([descriptor()]), 0);
+		expect(system.getDiagnostics().scheduledCount).toBe(1);
+
+		system.refresh(EMPTY_AMBIENT_SCAN_RESULT, 1);
+		expect(system.getDiagnostics().scheduledCount).toBe(0);
+		expect(system.getDiagnostics().retiredCount).toBe(1);
 	});
 });

@@ -93,6 +93,12 @@ export const FRONTEND_TUNING = {
 				offset: 48,
 			},
 		},
+		environment: {
+			/** Default day group index in Explorer (day group 0 / "Clear"). */
+			defaultDayGroupOverride: 0 as number | null,
+			defaultDayIndex: 0,
+			defaultTimeOfDay: 0.5,
+		},
 		lod: {
 			/** Initial outdoor scene-interest radii exposed by Explorer controls. */
 			defaultRadii: {
@@ -152,7 +158,20 @@ export const FRONTEND_TUNING = {
 			 *
 			 * Set to 1 to restore retail's contribution exactly.
 			 */
+			opacityScale: 1.0,
+		},
+		/** Authored sky and starfield particle presentation tuning. */
+		skyParticles: {
+			/**
+			 * Opacity multiplier applied to sky-attached particles (stars, raindrops), in [0, 1].
+			 * Set to 0 to completely disable them, or lower to keep them subtle.
+			 */
 			opacityScale: 0.5,
+			/**
+			 * Simulation speed multiplier for sky particle motion and twinkles.
+			 * Set to 0 to freeze them in place, or e.g. 0.1 to slow the rotation down.
+			 */
+			speedMultiplier: 0.5,
 		},
 		frameDefaults: {
 			/** Whether region-authored distance fog is enabled initially. */

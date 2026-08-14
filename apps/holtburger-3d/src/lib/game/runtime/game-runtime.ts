@@ -22,7 +22,7 @@ import type {
 	StaticObjectGeometryDiagnostics,
 	StaticObjectLayerDiagnostics,
 } from "../commit/artifacts";
-import { INVALID_ID, type LandblockId } from "../game-types";
+import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
 import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
@@ -61,15 +61,16 @@ import {
 import type { DatAssetId } from "../game-types";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
 import { SoundTableRepository } from "../behavior/sound-table-repository";
+import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository";
 import { ParticleMeshCache } from "../behavior/particle-mesh-cache";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
 import {
-	EXTERIOR_PARTICLE_RENDER_OWNER,
-	ParticleSystem,
+	SKY_PARTICLE_RENDER_OWNER,
 	type ParticleRenderOwner,
+	ParticleSystem,
 } from "../systems/particle-system";
 import { AmbientSystem } from "../systems/ambient-system";
 import {
@@ -78,6 +79,7 @@ import {
 	type AmbientRegionFacts,
 } from "../systems/ambient-region";
 import {
+	EMPTY_AMBIENT_SCAN_RESULT,
 	scanAmbientSources,
 	type AmbientTableResolver,
 	type AmbientTerrainBlock,
@@ -430,10 +432,17 @@ export class GameRuntime {
 	readonly #ambient: AmbientSystem;
 	/** Where ambience is centred; the listener's own position, kept for the scan and for playback. */
 	#audioListenerPosition: SceneVector3 = sceneVector3([0, 0, 0]);
+	/** Environment cell the listener occupies, or null for outdoor terrain. */
+	#audioListenerEnvCellId: EnvCellId | null = null;
 	/** Region ambient facts, installed once per active region; `null` before one is installed. */
 	#ambientResolver: AmbientTableResolver | null = null;
 	/** Staged ambient sound tables, keyed as the descriptors name them. */
 	readonly #ambientSoundTables = new Map<DatAssetId, DecodedSoundTable>();
+	/** Handles retaining staged ambient sound tables; released on new region or runtime destruction. */
+	readonly #ambientSoundTableHandles = new Map<
+		DatAssetId,
+		PreparedAssetHandle<DecodedSoundTable>
+	>();
 	/** Cell the last ambient scan ran from, so walking within one cell does not rescan. */
 	#ambientScanCell: string | null = null;
 	/**
@@ -577,7 +586,7 @@ export class GameRuntime {
 	 */
 	#particleRenderOwner(target: BehaviorTarget): ParticleRenderOwner | null {
 		if (this.#skyTargets.has(target.targetId)) {
-			return EXTERIOR_PARTICLE_RENDER_OWNER;
+			return SKY_PARTICLE_RENDER_OWNER;
 		}
 		const nodeId = sceneNodeIdOf(target.targetId);
 		return nodeId !== null && this.#selectedDynamicNodeIds.has(nodeId)
@@ -1109,7 +1118,7 @@ export class GameRuntime {
 	 * conversion and the retail spatial maths, not the choice.
 	 */
 	setAudioListener(placement: AudioListenerPlacement): void {
-		const { position, rotation } = placement;
+		const { envCellId, position, rotation } = placement;
 		if (
 			!position.every(Number.isFinite) ||
 			![rotation.w, rotation.x, rotation.y, rotation.z].every(Number.isFinite)
@@ -1117,6 +1126,7 @@ export class GameRuntime {
 			throw new Error("Audio listener placement must be finite.");
 		}
 		this.#audioListenerPosition = position;
+		this.#audioListenerEnvCellId = envCellId;
 		const { w, x, y, z } = rotation;
 		this.#audio.setListener({
 			position,
@@ -1145,6 +1155,12 @@ export class GameRuntime {
 	async installAmbientRegion(facts: AmbientRegionFacts): Promise<void> {
 		this.#ambientResolver = createAmbientTableResolver(facts);
 		this.#ambientScanCell = null;
+		for (const handle of this.#ambientSoundTableHandles.values()) {
+			handle.release();
+		}
+		this.#ambientSoundTableHandles.clear();
+		this.#ambientSoundTables.clear();
+
 		const staged = await Promise.all(
 			ambientSoundTableIds(facts).map(async (soundTableId) => {
 				const handle = await this.#soundTables.acquire(soundTableId);
@@ -1152,6 +1168,7 @@ export class GameRuntime {
 			}),
 		);
 		for (const [soundTableId, handle] of staged) {
+			this.#ambientSoundTableHandles.set(soundTableId, handle);
 			this.#ambientSoundTables.set(soundTableId, handle.asset);
 		}
 	}
@@ -1174,20 +1191,31 @@ export class GameRuntime {
 	 * Retail rebuilds on cell transition (`Ambient::InitSounds` takes a `Position`), and the scan
 	 * walks every cell of every installed landblock, so running it per frame would be pure waste:
 	 * ambience cannot change while the listener stays put.
+	 *
+	 * When the listener is inside an EnvCell whose authored flags do not include `SeenOutside`
+	 * (EnvCell flag 0x01), outdoor surface terrain ambience is silenced (acclient.c:140501-140526).
 	 */
 	#refreshAmbient(timeSeconds: number): void {
 		const resolver = this.#ambientResolver;
 		if (!resolver) return;
 		const position = this.#audioListenerPosition;
-		// Keyed on the terrain too, not only the listener: landblocks stream in after the first scan,
+		// Keyed on the terrain, cell residency, and listener scan cell: landblocks stream in after the first scan,
 		// and a listener standing still while its surroundings arrive would otherwise never hear them.
-		const cell = `${ambientScanCellKey(position)}/${this.#terrain.installationRevision}`;
+		const cell = `${ambientScanCellKey(position)}/${this.#audioListenerEnvCellId ?? "outside"}/${this.#terrain.installationRevision}`;
 		if (cell === this.#ambientScanCell) return;
 		this.#ambientScanCell = cell;
-		this.#ambient.refresh(
-			scanAmbientSources(position, this.#ambientTerrainBlocks(), resolver),
-			timeSeconds,
-		);
+
+		const seenOutside =
+			this.#audioListenerEnvCellId !== null
+				? this.#scene.getEnvCellSeenOutside(this.#audioListenerEnvCellId)
+				: true;
+
+		const scanResult =
+			seenOutside === false
+				? EMPTY_AMBIENT_SCAN_RESULT
+				: scanAmbientSources(position, this.#ambientTerrainBlocks(), resolver);
+
+		this.#ambient.refresh(scanResult, timeSeconds);
 	}
 
 	/** Installed terrain, expressed in the scene frame the scan measures distances in. */
@@ -1531,6 +1559,11 @@ export class GameRuntime {
 		this.#audio.destroy();
 		this.#skyScripts.destroy();
 		this.#particleEmitters.destroy();
+		for (const handle of this.#ambientSoundTableHandles.values()) {
+			handle.release();
+		}
+		this.#ambientSoundTableHandles.clear();
+		this.#ambientSoundTables.clear();
 		this.#soundTables.destroy();
 		this.#particleMeshes.destroy();
 		this.#targetSoundTables.clear();

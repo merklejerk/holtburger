@@ -140,9 +140,13 @@ import type {
 import { SKY_FAR_PLANE, skyViewMatrix, WebGL2SkyPass } from "./webgl2-sky-pass";
 import type { SkyDrawPass } from "../environment/sky-state";
 import { ParticleMeshResidency } from "./particle-mesh-residency";
-import { WebGL2ParticlePass } from "./webgl2-particle-pass";
+import {
+	type ParticleDrawContext,
+	WebGL2ParticlePass,
+} from "./webgl2-particle-pass";
 import {
 	EXTERIOR_PARTICLE_RENDER_OWNER,
+	SKY_PARTICLE_RENDER_OWNER,
 	type ParticleSourceCohort,
 } from "../systems/particle-system";
 import {
@@ -247,6 +251,7 @@ const ORIGIN = { x: 0, y: 0, z: 0 } as const;
 const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
 /** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
 const FLAT_PARTICLE_DOMAIN = "particle-render-domain:flat";
+const FLAT_SKY_PARTICLE_DOMAIN = "particle-render-domain:flat-sky";
 /** Unlit result for draws that resolve no landblock lights at all. */
 const EMPTY_LANDBLOCK_LIGHTS: LandblockLights = {
 	lights: EMPTY_LIGHTS,
@@ -346,6 +351,8 @@ interface PreparedSceneContributions {
 	readonly objects: readonly PreparedObjectFrameInput[];
 	/** Final contribution-local batches, recoalesced after particle owner routing. */
 	readonly particles: readonly ParticleDrawBatch[];
+	/** Sky-attached particle batches drawn before the landscape. */
+	readonly skyParticles: readonly ParticleDrawBatch[];
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
@@ -1061,6 +1068,7 @@ export class WebGL2Renderer implements Renderer {
 			`scope-atlas:${frame.atlas.visibility.topologyRevision}`,
 			this.#particleSources,
 			(owner) => {
+				if (owner === SKY_PARTICLE_RENDER_OWNER) return "sky";
 				const renderScopeKey =
 					owner === EXTERIOR_PARTICLE_RENDER_OWNER
 						? "outdoor"
@@ -1096,6 +1104,21 @@ export class WebGL2Renderer implements Renderer {
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
 		if (hasOutdoorScope) {
 			this.#submitSkyPhase(view, shading, "before-world", profile, pipeline);
+			const skyBatches = particlesByScope.get("sky");
+			if (
+				skyBatches &&
+				skyBatches.length > 0 &&
+				FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
+			) {
+				this.#drawParticleBatches(
+					view,
+					skyBatches,
+					profile,
+					this.#skyClockSeconds *
+						FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
+					FRONTEND_TUNING.rendering.skyParticles.opacityScale,
+				);
+			}
 		}
 		this.#submitTerrainPhase(view, shading, profile, pipeline);
 		this.#submitOpaquePhase(
@@ -1138,7 +1161,7 @@ export class WebGL2Renderer implements Renderer {
 			compositionGpu?.finish();
 		}
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
-		this.#drawParticles(view, profile, particlesByScope, pipeline);
+		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
 		this.#beginObjectPhase();
 	}
 
@@ -1278,14 +1301,19 @@ export class WebGL2Renderer implements Renderer {
 			frameSettings,
 			profile,
 		);
-		const particles = this.#particleBatcher
-			.route(
-				FLAT_PARTICLE_DOMAIN,
-				this.#particleSources,
-				() => FLAT_PARTICLE_DOMAIN,
-			)
-			.get(FLAT_PARTICLE_DOMAIN);
-		return { ...contributions, particles: particles ?? [] };
+		const routed = this.#particleBatcher.route(
+			FLAT_PARTICLE_DOMAIN,
+			this.#particleSources,
+			(owner) =>
+				owner === SKY_PARTICLE_RENDER_OWNER
+					? FLAT_SKY_PARTICLE_DOMAIN
+					: FLAT_PARTICLE_DOMAIN,
+		);
+		return {
+			...contributions,
+			particles: routed.get(FLAT_PARTICLE_DOMAIN) ?? [],
+			skyParticles: routed.get(FLAT_SKY_PARTICLE_DOMAIN) ?? [],
+		};
 	}
 
 	/**
@@ -1508,7 +1536,12 @@ export class WebGL2Renderer implements Renderer {
 				dynamicObjectCount,
 			);
 		}
-		return { objects: preparedObjects, particles: [], terrain };
+		return {
+			objects: preparedObjects,
+			particles: [],
+			skyParticles: [],
+			terrain,
+		};
 	}
 
 	#retainsObjectFootprint(
@@ -1559,17 +1592,16 @@ export class WebGL2Renderer implements Renderer {
 		);
 		const { material } = object;
 		const opacity = sourceOpacity(material.source.translucency);
-		const diffuse = Math.max(0, material.source.diffuseScale);
+		// RETAIL DIVERGENCE: Authored CSurface.diffuse (e.g. 0.2734 on 0x080006E4, the celtic knot
+		// entrance plaque on building 0x01000F69) is a legacy of the 1999 software rasterizer.
+		// Retail's Direct3D pipeline (acclient.c:437169 SetCurrentMaterial) renders static objects with
+		// default white material diffuse (1.0, 1.0, 1.0, 1.0) and never modulates textured or solid
+		// surfaces by CSurface.diffuse. Multiplying by it artificially darkens authored surfaces.
 		let preparedMaterial: PreparedObjectMaterial<WebGLTexture, WebGLSampler>;
 		if (material.source.kind === "solid-color") {
 			const [red, green, blue, alpha] = material.source.color;
 			preparedMaterial = {
-				color: [
-					red * diffuse,
-					green * diffuse,
-					blue * diffuse,
-					alpha * opacity,
-				],
+				color: [red, green, blue, alpha * opacity],
 				kind: "solid-color",
 			};
 		} else {
@@ -1585,7 +1617,7 @@ export class WebGL2Renderer implements Renderer {
 					? "filterable"
 					: "exact",
 			);
-			const color = [diffuse, diffuse, diffuse, opacity] as const;
+			const color = [1.0, 1.0, 1.0, opacity] as const;
 			if (material.source.textureEncoding === "direct-color") {
 				preparedMaterial = { base: baseBinding, color, kind: "direct-color" };
 			} else {
@@ -1906,47 +1938,38 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
-	#drawParticles(
+	#createParticleDrawContext(
 		view: PreparedView,
-		profile: WebGL2FrameProfileCapture | null,
-		particlesByScope: ReadonlyMap<string, readonly ParticleDrawBatch[]> | null,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		const pass = this.#particlePass;
-		if (!pass) return;
-		if ((particlesByScope === null) !== (portalPipeline === null)) {
-			throw new Error(
-				"Particle scope groups and portal pipeline must be supplied together.",
-			);
-		}
-		if (particlesByScope === null && view.particles.length === 0) return;
-		// Timed separately from the blended pass so the one contiguous frame upload and physical
-		// particle draw boundaries remain attributable.
-		const gpuPhase = profile?.beginGpuPhase("particle") ?? null;
-		const startedAt = profile?.beginCpuPhase();
-		const context = {
-			// Anchor-relative, matching both the view matrix and the particle origins. The
-			// camera's canonical position lives in a different frame, which would leave the
-			// billboard basis pointing at a spot thousands of units away.
+		clockSeconds: number,
+		opacityScale: number,
+	): ParticleDrawContext {
+		return {
 			cameraPosition: [
 				view.cameraPosition.x,
 				view.cameraPosition.y,
 				view.cameraPosition.z,
-			] as const,
-			clockSeconds: this.#skyClockSeconds,
+			],
+			clockSeconds,
 			gl: this.#gl,
+			opacityScale,
 			projection: mat4ToFloat32Array(
 				view.projection,
 				this.#particleProjectionScratch,
 			),
 			view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
 		};
+	}
+
+	#executeParticlePass(
+		profile: WebGL2FrameProfileCapture | null,
+		execute: (pass: WebGL2ParticlePass) => void,
+	): void {
+		const pass = this.#particlePass;
+		if (!pass) return;
+		const gpuPhase = profile?.beginGpuPhase("particle") ?? null;
+		const startedAt = profile?.beginCpuPhase();
 		try {
-			if (particlesByScope && portalPipeline) {
-				pass.drawScoped(context, particlesByScope, portalPipeline);
-			} else {
-				pass.draw(context, view.particles);
-			}
+			execute(pass);
 			const diagnostics = pass.getDiagnostics();
 			this.#frameSelectionMetrics.submittedParticleBatchCount +=
 				diagnostics.drawnBatchCount;
@@ -1960,6 +1983,40 @@ export class WebGL2Renderer implements Renderer {
 			}
 			gpuPhase?.finish();
 		}
+	}
+
+	#drawParticleBatches(
+		view: PreparedView,
+		batches: readonly ParticleDrawBatch[],
+		profile: WebGL2FrameProfileCapture | null,
+		clockSeconds: number,
+		opacityScale: number,
+	): void {
+		if (batches.length === 0 || opacityScale <= 0) return;
+		this.#executeParticlePass(profile, (pass) => {
+			const context = this.#createParticleDrawContext(
+				view,
+				clockSeconds,
+				opacityScale,
+			);
+			pass.draw(context, batches);
+		});
+	}
+
+	#drawScopedParticles(
+		view: PreparedView,
+		particlesByScope: ReadonlyMap<string, readonly ParticleDrawBatch[]>,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
+		this.#executeParticlePass(profile, (pass) => {
+			const context = this.#createParticleDrawContext(
+				view,
+				this.#skyClockSeconds,
+				1.0,
+			);
+			pass.drawScoped(context, particlesByScope, portalPipeline);
+		});
 	}
 
 	/** Draw one flat view through the single nullable-profile physical schedule. */
@@ -1980,6 +2037,19 @@ export class WebGL2Renderer implements Renderer {
 		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
 		if (domain === "exterior") {
 			this.#submitSkyPhase(view, shading, "before-world", profile, null);
+			if (
+				view.skyParticles.length > 0 &&
+				FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
+			) {
+				this.#drawParticleBatches(
+					view,
+					view.skyParticles,
+					profile,
+					this.#skyClockSeconds *
+						FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
+					FRONTEND_TUNING.rendering.skyParticles.opacityScale,
+				);
+			}
 		}
 		this.#submitTerrainPhase(view, shading, profile, null);
 		this.#submitOpaquePhase(view, objectPhases.opaque, shading, profile, null);
@@ -2016,7 +2086,13 @@ export class WebGL2Renderer implements Renderer {
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
-		this.#drawParticles(view, profile, null, null);
+		this.#drawParticleBatches(
+			view,
+			view.particles,
+			profile,
+			this.#skyClockSeconds,
+			1.0,
+		);
 		this.#gl.bindVertexArray(null);
 		this.#beginObjectPhase();
 	}

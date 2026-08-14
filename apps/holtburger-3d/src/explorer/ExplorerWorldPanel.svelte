@@ -499,20 +499,19 @@
 						)}
 				/>
 			</label>
-			<label class="explorer-environment-field">
-				<span>EnvCell renderer</span>
-				<select
-					class="explorer-control explorer-control--select"
-					value={envCellRenderMode}
+			<label class="explorer-toggle">
+				<input
+					checked={envCellRenderMode === "portal"}
+					type="checkbox"
 					onchange={(event) =>
 						updateEnvCellRenderMode(
-							(event.currentTarget as HTMLSelectElement)
-								.value as EnvCellRenderMode,
+							(event.currentTarget as HTMLInputElement).checked
+								? "portal"
+								: "flat",
 						)}
-				>
-					<option value="flat">Flat inspection</option>
-					<option value="portal">Portal rendering</option>
-				</select>
+				/>
+				<span>Portal rendering</span>
+				<strong>{envCellRenderMode === "portal" ? "On" : "Off"}</strong>
 			</label>
 		</fieldset>
 	{/if}

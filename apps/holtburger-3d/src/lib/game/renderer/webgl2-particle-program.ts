@@ -219,6 +219,7 @@ uniform int uMaterialKind;
 uniform vec4 uMaterialColor;
 uniform int uPalettedClipMap;
 uniform float uAlphaTest;
+uniform float uOpacityScale;
 
 out vec4 outColor;
 
@@ -269,7 +270,7 @@ void main() {
 	${portalApplication}
 	vec4 color = sampleMaterial();
 	// Translucency is retail's sense: 1 is fully transparent, so alpha is its complement.
-	color.a *= 1.0 - clamp(vTranslucency, 0.0, 1.0);
+	color.a *= (1.0 - clamp(vTranslucency, 0.0, 1.0)) * uOpacityScale;
 	if (color.a < uAlphaTest) discard;
 	outColor = color;
 }
@@ -290,6 +291,7 @@ export interface WebGL2ParticleProgram {
 		readonly materialColor: WebGLUniformLocation;
 		readonly palettedClipMap: WebGLUniformLocation;
 		readonly motionType: WebGLUniformLocation;
+		readonly opacityScale: WebGLUniformLocation;
 		readonly orientation: WebGLUniformLocation;
 		readonly palette: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
@@ -333,6 +335,7 @@ export function createWebGL2ParticleProgram(
 		materialColor: requireWebGL2Uniform(gl, program, "uMaterialColor"),
 		palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 		motionType: requireWebGL2Uniform(gl, program, "uMotionType"),
+		opacityScale: requireWebGL2Uniform(gl, program, "uOpacityScale"),
 		orientation: requireWebGL2Uniform(gl, program, "uOrientation"),
 		palette: requireWebGL2Uniform(gl, program, "uPalette"),
 		projection: requireWebGL2Uniform(gl, program, "uProjection"),

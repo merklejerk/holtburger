@@ -1592,17 +1592,16 @@ export class WebGL2Renderer implements Renderer {
 		);
 		const { material } = object;
 		const opacity = sourceOpacity(material.source.translucency);
-		const diffuse = Math.max(0, material.source.diffuseScale);
+		// RETAIL DIVERGENCE: Authored CSurface.diffuse (e.g. 0.2734 on 0x080006E4, the celtic knot
+		// entrance plaque on building 0x01000F69) is a legacy of the 1999 software rasterizer.
+		// Retail's Direct3D pipeline (acclient.c:437169 SetCurrentMaterial) renders static objects with
+		// default white material diffuse (1.0, 1.0, 1.0, 1.0) and never modulates textured or solid
+		// surfaces by CSurface.diffuse. Multiplying by it artificially darkens authored surfaces.
 		let preparedMaterial: PreparedObjectMaterial<WebGLTexture, WebGLSampler>;
 		if (material.source.kind === "solid-color") {
 			const [red, green, blue, alpha] = material.source.color;
 			preparedMaterial = {
-				color: [
-					red * diffuse,
-					green * diffuse,
-					blue * diffuse,
-					alpha * opacity,
-				],
+				color: [red, green, blue, alpha * opacity],
 				kind: "solid-color",
 			};
 		} else {
@@ -1618,7 +1617,7 @@ export class WebGL2Renderer implements Renderer {
 					? "filterable"
 					: "exact",
 			);
-			const color = [diffuse, diffuse, diffuse, opacity] as const;
+			const color = [1.0, 1.0, 1.0, opacity] as const;
 			if (material.source.textureEncoding === "direct-color") {
 				preparedMaterial = { base: baseBinding, color, kind: "direct-color" };
 			} else {

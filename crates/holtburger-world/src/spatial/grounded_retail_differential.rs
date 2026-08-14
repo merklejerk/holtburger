@@ -12,7 +12,7 @@ use holtburger_content::{
     CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
     CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
     LandblockPlacement, PlacedCollider, StaticColliderPlacement, TerrainCollisionCell,
-    TerrainCollisionSurface, TerrainCollisionTriangle, TerrainWaterCoverage,
+    TerrainCollisionSurface, TerrainCollisionTriangle,
 };
 use holtburger_dat::physics::{BspLeaf, BspNode};
 
@@ -550,7 +550,6 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
             terrain: TerrainCollisionSurface {
                 cells: vec![TerrainCollisionCell {
                     triangles: [terrain.clone(), remote],
-                    water: TerrainWaterCoverage::Dry,
                 }],
             },
             static_geometry: LandblockColliders {

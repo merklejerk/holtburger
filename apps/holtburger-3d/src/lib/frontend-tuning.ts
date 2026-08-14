@@ -82,6 +82,12 @@ export const FRONTEND_TUNING = {
 				offset: 48,
 			},
 		},
+		environment: {
+			/** Default day group index in Explorer (day group 0 / "Clear"). */
+			defaultDayGroupOverride: 0 as number | null,
+			defaultDayIndex: 0,
+			defaultTimeOfDay: 0.5,
+		},
 		lod: {
 			/** Initial outdoor scene-interest radii exposed by Explorer controls. */
 			defaultRadii: {

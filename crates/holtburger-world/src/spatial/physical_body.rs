@@ -687,15 +687,17 @@ fn solve_free_sphere_tick(
                 solved.cell
             );
             let mut pose = body_reference_pose(solved.pose, committed_cell, offset)?;
-            let velocity = collision_response(
-                desired_velocity,
-                state.response_policy.restitution,
+            let velocity = collision_response(CollisionResponseInput {
+                incoming: desired_velocity,
+                achieved_velocity: achieved_displacement / delta_seconds,
+                restitution: state.response_policy.restitution,
                 collision_normal,
-                false,
-                false,
-                state.response_policy.surface_motion,
-                0,
-            );
+                previously_walkable: false,
+                current_support_normal: None,
+                surface_motion: state.response_policy.surface_motion,
+                stationary_fall_frames: 0,
+            })
+            .velocity;
             apply_automatic_facing(
                 &mut pose,
                 achieved_displacement,
@@ -855,7 +857,7 @@ fn solve_grounded_body_tick(
             let mut pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
             // Support identity belongs to the collision domain that produced it. A recovered
             // placement deliberately drops that memory so the next ordinary tick reacquires it.
-            let mut support = if recovered { None } else { solved.support };
+            let support = if recovered { None } else { solved.support };
             let stationary_fall_frames = next_stationary_fall_frames(
                 state.stationary_fall_frames,
                 state.support,
@@ -863,18 +865,22 @@ fn solve_grounded_body_tick(
                 collision_normal,
                 achieved_velocity,
             );
-            let velocity = collision_response(
-                solved.velocity,
-                state.response_policy.restitution,
+            let collision_response = collision_response(CollisionResponseInput {
+                incoming: solved.velocity,
+                achieved_velocity,
+                restitution: state.response_policy.restitution,
                 collision_normal,
-                state.support.is_some(),
-                support.is_some(),
-                state.response_policy.surface_motion,
+                previously_walkable: state.support.is_some(),
+                current_support_normal: support.map(|current| current.normal),
+                surface_motion: state.response_policy.surface_motion,
                 stationary_fall_frames,
-            );
-            if support.is_some_and(|current| velocity.dot(&current.normal) > 0.0) {
-                support = None;
-            }
+            });
+            let support = if collision_response.separates_from_support {
+                None
+            } else {
+                support
+            };
+            let velocity = collision_response.velocity;
             apply_grounded_facing(
                 &mut pose,
                 achieved_velocity * delta_seconds,
@@ -1086,39 +1092,89 @@ const SLEDDING_FAST_SPEED_SQUARED: f32 = 6.25;
 const SLEDDING_SLOPE_NORMAL_Z: f32 = 0.984_807_7;
 const SLEDDING_SLOPE_FRICTION: f32 = 0.2;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+/// Canonical velocity and its support consequence from one collision response.
+struct CollisionResponse {
+    /// Velocity retained after stable support, restitution, or stationary-fall handling.
+    velocity: Vector3,
+    /// Whether the resolved velocity deliberately leaves the current walkable support.
+    separates_from_support: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+/// Complete collision and support facts consumed by one canonical response decision.
+struct CollisionResponseInput {
+    /// Velocity entering restitution handling.
+    incoming: Vector3,
+    /// Velocity measured from the displacement accepted by the geometry solver.
+    achieved_velocity: Vector3,
+    /// Authored body restitution behavior.
+    restitution: PhysicalRestitution,
+    /// Most relevant impact normal produced by the collision transaction.
+    collision_normal: Option<Vector3>,
+    /// Whether the preceding committed tick retained walkable support.
+    previously_walkable: bool,
+    /// Current support normal, independently from whether an impact normal was produced.
+    current_support_normal: Option<Vector3>,
+    /// Stable or Sledding supported-surface behavior.
+    surface_motion: PhysicalSurfaceMotion,
+    /// Retail's repeated stationary-fall escalation stage.
+    stationary_fall_frames: u8,
+}
+
 fn physical_surface_retains_gravity(surface_motion: PhysicalSurfaceMotion) -> bool {
     surface_motion == PhysicalSurfaceMotion::Sledding
 }
 
-fn collision_response(
-    incoming: Vector3,
-    restitution: PhysicalRestitution,
-    collision_normal: Option<Vector3>,
-    previously_walkable: bool,
-    currently_walkable: bool,
-    surface_motion: PhysicalSurfaceMotion,
-    stationary_fall_frames: u8,
-) -> Vector3 {
+fn collision_response(input: CollisionResponseInput) -> CollisionResponse {
+    let CollisionResponseInput {
+        incoming,
+        achieved_velocity,
+        restitution,
+        collision_normal,
+        previously_walkable,
+        current_support_normal,
+        surface_motion,
+        stationary_fall_frames,
+    } = input;
     if stationary_fall_frames > MAXIMUM_BOUNCE_STATIONARY_FALL_FRAMES {
-        return Vector3::zero();
+        return CollisionResponse {
+            velocity: Vector3::zero(),
+            separates_from_support: false,
+        };
     }
+    let currently_walkable = current_support_normal.is_some();
     let continuous_support = previously_walkable && currently_walkable;
     if continuous_support && surface_motion == PhysicalSurfaceMotion::Stable {
-        return incoming;
+        // A grounded solve has already redirected ordinary drive along its support plane. The
+        // original horizontal drive may point outward from a downhill plane, but retail retains
+        // continuous stable contact and commits the achieved tangent instead of treating that
+        // component as takeoff (`CTransition::adjust_offset`, acclient.c:300589-300730;
+        // `CPhysicsObj::handle_all_collisions`, acclient.c:309982-310068).
+        return CollisionResponse {
+            velocity: achieved_velocity,
+            separates_from_support: false,
+        };
     }
-    let Some(normal) = collision_normal else {
-        return incoming;
-    };
-    match restitution {
-        PhysicalRestitution::Inelastic => Vector3::zero(),
-        PhysicalRestitution::Elastic(elasticity) => {
-            let impact_speed = incoming.dot(&normal);
-            if impact_speed >= 0.0 {
-                incoming
-            } else {
-                incoming + normal * -(impact_speed * (elasticity.get() + 1.0))
+    let velocity = if let Some(normal) = collision_normal {
+        match restitution {
+            PhysicalRestitution::Inelastic => Vector3::zero(),
+            PhysicalRestitution::Elastic(elasticity) => {
+                let impact_speed = incoming.dot(&normal);
+                if impact_speed >= 0.0 {
+                    incoming
+                } else {
+                    incoming + normal * -(impact_speed * (elasticity.get() + 1.0))
+                }
             }
         }
+    } else {
+        incoming
+    };
+    CollisionResponse {
+        velocity,
+        separates_from_support: current_support_normal
+            .is_some_and(|normal| velocity.dot(&normal) > 0.0),
     }
 }
 

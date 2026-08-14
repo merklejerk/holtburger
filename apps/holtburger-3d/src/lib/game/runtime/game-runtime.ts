@@ -67,9 +67,9 @@ import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
 import {
-	EXTERIOR_PARTICLE_RENDER_OWNER,
-	ParticleSystem,
+	SKY_PARTICLE_RENDER_OWNER,
 	type ParticleRenderOwner,
+	ParticleSystem,
 } from "../systems/particle-system";
 import { AmbientSystem } from "../systems/ambient-system";
 import {
@@ -577,7 +577,7 @@ export class GameRuntime {
 	 */
 	#particleRenderOwner(target: BehaviorTarget): ParticleRenderOwner | null {
 		if (this.#skyTargets.has(target.targetId)) {
-			return EXTERIOR_PARTICLE_RENDER_OWNER;
+			return SKY_PARTICLE_RENDER_OWNER;
 		}
 		const nodeId = sceneNodeIdOf(target.targetId);
 		return nodeId !== null && this.#selectedDynamicNodeIds.has(nodeId)

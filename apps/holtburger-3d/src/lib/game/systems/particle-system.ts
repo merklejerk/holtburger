@@ -203,11 +203,13 @@ type EmitterRemovalReason = "destroyed" | "reaped" | "replaced" | "target-lost";
 
 /** Exterior-owned effects are routed through the selected outdoor scope envelope. */
 export const EXTERIOR_PARTICLE_RENDER_OWNER = "particle-render-owner:exterior";
+export const SKY_PARTICLE_RENDER_OWNER = "particle-render-owner:sky";
 
 /** Stable routing owner retained until the renderer assigns particles to this frame's domains. */
 export type ParticleRenderOwner =
 	| SceneNodeId
-	| typeof EXTERIOR_PARTICLE_RENDER_OWNER;
+	| typeof EXTERIOR_PARTICLE_RENDER_OWNER
+	| typeof SKY_PARTICLE_RENDER_OWNER;
 
 /** One owner-local source cohort awaiting renderer-owned portal-domain batching. */
 export interface ParticleSourceCohort {

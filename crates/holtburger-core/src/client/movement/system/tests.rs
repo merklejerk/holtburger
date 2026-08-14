@@ -1,11 +1,11 @@
 use super::super::common::{
-    AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, RUN_HELD_TURN_SPEED_RAD_PER_SEC,
-    TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND,
-    build_autonomous_position, build_motion_state_raw_motion_state, player_run_rate_scalar,
+    AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, RUN_HELD_TURN_RATE_SCALAR, TURN_LEFT_MOTION_COMMAND,
+    TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND, build_autonomous_position,
+    build_motion_state_raw_motion_state, player_run_rate_scalar,
     raw_motion_state_with_motion_style,
 };
 use super::*;
-use crate::client::movement_types::Gait;
+use crate::client::movement_types::{Gait, LongitudinalMotion};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
@@ -104,7 +104,8 @@ fn autonomous_wire_motion_state_uses_forward_without_turn_when_moving() {
     .expect("moving autonomous drive should emit a wire motion state");
 
     assert_eq!(state.gait, Gait::Run);
-    assert_eq!(state.locomotion, Some(Locomotion::Forward));
+    assert_eq!(state.longitudinal, Some(LongitudinalMotion::Forward));
+    assert_eq!(state.lateral, None);
     assert_eq!(state.turning, None);
 }
 
@@ -134,7 +135,8 @@ fn autonomous_wire_motion_state_can_turn_in_place() {
     .expect("heading-only autonomous drive should still emit a turn edge");
 
     assert_eq!(state.gait, Gait::Walk);
-    assert_eq!(state.locomotion, None);
+    assert_eq!(state.longitudinal, None);
+    assert_eq!(state.lateral, None);
     assert_eq!(state.turning, Some(Turn::Right));
 }
 
@@ -278,7 +280,7 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
         Some(ActiveDriveState {
             intent: ActiveDriveIntent::Manual(MotionState {
                 gait: Gait::Run,
-                locomotion: Some(Locomotion::Forward),
+                longitudinal: Some(LongitudinalMotion::Forward),
                 ..
             }),
             ..
@@ -394,10 +396,7 @@ fn motion_state_raw_motion_state_adds_right_turn_when_requested() {
         raw_motion_state.turn_command,
         Some(TURN_RIGHT_MOTION_COMMAND)
     );
-    assert_eq!(
-        raw_motion_state.turn_speed,
-        Some(RUN_HELD_TURN_SPEED_RAD_PER_SEC)
-    );
+    assert_eq!(raw_motion_state.turn_speed, Some(RUN_HELD_TURN_RATE_SCALAR));
 }
 
 #[test]
@@ -446,10 +445,7 @@ fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
         raw_motion_state.turn_command,
         Some(TURN_LEFT_MOTION_COMMAND)
     );
-    assert_eq!(
-        raw_motion_state.turn_speed,
-        Some(RUN_HELD_TURN_SPEED_RAD_PER_SEC)
-    );
+    assert_eq!(raw_motion_state.turn_speed, Some(RUN_HELD_TURN_RATE_SCALAR));
     assert_eq!(raw_motion_state.turn_hold_key, Some(HoldKey::Run as u32));
     assert!(
         raw_motion_state

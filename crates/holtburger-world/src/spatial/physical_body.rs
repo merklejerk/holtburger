@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Sphere, Vector3};
+use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
@@ -31,6 +31,223 @@ pub enum PhysicalBodyDefinitionError {
     InvalidResponseConfig,
 }
 
+/// Invalid authored or explicit physical response policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum PhysicalBodyResponsePolicyError {
+    /// Elasticity must be finite before retail's public clamp is applied.
+    #[error("physical-body elasticity must be finite")]
+    NonFiniteElasticity,
+    /// Authored friction is accepted by retail only inside the inclusive unit interval.
+    #[error("physical-body friction must be finite and between zero and one")]
+    InvalidFriction,
+}
+
+/// Retail-bounded coefficient used by elastic normal response.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicalElasticity(f32);
+
+impl PhysicalElasticity {
+    /// Retail constructor default (`acclient.c:307850`, `:318427`).
+    pub const DEFAULT: Self = Self(0.05);
+    /// No rebound while still preserving tangential velocity.
+    pub const ZERO: Self = Self(0.0);
+    /// Retail's public upper bound (`CPhysicsObj::set_elasticity`, `acclient.c:305519-305530`).
+    pub const MAXIMUM: Self = Self(0.1);
+
+    /// Applies retail's inclusive `[0.0, 0.1]` setter clamp.
+    pub fn new(value: f32) -> std::result::Result<Self, PhysicalBodyResponsePolicyError> {
+        if !value.is_finite() {
+            return Err(PhysicalBodyResponsePolicyError::NonFiniteElasticity);
+        }
+        Ok(Self(value.clamp(Self::ZERO.0, Self::MAXIMUM.0)))
+    }
+
+    /// Valid bounded coefficient.
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// Retail-validated authored surface friction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicalFriction(f32);
+
+impl PhysicalFriction {
+    /// Retail constructor default (`acclient.c:307853`, `:318424`).
+    pub const DEFAULT: Self = Self(0.95);
+
+    /// Accepts the same inclusive unit interval as `CPhysicsObj::set_description`.
+    pub fn new(value: f32) -> std::result::Result<Self, PhysicalBodyResponsePolicyError> {
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err(PhysicalBodyResponsePolicyError::InvalidFriction);
+        }
+        Ok(Self(value))
+    }
+
+    /// Valid authored coefficient.
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// Body-level static-contact response; zero elasticity remains distinct from inelasticity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PhysicalRestitution {
+    /// Reflect the incoming normal component using this bounded coefficient.
+    Elastic(PhysicalElasticity),
+    /// Stop all linear motion on an eligible impact.
+    Inelastic,
+}
+
+/// Whether supported motion uses ordinary stable response or retail Sledding behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicalSurfaceMotion {
+    /// Ordinary support suppresses gravity and continuous-support restitution.
+    Stable,
+    /// Physics-state bit `0x0080_0000` retains gravity, bounce, and slope friction.
+    Sledding,
+}
+
+/// Complete mutable physical response selected independently from collider geometry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicalBodyResponsePolicy {
+    /// Eligible impact behavior.
+    pub restitution: PhysicalRestitution,
+    /// Authored supported-surface friction.
+    pub friction: PhysicalFriction,
+    /// Stable or retail Sledding support behavior.
+    pub surface_motion: PhysicalSurfaceMotion,
+    /// Physics-state `AlignPath`; this supersedes Sledding velocity-facing.
+    pub align_path: bool,
+}
+
+/// Invalid one-tick actuation rejected before collision simulation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum PhysicalBodyActuationError {
+    /// A requested velocity contains NaN or infinity.
+    #[error("physical-body actuation velocity must be finite")]
+    NonFiniteVelocity,
+    /// Supported planar drive may not inject vertical velocity.
+    #[error("grounded supported drive velocity must be horizontal")]
+    VerticalGroundedDrive,
+    /// A resolved grounded launch must leave support upward.
+    #[error("grounded launch velocity must have a positive vertical component")]
+    NonUpwardLaunch,
+    /// A controller-supplied world heading contains NaN or infinity.
+    #[error("grounded control heading must be finite")]
+    NonFiniteControlHeading,
+}
+
+/// Validated one-shot launch velocity produced by an actor-specific resolver.
+#[derive(Debug, PartialEq)]
+pub struct GroundedLaunch {
+    /// Full world-space velocity committed atomically when support is left.
+    velocity: Vector3,
+}
+
+impl GroundedLaunch {
+    pub fn new(velocity: Vector3) -> std::result::Result<Self, PhysicalBodyActuationError> {
+        validate_finite_velocity(velocity)?;
+        if velocity.z <= 0.0 {
+            return Err(PhysicalBodyActuationError::NonUpwardLaunch);
+        }
+        Ok(Self { velocity })
+    }
+
+    pub const fn velocity(&self) -> Vector3 {
+        self.velocity
+    }
+}
+
+/// Grounded-character actuation with replaceable support drive and an optional launch edge.
+#[derive(Debug, PartialEq)]
+pub struct GroundedBodyActuation {
+    /// Explicit controller drive or generic retained-velocity coasting while supported.
+    supported_motion: GroundedSupportedMotion,
+    /// One-shot resolved launch; callers must not replay it after this tick.
+    launch: Option<GroundedLaunch>,
+    /// Optional controller-selected world heading applied before body-policy facing overrides.
+    control_heading: Option<f32>,
+}
+
+/// Source of planar velocity while a grounded body retains support.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum GroundedSupportedMotion {
+    /// A character controller supplied the complete stable planar target for this tick.
+    Driven(Vector3),
+    /// Generic body response advances and damps retained canonical velocity.
+    Coasting,
+}
+
+impl GroundedBodyActuation {
+    pub fn drive(
+        supported_planar_velocity: Vector3,
+    ) -> std::result::Result<Self, PhysicalBodyActuationError> {
+        validate_finite_velocity(supported_planar_velocity)?;
+        if supported_planar_velocity.z.abs() > f32::EPSILON {
+            return Err(PhysicalBodyActuationError::VerticalGroundedDrive);
+        }
+        Ok(Self {
+            supported_motion: GroundedSupportedMotion::Driven(supported_planar_velocity),
+            launch: None,
+            control_heading: None,
+        })
+    }
+
+    /// Advances retained supported velocity without a character-drive override.
+    pub const fn coast() -> Self {
+        Self {
+            supported_motion: GroundedSupportedMotion::Coasting,
+            launch: None,
+            control_heading: None,
+        }
+    }
+
+    pub fn with_launch(mut self, launch: GroundedLaunch) -> Self {
+        self.launch = Some(launch);
+        self
+    }
+
+    /// Applies the controller's absolute world heading without changing ballistic velocity.
+    pub fn with_control_heading(
+        mut self,
+        heading: f32,
+    ) -> std::result::Result<Self, PhysicalBodyActuationError> {
+        if !heading.is_finite() {
+            return Err(PhysicalBodyActuationError::NonFiniteControlHeading);
+        }
+        self.control_heading = Some(heading);
+        Ok(self)
+    }
+}
+
+/// Response-specific one-tick actuation for a registered physical body.
+#[derive(Debug, PartialEq)]
+pub enum PhysicalBodyActuation {
+    /// Unrestricted collision-aware three-dimensional target velocity.
+    FreeFlight {
+        /// Desired world-space velocity for this tick.
+        velocity: Vector3,
+    },
+    /// Grounded drive plus an optional supported launch edge.
+    Grounded(GroundedBodyActuation),
+}
+
+impl PhysicalBodyActuation {
+    pub fn free_flight(velocity: Vector3) -> std::result::Result<Self, PhysicalBodyActuationError> {
+        validate_finite_velocity(velocity)?;
+        Ok(Self::FreeFlight { velocity })
+    }
+
+    pub fn grounded_drive(
+        supported_planar_velocity: Vector3,
+    ) -> std::result::Result<Self, PhysicalBodyActuationError> {
+        Ok(Self::Grounded(GroundedBodyActuation::drive(
+            supported_planar_velocity,
+        )?))
+    }
+}
+
 /// Response-owned state retained with a generic body's single authoritative pose.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhysicalBodyResponseState {
@@ -43,10 +260,10 @@ pub enum PhysicalBodyResponseState {
     Grounded {
         /// Current support-sphere interior cell, or `None` while outdoors.
         cell: Option<Guid>,
-        /// Current vertical velocity integrated only while the body is active.
-        fall_velocity: f32,
         /// Last committed walkable support for the lower sphere.
         support: Option<GroundSupport>,
+        /// Retail's bounded consecutive stationary-fall transition stage.
+        stationary_fall_frames: u8,
     },
 }
 
@@ -91,6 +308,8 @@ pub enum PhysicalBodyActivity {
 pub struct PhysicalBodyState {
     /// Validated geometry and response policy shared by every spawn source.
     pub definition: PhysicalBodyDefinition,
+    /// Mutable authored/network response state, independent from immutable geometry.
+    pub response_policy: PhysicalBodyResponsePolicy,
     /// Response-only state; the containing `SpatialBody` remains the sole pose owner.
     pub response: PhysicalBodyResponseState,
     /// Whether the body may receive a fixed simulation tick.
@@ -99,19 +318,24 @@ pub struct PhysicalBodyState {
 
 impl PhysicalBodyState {
     /// Builds response memory whose variant is guaranteed to match the definition.
-    pub fn new(definition: PhysicalBodyDefinition, cell: Option<Guid>) -> Self {
+    pub fn new(
+        definition: PhysicalBodyDefinition,
+        response_policy: PhysicalBodyResponsePolicy,
+        cell: Option<Guid>,
+    ) -> Self {
         let response = match definition {
             PhysicalBodyDefinition::FreeSphere { .. } => {
                 PhysicalBodyResponseState::FreeSphere { cell }
             }
             PhysicalBodyDefinition::Grounded { .. } => PhysicalBodyResponseState::Grounded {
                 cell,
-                fall_velocity: 0.0,
                 support: None,
+                stationary_fall_frames: 0,
             },
         };
         Self {
             definition,
+            response_policy,
             response,
             activity: PhysicalBodyActivity::Active,
         }
@@ -300,12 +524,27 @@ struct GroundedTickState {
     spheres: GroundedBodySpheres,
     /// Finite grounded solver and response policy.
     config: GroundedConfig,
+    /// Retained mutable contact and facing response.
+    response_policy: PhysicalBodyResponsePolicy,
     /// Prior support-sphere interior cell.
     cell: Option<Guid>,
-    /// Prior downward velocity integrated only while active.
-    fall_velocity: f32,
     /// Prior committed walkable support.
     support: Option<GroundSupport>,
+    /// Prior stationary-fall transition stage.
+    stationary_fall_frames: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+/// Inputs retained by free-sphere response while a generic tick is evaluated.
+struct FreeSphereTickState {
+    /// Body-local collision sphere.
+    sphere: GroundedSphere,
+    /// Finite free-flight solver policy.
+    config: PhysicalFlyConfig,
+    /// Retained mutable collision and facing response.
+    response_policy: PhysicalBodyResponsePolicy,
+    /// Prior sphere-center interior cell.
+    cell: Option<Guid>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -327,18 +566,12 @@ struct HeldTickDiagnostics {
 pub(super) fn solve_physical_body_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
-    desired_velocity: Vector3,
+    actuation: PhysicalBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
     ensure!(
         delta_seconds.is_finite() && delta_seconds > 0.0,
         "physical-body tick interval must be finite and positive"
-    );
-    ensure!(
-        desired_velocity.x.is_finite()
-            && desired_velocity.y.is_finite()
-            && desired_velocity.z.is_finite(),
-        "physical-body desired velocity must be finite"
     );
     let physical = body
         .physical
@@ -360,35 +593,49 @@ pub(super) fn solve_physical_body_tick(
         (
             PhysicalBodyDefinition::FreeSphere { sphere, config },
             PhysicalBodyResponseState::FreeSphere { cell },
-        ) => solve_free_sphere_tick(
-            scene,
-            body,
-            sphere,
-            config,
-            *cell,
-            desired_velocity,
-            delta_seconds,
-        ),
+        ) => {
+            let PhysicalBodyActuation::FreeFlight { velocity } = actuation else {
+                anyhow::bail!("grounded actuation cannot drive a free-sphere physical body")
+            };
+            solve_free_sphere_tick(
+                scene,
+                body,
+                FreeSphereTickState {
+                    sphere,
+                    config,
+                    response_policy: physical.response_policy,
+                    cell: *cell,
+                },
+                velocity,
+                delta_seconds,
+            )
+        }
         (
             PhysicalBodyDefinition::Grounded { spheres, config },
             PhysicalBodyResponseState::Grounded {
                 cell,
-                fall_velocity,
                 support,
+                stationary_fall_frames,
             },
-        ) => solve_grounded_body_tick(
-            scene,
-            body,
-            GroundedTickState {
-                spheres,
-                config,
-                cell: *cell,
-                fall_velocity: *fall_velocity,
-                support: *support,
-            },
-            desired_velocity,
-            delta_seconds,
-        ),
+        ) => {
+            let PhysicalBodyActuation::Grounded(actuation) = actuation else {
+                anyhow::bail!("free-flight actuation cannot drive a grounded physical body")
+            };
+            solve_grounded_body_tick(
+                scene,
+                body,
+                GroundedTickState {
+                    spheres,
+                    config,
+                    response_policy: physical.response_policy,
+                    cell: *cell,
+                    support: *support,
+                    stationary_fall_frames: *stationary_fall_frames,
+                },
+                actuation,
+                delta_seconds,
+            )
+        }
         _ => anyhow::bail!("physical body definition and response state variants diverged"),
     }
 }
@@ -396,24 +643,22 @@ pub(super) fn solve_physical_body_tick(
 fn solve_free_sphere_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
-    sphere: GroundedSphere,
-    config: PhysicalFlyConfig,
-    cell: Option<Guid>,
+    state: FreeSphereTickState,
     desired_velocity: Vector3,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
-    let response = PhysicalBodyResponseState::FreeSphere { cell };
-    let offset = body.pose.rotation.rotate_vector(sphere.center);
+    let response = PhysicalBodyResponseState::FreeSphere { cell: state.cell };
+    let offset = body.pose.rotation.rotate_vector(state.sphere.center);
     let mut sphere_pose = body.pose;
     sphere_pose.coords = sphere_pose.coords + offset;
     let outcome = solve_physical_fly(
         scene,
-        config,
+        state.config,
         PhysicalFlyRequest {
             body: PhysicalFlyBody {
                 pose: sphere_pose,
-                cell,
-                radius: sphere.radius,
+                cell: state.cell,
+                radius: state.sphere.radius,
             },
             displacement: desired_velocity * delta_seconds,
         },
@@ -422,22 +667,44 @@ fn solve_free_sphere_tick(
         PhysicalFlyOutcome::Solved {
             body: solved,
             achieved_displacement,
+            collision_normal,
             motion,
             substeps,
             contact_passes,
         } => {
-            let path = trace_body_reference_path(scene, body.pose, cell, sphere, &motion, true)?;
+            let path = trace_body_reference_path(
+                scene,
+                body.pose,
+                state.cell,
+                state.sphere,
+                &motion,
+                true,
+            )?;
             let committed_cell = path.final_point().placement().committed_cell();
             ensure!(
                 committed_cell == solved.cell || path.has_recovery(),
                 "free-sphere placed path ended in {committed_cell:?}, but collision response committed {:?}",
                 solved.cell
             );
-            let pose = body_reference_pose(solved.pose, committed_cell, offset)?;
-            let achieved_velocity = achieved_displacement / delta_seconds;
+            let mut pose = body_reference_pose(solved.pose, committed_cell, offset)?;
+            let velocity = collision_response(
+                desired_velocity,
+                state.response_policy.restitution,
+                collision_normal,
+                false,
+                false,
+                state.response_policy.surface_motion,
+                0,
+            );
+            apply_automatic_facing(
+                &mut pose,
+                achieved_displacement,
+                velocity,
+                state.response_policy,
+            );
             Ok(PhysicalBodyTickCommit {
                 pose,
-                velocity: achieved_velocity,
+                velocity,
                 contact: ContactState::Airborne,
                 response: PhysicalBodyResponseState::FreeSphere {
                     cell: committed_cell,
@@ -465,7 +732,7 @@ fn solve_free_sphere_tick(
             scene,
             body,
             response,
-            sphere,
+            state.sphere,
             HeldTickDiagnostics {
                 status: free_budget_status(budget),
                 grounded: false,
@@ -481,26 +748,82 @@ fn solve_grounded_body_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
     state: GroundedTickState,
-    desired_velocity: Vector3,
+    actuation: GroundedBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
     let response = PhysicalBodyResponseState::Grounded {
         cell: state.cell,
-        fall_velocity: state.fall_velocity,
+        support: state.support,
+        stationary_fall_frames: state.stationary_fall_frames,
+    };
+    let mut grounded_body = GroundedBody {
+        pose: body.pose,
+        cell: state.cell,
+        velocity: body.velocity,
         support: state.support,
     };
+    // A newly attached grounded body has not yet had a collision transaction classify its
+    // contact. Let explicit planar drive participate in that first transaction so a body placed
+    // on a floor does not discard one tick of input. Once a solve commits `Airborne`, canonical
+    // velocity remains ballistic and later drive cannot steer it.
+    if body.contact == ContactState::Unknown
+        && grounded_body.support.is_none()
+        && let GroundedSupportedMotion::Driven(velocity) = actuation.supported_motion
+    {
+        grounded_body.velocity.x = velocity.x;
+        grounded_body.velocity.y = velocity.y;
+    }
+    let may_step_down = grounded_step_down_enabled(body.contact, actuation.launch.is_some());
+    if let Some(launch) = actuation.launch {
+        ensure!(
+            grounded_body.support.is_some(),
+            "grounded launch requires current walkable support"
+        );
+        grounded_body.velocity = launch.velocity();
+        grounded_body.support = None;
+    }
+    let mut supported_velocity = match actuation.supported_motion {
+        GroundedSupportedMotion::Driven(velocity) => velocity,
+        GroundedSupportedMotion::Coasting => grounded_body.velocity,
+    };
+    if let Some(support) = grounded_body.support {
+        match (
+            state.response_policy.surface_motion,
+            actuation.supported_motion,
+        ) {
+            (PhysicalSurfaceMotion::Stable, GroundedSupportedMotion::Driven(_)) => {}
+            (PhysicalSurfaceMotion::Stable, GroundedSupportedMotion::Coasting) => {
+                supported_velocity = surface_friction(
+                    supported_velocity,
+                    support.normal,
+                    state.response_policy.friction,
+                    delta_seconds,
+                    PhysicalSurfaceMotion::Stable,
+                );
+            }
+            (PhysicalSurfaceMotion::Sledding, _) => {
+                grounded_body.velocity = surface_friction(
+                    supported_velocity,
+                    support.normal,
+                    state.response_policy.friction,
+                    delta_seconds,
+                    PhysicalSurfaceMotion::Sledding,
+                );
+                supported_velocity = grounded_body.velocity;
+            }
+        }
+    }
     let outcome = solve_grounded(
         scene,
         state.config,
         GroundedRequest {
-            body: GroundedBody {
-                pose: body.pose,
-                cell: state.cell,
-                fall_velocity: state.fall_velocity,
-                support: state.support,
-            },
+            body: grounded_body,
             spheres: state.spheres,
-            drive_velocity: desired_velocity,
+            supported_velocity,
+            may_step_down,
+            retain_supported_gravity: physical_surface_retains_gravity(
+                state.response_policy.surface_motion,
+            ),
             delta_seconds,
         },
     )?;
@@ -508,6 +831,7 @@ fn solve_grounded_body_tick(
         GroundedOutcome::Solved {
             body: solved,
             achieved_velocity,
+            collision_normal,
             motion,
             substeps,
             contact_passes,
@@ -528,14 +852,40 @@ fn solve_grounded_body_tick(
                 "grounded placed path ended in {committed_cell:?}, but collision response committed {:?}",
                 solved.cell
             );
-            let pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
+            let mut pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
             // Support identity belongs to the collision domain that produced it. A recovered
             // placement deliberately drops that memory so the next ordinary tick reacquires it.
-            let support = if recovered { None } else { solved.support };
+            let mut support = if recovered { None } else { solved.support };
+            let stationary_fall_frames = next_stationary_fall_frames(
+                state.stationary_fall_frames,
+                state.support,
+                support,
+                collision_normal,
+                achieved_velocity,
+            );
+            let velocity = collision_response(
+                solved.velocity,
+                state.response_policy.restitution,
+                collision_normal,
+                state.support.is_some(),
+                support.is_some(),
+                state.response_policy.surface_motion,
+                stationary_fall_frames,
+            );
+            if support.is_some_and(|current| velocity.dot(&current.normal) > 0.0) {
+                support = None;
+            }
+            apply_grounded_facing(
+                &mut pose,
+                achieved_velocity * delta_seconds,
+                velocity,
+                state.response_policy,
+                actuation.control_heading,
+            );
             let grounded = support.is_some();
             Ok(PhysicalBodyTickCommit {
                 pose,
-                velocity: achieved_velocity,
+                velocity,
                 contact: if grounded {
                     ContactState::Grounded
                 } else {
@@ -543,8 +893,8 @@ fn solve_grounded_body_tick(
                 },
                 response: PhysicalBodyResponseState::Grounded {
                     cell: committed_cell,
-                    fall_velocity: solved.fall_velocity,
                     support,
+                    stationary_fall_frames,
                 },
                 activity: PhysicalBodyActivity::Active,
                 outcome: PhysicalBodyTickOutcome::Motion(PhysicalBodyMotion {
@@ -580,6 +930,11 @@ fn solve_grounded_body_tick(
             },
         ),
     }
+}
+
+/// Projects retained generic contact into retail's ordinary walking step-down eligibility.
+pub(crate) const fn grounded_step_down_enabled(contact: ContactState, launching: bool) -> bool {
+    !launching && !matches!(contact, ContactState::Airborne)
 }
 
 fn trace_body_reference_path(
@@ -649,19 +1004,19 @@ fn held_motion_commit(
             cell: committed_cell,
         },
         PhysicalBodyResponseState::Grounded {
-            fall_velocity,
             support,
+            stationary_fall_frames,
             ..
         } => PhysicalBodyResponseState::Grounded {
             cell: committed_cell,
-            fall_velocity,
             support: if recovered { None } else { support },
+            stationary_fall_frames: if recovered { 0 } else { stationary_fall_frames },
         },
     };
     let grounded = diagnostics.grounded && !recovered;
     Ok(PhysicalBodyTickCommit {
         pose,
-        velocity: Vector3::zero(),
+        velocity: body.velocity,
         contact: if recovered {
             ContactState::Airborne
         } else {
@@ -725,6 +1080,127 @@ fn grounded_budget_status(budget: GroundedBudget) -> PhysicalBodyTickStatus {
     }
 }
 
+const MAXIMUM_BOUNCE_STATIONARY_FALL_FRAMES: u8 = 1;
+const SLEDDING_STOP_SPEED_SQUARED: f32 = 1.5625;
+const SLEDDING_FAST_SPEED_SQUARED: f32 = 6.25;
+const SLEDDING_SLOPE_NORMAL_Z: f32 = 0.984_807_7;
+const SLEDDING_SLOPE_FRICTION: f32 = 0.2;
+
+fn physical_surface_retains_gravity(surface_motion: PhysicalSurfaceMotion) -> bool {
+    surface_motion == PhysicalSurfaceMotion::Sledding
+}
+
+fn collision_response(
+    incoming: Vector3,
+    restitution: PhysicalRestitution,
+    collision_normal: Option<Vector3>,
+    previously_walkable: bool,
+    currently_walkable: bool,
+    surface_motion: PhysicalSurfaceMotion,
+    stationary_fall_frames: u8,
+) -> Vector3 {
+    if stationary_fall_frames > MAXIMUM_BOUNCE_STATIONARY_FALL_FRAMES {
+        return Vector3::zero();
+    }
+    let continuous_support = previously_walkable && currently_walkable;
+    if continuous_support && surface_motion == PhysicalSurfaceMotion::Stable {
+        return incoming;
+    }
+    let Some(normal) = collision_normal else {
+        return incoming;
+    };
+    match restitution {
+        PhysicalRestitution::Inelastic => Vector3::zero(),
+        PhysicalRestitution::Elastic(elasticity) => {
+            let impact_speed = incoming.dot(&normal);
+            if impact_speed >= 0.0 {
+                incoming
+            } else {
+                incoming + normal * -(impact_speed * (elasticity.get() + 1.0))
+            }
+        }
+    }
+}
+
+fn surface_friction(
+    incoming: Vector3,
+    normal: Vector3,
+    authored_friction: PhysicalFriction,
+    quantum: f32,
+    surface_motion: PhysicalSurfaceMotion,
+) -> Vector3 {
+    let normal_speed = incoming.dot(&normal);
+    if normal_speed >= 0.25 {
+        return incoming;
+    }
+    let projected = incoming - normal * normal_speed;
+    let speed_squared = incoming.length_squared();
+    let friction = match surface_motion {
+        PhysicalSurfaceMotion::Stable => authored_friction.get(),
+        PhysicalSurfaceMotion::Sledding if speed_squared < SLEDDING_STOP_SPEED_SQUARED => 1.0,
+        PhysicalSurfaceMotion::Sledding
+            if speed_squared >= SLEDDING_FAST_SPEED_SQUARED
+                && normal.z < SLEDDING_SLOPE_NORMAL_Z =>
+        {
+            SLEDDING_SLOPE_FRICTION
+        }
+        PhysicalSurfaceMotion::Sledding => authored_friction.get(),
+    };
+    projected * (1.0 - friction).powf(quantum)
+}
+
+fn next_stationary_fall_frames(
+    previous: u8,
+    previous_support: Option<GroundSupport>,
+    current_support: Option<GroundSupport>,
+    collision_normal: Option<Vector3>,
+    achieved_velocity: Vector3,
+) -> u8 {
+    let remained_stationary_fall = previous_support.is_none()
+        && current_support.is_none()
+        && collision_normal.is_some()
+        && achieved_velocity.length_squared() <= f32::EPSILON;
+    if remained_stationary_fall {
+        previous.saturating_add(1).min(3)
+    } else {
+        0
+    }
+}
+
+fn apply_automatic_facing(
+    pose: &mut WorldPosition,
+    displacement: Vector3,
+    velocity: Vector3,
+    policy: PhysicalBodyResponsePolicy,
+) {
+    let heading = if policy.align_path && displacement.length_squared() > f32::EPSILON {
+        Some(Vector3::zero().heading_to(&displacement))
+    } else if policy.surface_motion == PhysicalSurfaceMotion::Sledding
+        && velocity.length_squared() > f32::EPSILON
+    {
+        Some(Vector3::zero().heading_to(&velocity))
+    } else {
+        None
+    };
+    if let Some(heading) = heading {
+        pose.rotation = Quaternion::from_heading(heading);
+    }
+}
+
+/// Applies character control first, then retail's later body-policy facing overrides.
+fn apply_grounded_facing(
+    pose: &mut WorldPosition,
+    displacement: Vector3,
+    velocity: Vector3,
+    policy: PhysicalBodyResponsePolicy,
+    control_heading: Option<f32>,
+) {
+    if let Some(heading) = control_heading {
+        pose.rotation = Quaternion::from_heading(heading);
+    }
+    apply_automatic_facing(pose, displacement, velocity, policy);
+}
+
 fn validate_physical_fly_config(
     config: PhysicalFlyConfig,
 ) -> std::result::Result<(), PhysicalBodyDefinitionError> {
@@ -760,6 +1236,16 @@ fn validate_grounded_config(
         return Err(PhysicalBodyDefinitionError::InvalidResponseConfig);
     }
     Ok(())
+}
+
+fn validate_finite_velocity(
+    velocity: Vector3,
+) -> std::result::Result<(), PhysicalBodyActuationError> {
+    if velocity.x.is_finite() && velocity.y.is_finite() && velocity.z.is_finite() {
+        Ok(())
+    } else {
+        Err(PhysicalBodyActuationError::NonFiniteVelocity)
+    }
 }
 
 /// Evaluates whether an unchanged retained body can simulate against one collision snapshot.
@@ -929,6 +1415,10 @@ fn vector_is_finite(vector: Vector3) -> bool {
 }
 
 #[cfg(test)]
+#[path = "restitution_retail_differential.rs"]
+mod restitution_retail_differential;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{EdgeProtection, GroundedConfig, PhysicalFlyConfig, RETAIL_WALKABLE_NORMAL_Z};
@@ -1012,5 +1502,96 @@ mod tests {
             PhysicalBodyDefinition::free_sphere(pair, FLY_CONFIG),
             Err(PhysicalBodyDefinitionError::FreeSphereHasUpperConstraint)
         );
+    }
+
+    #[test]
+    fn typed_actuation_rejects_invalid_velocity_domains() {
+        assert_eq!(
+            PhysicalBodyActuation::free_flight(Vector3::new(f32::NAN, 0.0, 0.0)),
+            Err(PhysicalBodyActuationError::NonFiniteVelocity)
+        );
+        assert_eq!(
+            PhysicalBodyActuation::grounded_drive(Vector3::new(1.0, 0.0, 0.01)),
+            Err(PhysicalBodyActuationError::VerticalGroundedDrive)
+        );
+        assert_eq!(
+            GroundedLaunch::new(Vector3::new(1.0, 0.0, 0.0)),
+            Err(PhysicalBodyActuationError::NonUpwardLaunch)
+        );
+        assert_eq!(
+            GroundedLaunch::new(Vector3::new(0.0, 0.0, f32::INFINITY)),
+            Err(PhysicalBodyActuationError::NonFiniteVelocity)
+        );
+        assert_eq!(
+            GroundedBodyActuation::coast().with_control_heading(f32::NAN),
+            Err(PhysicalBodyActuationError::NonFiniteControlHeading)
+        );
+    }
+
+    #[test]
+    fn response_coefficients_preserve_retail_bounds_and_semantic_distinctions() {
+        assert_eq!(
+            PhysicalElasticity::new(-4.0).unwrap(),
+            PhysicalElasticity::ZERO
+        );
+        assert_eq!(
+            PhysicalElasticity::new(4.0).unwrap(),
+            PhysicalElasticity::MAXIMUM
+        );
+        assert_eq!(
+            PhysicalElasticity::new(f32::NAN),
+            Err(PhysicalBodyResponsePolicyError::NonFiniteElasticity)
+        );
+        assert_eq!(
+            PhysicalFriction::new(1.01),
+            Err(PhysicalBodyResponsePolicyError::InvalidFriction)
+        );
+        assert_ne!(
+            PhysicalRestitution::Elastic(PhysicalElasticity::ZERO),
+            PhysicalRestitution::Inelastic
+        );
+    }
+
+    #[test]
+    fn controlled_facing_is_followed_by_sledding_then_align_path_precedence() {
+        let mut pose = WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::zero(),
+            rotation: Quaternion::from_heading(0.75),
+        };
+        let mut policy = PhysicalBodyResponsePolicy {
+            restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
+            friction: PhysicalFriction::DEFAULT,
+            surface_motion: PhysicalSurfaceMotion::Sledding,
+            align_path: true,
+        };
+        apply_grounded_facing(
+            &mut pose,
+            Vector3::new(0.0, 2.0, 0.0),
+            Vector3::new(-2.0, 0.0, 0.0),
+            policy,
+            Some(-0.5),
+        );
+        assert!((pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 0.000_01);
+
+        policy.align_path = false;
+        apply_grounded_facing(
+            &mut pose,
+            Vector3::zero(),
+            Vector3::new(-2.0, 0.0, 0.0),
+            policy,
+            Some(-0.5),
+        );
+        assert!(pose.rotation.to_heading().abs() < 0.000_01);
+
+        policy.surface_motion = PhysicalSurfaceMotion::Stable;
+        apply_grounded_facing(
+            &mut pose,
+            Vector3::zero(),
+            Vector3::new(-2.0, 0.0, 0.0),
+            policy,
+            Some(-0.5),
+        );
+        assert_eq!(pose.rotation, Quaternion::from_heading(-0.5));
     }
 }

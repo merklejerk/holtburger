@@ -81,8 +81,8 @@ pub struct GroundedBody {
     pub pose: WorldPosition,
     /// Current interior cell, or `None` while outdoors.
     pub cell: Option<Guid>,
-    /// Current downward or upward velocity owned by grounded response.
-    pub fall_velocity: f32,
+    /// Canonical full world-space linear velocity at the committed pose.
+    pub velocity: Vector3,
     /// Current lower-sphere support committed with `pose`.
     pub support: Option<GroundSupport>,
 }
@@ -94,8 +94,14 @@ pub struct GroundedRequest {
     pub body: GroundedBody,
     /// Authored lower and optional upper sphere pair.
     pub spheres: GroundedBodySpheres,
-    /// Desired world-space horizontal velocity; vertical drive is rejected.
-    pub drive_velocity: Vector3,
+    /// Finite world-space velocity used while supported; explicit controller drive is horizontal,
+    /// while generic surface response may supply a full support-tangent vector.
+    pub supported_velocity: Vector3,
+    /// Whether current contact state permits retail's walking step-down transaction.
+    /// Launch and established airborne ticks disable it; initial classification enables it.
+    pub may_step_down: bool,
+    /// Whether supported motion retains canonical velocity and gravity for retail Sledding.
+    pub retain_supported_gravity: bool,
     /// Positive simulation interval in seconds.
     pub delta_seconds: f32,
 }
@@ -118,6 +124,8 @@ pub enum GroundedOutcome {
         body: GroundedBody,
         /// Achieved world-space velocity derived from committed displacement.
         achieved_velocity: Vector3,
+        /// Strongest unit contact normal opposing this tick's active velocity, if any.
+        collision_normal: Option<Vector3>,
         /// Ordered accepted substep endpoints spanning the normalized solve interval.
         motion: Vec<MotionWaypoint>,
         /// Anti-tunneling substeps evaluated.
@@ -214,19 +222,31 @@ pub fn solve_grounded(
         spheres: request.spheres,
     };
     let supported = request.body.support.is_some();
-    let vertical_displacement = if supported || request.body.fall_velocity.abs() <= f32::EPSILON {
-        0.0
+    let active_velocity = if supported && request.retain_supported_gravity {
+        request.body.velocity
+    } else if supported {
+        request.supported_velocity
     } else {
-        request.body.fall_velocity * request.delta_seconds
-            + 0.5 * config.gravity * request.delta_seconds * request.delta_seconds
+        request.body.velocity
     };
-    let next_fall_velocity = if supported {
+    let accelerated = !supported || request.retain_supported_gravity;
+    let vertical_displacement = if active_velocity.z.abs() <= f32::EPSILON
+        && !(supported && request.retain_supported_gravity)
+    {
         0.0
+    } else if accelerated {
+        active_velocity.z * request.delta_seconds
+            + 0.5 * config.gravity * request.delta_seconds * request.delta_seconds
     } else {
-        request.body.fall_velocity + config.gravity * request.delta_seconds
+        active_velocity.z * request.delta_seconds
+    };
+    let next_velocity = if accelerated {
+        active_velocity + Vector3::new(0.0, 0.0, config.gravity * request.delta_seconds)
+    } else {
+        active_velocity
     };
 
-    let mut displacement = request.drive_velocity * request.delta_seconds;
+    let mut displacement = active_velocity * request.delta_seconds;
     displacement.z = vertical_displacement;
     if let Some(support) = request.body.support {
         displacement = project_into_plane(displacement, support.normal);
@@ -264,7 +284,7 @@ pub fn solve_grounded(
     let substep = displacement / required_substeps as f32;
     let original = request.body.clone();
     let mut body = request.body;
-    body.fall_velocity = next_fall_velocity;
+    body.velocity = next_velocity;
     // Retail carries one collision normal into the next substep, then clears it before collision
     // is recomputed (`acclient.c:301897-301919`). Keeping an arbitrary plane set for the whole
     // solve wedges finite walls and stair risers long after their authored geometry has ended.
@@ -274,6 +294,7 @@ pub fn solve_grounded(
     let mut current = start;
     let mut motion = Vec::with_capacity(required_substeps);
     let mut contact_passes = 0;
+    let mut collision_normal = None;
 
     'substeps: for completed_substeps in 0..required_substeps {
         let prior_support = body.support;
@@ -291,15 +312,21 @@ pub fn solve_grounded(
                 });
             }
         };
+        let mut contacted_walkable_support =
+            has_walkable_support_contact(&role_contacts, config.walkable_normal_z);
         let mut converged = false;
         let mut lower_step_retried = false;
 
         for _ in 0..config.maximum_contact_passes {
             contact_passes += 1;
+            contacted_walkable_support |=
+                has_walkable_support_contact(&role_contacts, config.walkable_normal_z);
             if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
                 converged = true;
                 break;
             }
+
+            remember_collision_normal(&mut collision_normal, &role_contacts, active_velocity);
 
             let lower_blocked = role_contacts
                 .iter()
@@ -319,7 +346,6 @@ pub fn solve_grounded(
                             reference_pose,
                             stepped.placement.committed_cell(),
                         );
-                        body.fall_velocity = 0.0;
                         body.support = Some(stepped.support);
                         motion.push(MotionWaypoint {
                             center: current,
@@ -467,14 +493,27 @@ pub fn solve_grounded(
                 placement: candidate_placement.clone(),
                 support,
             }))
-        } else {
+        } else if request.may_step_down {
+            // Retail reaches its ordinary step-down branch only while OBJECTINFO state retains
+            // contact (`CTransition::transitional_insert`, acclient.c:301550-301599). Running the
+            // full walking probe after `LeaveGround` snaps an upward launch back to the floor.
             step_down_candidate(context, &body, candidate)?
+        } else if contacted_walkable_support {
+            // An airborne sweep that actually struck a walkable lower contact may acquire that
+            // exact surface, but it does not inherit the much deeper walking step-down reach.
+            settle_candidate(context, &body, candidate, config.separation_epsilon * 2.0)?
+        } else {
+            CollisionQuery::Complete(SettleResult::Unsupported)
         };
         match settle_result {
             CollisionQuery::Complete(SettleResult::Supported(settled)) => {
+                remember_support_collision_normal(
+                    &mut collision_normal,
+                    settled.support.normal,
+                    active_velocity,
+                );
                 candidate = settled.body_center;
                 candidate_placement = settled.placement;
-                body.fall_velocity = 0.0;
                 body.support = Some(settled.support);
             }
             CollisionQuery::Complete(
@@ -500,7 +539,6 @@ pub fn solve_grounded(
                         CollisionQuery::Complete(Some(slid)) => {
                             candidate = slid.body_center;
                             candidate_placement = slid.placement;
-                            body.fall_velocity = 0.0;
                             body.support = Some(slid.support);
                         }
                         CollisionQuery::Complete(None) => {
@@ -560,14 +598,55 @@ pub fn solve_grounded(
         });
     }
 
+    let achieved_velocity = (current - start) / request.delta_seconds;
     Ok(GroundedOutcome::Solved {
-        achieved_velocity: (current - start) / request.delta_seconds,
+        achieved_velocity,
+        collision_normal,
         body,
         motion,
         substeps: required_substeps,
         contact_passes,
         constraint_count: encountered_constraints.len(),
     })
+}
+
+fn remember_collision_normal(
+    selected: &mut Option<Vector3>,
+    contacts: &[RoleContacts],
+    active_velocity: Vector3,
+) {
+    for contact in contacts.iter().flat_map(|entry| &entry.contacts) {
+        remember_support_collision_normal(selected, contact.response_normal, active_velocity);
+    }
+}
+
+fn has_walkable_support_contact(contacts: &[RoleContacts], walkable_normal_z: f32) -> bool {
+    contacts.iter().any(|entry| {
+        entry.role == SphereRole::Support
+            && entry
+                .contacts
+                .iter()
+                .any(|contact| contact.response_normal.z >= walkable_normal_z)
+    })
+}
+
+fn remember_support_collision_normal(
+    selected: &mut Option<Vector3>,
+    normal: Vector3,
+    active_velocity: Vector3,
+) {
+    let length_squared = normal.length_squared();
+    if length_squared <= f32::EPSILON || !length_squared.is_finite() {
+        return;
+    }
+    let normal = normal / length_squared.sqrt();
+    let opposition = active_velocity.dot(&normal);
+    if opposition >= 0.0 {
+        return;
+    }
+    if selected.is_none_or(|current| opposition < active_velocity.dot(&current)) {
+        *selected = Some(normal);
+    }
 }
 
 fn settle_candidate(
@@ -1065,18 +1144,16 @@ fn validate(config: GroundedConfig, request: &GroundedRequest) -> Result<()> {
         );
     }
     ensure!(
-        request.drive_velocity.x.is_finite()
-            && request.drive_velocity.y.is_finite()
-            && request.drive_velocity.z.is_finite(),
-        "grounded drive velocity must be finite"
+        request.supported_velocity.x.is_finite()
+            && request.supported_velocity.y.is_finite()
+            && request.supported_velocity.z.is_finite(),
+        "grounded supported velocity must be finite"
     );
     ensure!(
-        request.drive_velocity.z.abs() <= f32::EPSILON,
-        "grounded drive velocity must be horizontal"
-    );
-    ensure!(
-        request.body.fall_velocity.is_finite(),
-        "grounded fall velocity must be finite"
+        request.body.velocity.x.is_finite()
+            && request.body.velocity.y.is_finite()
+            && request.body.velocity.z.is_finite(),
+        "grounded body velocity must be finite"
     );
     ensure!(
         request.delta_seconds.is_finite() && request.delta_seconds > 0.0,
@@ -1183,7 +1260,7 @@ mod tests {
         GroundedBody {
             pose: pose(coords),
             cell: None,
-            fall_velocity: 0.0,
+            velocity: Vector3::zero(),
             support: support.map(|normal| GroundSupport { normal }),
         }
     }
@@ -1238,6 +1315,23 @@ mod tests {
             Vector3::new(0.0, 0.0, 1.0),
             Sphere {
                 center: Vector3::new((minimum_x + maximum_x) * 0.5, 96.0, 0.0),
+                radius: 192.0,
+            },
+        )
+    }
+
+    fn ceiling(id: u16, z: f32) -> PlacedCollider {
+        polygon(
+            id,
+            vec![
+                Vector3::new(0.0, 0.0, z),
+                Vector3::new(0.0, 192.0, z),
+                Vector3::new(192.0, 192.0, z),
+                Vector3::new(192.0, 0.0, z),
+            ],
+            Vector3::new(0.0, 0.0, -1.0),
+            Sphere {
+                center: Vector3::new(96.0, 96.0, z),
                 radius: 192.0,
             },
         )
@@ -1419,7 +1513,7 @@ mod tests {
         scene: &CollisionScene,
         body: GroundedBody,
         spheres: GroundedBodySpheres,
-        drive_velocity: Vector3,
+        supported_velocity: Vector3,
         delta_seconds: f32,
     ) -> GroundedOutcome {
         solve_with_config(
@@ -1427,7 +1521,7 @@ mod tests {
             config(),
             body,
             spheres,
-            drive_velocity,
+            supported_velocity,
             delta_seconds,
         )
     }
@@ -1437,16 +1531,19 @@ mod tests {
         config: GroundedConfig,
         body: GroundedBody,
         spheres: GroundedBodySpheres,
-        drive_velocity: Vector3,
+        supported_velocity: Vector3,
         delta_seconds: f32,
     ) -> GroundedOutcome {
+        let may_step_down = body.support.is_some();
         solve_grounded(
             scene,
             config,
             GroundedRequest {
                 body,
                 spheres,
-                drive_velocity,
+                supported_velocity,
+                may_step_down,
+                retain_supported_gravity: false,
                 delta_seconds,
             },
         )
@@ -1489,7 +1586,7 @@ mod tests {
             "first gravity tick moved the pose"
         );
         assert_eq!(first_achieved.z, 0.0, "first gravity tick reported motion");
-        assert!((first.fall_velocity + 0.98).abs() < EPSILON);
+        assert!((first.velocity.z + 0.98).abs() < EPSILON);
 
         let (second, second_achieved) = solved(solve(
             &scene,
@@ -1521,10 +1618,10 @@ mod tests {
         let mut current = body(Vector3::new(50.0, 50.0, 3.0), None);
         let mut landing_velocities = None;
         for _ in 0..20 {
-            let requested_vertical_velocity = if current.fall_velocity.abs() <= f32::EPSILON {
+            let requested_vertical_velocity = if current.velocity.z.abs() <= f32::EPSILON {
                 0.0
             } else {
-                current.fall_velocity + 0.5 * config().gravity * 0.1
+                current.velocity.z + 0.5 * config().gravity * 0.1
             };
             let (next, achieved) = solved(solve(&scene, current, spheres, Vector3::zero(), 0.1));
             current = next;
@@ -1544,7 +1641,7 @@ mod tests {
         let (requested, achieved) = landing_velocities.expect("landing tick was not observed");
         assert!(
             achieved > requested,
-            "landing reported requested fall velocity {requested} instead of achieved {achieved}"
+            "landing reported requested descent velocity {requested} instead of achieved {achieved}"
         );
     }
 
@@ -1567,7 +1664,7 @@ mod tests {
             (current.pose.coords - landed.coords).length() < EPSILON,
             "retained support drifted from rest: {current:?}"
         );
-        assert_eq!(current.fall_velocity, 0.0);
+        assert_eq!(current.velocity.z, 0.0);
     }
 
     #[test]
@@ -1586,6 +1683,32 @@ mod tests {
         assert!((moved.pose.coords - Vector3::new(23.0, 24.0, 0.0)).length() < EPSILON);
         assert!((achieved - Vector3::new(3.0, 4.0, 0.0)).length() < EPSILON);
         assert!(moved.support.is_some());
+    }
+
+    #[test]
+    fn physics_generated_supported_velocity_may_follow_a_slope_tangent() {
+        let shallow = ramp(2, 20.0, 30.0, 10.0, 30.0, 2.0);
+        let normal = shallow.shape.polygons[&2].normal;
+        let scene = scene(vec![shallow]);
+        let starting_height = 0.2 + lower_sphere().radius / normal.z - lower_sphere().center.z;
+        let start = Vector3::new(21.0, 20.0, starting_height);
+        let tangent_velocity = project_into_plane(Vector3::new(4.0, 0.0, 0.0), normal);
+        assert!(tangent_velocity.z > 0.0);
+
+        let (moved, achieved) = solved(solve(
+            &scene,
+            body(start, Some(normal)),
+            GroundedBodySpheres {
+                support: lower_sphere(),
+                upper: None,
+            },
+            tangent_velocity,
+            1.0,
+        ));
+
+        assert!((moved.pose.coords - (start + tangent_velocity)).length() < EPSILON);
+        assert!((achieved - tangent_velocity).length() < EPSILON);
+        assert_eq!(moved.support.map(|support| support.normal), Some(normal));
     }
 
     #[test]
@@ -1635,6 +1758,51 @@ mod tests {
             1.0,
         ));
         assert!((retreated.pose.coords.x - 7.5).abs() < EPSILON);
+    }
+
+    #[test]
+    fn wall_collision_exports_the_transaction_normal_for_velocity_response() {
+        let scene = scene(vec![floor(), wall_x(2, 10.0, 0.0, 4.0)]);
+        let outcome = solve(
+            &scene,
+            body(
+                Vector3::new(7.0, 20.0, 0.0),
+                Some(Vector3::new(0.0, 0.0, 1.0)),
+            ),
+            pair(),
+            Vector3::new(6.0, 4.0, 0.0),
+            1.0,
+        );
+        let GroundedOutcome::Solved {
+            collision_normal, ..
+        } = outcome
+        else {
+            panic!("wall solve did not complete")
+        };
+        assert_eq!(collision_normal, Some(Vector3::new(-1.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn upper_sphere_ceiling_exports_normal_and_clips_launch_displacement() {
+        let scene = scene(vec![ceiling(1, 3.0)]);
+        let mut launched = body(Vector3::new(20.0, 20.0, 0.0), None);
+        launched.velocity = Vector3::new(0.0, 0.0, 5.0);
+        let outcome = solve(&scene, launched, pair(), Vector3::zero(), 0.2);
+        let GroundedOutcome::Solved {
+            body,
+            achieved_velocity,
+            collision_normal,
+            ..
+        } = outcome
+        else {
+            panic!("ceiling solve did not complete")
+        };
+        assert!(
+            body.pose.coords.z < 0.51,
+            "ceiling did not clip launch: {body:?}"
+        );
+        assert!(achieved_velocity.z < 2.55);
+        assert_eq!(collision_normal, Some(Vector3::new(0.0, 0.0, -1.0)));
     }
 
     #[test]
@@ -1843,9 +2011,11 @@ mod tests {
         let steep_normal = steep.shape.polygons[&3].normal;
         assert!(steep_normal.z < config().walkable_normal_z);
         let steep_scene = scene(vec![steep]);
+        let mut steep_start = body(Vector3::new(39.0, 20.0, 0.0), None);
+        steep_start.velocity = Vector3::new(4.0, 0.0, 0.0);
         let (constrained, _, constraint_count) = solved_with_constraint_count(solve(
             &steep_scene,
-            body(Vector3::new(39.0, 20.0, 0.0), None),
+            steep_start,
             GroundedBodySpheres {
                 support: lower_sphere(),
                 upper: None,
@@ -2254,7 +2424,7 @@ mod tests {
         assert!(crossed.support.is_some());
 
         let mut falling = body(Vector3::new(191.0, 20.0, 3.0), None);
-        falling.fall_velocity = -1.0;
+        falling.velocity = Vector3::new(2.0, 0.0, -1.0);
         let (crossed, _) = solved(solve(
             &resident,
             falling,
@@ -2274,7 +2444,7 @@ mod tests {
         let original = GroundedBody {
             pose: pose(Vector3::new(191.0, 20.0, 3.0)),
             cell: None,
-            fall_velocity: -1.0,
+            velocity: Vector3::new(20.0, 0.0, -1.0),
             support: None,
         };
         let mut incomplete = CollisionScene::new();
@@ -2312,7 +2482,7 @@ mod tests {
             Vector3::new(20.0, 0.0, 0.0),
             0.1,
         ));
-        assert!((resumed.fall_velocity + 1.98).abs() < EPSILON);
+        assert!((resumed.velocity.z + 1.98).abs() < EPSILON);
         assert!(
             resumed.pose.coords.z < 3.0,
             "restored coverage did not resume gravity"

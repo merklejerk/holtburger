@@ -8,6 +8,19 @@ pub mod soul_emote_motion;
 pub use character_gen::{
     CharacterGenBuild, CharacterGenBuilder, CharacterGenPolicy, CharacterGenValidationError,
 };
+pub use client::character_jump::{
+    CharacterDriveResolutionError, CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump,
+    resolve_character_drive, resolve_character_jump, retail_jump_charge_profile,
+};
+pub use client::character_kinematics::{
+    CharacterJumpKinematics, CharacterKinematicsError, CharacterMovementKinematics,
+    jump_kinematics_from_movement_capabilities,
+};
+pub use client::character_motion::{
+    CharacterMotionContact, CharacterMotionController, CharacterMotionEvent,
+    CharacterMotionEventResult, CharacterMotionRejection, CharacterMotionSequence, JumpAttempt,
+    JumpChargeProfile, JumpExtent, JumpExtentError, SequencedCharacterMotionEvent,
+};
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,

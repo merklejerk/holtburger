@@ -46,9 +46,23 @@ export interface FreeFlyCameraControllerOptions {
 	readonly onChange: (state: FreeFlyCameraState) => void;
 	/** Sends wheel translation to the current host-owned camera policy. */
 	readonly onPhysicalWheel: (localUpDistance: number) => void;
+	/** Publishes normalized raw character keys without assigning grounded semantics here. */
+	readonly onCharacterInput: (input: CameraCharacterInput) => void;
+	/** Resolves the app regime's complete keyboard-yaw rate without teaching this controller its modes. */
+	readonly keyboardYawRadiansPerSecond?: (shiftActive: boolean) => number;
 	readonly requestAnimationFrame?: (callback: FrameRequestCallback) => number;
 	readonly cancelAnimationFrame?: (handle: number) => void;
 }
+
+/** Raw keyboard lifecycle consumed only when the app selects a character-control regime. */
+export type CameraCharacterInput =
+	| {
+			readonly key: "a" | "c" | "d" | "s" | "shift" | "space" | "w" | "z";
+			readonly kind: "key";
+			readonly pressed: boolean;
+			readonly repeat: boolean;
+	  }
+	| { readonly kind: "reset" };
 
 const DEFAULT_STATE: FreeFlyCameraState = {
 	hasManualControl: false,
@@ -66,6 +80,8 @@ export class FreeFlyCameraController {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onChange: (state: FreeFlyCameraState) => void;
 	readonly #onPhysicalWheel: (localUpDistance: number) => void;
+	readonly #onCharacterInput: (input: CameraCharacterInput) => void;
+	readonly #keyboardYawRadiansPerSecond: (shiftActive: boolean) => number;
 	readonly #requestAnimationFrame: (callback: FrameRequestCallback) => number;
 	readonly #cancelAnimationFrame: (handle: number) => void;
 	readonly #pressedKeys = new Set<MovementKey>();
@@ -82,6 +98,12 @@ export class FreeFlyCameraController {
 		this.#canvas = options.canvas;
 		this.#onChange = options.onChange;
 		this.#onPhysicalWheel = options.onPhysicalWheel;
+		this.#onCharacterInput = options.onCharacterInput;
+		this.#keyboardYawRadiansPerSecond =
+			options.keyboardYawRadiansPerSecond ??
+			((shiftActive) =>
+				CAMERA_CONTROL_TUNING.keyboardYawRadiansPerSecond *
+				this.#speedMultiplier(shiftActive));
 		this.#requestAnimationFrame =
 			options.requestAnimationFrame ??
 			window.requestAnimationFrame.bind(window);
@@ -251,6 +273,15 @@ export class FreeFlyCameraController {
 
 	readonly #handleKeyDown = (event: KeyboardEvent): void => {
 		this.#shiftActive = event.shiftKey;
+		const semanticKey = characterKey(event.key);
+		if (semanticKey !== null) {
+			this.#onCharacterInput({
+				key: semanticKey,
+				kind: "key",
+				pressed: true,
+				repeat: event.repeat,
+			});
+		}
 		const key = movementKey(event.key);
 		if (!key) {
 			if (event.key === "Shift" && !this.#localTranslationEnabled)
@@ -265,6 +296,15 @@ export class FreeFlyCameraController {
 
 	readonly #handleKeyUp = (event: KeyboardEvent): void => {
 		this.#shiftActive = event.key === "Shift" ? false : event.shiftKey;
+		const semanticKey = characterKey(event.key);
+		if (semanticKey !== null) {
+			this.#onCharacterInput({
+				key: semanticKey,
+				kind: "key",
+				pressed: false,
+				repeat: false,
+			});
+		}
 		const key = movementKey(event.key);
 		if (!key) {
 			if (event.key === "Shift" && !this.#localTranslationEnabled)
@@ -283,6 +323,7 @@ export class FreeFlyCameraController {
 	};
 
 	readonly #handleBlur = (): void => {
+		this.#onCharacterInput({ kind: "reset" });
 		this.#stopMovement();
 		if (!this.#localTranslationEnabled) this.#onChange(this.#state);
 	};
@@ -355,9 +396,8 @@ export class FreeFlyCameraController {
 				yawRadians:
 					next.yawRadians +
 					yawDirection *
-						CAMERA_CONTROL_TUNING.keyboardYawRadiansPerSecond *
-						deltaSeconds *
-						this.#speedMultiplier(this.#shiftActive),
+						this.#keyboardYawRadiansPerSecond(this.#shiftActive) *
+						deltaSeconds,
 			};
 		}
 		this.#setManualState(next);
@@ -396,6 +436,16 @@ function movementKey(key: string): MovementKey | null {
 	const normalized = key.toLowerCase();
 	if (["w", "a", "s", "d", "z", "c", "pageup", "pagedown"].includes(normalized))
 		return normalized as MovementKey;
+	return key === " " ? "space" : null;
+}
+
+function characterKey(
+	key: string,
+): "a" | "c" | "d" | "s" | "shift" | "space" | "w" | "z" | null {
+	const normalized = key.toLowerCase();
+	if (["w", "a", "s", "d", "z", "c", "shift"].includes(normalized)) {
+		return normalized as "a" | "c" | "d" | "s" | "shift" | "w" | "z";
+	}
 	return key === " " ? "space" : null;
 }
 

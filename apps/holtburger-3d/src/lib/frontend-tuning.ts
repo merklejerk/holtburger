@@ -42,16 +42,27 @@ export const FRONTEND_TUNING = {
 	explorer: {
 		camera: {
 			controls: {
-				/** Explorer-owned horizontal speed for host grounded precision walk. */
-				groundedSlowWalkSpeed: 4,
-				/** Explorer-owned horizontal speed for ordinary host grounded travel. */
-				groundedWalkSpeed: 12,
+				/** Explorer-owned numeric capabilities registered for the synthetic grounded body. */
+				groundedCharacterCapabilities: {
+					/** Human walk-forward motion-table speed (`acclient.c:329869`). */
+					baseWalkForwardSpeed: 3.12,
+					/** Human run-forward motion-table speed (`acclient.c:329873`). */
+					baseRunForwardSpeed: 4,
+					/** Explorer product run rate; keeps the accepted 12-unit default run speed. */
+					runRateScalar: 3,
+					/** Full-charge jump apex in world units, intentionally taller than retail skill 300. */
+					fullChargeJumpHeight: 8.425,
+				},
 				/** Seconds over which held keyboard movement reaches full speed. */
 				keyboardAccelerationSeconds: 2,
 				/** Starting fraction of full speed for held keyboard movement. */
 				keyboardInitialSpeedMultiplier: 0.125,
-				/** Keyboard yaw speed before the slow modifier is applied. */
+				/** Free-fly keyboard yaw speed before the precision modifier is applied. */
 				keyboardYawRadiansPerSecond: 1.8,
+				/** Human motion-table turn omega without the retail Run multiplier. */
+				groundedWalkYawRadiansPerSecond: 1.5,
+				/** Human motion-table turn omega after retail's fixed 1.5 Run multiplier. */
+				groundedRunYawRadiansPerSecond: 2.25,
 				/** Largest simulation step admitted after an animation-frame pause. */
 				maximumFrameDeltaSeconds: 0.05,
 				/** Vertical rotation limit, short of the camera-axis singularity. */

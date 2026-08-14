@@ -1,0 +1,462 @@
+use anyhow::{Context, Result, ensure};
+use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
+use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_world::{
+    CellTransitRequest, CollisionQuery, CollisionScene, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalBodyActivity, PhysicalBodyTickOutcome,
+    PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus, PlacedMotionPath,
+    PlacedMotionPathRequest, PlacedMotionPoint,
+};
+
+use crate::host_simulation_runtime::{HostPhysicalBodyTick, report_placed_motion_recoveries};
+
+use super::{
+    ActiveCamera, FIRST_PERSON_FORWARD_OFFSET, HUMAN_EYE_HEIGHT, PhysicalCameraMode,
+    PhysicalCameraPathLeg, PhysicalCameraPathPoint, PhysicalCameraResidency,
+    PhysicalCameraTickStatus, VIEWER_SPHERE_RADIUS,
+};
+
+/// Host-retained render viewer state, independent from collision-body placement.
+#[derive(Debug, Clone)]
+pub(super) struct PresentedViewer {
+    /// Exact last placement-committed viewer pose, retained independently from the body.
+    pub(super) pose: WorldPosition,
+    /// Last portal-committed cell containing the viewer sphere, or outdoors.
+    pub(super) cell: Option<Guid>,
+    /// Last view direction committed with `cell` and the presented origin.
+    pub(super) direction: Vector3,
+}
+
+/// Fully validated presentation derived from a still-provisional body tick.
+pub(super) struct PreparedCameraPresentation {
+    pub(super) initial: PhysicalCameraPathPoint,
+    pub(super) legs: Vec<PhysicalCameraPathLeg>,
+    pub(super) viewer: PresentedViewer,
+    pub(super) status: PhysicalCameraTickStatus,
+    pub(super) grounded: bool,
+    pub(super) constraint_count: usize,
+    pub(super) missing_landblocks: Vec<String>,
+    pub(super) outside_world: bool,
+    pub(super) substeps: usize,
+    pub(super) contact_passes: usize,
+}
+
+pub(super) fn prepare_camera_presentation(
+    previous: &ActiveCamera,
+    solved: &HostPhysicalBodyTick,
+    view_direction: Vector3,
+) -> Result<PreparedCameraPresentation> {
+    let mut status = PhysicalCameraTickStatus::MissingCoverage;
+    let mut grounded = false;
+    let mut constraint_count = 0;
+    let mut missing_landblocks = Vec::new();
+    let mut outside_world = false;
+    let mut substeps = 0;
+    let mut contact_passes = 0;
+    let viewer_path = match &solved.result.outcome {
+        PhysicalBodyTickOutcome::Motion(motion) => {
+            status = camera_tick_status(motion.status);
+            grounded = motion.grounded;
+            constraint_count = motion.constraint_count;
+            substeps = motion.substeps;
+            contact_passes = motion.contact_passes;
+            let body_motion = motion
+                .path
+                .legs()
+                .iter()
+                .map(|leg| MotionWaypoint {
+                    center: leg.end().center(),
+                    end_fraction: leg.end_fraction(),
+                    placement: MotionWaypointPlacement::Traverse,
+                })
+                .collect::<Vec<_>>();
+            match transit_presented_viewer_path(
+                &solved.collision,
+                previous,
+                solved.previous.pose,
+                solved.current.pose,
+                &body_motion,
+                view_direction,
+            )? {
+                CollisionQuery::Complete(path) => Some(path),
+                CollisionQuery::MissingCoverage(missing) => {
+                    status = PhysicalCameraTickStatus::MissingCoverage;
+                    grounded = false;
+                    constraint_count = 0;
+                    substeps = 0;
+                    contact_passes = 0;
+                    missing_landblocks = missing_landblock_names(&missing.landblocks);
+                    outside_world = missing.outside_world;
+                    None
+                }
+            }
+        }
+        PhysicalBodyTickOutcome::Inactive { activity } => {
+            if let PhysicalBodyActivity::AwaitingCoverage(missing) = activity {
+                missing_landblocks = missing_landblock_names(&missing.landblocks);
+                outside_world = missing.outside_world;
+            }
+            None
+        }
+    };
+    let (initial, legs, viewer) = match viewer_path {
+        Some(path) => {
+            let initial = serialize_path_point(path.anchor(), path.initial())?;
+            let legs = serialize_path_legs(&path)?;
+            let viewer = presented_viewer_from_path(&path, view_direction)?;
+            report_placed_motion_recoveries("physical camera viewer", &path);
+            (initial, legs, viewer)
+        }
+        None => {
+            let point = serialize_viewer_hold(&previous.viewer)?;
+            (
+                point.clone(),
+                vec![PhysicalCameraPathLeg {
+                    end_fraction: 1.0,
+                    end: point,
+                }],
+                previous.viewer.clone(),
+            )
+        }
+    };
+    Ok(PreparedCameraPresentation {
+        initial,
+        legs,
+        viewer,
+        status,
+        grounded,
+        constraint_count,
+        missing_landblocks,
+        outside_world,
+        substeps,
+        contact_passes,
+    })
+}
+
+pub(super) fn normalized_view_direction(direction: [f32; 3]) -> Result<Vector3> {
+    ensure!(
+        direction.iter().all(|component| component.is_finite()),
+        "physical camera view direction must be finite"
+    );
+    let direction = Vector3::new(direction[0], direction[1], direction[2]);
+    ensure!(
+        direction.length() > f32::EPSILON,
+        "physical camera view direction must be non-zero"
+    );
+    Ok(direction.normalize())
+}
+
+pub(super) fn grounded_viewer_offset(view_direction: Vector3) -> Vector3 {
+    Vector3::new(0.0, 0.0, HUMAN_EYE_HEIGHT) + view_direction * FIRST_PERSON_FORWARD_OFFSET
+}
+
+pub(super) fn parse_registration_residency(
+    residency: &PhysicalCameraResidency,
+) -> Result<(Guid, Option<Guid>)> {
+    let owner = parse_hex_guid(&residency.landblock_id, "camera landblock")?;
+    ensure!(
+        landblock_key(owner) == owner,
+        "physical camera landblock must be a normalized 0xFFFF owner"
+    );
+    let cell = residency
+        .env_cell_id
+        .as_deref()
+        .map(|cell| parse_hex_guid(cell, "camera EnvCell"))
+        .transpose()?;
+    if let Some(cell) = cell {
+        ensure!(
+            landblock_key(cell) == owner && (cell.0 & 0xffff) >= 0x0100,
+            "physical camera EnvCell does not belong to its normalized landblock owner"
+        );
+    }
+    Ok((owner, cell))
+}
+
+fn parse_hex_guid(value: &str, label: &str) -> Result<Guid> {
+    let hexadecimal = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .with_context(|| format!("{label} must start with 0x"))?;
+    let id = u32::from_str_radix(hexadecimal, 16)
+        .with_context(|| format!("{label} is not hexadecimal"))?;
+    Ok(Guid(id))
+}
+
+pub(super) fn scene_point_to_residency_pose(
+    scene_point: [f32; 3],
+    owner: Guid,
+    cell: Option<Guid>,
+) -> Result<WorldPosition> {
+    let derived = scene_point_to_pose(scene_point)?;
+    let derived_owner = landblock_key(derived.landblock_id);
+    if cell.is_none() {
+        ensure!(
+            derived_owner == owner,
+            "outdoor physical camera position does not belong to its supplied landblock"
+        );
+    }
+    let coords = reanchor_point(derived.coords, derived_owner, owner);
+    let mut pose = WorldPosition {
+        landblock_id: Guid(owner.0 & 0xffff_0000),
+        coords,
+        rotation: Quaternion::identity(),
+    }
+    .normalize_outdoor_cell();
+    if let Some(cell) = cell {
+        pose.landblock_id = cell;
+    }
+    Ok(pose)
+}
+
+/// Resolves the render viewer independently from the response body's primary sphere.
+pub(super) fn resolve_viewer_cell(
+    scene: &CollisionScene,
+    pose: WorldPosition,
+    seed_cell: Option<Guid>,
+) -> Result<CollisionQuery<Option<Guid>>> {
+    let placement = scene.transit_cell(CellTransitRequest {
+        previous_cell: seed_cell,
+        anchor: landblock_key(pose.landblock_id),
+        center: pose.coords,
+        radius: VIEWER_SPHERE_RADIUS,
+    })?;
+    Ok(match placement {
+        CollisionQuery::Complete(placement) => CollisionQuery::Complete(placement.committed_cell()),
+        CollisionQuery::MissingCoverage(missing) => CollisionQuery::MissingCoverage(missing),
+    })
+}
+
+/// Makes the pose frame agree with the independently resolved portal-history cell.
+pub(super) fn pose_with_cell(mut pose: WorldPosition, cell: Option<Guid>) -> Result<WorldPosition> {
+    if let Some(cell) = cell {
+        ensure!(
+            landblock_key(cell) == landblock_key(pose.landblock_id),
+            "resolved EnvCell does not belong to the pose owner"
+        );
+        pose.landblock_id = cell;
+        return Ok(pose);
+    }
+
+    // Clear a stale EnvCell selector before normalization; low words >= 0x0100 identify interiors.
+    pose.landblock_id = Guid(pose.landblock_id.0 & 0xffff_0000);
+    Ok(pose.normalize_outdoor_landblock_frame()?)
+}
+
+pub(super) fn transit_presented_viewer_path(
+    scene: &CollisionScene,
+    previous: &ActiveCamera,
+    previous_body_pose: WorldPosition,
+    candidate_body_pose: WorldPosition,
+    body_motion: &[MotionWaypoint],
+    direction: Vector3,
+) -> Result<CollisionQuery<PlacedMotionPath>> {
+    let anchor = landblock_key(previous_body_pose.landblock_id);
+    let viewer_owner = landblock_key(previous.viewer.pose.landblock_id);
+    let start = reanchor_point(previous.viewer.pose.coords, viewer_owner, anchor);
+    let mode = previous.input.mode();
+    let initial_viewer_offset = viewer_offset(mode, previous.viewer.direction);
+    let final_viewer_offset = viewer_offset(mode, direction);
+    let initial_body = reanchor_point(
+        previous_body_pose.coords,
+        landblock_key(previous_body_pose.landblock_id),
+        anchor,
+    );
+    let candidate_body = reanchor_point(
+        candidate_body_pose.coords,
+        landblock_key(candidate_body_pose.landblock_id),
+        anchor,
+    );
+    let waypoints = body_motion
+        .iter()
+        .map(|waypoint| MotionWaypoint {
+            // Body response may bend several times during one tick, while a view-direction change
+            // moves the first-person offset over that entire tick. Interpolating the offset at the
+            // solver's own fractions preserves both facts instead of concentrating a turn into the
+            // first substep.
+            center: waypoint.center
+                + initial_viewer_offset
+                + (final_viewer_offset - initial_viewer_offset) * waypoint.end_fraction,
+            end_fraction: waypoint.end_fraction,
+            placement: MotionWaypointPlacement::Traverse,
+        })
+        .collect::<Vec<_>>();
+    let waypoints = if waypoints.is_empty() {
+        vec![MotionWaypoint {
+            center: candidate_body + final_viewer_offset,
+            end_fraction: 1.0,
+            placement: MotionWaypointPlacement::Traverse,
+        }]
+    } else {
+        waypoints
+    };
+    debug_assert!(
+        (start - (initial_body + initial_viewer_offset)).length() < 0.01
+            || previous.viewer.pose != previous_body_pose,
+        "camera viewer and body unexpectedly diverged without a prior presentation hold"
+    );
+    Ok(scene.transit_motion_path(PlacedMotionPathRequest {
+        previous_cell: previous.viewer.cell,
+        anchor,
+        start,
+        radius: VIEWER_SPHERE_RADIUS,
+        waypoints: &waypoints,
+    })?)
+}
+
+fn viewer_offset(mode: PhysicalCameraMode, direction: Vector3) -> Vector3 {
+    match mode {
+        PhysicalCameraMode::PhysicalFly => Vector3::zero(),
+        PhysicalCameraMode::GroundedWalk => grounded_viewer_offset(direction),
+    }
+}
+
+fn serialize_path_point(
+    anchor: Guid,
+    point: &PlacedMotionPoint,
+) -> Result<PhysicalCameraPathPoint> {
+    let owner = match point.placement().committed_cell() {
+        Some(cell) => landblock_key(cell),
+        None => owner_for_anchor_point(anchor, point.center())?,
+    };
+    let origin = reanchor_point(point.center(), anchor, owner);
+    Ok(PhysicalCameraPathPoint {
+        residency: PhysicalCameraResidency {
+            landblock_id: format!("0x{:08x}", owner.0),
+            env_cell_id: point
+                .placement()
+                .committed_cell()
+                .map(|cell| format!("0x{:08x}", cell.0)),
+        },
+        origin: [origin.x, origin.y, origin.z],
+    })
+}
+
+fn serialize_path_legs(path: &PlacedMotionPath) -> Result<Vec<PhysicalCameraPathLeg>> {
+    path.legs()
+        .iter()
+        .map(|leg| {
+            Ok(PhysicalCameraPathLeg {
+                end_fraction: leg.end_fraction(),
+                end: serialize_path_point(path.anchor(), leg.end())?,
+            })
+        })
+        .collect()
+}
+
+fn presented_viewer_from_path(
+    path: &PlacedMotionPath,
+    direction: Vector3,
+) -> Result<PresentedViewer> {
+    let point = path.final_point();
+    let cell = point.placement().committed_cell();
+    let owner = cell
+        .map(landblock_key)
+        .map_or_else(|| owner_for_anchor_point(path.anchor(), point.center()), Ok)?;
+    let coords = reanchor_point(point.center(), path.anchor(), owner);
+    let mut pose = WorldPosition {
+        landblock_id: Guid(owner.0 & 0xffff_0000),
+        coords,
+        rotation: Quaternion::identity(),
+    }
+    .normalize_outdoor_cell();
+    if let Some(cell) = cell {
+        pose.landblock_id = cell;
+    }
+    Ok(PresentedViewer {
+        pose,
+        cell,
+        direction,
+    })
+}
+
+fn serialize_viewer_hold(viewer: &PresentedViewer) -> Result<PhysicalCameraPathPoint> {
+    let owner = landblock_key(viewer.pose.landblock_id);
+    ensure!(
+        viewer.cell.is_none_or(|cell| landblock_key(cell) == owner),
+        "retained viewer cell does not belong to its pose owner"
+    );
+    Ok(PhysicalCameraPathPoint {
+        residency: PhysicalCameraResidency {
+            landblock_id: format!("0x{:08x}", owner.0),
+            env_cell_id: viewer.cell.map(|cell| format!("0x{:08x}", cell.0)),
+        },
+        origin: [
+            viewer.pose.coords.x,
+            viewer.pose.coords.y,
+            viewer.pose.coords.z,
+        ],
+    })
+}
+
+fn camera_tick_status(status: GenericPhysicalBodyTickStatus) -> PhysicalCameraTickStatus {
+    match status {
+        GenericPhysicalBodyTickStatus::Solved => PhysicalCameraTickStatus::Solved,
+        GenericPhysicalBodyTickStatus::SubstepBudgetExceeded => {
+            PhysicalCameraTickStatus::SubstepBudgetExceeded
+        }
+        GenericPhysicalBodyTickStatus::ContactBudgetExceeded => {
+            PhysicalCameraTickStatus::ContactBudgetExceeded
+        }
+    }
+}
+
+fn owner_for_anchor_point(anchor: Guid, point: Vector3) -> Result<Guid> {
+    let anchor = landblock_key(anchor);
+    let x = ((anchor.0 >> 24) & 0xff) as i32 + (point.x / METERS_PER_LANDBLOCK).floor() as i32;
+    let y = ((anchor.0 >> 16) & 0xff) as i32 + (point.y / METERS_PER_LANDBLOCK).floor() as i32;
+    ensure!(
+        (0..=255).contains(&x) && (0..=255).contains(&y),
+        "presented camera viewer is outside AC world bounds"
+    );
+    Ok(Guid(((x as u32) << 24) | ((y as u32) << 16) | 0xffff))
+}
+
+fn reanchor_point(point: Vector3, source_owner: Guid, target_owner: Guid) -> Vector3 {
+    let source_x = ((source_owner.0 >> 24) & 0xff) as i32;
+    let source_y = ((source_owner.0 >> 16) & 0xff) as i32;
+    let target_x = ((target_owner.0 >> 24) & 0xff) as i32;
+    let target_y = ((target_owner.0 >> 16) & 0xff) as i32;
+    Vector3::new(
+        point.x + (source_x - target_x) as f32 * METERS_PER_LANDBLOCK,
+        point.y + (source_y - target_y) as f32 * METERS_PER_LANDBLOCK,
+        point.z,
+    )
+}
+
+fn missing_landblock_names(landblocks: &[Guid]) -> Vec<String> {
+    landblocks
+        .iter()
+        .map(|owner| format!("0x{:08x}", owner.0))
+        .collect()
+}
+
+/// Converts a canonical render-scene point into an outdoor AC pose.
+pub(super) fn scene_point_to_pose(scene_point: [f32; 3]) -> Result<WorldPosition> {
+    ensure!(
+        scene_point.iter().all(|component| component.is_finite()),
+        "physical camera placement must be finite"
+    );
+    let ac_world_x = scene_point[0];
+    let ac_world_y = -scene_point[2];
+    let block_x = (ac_world_x / METERS_PER_LANDBLOCK).floor() as i32;
+    let block_y = (ac_world_y / METERS_PER_LANDBLOCK).floor() as i32;
+    ensure!(
+        (0..=255).contains(&block_x) && (0..=255).contains(&block_y),
+        "physical camera placement is outside AC world bounds"
+    );
+    Ok(WorldPosition {
+        // Start with an outdoor selector so normalization may derive the exact terrain cell.
+        landblock_id: Guid(((block_x as u32) << 24) | ((block_y as u32) << 16)),
+        coords: Vector3::new(
+            ac_world_x - block_x as f32 * METERS_PER_LANDBLOCK,
+            ac_world_y - block_y as f32 * METERS_PER_LANDBLOCK,
+            scene_point[1],
+        ),
+        rotation: Quaternion::identity(),
+    }
+    .normalize_outdoor_cell())
+}
+
+pub(super) fn landblock_key(id: Guid) -> Guid {
+    Guid((id.0 & 0xffff_0000) | 0xffff)
+}

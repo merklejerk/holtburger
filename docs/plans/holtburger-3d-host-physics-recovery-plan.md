@@ -2737,9 +2737,9 @@ rendering, or presentation-probe concepts.
   `explorer/explorer-camera-coordinator.ts` already establish explicit frontend interest policy and
   revisioned replacement semantics for rendered content. Simulation interest is a separate
   projection owned beside that policy, not another render layer or LoD slider.
-- `apps/holtburger-3d/src-tauri/src/host_camera_runtime.rs` currently owns the body, viewer adapter,
-  fixed collision ring, asynchronous residency target, scene snapshot, and tick. This concentration
-  is the mechanism being cut apart.
+- `apps/holtburger-3d/src-tauri/src/host_camera_runtime/` was then a single-file module owning the
+  body, viewer adapter, fixed collision ring, asynchronous residency target, scene snapshot, and
+  tick. That concentration was the mechanism being cut apart.
 - `crates/holtburger-world/src/spatial/collision.rs` already provides immutable landblock products,
   staged complete-scene construction, explicit `MissingCoverage`, and the camera-agnostic
   `transit_motion_path` operation. Reuse those facts rather than adding a streaming cache or probe
@@ -2983,9 +2983,9 @@ rendering, or presentation-probe concepts.
       camera facts remain confined to the app adapter and frontend.
 - [x] Missing camera-body coverage holds one coherent rendered endpoint, produces actionable
       diagnostics, and neither snaps to free fly nor silently requests collision content.
-- [x] Mode switches preserve the displayed pose and placement through the same validated explicit-
-      body registration available to other frontend-owned dynamic entities; no closed camera-profile
-      command is required.
+- [x] Mode switches preserve the displayed pose and placement through a source-neutral explicit-
+      body definition and registration seam; no closed camera-profile command or ownerless public
+      registration command is required.
 - [x] Existing no-flash, starvation-hold, direction-interpolation, and one-pending-successor tests
       remain green without a frontend physical portal-traversal implementation.
 
@@ -2994,17 +2994,25 @@ rendering, or presentation-probe concepts.
 - `HostCameraRuntime` retains only an app-local controller/session record containing the generic
   `Ephemeral` body ID, camera mode, view input, fixed-tick sequencing, and presented viewer state.
   Its body solve goes through `HostSimulationRuntime`; its independent viewer offset and 0.3-meter
-  retail placement sphere go through the camera-agnostic placed-path tracer.
+  retail placement sphere go through the camera-agnostic placed-path tracer. One shared app-local
+  fixed-tick scheduler owns cadence; the camera is a replaceable generation-safe participant.
 - The frontend now supplies the Explorer camera's exact sphere geometry and response configuration.
   The host validates that UI mode agrees with the supplied response but contains no human/camera
-  profile selector or hidden body dimensions. The same validator backs the generic
-  `register_frontend_physical_body` command.
+  profile selector or hidden body dimensions. The definition validator remains source-neutral, but
+  the inert `register_frontend_physical_body` command was removed: a future public body API must ship
+  with ownership, scheduler participation, actuation, snapshots, and teardown as one lifecycle.
 - Physical mode registration succeeds while collision coverage is absent. The generic body remains
   dormant, fixed ticks publish a coherent held viewer endpoint with exact missing owners, and only
   explicit Explorer simulation-interest policy may load coverage.
 - **Course correction:** the camera adapter consumes the immutable collision snapshot returned with
   the generic tick. Fetching a second “current” snapshot after the solve allowed an interest commit
   to pair body motion from topology A with viewer traversal against topology B.
+- **Course correction:** a physical body tick is provisional until its adapter validates the derived
+  presentation contract. Camera portal traversal and serialization now veto the body commit on
+  failure, preventing authoritative physics from advancing beyond the published viewer state.
+- **Course correction:** the app composition root constructs the generic simulation runtime and
+  injects the same shared service into the camera adapter and Tauri state. The camera no longer
+  constructs, owns, or re-exports the simulator it consumes.
 
 #### Phase 8d: Cutover Cleanup and Final Verification
 

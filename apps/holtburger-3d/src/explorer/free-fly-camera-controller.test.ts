@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { Vec3 } from "../lib/game/math/types";
 import { FreeFlyCameraController } from "./free-fly-camera-controller";
 
-function controllerHarness() {
+function controllerHarness(
+	keyboardYawRadiansPerSecond?: (shiftActive: boolean) => number,
+) {
 	const listeners = new Map<string, EventListener>();
+	let animationFrame: FrameRequestCallback | null = null;
 	const canvas = {
 		addEventListener: (
 			type: string,
@@ -19,11 +22,17 @@ function controllerHarness() {
 	} as unknown as HTMLCanvasElement;
 	const changes = vi.fn();
 	const physicalWheel = vi.fn();
+	const characterInput = vi.fn();
 	const controller = new FreeFlyCameraController({
 		canvas,
+		keyboardYawRadiansPerSecond,
 		onChange: changes,
+		onCharacterInput: characterInput,
 		onPhysicalWheel: physicalWheel,
-		requestAnimationFrame: () => 1,
+		requestAnimationFrame: (callback) => {
+			animationFrame = callback;
+			return 1;
+		},
 		cancelAnimationFrame: vi.fn(),
 	});
 	const dispatch = (type: string, event: object): void => {
@@ -32,10 +41,58 @@ function controllerHarness() {
 			...event,
 		} as unknown as Event);
 	};
-	return { changes, controller, dispatch, physicalWheel };
+	return {
+		changes,
+		characterInput,
+		controller,
+		dispatch,
+		physicalWheel,
+		tick(frameAt: number) {
+			const callback = animationFrame;
+			animationFrame = null;
+			callback?.(frameAt);
+		},
+	};
 }
 
 describe("FreeFlyCameraController physical handoff", () => {
+	it("delegates the complete keyboard-yaw rate to the active app regime", () => {
+		const walking = controllerHarness((shiftActive) =>
+			shiftActive ? 1.5 : 2.25,
+		);
+		walking.dispatch("keydown", {
+			key: "Shift",
+			shiftKey: true,
+			repeat: false,
+		});
+		walking.dispatch("keydown", { key: "d", shiftKey: true, repeat: false });
+		walking.tick(0);
+		walking.tick(50);
+
+		const running = controllerHarness((shiftActive) =>
+			shiftActive ? 1.5 : 2.25,
+		);
+		running.dispatch("keydown", { key: "d", shiftKey: false, repeat: false });
+		running.tick(0);
+		running.tick(50);
+
+		expect(walking.controller.snapshotState().yawRadians).toBeCloseTo(0.075);
+		expect(running.controller.snapshotState().yawRadians).toBeCloseTo(0.1125);
+	});
+
+	it("publishes normalized character edges and focus reset without assigning semantics", () => {
+		const test = controllerHarness();
+		test.dispatch("keydown", { key: " ", repeat: false, shiftKey: false });
+		test.dispatch("keyup", { key: " ", shiftKey: false });
+		test.dispatch("blur", {});
+
+		expect(test.characterInput.mock.calls.map(([input]) => input)).toEqual([
+			{ key: "space", kind: "key", pressed: true, repeat: false },
+			{ key: "space", kind: "key", pressed: false, repeat: false },
+			{ kind: "reset" },
+		]);
+	});
+
 	it("publishes held local input while host position authority is active", () => {
 		const test = controllerHarness();
 		test.controller.setLocalTranslationEnabled(false);

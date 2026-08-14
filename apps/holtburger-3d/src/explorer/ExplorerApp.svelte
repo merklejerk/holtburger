@@ -37,9 +37,11 @@
 		ExplorerCameraCoordinator,
 		type ExplorerCameraFocusStatus,
 	} from "./explorer-camera-coordinator";
-	import { FreeFlyCameraController } from "./free-fly-camera-controller";
 	import {
-		resolveGroundedWalkVelocity,
+		FreeFlyCameraController,
+		type CameraCharacterInput,
+	} from "./free-fly-camera-controller";
+	import {
 		resolvePhysicalCameraViewDirection,
 		resolvePhysicalFlyVelocity,
 		resolvePhysicalFlyWheelDisplacement,
@@ -47,6 +49,10 @@
 		type PhysicalCameraMode,
 		type PhysicalCameraLocalMovement,
 	} from "../lib/game/motion/host-physical-camera-path";
+	import {
+		GroundedCharacterInput,
+		type GroundedCharacterEdge,
+	} from "./grounded-character-input";
 	import {
 		PhysicalCameraSession,
 		type PhysicalCameraStatus,
@@ -89,12 +95,14 @@
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let physicalCameraSession: PhysicalCameraSession | undefined;
+	let groundedCharacterInput: GroundedCharacterInput | undefined;
 	let simulationInterestController: SimulationInterestController | undefined;
 	let physicalSimulationAnchor: string | null = null;
 	let cameraMode = $state<ExplorerCameraMode>("free-fly");
 	let cameraModePending = $state(false);
 	let physicalCameraStatus = $state<PhysicalCameraStatus | null>(null);
 	let physicalCameraError = $state<string | null>(null);
+	let jumpChargeExtent = $state<number | null>(null);
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
 		$state(null);
@@ -350,10 +358,7 @@
 		);
 	}
 
-	function physicalCameraInput(
-		controller: FreeFlyCameraController,
-		mode: PhysicalCameraMode,
-	): {
+	function physicalCameraInput(controller: FreeFlyCameraController): {
 		readonly basis: {
 			readonly forward: [number, number, number];
 			readonly right: [number, number, number];
@@ -373,23 +378,14 @@
 			right: tuple(basis.right),
 			up: tuple(basis.up),
 		};
-		const worldVelocity =
-			mode === "grounded-walk"
-				? resolveGroundedWalkVelocity(
-						movement as PhysicalCameraLocalMovement,
-						cameraBasis,
-						precision
-							? FRONTEND_TUNING.explorer.camera.controls.groundedSlowWalkSpeed
-							: FRONTEND_TUNING.explorer.camera.controls.groundedWalkSpeed,
-					)
-				: resolvePhysicalFlyVelocity(
-						movement as PhysicalCameraLocalMovement,
-						cameraBasis,
-						FRONTEND_TUNING.explorer.camera.controls.moveSpeed *
-							(precision
-								? FRONTEND_TUNING.explorer.camera.controls.shiftSlowMultiplier
-								: 1),
-					);
+		const worldVelocity = resolvePhysicalFlyVelocity(
+			movement as PhysicalCameraLocalMovement,
+			cameraBasis,
+			FRONTEND_TUNING.explorer.camera.controls.moveSpeed *
+				(precision
+					? FRONTEND_TUNING.explorer.camera.controls.shiftSlowMultiplier
+					: 1),
+		);
 		return {
 			basis: cameraBasis,
 			viewDirection: resolvePhysicalCameraViewDirection(cameraBasis),
@@ -404,12 +400,26 @@
 		const mode =
 			session.status().mode ?? (cameraMode === "free-fly" ? null : cameraMode);
 		if (mode === null) return;
-		const input = physicalCameraInput(controller, mode);
-		void session
-			.setIntent(input.worldVelocity, input.viewDirection)
-			.catch((error: unknown) => {
-				physicalCameraError = errorMessage(error);
-			});
+		const input = physicalCameraInput(controller);
+		const characterInput = groundedCharacterInput;
+		let request: Promise<void>;
+		if (mode === "grounded-walk") {
+			if (characterInput === undefined) {
+				physicalCameraError =
+					"Grounded camera session has no character input owner.";
+				return;
+			}
+			request = session.setGroundedDrive(
+				characterInput.drive(),
+				input.viewDirection,
+			);
+		} else {
+			request = session.setIntent(input.worldVelocity, input.viewDirection);
+		}
+		void request.catch((error: unknown) => {
+			if (physicalCameraSession !== session) return;
+			physicalCameraError = errorMessage(error);
+		});
 	}
 
 	function sendPhysicalCameraWheel(localUpDistance: number): void {
@@ -419,7 +429,7 @@
 		const mode =
 			session.status().mode ?? (cameraMode === "free-fly" ? null : cameraMode);
 		if (mode !== "physical-fly") return;
-		const input = physicalCameraInput(controller, mode);
+		const input = physicalCameraInput(controller);
 		void session
 			.addDisplacement(
 				resolvePhysicalFlyWheelDisplacement(input.basis, localUpDistance),
@@ -427,8 +437,43 @@
 				input.viewDirection,
 			)
 			.catch((error: unknown) => {
+				if (physicalCameraSession !== session) return;
 				physicalCameraError = errorMessage(error);
 			});
+	}
+
+	function createGroundedCharacterInput(
+		session: PhysicalCameraSession,
+	): GroundedCharacterInput {
+		return new GroundedCharacterInput({
+			fullChargeDurationMs: session.groundedJumpChargeDurationMs(),
+			now: () => performance.now(),
+			onDrive: () => sendPhysicalCameraIntent(),
+			onEdge: (edge: GroundedCharacterEdge) => {
+				const controller = cameraController;
+				if (controller === undefined) return;
+				const viewDirection = physicalCameraInput(controller).viewDirection;
+				void session
+					.queueGroundedEvent(edge, viewDirection)
+					.catch((error: unknown) => {
+						if (physicalCameraSession !== session) return;
+						physicalCameraError = errorMessage(error);
+						// A missing discrete edge would strand the host's contiguous sequence. End
+						// this ownership epoch instead of allowing later input to queue behind a gap.
+						void leavePhysicalCamera(true);
+					});
+			},
+		});
+	}
+
+	function handleCameraCharacterInput(input: CameraCharacterInput): void {
+		const characterInput = groundedCharacterInput;
+		if (cameraMode !== "grounded-walk" || characterInput === undefined) return;
+		if (input.kind === "reset") {
+			characterInput.reset();
+			return;
+		}
+		characterInput.applyKey(input.key, input.pressed, input.repeat);
 	}
 
 	async function enterPhysicalCamera(mode: PhysicalCameraMode): Promise<void> {
@@ -447,7 +492,7 @@
 		try {
 			await session.start(
 				placement,
-				physicalCameraInput(controller, mode).viewDirection,
+				physicalCameraInput(controller).viewDirection,
 				mode,
 			);
 			if (cameraController !== controller || !runtimeReady) {
@@ -458,6 +503,10 @@
 			}
 			physicalCameraSession = session;
 			cameraMode = mode;
+			groundedCharacterInput =
+				mode === "grounded-walk"
+					? createGroundedCharacterInput(session)
+					: undefined;
 			sendPhysicalCameraIntent();
 		} catch (error) {
 			controller.setLocalTranslationEnabled(true);
@@ -479,6 +528,8 @@
 			null;
 		// Detach presentation first: no late segment can move the frontend pose after handoff.
 		physicalCameraSession = undefined;
+		groundedCharacterInput = undefined;
+		jumpChargeExtent = null;
 		const presented = controller.snapshotState();
 		controller.adoptPresentedPose(presented);
 		if (preserveResidency && lastHostResidency !== null) {
@@ -506,6 +557,8 @@
 			cameraCoordinator?.presentedPlacement() ?? oldSession.placement() ?? null;
 		const lastHostResidency = lastHostPlacement?.residency ?? null;
 		physicalCameraSession = undefined;
+		groundedCharacterInput = undefined;
+		jumpChargeExtent = null;
 		controller.adoptPresentedPose(controller.snapshotState());
 		controller.setLocalTranslationEnabled(false);
 		physicalCameraStatus = null;
@@ -526,7 +579,7 @@
 			}
 			await nextSession.start(
 				lastHostPlacement,
-				physicalCameraInput(controller, mode).viewDirection,
+				physicalCameraInput(controller).viewDirection,
 				mode,
 			);
 			if (cameraController !== controller || !runtimeReady) {
@@ -537,6 +590,10 @@
 			}
 			physicalCameraSession = nextSession;
 			cameraMode = mode;
+			groundedCharacterInput =
+				mode === "grounded-walk"
+					? createGroundedCharacterInput(nextSession)
+					: undefined;
 			sendPhysicalCameraIntent();
 		} catch (error) {
 			if (lastHostResidency !== null) {
@@ -573,7 +630,8 @@
 	}
 
 	onMount(() => {
-		if (canvasElement === null) {
+		const canvas = canvasElement;
+		if (canvas === null) {
 			startupError = "Explorer canvas was not mounted.";
 			return;
 		}
@@ -614,6 +672,8 @@
 			cameraCoordinator = undefined;
 			cameraController = undefined;
 			physicalCameraSession = undefined;
+			groundedCharacterInput = undefined;
+			jumpChargeExtent = null;
 			simulationInterestController = undefined;
 			physicalSimulationAnchor = null;
 			cameraMode = "free-fly";
@@ -658,7 +718,7 @@
 				const staticDetailBinding =
 					await staticDetailOwner.install(activeRegion);
 				if (destroyed) return;
-				webglDevice = await WebGL2Device.build(canvasElement!);
+				webglDevice = await WebGL2Device.build(canvas);
 				textureFilteringCapabilities =
 					webglDevice.getTextureFilteringCapabilities();
 				if (destroyed) return;
@@ -707,13 +767,26 @@
 				applyFrameSettings();
 				if (destroyed) return;
 				cameraController = new FreeFlyCameraController({
-					canvas: canvasElement!,
+					canvas,
+					keyboardYawRadiansPerSecond(shiftActive) {
+						const controls = FRONTEND_TUNING.explorer.camera.controls;
+						if (cameraMode === "grounded-walk") {
+							return shiftActive
+								? controls.groundedWalkYawRadiansPerSecond
+								: controls.groundedRunYawRadiansPerSecond;
+						}
+						return (
+							controls.keyboardYawRadiansPerSecond *
+							(shiftActive ? controls.shiftSlowMultiplier : 1)
+						);
+					},
 					onChange(state) {
 						if (cameraCoordinator) {
 							cameraCoordinator.handleCameraState(state);
 						}
 						sendPhysicalCameraIntent();
 					},
+					onCharacterInput: handleCameraCharacterInput,
 					onPhysicalWheel: sendPhysicalCameraWheel,
 				});
 				cameraCoordinator = new ExplorerCameraCoordinator(
@@ -736,7 +809,24 @@
 					}
 
 					const tickStartedAt = performance.now();
+					const activePhysicalSession = physicalCameraSession;
+					const terminalError =
+						activePhysicalSession?.takeTerminalError() ?? null;
+					if (
+						terminalError !== null &&
+						physicalCameraSession === activePhysicalSession
+					) {
+						physicalCameraError = errorMessage(terminalError);
+						void leavePhysicalCamera(true);
+					}
 					const physicalPlacement = physicalCameraSession?.placement() ?? null;
+					for (const outcome of physicalCameraSession?.takeCharacterEventOutcomes() ??
+						[]) {
+						if (outcome.kind === "rejected") {
+							groundedCharacterInput?.rejectBegin(outcome.sequence);
+						}
+					}
+					jumpChargeExtent = groundedCharacterInput?.chargeExtent() ?? null;
 					if (physicalPlacement && cameraController) {
 						cameraController.applyPresentedPosition(physicalPlacement.position);
 						physicalCameraStatus = physicalCameraSession?.status() ?? null;
@@ -810,6 +900,14 @@
 	></canvas>
 
 	<div class="explorer-overlay">
+		{#if jumpChargeExtent !== null}
+			<div class="explorer-jump-charge" aria-label="Jump power">
+				<div
+					class="explorer-jump-charge-fill"
+					style:width={`${jumpChargeExtent * 100}%`}
+				></div>
+			</div>
+		{/if}
 		{#if startupError !== null}
 			<section class="explorer-startup-error" role="alert">
 				{startupError}

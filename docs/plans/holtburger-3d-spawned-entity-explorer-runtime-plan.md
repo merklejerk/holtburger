@@ -157,7 +157,7 @@ a spawned mutation bus and must not be stretched into one.
 - `crates/holtburger-content/src/`
 - `apps/holtburger-3d/src-tauri/src/lib.rs`
 - `apps/holtburger-3d/src-tauri/src/host_simulation_runtime.rs`
-- `apps/holtburger-3d/src-tauri/src/host_camera_runtime.rs`
+- `apps/holtburger-3d/src-tauri/src/host_camera_runtime/`
 - `apps/holtburger-3d/src/lib/game/runtime/game-runtime.ts`
 - `apps/holtburger-3d/src/lib/game/systems/dynamic-entity-system.ts`
 - `apps/holtburger-3d/src/lib/game/systems/animation-system.ts`

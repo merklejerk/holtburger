@@ -33,9 +33,12 @@ pub use grounded::{
     solve_grounded,
 };
 pub use physical_body::{
-    InvalidPhysicalBodyPlacement, PhysicalBodyActivity, PhysicalBodyDefinition,
-    PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyResponseState, PhysicalBodyState,
-    PhysicalBodyTickOutcome, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalSphereSet,
+    GroundedBodyActuation, GroundedLaunch, InvalidPhysicalBodyPlacement, PhysicalBodyActivity,
+    PhysicalBodyActuation, PhysicalBodyActuationError, PhysicalBodyDefinition,
+    PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyResponsePolicy,
+    PhysicalBodyResponsePolicyError, PhysicalBodyResponseState, PhysicalBodyState,
+    PhysicalBodyTickOutcome, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalElasticity,
+    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
     evaluate_physical_body_activity, initial_physical_body_activity, resolve_physical_body_cell,
 };
 pub use physical_fly::{

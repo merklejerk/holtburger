@@ -5,6 +5,7 @@ import type { HostPhysicalCameraPath } from "../lib/game/motion/host-physical-ca
 import type { PhysicalCameraPlacement } from "../lib/game/motion/host-physical-camera-path";
 import {
 	PhysicalCameraSession,
+	type HostPhysicalCameraFailure,
 	type PhysicalCameraTransport,
 } from "./physical-camera-session";
 
@@ -43,6 +44,7 @@ function path(
 		substeps: 1,
 		contactPasses: 1,
 		solveDurationMs: 0.1,
+		characterEventOutcomes: [],
 		...overrides,
 	};
 }
@@ -67,23 +69,38 @@ function movingPath(
 
 function harness() {
 	const calls: { command: string; args?: Record<string, unknown> }[] = [];
-	let handler: ((path: HostPhysicalCameraPath) => void) | null = null;
+	let motionHandler: ((path: HostPhysicalCameraPath) => void) | null = null;
+	let failureHandler: ((failure: HostPhysicalCameraFailure) => void) | null =
+		null;
 	let now = 0;
 	const transport: PhysicalCameraTransport = {
 		invoke: async (command, args) => {
 			calls.push({ command, args });
-			return command === "start_physical_camera" ? 7 : undefined;
+			if (command === "start_physical_camera") {
+				const kind = (args?.registration as { control: { kind: string } })
+					.control.kind;
+				return {
+					jumpChargeDurationMs: kind === "grounded-character" ? 1_000 : null,
+					session: 7,
+				};
+			}
+			return command === "queue_grounded_camera_event" ? "queued" : undefined;
 		},
-		listen: async (_event, next) => {
-			handler = next;
-			return () => (handler = null);
+		listenMotion: async (_event, next) => {
+			motionHandler = next;
+			return () => (motionHandler = null);
+		},
+		listenFailure: async (_event, next) => {
+			failureHandler = next;
+			return () => (failureHandler = null);
 		},
 		now: () => now,
 	};
 	return {
 		calls,
 		transport,
-		deliver: (next: HostPhysicalCameraPath) => handler?.(next),
+		deliver: (next: HostPhysicalCameraPath) => motionHandler?.(next),
+		fail: (failure: HostPhysicalCameraFailure) => failureHandler?.(failure),
 		advance: (milliseconds: number) => (now += milliseconds),
 	};
 }
@@ -109,6 +126,12 @@ describe("PhysicalCameraSession", () => {
 		expect(test.calls[0]?.command).toBe("start_physical_camera");
 		expect(test.calls[0]?.args?.registration).toEqual({
 			body: {
+				responsePolicy: {
+					alignPath: false,
+					friction: 0.95,
+					restitution: { elasticity: 0, kind: "elastic" },
+					surfaceMotion: "stable",
+				},
 				response: {
 					config: {
 						maximumContactPasses: 8,
@@ -120,14 +143,16 @@ describe("PhysicalCameraSession", () => {
 				},
 				spheres: [{ center: [0, 0, 0], radius: 0.25 }],
 			},
-			mode: "physical-fly",
+			control: {
+				kind: "physical-fly",
+				speedEnvelope: {
+					kind: "linear-ramp",
+					accelerationSeconds: 2,
+					initialSpeedMultiplier: 0.125,
+				},
+			},
 			residency: { envCellId: null, landblockId: "0xda55ffff" },
 			scenePosition: [0xda * 192 + 96, 20, -(0x55 * 192 + 96)],
-			speedEnvelope: {
-				kind: "linear-ramp",
-				accelerationSeconds: 2,
-				initialSpeedMultiplier: 0.125,
-			},
 			viewDirection: [0, 1, 0],
 		});
 
@@ -144,6 +169,20 @@ describe("PhysicalCameraSession", () => {
 		test.deliver(movingPath(4, 4, 5));
 		test.deliver(movingPath(2, 2, 3));
 		expect(session.placement()?.position.x).toBe(0xda * 192 + 4);
+	});
+
+	it("surfaces only terminal failures for the current session", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "physical-fly");
+
+		test.fail({ message: "obsolete", session: 6 });
+		expect(session.takeTerminalError()).toBeNull();
+		test.fail({ message: "placement transaction rejected", session: 7 });
+		expect(session.takeTerminalError()?.message).toContain(
+			"placement transaction rejected",
+		);
+		expect(session.takeTerminalError()).toBeNull();
 	});
 
 	it("counts sequence gaps and resynchronizes from the received initial point", async () => {
@@ -217,10 +256,12 @@ describe("PhysicalCameraSession", () => {
 		await session.start(placement(), [0, 1, 0], "grounded-walk");
 		expect(test.calls[0]?.args).toEqual({
 			registration: expect.objectContaining({
-				mode: "grounded-walk",
-				speedEnvelope: { kind: "instant" },
+				control: expect.objectContaining({ kind: "grounded-character" }),
 			}),
 		});
+		expect(
+			(test.calls[0]?.args?.registration as { control: object }).control,
+		).not.toHaveProperty("speedEnvelope");
 		test.deliver(
 			path({
 				mode: "grounded-walk",
@@ -241,7 +282,22 @@ describe("PhysicalCameraSession", () => {
 		const session = new PhysicalCameraSession(test.transport);
 		await session.start(placement(), [0, 1, 0], "grounded-walk");
 		expect(test.calls[0]?.args?.registration).toMatchObject({
+			control: {
+				capabilities: {
+					baseRunForwardSpeed: 4,
+					baseWalkForwardSpeed: 3.12,
+					fullChargeJumpHeight: 8.425,
+					runRateScalar: 3,
+				},
+				kind: "grounded-character",
+			},
 			body: {
+				responsePolicy: {
+					alignPath: false,
+					friction: 0.95,
+					restitution: { elasticity: 0.05, kind: "elastic" },
+					surfaceMotion: "stable",
+				},
 				response: {
 					kind: "grounded",
 					config: {
@@ -250,6 +306,84 @@ describe("PhysicalCameraSession", () => {
 				},
 			},
 		});
+	});
+
+	it("separates coalescible grounded drive from ordered lifecycle edges", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "grounded-walk");
+		expect(session.groundedJumpChargeDurationMs()).toBe(1_000);
+		const drive = {
+			gait: "run" as const,
+			lateral: "left" as const,
+			longitudinal: "forward" as const,
+			turn: null,
+		};
+		await session.setGroundedDrive(drive, [0, 1, 0]);
+		await session.setGroundedDrive(drive, [0, 1, 0]);
+		await session.setGroundedDrive(drive, [1, 0, 0]);
+		await session.queueGroundedEvent(
+			{
+				drive,
+				extent: 0.5,
+				kind: "release-jump",
+				sequence: 4,
+			},
+			[0, 0, -1],
+		);
+
+		expect(
+			test.calls
+				.filter(({ command }) => command === "set_grounded_camera_drive")
+				.map(({ args }) => args?.intent),
+		).toEqual([
+			{ drive, revision: 0, session: 7, viewDirection: [0, 1, 0] },
+			{ drive, revision: 1, session: 7, viewDirection: [1, 0, 0] },
+		]);
+		expect(
+			test.calls.find(
+				({ command }) => command === "queue_grounded_camera_event",
+			)?.args?.request,
+		).toEqual({
+			drive,
+			extent: 0.5,
+			kind: "release-jump",
+			revision: 2,
+			sequence: 4,
+			session: 7,
+			viewDirection: [0, 0, -1],
+		});
+	});
+
+	it("delivers each fixed-tick character outcome to presentation once", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "grounded-walk");
+		test.deliver(
+			path({
+				characterEventOutcomes: [
+					{ kind: "charge-accepted", sequence: 0 },
+					{ kind: "rejected", reason: "airborne", sequence: 1 },
+				],
+				mode: "grounded-walk",
+			}),
+		);
+
+		expect(session.takeCharacterEventOutcomes()).toEqual([
+			{ kind: "charge-accepted", sequence: 0 },
+			{ kind: "rejected", reason: "airborne", sequence: 1 },
+		]);
+		expect(session.takeCharacterEventOutcomes()).toEqual([]);
+	});
+
+	it("does not expose the physical-fly world-velocity bypass to grounded sessions", async () => {
+		const test = harness();
+		const session = new PhysicalCameraSession(test.transport);
+		await session.start(placement(), [0, 1, 0], "grounded-walk");
+
+		await expect(session.setIntent([1, 0, 0], [0, 1, 0])).rejects.toThrow(
+			"only for physical fly",
+		);
 	});
 
 	it("sequences distinct intents and suppresses duplicates", async () => {
@@ -261,7 +395,7 @@ describe("PhysicalCameraSession", () => {
 		await session.setIntent([1, 2, 3], [1, 0, 0]);
 		await session.setIntent([3, 2, 1], [1, 0, 0]);
 		const intents = test.calls.filter(
-			({ command }) => command === "set_physical_camera_intent",
+			({ command }) => command === "set_physical_fly_camera_intent",
 		);
 		expect(intents).toHaveLength(3);
 		expect(intents.map(({ args }) => args?.intent)).toEqual([
@@ -301,7 +435,7 @@ describe("PhysicalCameraSession", () => {
 		await session.setIntent([1, 0, 0], [0, 1, 0]);
 
 		const totals = test.calls
-			.filter(({ command }) => command === "set_physical_camera_intent")
+			.filter(({ command }) => command === "set_physical_fly_camera_intent")
 			.map(
 				({ args }) =>
 					(args?.intent as { worldDisplacementTotal: number[] })
@@ -323,7 +457,7 @@ describe("PhysicalCameraSession", () => {
 		await session.setIntent([-1, 0, 0], [0, 1, 0]);
 
 		const epochs = test.calls
-			.filter(({ command }) => command === "set_physical_camera_intent")
+			.filter(({ command }) => command === "set_physical_fly_camera_intent")
 			.map(
 				({ args }) => (args?.intent as { movementEpoch: number }).movementEpoch,
 			);

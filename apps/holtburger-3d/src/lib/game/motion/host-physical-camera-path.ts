@@ -20,6 +20,29 @@ export type PhysicalCameraMode = "physical-fly" | "grounded-walk";
 /** Every Explorer camera authority mode. */
 export type ExplorerCameraMode = "free-fly" | PhysicalCameraMode;
 
+/** Host result for one grounded jump lifecycle edge drained before a fixed solve. */
+export type GroundedCharacterEventOutcome =
+	| {
+			readonly kind:
+				| "charge-accepted"
+				| "charge-continues"
+				| "ignored-stale"
+				| "jump-released"
+				| "reset";
+			readonly sequence: number;
+	  }
+	| {
+			readonly kind: "rejected";
+			readonly reason:
+				| "airborne"
+				| "charge-not-active"
+				| "constrained"
+				| "invalid-heading"
+				| "missing-coverage"
+				| "unsupported";
+			readonly sequence: number;
+	  };
+
 /** One authoritative viewer point in landblock-local AC axes. */
 interface HostPhysicalCameraPathPoint {
 	/** Portal-seeded placement that becomes authoritative with this point. */
@@ -68,6 +91,8 @@ export interface HostPhysicalCameraPath {
 	readonly contactPasses: number;
 	/** Host wall time spent solving the body and portal-transiting its viewer. */
 	readonly solveDurationMs: number;
+	/** Ordered grounded lifecycle outcomes processed immediately before this solve. */
+	readonly characterEventOutcomes: readonly GroundedCharacterEventOutcome[];
 }
 
 /** Canonical presented position and authoritative residency evaluated from one host path. */
@@ -228,32 +253,4 @@ export function resolvePhysicalFlyWheelDisplacement(
 	const east = basis.up[0] * distance;
 	const north = -basis.up[2] * distance;
 	return [east, north === 0 ? 0 : north, basis.up[1] * distance];
-}
-
-/**
- * Converts Explorer input into yaw-relative, horizontal AC-world walking velocity.
- *
- * Camera pitch and vertical input are presentation policy and cannot inject grounded drive.
- */
-export function resolveGroundedWalkVelocity(
-	movement: PhysicalCameraLocalMovement,
-	basis: PhysicalCameraBasis,
-	speed: number,
-): [number, number, number] {
-	const forward = horizontalDirection(basis.forward);
-	const right = horizontalDirection(basis.right);
-	const sceneX = forward[0] * movement.forward + right[0] * movement.right;
-	const sceneZ = forward[1] * movement.forward + right[1] * movement.right;
-	const length = Math.hypot(sceneX, sceneZ);
-	if (length === 0) return [0, 0, 0];
-	const scale = speed / length;
-	const north = -sceneZ * scale;
-	return [sceneX * scale, north === 0 ? 0 : north, 0];
-}
-
-function horizontalDirection(
-	direction: readonly [number, number, number],
-): readonly [number, number] {
-	const length = Math.hypot(direction[0], direction[2]);
-	return length === 0 ? [0, 0] : [direction[0] / length, direction[2] / length];
 }

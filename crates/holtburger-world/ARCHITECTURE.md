@@ -135,6 +135,23 @@ existing implicit `tick()` policy:
 - Grounded cell transit queries both spheres through the previous-cell/portal-neighbor rule, but the
   lower sphere alone selects the committed cell. Back-face polygons produce approach-side contacts;
   no retail transition flag is retained when sphere role already determines the response.
+- `PhysicalBodyResponsePolicy` is one composite body fact: elastic versus inelastic restitution,
+  authored friction, Stable versus retail Sledding surface motion, and `AlignPath`. Construction and
+  authoritative updates own that policy; collision outcomes never infer or toggle Sledding.
+- Elastic response clamps its coefficient to retail's `[0.0, 0.1]` domain and reflects only the
+  incoming collision-normal component, preserving tangent velocity
+  (`CPhysicsObj::set_elasticity`, `acclient.c:305519-305530`;
+  `handle_all_collisions`, `acclient.c:309982-310045`). Inelastic response zeros velocity. Stable
+  bodies suppress restitution across continuous walkable support so correction cannot become a
+  per-tick trampoline.
+- Sledding deliberately bypasses Stable's supported-gravity suppression, retains eligible
+  continuous-support restitution, and selects the retail speed/slope friction branches. Nonzero
+  velocity supplies Sledding facing after ordinary control; `AlignPath` displacement-facing runs
+  later and supersedes it. These are generic body semantics, not character-controller modes.
+- `SpatialBody.velocity` is the only retained linear-velocity authority. Grounded actuation may
+  carry one resolved launch and one control heading, but it cannot retain a competing fall velocity
+  or replay a launch on later ticks. Airborne drive preserves existing planar velocity while gravity
+  and collision response update the canonical vector.
 
 Collision integration uses an anchor landblock's local coordinates across one solve. It does not
 accumulate large absolute-world `f32` coordinates; doing so produced measurable centimeter-scale

@@ -1,11 +1,16 @@
 import {
 	evaluateHostPhysicalCameraPath,
 	type HostPhysicalCameraPath,
+	type GroundedCharacterEventOutcome,
 	type PhysicalCameraMode,
 	type PhysicalCameraPlacement,
 	type PhysicalCameraTickStatus,
 	validateHostPhysicalCameraPath,
 } from "../lib/game/motion/host-physical-camera-path";
+import type {
+	GroundedCharacterDrive,
+	GroundedCharacterEdge,
+} from "./grounded-character-input";
 import type { EnvCellId } from "../lib/game/game-types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
@@ -28,6 +33,8 @@ interface PhysicalSphereDefinition {
 interface PhysicalBodyDefinition {
 	/** Ordered role-bearing geometry supplied to the generic host validator. */
 	readonly spheres: readonly PhysicalSphereDefinition[];
+	/** Complete initial retail response state; the host never infers camera defaults. */
+	readonly responsePolicy: PhysicalBodyResponsePolicy;
 	/** Implemented response semantics and finite solve configuration. */
 	readonly response:
 		| {
@@ -42,6 +49,19 @@ interface PhysicalBodyDefinition {
 				/** Grounded solver and response policy. */
 				readonly config: GroundedResponseConfig;
 		  };
+}
+
+interface PhysicalBodyResponsePolicy {
+	/** Eligible static-impact response. */
+	readonly restitution:
+		| { readonly kind: "elastic"; readonly elasticity: number }
+		| { readonly kind: "inelastic" };
+	/** Authored supported-surface friction. */
+	readonly friction: number;
+	/** Ordinary stable support or explicit retail Sledding state. */
+	readonly surfaceMotion: "stable" | "sledding";
+	/** Whether path-facing supersedes Sledding velocity-facing. */
+	readonly alignPath: boolean;
 }
 
 interface PhysicalFlyResponseConfig {
@@ -82,11 +102,48 @@ type PhysicalCameraSpeedEnvelope =
 			readonly initialSpeedMultiplier: number;
 	  };
 
-/** Explorer translation feel applied by the host before generic physical-body solving. */
-function physicalCameraSpeedEnvelope(
+interface CharacterMotionCapabilities {
+	/** Base forward speed selected by the walking gait. */
+	readonly baseWalkForwardSpeed: number;
+	/** Base forward speed selected by the running gait. */
+	readonly baseRunForwardSpeed: number;
+	/** Actor-specific run-rate scalar applied by the shared resolver. */
+	readonly runRateScalar: number;
+	/** Full-charge jump apex before retail's minimum-height floor. */
+	readonly fullChargeJumpHeight: number;
+}
+
+/** Explorer-owned numeric capabilities for its synthetic character controller. */
+function explorerCharacterCapabilities(): CharacterMotionCapabilities {
+	return FRONTEND_TUNING.explorer.camera.controls.groundedCharacterCapabilities;
+}
+
+type PhysicalCameraControl =
+	| {
+			/** Host-accelerated collision-aware flight. */
+			readonly kind: "physical-fly";
+			readonly speedEnvelope: PhysicalCameraSpeedEnvelope;
+	  }
+	| {
+			/** Semantic character control resolved before generic body actuation. */
+			readonly kind: "grounded-character";
+			readonly capabilities: CharacterMotionCapabilities;
+	  };
+
+/** Builds one controller contract without coupling capability facts to body geometry. */
+function physicalCameraControl(
 	mode: PhysicalCameraMode,
-): PhysicalCameraSpeedEnvelope {
-	if (mode === "grounded-walk") return { kind: "instant" };
+): PhysicalCameraControl {
+	return mode === "physical-fly"
+		? { kind: "physical-fly", speedEnvelope: physicalFlyCameraSpeedEnvelope() }
+		: {
+				kind: "grounded-character",
+				capabilities: explorerCharacterCapabilities(),
+			};
+}
+
+/** Explorer translation feel applied by the host before generic physical-body solving. */
+function physicalFlyCameraSpeedEnvelope(): PhysicalCameraSpeedEnvelope {
 	return {
 		kind: "linear-ramp",
 		accelerationSeconds:
@@ -101,6 +158,13 @@ function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
 	if (mode === "physical-fly") {
 		return {
 			spheres: [{ center: [0, 0, 0], radius: 0.25 }],
+			responsePolicy: {
+				// Physical fly is a controlled kinematic camera: clip the incoming normal without rebound.
+				restitution: { kind: "elastic", elasticity: 0 },
+				friction: 0.95,
+				surfaceMotion: "stable",
+				alignPath: false,
+			},
 			response: {
 				kind: "free-sphere",
 				config: {
@@ -119,6 +183,14 @@ function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
 			{ center: [0, 0, 0.475], radius: 0.48 },
 			{ center: [0, 0, 1.35], radius: 0.48 },
 		],
+		responsePolicy: {
+			// Retail CPhysicsObj/PhysicsDesc constructor defaults (`acclient.c:307850-307853`,
+			// `:318424-318427`); ordinary players do not set Sledding during movement.
+			restitution: { kind: "elastic", elasticity: 0.05 },
+			friction: 0.95,
+			surfaceMotion: "stable",
+			alignPath: false,
+		},
 		response: {
 			kind: "grounded",
 			config: {
@@ -139,11 +211,21 @@ function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
 /** Injectable Tauri boundary for one host-solved camera session. */
 export interface PhysicalCameraTransport {
 	invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
-	listen(
+	listenMotion(
 		event: string,
 		handler: (path: HostPhysicalCameraPath) => void,
 	): Promise<() => void>;
+	listenFailure(
+		event: string,
+		handler: (failure: HostPhysicalCameraFailure) => void,
+	): Promise<() => void>;
 	now(): number;
+}
+
+/** Terminal host failure scoped to one exact camera ownership generation. */
+export interface HostPhysicalCameraFailure {
+	readonly session: number;
+	readonly message: string;
 }
 
 /** Explorer-visible diagnostics for the current host session. */
@@ -167,6 +249,8 @@ export class PhysicalCameraSession {
 	#unlisten: (() => void) | null = null;
 	#session: number | null = null;
 	#preRegistrationPath: HostPhysicalCameraPath | null = null;
+	#preRegistrationFailure: HostPhysicalCameraFailure | null = null;
+	#terminalError: Error | null = null;
 	#activePath: HostPhysicalCameraPath | null = null;
 	#pendingPath: HostPhysicalCameraPath | null = null;
 	#activeStartedAt = 0;
@@ -174,9 +258,14 @@ export class PhysicalCameraSession {
 	#highestSequence = -1;
 	#droppedPaths = 0;
 	#intentSequence = 0;
+	#inputRevision = 0;
 	#movementEpoch = 0;
 	#movementActive = false;
 	#lastIntent: PhysicalCameraInput | null = null;
+	#lastGroundedInput: GroundedCameraInput | null = null;
+	#characterEventOutcomes: GroundedCharacterEventOutcome[] = [];
+	#mode: PhysicalCameraMode | null = null;
+	#jumpChargeDurationMs: number | null = null;
 	#worldDisplacementTotal: [number, number, number] = [0, 0, 0];
 
 	constructor(transport: PhysicalCameraTransport) {
@@ -190,38 +279,46 @@ export class PhysicalCameraSession {
 		mode: PhysicalCameraMode,
 	): Promise<void> {
 		if (this.#unlisten !== null) return;
-		this.#unlisten = await this.#transport.listen(
+		const unlistenMotion = await this.#transport.listenMotion(
 			"host://physical-camera-motion",
 			(path) => this.#receivePath(path),
 		);
+		let unlistenFailure: (() => void) | null = null;
 		try {
+			unlistenFailure = await this.#transport.listenFailure(
+				"host://physical-camera-failure",
+				(failure) => this.#receiveFailure(failure),
+			);
+			this.#unlisten = () => {
+				unlistenMotion();
+				unlistenFailure?.();
+			};
 			const result = await this.#transport.invoke("start_physical_camera", {
 				registration: {
 					body: physicalCameraBody(mode),
-					mode,
+					control: physicalCameraControl(mode),
 					residency: placement.residency,
 					scenePosition: [
 						placement.position.x,
 						placement.position.y,
 						placement.position.z,
 					],
-					speedEnvelope: physicalCameraSpeedEnvelope(mode),
 					viewDirection,
 				},
 			});
-			if (
-				typeof result !== "number" ||
-				!Number.isSafeInteger(result) ||
-				result <= 0
-			) {
-				throw new Error("Host returned an invalid physical-camera session id.");
-			}
-			this.#session = result;
+			const receipt = physicalCameraStartReceipt(result, mode);
+			this.#session = receipt.session;
+			this.#mode = mode;
+			this.#jumpChargeDurationMs = receipt.jumpChargeDurationMs;
 			const pending = this.#preRegistrationPath;
 			this.#preRegistrationPath = null;
-			if (pending?.session === this.#session) this.#acceptPath(pending);
+			if (pending?.session === receipt.session) this.#acceptPath(pending);
+			const failure = this.#preRegistrationFailure;
+			this.#preRegistrationFailure = null;
+			if (failure?.session === receipt.session) this.#acceptFailure(failure);
 		} catch (error) {
-			this.#unlisten();
+			this.#unlisten?.();
+			if (this.#unlisten === null) unlistenMotion();
 			this.#unlisten = null;
 			throw error;
 		}
@@ -246,6 +343,16 @@ export class PhysicalCameraSession {
 		return this.#unlisten !== null && this.#session !== null;
 	}
 
+	/** Host-supplied charge timing used by both the power bar and normalized release extent. */
+	groundedJumpChargeDurationMs(): number {
+		if (this.#mode !== "grounded-walk" || this.#jumpChargeDurationMs === null) {
+			throw new Error(
+				"Grounded jump charge timing requires a grounded session.",
+			);
+		}
+		return this.#jumpChargeDurationMs;
+	}
+
 	/** Sends one concrete movement/view intent only when either owned input changes. */
 	async setIntent(
 		worldVelocity: readonly [number, number, number],
@@ -253,6 +360,11 @@ export class PhysicalCameraSession {
 	): Promise<void> {
 		const session = this.#session;
 		if (session === null) return;
+		if (this.#mode !== "physical-fly") {
+			throw new Error(
+				"Concrete world velocity is valid only for physical fly.",
+			);
+		}
 		const input = { viewDirection, worldVelocity };
 		const movementActive = worldVelocity.some((component) => component !== 0);
 		if (movementActive && !this.#movementActive) this.#movementEpoch += 1;
@@ -262,7 +374,7 @@ export class PhysicalCameraSession {
 		this.#lastIntent = input;
 		const sequence = this.#intentSequence++;
 		try {
-			await this.#transport.invoke("set_physical_camera_intent", {
+			await this.#transport.invoke("set_physical_fly_camera_intent", {
 				intent: {
 					movementEpoch: this.#movementEpoch,
 					session,
@@ -278,6 +390,65 @@ export class PhysicalCameraSession {
 				this.#lastIntent = null;
 			}
 			throw error;
+		}
+	}
+
+	/** Sends one coalescible semantic drive/view snapshot for grounded character control. */
+	async setGroundedDrive(
+		drive: GroundedCharacterDrive,
+		viewDirection: readonly [number, number, number],
+	): Promise<void> {
+		const session = this.#session;
+		if (session === null) return;
+		if (this.#mode !== "grounded-walk") {
+			throw new Error(
+				"Semantic character drive is valid only for grounded walk.",
+			);
+		}
+		const input = { drive, viewDirection };
+		if (
+			this.#lastGroundedInput !== null &&
+			groundedInputsEqual(input, this.#lastGroundedInput)
+		) {
+			return;
+		}
+		this.#lastGroundedInput = input;
+		const revision = this.#inputRevision++;
+		try {
+			await this.#transport.invoke("set_grounded_camera_drive", {
+				intent: { drive, revision, session, viewDirection },
+			});
+		} catch (error) {
+			if (
+				this.#lastGroundedInput !== null &&
+				groundedInputsEqual(this.#lastGroundedInput, input)
+			) {
+				this.#lastGroundedInput = null;
+			}
+			throw error;
+		}
+	}
+
+	/** Queues one ordered jump/reset edge; fixed-tick semantic outcome arrives on the motion path. */
+	async queueGroundedEvent(
+		edge: GroundedCharacterEdge,
+		viewDirection: readonly [number, number, number],
+	): Promise<void> {
+		const session = this.#session;
+		if (session === null) return;
+		if (this.#mode !== "grounded-walk") {
+			throw new Error(
+				"Character lifecycle edges are valid only for grounded walk.",
+			);
+		}
+		const revision = this.#inputRevision++;
+		const result = await this.#transport.invoke("queue_grounded_camera_event", {
+			request: { ...edge, revision, session, viewDirection },
+		});
+		if (result !== "queued") {
+			throw new Error(
+				`Host rejected grounded character edge: ${String(result)}.`,
+			);
 		}
 	}
 
@@ -321,6 +492,33 @@ export class PhysicalCameraSession {
 		};
 	}
 
+	/** Drains lifecycle results once so optimistic presentation cannot replay them. */
+	takeCharacterEventOutcomes(): readonly GroundedCharacterEventOutcome[] {
+		return this.#characterEventOutcomes.splice(0);
+	}
+
+	/** Drains one terminal host error so the owning UI can perform a deliberate handoff. */
+	takeTerminalError(): Error | null {
+		const error = this.#terminalError;
+		this.#terminalError = null;
+		return error;
+	}
+
+	#receiveFailure(failure: HostPhysicalCameraFailure): void {
+		validatePhysicalCameraFailure(failure);
+		if (this.#session === null) {
+			this.#preRegistrationFailure = failure;
+			return;
+		}
+		if (failure.session === this.#session) this.#acceptFailure(failure);
+	}
+
+	#acceptFailure(failure: HostPhysicalCameraFailure): void {
+		this.#terminalError = new Error(
+			`Physical camera host tick failed: ${failure.message}`,
+		);
+	}
+
 	#receivePath(path: HostPhysicalCameraPath): void {
 		if (this.#session === null) {
 			this.#preRegistrationPath = path;
@@ -337,6 +535,7 @@ export class PhysicalCameraSession {
 		this.#droppedPaths += gap;
 		this.#highestSequence = path.sequence;
 		this.#latestPath = path;
+		this.#characterEventOutcomes.push(...path.characterEventOutcomes);
 		const now = this.#transport.now();
 		if (this.#activePath === null || gap > 0) {
 			this.#activePath = path;
@@ -394,22 +593,60 @@ export class PhysicalCameraSession {
 		this.#unlisten = null;
 		this.#session = null;
 		this.#preRegistrationPath = null;
+		this.#preRegistrationFailure = null;
+		this.#terminalError = null;
 		this.#activePath = null;
 		this.#pendingPath = null;
 		this.#latestPath = null;
 		this.#highestSequence = -1;
 		this.#droppedPaths = 0;
 		this.#intentSequence = 0;
+		this.#inputRevision = 0;
 		this.#movementEpoch = 0;
 		this.#movementActive = false;
 		this.#lastIntent = null;
+		this.#lastGroundedInput = null;
+		this.#characterEventOutcomes = [];
+		this.#mode = null;
+		this.#jumpChargeDurationMs = null;
 		this.#worldDisplacementTotal = [0, 0, 0];
+	}
+}
+
+function validatePhysicalCameraFailure(
+	failure: HostPhysicalCameraFailure,
+): void {
+	if (
+		!Number.isSafeInteger(failure.session) ||
+		failure.session <= 0 ||
+		typeof failure.message !== "string" ||
+		failure.message.length === 0
+	) {
+		throw new Error("Host returned an invalid physical-camera failure event.");
 	}
 }
 
 interface PhysicalCameraInput {
 	readonly viewDirection: readonly [number, number, number];
 	readonly worldVelocity: readonly [number, number, number];
+}
+
+interface GroundedCameraInput {
+	readonly drive: GroundedCharacterDrive;
+	readonly viewDirection: readonly [number, number, number];
+}
+
+function groundedInputsEqual(
+	left: GroundedCameraInput,
+	right: GroundedCameraInput,
+): boolean {
+	return (
+		left.drive.gait === right.drive.gait &&
+		left.drive.lateral === right.drive.lateral &&
+		left.drive.longitudinal === right.drive.longitudinal &&
+		left.drive.turn === right.drive.turn &&
+		vectorsEqual(left.viewDirection, right.viewDirection)
+	);
 }
 
 function inputsEqual(
@@ -427,4 +664,42 @@ function vectorsEqual(
 	right: readonly [number, number, number],
 ): boolean {
 	return left.every((component, index) => component === right[index]);
+}
+
+function physicalCameraStartReceipt(
+	value: unknown,
+	mode: PhysicalCameraMode,
+): { readonly jumpChargeDurationMs: number | null; readonly session: number } {
+	if (typeof value !== "object" || value === null) {
+		throw new Error(
+			"Host returned an invalid physical-camera registration receipt.",
+		);
+	}
+	const receipt = value as Record<string, unknown>;
+	if (
+		typeof receipt.session !== "number" ||
+		!Number.isSafeInteger(receipt.session) ||
+		receipt.session <= 0
+	) {
+		throw new Error("Host returned an invalid physical-camera session id.");
+	}
+	const duration = receipt.jumpChargeDurationMs;
+	if (mode === "grounded-walk") {
+		if (
+			typeof duration !== "number" ||
+			!Number.isSafeInteger(duration) ||
+			duration <= 0
+		) {
+			throw new Error(
+				"Host returned an invalid grounded jump charge duration.",
+			);
+		}
+		return { jumpChargeDurationMs: duration, session: receipt.session };
+	}
+	if (duration !== null) {
+		throw new Error(
+			"Physical-fly registration unexpectedly returned jump timing.",
+		);
+	}
+	return { jumpChargeDurationMs: null, session: receipt.session };
 }

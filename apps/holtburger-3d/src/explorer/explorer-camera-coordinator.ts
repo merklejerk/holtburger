@@ -306,12 +306,13 @@ export class ExplorerCameraCoordinator {
 			},
 		};
 		if (!this.#audioFollowsCamera) return;
-		const { position, rotation } = camera.placement;
+		const { position, rotation, envCellId } = camera.placement;
 		this.#runtime.setAudioListener({
 			// Both frontend and host presentation positions enter this method in canonical scene
 			// coordinates, so the retained listener position is scene-frame by construction.
 			position: sceneVector3([position.x, position.y, position.z]),
 			rotation,
+			envCellId,
 		});
 	}
 

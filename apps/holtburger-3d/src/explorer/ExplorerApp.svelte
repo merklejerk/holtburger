@@ -124,9 +124,10 @@
 	let textureFilteringCapabilities =
 		$state<TextureFilteringCapabilities | null>(null);
 	let environmentSelection = $state<ExplorerEnvironmentSelection>({
-		dayIndex: 0,
-		timeOfDay: 0.5,
-		dayGroupOverride: null,
+		dayIndex: FRONTEND_TUNING.explorer.environment.defaultDayIndex,
+		timeOfDay: FRONTEND_TUNING.explorer.environment.defaultTimeOfDay,
+		dayGroupOverride:
+			FRONTEND_TUNING.explorer.environment.defaultDayGroupOverride,
 	});
 	/** Explorer-local dynamic display choices; they do not alter resolved regional data. */
 	let frameSettings = $state<FrameSettings>({ ...DEFAULT_FRAME_SETTINGS });

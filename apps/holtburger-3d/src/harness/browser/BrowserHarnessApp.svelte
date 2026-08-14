@@ -80,10 +80,11 @@
 	 */
 	function applyHarnessCamera(target: GameRuntime, camera: Camera): void {
 		target.setPrimaryCamera(camera);
-		const { position, rotation } = camera.placement;
+		const { position, rotation, envCellId } = camera.placement;
 		target.setAudioListener({
 			position: sceneVector3([position.x, position.y, position.z]),
 			rotation,
+			envCellId,
 		});
 	}
 

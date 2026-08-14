@@ -265,7 +265,9 @@ export class WebGL2SkyPass {
 		const drawn = sky.objects.filter(
 			(object) =>
 				object.placement.pass === pass &&
-				(context.weatherEnabled || object.placement.kind === "celestial"),
+				(context.weatherEnabled || object.placement.kind === "celestial") &&
+				(object.placement.kind !== "weather" ||
+					FRONTEND_TUNING.rendering.weather.opacityScale > 0),
 		);
 		if (drawn.length === 0) return;
 

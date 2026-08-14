@@ -39,6 +39,8 @@ export interface ParticleDrawContext {
 	readonly view: Float32Array;
 	readonly cameraPosition: readonly [number, number, number];
 	readonly clockSeconds: number;
+	/** Global opacity scale applied to all particles in this context, in [0, 1]. Defaults to 1. */
+	readonly opacityScale?: number;
 }
 
 export interface ParticleDrawDiagnostics {
@@ -106,6 +108,7 @@ export class WebGL2ParticlePass {
 		this.#scopedBatches.length = 0;
 		this.#scopedRenderScopeKeys.length = 0;
 		for (const [renderScopeKey, batches] of batchesByScope) {
+			if (renderScopeKey === "sky") continue;
 			for (const batch of batches) {
 				this.#scopedBatches.push(batch);
 				this.#scopedRenderScopeKeys.push(renderScopeKey);
@@ -133,7 +136,8 @@ export class WebGL2ParticlePass {
 		for (const batch of batches) {
 			preparedInstanceCount += batch.particles.length;
 		}
-		if (preparedInstanceCount === 0) {
+		const opacityScale = context.opacityScale ?? 1.0;
+		if (opacityScale <= 0 || preparedInstanceCount === 0) {
 			this.#diagnostics = {
 				drawnBatchCount: 0,
 				drawnParticleCount: 0,
@@ -178,6 +182,7 @@ export class WebGL2ParticlePass {
 		gl.uniformMatrix4fv(program.uniforms.projection, false, context.projection);
 		gl.uniformMatrix4fv(program.uniforms.view, false, context.view);
 		gl.uniform1f(program.uniforms.clockSeconds, context.clockSeconds);
+		gl.uniform1f(program.uniforms.opacityScale, opacityScale);
 		gl.uniform3f(
 			program.uniforms.cameraPosition,
 			context.cameraPosition[0],

@@ -87,6 +87,13 @@ export interface AmbientScanResult {
 	readonly examinedCellCount: number;
 }
 
+/** Immutable empty scan result used when ambient sounds are silenced (e.g. inside an EnvCell without SeenOutside). */
+export const EMPTY_AMBIENT_SCAN_RESULT: AmbientScanResult = Object.freeze({
+	accumulations: new Map(),
+	totalWeight: 0,
+	examinedCellCount: 0,
+});
+
 /** Identity of one descriptor within the region; several tables share an `stbId`, so index is the key. */
 function ambientDescriptorKey(descriptor: AmbientDescriptor): string {
 	return `${descriptor.tableIndex}:${descriptor.soundType}`;

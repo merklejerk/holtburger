@@ -9,6 +9,7 @@ import {
 	ambientWeight,
 } from "./ambient-weighting";
 import {
+	EMPTY_AMBIENT_SCAN_RESULT,
 	placeAmbientSound,
 	scanAmbientSources,
 	type AmbientDescriptor,
@@ -276,5 +277,11 @@ describe("placeAmbientSound", () => {
 
 	it("has no placement for a descriptor with no directional contributors", () => {
 		expect(placeAmbientSound(new Map(), LISTENER, () => 0.5)).toBeNull();
+	});
+
+	it("provides an empty scan result singleton with zero weight and no accumulations", () => {
+		expect(EMPTY_AMBIENT_SCAN_RESULT.accumulations.size).toBe(0);
+		expect(EMPTY_AMBIENT_SCAN_RESULT.totalWeight).toBe(0);
+		expect(EMPTY_AMBIENT_SCAN_RESULT.examinedCellCount).toBe(0);
 	});
 });

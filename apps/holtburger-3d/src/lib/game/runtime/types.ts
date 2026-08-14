@@ -1,3 +1,4 @@
+import type { EnvCellId } from "../game-types";
 import type { SceneVec3, SceneVector3 } from "../../assets/ac-frame";
 import type { Quat } from "../math/types";
 import type { SceneResidency } from "../scene";
@@ -40,6 +41,13 @@ export interface AudioListenerPlacement {
 	readonly position: SceneVector3;
 	/** Listener-to-world orientation; its local +X is the right hand panning projects onto. */
 	readonly rotation: Quat;
+	/**
+	 * Environment cell the listener is currently inside, or null for outdoor terrain.
+	 *
+	 * When set to an indoor EnvCell whose authored flags do not include `SeenOutside`
+	 * (EnvCell flag 0x01), outdoor surface terrain ambience is silenced (acclient.c:140501-140526).
+	 */
+	readonly envCellId: EnvCellId | null;
 }
 
 export interface Camera {

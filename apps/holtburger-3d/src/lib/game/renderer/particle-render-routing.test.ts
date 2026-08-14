@@ -4,6 +4,7 @@ import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import {
 	EXTERIOR_PARTICLE_RENDER_OWNER,
+	SKY_PARTICLE_RENDER_OWNER,
 	type ParticleSourceCohort,
 } from "../systems/particle-system";
 import type { ParticleInstanceRecord } from "./particle-instance-stream";
@@ -55,6 +56,19 @@ describe("particle render routing", () => {
 				.get("outdoor"),
 		).toHaveLength(1);
 		expect(batcher.route(1, sources, () => null).get("outdoor")).toEqual([]);
+	});
+
+	it("routes sky effects to the sky domain", () => {
+		const batcher = new ParticleRenderBatcher();
+		const sources = [source(SKY_PARTICLE_RENDER_OWNER, 1)];
+
+		expect(
+			batcher
+				.route(1, sources, (owner) =>
+					owner === SKY_PARTICLE_RENDER_OWNER ? "sky" : null,
+				)
+				.get("sky"),
+		).toHaveLength(1);
 	});
 
 	it("recoalesces compatible nodes sharing one executor contribution", () => {

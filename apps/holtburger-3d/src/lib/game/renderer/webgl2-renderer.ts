@@ -2318,19 +2318,23 @@ export class WebGL2Renderer implements Renderer {
 			"filterable",
 			TextureWrapMode.Repeat,
 		);
+		// Both mask arrays are addressed with cell-local UVs that reach exactly 0 and 1 at a cell
+		// boundary, and each cell's mask is independent of its neighbor's. Repeat wrapping would
+		// make the boundary texel blend against the opposite edge of the same mask, bleeding an
+		// unrelated corner's alpha into a half-texel band along every cell edge.
 		this.#bindTextureArray(
 			3,
 			blendMasks,
 			this.#terrainProgram.uniforms.blendMasks,
 			"filterable",
-			TextureWrapMode.Repeat,
+			TextureWrapMode.Clamp,
 		);
 		this.#bindTextureArray(
 			4,
 			roadMasks,
 			this.#terrainProgram.uniforms.roadMasks,
 			"filterable",
-			TextureWrapMode.Repeat,
+			TextureWrapMode.Clamp,
 		);
 		this.#bindTexture2D(
 			5,

@@ -306,7 +306,7 @@ mod tests {
         CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
         CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
         LandblockPlacement, LandblockTerrain, PlacedCollider, StaticColliderPlacement,
-        TerrainCellDiagonals, TerrainCollisionSurface,
+        TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode, InternalNode};
 
@@ -315,7 +315,6 @@ mod tests {
     const LANDBLOCK: u32 = 0xda55_ffff;
     const EAST: u32 = 0xdb55_ffff;
     const WATER_TERRAIN_SAMPLE: u16 = 0x10 << 2;
-    const RETAIL_FULL_WATER_DEPTH: f32 = 0.9;
 
     fn config() -> PhysicalFlyConfig {
         PhysicalFlyConfig {
@@ -695,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn free_sphere_uses_the_generic_retail_water_adjusted_terrain_plane() {
+    fn free_sphere_uses_the_generic_water_adjusted_collision_mesh() {
         let mut collision = scene(Vec::new());
         collision
             .insert(LandblockCollisionAsset {
@@ -710,7 +709,7 @@ mod tests {
             body(Vector3::new(50.0, 50.0, 5.0)),
             Vector3::new(0.0, 0.0, -8.0),
         ));
-        let expected_center = 1.0 - RETAIL_FULL_WATER_DEPTH;
+        let expected_center = 1.0 - TERRAIN_WATER_COLLISION_DEPTH;
         assert!((floor.pose.coords.z - expected_center).abs() < 0.002);
     }
 

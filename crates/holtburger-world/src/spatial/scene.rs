@@ -581,8 +581,8 @@ mod physical_body_tests {
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
         CellCollisionPortal, CellCollisionPortalTarget, CellVolume, LandblockColliders,
-        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain, TerrainCellDiagonals,
-        TerrainCollisionSurface,
+        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain,
+        TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use std::time::Duration;
 
@@ -604,7 +604,6 @@ mod physical_body_tests {
         separation_epsilon: 0.000_5,
     };
     const WATER_TERRAIN_SAMPLE: u16 = 0x10 << 2;
-    const RETAIL_FULL_WATER_DEPTH: f32 = 0.9;
 
     fn pose(coords: Vector3) -> WorldPosition {
         WorldPosition {
@@ -1190,7 +1189,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn grounded_body_uses_the_generic_retail_water_adjusted_terrain_plane() {
+    fn grounded_body_uses_the_generic_water_adjusted_collision_mesh() {
         let collision = flat_collision_scene_with_sample(WATER_TERRAIN_SAMPLE);
         let now = Instant::now();
         let mut scene = SpatialScene::new();
@@ -1215,7 +1214,7 @@ mod physical_body_tests {
         let body = scene.body(id).unwrap();
         assert!(motion.grounded);
         assert_eq!(body.contact, ContactState::Grounded);
-        assert!((body.pose.coords.z - (start.z - RETAIL_FULL_WATER_DEPTH)).abs() < 0.002);
+        assert!((body.pose.coords.z - (start.z - TERRAIN_WATER_COLLISION_DEPTH)).abs() < 0.002);
     }
 
     #[test]

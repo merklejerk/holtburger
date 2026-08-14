@@ -67,7 +67,8 @@ mod tests {
     use holtburger_common::{Guid, Quaternion};
     use holtburger_world::{
         CollisionScene, EdgeProtection, GroundedConfig, PhysicalBodyDefinition,
-        RETAIL_WALKABLE_NORMAL_Z, SpatialBody, SpatialBodyId, SpatialScene,
+        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
+        PhysicalSurfaceMotion, RETAIL_WALKABLE_NORMAL_Z, SpatialBody, SpatialBodyId, SpatialScene,
     };
     use std::time::Instant;
 
@@ -81,6 +82,12 @@ mod tests {
         maximum_substeps: 8,
         maximum_contact_passes: 4,
         separation_epsilon: 0.001,
+    };
+    const STABLE_POLICY: PhysicalBodyResponsePolicy = PhysicalBodyResponsePolicy {
+        restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
+        friction: PhysicalFriction::DEFAULT,
+        surface_motion: PhysicalSurfaceMotion::Stable,
+        align_path: false,
     };
 
     fn sphere(x: f32, z: f32, radius: f32) -> Sphere {
@@ -216,10 +223,16 @@ mod tests {
         let ephemeral = world.register_ephemeral_body(pose, now);
         let collision = CollisionScene::new();
         world
-            .attach_physical_body(entity, setup_definition, None, &collision)
+            .attach_physical_body(entity, setup_definition, STABLE_POLICY, None, &collision)
             .unwrap();
         world
-            .attach_physical_body(ephemeral, explicit_definition, None, &collision)
+            .attach_physical_body(
+                ephemeral,
+                explicit_definition,
+                STABLE_POLICY,
+                None,
+                &collision,
+            )
             .unwrap();
 
         assert_eq!(

@@ -1,6 +1,6 @@
 use crate::client::movement_types::{
-    Gait, Locomotion, MotionState, MotionStyle, MovementPacketMetadata, Turn,
-    planar_velocity_for_heading,
+    Gait, LateralMotion, LongitudinalMotion, MotionState, MotionStyle, MovementPacketMetadata,
+    Turn, planar_velocity_for_heading,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::game_action::*;
@@ -26,8 +26,10 @@ pub(super) const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
 pub(super) const TURN_LEFT_MOTION_COMMAND: u32 = 0x6500_000e;
 const SIDESTEP_RIGHT_MOTION_COMMAND: u32 = 0x6500_000f;
 const SIDESTEP_LEFT_MOTION_COMMAND: u32 = 0x6500_0010;
-pub(super) const RUN_HELD_TURN_SPEED_RAD_PER_SEC: f32 = 1.5;
-const NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC: f32 = 1.0;
+/// Retail animation-rate multiplier applied to turn commands while Run is held.
+pub(super) const RUN_HELD_TURN_RATE_SCALAR: f32 = 1.5;
+/// Retail animation-rate multiplier applied to turn commands without Run held.
+const NON_RUN_HELD_TURN_RATE_SCALAR: f32 = 1.0;
 
 pub(super) fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
     let mut delta = (desired_heading - current_heading) % TAU;
@@ -119,17 +121,22 @@ pub(super) fn player_run_rate_scalar(world: &WorldState) -> f32 {
     world.player_run_rate().unwrap_or(FALLBACK_RUN_RATE_SCALAR)
 }
 
-fn locomotion_command_for_state(
-    locomotion: Locomotion,
+fn longitudinal_command_for_state(
+    longitudinal: LongitudinalMotion,
     gait: Gait,
     run_rate_scalar: f32,
 ) -> (u32, f32) {
-    match (gait, locomotion) {
-        (Gait::Run, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, run_rate_scalar),
-        (Gait::Walk, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, 1.0),
-        (_, Locomotion::Backstep) => (WALK_BACKWARD_MOTION_COMMAND, 1.0),
-        (_, Locomotion::StrafeLeft) => (SIDESTEP_LEFT_MOTION_COMMAND, 1.0),
-        (_, Locomotion::StrafeRight) => (SIDESTEP_RIGHT_MOTION_COMMAND, 1.0),
+    match (gait, longitudinal) {
+        (Gait::Run, LongitudinalMotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, run_rate_scalar),
+        (Gait::Walk, LongitudinalMotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, 1.0),
+        (_, LongitudinalMotion::Backward) => (WALK_BACKWARD_MOTION_COMMAND, 1.0),
+    }
+}
+
+fn lateral_command_for_state(lateral: LateralMotion) -> u32 {
+    match lateral {
+        LateralMotion::Left => SIDESTEP_LEFT_MOTION_COMMAND,
+        LateralMotion::Right => SIDESTEP_RIGHT_MOTION_COMMAND,
     }
 }
 
@@ -153,27 +160,24 @@ pub(super) fn build_motion_state_raw_motion_state(
         ..Default::default()
     };
 
-    if let Some(locomotion) = state.locomotion {
+    if let Some(longitudinal) = state.longitudinal {
         let (command, speed) =
-            locomotion_command_for_state(locomotion, state.gait, run_rate_scalar);
-        match locomotion {
-            Locomotion::Forward | Locomotion::Backstep => {
-                raw_motion_state.flags |= RawMotionFlags::FORWARD_COMMAND
-                    | RawMotionFlags::FORWARD_HOLD_KEY
-                    | RawMotionFlags::FORWARD_SPEED;
-                raw_motion_state.forward_command = Some(command);
-                raw_motion_state.forward_hold_key = Some(axis_hold_key);
-                raw_motion_state.forward_speed = Some(speed);
-            }
-            Locomotion::StrafeLeft | Locomotion::StrafeRight => {
-                raw_motion_state.flags |= RawMotionFlags::SIDE_STEP_COMMAND
-                    | RawMotionFlags::SIDE_STEP_HOLD_KEY
-                    | RawMotionFlags::SIDE_STEP_SPEED;
-                raw_motion_state.sidestep_command = Some(command);
-                raw_motion_state.sidestep_hold_key = Some(axis_hold_key);
-                raw_motion_state.sidestep_speed = Some(speed);
-            }
-        }
+            longitudinal_command_for_state(longitudinal, state.gait, run_rate_scalar);
+        raw_motion_state.flags |= RawMotionFlags::FORWARD_COMMAND
+            | RawMotionFlags::FORWARD_HOLD_KEY
+            | RawMotionFlags::FORWARD_SPEED;
+        raw_motion_state.forward_command = Some(command);
+        raw_motion_state.forward_hold_key = Some(axis_hold_key);
+        raw_motion_state.forward_speed = Some(speed);
+    }
+
+    if let Some(lateral) = state.lateral {
+        raw_motion_state.flags |= RawMotionFlags::SIDE_STEP_COMMAND
+            | RawMotionFlags::SIDE_STEP_HOLD_KEY
+            | RawMotionFlags::SIDE_STEP_SPEED;
+        raw_motion_state.sidestep_command = Some(lateral_command_for_state(lateral));
+        raw_motion_state.sidestep_hold_key = Some(axis_hold_key);
+        raw_motion_state.sidestep_speed = Some(1.0);
     }
 
     if let Some(turn) = state.turning {
@@ -182,21 +186,21 @@ pub(super) fn build_motion_state_raw_motion_state(
             | RawMotionFlags::TURN_SPEED;
         raw_motion_state.turn_command = Some(turn_motion_command_for_state(turn));
         raw_motion_state.turn_hold_key = Some(axis_hold_key);
-        raw_motion_state.turn_speed = Some(wire_turn_speed_for_state(state));
+        raw_motion_state.turn_speed = Some(turn_rate_scalar_for_state(state));
     }
 
     raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
 }
 
-fn local_locomotion_speed_for_state(
+fn local_longitudinal_speed_for_state(
     state: MotionState,
     capabilities: &SelfMovementCapabilities,
 ) -> f32 {
-    match (state.gait, state.locomotion) {
+    match (state.gait, state.longitudinal) {
         (_, None) => 0.0,
-        (Gait::Run, Some(Locomotion::Forward)) => capabilities.resolved_manual_run_speed(),
-        (Gait::Walk, Some(Locomotion::Forward)) => capabilities.base_walk_forward_speed(),
-        (_, Some(Locomotion::Backstep | Locomotion::StrafeLeft | Locomotion::StrafeRight)) => 1.0,
+        (Gait::Run, Some(LongitudinalMotion::Forward)) => capabilities.resolved_manual_run_speed(),
+        (Gait::Walk, Some(LongitudinalMotion::Forward)) => capabilities.base_walk_forward_speed(),
+        (_, Some(LongitudinalMotion::Backward)) => 1.0,
     }
 }
 
@@ -205,43 +209,43 @@ pub(super) fn local_velocity_for_state(
     state: MotionState,
     capabilities: &SelfMovementCapabilities,
 ) -> Vector3 {
-    match state.locomotion {
-        Some(Locomotion::Forward) => planar_velocity_for_heading(
+    let longitudinal = match state.longitudinal {
+        Some(LongitudinalMotion::Forward) => planar_velocity_for_heading(
             current_heading,
-            local_locomotion_speed_for_state(state, capabilities),
+            local_longitudinal_speed_for_state(state, capabilities),
         ),
-        Some(Locomotion::Backstep) => {
+        Some(LongitudinalMotion::Backward) => {
             planar_velocity_for_heading(normalize_heading(current_heading + PI), 1.0)
         }
-        Some(Locomotion::StrafeLeft) => {
+        None => Vector3::zero(),
+    };
+    let lateral = match state.lateral {
+        Some(LateralMotion::Left) => {
             planar_velocity_for_heading(normalize_heading(current_heading - (PI / 2.0)), 1.0)
         }
-        Some(Locomotion::StrafeRight) => {
+        Some(LateralMotion::Right) => {
             planar_velocity_for_heading(normalize_heading(current_heading + (PI / 2.0)), 1.0)
         }
         None => Vector3::zero(),
+    };
+    let combined = longitudinal + lateral;
+    let maximum_speed = capabilities.resolved_manual_run_speed();
+    if combined.length() > maximum_speed {
+        combined.normalize() * maximum_speed
+    } else {
+        combined
     }
 }
 
-fn wire_turn_speed_for_state(state: MotionState) -> f32 {
-    state.turn_speed.unwrap_or(match state.gait {
-        Gait::Run => RUN_HELD_TURN_SPEED_RAD_PER_SEC,
-        Gait::Walk => NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC,
+pub(super) fn turn_rate_scalar_for_state(state: MotionState) -> f32 {
+    state.turn_rate_scalar.unwrap_or(match state.gait {
+        Gait::Run => RUN_HELD_TURN_RATE_SCALAR,
+        Gait::Walk => NON_RUN_HELD_TURN_RATE_SCALAR,
     })
 }
 
-fn local_turn_omega(base_omega: Vector3, override_speed: Option<f32>) -> Vector3 {
-    match override_speed {
-        Some(speed) => {
-            let base_magnitude = base_omega.length();
-            if base_magnitude > 0.0 {
-                base_omega.normalize() * speed
-            } else {
-                Vector3::zero()
-            }
-        }
-        None => base_omega,
-    }
+fn local_turn_omega(base_omega: Vector3, turn_rate_scalar: f32) -> Vector3 {
+    base_omega * turn_rate_scalar
 }
 
 pub(super) fn local_omega_for_state(
@@ -251,11 +255,11 @@ pub(super) fn local_omega_for_state(
     match state.turning {
         Some(Turn::Right) => local_turn_omega(
             capabilities.kinematics().base_turn_right_omega,
-            state.turn_speed,
+            turn_rate_scalar_for_state(state),
         ),
         Some(Turn::Left) => local_turn_omega(
             capabilities.kinematics().base_turn_left_omega,
-            state.turn_speed,
+            turn_rate_scalar_for_state(state),
         ),
         None => Vector3::zero(),
     }
@@ -287,38 +291,76 @@ mod tests {
     }
 
     #[test]
-    fn local_omega_for_state_preserves_base_turn_omega_without_override() {
+    fn local_omega_for_run_multiplies_authored_omega_by_retail_rate() {
         let capabilities = test_capabilities();
 
         assert_eq!(
             local_omega_for_state(
                 MotionState {
                     gait: Gait::Run,
-                    locomotion: None,
+                    longitudinal: None,
+                    lateral: None,
                     turning: Some(Turn::Left),
-                    turn_speed: None,
+                    turn_rate_scalar: None,
                 },
                 &capabilities,
             ),
-            Vector3::new(0.0, 0.0, -1.5)
+            Vector3::new(0.0, 0.0, -2.25)
         );
     }
 
     #[test]
-    fn local_omega_for_state_applies_turn_speed_override_to_base_direction() {
+    fn local_omega_for_state_applies_turn_rate_override_to_authored_omega() {
         let capabilities = test_capabilities();
 
         assert_eq!(
             local_omega_for_state(
                 MotionState {
                     gait: Gait::Walk,
-                    locomotion: None,
+                    longitudinal: None,
+                    lateral: None,
                     turning: Some(Turn::Left),
-                    turn_speed: Some(0.75),
+                    turn_rate_scalar: Some(0.75),
                 },
                 &capabilities,
             ),
-            Vector3::new(0.0, 0.0, -0.75)
+            Vector3::new(0.0, 0.0, -1.125)
         );
+    }
+
+    #[test]
+    fn raw_motion_state_encodes_longitudinal_and_lateral_axes_together() {
+        let world = WorldState::synthetic();
+        let raw = build_motion_state_raw_motion_state(
+            &world,
+            MotionState::builder()
+                .walk()
+                .forward()
+                .strafe_left()
+                .build(),
+            MotionStyle::Omit,
+        );
+
+        assert!(raw.flags.contains(RawMotionFlags::FORWARD_COMMAND));
+        assert!(raw.flags.contains(RawMotionFlags::SIDE_STEP_COMMAND));
+        assert_eq!(raw.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
+        assert_eq!(raw.sidestep_command, Some(SIDESTEP_LEFT_MOTION_COMMAND));
+    }
+
+    #[test]
+    fn local_velocity_composes_longitudinal_and_lateral_axes() {
+        let velocity = local_velocity_for_state(
+            0.0,
+            MotionState::builder()
+                .walk()
+                .forward()
+                .strafe_left()
+                .build(),
+            &test_capabilities(),
+        );
+
+        assert!((velocity.x + 1.0).abs() < 1e-5);
+        assert!((velocity.y + 1.0).abs() < 1e-5);
+        assert_eq!(velocity.z, 0.0);
     }
 }

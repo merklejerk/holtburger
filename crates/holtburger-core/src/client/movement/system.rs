@@ -5,7 +5,7 @@ use super::common::{
     normalize_heading, raw_motion_state_with_motion_style, signed_heading_delta,
 };
 use crate::client::movement_types::{
-    AutonomousDriveIntent, Locomotion, MotionState, MotionStyle, MovementPacketMetadata,
+    AutonomousDriveIntent, LongitudinalMotion, MotionState, MotionStyle, MovementPacketMetadata,
     PlayerDriveIntent, Turn,
 };
 use anyhow::Result;
@@ -345,12 +345,13 @@ impl MovementSystem {
             intent.desired_world_delta.y,
             0.0,
         );
-        let locomotion = (planar_delta.length_squared() > 1e-6).then_some(Locomotion::Forward);
+        let longitudinal =
+            (planar_delta.length_squared() > 1e-6).then_some(LongitudinalMotion::Forward);
         let desired_heading = intent.desired_heading.map(normalize_heading).or_else(|| {
             (planar_delta.length_squared() > 1e-6)
                 .then(|| Vector3::zero().heading_to(&planar_delta))
         });
-        let turning = if locomotion.is_some() {
+        let turning = if longitudinal.is_some() {
             None
         } else {
             desired_heading.and_then(|desired_heading| {
@@ -365,7 +366,7 @@ impl MovementSystem {
             })
         };
 
-        if locomotion.is_none() && turning.is_none() {
+        if longitudinal.is_none() && turning.is_none() {
             return None;
         }
 
@@ -373,9 +374,10 @@ impl MovementSystem {
         // MoveToState edge so observers receive motion-state broadcasts.
         Some(MotionState {
             gait: intent.gait,
-            locomotion,
+            longitudinal,
+            lateral: None,
             turning,
-            turn_speed: None,
+            turn_rate_scalar: None,
         })
     }
 

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { Vec3 } from "../math/types";
 import {
 	evaluateHostPhysicalCameraPath,
-	resolveGroundedWalkVelocity,
 	resolvePhysicalCameraViewDirection,
 	resolvePhysicalFlyVelocity,
 	resolvePhysicalFlyWheelDisplacement,
@@ -44,6 +43,7 @@ function path(
 		substeps: 1,
 		contactPasses: 1,
 		solveDurationMs: 0.1,
+		characterEventOutcomes: [],
 		...overrides,
 	};
 }
@@ -226,36 +226,5 @@ describe("resolvePhysicalCameraViewDirection", () => {
 				up: [0, 1, 0],
 			}),
 		).toEqual([0.3, 0.5, 0.4]);
-	});
-});
-
-describe("resolveGroundedWalkVelocity", () => {
-	it("uses yaw while ignoring camera pitch and vertical input", () => {
-		const pitchedBasis = {
-			forward: [0, 0.8, -0.6] as const,
-			right: [1, 0, 0] as const,
-			up: [0, 0.6, 0.8] as const,
-		};
-		expect(
-			resolveGroundedWalkVelocity(
-				{ forward: 1, right: 0, up: 1 },
-				pitchedBasis,
-				4,
-			),
-		).toEqual([0, 4, 0]);
-	});
-
-	it("normalizes diagonal walking input on the horizontal plane", () => {
-		const velocity = resolveGroundedWalkVelocity(
-			{ forward: 1, right: 1, up: 0 },
-			{
-				forward: [0, 0, -1],
-				right: [1, 0, 0],
-				up: [0, 1, 0],
-			},
-			4,
-		);
-		expect(Math.hypot(...velocity)).toBeCloseTo(4);
-		expect(velocity[2]).toBe(0);
 	});
 });

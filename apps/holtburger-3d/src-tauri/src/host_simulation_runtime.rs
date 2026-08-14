@@ -5,14 +5,16 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Vector3};
 use holtburger_content::LandblockCollisionAsset;
 use holtburger_core::ContentAssetService;
 use holtburger_world::{
     CollisionScene, EdgeProtection, GroundedConfig, InvalidPhysicalBodyPlacement,
-    PhysicalBodyActivity, PhysicalBodyDefinition, PhysicalBodyTickResult, PhysicalFlyConfig,
-    PhysicalSphereSet, PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyEvent,
-    SpatialBodyId, SpatialScene,
+    PhysicalBodyActivity, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalElasticity, PhysicalFlyConfig,
+    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+    PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyEvent, SpatialBodyId,
+    SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
@@ -127,7 +129,75 @@ pub enum PhysicalResponseRequest {
     },
 }
 
-/// Source-neutral serialized physical definition used by every frontend registration path.
+/// Explicit eligible-impact behavior at the serialized registration boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PhysicalRestitutionRequest {
+    /// Retail normal-component reflection with a bounded coefficient.
+    Elastic {
+        /// Requested coefficient; the world type applies retail's `[0.0, 0.1]` clamp.
+        elasticity: f32,
+    },
+    /// Zero complete velocity on an eligible impact.
+    Inelastic,
+}
+
+/// Explicit stable-versus-Sledding surface response.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhysicalSurfaceMotionRequest {
+    /// Ordinary stable support response.
+    Stable,
+    /// Retail physics-state `Sledding` response.
+    Sledding,
+}
+
+/// Complete mutable response policy required from every frontend-created body.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhysicalBodyResponsePolicyRequest {
+    /// Eligible impact behavior.
+    pub restitution: PhysicalRestitutionRequest,
+    /// Authored supported-surface friction in the inclusive unit interval.
+    pub friction: f32,
+    /// Stable or retail Sledding support behavior.
+    pub surface_motion: PhysicalSurfaceMotionRequest,
+    /// Whether path displacement supersedes Sledding velocity-facing.
+    pub align_path: bool,
+}
+
+impl PhysicalBodyResponsePolicyRequest {
+    pub(crate) fn resolve(self) -> Result<PhysicalBodyResponsePolicy> {
+        Ok(PhysicalBodyResponsePolicy {
+            restitution: match self.restitution {
+                PhysicalRestitutionRequest::Elastic { elasticity } => {
+                    PhysicalRestitution::Elastic(PhysicalElasticity::new(elasticity)?)
+                }
+                PhysicalRestitutionRequest::Inelastic => PhysicalRestitution::Inelastic,
+            },
+            friction: PhysicalFriction::new(self.friction)?,
+            surface_motion: match self.surface_motion {
+                PhysicalSurfaceMotionRequest::Stable => PhysicalSurfaceMotion::Stable,
+                PhysicalSurfaceMotionRequest::Sledding => PhysicalSurfaceMotion::Sledding,
+            },
+            align_path: self.align_path,
+        })
+    }
+}
+
+#[cfg(test)]
+pub(crate) const fn stable_response_policy_request(
+    elasticity: f32,
+) -> PhysicalBodyResponsePolicyRequest {
+    PhysicalBodyResponsePolicyRequest {
+        restitution: PhysicalRestitutionRequest::Elastic { elasticity },
+        friction: 0.95,
+        surface_motion: PhysicalSurfaceMotionRequest::Stable,
+        align_path: false,
+    }
+}
+
+/// Source-neutral serialized physical definition used by app-local body registration adapters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhysicalBodyDefinitionRequest {
@@ -135,79 +205,8 @@ pub struct PhysicalBodyDefinitionRequest {
     pub spheres: Vec<PhysicalSphereRequest>,
     /// Implemented response semantics and finite solver policy.
     pub response: PhysicalResponseRequest,
-}
-
-/// Explicit AC-world pose for a frontend-owned generic body registration.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PhysicalBodyPoseRequest {
-    /// Exact outdoor cell or EnvCell identifier carrying the local frame.
-    pub landblock_id: String,
-    /// Landblock-local AC-axis body-reference coordinates.
-    pub coords: [f32; 3],
-    /// Unit quaternion `[w, x, y, z]`.
-    pub rotation: [f32; 4],
-}
-
-/// Generic frontend-owned registration with an explicit pose and physical definition.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FrontendPhysicalBodyRegistration {
-    /// Initial authoritative body-reference pose.
-    pub pose: PhysicalBodyPoseRequest,
-    /// Prior EnvCell selected by portal history, or `None` while outdoors.
-    pub retained_cell_id: Option<String>,
-    /// Explicit geometry and response semantics to validate before registration.
-    pub body: PhysicalBodyDefinitionRequest,
-}
-
-impl FrontendPhysicalBodyRegistration {
-    fn resolve(&self) -> Result<(WorldPosition, Option<Guid>, PhysicalBodyDefinition)> {
-        let landblock_id = parse_guid(&self.pose.landblock_id, "physical body landblock")?;
-        let retained_cell = self
-            .retained_cell_id
-            .as_deref()
-            .map(|cell| parse_guid(cell, "physical body retained EnvCell"))
-            .transpose()?;
-        if let Some(cell) = retained_cell {
-            ensure!(
-                cell.0 & 0xffff >= 0x0100 && cell.0 & 0xffff_0000 == landblock_id.0 & 0xffff_0000,
-                "physical body retained EnvCell does not belong to its pose owner"
-            );
-        }
-        let values = self.pose.coords.iter().chain(self.pose.rotation.iter());
-        ensure!(
-            values.clone().all(|value| value.is_finite()),
-            "physical body pose must be finite"
-        );
-        let rotation = Quaternion {
-            w: self.pose.rotation[0],
-            x: self.pose.rotation[1],
-            y: self.pose.rotation[2],
-            z: self.pose.rotation[3],
-        };
-        let rotation_length_squared = rotation.w * rotation.w
-            + rotation.x * rotation.x
-            + rotation.y * rotation.y
-            + rotation.z * rotation.z;
-        ensure!(
-            (rotation_length_squared - 1.0).abs() <= 0.001,
-            "physical body rotation must be a unit quaternion"
-        );
-        Ok((
-            WorldPosition {
-                landblock_id,
-                coords: Vector3::new(
-                    self.pose.coords[0],
-                    self.pose.coords[1],
-                    self.pose.coords[2],
-                ),
-                rotation,
-            },
-            retained_cell,
-            self.body.resolve()?,
-        ))
-    }
+    /// Complete initial mutable response policy; no camera or entity defaults are inferred here.
+    pub response_policy: PhysicalBodyResponsePolicyRequest,
 }
 
 impl PhysicalBodyDefinitionRequest {
@@ -417,15 +416,19 @@ impl HostSimulationRuntime {
             .register_ephemeral_body(pose, now)
     }
 
-    /// Validates and registers one arbitrary frontend-owned body definition.
-    pub fn register_frontend_physical_body(
+    /// Registers an already validated source-neutral body without re-deriving its policy.
+    pub fn register_resolved_physical_body(
         &self,
-        registration: &FrontendPhysicalBodyRegistration,
+        pose: WorldPosition,
+        retained_cell: Option<Guid>,
+        definition: PhysicalBodyDefinition,
+        response_policy: PhysicalBodyResponsePolicy,
         now: std::time::Instant,
     ) -> Result<SpatialBodyId> {
-        let (pose, retained_cell, definition) = registration.resolve()?;
         let body_id = self.register_ephemeral_body(pose, now);
-        if let Err(error) = self.attach_physical_body(body_id, definition, retained_cell) {
+        if let Err(error) =
+            self.attach_physical_body(body_id, definition, response_policy, retained_cell)
+        {
             self.remove_body(body_id);
             return Err(error);
         }
@@ -437,26 +440,28 @@ impl HostSimulationRuntime {
         &self,
         body_id: SpatialBodyId,
         definition: PhysicalBodyDefinition,
+        response_policy: PhysicalBodyResponsePolicy,
         retained_cell: Option<Guid>,
     ) -> Result<()> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = Arc::clone(&state.scene);
         let event = state
             .bodies
-            .attach_physical_body(body_id, definition, retained_cell, &scene)?
+            .attach_physical_body(body_id, definition, response_policy, retained_cell, &scene)?
             .with_context(|| format!("physical body {body_id:?} is not registered"))?;
         state.body_events.push(event);
         Ok(())
     }
 
-    /// Advances one generic body against the scene snapshot committed under the same lock.
-    pub fn tick_physical_body(
+    /// Commits one body tick only after an adapter validates its derived contract.
+    pub fn tick_physical_body_transaction_with<T>(
         &self,
         body_id: SpatialBodyId,
-        desired_velocity: Vector3,
         delta_seconds: f32,
         now: std::time::Instant,
-    ) -> Result<HostPhysicalBodyTick> {
+        build_actuation: impl FnOnce(&SpatialBody) -> Result<PhysicalBodyActuation>,
+        accept: impl FnOnce(&HostPhysicalBodyTick) -> Result<T>,
+    ) -> Result<(HostPhysicalBodyTick, T)> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = Arc::clone(&state.scene);
         let previous = state
@@ -464,12 +469,21 @@ impl HostSimulationRuntime {
             .body(body_id)
             .cloned()
             .with_context(|| format!("physical body {body_id:?} is not registered"))?;
-        let result = state.bodies.tick_physical_body(
+        let actuation = build_actuation(&previous)?;
+        let (result, accepted) = state.bodies.tick_physical_body_transaction(
             body_id,
             &scene,
-            desired_velocity,
+            actuation,
             delta_seconds,
             now,
+            |current, result| {
+                accept(&HostPhysicalBodyTick {
+                    previous: previous.clone(),
+                    current: current.clone(),
+                    result: result.clone(),
+                    collision: Arc::clone(&scene),
+                })
+            },
         )?;
         report_body_placement_recoveries(body_id, &result);
         if let Some(event) = result.activity_event.clone() {
@@ -480,12 +494,25 @@ impl HostSimulationRuntime {
             .body(body_id)
             .cloned()
             .expect("physical body vanished during a locked host tick");
-        Ok(HostPhysicalBodyTick {
-            previous,
-            current,
-            result,
-            collision: scene,
-        })
+        Ok((
+            HostPhysicalBodyTick {
+                previous,
+                current,
+                result,
+                collision: scene,
+            },
+            accepted,
+        ))
+    }
+
+    #[cfg(test)]
+    pub fn physical_body_snapshot(&self, body_id: SpatialBodyId) -> Option<SpatialBody> {
+        self.state
+            .lock()
+            .expect("host simulation lock poisoned")
+            .bodies
+            .body(body_id)
+            .cloned()
     }
 
     /// Removes one generic body without changing simulation interest.
@@ -721,17 +748,6 @@ fn optional_cell_name(cell: Option<Guid>) -> String {
     )
 }
 
-fn parse_guid(value: &str, label: &str) -> Result<Guid> {
-    let hexadecimal = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))
-        .with_context(|| format!("{label} must start with 0x"))?;
-    Ok(Guid(
-        u32::from_str_radix(hexadecimal, 16)
-            .with_context(|| format!("{label} is not hexadecimal"))?,
-    ))
-}
-
 /// Emits and drains every queued generic body-availability transition.
 pub fn emit_body_activity_events(
     app: &tauri::AppHandle,
@@ -902,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_registration_accepts_arbitrary_geometry_without_profiles() {
+    fn body_definition_request_accepts_arbitrary_geometry_without_profiles() {
         let first = PhysicalBodyDefinitionRequest {
             spheres: vec![PhysicalSphereRequest {
                 center: [0.1, -0.2, 0.3],
@@ -916,6 +932,7 @@ mod tests {
                     separation_epsilon: 0.001,
                 },
             },
+            response_policy: stable_response_policy_request(0.0),
         }
         .resolve()
         .unwrap();
@@ -932,6 +949,7 @@ mod tests {
                     separation_epsilon: 0.001,
                 },
             },
+            response_policy: stable_response_policy_request(0.0),
         }
         .resolve()
         .unwrap();
@@ -948,7 +966,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_registration_rejects_a_third_grounded_sphere_without_truncation() {
+    fn body_definition_request_rejects_a_third_grounded_sphere_without_truncation() {
         let error = PhysicalBodyDefinitionRequest {
             spheres: vec![
                 PhysicalSphereRequest {
@@ -977,6 +995,7 @@ mod tests {
                     separation_epsilon: 0.001,
                 },
             },
+            response_policy: stable_response_policy_request(0.05),
         }
         .resolve()
         .unwrap_err();
@@ -985,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_registration_rejects_response_shape_mismatch() {
+    fn body_definition_request_rejects_response_shape_mismatch() {
         let error = PhysicalBodyDefinitionRequest {
             spheres: vec![
                 PhysicalSphereRequest {
@@ -1005,6 +1024,7 @@ mod tests {
                     separation_epsilon: 0.001,
                 },
             },
+            response_policy: stable_response_policy_request(0.0),
         }
         .resolve()
         .unwrap_err();
@@ -1042,7 +1062,12 @@ mod tests {
         )
         .unwrap();
         service
-            .attach_physical_body(body_id, definition, None)
+            .attach_physical_body(
+                body_id,
+                definition,
+                stable_response_policy_request(0.0).resolve().unwrap(),
+                None,
+            )
             .unwrap();
         assert!(matches!(
             service

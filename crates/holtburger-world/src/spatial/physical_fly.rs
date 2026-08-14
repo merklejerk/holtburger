@@ -61,6 +61,8 @@ pub enum PhysicalFlyOutcome {
         body: PhysicalFlyBody,
         /// Actual world-space displacement from the request's starting pose.
         achieved_displacement: Vector3,
+        /// Strongest unit contact normal opposing the requested displacement, if any.
+        collision_normal: Option<Vector3>,
         /// Ordered accepted substep endpoints spanning the normalized solve interval.
         motion: Vec<MotionWaypoint>,
         /// Anti-tunneling substeps evaluated.
@@ -131,6 +133,7 @@ pub fn solve_physical_fly(
     let mut current = start;
     let mut motion = Vec::with_capacity(required_substeps);
     let mut contact_passes = 0usize;
+    let mut collision_normal = None;
     for completed_substeps in 0..required_substeps {
         let mut candidate = current + substep;
         let mut candidate_placement = transit(scene, anchor, body, candidate)?;
@@ -156,6 +159,8 @@ pub fn solve_physical_fly(
                 converged = true;
                 break;
             }
+
+            remember_collision_normal(&mut collision_normal, &contacts, request.displacement);
 
             candidate = candidate + separating_displacement(&contacts, config.separation_epsilon);
             candidate_placement = transit(scene, anchor, body, candidate)?;
@@ -203,10 +208,32 @@ pub fn solve_physical_fly(
     Ok(PhysicalFlyOutcome::Solved {
         body,
         achieved_displacement: current - start,
+        collision_normal,
         motion,
         substeps: required_substeps,
         contact_passes,
     })
+}
+
+fn remember_collision_normal(
+    selected: &mut Option<Vector3>,
+    contacts: &[super::StaticContact],
+    requested_displacement: Vector3,
+) {
+    for contact in contacts {
+        let length_squared = contact.normal.length_squared();
+        if length_squared <= f32::EPSILON || !length_squared.is_finite() {
+            continue;
+        }
+        let normal = contact.normal / length_squared.sqrt();
+        let opposition = requested_displacement.dot(&normal);
+        if opposition >= 0.0 {
+            continue;
+        }
+        if selected.is_none_or(|current| opposition < requested_displacement.dot(&current)) {
+            *selected = Some(normal);
+        }
+    }
 }
 
 fn transit(
@@ -554,13 +581,21 @@ mod tests {
     #[test]
     fn wall_impact_stops_normal_motion_and_preserves_oblique_slide() {
         let scene = scene(vec![wall_x(10.0)]);
-        let body = solved(solve(
+        let PhysicalFlyOutcome::Solved {
+            body,
+            collision_normal,
+            ..
+        } = solve(
             &scene,
             body(Vector3::new(7.0, 20.0, 5.0)),
             Vector3::new(6.0, 4.0, 0.0),
-        ));
+        )
+        else {
+            panic!("wall solve did not complete")
+        };
         assert!((body.pose.coords.x - 9.0).abs() < 0.002, "{body:?}");
         assert!((body.pose.coords.y - 24.0).abs() < 0.002, "{body:?}");
+        assert_eq!(collision_normal, Some(Vector3::new(-1.0, 0.0, 0.0)));
     }
 
     #[test]
@@ -637,12 +672,20 @@ mod tests {
             Vector3::new(0.0, 0.0, -8.0),
         ));
         assert!((floor.pose.coords.z - 1.0).abs() < 0.002);
-        let ceiling = solved(solve(
+        let PhysicalFlyOutcome::Solved {
+            body: ceiling,
+            collision_normal,
+            ..
+        } = solve(
             &scene,
             body(Vector3::new(50.0, 50.0, 5.0)),
             Vector3::new(0.0, 0.0, 8.0),
-        ));
+        )
+        else {
+            panic!("ceiling solve did not complete")
+        };
         assert!((ceiling.pose.coords.z - 9.0).abs() < 0.002);
+        assert_eq!(collision_normal, Some(Vector3::new(0.0, 0.0, -1.0)));
     }
 
     #[test]

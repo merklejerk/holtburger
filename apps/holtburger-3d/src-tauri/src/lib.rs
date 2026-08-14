@@ -23,6 +23,7 @@ pub mod cell_struct_projection;
 mod env_cell_source;
 pub mod gfx_obj_geometry;
 mod host_camera_runtime;
+mod host_fixed_tick_runtime;
 mod host_simulation_runtime;
 pub mod interior_seam;
 mod landblock_source_batch;
@@ -725,24 +726,47 @@ async fn start_physical_camera(
     app: tauri::AppHandle,
     runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
     registration: host_camera_runtime::PhysicalCameraRegistration,
-) -> Result<u64, String> {
+) -> Result<host_camera_runtime::PhysicalCameraStartReceipt, String> {
     let runtime = Arc::clone(&runtime);
+    let mode = registration.control.mode();
     let registration_runtime = Arc::clone(&runtime);
     let session = tokio::task::spawn_blocking(move || registration_runtime.start(registration))
         .await
         .map_err(|error| format!("physical camera registration task failed: {error}"))?
         .map_err(format_error)?;
-    host_camera_runtime::spawn_tick_loop(app, runtime, session);
-    Ok(session)
+    if !runtime.schedule(app, session) {
+        return Err("physical camera registration was superseded before scheduling".to_string());
+    }
+    host_camera_runtime::PhysicalCameraStartReceipt::new(session, mode).map_err(format_error)
 }
 
 /// Replaces the world-space velocity consumed by the next fixed host tick.
 #[tauri::command]
-fn set_physical_camera_intent(
+fn set_physical_fly_camera_intent(
     runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
-    intent: host_camera_runtime::PhysicalCameraIntent,
+    intent: host_camera_runtime::PhysicalFlyCameraIntent,
 ) -> Result<(), String> {
-    runtime.set_intent(intent).map_err(format_error)
+    runtime
+        .set_physical_fly_intent(intent)
+        .map_err(format_error)
+}
+
+/// Replaces the semantic drive/view snapshot consumed by grounded character control.
+#[tauri::command]
+fn set_grounded_camera_drive(
+    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
+    intent: host_camera_runtime::GroundedCameraDriveIntent,
+) -> Result<(), String> {
+    runtime.set_grounded_drive(intent).map_err(format_error)
+}
+
+/// Queues one ordered grounded jump/reset edge for the next fixed host tick.
+#[tauri::command]
+fn queue_grounded_camera_event(
+    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
+    request: host_camera_runtime::GroundedCameraEventRequest,
+) -> Result<host_camera_runtime::GroundedCameraQueueResult, String> {
+    runtime.queue_grounded_event(request).map_err(format_error)
 }
 
 /// Returns position authority to frontend free fly and invalidates the old tick generation.
@@ -779,38 +803,6 @@ fn start_simulation_interest_session(
     runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
 ) -> u64 {
     runtime.reserve_interest_session()
-}
-
-/// Registers one arbitrary frontend-owned physical body without presentation policy.
-#[tauri::command]
-async fn register_frontend_physical_body(
-    app: tauri::AppHandle,
-    runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
-    registration: host_simulation_runtime::FrontendPhysicalBodyRegistration,
-) -> Result<host_simulation_runtime::HostSpatialBodyId, String> {
-    let runtime_for_registration = Arc::clone(&runtime);
-    let body_id = tokio::task::spawn_blocking(move || {
-        runtime_for_registration
-            .register_frontend_physical_body(&registration, std::time::Instant::now())
-    })
-    .await
-    .map_err(|error| format!("physical-body registration task failed: {error}"))?
-    .map_err(format_error)?;
-    host_simulation_runtime::emit_body_activity_events(&app, &runtime).map_err(format_error)?;
-    Ok(body_id.into())
-}
-
-/// Removes exactly one host-allocated frontend-owned physical body.
-#[tauri::command]
-fn unregister_frontend_physical_body(
-    runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
-    body_id: u64,
-) -> Result<(), String> {
-    runtime
-        .remove_body(holtburger_world::SpatialBodyId::Ephemeral(body_id))
-        .with_context(|| format!("frontend physical body {body_id} is not registered"))
-        .map(|_| ())
-        .map_err(format_error)
 }
 
 fn surface_texture_asset_id(texture_id: u32) -> String {
@@ -1220,22 +1212,32 @@ pub fn run() {
         .expect("failed to initialize Holtburger 3D content repository from configured content");
     let collision_source: Arc<dyn host_simulation_runtime::CollisionSource> =
         content_state.service.clone();
-    let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
+    let simulation = Arc::new(host_simulation_runtime::HostSimulationRuntime::new(
         collision_source,
     ));
-    let simulation = camera_runtime.simulation_runtime();
+    let fixed_tick_runtime = Arc::new(host_fixed_tick_runtime::HostFixedTickRuntime::new());
+    let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
+        Arc::clone(&simulation),
+        Arc::clone(&fixed_tick_runtime),
+    ));
+    let fixed_tick_runtime_for_setup = Arc::clone(&fixed_tick_runtime);
     tauri::Builder::default()
+        .setup(move |_| {
+            fixed_tick_runtime_for_setup.spawn();
+            Ok(())
+        })
         .manage(content_state)
         .manage(simulation)
+        .manage(fixed_tick_runtime)
         .manage(camera_runtime)
         .invoke_handler(tauri::generate_handler![
             host_status,
             start_simulation_interest_session,
             replace_simulation_interest,
-            register_frontend_physical_body,
-            unregister_frontend_physical_body,
             start_physical_camera,
-            set_physical_camera_intent,
+            set_physical_fly_camera_intent,
+            set_grounded_camera_drive,
+            queue_grounded_camera_event,
             stop_physical_camera,
             load_active_region_data,
             load_animation,

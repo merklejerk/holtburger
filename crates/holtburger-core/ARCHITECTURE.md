@@ -38,11 +38,17 @@ The core crate exposes two layers of client-facing behavior:
 
 Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
 
-The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines resolved movement commands built around `MotionState`, plus one-shot `SnapFacing` and `Stop`. [src/client/movement.rs](src/client/movement.rs) remains the sole executor that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
+The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines resolved movement commands built around a composite `MotionState`, plus one-shot `SnapFacing` and `Stop`. A motion state represents longitudinal, lateral, and turn axes independently, so diagonal translation does not require a named locomotion variant. [src/client/movement/mod.rs](src/client/movement/mod.rs) remains the sole executor boundary that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
+
+[src/client/character_motion.rs](src/client/character_motion.rs) provides the reusable, clock-free character input interpreter. It accepts replaceable semantic drive snapshots and monotonically sequenced jump lifecycle edges, suppresses translation during a standing-long-jump charge, and emits an actor-neutral `JumpAttempt`. Frontends retain raw-key arbitration, charge timing, and presentation; actor-specific resolvers retain eligibility and launch-kinematics policy; world physics retains velocity and contact authority.
+
+[src/client/character_kinematics.rs](src/client/character_kinematics.rs) owns validated actor-specific movement and jump capabilities. Motion-table base speeds remain separate from the effective run-rate scalar supplied by the actor-owning layer, so skill, burden, enchantment, and exhaustion policy do not leak into the controller or physical body.
+
+[src/client/character_jump.rs](src/client/character_jump.rs) is the pure release-time resolver. Charge timing and launch capability deliberately do not share a profile: `JumpChargeProfile` describes the frontend gesture, while each call to `resolve_character_jump` receives fresh `CharacterJumpKinematics`. This permits a future actor adapter to sample mutable capabilities and resource policy for every accepted attempt without teaching the interpreter about skills or caching those facts on a physical body. The resolver computes one `ResolvedJump`; later orchestration must pass that same result to local launch and packet construction instead of deriving either velocity again. Gameplay capability sourcing, resource transactions, packet emission, and player prediction remain outside this contract.
 
 The public boundary is `MovementCommand`:
 
-- `MovementCommand::SetMotion` expresses one continuous resolved locomotion and turning state.
+- `MovementCommand::SetMotion` expresses one continuous resolved longitudinal, lateral, gait, and turning state.
 - `MovementCommand::PulseMotion` expresses a resolved state with an explicit expiry.
 - `MovementCommand::SnapFacing` and `MovementCommand::Stop` remain one-shot primitives.
 - `MovementSystem` ingests those commands, coalesces them at the physics boundary, and decides on tick whether a `MoveToState`, stop pulse, or `AutonomousPosition` sync is actually required.
@@ -90,7 +96,7 @@ It intentionally does not standardize a scheduler, claim system, universal reaso
 #### Auth & Connection ([src/client/auth.rs](src/client/auth.rs))
 Manages the multi-stage handshake with GLS (Global Login Service) and the World server. Handles ticket exchange and character selection.
 
-#### Movement ([src/client/movement.rs](src/client/movement.rs))
+#### Movement ([src/client/movement/mod.rs](src/client/movement/mod.rs))
 The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, calculates client-side prediction, and pushes reliable synchronization with the server's authoritative position.
 
 Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-controlled movement reconciliation. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
@@ -109,8 +115,9 @@ Movement in `holtburger-core` should converge on three distinct layers:
     - Decide when locomotion intent actually implies a new server-visible movement edge or clear.
 2. **Primitive client actions**
     - Set heading through a one-shot snap-facing command when a frontend wants an immediate observer-visible reorientation.
-    - Start, pulse, or stop locomotion through resolved `MovementCommand` values backed by one `MotionState`.
-    - Express turning and locomotion together in one coherent actuator state while still allowing turn-only motion.
+    - Start, pulse, or stop locomotion through resolved `MovementCommand` values backed by one composite `MotionState`.
+    - Express longitudinal, lateral, and turning axes together in one coherent actuator state while still allowing turn-only motion.
+    - Interpret ordered jump lifecycle edges without owning keyboard state, a charge clock, actor capabilities, or body physics.
 3. **Optional reusable controllers**
     - Approach target until arrival distance.
     - Follow or maintain range.

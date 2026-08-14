@@ -1018,7 +1018,7 @@ fn probe_explicit_grounded_route(
             rotation: Quaternion::identity(),
         },
         cell: route.cell,
-        fall_velocity: 0.0,
+        velocity: Vector3::zero(),
         support: None,
     };
     let support_center = route.start + route.spheres.support.center;
@@ -1101,7 +1101,9 @@ fn emit_grounded_route_tick(
         GroundedRequest {
             body: request.body,
             spheres,
-            drive_velocity: request.requested_velocity,
+            supported_velocity: request.requested_velocity,
+            may_step_down: true,
+            retain_supported_gravity: false,
             delta_seconds: HOST_TICK_SECONDS,
         },
     )?;
@@ -1122,7 +1124,7 @@ fn emit_grounded_route_tick(
             };
             let support_normal = format_ground_support(&body);
             println!(
-                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} grounded={} support_normal={support_normal} fall_velocity={:.6} constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} grounded={} support_normal={support_normal} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
                 start.x,
                 start.y,
                 start.z,
@@ -1137,7 +1139,9 @@ fn emit_grounded_route_tick(
                 achieved_velocity.z,
                 format_cell(body.cell),
                 body.support.is_some(),
-                body.fall_velocity,
+                body.velocity.x,
+                body.velocity.y,
+                body.velocity.z,
             );
             Ok(GroundedRouteTick::Solved(body))
         }
@@ -1161,13 +1165,15 @@ fn emit_grounded_route_tick(
             constraint_count,
         } => {
             println!(
-                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} grounded={} fall_velocity={:.6} constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} grounded={} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
                 body.pose.coords.x,
                 body.pose.coords.y,
                 body.pose.coords.z,
                 format_cell(body.cell),
                 body.support.is_some(),
-                body.fall_velocity,
+                body.velocity.x,
+                body.velocity.y,
+                body.velocity.z,
             );
             Ok(GroundedRouteTick::Stopped)
         }
@@ -1356,7 +1362,7 @@ fn probe_grounded_outside_portals(
     } else {
         if let Some((waypoint, direction, trace)) = traversable_pair.first() {
             println!(
-                "grounded_route pair_unsettled cell=0x{:08X} portal={} direction=({:.3},{:.3}) final_cell={} final=({:.3},{:.3},{:.3}) fall_velocity={:.3} constraints={}",
+                "grounded_route pair_unsettled cell=0x{:08X} portal={} direction=({:.3},{:.3}) final_cell={} final=({:.3},{:.3},{:.3}) body_velocity=({:.3},{:.3},{:.3}) constraints={}",
                 waypoint.cell,
                 waypoint.portal_index,
                 direction.x,
@@ -1368,7 +1374,9 @@ fn probe_grounded_outside_portals(
                 trace.body.pose.coords.x,
                 trace.body.pose.coords.y,
                 trace.body.pose.coords.z,
-                trace.body.fall_velocity,
+                trace.body.velocity.x,
+                trace.body.velocity.y,
+                trace.body.velocity.z,
                 trace.constraint_count,
             );
         } else {
@@ -1420,7 +1428,9 @@ fn exit_outside_portal(
             GroundedRequest {
                 body,
                 spheres,
-                drive_velocity: entry_direction * -WALK_SPEED,
+                supported_velocity: entry_direction * -WALK_SPEED,
+                may_step_down: true,
+                retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
             },
         )?)?;
@@ -1564,7 +1574,7 @@ fn traverse_outside_portal(
         }
         .normalize_outdoor_cell(),
         cell: None,
-        fall_velocity: 0.0,
+        velocity: Vector3::zero(),
         support: None,
     };
     let registration = match scene.transit_cell(CellTransitRequest {
@@ -1598,7 +1608,9 @@ fn traverse_outside_portal(
             GroundedRequest {
                 body,
                 spheres,
-                drive_velocity: Vector3::zero(),
+                supported_velocity: Vector3::zero(),
+                may_step_down: true,
+                retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
             },
         )?)
@@ -1637,7 +1649,9 @@ fn traverse_outside_portal(
             GroundedRequest {
                 body,
                 spheres,
-                drive_velocity: direction * WALK_SPEED,
+                supported_velocity: direction * WALK_SPEED,
+                may_step_down: true,
+                retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
             },
         )?)

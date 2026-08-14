@@ -53,12 +53,18 @@ pub struct AutonomousDriveIntent {
     pub force_grounded: bool,
 }
 
+/// Signed character motion along the facing axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Locomotion {
+pub enum LongitudinalMotion {
     Forward,
-    Backstep,
-    StrafeLeft,
-    StrafeRight,
+    Backward,
+}
+
+/// Signed character motion perpendicular to the facing axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LateralMotion {
+    Left,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,18 +76,23 @@ pub enum Turn {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionState {
     pub gait: Gait,
-    pub locomotion: Option<Locomotion>,
+    /// Active forward/backward motion, independent from sidestepping.
+    pub longitudinal: Option<LongitudinalMotion>,
+    /// Active sidestep motion, independent from forward/backward motion.
+    pub lateral: Option<LateralMotion>,
     pub turning: Option<Turn>,
-    pub turn_speed: Option<f32>,
+    /// Explicit animation-rate scalar for turn motion; gait supplies retail's default when absent.
+    pub turn_rate_scalar: Option<f32>,
 }
 
 impl Default for MotionState {
     fn default() -> Self {
         Self {
             gait: Gait::Walk,
-            locomotion: None,
+            longitudinal: None,
+            lateral: None,
             turning: None,
-            turn_speed: None,
+            turn_rate_scalar: None,
         }
     }
 }
@@ -89,6 +100,20 @@ impl Default for MotionState {
 impl MotionState {
     pub fn builder() -> MotionStateBuilder {
         MotionStateBuilder::default()
+    }
+
+    /// Returns whether any translation or turn command is active.
+    pub fn is_stationary(self) -> bool {
+        self.longitudinal.is_none() && self.lateral.is_none() && self.turning.is_none()
+    }
+
+    /// Removes translation while retaining gait and facing control.
+    pub fn without_translation(self) -> Self {
+        Self {
+            longitudinal: None,
+            lateral: None,
+            ..self
+        }
     }
 }
 
@@ -109,22 +134,22 @@ impl MotionStateBuilder {
     }
 
     pub fn forward(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::Forward);
+        self.state.longitudinal = Some(LongitudinalMotion::Forward);
         self
     }
 
     pub fn backstep(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::Backstep);
+        self.state.longitudinal = Some(LongitudinalMotion::Backward);
         self
     }
 
     pub fn strafe_left(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::StrafeLeft);
+        self.state.lateral = Some(LateralMotion::Left);
         self
     }
 
     pub fn strafe_right(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::StrafeRight);
+        self.state.lateral = Some(LateralMotion::Right);
         self
     }
 
@@ -138,8 +163,8 @@ impl MotionStateBuilder {
         self
     }
 
-    pub fn with_turn_speed(mut self, turn_speed: f32) -> Self {
-        self.state.turn_speed = Some(turn_speed);
+    pub fn with_turn_rate_scalar(mut self, turn_rate_scalar: f32) -> Self {
+        self.state.turn_rate_scalar = Some(turn_rate_scalar);
         self
     }
 
@@ -207,13 +232,14 @@ mod tests {
             .run()
             .forward()
             .turn_left()
-            .with_turn_speed(1.25)
+            .with_turn_rate_scalar(1.25)
             .build();
 
         assert_eq!(state.gait, Gait::Run);
-        assert_eq!(state.locomotion, Some(Locomotion::Forward));
+        assert_eq!(state.longitudinal, Some(LongitudinalMotion::Forward));
+        assert_eq!(state.lateral, None);
         assert_eq!(state.turning, Some(Turn::Left));
-        assert_eq!(state.turn_speed, Some(1.25));
+        assert_eq!(state.turn_rate_scalar, Some(1.25));
     }
 
     #[test]
@@ -221,9 +247,10 @@ mod tests {
         let state = MotionState::default();
 
         assert_eq!(state.gait, Gait::Walk);
-        assert_eq!(state.locomotion, None);
+        assert_eq!(state.longitudinal, None);
+        assert_eq!(state.lateral, None);
         assert_eq!(state.turning, None);
-        assert_eq!(state.turn_speed, None);
+        assert_eq!(state.turn_rate_scalar, None);
     }
 
     #[test]
@@ -236,9 +263,10 @@ mod tests {
             intent,
             PlayerDriveIntent::ManualHeld(MotionState {
                 gait: Gait::Run,
-                locomotion: Some(Locomotion::Forward),
+                longitudinal: Some(LongitudinalMotion::Forward),
+                lateral: None,
                 turning: Some(Turn::Right),
-                turn_speed: None,
+                turn_rate_scalar: None,
             })
         );
     }
@@ -255,9 +283,10 @@ mod tests {
             PlayerDriveIntent::ManualPulse {
                 state: MotionState {
                     gait: Gait::Walk,
-                    locomotion: Some(Locomotion::Forward),
+                    longitudinal: Some(LongitudinalMotion::Forward),
+                    lateral: None,
                     turning: None,
-                    turn_speed: None,
+                    turn_rate_scalar: None,
                 },
                 duration: Duration::from_millis(120),
             }

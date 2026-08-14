@@ -23,15 +23,39 @@ use super::{
     remember_next_sliding_normal, settle_candidate, solve_grounded, step_up_candidate,
 };
 use crate::spatial::collision::CollisionScene;
+use crate::spatial::physical_body::grounded_step_down_enabled;
 use crate::{
-    CellTransitRequest, CollisionPlacement, CollisionQuery, CoverageRequest, EdgeProtection,
-    GroundedObstructionRequest, SupportRequest,
+    CellTransitRequest, CollisionPlacement, CollisionQuery, ContactState, CoverageRequest,
+    EdgeProtection, GroundedObstructionRequest, SupportRequest,
 };
 use holtburger_common::position::WorldPosition;
 
 const LANDBLOCK: u32 = 0xda55_ffff;
 const RETAIL_EPSILON: f32 = 0.000_2;
 const TEST_EPSILON: f32 = 0.000_01;
+
+/// Retail's ordinary step-down branch requires OBJECTINFO contact-state bit 1.
+fn retail_ordinary_step_down_enabled(has_contact: bool, leave_ground: bool) -> bool {
+    has_contact && !leave_ground
+}
+
+#[test]
+fn upward_launch_clears_retail_walking_step_down_while_initial_classification_may_probe() {
+    for (contact, launching, retail_has_contact) in [
+        (ContactState::Grounded, false, true),
+        (ContactState::Grounded, true, true),
+        (ContactState::Airborne, false, false),
+    ] {
+        assert_eq!(
+            grounded_step_down_enabled(contact, launching),
+            retail_ordinary_step_down_enabled(retail_has_contact, launching),
+        );
+    }
+
+    // Holtburger's explicit Unknown state exists only before the first collision transaction; it
+    // must probe support once so a newly registered body can classify a floor beneath it.
+    assert!(grounded_step_down_enabled(ContactState::Unknown, false));
+}
 
 #[derive(Debug, Clone, Copy)]
 struct RetailPolygon<'a> {
@@ -306,7 +330,7 @@ fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
             }
             .normalize_outdoor_cell(),
             cell: None,
-            fall_velocity: 0.0,
+            velocity: Vector3::zero(),
             support: None,
         };
         let mut config = grounded_config();
@@ -543,7 +567,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
             rotation: Quaternion::identity(),
         },
         cell: Some(Guid(CELL)),
-        fall_velocity: 0.0,
+        velocity: Vector3::zero(),
         support: Some(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         }),
@@ -631,7 +655,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         }
         .normalize_outdoor_cell(),
         cell: None,
-        fall_velocity: 0.0,
+        velocity: Vector3::zero(),
         support: Some(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         }),
@@ -795,13 +819,15 @@ fn zero_adjustment_edge_routes_to_retail_precipice_slide_instead_of_ratcheting_d
                 }
                 .normalize_outdoor_cell(),
                 cell: None,
-                fall_velocity: 0.0,
+                velocity: Vector3::zero(),
                 support: Some(GroundSupport {
                     normal: Vector3::new(0.0, 0.0, 1.0),
                 }),
             },
             spheres: grounded_pair(),
-            drive_velocity: requested_velocity,
+            supported_velocity: requested_velocity,
+            may_step_down: true,
+            retain_supported_gravity: false,
             delta_seconds: 1.0,
         },
     )
@@ -886,7 +912,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
                 rotation: Quaternion::identity(),
             },
             cell: Some(Guid(FIRST_CELL)),
-            fall_velocity: 0.0,
+            velocity: Vector3::zero(),
             support: Some(GroundSupport {
                 normal: Vector3::new(0.0, 0.0, 1.0),
             }),
@@ -903,7 +929,9 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
                 GroundedRequest {
                     body,
                     spheres: grounded_pair(),
-                    drive_velocity: Vector3::new(speed, 0.0, 0.0),
+                    supported_velocity: Vector3::new(speed, 0.0, 0.0),
+                    may_step_down: true,
+                    retain_supported_gravity: false,
                     delta_seconds: 1.0 / 30.0,
                 },
             )
@@ -931,7 +959,9 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
             GroundedRequest {
                 body,
                 spheres: grounded_pair(),
-                drive_velocity: Vector3::new(-1.0, 0.0, 0.0),
+                supported_velocity: Vector3::new(-1.0, 0.0, 0.0),
+                may_step_down: true,
+                retain_supported_gravity: false,
                 delta_seconds: 1.0 / 30.0,
             },
         )
@@ -1040,13 +1070,15 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
                     rotation: Quaternion::identity(),
                 },
                 cell: Some(Guid(SAFE_CELL)),
-                fall_velocity: 0.0,
+                velocity: Vector3::zero(),
                 support: Some(GroundSupport {
                     normal: Vector3::new(0.0, 0.0, 1.0),
                 }),
             },
             spheres: grounded_pair(),
-            drive_velocity,
+            supported_velocity: drive_velocity,
+            may_step_down: true,
+            retain_supported_gravity: false,
             delta_seconds,
         },
     )
@@ -1074,7 +1106,9 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
         GroundedRequest {
             body,
             spheres: grounded_pair(),
-            drive_velocity: retreat_velocity,
+            supported_velocity: retreat_velocity,
+            may_step_down: true,
+            retain_supported_gravity: false,
             delta_seconds,
         },
     )
@@ -1121,7 +1155,7 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
             }
             .normalize_outdoor_cell(),
             cell: None,
-            fall_velocity: 0.0,
+            velocity: Vector3::zero(),
             support: Some(GroundSupport {
                 normal: Vector3::new(0.0, 0.0, 1.0),
             }),
@@ -1183,7 +1217,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         }
         .normalize_outdoor_cell(),
         cell: None,
-        fall_velocity: 0.0,
+        velocity: Vector3::zero(),
         support: Some(support),
     };
     let blocked = solve_grounded(
@@ -1192,7 +1226,9 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         GroundedRequest {
             body: body.clone(),
             spheres: grounded_pair(),
-            drive_velocity: Vector3::new(1.0, 0.0, 0.0),
+            supported_velocity: Vector3::new(1.0, 0.0, 0.0),
+            may_step_down: true,
+            retain_supported_gravity: false,
             delta_seconds: 0.5,
         },
     )
@@ -1212,7 +1248,9 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         GroundedRequest {
             body: blocked,
             spheres: grounded_pair(),
-            drive_velocity: Vector3::new(-1.0, 0.0, 0.0),
+            supported_velocity: Vector3::new(-1.0, 0.0, 0.0),
+            may_step_down: true,
+            retain_supported_gravity: false,
             delta_seconds: 0.5,
         },
     )
@@ -1264,7 +1302,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         }
         .normalize_outdoor_cell(),
         cell: None,
-        fall_velocity: 0.0,
+        velocity: Vector3::zero(),
         support: Some(GroundSupport {
             normal: upper_normal,
         }),
@@ -1295,7 +1333,9 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         GroundedRequest {
             body,
             spheres,
-            drive_velocity: Vector3::zero(),
+            supported_velocity: Vector3::zero(),
+            may_step_down: true,
+            retain_supported_gravity: false,
             delta_seconds: 1.0 / 30.0,
         },
     )
@@ -1336,7 +1376,7 @@ fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
         }
         .normalize_outdoor_cell(),
         cell: None,
-        fall_velocity: 0.0,
+        velocity: Vector3::zero(),
         support: Some(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         }),
@@ -1422,7 +1462,7 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
                         }
                         .normalize_outdoor_cell(),
                         cell: None,
-                        fall_velocity: 0.0,
+                        velocity: Vector3::zero(),
                         support: Some(GroundSupport {
                             normal: Vector3::new(0.0, 0.0, 1.0),
                         }),
@@ -1433,7 +1473,9 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
                         GroundedRequest {
                             body,
                             spheres: grounded_pair(),
-                            drive_velocity: Vector3::new(1.0, lateral_velocity, 0.0),
+                            supported_velocity: Vector3::new(1.0, lateral_velocity, 0.0),
+                            may_step_down: true,
+                            retain_supported_gravity: false,
                             delta_seconds: 0.5,
                         },
                     )

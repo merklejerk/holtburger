@@ -6,6 +6,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
 mod builder;
+pub mod character_jump;
+pub mod character_kinematics;
+pub mod character_motion;
 mod character_selection;
 mod commands;
 mod messages;

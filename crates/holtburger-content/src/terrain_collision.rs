@@ -24,6 +24,35 @@ pub struct TerrainCollisionTriangle {
 pub struct TerrainCollisionCell {
     /// The exact two triangles selected by retail's diagonal rule.
     pub triangles: [TerrainCollisionTriangle; 2],
+    /// Authored water coverage retained for point-dependent physical contact depth.
+    pub water: TerrainWaterCoverage,
+}
+
+/// Water-bearing terrain vertices for one partially flooded cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerrainWaterVertices {
+    /// Whether the southwest terrain vertex uses a water surface type.
+    pub southwest: bool,
+    /// Whether the southeast terrain vertex uses a water surface type.
+    pub southeast: bool,
+    /// Whether the northwest terrain vertex uses a water surface type.
+    pub northwest: bool,
+    /// Whether the northeast terrain vertex uses a water surface type.
+    pub northeast: bool,
+}
+
+/// Authored water coverage derived from the four terrain vertices of one cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainWaterCoverage {
+    /// No terrain vertex uses a water surface type.
+    Dry,
+    /// The cell mixes water and non-water terrain vertices.
+    PartiallyFlooded {
+        /// Exact corner classification used by retail's point-dependent depth lookup.
+        vertices: TerrainWaterVertices,
+    },
+    /// Every terrain vertex uses a water surface type.
+    FullyFlooded,
 }
 
 /// Canonical terrain collision geometry for one outdoor landblock.
@@ -57,6 +86,11 @@ impl TerrainCollisionSurface {
             terrain.heights.iter().all(|height| height.is_finite()),
             "terrain collision received a non-finite height"
         );
+        ensure!(
+            terrain.terrain_samples.len() == expected_samples,
+            "terrain collision received {} terrain samples; expected {expected_samples}",
+            terrain.terrain_samples.len()
+        );
 
         let mut cells = Vec::with_capacity(TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS);
         for row in 0..TERRAIN_GRID_CELLS {
@@ -81,11 +115,46 @@ impl TerrainCollisionSurface {
                 };
                 cells.push(TerrainCollisionCell {
                     triangles: vertices.map(TerrainCollisionTriangle::from_vertices),
+                    water: terrain_water_coverage(terrain, column, row),
                 });
             }
         }
         Ok(Self { cells })
     }
+}
+
+fn terrain_water_coverage(
+    terrain: &LandblockTerrain,
+    column: usize,
+    row: usize,
+) -> TerrainWaterCoverage {
+    let vertices = TerrainWaterVertices {
+        southwest: terrain_vertex_is_water(terrain, column, row),
+        southeast: terrain_vertex_is_water(terrain, column + 1, row),
+        northwest: terrain_vertex_is_water(terrain, column, row + 1),
+        northeast: terrain_vertex_is_water(terrain, column + 1, row + 1),
+    };
+    let water_count = [
+        vertices.southwest,
+        vertices.southeast,
+        vertices.northwest,
+        vertices.northeast,
+    ]
+    .into_iter()
+    .filter(|water| *water)
+    .count();
+    match water_count {
+        0 => TerrainWaterCoverage::Dry,
+        4 => TerrainWaterCoverage::FullyFlooded,
+        _ => TerrainWaterCoverage::PartiallyFlooded { vertices },
+    }
+}
+
+fn terrain_vertex_is_water(terrain: &LandblockTerrain, column: usize, row: usize) -> bool {
+    // Retail's fixed `SurfChar` table marks terrain types 16 through 20 as water
+    // (`CLandBlockStruct::CalcCellWater`, acclient.c:339033-339100).
+    let terrain_type = (terrain.terrain_samples[row * terrain.grid_size + column] >> 2) & 0x1f;
+    (0x10..=0x14).contains(&terrain_type)
 }
 
 impl TerrainCollisionTriangle {
@@ -143,8 +212,37 @@ mod tests {
                         .iter()
                         .all(|triangle| triangle.normal.z > 0.0)
                 );
+                assert_eq!(cell.water, TerrainWaterCoverage::Dry);
             }
         }
+    }
+
+    #[test]
+    fn preserves_retail_water_coverage_and_corner_order() {
+        const WATER_SAMPLE: u16 = 0x10 << 2;
+
+        let mut partial = terrain(0xda55_ffff);
+        partial.terrain_samples[0] = WATER_SAMPLE;
+        partial.terrain_samples[10] = WATER_SAMPLE;
+        let surface = TerrainCollisionSurface::from_terrain(&partial).unwrap();
+        assert_eq!(
+            surface.cells[0].water,
+            TerrainWaterCoverage::PartiallyFlooded {
+                vertices: TerrainWaterVertices {
+                    southwest: true,
+                    southeast: false,
+                    northwest: false,
+                    northeast: true,
+                }
+            }
+        );
+
+        let mut flooded = terrain(0xda55_ffff);
+        for index in [0, 1, 9, 10] {
+            flooded.terrain_samples[index] = WATER_SAMPLE;
+        }
+        let surface = TerrainCollisionSurface::from_terrain(&flooded).unwrap();
+        assert_eq!(surface.cells[0].water, TerrainWaterCoverage::FullyFlooded);
     }
 
     #[test]
@@ -180,8 +278,12 @@ mod tests {
 
     #[test]
     fn rejects_malformed_canonical_terrain() {
-        let mut terrain = terrain(0xda55_ffff);
-        terrain.heights.pop();
-        assert!(TerrainCollisionSurface::from_terrain(&terrain).is_err());
+        let mut malformed_heights = terrain(0xda55_ffff);
+        malformed_heights.heights.pop();
+        assert!(TerrainCollisionSurface::from_terrain(&malformed_heights).is_err());
+
+        let mut malformed_samples = terrain(0xda55_ffff);
+        malformed_samples.terrain_samples.pop();
+        assert!(TerrainCollisionSurface::from_terrain(&malformed_samples).is_err());
     }
 }

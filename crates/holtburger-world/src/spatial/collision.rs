@@ -7,7 +7,8 @@ use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
     CellCollisionPortal, CellCollisionPortalTarget, CellVolume, LandblockCollisionAsset,
-    PlacedCollider, StaticColliderPlacement, TerrainCollisionTriangle,
+    PlacedCollider, StaticColliderPlacement, TerrainCollisionCell, TerrainCollisionTriangle,
+    TerrainWaterCoverage,
 };
 use thiserror::Error;
 
@@ -17,6 +18,14 @@ use super::bsp_query::{
 };
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
+// Retail water depths come from `CObjCell::get_water_depth` and
+// `CLandBlockStruct::calc_water_depth` (`acclient.c:333220-333250,339100-339180`).
+/// Retail's dry quadrant inset inside a partially flooded terrain cell.
+const PARTIAL_DRY_TERRAIN_DEPTH: f32 = 0.1;
+/// Retail's water quadrant inset inside a partially flooded terrain cell.
+const PARTIAL_WATER_TERRAIN_DEPTH: f32 = 0.45;
+/// Retail's contact inset for a fully flooded terrain cell.
+const FULL_WATER_TERRAIN_DEPTH: f32 = 0.9;
 
 /// Why a collision query cannot safely answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -870,7 +879,7 @@ impl CollisionScene {
                 for cell in &asset.terrain.cells {
                     for triangle in &cell.triangles {
                         if let Some(contact) =
-                            terrain_contact(triangle, local_center, request.sweep.radius)
+                            terrain_contact(cell, triangle, local_center, request.sweep.radius)
                             && movement.dot(&contact.normal) <= 0.0
                         {
                             contacts.push(GroundedObstruction {
@@ -987,9 +996,10 @@ impl CollisionScene {
             if request.placement.reaches_outdoors {
                 for cell in &asset.terrain.cells {
                     for triangle in &cell.triangles {
-                        let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
+                        let vertices = terrain_contact_vertices(cell, triangle, local_center);
+                        let plane_d = -triangle.normal.dot(&vertices[0]);
                         if let Some(support) = support_on_polygon(
-                            &triangle.vertices,
+                            &vertices,
                             triangle.normal,
                             plane_d,
                             local_center,
@@ -1662,7 +1672,7 @@ impl CollisionScene {
             if placement.reaches_outdoors {
                 for cell in &asset.terrain.cells {
                     for triangle in &cell.triangles {
-                        if let Some(contact) = terrain_contact(triangle, local_center, radius)
+                        if let Some(contact) = terrain_contact(cell, triangle, local_center, radius)
                             && movement.is_none_or(|delta| delta.dot(&contact.normal) < 0.0)
                         {
                             contacts.push(StaticContact {
@@ -2056,11 +2066,13 @@ fn containing_reached_cell(
 }
 
 fn terrain_contact(
+    cell: &TerrainCollisionCell,
     triangle: &TerrainCollisionTriangle,
     center: Vector3,
     radius: f32,
 ) -> Option<StaticContact> {
-    let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
+    let vertices = terrain_contact_vertices(cell, triangle, center);
+    let plane_d = -triangle.normal.dot(&vertices[0]);
     let distance = triangle.normal.dot(&center) + plane_d;
     // Use the same authored-contact tolerance as polygon queries. A support probe followed by
     // placement confirmation can differ by a few float ULPs at exact tangency; reporting that as
@@ -2069,13 +2081,61 @@ fn terrain_contact(
         return None;
     }
     let projected = center - triangle.normal * distance;
-    if !point_in_triangle(projected, triangle.vertices, triangle.normal) {
+    if !point_in_triangle(projected, vertices, triangle.normal) {
         return None;
     }
     Some(StaticContact {
         normal: triangle.normal,
         depth: radius - distance,
     })
+}
+
+fn terrain_contact_vertices(
+    cell: &TerrainCollisionCell,
+    triangle: &TerrainCollisionTriangle,
+    point: Vector3,
+) -> [Vector3; 3] {
+    let depth = terrain_water_depth(cell, point);
+    if depth <= f32::EPSILON {
+        return triangle.vertices;
+    }
+    // Retail adds water depth to the authored plane-distance equation, which is equivalent to
+    // lowering every terrain vertex vertically by `depth / normal.z`
+    // (`OBJECTINFO::validate_walkable`, acclient.c:302724-302849).
+    let vertical_offset = Vector3::new(0.0, 0.0, depth / triangle.normal.z);
+    triangle.vertices.map(|vertex| vertex - vertical_offset)
+}
+
+fn terrain_water_depth(cell: &TerrainCollisionCell, point: Vector3) -> f32 {
+    match cell.water {
+        TerrainWaterCoverage::Dry => 0.0,
+        TerrainWaterCoverage::FullyFlooded => FULL_WATER_TERRAIN_DEPTH,
+        TerrainWaterCoverage::PartiallyFlooded { vertices } => {
+            let mut minimum_x = f32::INFINITY;
+            let mut maximum_x = f32::NEG_INFINITY;
+            let mut minimum_y = f32::INFINITY;
+            let mut maximum_y = f32::NEG_INFINITY;
+            for vertex in cell.triangles.iter().flat_map(|triangle| triangle.vertices) {
+                minimum_x = minimum_x.min(vertex.x);
+                maximum_x = maximum_x.max(vertex.x);
+                minimum_y = minimum_y.min(vertex.y);
+                maximum_y = maximum_y.max(vertex.y);
+            }
+            let east = point.x >= (minimum_x + maximum_x) * 0.5;
+            let north = point.y >= (minimum_y + maximum_y) * 0.5;
+            let selected_is_water = match (east, north) {
+                (false, false) => vertices.southwest,
+                (true, false) => vertices.southeast,
+                (false, true) => vertices.northwest,
+                (true, true) => vertices.northeast,
+            };
+            if selected_is_water {
+                PARTIAL_WATER_TERRAIN_DEPTH
+            } else {
+                PARTIAL_DRY_TERRAIN_DEPTH
+            }
+        }
+    }
 }
 
 fn point_in_triangle(point: Vector3, vertices: [Vector3; 3], normal: Vector3) -> bool {
@@ -2497,14 +2557,92 @@ mod tests {
             ],
             normal: Vector3::new(0.0, 0.0, 1.0),
         };
+        let cell = TerrainCollisionCell {
+            triangles: [triangle.clone(), triangle.clone()],
+            water: TerrainWaterCoverage::Dry,
+        };
         assert!(
-            terrain_contact(&triangle, Vector3::new(1.0, 1.0, 0.999_9), 1.0).is_none(),
+            terrain_contact(&cell, &triangle, Vector3::new(1.0, 1.0, 0.999_9), 1.0).is_none(),
             "sub-tolerance float drift became placement penetration"
         );
         assert!(
-            terrain_contact(&triangle, Vector3::new(1.0, 1.0, 0.999), 1.0).is_some(),
+            terrain_contact(&cell, &triangle, Vector3::new(1.0, 1.0, 0.999), 1.0).is_some(),
             "meaningful terrain penetration was hidden by tolerance"
         );
+    }
+
+    #[test]
+    fn terrain_contact_vertices_match_retail_water_depth_matrix() {
+        const ORACLE_PARTIAL_DRY_DEPTH: f32 = 0.1;
+        const ORACLE_PARTIAL_WATER_DEPTH: f32 = 0.45;
+        const ORACLE_FULL_WATER_DEPTH: f32 = 0.9;
+
+        let southwest = Vector3::new(0.0, 0.0, 0.0);
+        let southeast = Vector3::new(24.0, 0.0, 0.0);
+        let northwest = Vector3::new(0.0, 24.0, 0.0);
+        let northeast = Vector3::new(24.0, 24.0, 0.0);
+        let first = TerrainCollisionTriangle {
+            vertices: [southwest, southeast, northeast],
+            normal: Vector3::new(0.0, 0.0, 1.0),
+        };
+        let second = TerrainCollisionTriangle {
+            vertices: [southwest, northeast, northwest],
+            normal: Vector3::new(0.0, 0.0, 1.0),
+        };
+        let partial = TerrainCollisionCell {
+            triangles: [first.clone(), second.clone()],
+            water: TerrainWaterCoverage::PartiallyFlooded {
+                vertices: holtburger_content::TerrainWaterVertices {
+                    southwest: true,
+                    southeast: false,
+                    northwest: false,
+                    northeast: true,
+                },
+            },
+        };
+        let partial_cases = [
+            (Vector3::new(6.0, 6.0, 0.0), -ORACLE_PARTIAL_WATER_DEPTH),
+            (Vector3::new(18.0, 6.0, 0.0), -ORACLE_PARTIAL_DRY_DEPTH),
+            (Vector3::new(6.0, 18.0, 0.0), -ORACLE_PARTIAL_DRY_DEPTH),
+            (Vector3::new(18.0, 18.0, 0.0), -ORACLE_PARTIAL_WATER_DEPTH),
+        ];
+        for (point, expected_z) in partial_cases {
+            let vertices = terrain_contact_vertices(&partial, &first, point);
+            assert!(
+                vertices
+                    .iter()
+                    .all(|vertex| (vertex.z - expected_z).abs() < f32::EPSILON)
+            );
+        }
+
+        let flooded = TerrainCollisionCell {
+            triangles: [first.clone(), second],
+            water: TerrainWaterCoverage::FullyFlooded,
+        };
+        let vertices = terrain_contact_vertices(&flooded, &first, Vector3::new(6.0, 6.0, 0.0));
+        assert!(
+            vertices
+                .iter()
+                .all(|vertex| (vertex.z + ORACLE_FULL_WATER_DEPTH).abs() < f32::EPSILON)
+        );
+
+        let sloped_first = TerrainCollisionTriangle {
+            vertices: [
+                southwest,
+                Vector3::new(24.0, 0.0, 6.0),
+                Vector3::new(24.0, 24.0, 6.0),
+            ],
+            normal: Vector3::new(-6.0, 0.0, 24.0).normalize(),
+        };
+        let flooded_slope = TerrainCollisionCell {
+            triangles: [sloped_first.clone(), flooded.triangles[1].clone()],
+            water: TerrainWaterCoverage::FullyFlooded,
+        };
+        let adjusted =
+            terrain_contact_vertices(&flooded_slope, &sloped_first, Vector3::new(6.0, 6.0, 0.0));
+        let authored_d = -sloped_first.normal.dot(&sloped_first.vertices[0]);
+        let adjusted_d = -sloped_first.normal.dot(&adjusted[0]);
+        assert!((adjusted_d - authored_d - ORACLE_FULL_WATER_DEPTH).abs() < 0.000_01);
     }
 
     #[test]

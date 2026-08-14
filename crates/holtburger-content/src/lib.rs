@@ -55,7 +55,8 @@ pub use object_collision::{
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};
 pub use terrain_collision::{
-    TerrainCollisionCell, TerrainCollisionSurface, TerrainCollisionTriangle,
+    TerrainCollisionCell, TerrainCollisionSurface, TerrainCollisionTriangle, TerrainWaterCoverage,
+    TerrainWaterVertices,
 };
 pub use terrain_topology::{TERRAIN_GRID_CELLS, TerrainCellDiagonals};
 pub use texture_pixels::{ResolvedSurfaceTexturePixels, TexturePixelFormat};

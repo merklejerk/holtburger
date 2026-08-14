@@ -93,6 +93,21 @@ out vec4 fragmentColor;
 const uint ROAD_TERRAIN_TYPE = 32u;
 const int LIGHT_GRID_CELLS = ${OUTDOOR_TERRAIN_GRID_CELLS};
 
+/**
+ * The two terrain surface coordinates a fragment needs, both in surface-field cell units.
+ *
+ * \`cell\` is cell-local [0,1) and addresses the per-cell alpha masks, whose rotation and flip math
+ * is only defined inside one cell. \`field\` is the landblock-wide coordinate of the same point, and
+ * it is what tiled color lookups must use: the two differ by a whole number of cells, so a
+ * repeat-wrapped sampler reads the identical texel while screen-space derivatives stay continuous
+ * across cell boundaries. Tiling from \`cell\` instead makes every boundary pixel quad report a
+ * full-texture derivative, collapse to the 1x1 mip, and draw a flat one-pixel seam.
+ */
+struct TerrainUv {
+	vec2 cell;
+	vec2 field;
+};
+
 // The light grid is always the landblock's authored 8x8, deliberately independent of the surface
 // field: that field's resolution drops with the LOD stride (8x8, 4x4, 2x2), so reusing its cell
 // would make a lamp's reach coarsen with distance and shift the lit area between LODs.
@@ -160,9 +175,9 @@ vec2 rotateSourceAlphaUv(vec2 uv, int rotation) {
 	return uv;
 }
 
-vec4 sampleTerrainColor(uint terrainCode, vec2 cellUv) {
+vec4 sampleTerrainColor(uint terrainCode, TerrainUv uv) {
 	uvec4 record = compositionRecord(int(terrainCode), 0);
-	return texture(uColors, vec3(fract(cellUv * float(record.y)), float(record.x)));
+	return texture(uColors, vec3(uv.field * float(record.y), float(record.x)));
 }
 
 ivec2 findTerrainMap(uint pcode, uint shapeCode) {
@@ -187,14 +202,14 @@ ivec2 findRoadMap(uint pcode, uint roadCode) {
 	return ivec2(-1, 0);
 }
 
-vec3 applyTerrainOverlay(vec3 color, uint pcode, uint terrainCode, uint shapeCode, vec2 cellUv) {
+vec3 applyTerrainOverlay(vec3 color, uint pcode, uint terrainCode, uint shapeCode, TerrainUv uv) {
 	ivec2 map = findTerrainMap(pcode, shapeCode);
 	if (map.x < 0) return color;
-	float mask = texture(uBlendMasks, vec3(rotateSourceAlphaUv(sourceAlphaUv(cellUv), map.y), float(map.x))).r;
-	return mix(color, sampleTerrainColor(terrainCode, cellUv).rgb, clamp(1.0 - mask, 0.0, 1.0));
+	float mask = texture(uBlendMasks, vec3(rotateSourceAlphaUv(sourceAlphaUv(uv.cell), map.y), float(map.x))).r;
+	return mix(color, sampleTerrainColor(terrainCode, uv).rgb, clamp(1.0 - mask, 0.0, 1.0));
 }
 
-vec3 composeTerrain(uint pcode, vec2 cellUv) {
+vec3 composeTerrain(uint pcode, TerrainUv uv) {
 	uint codes[4];
 	for (int corner = 0; corner < 4; corner += 1) codes[corner] = terrainCodeAt(pcode, corner);
 	int baseIndex = -1;
@@ -207,14 +222,14 @@ vec3 composeTerrain(uint pcode, vec2 cellUv) {
 		}
 	}
 	if (baseIndex < 0) {
-		vec3 color = sampleTerrainColor(codes[0], cellUv).rgb;
-		color = applyTerrainOverlay(color, pcode, codes[1], 2u, cellUv);
-		color = applyTerrainOverlay(color, pcode, codes[2], 4u, cellUv);
-		return applyTerrainOverlay(color, pcode, codes[3], 8u, cellUv);
+		vec3 color = sampleTerrainColor(codes[0], uv).rgb;
+		color = applyTerrainOverlay(color, pcode, codes[1], 2u, uv);
+		color = applyTerrainOverlay(color, pcode, codes[2], 4u, uv);
+		return applyTerrainOverlay(color, pcode, codes[3], 8u, uv);
 	}
 
 	uint baseCode = codes[baseIndex];
-	vec3 color = sampleTerrainColor(baseCode, cellUv).rgb;
+	vec3 color = sampleTerrainColor(baseCode, uv).rgb;
 	int firstOverlayIndex = -1;
 	uint firstShape = 0u;
 	for (int corner = 0; corner < 4; corner += 1) {
@@ -228,22 +243,22 @@ vec3 composeTerrain(uint pcode, vec2 cellUv) {
 			firstShape += 1u << uint(corner);
 			continue;
 		}
-		color = applyTerrainOverlay(color, pcode, codes[firstOverlayIndex], firstShape, cellUv);
-		return applyTerrainOverlay(color, pcode, codes[corner], 1u << uint(corner), cellUv);
+		color = applyTerrainOverlay(color, pcode, codes[firstOverlayIndex], firstShape, uv);
+		return applyTerrainOverlay(color, pcode, codes[corner], 1u << uint(corner), uv);
 	}
 	if (firstOverlayIndex >= 0) {
-		color = applyTerrainOverlay(color, pcode, codes[firstOverlayIndex], firstShape, cellUv);
+		color = applyTerrainOverlay(color, pcode, codes[firstOverlayIndex], firstShape, uv);
 	}
 	return color;
 }
 
-vec3 applyRoads(vec3 color, uint pcode, vec2 cellUv) {
+vec3 applyRoads(vec3 color, uint pcode, TerrainUv uv) {
 	uint mask = 0u;
 	for (int corner = 0; corner < 4; corner += 1) {
 		if (roadCodeAt(pcode, corner) != 0u) mask |= 1u << uint(corner);
 	}
 	if (mask == 0u) return color;
-	vec3 roadColor = sampleTerrainColor(ROAD_TERRAIN_TYPE, cellUv).rgb;
+	vec3 roadColor = sampleTerrainColor(ROAD_TERRAIN_TYPE, uv).rgb;
 	if (mask == 15u) return roadColor;
 	uint codes[2];
 	int count = 1;
@@ -257,19 +272,21 @@ vec3 applyRoads(vec3 color, uint pcode, vec2 cellUv) {
 		if (index >= count) break;
 		ivec2 map = findRoadMap(pcode, codes[index]);
 		if (map.x < 0) continue;
-		product *= texture(uRoadMasks, vec3(rotateSourceAlphaUv(sourceAlphaUv(cellUv), map.y), float(map.x))).r;
+		product *= texture(uRoadMasks, vec3(rotateSourceAlphaUv(sourceAlphaUv(uv.cell), map.y), float(map.x))).r;
 	}
 	return mix(color, roadColor, clamp(1.0 - product, 0.0, 1.0));
 }
 
 void main() {
 	ivec2 fieldSize = textureSize(uSurfaceField, 0);
-	ivec2 cell = min(ivec2(vGridUv * vec2(fieldSize)), fieldSize - ivec2(1));
+	TerrainUv uv;
+	uv.field = vGridUv * vec2(fieldSize);
+	uv.cell = fract(uv.field);
+	ivec2 cell = min(ivec2(uv.field), fieldSize - ivec2(1));
 	uint pcode = texelFetch(uSurfaceField, cell, 0).r;
-	vec2 cellUv = fract(vGridUv * vec2(fieldSize));
-	vec3 color = applyRoads(composeTerrain(pcode, cellUv), pcode, cellUv);
+	vec3 color = applyRoads(composeTerrain(pcode, uv), pcode, uv);
 	uvec4 metadata = compositionRecord(0, 4);
-	vec4 detail = texture(uDetail, fract(cellUv * float(metadata.w)));
+	vec4 detail = texture(uDetail, uv.field * float(metadata.w));
 	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
 	// Lighting modulates the complete surface albedo, then fog applies as a raster stage. The

@@ -35,6 +35,8 @@ interface PhysicalBodyDefinition {
 	readonly spheres: readonly PhysicalSphereDefinition[];
 	/** Complete initial retail response state; the host never infers camera defaults. */
 	readonly responsePolicy: PhysicalBodyResponsePolicy;
+	/** Optional collision domains ignored by this body. */
+	readonly collisionExclusions: readonly "entirely-water-barrier"[];
 	/** Implemented response semantics and finite solve configuration. */
 	readonly response:
 		| {
@@ -158,6 +160,8 @@ function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
 	if (mode === "physical-fly") {
 		return {
 			spheres: [{ center: [0, 0, 0], radius: 0.25 }],
+			// Retail exempts viewer bodies from its whole-landblock ocean restriction.
+			collisionExclusions: ["entirely-water-barrier"],
 			responsePolicy: {
 				// Physical fly is a controlled kinematic camera: clip the incoming normal without rebound.
 				restitution: { kind: "elastic", elasticity: 0 },
@@ -183,6 +187,7 @@ function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
 			{ center: [0, 0, 0.475], radius: 0.48 },
 			{ center: [0, 0, 1.35], radius: 0.48 },
 		],
+		collisionExclusions: [],
 		responsePolicy: {
 			// Retail CPhysicsObj/PhysicsDesc constructor defaults (`acclient.c:307850-307853`,
 			// `:318424-318427`); ordinary players do not set Sledding during movement.

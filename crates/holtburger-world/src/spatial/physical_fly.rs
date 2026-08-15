@@ -4,10 +4,12 @@ use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 
+use super::PhysicalCollisionFilter;
 use super::collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
-    MissingCoverage, MotionWaypoint, MovementObstructionRequest, PlacementRequest,
-    anchor_point_to_outdoor_position, landblock_key, separating_displacement,
+    MissingCoverage, MotionWaypoint, MovementObstructionRequest, MovementRestrictionRequest,
+    PlacementRequest, PlacementRestrictionRequest, StaticContact, anchor_point_to_outdoor_position,
+    landblock_key, separating_displacement,
 };
 
 /// Explicit safety budgets for one physical-fly solve.
@@ -41,6 +43,8 @@ pub struct PhysicalFlyRequest {
     pub body: PhysicalFlyBody,
     /// World-space displacement requested for this solve.
     pub displacement: Vector3,
+    /// Body-owned optional collision-domain exclusions.
+    pub filter: PhysicalCollisionFilter,
 }
 
 /// Which finite solver budget refused a request.
@@ -138,20 +142,19 @@ pub fn solve_physical_fly(
         let mut candidate = current + substep;
         let mut candidate_placement = transit(scene, anchor, body, candidate)?;
         let mut converged = false;
-        let mut contacts = match scene.movement_obstructions(MovementObstructionRequest {
-            sweep: CoverageRequest {
-                anchor,
-                start: current,
-                end: candidate,
-                radius: body.radius,
-            },
-            placement: &candidate_placement,
-        })? {
-            CollisionQuery::Complete(contacts) => contacts,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(PhysicalFlyOutcome::MissingCoverage { body, missing });
-            }
+        let sweep = CoverageRequest {
+            anchor,
+            start: current,
+            end: candidate,
+            radius: body.radius,
         };
+        let mut contacts =
+            match movement_contacts(scene, sweep, &candidate_placement, request.filter)? {
+                CollisionQuery::Complete(contacts) => contacts,
+                CollisionQuery::MissingCoverage(missing) => {
+                    return Ok(PhysicalFlyOutcome::MissingCoverage { body, missing });
+                }
+            };
 
         for _ in 0..config.maximum_contact_passes {
             contact_passes += 1;
@@ -164,12 +167,14 @@ pub fn solve_physical_fly(
 
             candidate = candidate + separating_displacement(&contacts, config.separation_epsilon);
             candidate_placement = transit(scene, anchor, body, candidate)?;
-            contacts = match scene.placement_contacts(PlacementRequest {
+            contacts = match placement_contacts(
+                scene,
                 anchor,
-                center: candidate,
-                radius: body.radius,
-                placement: &candidate_placement,
-            })? {
+                candidate,
+                body.radius,
+                &candidate_placement,
+                request.filter,
+            )? {
                 CollisionQuery::Complete(contacts) => contacts,
                 CollisionQuery::MissingCoverage(missing) => {
                     return Ok(PhysicalFlyOutcome::MissingCoverage { body, missing });
@@ -213,6 +218,66 @@ pub fn solve_physical_fly(
         substeps: required_substeps,
         contact_passes,
     })
+}
+
+fn movement_contacts(
+    scene: &CollisionScene,
+    sweep: CoverageRequest,
+    placement: &CollisionPlacement,
+    filter: PhysicalCollisionFilter,
+) -> Result<CollisionQuery<Vec<StaticContact>>> {
+    let mut contacts =
+        match scene.movement_obstructions(MovementObstructionRequest { sweep, placement })? {
+            CollisionQuery::Complete(contacts) => contacts,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+    match scene.movement_restrictions(MovementRestrictionRequest {
+        sweep,
+        placement,
+        filter,
+    })? {
+        CollisionQuery::Complete(restrictions) => contacts.extend(restrictions),
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    }
+    Ok(CollisionQuery::Complete(contacts))
+}
+
+fn placement_contacts(
+    scene: &CollisionScene,
+    anchor: Guid,
+    center: Vector3,
+    radius: f32,
+    placement: &CollisionPlacement,
+    filter: PhysicalCollisionFilter,
+) -> Result<CollisionQuery<Vec<StaticContact>>> {
+    let mut contacts = match scene.placement_contacts(PlacementRequest {
+        anchor,
+        center,
+        radius,
+        placement,
+    })? {
+        CollisionQuery::Complete(contacts) => contacts,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    match scene.placement_restrictions(PlacementRestrictionRequest {
+        anchor,
+        center,
+        radius,
+        placement,
+        filter,
+    })? {
+        CollisionQuery::Complete(restrictions) => contacts.extend(restrictions),
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    }
+    Ok(CollisionQuery::Complete(contacts))
 }
 
 fn remember_collision_normal(
@@ -545,7 +610,33 @@ mod tests {
         body: PhysicalFlyBody,
         displacement: Vector3,
     ) -> PhysicalFlyOutcome {
-        solve_physical_fly(scene, config(), PhysicalFlyRequest { body, displacement }).unwrap()
+        solve_physical_fly(
+            scene,
+            config(),
+            PhysicalFlyRequest {
+                body,
+                displacement,
+                filter: PhysicalCollisionFilter::ALL,
+            },
+        )
+        .unwrap()
+    }
+
+    fn water_boundary_scene() -> CollisionScene {
+        let mut scene = CollisionScene::new();
+        insert_test_halo(&mut scene, &[LANDBLOCK, EAST]);
+        scene
+            .insert(artifact(LANDBLOCK, Vec::new(), Vec::new()))
+            .unwrap();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: EAST,
+                // Terrain type 0x10 is one of retail's water surface classes.
+                terrain: terrain_with_sample(EAST, WATER_TERRAIN_SAMPLE),
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+        scene
     }
 
     fn solved(outcome: PhysicalFlyOutcome) -> PhysicalFlyBody {
@@ -553,6 +644,31 @@ mod tests {
             PhysicalFlyOutcome::Solved { body, .. } => body,
             other => panic!("expected solved physical fly, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn whole_water_landblock_blocks_ordinary_body_but_not_viewer_exemption() {
+        // Retail returns collision before terrain response for an entirely-water landblock, except
+        // for viewer and missile physics states (`CLandCell::find_env_collisions`,
+        // `acclient.c:340351-340399`).
+        let scene = water_boundary_scene();
+        let original = body(Vector3::new(191.5, 96.0, 50.0));
+        let blocked = solved(solve(&scene, original, Vector3::new(1.0, 0.0, 0.0)));
+        assert_eq!(landblock_key(blocked.pose.landblock_id), Guid(LANDBLOCK));
+
+        let exempt = solve_physical_fly(
+            &scene,
+            config(),
+            PhysicalFlyRequest {
+                body: original,
+                displacement: Vector3::new(1.0, 0.0, 0.0),
+                filter: PhysicalCollisionFilter::excluding(
+                    crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
+                ),
+            },
+        )
+        .unwrap();
+        assert_eq!(landblock_key(solved(exempt).pose.landblock_id), Guid(EAST));
     }
 
     #[test]
@@ -694,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn free_sphere_uses_the_generic_water_adjusted_collision_mesh() {
+    fn water_barrier_exempt_free_sphere_uses_the_adjusted_collision_mesh() {
         let mut collision = scene(Vec::new());
         collision
             .insert(LandblockCollisionAsset {
@@ -704,11 +820,20 @@ mod tests {
             })
             .unwrap();
 
-        let floor = solved(solve(
-            &collision,
-            body(Vector3::new(50.0, 50.0, 5.0)),
-            Vector3::new(0.0, 0.0, -8.0),
-        ));
+        let floor = solved(
+            solve_physical_fly(
+                &collision,
+                config(),
+                PhysicalFlyRequest {
+                    body: body(Vector3::new(50.0, 50.0, 5.0)),
+                    displacement: Vector3::new(0.0, 0.0, -8.0),
+                    filter: PhysicalCollisionFilter::excluding(
+                        crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
+                    ),
+                },
+            )
+            .unwrap(),
+        );
         let expected_center = 1.0 - TERRAIN_WATER_COLLISION_DEPTH;
         assert!((floor.pose.coords.z - expected_center).abs() < 0.002);
     }
@@ -745,6 +870,7 @@ mod tests {
             PhysicalFlyRequest {
                 body: original,
                 displacement: Vector3::new(20.0, 0.0, 0.0),
+                filter: PhysicalCollisionFilter::ALL,
             },
         )
         .unwrap();
@@ -779,6 +905,7 @@ mod tests {
             PhysicalFlyRequest {
                 body: original,
                 displacement: Vector3::new(0.1, 0.0, 0.0),
+                filter: PhysicalCollisionFilter::ALL,
             },
         )
         .unwrap();

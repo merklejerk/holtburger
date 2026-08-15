@@ -15,6 +15,7 @@ use super::bsp_query::{
     BspSupportFeature, placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts,
     placed_supports, support_on_polygon,
 };
+use super::{PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
 
@@ -283,6 +284,43 @@ pub struct SupportRequest<'a> {
     pub maximum_rise: f32,
     /// Candidate placement selecting the collision domains visible to this query.
     pub placement: &'a CollisionPlacement,
+}
+
+/// Body-primary directional query for optional filtered movement restrictions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MovementRestrictionRequest<'a> {
+    /// Swept primary sphere whose center selects retail land restrictions.
+    pub sweep: CoverageRequest,
+    /// Candidate placement selecting whether outdoor restrictions participate.
+    pub placement: &'a CollisionPlacement,
+    /// Body-owned optional collision-domain exclusions.
+    pub filter: PhysicalCollisionFilter,
+}
+
+/// Body-primary directionless query for optional filtered placement restrictions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlacementRestrictionRequest<'a> {
+    /// Normalized landblock whose local frame contains `center`.
+    pub anchor: Guid,
+    /// Primary sphere center selecting retail land restrictions.
+    pub center: Vector3,
+    /// Positive primary sphere radius used to prove collision coverage.
+    pub radius: f32,
+    /// Candidate placement selecting whether outdoor restrictions participate.
+    pub placement: &'a CollisionPlacement,
+    /// Body-owned optional collision-domain exclusions.
+    pub filter: PhysicalCollisionFilter,
+}
+
+/// Complete internal input for directionless or directional static contacts.
+#[derive(Debug, Clone, Copy)]
+struct StaticContactRequest<'a> {
+    touched: &'a [Guid],
+    anchor: Guid,
+    center: Vector3,
+    radius: f32,
+    movement: Option<Vector3>,
+    placement: &'a CollisionPlacement,
 }
 
 /// Prior-cell-aware interior transit query.
@@ -826,6 +864,22 @@ impl CollisionScene {
             })
     }
 
+    /// Whether one authoritative body center occupies a region forbidden by its active domains.
+    pub fn body_center_is_forbidden(
+        &self,
+        anchor: Guid,
+        center: Vector3,
+        placement: &CollisionPlacement,
+        filter: PhysicalCollisionFilter,
+    ) -> bool {
+        if !entirely_water_restriction_participates(placement, filter) {
+            return false;
+        }
+        self.landblocks
+            .get(&anchor_point_landblock(anchor, center))
+            .is_some_and(|asset| asset.terrain.entirely_water)
+    }
+
     /// Returns every directional obstruction at the candidate sphere position.
     pub fn movement_obstructions(
         &self,
@@ -839,12 +893,36 @@ impl CollisionScene {
         };
         let movement = request.sweep.end - request.sweep.start;
         Ok(CollisionQuery::Complete(self.contacts(
+            StaticContactRequest {
+                touched: &touched,
+                anchor: request.sweep.anchor,
+                center: request.sweep.end,
+                radius: request.sweep.radius,
+                movement: Some(movement),
+                placement: request.placement,
+            },
+        )))
+    }
+
+    /// Returns optional body-primary restrictions crossed by directional movement.
+    pub fn movement_restrictions(
+        &self,
+        request: MovementRestrictionRequest,
+    ) -> Result<CollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
+        let touched = match self.coverage(request.sweep)? {
+            CollisionQuery::Complete(touched) => touched,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+        if !entirely_water_restriction_participates(request.placement, request.filter) {
+            return Ok(CollisionQuery::Complete(Vec::new()));
+        }
+        Ok(CollisionQuery::Complete(self.entirely_water_contacts(
             &touched,
             request.sweep.anchor,
             request.sweep.end,
-            request.sweep.radius,
-            Some(movement),
-            request.placement,
+            Some(request.sweep.end - request.sweep.start),
         )))
     }
 
@@ -948,12 +1026,41 @@ impl CollisionScene {
             }
         };
         Ok(CollisionQuery::Complete(self.contacts(
+            StaticContactRequest {
+                touched: &touched,
+                anchor: request.anchor,
+                center: request.center,
+                radius: request.radius,
+                movement: None,
+                placement: request.placement,
+            },
+        )))
+    }
+
+    /// Returns optional body-primary restrictions at a stationary placement.
+    pub fn placement_restrictions(
+        &self,
+        request: PlacementRestrictionRequest,
+    ) -> Result<CollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
+        let touched = match self.coverage(CoverageRequest {
+            anchor: request.anchor,
+            start: request.center,
+            end: request.center,
+            radius: request.radius,
+        })? {
+            CollisionQuery::Complete(touched) => touched,
+            CollisionQuery::MissingCoverage(missing) => {
+                return Ok(CollisionQuery::MissingCoverage(missing));
+            }
+        };
+        if !entirely_water_restriction_participates(request.placement, request.filter) {
+            return Ok(CollisionQuery::Complete(Vec::new()));
+        }
+        Ok(CollisionQuery::Complete(self.entirely_water_contacts(
             &touched,
             request.anchor,
             request.center,
-            request.radius,
             None,
-            request.placement,
         )))
     }
 
@@ -1644,26 +1751,21 @@ impl CollisionScene {
         Ok(volume_reaches(target, probe, 0.0))
     }
 
-    fn contacts(
-        &self,
-        touched: &[Guid],
-        anchor: Guid,
-        center: Vector3,
-        radius: f32,
-        movement: Option<Vector3>,
-        placement: &CollisionPlacement,
-    ) -> Vec<StaticContact> {
+    fn contacts(&self, request: StaticContactRequest<'_>) -> Vec<StaticContact> {
         let mut contacts = Vec::new();
-        for owner in touched {
+        for owner in request.touched {
             let Some(asset) = self.landblocks.get(owner) else {
                 continue;
             };
-            let local_center = anchor_to_landblock(center, anchor, *owner);
-            if placement.reaches_outdoors {
+            let local_center = anchor_to_landblock(request.center, request.anchor, *owner);
+            if request.placement.reaches_outdoors {
                 for cell in &asset.terrain.cells {
                     for triangle in &cell.triangles {
-                        if let Some(contact) = terrain_contact(triangle, local_center, radius)
-                            && movement.is_none_or(|delta| delta.dot(&contact.normal) < 0.0)
+                        if let Some(contact) =
+                            terrain_contact(triangle, local_center, request.radius)
+                            && request
+                                .movement
+                                .is_none_or(|delta| delta.dot(&contact.normal) < 0.0)
                         {
                             contacts.push(StaticContact {
                                 normal: contact.normal,
@@ -1674,28 +1776,97 @@ impl CollisionScene {
                 }
             }
         }
-        for selected in self.selected_colliders(touched, placement) {
+        for selected in self.selected_colliders(request.touched, request.placement) {
             let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
-            let local_center = anchor_to_landblock(center, anchor, reference.owner);
+            let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
             let separation = local_center - collider.bounds_center;
-            let reach = radius + collider.bounds_radius;
+            let reach = request.radius + collider.bounds_radius;
             if separation.length_squared() > reach * reach {
                 continue;
             }
-            for contact in
-                placed_solid_contacts(collider, local_center, radius, selected.center_solid)
-                    .into_iter()
-                    .chain(placed_polygon_contacts(collider, local_center, radius))
-            {
-                if movement.is_some_and(|delta| delta.dot(&contact.normal) >= 0.0) {
+            for contact in placed_solid_contacts(
+                collider,
+                local_center,
+                request.radius,
+                selected.center_solid,
+            )
+            .into_iter()
+            .chain(placed_polygon_contacts(
+                collider,
+                local_center,
+                request.radius,
+            )) {
+                if request
+                    .movement
+                    .is_some_and(|delta| delta.dot(&contact.normal) >= 0.0)
+                {
                     continue;
                 }
                 contacts.push(StaticContact {
                     normal: contact.normal,
                     depth: contact.depth,
                 });
+            }
+        }
+        contacts
+    }
+
+    /// Synthesizes retail's whole-landblock water restriction as center-based boundary contacts.
+    ///
+    /// `CLandCell::find_env_collisions` rejects an `ENTIRELY_WATER` landblock before ordinary
+    /// terrain response for bodies without the viewer or missile exemptions
+    /// (`acclient.c:340351-340399`). The sphere radius intentionally does not move this boundary.
+    fn entirely_water_contacts(
+        &self,
+        touched: &[Guid],
+        anchor: Guid,
+        center: Vector3,
+        movement: Option<Vector3>,
+    ) -> Vec<StaticContact> {
+        let mut contacts = Vec::new();
+        for owner in touched {
+            let Some(asset) = self.landblocks.get(owner) else {
+                continue;
+            };
+            if !asset.terrain.entirely_water {
+                continue;
+            }
+            let end = anchor_to_landblock(center, anchor, *owner);
+            if !inside_landblock_xy(end) {
+                continue;
+            }
+            let start = movement.map_or(end, |delta| end - delta);
+            let mut entered = false;
+            if start.x < 0.0 {
+                contacts.push(StaticContact {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    depth: end.x.max(0.0),
+                });
+                entered = true;
+            } else if start.x >= METERS_PER_LANDBLOCK {
+                contacts.push(StaticContact {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    depth: (METERS_PER_LANDBLOCK - end.x).max(0.0),
+                });
+                entered = true;
+            }
+            if start.y < 0.0 {
+                contacts.push(StaticContact {
+                    normal: Vector3::new(0.0, -1.0, 0.0),
+                    depth: end.y.max(0.0),
+                });
+                entered = true;
+            } else if start.y >= METERS_PER_LANDBLOCK {
+                contacts.push(StaticContact {
+                    normal: Vector3::new(0.0, 1.0, 0.0),
+                    depth: (METERS_PER_LANDBLOCK - end.y).max(0.0),
+                });
+                entered = true;
+            }
+            if !entered {
+                contacts.push(nearest_landblock_exit(end));
             }
         }
         contacts
@@ -2283,6 +2454,32 @@ pub(super) fn landblock_key(landblock_id: Guid) -> Guid {
     Guid((landblock_id.0 & 0xffff_0000) | 0xffff)
 }
 
+fn inside_landblock_xy(point: Vector3) -> bool {
+    (0.0..METERS_PER_LANDBLOCK).contains(&point.x) && (0.0..METERS_PER_LANDBLOCK).contains(&point.y)
+}
+
+fn entirely_water_restriction_participates(
+    placement: &CollisionPlacement,
+    filter: PhysicalCollisionFilter,
+) -> bool {
+    placement.reaches_outdoors
+        && !filter.excludes(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER)
+}
+
+fn nearest_landblock_exit(point: Vector3) -> StaticContact {
+    let candidates = [
+        (point.x, Vector3::new(-1.0, 0.0, 0.0)),
+        (METERS_PER_LANDBLOCK - point.x, Vector3::new(1.0, 0.0, 0.0)),
+        (point.y, Vector3::new(0.0, -1.0, 0.0)),
+        (METERS_PER_LANDBLOCK - point.y, Vector3::new(0.0, 1.0, 0.0)),
+    ];
+    let (depth, normal) = candidates
+        .into_iter()
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .expect("a landblock always has four boundary faces");
+    StaticContact { normal, depth }
+}
+
 /// Collapses parallel contacts and returns the finite displacement that clears all of them.
 pub(super) fn separating_displacement(contacts: &[StaticContact], epsilon: f32) -> Vector3 {
     let mut constraints: Vec<(Vector3, f32)> = Vec::new();
@@ -2322,12 +2519,7 @@ pub(super) fn anchor_point_to_outdoor_position(
     point: Vector3,
     rotation: holtburger_common::Quaternion,
 ) -> WorldPosition {
-    let anchor = landblock_key(anchor);
-    let x = (((anchor.0 >> 24) & 0xff) as i32 + (point.x / METERS_PER_LANDBLOCK).floor() as i32)
-        .clamp(0, 255) as u32;
-    let y = (((anchor.0 >> 16) & 0xff) as i32 + (point.y / METERS_PER_LANDBLOCK).floor() as i32)
-        .clamp(0, 255) as u32;
-    let owner = Guid((x << 24) | (y << 16) | 0xffff);
+    let owner = anchor_point_landblock(anchor, point);
     WorldPosition {
         // A pose carries an outdoor cell selector, not the root record's 0xFFFF selector.
         landblock_id: Guid(owner.0 & 0xffff_0000),
@@ -2335,6 +2527,15 @@ pub(super) fn anchor_point_to_outdoor_position(
         rotation,
     }
     .normalize_outdoor_cell()
+}
+
+fn anchor_point_landblock(anchor: Guid, point: Vector3) -> Guid {
+    let anchor = landblock_key(anchor);
+    let x = (((anchor.0 >> 24) & 0xff) as i32 + (point.x / METERS_PER_LANDBLOCK).floor() as i32)
+        .clamp(0, 255) as u32;
+    let y = (((anchor.0 >> 16) & 0xff) as i32 + (point.y / METERS_PER_LANDBLOCK).floor() as i32)
+        .clamp(0, 255) as u32;
+    Guid((x << 24) | (y << 16) | 0xffff)
 }
 
 #[cfg(test)]
@@ -2401,7 +2602,7 @@ mod tests {
         scene
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
-                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders {
                     colliders,
                     cell_volumes,
@@ -2420,7 +2621,7 @@ mod tests {
                 scene
                     .insert(LandblockCollisionAsset {
                         landblock_id: (x << 24) | (y << 16) | 0xffff,
-                        terrain: TerrainCollisionSurface { cells: Vec::new() },
+                        terrain: TerrainCollisionSurface::empty(),
                         static_geometry: LandblockColliders {
                             colliders: Vec::new(),
                             cell_volumes: if center {
@@ -2433,6 +2634,21 @@ mod tests {
                     .unwrap();
             }
         }
+        scene
+    }
+
+    fn entirely_water_boundary_scene() -> CollisionScene {
+        let mut scene = placement_scene(Vec::new());
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0xdb55_ffff,
+                terrain: TerrainCollisionSurface {
+                    cells: Vec::new(),
+                    entirely_water: true,
+                },
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
         scene
     }
 
@@ -2505,6 +2721,60 @@ mod tests {
             terrain_contact(&triangle, Vector3::new(1.0, 1.0, 0.999), 1.0).is_some(),
             "meaningful terrain penetration was hidden by tolerance"
         );
+    }
+
+    #[test]
+    fn entirely_water_boundary_obstructs_ordinary_bodies_but_honors_explicit_exclusion() {
+        let scene = entirely_water_boundary_scene();
+        let sweep = CoverageRequest {
+            anchor: Guid(0xda55_ffff),
+            start: Vector3::new(191.9, 96.0, 50.0),
+            end: Vector3::new(192.1, 96.0, 50.0),
+            radius: 0.25,
+        };
+        let placement = CollisionPlacement::outdoor();
+        let CollisionQuery::Complete(contacts) = scene
+            .movement_restrictions(MovementRestrictionRequest {
+                sweep,
+                placement: &placement,
+                filter: PhysicalCollisionFilter::ALL,
+            })
+            .unwrap()
+        else {
+            panic!("water-boundary fixture unexpectedly lacks collision coverage");
+        };
+        assert_eq!(contacts.len(), 1);
+        assert_eq!(contacts[0].normal, Vector3::new(-1.0, 0.0, 0.0));
+        assert!((contacts[0].depth - (sweep.end.x - METERS_PER_LANDBLOCK)).abs() < f32::EPSILON);
+
+        let barrier_exempt =
+            PhysicalCollisionFilter::excluding(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER);
+        let CollisionQuery::Complete(exempt_contacts) = scene
+            .movement_restrictions(MovementRestrictionRequest {
+                sweep,
+                placement: &placement,
+                filter: barrier_exempt,
+            })
+            .unwrap()
+        else {
+            panic!("water-boundary fixture unexpectedly lacks collision coverage");
+        };
+        assert!(exempt_contacts.is_empty());
+
+        let CollisionQuery::Complete(placement_contacts) = scene
+            .placement_restrictions(PlacementRestrictionRequest {
+                anchor: sweep.anchor,
+                center: sweep.end,
+                radius: sweep.radius,
+                placement: &placement,
+                filter: PhysicalCollisionFilter::ALL,
+            })
+            .unwrap()
+        else {
+            panic!("water-boundary fixture unexpectedly lacks placement coverage");
+        };
+        assert_eq!(placement_contacts.len(), 1);
+        assert_eq!(placement_contacts[0].normal, Vector3::new(-1.0, 0.0, 0.0));
     }
 
     #[test]
@@ -3426,7 +3696,7 @@ mod tests {
         scene
             .insert(LandblockCollisionAsset {
                 landblock_id: source_owner.0,
-                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders {
                     colliders: vec![collider_at(
                         -1.0,
@@ -3439,7 +3709,7 @@ mod tests {
         scene
             .insert(LandblockCollisionAsset {
                 landblock_id: target_owner.0,
-                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders {
                     colliders: Vec::new(),
                     cell_volumes: vec![volume(
@@ -3496,7 +3766,7 @@ mod tests {
             .apply_residency_change(
                 vec![LandblockCollisionAsset {
                     landblock_id: invalid_owner.0,
-                    terrain: TerrainCollisionSurface { cells: Vec::new() },
+                    terrain: TerrainCollisionSurface::empty(),
                     static_geometry: LandblockColliders {
                         colliders: vec![collider_at(
                             0.0,
@@ -3540,7 +3810,7 @@ mod tests {
             .staged_residency_change(
                 vec![LandblockCollisionAsset {
                     landblock_id: inserted_owner.0,
-                    terrain: TerrainCollisionSurface { cells: Vec::new() },
+                    terrain: TerrainCollisionSurface::empty(),
                     static_geometry: LandblockColliders::default(),
                 }],
                 &[],

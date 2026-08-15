@@ -23,9 +23,9 @@ pub use collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionQueryError, CollisionScene,
     CollisionSceneUpdateError, CoverageRequest, GroundedObstruction, GroundedObstructionRequest,
     MissingCoverage, MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
-    PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint,
-    PlacementRecovery, PlacementRequest, StaticContact, SupportContact, SupportFeature,
-    SupportRequest,
+    MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest,
+    PlacedMotionPoint, PlacementRecovery, PlacementRequest, PlacementRestrictionRequest,
+    StaticContact, SupportContact, SupportFeature, SupportRequest,
 };
 pub use grounded::{
     EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
@@ -37,9 +37,10 @@ pub use physical_body::{
     PhysicalBodyActuation, PhysicalBodyActuationError, PhysicalBodyDefinition,
     PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyResponsePolicy,
     PhysicalBodyResponsePolicyError, PhysicalBodyResponseState, PhysicalBodyState,
-    PhysicalBodyTickOutcome, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalElasticity,
-    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-    evaluate_physical_body_activity, initial_physical_body_activity, resolve_physical_body_cell,
+    PhysicalBodyTickOutcome, PhysicalBodyTickResult, PhysicalBodyTickStatus,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction,
+    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, evaluate_physical_body_activity,
+    initial_physical_body_activity, resolve_physical_body_cell,
 };
 pub use physical_fly::{
     PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,

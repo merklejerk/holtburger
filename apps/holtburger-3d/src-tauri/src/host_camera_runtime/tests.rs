@@ -2,8 +2,8 @@ use std::sync::Mutex;
 
 use crate::host_simulation_runtime::{
     EdgeProtectionRequest, GroundedConfigRequest, PhysicalBodyDefinitionRequest,
-    PhysicalFlyConfigRequest, PhysicalResponseRequest, PhysicalSphereRequest,
-    SimulationInterestRequest, stable_response_policy_request,
+    PhysicalCollisionExclusionRequest, PhysicalFlyConfigRequest, PhysicalResponseRequest,
+    PhysicalSphereRequest, SimulationInterestRequest, stable_response_policy_request,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Plane, Quaternion, Vector3};
@@ -87,7 +87,7 @@ impl CollisionSource for ThinCollisionSource {
     fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
         Ok(Some(LandblockCollisionAsset {
             landblock_id,
-            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            terrain: TerrainCollisionSurface::empty(),
             static_geometry: LandblockColliders {
                 colliders: Vec::new(),
                 cell_volumes: if landblock_id == 0xda55_ffff {
@@ -175,6 +175,7 @@ fn registration(pose: WorldPosition, mode: PhysicalCameraMode) -> PhysicalCamera
 fn body_request(mode: PhysicalCameraMode) -> PhysicalBodyDefinitionRequest {
     match mode {
         PhysicalCameraMode::PhysicalFly => PhysicalBodyDefinitionRequest {
+            collision_exclusions: vec![PhysicalCollisionExclusionRequest::EntirelyWaterBarrier],
             spheres: vec![PhysicalSphereRequest {
                 center: [0.0, 0.0, 0.0],
                 radius: 0.25,
@@ -190,6 +191,7 @@ fn body_request(mode: PhysicalCameraMode) -> PhysicalBodyDefinitionRequest {
             response_policy: stable_response_policy_request(0.0),
         },
         PhysicalCameraMode::GroundedWalk => PhysicalBodyDefinitionRequest {
+            collision_exclusions: Vec::new(),
             spheres: vec![
                 PhysicalSphereRequest {
                     center: [0.0, 0.0, 0.475],
@@ -364,7 +366,7 @@ fn thin_viewer_scene(overlap_first_cell: bool) -> CollisionScene {
             scene
                 .insert(LandblockCollisionAsset {
                     landblock_id: (x << 24) | (y << 16) | 0xffff,
-                    terrain: TerrainCollisionSurface { cells: Vec::new() },
+                    terrain: TerrainCollisionSurface::empty(),
                     static_geometry: LandblockColliders {
                         colliders: Vec::new(),
                         cell_volumes: if center {
@@ -795,7 +797,8 @@ fn physical_fly_registration_preserves_the_supplied_overlap_cell() {
         },
         body_request(PhysicalCameraMode::PhysicalFly)
             .resolve()
-            .unwrap(),
+            .unwrap()
+            .definition,
         Some(Guid(0xda55_010b)),
     )
     .unwrap();

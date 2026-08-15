@@ -121,6 +121,41 @@ pub struct PhysicalBodyResponsePolicy {
     pub align_path: bool,
 }
 
+bitflags::bitflags! {
+    /// Optional collision domains excluded by one physical body.
+    ///
+    /// These flags affect contact participation only. Placement, portal traversal, and collision
+    /// coverage remain authoritative regardless of a body's filter.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct PhysicalCollisionExclusions: u8 {
+        /// Retail's whole-water-landblock barrier does not obstruct this body.
+        const ENTIRELY_WATER_BARRIER = 1 << 0;
+    }
+}
+
+/// Typed body-owned collision participation, independent from geometry and response policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PhysicalCollisionFilter {
+    exclusions: PhysicalCollisionExclusions,
+}
+
+impl PhysicalCollisionFilter {
+    /// Participates in every supported collision domain.
+    pub const ALL: Self = Self {
+        exclusions: PhysicalCollisionExclusions::empty(),
+    };
+
+    /// Constructs a filter from explicit collision-domain exclusions.
+    pub const fn excluding(exclusions: PhysicalCollisionExclusions) -> Self {
+        Self { exclusions }
+    }
+
+    /// Whether this body ignores one optional collision domain.
+    pub const fn excludes(self, exclusion: PhysicalCollisionExclusions) -> bool {
+        self.exclusions.contains(exclusion)
+    }
+}
+
 /// Invalid one-tick actuation rejected before collision simulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum PhysicalBodyActuationError {
@@ -290,6 +325,8 @@ pub enum InvalidPhysicalBodyPlacement {
     },
     /// The unchanged retained shape overlaps restored authored collision.
     OverlapsStaticCollision,
+    /// The body's center occupies a region forbidden by one participating collision domain.
+    ForbiddenCollisionRegion,
 }
 
 /// Exhaustive collision-coverage lifecycle for a registered physical body.
@@ -308,6 +345,8 @@ pub enum PhysicalBodyActivity {
 pub struct PhysicalBodyState {
     /// Validated geometry and response policy shared by every spawn source.
     pub definition: PhysicalBodyDefinition,
+    /// Body-owned collision participation, separate from response and topology.
+    pub collision_filter: PhysicalCollisionFilter,
     /// Mutable authored/network response state, independent from immutable geometry.
     pub response_policy: PhysicalBodyResponsePolicy,
     /// Response-only state; the containing `SpatialBody` remains the sole pose owner.
@@ -320,6 +359,7 @@ impl PhysicalBodyState {
     /// Builds response memory whose variant is guaranteed to match the definition.
     pub fn new(
         definition: PhysicalBodyDefinition,
+        collision_filter: PhysicalCollisionFilter,
         response_policy: PhysicalBodyResponsePolicy,
         cell: Option<Guid>,
     ) -> Self {
@@ -335,6 +375,7 @@ impl PhysicalBodyState {
         };
         Self {
             definition,
+            collision_filter,
             response_policy,
             response,
             activity: PhysicalBodyActivity::Active,
@@ -526,6 +567,8 @@ struct GroundedTickState {
     config: GroundedConfig,
     /// Retained mutable contact and facing response.
     response_policy: PhysicalBodyResponsePolicy,
+    /// Body-owned optional collision-domain exclusions.
+    collision_filter: PhysicalCollisionFilter,
     /// Prior support-sphere interior cell.
     cell: Option<Guid>,
     /// Prior committed walkable support.
@@ -543,6 +586,8 @@ struct FreeSphereTickState {
     config: PhysicalFlyConfig,
     /// Retained mutable collision and facing response.
     response_policy: PhysicalBodyResponsePolicy,
+    /// Body-owned optional collision-domain exclusions.
+    collision_filter: PhysicalCollisionFilter,
     /// Prior sphere-center interior cell.
     cell: Option<Guid>,
 }
@@ -604,6 +649,7 @@ pub(super) fn solve_physical_body_tick(
                     sphere,
                     config,
                     response_policy: physical.response_policy,
+                    collision_filter: physical.collision_filter,
                     cell: *cell,
                 },
                 velocity,
@@ -628,6 +674,7 @@ pub(super) fn solve_physical_body_tick(
                     spheres,
                     config,
                     response_policy: physical.response_policy,
+                    collision_filter: physical.collision_filter,
                     cell: *cell,
                     support: *support,
                     stationary_fall_frames: *stationary_fall_frames,
@@ -661,6 +708,7 @@ fn solve_free_sphere_tick(
                 radius: state.sphere.radius,
             },
             displacement: desired_velocity * delta_seconds,
+            filter: state.collision_filter,
         },
     )?;
     match outcome {
@@ -827,6 +875,7 @@ fn solve_grounded_body_tick(
                 state.response_policy.surface_motion,
             ),
             delta_seconds,
+            filter: state.collision_filter,
         },
     )?;
     match outcome {
@@ -1350,6 +1399,13 @@ pub fn evaluate_physical_body_activity(
                 },
             ));
         }
+        if index == 0
+            && scene.body_center_is_forbidden(anchor, center, &placement, physical.collision_filter)
+        {
+            return Ok(PhysicalBodyActivity::InvalidPlacement(
+                InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion,
+            ));
+        }
         let contacts = match scene.placement_contacts(PlacementRequest {
             anchor,
             center,
@@ -1370,20 +1426,40 @@ pub fn evaluate_physical_body_activity(
     Ok(PhysicalBodyActivity::Active)
 }
 
-/// Initial registration checks coverage only; the first ordinary response solve establishes a safe
-/// pose. Restoration uses `evaluate_physical_body_activity` because an already-safe retained pose
-/// may neither settle nor relabel itself when content returns.
+/// Initial registration checks coverage and center-forbidden domains; the first ordinary response
+/// solve still establishes contact-safe placement. Restoration uses
+/// `evaluate_physical_body_activity` because an already-safe retained pose may neither settle nor
+/// relabel itself when content returns.
 pub fn initial_physical_body_activity(
     scene: &CollisionScene,
     pose: WorldPosition,
     definition: PhysicalBodyDefinition,
+    collision_filter: PhysicalCollisionFilter,
+    retained_cell: Option<Guid>,
 ) -> Result<PhysicalBodyActivity, CollisionQueryError> {
-    Ok(
-        match physical_body_missing_coverage(scene, pose, definition)? {
-            Some(missing) => PhysicalBodyActivity::AwaitingCoverage(missing),
-            None => PhysicalBodyActivity::Active,
-        },
-    )
+    if let Some(missing) = physical_body_missing_coverage(scene, pose, definition)? {
+        return Ok(PhysicalBodyActivity::AwaitingCoverage(missing));
+    }
+    let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
+    let sphere = definition.spheres().primary();
+    let center = pose.coords + pose.rotation.rotate_vector(sphere.center);
+    let placement = match scene.transit_cell(CellTransitRequest {
+        previous_cell: retained_cell,
+        anchor,
+        center,
+        radius: sphere.radius,
+    })? {
+        CollisionQuery::Complete(placement) => placement,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(PhysicalBodyActivity::AwaitingCoverage(missing));
+        }
+    };
+    if scene.body_center_is_forbidden(anchor, center, &placement, collision_filter) {
+        return Ok(PhysicalBodyActivity::InvalidPlacement(
+            InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion,
+        ));
+    }
+    Ok(PhysicalBodyActivity::Active)
 }
 
 fn physical_body_missing_coverage(

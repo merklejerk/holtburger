@@ -33,9 +33,19 @@ pub struct TerrainCollisionCell {
 pub struct TerrainCollisionSurface {
     /// Landblock-local cells in south-to-north, west-to-east row-major order.
     pub cells: Vec<TerrainCollisionCell>,
+    /// Whether every authored terrain vertex belongs to retail's water surface classes.
+    pub entirely_water: bool,
 }
 
 impl TerrainCollisionSurface {
+    /// Empty non-water collision surface used by synthetic collision products.
+    pub const fn empty() -> Self {
+        Self {
+            cells: Vec::new(),
+            entirely_water: false,
+        }
+    }
+
     /// Builds obstruction triangles from one validated canonical terrain asset.
     pub fn from_terrain(terrain: &LandblockTerrain) -> Result<Self> {
         let expected_grid_size = TERRAIN_GRID_CELLS + 1;
@@ -99,14 +109,26 @@ impl TerrainCollisionSurface {
                 });
             }
         }
-        Ok(Self { cells })
+        let entirely_water = terrain
+            .terrain_samples
+            .iter()
+            .copied()
+            .all(terrain_sample_is_water);
+        Ok(Self {
+            cells,
+            entirely_water,
+        })
     }
 }
 
 fn terrain_vertex_is_water(terrain: &LandblockTerrain, column: usize, row: usize) -> bool {
     // Retail's fixed `SurfChar` table marks terrain types 16 through 20 as water
     // (`CLandBlockStruct::CalcCellWater`, acclient.c:339033-339100).
-    let terrain_type = (terrain.terrain_samples[row * terrain.grid_size + column] >> 2) & 0x1f;
+    terrain_sample_is_water(terrain.terrain_samples[row * terrain.grid_size + column])
+}
+
+fn terrain_sample_is_water(sample: u16) -> bool {
+    let terrain_type = (sample >> 2) & 0x1f;
     (0x10..=0x14).contains(&terrain_type)
 }
 
@@ -190,6 +212,7 @@ mod tests {
         partial.heights.fill(0.0);
         partial.terrain_samples[0] = WATER_SAMPLE;
         let surface = TerrainCollisionSurface::from_terrain(&partial).unwrap();
+        assert!(!surface.entirely_water);
         let cell = &surface.cells[0];
         let southwest = Vector3::new(0.0, 0.0, -TERRAIN_WATER_COLLISION_DEPTH);
         let dry_vertices = cell
@@ -220,6 +243,7 @@ mod tests {
             flooded.terrain_samples[index] = WATER_SAMPLE;
         }
         let surface = TerrainCollisionSurface::from_terrain(&flooded).unwrap();
+        assert!(!surface.entirely_water);
         assert!(surface.cells[0].triangles.iter().all(|triangle| {
             triangle
                 .vertices
@@ -227,6 +251,26 @@ mod tests {
                 .all(|vertex| vertex.z == -TERRAIN_WATER_COLLISION_DEPTH)
                 && triangle.normal == Vector3::new(0.0, 0.0, 1.0)
         }));
+    }
+
+    #[test]
+    fn classifies_only_a_wholly_water_landblock_as_entirely_water() {
+        const WATER_SAMPLE: u16 = 0x10 << 2;
+
+        let mut flooded = terrain(0xda55_ffff);
+        flooded.terrain_samples.fill(WATER_SAMPLE);
+        assert!(
+            TerrainCollisionSurface::from_terrain(&flooded)
+                .unwrap()
+                .entirely_water
+        );
+
+        flooded.terrain_samples[40] = 0;
+        assert!(
+            !TerrainCollisionSurface::from_terrain(&flooded)
+                .unwrap()
+                .entirely_water
+        );
     }
 
     #[test]

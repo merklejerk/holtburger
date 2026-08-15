@@ -1,4 +1,3 @@
-import { log, LogLevel } from "../../logs";
 import { LeaseRegistry } from "../ownership";
 import type { ClosedWorkerPoolDiagnostics } from "../workers/closed-worker";
 import type {
@@ -201,7 +200,7 @@ export class TextureManager<TOwnerId extends string = string> {
 			// An owner can also reserve generated textures before its asset facts materialize. Roll back
 			// only this retain operation so an asset failure cannot evict those independent resources.
 			this.#dropKeys(owner, newlyRetained);
-			log(error, LogLevel.Error);
+			console.error(error);
 		}
 	}
 

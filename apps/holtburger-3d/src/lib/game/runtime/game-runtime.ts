@@ -12,7 +12,6 @@ import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import { animationHookCommand } from "../../assets/decode-animation-record";
-import { log, LogLevel } from "../../logs";
 import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
 import type {
 	EnvCellMaterializationDiagnostics,
@@ -486,10 +485,7 @@ export class GameRuntime {
 	): void {
 		this.#trackRealizationContinuation(
 			this.#stageParticleMeshes(prepared).catch((cause) => {
-				log(
-					new Error("Particle mesh staging failed.", { cause }),
-					LogLevel.Error,
-				);
+				console.error(new Error("Particle mesh staging failed.", { cause }));
 			}),
 		);
 	}
@@ -737,16 +733,13 @@ export class GameRuntime {
 			currentness: staticLayerCurrentness,
 			failureReporter: {
 				reportAtlasFailure: ({ cause, layer, owner, revision }) =>
-					log(
-						{
-							cause,
-							kind: "static-layer-atlas-failed",
-							layer,
-							owner,
-							revision,
-						},
-						LogLevel.Error,
-					),
+					console.error({
+						cause,
+						kind: "static-layer-atlas-failed",
+						layer,
+						owner,
+						revision,
+					}),
 			},
 			geometry: dependencies.staticGeometryPreparer,
 			publisher: {
@@ -783,16 +776,13 @@ export class GameRuntime {
 			currentness: staticLayerCurrentness,
 			failureReporter: {
 				reportAtlasFailure: ({ cause, layer, owner, revision }) =>
-					log(
-						{
-							cause,
-							kind: "env-cell-atlas-failed",
-							layer,
-							owner,
-							revision,
-						},
-						LogLevel.Error,
-					),
+					console.error({
+						cause,
+						kind: "env-cell-atlas-failed",
+						layer,
+						owner,
+						revision,
+					}),
 			},
 			geometry: new EnvCellGeometryPreparer(
 				dependencies.staticGeometryPreparer,
@@ -1719,7 +1709,7 @@ export class GameRuntime {
 						)
 					)
 						return;
-					log(error, LogLevel.Error);
+					console.error(error);
 					this.#publishSceneAvailability({
 						kind: "scene-content-failed",
 						layer: artifact.layer,
@@ -1820,7 +1810,7 @@ export class GameRuntime {
 					) {
 						return;
 					}
-					log(error, LogLevel.Error);
+					console.error(error);
 					this.#publishSceneAvailability({
 						kind: "scene-content-failed",
 						layer: artifact.layer,
@@ -1947,12 +1937,6 @@ export class GameRuntime {
 				}
 				state = "committed";
 				this.#authoredDynamicResidents.set(ownerId, diagnostics);
-				for (const diagnostic of diagnostics) {
-					log(
-						{ kind: "static-authored-dynamic-active", ...diagnostic },
-						LogLevel.Info,
-					);
-				}
 			},
 			release: () => {
 				if (state !== "prepared") return;

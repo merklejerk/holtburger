@@ -6,9 +6,9 @@ use holtburger_common::{Guid, Vector3};
 
 use super::PhysicalCollisionFilter;
 use super::collision::{
-    CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
-    MissingCoverage, MotionWaypoint, MovementObstructionRequest, MovementRestrictionRequest,
-    PlacementRequest, PlacementRestrictionRequest, StaticContact, anchor_point_to_outdoor_position,
+    CellTransitRequest, CollisionPlacement, CollisionScene, MotionWaypoint,
+    MovementObstructionRequest, MovementRestrictionRequest, PlacementRequest,
+    PlacementRestrictionRequest, SphereSweep, StaticContact, anchor_point_to_outdoor_position,
     landblock_key, separating_displacement,
 };
 
@@ -74,13 +74,6 @@ pub enum PhysicalFlyOutcome {
         /// Contact passes evaluated across all substeps.
         contact_passes: usize,
     },
-    /// Collision coverage was incomplete; the last safe state is held.
-    MissingCoverage {
-        /// Last safely committed body state.
-        body: PhysicalFlyBody,
-        /// Exact missing coverage reason.
-        missing: MissingCoverage,
-    },
     /// A finite safety budget was reached; the last safe state is held.
     BudgetExceeded {
         /// Last safely committed body state.
@@ -103,20 +96,6 @@ pub fn solve_physical_fly(
     validate(config, request.body.radius, request.displacement)?;
     let anchor = landblock_key(request.body.pose.landblock_id);
     let start = request.body.pose.coords;
-    let end = start + request.displacement;
-    let full_sweep = CoverageRequest {
-        anchor,
-        start,
-        end,
-        radius: request.body.radius,
-    };
-    if let CollisionQuery::MissingCoverage(missing) = scene.coverage(full_sweep)? {
-        return Ok(PhysicalFlyOutcome::MissingCoverage {
-            body: request.body,
-            missing,
-        });
-    }
-
     let distance = request.displacement.length();
     let required_substeps = if distance <= f32::EPSILON {
         1
@@ -142,19 +121,13 @@ pub fn solve_physical_fly(
         let mut candidate = current + substep;
         let mut candidate_placement = transit(scene, anchor, body, candidate)?;
         let mut converged = false;
-        let sweep = CoverageRequest {
+        let sweep = SphereSweep {
             anchor,
             start: current,
             end: candidate,
             radius: body.radius,
         };
-        let mut contacts =
-            match movement_contacts(scene, sweep, &candidate_placement, request.filter)? {
-                CollisionQuery::Complete(contacts) => contacts,
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(PhysicalFlyOutcome::MissingCoverage { body, missing });
-                }
-            };
+        let mut contacts = movement_contacts(scene, sweep, &candidate_placement, request.filter)?;
 
         for _ in 0..config.maximum_contact_passes {
             contact_passes += 1;
@@ -167,19 +140,14 @@ pub fn solve_physical_fly(
 
             candidate = candidate + separating_displacement(&contacts, config.separation_epsilon);
             candidate_placement = transit(scene, anchor, body, candidate)?;
-            contacts = match placement_contacts(
+            contacts = placement_contacts(
                 scene,
                 anchor,
                 candidate,
                 body.radius,
                 &candidate_placement,
                 request.filter,
-            )? {
-                CollisionQuery::Complete(contacts) => contacts,
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(PhysicalFlyOutcome::MissingCoverage { body, missing });
-                }
-            };
+            )?;
             if contacts.is_empty() {
                 converged = true;
                 break;
@@ -222,28 +190,18 @@ pub fn solve_physical_fly(
 
 fn movement_contacts(
     scene: &CollisionScene,
-    sweep: CoverageRequest,
+    sweep: SphereSweep,
     placement: &CollisionPlacement,
     filter: PhysicalCollisionFilter,
-) -> Result<CollisionQuery<Vec<StaticContact>>> {
+) -> Result<Vec<StaticContact>> {
     let mut contacts =
-        match scene.movement_obstructions(MovementObstructionRequest { sweep, placement })? {
-            CollisionQuery::Complete(contacts) => contacts,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
-    match scene.movement_restrictions(MovementRestrictionRequest {
+        scene.movement_obstructions(MovementObstructionRequest { sweep, placement })?;
+    contacts.extend(scene.movement_restrictions(MovementRestrictionRequest {
         sweep,
         placement,
         filter,
-    })? {
-        CollisionQuery::Complete(restrictions) => contacts.extend(restrictions),
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    }
-    Ok(CollisionQuery::Complete(contacts))
+    })?);
+    Ok(contacts)
 }
 
 fn placement_contacts(
@@ -253,31 +211,21 @@ fn placement_contacts(
     radius: f32,
     placement: &CollisionPlacement,
     filter: PhysicalCollisionFilter,
-) -> Result<CollisionQuery<Vec<StaticContact>>> {
-    let mut contacts = match scene.placement_contacts(PlacementRequest {
+) -> Result<Vec<StaticContact>> {
+    let mut contacts = scene.placement_contacts(PlacementRequest {
         anchor,
         center,
         radius,
         placement,
-    })? {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
-    match scene.placement_restrictions(PlacementRestrictionRequest {
+    })?;
+    contacts.extend(scene.placement_restrictions(PlacementRestrictionRequest {
         anchor,
         center,
         radius,
         placement,
         filter,
-    })? {
-        CollisionQuery::Complete(restrictions) => contacts.extend(restrictions),
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    }
-    Ok(CollisionQuery::Complete(contacts))
+    })?);
+    Ok(contacts)
 }
 
 fn remember_collision_normal(
@@ -307,17 +255,12 @@ fn transit(
     body: PhysicalFlyBody,
     center: Vector3,
 ) -> Result<CollisionPlacement> {
-    match scene.transit_cell(CellTransitRequest {
+    Ok(scene.transit_cell(CellTransitRequest {
         previous_cell: body.cell,
         anchor,
         center,
         radius: body.radius,
-    })? {
-        CollisionQuery::Complete(placement) => Ok(placement),
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("collision coverage changed during a preflighted solve: {missing:?}")
-        }
-    }
+    })?)
 }
 
 fn pose_for_commit(
@@ -839,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_coverage_holds_the_original_pose() {
+    fn physical_fly_crosses_a_missing_owner_as_open_space() {
         let original = body(Vector3::new(50.0, 50.0, 5.0));
         let mut scene = CollisionScene::new();
         for owner in test_halo_owners(&[LANDBLOCK]) {
@@ -850,13 +793,8 @@ mod tests {
             }
         }
         let outcome = solve(&scene, original, Vector3::new(1.0, 0.0, 0.0));
-        match outcome {
-            PhysicalFlyOutcome::MissingCoverage { body, missing } => {
-                assert_eq!(body, original);
-                assert_eq!(missing.landblocks, vec![Guid(LANDBLOCK)]);
-            }
-            other => panic!("expected missing coverage, got {other:?}"),
-        }
+        let moved = solved(outcome);
+        assert_eq!(moved.pose.coords, Vector3::new(51.0, 50.0, 5.0));
     }
 
     #[test]

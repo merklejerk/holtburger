@@ -42,8 +42,6 @@ pub enum CharacterJumpReadiness {
     Unsupported,
     /// Current collision constraints prohibit leaving the pose.
     Constrained,
-    /// Required collision owners are not resident, so launch cannot be simulated atomically.
-    MissingCoverage,
 }
 
 /// Why an interpreted attempt could not become resolved launch kinematics.
@@ -55,8 +53,6 @@ pub enum CharacterJumpRejection {
     Unsupported,
     #[error("a fully constrained body cannot jump")]
     Constrained,
-    #[error("jump collision coverage is unavailable")]
-    MissingCoverage,
     #[error("character heading must be finite")]
     InvalidHeading,
 }
@@ -196,7 +192,6 @@ fn require_supported(readiness: CharacterJumpReadiness) -> Result<(), CharacterJ
         CharacterJumpReadiness::Airborne => Err(CharacterJumpRejection::Airborne),
         CharacterJumpReadiness::Unsupported => Err(CharacterJumpRejection::Unsupported),
         CharacterJumpReadiness::Constrained => Err(CharacterJumpRejection::Constrained),
-        CharacterJumpReadiness::MissingCoverage => Err(CharacterJumpRejection::MissingCoverage),
     }
 }
 
@@ -307,10 +302,6 @@ mod tests {
             (
                 CharacterJumpReadiness::Constrained,
                 CharacterJumpRejection::Constrained,
-            ),
-            (
-                CharacterJumpReadiness::MissingCoverage,
-                CharacterJumpRejection::MissingCoverage,
             ),
         ] {
             assert_eq!(

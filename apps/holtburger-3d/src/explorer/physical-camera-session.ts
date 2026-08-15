@@ -5,6 +5,7 @@ import {
 	type PhysicalCameraMode,
 	type PhysicalCameraPlacement,
 	type PhysicalCameraTickStatus,
+	type PhysicalCameraSceneResidency,
 	validateHostPhysicalCameraPath,
 } from "../lib/game/motion/host-physical-camera-path";
 import type {
@@ -241,8 +242,7 @@ export interface PhysicalCameraStatus {
 	readonly grounded: boolean;
 	readonly constraintCount: number;
 	readonly droppedPaths: number;
-	readonly missingLandblocks: readonly string[];
-	readonly outsideWorld: boolean;
+	readonly sceneResidency: PhysicalCameraSceneResidency | null;
 	readonly substeps: number;
 	readonly contactPasses: number;
 	readonly solveDurationMs: number;
@@ -489,8 +489,7 @@ export class PhysicalCameraSession {
 			grounded: latest?.grounded ?? false,
 			constraintCount: latest?.constraintCount ?? 0,
 			droppedPaths: this.#droppedPaths,
-			missingLandblocks: latest?.missingLandblocks ?? [],
-			outsideWorld: latest?.outsideWorld ?? false,
+			sceneResidency: latest?.sceneResidency ?? null,
 			substeps: latest?.substeps ?? 0,
 			contactPasses: latest?.contactPasses ?? 0,
 			solveDurationMs: latest?.solveDurationMs ?? 0,

@@ -37,10 +37,9 @@ function path(
 			},
 		],
 		status: "solved",
+		sceneResidency: { state: "resident" },
 		grounded: false,
 		constraintCount: 0,
-		missingLandblocks: [],
-		outsideWorld: false,
 		substeps: 1,
 		contactPasses: 1,
 		solveDurationMs: 0.1,
@@ -251,7 +250,7 @@ describe("PhysicalCameraSession", () => {
 		expect(session.placement()?.position.x).toBe(0xda * 192 + 98);
 	});
 
-	it("surfaces the exact missing collision owner", async () => {
+	it("surfaces a missing collision owner without changing solve status", async () => {
 		const test = harness();
 		const session = new PhysicalCameraSession(test.transport);
 		await session.start(placement(), [0, 1, 0], "grounded-walk");
@@ -266,15 +265,19 @@ describe("PhysicalCameraSession", () => {
 		test.deliver(
 			path({
 				mode: "grounded-walk",
-				status: "missing-coverage",
-				missingLandblocks: ["0xdb55ffff"],
+				sceneResidency: {
+					state: "missing-owner",
+					landblockId: "0xdb55ffff",
+				},
 			}),
 		);
 		expect(session.status()).toMatchObject({
 			mode: "grounded-walk",
-			tick: "missing-coverage",
-			missingLandblocks: ["0xdb55ffff"],
-			outsideWorld: false,
+			tick: "solved",
+			sceneResidency: {
+				state: "missing-owner",
+				landblockId: "0xdb55ffff",
+			},
 		});
 	});
 

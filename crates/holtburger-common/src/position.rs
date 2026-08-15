@@ -5,6 +5,25 @@ use std::fmt;
 
 pub const METERS_PER_LANDBLOCK: f32 = 192.0;
 pub const METERS_PER_MAP_DEGREE: f32 = 240.0;
+/// Highest authored outdoor landblock coordinate on either axis (2,040 terrain cells / 8).
+pub const MAX_OUTDOOR_LANDBLOCK_AXIS: u8 = 0xfe;
+
+/// Returns the authored outdoor owner containing one anchor-local point.
+///
+/// Non-finite points and points beyond AC's finite landscape have no canonical owner. The
+/// saturating intermediate arithmetic keeps this primitive total even for extreme finite inputs.
+pub fn outdoor_landblock_owner_at(anchor: Guid, local_point: Vector3) -> Option<Guid> {
+    if !local_point.x.is_finite() || !local_point.y.is_finite() {
+        return None;
+    }
+    let anchor_x = i64::from((anchor.0 >> 24) & 0xff);
+    let anchor_y = i64::from((anchor.0 >> 16) & 0xff);
+    let x = anchor_x.saturating_add((local_point.x / METERS_PER_LANDBLOCK).floor() as i64);
+    let y = anchor_y.saturating_add((local_point.y / METERS_PER_LANDBLOCK).floor() as i64);
+    let range = 0..=i64::from(MAX_OUTDOOR_LANDBLOCK_AXIS);
+    (range.contains(&x) && range.contains(&y))
+        .then_some(Guid(((x as u32) << 24) | ((y as u32) << 16) | 0xffff))
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct WorldPosition {
@@ -20,8 +39,6 @@ pub enum WorldPositionReanchorError {
     NullSource,
     /// The target must identify a normalized `0xFFFF` landblock owner.
     InvalidTargetOwner(Guid),
-    /// Reanchoring local coordinates would leave AC's representable outdoor grid.
-    OutsideWorld,
 }
 
 impl fmt::Display for WorldPositionReanchorError {
@@ -33,9 +50,6 @@ impl fmt::Display for WorldPositionReanchorError {
                 "world-position reanchor target 0x{:08X} is not a normalized landblock owner",
                 owner.0
             ),
-            Self::OutsideWorld => {
-                formatter.write_str("world-position reanchor leaves the outdoor world grid")
-            }
         }
     }
 }
@@ -122,20 +136,19 @@ impl WorldPosition {
         .normalize_outdoor_cell())
     }
 
-    /// Reanchors outdoor local coordinates into the landblock that contains the same point.
+    /// Reanchors into the authored outdoor owner containing this point when one exists.
+    ///
+    /// Outside AC's finite landscape the last valid owner remains the coordinate anchor and local
+    /// X/Y are intentionally noncanonical. Calling this again after motion returns to the authored
+    /// lattice recanonicalizes the same world point without a snap.
     pub fn normalize_outdoor_landblock_frame(self) -> Result<Self, WorldPositionReanchorError> {
         if self.landblock_id == Guid::NULL {
             return Err(WorldPositionReanchorError::NullSource);
         }
-        let (source_x, source_y) = self.landblock_coords();
-        let target_x = i32::from(source_x) + (self.coords.x / METERS_PER_LANDBLOCK).floor() as i32;
-        let target_y = i32::from(source_y) + (self.coords.y / METERS_PER_LANDBLOCK).floor() as i32;
-        if !(0..=255).contains(&target_x) || !(0..=255).contains(&target_y) {
-            return Err(WorldPositionReanchorError::OutsideWorld);
-        }
-        self.reanchor_to_landblock_owner(Guid(
-            ((target_x as u32) << 24) | ((target_y as u32) << 16) | 0xffff,
-        ))
+        let Some(target) = outdoor_landblock_owner_at(self.landblock_id, self.coords) else {
+            return Ok(self);
+        };
+        self.reanchor_to_landblock_owner(target)
     }
 
     pub fn global_coords(&self) -> Vector3 {
@@ -317,6 +330,77 @@ mod tests {
         assert_eq!(normalized.global_coords(), original.global_coords());
         assert_eq!(normalized.landblock_coords(), (0xdb, 0x54));
         assert_eq!(normalized.coords, Vector3::new(0.25, 191.75, 4.0));
+    }
+
+    #[test]
+    fn outdoor_frame_normalization_retains_each_landscape_edge_and_recanonicalizes_on_return() {
+        let cases = [
+            (
+                Guid(0x0055_0020),
+                Vector3::new(-0.25, 96.0, 4.0),
+                Vector3::new(0.25, 96.0, 4.0),
+            ),
+            (
+                Guid(0xfe55_0020),
+                Vector3::new(192.25, 96.0, 4.0),
+                Vector3::new(191.75, 96.0, 4.0),
+            ),
+            (
+                Guid(0x5500_0020),
+                Vector3::new(96.0, -0.25, 4.0),
+                Vector3::new(96.0, 0.25, 4.0),
+            ),
+            (
+                Guid(0x55fe_0020),
+                Vector3::new(96.0, 192.25, 4.0),
+                Vector3::new(96.0, 191.75, 4.0),
+            ),
+        ];
+
+        for (anchor, outside_coords, returned_coords) in cases {
+            let outside = WorldPosition {
+                landblock_id: anchor,
+                coords: outside_coords,
+                rotation: Quaternion::identity(),
+            };
+            assert_eq!(
+                outside.normalize_outdoor_landblock_frame().unwrap(),
+                outside
+            );
+
+            let returned = WorldPosition {
+                coords: returned_coords,
+                ..outside
+            };
+            let normalized = returned.normalize_outdoor_landblock_frame().unwrap();
+            assert_eq!(
+                normalized.landblock_id.0 & 0xffff_0000,
+                anchor.0 & 0xffff_0000
+            );
+            assert_eq!(normalized.coords, returned_coords);
+            assert_eq!(normalized.global_coords(), returned.global_coords());
+        }
+    }
+
+    #[test]
+    fn outdoor_owner_lookup_is_total_for_invalid_and_extreme_points() {
+        let anchor = Guid(0x7f7f_ffff);
+        assert_eq!(
+            outdoor_landblock_owner_at(anchor, Vector3::new(191.0, 0.0, 0.0)),
+            Some(anchor)
+        );
+        assert_eq!(
+            outdoor_landblock_owner_at(anchor, Vector3::new(f32::NAN, 0.0, 0.0)),
+            None
+        );
+        assert_eq!(
+            outdoor_landblock_owner_at(anchor, Vector3::new(f32::MAX, f32::MAX, 0.0)),
+            None
+        );
+        assert_eq!(
+            outdoor_landblock_owner_at(anchor, Vector3::new(f32::MIN, f32::MIN, 0.0)),
+            None
+        );
     }
 
     #[test]

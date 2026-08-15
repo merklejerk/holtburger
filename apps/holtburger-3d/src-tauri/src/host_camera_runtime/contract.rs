@@ -336,7 +336,6 @@ pub enum GroundedCameraRejection {
     Unsupported,
     Airborne,
     Constrained,
-    MissingCoverage,
     InvalidHeading,
 }
 
@@ -357,14 +356,27 @@ impl Default for PhysicalFlyCameraIntent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhysicalCameraTickStatus {
-    /// The solver committed a new safe pose.
+    /// The solver committed an accepted pose against the installed collision snapshot.
     Solved,
-    /// Required collision content was absent, so the prior safe pose was held.
-    MissingCoverage,
     /// The request exceeded its bounded anti-tunneling budget.
     SubstepBudgetExceeded,
     /// Contact separation did not converge inside the bounded pass budget.
     ContactBudgetExceeded,
+}
+
+/// Non-gating residency of the physical body's final primary-sphere owner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "kebab-case")]
+pub enum PhysicalCameraSceneResidency {
+    /// Collision products for the final canonical owner are installed.
+    Resident,
+    /// The final canonical owner is outside current collision interest.
+    MissingOwner {
+        /// Canonical owner a consumer may choose to request.
+        landblock_id: String,
+    },
+    /// The final primary sphere is beyond AC's authored outdoor landscape.
+    OutsideLandscape,
 }
 
 /// Authoritative scene residency committed with one physical-camera pose.
@@ -457,16 +469,14 @@ pub struct PhysicalCameraMotionPath {
     pub initial: PhysicalCameraPathPoint,
     /// Non-empty accepted motion and placement transitions through the fixed tick.
     pub legs: Vec<PhysicalCameraPathLeg>,
-    /// Why the path moved or held.
+    /// Solver completion or finite-budget result.
     pub status: PhysicalCameraTickStatus,
+    /// Installed collision residency, independent from solver completion.
+    pub scene_residency: PhysicalCameraSceneResidency,
     /// Whether grounded response committed lower-sphere support.
     pub grounded: bool,
     /// Distinct non-walkable planes encountered during the latest grounded solve.
     pub constraint_count: usize,
-    /// Exact normalized owners missing when `status` is `missing-coverage`.
-    pub missing_landblocks: Vec<String>,
-    /// Whether the requested swept sphere left AC's representable world grid.
-    pub outside_world: bool,
     /// Collision substeps consumed by this tick.
     pub substeps: usize,
     /// Contact-separation passes consumed by this tick.

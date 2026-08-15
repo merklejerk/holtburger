@@ -7,6 +7,7 @@ Evidence pass: 2026-07-31
 Roadmap split: 2026-07-31
 Convergence review: 2026-08-01
 Host-physics reconciliation: 2026-08-12
+Open-scene reconciliation: 2026-08-15
 
 ## Goal
 
@@ -23,7 +24,7 @@ by explorer scenarios or a future network client.
 | Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`                                                                                  |
 | Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                                                                                                    |
 | Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day                                                                                  |
-| Host physical-body topology       | Implemented 2026-08-12    | Explicit simulation interest, generic retained bodies, coverage lifecycle, and placed paths landed; app-local camera acceptance remains         |
+| Host physical-body topology       | Implemented 2026-08-15    | External simulation interest, generic bodies, total installed-scene collision, non-gating residency, and placed paths landed                     |
 | Spawned execution                 | Queued                    | Must consume the existing generic body/store and source-neutral definition boundary; no second spawned physics registry                         |
 
 ## Why This Roadmap Is Split
@@ -108,7 +109,8 @@ authority requirements.
 Plan: [holtburger-3d-spawned-entity-explorer-runtime-plan.md](holtburger-3d-spawned-entity-explorer-runtime-plan.md)
 
 Progress: Queued — next mainline plan now that the authored-effects plan is complete; convergence
-audit and rewrite complete (2026-08-01), host-physics path reconciliation recorded (2026-08-12).
+audit and rewrite complete (2026-08-01), host-physics reconciliation recorded (2026-08-12), and
+open installed-scene semantics reconciled (2026-08-15).
 
 Outcome:
 
@@ -117,8 +119,8 @@ Outcome:
 - Spawned lifecycle and mutations cross Tauri through the existing view-event path with a complete
   initial snapshot and explicit resnapshot after detected receiver lag.
 - World state owns canonical appearance, lifecycle operations, placement, attachment, and motion facts.
-- Host-local physical prediction reuses the existing `SpatialBody` physical composite, coverage
-  lifecycle, and world-owned placed-motion path. A server spawn resolves setup geometry plus
+- Host-local physical prediction reuses the existing `SpatialBody` physical composite, per-tick
+  scene residency, and world-owned placed-motion path. A server spawn resolves setup geometry plus
   response policy into the same definition accepted from an explicit frontend spawn; source
   provenance does not fork simulation.
 - Spawned attach/detach provides the concrete lifecycle consumer for shared animated parent-part
@@ -130,9 +132,9 @@ Outcome:
 - App-local explorer and client composition remain policy boundaries over shared world/core mechanics,
   with no second authoritative runtime or speculative base-runtime hierarchy.
 - Spawned motion may consume the landed `holtburger-world` collision queries and generic physical-
-  body tick when a concrete scenario requires local prediction. Bodies remain dormant when explicit
-  application simulation interest does not cover them; they report missing owners but never load or
-  evict collision themselves. Spawned entities do not consume the Explorer camera adapter, camera
+  body tick when a concrete scenario requires local prediction. Bodies continue through absent
+  collision as open space and report final-owner residency, but never load, retain, or evict
+  collision themselves. Spawned entities do not consume the Explorer camera adapter, camera
   dimensions, input mapping, or camera transport.
 
 This plan establishes a durable growth seam for later explorer physics demonstrations, which require
@@ -163,8 +165,9 @@ These contracts survive every roadmap stage:
     initial snapshot plus the existing ordered focused deltas.
 14. Feed epochs, global entity sequences, permanent generation tombstones, and a stateful projector
     require measured need; they are not roadmap prerequisites.
-15. Application policy owns simulation interest. Physical bodies consume the resulting immutable
-    collision snapshot and cannot load, retain, or evict collision content.
+15. Application policy owns simulation interest. Physical bodies query the resulting immutable
+    installed collision snapshot, treat absent products as open space, report final-owner residency
+    without gating motion, and cannot load, retain, or evict collision content.
 16. Server-owned, local-player, and frontend-owned bodies share one validated geometry-plus-response
     definition and one `SpatialBody` store; identity allocation and setup lookup remain producer
     concerns.

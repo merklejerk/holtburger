@@ -10,8 +10,7 @@ use holtburger_core::{
     SequencedCharacterMotionEvent, resolve_character_drive, resolve_character_jump,
 };
 use holtburger_world::{
-    ContactState, GroundedBodyActuation, GroundedLaunch, PhysicalBodyActivity,
-    PhysicalBodyActuation, SpatialBody,
+    ContactState, GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation, SpatialBody,
 };
 
 use super::{
@@ -235,12 +234,7 @@ pub(super) fn grounded_camera_actuation(
 }
 
 fn character_motion_contact(body: &SpatialBody) -> CharacterMotionContact {
-    if body.contact == ContactState::Grounded
-        && body
-            .physical
-            .as_ref()
-            .is_some_and(|physical| physical.activity == PhysicalBodyActivity::Active)
-    {
+    if body.contact == ContactState::Grounded {
         CharacterMotionContact::Walkable
     } else {
         CharacterMotionContact::Unsupported
@@ -248,12 +242,6 @@ fn character_motion_contact(body: &SpatialBody) -> CharacterMotionContact {
 }
 
 fn character_jump_readiness(body: &SpatialBody) -> CharacterJumpReadiness {
-    let Some(physical) = body.physical.as_ref() else {
-        return CharacterJumpReadiness::MissingCoverage;
-    };
-    if physical.activity != PhysicalBodyActivity::Active {
-        return CharacterJumpReadiness::MissingCoverage;
-    }
     match body.contact {
         ContactState::Grounded => CharacterJumpReadiness::Supported,
         ContactState::Airborne => CharacterJumpReadiness::Airborne,
@@ -266,7 +254,6 @@ fn jump_rejection(reason: CharacterJumpRejection) -> GroundedCameraRejection {
         CharacterJumpRejection::Airborne => GroundedCameraRejection::Airborne,
         CharacterJumpRejection::Unsupported => GroundedCameraRejection::Unsupported,
         CharacterJumpRejection::Constrained => GroundedCameraRejection::Constrained,
-        CharacterJumpRejection::MissingCoverage => GroundedCameraRejection::MissingCoverage,
         CharacterJumpRejection::InvalidHeading => GroundedCameraRejection::InvalidHeading,
     }
 }

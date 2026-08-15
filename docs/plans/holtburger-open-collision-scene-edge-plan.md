@@ -1,6 +1,6 @@
 # Holtburger Open Collision Scene-Edge Plan
 
-Status: Ready for execution — architecture and scene-edge concessions ratified
+Status: Complete — implemented and verified 2026-08-15
 Created: 2026-08-15
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Supersedes the missing-coverage hold policy recorded by:
@@ -76,7 +76,7 @@ is surfaced as non-gating consumer status rather than solver control flow.
 
 ## Ground Truth and Existing Patterns
 
-### Current Implementation Sources
+### Pre-cutover Implementation Sources
 
 - `crates/holtburger-world/src/spatial/collision.rs`
   - `MissingCoverage`, `CollisionQuery<T>`, `CoverageRequest`, `CollisionScene::coverage`, static
@@ -164,15 +164,27 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 #### Task Checklist
 
-- [ ] Census shared world symbols and callers.
-- [ ] Census host/camera serialized contracts and frontend consumers.
-- [ ] Confirm anchor-relative open-space motion can recanonicalize after leaving either landscape axis.
-- [ ] Confirm initial forbidden-water placement reaches the ordinary barrier solver without activity gating.
-- [ ] Update this plan's open decisions and course-correction log.
+- [x] Census shared world symbols and callers.
+- [x] Census host/camera serialized contracts and frontend consumers.
+- [x] Confirm anchor-relative open-space motion can recanonicalize after leaving either landscape axis.
+- [x] Confirm initial forbidden-water placement reaches the ordinary barrier solver without activity gating.
+- [x] Update this plan's open decisions and course-correction log.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- `CoverageRequest` becomes `SphereSweep`; it retains geometry validation and loses all residency
+  semantics.
+- `PhysicalBodySceneResidency::{Resident, MissingOwner, OutsideLandscape}` is the selected
+  non-gating tick fact. `MissingOwner` carries the canonical final owner required by a consumer
+  that chooses to expand interest or tear down a local representation.
+- `WorldPosition` retains its last valid outdoor anchor while outside the authored landscape and
+  recanonicalizes through the same normalization operation when it returns. No second global
+  position type is introduced.
+- The existing forbidden-water registration check prevents the first ordinary solver tick. It will
+  be deleted with body activity rather than weakened by a registration-only exception.
+- Live consumers were assigned as follows: collision wrappers and source-halo proof to Phase 1;
+  physical-fly/grounded propagation to Phase 2; body activity and reevaluation to Phase 3; host
+  events, camera holds, serialized missing-landblock fields, and jump rejection to Phase 4.
 
 ### Phase 1: Total Installed-Scene Collision Queries
 
@@ -180,8 +192,9 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 - Rename `CoverageRequest` to an honest geometric name such as `SphereSweep`; retain its validated
   start, end, anchor, and radius facts without residency semantics.
-- Delete `MissingCoverage`, `CollisionQuery<T>`, `CollisionScene::coverage`, and the
-  source-neighbor completeness calculation used only by coverage proof.
+- Delete `MissingCoverage`, `CollisionQuery<T>`, `CollisionScene::coverage`, and source-neighbor
+  completeness proof. Retain the neighboring-source candidate scan used to select installed static
+  objects whose bounds can cross an owner seam; absent candidates contribute nothing.
 - Make movement, grounded obstruction, placement, support, cell transit, and placed-motion queries
   return their domain result directly inside `Result<_, CollisionQueryError>`.
 - Have every query iterate only installed touched owners. Missing owners contribute no facts.
@@ -206,16 +219,23 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 #### Task Checklist
 
-- [ ] Cut query request vocabulary from coverage to geometry.
-- [ ] Remove coverage proof and missing-owner propagation.
-- [ ] Totalize contact and support queries over partial scenes.
-- [ ] Totalize cell transit and placed-motion traversal over partial scenes.
-- [ ] Rewrite focused query tests around installed-scene semantics.
-- [ ] Delete tests whose only purpose was preserving coverage suspension.
+- [x] Cut query request vocabulary from coverage to geometry.
+- [x] Remove coverage proof and missing-owner propagation.
+- [x] Totalize contact and support queries over partial scenes.
+- [x] Totalize cell transit and placed-motion traversal over partial scenes.
+- [x] Rewrite focused query tests around installed-scene semantics.
+- [x] Delete tests whose only purpose was preserving coverage suspension.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- Phase 0 inspection corrected one over-broad deletion target: `collision_source_landblocks` was
+  used both for completeness proof and for resident overlapping-static selection. Phase 1 removes
+  the proof but retains the geometric candidate scan under honest non-coverage naming so fully
+  installed seam behavior does not regress.
+- `collision_source_landblocks` became `neighboring_source_landblocks`: it selects only installed
+  overlap candidates and proves no completeness property.
+- Missing retained EnvCells now enter deterministic installed-topology recovery. No topology is
+  synthesized when the current scene has no candidate.
 
 ### Phase 2: Flatten Physical Solvers
 
@@ -245,15 +265,18 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 #### Task Checklist
 
-- [ ] Flatten physical-fly results and helper contracts.
-- [ ] Flatten grounded results and helper contracts.
-- [ ] Flatten generic physical-body tick translation.
-- [ ] Add focused open-scene motion tests for free and grounded bodies.
-- [ ] Re-run stair, wall-slide, cliff, mound, water, and portal differential matrices.
+- [x] Flatten physical-fly results and helper contracts.
+- [x] Flatten grounded results and helper contracts.
+- [x] Flatten generic physical-body tick translation.
+- [x] Add focused open-scene motion tests for free and grounded bodies.
+- [x] Re-run stair, wall-slide, cliff, mound, water, and portal differential matrices.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- Finite contact/substep budgets remain physical results even in empty space; focused tests use
+  requests within the configured budget when proving full requested motion.
+- Landscape-edge integration retains the last canonical owner as its anchor and noncanonical local
+  coordinates until the primary sphere returns to `0x00..0xFE` on both axes.
 
 ### Phase 3: Remove Coverage-Gated Body Lifecycle
 
@@ -283,15 +306,18 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 #### Task Checklist
 
-- [ ] Remove missing-coverage activity state and gates.
-- [ ] Resolve or delete invalid-placement activity.
-- [ ] Remove scene-replacement body reevaluation.
-- [ ] Add final-owner residency derivation to the tick contract.
-- [ ] Delete dead activity event plumbing and tests.
+- [x] Remove missing-coverage activity state and gates.
+- [x] Resolve or delete invalid-placement activity.
+- [x] Remove scene-replacement body reevaluation.
+- [x] Add final-owner residency derivation to the tick contract.
+- [x] Delete dead activity event plumbing and tests.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- Registration now validates only body definition/input invariants. Installed whole-water and static
+  contacts are owned by the first ordinary bounded solve.
+- Scene residency is computed once from the committed final primary-sphere center and returned with
+  the generic motion result; it is not retained on `PhysicalBodyState`.
 
 ### Phase 4: Host, Camera, and Character-Control Cutover
 
@@ -322,15 +348,19 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 #### Task Checklist
 
-- [ ] Simplify host interest replacement and event queues.
-- [ ] Simplify camera registration and tick presentation.
-- [ ] Replace camera status transport and frontend evaluation.
-- [ ] Remove jump missing-coverage contracts.
-- [ ] Rewrite app-local tests around open scene edges.
+- [x] Simplify host interest replacement and event queues.
+- [x] Simplify camera registration and tick presentation.
+- [x] Replace camera status transport and frontend evaluation.
+- [x] Remove jump missing-coverage contracts.
+- [x] Rewrite app-local tests around open scene edges.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- Camera paths always serialize committed motion. `PhysicalCameraTickStatus` now describes only
+  solve/budget outcomes; `PhysicalCameraSceneResidency` independently carries resident,
+  missing-owner, or outside-landscape state.
+- Jump events use contact/controller readiness only. Evicting collision does not introduce a new
+  rejection reason or defer an accepted launch.
 
 ### Phase 5: Resteer and Dry-Run the Remaining Cutover
 
@@ -353,14 +383,19 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 #### Task Checklist
 
-- [ ] Review diff and complexity changes with the user.
-- [ ] Dry-run loaded and partial-scene scenarios.
-- [ ] Record course corrections in this plan.
-- [ ] Confirm the final diagnostic contract.
+- [x] Review diff and complexity changes with the user.
+- [x] Dry-run loaded and partial-scene scenarios.
+- [x] Record course corrections in this plan.
+- [x] Confirm the final diagnostic contract.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- The behavior cutover removed roughly 2,000 lines while adding roughly 1,100 across code, tests,
+  and documentation; no replacement prepared-query or residency-event abstraction was needed.
+- Missing neighbor-source overlap does not make a body `MissingOwner` when its final canonical owner
+  is installed. Residency deliberately describes only the final owner, not scene completeness.
+- Per-tick residency remains the only diagnostic contract. No transition queue has a named current
+  consumer, so one was not retained.
 
 ### Phase 6: Cleanup, Documentation, and Acceptance
 
@@ -386,16 +421,26 @@ Before deleting the existing mechanism, preserve or explicitly replace every gua
 
 #### Task Checklist
 
-- [ ] Delete dead symbols, exports, tests, and diagnostics.
-- [ ] Update active plans and annotate historical plans.
-- [ ] Run formatter, clippy with warnings denied, and affected Rust suites.
-- [ ] Run Svelte/TypeScript checks, Vitest, and Prettier.
-- [ ] Run Explorer acceptance and record results.
-- [ ] Complete a final code-quality review before commit.
+- [x] Delete dead symbols, exports, tests, and diagnostics.
+- [x] Update active plans and annotate historical plans.
+- [x] Run formatter, clippy with warnings denied, and affected Rust suites.
+- [x] Run Svelte/TypeScript checks, Vitest, and Prettier.
+- [x] Run Explorer acceptance and record results.
+- [x] Complete a final code-quality review before commit.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- The live vocabulary sweep is clean. The sole surviving `missingLandblocks` match is an unrelated
+  legacy static-render resolver fixture outside the physical-body and collision-query contracts.
+- Browser acceptance uses the repository's deterministic content/render harness, while
+  under-provisioned physical-camera behavior is covered at the host-runtime boundary because the
+  browser harness does not instantiate Tauri's physical-camera runtime. This keeps the evidence
+  honest instead of claiming a browser-only render harness exercised host physics.
+- The final review found no consumer for residency transition events and no justification for a
+  prepared-query completeness abstraction. Per-tick final-owner residency remains the complete
+  diagnostic contract.
+- Production build warnings about the existing large active-region chunk and ineffective Tauri
+  dynamic imports are unchanged and outside this solver cutover.
 
 ## Verification Matrix
 
@@ -451,20 +496,20 @@ so future work does not rebuild coverage suspension from stale guidance.
 
 ## Definition of Done
 
-- [ ] Missing collision products behave as absent geometry in every collision query family.
-- [ ] Physical-fly and grounded bodies continue simulating outside collision interest.
-- [ ] No shared or app-local body freezes because collision coverage is absent.
-- [ ] Missing neighbor-owned overlap geometry is explicitly accepted and not recomputed as a hidden
+- [x] Missing collision products behave as absent geometry in every collision query family.
+- [x] Physical-fly and grounded bodies continue simulating outside collision interest.
+- [x] No shared or app-local body freezes because collision coverage is absent.
+- [x] Missing neighbor-owned overlap geometry is explicitly accepted and not recomputed as a hidden
       completeness requirement.
-- [ ] Scene-residency status is computed once by its owning layer and surfaced without gating motion.
-- [ ] EnvCell and viewer placement use installed topology without coverage holds.
-- [ ] Interest replacement does not inspect or mutate bodies.
-- [ ] Fully loaded retail differential behavior remains green.
-- [ ] Dead coverage lifecycle code and vocabulary are removed in the same cutover.
-- [ ] Active architectural docs reflect the new contract; historical plans identify supersession.
-- [ ] Rust formatting, clippy with warnings denied, and affected tests pass.
-- [ ] Svelte/TypeScript checks, Vitest, and Prettier pass.
-- [ ] Explorer acceptance covers loaded behavior and an intentionally incomplete scene edge.
+- [x] Scene-residency status is computed once by its owning layer and surfaced without gating motion.
+- [x] EnvCell and viewer placement use installed topology without coverage holds.
+- [x] Interest replacement does not inspect or mutate bodies.
+- [x] Fully loaded retail differential behavior remains green.
+- [x] Dead coverage lifecycle code and vocabulary are removed in the same cutover.
+- [x] Active architectural docs reflect the new contract; historical plans identify supersession.
+- [x] Rust formatting, clippy with warnings denied, and affected tests pass.
+- [x] Svelte/TypeScript checks, Vitest, and Prettier pass.
+- [x] Explorer acceptance covers loaded behavior and an intentionally incomplete scene edge.
 
 ## Open Questions
 
@@ -481,3 +526,31 @@ None. New questions discovered during execution must be recorded before broadeni
   the landscape lattice. Bodies retain an unclamped anchor-relative pose and may recanonicalize on
   return. User also ratified registration inside forbidden water, leaving correction to the ordinary
   solver and eliminating the remaining activity-lifecycle justification.
+- 2026-08-15: Phase 0 census confirmed coverage is threaded through every static query family,
+  both physical solvers, generic body activity, scene replacement, host activity events, camera
+  presentation, and jump readiness. Selected `SphereSweep` and
+  `PhysicalBodySceneResidency::{Resident, MissingOwner, OutsideLandscape}` as replacement terms.
+  No unplanned consumer or architectural blocker was found.
+- 2026-08-15: Phases 1-4 completed the clean cutover. Static queries became total over installed
+  geometry; physical solvers lost missing-coverage outcomes; registered bodies lost activity and
+  restoration state; interest replacement stopped inspecting bodies; and host camera/jump/frontend
+  contracts now consume committed motion plus orthogonal final-owner residency.
+- 2026-08-15: Phase 5 review measured roughly 2,000 removed lines versus 1,100 added across the
+  final code, tests, and documentation diff. No prepared-query, transition-event, or
+  retained-residency abstraction survived. Focused tests cover empty-scene fly/grounded motion,
+  missing-owner camera motion, jump after eviction, missing EnvCell recovery, and outdoor
+  landscape exit/re-entry.
+- 2026-08-15: Phase 6 verification passed `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`. The first
+  sandboxed workspace-test attempt was denied a loopback listener used by the scripting suite; the
+  identical suite passed with local-socket permission.
+- 2026-08-15: App verification passed `npm run check`, `npm run test:ts` (156 files, 1,066 tests),
+  `npm run lint`, `npm run format:check`, and `npm run build`. The deterministic browser harness
+  passed ordinary loaded DA55 portal rendering and an explicit `0x7d64010e` EnvCell portal case
+  (`ready: true`, no browser console messages, active portal-selected scopes). Focused host-runtime
+  tests supply the intentionally under-provisioned physical-camera evidence that the browser-only
+  harness cannot exercise.
+- 2026-08-15: Post-Explorer code-quality review collapsed three copies of authored-landscape owner
+  derivation into `outdoor_landblock_owner_at` and made touched-owner arithmetic saturating. Extreme
+  finite coordinates now deterministically query empty space instead of risking debug-build integer
+  overflow. Common, world, and app Rust suites plus workspace clippy remain green.

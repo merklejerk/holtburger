@@ -1,11 +1,11 @@
 #[cfg(test)]
 use super::PhysicalCollisionFilter;
 use super::{
-    AuthoritativeBodySync, BasicSpatialPhysics, CollisionQueryError, CollisionScene, ContactState,
+    AuthoritativeBodySync, BasicSpatialPhysics, CollisionScene, ContactState,
     PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyState, PhysicalBodyTickResult,
-    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyEvent, SpatialBodyId,
-    SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig, evaluate_physical_body_activity,
-    initial_physical_body_activity, physical_body::solve_physical_body_tick,
+    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialPhysics,
+    SpatialSampleMode, SpatialSamplingConfig,
+    physical_body::{physical_body_scene_residency, solve_physical_body_tick},
     physics::sample_mode_for_projection_state,
 };
 use crate::entity::EntityMotionSnapshot;
@@ -176,69 +176,18 @@ impl SpatialScene {
         collision_filter: super::PhysicalCollisionFilter,
         response_policy: super::PhysicalBodyResponsePolicy,
         retained_cell: Option<Guid>,
-        collision: &CollisionScene,
-    ) -> Result<Option<SpatialBodyEvent>, CollisionQueryError> {
-        let Some(body) = self.body_store.body_mut(body_id) else {
-            return Ok(None);
-        };
-        let mut physical =
-            PhysicalBodyState::new(definition, collision_filter, response_policy, retained_cell);
-        physical.activity = initial_physical_body_activity(
-            collision,
-            body.pose,
+    ) -> Option<()> {
+        let body = self.body_store.body_mut(body_id)?;
+        body.physical = Some(PhysicalBodyState::new(
             definition,
             collision_filter,
+            response_policy,
             retained_cell,
-        )?;
-        let activity = physical.activity.clone();
-        body.physical = Some(physical);
-        Ok(Some(SpatialBodyEvent::PhysicalActivityChanged {
-            body_id,
-            activity,
-        }))
+        ));
+        Some(())
     }
 
-    /// Revalidates every retained physical body after one complete collision-scene replacement.
-    pub fn reevaluate_physical_bodies(
-        &mut self,
-        collision: &CollisionScene,
-    ) -> Result<Vec<SpatialBodyEvent>, CollisionQueryError> {
-        let mut events = Vec::new();
-        for body in self.body_store.bodies.values_mut() {
-            let Some(physical) = body.physical.as_mut() else {
-                continue;
-            };
-            let activity = evaluate_physical_body_activity(collision, body.pose, physical)?;
-            if activity == physical.activity {
-                continue;
-            }
-            physical.activity = activity.clone();
-            events.push(SpatialBodyEvent::PhysicalActivityChanged {
-                body_id: body.id,
-                activity,
-            });
-        }
-        Ok(events)
-    }
-
-    /// Applies one typed physical-activity transition to an existing matching body.
-    pub fn apply_physical_body_activity(
-        &mut self,
-        body_id: SpatialBodyId,
-        activity: super::PhysicalBodyActivity,
-    ) -> bool {
-        let Some(physical) = self
-            .body_store
-            .body_mut(body_id)
-            .and_then(|body| body.physical.as_mut())
-        else {
-            return false;
-        };
-        physical.activity = activity;
-        true
-    }
-
-    /// Advances one active registered physical body without consulting content or interest policy.
+    /// Advances one registered physical body without consulting content or interest policy.
     pub fn tick_physical_body(
         &mut self,
         body_id: SpatialBodyId,
@@ -261,7 +210,7 @@ impl SpatialScene {
     /// Solves one body provisionally and commits it only after its consumer accepts the result.
     ///
     /// The callback sees the complete tentative body and observable result while the scene still
-    /// contains the prior state. An error vetoes every body mutation and activity event.
+    /// contains the prior state. An error vetoes every body mutation.
     pub fn tick_physical_body_transaction<T>(
         &mut self,
         body_id: SpatialBodyId,
@@ -276,22 +225,15 @@ impl SpatialScene {
             .body(body_id)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("physical body {body_id:?} is not registered"))?;
-        let prior_activity = body
+        let definition = body
             .physical
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("spatial body {body_id:?} has no physical definition"))?
-            .activity
-            .clone();
+            .definition;
         let commit = solve_physical_body_tick(collision, &body, actuation, delta_seconds)?;
-        let activity_event = (commit.activity != prior_activity).then(|| {
-            SpatialBodyEvent::PhysicalActivityChanged {
-                body_id,
-                activity: commit.activity.clone(),
-            }
-        });
         let result = PhysicalBodyTickResult {
-            outcome: commit.outcome.clone(),
-            activity_event,
+            motion: commit.motion.clone(),
+            scene_residency: physical_body_scene_residency(collision, commit.pose, definition),
         };
         let mut tentative = body;
         tentative.pose = commit.pose;
@@ -302,11 +244,8 @@ impl SpatialScene {
             .as_mut()
             .expect("physical definition vanished during single-threaded solve");
         physical.response = commit.response;
-        physical.activity = commit.activity;
-        if matches!(commit.outcome, super::PhysicalBodyTickOutcome::Motion(_)) {
-            tentative.sampling.mode = SpatialSampleMode::SimulatingVelocity;
-            tentative.sampling.last_derived_at = now;
-        }
+        tentative.sampling.mode = SpatialSampleMode::SimulatingVelocity;
+        tentative.sampling.last_derived_at = now;
         let accepted = accept(&tentative, &result)?;
         self.body_store
             .update_body(tentative)
@@ -583,10 +522,10 @@ mod physical_body_tests {
     use super::*;
     use crate::{
         EdgeProtection, GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
-        InvalidPhysicalBodyPlacement, PhysicalBodyActivity, PhysicalBodyDefinition,
-        PhysicalBodyResponsePolicy, PhysicalBodyResponseState, PhysicalBodyTickOutcome,
-        PhysicalBodyTickStatus, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
-        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, RETAIL_WALKABLE_NORMAL_Z,
+        PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyResponseState,
+        PhysicalBodySceneResidency, PhysicalBodyTickStatus, PhysicalElasticity, PhysicalFlyConfig,
+        PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        RETAIL_WALKABLE_NORMAL_Z,
     };
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
@@ -774,7 +713,6 @@ mod physical_body_tests {
 
     #[test]
     fn entity_and_ephemeral_bodies_share_one_parameterized_store_contract() {
-        let collision = collision_scene(None);
         let now = Instant::now();
         let mut scene = SpatialScene::new();
         let entity_id = SpatialBodyId::Entity(Guid(0x5000_0001));
@@ -791,7 +729,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
         scene
@@ -801,7 +738,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
 
@@ -829,7 +765,6 @@ mod physical_body_tests {
 
     #[test]
     fn body_identity_authority_does_not_change_the_resolved_definition() {
-        let collision = collision_scene(None);
         let now = Instant::now();
         let mut scene = SpatialScene::new();
         let entity = SpatialBodyId::Entity(Guid(0x5000_0001));
@@ -856,7 +791,6 @@ mod physical_body_tests {
                     PhysicalCollisionFilter::ALL,
                     stable_policy(),
                     None,
-                    &collision,
                 )
                 .unwrap();
         }
@@ -886,7 +820,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
         let before = scene.body(id).unwrap().clone();
@@ -933,14 +866,7 @@ mod physical_body_tests {
                 ..stable_policy()
             };
             scene
-                .attach_physical_body(
-                    id,
-                    definition,
-                    PhysicalCollisionFilter::ALL,
-                    sledding,
-                    None,
-                    &collision,
-                )
+                .attach_physical_body(id, definition, PhysicalCollisionFilter::ALL, sledding, None)
                 .unwrap();
             scene
                 .tick_physical_body(
@@ -986,7 +912,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
 
@@ -1041,7 +966,6 @@ mod physical_body_tests {
                     PhysicalCollisionFilter::ALL,
                     policy,
                     None,
-                    &collision,
                 )
                 .unwrap();
             scene
@@ -1062,7 +986,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn missing_coverage_freezes_all_body_state_until_an_ordinary_resumed_tick() {
+    fn missing_owner_does_not_gate_free_body_motion() {
         let now = Instant::now();
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
@@ -1073,55 +997,96 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &CollisionScene::new(),
             )
             .unwrap();
-        let retained = scene.body(id).unwrap().clone();
-
-        let dormant = scene
+        let result = scene
             .tick_physical_body(
                 id,
                 &CollisionScene::new(),
-                PhysicalBodyActuation::free_flight(Vector3::new(10.0, 0.0, 0.0)).unwrap(),
+                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
                 1.0,
                 now + Duration::from_secs(10),
             )
             .unwrap();
 
-        assert!(matches!(
-            dormant.outcome,
-            PhysicalBodyTickOutcome::Inactive {
-                activity: PhysicalBodyActivity::AwaitingCoverage(_),
-                ..
+        assert_eq!(result.motion.status, PhysicalBodyTickStatus::Solved);
+        assert_eq!(
+            result.scene_residency,
+            PhysicalBodySceneResidency::MissingOwner {
+                owner: Guid(0xda55_ffff)
             }
-        ));
-        assert_eq!(scene.body(id).unwrap(), &retained);
+        );
+        assert!((scene.body(id).unwrap().pose.coords.x - 97.0).abs() < 0.000_1);
+    }
 
-        let collision = collision_scene(None);
-        let resumed = scene.reevaluate_physical_bodies(&collision).unwrap();
-        assert_eq!(resumed.len(), 1);
-        assert!(matches!(
-            resumed[0],
-            SpatialBodyEvent::PhysicalActivityChanged {
-                activity: PhysicalBodyActivity::Active,
-                ..
-            }
-        ));
-        let moved = scene
+    #[test]
+    fn free_body_leaves_and_reenters_the_outdoor_landscape_without_a_snap() {
+        let owner = Guid(0xfe55_ffff);
+        let mut collision = CollisionScene::new();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: owner.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let id = scene.register_ephemeral_body(
+            WorldPosition {
+                landblock_id: owner,
+                coords: Vector3::new(191.9, 96.0, 20.0),
+                rotation: Quaternion::identity(),
+            },
+            now,
+        );
+        scene
+            .attach_physical_body(
+                id,
+                free_definition(Vector3::zero(), 0.25),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+            )
+            .unwrap();
+
+        let outside = scene
             .tick_physical_body(
                 id,
                 &collision,
                 PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
-                0.1,
-                now + Duration::from_secs(11),
+                1.0,
+                now + Duration::from_secs(1),
             )
             .unwrap();
-        assert!(matches!(
-            moved.outcome,
-            PhysicalBodyTickOutcome::Motion(ref motion)
-                if motion.status == PhysicalBodyTickStatus::Solved
-        ));
-        assert!((scene.body(id).unwrap().pose.coords.x - 96.1).abs() < 0.000_1);
+        assert_eq!(
+            outside.scene_residency,
+            PhysicalBodySceneResidency::OutsideLandscape
+        );
+        assert_eq!(
+            scene.body(id).unwrap().pose.landblock_id.0 & 0xffff_0000,
+            owner.0 & 0xffff_0000
+        );
+        assert!((scene.body(id).unwrap().pose.coords.x - 192.9).abs() < 0.000_1);
+
+        let returned = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::free_flight(Vector3::new(-1.0, 0.0, 0.0)).unwrap(),
+                1.0,
+                now + Duration::from_secs(2),
+            )
+            .unwrap();
+        assert_eq!(
+            returned.scene_residency,
+            PhysicalBodySceneResidency::Resident
+        );
+        assert_eq!(
+            scene.body(id).unwrap().pose.landblock_id.0 & 0xffff_0000,
+            owner.0 & 0xffff_0000
+        );
+        assert!((scene.body(id).unwrap().pose.coords.x - 191.9).abs() < 0.000_1);
     }
 
     #[test]
@@ -1137,7 +1102,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
         let stored = scene.body_mut(id).unwrap();
@@ -1217,7 +1181,6 @@ mod physical_body_tests {
                     PhysicalCollisionFilter::ALL,
                     stable_policy(),
                     None,
-                    &collision,
                 )
                 .unwrap();
             for tick in 1..=100 {
@@ -1254,7 +1217,6 @@ mod physical_body_tests {
                 ),
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
 
@@ -1267,9 +1229,7 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .unwrap();
-        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
-            panic!("covered water contact unexpectedly became inactive")
-        };
+        let motion = result.motion;
         let body = scene.body(id).unwrap();
         assert!(motion.grounded);
         assert_eq!(body.contact, ContactState::Grounded);
@@ -1277,7 +1237,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn body_registered_inside_forbidden_whole_water_region_is_explicitly_invalid() {
+    fn body_registered_inside_whole_water_uses_the_ordinary_solver() {
         let collision = flat_collision_scene_with_sample(WATER_TERRAIN_SAMPLE);
         let now = Instant::now();
         let mut scene = SpatialScene::new();
@@ -1289,20 +1249,24 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
 
-        assert_eq!(
-            scene.body(id).unwrap().physical.as_ref().unwrap().activity,
-            PhysicalBodyActivity::InvalidPlacement(
-                InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion
+        let result = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                0.1,
+                now + Duration::from_millis(100),
             )
-        );
+            .unwrap();
+        assert_eq!(result.scene_residency, PhysicalBodySceneResidency::Resident);
+        assert_eq!(result.motion.status, PhysicalBodyTickStatus::Solved);
     }
 
     #[test]
-    fn missing_coverage_holds_canonical_velocity_without_deferring_launch() {
+    fn grounded_launch_executes_in_a_missing_owner() {
         let now = Instant::now();
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
@@ -1313,7 +1277,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &CollisionScene::new(),
             )
             .unwrap();
         let stored = scene.body_mut(id).unwrap();
@@ -1327,13 +1290,11 @@ mod physical_body_tests {
         *support = Some(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         });
-        let retained = scene.body(id).unwrap().clone();
-
         let launch = GroundedLaunch::new(Vector3::new(8.0, 0.0, 6.0)).unwrap();
         let actuation = GroundedBodyActuation::drive(Vector3::zero())
             .unwrap()
             .with_launch(launch);
-        let held = scene
+        let result = scene
             .tick_physical_body(
                 id,
                 &CollisionScene::new(),
@@ -1342,34 +1303,22 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .unwrap();
-        assert!(matches!(
-            held.outcome,
-            PhysicalBodyTickOutcome::Inactive { .. }
-        ));
-        assert_eq!(scene.body(id).unwrap(), &retained);
-
-        let collision = collision_scene(None);
-        scene.reevaluate_physical_bodies(&collision).unwrap();
-        scene
-            .tick_physical_body(
-                id,
-                &collision,
-                PhysicalBodyActuation::grounded_drive(Vector3::zero()).unwrap(),
-                0.1,
-                now + Duration::from_millis(200),
-            )
-            .unwrap();
-        let resumed = scene.body(id).unwrap();
-        assert_eq!(resumed.pose.coords, retained.pose.coords);
-        assert_eq!(resumed.velocity, Vector3::zero());
-        assert_eq!(resumed.contact, ContactState::Grounded);
+        assert_eq!(
+            result.scene_residency,
+            PhysicalBodySceneResidency::MissingOwner {
+                owner: Guid(0xda55_ffff)
+            }
+        );
+        let launched = scene.body(id).unwrap();
+        assert!(launched.pose.coords.x > 96.0);
+        assert!(launched.pose.coords.z > 20.0);
+        assert_eq!(launched.contact, ContactState::Airborne);
     }
 
     #[test]
-    fn retained_env_cell_resumes_only_against_compatible_restored_topology() {
+    fn missing_retained_env_cell_recovers_to_open_outdoor_space() {
         let now = Instant::now();
         let cell = Guid(0xda55_0100);
-        let with_cell = collision_scene(Some(0x0100));
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(
             WorldPosition {
@@ -1385,55 +1334,33 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 Some(cell),
-                &with_cell,
+            )
+            .unwrap();
+        let result = scene
+            .tick_physical_body(
+                id,
+                &CollisionScene::new(),
+                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                0.1,
+                now + Duration::from_millis(100),
             )
             .unwrap();
         assert_eq!(
-            scene.body(id).unwrap().physical.as_ref().unwrap().activity,
-            PhysicalBodyActivity::Active
-        );
-
-        scene
-            .reevaluate_physical_bodies(&CollisionScene::new())
-            .unwrap();
-        assert!(matches!(
-            scene.body(id).unwrap().physical.as_ref().unwrap().activity,
-            PhysicalBodyActivity::AwaitingCoverage(_)
-        ));
-        assert_eq!(
-            scene.reevaluate_physical_bodies(&with_cell).unwrap().len(),
-            1
+            result.scene_residency,
+            PhysicalBodySceneResidency::MissingOwner {
+                owner: Guid(0xda55_ffff)
+            }
         );
         assert_eq!(
-            scene
-                .body(id)
-                .unwrap()
-                .physical
-                .as_ref()
-                .unwrap()
-                .response
-                .cell(),
-            Some(cell)
+            result
+                .motion
+                .path
+                .final_point()
+                .placement()
+                .committed_cell(),
+            None
         );
-
-        let incompatible = collision_scene(None);
-        let invalid = scene.reevaluate_physical_bodies(&incompatible).unwrap();
-        assert_eq!(invalid.len(), 1);
-        assert!(matches!(
-            invalid[0],
-            SpatialBodyEvent::PhysicalActivityChanged {
-                activity: PhysicalBodyActivity::InvalidPlacement(
-                    InvalidPhysicalBodyPlacement::RetainedCellUnavailable(current)
-                ),
-                ..
-            } if current == cell
-        ));
-        assert!(
-            scene
-                .reevaluate_physical_bodies(&incompatible)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(!scene.body(id).unwrap().pose.is_indoors());
     }
 
     #[test]
@@ -1449,7 +1376,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
 
@@ -1462,9 +1388,7 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .unwrap();
-        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
-            panic!("covered seam tick unexpectedly became inactive")
-        };
+        let motion = result.motion;
 
         assert!((motion.path.final_point().center().x - 192.1).abs() < 0.000_1);
         assert_eq!(
@@ -1497,7 +1421,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
-                &collision,
             )
             .unwrap();
 
@@ -1510,9 +1433,7 @@ mod physical_body_tests {
                 now + Duration::from_secs(1),
             )
             .unwrap();
-        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
-            panic!("covered thin-cell route unexpectedly became inactive")
-        };
+        let motion = result.motion;
 
         assert_eq!(motion.path.initial().placement().committed_cell(), None);
         assert!(
@@ -1577,7 +1498,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 Some(cell),
-                &collision,
             )
             .unwrap();
 
@@ -1590,9 +1510,7 @@ mod physical_body_tests {
                 now + Duration::from_secs(1),
             )
             .unwrap();
-        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
-            panic!("covered recovery tick unexpectedly became inactive")
-        };
+        let motion = result.motion;
         let committed = scene.body(id).unwrap();
 
         assert_eq!(motion.path.final_point().placement().committed_cell(), None);
@@ -1643,7 +1561,6 @@ mod physical_body_tests {
                 PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 Some(cell),
-                &collision,
             )
             .unwrap();
 
@@ -1656,9 +1573,7 @@ mod physical_body_tests {
                 now + Duration::from_secs(1),
             )
             .unwrap();
-        let PhysicalBodyTickOutcome::Motion(motion) = result.outcome else {
-            panic!("covered held tick unexpectedly became inactive")
-        };
+        let motion = result.motion;
         let committed = scene.body(id).unwrap();
 
         assert_eq!(motion.status, PhysicalBodyTickStatus::SubstepBudgetExceeded);

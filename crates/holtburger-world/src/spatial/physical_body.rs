@@ -2,16 +2,16 @@
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
+use holtburger_common::position::outdoor_landblock_owner_at;
 use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
-    CellTransitRequest, CollisionQuery, CollisionQueryError, CollisionScene, ContactState,
-    CoverageRequest, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
-    GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere, MissingCoverage,
-    MotionWaypoint, PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome,
-    PhysicalFlyRequest, PlacedMotionPath, PlacedMotionPathRequest, PlacementRequest, SpatialBody,
-    solve_grounded, solve_physical_fly,
+    CellTransitRequest, CollisionQueryError, CollisionScene, ContactState, GroundSupport,
+    GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome,
+    GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyBudget,
+    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
+    PlacedMotionPathRequest, SpatialBody, solve_grounded, solve_physical_fly,
 };
 
 /// Invalid geometry rejected before a body enters authoritative world state.
@@ -124,8 +124,8 @@ pub struct PhysicalBodyResponsePolicy {
 bitflags::bitflags! {
     /// Optional collision domains excluded by one physical body.
     ///
-    /// These flags affect contact participation only. Placement, portal traversal, and collision
-    /// coverage remain authoritative regardless of a body's filter.
+    /// These flags affect contact participation only. Placement and portal traversal remain
+    /// authoritative regardless of a body's filter.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct PhysicalCollisionExclusions: u8 {
         /// Retail's whole-water-landblock barrier does not obstruct this body.
@@ -311,36 +311,7 @@ impl PhysicalBodyResponseState {
     }
 }
 
-/// Why retained body placement cannot be resumed against the current topology.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InvalidPhysicalBodyPlacement {
-    /// A retained EnvCell is absent from the restored collision snapshot.
-    RetainedCellUnavailable(Guid),
-    /// Restored topology selects a different placement for the unchanged body.
-    PlacementChanged {
-        /// Cell retained while coverage was absent.
-        retained: Option<Guid>,
-        /// Cell selected by restored topology.
-        restored: Option<Guid>,
-    },
-    /// The unchanged retained shape overlaps restored authored collision.
-    OverlapsStaticCollision,
-    /// The body's center occupies a region forbidden by one participating collision domain.
-    ForbiddenCollisionRegion,
-}
-
-/// Exhaustive collision-coverage lifecycle for a registered physical body.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PhysicalBodyActivity {
-    /// Required collision coverage and retained placement are valid for fixed ticks.
-    Active,
-    /// Exact required collision owners are absent; all body state is frozen.
-    AwaitingCoverage(MissingCoverage),
-    /// Coverage exists, but retained placement is incompatible with restored topology.
-    InvalidPlacement(InvalidPhysicalBodyPlacement),
-}
-
-/// Physical definition, response memory, and coverage activity attached to one spatial body.
+/// Physical definition and response memory attached to one spatial body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicalBodyState {
     /// Validated geometry and response policy shared by every spawn source.
@@ -351,8 +322,6 @@ pub struct PhysicalBodyState {
     pub response_policy: PhysicalBodyResponsePolicy,
     /// Response-only state; the containing `SpatialBody` remains the sole pose owner.
     pub response: PhysicalBodyResponseState,
-    /// Whether the body may receive a fixed simulation tick.
-    pub activity: PhysicalBodyActivity,
 }
 
 impl PhysicalBodyState {
@@ -378,7 +347,6 @@ impl PhysicalBodyState {
             collision_filter,
             response_policy,
             response,
-            activity: PhysicalBodyActivity::Active,
         }
     }
 }
@@ -492,7 +460,7 @@ impl PhysicalBodyDefinition {
     }
 }
 
-/// Result category for one active generic physical-body fixed tick.
+/// Result category for one generic physical-body fixed tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhysicalBodyTickStatus {
     /// Collision response accepted and committed the tick.
@@ -520,25 +488,27 @@ pub struct PhysicalBodyMotion {
     pub contact_passes: usize,
 }
 
-/// Observable result of requesting one generic body tick.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PhysicalBodyTickOutcome {
-    /// The body was active and produced one authoritative placed path.
-    Motion(PhysicalBodyMotion),
-    /// The registered body remains frozen in an observable non-active state.
-    Inactive {
-        /// Exact retained coverage or placement state.
-        activity: PhysicalBodyActivity,
+/// Residency of the final primary-sphere owner in the installed collision snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicalBodySceneResidency {
+    /// The primary sphere ends in an installed authored outdoor owner.
+    Resident,
+    /// The primary sphere ends in a canonical authored owner absent from the scene.
+    MissingOwner {
+        /// Canonical owner a consumer may choose to load or use for teardown policy.
+        owner: Guid,
     },
+    /// The primary sphere ends beyond AC's finite authored outdoor lattice.
+    OutsideLandscape,
 }
 
-/// One fixed-tick result plus its optional coverage-activity transition.
+/// One fixed-tick motion plus orthogonal installed-scene residency.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicalBodyTickResult {
-    /// Motion or retained inactive state produced by the request.
-    pub outcome: PhysicalBodyTickOutcome,
-    /// Emitted exactly once when this tick changes collision activity.
-    pub activity_event: Option<super::SpatialBodyEvent>,
+    /// Authoritative placed motion produced by the request.
+    pub motion: PhysicalBodyMotion,
+    /// Non-gating final primary-sphere collision residency.
+    pub scene_residency: PhysicalBodySceneResidency,
 }
 
 #[derive(Debug, Clone)]
@@ -552,10 +522,8 @@ pub(super) struct PhysicalBodyTickCommit {
     pub contact: ContactState,
     /// Response-only state matching the physical definition variant.
     pub response: PhysicalBodyResponseState,
-    /// Collision-coverage activity after the solve.
-    pub activity: PhysicalBodyActivity,
-    /// Placed motion or explicit inactive result returned to the caller.
-    pub outcome: PhysicalBodyTickOutcome,
+    /// Placed motion returned to the caller.
+    pub motion: PhysicalBodyMotion,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -622,18 +590,6 @@ pub(super) fn solve_physical_body_tick(
         .physical
         .as_ref()
         .context("spatial body has no physical definition")?;
-    if physical.activity != PhysicalBodyActivity::Active {
-        return Ok(PhysicalBodyTickCommit {
-            pose: body.pose,
-            velocity: body.velocity,
-            contact: body.contact,
-            response: physical.response.clone(),
-            activity: physical.activity.clone(),
-            outcome: PhysicalBodyTickOutcome::Inactive {
-                activity: physical.activity.clone(),
-            },
-        });
-    }
     match (physical.definition, &physical.response) {
         (
             PhysicalBodyDefinition::FreeSphere { sphere, config },
@@ -759,19 +715,15 @@ fn solve_free_sphere_tick(
                 response: PhysicalBodyResponseState::FreeSphere {
                     cell: committed_cell,
                 },
-                activity: PhysicalBodyActivity::Active,
-                outcome: PhysicalBodyTickOutcome::Motion(PhysicalBodyMotion {
+                motion: PhysicalBodyMotion {
                     path,
                     status: PhysicalBodyTickStatus::Solved,
                     grounded: false,
                     constraint_count: 0,
                     substeps,
                     contact_passes,
-                }),
+                },
             })
-        }
-        PhysicalFlyOutcome::MissingCoverage { missing, .. } => {
-            inactive_commit(body, response, missing)
         }
         PhysicalFlyOutcome::BudgetExceeded {
             budget,
@@ -951,19 +903,15 @@ fn solve_grounded_body_tick(
                     support,
                     stationary_fall_frames,
                 },
-                activity: PhysicalBodyActivity::Active,
-                outcome: PhysicalBodyTickOutcome::Motion(PhysicalBodyMotion {
+                motion: PhysicalBodyMotion {
                     path,
                     status: PhysicalBodyTickStatus::Solved,
                     grounded,
                     constraint_count,
                     substeps,
                     contact_passes,
-                }),
+                },
             })
-        }
-        GroundedOutcome::MissingCoverage { missing, .. } => {
-            inactive_commit(body, response, missing)
         }
         GroundedOutcome::BudgetExceeded {
             budget,
@@ -1014,18 +962,15 @@ fn trace_body_reference_path(
             })
             .collect()
     };
-    match scene.transit_motion_path(PlacedMotionPathRequest {
-        previous_cell,
-        anchor,
-        start: initial_pose.coords + offset,
-        radius: primary.radius,
-        waypoints: &sphere_motion,
-    })? {
-        CollisionQuery::Complete(path) => Ok(path.translated(offset * -1.0)),
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("coverage changed while placing accepted body motion: {missing:?}")
-        }
-    }
+    Ok(scene
+        .transit_motion_path(PlacedMotionPathRequest {
+            previous_cell,
+            anchor,
+            start: initial_pose.coords + offset,
+            radius: primary.radius,
+            waypoints: &sphere_motion,
+        })?
+        .translated(offset * -1.0))
 }
 
 fn held_motion_commit(
@@ -1078,31 +1023,14 @@ fn held_motion_commit(
             body.contact
         },
         response,
-        activity: PhysicalBodyActivity::Active,
-        outcome: PhysicalBodyTickOutcome::Motion(PhysicalBodyMotion {
+        motion: PhysicalBodyMotion {
             path,
             status: diagnostics.status,
             grounded,
             constraint_count: diagnostics.constraint_count,
             substeps: diagnostics.substeps,
             contact_passes: diagnostics.contact_passes,
-        }),
-    })
-}
-
-fn inactive_commit(
-    body: &SpatialBody,
-    response: PhysicalBodyResponseState,
-    missing: MissingCoverage,
-) -> Result<PhysicalBodyTickCommit> {
-    let activity = PhysicalBodyActivity::AwaitingCoverage(missing);
-    Ok(PhysicalBodyTickCommit {
-        pose: body.pose,
-        velocity: body.velocity,
-        contact: body.contact,
-        response,
-        activity: activity.clone(),
-        outcome: PhysicalBodyTickOutcome::Inactive { activity },
+        },
     })
 }
 
@@ -1353,180 +1281,44 @@ fn validate_finite_velocity(
     }
 }
 
-/// Evaluates whether an unchanged retained body can simulate against one collision snapshot.
-pub fn evaluate_physical_body_activity(
-    scene: &CollisionScene,
-    pose: WorldPosition,
-    physical: &PhysicalBodyState,
-) -> Result<PhysicalBodyActivity, CollisionQueryError> {
-    if let Some(missing) = physical_body_missing_coverage(scene, pose, physical.definition)? {
-        return Ok(PhysicalBodyActivity::AwaitingCoverage(missing));
-    }
-
-    let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
-    let retained_cell = physical.response.cell();
-    let spheres = physical.definition.spheres();
-    if let Some(cell) = retained_cell
-        && !scene.contains_env_cell(cell)
-    {
-        return Ok(PhysicalBodyActivity::InvalidPlacement(
-            InvalidPhysicalBodyPlacement::RetainedCellUnavailable(cell),
-        ));
-    }
-
-    for (index, sphere) in [Some(spheres.primary()), spheres.upper_constraint()]
-        .into_iter()
-        .flatten()
-        .enumerate()
-    {
-        let center = pose.coords + pose.rotation.rotate_vector(sphere.center);
-        let placement = match scene.transit_cell(CellTransitRequest {
-            previous_cell: retained_cell,
-            anchor,
-            center,
-            radius: sphere.radius,
-        })? {
-            CollisionQuery::Complete(placement) => placement,
-            CollisionQuery::MissingCoverage(current) => {
-                return Ok(PhysicalBodyActivity::AwaitingCoverage(current));
-            }
-        };
-        if index == 0 && placement.committed_cell() != retained_cell {
-            return Ok(PhysicalBodyActivity::InvalidPlacement(
-                InvalidPhysicalBodyPlacement::PlacementChanged {
-                    retained: retained_cell,
-                    restored: placement.committed_cell(),
-                },
-            ));
-        }
-        if index == 0
-            && scene.body_center_is_forbidden(anchor, center, &placement, physical.collision_filter)
-        {
-            return Ok(PhysicalBodyActivity::InvalidPlacement(
-                InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion,
-            ));
-        }
-        let contacts = match scene.placement_contacts(PlacementRequest {
-            anchor,
-            center,
-            radius: sphere.radius,
-            placement: &placement,
-        })? {
-            CollisionQuery::Complete(contacts) => contacts,
-            CollisionQuery::MissingCoverage(current) => {
-                return Ok(PhysicalBodyActivity::AwaitingCoverage(current));
-            }
-        };
-        if !contacts.is_empty() {
-            return Ok(PhysicalBodyActivity::InvalidPlacement(
-                InvalidPhysicalBodyPlacement::OverlapsStaticCollision,
-            ));
-        }
-    }
-    Ok(PhysicalBodyActivity::Active)
-}
-
-/// Initial registration checks coverage and center-forbidden domains; the first ordinary response
-/// solve still establishes contact-safe placement. Restoration uses
-/// `evaluate_physical_body_activity` because an already-safe retained pose may neither settle nor
-/// relabel itself when content returns.
-pub fn initial_physical_body_activity(
+/// Derives non-gating collision residency from the final primary-sphere owner exactly once.
+pub(super) fn physical_body_scene_residency(
     scene: &CollisionScene,
     pose: WorldPosition,
     definition: PhysicalBodyDefinition,
-    collision_filter: PhysicalCollisionFilter,
-    retained_cell: Option<Guid>,
-) -> Result<PhysicalBodyActivity, CollisionQueryError> {
-    if let Some(missing) = physical_body_missing_coverage(scene, pose, definition)? {
-        return Ok(PhysicalBodyActivity::AwaitingCoverage(missing));
-    }
+) -> PhysicalBodySceneResidency {
     let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
-    let sphere = definition.spheres().primary();
-    let center = pose.coords + pose.rotation.rotate_vector(sphere.center);
-    let placement = match scene.transit_cell(CellTransitRequest {
-        previous_cell: retained_cell,
-        anchor,
-        center,
-        radius: sphere.radius,
-    })? {
-        CollisionQuery::Complete(placement) => placement,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(PhysicalBodyActivity::AwaitingCoverage(missing));
-        }
+    let primary = definition.spheres().primary();
+    let center = pose.coords + pose.rotation.rotate_vector(primary.center);
+    let Some(owner) = outdoor_landblock_owner_at(anchor, center) else {
+        return PhysicalBodySceneResidency::OutsideLandscape;
     };
-    if scene.body_center_is_forbidden(anchor, center, &placement, collision_filter) {
-        return Ok(PhysicalBodyActivity::InvalidPlacement(
-            InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion,
-        ));
+    if scene.contains_landblock(owner) {
+        PhysicalBodySceneResidency::Resident
+    } else {
+        PhysicalBodySceneResidency::MissingOwner { owner }
     }
-    Ok(PhysicalBodyActivity::Active)
-}
-
-fn physical_body_missing_coverage(
-    scene: &CollisionScene,
-    pose: WorldPosition,
-    definition: PhysicalBodyDefinition,
-) -> Result<Option<MissingCoverage>, CollisionQueryError> {
-    let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
-    let spheres = definition.spheres();
-    let mut missing = MissingCoverage {
-        landblocks: Vec::new(),
-        outside_world: false,
-    };
-    for sphere in [Some(spheres.primary()), spheres.upper_constraint()]
-        .into_iter()
-        .flatten()
-    {
-        let center = pose.coords + pose.rotation.rotate_vector(sphere.center);
-        if let CollisionQuery::MissingCoverage(current) = scene.coverage(CoverageRequest {
-            anchor,
-            start: center,
-            end: center,
-            radius: sphere.radius,
-        })? {
-            merge_missing(&mut missing, current);
-        }
-    }
-    Ok((missing.outside_world || !missing.landblocks.is_empty()).then_some(missing))
 }
 
 /// Resolves initial response placement from one caller-provided portal-history seed.
 ///
-/// Registration adapters use this only when collision coverage is available. Already registered
-/// dormant bodies retain their resolved response cell and use `evaluate_physical_body_activity`
-/// instead, so restoration can never silently relabel them.
 pub fn resolve_physical_body_cell(
     scene: &CollisionScene,
     pose: WorldPosition,
     definition: PhysicalBodyDefinition,
     seed_cell: Option<Guid>,
-) -> Result<CollisionQuery<Option<Guid>>, CollisionQueryError> {
+) -> Result<Option<Guid>, CollisionQueryError> {
     let primary = definition.spheres().primary();
     let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
     let center = pose.coords + pose.rotation.rotate_vector(primary.center);
-    Ok(
-        match scene.transit_cell(CellTransitRequest {
+    Ok(scene
+        .transit_cell(CellTransitRequest {
             previous_cell: seed_cell,
             anchor,
             center,
             radius: primary.radius,
-        })? {
-            CollisionQuery::Complete(placement) => {
-                CollisionQuery::Complete(placement.committed_cell())
-            }
-            CollisionQuery::MissingCoverage(missing) => CollisionQuery::MissingCoverage(missing),
-        },
-    )
-}
-
-fn merge_missing(merged: &mut MissingCoverage, current: MissingCoverage) {
-    merged.outside_world |= current.outside_world;
-    for owner in current.landblocks {
-        if !merged.landblocks.contains(&owner) {
-            merged.landblocks.push(owner);
-        }
-    }
-    merged.landblocks.sort_unstable();
+        })?
+        .committed_cell())
 }
 
 fn validate_sphere(sphere: Sphere) -> Result<GroundedSphere, PhysicalBodyDefinitionError> {

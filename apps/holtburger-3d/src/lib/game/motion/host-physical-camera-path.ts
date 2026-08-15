@@ -7,12 +7,17 @@ import {
 import type { SceneResidency } from "../scene";
 import { Vec3 } from "../math/types";
 
-/** Why one fixed host tick moved or held the physical camera. */
+/** Solver completion or finite-budget result for one fixed host tick. */
 export type PhysicalCameraTickStatus =
 	| "solved"
-	| "missing-coverage"
 	| "substep-budget-exceeded"
 	| "contact-budget-exceeded";
+
+/** Non-gating residency of the final primary-sphere collision owner. */
+export type PhysicalCameraSceneResidency =
+	| { readonly state: "resident" }
+	| { readonly state: "missing-owner"; readonly landblockId: LandblockId }
+	| { readonly state: "outside-landscape" };
 
 /** Host-owned physical response selected for one camera session. */
 export type PhysicalCameraMode = "physical-fly" | "grounded-walk";
@@ -38,7 +43,6 @@ export type GroundedCharacterEventOutcome =
 				| "charge-not-active"
 				| "constrained"
 				| "invalid-heading"
-				| "missing-coverage"
 				| "unsupported";
 			readonly sequence: number;
 	  };
@@ -77,14 +81,12 @@ export interface HostPhysicalCameraPath {
 		...HostPhysicalCameraPathLeg[],
 	];
 	readonly status: PhysicalCameraTickStatus;
+	/** Installed collision residency, independent from solver completion. */
+	readonly sceneResidency: PhysicalCameraSceneResidency;
 	/** Whether grounded response retained walkable lower-sphere support. */
 	readonly grounded: boolean;
 	/** Distinct non-walkable planes encountered during the latest grounded solve. */
 	readonly constraintCount: number;
-	/** Exact normalized owners absent from a missing-coverage tick. */
-	readonly missingLandblocks: readonly LandblockId[];
-	/** Whether the requested sweep left AC's representable outdoor grid. */
-	readonly outsideWorld: boolean;
 	/** Collision substeps consumed by this tick. */
 	readonly substeps: number;
 	/** Contact-separation passes consumed by this tick. */

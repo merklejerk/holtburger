@@ -25,8 +25,8 @@ use super::{
 use crate::spatial::collision::CollisionScene;
 use crate::spatial::physical_body::grounded_step_down_enabled;
 use crate::{
-    CellTransitRequest, CollisionPlacement, CollisionQuery, ContactState, CoverageRequest,
-    EdgeProtection, GroundedObstructionRequest, PhysicalCollisionFilter, SupportRequest,
+    CellTransitRequest, CollisionPlacement, ContactState, EdgeProtection,
+    GroundedObstructionRequest, PhysicalCollisionFilter, SphereSweep, SupportRequest,
 };
 use holtburger_common::position::WorldPosition;
 
@@ -352,9 +352,6 @@ fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
             config.step_down_height,
         )
         .unwrap();
-        let CollisionQuery::Complete(settled) = settled else {
-            panic!("mound threshold fixture unexpectedly lacks coverage");
-        };
         assert_eq!(
             matches!(settled, SettleResult::Supported(_)),
             expected_walkable,
@@ -461,9 +458,9 @@ fn authored_crest_plane_not_radial_edge_normal_controls_grounded_response() {
     );
 
     let scene = scene(vec![placed_polygon(1, vertices.clone())]);
-    let contacts = match scene
+    let contacts = scene
         .grounded_obstructions(GroundedObstructionRequest {
-            sweep: CoverageRequest {
+            sweep: SphereSweep {
                 anchor: Guid(LANDBLOCK),
                 start: center - movement,
                 end: center,
@@ -471,13 +468,7 @@ fn authored_crest_plane_not_radial_edge_normal_controls_grounded_response() {
             },
             placement: &crate::CollisionPlacement::outdoor(),
         })
-        .unwrap()
-    {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            panic!("crest fixture unexpectedly lacks coverage: {missing:?}")
-        }
-    };
+        .unwrap();
     let contact = contacts
         .iter()
         .find(|contact| contact.separation_normal.x.abs() > 0.01)
@@ -603,7 +594,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
         config.step_down_height,
     )
     .unwrap();
-    let CollisionQuery::Complete(SettleResult::Supported(settled)) = settled else {
+    let SettleResult::Supported(settled) = settled else {
         panic!("portal-visible terrain lip vetoed the walkable transaction: {settled:?}");
     };
     assert!((expected_lift - TERRAIN_HEIGHT).abs() < TEST_EPSILON);
@@ -680,9 +671,6 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
             radius: spheres.support.radius,
         })
         .unwrap();
-    let CollisionQuery::Complete(candidate_placement) = candidate_placement else {
-        panic!("horizontal-portal candidate unexpectedly lacks coverage");
-    };
     assert!(
         candidate_placement.reached_interior_cells().is_empty(),
         "fixture candidate already reached the destination cell"
@@ -696,9 +684,6 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
             radius: spheres.support.radius,
         })
         .unwrap();
-    let CollisionQuery::Complete(lowered_placement) = lowered_placement else {
-        panic!("horizontal-portal step-down endpoint unexpectedly lacks coverage");
-    };
     assert_eq!(
         lowered_placement.reached_interior_cells(),
         &[Guid(CELL)],
@@ -730,7 +715,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         config.step_down_height,
     )
     .unwrap();
-    let CollisionQuery::Complete(SettleResult::Supported(settled)) = settled else {
+    let SettleResult::Supported(settled) = settled else {
         panic!("lowered placement rebuild lost portal ramp support: {settled:?}");
     };
     assert!(
@@ -771,9 +756,6 @@ fn portal_straddling_building_keeps_walkable_polygons_after_center_solid_is_disa
             placement: &placement,
         })
         .unwrap();
-    let CollisionQuery::Complete(supports) = supports else {
-        panic!("building-ramp fixture unexpectedly lacks collision coverage: {supports:?}");
-    };
     assert_eq!(supports.len(), 1, "portal reach removed the building ramp");
     assert!(supports[0].height_delta.abs() < TEST_EPSILON);
     assert_vector_close(
@@ -1196,7 +1178,7 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
             config.step_down_height,
         )
         .unwrap();
-        let CollisionQuery::Complete(SettleResult::Supported(settled)) = settled else {
+        let SettleResult::Supported(settled) = settled else {
             panic!("overlapping supports did not settle: order={order:?} result={settled:?}");
         };
         assert!(
@@ -1333,7 +1315,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         filter: PhysicalCollisionFilter::ALL,
     };
     let first = settle_candidate(context, &body, high, config.step_down_height).unwrap();
-    let CollisionQuery::Complete(SettleResult::Supported(first)) = first else {
+    let SettleResult::Supported(first) = first else {
         panic!("mound fixture did not acquire the retained slope: {first:?}");
     };
     assert!(
@@ -1416,7 +1398,7 @@ fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
         candidate,
     )
     .unwrap();
-    let CollisionQuery::Complete(Some(lower_step)) = lower_step else {
+    let Some(lower_step) = lower_step else {
         panic!("lower-only step did not produce a candidate: {lower_step:?}");
     };
     assert!(
@@ -1447,7 +1429,7 @@ fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
     )
     .unwrap();
     assert!(
-        matches!(paired_step, CollisionQuery::Complete(None)),
+        paired_step.is_none(),
         "upper sphere failed to veto the otherwise valid raised placement: {paired_step:?}"
     );
 }

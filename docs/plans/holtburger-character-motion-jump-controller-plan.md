@@ -5,6 +5,12 @@ Created: 2026-08-13
 Implementation branch: `3d-next`
 Parent foundation: `docs/plans/holtburger-3d-host-physics-recovery-plan.md`
 
+> Superseded policy note (2026-08-15):
+> `docs/plans/holtburger-open-collision-scene-edge-plan.md` removes collision-coverage jump
+> readiness/rejection and body suspension. Contact and controller state still govern jump
+> eligibility; absent collision products now behave as open space. Historical findings below are
+> retained as the implementation record.
+
 ## Context and Boundaries
 
 ### Goal

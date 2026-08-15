@@ -9,6 +9,12 @@ Superseded donor execution record:
 `.worktrees/claude/docs/plans/holtburger-3d-host-physics-runtime-physical-camera-plan.md`
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 
+> Superseded policy note (2026-08-15):
+> `docs/plans/holtburger-open-collision-scene-edge-plan.md` replaces this plan's missing-coverage
+> holds, dormant-body lifecycle, restoration validation, and body-activity events. The incident and
+> execution record below is retained for provenance; it is not the current collision-interest
+> contract.
+
 ## Context and Boundaries
 
 ### Goal

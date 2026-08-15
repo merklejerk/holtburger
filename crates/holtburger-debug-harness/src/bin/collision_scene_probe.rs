@@ -12,12 +12,11 @@ use holtburger_content::{
 use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
 use holtburger_world::{
-    CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, EdgeProtection,
-    GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest,
-    GroundedSphere, MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter,
-    PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,
-    PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, solve_grounded,
-    solve_physical_fly,
+    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, GroundedBody,
+    GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
+    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PhysicalFlyBody,
+    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPathRequest,
+    PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, solve_grounded, solve_physical_fly,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -278,17 +277,12 @@ fn main() -> Result<()> {
     }
     let mut scene = CollisionScene::new();
     insert_simulation_interest_neighborhood(&service, collision, &mut scene)?;
-    let high_altitude_contacts = match scene.placement_contacts(PlacementRequest {
+    let high_altitude_contacts = scene.placement_contacts(PlacementRequest {
         anchor: Guid(landblock.landblock_id),
         center: Vector3::new(96.0, 96.0, 600.0),
         radius: 0.5,
         placement: &CollisionPlacement::outdoor(),
-    })? {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("inserted product artifact reported missing coverage: {missing:?}")
-        }
-    };
+    })?;
     println!(
         "world_query high_altitude_placement_contacts={}",
         high_altitude_contacts.len()
@@ -547,12 +541,7 @@ fn append_placed_motion_transitions(
     transitions: &mut Vec<PlacementLegTransition>,
 ) -> Result<Option<Guid>> {
     let previous_cell = request.previous_cell;
-    let path = match scene.transit_motion_path(request)? {
-        CollisionQuery::Complete(path) => path,
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("placed-motion trace lost collision coverage: {missing:?}")
-        }
-    };
+    let path = scene.transit_motion_path(request)?;
     ensure!(
         !path.has_recovery(),
         "ordinary placed-motion probe unexpectedly required placement recovery"
@@ -587,18 +576,13 @@ fn append_physical_fly_viewer_transitions(
     body_motion: &[MotionWaypoint],
     transitions: &mut Vec<PlacementLegTransition>,
 ) -> Result<Option<Guid>> {
-    let body_path = match scene.transit_motion_path(PlacedMotionPathRequest {
+    let body_path = scene.transit_motion_path(PlacedMotionPathRequest {
         previous_cell,
         anchor,
         start,
         radius: PHYSICAL_FLY_RADIUS,
         waypoints: body_motion,
-    })? {
-        CollisionQuery::Complete(path) => path,
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("physical-fly body path lost collision coverage: {missing:?}")
-        }
-    };
+    })?;
     let viewer_motion = body_path
         .legs()
         .iter()
@@ -803,28 +787,18 @@ fn traverse_physical_fly_portal(
         cell: None,
         radius: PHYSICAL_FLY_RADIUS,
     };
-    let placement = match scene.transit_cell(CellTransitRequest {
+    let placement = scene.transit_cell(CellTransitRequest {
         previous_cell: None,
         anchor: Guid(landblock_id),
         center: body.pose.coords,
         radius: body.radius,
-    })? {
-        CollisionQuery::Complete(placement) => placement,
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("physical-fly portal registration lost collision coverage: {missing:?}")
-        }
-    };
-    let contacts = match scene.placement_contacts(PlacementRequest {
+    })?;
+    let contacts = scene.placement_contacts(PlacementRequest {
         anchor: Guid(landblock_id),
         center: body.pose.coords,
         radius: body.radius,
         placement: &placement,
-    })? {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("physical-fly portal preflight lost collision coverage: {missing:?}")
-        }
-    };
+    })?;
     if !contacts.is_empty() {
         return Ok(PhysicalFlyPortalAttempt::InvalidStart {
             contacts: contacts.len(),
@@ -920,9 +894,6 @@ fn solved_physical_fly(outcome: PhysicalFlyOutcome) -> Result<SolvedPhysicalFly>
             contact_passes,
             motion,
         }),
-        PhysicalFlyOutcome::MissingCoverage { missing, .. } => {
-            anyhow::bail!("physical-fly portal trace lost collision coverage: {missing:?}")
-        }
         PhysicalFlyOutcome::BudgetExceeded {
             body,
             budget,
@@ -1025,17 +996,12 @@ fn probe_explicit_grounded_route(
         support: None,
     };
     let support_center = route.start + route.spheres.support.center;
-    let placement = match scene.transit_cell(CellTransitRequest {
+    let placement = scene.transit_cell(CellTransitRequest {
         previous_cell: route.cell,
         anchor,
         center: support_center,
         radius: route.spheres.support.radius,
-    })? {
-        CollisionQuery::Complete(placement) => placement,
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("explicit grounded registration lacks collision coverage: {missing:?}")
-        }
-    };
+    })?;
     ensure!(
         placement.committed_cell() == route.cell,
         "explicit grounded start requested cell {}, but portal traversal selected {}; pass --grounded-cell for an indoor start",
@@ -1148,18 +1114,6 @@ fn emit_grounded_route_tick(
                 body.velocity.z,
             );
             Ok(GroundedRouteTick::Solved(body))
-        }
-        GroundedOutcome::MissingCoverage { body, missing } => {
-            println!(
-                "grounded_explicit phase={phase} tick={tick} status=missing_coverage final=({:.6},{:.6},{:.6}) cell={} missing_landblocks={:?} outside_world={}",
-                body.pose.coords.x,
-                body.pose.coords.y,
-                body.pose.coords.z,
-                format_cell(body.cell),
-                missing.landblocks,
-                missing.outside_world,
-            );
-            Ok(GroundedRouteTick::Stopped)
         }
         GroundedOutcome::BudgetExceeded {
             body,
@@ -1582,17 +1536,12 @@ fn traverse_outside_portal(
         velocity: Vector3::zero(),
         support: None,
     };
-    let registration = match scene.transit_cell(CellTransitRequest {
+    let registration = scene.transit_cell(CellTransitRequest {
         previous_cell: None,
         anchor: Guid(landblock_id),
         center: body.pose.coords + body.pose.rotation.rotate_vector(spheres.support.center),
         radius: spheres.support.radius,
-    })? {
-        CollisionQuery::Complete(placement) => placement,
-        CollisionQuery::MissingCoverage(missing) => {
-            anyhow::bail!("grounded portal registration lost collision coverage: {missing:?}")
-        }
-    };
+    })?;
     body.cell = registration.committed_cell();
     if let Some(cell) = body.cell {
         body.pose.landblock_id = cell;
@@ -1774,28 +1723,20 @@ fn initial_placement_contacts(
     let mut contact_count = 0;
     for sphere in [Some(spheres.support), spheres.upper].into_iter().flatten() {
         let center = body.pose.coords + body.pose.rotation.rotate_vector(sphere.center);
-        let placement = match scene.transit_cell(CellTransitRequest {
+        let placement = scene.transit_cell(CellTransitRequest {
             previous_cell: body.cell,
             anchor: body.pose.landblock_id,
             center,
             radius: sphere.radius,
-        })? {
-            CollisionQuery::Complete(placement) => placement,
-            CollisionQuery::MissingCoverage(missing) => {
-                anyhow::bail!("grounded portal preflight lost collision coverage: {missing:?}")
-            }
-        };
-        contact_count += match scene.placement_contacts(PlacementRequest {
-            anchor: body.pose.landblock_id,
-            center,
-            radius: sphere.radius,
-            placement: &placement,
-        })? {
-            CollisionQuery::Complete(contacts) => contacts.len(),
-            CollisionQuery::MissingCoverage(missing) => {
-                anyhow::bail!("grounded portal preflight lost placement coverage: {missing:?}")
-            }
-        };
+        })?;
+        contact_count += scene
+            .placement_contacts(PlacementRequest {
+                anchor: body.pose.landblock_id,
+                center,
+                radius: sphere.radius,
+                placement: &placement,
+            })?
+            .len();
     }
     Ok(contact_count)
 }
@@ -1812,9 +1753,6 @@ fn solved_grounded(outcome: GroundedOutcome) -> Result<SolvedGrounded> {
             constraint_count,
             motion,
         }),
-        GroundedOutcome::MissingCoverage { missing, .. } => {
-            anyhow::bail!("grounded portal trace lost collision coverage: {missing:?}")
-        }
         GroundedOutcome::BudgetExceeded {
             body,
             budget,

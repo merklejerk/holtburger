@@ -781,7 +781,6 @@ fn stop_physical_camera(
 /// Replaces the complete frontend-owned collision simulation interest.
 #[tauri::command]
 async fn replace_simulation_interest(
-    app: tauri::AppHandle,
     runtime: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
     request: host_simulation_runtime::SimulationInterestRequest,
 ) -> Result<host_simulation_runtime::SimulationInterestReceipt, String> {
@@ -793,7 +792,6 @@ async fn replace_simulation_interest(
     .await
     .map_err(|error| format!("simulation-interest replacement task failed: {error}"))?
     .map_err(format_error)?;
-    host_simulation_runtime::emit_body_activity_events(&app, &runtime).map_err(format_error)?;
     Ok(receipt)
 }
 

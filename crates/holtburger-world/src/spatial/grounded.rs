@@ -5,11 +5,10 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 
 use super::collision::{
-    CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
-    GroundedObstruction, GroundedObstructionRequest, MissingCoverage, MotionWaypoint,
-    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest, StaticContact,
-    SupportContact, SupportFeature, SupportRequest, anchor_point_to_outdoor_position,
-    landblock_key, separating_displacement,
+    CellTransitRequest, CollisionPlacement, CollisionScene, GroundedObstruction,
+    GroundedObstructionRequest, MotionWaypoint, MovementRestrictionRequest, PlacementRequest,
+    PlacementRestrictionRequest, SphereSweep, StaticContact, SupportContact, SupportFeature,
+    SupportRequest, anchor_point_to_outdoor_position, landblock_key, separating_displacement,
 };
 
 /// Retail's minimum upward surface-normal component for walkable support.
@@ -138,13 +137,6 @@ pub enum GroundedOutcome {
         /// Distinct non-walkable planes encountered during this solve.
         constraint_count: usize,
     },
-    /// Collision coverage was incomplete; the exact prior state is held.
-    MissingCoverage {
-        /// Last safely committed body state.
-        body: GroundedBody,
-        /// Exact missing coverage reason.
-        missing: MissingCoverage,
-    },
     /// A finite safety budget was reached; the last safe state is held.
     BudgetExceeded {
         /// Last safely committed body state.
@@ -257,20 +249,6 @@ pub fn solve_grounded(
     if let Some(support) = request.body.support {
         displacement = project_into_plane(displacement, support.normal);
     }
-    if let Some(missing) = pair_coverage(
-        scene,
-        anchor,
-        start,
-        displacement,
-        reference_pose,
-        request.spheres,
-    )? {
-        return Ok(GroundedOutcome::MissingCoverage {
-            body: request.body,
-            missing,
-        });
-    }
-
     let distance = displacement.length();
     let required_substeps = if distance <= f32::EPSILON {
         1
@@ -309,15 +287,7 @@ pub fn solve_grounded(
             center: mut candidate,
             placement: mut candidate_placement,
             contacts: mut role_contacts,
-        } = match movement_candidate(context, &body, current, constrained_substep)? {
-            CollisionQuery::Complete(candidate) => candidate,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(GroundedOutcome::MissingCoverage {
-                    body: original,
-                    missing,
-                });
-            }
-        };
+        } = movement_candidate(context, &body, current, constrained_substep)?;
         let mut contacted_walkable_support =
             has_walkable_support_contact(&role_contacts, config.walkable_normal_z);
         let mut converged = false;
@@ -342,34 +312,22 @@ pub fn solve_grounded(
                 && body.support.is_some()
                 && config.step_up_height > 0.0
             {
-                match step_up_candidate(context, &body, current, candidate)? {
-                    CollisionQuery::Complete(Some(stepped)) => {
-                        current = stepped.body_center;
-                        body.cell = stepped.placement.committed_cell();
-                        body.pose = pose_for_commit(
-                            anchor,
-                            current,
-                            reference_pose,
-                            stepped.placement.committed_cell(),
-                        );
-                        body.support = Some(stepped.support);
-                        motion.push(MotionWaypoint {
-                            center: current,
-                            end_fraction: (completed_substeps + 1) as f32
-                                / required_substeps as f32,
-                            placement: super::collision::MotionWaypointPlacement::Committed(
-                                body.cell,
-                            ),
-                        });
-                        continue 'substeps;
-                    }
-                    CollisionQuery::Complete(_) => {}
-                    CollisionQuery::MissingCoverage(missing) => {
-                        return Ok(GroundedOutcome::MissingCoverage {
-                            body: original,
-                            missing,
-                        });
-                    }
+                if let Some(stepped) = step_up_candidate(context, &body, current, candidate)? {
+                    current = stepped.body_center;
+                    body.cell = stepped.placement.committed_cell();
+                    body.pose = pose_for_commit(
+                        anchor,
+                        current,
+                        reference_pose,
+                        stepped.placement.committed_cell(),
+                    );
+                    body.support = Some(stepped.support);
+                    motion.push(MotionWaypoint {
+                        center: current,
+                        end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
+                        placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
+                    });
+                    continue 'substeps;
                 }
 
                 let mut retry_normal = None;
@@ -397,19 +355,10 @@ pub fn solve_grounded(
                     sliding_normal = retry_normal;
                     lower_step_retried = true;
                     constrained_substep = retry_substep;
-                    match movement_candidate(context, &body, current, retry_substep)? {
-                        CollisionQuery::Complete(retry) => {
-                            candidate = retry.center;
-                            candidate_placement = retry.placement;
-                            role_contacts = retry.contacts;
-                        }
-                        CollisionQuery::MissingCoverage(missing) => {
-                            return Ok(GroundedOutcome::MissingCoverage {
-                                body: original,
-                                missing,
-                            });
-                        }
-                    };
+                    let retry = movement_candidate(context, &body, current, retry_substep)?;
+                    candidate = retry.center;
+                    candidate_placement = retry.placement;
+                    role_contacts = retry.contacts;
                     continue;
                 }
             }
@@ -435,23 +384,15 @@ pub fn solve_grounded(
                 })
                 .collect::<Vec<_>>();
             candidate = candidate + separating_displacement(&contacts, config.separation_epsilon);
-            candidate_placement = match transit_pair(
+            candidate_placement = transit_pair(
                 scene,
                 anchor,
                 &body,
                 reference_pose,
                 request.spheres,
                 candidate,
-            )? {
-                CollisionQuery::Complete(cells) => cells,
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(GroundedOutcome::MissingCoverage {
-                        body: original,
-                        missing,
-                    });
-                }
-            };
-            role_contacts = match placement_contacts(
+            )?;
+            role_contacts = placement_contacts(
                 scene,
                 anchor,
                 candidate,
@@ -459,15 +400,7 @@ pub fn solve_grounded(
                 request.spheres,
                 &candidate_placement,
                 request.filter,
-            )? {
-                CollisionQuery::Complete(contacts) => contacts,
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(GroundedOutcome::MissingCoverage {
-                        body: original,
-                        missing,
-                    });
-                }
-            };
+            )?;
             if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
                 converged = true;
                 break;
@@ -495,11 +428,11 @@ pub fn solve_grounded(
                 && body.cell == candidate_placement.committed_cell()
         });
         let settle_result = if let Some(support) = stationary_support {
-            CollisionQuery::Complete(SettleResult::Supported(SupportedPlacement {
+            SettleResult::Supported(SupportedPlacement {
                 body_center: current,
                 placement: candidate_placement.clone(),
                 support,
-            }))
+            })
         } else if request.may_step_down {
             // Retail reaches its ordinary step-down branch only while OBJECTINFO state retains
             // contact (`CTransition::transitional_insert`, acclient.c:301550-301599). Running the
@@ -510,10 +443,10 @@ pub fn solve_grounded(
             // exact surface, but it does not inherit the much deeper walking step-down reach.
             settle_candidate(context, &body, candidate, config.separation_epsilon * 2.0)?
         } else {
-            CollisionQuery::Complete(SettleResult::Unsupported)
+            SettleResult::Unsupported
         };
         match settle_result {
-            CollisionQuery::Complete(SettleResult::Supported(settled)) => {
+            SettleResult::Supported(settled) => {
                 remember_support_collision_normal(
                     &mut collision_normal,
                     settled.support.normal,
@@ -523,9 +456,9 @@ pub fn solve_grounded(
                 candidate_placement = settled.placement;
                 body.support = Some(settled.support);
             }
-            CollisionQuery::Complete(
-                result @ (SettleResult::Edge { .. } | SettleResult::Unsupported),
-            ) if config.edge_protection == EdgeProtection::Creature => {
+            result @ (SettleResult::Edge { .. } | SettleResult::Unsupported)
+                if config.edge_protection == EdgeProtection::Creature =>
+            {
                 // Retail restores both the saved check position and saved cell before precipice
                 // response (`CTransition::edge_slide`, acclient.c:301354-301440). Rolling back the
                 // whole candidate keeps protection independent of whether this substep happened
@@ -543,50 +476,30 @@ pub fn solve_grounded(
                         constrained_substep,
                         inward_normal,
                     )? {
-                        CollisionQuery::Complete(Some(slid)) => {
+                        Some(slid) => {
                             candidate = slid.body_center;
                             candidate_placement = slid.placement;
                             body.support = Some(slid.support);
                         }
-                        CollisionQuery::Complete(None) => {
+                        None => {
                             candidate = current;
-                            candidate_placement = match transit_pair(
+                            candidate_placement = transit_pair(
                                 scene,
                                 anchor,
                                 &body,
                                 reference_pose,
                                 request.spheres,
                                 current,
-                            )? {
-                                CollisionQuery::Complete(placement) => placement,
-                                CollisionQuery::MissingCoverage(missing) => {
-                                    return Ok(GroundedOutcome::MissingCoverage {
-                                        body: original,
-                                        missing,
-                                    });
-                                }
-                            };
+                            )?;
                             body.support = Some(prior_support);
-                        }
-                        CollisionQuery::MissingCoverage(missing) => {
-                            return Ok(GroundedOutcome::MissingCoverage {
-                                body: original,
-                                missing,
-                            });
                         }
                     }
                 } else {
                     body.support = None;
                 }
             }
-            CollisionQuery::Complete(SettleResult::Edge { .. } | SettleResult::Unsupported) => {
+            SettleResult::Edge { .. } | SettleResult::Unsupported => {
                 body.support = None;
-            }
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(GroundedOutcome::MissingCoverage {
-                    body: original,
-                    missing,
-                });
             }
         }
 
@@ -661,41 +574,31 @@ fn settle_candidate(
     body: &GroundedBody,
     candidate: Vector3,
     maximum_drop: f32,
-) -> Result<CollisionQuery<SettleResult>> {
-    let candidate_placement = match transit_pair(
+) -> Result<SettleResult> {
+    let candidate_placement = transit_pair(
         context.scene,
         context.anchor,
         body,
         context.pose,
         context.spheres,
         candidate,
-    )? {
-        CollisionQuery::Complete(cells) => cells,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
+    )?;
     // Retail lowers the complete candidate body, invalidates its CELLARRAY, and rebuilds that
     // collision-domain set before evaluating walkable surfaces (`CTransition::step_down`,
     // acclient.c:301354-301437). The vertical transaction must retain the candidate domains as
     // well: an upper sphere can expose outdoor terrain before the lowered endpoint reaches it.
     let lowered = candidate - Vector3::new(0.0, 0.0, maximum_drop);
-    let lowered_placement = match transit_pair(
+    let lowered_placement = transit_pair(
         context.scene,
         context.anchor,
         body,
         context.pose,
         context.spheres,
         lowered,
-    )? {
-        CollisionQuery::Complete(cells) => cells,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
+    )?;
     let support_placement = candidate_placement.clone().merge_reached(lowered_placement);
     let support_center = sphere_center(candidate, context.pose, context.spheres.support);
-    let supports = match context.scene.support_contacts(SupportRequest {
+    let supports = context.scene.support_contacts(SupportRequest {
         anchor: context.anchor,
         center: support_center,
         radius: context.spheres.support.radius,
@@ -703,12 +606,7 @@ fn settle_candidate(
         // Retail accepts negative `walk_interp` only down to -0.1 during step-down.
         maximum_rise: maximum_drop * 0.1,
         placement: &support_placement,
-    })? {
-        CollisionQuery::Complete(supports) => supports,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
+    })?;
     let mut surface: Option<SupportContact> = None;
     let mut edge: Option<SupportContact> = None;
     for support in supports
@@ -734,7 +632,7 @@ fn settle_candidate(
         }
     }
     let Some(support) = surface else {
-        return Ok(CollisionQuery::Complete(match edge {
+        return Ok(match edge {
             Some(support) => {
                 let SupportFeature::Edge { inward_normal } = support.feature else {
                     unreachable!();
@@ -742,23 +640,18 @@ fn settle_candidate(
                 SettleResult::Edge { inward_normal }
             }
             None => SettleResult::Unsupported,
-        }));
+        });
     };
     let settled = candidate + Vector3::new(0.0, 0.0, support.height_delta);
-    let settled_cells = match transit_pair(
+    let settled_cells = transit_pair(
         context.scene,
         context.anchor,
         body,
         context.pose,
         context.spheres,
         settled,
-    )? {
-        CollisionQuery::Complete(cells) => cells,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
-    let confirmation = match placement_contacts(
+    )?;
+    let confirmation = placement_contacts(
         context.scene,
         context.anchor,
         settled,
@@ -766,39 +659,30 @@ fn settle_candidate(
         context.spheres,
         &settled_cells,
         context.filter,
-    )? {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
+    )?;
     if confirmation.iter().any(|entry| !entry.contacts.is_empty()) {
         // Retail's single mutable step-down transaction can retain horizontal progress while a
         // reached lower face is still momentarily occluded by the finite edge being left. Preserve
         // that bridge at the candidate elevation only when the same bounded query proved a real
         // surface below. Edge reach by itself must not become ratcheting support.
         if let Some(edge) = edge {
-            return Ok(CollisionQuery::Complete(SettleResult::Supported(
-                SupportedPlacement {
-                    body_center: candidate,
-                    placement: candidate_placement,
-                    support: GroundSupport {
-                        normal: edge.normal,
-                    },
+            return Ok(SettleResult::Supported(SupportedPlacement {
+                body_center: candidate,
+                placement: candidate_placement,
+                support: GroundSupport {
+                    normal: edge.normal,
                 },
-            )));
+            }));
         }
-        return Ok(CollisionQuery::Complete(SettleResult::Unsupported));
+        return Ok(SettleResult::Unsupported);
     }
-    Ok(CollisionQuery::Complete(SettleResult::Supported(
-        SupportedPlacement {
-            body_center: settled,
-            placement: settled_cells,
-            support: GroundSupport {
-                normal: support.normal,
-            },
+    Ok(SettleResult::Supported(SupportedPlacement {
+        body_center: settled,
+        placement: settled_cells,
+        support: GroundSupport {
+            normal: support.normal,
         },
-    )))
+    }))
 }
 
 fn step_up_candidate(
@@ -806,17 +690,16 @@ fn step_up_candidate(
     body: &GroundedBody,
     current: Vector3,
     candidate: Vector3,
-) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+) -> Result<Option<SupportedPlacement>> {
     let raised = candidate + Vector3::new(0.0, 0.0, context.config.step_up_height);
     match settle_candidate(context, body, raised, context.config.step_up_height)? {
-        CollisionQuery::Complete(SettleResult::Supported(stepped))
+        SettleResult::Supported(stepped)
             if stepped.body_center.z - current.z
                 <= context.config.step_up_height + context.config.separation_epsilon =>
         {
-            Ok(CollisionQuery::Complete(Some(stepped)))
+            Ok(Some(stepped))
         }
-        CollisionQuery::Complete(_) => Ok(CollisionQuery::Complete(None)),
-        CollisionQuery::MissingCoverage(missing) => Ok(CollisionQuery::MissingCoverage(missing)),
+        _ => Ok(None),
     }
 }
 
@@ -824,7 +707,7 @@ fn step_down_candidate(
     context: GroundedSolveContext<'_>,
     body: &GroundedBody,
     candidate: Vector3,
-) -> Result<CollisionQuery<SettleResult>> {
+) -> Result<SettleResult> {
     settle_candidate(context, body, candidate, context.config.step_down_height)
 }
 
@@ -836,13 +719,13 @@ fn edge_slide_candidate(
     current: Vector3,
     requested_substep: Vector3,
     inward_normal: Option<Vector3>,
-) -> Result<CollisionQuery<Option<SupportedPlacement>>> {
+) -> Result<Option<SupportedPlacement>> {
     let Some(inward_normal) = inward_normal else {
-        return Ok(CollisionQuery::Complete(None));
+        return Ok(None);
     };
     let edge_slide = project_into_plane(requested_substep, inward_normal);
     if edge_slide.length_squared() <= f32::EPSILON {
-        return Ok(CollisionQuery::Complete(None));
+        return Ok(None);
     }
     match settle_candidate(
         context,
@@ -850,48 +733,8 @@ fn edge_slide_candidate(
         current + edge_slide,
         context.config.step_down_height,
     )? {
-        CollisionQuery::Complete(SettleResult::Supported(settled)) => {
-            Ok(CollisionQuery::Complete(Some(settled)))
-        }
-        CollisionQuery::Complete(_) => Ok(CollisionQuery::Complete(None)),
-        CollisionQuery::MissingCoverage(missing) => Ok(CollisionQuery::MissingCoverage(missing)),
-    }
-}
-
-fn pair_coverage(
-    scene: &CollisionScene,
-    anchor: Guid,
-    body_start: Vector3,
-    displacement: Vector3,
-    pose: WorldPosition,
-    spheres: GroundedBodySpheres,
-) -> Result<Option<MissingCoverage>> {
-    let mut missing_landblocks = Vec::new();
-    let mut outside_world = false;
-    for sphere in sphere_entries(spheres) {
-        let start = sphere_center(body_start, pose, sphere);
-        match scene.coverage(CoverageRequest {
-            anchor,
-            start,
-            end: start + displacement,
-            radius: sphere.radius,
-        })? {
-            CollisionQuery::Complete(_) => {}
-            CollisionQuery::MissingCoverage(missing) => {
-                missing_landblocks.extend(missing.landblocks);
-                outside_world |= missing.outside_world;
-            }
-        }
-    }
-    missing_landblocks.sort_unstable();
-    missing_landblocks.dedup();
-    if missing_landblocks.is_empty() && !outside_world {
-        Ok(None)
-    } else {
-        Ok(Some(MissingCoverage {
-            landblocks: missing_landblocks,
-            outside_world,
-        }))
+        SettleResult::Supported(settled) => Ok(Some(settled)),
+        _ => Ok(None),
     }
 }
 
@@ -900,32 +743,22 @@ fn movement_candidate(
     body: &GroundedBody,
     current: Vector3,
     displacement: Vector3,
-) -> Result<CollisionQuery<MovementCandidate>> {
+) -> Result<MovementCandidate> {
     let center = current + displacement;
-    let placement = match transit_pair(
+    let placement = transit_pair(
         context.scene,
         context.anchor,
         body,
         context.pose,
         context.spheres,
         center,
-    )? {
-        CollisionQuery::Complete(placement) => placement,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
-    let contacts = match movement_contacts(context, current, center, &placement)? {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
-    Ok(CollisionQuery::Complete(MovementCandidate {
+    )?;
+    let contacts = movement_contacts(context, current, center, &placement)?;
+    Ok(MovementCandidate {
         center,
         placement,
         contacts,
-    }))
+    })
 }
 
 fn movement_contacts(
@@ -933,26 +766,21 @@ fn movement_contacts(
     body_start: Vector3,
     body_end: Vector3,
     placement: &CollisionPlacement,
-) -> Result<CollisionQuery<Vec<RoleContacts>>> {
+) -> Result<Vec<RoleContacts>> {
     let mut result = Vec::new();
     for (role, sphere) in role_spheres(context.spheres) {
         let offset = context.pose.rotation.rotate_vector(sphere.center);
-        let contacts = match context
+        let contacts = context
             .scene
             .grounded_obstructions(GroundedObstructionRequest {
-                sweep: CoverageRequest {
+                sweep: SphereSweep {
                     anchor: context.anchor,
                     start: body_start + offset,
                     end: body_end + offset,
                     radius: sphere.radius,
                 },
                 placement,
-            })? {
-            CollisionQuery::Complete(contacts) => contacts,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+            })?;
         result.push(RoleContacts { role, contacts });
     }
     // Retail derives `global_low_point` from SPHEREPATH sphere zero and performs the whole-water
@@ -962,10 +790,10 @@ fn movement_contacts(
         .pose
         .rotation
         .rotate_vector(context.spheres.support.center);
-    let restrictions = match context
+    let restrictions = context
         .scene
         .movement_restrictions(MovementRestrictionRequest {
-            sweep: CoverageRequest {
+            sweep: SphereSweep {
                 anchor: context.anchor,
                 start: body_start + support_offset,
                 end: body_end + support_offset,
@@ -973,16 +801,11 @@ fn movement_contacts(
             },
             placement,
             filter: context.filter,
-        })? {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
+        })?;
     result[0]
         .contacts
         .extend(restrictions.into_iter().map(static_grounded_obstruction));
-    Ok(CollisionQuery::Complete(result))
+    Ok(result)
 }
 
 fn placement_contacts(
@@ -993,42 +816,33 @@ fn placement_contacts(
     spheres: GroundedBodySpheres,
     placement: &CollisionPlacement,
     filter: super::PhysicalCollisionFilter,
-) -> Result<CollisionQuery<Vec<RoleContacts>>> {
+) -> Result<Vec<RoleContacts>> {
     let mut result = Vec::new();
     for (role, sphere) in role_spheres(spheres) {
-        let contacts = match scene.placement_contacts(PlacementRequest {
-            anchor,
-            center: sphere_center(body_center, pose, sphere),
-            radius: sphere.radius,
-            placement,
-        })? {
-            CollisionQuery::Complete(contacts) => contacts
-                .into_iter()
-                .map(static_grounded_obstruction)
-                .collect(),
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+        let contacts = scene
+            .placement_contacts(PlacementRequest {
+                anchor,
+                center: sphere_center(body_center, pose, sphere),
+                radius: sphere.radius,
+                placement,
+            })?
+            .into_iter()
+            .map(static_grounded_obstruction)
+            .collect();
         result.push(RoleContacts { role, contacts });
     }
     let support_center = sphere_center(body_center, pose, spheres.support);
-    let restrictions = match scene.placement_restrictions(PlacementRestrictionRequest {
+    let restrictions = scene.placement_restrictions(PlacementRestrictionRequest {
         anchor,
         center: support_center,
         radius: spheres.support.radius,
         placement,
         filter,
-    })? {
-        CollisionQuery::Complete(contacts) => contacts,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
+    })?;
     result[0]
         .contacts
         .extend(restrictions.into_iter().map(static_grounded_obstruction));
-    Ok(CollisionQuery::Complete(result))
+    Ok(result)
 }
 
 fn static_grounded_obstruction(contact: StaticContact) -> GroundedObstruction {
@@ -1119,34 +933,24 @@ fn transit_pair(
     pose: WorldPosition,
     spheres: GroundedBodySpheres,
     body_center: Vector3,
-) -> Result<CollisionQuery<CollisionPlacement>> {
-    let lower = match scene.transit_cell(CellTransitRequest {
+) -> Result<CollisionPlacement> {
+    let lower = scene.transit_cell(CellTransitRequest {
         previous_cell: body.cell,
         anchor,
         center: sphere_center(body_center, pose, spheres.support),
         radius: spheres.support.radius,
-    })? {
-        CollisionQuery::Complete(placement) => placement,
-        CollisionQuery::MissingCoverage(missing) => {
-            return Ok(CollisionQuery::MissingCoverage(missing));
-        }
-    };
+    })?;
     let placement = if let Some(upper) = spheres.upper {
-        match scene.transit_cell(CellTransitRequest {
+        lower.merge_reached(scene.transit_cell(CellTransitRequest {
             previous_cell: body.cell,
             anchor,
             center: sphere_center(body_center, pose, upper),
             radius: upper.radius,
-        })? {
-            CollisionQuery::Complete(upper_placement) => lower.merge_reached(upper_placement),
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        }
+        })?)
     } else {
         lower
     };
-    Ok(CollisionQuery::Complete(placement))
+    Ok(placement)
 }
 
 fn sphere_center(body_center: Vector3, pose: WorldPosition, sphere: GroundedSphere) -> Vector3 {
@@ -1634,15 +1438,13 @@ mod tests {
             filter: crate::PhysicalCollisionFilter::ALL,
         };
 
-        let CollisionQuery::Complete(contacts) = movement_contacts(
+        let contacts = movement_contacts(
             context,
             Vector3::new(191.0, 96.0, 2.0),
             Vector3::new(191.2, 96.0, 2.0),
             &CollisionPlacement::outdoor(),
         )
-        .unwrap() else {
-            panic!("water-boundary fixture unexpectedly lacks collision coverage");
-        };
+        .unwrap();
 
         assert!(contacts.iter().all(|entry| entry.contacts.is_empty()));
     }
@@ -2537,7 +2339,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_coverage_holds_all_grounded_state_and_resumes_without_hidden_gravity() {
+    fn grounded_body_crosses_a_missing_owner_as_open_space() {
         let original = GroundedBody {
             pose: pose(Vector3::new(191.0, 20.0, 3.0)),
             cell: None,
@@ -2555,34 +2357,21 @@ mod tests {
         incomplete
             .insert(artifact(LANDBLOCK, vec![floor()], Vec::new()))
             .unwrap();
-        match solve(
-            &incomplete,
-            original.clone(),
-            pair(),
-            Vector3::new(20.0, 0.0, 0.0),
-            0.1,
-        ) {
-            GroundedOutcome::MissingCoverage { body, missing } => {
-                assert_eq!(body, original, "coverage hold mutated grounded state");
-                assert_eq!(missing.landblocks, vec![Guid(EAST)]);
-            }
-            other => panic!("missing owner did not hold the body: {other:?}"),
-        }
-
-        incomplete
-            .insert(artifact(EAST, vec![floor()], Vec::new()))
-            .unwrap();
-        let (resumed, _) = solved(solve(
+        let (crossed, _) = solved(solve(
             &incomplete,
             original,
             pair(),
             Vector3::new(20.0, 0.0, 0.0),
             0.1,
         ));
-        assert!((resumed.velocity.z + 1.98).abs() < EPSILON);
+        assert_eq!(
+            crossed.pose.landblock_id.0 & 0xffff_0000,
+            EAST & 0xffff_0000
+        );
+        assert!((crossed.velocity.z + 1.98).abs() < EPSILON);
         assert!(
-            resumed.pose.coords.z < 3.0,
-            "restored coverage did not resume gravity"
+            crossed.pose.coords.z < 3.0,
+            "gravity stopped at the scene edge"
         );
     }
 

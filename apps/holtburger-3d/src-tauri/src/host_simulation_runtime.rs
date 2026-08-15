@@ -9,15 +9,13 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_content::LandblockCollisionAsset;
 use holtburger_core::ContentAssetService;
 use holtburger_world::{
-    CollisionScene, EdgeProtection, GroundedConfig, InvalidPhysicalBodyPlacement,
-    PhysicalBodyActivity, PhysicalBodyActuation, PhysicalBodyDefinition,
+    CollisionScene, EdgeProtection, GroundedConfig, PhysicalBodyActuation, PhysicalBodyDefinition,
     PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
     PhysicalCollisionFilter, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
     PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PlacedMotionPath,
-    PlacementRecovery, SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialScene,
+    PlacementRecovery, SpatialBody, SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
 
 /// Injectable source of complete, atomic landblock collision products.
 pub trait CollisionSource: Send + Sync {
@@ -300,74 +298,6 @@ fn resolve_collision_filter(
     Ok(PhysicalCollisionFilter::excluding(exclusions))
 }
 
-/// Generic event emitted when one body's collision availability changes.
-pub const BODY_ACTIVITY_EVENT: &str = "host://physical-body-activity";
-
-/// Transport-safe generic body identity; spawn provenance remains outside physical definitions.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum HostSpatialBodyId {
-    /// Authoritative server/world entity.
-    Entity {
-        /// Hexadecimal entity GUID.
-        guid: String,
-    },
-    /// Session-local authoritative player.
-    LocalPlayer {
-        /// Hexadecimal player GUID.
-        guid: String,
-    },
-    /// Host-allocated frontend-local body.
-    Ephemeral {
-        /// Monotonic host-local identifier.
-        id: u64,
-    },
-}
-
-impl From<SpatialBodyId> for HostSpatialBodyId {
-    fn from(body_id: SpatialBodyId) -> Self {
-        match body_id {
-            SpatialBodyId::Entity(guid) => Self::Entity {
-                guid: format!("0x{:08x}", guid.0),
-            },
-            SpatialBodyId::LocalPlayer(guid) => Self::LocalPlayer {
-                guid: format!("0x{:08x}", guid.0),
-            },
-            SpatialBodyId::Ephemeral(id) => Self::Ephemeral { id },
-        }
-    }
-}
-
-/// Transport-safe exhaustive body availability state.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "state", rename_all = "kebab-case")]
-pub enum HostPhysicalBodyActivity {
-    /// Collision coverage and retained placement are valid.
-    Active,
-    /// Exact collision owners required before simulation may resume.
-    AwaitingCoverage {
-        /// Sorted normalized landblock owners absent from the collision snapshot.
-        landblock_ids: Vec<String>,
-        /// Whether the required source halo extends beyond the AC world grid.
-        outside_world: bool,
-    },
-    /// Restored topology cannot accept the retained body placement.
-    InvalidPlacement {
-        /// Stable human-readable reason suitable for application diagnostics.
-        reason: String,
-    },
-}
-
-/// One body identity paired with its newly authoritative availability.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostPhysicalBodyActivityEvent {
-    /// Stable identity whose activity changed.
-    pub body_id: HostSpatialBodyId,
-    /// Newly authoritative exhaustive activity.
-    pub activity: HostPhysicalBodyActivity,
-}
-
 /// State that must change atomically with respect to every generic body tick.
 struct HostSimulationState {
     /// Complete immutable collision topology used by the next tick.
@@ -376,8 +306,6 @@ struct HostSimulationState {
     resident: HashSet<Guid>,
     /// Canonical identity, pose, and physical state for every registered body.
     bodies: SpatialScene,
-    /// Availability transitions waiting for the app transport to drain them.
-    body_events: Vec<SpatialBodyEvent>,
 }
 
 impl Default for HostSimulationState {
@@ -386,7 +314,6 @@ impl Default for HostSimulationState {
             scene: Arc::new(CollisionScene::new()),
             resident: HashSet::new(),
             bodies: SpatialScene::new(),
-            body_events: Vec::new(),
         }
     }
 }
@@ -406,9 +333,9 @@ struct SimulationInterestTarget {
 pub struct HostPhysicalBodyTick {
     /// Body state before the fixed tick.
     pub previous: SpatialBody,
-    /// Body state after the fixed tick or retained inactive hold.
+    /// Body state after the fixed tick.
     pub current: SpatialBody,
-    /// Generic placed-motion or inactive result.
+    /// Generic placed-motion result and orthogonal scene residency.
     pub result: PhysicalBodyTickResult,
     /// Exact immutable topology snapshot used by the solve.
     pub collision: Arc<CollisionScene>,
@@ -477,7 +404,7 @@ impl HostSimulationRuntime {
         Ok(body_id)
     }
 
-    /// Attaches a source-neutral physical definition and publishes its initial activity.
+    /// Attaches a source-neutral physical definition.
     pub fn attach_physical_body(
         &self,
         body_id: SpatialBodyId,
@@ -485,8 +412,7 @@ impl HostSimulationRuntime {
         retained_cell: Option<Guid>,
     ) -> Result<()> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        let scene = Arc::clone(&state.scene);
-        let event = state
+        state
             .bodies
             .attach_physical_body(
                 body_id,
@@ -494,10 +420,8 @@ impl HostSimulationRuntime {
                 registration.collision_filter,
                 registration.response_policy,
                 retained_cell,
-                &scene,
-            )?
+            )
             .with_context(|| format!("physical body {body_id:?} is not registered"))?;
-        state.body_events.push(event);
         Ok(())
     }
 
@@ -534,9 +458,6 @@ impl HostSimulationRuntime {
             },
         )?;
         report_body_placement_recoveries(body_id, &result);
-        if let Some(event) = result.activity_event.clone() {
-            state.body_events.push(event);
-        }
         let current = state
             .bodies
             .body(body_id)
@@ -570,20 +491,6 @@ impl HostSimulationRuntime {
             .expect("host simulation lock poisoned")
             .bodies
             .remove_body(body_id)
-    }
-
-    /// Drains typed body-availability transitions for transport or application policy.
-    pub fn take_body_events(&self) -> Vec<HostPhysicalBodyActivityEvent> {
-        std::mem::take(
-            &mut self
-                .state
-                .lock()
-                .expect("host simulation lock poisoned")
-                .body_events,
-        )
-        .into_iter()
-        .filter_map(host_body_activity_event)
-        .collect()
     }
 
     /// Opens a new frontend policy lifetime and invalidates work from every earlier lifetime.
@@ -679,13 +586,8 @@ impl HostSimulationRuntime {
             return Ok(receipt(request.revision, false, &unavailable));
         }
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        let body_events = state
-            .bodies
-            .reevaluate_physical_bodies(&next_scene)
-            .context("could not reevaluate physical bodies against replacement collision scene")?;
         state.scene = Arc::new(next_scene);
         state.resident = next_resident;
-        state.body_events.extend(body_events);
         Ok(receipt(request.revision, true, &unavailable))
     }
 
@@ -699,9 +601,7 @@ impl HostSimulationRuntime {
 }
 
 fn report_body_placement_recoveries(body_id: SpatialBodyId, result: &PhysicalBodyTickResult) {
-    let holtburger_world::PhysicalBodyTickOutcome::Motion(motion) = &result.outcome else {
-        return;
-    };
+    let motion = &result.motion;
     if !motion.path.has_recovery() {
         return;
     }
@@ -745,70 +645,6 @@ pub(crate) fn report_placed_motion_recoveries(subject: &str, path: &PlacedMotion
             ),
         }
     }
-}
-
-fn host_body_activity_event(event: SpatialBodyEvent) -> Option<HostPhysicalBodyActivityEvent> {
-    let SpatialBodyEvent::PhysicalActivityChanged { body_id, activity } = event else {
-        return None;
-    };
-    Some(HostPhysicalBodyActivityEvent {
-        body_id: body_id.into(),
-        activity: match activity {
-            PhysicalBodyActivity::Active => HostPhysicalBodyActivity::Active,
-            PhysicalBodyActivity::AwaitingCoverage(missing) => {
-                HostPhysicalBodyActivity::AwaitingCoverage {
-                    landblock_ids: missing
-                        .landblocks
-                        .into_iter()
-                        .map(|owner| format!("0x{:08x}", owner.0))
-                        .collect(),
-                    outside_world: missing.outside_world,
-                }
-            }
-            PhysicalBodyActivity::InvalidPlacement(reason) => {
-                HostPhysicalBodyActivity::InvalidPlacement {
-                    reason: match reason {
-                        InvalidPhysicalBodyPlacement::RetainedCellUnavailable(cell) => format!(
-                            "retained EnvCell 0x{:08x} is unavailable in restored topology",
-                            cell.0
-                        ),
-                        InvalidPhysicalBodyPlacement::PlacementChanged { retained, restored } => {
-                            format!(
-                                "restored placement changed from {} to {}",
-                                optional_cell_name(retained),
-                                optional_cell_name(restored)
-                            )
-                        }
-                        InvalidPhysicalBodyPlacement::OverlapsStaticCollision => {
-                            "retained body overlaps restored static collision".to_string()
-                        }
-                        InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion => {
-                            "body center occupies a forbidden collision region".to_string()
-                        }
-                    },
-                }
-            }
-        },
-    })
-}
-
-fn optional_cell_name(cell: Option<Guid>) -> String {
-    cell.map_or_else(
-        || "outdoors".to_string(),
-        |cell| format!("0x{:08x}", cell.0),
-    )
-}
-
-/// Emits and drains every queued generic body-availability transition.
-pub fn emit_body_activity_events(
-    app: &tauri::AppHandle,
-    runtime: &HostSimulationRuntime,
-) -> Result<()> {
-    for event in runtime.take_body_events() {
-        app.emit(BODY_ACTIVITY_EVENT, event)
-            .context("could not emit physical-body activity")?;
-    }
-    Ok(())
 }
 
 fn parse_owner_set(values: &[String]) -> Result<HashSet<Guid>> {
@@ -1099,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    fn scene_replacement_and_body_availability_commit_under_one_lock() {
+    fn scene_replacement_does_not_mutate_registered_body_state() {
         let service = HostSimulationRuntime::new(Arc::new(CountingSource::default()));
         let session = service.reserve_interest_session();
         let body_id = service.register_ephemeral_body(
@@ -1138,20 +974,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert!(matches!(
-            service
-                .state
-                .lock()
-                .unwrap()
-                .bodies
-                .body(body_id)
-                .unwrap()
-                .physical
-                .as_ref()
-                .unwrap()
-                .activity,
-            PhysicalBodyActivity::AwaitingCoverage(_)
-        ));
+        let registered = service.physical_body_snapshot(body_id).unwrap();
 
         let mut owners = Vec::new();
         for y in 0x54u32..=0x56 {
@@ -1169,17 +992,7 @@ mod tests {
 
         let state = service.state.lock().unwrap();
         assert!(!state.scene.contains_env_cell(Guid(0xda55_0100)));
-        assert_eq!(
-            state
-                .bodies
-                .body(body_id)
-                .unwrap()
-                .physical
-                .as_ref()
-                .unwrap()
-                .activity,
-            PhysicalBodyActivity::Active
-        );
+        assert_eq!(state.bodies.body(body_id).unwrap(), &registered);
         drop(state);
 
         service
@@ -1189,19 +1002,8 @@ mod tests {
                 landblock_ids: Vec::new(),
             })
             .unwrap();
-        assert!(matches!(
-            service
-                .state
-                .lock()
-                .unwrap()
-                .bodies
-                .body(body_id)
-                .unwrap()
-                .physical
-                .as_ref()
-                .unwrap()
-                .activity,
-            PhysicalBodyActivity::AwaitingCoverage(_)
-        ));
+        let state = service.state.lock().unwrap();
+        assert_eq!(state.bodies.body(body_id).unwrap(), &registered);
+        assert!(!state.scene.contains_landblock(Guid(0xda55_ffff)));
     }
 }

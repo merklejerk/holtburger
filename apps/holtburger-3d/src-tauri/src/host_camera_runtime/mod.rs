@@ -27,9 +27,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::Vector3;
-use holtburger_world::{
-    CollisionQuery, PhysicalBodyActuation, SpatialBodyId, resolve_physical_body_cell,
-};
+use holtburger_world::{PhysicalBodyActuation, SpatialBodyId, resolve_physical_body_cell};
 use tauri::{AppHandle, Emitter};
 
 use crate::host_fixed_tick_runtime::{
@@ -128,23 +126,14 @@ impl HostCameraRuntime {
             maximum_displacement_per_tick.is_finite(),
             "physical camera displacement budget must be finite"
         );
-        let body_cell = match resolve_physical_body_cell(
+        let body_cell = resolve_physical_body_cell(
             &scene,
             body_pose,
             body_registration.definition,
             initial_viewer_cell,
-        )? {
-            CollisionQuery::Complete(cell) => cell,
-            // A body remains registered and dormant while explicit interest is absent. The
-            // supplied placement is retained as topology history and validated on restoration.
-            CollisionQuery::MissingCoverage(_) => initial_viewer_cell,
-        };
+        )?;
         body_pose = pose_with_cell(body_pose, body_cell)?;
-        let viewer_cell = match resolve_viewer_cell(&scene, presented_pose, initial_viewer_cell)? {
-            CollisionQuery::Complete(cell) => cell,
-            // Viewer placement follows the same dormant-history rule as its physical body.
-            CollisionQuery::MissingCoverage(_) => initial_viewer_cell,
-        };
+        let viewer_cell = resolve_viewer_cell(&scene, presented_pose, initial_viewer_cell)?;
         presented_pose = pose_with_cell(presented_pose, viewer_cell)?;
         let body_id = self.simulation.register_resolved_physical_body(
             body_pose,
@@ -453,10 +442,9 @@ impl HostCameraRuntime {
             legs,
             viewer,
             status,
+            scene_residency,
             grounded,
             constraint_count,
-            missing_landblocks,
-            outside_world,
             substeps,
             contact_passes,
         } = presentation;
@@ -476,10 +464,9 @@ impl HostCameraRuntime {
             initial,
             legs,
             status,
+            scene_residency,
             grounded,
             constraint_count,
-            missing_landblocks,
-            outside_world,
             substeps,
             contact_passes,
             solve_duration_ms,
@@ -501,10 +488,6 @@ impl HostFixedTickParticipant for CameraTickParticipant {
             return Ok(HostFixedTickDisposition::Finished);
         };
         self.app.emit(CAMERA_MOTION_EVENT, tick)?;
-        crate::host_simulation_runtime::emit_body_activity_events(
-            &self.app,
-            &self.runtime.simulation,
-        )?;
         Ok(HostFixedTickDisposition::Continue)
     }
 

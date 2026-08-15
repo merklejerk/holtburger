@@ -274,15 +274,6 @@ impl WorldState {
                     ]
                 })
             }
-            SpatialBodyEvent::PhysicalActivityChanged { body_id, activity } => {
-                if !self
-                    .scene
-                    .apply_physical_body_activity(*body_id, activity.clone())
-                {
-                    return Vec::new();
-                }
-                vec![WorldEvent::RuntimeBodyChanged { body_id: *body_id }]
-            }
         }
     }
 

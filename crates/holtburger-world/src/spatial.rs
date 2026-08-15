@@ -20,12 +20,12 @@ pub(crate) use physics::project_pose_by_velocity;
 #[cfg(test)]
 mod tests;
 pub use collision::{
-    CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionQueryError, CollisionScene,
-    CollisionSceneUpdateError, CoverageRequest, GroundedObstruction, GroundedObstructionRequest,
-    MissingCoverage, MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
-    MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest,
-    PlacedMotionPoint, PlacementRecovery, PlacementRequest, PlacementRestrictionRequest,
-    StaticContact, SupportContact, SupportFeature, SupportRequest,
+    CellTransitRequest, CollisionPlacement, CollisionQueryError, CollisionScene,
+    CollisionSceneUpdateError, GroundedObstruction, GroundedObstructionRequest, MotionWaypoint,
+    MotionWaypointPlacement, MovementObstructionRequest, MovementRestrictionRequest,
+    PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint,
+    PlacementRecovery, PlacementRequest, PlacementRestrictionRequest, SphereSweep, StaticContact,
+    SupportContact, SupportFeature, SupportRequest,
 };
 pub use grounded::{
     EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
@@ -33,14 +33,12 @@ pub use grounded::{
     solve_grounded,
 };
 pub use physical_body::{
-    GroundedBodyActuation, GroundedLaunch, InvalidPhysicalBodyPlacement, PhysicalBodyActivity,
-    PhysicalBodyActuation, PhysicalBodyActuationError, PhysicalBodyDefinition,
-    PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyResponsePolicy,
-    PhysicalBodyResponsePolicyError, PhysicalBodyResponseState, PhysicalBodyState,
-    PhysicalBodyTickOutcome, PhysicalBodyTickResult, PhysicalBodyTickStatus,
+    GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation, PhysicalBodyActuationError,
+    PhysicalBodyDefinition, PhysicalBodyDefinitionError, PhysicalBodyMotion,
+    PhysicalBodyResponsePolicy, PhysicalBodyResponsePolicyError, PhysicalBodyResponseState,
+    PhysicalBodySceneResidency, PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus,
     PhysicalCollisionExclusions, PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction,
-    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, evaluate_physical_body_activity,
-    initial_physical_body_activity, resolve_physical_body_cell,
+    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, resolve_physical_body_cell,
 };
 pub use physical_fly::{
     PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,

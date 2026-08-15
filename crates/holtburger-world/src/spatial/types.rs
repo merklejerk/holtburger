@@ -271,13 +271,6 @@ pub enum SpatialBodyEvent {
         body_id: SpatialBodyId,
         pose: WorldPosition,
     },
-    /// A registered physical body entered a distinct collision-availability state.
-    PhysicalActivityChanged {
-        /// Stable generic body identity.
-        body_id: SpatialBodyId,
-        /// Newly authoritative coverage/placement activity.
-        activity: super::PhysicalBodyActivity,
-    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

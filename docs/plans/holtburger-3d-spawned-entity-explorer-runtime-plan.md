@@ -5,6 +5,7 @@ Created: 2026-07-31
 Rewritten: 2026-08-01 from the convergence world/feed audit
 Refined: 2026-08-01 after recovery-scope review
 Reconciled: 2026-08-12 after the generic host physical-body and simulation-interest cutover
+Reconciled: 2026-08-15 after the open installed-collision-scene cutover
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Prerequisites:
 
@@ -21,8 +22,8 @@ Prerequisites:
 | Claude one-feed/two-drivers topology                     | Donor-proven at `c938a438`                                                 | Preserve one world/event contract, not donor machinery           |
 | World/entity/spatial/attachment semantics                | Audited on `3d-next` on 2026-08-01                                         | Extend existing `WorldState`; do not duplicate                   |
 | Current `ClientViewEvent` recovery                       | Initial entity snapshot is incomplete                                      | Extend `InitialViewState`; retain the existing ordered broadcast |
-| Static collision, generic bodies, and placed paths       | Implemented in `holtburger-world`                                          | Reuse the existing body store and lifecycle for physical scenarios |
-| Explicit host simulation interest                       | Implemented app-locally                                                    | Scenario/application policy supplies coverage; bodies never stream |
+| Static collision, generic bodies, and placed paths       | Implemented in `holtburger-world`                                          | Reuse the existing body store and installed-scene queries for physical scenarios |
+| Explicit host simulation interest                       | Implemented app-locally                                                    | Scenario/application policy supplies owners; bodies never stream or suspend |
 | Explorer physical camera adapter                        | Implemented app-locally; final live acceptance remains                     | Camera projection and controls remain outside spawned simulation   |
 | Spawned runtime implementation                           | Not started                                                                | Execute the phases below in order                                |
 
@@ -75,14 +76,14 @@ a spawned mutation bus and must not be stretched into one.
   sparse correction, teleport, reset, pause, resume, and deterministic step scenarios.
 - Shared frontend template, animation, script, effect, renderer, and resource-lifetime systems.
 - Host-resolved motion selection and frontend smooth presentation between sparse authoritative samples.
-- Reuse of the landed typed collision coverage, generic `SpatialBody` physical composite, bounded
+- Reuse of the landed installed-scene collision queries, generic `SpatialBody` physical composite, bounded
   response, and camera-agnostic placed-motion contracts only when a named spawned scenario requires
   host-local prediction. A setup-backed server body and an explicit frontend body resolve through
   the same geometry-plus-response validator. A solved entity path preserves accepted response bends
   and host-owned portal placement; it does not inherit the Explorer camera adapter or transport.
-- Explicit scenario/application simulation interest supplies collision coverage independently from
-  render LoD and body placement. An uncovered body remains registered and dormant, and its activity
-  transition may inform policy without automatically loading content.
+- Explicit scenario/application simulation interest supplies collision owners independently from
+  render LoD and body placement. Absent products behave as open space; each tick reports final-owner
+  scene residency without automatically loading content or gating motion.
 - Animated parent-part attachment following with ancestor-derived authoritative residency.
 - `PhysicsScriptTable` decode, transport, and intensity selection — inherited from the effects
   plan by its 2026-08-06 scope ratification. Retail proved the mechanism is exclusively
@@ -171,7 +172,7 @@ a spawned mutation bus and must not be stretched into one.
 | Semantic appearance                                | `holtburger-world`                               | Complete snapshot and visual-template staging                 |
 | Attachment and inherited residency                 | `holtburger-world`                               | Complete snapshot/deltas, then frontend attachment projection |
 | Accepted body placement and correction kind        | `holtburger-world`                               | Sparse placement projection                                   |
-| Physical geometry, response, and coverage activity | `holtburger-world::SpatialBody`                  | First concrete host-local physical prediction scenario        |
+| Physical geometry, response, and scene residency   | `holtburger-world::SpatialBody` and tick result  | First concrete host-local physical prediction scenario        |
 | Collision-accepted geometry and portal placement   | `holtburger-world` placed-motion path            | First concrete host-local physical prediction scenario        |
 | Collision simulation-interest owner set            | Application policy and app-local host service    | Explorer scenario physical-prediction coverage                 |
 | Semantic motion state and resolved selection       | `holtburger-world` using a content-built catalog | Spatial projection and frontend motion-plan playback          |
@@ -211,21 +212,36 @@ demonstrate out-of-order or undetectable loss. They are not an eager correctness
 ### 2026-08-12 Physical-Body Reconciliation
 
 - `SpatialBodyStore` is the only spatial-body registry. Its `SpatialBody` may retain a validated
-  `PhysicalBodyState` containing geometry, response-only memory, and exhaustive active,
-  awaiting-coverage, or invalid-placement activity. Spawned execution extends that body; it does not
-  create a spawned collision-body cache.
+  `PhysicalBodyState`; the 2026-08-15 reconciliation below narrows that state to geometry and
+  response-only memory. Spawned execution extends that body; it does not create a spawned
+  collision-body cache.
 - Physical definitions are source-neutral. Server hydration resolves setup motion spheres plus an
   authoritative response policy under `SpatialBodyId::Entity`; frontend-local spawns submit explicit
   geometry plus policy and receive `Ephemeral` identity. Both enter the same validator and retained
   definition, while setup lookup and identity allocation stay outside simulation.
 - Simulation interest is an explicit, revisioned application request realized by the app-local host
-  service. Neither registration nor ticking may load, evict, or replace collision coverage. Missing
-  coverage freezes all retained body state and emits exact missing owners for policy to consume.
+  service. Neither registration nor ticking may load, evict, or replace collision content. The
+  2026-08-15 reconciliation below defines the current open-scene and residency behavior.
 - `HostCameraRuntime` is evidence that an app-local controller can adapt generic body motion into a
   presentation path. Its viewer offset, camera cadence, diagnostics, and Tauri event are not reusable
   spawned-entity contracts.
 - This reconciliation records reusable landed primitives only. It does not claim that decoded server
   spawns, entity physical-definition attachment, or spawned fixed-tick scheduling are implemented.
+
+### 2026-08-15 Open Installed-Scene Reconciliation
+
+- `SpatialBodyStore` remains the sole body registry, but `PhysicalBodyState` now retains only
+  validated definition and response memory. Collision residency is a per-tick derived fact, not a
+  persistent activity lifecycle.
+- Application policy still owns revisioned simulation interest. Queries read only the immutable
+  installed `CollisionScene`; absent terrain, statics, EnvCells, portals, and source-owned overlap
+  geometry contribute no collision facts and never trigger body-driven loading.
+- Every registered body continues ticking through partial or empty scenes. The generic tick result
+  reports `PhysicalBodySceneResidency::{Resident, MissingOwner, OutsideLandscape}` from the final
+  primary sphere so a concrete spawned consumer may expand interest or tear down its local
+  representation without making that policy part of simulation.
+- Placement through absent topology is best effort. A later scene replacement does not inspect or
+  mutate bodies, and seamless correction when geometry returns is explicitly not guaranteed.
 
 ## Target Runtime Shape
 
@@ -450,11 +466,12 @@ the frontend receives only the presentation facts required to predict the same t
   introduce a scenario/camera profile or another body store. Evaluate supplied placement-stable legs
   at render cadence; do not restore frontend actor portal traversal or infer residency from endpoints.
 - Have scenario/application policy request the collision owner set needed by that physical scenario.
-  Awaiting-coverage activity holds the exact prior state and may prompt a later explicit interest
-  replacement, but the body itself never loads content.
+  Missing-owner residency may prompt a later explicit interest replacement or consumer teardown,
+  but the body continues simulating and never loads content.
 - Keep sparse server-authoritative placement as an explicit anchor until the Phase 4 retail/network
-  evidence names the host-side geometry that can safely become a placed path. Missing topology
-  holds the last proven placement and never falls back to frontend containment.
+  evidence names the host-side geometry that can safely become a placed path. Host-local prediction
+  uses best-effort installed topology; authoritative sparse placement remains the consumer's reset
+  source when partial-scene motion is no longer acceptable.
 - Keep server-authoritative pose available only as diagnostics if a real diagnostic view consumes it.
 
 #### Acceptance Criteria
@@ -463,7 +480,8 @@ the frontend receives only the presentation facts required to predict the same t
   drift.
 - An ordinary correction converges continuously; a forced correction snaps on the first eligible
   presentation sample.
-- One placed path can cross multiple portals, and unavailable topology never guesses residency.
+- One placed path can cross multiple installed portals; absent topology degrades to best-effort
+  placement and an explicit non-gating scene-residency fact.
 - The physical scenario and an explicit frontend-owned body resolve equivalent geometry/response
   payloads identically; neither registration nor tick changes simulation interest.
 - Animation, effects, and renderer code do not write root placement independently.

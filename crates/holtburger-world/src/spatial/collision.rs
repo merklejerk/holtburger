@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
+use holtburger_common::position::{
+    MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK, WorldPosition, outdoor_landblock_owner_at,
+};
 use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
     CellCollisionPortal, CellCollisionPortalTarget, CellVolume, LandblockCollisionAsset,
@@ -18,24 +20,6 @@ use super::bsp_query::{
 use super::{PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
-
-/// Why a collision query cannot safely answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingCoverage {
-    /// Resident landblocks required by the swept sphere but absent from the scene.
-    pub landblocks: Vec<Guid>,
-    /// Whether the swept sphere leaves AC's representable outdoor coordinate space.
-    pub outside_world: bool,
-}
-
-/// A collision query whose coverage is explicit rather than conflated with a miss.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CollisionQuery<T> {
-    /// Every touched landblock was resident and the query completed.
-    Complete(T),
-    /// At least one touched landblock was absent or outside the world.
-    MissingCoverage(MissingCoverage),
-}
 
 /// Invalid collision-query geometry rejected before traversal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -162,9 +146,9 @@ impl From<BspSupportFeature> for SupportFeature {
     }
 }
 
-/// Swept-sphere facts required to prove collision coverage.
+/// Validated swept-sphere geometry expressed in one outdoor anchor frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CoverageRequest {
+pub struct SphereSweep {
     /// Normalized landblock whose local frame contains both centers.
     pub anchor: Guid,
     /// Anchor-local start center; it may lie outside the anchor's 0..192 extent.
@@ -243,7 +227,7 @@ impl CollisionPlacement {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MovementObstructionRequest<'a> {
     /// Swept sphere being tested.
-    pub sweep: CoverageRequest,
+    pub sweep: SphereSweep,
     /// Candidate placement selecting the collision domains visible to this query.
     pub placement: &'a CollisionPlacement,
 }
@@ -252,7 +236,7 @@ pub struct MovementObstructionRequest<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundedObstructionRequest<'a> {
     /// Swept sphere being tested.
-    pub sweep: CoverageRequest,
+    pub sweep: SphereSweep,
     /// Candidate placement selecting the collision domains visible to this query.
     pub placement: &'a CollisionPlacement,
 }
@@ -291,7 +275,7 @@ pub struct SupportRequest<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MovementRestrictionRequest<'a> {
     /// Swept primary sphere whose center selects retail land restrictions.
-    pub sweep: CoverageRequest,
+    pub sweep: SphereSweep,
     /// Candidate placement selecting whether outdoor restrictions participate.
     pub placement: &'a CollisionPlacement,
     /// Body-owned optional collision-domain exclusions.
@@ -305,7 +289,7 @@ pub struct PlacementRestrictionRequest<'a> {
     pub anchor: Guid,
     /// Primary sphere center selecting retail land restrictions.
     pub center: Vector3,
-    /// Positive primary sphere radius used to prove collision coverage.
+    /// Positive primary-sphere radius used to select installed restrictions.
     pub radius: f32,
     /// Candidate placement selecting whether outdoor restrictions participate.
     pub placement: &'a CollisionPlacement,
@@ -366,7 +350,7 @@ pub struct PlacedMotionPathRequest<'a> {
     pub anchor: Guid,
     /// Anchor-local initial sphere center.
     pub start: Vector3,
-    /// Positive mover radius used for coverage and reached collision domains.
+    /// Positive mover radius used to derive reached collision domains.
     pub radius: f32,
     /// Ordered collision-accepted geometry; portal crossings are inserted between these endpoints.
     pub waypoints: &'a [MotionWaypoint],
@@ -508,7 +492,7 @@ struct PlacementTransition {
     target_cell: Option<Guid>,
 }
 
-/// One coverage-proven geometric segment evaluated for authoritative placement changes.
+/// One geometric segment evaluated against currently installed placement topology.
 #[derive(Debug, Clone, Copy)]
 struct PlacementMotionSegment<'a> {
     /// Normalized landblock whose local frame contains both endpoints.
@@ -519,7 +503,7 @@ struct PlacementMotionSegment<'a> {
     end: Vector3,
     /// Sphere radius used for portal reach and far-side placement.
     radius: f32,
-    /// Resident landblocks already proven to cover the complete swept sphere.
+    /// Installed outdoor owners touched by this segment.
     touched: &'a [Guid],
 }
 
@@ -712,7 +696,7 @@ impl StaticShadowIndex {
     ) -> Vec<ColliderReference> {
         let mut selected = Vec::new();
         if placement.reaches_outdoors {
-            for owner in collision_source_landblocks(touched) {
+            for owner in neighboring_source_landblocks(touched) {
                 if let Some(colliders) = self.outdoor_colliders.get(&owner) {
                     selected.extend(colliders.iter().copied());
                 }
@@ -828,27 +812,6 @@ impl CollisionScene {
         removed
     }
 
-    /// Proves that every touched landblock and static-collider source neighbor is resident.
-    pub fn coverage(
-        &self,
-        request: CoverageRequest,
-    ) -> Result<CollisionQuery<Vec<Guid>>, CollisionQueryError> {
-        validate_coverage(request)?;
-        let (touched, outside_world) = touched_landblocks(request);
-        let missing = collision_source_landblocks(&touched)
-            .into_iter()
-            .filter(|landblock| !self.landblocks.contains_key(landblock))
-            .collect::<Vec<_>>();
-        if outside_world || !missing.is_empty() {
-            Ok(CollisionQuery::MissingCoverage(MissingCoverage {
-                landblocks: missing,
-                outside_world,
-            }))
-        } else {
-            Ok(CollisionQuery::Complete(touched))
-        }
-    }
-
     /// Whether the current immutable snapshot contains one exact authored EnvCell.
     pub fn contains_env_cell(&self, cell: Guid) -> bool {
         if cell.0 & 0xffff < 0x0100 {
@@ -865,6 +828,11 @@ impl CollisionScene {
             })
     }
 
+    /// Whether the immutable snapshot contains one canonical outdoor collision owner.
+    pub fn contains_landblock(&self, owner: Guid) -> bool {
+        self.landblocks.contains_key(&landblock_key(owner))
+    }
+
     /// Whether one authoritative body center occupies a region forbidden by its active domains.
     pub fn body_center_is_forbidden(
         &self,
@@ -876,8 +844,8 @@ impl CollisionScene {
         if !entirely_water_restriction_participates(placement, filter) {
             return false;
         }
-        self.landblocks
-            .get(&anchor_point_landblock(anchor, center))
+        outdoor_landblock_owner_at(anchor, center)
+            .and_then(|owner| self.landblocks.get(&owner))
             .is_some_and(|asset| asset.terrain.entirely_water)
     }
 
@@ -885,59 +853,45 @@ impl CollisionScene {
     pub fn movement_obstructions(
         &self,
         request: MovementObstructionRequest,
-    ) -> Result<CollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
-        let touched = match self.coverage(request.sweep)? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+    ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        validate_sweep(request.sweep)?;
+        let touched = touched_landblocks(request.sweep);
         let movement = request.sweep.end - request.sweep.start;
-        Ok(CollisionQuery::Complete(self.contacts(
-            StaticContactRequest {
-                touched: &touched,
-                anchor: request.sweep.anchor,
-                center: request.sweep.end,
-                radius: request.sweep.radius,
-                movement: Some(movement),
-                placement: request.placement,
-            },
-        )))
+        Ok(self.contacts(StaticContactRequest {
+            touched: &touched,
+            anchor: request.sweep.anchor,
+            center: request.sweep.end,
+            radius: request.sweep.radius,
+            movement: Some(movement),
+            placement: request.placement,
+        }))
     }
 
     /// Returns optional body-primary restrictions crossed by directional movement.
     pub fn movement_restrictions(
         &self,
         request: MovementRestrictionRequest,
-    ) -> Result<CollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
-        let touched = match self.coverage(request.sweep)? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+    ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        validate_sweep(request.sweep)?;
+        let touched = touched_landblocks(request.sweep);
         if !entirely_water_restriction_participates(request.placement, request.filter) {
-            return Ok(CollisionQuery::Complete(Vec::new()));
+            return Ok(Vec::new());
         }
-        Ok(CollisionQuery::Complete(self.entirely_water_contacts(
+        Ok(self.entirely_water_contacts(
             &touched,
             request.sweep.anchor,
             request.sweep.end,
             Some(request.sweep.end - request.sweep.start),
-        )))
+        ))
     }
 
     /// Returns directional grounded obstructions without collapsing polygon back faces.
     pub fn grounded_obstructions(
         &self,
         request: GroundedObstructionRequest,
-    ) -> Result<CollisionQuery<Vec<GroundedObstruction>>, CollisionQueryError> {
-        let touched = match self.coverage(request.sweep)? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+    ) -> Result<Vec<GroundedObstruction>, CollisionQueryError> {
+        validate_sweep(request.sweep)?;
+        let touched = touched_landblocks(request.sweep);
         let movement = request.sweep.end - request.sweep.start;
         let mut contacts = Vec::new();
         for owner in &touched {
@@ -1006,63 +960,49 @@ impl CollisionScene {
                     }),
             );
         }
-        Ok(CollisionQuery::Complete(contacts))
+        Ok(contacts)
     }
 
     /// Returns every overlap at a candidate placement without directional filtering.
     pub fn placement_contacts(
         &self,
         request: PlacementRequest,
-    ) -> Result<CollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
-        let coverage = CoverageRequest {
+    ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
             end: request.center,
             radius: request.radius,
         };
-        let touched = match self.coverage(coverage)? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
-        Ok(CollisionQuery::Complete(self.contacts(
-            StaticContactRequest {
-                touched: &touched,
-                anchor: request.anchor,
-                center: request.center,
-                radius: request.radius,
-                movement: None,
-                placement: request.placement,
-            },
-        )))
+        validate_sweep(sweep)?;
+        let touched = touched_landblocks(sweep);
+        Ok(self.contacts(StaticContactRequest {
+            touched: &touched,
+            anchor: request.anchor,
+            center: request.center,
+            radius: request.radius,
+            movement: None,
+            placement: request.placement,
+        }))
     }
 
     /// Returns optional body-primary restrictions at a stationary placement.
     pub fn placement_restrictions(
         &self,
         request: PlacementRestrictionRequest,
-    ) -> Result<CollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
-        let touched = match self.coverage(CoverageRequest {
+    ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
             end: request.center,
             radius: request.radius,
-        })? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
         };
+        validate_sweep(sweep)?;
+        let touched = touched_landblocks(sweep);
         if !entirely_water_restriction_participates(request.placement, request.filter) {
-            return Ok(CollisionQuery::Complete(Vec::new()));
+            return Ok(Vec::new());
         }
-        Ok(CollisionQuery::Complete(self.entirely_water_contacts(
-            &touched,
-            request.anchor,
-            request.center,
-            None,
-        )))
+        Ok(self.entirely_water_contacts(&touched, request.anchor, request.center, None))
     }
 
     /// Returns authored surfaces reachable by lowering the sphere within a finite distance.
@@ -1071,20 +1011,15 @@ impl CollisionScene {
     pub fn support_contacts(
         &self,
         request: SupportRequest,
-    ) -> Result<CollisionQuery<Vec<SupportContact>>, CollisionQueryError> {
+    ) -> Result<Vec<SupportContact>, CollisionQueryError> {
         validate_probe(request)?;
-        let coverage = CoverageRequest {
+        let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
             end: request.center - Vector3::new(0.0, 0.0, request.maximum_drop),
             radius: request.radius,
         };
-        let touched = match self.coverage(coverage)? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+        let touched = touched_landblocks(sweep);
 
         let mut supports = Vec::new();
         for owner in &touched {
@@ -1142,7 +1077,7 @@ impl CollisionScene {
                 }),
             );
         }
-        Ok(CollisionQuery::Complete(supports))
+        Ok(supports)
     }
 
     /// Resolves both the center-containing cell and every collision cell reached by one sphere.
@@ -1152,27 +1087,20 @@ impl CollisionScene {
     pub fn transit_cell(
         &self,
         request: CellTransitRequest,
-    ) -> Result<CollisionQuery<CollisionPlacement>, CollisionQueryError> {
-        let coverage = CoverageRequest {
+    ) -> Result<CollisionPlacement, CollisionQueryError> {
+        let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
             end: request.center,
             radius: request.radius,
         };
-        let touched = match self.coverage(coverage)? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
-
-        Ok(CollisionQuery::Complete(
-            self.transit_cell_with_coverage(request, &touched),
-        ))
+        validate_sweep(sweep)?;
+        let touched = touched_landblocks(sweep);
+        Ok(self.transit_cell_installed(request, &touched))
     }
 
-    /// Resolves placement after the caller has proven collision coverage for `request.center`.
-    fn transit_cell_with_coverage(
+    /// Resolves placement using only currently installed owners touched by `request.center`.
+    fn transit_cell_installed(
         &self,
         request: CellTransitRequest,
         touched: &[Guid],
@@ -1240,19 +1168,14 @@ impl CollisionScene {
     pub fn transit_motion_path(
         &self,
         request: PlacedMotionPathRequest<'_>,
-    ) -> Result<CollisionQuery<PlacedMotionPath>, CollisionQueryError> {
+    ) -> Result<PlacedMotionPath, CollisionQueryError> {
         validate_motion_waypoints(request.waypoints)?;
-        let (initial_placement, initial_recovery) = match self.placement_for_committed_cell(
+        let (initial_placement, initial_recovery) = self.placement_for_committed_cell(
             request.anchor,
             request.start,
             request.radius,
             request.previous_cell,
-        )? {
-            CollisionQuery::Complete(placement) => placement,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+        )?;
         let mut path = PlacedMotionPath {
             anchor: landblock_key(request.anchor),
             initial: PlacedMotionPoint {
@@ -1268,18 +1191,14 @@ impl CollisionScene {
 
         for waypoint in request.waypoints {
             let segment_leg_start = path.legs.len();
-            let sweep = CoverageRequest {
+            let sweep = SphereSweep {
                 anchor: request.anchor,
                 start: geometric_start,
                 end: waypoint.center,
                 radius: request.radius,
             };
-            let touched = match self.coverage(sweep)? {
-                CollisionQuery::Complete(touched) => touched,
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(CollisionQuery::MissingCoverage(missing));
-                }
-            };
+            validate_sweep(sweep)?;
+            let touched = touched_landblocks(sweep);
             let transition_limit = self
                 .landblocks
                 .values()
@@ -1311,17 +1230,12 @@ impl CollisionScene {
                 }
                 let center =
                     interpolate_point(geometric_start, waypoint.center, transition.fraction);
-                let (placement, recovery) = match self.placement_for_committed_cell(
+                let (placement, recovery) = self.placement_for_committed_cell(
                     request.anchor,
                     center,
                     request.radius,
                     transition.target_cell,
-                )? {
-                    CollisionQuery::Complete(placement) => placement,
-                    CollisionQuery::MissingCoverage(missing) => {
-                        return Ok(CollisionQuery::MissingCoverage(missing));
-                    }
-                };
+                )?;
                 let end_fraction = geometric_start_fraction
                     + (waypoint.end_fraction - geometric_start_fraction) * transition.fraction;
                 append_motion_leg(
@@ -1337,17 +1251,12 @@ impl CollisionScene {
                 cursor = transition.fraction;
             }
 
-            let inferred = match self.placement_for_committed_cell(
+            let inferred = self.placement_for_committed_cell(
                 request.anchor,
                 waypoint.center,
                 request.radius,
                 current_cell,
-            )? {
-                CollisionQuery::Complete(placement) => placement,
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(CollisionQuery::MissingCoverage(missing));
-                }
-            };
+            )?;
             let (placement, recovery) = match waypoint.placement {
                 MotionWaypointPlacement::Traverse => inferred,
                 MotionWaypointPlacement::Committed(cell) if inferred.0.committed_cell() == cell => {
@@ -1360,17 +1269,12 @@ impl CollisionScene {
                     // contradictory ordinary traversal is a numerical portal graze, so none of
                     // that segment's inferred transitions may leak into the authoritative path.
                     path.legs.truncate(segment_leg_start);
-                    match self.placement_for_committed_cell(
+                    self.placement_for_committed_cell(
                         request.anchor,
                         waypoint.center,
                         request.radius,
                         cell,
-                    )? {
-                        CollisionQuery::Complete(placement) => placement,
-                        CollisionQuery::MissingCoverage(missing) => {
-                            return Ok(CollisionQuery::MissingCoverage(missing));
-                        }
-                    }
+                    )?
                 }
             };
             append_motion_leg(
@@ -1387,7 +1291,7 @@ impl CollisionScene {
             geometric_start_fraction = waypoint.end_fraction;
         }
 
-        Ok(CollisionQuery::Complete(path))
+        Ok(path)
     }
 
     fn placement_for_committed_cell(
@@ -1396,66 +1300,37 @@ impl CollisionScene {
         center: Vector3,
         radius: f32,
         committed_cell: Option<Guid>,
-    ) -> Result<CollisionQuery<(CollisionPlacement, Option<PlacementRecovery>)>, CollisionQueryError>
-    {
-        if let Some(cell) = committed_cell {
-            let owner = landblock_key(cell);
-            let has_cell = self.landblocks.get(&owner).is_some_and(|asset| {
-                asset
-                    .static_geometry
-                    .cell_volumes
-                    .iter()
-                    .any(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
-            });
-            if !has_cell {
-                return Err(CollisionQueryError::UnknownMotionCell { cell: cell.0 });
-            }
-        }
-        let mut placement = match self.transit_cell(CellTransitRequest {
+    ) -> Result<(CollisionPlacement, Option<PlacementRecovery>), CollisionQueryError> {
+        let mut placement = self.transit_cell(CellTransitRequest {
             previous_cell: committed_cell,
             anchor,
             center,
             radius,
-        })? {
-            CollisionQuery::Complete(placement) => placement,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
-        };
+        })?;
         let recovery = if let Some(previous_cell) =
             committed_cell.filter(|cell| placement.committed_cell != Some(*cell))
         {
-            match self.recover_placement(
+            Some(self.recover_placement(
                 anchor,
                 center,
                 radius,
                 previous_cell,
                 placement.committed_cell,
-            )? {
-                CollisionQuery::Complete(recovery) => Some(recovery),
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(CollisionQuery::MissingCoverage(missing));
-                }
-            }
+            )?)
         } else {
             None
         };
         if let Some(PlacementRecovery::Recovered { recovered_cell, .. }) = &recovery {
-            placement = match self.transit_cell(CellTransitRequest {
+            placement = self.transit_cell(CellTransitRequest {
                 previous_cell: *recovered_cell,
                 anchor,
                 center,
                 radius,
-            })? {
-                CollisionQuery::Complete(placement) => placement,
-                CollisionQuery::MissingCoverage(missing) => {
-                    return Ok(CollisionQuery::MissingCoverage(missing));
-                }
-            };
-            return Ok(CollisionQuery::Complete((placement, recovery)));
+            })?;
+            return Ok((placement, recovery));
         }
         if recovery.is_some() {
-            return Ok(CollisionQuery::Complete((placement, recovery)));
+            return Ok((placement, recovery));
         }
         placement.committed_cell = committed_cell;
         match committed_cell {
@@ -1466,7 +1341,7 @@ impl CollisionScene {
             }
             None => placement.reaches_outdoors = true,
         }
-        Ok(CollisionQuery::Complete((placement, recovery)))
+        Ok((placement, recovery))
     }
 
     fn recover_placement(
@@ -1476,18 +1351,15 @@ impl CollisionScene {
         radius: f32,
         previous_cell: Guid,
         transit_cell: Option<Guid>,
-    ) -> Result<CollisionQuery<PlacementRecovery>, CollisionQueryError> {
-        let touched = match self.coverage(CoverageRequest {
+    ) -> Result<PlacementRecovery, CollisionQueryError> {
+        let sweep = SphereSweep {
             anchor,
             start: center,
             end: center,
             radius,
-        })? {
-            CollisionQuery::Complete(touched) => touched,
-            CollisionQuery::MissingCoverage(missing) => {
-                return Ok(CollisionQuery::MissingCoverage(missing));
-            }
         };
+        validate_sweep(sweep)?;
+        let touched = touched_landblocks(sweep);
         let mut candidates = touched
             .into_iter()
             .flat_map(|owner| {
@@ -1509,7 +1381,7 @@ impl CollisionScene {
             .collect::<Vec<_>>();
         candidates.sort_unstable();
         candidates.dedup();
-        Ok(CollisionQuery::Complete(match candidates.as_slice() {
+        Ok(match candidates.as_slice() {
             [] => PlacementRecovery::Recovered {
                 previous_cell,
                 recovered_cell: None,
@@ -1523,7 +1395,7 @@ impl CollisionScene {
                 candidates,
                 selected_cell: transit_cell,
             },
-        }))
+        })
     }
 
     fn next_placement_transition(
@@ -1666,7 +1538,7 @@ impl CollisionScene {
     ) -> Option<Guid> {
         let probe_fraction = (fraction + minimum_advance).min(1.0);
         let probe = interpolate_point(segment.start, segment.end, probe_fraction);
-        let placement = self.transit_cell_with_coverage(
+        let placement = self.transit_cell_installed(
             CellTransitRequest {
                 previous_cell: Some(source_cell),
                 anchor: segment.anchor,
@@ -2366,7 +2238,7 @@ fn append_motion_leg(path: &mut PlacedMotionPath, end_fraction: f32, mut end: Pl
     path.legs.push(PlacedMotionLeg { end_fraction, end });
 }
 
-fn validate_coverage(request: CoverageRequest) -> Result<(), CollisionQueryError> {
+fn validate_sweep(request: SphereSweep) -> Result<(), CollisionQueryError> {
     if !request.start.x.is_finite()
         || !request.start.y.is_finite()
         || !request.start.z.is_finite()
@@ -2383,7 +2255,7 @@ fn validate_coverage(request: CoverageRequest) -> Result<(), CollisionQueryError
 }
 
 fn validate_probe(request: SupportRequest) -> Result<(), CollisionQueryError> {
-    validate_coverage(CoverageRequest {
+    validate_sweep(SphereSweep {
         anchor: request.anchor,
         start: request.center,
         end: request.center,
@@ -2399,7 +2271,7 @@ fn validate_probe(request: SupportRequest) -> Result<(), CollisionQueryError> {
     Ok(())
 }
 
-fn touched_landblocks(request: CoverageRequest) -> (Vec<Guid>, bool) {
+fn touched_landblocks(request: SphereSweep) -> Vec<Guid> {
     let minimum = Vector3::new(
         request.start.x.min(request.end.x) - request.radius,
         request.start.y.min(request.end.y) - request.radius,
@@ -2411,24 +2283,31 @@ fn touched_landblocks(request: CoverageRequest) -> (Vec<Guid>, bool) {
         0.0,
     );
     let anchor = landblock_key(request.anchor);
-    let anchor_x = ((anchor.0 >> 24) & 0xff) as i32;
-    let anchor_y = ((anchor.0 >> 16) & 0xff) as i32;
-    let min_x = anchor_x + (minimum.x / METERS_PER_LANDBLOCK).floor() as i32;
-    let min_y = anchor_y + (minimum.y / METERS_PER_LANDBLOCK).floor() as i32;
-    let max_x = anchor_x + (maximum.x / METERS_PER_LANDBLOCK).floor() as i32;
-    let max_y = anchor_y + (maximum.y / METERS_PER_LANDBLOCK).floor() as i32;
-    let outside_world = min_x < 0 || min_y < 0 || max_x > 255 || max_y > 255;
+    let anchor_x = i64::from((anchor.0 >> 24) & 0xff);
+    let anchor_y = i64::from((anchor.0 >> 16) & 0xff);
+    let min_x = anchor_x.saturating_add((minimum.x / METERS_PER_LANDBLOCK).floor() as i64);
+    let min_y = anchor_y.saturating_add((minimum.y / METERS_PER_LANDBLOCK).floor() as i64);
+    let max_x = anchor_x.saturating_add((maximum.x / METERS_PER_LANDBLOCK).floor() as i64);
+    let max_y = anchor_y.saturating_add((maximum.y / METERS_PER_LANDBLOCK).floor() as i64);
+    let maximum_axis = i64::from(MAX_OUTDOOR_LANDBLOCK_AXIS);
+    let first_x = min_x.max(0);
+    let first_y = min_y.max(0);
+    let last_x = max_x.min(maximum_axis);
+    let last_y = max_y.min(maximum_axis);
+    if first_x > last_x || first_y > last_y {
+        return Vec::new();
+    }
     let mut touched = Vec::new();
-    for x in min_x.clamp(0, 255)..=max_x.clamp(0, 255) {
-        for y in min_y.clamp(0, 255)..=max_y.clamp(0, 255) {
+    for x in first_x..=last_x {
+        for y in first_y..=last_y {
             touched.push(Guid(((x as u32) << 24) | ((y as u32) << 16) | 0xffff));
         }
     }
-    (touched, outside_world)
+    touched
 }
 
-/// Expands touched collision owners by the one-landblock source halo static shadows may cross.
-fn collision_source_landblocks(touched: &[Guid]) -> Vec<Guid> {
+/// Finds installed-source candidates whose authored bounds may cross a touched owner seam.
+fn neighboring_source_landblocks(touched: &[Guid]) -> Vec<Guid> {
     let mut sources = Vec::new();
     for owner in touched {
         let x = ((owner.0 >> 24) & 0xff) as i32;
@@ -2437,7 +2316,9 @@ fn collision_source_landblocks(touched: &[Guid]) -> Vec<Guid> {
             for offset_y in -1..=1 {
                 let source_x = x + offset_x;
                 let source_y = y + offset_y;
-                if !(0..=255).contains(&source_x) || !(0..=255).contains(&source_y) {
+                if !(0..=i32::from(MAX_OUTDOOR_LANDBLOCK_AXIS)).contains(&source_x)
+                    || !(0..=i32::from(MAX_OUTDOOR_LANDBLOCK_AXIS)).contains(&source_y)
+                {
                     continue;
                 }
                 sources.push(Guid(
@@ -2520,7 +2401,13 @@ pub(super) fn anchor_point_to_outdoor_position(
     point: Vector3,
     rotation: holtburger_common::Quaternion,
 ) -> WorldPosition {
-    let owner = anchor_point_landblock(anchor, point);
+    let Some(owner) = outdoor_landblock_owner_at(anchor, point) else {
+        return WorldPosition {
+            landblock_id: Guid(anchor.0 & 0xffff_0000),
+            coords: point,
+            rotation,
+        };
+    };
     WorldPosition {
         // A pose carries an outdoor cell selector, not the root record's 0xFFFF selector.
         landblock_id: Guid(owner.0 & 0xffff_0000),
@@ -2528,15 +2415,6 @@ pub(super) fn anchor_point_to_outdoor_position(
         rotation,
     }
     .normalize_outdoor_cell()
-}
-
-fn anchor_point_landblock(anchor: Guid, point: Vector3) -> Guid {
-    let anchor = landblock_key(anchor);
-    let x = (((anchor.0 >> 24) & 0xff) as i32 + (point.x / METERS_PER_LANDBLOCK).floor() as i32)
-        .clamp(0, 255) as u32;
-    let y = (((anchor.0 >> 16) & 0xff) as i32 + (point.y / METERS_PER_LANDBLOCK).floor() as i32)
-        .clamp(0, 255) as u32;
-    Guid((x << 24) | (y << 16) | 0xffff)
 }
 
 #[cfg(test)]
@@ -2727,42 +2605,36 @@ mod tests {
     #[test]
     fn entirely_water_boundary_obstructs_ordinary_bodies_but_honors_explicit_exclusion() {
         let scene = entirely_water_boundary_scene();
-        let sweep = CoverageRequest {
+        let sweep = SphereSweep {
             anchor: Guid(0xda55_ffff),
             start: Vector3::new(191.9, 96.0, 50.0),
             end: Vector3::new(192.1, 96.0, 50.0),
             radius: 0.25,
         };
         let placement = CollisionPlacement::outdoor();
-        let CollisionQuery::Complete(contacts) = scene
+        let contacts = scene
             .movement_restrictions(MovementRestrictionRequest {
                 sweep,
                 placement: &placement,
                 filter: PhysicalCollisionFilter::ALL,
             })
-            .unwrap()
-        else {
-            panic!("water-boundary fixture unexpectedly lacks collision coverage");
-        };
+            .unwrap();
         assert_eq!(contacts.len(), 1);
         assert_eq!(contacts[0].normal, Vector3::new(-1.0, 0.0, 0.0));
         assert!((contacts[0].depth - (sweep.end.x - METERS_PER_LANDBLOCK)).abs() < f32::EPSILON);
 
         let barrier_exempt =
             PhysicalCollisionFilter::excluding(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER);
-        let CollisionQuery::Complete(exempt_contacts) = scene
+        let exempt_contacts = scene
             .movement_restrictions(MovementRestrictionRequest {
                 sweep,
                 placement: &placement,
                 filter: barrier_exempt,
             })
-            .unwrap()
-        else {
-            panic!("water-boundary fixture unexpectedly lacks collision coverage");
-        };
+            .unwrap();
         assert!(exempt_contacts.is_empty());
 
-        let CollisionQuery::Complete(placement_contacts) = scene
+        let placement_contacts = scene
             .placement_restrictions(PlacementRestrictionRequest {
                 anchor: sweep.anchor,
                 center: sweep.end,
@@ -2770,10 +2642,7 @@ mod tests {
                 placement: &placement,
                 filter: PhysicalCollisionFilter::ALL,
             })
-            .unwrap()
-        else {
-            panic!("water-boundary fixture unexpectedly lacks placement coverage");
-        };
+            .unwrap();
         assert_eq!(placement_contacts.len(), 1);
         assert_eq!(placement_contacts[0].normal, Vector3::new(-1.0, 0.0, 0.0));
     }
@@ -2781,21 +2650,27 @@ mod tests {
     #[test]
     fn direct_queries_reject_invalid_geometry() {
         let scene = CollisionScene::new();
-        let request = CoverageRequest {
+        let request = SphereSweep {
             anchor: Guid(0xda55_ffff),
             start: Vector3::zero(),
             end: Vector3::zero(),
             radius: 0.0,
         };
         assert_eq!(
-            scene.coverage(request),
+            scene.movement_obstructions(MovementObstructionRequest {
+                sweep: request,
+                placement: &CollisionPlacement::outdoor(),
+            }),
             Err(CollisionQueryError::InvalidRadius)
         );
         assert_eq!(
-            scene.coverage(CoverageRequest {
-                start: Vector3::new(f32::NAN, 0.0, 0.0),
-                radius: 1.0,
-                ..request
+            scene.movement_obstructions(MovementObstructionRequest {
+                sweep: SphereSweep {
+                    start: Vector3::new(f32::NAN, 0.0, 0.0),
+                    radius: 1.0,
+                    ..request
+                },
+                placement: &CollisionPlacement::outdoor(),
             }),
             Err(CollisionQueryError::NonFiniteCenter)
         );
@@ -2821,6 +2696,24 @@ mod tests {
             }),
             Err(CollisionQueryError::InvalidDistance)
         );
+    }
+
+    #[test]
+    fn extreme_finite_sweep_outside_the_landscape_is_empty_space() {
+        let scene = CollisionScene::new();
+        let contacts = scene
+            .movement_obstructions(MovementObstructionRequest {
+                sweep: SphereSweep {
+                    anchor: Guid(0xda55_ffff),
+                    start: Vector3::new(f32::MAX, f32::MIN, 20.0),
+                    end: Vector3::new(f32::MAX, f32::MIN, 20.0),
+                    radius: 0.25,
+                },
+                placement: &CollisionPlacement::outdoor(),
+            })
+            .unwrap();
+
+        assert!(contacts.is_empty());
     }
 
     #[test]
@@ -2906,7 +2799,7 @@ mod tests {
             ],
         }]);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: None,
                 anchor: Guid(0xda55_ffff),
@@ -2918,10 +2811,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(path.anchor(), Guid(0xda55_ffff));
         assert_eq!(path.initial().placement().committed_cell(), None);
@@ -2946,17 +2836,14 @@ mod tests {
         let target_cell = Guid(0xda55_010b);
         let scene = placement_scene(coincident_outdoor_cells());
 
-        let CollisionQuery::Complete(placement) = scene
+        let placement = scene
             .transit_cell(CellTransitRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
                 center: Vector3::new(100.2, 10.0, 20.0),
                 radius: 0.3,
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic placement unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(placement.committed_cell(), Some(target_cell));
         assert!(placement.reaches_outdoors());
@@ -2972,7 +2859,7 @@ mod tests {
         let target_cell = Guid(0xda55_010b);
         let scene = placement_scene(coincident_outdoor_cells());
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -2984,10 +2871,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(
             path.initial().placement().committed_cell(),
@@ -3017,7 +2901,7 @@ mod tests {
         cells.pop();
         let scene = placement_scene(cells);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3029,10 +2913,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(
             path.initial().placement().committed_cell(),
@@ -3060,7 +2941,7 @@ mod tests {
         });
         let scene = placement_scene(cells);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3072,10 +2953,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         let boundary = path.legs()[0].end().placement();
         assert_eq!(boundary.committed_cell(), None);
@@ -3106,7 +2984,7 @@ mod tests {
             portals: Vec::new(),
         }]);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3118,10 +2996,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("synthetic recovery path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(path.final_point().placement().committed_cell(), None);
         assert_eq!(
@@ -3164,7 +3039,7 @@ mod tests {
             },
         ]);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3176,10 +3051,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("synthetic recovery path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(
             path.final_point().placement().committed_cell(),
@@ -3225,7 +3097,7 @@ mod tests {
             open_candidate(0x010b),
         ]);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3237,10 +3109,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("synthetic recovery path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(path.final_point().placement().committed_cell(), None);
         assert_eq!(
@@ -3293,7 +3162,7 @@ mod tests {
                 portals: Vec::new(),
             },
         ]);
-        let first = match scene
+        let first = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3305,11 +3174,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        {
-            CollisionQuery::Complete(path) => path,
-            CollisionQuery::MissingCoverage(_) => panic!("synthetic scene unexpectedly missing"),
-        };
+            .unwrap();
         let split_waypoints = first
             .legs()
             .iter()
@@ -3320,7 +3185,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let second = match scene
+        let second = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3328,11 +3193,7 @@ mod tests {
                 radius: 0.3,
                 waypoints: &split_waypoints,
             })
-            .unwrap()
-        {
-            CollisionQuery::Complete(path) => path,
-            CollisionQuery::MissingCoverage(_) => panic!("synthetic scene unexpectedly missing"),
-        };
+            .unwrap();
         let placements = second
             .legs()
             .iter()
@@ -3387,7 +3248,7 @@ mod tests {
             },
         ]);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3399,10 +3260,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Committed(Some(source_cell)),
                 }],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(
             path.final_point().placement().committed_cell(),
@@ -3418,7 +3276,7 @@ mod tests {
     #[test]
     fn placed_motion_path_preserves_accepted_bends_before_adding_portal_splits() {
         let scene = placement_scene(Vec::new());
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: None,
                 anchor: Guid(0xda55_ffff),
@@ -3437,10 +3295,7 @@ mod tests {
                     },
                 ],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(path.legs().len(), 2);
         assert_eq!(path.legs()[0].end_fraction(), 0.25);
@@ -3489,7 +3344,7 @@ mod tests {
             },
         ]);
 
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: Some(source_cell),
                 anchor: Guid(0xda55_ffff),
@@ -3501,10 +3356,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(
             path.initial().placement().committed_cell(),
@@ -3525,7 +3377,7 @@ mod tests {
     #[test]
     fn outdoor_placed_motion_path_keeps_one_anchor_across_a_landblock_boundary() {
         let scene = placement_scene(Vec::new());
-        let CollisionQuery::Complete(path) = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: None,
                 anchor: Guid(0xda55_ffff),
@@ -3537,10 +3389,7 @@ mod tests {
                     placement: MotionWaypointPlacement::Traverse,
                 }],
             })
-            .unwrap()
-        else {
-            panic!("resident synthetic path unexpectedly lacked coverage");
-        };
+            .unwrap();
 
         assert_eq!(path.anchor(), Guid(0xda55_ffff));
         assert_eq!(path.legs().len(), 1);
@@ -3549,9 +3398,9 @@ mod tests {
     }
 
     #[test]
-    fn placed_motion_path_returns_missing_coverage_without_a_partial_result() {
+    fn placed_motion_path_crosses_an_empty_scene_as_open_space() {
         let scene = CollisionScene::new();
-        let result = scene
+        let path = scene
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: None,
                 anchor: Guid(0xda55_ffff),
@@ -3565,7 +3414,10 @@ mod tests {
             })
             .unwrap();
 
-        assert!(matches!(result, CollisionQuery::MissingCoverage(_)));
+        assert_eq!(path.anchor(), Guid(0xda55_ffff));
+        assert_eq!(path.legs().len(), 1);
+        assert_eq!(path.final_point().center(), Vector3::new(97.0, 96.0, 20.0));
+        assert_eq!(path.final_point().placement().committed_cell(), None);
     }
 
     #[test]

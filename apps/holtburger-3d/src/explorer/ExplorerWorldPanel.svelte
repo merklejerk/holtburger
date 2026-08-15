@@ -369,17 +369,20 @@
 		</label>
 		<p>
 			{cameraModePending
-				? "Loading collision coverage and placing the physical camera."
+				? "Loading collision content and placing the physical camera."
 				: cameraMode !== "free-fly"
-					? `Host ${physicalCameraStatus?.mode ?? cameraMode}: ${physicalCameraStatus?.tick ?? "awaiting-first-path"}; cell ${physicalCameraStatus?.cellId ?? "outdoor"}; ${physicalCameraStatus?.grounded ? "grounded" : "airborne"}; ${physicalCameraStatus?.constraintCount ?? 0} solve constraints; ${physicalCameraStatus?.solveDurationMs.toFixed(2) ?? "0.00"} ms; ${physicalCameraStatus?.substeps ?? 0} substeps; ${physicalCameraStatus?.contactPasses ?? 0} contact passes; ${physicalCameraStatus?.droppedPaths ?? 0} dropped paths.`
+					? `Host ${physicalCameraStatus?.mode ?? cameraMode}: ${physicalCameraStatus?.tick ?? "awaiting-first-path"}; collision ${physicalCameraStatus?.sceneResidency?.state ?? "unknown"}; cell ${physicalCameraStatus?.cellId ?? "outdoor"}; ${physicalCameraStatus?.grounded ? "grounded" : "airborne"}; ${physicalCameraStatus?.constraintCount ?? 0} solve constraints; ${physicalCameraStatus?.solveDurationMs.toFixed(2) ?? "0.00"} ms; ${physicalCameraStatus?.substeps ?? 0} substeps; ${physicalCameraStatus?.contactPasses ?? 0} contact passes; ${physicalCameraStatus?.droppedPaths ?? 0} dropped paths.`
 					: "Free fly bypasses collision and remains the recovery mode."}
 		</p>
-		{#if physicalCameraStatus?.tick === "missing-coverage"}
+		{#if physicalCameraStatus?.sceneResidency?.state === "missing-owner"}
 			<p class="invalid">
-				Coverage hold:
-				{physicalCameraStatus.outsideWorld
-					? "outside AC world bounds"
-					: physicalCameraStatus.missingLandblocks.join(", ")}
+				Collision owner {physicalCameraStatus.sceneResidency.landblockId} is not resident;
+				motion continues through open space.
+			</p>
+		{:else if physicalCameraStatus?.sceneResidency?.state === "outside-landscape"}
+			<p class="invalid">
+				Camera is outside the authored landscape; motion continues through open
+				space.
 			</p>
 		{/if}
 		{#if physicalCameraError !== null}

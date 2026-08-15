@@ -25,7 +25,7 @@ use holtburger_content::{
     LandblockCollisionAsset, LandblockPlacement, TerrainCollisionSurface,
 };
 use holtburger_world::spatial::{
-    CellTransitRequest, CollisionQuery, CollisionScene, MotionWaypoint, MotionWaypointPlacement,
+    CellTransitRequest, CollisionScene, MotionWaypoint, MotionWaypointPlacement,
     PlacedMotionPathRequest,
 };
 
@@ -63,7 +63,7 @@ fn probe_transit_cell(label: &str, previous_cell: Option<Guid>, x: f32) {
         center: Vector3::new(x, 1.0, 0.0),
         radius: 0.5,
     }) {
-        Ok(CollisionQuery::Complete(placement)) => println!(
+        Ok(placement) => println!(
             "== {label}\n  committed={:?} reachesOutdoors={} reached={:?}",
             cell_label(placement.committed_cell()),
             placement.reaches_outdoors(),
@@ -73,9 +73,6 @@ fn probe_transit_cell(label: &str, previous_cell: Option<Guid>, x: f32) {
                 .filter_map(|cell| cell_label(Some(*cell)))
                 .collect::<Vec<_>>(),
         ),
-        Ok(CollisionQuery::MissingCoverage(missing)) => {
-            println!("== {label}\n  missing coverage: {missing:?}")
-        }
         Err(error) => println!("== {label}\n  error: {error:?}"),
     }
 }
@@ -95,7 +92,7 @@ fn report_inside_b(label: &str, scene: CollisionScene) {
         waypoints: &waypoints,
     };
     match scene.transit_motion_path(request) {
-        Ok(CollisionQuery::Complete(path)) => {
+        Ok(path) => {
             println!(
                 "  initial cell={:?} (start x=14)",
                 cell_label(path.initial().placement().committed_cell())
@@ -116,7 +113,6 @@ fn report_inside_b(label: &str, scene: CollisionScene) {
                 path.final_point().placement().reaches_outdoors(),
             );
         }
-        Ok(CollisionQuery::MissingCoverage(missing)) => println!("  missing coverage: {missing:?}"),
         Err(error) => println!("  error: {error:?}"),
     }
 }
@@ -138,7 +134,7 @@ fn report(label: &str, scene: CollisionScene) {
         waypoints: &waypoints,
     };
     match scene.transit_motion_path(request) {
-        Ok(CollisionQuery::Complete(path)) => {
+        Ok(path) => {
             println!(
                 "  initial   cell={:?} recovery={:?}",
                 cell_label(path.initial().placement().committed_cell()),
@@ -163,9 +159,6 @@ fn report(label: &str, scene: CollisionScene) {
                     "DID NOT reach cell B"
                 }
             );
-        }
-        Ok(CollisionQuery::MissingCoverage(missing)) => {
-            println!("  missing coverage: {missing:?}");
         }
         Err(error) => println!("  error: {error:?}"),
     }

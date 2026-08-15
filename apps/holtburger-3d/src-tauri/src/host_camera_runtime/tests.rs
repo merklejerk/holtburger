@@ -14,8 +14,8 @@ use holtburger_content::{
 };
 use holtburger_core::CharacterJumpKinematics;
 use holtburger_world::{
-    CollisionQuery, CollisionScene, MotionWaypoint, MotionWaypointPlacement,
-    RETAIL_WALKABLE_NORMAL_Z, SpatialBodyId,
+    CollisionScene, MotionWaypoint, MotionWaypointPlacement, RETAIL_WALKABLE_NORMAL_Z,
+    SpatialBodyId,
 };
 
 use super::*;
@@ -694,7 +694,7 @@ fn stationary_grounded_body_publishes_a_view_offset_portal_crossing() {
         tick_registration: None,
     };
 
-    let CollisionQuery::Complete(path) = transit_presented_viewer_path(
+    let path = transit_presented_viewer_path(
         &scene,
         &previous,
         body_pose,
@@ -706,9 +706,7 @@ fn stationary_grounded_body_publishes_a_view_offset_portal_crossing() {
         }],
         Vector3::new(1.0, 0.0, 0.0),
     )
-    .unwrap() else {
-        panic!("resident viewer rotation unexpectedly lacked coverage");
-    };
+    .unwrap();
 
     assert_eq!(path.initial().center().x, 99.72);
     assert_eq!(
@@ -766,7 +764,7 @@ fn grounded_view_offset_turn_spans_every_accepted_substep() {
         },
     ];
 
-    let CollisionQuery::Complete(path) = transit_presented_viewer_path(
+    let path = transit_presented_viewer_path(
         &scene,
         &previous,
         body_pose,
@@ -774,9 +772,7 @@ fn grounded_view_offset_turn_spans_every_accepted_substep() {
         &motion,
         Vector3::new(1.0, 0.0, 0.0),
     )
-    .unwrap() else {
-        panic!("resident viewer turn unexpectedly lacked coverage");
-    };
+    .unwrap();
 
     assert!((path.initial().center().x - 89.82).abs() < 0.000_1);
     assert_eq!(path.legs().len(), 2);
@@ -803,7 +799,7 @@ fn physical_fly_registration_preserves_the_supplied_overlap_cell() {
     )
     .unwrap();
 
-    assert_eq!(cell, CollisionQuery::Complete(Some(Guid(0xda55_010b))));
+    assert_eq!(cell, Some(Guid(0xda55_010b)));
 }
 
 #[test]
@@ -908,7 +904,7 @@ fn tick_commits_exactly_the_viewer_placement_at_the_path_endpoint() {
 }
 
 #[test]
-fn missing_candidate_coverage_publishes_only_an_authoritative_hold_path() {
+fn missing_overlap_owner_does_not_gate_motion_in_a_resident_final_owner() {
     let runtime = runtime_with_da55_interest(Arc::new(MissingFarEastCollisionSource));
     let pose = scene_point_to_pose([
         0xda as f32 * 192.0 + 190.0,
@@ -928,15 +924,12 @@ fn missing_candidate_coverage_publishes_only_an_authoritative_hold_path() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(path.status, PhysicalCameraTickStatus::MissingCoverage);
-    assert_eq!(path.missing_landblocks, ["0xdc55ffff"]);
-    assert_eq!(path.legs.len(), 1);
-    assert_eq!(path.initial.origin, final_path_point(&path).origin);
+    assert_eq!(path.status, PhysicalCameraTickStatus::Solved);
+    assert_eq!(path.scene_residency, PhysicalCameraSceneResidency::Resident);
+    assert!(!path.legs.is_empty());
     assert_eq!(path.initial.residency.landblock_id, "0xda55ffff");
-    assert_eq!(
-        path.initial.residency.landblock_id,
-        final_path_point(&path).residency.landblock_id
-    );
+    assert_eq!(final_path_point(&path).residency.landblock_id, "0xdb55ffff");
+    assert_ne!(path.initial.origin, final_path_point(&path).origin);
 }
 
 #[test]
@@ -1237,7 +1230,7 @@ fn lifecycle_gap_waits_for_the_missing_edge_and_rejects_duplicates_observably() 
 }
 
 #[test]
-fn release_without_collision_coverage_is_rejected_and_never_deferred() {
+fn release_after_scene_eviction_executes_once_in_open_space() {
     let runtime = runtime_with_da55_interest(Arc::new(GroundCollisionSource));
     let pose = scene_point_to_pose([
         0xda as f32 * 192.0 + 96.0,
@@ -1294,19 +1287,21 @@ fn release_without_collision_coverage_is_rejected_and_never_deferred() {
             },
         ))
         .unwrap();
-    let rejected = runtime
+    let launched = runtime
         .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
         .unwrap()
         .unwrap();
     assert_eq!(
-        rejected.character_event_outcomes,
+        launched.character_event_outcomes,
         [GroundedCameraEventOutcome {
             sequence: 1,
-            result: GroundedCameraEventOutcomeKind::Rejected {
-                reason: GroundedCameraRejection::MissingCoverage,
-            },
+            result: GroundedCameraEventOutcomeKind::JumpReleased,
         }]
     );
+    assert!(matches!(
+        launched.scene_residency,
+        PhysicalCameraSceneResidency::MissingOwner { .. }
+    ));
 
     let restored_session = simulation.reserve_interest_session();
     simulation
@@ -1324,8 +1319,8 @@ fn release_without_collision_coverage_is_rejected_and_never_deferred() {
     let active = runtime.state.lock().unwrap().active.clone().unwrap();
     let body = simulation.physical_body_snapshot(active.body_id).unwrap();
     assert!(
-        body.velocity.z <= 0.0,
-        "rejected jump was replayed: {body:?}"
+        body.velocity.z > 0.0,
+        "accepted jump lost its launch: {body:?}"
     );
 }
 
@@ -1522,7 +1517,7 @@ fn stopping_an_old_session_cannot_invalidate_a_new_registration() {
 }
 
 #[test]
-fn registration_retains_a_dormant_body_without_loading_missing_coverage() {
+fn registration_simulates_without_loading_missing_collision_owners() {
     let runtime = runtime_with_da55_interest(Arc::new(MissingEastCollisionSource));
     let pose = scene_point_to_pose([
         0xda as f32 * 192.0 + 191.0,
@@ -1533,13 +1528,21 @@ fn registration_retains_a_dormant_body_without_loading_missing_coverage() {
     let session = runtime
         .start(registration(pose, PhysicalCameraMode::PhysicalFly))
         .unwrap();
+    runtime
+        .set_physical_fly_intent(intent(session, 0, [60.0, 0.0, 0.0]))
+        .unwrap();
 
     let path = runtime
         .tick(session, Duration::from_millis(33))
         .unwrap()
         .unwrap();
 
-    assert_eq!(path.status, PhysicalCameraTickStatus::MissingCoverage);
-    assert_eq!(path.missing_landblocks, ["0xdb55ffff"]);
-    assert_eq!(path.initial.origin, final_path_point(&path).origin);
+    assert_eq!(path.status, PhysicalCameraTickStatus::Solved);
+    assert_eq!(
+        path.scene_residency,
+        PhysicalCameraSceneResidency::MissingOwner {
+            landblock_id: "0xdb55ffff".to_owned(),
+        }
+    );
+    assert_eq!(final_path_point(&path).residency.landblock_id, "0xdb55ffff");
 }

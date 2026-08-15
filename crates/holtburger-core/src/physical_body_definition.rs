@@ -68,9 +68,9 @@ mod tests {
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{Guid, Quaternion};
     use holtburger_world::{
-        CollisionScene, EdgeProtection, GroundedConfig, PhysicalBodyDefinition,
-        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-        PhysicalSurfaceMotion, RETAIL_WALKABLE_NORMAL_Z, SpatialBody, SpatialBodyId, SpatialScene,
+        EdgeProtection, GroundedConfig, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSurfaceMotion,
+        RETAIL_WALKABLE_NORMAL_Z, SpatialBody, SpatialBodyId, SpatialScene,
     };
     use std::time::Instant;
 
@@ -223,7 +223,6 @@ mod tests {
         let entity = SpatialBodyId::Entity(Guid(0x5000_0001));
         world.register_body(SpatialBody::new(entity, pose, now));
         let ephemeral = world.register_ephemeral_body(pose, now);
-        let collision = CollisionScene::new();
         world
             .attach_physical_body(
                 entity,
@@ -231,7 +230,6 @@ mod tests {
                 PhysicalCollisionFilter::ALL,
                 STABLE_POLICY,
                 None,
-                &collision,
             )
             .unwrap();
         world
@@ -241,7 +239,6 @@ mod tests {
                 PhysicalCollisionFilter::ALL,
                 STABLE_POLICY,
                 None,
-                &collision,
             )
             .unwrap();
 

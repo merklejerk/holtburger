@@ -1,4 +1,3 @@
-import { log, LogLevel } from "../../logs";
 import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
 import {
 	diffSceneInterest,
@@ -121,7 +120,7 @@ export class SceneInterestCommitCoordinator {
 				}
 			}
 		} catch (error) {
-			log(error, LogLevel.Error);
+			console.error(error);
 			for (const layer of layers) {
 				if (this.#isCurrent(layer, dispatchRevision)) {
 					this.#callbacks.failed({ error, layer, revision: dispatchRevision });

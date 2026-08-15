@@ -1,4 +1,3 @@
-import { log, LogLevel } from "../../logs";
 import type { LandblockId } from "../game-types";
 import type { AABB3 } from "../math/types";
 import type { Vec3 } from "../math/types";
@@ -280,7 +279,7 @@ export class TerrainSystem<
 				kind: "failed",
 				source: installation.source,
 			});
-			log(error, LogLevel.Error);
+			console.error(error);
 		}
 	}
 

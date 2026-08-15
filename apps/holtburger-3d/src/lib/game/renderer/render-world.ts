@@ -73,10 +73,7 @@ interface RenderWorldSystems {
 		): VisibleScene;
 	};
 	readonly terrain: {
-		getDrawUnit(
-			nodeId: SceneNodeId,
-			anchorLandblockId: LandblockId,
-		): TerrainDrawUnit | null;
+		getDrawUnit(nodeId: SceneNodeId): TerrainDrawUnit | null;
 	};
 	readonly staticObjects: {
 		getRenderable(nodeId: SceneNodeId): StaticObjectRenderable | null;
@@ -228,16 +225,12 @@ export class RenderWorld {
 		return placement ? scopeKey(placement.scope) : null;
 	}
 
-	resolveTerrainDrawUnit(
-		nodeId: SceneNodeId,
-		anchorLandblockId: LandblockId,
-	): TerrainDrawUnit | null {
-		return this.#systems.terrain.getDrawUnit(nodeId, anchorLandblockId);
+	resolveTerrainDrawUnit(nodeId: SceneNodeId): TerrainDrawUnit | null {
+		return this.#systems.terrain.getDrawUnit(nodeId);
 	}
 
 	getRenderContributionDescriptor(
 		nodeId: SceneNodeId,
-		anchorLandblockId: LandblockId,
 	): RenderContribution | null {
 		const staticObject = this.#systems.staticObjects.getRenderable(nodeId);
 		if (staticObject) {
@@ -267,7 +260,7 @@ export class RenderWorld {
 		}
 		const cell = this.#systems.envCells.getCellRenderable(nodeId);
 		if (cell) return { kind: "env-cell", renderable: cell };
-		const terrain = this.resolveTerrainDrawUnit(nodeId, anchorLandblockId);
+		const terrain = this.resolveTerrainDrawUnit(nodeId);
 		return terrain ? { drawUnit: terrain, kind: "terrain" } : null;
 	}
 

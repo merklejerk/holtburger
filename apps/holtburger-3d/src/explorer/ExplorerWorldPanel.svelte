@@ -1,13 +1,13 @@
 <script lang="ts">
 	import type { SceneResidency } from "../lib/game/scene";
-	import type { LoDConfig } from "../lib/game/runtime/types";
+	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import {
-		formatExplorerLodRadius,
-		updateExplorerLodRadius,
-		type ExplorerLodRadius,
-	} from "./explorer-lod";
+		formatResidencyRadius,
+		updateExplorerResidencyRadius,
+		type ExplorerRadiusKind,
+	} from "./explorer-residency-radius";
 	import { parseResidenceInput } from "./world-input";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type {
@@ -34,7 +34,7 @@
 		/** Request frontend-owned scene content and automatic Explorer camera placement. */
 		readonly requestSceneInterest: (
 			residency: SceneResidency,
-			lod: LoDConfig,
+			radii: SceneInterestRadii,
 		) => void;
 		/** Current automatic camera-placement lifecycle state. */
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
@@ -129,21 +129,23 @@
 
 	let interestInput = $state("0000");
 	let interestStatus = $state("No scene interest requested.");
-	let lod = $state<LoDConfig>({ ...FRONTEND_TUNING.explorer.lod.defaultRadii });
+	let radii = $state<SceneInterestRadii>({
+		...FRONTEND_TUNING.explorer.residency.defaultRadii,
+	});
 
 	const parsedInterest = $derived(parseResidenceInput(interestInput));
 
 	function submitInterest(event: SubmitEvent): void {
 		event.preventDefault();
 		if (!runtimeReady || !parsedInterest) return;
-		requestSceneInterest(parsedInterest.residency, lod);
+		requestSceneInterest(parsedInterest.residency, radii);
 		interestStatus = `Requested around ${parsedInterest.residency.landblockId}.`;
 	}
 
-	function updateRadius(kind: ExplorerLodRadius, event: Event): void {
+	function updateRadius(kind: ExplorerRadiusKind, event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
-		lod = updateExplorerLodRadius(
-			lod,
+		radii = updateExplorerResidencyRadius(
+			radii,
 			kind,
 			input.value === "-1" ? null : Number(input.value),
 		);
@@ -236,104 +238,104 @@
 					"Enter four or eight hexadecimal digits, or N/S E/W coordinates."}
 			</p>
 			<div
-				class="explorer-lod-controls"
+				class="explorer-residency-controls"
 				aria-label="Scene interest level of detail"
 			>
-				<p class="ac-section-label">Outdoor LoD</p>
-				<div class="explorer-lod-control">
+				<p class="ac-section-label">Outdoor residency</p>
+				<div class="explorer-residency-control">
 					<ExplorerLayerVisibilityButton
 						label="terrain"
 						visible={layerVisibility[LandblockLayerKind.Terrain]}
 						updateVisible={(visible) =>
 							updateLayerVisibility(LandblockLayerKind.Terrain, visible)}
 					/>
-					<label for="explorer-lod-terrain">Terrain</label>
-					<strong>{formatExplorerLodRadius(lod.terrainRadius)}</strong>
+					<label for="explorer-residency-terrain">Terrain</label>
+					<strong>{formatResidencyRadius(radii.terrainRadius)}</strong>
 					<input
-						id="explorer-lod-terrain"
-						max={FRONTEND_TUNING.explorer.lod.maximumRadius}
-						min={FRONTEND_TUNING.explorer.lod.minimumRadius}
+						id="explorer-residency-terrain"
+						max={FRONTEND_TUNING.explorer.residency.maximumRadius}
+						min={FRONTEND_TUNING.explorer.residency.minimumRadius}
 						step="1"
 						type="range"
-						value={lod.terrainRadius}
+						value={radii.terrainRadius}
 						oninput={(event) => updateRadius("terrain", event)}
 					/>
 				</div>
-				<div class="explorer-lod-control">
+				<div class="explorer-residency-control">
 					<ExplorerLayerVisibilityButton
 						label="building"
 						visible={layerVisibility[LandblockLayerKind.Buildings]}
 						updateVisible={(visible) =>
 							updateLayerVisibility(LandblockLayerKind.Buildings, visible)}
 					/>
-					<label for="explorer-lod-buildings">Buildings</label>
-					<strong>{formatExplorerLodRadius(lod.buildingRadius)}</strong>
+					<label for="explorer-residency-buildings">Buildings</label>
+					<strong>{formatResidencyRadius(radii.buildingRadius)}</strong>
 					<input
-						id="explorer-lod-buildings"
-						max={lod.terrainRadius}
+						id="explorer-residency-buildings"
+						max={radii.terrainRadius}
 						min="-1"
 						step="1"
 						type="range"
-						value={lod.buildingRadius ?? -1}
+						value={radii.buildingRadius ?? -1}
 						oninput={(event) => updateRadius("buildings", event)}
 					/>
 				</div>
-				<div class="explorer-lod-control">
+				<div class="explorer-residency-control">
 					<ExplorerLayerVisibilityButton
 						label="explicit object"
 						visible={layerVisibility[LandblockLayerKind.Objects]}
 						updateVisible={(visible) =>
 							updateLayerVisibility(LandblockLayerKind.Objects, visible)}
 					/>
-					<label for="explorer-lod-objects">Explicit objects</label>
-					<strong>{formatExplorerLodRadius(lod.explicitObjectRadius)}</strong>
+					<label for="explorer-residency-objects">Explicit objects</label>
+					<strong>{formatResidencyRadius(radii.explicitObjectRadius)}</strong>
 					<input
-						id="explorer-lod-objects"
-						disabled={lod.buildingRadius === null}
-						max={lod.buildingRadius ?? -1}
+						id="explorer-residency-objects"
+						disabled={radii.buildingRadius === null}
+						max={radii.buildingRadius ?? -1}
 						min="-1"
 						step="1"
 						type="range"
-						value={lod.explicitObjectRadius ?? -1}
+						value={radii.explicitObjectRadius ?? -1}
 						oninput={(event) => updateRadius("explicitObjects", event)}
 					/>
 				</div>
-				<div class="explorer-lod-control">
+				<div class="explorer-residency-control">
 					<ExplorerLayerVisibilityButton
 						label="generated scenery"
 						visible={layerVisibility[LandblockLayerKind.Generated]}
 						updateVisible={(visible) =>
 							updateLayerVisibility(LandblockLayerKind.Generated, visible)}
 					/>
-					<label for="explorer-lod-generated">Generated scenery</label>
-					<strong>{formatExplorerLodRadius(lod.generatedObjectRadius)}</strong>
+					<label for="explorer-residency-generated">Generated scenery</label>
+					<strong>{formatResidencyRadius(radii.generatedObjectRadius)}</strong>
 					<input
-						id="explorer-lod-generated"
-						disabled={lod.buildingRadius === null}
-						max={lod.buildingRadius ?? -1}
+						id="explorer-residency-generated"
+						disabled={radii.buildingRadius === null}
+						max={radii.buildingRadius ?? -1}
 						min="-1"
 						step="1"
 						type="range"
-						value={lod.generatedObjectRadius ?? -1}
+						value={radii.generatedObjectRadius ?? -1}
 						oninput={(event) => updateRadius("generatedObjects", event)}
 					/>
 				</div>
-				<div class="explorer-lod-control">
+				<div class="explorer-residency-control">
 					<ExplorerLayerVisibilityButton
 						label="environment cell"
 						visible={layerVisibility[LandblockLayerKind.EnvCells]}
 						updateVisible={(visible) =>
 							updateLayerVisibility(LandblockLayerKind.EnvCells, visible)}
 					/>
-					<label for="explorer-lod-env-cells">Env cells</label>
-					<strong>{formatExplorerLodRadius(lod.envCellRadius)}</strong>
+					<label for="explorer-residency-env-cells">Env cells</label>
+					<strong>{formatResidencyRadius(radii.envCellRadius)}</strong>
 					<input
-						id="explorer-lod-env-cells"
-						max={lod.terrainRadius}
+						id="explorer-residency-env-cells"
+						max={radii.terrainRadius}
 						min="-1"
 						step="1"
 						type="range"
-						value={lod.envCellRadius ?? -1}
+						value={radii.envCellRadius ?? -1}
 						oninput={(event) => updateRadius("envCells", event)}
 					/>
 				</div>

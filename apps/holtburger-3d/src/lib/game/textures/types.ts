@@ -56,10 +56,9 @@ export type TextureArrayKey = `texture-array:${TexturePurpose}:${string}` & {
 };
 
 /** Stable generated pcode field for one landblock and mesh stride. */
-export type TerrainSurfaceTextureKey =
-	`terrain-surface:${LandblockId}/${number}` & {
-		readonly [terrainSurfaceTextureKeyBrand]: true;
-	};
+export type TerrainSurfaceTextureKey = `terrain-surface:${LandblockId}` & {
+	readonly [terrainSurfaceTextureKeyBrand]: true;
+};
 
 /** Stable generated terrain-composition lookup table for one installed active region. */
 export type TerrainCompositionTextureKey = `terrain-composition:${string}` & {
@@ -271,17 +270,11 @@ export function createTextureArrayKey(
 	return `texture-array:${purpose}:${setId}` as TextureArrayKey;
 }
 
-/** Build the canonical generated pcode-field identity for one landblock mesh stride. */
+/** Build the canonical generated pcode-field identity for one landblock. */
 export function createTerrainSurfaceTextureKey(
 	landblockId: LandblockId,
-	stride: number,
 ): TerrainSurfaceTextureKey {
-	if (!Number.isInteger(stride) || stride <= 0) {
-		throw new Error(
-			"Terrain surface texture stride must be a positive integer.",
-		);
-	}
-	return `terrain-surface:${landblockId}/${stride}` as TerrainSurfaceTextureKey;
+	return `terrain-surface:${landblockId}` as TerrainSurfaceTextureKey;
 }
 
 /** Build the canonical generated terrain-composition identity for one installed active region. */

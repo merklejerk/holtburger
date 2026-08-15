@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
 	resolveTerrainTextureFacts,
-	selectTerrainMeshStride,
-	selectTerrainTransitionDirection,
 	type TerrainCompositionFacts,
 } from "./types";
 
@@ -80,33 +78,4 @@ describe("terrain types", () => {
 
 		expect(secondLandblockFacts).toEqual(firstLandblockFacts);
 	});
-
-	it("selects retail stride rings", () => {
-		expect(selectTerrainMeshStride("0x1111ffff", "0x1111ffff")).toBe(1);
-		expect(selectTerrainMeshStride("0x1311ffff", "0x1111ffff")).toBe(2);
-		expect(selectTerrainMeshStride("0x1411ffff", "0x1111ffff")).toBe(4);
-		expect(selectTerrainMeshStride("0x1611ffff", "0x1111ffff")).toBe(8);
-	});
-
-	it.each([
-		["0x1111ffff", "viewer-block"],
-		["0x1211ffff", "east"],
-		["0x1210ffff", "southeast"],
-		["0x1312ffff", "east"],
-		["0x1213ffff", "north"],
-		["0x1313ffff", "northeast"],
-		["0x110fffff", "south"],
-		["0x1411ffff", "viewer-block"],
-		["0x1512ffff", "east"],
-		["0x1415ffff", "north"],
-		["0x1515ffff", "northeast"],
-		["0x1611ffff", "viewer-block"],
-	] as const)(
-		"matches retail's transition ring for %s",
-		(landblockId, transitionDirection) => {
-			expect(selectTerrainTransitionDirection(landblockId, "0x1111ffff")).toBe(
-				transitionDirection,
-			);
-		},
-	);
 });

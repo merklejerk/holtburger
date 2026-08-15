@@ -25,36 +25,22 @@ import {
 	type TerrainCompositionTable,
 } from "./composition-table";
 import type { TerrainGenerator } from "./terrain-generator";
+import { MAXIMUM_TERRAIN_CODE } from "./terrain-sample";
 import {
 	sampleTerrainSurface,
 	type TerrainSurfaceSample,
 } from "./terrain-surface";
 import {
-	selectTerrainMeshStride,
-	selectTerrainTransitionDirection,
 	terrainGeneratedTextureKeys,
 	terrainTextureKeysFromFacts,
+	TERRAIN_GRID_CELLS,
 	type RealizedTerrainResources,
 	type TerrainDrawUnit,
 	type TerrainGeneratedTextureKeys,
 	type TerrainGenerationResult,
 	type TerrainGenerationSource,
 	type TerrainSourceInstallation,
-	type TerrainVariantDrawRange,
-	TERRAIN_MESH_STRIDES,
 } from "./types";
-
-const TERRAIN_TRANSITION_DIRECTIONS = [
-	"viewer-block",
-	"north",
-	"northeast",
-	"east",
-	"southeast",
-	"south",
-	"southwest",
-	"west",
-	"northwest",
-] as const;
 
 /** One resolved terrain source and every stable resource identity it owns. */
 interface ResolvedTerrainSource<TOwnerId extends string> {
@@ -100,7 +86,7 @@ export interface TerrainSystemArtifact {
 	readonly source: TerrainSourceInstallation;
 }
 
-/** Owns terrain generation state, generated geometry, and frame-time variant selection. */
+/** Owns terrain generation state, generated geometry, and per-landblock draw-unit selection. */
 export class TerrainSystem<
 	TManagerOwnerId extends string = string,
 	TOwnerId extends TManagerOwnerId = TManagerOwnerId,
@@ -117,8 +103,6 @@ export class TerrainSystem<
 		LandblockId,
 		TerrainInstallation<TOwnerId>
 	>();
-	/** Anchor whose selected render variants currently define terrain scene-node bounds. */
-	#boundsAnchorLandblockId: LandblockId | null = null;
 	/**
 	 * Bumped whenever the installed set changes, so consumers that derive from *which* landblocks are
 	 * resident can tell that their derivation is stale without diffing the set themselves.
@@ -171,21 +155,6 @@ export class TerrainSystem<
 		this.#removeSource(landblockId);
 	}
 
-	/**
-	 * Publish the terrain variants selected for one render anchor to the scene graph.
-	 *
-	 * The anchor changes only when the primary camera enters another landblock, so
-	 * this keeps spatial bounds aligned with visible terrain geometry without
-	 * per-frame scene-index writes.
-	 */
-	updateSceneBoundsForAnchor(anchorLandblockId: LandblockId): void {
-		if (this.#boundsAnchorLandblockId === anchorLandblockId) return;
-		this.#boundsAnchorLandblockId = anchorLandblockId;
-		for (const landblockId of this.#installations.keys()) {
-			this.#syncSceneBoundsForLandblock(landblockId);
-		}
-	}
-
 	/** Reserve a newly interested source's resources and start one generation operation. */
 	#installSource(input: TerrainSourceInstallation): void {
 		if (this.#destroyed) {
@@ -222,36 +191,19 @@ export class TerrainSystem<
 	}
 
 	/** Select one already-realized terrain draw unit for a visible landblock. */
-	getDrawUnit(
-		nodeId: SceneNodeId,
-		anchorLandblockId: LandblockId,
-	): TerrainDrawUnit | null {
+	getDrawUnit(nodeId: SceneNodeId): TerrainDrawUnit | null {
 		const landblockId = this.#nodeLandblocks.get(nodeId);
 		if (!landblockId) return null;
 		const installation = this.#installations.get(landblockId);
 		if (!installation || installation.kind !== "realized") return null;
 
-		const variant = this.#selectVariant(
-			landblockId,
-			installation.resources,
-			anchorLandblockId,
-		);
-		const { stride } = variant.variant;
-		const surfaceField =
-			installation.source.generatedTextures.surfaceFields.get(stride);
-		if (!surfaceField) {
-			throw new Error(
-				`Terrain ${landblockId} is missing stride ${stride} surface data.`,
-			);
-		}
 		const drawUnit: TerrainDrawUnit = {
 			composition: installation.source.generatedTextures.composition,
 			coordinates: getLandblockCoordinates(landblockId),
+			dominantTerrainCode: installation.resources.dominantTerrainCode,
 			geometry: installation.source.geometry,
-			indexCount: variant.indexCount,
-			indexStart: variant.indexStart,
 			landblockId,
-			surfaceField,
+			surfaceField: installation.source.generatedTextures.surfaceField,
 			textures: terrainTextureKeysFromFacts(
 				installation.source.input.presentation.textures,
 			),
@@ -341,19 +293,15 @@ export class TerrainSystem<
 			geometry: result.geometry,
 			key: source.geometry,
 		});
-		this.#textures.upsertGeneratedTextures(
-			result.surfaceFields.map((field) => {
-				const key = source.generatedTextures.surfaceFields.get(field.stride);
-				if (!key) {
-					throw new Error(
-						`Terrain ${source.input.landblockId} has no generated texture key for stride ${field.stride}.`,
-					);
-				}
-				return { key, upload: createTerrainSurfaceUpload(field) };
-			}),
-		);
+		this.#textures.upsertGeneratedTextures([
+			{
+				key: source.generatedTextures.surfaceField,
+				upload: createTerrainSurfaceUpload(result.surfaceField),
+			},
+		]);
 		return {
-			variants: result.variants,
+			bounds: result.bounds,
+			dominantTerrainCode: result.dominantTerrainCode,
 		};
 	}
 
@@ -387,7 +335,7 @@ export class TerrainSystem<
 		this.#geometry.reserveKeys(source.owner, [source.geometry]);
 		this.#textures.reserveKeys(source.owner, [
 			source.generatedTextures.composition,
-			...source.generatedTextures.surfaceFields.values(),
+			source.generatedTextures.surfaceField,
 		]);
 		void this.#textures.retain(
 			source.owner,
@@ -411,41 +359,21 @@ export class TerrainSystem<
 		);
 	}
 
+	/**
+	 * Publish generated bounds once a landblock realizes.
+	 *
+	 * Install-time bounds come from the artifact, which predates generation. The generated mesh
+	 * knows its own extent exactly, so replacing them tightens culling. Bounds no longer depend on
+	 * the render anchor, because every landblock has exactly one mesh.
+	 */
 	#syncSceneBoundsForLandblock(landblockId: LandblockId): void {
-		const anchorLandblockId = this.#boundsAnchorLandblockId;
 		const installation = this.#installations.get(landblockId);
-		if (anchorLandblockId === null || installation?.kind !== "realized") return;
-		const bounds = this.#selectVariant(
-			landblockId,
-			installation.resources,
-			anchorLandblockId,
-		).bounds;
+		if (installation?.kind !== "realized") return;
 		for (const [nodeId, nodeLandblockId] of this.#nodeLandblocks) {
 			if (nodeLandblockId === landblockId) {
-				this.#scene.updateBounds(nodeId, bounds);
+				this.#scene.updateBounds(nodeId, installation.resources.bounds);
 			}
 		}
-	}
-
-	#selectVariant(
-		landblockId: LandblockId,
-		resources: RealizedTerrainResources,
-		anchorLandblockId: LandblockId,
-	): TerrainVariantDrawRange {
-		const stride = selectTerrainMeshStride(landblockId, anchorLandblockId);
-		const transitionDirection = selectTerrainTransitionDirection(
-			landblockId,
-			anchorLandblockId,
-		);
-		const variant = resources.variants.find(
-			(candidate) =>
-				candidate.variant.stride === stride &&
-				candidate.variant.transitionDirection === transitionDirection,
-		);
-		if (variant) return variant;
-		throw new Error(
-			`Terrain ${landblockId} is missing ${stride}/${transitionDirection} geometry.`,
-		);
 	}
 }
 
@@ -475,80 +403,32 @@ function validateTerrainGenerationResult(
 			"Terrain generation geometry contains invalid attribute or index values.",
 		);
 	}
-	const ranges = [...result.variants]
-		.map(({ indexCount, indexStart }) => ({ indexCount, indexStart }))
-		.sort((left, right) => left.indexStart - right.indexStart);
-	for (let index = 0; index < ranges.length; index += 1) {
-		const range = ranges[index];
-		const previous = ranges[index - 1];
-		if (
-			!Number.isInteger(range.indexStart) ||
-			!Number.isInteger(range.indexCount) ||
-			range.indexStart < 0 ||
-			range.indexCount <= 0 ||
-			range.indexStart + range.indexCount > result.geometry.indices.length ||
-			(previous !== undefined &&
-				previous.indexStart + previous.indexCount > range.indexStart)
-		) {
-			throw new Error(
-				"Terrain generation contains overlapping or out-of-bounds draw ranges.",
-			);
-		}
-	}
-	const strides = new Set(result.surfaceFields.map(({ stride }) => stride));
+	const field = result.surfaceField;
 	if (
-		strides.size !== result.surfaceFields.length ||
-		strides.size !== TERRAIN_MESH_STRIDES.length ||
-		TERRAIN_MESH_STRIDES.some((stride) => !strides.has(stride))
+		field.width !== TERRAIN_GRID_CELLS ||
+		field.height !== TERRAIN_GRID_CELLS ||
+		field.cellPcodes.length !== field.width * field.height
 	) {
 		throw new Error(
-			"Terrain generation must return one surface field for every stride.",
+			"Terrain surface field does not match the authored cell grid.",
 		);
 	}
-	for (const field of result.surfaceFields) {
-		const expectedDimension = 8 / field.stride;
-		if (
-			field.width !== expectedDimension ||
-			field.height !== expectedDimension ||
-			field.cellPcodes.length !== field.width * field.height
-		) {
-			throw new Error(
-				`Terrain stride ${field.stride} surface field does not match its generated cell grid.`,
-			);
-		}
-	}
-	const expectedVariants = new Set(
-		TERRAIN_MESH_STRIDES.flatMap((stride) =>
-			TERRAIN_TRANSITION_DIRECTIONS.map(
-				(direction) => `${stride}/${direction}`,
-			),
-		),
-	);
-	const returnedVariants = new Set(
-		result.variants.map(
-			({ variant }) => `${variant.stride}/${variant.transitionDirection}`,
-		),
-	);
+	// The flat-terrain path feeds this straight to the fragment program as a composition-table
+	// column. Generation is behind a replaceable port, so a bad value would otherwise surface as an
+	// out-of-range texel fetch rather than as the contract violation it is.
 	if (
-		returnedVariants.size !== result.variants.length ||
-		returnedVariants.size !== expectedVariants.size ||
-		[...expectedVariants].some((variant) => !returnedVariants.has(variant))
+		!Number.isInteger(result.dominantTerrainCode) ||
+		result.dominantTerrainCode < 0 ||
+		result.dominantTerrainCode > MAXIMUM_TERRAIN_CODE
 	) {
 		throw new Error(
-			"Terrain generation must return every stride and transition-direction variant.",
+			`Terrain dominant code ${result.dominantTerrainCode} is outside the authored terrain-code range.`,
 		);
-	}
-	for (const variant of result.variants) {
-		if (!strides.has(variant.variant.stride)) {
-			throw new Error(
-				`Terrain variant ${variant.variant.stride}/${variant.variant.transitionDirection} has no surface field.`,
-			);
-		}
 	}
 }
 
 function createTerrainSurfaceUpload(
-	field: TerrainGenerationResult["surfaceFields"][number],
+	field: TerrainGenerationResult["surfaceField"],
 ): Texture2DUpload {
 	return {
 		data: field.cellPcodes,

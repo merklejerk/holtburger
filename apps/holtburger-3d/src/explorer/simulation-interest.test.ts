@@ -32,7 +32,7 @@ describe("computeSimulationInterest", () => {
 });
 
 describe("SimulationInterestController", () => {
-	it("does not replace simulation interest when only render LoD changes", async () => {
+	it("does not replace simulation interest when only render residency radii change", async () => {
 		const replace = vi.fn(async (request: SimulationInterestRequest) => ({
 			committed: true,
 			revision: request.revision,
@@ -41,10 +41,10 @@ describe("SimulationInterestController", () => {
 		const controller = new SimulationInterestController({ replace });
 
 		const first = controller.request("0xda55ffff");
-		// Render LoD is deliberately not an input. Re-requesting the same anchor is a no-op.
-		const afterRenderLodChange = controller.request("0xda55ffff");
+		// Render residency radii are deliberately not an input. Re-requesting the same anchor is a no-op.
+		const afterResidencyChange = controller.request("0xda55ffff");
 
-		expect(afterRenderLodChange).toBe(first);
+		expect(afterResidencyChange).toBe(first);
 		await first;
 		expect(replace).toHaveBeenCalledOnce();
 	});

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveTerrainCoverageFog } from "./terrain-fog";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
+import {
+	resolveTerrainCoverageFog,
+	solidTerrainCutoffLandblocks,
+} from "./terrain-fog";
 
 const AUTHORED_FOG = {
 	near: 15,
@@ -30,5 +35,48 @@ describe("resolveTerrainCoverageFog", () => {
 		expect(() =>
 			resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 1.5 }),
 		).toThrow("non-negative integer radius");
+	});
+});
+
+describe("solidTerrainCutoffLandblocks", () => {
+	it("converts the configured fog coverage into a whole landblock ring", () => {
+		const fog = resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 8 });
+		if (fog === null) throw new Error("Coverage fog must resolve.");
+		const coverage = FRONTEND_TUNING.rendering.solidTerrainFogCoverage;
+
+		expect(solidTerrainCutoffLandblocks(fog)).toBe(
+			Math.ceil(
+				(fog.near + (fog.far - fog.near) * coverage) /
+					OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			),
+		);
+	});
+
+	it("keeps the ring inside the residency window it was derived from", () => {
+		for (const terrainRadius of [0, 1, 2, 4, 8]) {
+			const fog = resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius });
+			if (fog === null) throw new Error("Coverage fog must resolve.");
+			expect(solidTerrainCutoffLandblocks(fog)).toBeLessThanOrEqual(
+				terrainRadius + 1,
+			);
+		}
+	});
+
+	it("grows the ring as the residency window grows", () => {
+		const nearRing = solidTerrainCutoffLandblocks(
+			resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 2 }),
+		);
+		const farRing = solidTerrainCutoffLandblocks(
+			resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 8 }),
+		);
+		if (nearRing === null || farRing === null) {
+			throw new Error("Coverage fog must resolve a ring.");
+		}
+
+		expect(nearRing).toBeLessThan(farRing);
+	});
+
+	it("never renders terrain flat when fog is disabled", () => {
+		expect(solidTerrainCutoffLandblocks(null)).toBeNull();
 	});
 });

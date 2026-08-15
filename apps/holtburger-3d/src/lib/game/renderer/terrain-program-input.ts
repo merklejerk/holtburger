@@ -1,3 +1,4 @@
+import type { LandblockId } from "../game-types";
 import type { TextureArrayBinding } from "../textures/texture-manager";
 import type {
 	GeometryResourceKey,
@@ -22,4 +23,34 @@ export interface TerrainProgramInput {
 	readonly composition: Texture2DResourceKey;
 	/** Device bindings for regional texture arrays and landscape detail. */
 	readonly textures: TerrainTextureBindings;
+}
+
+/**
+ * Fail loudly if two terrain draws in one pass resolve against different active regions.
+ *
+ * Everything here except `geometry` and `surfaceField` is keyed on `activeRegionKey`, so the
+ * terrain pass binds those once and reuses them for every landblock. That is correct only while
+ * one region is live, which holds today by construction: `activeRegionKey` takes no landblock
+ * input, and exactly one `ActiveRegionSource` exists per content source. Nothing in the type
+ * system says so, and a future multi-region source would otherwise draw one region's landblocks
+ * with another's palette — a wrong picture with no error, which reads as a content bug.
+ */
+export function assertSharedTerrainRegion(
+	expected: TerrainProgramInput,
+	actual: TerrainProgramInput,
+	landblockId: LandblockId,
+): void {
+	if (
+		expected.composition !== actual.composition ||
+		expected.textures.colors.resource !== actual.textures.colors.resource ||
+		expected.textures.blendMasks.resource !==
+			actual.textures.blendMasks.resource ||
+		expected.textures.roadMasks.resource !==
+			actual.textures.roadMasks.resource ||
+		expected.textures.detail !== actual.textures.detail
+	) {
+		throw new Error(
+			`Terrain landblock ${landblockId} resolves a different active region than its pass bound (${actual.composition} vs ${expected.composition}).`,
+		);
+	}
 }

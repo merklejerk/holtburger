@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { SceneResidency } from "../lib/game/scene";
-	import type { LoDConfig } from "../lib/game/runtime/types";
+	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
 	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
@@ -45,7 +45,7 @@
 		readonly runtimeReady: boolean;
 		readonly requestSceneInterest: (
 			residency: SceneResidency,
-			lod: LoDConfig,
+			radii: SceneInterestRadii,
 		) => void;
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
 		readonly cameraMode: ExplorerCameraMode;

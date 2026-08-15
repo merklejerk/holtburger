@@ -78,6 +78,10 @@ uniform int uFogEnabled;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform vec3 uFogColor;
+// Non-zero when this landblock renders as one flat colour instead of compositing its cells.
+uniform int uSolidTerrain;
+// Terrain code standing in for the whole landblock while uSolidTerrain is set.
+uniform uint uSolidTerrainCode;
 
 ${WEBGL2_DISTANCE_FOG_GLSL}
 ${WEBGL2_SCENE_LIGHTING_GLSL}
@@ -108,9 +112,10 @@ struct TerrainUv {
 	vec2 field;
 };
 
-// The light grid is always the landblock's authored 8x8, deliberately independent of the surface
-// field: that field's resolution drops with the LOD stride (8x8, 4x4, 2x2), so reusing its cell
-// would make a lamp's reach coarsen with distance and shift the lit area between LODs.
+// The light grid is the landblock's authored 8x8, kept as its own constant rather than derived from
+// the surface field's dimensions even though both are 8x8 today. They answer different questions --
+// one is how finely lamps are bucketed, the other how finely terrain is composited -- so tying the
+// lamp bucket to the composition grid would silently change lighting if either were ever retuned.
 vec3 evaluateMaskedStaticLights(vec3 position, vec3 unitNormal) {
 	ivec2 cell = clamp(
 		ivec2(vGridUv * float(LIGHT_GRID_CELLS)),
@@ -277,7 +282,27 @@ vec3 applyRoads(vec3 color, uint pcode, TerrainUv uv) {
 	return mix(color, roadColor, clamp(1.0 - product, 0.0, 1.0));
 }
 
+/**
+ * Flat stand-in colour for a landblock too fogged to be worth compositing.
+ *
+ * Samples the dominant terrain type's colour texture at its smallest mip. Terrain colours carry a
+ * complete mip chain, so that level is the box-filtered average of the whole texture -- the colour
+ * the composited surface would average to, without a surface field, a blend, or a road lookup.
+ * The explicit large LOD clamps to that level whatever the array's dimensions are.
+ */
+vec3 solidTerrainColor() {
+	uvec4 record = compositionRecord(int(uSolidTerrainCode), 0);
+	return textureLod(uColors, vec3(0.5, 0.5, float(record.x)), 32.0).rgb;
+}
+
 void main() {
+	if (uSolidTerrain != 0) {
+		// Directional light only. A fogged landblock cannot show a lamp pool, and skipping point
+		// lights is what lets the draw omit its static-light state entirely.
+		vec3 flatColor = solidTerrainColor() * min(vAmbientSun, vec3(1.0));
+		fragmentColor = vec4(applyDistanceFog(flatColor, vViewerDistance), 1.0);
+		return;
+	}
 	ivec2 fieldSize = textureSize(uSurfaceField, 0);
 	TerrainUv uv;
 	uv.field = vGridUv * vec2(fieldSize);
@@ -336,6 +361,8 @@ export interface WebGL2TerrainProgram {
 		readonly sunVector: WebGLUniformLocation;
 		readonly staticLightMask: WebGLUniformLocation;
 		readonly surfaceField: WebGLUniformLocation;
+		readonly solidTerrain: WebGLUniformLocation;
+		readonly solidTerrainCode: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 	};
 }
@@ -428,6 +455,12 @@ export function createWebGL2TerrainProgram(
 				sunVector: requireWebGL2Uniform(gl, program, "uSunVector"),
 				staticLightMask: requireWebGL2Uniform(gl, program, "uStaticLightMask"),
 				surfaceField: requireWebGL2Uniform(gl, program, "uSurfaceField"),
+				solidTerrain: requireWebGL2Uniform(gl, program, "uSolidTerrain"),
+				solidTerrainCode: requireWebGL2Uniform(
+					gl,
+					program,
+					"uSolidTerrainCode",
+				),
 				view: requireWebGL2Uniform(gl, program, "uView"),
 			},
 		};

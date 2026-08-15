@@ -171,7 +171,7 @@ import {
 	type StaticLayerKind,
 	type SceneInterestMap,
 	type SceneInterestRequest,
-	validateLoDConfigOrThrow,
+	validateSceneInterestRadiiOrThrow,
 } from "./scene-interest";
 import {
 	EnvCellGeometryPreparer,
@@ -1088,12 +1088,12 @@ export class GameRuntime {
 
 	/** Replace frontend-owned static content interest without moving the camera. */
 	updateSceneInterest(request: SceneInterestRequest): SceneInterestReceipt {
-		validateLoDConfigOrThrow(request.lod);
+		validateSceneInterestRadiiOrThrow(request.radii);
 		this.#terrainFogCoverage = {
-			terrainRadius: request.lod.terrainRadius,
+			terrainRadius: request.radii.terrainRadius,
 		};
 		return this.#applySceneInterest(
-			computeSceneInterest(request.anchorLandblockId, request.lod),
+			computeSceneInterest(request.anchorLandblockId, request.radii),
 		);
 	}
 
@@ -1248,8 +1248,6 @@ export class GameRuntime {
 		) {
 			throw new Error("Primary camera placement must be finite.");
 		}
-		const anchorChanged =
-			this.#camera.placement.landblockId !== camera.placement.landblockId;
 		this.#camera = {
 			far: camera.far,
 			fov: camera.fov,
@@ -1261,9 +1259,6 @@ export class GameRuntime {
 				rotation: new Quat(rotation.w, rotation.x, rotation.y, rotation.z),
 			},
 		};
-		if (anchorChanged) {
-			this.#terrain.updateSceneBoundsForAnchor(camera.placement.landblockId);
-		}
 	}
 
 	/** Replace the frontend-resolved environment without changing scene residency or interest. */

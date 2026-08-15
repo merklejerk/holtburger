@@ -99,7 +99,7 @@ export const FRONTEND_TUNING = {
 			defaultDayIndex: 0,
 			defaultTimeOfDay: 0.5,
 		},
-		lod: {
+		residency: {
 			/** Initial outdoor scene-interest radii exposed by Explorer controls. */
 			defaultRadii: {
 				buildingRadius: 8,
@@ -245,6 +245,20 @@ export const FRONTEND_TUNING = {
 			/** World distance where terrain detail texture becomes fully faded. */
 			far: 50,
 		},
+		/**
+		 * Fog coverage at which terrain stops compositing and renders one flat color.
+		 *
+		 * Distant terrain does not need to be correct, and a flat landblock skips its surface-field
+		 * bind, its light state, and its mask upload. Lower values move the switch nearer the camera
+		 * and flatten more of the window; raise it if the transition reads badly, since whatever
+		 * colour error the flat stand-in carries survives the fog blend in proportion to how much
+		 * fog is left at the ring.
+		 *
+		 * The ring itself is derived, not configured: `solidTerrainCutoffLandblocks` converts this
+		 * and the frame's fog into whole landblocks, and the renderer reports where it landed as
+		 * `FrameSelectionMetrics.solidTerrainCutoffLandblocks`.
+		 */
+		solidTerrainFogCoverage: 0.33,
 		transparentObjects: {
 			/** Number of coarse camera-depth bands used for near transparent objects. */
 			depthBucketCount: 8,

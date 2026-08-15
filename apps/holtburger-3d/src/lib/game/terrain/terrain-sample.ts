@@ -13,9 +13,12 @@ export function roadCodeOf(sample: number): number {
 	return sample & 0x03;
 }
 
+/** Largest terrain type the five-bit terrain field can carry. */
+export const MAXIMUM_TERRAIN_CODE = 0x1f;
+
 /** Terrain type, indexing the region's terrain-type table. */
 export function terrainCodeOf(sample: number): number {
-	return (sample >>> 2) & 0x1f;
+	return (sample >>> 2) & MAXIMUM_TERRAIN_CODE;
 }
 
 /**

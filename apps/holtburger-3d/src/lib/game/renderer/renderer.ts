@@ -282,6 +282,17 @@ export interface FrameSelectionMetrics {
 	 * order is landblock-coherent enough for per-landblock binding.
 	 */
 	readonly staticLightBinds: number;
+	/** Per-landblock terrain light-mask uploads; unlit landblocks skip theirs entirely. */
+	readonly terrainLightMaskUploads: number;
+	/** Terrain landblocks drawn as one flat colour because fog already hides their detail. */
+	readonly solidTerrainDraws: number;
+	/**
+	 * Landblock ring at which terrain switches to flat, or null when fog leaves it composited.
+	 *
+	 * Exposed because the ring is derived from the frame's fog rather than configured directly, so
+	 * this is the only way to see where a given `solidTerrainFogCoverage` actually landed.
+	 */
+	readonly solidTerrainCutoffLandblocks: number | null;
 	/** Lighting-uniform binds caused by a draw changing its retail lighting role. */
 	readonly objectLightingBinds: number;
 	/** Object-program activation count across every rendered view. */

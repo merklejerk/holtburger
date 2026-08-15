@@ -23,7 +23,7 @@
 	import { TauriSkySource } from "../lib/assets/tauri-sky-source";
 	import { TauriLandblockSourceBatch } from "../lib/assets/tauri-landblock-source-batch";
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
-	import type { LoDConfig } from "../lib/game/runtime/types";
+	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { SceneResidency } from "../lib/game/scene";
 	import {
@@ -308,7 +308,7 @@
 
 	function requestSceneInterest(
 		residency: SceneResidency,
-		lod: LoDConfig,
+		radii: SceneInterestRadii,
 	): void {
 		// Automatic focus is an explicit teleport. Return position authority to free fly before the
 		// coordinator applies it instead of letting the host overwrite the new pose next frame.
@@ -318,9 +318,9 @@
 				physicalCameraError = errorMessage(error);
 			},
 		);
-		cameraCoordinator?.requestSceneInterest(residency, lod);
+		cameraCoordinator?.requestSceneInterest(residency, radii);
 		sceneInterest = {
-			lod: { ...lod },
+			radii: { ...radii },
 			residency: { ...residency },
 		};
 	}

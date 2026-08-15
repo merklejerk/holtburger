@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
-	countExplorerLodLandblocks,
-	updateExplorerLodRadius,
-} from "./explorer-lod";
+	countResidentLandblocks,
+	updateExplorerResidencyRadius,
+} from "./explorer-residency-radius";
 
-describe("Explorer LoD controls", () => {
+describe("Explorer residency-radius controls", () => {
 	it("clamps every dependent radius when terrain coverage shrinks", () => {
 		const configured = {
 			buildingRadius: 4,
@@ -15,7 +15,7 @@ describe("Explorer LoD controls", () => {
 			terrainRadius: 6,
 		};
 
-		expect(updateExplorerLodRadius(configured, "terrain", 2)).toEqual({
+		expect(updateExplorerResidencyRadius(configured, "terrain", 2)).toEqual({
 			buildingRadius: 2,
 			envCellRadius: 2,
 			explicitObjectRadius: 2,
@@ -25,17 +25,19 @@ describe("Explorer LoD controls", () => {
 	});
 
 	it("keeps detail layers beneath buildings and disables them with buildings", () => {
-		let config = updateExplorerLodRadius(
-			FRONTEND_TUNING.explorer.lod.defaultRadii,
+		let config = updateExplorerResidencyRadius(
+			FRONTEND_TUNING.explorer.residency.defaultRadii,
 			"buildings",
 			2,
 		);
-		config = updateExplorerLodRadius(config, "explicitObjects", 8);
-		config = updateExplorerLodRadius(config, "generatedObjects", 1);
+		config = updateExplorerResidencyRadius(config, "explicitObjects", 8);
+		config = updateExplorerResidencyRadius(config, "generatedObjects", 1);
 
 		expect(config.explicitObjectRadius).toBe(2);
 		expect(config.generatedObjectRadius).toBe(1);
-		expect(updateExplorerLodRadius(config, "buildings", null)).toMatchObject({
+		expect(
+			updateExplorerResidencyRadius(config, "buildings", null),
+		).toMatchObject({
 			buildingRadius: null,
 			explicitObjectRadius: null,
 			generatedObjectRadius: null,
@@ -43,7 +45,7 @@ describe("Explorer LoD controls", () => {
 	});
 
 	it("reports square landblock coverage for each outdoor radius", () => {
-		expect(countExplorerLodLandblocks(0)).toBe(1);
-		expect(countExplorerLodLandblocks(2)).toBe(25);
+		expect(countResidentLandblocks(0)).toBe(1);
+		expect(countResidentLandblocks(2)).toBe(25);
 	});
 });

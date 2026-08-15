@@ -155,10 +155,8 @@ describe("RenderWorld", () => {
 			world.queryFlatScene(FRUSTUM, "0001", INCLUDE_ALL_SCENE_CULLING_GROUPS),
 		).toBe(VISIBLE_SCENE);
 		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
-		expect(world.resolveTerrainDrawUnit("scene-node:1", "0002")).toBe(TERRAIN);
-		expect(
-			world.getRenderContributionDescriptor("scene-node:9", "0002"),
-		).toEqual({
+		expect(world.resolveTerrainDrawUnit("scene-node:1")).toBe(TERRAIN);
+		expect(world.getRenderContributionDescriptor("scene-node:9")).toEqual({
 			footprint: {
 				kind: "eligible",
 				localBounds: AABB3.zero(),
@@ -218,28 +216,28 @@ describe("RenderWorld", () => {
 			frameStreamedInstances: [],
 		} satisfies StaticObjectRenderable;
 		selectedStaticRenderable = staticRenderable;
-		expect(
-			world.getRenderContributionDescriptor("scene-node:8", "0002"),
-		).toMatchObject({
-			cullingGroup: "buildings",
-			footprint: {
-				kind: "eligible",
-				localBounds: AABB3.zero(),
-				objectClass: "building",
-				placement: PLACEMENT,
+		expect(world.getRenderContributionDescriptor("scene-node:8")).toMatchObject(
+			{
+				cullingGroup: "buildings",
+				footprint: {
+					kind: "eligible",
+					localBounds: AABB3.zero(),
+					objectClass: "building",
+					placement: PLACEMENT,
+				},
+				kind: "static-object",
+				renderable: staticRenderable,
 			},
-			kind: "static-object",
-			renderable: staticRenderable,
-		});
+		);
 		staticCullingGroup = "generated";
-		expect(
-			world.getRenderContributionDescriptor("scene-node:8", "0002"),
-		).toMatchObject({
-			footprint: {
-				kind: "ineligible",
-				reason: "generated-instance-container",
+		expect(world.getRenderContributionDescriptor("scene-node:8")).toMatchObject(
+			{
+				footprint: {
+					kind: "ineligible",
+					reason: "generated-instance-container",
+				},
 			},
-		});
+		);
 		expect(world.resolveStaticObjectRenderable(staticRenderable)).toEqual([
 			{
 				drawUnit: staticRenderable.drawUnits[0],

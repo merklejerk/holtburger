@@ -1,7 +1,7 @@
 import type { LandblockId } from "../lib/game/game-types";
 import { getLandblockCoordinates } from "../lib/game/landblocks";
 
-/** Current Explorer policy radius for collision simulation, independent from render LoD. */
+/** Current Explorer policy radius for collision simulation, independent from render residency radii. */
 const SIMULATION_INTEREST_RADIUS = 2;
 
 /** Complete host replacement of the collision owners required by application policy. */

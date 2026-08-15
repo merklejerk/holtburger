@@ -1,19 +1,19 @@
-import type { LoDConfig } from "../lib/game/runtime/types";
+import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
-export type ExplorerLodRadius =
+export type ExplorerRadiusKind =
 	| "buildings"
 	| "envCells"
 	| "explicitObjects"
 	| "generatedObjects"
 	| "terrain";
 
-/** Apply one Explorer LoD control while preserving the outdoor radius hierarchy. */
-export function updateExplorerLodRadius(
-	config: LoDConfig,
-	kind: ExplorerLodRadius,
+/** Apply one Explorer residency-radius control while preserving the outdoor radius hierarchy. */
+export function updateExplorerResidencyRadius(
+	config: SceneInterestRadii,
+	kind: ExplorerRadiusKind,
 	value: number | null,
-): LoDConfig {
+): SceneInterestRadii {
 	const next = { ...config };
 	switch (kind) {
 		case "terrain":
@@ -65,24 +65,27 @@ export function updateExplorerLodRadius(
 }
 
 /** Return the Chebyshev-square coverage count for an enabled radius. */
-export function countExplorerLodLandblocks(radius: number): number {
+export function countResidentLandblocks(radius: number): number {
 	const normalized = clampRadius(radius);
 	return (normalized * 2 + 1) ** 2;
 }
 
 /** Format an optional radius for its compact Explorer slider readout. */
-export function formatExplorerLodRadius(radius: number | null): string {
+export function formatResidencyRadius(radius: number | null): string {
 	return radius === null
 		? "Off"
-		: `${radius} out (${countExplorerLodLandblocks(radius)} landblocks)`;
+		: `${radius} out (${countResidentLandblocks(radius)} landblocks)`;
 }
 
 function clampRadius(radius: number | null): number {
 	if (radius === null || !Number.isFinite(radius))
-		return FRONTEND_TUNING.explorer.lod.minimumRadius;
+		return FRONTEND_TUNING.explorer.residency.minimumRadius;
 	return Math.min(
-		FRONTEND_TUNING.explorer.lod.maximumRadius,
-		Math.max(FRONTEND_TUNING.explorer.lod.minimumRadius, Math.trunc(radius)),
+		FRONTEND_TUNING.explorer.residency.maximumRadius,
+		Math.max(
+			FRONTEND_TUNING.explorer.residency.minimumRadius,
+			Math.trunc(radius),
+		),
 	);
 }
 

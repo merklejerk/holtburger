@@ -18,30 +18,14 @@ import type { TexturePreparer } from "../textures/texture-preparer";
 import type { TextureFact } from "../textures/types";
 import type { TerrainGenerator } from "./terrain-generator";
 import { TerrainSystem } from "./terrain-system";
-import { resolveTerrainTextureFacts, TERRAIN_MESH_STRIDES } from "./types";
-import type {
-	TerrainGenerationResult,
-	TerrainGenerationSource,
-	TerrainMeshStride,
-	TerrainPcodeField,
-	TerrainTransitionDirection,
-} from "./types";
+import { resolveTerrainTextureFacts, TERRAIN_GRID_CELLS } from "./types";
+import type { TerrainGenerationResult, TerrainGenerationSource } from "./types";
 
-const STRIDES = TERRAIN_MESH_STRIDES;
-const TRANSITION_DIRECTIONS: readonly TerrainTransitionDirection[] = [
-	"viewer-block",
-	"north",
-	"northeast",
-	"east",
-	"southeast",
-	"south",
-	"southwest",
-	"west",
-	"northwest",
-];
+/** Distinctive bounds so a published value is traceable to the generation result. */
+const GENERATED_BOUNDS = new AABB3(new Vec3(0, -3, -192), new Vec3(192, 7, 0));
 
 describe("TerrainSystem", () => {
-	it("generates once, realizes complete output, and selects a frame-time variant", async () => {
+	it("generates once and realizes one complete draw unit", async () => {
 		const generator = new DeferredTerrainGenerator();
 		const resources = new FakeRendererResourceManager();
 		const terrain = createTerrainSystem(generator, resources);
@@ -55,32 +39,27 @@ describe("TerrainSystem", () => {
 		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(terrain.getDrawUnit(nodeId, installation.landblockId)).toMatchObject(
-			{
-				composition: "terrain-composition:test-region",
-				geometry: "terrain-geometry:0x1111ffff",
-				indexCount: 3,
-				indexStart: 0,
-				landblockId: "0x1111ffff",
-				surfaceField: "terrain-surface:0x1111ffff/1",
-				textures: {
-					blendMasks:
-						"texture-array:terrain-blend-mask:terrain-active-region:test-region",
-					colors:
-						"texture-array:terrain-color:terrain-active-region:test-region",
-					detail: "asset-texture:terrain-detail:0x05000004",
-					roadMasks:
-						"texture-array:terrain-road-mask:terrain-active-region:test-region",
-				},
+		expect(terrain.getDrawUnit(nodeId)).toMatchObject({
+			composition: "terrain-composition:test-region",
+			geometry: "terrain-geometry:0x1111ffff",
+			landblockId: "0x1111ffff",
+			surfaceField: "terrain-surface:0x1111ffff",
+			textures: {
+				blendMasks:
+					"texture-array:terrain-blend-mask:terrain-active-region:test-region",
+				colors: "texture-array:terrain-color:terrain-active-region:test-region",
+				detail: "asset-texture:terrain-detail:0x05000004",
+				roadMasks:
+					"texture-array:terrain-road-mask:terrain-active-region:test-region",
 			},
-		);
+		});
 
 		terrain.removeOwner(ownerId(installation.landblockId));
 		expect(resources.released).toHaveLength(resources.created.length);
 		expect(new Set(resources.released)).toEqual(new Set(resources.created));
 	});
 
-	it("publishes the selected render variant bounds when its anchor changes", async () => {
+	it("publishes the generated mesh bounds once the landblock realizes", async () => {
 		const generator = new DeferredTerrainGenerator();
 		const scene = new SceneGraph();
 		const terrain = createTerrainSystem(
@@ -90,31 +69,15 @@ describe("TerrainSystem", () => {
 		);
 		const installation = createInstallation();
 		const nodeId = installTerrain(terrain, installation);
-		const result = createGenerationResult();
 		const updateBounds = vi.spyOn(scene, "updateBounds");
 
-		terrain.updateSceneBoundsForAnchor(installation.landblockId);
-		generator.resolve(result);
+		generator.resolve(createGenerationResult());
 		await Promise.resolve();
 		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(scene.getNode(nodeId)?.localBounds).toEqual(
-			variantFor(result, 1, "viewer-block").bounds,
-		);
-
-		updateBounds.mockClear();
-		terrain.updateSceneBoundsForAnchor(installation.landblockId);
-		expect(updateBounds).not.toHaveBeenCalled();
-
-		terrain.updateSceneBoundsForAnchor("0x1311ffff");
-		expect(scene.getNode(nodeId)?.localBounds).toEqual(
-			variantFor(result, 2, "west").bounds,
-		);
-		expect(updateBounds).toHaveBeenCalledWith(
-			nodeId,
-			variantFor(result, 2, "west").bounds,
-		);
+		expect(scene.getNode(nodeId)?.localBounds).toEqual(GENERATED_BOUNDS);
+		expect(updateBounds).toHaveBeenCalledWith(nodeId, GENERATED_BOUNDS);
 	});
 
 	it("shares one composition resource across interested landblocks in a region", () => {
@@ -178,7 +141,7 @@ describe("TerrainSystem", () => {
 		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(terrain.getDrawUnit(nodeId, installation.landblockId)).toBeNull();
+		expect(terrain.getDrawUnit(nodeId)).toBeNull();
 		expect(resources.released).toEqual([
 			"texture-2d-resource:0",
 			"geometry-resource:0",
@@ -269,55 +232,21 @@ const TERRAIN_VARIATION = {
 } as const;
 
 function createGenerationResult(): TerrainGenerationResult {
-	const variants = STRIDES.flatMap((stride) =>
-		TRANSITION_DIRECTIONS.map((transitionDirection, directionIndex) => ({
-			bounds: new AABB3(
-				new Vec3(stride, directionIndex, -stride),
-				new Vec3(stride + 1, directionIndex + 1, 0),
-			),
-			indexCount: 3,
-			indexStart:
-				(STRIDES.indexOf(stride) * TRANSITION_DIRECTIONS.length +
-					directionIndex) *
-				3,
-			variant: { stride, transitionDirection },
-		})),
-	);
 	return {
+		bounds: GENERATED_BOUNDS,
+		dominantTerrainCode: 3,
 		geometry: {
-			indices: new Uint16Array(variants.flatMap(() => [0, 1, 2])),
+			indices: new Uint16Array([0, 1, 2]),
 			kind: "terrain",
 			normals: new Float32Array(9),
 			positions: new Float32Array(9),
 			textureCoordinates: new Float32Array(6),
 		},
-		surfaceFields: STRIDES.map(createSurfaceField),
-		variants,
-	};
-}
-
-function variantFor(
-	result: TerrainGenerationResult,
-	stride: TerrainMeshStride,
-	transitionDirection: TerrainTransitionDirection,
-) {
-	const variant = result.variants.find(
-		(candidate) =>
-			candidate.variant.stride === stride &&
-			candidate.variant.transitionDirection === transitionDirection,
-	);
-	if (!variant)
-		throw new Error("Terrain test fixture is missing a requested variant.");
-	return variant;
-}
-
-function createSurfaceField(stride: TerrainMeshStride): TerrainPcodeField {
-	const dimension = 8 / stride;
-	return {
-		cellPcodes: new Uint32Array(dimension * dimension),
-		height: dimension,
-		stride,
-		width: dimension,
+		surfaceField: {
+			cellPcodes: new Uint32Array(TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS),
+			height: TERRAIN_GRID_CELLS,
+			width: TERRAIN_GRID_CELLS,
+		},
 	};
 }
 

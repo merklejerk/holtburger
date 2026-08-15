@@ -1,7 +1,6 @@
 import type { DatAssetId, LandblockId } from "../game-types";
 import type { TerrainGeometryKey } from "../geometry/types";
 import {
-	getLandblockCoordinates,
 	type LandblockCoordinates,
 	OUTDOOR_TERRAIN_GRID_CELLS,
 } from "../landblocks";
@@ -111,63 +110,30 @@ export interface TerrainTextureKeys {
 	readonly detail: AssetTextureKey;
 }
 
-/** Authored-grid sampling stride used to generate one retail terrain LOD. */
-export type TerrainMeshStride = 1 | 2 | 4 | 8;
-
-/** Every authored-grid stride generated and retained for one terrain landblock. */
-export const TERRAIN_MESH_STRIDES: readonly TerrainMeshStride[] = [1, 2, 4, 8];
-
 /** Stable generated texture identities retained for one terrain source installation. */
 export interface TerrainGeneratedTextureKeys {
 	readonly composition: TerrainCompositionTextureKey;
-	readonly surfaceFields: ReadonlyMap<
-		TerrainMeshStride,
-		TerrainSurfaceTextureKey
-	>;
+	readonly surfaceField: TerrainSurfaceTextureKey;
 }
 
-/** Retail transition orientation selected relative to the scene anchor. */
-export type TerrainTransitionDirection =
-	| "viewer-block"
-	| "north"
-	| "northeast"
-	| "east"
-	| "southeast"
-	| "south"
-	| "southwest"
-	| "west"
-	| "northwest";
-
-/** One generated per-cell terrain pcode field shared by every directional variant of a stride. */
+/** The generated per-cell terrain pcode field for one landblock. */
 export interface TerrainPcodeField {
-	readonly stride: TerrainMeshStride;
-	/** Generated-cell width; retail terrain uses 8/stride cells on each axis. */
+	/** Generated-cell width; terrain uses the authored cell count on each axis. */
 	readonly width: number;
-	/** Generated-cell height; retail terrain uses 8/stride cells on each axis. */
+	/** Generated-cell height; terrain uses the authored cell count on each axis. */
 	readonly height: number;
-	/** Row-major generated pcodes, one 32-bit entry per generated terrain quad. */
+	/** Row-major generated pcodes, one 32-bit entry per terrain quad. */
 	readonly cellPcodes: Uint32Array;
-}
-
-/** LOD and transition adjustment selected from scene-anchor-relative policy. */
-export interface TerrainVariant {
-	readonly stride: TerrainMeshStride;
-	readonly transitionDirection: TerrainTransitionDirection;
-}
-
-/** Indexed slice containing one terrain variant in concatenated geometry. */
-export interface TerrainVariantDrawRange {
-	readonly variant: TerrainVariant;
-	readonly indexStart: number;
-	readonly indexCount: number;
-	readonly bounds: AABB3;
 }
 
 /** Complete immutable CPU result of one landblock-local terrain-generation job. */
 export interface TerrainGenerationResult {
 	readonly geometry: TerrainGeometryData;
-	readonly variants: readonly TerrainVariantDrawRange[];
-	readonly surfaceFields: readonly TerrainPcodeField[];
+	/** Landblock-local bounds of the generated mesh. */
+	readonly bounds: AABB3;
+	/** Terrain code covering the most of this landblock, used when it renders flat at distance. */
+	readonly dominantTerrainCode: number;
+	readonly surfaceField: TerrainPcodeField;
 }
 
 /** Generation and presentation facts installed under one interested landblock. */
@@ -179,7 +145,10 @@ export interface TerrainSourceInstallation {
 
 /** Terrain-generation output retained after source-owned geometry publication. */
 export interface RealizedTerrainResources {
-	readonly variants: readonly TerrainVariantDrawRange[];
+	/** Landblock-local bounds of the generated mesh, published to the scene graph. */
+	readonly bounds: AABB3;
+	/** Terrain code standing in for the whole landblock once it renders flat at distance. */
+	readonly dominantTerrainCode: number;
 }
 
 /** One selected terrain submission ready for renderer resource resolution and drawing. */
@@ -188,9 +157,9 @@ export interface TerrainDrawUnit {
 	readonly landblockId: LandblockId;
 	readonly coordinates: LandblockCoordinates;
 	readonly geometry: TerrainGeometryKey;
-	readonly indexStart: number;
-	readonly indexCount: number;
 	readonly surfaceField: TerrainSurfaceTextureKey;
+	/** Terrain code the fragment program composites from when this landblock renders flat. */
+	readonly dominantTerrainCode: number;
 	readonly textures: TerrainTextureKeys;
 	/** Stable regional lookup texture interpreted by the terrain fragment program. */
 	readonly composition: TerrainCompositionTextureKey;
@@ -263,63 +232,8 @@ export function terrainGeneratedTextureKeys(
 		composition: createTerrainCompositionTextureKey(
 			presentation.composition.activeRegionKey,
 		),
-		surfaceFields: new Map(
-			TERRAIN_MESH_STRIDES.map((stride) => [
-				stride,
-				createTerrainSurfaceTextureKey(landblockId, stride),
-			]),
-		),
+		surfaceField: createTerrainSurfaceTextureKey(landblockId),
 	};
-}
-
-/** Select the retail authored-grid stride for a landblock relative to the scene anchor. */
-export function selectTerrainMeshStride(
-	landblockId: LandblockId,
-	anchorLandblockId: LandblockId,
-): TerrainMeshStride {
-	const distance = landblockChebyshevDistance(landblockId, anchorLandblockId);
-	if (distance <= 1) return 1;
-	if (distance === 2) return 2;
-	if (distance <= 4) return 4;
-	return 8;
-}
-
-/** Select the retail transition orientation for a landblock relative to the scene anchor. */
-export function selectTerrainTransitionDirection(
-	landblockId: LandblockId,
-	anchorLandblockId: LandblockId,
-): TerrainTransitionDirection {
-	const landblock = getLandblockCoordinates(landblockId);
-	const anchor = getLandblockCoordinates(anchorLandblockId);
-	const horizontal = landblock.x - anchor.x;
-	// Encoded landblock Y and canonical terrain rows both grow toward render-local north (-Z).
-	const vertical = landblock.y - anchor.y;
-	const transitionRadius = terrainTransitionRadius(horizontal, vertical);
-	if (transitionRadius === null) return "viewer-block";
-
-	if (horizontal === transitionRadius) {
-		if (vertical === transitionRadius) return "northeast";
-		if (vertical === -transitionRadius) return "southeast";
-		return "east";
-	}
-	if (horizontal === -transitionRadius) {
-		if (vertical === transitionRadius) return "northwest";
-		if (vertical === -transitionRadius) return "southwest";
-		return "west";
-	}
-	if (vertical === transitionRadius) return "north";
-	if (vertical === -transitionRadius) return "south";
-	return "viewer-block";
-}
-
-/** Return the sole ring radius whose outward boundary requires a transition adjustment. */
-function terrainTransitionRadius(
-	horizontal: number,
-	vertical: number,
-): 1 | 2 | 4 | null {
-	const distance = Math.max(Math.abs(horizontal), Math.abs(vertical));
-	if (distance === 1 || distance === 2 || distance === 4) return distance;
-	return null;
 }
 
 function createTextureArrayFact(
@@ -340,16 +254,4 @@ function createTextureArrayFact(
 
 function uniqueTextureIds(ids: readonly DatAssetId[]): readonly DatAssetId[] {
 	return [...new Set(ids)];
-}
-
-function landblockChebyshevDistance(
-	landblockId: LandblockId,
-	anchorLandblockId: LandblockId,
-): number {
-	const landblock = getLandblockCoordinates(landblockId);
-	const anchor = getLandblockCoordinates(anchorLandblockId);
-	return Math.max(
-		Math.abs(landblock.x - anchor.x),
-		Math.abs(landblock.y - anchor.y),
-	);
 }

@@ -3,7 +3,7 @@ import type { SceneVec3, SceneVector3 } from "../../assets/ac-frame";
 import type { Quat } from "../math/types";
 import type { SceneResidency } from "../scene";
 
-export interface LoDConfig {
+export interface SceneInterestRadii {
 	/** Outdoor terrain radius; terrain is always enabled for an active interest. */
 	terrainRadius: number;
 	/** Outdoor-building radius, or null when the layer is disabled. */

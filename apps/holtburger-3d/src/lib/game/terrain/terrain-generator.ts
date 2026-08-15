@@ -1,34 +1,28 @@
 import { AABB3, Vec3 } from "../math/types";
 import { getLandblockCoordinates } from "../landblocks";
-import { roadCodeOf, terrainCodeOf } from "./terrain-sample";
+import {
+	MAXIMUM_TERRAIN_CODE,
+	roadCodeOf,
+	terrainCodeOf,
+} from "./terrain-sample";
 import type { TerrainGeometryData } from "../renderer/geometry";
 import {
 	TERRAIN_GRID_CELLS,
-	TERRAIN_MESH_STRIDES,
 	type TerrainGenerationResult,
 	type TerrainGenerationSource,
-	type TerrainMeshStride,
 	type TerrainPcodeField,
-	type TerrainTransitionDirection,
-	type TerrainVariantDrawRange,
 } from "./types";
 import { usesSouthwestToNortheastCut } from "./terrain-surface";
 
-const TRANSITION_DIRECTIONS: readonly TerrainTransitionDirection[] = [
-	"viewer-block",
-	"north",
-	"northeast",
-	"east",
-	"southeast",
-	"south",
-	"southwest",
-	"west",
-	"northwest",
-];
+/** Vertices along one axis of the authored-resolution mesh. */
+const SIDE_VERTICES = TERRAIN_GRID_CELLS + 1;
+const VERTEX_COUNT = SIDE_VERTICES * SIDE_VERTICES;
+/** Two triangles per authored cell, three indices each. */
+const INDEX_COUNT = TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS * 6;
 
 /** Renderer-independent boundary for complete landblock terrain generation. */
 export interface TerrainGenerator {
-	/** Generate every pre-realized terrain variant from one canonical landblock source. */
+	/** Generate one landblock's terrain mesh and pcode field from its canonical source. */
 	generate(source: TerrainGenerationSource): Promise<TerrainGenerationResult>;
 	/** Stop accepting terrain jobs and release any executor resources. */
 	destroy(): Promise<void>;
@@ -37,9 +31,9 @@ export interface TerrainGenerator {
 /**
  * Produces real, canonical-grid terrain on the runtime thread.
  *
- * A terrain source is at most a 9x9 grid and generation materializes fixed, bounded output. Keep
- * this implementation synchronous until profiling demonstrates a worker transport is necessary;
- * the `TerrainGenerator` port preserves that future replacement seam without mislabelling this
+ * A terrain source is a 9x9 grid and generation materializes fixed, bounded output. Keep this
+ * implementation synchronous until profiling demonstrates a worker transport is necessary; the
+ * `TerrainGenerator` port preserves that future replacement seam without mislabelling this
  * implementation as a worker pool.
  */
 export class InlineTerrainGenerator implements TerrainGenerator {
@@ -65,296 +59,123 @@ export class InlineTerrainGenerator implements TerrainGenerator {
 	}
 }
 
-/** Generate all retail stride/direction geometry variants from one canonical terrain source. */
+/**
+ * Generate one landblock's terrain at the authored grid resolution.
+ *
+ * RETAIL DIVERGENCE: retail generated four sampling strides per landblock and lowered the edge
+ * vertices facing a coarser neighbour via `CLandBlockStruct::TransAdjust` (acclient.c:339719, called
+ * from acclient.c:340183) so the seam between two LOD levels did not crack. We generate the authored
+ * 8x8 grid for every landblock at every distance, so there are no mismatched neighbours and nothing
+ * to adjust. Distant terrain therefore follows the authored heightmap more closely than retail's
+ * did, which changes distant silhouettes. Nothing observes that but the camera: LOD never reached
+ * placement or physics, which sample `source.heights` directly (`terrain-surface.ts`). The stride
+ * mechanism existed for 1999 triangle budgets; a full-resolution landblock is 128 triangles.
+ */
 export function generateTerrain(
 	source: TerrainGenerationSource,
 ): TerrainGenerationResult {
 	validateSource(source);
-	const geometryParts: number[] = [];
-	const normalParts: number[] = [];
-	const textureCoordinateParts: number[] = [];
-	const indexParts: number[] = [];
-	const variants: TerrainVariantDrawRange[] = [];
-	let vertexStart = 0;
-	let indexStart = 0;
+	const positions = new Float32Array(VERTEX_COUNT * 3);
+	const textureCoordinates = new Float32Array(VERTEX_COUNT * 2);
+	for (let row = 0; row < SIDE_VERTICES; row += 1) {
+		for (let column = 0; column < SIDE_VERTICES; column += 1) {
+			const vertex = row * SIDE_VERTICES + column;
+			const positionOffset = vertex * 3;
+			// Canonical rows run south-to-north. Render-local -Z is north, matching the existing
+			// static-terrain conversion and the identity terrain-root transform.
+			positions[positionOffset] = column * source.tileSize;
+			positions[positionOffset + 1] =
+				source.heights[row * source.gridSize + column] ?? NaN;
+			positions[positionOffset + 2] = row === 0 ? 0 : -row * source.tileSize;
+			const uvOffset = vertex * 2;
+			textureCoordinates[uvOffset] = column / TERRAIN_GRID_CELLS;
+			textureCoordinates[uvOffset + 1] = row / TERRAIN_GRID_CELLS;
+		}
+	}
 
-	for (const stride of TERRAIN_MESH_STRIDES) {
-		for (const transitionDirection of TRANSITION_DIRECTIONS) {
-			const generated = generateVariant(source, stride, transitionDirection);
-			geometryParts.push(...generated.positions);
-			normalParts.push(...generated.normals);
-			textureCoordinateParts.push(...generated.textureCoordinates);
-			for (const index of generated.indices)
-				indexParts.push(index + vertexStart);
-			variants.push({
-				bounds: generated.bounds,
-				indexCount: generated.indices.length,
-				indexStart,
-				variant: { stride, transitionDirection },
-			});
-			vertexStart += generated.positions.length / 3;
-			indexStart += generated.indices.length;
+	// Vertex indices stay well inside 16 bits at this fixed grid size, so the width is known
+	// without scanning the indices for their maximum.
+	const indices = new Uint16Array(INDEX_COUNT);
+	let cursor = 0;
+	for (let row = 0; row < TERRAIN_GRID_CELLS; row += 1) {
+		for (let column = 0; column < TERRAIN_GRID_CELLS; column += 1) {
+			const southwest = row * SIDE_VERTICES + column;
+			const southeast = southwest + 1;
+			const northwest = southwest + SIDE_VERTICES;
+			const northeast = northwest + 1;
+			if (usesSouthwestToNortheastCut(source, column, row)) {
+				indices.set(
+					[southwest, southeast, northeast, southwest, northeast, northwest],
+					cursor,
+				);
+			} else {
+				indices.set(
+					[southwest, southeast, northwest, northeast, northwest, southeast],
+					cursor,
+				);
+			}
+			cursor += 6;
 		}
 	}
 
 	const geometry: TerrainGeometryData = {
-		indices: createIndices(indexParts),
-		kind: "terrain",
-		normals: new Float32Array(normalParts),
-		positions: new Float32Array(geometryParts),
-		textureCoordinates: new Float32Array(textureCoordinateParts),
-	};
-	return {
-		geometry,
-		surfaceFields: TERRAIN_MESH_STRIDES.map((stride) =>
-			generateSurfaceField(source, stride),
-		),
-		variants,
-	};
-}
-
-interface GeneratedVariant {
-	readonly bounds: AABB3;
-	readonly indices: readonly number[];
-	readonly normals: Float32Array;
-	readonly positions: Float32Array;
-	readonly textureCoordinates: Float32Array;
-}
-
-function generateVariant(
-	source: TerrainGenerationSource,
-	stride: TerrainMeshStride,
-	transitionDirection: TerrainTransitionDirection,
-): GeneratedVariant {
-	const cells = TERRAIN_GRID_CELLS / stride;
-	const sideVertices = cells + 1;
-	const heights = generateVariantHeights(source, stride, transitionDirection);
-	const positions = new Float32Array(sideVertices * sideVertices * 3);
-	const textureCoordinates = new Float32Array(sideVertices * sideVertices * 2);
-	for (let row = 0; row < sideVertices; row += 1) {
-		for (let column = 0; column < sideVertices; column += 1) {
-			const vertex = row * sideVertices + column;
-			const positionOffset = vertex * 3;
-			// Canonical rows run south-to-north. Render-local -Z is north, matching the existing
-			// static-terrain conversion and the identity terrain-root transform.
-			positions[positionOffset] = column * stride * source.tileSize;
-			positions[positionOffset + 1] = heights[vertex];
-			positions[positionOffset + 2] =
-				row === 0 ? 0 : -row * stride * source.tileSize;
-			const uvOffset = vertex * 2;
-			textureCoordinates[uvOffset] = column / cells;
-			textureCoordinates[uvOffset + 1] = row / cells;
-		}
-	}
-
-	const indices: number[] = [];
-	for (let row = 0; row < cells; row += 1) {
-		for (let column = 0; column < cells; column += 1) {
-			const southwest = row * sideVertices + column;
-			const southeast = southwest + 1;
-			const northwest = southwest + sideVertices;
-			const northeast = northwest + 1;
-			if (usesSouthwestToNortheastCut(source, column, row)) {
-				indices.push(
-					southwest,
-					southeast,
-					northeast,
-					southwest,
-					northeast,
-					northwest,
-				);
-			} else {
-				indices.push(
-					southwest,
-					southeast,
-					northwest,
-					northeast,
-					northwest,
-					southeast,
-				);
-			}
-		}
-	}
-	return {
-		bounds: boundsForPositions(positions),
 		indices,
+		kind: "terrain",
 		normals: calculateNormals(positions, indices),
 		positions,
 		textureCoordinates,
 	};
-}
-
-function generateVariantHeights(
-	source: TerrainGenerationSource,
-	stride: TerrainMeshStride,
-	transitionDirection: TerrainTransitionDirection,
-): Float32Array {
-	const cells = TERRAIN_GRID_CELLS / stride;
-	const sideVertices = cells + 1;
-	const heights = new Float32Array(sideVertices * sideVertices);
-	for (let row = 0; row < sideVertices; row += 1) {
-		for (let column = 0; column < sideVertices; column += 1) {
-			heights[row * sideVertices + column] =
-				source.heights[row * stride * source.gridSize + column * stride] ?? NaN;
-		}
-	}
-	if (stride === 1 || transitionDirection === "viewer-block") return heights;
-
-	// Retail's transition adjustment averages odd vertices on each edge facing a coarser
-	// neighbor. It changes heights and normals only; topology and pcode fields remain stride-owned.
-	if (isNorthFacing(transitionDirection))
-		averageRow(heights, sideVertices, cells);
-	if (isSouthFacing(transitionDirection)) averageRow(heights, sideVertices, 0);
-	if (isEastFacing(transitionDirection))
-		averageColumn(heights, sideVertices, cells);
-	if (isWestFacing(transitionDirection))
-		averageColumn(heights, sideVertices, 0);
-	if (stride === 2)
-		applyCardinalHalfResolutionClamps(heights, source, transitionDirection);
-	return heights;
+	const surfaceField = generateSurfaceField(source);
+	return {
+		bounds: boundsForPositions(positions),
+		dominantTerrainCode: dominantTerrainCode(surfaceField),
+		geometry,
+		surfaceField,
+	};
 }
 
 /**
- * Port retail's cardinal `TransAdjust` lowering pass for the 4×4-cell mesh.
+ * The terrain code covering the most corners of this landblock.
  *
- * It samples the authored 9×9 height grid, not the reduced 5×5 vertex grid. ACE and ACViewer's
- * C# ports use the latter width in some expressions, but the retail client indexes the authored
- * grid directly. The clamp applies only to cardinal directions and intentionally affects the edge
- * opposite the ordinary coarse-neighbor averaging pass.
+ * Stands in for the whole landblock once it is far enough away to render flat. Derived from the
+ * generated pcodes rather than the raw samples so it names exactly what the composited surface
+ * would have been built from. Ties break toward the lower code, which only has to be deterministic.
  */
-function applyCardinalHalfResolutionClamps(
-	heights: Float32Array,
-	source: TerrainGenerationSource,
-	direction: TerrainTransitionDirection,
-): void {
-	if (
-		direction !== "north" &&
-		direction !== "south" &&
-		direction !== "east" &&
-		direction !== "west"
-	) {
-		return;
+function dominantTerrainCode(field: TerrainPcodeField): number {
+	// The code range is small and fixed, so a dense tally beats a map.
+	const counts = new Uint16Array(MAXIMUM_TERRAIN_CODE + 1);
+	for (const pcode of field.cellPcodes) {
+		counts[(pcode >>> 15) & MAXIMUM_TERRAIN_CODE] += 1;
+		counts[(pcode >>> 10) & MAXIMUM_TERRAIN_CODE] += 1;
+		counts[(pcode >>> 5) & MAXIMUM_TERRAIN_CODE] += 1;
+		counts[pcode & MAXIMUM_TERRAIN_CODE] += 1;
 	}
-	const sideVertices = TERRAIN_GRID_CELLS / 2 + 1;
-	for (
-		let coarseCoordinate = 1;
-		coarseCoordinate < sideVertices - 1;
-		coarseCoordinate += 2
-	) {
-		const sourceCoordinate = coarseCoordinate * 2;
-		if (direction === "north") {
-			clampVertexHeight(
-				heights,
-				0,
-				coarseCoordinate,
-				source.heights[sourceCoordinate + 1] ?? NaN,
-				source.heights[sourceCoordinate + 2] ?? NaN,
-				source.heights[sourceCoordinate - 1] ?? NaN,
-				source.heights[sourceCoordinate - 2] ?? NaN,
-				sideVertices,
-			);
-			continue;
-		}
-		if (direction === "south") {
-			const row = TERRAIN_GRID_CELLS * source.gridSize;
-			clampVertexHeight(
-				heights,
-				sideVertices - 1,
-				coarseCoordinate,
-				source.heights[row + sourceCoordinate + 1] ?? NaN,
-				source.heights[row + sourceCoordinate + 2] ?? NaN,
-				source.heights[row + sourceCoordinate - 1] ?? NaN,
-				source.heights[row + sourceCoordinate - 2] ?? NaN,
-				sideVertices,
-			);
-			continue;
-		}
-		if (direction === "east") {
-			clampVertexHeight(
-				heights,
-				coarseCoordinate,
-				0,
-				source.heights[(sourceCoordinate + 1) * source.gridSize] ?? NaN,
-				source.heights[(sourceCoordinate + 2) * source.gridSize] ?? NaN,
-				source.heights[(sourceCoordinate - 1) * source.gridSize] ?? NaN,
-				source.heights[(sourceCoordinate - 2) * source.gridSize] ?? NaN,
-				sideVertices,
-			);
-			continue;
-		}
-		clampVertexHeight(
-			heights,
-			coarseCoordinate,
-			sideVertices - 1,
-			source.heights[
-				(sourceCoordinate + 1) * source.gridSize + TERRAIN_GRID_CELLS
-			] ?? NaN,
-			source.heights[
-				(sourceCoordinate + 2) * source.gridSize + TERRAIN_GRID_CELLS
-			] ?? NaN,
-			source.heights[
-				(sourceCoordinate - 1) * source.gridSize + TERRAIN_GRID_CELLS
-			] ?? NaN,
-			source.heights[
-				(sourceCoordinate - 2) * source.gridSize + TERRAIN_GRID_CELLS
-			] ?? NaN,
-			sideVertices,
-		);
+	let dominant = 0;
+	for (let code = 1; code < counts.length; code += 1) {
+		if (counts[code] > counts[dominant]) dominant = code;
 	}
-}
-
-/** Lower one reduced-grid vertex to retail's two source-height extrapolation limits. */
-function clampVertexHeight(
-	heights: Float32Array,
-	row: number,
-	column: number,
-	height0: number,
-	height1: number,
-	height2: number,
-	height3: number,
-	width: number,
-): void {
-	const index = row * width + column;
-	heights[index] = Math.min(
-		heights[index] ?? NaN,
-		height2 * 2 - height3,
-		height0 * 2 - height1,
-	);
+	return dominant;
 }
 
 function generateSurfaceField(
 	source: TerrainGenerationSource,
-	stride: TerrainMeshStride,
 ): TerrainPcodeField {
-	const cells = TERRAIN_GRID_CELLS / stride;
-	const cellPcodes = new Uint32Array(cells * cells);
-	for (let row = 0; row < cells; row += 1) {
-		for (let column = 0; column < cells; column += 1) {
-			const southwest = sourceIndex(source, row * stride, column * stride);
-			const southeast = sourceIndex(
-				source,
-				row * stride,
-				(column + 1) * stride,
-			);
-			const northeast = sourceIndex(
-				source,
-				(row + 1) * stride,
-				(column + 1) * stride,
-			);
-			const northwest = sourceIndex(
-				source,
-				(row + 1) * stride,
-				column * stride,
-			);
-			cellPcodes[row * cells + column] = packTerrainPcode([
-				source.terrainSamples[southwest],
-				source.terrainSamples[southeast],
-				source.terrainSamples[northeast],
-				source.terrainSamples[northwest],
+	const cellPcodes = new Uint32Array(TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS);
+	for (let row = 0; row < TERRAIN_GRID_CELLS; row += 1) {
+		for (let column = 0; column < TERRAIN_GRID_CELLS; column += 1) {
+			cellPcodes[row * TERRAIN_GRID_CELLS + column] = packTerrainPcode([
+				source.terrainSamples[sourceIndex(source, row, column)],
+				source.terrainSamples[sourceIndex(source, row, column + 1)],
+				source.terrainSamples[sourceIndex(source, row + 1, column + 1)],
+				source.terrainSamples[sourceIndex(source, row + 1, column)],
 			]);
 		}
 	}
-	return { cellPcodes, height: cells, stride, width: cells };
+	return {
+		cellPcodes,
+		height: TERRAIN_GRID_CELLS,
+		width: TERRAIN_GRID_CELLS,
+	};
 }
 
 function packTerrainPcode(samples: readonly number[]): number {
@@ -378,7 +199,7 @@ function packTerrainPcode(samples: readonly number[]): number {
 
 function calculateNormals(
 	positions: Float32Array,
-	indices: readonly number[],
+	indices: Uint16Array,
 ): Float32Array {
 	const normals = new Float32Array(positions.length);
 	for (let index = 0; index < indices.length; index += 3) {
@@ -433,63 +254,6 @@ function boundsForPositions(positions: Float32Array): AABB3 {
 		maxZ = Math.max(maxZ, positions[offset + 2]);
 	}
 	return new AABB3(new Vec3(minX, minY, minZ), new Vec3(maxX, maxY, maxZ));
-}
-
-function createIndices(indices: readonly number[]): Uint16Array | Uint32Array {
-	const maximum = Math.max(...indices);
-	return maximum <= 0xffff
-		? new Uint16Array(indices)
-		: new Uint32Array(indices);
-}
-
-function averageRow(values: Float32Array, width: number, row: number): void {
-	for (let column = 1; column < width - 1; column += 2) {
-		const index = row * width + column;
-		values[index] = (values[index - 1] + values[index + 1]) * 0.5;
-	}
-}
-
-function averageColumn(
-	values: Float32Array,
-	width: number,
-	column: number,
-): void {
-	for (let row = 1; row < width - 1; row += 2) {
-		const index = row * width + column;
-		values[index] = (values[index - width] + values[index + width]) * 0.5;
-	}
-}
-
-function isNorthFacing(direction: TerrainTransitionDirection): boolean {
-	return (
-		direction === "north" ||
-		direction === "northeast" ||
-		direction === "northwest"
-	);
-}
-
-function isSouthFacing(direction: TerrainTransitionDirection): boolean {
-	return (
-		direction === "south" ||
-		direction === "southeast" ||
-		direction === "southwest"
-	);
-}
-
-function isEastFacing(direction: TerrainTransitionDirection): boolean {
-	return (
-		direction === "east" ||
-		direction === "northeast" ||
-		direction === "southeast"
-	);
-}
-
-function isWestFacing(direction: TerrainTransitionDirection): boolean {
-	return (
-		direction === "west" ||
-		direction === "northwest" ||
-		direction === "southwest"
-	);
 }
 
 function sourceIndex(

@@ -8,7 +8,7 @@ import type { SceneInterestRevision } from "../lib/game/runtime/scene-availabili
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { Camera } from "../lib/game/runtime/types";
-import type { LoDConfig } from "../lib/game/runtime/types";
+import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
@@ -104,10 +104,13 @@ export class ExplorerCameraCoordinator {
 	}
 
 	/** Request content around a frontend-selected location and begin the matching focus flow. */
-	requestSceneInterest(residency: SceneResidency, lod: LoDConfig): void {
+	requestSceneInterest(
+		residency: SceneResidency,
+		radii: SceneInterestRadii,
+	): void {
 		const receipt = this.#runtime.updateSceneInterest({
 			anchorLandblockId: residency.landblockId,
-			lod,
+			radii,
 		});
 		const pending: PendingFocus =
 			residency.envCellId === null
@@ -127,7 +130,7 @@ export class ExplorerCameraCoordinator {
 			this.#tryFocusOutdoor(pending);
 			return;
 		}
-		if (lod.envCellRadius === null) {
+		if (radii.envCellRadius === null) {
 			this.#finishRejectedInteriorResolution(
 				pending,
 				resolveExplicitExplorerEnvCell(

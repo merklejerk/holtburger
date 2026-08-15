@@ -2,7 +2,9 @@ import {
 	createLandblockOffset,
 	createLandblockWorldOrigin,
 	getLandblockCoordinates,
+	landblockChebyshevDistance,
 } from "../landblocks";
+import { solidTerrainCutoffLandblocks } from "../environment/terrain-fog";
 import {
 	createPerspectiveMat4,
 	createViewMat4,
@@ -44,7 +46,10 @@ import {
 	type ObjectInstanceData,
 	type StaticInstanceStreamData,
 } from "../systems/static-resources";
-import type { TerrainProgramInput } from "./terrain-program-input";
+import {
+	assertSharedTerrainRegion,
+	type TerrainProgramInput,
+} from "./terrain-program-input";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import {
 	WebGL2ResourceManager,
@@ -91,7 +96,8 @@ import {
 } from "./webgl2-terrain-light-mask";
 
 /**
- * Texture unit for the terrain light mask, after the six `#bindTerrainResources` occupies.
+ * Texture unit for the terrain light mask, after the six the terrain shader samples: unit 0 is the
+ * per-landblock surface field, units 1-5 the region-constant pass textures.
  * Object programs bind only units 0-2, so nothing contends for it.
  */
 const TERRAIN_LIGHT_MASK_TEXTURE_UNIT = 6;
@@ -259,7 +265,7 @@ const EMPTY_LANDBLOCK_LIGHTS: LandblockLights = {
 };
 
 interface TerrainFrameInput {
-	/** Selected LOD, transition range, and logical texture identities. */
+	/** Logical geometry and texture identities for one landblock's terrain. */
 	readonly drawUnit: TerrainDrawUnit;
 	/** Device resources resolved by this renderer for the terrain shader contract. */
 	readonly program: TerrainProgramInput;
@@ -453,6 +459,8 @@ interface MutableFrameSelectionMetrics {
 	staticLightBinds: number;
 	/** Per-landblock terrain mask uploads; unlit landblocks skip theirs entirely. */
 	terrainLightMaskUploads: number;
+	solidTerrainDraws: number;
+	solidTerrainCutoffLandblocks: number | null;
 	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
@@ -620,6 +628,8 @@ export class WebGL2Renderer implements Renderer {
 		droppedLights: 0,
 		staticLightBinds: 0,
 		terrainLightMaskUploads: 0,
+		solidTerrainDraws: 0,
+		solidTerrainCutoffLandblocks: null,
 		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
@@ -1332,10 +1342,7 @@ export class WebGL2Renderer implements Renderer {
 		const objects: ObjectFrameInput[] = [];
 		this.#frameSelectionMetrics.visibleSceneEntries += visibleEntries.length;
 		for (const nodeId of visibleEntries) {
-			const contribution = this.#world.getRenderContributionDescriptor(
-				nodeId,
-				prepared.anchorLandblockId,
-			);
+			const contribution = this.#world.getRenderContributionDescriptor(nodeId);
 			if (!contribution) continue;
 			if (contribution.kind === "static-object") {
 				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
@@ -1786,6 +1793,8 @@ export class WebGL2Renderer implements Renderer {
 		metrics.droppedLights = 0;
 		metrics.staticLightBinds = 0;
 		metrics.terrainLightMaskUploads = 0;
+		metrics.solidTerrainDraws = 0;
+		metrics.solidTerrainCutoffLandblocks = null;
 		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
@@ -2250,40 +2259,102 @@ export class WebGL2Renderer implements Renderer {
 			this.#dynamicLightScratch,
 		);
 		this.#beginTerrainLightMasks();
+		// Safe because view.terrain is non-empty; the caller returned early otherwise.
+		const passResources = view.terrain[0]!;
+		this.#beginTerrainPassResources(passResources);
 		for (const terrain of view.terrain) {
+			assertSharedTerrainRegion(
+				passResources.program,
+				terrain.program,
+				terrain.drawUnit.landblockId,
+			);
+		}
+		// Landblocks at or past this ring render flat. Derived once from the frame's fog, which is
+		// itself scaled to the residency radius, so the ring tracks the interest window.
+		const solidCutoff = solidTerrainCutoffLandblocks(shading.fog);
+		this.#frameSelectionMetrics.solidTerrainCutoffLandblocks = solidCutoff;
+		// Two partitions rather than one interleaved loop, so `uSolidTerrain` changes exactly twice
+		// per pass. Submission order is not distance-sorted, so a single loop would toggle it once
+		// per run of like landblocks.
+		this.#drawTerrainPartition(view, shading, solidCutoff, false);
+		this.#drawTerrainPartition(view, shading, solidCutoff, true);
+		gl.disable(gl.CULL_FACE);
+		gl.disable(gl.POLYGON_OFFSET_FILL);
+	}
+
+	/**
+	 * Draw either the composited or the flat half of one terrain pass.
+	 *
+	 * A flat landblock skips its surface-field bind, its static-light uniforms, and its mask
+	 * upload: fog has already swallowed the detail those produce, and one terrain code names the
+	 * whole block.
+	 */
+	#drawTerrainPartition(
+		view: PreparedView,
+		shading: SceneShading,
+		solidCutoff: number | null,
+		solid: boolean,
+	): void {
+		const gl = this.#gl;
+		gl.uniform1i(this.#terrainProgram.uniforms.solidTerrain, solid ? 1 : 0);
+		for (const terrain of view.terrain) {
+			const isSolid =
+				solidCutoff !== null &&
+				landblockChebyshevDistance(
+					terrain.drawUnit.coordinates,
+					view.anchorCoordinates,
+				) >= solidCutoff;
+			if (isSolid !== solid) continue;
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.coordinates,
 				view.anchorCoordinates,
 				this.#offsetScratch,
 			);
-			this.#bindTerrainResources(terrain);
-			const landblockLights = shading.staticLights(
-				terrain.drawUnit.landblockId,
-			);
-			bindWebGL2StaticLights(
-				gl,
-				this.#terrainProgram.uniforms,
-				landblockLights.lights,
-				shading.anchorOrigin,
-				shading.authoredLightResponse,
-				this.#dynamicLightScratch,
-			);
-			this.#uploadTerrainLightMask(landblockLights);
-			this.#frameSelectionMetrics.staticLightBinds += 1;
+			if (solid) {
+				gl.uniform1ui(
+					this.#terrainProgram.uniforms.solidTerrainCode,
+					terrain.drawUnit.dominantTerrainCode,
+				);
+				this.#frameSelectionMetrics.solidTerrainDraws += 1;
+			} else {
+				this.#bindTerrainSurfaceField(terrain);
+				const landblockLights = shading.staticLights(
+					terrain.drawUnit.landblockId,
+				);
+				bindWebGL2StaticLights(
+					gl,
+					this.#terrainProgram.uniforms,
+					landblockLights.lights,
+					shading.anchorOrigin,
+					shading.authoredLightResponse,
+					this.#dynamicLightScratch,
+				);
+				this.#uploadTerrainLightMask(landblockLights);
+				this.#frameSelectionMetrics.staticLightBinds += 1;
+			}
 			this.#drawTerrainGeometry(
 				terrain.program.geometry,
-				terrain.drawUnit.indexStart,
-				terrain.drawUnit.indexCount,
 				WebGL2Renderer.#identityMatrix,
 				landblockOffset,
 			);
 		}
-		gl.disable(gl.CULL_FACE);
-		gl.disable(gl.POLYGON_OFFSET_FILL);
 	}
 
-	#bindTerrainResources(input: TerrainFrameInput): void {
+	/**
+	 * Bind every region-constant terrain texture once for the whole pass.
+	 *
+	 * `composition`, `colors`, `blendMasks`, `roadMasks`, and `detail` are all keyed on
+	 * `activeRegionKey`, which takes no landblock input, and exactly one `ActiveRegionSource` is
+	 * live per content source. They are therefore identical for every landblock in the pass, and
+	 * rebinding them per landblock was pure waste. `assertSharedTerrainRegion` keeps that true.
+	 *
+	 * Bound per pass rather than once at program build because other passes own these texture
+	 * units between terrain passes.
+	 */
+	#beginTerrainPassResources(input: TerrainFrameInput): void {
 		const { textures } = input.program;
+		// Unit 0 must hold a real R32UI texture even when every landblock in the pass renders flat
+		// and never rebinds it. Composited landblocks overwrite it with their own.
 		const surfaceField = this.#resources.getTexture2D(
 			input.program.surfaceField,
 		);
@@ -2342,6 +2413,27 @@ export class WebGL2Renderer implements Renderer {
 			this.#terrainProgram.uniforms.detail,
 			"filterable",
 			TextureWrapMode.Repeat,
+		);
+		gl.activeTexture(gl.TEXTURE0);
+	}
+
+	/**
+	 * Bind the one genuinely per-landblock terrain texture.
+	 *
+	 * Everything else the terrain shader samples is region-constant and already bound for the pass
+	 * by `#beginTerrainPassResources`.
+	 */
+	#bindTerrainSurfaceField(input: TerrainFrameInput): void {
+		const surfaceField = this.#resources.getTexture2D(
+			input.program.surfaceField,
+		);
+		const gl = this.#gl;
+		this.#bindTexture2D(
+			0,
+			surfaceField,
+			this.#terrainProgram.uniforms.surfaceField,
+			"exact",
+			TextureWrapMode.Clamp,
 		);
 		gl.activeTexture(gl.TEXTURE0);
 	}
@@ -2424,15 +2516,13 @@ export class WebGL2Renderer implements Renderer {
 		gl.uniform1i(uniform, unit);
 	}
 
+	/** Draw one landblock's whole terrain mesh; a landblock has exactly one. */
 	#drawTerrainGeometry(
 		geometryKey: GeometryResourceKey,
-		indexStart: number,
-		indexCount: number,
 		localToLandblock: Mat4,
 		landblockOffset: Vec3,
 	): void {
 		const binding = this.#resources.getGeometry(geometryKey);
-		validateDrawRange(binding, indexStart, indexCount);
 		const gl = this.#gl;
 		gl.uniformMatrix4fv(
 			this.#terrainProgram.uniforms.localToLandblock,
@@ -2446,12 +2536,7 @@ export class WebGL2Renderer implements Renderer {
 			landblockOffset.z,
 		);
 		gl.bindVertexArray(binding.vertexArray);
-		gl.drawElements(
-			gl.TRIANGLES,
-			indexCount,
-			binding.indexType,
-			indexStart * binding.indexElementBytes,
-		);
+		gl.drawElements(gl.TRIANGLES, binding.indexCount, binding.indexType, 0);
 	}
 
 	/** Partition one prepared physical object population for both opaque and deferred consumers. */

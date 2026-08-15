@@ -59,16 +59,21 @@ it may add CPU clocks and asynchronous GPU timestamp queries; disabling it must
 tear down those resources again.
 
 **The harness renders on the real GPU with `--gpu`, and CPU and GPU timing both
-work there.** A representative capture:
+work there.**
 
 ```
 npm run harness:browser -- --brief --gpu --profile-renderer --measure-ms 6000 ...
-GPU: opaque 1.133 ms  terrain 0.074 ms  blended 0.039 ms  total 1.247 ms
-CPU: mean 2.307 ms  p95 2.8 ms
 ```
 
 SwiftShader is only the default because it is deterministic and available
 everywhere. Pass `--gpu` for anything meant to be performance evidence.
+
+Capture your own numbers; do not quote numbers recorded here or in any other
+doc. A timing is only meaningful alongside the scene interest radius, content,
+and hardware that produced it, and those are exactly the facts a pasted figure
+loses. A stale capture taken at an unrepresentative radius reads as a budget and
+will be believed. Record what a measurement _means_ in a plan or commit message
+next to its configuration, not as a standing figure in this file.
 
 ### Looking at Particles
 

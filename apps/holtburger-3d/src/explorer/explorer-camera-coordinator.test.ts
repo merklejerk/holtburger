@@ -3,13 +3,13 @@ import { sceneVec3 } from "../lib/assets/ac-frame";
 import type { GameRuntime } from "../lib/game/runtime/game-runtime";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
-import type { LoDConfig } from "../lib/game/runtime/types";
+import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import { AABB3, Vec3 } from "../lib/game/math/types";
 import type { ScenePointResidencyCandidates } from "../lib/game/scene";
 import type { FreeFlyCameraController } from "./free-fly-camera-controller";
 import { ExplorerCameraCoordinator } from "./explorer-camera-coordinator";
 
-const TEST_LOD: LoDConfig = {
+const TEST_RADII: SceneInterestRadii = {
 	buildingRadius: 0,
 	envCellRadius: 0,
 	explicitObjectRadius: 0,
@@ -37,7 +37,7 @@ describe("ExplorerCameraCoordinator", () => {
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
 			},
-			TEST_LOD,
+			TEST_RADII,
 		);
 
 		expect(setAutomaticPose).toHaveBeenCalledWith({
@@ -71,7 +71,7 @@ describe("ExplorerCameraCoordinator", () => {
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
 			},
-			TEST_LOD,
+			TEST_RADII,
 		);
 		emit({
 			kind: "scene-content-failed",
@@ -564,7 +564,7 @@ describe("ExplorerCameraCoordinator", () => {
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
 			},
-			TEST_LOD,
+			TEST_RADII,
 		);
 
 		coordinator.syncFreeFlyCamera();
@@ -589,7 +589,7 @@ describe("ExplorerCameraCoordinator", () => {
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
 			},
-			{ ...TEST_LOD, envCellRadius: null },
+			{ ...TEST_RADII, envCellRadius: null },
 		);
 
 		expect(statuses.at(-1)).toBe(
@@ -614,7 +614,7 @@ describe("ExplorerCameraCoordinator", () => {
 				envCellId: "0x0102dead",
 				landblockId: "0x0102ffff",
 			},
-			TEST_LOD,
+			TEST_RADII,
 		);
 
 		expect(statuses.at(-1)).toBe(

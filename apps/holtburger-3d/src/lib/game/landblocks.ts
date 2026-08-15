@@ -19,6 +19,22 @@ export interface LandblockCoordinates {
 	readonly y: number;
 }
 
+/**
+ * Chebyshev (square-ring) distance in landblocks.
+ *
+ * The residency window is a Chebyshev square, so this is the distance that names which ring a
+ * landblock sits on relative to the anchor.
+ */
+export function landblockChebyshevDistance(
+	landblock: LandblockCoordinates,
+	anchor: LandblockCoordinates,
+): number {
+	return Math.max(
+		Math.abs(landblock.x - anchor.x),
+		Math.abs(landblock.y - anchor.y),
+	);
+}
+
 export function getLandblockCoordinates(
 	landblockId: LandblockId,
 ): LandblockCoordinates {

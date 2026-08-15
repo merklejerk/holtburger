@@ -6,7 +6,7 @@ import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
 	type SceneInterestMap,
-	validateLoDConfigOrThrow,
+	validateSceneInterestRadiiOrThrow,
 } from "./scene-interest";
 
 function sceneInterest(
@@ -157,7 +157,7 @@ describe("computeSceneInterest", () => {
 
 	it("rejects fractional and out-of-range optional radii", () => {
 		expect(() =>
-			validateLoDConfigOrThrow({
+			validateSceneInterestRadiiOrThrow({
 				buildingRadius: null,
 				envCellRadius: null,
 				explicitObjectRadius: null,
@@ -166,7 +166,7 @@ describe("computeSceneInterest", () => {
 			}),
 		).toThrow("Invalid scene config");
 		expect(() =>
-			validateLoDConfigOrThrow({
+			validateSceneInterestRadiiOrThrow({
 				buildingRadius: 2,
 				envCellRadius: null,
 				explicitObjectRadius: null,

@@ -140,6 +140,7 @@
 		/** Request canonical outdoor layers for one neighborhood. */
 		readonly requestSceneInterest: (
 			landblockId: string,
+			terrainRadius: number,
 			buildingRadius: number,
 			envCellRadius: number | null,
 			explicitObjectRadius: number | null,
@@ -356,6 +357,7 @@
 
 	function requestSceneInterest(
 		rawLandblockId: string,
+		terrainRadius: number,
 		buildingRadius: number,
 		envCellRadius: number | null,
 		explicitObjectRadius: number | null,
@@ -364,9 +366,18 @@
 		cameraPitchDegrees: number,
 	): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
-		if (!Number.isInteger(buildingRadius) || buildingRadius < 0) {
+		if (!Number.isInteger(terrainRadius) || terrainRadius < 0) {
 			throw new Error(
-				"Browser harness building radius must be a non-negative integer.",
+				"Browser harness terrain radius must be a non-negative integer.",
+			);
+		}
+		if (
+			!Number.isInteger(buildingRadius) ||
+			buildingRadius < 0 ||
+			buildingRadius > terrainRadius
+		) {
+			throw new Error(
+				"Browser harness building radius must be a non-negative integer no greater than terrain radius.",
 			);
 		}
 		if (
@@ -406,14 +417,14 @@
 		const usesGeneratedFixture = fixture === "instanced";
 		runtime.updateSceneInterest({
 			anchorLandblockId: landblockId,
-			lod: {
+			radii: {
 				buildingRadius: usesGeneratedFixture ? null : buildingRadius,
 				envCellRadius,
 				explicitObjectRadius,
 				generatedObjectRadius: usesGeneratedFixture
 					? buildingRadius
 					: generatedObjectRadius,
-				terrainRadius: buildingRadius,
+				terrainRadius,
 			},
 		});
 		setCameraLandblock(landblockId, cameraYawDegrees, cameraPitchDegrees);

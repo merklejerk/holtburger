@@ -166,6 +166,9 @@ describe("GameRuntime view and interest control", () => {
 			objectProgramChanges: 0,
 			droppedLights: 0,
 			staticLightBinds: 0,
+			terrainLightMaskUploads: 0,
+			solidTerrainDraws: 0,
+			solidTerrainCutoffLandblocks: null,
 			objectLightingBinds: 0,
 			objectTextureBinds: 0,
 		};
@@ -212,7 +215,7 @@ describe("GameRuntime view and interest control", () => {
 
 		runtime.updateSceneInterest({
 			anchorLandblockId: "0x1010ffff",
-			lod: {
+			radii: {
 				buildingRadius: null,
 				envCellRadius: null,
 				explicitObjectRadius: null,
@@ -633,7 +636,7 @@ describe("GameRuntime view and interest control", () => {
 function sceneInterest(anchorLandblockId: string) {
 	return {
 		anchorLandblockId,
-		lod: {
+		radii: {
 			buildingRadius: null,
 			envCellRadius: null,
 			explicitObjectRadius: null,
@@ -646,7 +649,7 @@ function sceneInterest(anchorLandblockId: string) {
 function buildingSceneInterest(anchorLandblockId: string) {
 	return {
 		anchorLandblockId,
-		lod: {
+		radii: {
 			buildingRadius: 0,
 			envCellRadius: null,
 			explicitObjectRadius: null,
@@ -659,7 +662,7 @@ function buildingSceneInterest(anchorLandblockId: string) {
 function objectSceneInterest(anchorLandblockId: string) {
 	return {
 		anchorLandblockId,
-		lod: {
+		radii: {
 			buildingRadius: null,
 			envCellRadius: null,
 			explicitObjectRadius: 0,
@@ -672,7 +675,7 @@ function objectSceneInterest(anchorLandblockId: string) {
 function generatedSceneInterest(anchorLandblockId: string) {
 	return {
 		anchorLandblockId,
-		lod: {
+		radii: {
 			buildingRadius: null,
 			envCellRadius: null,
 			explicitObjectRadius: null,

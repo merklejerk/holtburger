@@ -1,6 +1,6 @@
 import type { LandblockId } from "../game-types";
 import { getLandblockCoordinates } from "../landblocks";
-import type { LoDConfig } from "./types";
+import type { SceneInterestRadii } from "./types";
 
 export enum LandblockLayerKind {
 	Terrain = "terrain",
@@ -62,11 +62,13 @@ export interface SceneInterestRequest {
 	/** Outdoor landblock around which requested layers are retained. */
 	readonly anchorLandblockId: LandblockId;
 	/** Complete enabled-layer and radius policy for this request. */
-	readonly lod: LoDConfig;
+	readonly radii: SceneInterestRadii;
 }
 
 /** Reject a scene-interest radius configuration that cannot produce coherent layers. */
-export function validateLoDConfigOrThrow(cfg: LoDConfig): void {
+export function validateSceneInterestRadiiOrThrow(
+	cfg: SceneInterestRadii,
+): void {
 	const optionalRadii = [
 		cfg.buildingRadius,
 		cfg.explicitObjectRadius,
@@ -88,7 +90,7 @@ export function validateLoDConfigOrThrow(cfg: LoDConfig): void {
 /** Derive every static layer required around one anchor landblock. */
 export function computeSceneInterest(
 	anchorLandblockId: LandblockId,
-	config: LoDConfig,
+	config: SceneInterestRadii,
 ): SceneInterestMap {
 	const anchor = getLandblockCoordinates(anchorLandblockId);
 	const suffix = landblockIdSuffix(anchorLandblockId);

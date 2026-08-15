@@ -178,6 +178,7 @@ function parseArgs(args) {
 		staticLights: true,
 		weather: true,
 		profileRenderer: false,
+		terrainRadius: null,
 		textureFiltering: null,
 		lifecycle: false,
 		fixture: null,
@@ -200,6 +201,15 @@ function parseArgs(args) {
 			case "--landblock":
 				parsed.landblockId = requireValue(args, ++index, arg);
 				break;
+			case "--terrain-radius": {
+				const value = Number(args[index + 1]);
+				if (!Number.isInteger(value) || value < 0) {
+					throw new Error("--terrain-radius must be a non-negative integer.");
+				}
+				parsed.terrainRadius = value;
+				index += 1;
+				break;
+			}
 			case "--building-radius":
 				parsed.buildingRadius = Number(requireValue(args, ++index, arg));
 				if (
@@ -522,6 +532,12 @@ function parseArgs(args) {
 		}
 	}
 	if (
+		parsed.terrainRadius !== null &&
+		parsed.terrainRadius < parsed.buildingRadius
+	) {
+		throw new Error("--terrain-radius must be no less than --building-radius.");
+	}
+	if (
 		parsed.envCellRadius !== null &&
 		parsed.envCellRadius > parsed.buildingRadius
 	) {
@@ -652,6 +668,9 @@ Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --brief               Print frame and content-summary evidence instead of full diagnostics.
 
+  --terrain-radius <n>  Request terrain out to this radius independently of buildings, so a
+                         terrain-cost capture does not also load a building neighborhood that
+                         large. Must be at least --building-radius. Default: --building-radius
   --building-radius <n> Request a square terrain/building neighborhood. Default: 0
   --env-cell-radius <n> Request EnvCells within the building neighborhood.
   --explicit-object-radius <n> Request explicit objects within the building neighborhood.
@@ -1176,6 +1195,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 			[
 				options.landblockId,
+				options.terrainRadius ?? options.buildingRadius,
 				options.buildingRadius,
 				options.envCellRadius,
 				options.explicitObjectRadius,
@@ -1431,6 +1451,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 				[
 					options.landblockId,
+					options.terrainRadius ?? options.buildingRadius,
 					options.buildingRadius,
 					options.envCellRadius,
 					options.explicitObjectRadius,

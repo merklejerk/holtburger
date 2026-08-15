@@ -126,6 +126,7 @@ describe("PhysicalCameraSession", () => {
 		expect(test.calls[0]?.command).toBe("start_physical_camera");
 		expect(test.calls[0]?.args?.registration).toEqual({
 			body: {
+				collisionExclusions: ["entirely-water-barrier"],
 				responsePolicy: {
 					alignPath: false,
 					friction: 0.95,
@@ -292,6 +293,7 @@ describe("PhysicalCameraSession", () => {
 				kind: "grounded-character",
 			},
 			body: {
+				collisionExclusions: [],
 				responsePolicy: {
 					alignPath: false,
 					friction: 0.95,

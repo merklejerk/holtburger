@@ -26,7 +26,7 @@ use crate::spatial::collision::CollisionScene;
 use crate::spatial::physical_body::grounded_step_down_enabled;
 use crate::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, ContactState, CoverageRequest,
-    EdgeProtection, GroundedObstructionRequest, SupportRequest,
+    EdgeProtection, GroundedObstructionRequest, PhysicalCollisionFilter, SupportRequest,
 };
 use holtburger_common::position::WorldPosition;
 
@@ -342,6 +342,7 @@ fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
                 anchor: Guid(LANDBLOCK),
                 pose: body.pose,
                 spheres: grounded_pair(),
+                filter: PhysicalCollisionFilter::ALL,
             },
             &body,
             candidate,
@@ -551,6 +552,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
                 cells: vec![TerrainCollisionCell {
                     triangles: [terrain.clone(), remote],
                 }],
+                entirely_water: false,
             },
             static_geometry: LandblockColliders {
                 colliders: vec![ramp],
@@ -591,6 +593,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
             anchor: Guid(LANDBLOCK),
             pose: body.pose,
             spheres,
+            filter: PhysicalCollisionFilter::ALL,
         },
         &body,
         candidate,
@@ -638,7 +641,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
     scene
         .insert(LandblockCollisionAsset {
             landblock_id: LANDBLOCK,
-            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            terrain: TerrainCollisionSurface::empty(),
             static_geometry: LandblockColliders {
                 colliders: vec![ramp],
                 cell_volumes: vec![volume],
@@ -717,6 +720,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
             anchor: Guid(LANDBLOCK),
             pose: body.pose,
             spheres,
+            filter: PhysicalCollisionFilter::ALL,
         },
         &body,
         candidate,
@@ -811,6 +815,7 @@ fn zero_adjustment_edge_routes_to_retail_precipice_slide_instead_of_ratcheting_d
         &scene,
         config,
         GroundedRequest {
+            filter: PhysicalCollisionFilter::ALL,
             body: GroundedBody {
                 pose: WorldPosition {
                     landblock_id: Guid(LANDBLOCK),
@@ -927,6 +932,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
                 &scene,
                 config,
                 GroundedRequest {
+                    filter: PhysicalCollisionFilter::ALL,
                     body,
                     spheres: grounded_pair(),
                     supported_velocity: Vector3::new(speed, 0.0, 0.0),
@@ -957,6 +963,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
             &scene,
             config,
             GroundedRequest {
+                filter: PhysicalCollisionFilter::ALL,
                 body,
                 spheres: grounded_pair(),
                 supported_velocity: Vector3::new(-1.0, 0.0, 0.0),
@@ -1063,6 +1070,7 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
         &scene,
         config,
         GroundedRequest {
+            filter: PhysicalCollisionFilter::ALL,
             body: GroundedBody {
                 pose: WorldPosition {
                     landblock_id: Guid(SAFE_CELL),
@@ -1104,6 +1112,7 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
         &scene,
         config,
         GroundedRequest {
+            filter: PhysicalCollisionFilter::ALL,
             body,
             spheres: grounded_pair(),
             supported_velocity: retreat_velocity,
@@ -1177,6 +1186,7 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
                 anchor: Guid(LANDBLOCK),
                 pose: body.pose,
                 spheres,
+                filter: PhysicalCollisionFilter::ALL,
             },
             &body,
             candidate,
@@ -1224,6 +1234,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         &scene,
         grounded_config(),
         GroundedRequest {
+            filter: PhysicalCollisionFilter::ALL,
             body: body.clone(),
             spheres: grounded_pair(),
             supported_velocity: Vector3::new(1.0, 0.0, 0.0),
@@ -1246,6 +1257,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         &scene,
         grounded_config(),
         GroundedRequest {
+            filter: PhysicalCollisionFilter::ALL,
             body: blocked,
             spheres: grounded_pair(),
             supported_velocity: Vector3::new(-1.0, 0.0, 0.0),
@@ -1315,6 +1327,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         anchor: Guid(LANDBLOCK),
         pose: body.pose,
         spheres,
+        filter: PhysicalCollisionFilter::ALL,
     };
     let first = settle_candidate(context, &body, high, config.step_down_height).unwrap();
     let CollisionQuery::Complete(SettleResult::Supported(first)) = first else {
@@ -1331,6 +1344,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         &scene,
         config,
         GroundedRequest {
+            filter: PhysicalCollisionFilter::ALL,
             body,
             spheres,
             supported_velocity: Vector3::zero(),
@@ -1392,6 +1406,7 @@ fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
                 support: grounded_pair().support,
                 upper: None,
             },
+            filter: PhysicalCollisionFilter::ALL,
         },
         &supported,
         start,
@@ -1421,6 +1436,7 @@ fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
             anchor: Guid(LANDBLOCK),
             pose: supported.pose,
             spheres: grounded_pair(),
+            filter: PhysicalCollisionFilter::ALL,
         },
         &supported,
         start,
@@ -1471,6 +1487,7 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
                         &scene,
                         grounded_config(),
                         GroundedRequest {
+                            filter: PhysicalCollisionFilter::ALL,
                             body,
                             spheres: grounded_pair(),
                             supported_velocity: Vector3::new(1.0, lateral_velocity, 0.0),
@@ -1646,7 +1663,7 @@ fn scene_with_volumes(
     scene
         .insert(LandblockCollisionAsset {
             landblock_id: LANDBLOCK,
-            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            terrain: TerrainCollisionSurface::empty(),
             static_geometry: LandblockColliders {
                 colliders,
                 cell_volumes,
@@ -1659,7 +1676,7 @@ fn scene_with_volumes(
 fn artifact(landblock_id: u32, colliders: Vec<PlacedCollider>) -> LandblockCollisionAsset {
     LandblockCollisionAsset {
         landblock_id,
-        terrain: TerrainCollisionSurface { cells: Vec::new() },
+        terrain: TerrainCollisionSurface::empty(),
         static_geometry: LandblockColliders {
             colliders,
             cell_volumes: Vec::new(),

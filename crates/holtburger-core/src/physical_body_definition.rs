@@ -2,6 +2,8 @@
 
 use holtburger_common::{Sphere, Vector3};
 use holtburger_dat::file_type::SetupModel;
+#[cfg(test)]
+use holtburger_world::PhysicalCollisionFilter;
 use holtburger_world::{PhysicalBodyDefinitionError, PhysicalSphereSet};
 use thiserror::Error;
 
@@ -223,12 +225,20 @@ mod tests {
         let ephemeral = world.register_ephemeral_body(pose, now);
         let collision = CollisionScene::new();
         world
-            .attach_physical_body(entity, setup_definition, STABLE_POLICY, None, &collision)
+            .attach_physical_body(
+                entity,
+                setup_definition,
+                PhysicalCollisionFilter::ALL,
+                STABLE_POLICY,
+                None,
+                &collision,
+            )
             .unwrap();
         world
             .attach_physical_body(
                 ephemeral,
                 explicit_definition,
+                PhysicalCollisionFilter::ALL,
                 STABLE_POLICY,
                 None,
                 &collision,

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use super::PhysicalCollisionFilter;
 use super::{
     AuthoritativeBodySync, BasicSpatialPhysics, CollisionQueryError, CollisionScene, ContactState,
     PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyState, PhysicalBodyTickResult,
@@ -171,6 +173,7 @@ impl SpatialScene {
         &mut self,
         body_id: SpatialBodyId,
         definition: PhysicalBodyDefinition,
+        collision_filter: super::PhysicalCollisionFilter,
         response_policy: super::PhysicalBodyResponsePolicy,
         retained_cell: Option<Guid>,
         collision: &CollisionScene,
@@ -178,8 +181,15 @@ impl SpatialScene {
         let Some(body) = self.body_store.body_mut(body_id) else {
             return Ok(None);
         };
-        let mut physical = PhysicalBodyState::new(definition, response_policy, retained_cell);
-        physical.activity = initial_physical_body_activity(collision, body.pose, definition)?;
+        let mut physical =
+            PhysicalBodyState::new(definition, collision_filter, response_policy, retained_cell);
+        physical.activity = initial_physical_body_activity(
+            collision,
+            body.pose,
+            definition,
+            collision_filter,
+            retained_cell,
+        )?;
         let activity = physical.activity.clone();
         body.physical = Some(physical);
         Ok(Some(SpatialBodyEvent::PhysicalActivityChanged {
@@ -659,7 +669,7 @@ mod physical_body_tests {
                 collision
                     .insert(LandblockCollisionAsset {
                         landblock_id: (x << 24) | (y << 16) | 0xffff,
-                        terrain: TerrainCollisionSurface { cells: Vec::new() },
+                        terrain: TerrainCollisionSurface::empty(),
                         static_geometry: LandblockColliders {
                             colliders: Vec::new(),
                             cell_volumes: if x == 0xda && y == 0x55 {
@@ -716,7 +726,7 @@ mod physical_body_tests {
         collision
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
-                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders {
                     colliders: Vec::new(),
                     cell_volumes: vec![CellVolume {
@@ -778,6 +788,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 entity_id,
                 grounded_definition(),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
                 &collision,
@@ -787,6 +798,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 ephemeral_id,
                 free_definition(Vector3::new(0.2, -0.1, 0.3), 0.27),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
                 &collision,
@@ -838,7 +850,14 @@ mod physical_body_tests {
         ));
         for body_id in [entity, local_player, ephemeral] {
             scene
-                .attach_physical_body(body_id, definition, stable_policy(), None, &collision)
+                .attach_physical_body(
+                    body_id,
+                    definition,
+                    PhysicalCollisionFilter::ALL,
+                    stable_policy(),
+                    None,
+                    &collision,
+                )
                 .unwrap();
         }
 
@@ -864,6 +883,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.25),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
                 &collision,
@@ -913,7 +933,14 @@ mod physical_body_tests {
                 ..stable_policy()
             };
             scene
-                .attach_physical_body(id, definition, sledding, None, &collision)
+                .attach_physical_body(
+                    id,
+                    definition,
+                    PhysicalCollisionFilter::ALL,
+                    sledding,
+                    None,
+                    &collision,
+                )
                 .unwrap();
             scene
                 .tick_physical_body(
@@ -953,7 +980,14 @@ mod physical_body_tests {
         let start = Vector3::new(90.0, 96.0, 0.005);
         let id = scene.register_ephemeral_body(pose(start), now);
         scene
-            .attach_physical_body(id, grounded_definition(), stable_policy(), None, &collision)
+            .attach_physical_body(
+                id,
+                grounded_definition(),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+                &collision,
+            )
             .unwrap();
 
         scene
@@ -1004,6 +1038,7 @@ mod physical_body_tests {
                 .attach_physical_body(
                     id,
                     free_definition(Vector3::zero(), 0.25),
+                    PhysicalCollisionFilter::ALL,
                     policy,
                     None,
                     &collision,
@@ -1035,6 +1070,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 free_definition(Vector3::new(0.1, 0.0, 0.2), 0.25),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
                 &CollisionScene::new(),
@@ -1095,7 +1131,14 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(id, grounded_definition(), stable_policy(), None, &collision)
+            .attach_physical_body(
+                id,
+                grounded_definition(),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+                &collision,
+            )
             .unwrap();
         let stored = scene.body_mut(id).unwrap();
         stored.contact = ContactState::Grounded;
@@ -1168,7 +1211,14 @@ mod physical_body_tests {
             let start = Vector3::new(90.0 + index as f32, 96.0, 0.005);
             let id = scene.register_ephemeral_body(pose(start), now);
             scene
-                .attach_physical_body(id, definition, stable_policy(), None, &collision)
+                .attach_physical_body(
+                    id,
+                    definition,
+                    PhysicalCollisionFilter::ALL,
+                    stable_policy(),
+                    None,
+                    &collision,
+                )
                 .unwrap();
             for tick in 1..=100 {
                 scene
@@ -1189,14 +1239,23 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn grounded_body_uses_the_generic_water_adjusted_collision_mesh() {
+    fn water_barrier_exempt_grounded_body_uses_the_adjusted_collision_mesh() {
         let collision = flat_collision_scene_with_sample(WATER_TERRAIN_SAMPLE);
         let now = Instant::now();
         let mut scene = SpatialScene::new();
         let start = Vector3::new(96.0, 96.0, 0.005);
         let id = scene.register_ephemeral_body(pose(start), now);
         scene
-            .attach_physical_body(id, grounded_definition(), stable_policy(), None, &collision)
+            .attach_physical_body(
+                id,
+                grounded_definition(),
+                PhysicalCollisionFilter::excluding(
+                    crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
+                ),
+                stable_policy(),
+                None,
+                &collision,
+            )
             .unwrap();
 
         let result = scene
@@ -1218,6 +1277,31 @@ mod physical_body_tests {
     }
 
     #[test]
+    fn body_registered_inside_forbidden_whole_water_region_is_explicitly_invalid() {
+        let collision = flat_collision_scene_with_sample(WATER_TERRAIN_SAMPLE);
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
+        scene
+            .attach_physical_body(
+                id,
+                grounded_definition(),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+                &collision,
+            )
+            .unwrap();
+
+        assert_eq!(
+            scene.body(id).unwrap().physical.as_ref().unwrap().activity,
+            PhysicalBodyActivity::InvalidPlacement(
+                InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion
+            )
+        );
+    }
+
+    #[test]
     fn missing_coverage_holds_canonical_velocity_without_deferring_launch() {
         let now = Instant::now();
         let mut scene = SpatialScene::new();
@@ -1226,6 +1310,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 grounded_definition(),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
                 &CollisionScene::new(),
@@ -1297,6 +1382,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.25),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 Some(cell),
                 &with_cell,
@@ -1360,6 +1446,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 free_definition(Vector3::new(0.2, 0.0, 0.0), 0.25),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
                 &collision,
@@ -1407,6 +1494,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.1),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 None,
                 &collision,
@@ -1455,7 +1543,7 @@ mod physical_body_tests {
         collision
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
-                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders {
                     colliders: Vec::new(),
                     cell_volumes: vec![CellVolume {
@@ -1486,6 +1574,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.1),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 Some(cell),
                 &collision,
@@ -1519,7 +1608,7 @@ mod physical_body_tests {
         collision
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
-                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders {
                     colliders: Vec::new(),
                     cell_volumes: vec![CellVolume {
@@ -1551,6 +1640,7 @@ mod physical_body_tests {
             .attach_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.1),
+                PhysicalCollisionFilter::ALL,
                 stable_policy(),
                 Some(cell),
                 &collision,

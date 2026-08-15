@@ -7,8 +7,9 @@ use holtburger_common::{Guid, Vector3};
 use super::collision::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, CoverageRequest,
     GroundedObstruction, GroundedObstructionRequest, MissingCoverage, MotionWaypoint,
-    PlacementRequest, StaticContact, SupportContact, SupportFeature, SupportRequest,
-    anchor_point_to_outdoor_position, landblock_key, separating_displacement,
+    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest, StaticContact,
+    SupportContact, SupportFeature, SupportRequest, anchor_point_to_outdoor_position,
+    landblock_key, separating_displacement,
 };
 
 /// Retail's minimum upward surface-normal component for walkable support.
@@ -104,6 +105,8 @@ pub struct GroundedRequest {
     pub retain_supported_gravity: bool,
     /// Positive simulation interval in seconds.
     pub delta_seconds: f32,
+    /// Body-owned optional collision-domain exclusions.
+    pub filter: super::PhysicalCollisionFilter,
 }
 
 /// Which finite grounded-solver budget refused a request.
@@ -201,6 +204,8 @@ struct GroundedSolveContext<'a> {
     anchor: Guid,
     pose: WorldPosition,
     spheres: GroundedBodySpheres,
+    /// Body-owned optional collision-domain exclusions.
+    filter: super::PhysicalCollisionFilter,
 }
 
 /// Advances one bounded grounded tick.
@@ -220,6 +225,7 @@ pub fn solve_grounded(
         anchor,
         pose: reference_pose,
         spheres: request.spheres,
+        filter: request.filter,
     };
     let supported = request.body.support.is_some();
     let active_velocity = if supported && request.retain_supported_gravity {
@@ -451,6 +457,7 @@ pub fn solve_grounded(
                 reference_pose,
                 request.spheres,
                 &candidate_placement,
+                request.filter,
             )? {
                 CollisionQuery::Complete(contacts) => contacts,
                 CollisionQuery::MissingCoverage(missing) => {
@@ -756,6 +763,7 @@ fn settle_candidate(
         context.pose,
         context.spheres,
         &settled_cells,
+        context.filter,
     )? {
         CollisionQuery::Complete(contacts) => contacts,
         CollisionQuery::MissingCoverage(missing) => {
@@ -904,15 +912,7 @@ fn movement_candidate(
             return Ok(CollisionQuery::MissingCoverage(missing));
         }
     };
-    let contacts = match movement_contacts(
-        context.scene,
-        context.anchor,
-        current,
-        center,
-        context.pose,
-        context.spheres,
-        &placement,
-    )? {
+    let contacts = match movement_contacts(context, current, center, &placement)? {
         CollisionQuery::Complete(contacts) => contacts,
         CollisionQuery::MissingCoverage(missing) => {
             return Ok(CollisionQuery::MissingCoverage(missing));
@@ -926,26 +926,25 @@ fn movement_candidate(
 }
 
 fn movement_contacts(
-    scene: &CollisionScene,
-    anchor: Guid,
+    context: GroundedSolveContext<'_>,
     body_start: Vector3,
     body_end: Vector3,
-    pose: WorldPosition,
-    spheres: GroundedBodySpheres,
     placement: &CollisionPlacement,
 ) -> Result<CollisionQuery<Vec<RoleContacts>>> {
     let mut result = Vec::new();
-    for (role, sphere) in role_spheres(spheres) {
-        let offset = pose.rotation.rotate_vector(sphere.center);
-        let contacts = match scene.grounded_obstructions(GroundedObstructionRequest {
-            sweep: CoverageRequest {
-                anchor,
-                start: body_start + offset,
-                end: body_end + offset,
-                radius: sphere.radius,
-            },
-            placement,
-        })? {
+    for (role, sphere) in role_spheres(context.spheres) {
+        let offset = context.pose.rotation.rotate_vector(sphere.center);
+        let contacts = match context
+            .scene
+            .grounded_obstructions(GroundedObstructionRequest {
+                sweep: CoverageRequest {
+                    anchor: context.anchor,
+                    start: body_start + offset,
+                    end: body_end + offset,
+                    radius: sphere.radius,
+                },
+                placement,
+            })? {
             CollisionQuery::Complete(contacts) => contacts,
             CollisionQuery::MissingCoverage(missing) => {
                 return Ok(CollisionQuery::MissingCoverage(missing));
@@ -953,6 +952,32 @@ fn movement_contacts(
         };
         result.push(RoleContacts { role, contacts });
     }
+    // Retail derives `global_low_point` from SPHEREPATH sphere zero and performs the
+    // whole-water test once. Upper body spheres must not independently select a barrier.
+    let support_offset = context
+        .pose
+        .rotation
+        .rotate_vector(context.spheres.support.center);
+    let restrictions = match context
+        .scene
+        .movement_restrictions(MovementRestrictionRequest {
+            sweep: CoverageRequest {
+                anchor: context.anchor,
+                start: body_start + support_offset,
+                end: body_end + support_offset,
+                radius: context.spheres.support.radius,
+            },
+            placement,
+            filter: context.filter,
+        })? {
+        CollisionQuery::Complete(contacts) => contacts,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    result[0]
+        .contacts
+        .extend(restrictions.into_iter().map(static_grounded_obstruction));
     Ok(CollisionQuery::Complete(result))
 }
 
@@ -963,6 +988,7 @@ fn placement_contacts(
     pose: WorldPosition,
     spheres: GroundedBodySpheres,
     placement: &CollisionPlacement,
+    filter: super::PhysicalCollisionFilter,
 ) -> Result<CollisionQuery<Vec<RoleContacts>>> {
     let mut result = Vec::new();
     for (role, sphere) in role_spheres(spheres) {
@@ -974,11 +1000,7 @@ fn placement_contacts(
         })? {
             CollisionQuery::Complete(contacts) => contacts
                 .into_iter()
-                .map(|contact| GroundedObstruction {
-                    separation_normal: contact.normal,
-                    response_normal: contact.normal,
-                    depth: contact.depth,
-                })
+                .map(static_grounded_obstruction)
                 .collect(),
             CollisionQuery::MissingCoverage(missing) => {
                 return Ok(CollisionQuery::MissingCoverage(missing));
@@ -986,7 +1008,31 @@ fn placement_contacts(
         };
         result.push(RoleContacts { role, contacts });
     }
+    let support_center = sphere_center(body_center, pose, spheres.support);
+    let restrictions = match scene.placement_restrictions(PlacementRestrictionRequest {
+        anchor,
+        center: support_center,
+        radius: spheres.support.radius,
+        placement,
+        filter,
+    })? {
+        CollisionQuery::Complete(contacts) => contacts,
+        CollisionQuery::MissingCoverage(missing) => {
+            return Ok(CollisionQuery::MissingCoverage(missing));
+        }
+    };
+    result[0]
+        .contacts
+        .extend(restrictions.into_iter().map(static_grounded_obstruction));
     Ok(CollisionQuery::Complete(result))
+}
+
+fn static_grounded_obstruction(contact: StaticContact) -> GroundedObstruction {
+    GroundedObstruction {
+        separation_normal: contact.normal,
+        response_normal: contact.normal,
+        depth: contact.depth,
+    }
 }
 
 fn remember_encountered_constraints(
@@ -1498,7 +1544,7 @@ mod tests {
     ) -> LandblockCollisionAsset {
         LandblockCollisionAsset {
             landblock_id,
-            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            terrain: TerrainCollisionSurface::empty(),
             static_geometry: LandblockColliders {
                 colliders,
                 cell_volumes,
@@ -1542,9 +1588,59 @@ mod tests {
                 may_step_down,
                 retain_supported_gravity: false,
                 delta_seconds,
+                filter: crate::PhysicalCollisionFilter::ALL,
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn whole_water_restriction_is_selected_only_by_primary_sphere() {
+        let mut collision = CollisionScene::new();
+        insert_test_halo(&mut collision, &[LANDBLOCK, EAST]);
+        collision
+            .insert(artifact(LANDBLOCK, Vec::new(), Vec::new()))
+            .unwrap();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: EAST,
+                terrain: TerrainCollisionSurface {
+                    cells: Vec::new(),
+                    entirely_water: true,
+                },
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+        let spheres = GroundedBodySpheres {
+            support: GroundedSphere {
+                center: Vector3::zero(),
+                radius: 0.25,
+            },
+            upper: Some(GroundedSphere {
+                center: Vector3::new(1.0, 0.0, 1.0),
+                radius: 0.25,
+            }),
+        };
+        let context = GroundedSolveContext {
+            scene: &collision,
+            config: config(),
+            anchor: Guid(LANDBLOCK),
+            pose: pose(Vector3::zero()),
+            spheres,
+            filter: crate::PhysicalCollisionFilter::ALL,
+        };
+
+        let CollisionQuery::Complete(contacts) = movement_contacts(
+            context,
+            Vector3::new(191.0, 96.0, 2.0),
+            Vector3::new(191.2, 96.0, 2.0),
+            &CollisionPlacement::outdoor(),
+        )
+        .unwrap() else {
+            panic!("water-boundary fixture unexpectedly lacks collision coverage");
+        };
+
+        assert!(contacts.iter().all(|entry| entry.contacts.is_empty()));
     }
 
     fn solved(outcome: GroundedOutcome) -> (GroundedBody, Vector3) {

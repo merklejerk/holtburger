@@ -14,9 +14,10 @@ use holtburger_dat::physics::BspNode;
 use holtburger_world::{
     CellTransitRequest, CollisionPlacement, CollisionQuery, CollisionScene, EdgeProtection,
     GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest,
-    GroundedSphere, MotionWaypoint, MotionWaypointPlacement, PhysicalFlyBody, PhysicalFlyConfig,
-    PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest,
-    RETAIL_WALKABLE_NORMAL_Z, solve_grounded, solve_physical_fly,
+    GroundedSphere, MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter,
+    PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,
+    PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, solve_grounded,
+    solve_physical_fly,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -861,6 +862,7 @@ fn traverse_physical_fly_portal(
             PhysicalFlyRequest {
                 body,
                 displacement: direction * WALK_SPEED * HOST_TICK_SECONDS,
+                filter: PhysicalCollisionFilter::ALL,
             },
         )?)
         .with_context(|| format!("drive tick {tick}"))?;
@@ -959,6 +961,7 @@ fn exit_physical_fly_portal(
             PhysicalFlyRequest {
                 body,
                 displacement: entry_direction * -WALK_SPEED * HOST_TICK_SECONDS,
+                filter: PhysicalCollisionFilter::ALL,
             },
         )?)
         .with_context(|| format!("reverse tick {tick}"))?;
@@ -1105,6 +1108,7 @@ fn emit_grounded_route_tick(
             may_step_down: true,
             retain_supported_gravity: false,
             delta_seconds: HOST_TICK_SECONDS,
+            filter: PhysicalCollisionFilter::ALL,
         },
     )?;
     match outcome {
@@ -1432,6 +1436,7 @@ fn exit_outside_portal(
                 may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
+                filter: PhysicalCollisionFilter::ALL,
             },
         )?)?;
         body = solved.body;
@@ -1612,6 +1617,7 @@ fn traverse_outside_portal(
                 may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
+                filter: PhysicalCollisionFilter::ALL,
             },
         )?)
         .with_context(|| format!("settle tick {tick}"))?;
@@ -1653,6 +1659,7 @@ fn traverse_outside_portal(
                 may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
+                filter: PhysicalCollisionFilter::ALL,
             },
         )?)
         .with_context(|| format!("drive tick {tick}"))?;

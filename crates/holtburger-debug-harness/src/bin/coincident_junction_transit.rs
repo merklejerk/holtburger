@@ -243,7 +243,7 @@ fn build_scene(direct: bool) -> CollisionScene {
     scene
         .insert(LandblockCollisionAsset {
             landblock_id: LANDBLOCK,
-            terrain: TerrainCollisionSurface { cells: Vec::new() },
+            terrain: TerrainCollisionSurface::empty(),
             static_geometry: LandblockColliders {
                 colliders: Vec::new(),
                 cell_volumes: vec![cell_a, cell_b],
@@ -265,7 +265,7 @@ fn build_scene(direct: bool) -> CollisionScene {
             scene
                 .insert(LandblockCollisionAsset {
                     landblock_id: neighbour,
-                    terrain: TerrainCollisionSurface { cells: Vec::new() },
+                    terrain: TerrainCollisionSurface::empty(),
                     static_geometry: LandblockColliders {
                         colliders: Vec::new(),
                         cell_volumes: Vec::new(),

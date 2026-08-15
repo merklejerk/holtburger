@@ -117,8 +117,7 @@ impl HostCameraRuntime {
             camera_mode_matches_response(mode, registration.body.response),
             "physical camera mode does not match its explicit body response"
         );
-        let definition = registration.body.resolve()?;
-        let response_policy = registration.body.response_policy.resolve()?;
+        let body_registration = registration.body.resolve()?;
         let maximum_displacement_per_tick = match registration.body.response {
             PhysicalResponseRequest::FreeSphere { config } => {
                 config.maximum_substep_distance * config.maximum_substeps as f32
@@ -129,13 +128,17 @@ impl HostCameraRuntime {
             maximum_displacement_per_tick.is_finite(),
             "physical camera displacement budget must be finite"
         );
-        let body_cell =
-            match resolve_physical_body_cell(&scene, body_pose, definition, initial_viewer_cell)? {
-                CollisionQuery::Complete(cell) => cell,
-                // A body remains registered and dormant while explicit interest is absent. The
-                // supplied placement is retained as topology history and validated on restoration.
-                CollisionQuery::MissingCoverage(_) => initial_viewer_cell,
-            };
+        let body_cell = match resolve_physical_body_cell(
+            &scene,
+            body_pose,
+            body_registration.definition,
+            initial_viewer_cell,
+        )? {
+            CollisionQuery::Complete(cell) => cell,
+            // A body remains registered and dormant while explicit interest is absent. The
+            // supplied placement is retained as topology history and validated on restoration.
+            CollisionQuery::MissingCoverage(_) => initial_viewer_cell,
+        };
         body_pose = pose_with_cell(body_pose, body_cell)?;
         let viewer_cell = match resolve_viewer_cell(&scene, presented_pose, initial_viewer_cell)? {
             CollisionQuery::Complete(cell) => cell,
@@ -146,8 +149,7 @@ impl HostCameraRuntime {
         let body_id = self.simulation.register_resolved_physical_body(
             body_pose,
             body_cell,
-            definition,
-            response_policy,
+            body_registration,
             Instant::now(),
         )?;
         let viewer = PresentedViewer {

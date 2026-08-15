@@ -11,10 +11,10 @@ use holtburger_core::ContentAssetService;
 use holtburger_world::{
     CollisionScene, EdgeProtection, GroundedConfig, InvalidPhysicalBodyPlacement,
     PhysicalBodyActivity, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalElasticity, PhysicalFlyConfig,
-    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-    PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyEvent, SpatialBodyId,
-    SpatialScene,
+    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
+    PhysicalCollisionFilter, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
+    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PlacedMotionPath,
+    PlacementRecovery, SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
@@ -207,11 +207,32 @@ pub struct PhysicalBodyDefinitionRequest {
     pub response: PhysicalResponseRequest,
     /// Complete initial mutable response policy; no camera or entity defaults are inferred here.
     pub response_policy: PhysicalBodyResponsePolicyRequest,
+    /// Explicit optional collision domains ignored by this body.
+    pub collision_exclusions: Vec<PhysicalCollisionExclusionRequest>,
+}
+
+/// Optional collision domain excluded by a frontend-created body.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhysicalCollisionExclusionRequest {
+    /// Retail's whole-landblock ocean restriction does not obstruct this body.
+    EntirelyWaterBarrier,
+}
+
+/// Fully validated app-local body registration passed atomically into simulation state.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedPhysicalBodyRegistration {
+    /// Validated geometry and solver response kind.
+    pub definition: PhysicalBodyDefinition,
+    /// Body-owned optional collision-domain exclusions.
+    pub collision_filter: PhysicalCollisionFilter,
+    /// Initial mutable contact response.
+    pub response_policy: PhysicalBodyResponsePolicy,
 }
 
 impl PhysicalBodyDefinitionRequest {
-    /// Validates geometry, cardinality, response compatibility, and solver configuration.
-    pub fn resolve(&self) -> Result<PhysicalBodyDefinition> {
+    /// Validates the complete body registration without permitting partially resolved consumers.
+    pub fn resolve(&self) -> Result<ResolvedPhysicalBodyRegistration> {
         ensure!(
             (1..=2).contains(&self.spheres.len()),
             "physical body requires one or two spheres"
@@ -224,7 +245,7 @@ impl PhysicalBodyDefinitionRequest {
             sphere(self.spheres[0]),
             self.spheres.get(1).copied().map(sphere),
         )?;
-        Ok(match self.response {
+        let definition = match self.response {
             PhysicalResponseRequest::FreeSphere { config } => PhysicalBodyDefinition::free_sphere(
                 spheres,
                 PhysicalFlyConfig {
@@ -251,8 +272,32 @@ impl PhysicalBodyDefinitionRequest {
                     separation_epsilon: config.separation_epsilon,
                 },
             )?,
+        };
+        Ok(ResolvedPhysicalBodyRegistration {
+            definition,
+            collision_filter: resolve_collision_filter(&self.collision_exclusions)?,
+            response_policy: self.response_policy.resolve()?,
         })
     }
+}
+
+fn resolve_collision_filter(
+    requested: &[PhysicalCollisionExclusionRequest],
+) -> Result<PhysicalCollisionFilter> {
+    let mut exclusions = PhysicalCollisionExclusions::empty();
+    for exclusion in requested {
+        let bit = match exclusion {
+            PhysicalCollisionExclusionRequest::EntirelyWaterBarrier => {
+                PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER
+            }
+        };
+        ensure!(
+            !exclusions.contains(bit),
+            "physical body collision exclusions contain a duplicate"
+        );
+        exclusions.insert(bit);
+    }
+    Ok(PhysicalCollisionFilter::excluding(exclusions))
 }
 
 /// Generic event emitted when one body's collision availability changes.
@@ -421,14 +466,11 @@ impl HostSimulationRuntime {
         &self,
         pose: WorldPosition,
         retained_cell: Option<Guid>,
-        definition: PhysicalBodyDefinition,
-        response_policy: PhysicalBodyResponsePolicy,
+        registration: ResolvedPhysicalBodyRegistration,
         now: std::time::Instant,
     ) -> Result<SpatialBodyId> {
         let body_id = self.register_ephemeral_body(pose, now);
-        if let Err(error) =
-            self.attach_physical_body(body_id, definition, response_policy, retained_cell)
-        {
+        if let Err(error) = self.attach_physical_body(body_id, registration, retained_cell) {
             self.remove_body(body_id);
             return Err(error);
         }
@@ -439,15 +481,21 @@ impl HostSimulationRuntime {
     pub fn attach_physical_body(
         &self,
         body_id: SpatialBodyId,
-        definition: PhysicalBodyDefinition,
-        response_policy: PhysicalBodyResponsePolicy,
+        registration: ResolvedPhysicalBodyRegistration,
         retained_cell: Option<Guid>,
     ) -> Result<()> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = Arc::clone(&state.scene);
         let event = state
             .bodies
-            .attach_physical_body(body_id, definition, response_policy, retained_cell, &scene)?
+            .attach_physical_body(
+                body_id,
+                registration.definition,
+                registration.collision_filter,
+                registration.response_policy,
+                retained_cell,
+                &scene,
+            )?
             .with_context(|| format!("physical body {body_id:?} is not registered"))?;
         state.body_events.push(event);
         Ok(())
@@ -734,6 +782,9 @@ fn host_body_activity_event(event: SpatialBodyEvent) -> Option<HostPhysicalBodyA
                         InvalidPhysicalBodyPlacement::OverlapsStaticCollision => {
                             "retained body overlaps restored static collision".to_string()
                         }
+                        InvalidPhysicalBodyPlacement::ForbiddenCollisionRegion => {
+                            "body center occupies a forbidden collision region".to_string()
+                        }
                     },
                 }
             }
@@ -815,7 +866,7 @@ mod tests {
             self.loads.fetch_add(1, Ordering::SeqCst);
             Ok(Some(LandblockCollisionAsset {
                 landblock_id,
-                terrain: TerrainCollisionSurface { cells: Vec::new() },
+                terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders::default(),
             }))
         }
@@ -920,6 +971,7 @@ mod tests {
     #[test]
     fn body_definition_request_accepts_arbitrary_geometry_without_profiles() {
         let first = PhysicalBodyDefinitionRequest {
+            collision_exclusions: Vec::new(),
             spheres: vec![PhysicalSphereRequest {
                 center: [0.1, -0.2, 0.3],
                 radius: 0.27,
@@ -937,6 +989,7 @@ mod tests {
         .resolve()
         .unwrap();
         let second = PhysicalBodyDefinitionRequest {
+            collision_exclusions: Vec::new(),
             spheres: vec![PhysicalSphereRequest {
                 center: [-0.4, 0.5, 0.6],
                 radius: 0.73,
@@ -954,20 +1007,32 @@ mod tests {
         .resolve()
         .unwrap();
 
-        assert_ne!(first, second);
+        assert_ne!(first.definition, second.definition);
         assert!(
-            matches!(first, PhysicalBodyDefinition::FreeSphere { sphere, .. }
+            matches!(first.definition, PhysicalBodyDefinition::FreeSphere { sphere, .. }
             if sphere.center == Vector3::new(0.1, -0.2, 0.3) && sphere.radius == 0.27)
         );
         assert!(
-            matches!(second, PhysicalBodyDefinition::FreeSphere { sphere, .. }
+            matches!(second.definition, PhysicalBodyDefinition::FreeSphere { sphere, .. }
             if sphere.center == Vector3::new(-0.4, 0.5, 0.6) && sphere.radius == 0.73)
         );
     }
 
     #[test]
+    fn collision_filter_rejects_duplicate_exclusions() {
+        let error = resolve_collision_filter(&[
+            PhysicalCollisionExclusionRequest::EntirelyWaterBarrier,
+            PhysicalCollisionExclusionRequest::EntirelyWaterBarrier,
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate"));
+    }
+
+    #[test]
     fn body_definition_request_rejects_a_third_grounded_sphere_without_truncation() {
         let error = PhysicalBodyDefinitionRequest {
+            collision_exclusions: Vec::new(),
             spheres: vec![
                 PhysicalSphereRequest {
                     center: [0.0, 0.0, 0.4],
@@ -1006,6 +1071,7 @@ mod tests {
     #[test]
     fn body_definition_request_rejects_response_shape_mismatch() {
         let error = PhysicalBodyDefinitionRequest {
+            collision_exclusions: Vec::new(),
             spheres: vec![
                 PhysicalSphereRequest {
                     center: [0.0, 0.0, 0.4],
@@ -1064,8 +1130,11 @@ mod tests {
         service
             .attach_physical_body(
                 body_id,
-                definition,
-                stable_response_policy_request(0.0).resolve().unwrap(),
+                ResolvedPhysicalBodyRegistration {
+                    definition,
+                    collision_filter: PhysicalCollisionFilter::ALL,
+                    response_policy: stable_response_policy_request(0.0).resolve().unwrap(),
+                },
                 None,
             )
             .unwrap();

@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use holtburger_common::{Guid, Plane, Quaternion, Sphere, Vector3};
 use holtburger_content::{
-    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
-    CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
+    BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
+    CollisionBox, CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
     LandblockPlacement, PlacedCollider, StaticColliderPlacement, TerrainCollisionCell,
     TerrainCollisionSurface, TerrainCollisionTriangle,
 };
@@ -546,7 +546,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
                 cells: vec![TerrainCollisionCell {
                     triangles: [terrain.clone(), remote],
                 }],
-                entirely_water: false,
+                ..TerrainCollisionSurface::empty()
             },
             static_geometry: LandblockColliders {
                 colliders: vec![ramp],
@@ -1578,17 +1578,7 @@ fn placed_polygon(id: u16, vertices: Vec<Vector3>) -> PlacedCollider {
 fn placed_polygon_with_normal(id: u16, vertices: Vec<Vector3>, normal: Vector3) -> PlacedCollider {
     let d = -normal.dot(&vertices[0]);
     let box_bounds = CollisionBox::from_points(vertices.iter().copied()).unwrap();
-    let mut minimum = vertices[0];
-    let mut maximum = vertices[0];
-    for vertex in vertices.iter().copied().skip(1) {
-        minimum.x = minimum.x.min(vertex.x);
-        minimum.y = minimum.y.min(vertex.y);
-        minimum.z = minimum.z.min(vertex.z);
-        maximum.x = maximum.x.max(vertex.x);
-        maximum.y = maximum.y.max(vertex.y);
-        maximum.z = maximum.z.max(vertex.z);
-    }
-    let bounds_center = (minimum + maximum) * 0.5;
+    let bounds_center = box_bounds.center();
     let bounds = Sphere {
         center: bounds_center,
         radius: vertices
@@ -1597,7 +1587,7 @@ fn placed_polygon_with_normal(id: u16, vertices: Vec<Vector3>, normal: Vector3) 
             .fold(0.0, f32::max),
     };
     PlacedCollider {
-        shape: Arc::new(CollisionShape {
+        shape: Arc::new(CollisionShape::Bsp(BspSolid {
             bsp: BspNode::Leaf(BspLeaf {
                 index: 0,
                 solid: 0,
@@ -1614,14 +1604,13 @@ fn placed_polygon_with_normal(id: u16, vertices: Vec<Vector3>, normal: Vector3) 
                     d,
                 },
             )]),
-        }),
+        })),
         placement: LandblockPlacement {
             origin: Vector3::zero(),
             orientation: Quaternion::identity(),
         },
         scale: ColliderScale::uniform(1.0).unwrap(),
-        bounds_center: bounds.center,
-        bounds_radius: bounds.radius,
+        bounds: box_bounds,
         source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
     }
 }

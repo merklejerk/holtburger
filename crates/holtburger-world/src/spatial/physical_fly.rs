@@ -311,8 +311,9 @@ mod tests {
 
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
-        CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
+        BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
+        CollisionBox, CollisionPolygon, CollisionShape, LandblockColliders,
+        LandblockCollisionAsset,
         LandblockPlacement, LandblockTerrain, PlacedCollider, StaticColliderPlacement,
         TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals, TerrainCollisionSurface,
     };
@@ -427,7 +428,7 @@ mod tests {
             center: Vector3::new(96.0, 96.0, 20.0),
             radius: 200.0,
         };
-        let shape = Arc::new(CollisionShape {
+        let shape = Arc::new(CollisionShape::Bsp(BspSolid {
             bsp: BspNode::Internal(InternalNode {
                 tag: *b"BPnn",
                 plane,
@@ -439,7 +440,7 @@ mod tests {
             bounds,
             box_bounds,
             polygons: HashMap::from([(1, polygon)]),
-        });
+        }));
         PlacedCollider {
             shape,
             placement: LandblockPlacement {
@@ -447,8 +448,13 @@ mod tests {
                 orientation: Quaternion::identity(),
             },
             scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds_center: bounds.center,
-            bounds_radius: bounds.radius,
+            // The synthetic solid fills the half-space, not just its boundary polygon, so its
+            // broad-phase box covers the whole authored bounding sphere.
+            bounds: CollisionBox::from_points([
+                bounds.center - Vector3::new(bounds.radius, bounds.radius, bounds.radius),
+                bounds.center + Vector3::new(bounds.radius, bounds.radius, bounds.radius),
+            ])
+            .unwrap(),
             source_placement: if is_building {
                 StaticColliderPlacement::BuildingShell { source_index: 0 }
             } else {
@@ -473,7 +479,7 @@ mod tests {
             center: Vector3::new(x, 20.0, 10.0),
             radius: 30.0,
         };
-        let shape = Arc::new(CollisionShape {
+        let shape = Arc::new(CollisionShape::Bsp(BspSolid {
             bsp: BspNode::Leaf(BspLeaf {
                 index: 0,
                 solid: 0,
@@ -499,7 +505,7 @@ mod tests {
                     d: x,
                 },
             )]),
-        });
+        }));
         PlacedCollider {
             shape,
             placement: LandblockPlacement {
@@ -507,8 +513,11 @@ mod tests {
                 orientation: Quaternion::identity(),
             },
             scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds_center: bounds.center,
-            bounds_radius: bounds.radius,
+            bounds: CollisionBox::from_points([
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x, 40.0, 20.0),
+            ])
+            .unwrap(),
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
     }
@@ -688,10 +697,14 @@ mod tests {
 
     #[test]
     fn non_uniformly_scaled_bsp_plane_keeps_world_space_sphere_math_exact() {
-        let mut wall = wall_x(5.0);
-        wall.scale = ColliderScale::from_components(Vector3::new(2.0, 3.0, 4.0)).unwrap();
-        wall.bounds_radius *= 4.0;
-        wall.bounds_center = wall.point_to_landblock_space(wall.shape.bounds.center);
+        let wall = wall_x(5.0);
+        let wall = PlacedCollider::new(
+            wall.shape,
+            wall.placement,
+            ColliderScale::from_components(Vector3::new(2.0, 3.0, 4.0)).unwrap(),
+            wall.source_placement,
+        )
+        .unwrap();
         let body = solved(solve(
             &scene(vec![wall]),
             body(Vector3::new(7.0, 20.0, 5.0)),
@@ -886,9 +899,10 @@ mod tests {
             Vector3::new(10.0, 5.0, 20.0),
             Vector3::new(10.0, 5.0, 0.0),
         ];
-        building.shape = Arc::new(CollisionShape {
-            bsp: building.shape.bsp.clone(),
-            bounds: building.shape.bounds,
+        let building_solid = building.shape.as_bsp().expect("synthetic wall is a BSP solid");
+        building.shape = Arc::new(CollisionShape::Bsp(BspSolid {
+            bsp: building_solid.bsp.clone(),
+            bounds: building_solid.bounds,
             box_bounds: CollisionBox::from_points(opening_vertices.iter().copied())
                 .expect("synthetic boundary polygon has finite bounds"),
             polygons: HashMap::from([(
@@ -899,7 +913,7 @@ mod tests {
                     d: 10.0,
                 },
             )]),
-        });
+        }));
         let volume = CellVolume {
             cell_selector: 0x0100,
             placement: LandblockPlacement {

@@ -1,5 +1,6 @@
 mod bsp_query;
 mod collision;
+mod volume_query;
 mod grounded;
 mod physical_body;
 mod physical_fly;

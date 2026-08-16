@@ -13,10 +13,11 @@ use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
 use holtburger_world::{
     CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, GroundedBody,
-    GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
-    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PhysicalFlyBody,
-    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPathRequest,
-    PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, solve_grounded, solve_physical_fly,
+    GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
+    GroundedRequest, GroundedSphere, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalCollisionFilter, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome,
+    PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
+    SphereSweep, SupportRequest, solve_grounded, solve_physical_fly,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -97,6 +98,9 @@ struct Args {
     /// Grounded sphere roles used by the explicit route.
     #[arg(long, value_enum, default_value_t = GroundedRouteBody::Pair)]
     grounded_body: GroundedRouteBody,
+    /// Time this many grounded-obstruction and support query pairs across the assembled scene.
+    #[arg(long, default_value_t = 0)]
+    query_benchmark: usize,
 }
 
 /// One fully validated, deterministic grounded product-route replay.
@@ -220,6 +224,10 @@ fn main() -> Result<()> {
         placements.setup_parts - placements.collidable_setup_parts
     );
     println!(
+        "setup_volumes fallback_records={} emitted_volume_colliders={}",
+        placements.volume_records, placements.emitted_volumes
+    );
+    println!(
         "cell_structures collidable={} inert_missing_root_bounds={} volumes={}",
         collidable_cell_structures,
         unbounded_cell_structures,
@@ -230,8 +238,13 @@ fn main() -> Result<()> {
             .get(*collider_index)
             .with_context(|| format!("collider index {collider_index} is out of range"))?;
         let collider = &collision.static_geometry.colliders[*collider_index];
+        let shape_kind = match &*collider.shape {
+            holtburger_content::CollisionShape::Bsp(_) => "bsp",
+            holtburger_content::CollisionShape::Cylinder(_) => "cylinder",
+            holtburger_content::CollisionShape::Ball(_) => "ball",
+        };
         println!(
-            "collider[{collider_index}]={provenance} origin=({:.6},{:.6},{:.6}) rotation=({:.6},{:.6},{:.6},{:.6}) bounds=({:.6},{:.6},{:.6};{:.6}) polygons={} domain={:?}",
+            "collider[{collider_index}]={provenance} shape={shape_kind} origin=({:.6},{:.6},{:.6}) rotation=({:.6},{:.6},{:.6},{:.6}) bounds=({:.6},{:.6},{:.6})..({:.6},{:.6},{:.6}) domain={:?}",
             collider.placement.origin.x,
             collider.placement.origin.y,
             collider.placement.origin.z,
@@ -239,28 +252,47 @@ fn main() -> Result<()> {
             collider.placement.orientation.x,
             collider.placement.orientation.y,
             collider.placement.orientation.z,
-            collider.bounds_center.x,
-            collider.bounds_center.y,
-            collider.bounds_center.z,
-            collider.bounds_radius,
-            collider.shape.polygons.len(),
+            collider.bounds.minimum().x,
+            collider.bounds.minimum().y,
+            collider.bounds.minimum().z,
+            collider.bounds.maximum().x,
+            collider.bounds.maximum().y,
+            collider.bounds.maximum().z,
             collider.source_placement,
         );
-        let mut polygons = collider.shape.polygons.iter().collect::<Vec<_>>();
-        polygons.sort_by_key(|(polygon_id, _)| **polygon_id);
-        for (polygon_id, polygon) in polygons {
-            let normal = collider.normal_to_landblock_space(polygon.normal);
-            let vertices = polygon
-                .vertices
-                .iter()
-                .map(|vertex| collider.point_to_landblock_space(*vertex))
-                .collect::<Vec<_>>();
-            println!(
-                "collider[{collider_index}].polygon[{polygon_id}] normal=({:.6},{:.6},{:.6}) vertices={vertices:?}",
-                normal.x, normal.y, normal.z
-            );
+        match &*collider.shape {
+            holtburger_content::CollisionShape::Bsp(solid) => {
+                let mut polygons = solid.polygons.iter().collect::<Vec<_>>();
+                polygons.sort_by_key(|(polygon_id, _)| **polygon_id);
+                for (polygon_id, polygon) in polygons {
+                    let normal = collider.normal_to_landblock_space(polygon.normal);
+                    let vertices = polygon
+                        .vertices
+                        .iter()
+                        .map(|vertex| collider.point_to_landblock_space(*vertex))
+                        .collect::<Vec<_>>();
+                    println!(
+                        "collider[{collider_index}].polygon[{polygon_id}] normal=({:.6},{:.6},{:.6}) vertices={vertices:?}",
+                        normal.x, normal.y, normal.z
+                    );
+                }
+                describe_bsp(*collider_index, collider, &solid.bsp, "root");
+            }
+            holtburger_content::CollisionShape::Cylinder(cylinder) => {
+                let low = collider.point_to_landblock_space(cylinder.low_point);
+                println!(
+                    "collider[{collider_index}].cylinder low=({:.6},{:.6},{:.6}) radius={:.6} height={:.6}",
+                    low.x, low.y, low.z, cylinder.radius, cylinder.height
+                );
+            }
+            holtburger_content::CollisionShape::Ball(ball) => {
+                let center = collider.point_to_landblock_space(ball.center);
+                println!(
+                    "collider[{collider_index}].ball center=({:.6},{:.6},{:.6}) radius={:.6}",
+                    center.x, center.y, center.z, ball.radius
+                );
+            }
         }
-        describe_bsp(*collider_index, collider, &collider.shape.bsp, "root");
     }
     if let Some(portal_cell) = args.portal_cell {
         for portal in interior
@@ -287,6 +319,9 @@ fn main() -> Result<()> {
         "world_query high_altitude_placement_contacts={}",
         high_altitude_contacts.len()
     );
+    if args.query_benchmark > 0 {
+        benchmark_static_queries(&scene, landblock.landblock_id, args.query_benchmark)?;
+    }
     if let Some(route) = explicit_grounded_route {
         probe_explicit_grounded_route(&scene, landblock.landblock_id, route)?;
     } else {
@@ -448,20 +483,97 @@ fn append_source_provenance(
         0x01 => {}
         0x02 => {
             let setup = decode_cache.setup_model(repository, source_did)?;
+            let mut any_part_bsp = false;
             for (part_index, part_id) in setup.parts.iter().enumerate() {
                 if decode_cache
                     .gfx_obj(repository, *part_id)?
                     .physics_bsp
                     .is_some()
                 {
+                    any_part_bsp = true;
                     provenance.push(format!(
                         "{placement} source=0x{source_did:08X} part[{part_index}]=0x{part_id:08X}"
+                    ));
+                }
+            }
+            // Mirror assembly's retail precedence: setup volumes participate only when no part
+            // carries a physics BSP, and cylspheres suppress spheres. Recomputed from source on
+            // purpose — this census is the independent oracle the collider-count parity check
+            // compares assembly against.
+            if !any_part_bsp {
+                let (label, count) = if setup.cyl_spheres.is_empty() {
+                    ("sphere", setup.spheres.len())
+                } else {
+                    ("cylsphere", setup.cyl_spheres.len())
+                };
+                for volume_index in 0..count {
+                    provenance.push(format!(
+                        "{placement} source=0x{source_did:08X} {label}[{volume_index}]"
                     ));
                 }
             }
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// Times static queries at deterministic scattered positions over the installed 5x5 scene.
+///
+/// This measures broad-phase selection plus narrow phase for the current per-landblock scan, so
+/// the Phase 5 cell index change can be sized against the same command.
+fn benchmark_static_queries(
+    scene: &CollisionScene,
+    landblock_id: u32,
+    query_count: usize,
+) -> Result<()> {
+    let anchor = Guid(landblock_id);
+    let placement = CollisionPlacement::outdoor();
+    // Deterministic low-discrepancy walk over the landblock interior at a plausible body height.
+    let position = |index: usize| {
+        let golden = 0.618_034_f32;
+        let x = 4.0 + ((index as f32 * golden) % 1.0) * 184.0;
+        let y = 4.0 + ((index as f32 * golden * golden) % 1.0) * 184.0;
+        Vector3::new(x, y, 40.0)
+    };
+    let start = std::time::Instant::now();
+    let mut total_obstructions = 0usize;
+    for index in 0..query_count {
+        let center = position(index);
+        total_obstructions += scene
+            .grounded_obstructions(GroundedObstructionRequest {
+                sweep: SphereSweep {
+                    anchor,
+                    start: center,
+                    end: center + Vector3::new(0.13, 0.0, 0.0),
+                    radius: 0.48,
+                },
+                placement: &placement,
+            })?
+            .len();
+    }
+    let obstruction_elapsed = start.elapsed();
+    let start = std::time::Instant::now();
+    let mut total_supports = 0usize;
+    for index in 0..query_count {
+        let center = position(index);
+        total_supports += scene
+            .support_contacts(SupportRequest {
+                anchor,
+                center,
+                radius: 0.48,
+                maximum_drop: 1.5,
+                maximum_rise: 0.6,
+                placement: &placement,
+            })?
+            .len();
+    }
+    let support_elapsed = start.elapsed();
+    println!(
+        "query_benchmark count={query_count} obstruction_us_per_query={:.2} support_us_per_query={:.2} obstructions={total_obstructions} supports={total_supports}",
+        obstruction_elapsed.as_secs_f64() * 1e6 / query_count as f64,
+        support_elapsed.as_secs_f64() * 1e6 / query_count as f64,
+    );
     Ok(())
 }
 
@@ -1808,6 +1920,10 @@ struct PlacementCensus {
     no_physics_records: usize,
     setup_parts: usize,
     collidable_setup_parts: usize,
+    /// Records collidable only through the setup volume fallback.
+    volume_records: usize,
+    /// Cylinder and ball colliders those records emit.
+    emitted_volumes: usize,
 }
 
 impl PlacementCensus {
@@ -1839,7 +1955,22 @@ impl PlacementCensus {
                     }
                 }
                 self.collidable_setup_parts += collidable_parts;
-                collidable_parts
+                if collidable_parts > 0 {
+                    collidable_parts
+                } else {
+                    // Assembly's retail volume fallback: cylspheres, else spheres, only when no
+                    // part carries a physics BSP. Independently recomputed as the parity oracle.
+                    let volumes = if setup.cyl_spheres.is_empty() {
+                        setup.spheres.len()
+                    } else {
+                        setup.cyl_spheres.len()
+                    };
+                    if volumes > 0 {
+                        self.volume_records += 1;
+                        self.emitted_volumes += volumes;
+                    }
+                    volumes
+                }
             }
             _ => {
                 self.unsupported_records += 1;

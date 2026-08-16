@@ -101,10 +101,15 @@ The host-physics recovery adds an explicit static-collision subsystem without ch
 existing implicit `tick()` policy:
 
 - `CollisionScene` owns complete landblock collision artifacts and one derived resident static-shadow
-  index. Geometry remains owned once by its source artifact; outdoor and EnvCell buckets contain
-  stable source references, including the rare shipped placements that cross an owner boundary.
-  Batched insertion/replacement/eviction rebuilds the index transactionally, so terrain, placed
-  shapes, volumes, and every derived shadow change atomically.
+  index. Geometry remains owned once by its source artifact. Outdoor colliders and building shells
+  register into global 24m-cell buckets keyed by the cells their placed bounds shadow (retail's
+  per-cell stab-list granularity), so cross-owner spans need no seam handling and selection cost
+  follows the query's swept extent rather than scene residency; EnvCell buckets contain stable
+  source references per reached cell. Terrain contact generation indexes the row-major cell grid
+  directly by the query's reach, widened by the surface's cached burial-shift bound so buried-body
+  recovery contacts stay identical to an exhaustive scan. Batched
+  insertion/replacement/eviction rebuilds the index transactionally, so terrain, placed shapes,
+  volumes, and every derived shadow change atomically.
 - Coverage, movement obstruction, lower-sphere support, placement confirmation, and prior-cell
   transit are separate typed query families. Queries return geometry facts without choosing
   grounded policy, and missing coverage is a result rather than a collision miss.

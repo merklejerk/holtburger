@@ -1055,7 +1055,7 @@ mod tests {
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
         CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
-        CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
+        BspSolid, CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
         LandblockPlacement, LandblockTerrain, PlacedCollider, StaticColliderPlacement,
         TerrainCellDiagonals, TerrainCollisionSurface,
     };
@@ -1119,7 +1119,7 @@ mod tests {
     fn polygon(id: u16, vertices: Vec<Vector3>, normal: Vector3, bounds: Sphere) -> PlacedCollider {
         let d = -normal.dot(&vertices[0]);
         let box_bounds = CollisionBox::from_points(vertices.iter().copied()).unwrap();
-        let shape = Arc::new(CollisionShape {
+        let shape = Arc::new(CollisionShape::Bsp(BspSolid {
             bsp: BspNode::Leaf(BspLeaf {
                 index: 0,
                 solid: 0,
@@ -1136,7 +1136,7 @@ mod tests {
                     d,
                 },
             )]),
-        });
+        }));
         PlacedCollider {
             shape,
             placement: LandblockPlacement {
@@ -1144,8 +1144,7 @@ mod tests {
                 orientation: Quaternion::identity(),
             },
             scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds_center: bounds.center,
-            bounds_radius: bounds.radius,
+            bounds: box_bounds,
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
     }
@@ -1413,8 +1412,8 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: EAST,
                 terrain: TerrainCollisionSurface {
-                    cells: Vec::new(),
                     entirely_water: true,
+                    ..TerrainCollisionSurface::empty()
                 },
                 static_geometry: LandblockColliders::default(),
             })
@@ -1587,7 +1586,7 @@ mod tests {
     #[test]
     fn physics_generated_supported_velocity_may_follow_a_slope_tangent() {
         let shallow = ramp(2, 20.0, 30.0, 10.0, 30.0, 2.0);
-        let normal = shallow.shape.polygons[&2].normal;
+        let normal = shallow.shape.as_bsp().unwrap().polygons[&2].normal;
         let scene = scene(vec![shallow]);
         let starting_height = 0.2 + lower_sphere().radius / normal.z - lower_sphere().center.z;
         let start = Vector3::new(21.0, 20.0, starting_height);
@@ -1850,7 +1849,7 @@ mod tests {
     #[test]
     fn shallow_ramp_is_support_while_steep_face_is_only_a_constraint() {
         let shallow = ramp(2, 20.0, 30.0, 10.0, 30.0, 2.0);
-        let shallow_normal = shallow.shape.polygons[&2].normal;
+        let shallow_normal = shallow.shape.as_bsp().unwrap().polygons[&2].normal;
         let shallow_scene = scene(vec![shallow]);
         let starting_height =
             0.2 + lower_sphere().radius / shallow_normal.z - lower_sphere().center.z;
@@ -1907,7 +1906,7 @@ mod tests {
         );
 
         let steep = ramp(3, 40.0, 42.0, 10.0, 30.0, 4.0);
-        let steep_normal = steep.shape.polygons[&3].normal;
+        let steep_normal = steep.shape.as_bsp().unwrap().polygons[&3].normal;
         assert!(steep_normal.z < config().walkable_normal_z);
         let steep_scene = scene(vec![steep]);
         let mut steep_start = body(Vector3::new(39.0, 20.0, 0.0), None);
@@ -2187,7 +2186,7 @@ mod tests {
         };
         let mut interior_floor = floor();
         interior_floor.placement.origin.z = -1.0;
-        interior_floor.bounds_center.z -= 1.0;
+        interior_floor.bounds = interior_floor.bounds.translated(Vector3::new(0.0, 0.0, -1.0));
         interior_floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id };
         let terrain = TerrainCollisionSurface::from_terrain(&LandblockTerrain {
             grid_size: 9,

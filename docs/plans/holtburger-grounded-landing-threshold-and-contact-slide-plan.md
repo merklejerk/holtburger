@@ -337,9 +337,70 @@ mirrored `walkableNormalZ`/`landingNormalZ`/`airborneStepDownHeight`/gravity/ste
 the "app factory data, not simulator profiles" comment in `physical-camera-session.ts` is
 superseded by this addendum; and the spawned-entity plan's 2026-08-12 reconciliation line
 "frontend-local spawns submit explicit geometry plus policy" is superseded — frontend-local
-spawns submit content identity, explicit geometry is diagnostics-only. Execution order: the
-camera-profile cutover can land independently; the spawner/server shared path lands with the
-spawned-entity plan's body-attachment phases.
+spawns submit content identity, explicit geometry is diagnostics-only.
+
+Scope split: **phases A-C below are this addendum's executable work** (the camera-profile
+cutover, independently landable). The spawner/server shared creation path is explicitly NOT
+executed here — it lands with the spawned-entity plan's body-attachment phases, which its
+2026-08-16 reconciliation now points at; phase A only requires the core builder be shaped so
+that path can consume it unchanged.
+
+### Addendum Phase A: Core-owned retail body profiles
+
+Deliverables:
+
+- `holtburger-core::physical_body_definition` gains the retail player profile: a constructor
+  returning the validated grounded `PhysicalBodyDefinition` inputs (sphere pair, retail
+  PhysicsDesc response policy — elasticity 0.05, friction 0.95, stable, no align-path — and the
+  retail `GroundedConfig`), plus the physical-fly viewer profile (0.25 sphere, zero-elasticity
+  clip policy, fly config). Constants sourced from `holtburger_world::RETAIL_*`; sphere pair
+  either from the cited literals or resolved via `resolve_setup_physical_spheres` from the
+  authored player setup — decide by whether the authored setup is available without content
+  discovery in the host path (record the choice here).
+- Solver budget fields (substeps, contact passes, separation epsilon, substep distance) stay
+  overridable app policy with profile defaults, matching the current TS values.
+
+Acceptance: `cargo test -p holtburger-core` covers the profile against the world constants
+(no mirrored literals — the test must reference `RETAIL_*` re-exports); clippy clean.
+
+### Addendum Phase B: Host contract cutover
+
+Deliverables:
+
+- `host_simulation_runtime`'s registration request replaces raw
+  `PhysicalResponseRequest::{Grounded, FreeSphere}` config payloads with a profile selector plus
+  the app-policy overrides (edge protection, budgets, collision exclusions, speed handling stays
+  where it is). `PhysicalBodyRegistrationRequest::resolve` consumes the Phase A builders.
+- The raw-geometry request shape survives only behind the diagnostics door used by harness and
+  tests (`ResolvedPhysicalBodyRegistration` and the validator layer are unchanged).
+- `host_camera_runtime` passes the profile for its mode; contract docs updated.
+
+Acceptance: workspace tests pass; grep proves no retail physics literal remains in
+`apps/holtburger-3d/src-tauri` outside tests/diagnostics.
+
+### Addendum Phase C: TS contract shrink and evidence
+
+Deliverables:
+
+- `physical-camera-session.ts`: `physicalCameraBody` collapses to profile + app knobs;
+  `RETAIL_WALKABLE_NORMAL_Z`/`RETAIL_LANDING_NORMAL_Z`/`RETAIL_AIRBORNE_STEP_DOWN_HEIGHT`
+  mirrors and the sphere/policy literals are deleted; the superseded "app factory data" comment
+  is replaced with a pointer to this addendum. `GroundedResponseConfig`/fly config types shrink
+  accordingly; session tests updated.
+- Runtime evidence: the Explorer grounded camera behaves identically — probe-equivalent check
+  via the host camera tests plus one manual/harness confirmation that jump, walk, slide, and
+  fly all still work (the slide state reached the status line in this plan's main work; it must
+  still read `sliding` on the 0x1EB6FFFF face).
+
+Acceptance: `tsc` clean, vitest green; grep proves no solver-physics constant remains in
+`apps/holtburger-3d/src` outside test fixtures.
+
+### Addendum Definition of Done
+
+- [ ] Phases A-C accepted as above
+- [ ] Three-way constant mirror deleted (Rust prod + oracle only; oracle stays independent)
+- [ ] Superseded comments and reconciliation lines updated in the same change
+- [ ] Decision recorded here: sphere source (literals vs authored setup resolution)
 
 ## Decisions and Course Corrections
 

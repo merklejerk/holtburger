@@ -127,6 +127,7 @@ import {
 	type PreparedObjectTextureBinding,
 	type PreparedStaticObjectDrawCompatibility,
 	type ObjectBlendPolicy,
+	type TransparentObjectSortFacts,
 } from "./object-rendering-policy";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
 import type { PreparedPortalProjection } from "./portal-view-window";
@@ -2548,7 +2549,7 @@ export class WebGL2Renderer implements Renderer {
 		try {
 			const phases = createObjectSubmissionPhases(
 				view.objects,
-				(object) => this.#transparentDistanceSquared(object, view),
+				(object) => this.#transparentSortFacts(object, view),
 				(object) =>
 					object.instances?.kind === "frame-template"
 						? object.instances.cohortKey
@@ -2568,11 +2569,11 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	/** Compute the existing object-center camera ordering fact exactly once per transparent range. */
-	#transparentDistanceSquared(
+	/** Compute object-center camera ordering facts exactly once per transparent range. */
+	#transparentSortFacts(
 		object: PreparedObjectFrameInput,
 		view: PreparedViewGeometry,
-	): number {
+	): TransparentObjectSortFacts {
 		const facts = object.transparentSort;
 		if (!facts) {
 			throw new Error(
@@ -2597,13 +2598,24 @@ export class WebGL2Renderer implements Renderer {
 			view.anchorCoordinates,
 			this.#offsetScratch,
 		);
-		const x =
-			this.#transparentCenterScratch.x + offset.x - view.cameraPosition.x;
-		const y =
-			this.#transparentCenterScratch.y + offset.y - view.cameraPosition.y;
-		const z =
-			this.#transparentCenterScratch.z + offset.z - view.cameraPosition.z;
-		return x * x + y * y + z * z;
+		this.#transparentCenterScratch.x += offset.x;
+		this.#transparentCenterScratch.y += offset.y;
+		this.#transparentCenterScratch.z += offset.z;
+		const x = this.#transparentCenterScratch.x - view.cameraPosition.x;
+		const y = this.#transparentCenterScratch.y - view.cameraPosition.y;
+		const z = this.#transparentCenterScratch.z - view.cameraPosition.z;
+		const distanceSquared = x * x + y * y + z * z;
+		transformPoint3(
+			view.view,
+			this.#transparentCenterScratch,
+			this.#transparentCenterScratch,
+		);
+		return {
+			// The renderer's right-handed view matrix maps forward to negative view-space Z.
+			cameraDepth: -this.#transparentCenterScratch.z,
+			distanceSquared,
+			stableId: facts.stableId,
+		};
 	}
 
 	#drawOpaqueObjects(

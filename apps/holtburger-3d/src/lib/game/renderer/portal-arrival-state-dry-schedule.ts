@@ -19,7 +19,9 @@ export interface PortalDryOpaqueBatch {
 export interface PortalDryDeferredSubmission {
 	/** Final adjacent-run compatibility after blend/material/program policy resolution. */
 	readonly batchKey: string;
-	/** Squared camera distance consumed by the production bounded-band ordering policy. */
+	/** Signed distance along the camera's forward axis used for nearby ordering. */
+	readonly cameraDepth: number;
+	/** Squared radial camera distance used to select nearby ordering. */
 	readonly distanceSquared: number;
 	/** Blend-order family already resolved by the renderer-neutral material planner. */
 	readonly kind: "additive" | "transparent";
@@ -189,14 +191,10 @@ export interface PortalArrivalStateDryScheduleTrace {
 	readonly scopeVisibilityEnvelopeReductionCommandCount: number;
 	/** GPU scope-tile instances evaluated across all completed frontiers. */
 	readonly scopeVisibilityEnvelopeReductionInstanceCount: number;
-	/** Stable cohort-key evaluations performed by transparent ordering. */
-	readonly transparentBatchKeyEvaluationCount: number;
+	/** Stable cohort-key evaluations performed for far transparent batching. */
+	readonly transparentFarBatchKeyEvaluationCount: number;
 	/** Far/near classifications performed by transparent ordering. */
-	readonly transparentDepthBandClassificationCount: number;
-	/** Fixed bounded-band slots visited while emitting transparent work. */
-	readonly transparentDepthBucketVisitCount: number;
-	/** Square roots performed for near transparent candidates. */
-	readonly transparentNearSquareRootCount: number;
+	readonly transparentDistanceClassificationCount: number;
 	/** Adjacent compatible physical alpha runs after sorting. */
 	readonly transparentRunCount: number;
 	/** Selected physical crossings with a selected source scope. */
@@ -319,12 +317,10 @@ export function createPortalArrivalStateDryScheduleTrace(
 			plan.commands.scopeEnvelopeReductionCommandCount,
 		scopeVisibilityEnvelopeReductionInstanceCount:
 			plan.commands.scopeEnvelopeReductionInstanceCount,
-		transparentBatchKeyEvaluationCount:
-			transparent.trace.batchKeyEvaluationCount,
-		transparentDepthBandClassificationCount:
-			transparent.trace.depthBandClassificationCount,
-		transparentDepthBucketVisitCount: transparent.trace.depthBucketVisitCount,
-		transparentNearSquareRootCount: transparent.trace.nearSquareRootCount,
+		transparentDistanceClassificationCount:
+			transparent.trace.distanceClassificationCount,
+		transparentFarBatchKeyEvaluationCount:
+			transparent.trace.farBatchKeyEvaluationCount,
 		transparentRunCount: adjacentRunCount(
 			transparent.values.map(({ batchKey }) => batchKey),
 		),
@@ -464,8 +460,10 @@ function orderPhysicalTransparent(
 } {
 	const ordered = orderTransparentObjectRanges(
 		values.map((range) => ({
+			cameraDepth: range.cameraDepth,
 			distanceSquared: range.distanceSquared,
 			range,
+			stableId: range.submissionKey,
 		})),
 		({ batchKey }) => batchKey,
 	);

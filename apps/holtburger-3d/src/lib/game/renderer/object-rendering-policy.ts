@@ -1,36 +1,40 @@
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 
-/** Squared near-policy boundary used before assigning the bounded physical-depth bands. */
+/** Squared radius inside which transparent geometry receives exact camera-depth ordering. */
 const TRANSPARENT_NEAR_DISTANCE_SQUARED =
 	FRONTEND_TUNING.rendering.transparentObjects.nearDistance ** 2;
 
-/** One transparent range paired with its current-frame camera distance. */
-export interface TransparentObjectRange<T> {
-	/** Precomputed squared camera distance; avoids per-comparison coordinate work and allocations. */
+/** Current-frame facts needed to classify and deterministically order transparent geometry. */
+export interface TransparentObjectSortFacts {
+	/** Signed distance along the camera's forward axis, used for exact back-to-front ordering. */
+	readonly cameraDepth: number;
+	/** Squared radial camera distance, used only to select the bounded near policy. */
 	readonly distanceSquared: number;
+	/** Stable physical identity used to break equal-depth ties deterministically. */
+	readonly stableId: string;
+}
+
+/** One transparent range paired with its current-frame ordering facts. */
+export interface TransparentObjectRange<T> extends TransparentObjectSortFacts {
 	readonly range: T;
 }
 
-/** Far batchable and coarsely depth-ordered near transparent phases for one view. */
+/** Far batchable and exactly depth-ordered near transparent phases for one view. */
 export interface OrderedTransparentObjectRanges<T> {
 	/** Candidates outside the near-policy radius, grouped by stable batching cohort. */
 	readonly far: readonly TransparentObjectRange<T>[];
-	/** Candidates inside the near-policy radius, ordered by coarse back-to-front bands. */
+	/** Candidates inside the near-policy radius, ordered exactly back-to-front by camera depth. */
 	readonly near: readonly TransparentObjectRange<T>[];
-	/** Exact structural work performed by the bounded production ordering policy. */
+	/** Structural work performed by the bounded production ordering policy. */
 	readonly trace: TransparentObjectOrderingTrace;
 }
 
 /** Primitive CPU work performed while ordering one transparent population. */
 export interface TransparentObjectOrderingTrace {
-	/** Stable cohort-key evaluations; exactly one per physical candidate. */
-	readonly batchKeyEvaluationCount: number;
+	/** Stable cohort-key evaluations; exactly one per far physical candidate. */
+	readonly farBatchKeyEvaluationCount: number;
 	/** Far/near classifications; exactly one per physical candidate. */
-	readonly depthBandClassificationCount: number;
-	/** Fixed bounded-band slots visited when emitting the near phase. */
-	readonly depthBucketVisitCount: number;
-	/** Square roots needed only for candidates inside the near-policy radius. */
-	readonly nearSquareRootCount: number;
+	readonly distanceClassificationCount: number;
 }
 
 /** Renderer-resolved ordering class consumed by the frame submission partition. */
@@ -208,59 +212,56 @@ export function sourceOpacity(translucency: number): number {
 	return Math.max(0, Math.min(1, normalized));
 }
 
-/** Partition transparency into bounded depth bands and stable owner-provided batching cohorts. */
+/** Partition transparency into exact nearby depth order and stable distant batching cohorts. */
 export function orderTransparentObjectRanges<T>(
 	ranges: readonly TransparentObjectRange<T>[],
 	batchKey: (range: T) => string | null,
 ): OrderedTransparentObjectRanges<T> {
 	const far: TransparentObjectRange<T>[] = [];
-	const nearBuckets = Array.from(
-		{ length: FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount },
-		() => [] as TransparentObjectRange<T>[],
-	);
-	let nearSquareRootCount = 0;
+	const near: TransparentObjectRange<T>[] = [];
 	for (const range of ranges) {
+		validateTransparentObjectRange(range);
 		if (range.distanceSquared > TRANSPARENT_NEAR_DISTANCE_SQUARED) {
 			far.push(range);
 			continue;
 		}
-		nearSquareRootCount += 1;
-		const bucket = Math.min(
-			FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount - 1,
-			Math.floor(
-				(Math.sqrt(range.distanceSquared) /
-					FRONTEND_TUNING.rendering.transparentObjects.nearDistance) *
-					FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount,
-			),
-		);
-		const bucketRanges = nearBuckets[bucket];
-		if (!bucketRanges) {
-			throw new Error(
-				`Transparent range produced invalid depth bucket ${bucket}.`,
-			);
-		}
-		bucketRanges.push(range);
+		near.push(range);
 	}
-	const near: TransparentObjectRange<T>[] = [];
-	for (let index = nearBuckets.length - 1; index >= 0; index -= 1) {
-		const bucketRanges = nearBuckets[index];
-		if (!bucketRanges) {
-			throw new Error(`Transparent depth bucket ${index} is missing.`);
-		}
-		for (const range of groupTransparentRanges(bucketRanges, batchKey)) {
-			near.push(range);
-		}
-	}
+	near.sort(
+		(left, right) =>
+			right.cameraDepth - left.cameraDepth ||
+			compareStableIds(left.stableId, right.stableId),
+	);
 	return {
 		far: groupTransparentRanges(far, batchKey),
 		near,
 		trace: {
-			batchKeyEvaluationCount: ranges.length,
-			depthBandClassificationCount: ranges.length,
-			depthBucketVisitCount: nearBuckets.length,
-			nearSquareRootCount,
+			distanceClassificationCount: ranges.length,
+			farBatchKeyEvaluationCount: far.length,
 		},
 	};
+}
+
+function compareStableIds(left: string, right: string): number {
+	if (left < right) return -1;
+	if (left > right) return 1;
+	return 0;
+}
+
+function validateTransparentObjectRange<T>(
+	range: TransparentObjectRange<T>,
+): void {
+	if (!Number.isFinite(range.cameraDepth)) {
+		throw new Error("Transparent object camera depth must be finite.");
+	}
+	if (!Number.isFinite(range.distanceSquared) || range.distanceSquared < 0) {
+		throw new Error(
+			"Transparent object camera distance must be finite and non-negative.",
+		);
+	}
+	if (range.stableId.length === 0) {
+		throw new Error("Transparent object stable identity must not be empty.");
+	}
 }
 
 /**
@@ -274,7 +275,7 @@ export function createObjectSubmissionPhases<
 	T extends ObjectSubmissionOrderingInput,
 >(
 	objects: readonly T[],
-	transparentDistanceSquared: (object: T) => number,
+	transparentSortFacts: (object: T) => TransparentObjectSortFacts,
 	transparentBatchKey: (object: T) => string | null,
 ): ObjectSubmissionPhases<T> {
 	const opaque: T[] = [];
@@ -287,13 +288,7 @@ export function createObjectSubmissionPhases<
 				opaque.push(object);
 				break;
 			case "transparent": {
-				const distanceSquared = transparentDistanceSquared(object);
-				if (!Number.isFinite(distanceSquared) || distanceSquared < 0) {
-					throw new Error(
-						"Transparent object camera distance must be finite and non-negative.",
-					);
-				}
-				transparent.push({ distanceSquared, range: object });
+				transparent.push({ ...transparentSortFacts(object), range: object });
 				break;
 			}
 			case "additive":

@@ -307,6 +307,40 @@ None. All four draft questions were resolved with evidence — see Resolved Ques
   interp/dead-reckon/snap machinery is the coarse ancestor of retail's node queue; fidelity
   upgrades to it are dynamic-entity roadmap scope.
 
+## Addendum (2026-08-16): Host-Resolved Body Profiles
+
+Ratified follow-up from this plan's quality pass: the frontend stops authoring solver physics.
+Today `physicalCameraBody` in `physical-camera-session.ts` hand-assembles the retail human —
+sphere pair, PhysicsDesc response defaults, and a `GroundedConfig` that now mirrors three retail
+constants with no cross-check (bit-equal today, verified 0x3F2A0751 both sides; nothing keeps it
+so). That reverses this codebase's own direction: `holtburger-core` already resolves retail
+bodies from authored content (`resolve_setup_physical_spheres`), and the spawned-entity plan
+already hydrates entity bodies from setup + authoritative policy rather than hand-assembly.
+
+Target shape — two tiers:
+
+1. **Raw geometry registration** (`PhysicalBodyDefinition` + validators) remains as the internal
+   layer every resolution feeds, and as the explicit diagnostics door for harness and synthetic
+   fixtures. It stops being the frontend contract.
+2. **Resolve-by-identity becomes the frontend contract.** The frontend names what it wants and
+   its genuinely-app policy only:
+   - Camera: a named profile (`retail-player-grounded`, `physical-fly-viewer`) plus app knobs
+     (speed envelope, edge-protection choice); `holtburger-core` owns the profile's spheres,
+     retail response policy, and retail `GroundedConfig` constants.
+   - Explorer weenie-spawner UX: setup/weenie DID + scale into a host creation path that
+     resolves through `resolve_setup_physical_spheres` and retail policy.
+   - Server spawning: the same core resolution call, fed by hydration — the spawner UX becomes a
+     rehearsal of the server path, not a parallel invention.
+
+Consequences: the TS grounded/fly config contracts shrink to mode + app policy (deleting the
+mirrored `walkableNormalZ`/`landingNormalZ`/`airborneStepDownHeight`/gravity/step constants);
+the "app factory data, not simulator profiles" comment in `physical-camera-session.ts` is
+superseded by this addendum; and the spawned-entity plan's 2026-08-12 reconciliation line
+"frontend-local spawns submit explicit geometry plus policy" is superseded — frontend-local
+spawns submit content identity, explicit geometry is diagnostics-only. Execution order: the
+camera-profile cutover can land independently; the spawner/server shared path lands with the
+spawned-entity plan's body-attachment phases.
+
 ## Decisions and Course Corrections
 
 - (2026-08-15) Plan created from the walkable-allowance gap discovered and sharpened during the

@@ -219,6 +219,9 @@ demonstrate out-of-order or undetectable loss. They are not an eager correctness
   authoritative response policy under `SpatialBodyId::Entity`; frontend-local spawns submit explicit
   geometry plus policy and receive `Ephemeral` identity. Both enter the same validator and retained
   definition, while setup lookup and identity allocation stay outside simulation.
+  *(Superseded 2026-08-16 for the frontend contract: frontend-local spawns submit content
+  identity resolved through the shared core path; explicit geometry remains diagnostics-only —
+  see the contact-slide plan's host-resolved body profiles addendum.)*
 - Simulation interest is an explicit, revisioned application request realized by the app-local host
   service. Neither registration nor ticking may load, evict, or replace collision content. The
   2026-08-15 reconciliation below defines the current open-scene and residency behavior.

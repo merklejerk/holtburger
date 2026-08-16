@@ -8,14 +8,17 @@ use holtburger_common::position::{
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
-    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, LandblockCollisionAsset,
-    PlacedCollider, StaticColliderPlacement, TerrainCollisionTriangle,
+    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, CollisionShape,
+    LandblockCollisionAsset, PlacedCollider, StaticColliderPlacement, TerrainCollisionTriangle,
 };
 use thiserror::Error;
 
 use super::bsp_query::{
-    BspSupportFeature, placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts,
-    placed_supports, support_on_polygon,
+    ShapeSupportFeature, placed_polygon_contacts, placed_polygon_obstructions,
+    placed_solid_contacts, placed_supports, support_on_polygon,
+};
+use super::volume_query::{
+    placed_ball_contact, placed_ball_support, placed_cylinder_contact, placed_cylinder_support,
 };
 use super::{PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
@@ -137,11 +140,11 @@ pub enum SupportFeature {
     },
 }
 
-impl From<BspSupportFeature> for SupportFeature {
-    fn from(feature: BspSupportFeature) -> Self {
+impl From<ShapeSupportFeature> for SupportFeature {
+    fn from(feature: ShapeSupportFeature) -> Self {
         match feature {
-            BspSupportFeature::Surface => Self::Surface,
-            BspSupportFeature::Edge { inward_normal } => Self::Edge { inward_normal },
+            ShapeSupportFeature::Surface => Self::Surface,
+            ShapeSupportFeature::Edge { inward_normal } => Self::Edge { inward_normal },
         }
     }
 }
@@ -506,11 +509,74 @@ struct PlacementMotionSegment<'a> {
     touched: &'a [Guid],
 }
 
+/// Inclusive rectangle of global 24m outdoor cell coordinates.
+///
+/// Global coordinates are `landblock_coordinate * 8 + local_cell`, the same frame retail's
+/// per-cell static shadow lists live in (`CPhysicsObj::add_shadows_to_cells`,
+/// `acclient.c:306734`). They are unbounded integers, so cross-landblock spans need no seams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GlobalCellRange {
+    minimum: (i32, i32),
+    maximum: (i32, i32),
+}
+
+impl GlobalCellRange {
+    /// The cells overlapped by an anchor-local axis-aligned XY extent.
+    ///
+    /// Coordinates are intersected with the finite landscape lattice (256 x 256 landblocks of
+    /// 8 x 8 cells): nothing is ever registered outside it, so an extent reaching beyond —
+    /// including the noncanonical far-outside poses the scene-edge policy permits — selects the
+    /// lattice-overlapping part or nothing, without overflowing or iterating unbounded cells.
+    fn from_local_extent(anchor: Guid, minimum: Vector3, maximum: Vector3) -> Self {
+        const LATTICE_CELLS: i64 = 256 * 8;
+        let anchor_x = ((anchor.0 >> 24) & 0xff) as i64 * 8;
+        let anchor_y = ((anchor.0 >> 16) & 0xff) as i64 * 8;
+        let cell = |anchor_base: i64, coordinate: f32| {
+            let local = (coordinate / OUTDOOR_CELL_METERS).floor();
+            // f32-to-i64 casts saturate, so an extreme-but-finite coordinate stays well-defined
+            // before the lattice clamp.
+            anchor_base
+                .saturating_add(local as i64)
+                .clamp(-1, LATTICE_CELLS) as i32
+        };
+        Self {
+            minimum: (cell(anchor_x, minimum.x), cell(anchor_y, minimum.y)),
+            maximum: (cell(anchor_x, maximum.x), cell(anchor_y, maximum.y)),
+        }
+    }
+
+    /// The cells overlapped by a sphere query with extra planar reach.
+    fn from_sphere(anchor: Guid, center: Vector3, reach: f32) -> Self {
+        Self::from_local_extent(
+            anchor,
+            center - Vector3::new(reach, reach, 0.0),
+            center + Vector3::new(reach, reach, 0.0),
+        )
+    }
+
+    fn cells(self) -> impl Iterator<Item = (i32, i32)> {
+        (self.minimum.0..=self.maximum.0)
+            .flat_map(move |x| (self.minimum.1..=self.maximum.1).map(move |y| (x, y)))
+    }
+
+    fn contains(self, cell: (i32, i32)) -> bool {
+        cell.0 >= self.minimum.0
+            && cell.0 <= self.maximum.0
+            && cell.1 >= self.minimum.1
+            && cell.1 <= self.maximum.1
+    }
+}
+
+/// Side length of one outdoor land cell in meters.
+const OUTDOOR_CELL_METERS: f32 = 24.0;
+
 /// Scene-derived equivalent of retail's outdoor and EnvCell static shadow lists.
 #[derive(Debug, Clone, Default)]
 struct StaticShadowIndex {
-    outdoor_colliders: HashMap<Guid, Vec<ColliderReference>>,
-    building_shells: HashMap<Guid, Vec<ColliderReference>>,
+    /// Outdoor colliders and building shells bucketed by the global 24m cells their placed
+    /// bounds shadow. One map serves both: they were always selected together under the same
+    /// outdoors gate, and building identity lives on `source_placement`.
+    outdoor_cells: HashMap<(i32, i32), Vec<ColliderReference>>,
     interior_colliders: HashMap<Guid, Vec<ColliderReference>>,
 }
 
@@ -536,22 +602,14 @@ impl StaticShadowIndex {
                 match collider.source_placement {
                     source @ (StaticColliderPlacement::OutdoorExplicit { .. }
                     | StaticColliderPlacement::OutdoorGenerated { .. }) => {
-                        index
-                            .outdoor_colliders
-                            .entry(owner)
-                            .or_default()
-                            .push(reference);
+                        index.stamp_outdoor(owner, collider, reference);
                         outdoor_groups
                             .entry(source)
                             .or_default()
                             .push(collider_index);
                     }
                     StaticColliderPlacement::BuildingShell { .. } => {
-                        index
-                            .building_shells
-                            .entry(owner)
-                            .or_default()
-                            .push(reference);
+                        index.stamp_outdoor(owner, collider, reference);
                     }
                     StaticColliderPlacement::EnvCellShell { cell_id } => {
                         index
@@ -677,9 +735,8 @@ impl StaticShadowIndex {
         }
 
         for colliders in index
-            .outdoor_colliders
+            .outdoor_cells
             .values_mut()
-            .chain(index.building_shells.values_mut())
             .chain(index.interior_colliders.values_mut())
         {
             colliders.sort_unstable();
@@ -688,18 +745,32 @@ impl StaticShadowIndex {
         Ok(index)
     }
 
+    /// Registers one placed collider into every global cell its bounds shadow.
+    fn stamp_outdoor(
+        &mut self,
+        owner: Guid,
+        collider: &PlacedCollider,
+        reference: ColliderReference,
+    ) {
+        let range = GlobalCellRange::from_local_extent(
+            owner,
+            collider.bounds.minimum(),
+            collider.bounds.maximum(),
+        );
+        for cell in range.cells() {
+            self.outdoor_cells.entry(cell).or_default().push(reference);
+        }
+    }
+
     fn selected_colliders(
         &self,
-        touched: &[Guid],
+        query_cells: GlobalCellRange,
         placement: &CollisionPlacement,
     ) -> Vec<ColliderReference> {
         let mut selected = Vec::new();
         if placement.reaches_outdoors {
-            for owner in neighboring_source_landblocks(touched) {
-                if let Some(colliders) = self.outdoor_colliders.get(&owner) {
-                    selected.extend(colliders.iter().copied());
-                }
-                if let Some(colliders) = self.building_shells.get(&owner) {
+            for cell in query_cells.cells() {
+                if let Some(colliders) = self.outdoor_cells.get(&cell) {
                     selected.extend(colliders.iter().copied());
                 }
             }
@@ -899,7 +970,9 @@ impl CollisionScene {
             };
             let local_center = anchor_to_landblock(request.sweep.end, request.sweep.anchor, *owner);
             if request.placement.reaches_outdoors {
-                for cell in &asset.terrain.cells {
+                for cell in
+                    overlapped_terrain_cells(&asset.terrain, local_center, request.sweep.radius)
+                {
                     for triangle in &cell.triangles {
                         if let Some(contact) =
                             terrain_contact(triangle, local_center, request.sweep.radius)
@@ -915,49 +988,79 @@ impl CollisionScene {
                 }
             }
         }
-        for selected in self.selected_colliders(&touched, request.placement) {
+        let query_cells = GlobalCellRange::from_sphere(
+            request.sweep.anchor,
+            request.sweep.end,
+            request.sweep.radius,
+        );
+        for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center =
                 anchor_to_landblock(request.sweep.end, request.sweep.anchor, reference.owner);
-            let separation = local_center - collider.bounds_center;
-            let reach = request.sweep.radius + collider.bounds_radius;
-            if separation.length_squared() > reach * reach {
+            if !collider
+                .bounds
+                .intersects_sphere(local_center, request.sweep.radius)
+            {
                 continue;
             }
-            contacts.extend(
-                placed_solid_contacts(
-                    collider,
-                    local_center,
-                    request.sweep.radius,
-                    selected.center_solid,
-                )
-                .into_iter()
-                .filter(|contact| movement.dot(&contact.normal) <= 0.0)
-                .map(|contact| GroundedObstruction {
-                    separation_normal: contact.normal,
-                    response_normal: contact.normal,
-                    depth: contact.depth,
-                }),
-            );
-            contacts.extend(
-                placed_polygon_obstructions(collider, local_center, request.sweep.radius)
-                    .into_iter()
-                    .filter_map(|contact| {
-                        let response_normal =
-                            if contact.polygon_normal.dot(&contact.separation.normal) >= 0.0 {
-                                contact.polygon_normal
-                            } else {
-                                contact.polygon_normal * -1.0
-                            };
-                        (movement.dot(&response_normal) <= 0.0).then_some(GroundedObstruction {
-                            separation_normal: contact.separation.normal,
-                            response_normal,
-                            depth: contact.separation.depth,
-                        })
-                    }),
-            );
+            let undirected_start = contacts.len();
+            match &*collider.shape {
+                CollisionShape::Bsp(solid) => {
+                    contacts.extend(
+                        placed_solid_contacts(
+                            collider,
+                            solid,
+                            local_center,
+                            request.sweep.radius,
+                            selected.center_solid,
+                        )
+                        .into_iter()
+                        .map(|contact| GroundedObstruction {
+                            separation_normal: contact.normal,
+                            response_normal: contact.normal,
+                            depth: contact.depth,
+                        }),
+                    );
+                    contacts.extend(
+                        placed_polygon_obstructions(
+                            collider,
+                            solid,
+                            local_center,
+                            request.sweep.radius,
+                        )
+                        .into_iter()
+                        .map(|contact| {
+                            // Orient the authored polygon normal toward the body; the shared
+                            // facing filter below applies to the oriented response.
+                            let response_normal =
+                                if contact.polygon_normal.dot(&contact.separation.normal) >= 0.0 {
+                                    contact.polygon_normal
+                                } else {
+                                    contact.polygon_normal * -1.0
+                                };
+                            GroundedObstruction {
+                                separation_normal: contact.separation.normal,
+                                response_normal,
+                                depth: contact.separation.depth,
+                            }
+                        }),
+                    );
+                }
+                CollisionShape::Cylinder(cylinder) => contacts.extend(
+                    placed_cylinder_contact(collider, cylinder, local_center, request.sweep.radius)
+                        .map(volume_obstruction),
+                ),
+                CollisionShape::Ball(ball) => contacts.extend(
+                    placed_ball_contact(collider, ball, local_center, request.sweep.radius)
+                        .map(volume_obstruction),
+                ),
+            }
+            // One facing rule for every shape: keep only obstructions the movement runs into.
+            retain_from(&mut contacts, undirected_start, |obstruction| {
+                movement.dot(&obstruction.response_normal) <= 0.0
+            });
         }
         Ok(contacts)
     }
@@ -1027,7 +1130,9 @@ impl CollisionScene {
             };
             let local_center = anchor_to_landblock(request.center, request.anchor, *owner);
             if request.placement.reaches_outdoors {
-                for cell in &asset.terrain.cells {
+                // A settle probe is vertical, so its planar reach is only the sphere radius; the
+                // drop and rise change which triangles can be reached in Z, not in XY.
+                for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius) {
                     for triangle in &cell.triangles {
                         let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
                         if let Some(support) = support_on_polygon(
@@ -1049,32 +1154,64 @@ impl CollisionScene {
                 }
             }
         }
-        for selected in self.selected_colliders(&touched, request.placement) {
+        let query_cells =
+            GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
+        let vertical_reach = request.radius + request.maximum_drop.max(request.maximum_rise);
+        for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
-            let vertical_reach = request.radius + request.maximum_drop.max(request.maximum_rise);
-            let separation = local_center - collider.bounds_center;
-            let reach = vertical_reach + collider.bounds_radius;
-            if separation.length_squared() > reach * reach {
+            if !collider
+                .bounds
+                .intersects_sphere(local_center, vertical_reach)
+            {
                 continue;
             }
-            supports.extend(
-                placed_supports(
+            // One contract mapping for every shape's supports.
+            let mut push = |support: super::bsp_query::ShapeSupport| {
+                supports.push(SupportContact {
+                    normal: support.normal,
+                    height_delta: support.height_delta,
+                    feature: support.feature.into(),
+                });
+            };
+            match &*collider.shape {
+                CollisionShape::Bsp(solid) => placed_supports(
                     collider,
+                    solid,
                     local_center,
                     request.radius,
                     request.maximum_drop,
                     request.maximum_rise,
                 )
                 .into_iter()
-                .map(|support| SupportContact {
-                    normal: support.normal,
-                    height_delta: support.height_delta,
-                    feature: support.feature.into(),
-                }),
-            );
+                .for_each(&mut push),
+                CollisionShape::Cylinder(cylinder) => {
+                    if let Some(support) = placed_cylinder_support(
+                        collider,
+                        cylinder,
+                        local_center,
+                        request.radius,
+                        request.maximum_drop,
+                        request.maximum_rise,
+                    ) {
+                        push(support);
+                    }
+                }
+                CollisionShape::Ball(ball) => {
+                    if let Some(support) = placed_ball_support(
+                        collider,
+                        ball,
+                        local_center,
+                        request.radius,
+                        request.maximum_drop,
+                        request.maximum_rise,
+                    ) {
+                        push(support);
+                    }
+                }
+            }
         }
         Ok(supports)
     }
@@ -1631,7 +1768,7 @@ impl CollisionScene {
             };
             let local_center = anchor_to_landblock(request.center, request.anchor, *owner);
             if request.placement.reaches_outdoors {
-                for cell in &asset.terrain.cells {
+                for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius) {
                     for triangle in &cell.triangles {
                         if let Some(contact) =
                             terrain_contact(triangle, local_center, request.radius)
@@ -1648,38 +1785,62 @@ impl CollisionScene {
                 }
             }
         }
-        for selected in self.selected_colliders(request.touched, request.placement) {
+        let query_cells =
+            GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
+        for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
-            let separation = local_center - collider.bounds_center;
-            let reach = request.radius + collider.bounds_radius;
-            if separation.length_squared() > reach * reach {
+            if !collider
+                .bounds
+                .intersects_sphere(local_center, request.radius)
+            {
                 continue;
             }
-            for contact in placed_solid_contacts(
-                collider,
-                local_center,
-                request.radius,
-                selected.center_solid,
-            )
-            .into_iter()
-            .chain(placed_polygon_contacts(
-                collider,
-                local_center,
-                request.radius,
-            )) {
+            // One movement gate and contract mapping for every shape's contacts.
+            let mut push = |contact: super::bsp_query::ShapeContact| {
                 if request
                     .movement
                     .is_some_and(|delta| delta.dot(&contact.normal) >= 0.0)
                 {
-                    continue;
+                    return;
                 }
                 contacts.push(StaticContact {
                     normal: contact.normal,
                     depth: contact.depth,
                 });
+            };
+            match &*collider.shape {
+                CollisionShape::Bsp(solid) => placed_solid_contacts(
+                    collider,
+                    solid,
+                    local_center,
+                    request.radius,
+                    selected.center_solid,
+                )
+                .into_iter()
+                .chain(placed_polygon_contacts(
+                    collider,
+                    solid,
+                    local_center,
+                    request.radius,
+                ))
+                .for_each(&mut push),
+                CollisionShape::Cylinder(cylinder) => {
+                    if let Some(contact) =
+                        placed_cylinder_contact(collider, cylinder, local_center, request.radius)
+                    {
+                        push(contact);
+                    }
+                }
+                CollisionShape::Ball(ball) => {
+                    if let Some(contact) =
+                        placed_ball_contact(collider, ball, local_center, request.radius)
+                    {
+                        push(contact);
+                    }
+                }
             }
         }
         contacts
@@ -1746,11 +1907,11 @@ impl CollisionScene {
 
     fn selected_colliders(
         &self,
-        touched: &[Guid],
+        query_cells: GlobalCellRange,
         placement: &CollisionPlacement,
     ) -> Vec<SelectedCollider> {
         self.shadows
-            .selected_colliders(touched, placement)
+            .selected_colliders(query_cells, placement)
             .into_iter()
             .map(|reference| {
                 let collider = &self.landblocks[&reference.owner].static_geometry.colliders
@@ -1772,65 +1933,33 @@ impl CollisionScene {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct OutdoorCellBounds {
-    minimum: (i32, i32),
-    maximum: (i32, i32),
-}
-
-impl OutdoorCellBounds {
-    fn contains(self, cell: (i32, i32)) -> bool {
-        cell.0 >= self.minimum.0
-            && cell.0 <= self.maximum.0
-            && cell.1 >= self.minimum.1
-            && cell.1 <= self.maximum.1
-    }
-}
-
 /// Returns every 24-meter outdoor land cell shadowed by one multipart static as one rectangle.
 fn outdoor_cell_bounds(
     owner: Guid,
     collider_indices: &[usize],
     colliders: &[PlacedCollider],
-) -> OutdoorCellBounds {
-    let mut points = collider_indices.iter().copied().flat_map(|collider_index| {
-        let collider = &colliders[collider_index];
-        collider
-            .shape
-            .box_bounds
-            .corners()
-            .map(|corner| collider.point_to_landblock_space(corner))
-    });
-    let first = points
+) -> GlobalCellRange {
+    let mut boxes = collider_indices
+        .iter()
+        .copied()
+        .map(|collider_index| colliders[collider_index].bounds);
+    let first = boxes
         .next()
         .expect("a collidable static placement has at least one part box");
-    let mut minimum = first;
-    let mut maximum = first;
-    for point in points {
-        minimum.x = minimum.x.min(point.x);
-        minimum.y = minimum.y.min(point.y);
-        maximum.x = maximum.x.max(point.x);
-        maximum.y = maximum.y.max(point.y);
+    let mut minimum = first.minimum();
+    let mut maximum = first.maximum();
+    for bounds in boxes {
+        minimum.x = minimum.x.min(bounds.minimum().x);
+        minimum.y = minimum.y.min(bounds.minimum().y);
+        maximum.x = maximum.x.max(bounds.maximum().x);
+        maximum.y = maximum.y.max(bounds.maximum().y);
     }
-    let owner_x = ((owner.0 >> 24) & 0xff) as i32 * 8;
-    let owner_y = ((owner.0 >> 16) & 0xff) as i32 * 8;
-    OutdoorCellBounds {
-        minimum: (
-            owner_x + (minimum.x / 24.0).floor() as i32,
-            owner_y + (minimum.y / 24.0).floor() as i32,
-        ),
-        maximum: (
-            owner_x + (maximum.x / 24.0).floor() as i32,
-            owner_y + (maximum.y / 24.0).floor() as i32,
-        ),
-    }
+    GlobalCellRange::from_local_extent(owner, minimum, maximum)
 }
 
 fn outdoor_cell_coordinates(owner: Guid, point: Vector3) -> (i32, i32) {
-    (
-        ((owner.0 >> 24) & 0xff) as i32 * 8 + (point.x / 24.0).floor() as i32,
-        ((owner.0 >> 16) & 0xff) as i32 * 8 + (point.y / 24.0).floor() as i32,
-    )
+    let range = GlobalCellRange::from_local_extent(owner, point, point);
+    range.minimum
 }
 
 fn point_between_landblocks(point: Vector3, source_owner: u32, target_owner: u32) -> Vector3 {
@@ -1855,17 +1984,18 @@ fn part_reaches_building_portal(
     target_owner: u32,
     portal: &CellCollisionPortal,
 ) -> bool {
+    let bounds_radius = collider.bounds.circumradius();
     let sphere_center = target.placement.to_local_space(point_between_landblocks(
-        collider.bounds_center,
+        collider.bounds.center(),
         collider_owner,
         target_owner,
     ));
     let sphere_distance = portal.plane.distance_to_point(&sphere_center);
     if portal.positive_side {
-        if sphere_distance > collider.bounds_radius + CELL_PLANE_TOLERANCE {
+        if sphere_distance > bounds_radius + CELL_PLANE_TOLERANCE {
             return false;
         }
-    } else if sphere_distance < -collider.bounds_radius - CELL_PLANE_TOLERANCE {
+    } else if sphere_distance < -bounds_radius - CELL_PLANE_TOLERANCE {
         return false;
     }
     let distances = part_box_in_cell(collider, collider_owner, target, target_owner)
@@ -1944,17 +2074,18 @@ fn part_reaches_portal(
     cell_owner: u32,
     portal: &CellCollisionPortal,
 ) -> bool {
+    let bounds_radius = collider.bounds.circumradius();
     let sphere_center = source.placement.to_local_space(point_between_landblocks(
-        collider.bounds_center,
+        collider.bounds.center(),
         collider_owner,
         cell_owner,
     ));
     let sphere_distance = portal.plane.distance_to_point(&sphere_center);
     if portal.positive_side {
-        if sphere_distance < -collider.bounds_radius - CELL_PLANE_TOLERANCE {
+        if sphere_distance < -bounds_radius - CELL_PLANE_TOLERANCE {
             return false;
         }
-    } else if sphere_distance > collider.bounds_radius + CELL_PLANE_TOLERANCE {
+    } else if sphere_distance > bounds_radius + CELL_PLANE_TOLERANCE {
         return false;
     }
 
@@ -1992,10 +2123,9 @@ fn part_box_in_cell(
     volume: &CellVolume,
     cell_owner: u32,
 ) -> [Vector3; 8] {
-    let transformed = collider.shape.box_bounds.corners().map(|corner| {
-        let source_point = collider.point_to_landblock_space(corner);
+    let transformed = collider.placed_box_corners().map(|corner| {
         volume.placement.to_local_space(point_between_landblocks(
-            source_point,
+            corner,
             collider_owner,
             cell_owner,
         ))
@@ -2096,6 +2226,74 @@ fn containing_reached_cell(
                 .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
                 .is_some_and(|volume| volume_reaches(volume, landblock_point, 0.0))
         })
+}
+
+/// Retains, in order, the tail elements from `start` that satisfy the predicate.
+fn retain_from<T: Copy>(items: &mut Vec<T>, start: usize, mut keep: impl FnMut(&T) -> bool) {
+    let mut kept = start;
+    for index in start..items.len() {
+        if keep(&items[index]) {
+            items.swap(kept, index);
+            kept += 1;
+        }
+    }
+    items.truncate(kept);
+}
+
+/// Maps a volume separation contact onto the grounded obstruction contract; a volume's authored
+/// surface is the solid its separation came from, so the normals coincide.
+fn volume_obstruction(contact: super::bsp_query::ShapeContact) -> GroundedObstruction {
+    GroundedObstruction {
+        separation_normal: contact.normal,
+        response_normal: contact.normal,
+        depth: contact.depth,
+    }
+}
+
+/// Terrain cells whose 24m footprint overlaps a sphere's contact-reachable extent, in storage
+/// order.
+///
+/// `TerrainCollisionSurface.cells` is row-major over the authored 8x8 grid (row = Y cell,
+/// column = X cell), so overlap resolves to direct index arithmetic instead of a scan.
+///
+/// `terrain_contact` projects a center below a triangle's plane back along the normal, so a
+/// buried body reaches triangles horizontally offset by up to its vertical burial times the
+/// surface's steepest planar-shift ratio. The planar reach grows by that provable bound, keeping
+/// buried-body recovery contacts identical to an exhaustive scan.
+fn overlapped_terrain_cells(
+    terrain: &holtburger_content::TerrainCollisionSurface,
+    center: Vector3,
+    reach: f32,
+) -> impl Iterator<Item = &holtburger_content::TerrainCollisionCell> {
+    let burial = (terrain.maximum_height - (center.z - reach)).max(0.0);
+    let reach = reach + (burial + reach) * terrain.maximum_planar_shift_ratio;
+    let side = holtburger_content::TERRAIN_GRID_CELLS as i32;
+    let clamped_range = move |minimum: f32, maximum: f32| {
+        let low = (minimum / OUTDOOR_CELL_METERS).floor().max(0.0) as i32;
+        let high = (maximum / OUTDOOR_CELL_METERS)
+            .floor()
+            .min((side - 1) as f32) as i32;
+        low..=high
+    };
+    // Authored surfaces always carry the full row-major grid, which direct indexing requires.
+    // Synthetic surfaces may carry any subset with no coordinate meaning, so they keep the
+    // exhaustive scan.
+    let indexed = terrain.cells.len() == (side * side) as usize;
+    let columns = clamped_range(center.x - reach, center.x + reach);
+    let indexed_cells = indexed.then(move || {
+        clamped_range(center.y - reach, center.y + reach).flat_map(move |row| {
+            columns
+                .clone()
+                .map(move |column| &terrain.cells[(row * side + column) as usize])
+        })
+    });
+    let scan = if indexed {
+        0..0
+    } else {
+        0..terrain.cells.len()
+    };
+    scan.map(|index| &terrain.cells[index])
+        .chain(indexed_cells.into_iter().flatten())
 }
 
 fn terrain_contact(
@@ -2305,32 +2503,6 @@ fn touched_landblocks(request: SphereSweep) -> Vec<Guid> {
     touched
 }
 
-/// Finds installed-source candidates whose authored bounds may cross a touched owner seam.
-fn neighboring_source_landblocks(touched: &[Guid]) -> Vec<Guid> {
-    let mut sources = Vec::new();
-    for owner in touched {
-        let x = ((owner.0 >> 24) & 0xff) as i32;
-        let y = ((owner.0 >> 16) & 0xff) as i32;
-        for offset_x in -1..=1 {
-            for offset_y in -1..=1 {
-                let source_x = x + offset_x;
-                let source_y = y + offset_y;
-                if !(0..=i32::from(MAX_OUTDOOR_LANDBLOCK_AXIS)).contains(&source_x)
-                    || !(0..=i32::from(MAX_OUTDOOR_LANDBLOCK_AXIS)).contains(&source_y)
-                {
-                    continue;
-                }
-                sources.push(Guid(
-                    ((source_x as u32) << 24) | ((source_y as u32) << 16) | 0xffff,
-                ));
-            }
-        }
-    }
-    sources.sort_unstable();
-    sources.dedup();
-    sources
-}
-
 pub(super) fn landblock_key(landblock_id: Guid) -> Guid {
     Guid((landblock_id.0 & 0xffff_0000) | 0xffff)
 }
@@ -2423,8 +2595,9 @@ mod tests {
 
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        ColliderScale, CollisionBox, CollisionShape, LandblockColliders, LandblockPlacement,
-        OutdoorBuildingTransit, StaticColliderPlacement, TerrainCollisionSurface,
+        BspSolid, ColliderScale, CollisionBox, CollisionShape, LandblockColliders,
+        LandblockPlacement, OutdoorBuildingTransit, StaticColliderPlacement,
+        TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
 
@@ -2437,7 +2610,7 @@ mod tests {
             radius: 1.0,
         };
         PlacedCollider {
-            shape: Arc::new(CollisionShape {
+            shape: Arc::new(CollisionShape::Bsp(BspSolid {
                 bsp: BspNode::Leaf(BspLeaf {
                     index: 0,
                     solid: 0,
@@ -2451,16 +2624,258 @@ mod tests {
                 ])
                 .unwrap(),
                 polygons: HashMap::new(),
-            }),
+            })),
             placement: LandblockPlacement {
                 origin: center,
                 orientation: Quaternion::identity(),
             },
             scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds_center: center,
-            bounds_radius: 1.0,
+            bounds: CollisionBox::from_points([
+                center - Vector3::new(1.0, 1.0, 1.0),
+                center + Vector3::new(1.0, 1.0, 1.0),
+            ])
+            .unwrap(),
             source_placement,
         }
+    }
+
+    fn owner_cells(owner: Guid) -> GlobalCellRange {
+        GlobalCellRange::from_local_extent(
+            owner,
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(191.9, 191.9, 0.0),
+        )
+    }
+
+    /// Test-only full-scan oracle: every resident collider and terrain triangle, no selection.
+    ///
+    /// Shares the narrow phase with production on purpose — this differential proves the cell
+    /// index selects a superset of everything that can contact, never that the narrow phase is
+    /// correct (the retail differentials own that).
+    fn full_scan_contacts(
+        scene: &CollisionScene,
+        anchor: Guid,
+        center: Vector3,
+        radius: f32,
+        placement: &CollisionPlacement,
+    ) -> Vec<(u32, u32, u32, u32)> {
+        let mut contacts = Vec::new();
+        for (owner, asset) in &scene.landblocks {
+            let local_center = anchor_to_landblock(center, anchor, *owner);
+            if placement.reaches_outdoors {
+                for cell in &asset.terrain.cells {
+                    for triangle in &cell.triangles {
+                        if let Some(contact) = terrain_contact(triangle, local_center, radius) {
+                            contacts.push(contact_bits(contact.normal, contact.depth));
+                        }
+                    }
+                }
+            }
+            for collider in &asset.static_geometry.colliders {
+                let selectable = match collider.source_placement {
+                    StaticColliderPlacement::OutdoorExplicit { .. }
+                    | StaticColliderPlacement::OutdoorGenerated { .. }
+                    | StaticColliderPlacement::BuildingShell { .. } => placement.reaches_outdoors,
+                    StaticColliderPlacement::EnvCellShell { cell_id } => placement
+                        .reached_interior_cells
+                        .contains(&Guid((owner.0 & 0xffff_0000) | (cell_id & 0xffff))),
+                    // Indoor statics shadow through reached-cell traversal; the seam cases this
+                    // differential covers are outdoor, so restrict the oracle to outdoor kinds.
+                    StaticColliderPlacement::IndoorStatic { .. } => false,
+                };
+                if !selectable {
+                    continue;
+                }
+                let center_solid = !matches!(
+                    collider.source_placement,
+                    StaticColliderPlacement::BuildingShell { .. }
+                ) || !placement.reaches_interior_in(*owner);
+                let shape_contacts: Vec<_> = match &*collider.shape {
+                    CollisionShape::Bsp(solid) => {
+                        placed_solid_contacts(collider, solid, local_center, radius, center_solid)
+                            .into_iter()
+                            .chain(placed_polygon_contacts(
+                                collider,
+                                solid,
+                                local_center,
+                                radius,
+                            ))
+                            .collect()
+                    }
+                    CollisionShape::Cylinder(cylinder) => {
+                        placed_cylinder_contact(collider, cylinder, local_center, radius)
+                            .into_iter()
+                            .collect()
+                    }
+                    CollisionShape::Ball(ball) => {
+                        placed_ball_contact(collider, ball, local_center, radius)
+                            .into_iter()
+                            .collect()
+                    }
+                };
+                for contact in shape_contacts {
+                    contacts.push(contact_bits(contact.normal, contact.depth));
+                }
+            }
+        }
+        contacts.sort_unstable();
+        contacts
+    }
+
+    /// Buried centers reach horizontally offset sloped triangles through the projection in
+    /// `terrain_contact`; indexed terrain selection must reproduce that recovery surface exactly.
+    #[test]
+    fn indexed_terrain_selection_reproduces_full_scan_contacts_for_buried_centers() {
+        let owner = Guid(0xda55_ffff);
+        // A steep west-to-east ramp: heights rise 4m per 24m column.
+        let heights: Vec<f32> = (0..81).map(|index| (index / 9) as f32 * 4.0).collect();
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: owner.0,
+                terrain: TerrainCollisionSurface::from_terrain(
+                    &holtburger_content::LandblockTerrain {
+                        grid_size: 9,
+                        tile_size: 24.0,
+                        height_indices: vec![0; 81],
+                        heights,
+                        terrain_samples: vec![0; 81],
+                        cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(
+                            owner.0,
+                        ),
+                    },
+                )
+                .unwrap(),
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+
+        let placement = CollisionPlacement::outdoor();
+        let mut total_contacts = 0usize;
+        for (x, y, z) in [
+            (96.0, 96.0, -20.0),
+            (150.0, 40.0, 0.0),
+            (60.0, 120.0, 5.0),
+            (180.0, 96.0, -5.0),
+        ] {
+            let center = Vector3::new(x, y, z);
+            let mut indexed: Vec<_> = scene
+                .placement_contacts(PlacementRequest {
+                    anchor: owner,
+                    center,
+                    radius: 0.5,
+                    placement: &placement,
+                })
+                .unwrap()
+                .into_iter()
+                .map(|contact| contact_bits(contact.normal, contact.depth))
+                .collect();
+            indexed.sort_unstable();
+            let full = full_scan_contacts(&scene, owner, center, 0.5, &placement);
+            assert_eq!(
+                indexed, full,
+                "buried terrain selection diverged at ({x}, {y}, {z})"
+            );
+            total_contacts += indexed.len();
+        }
+        assert!(
+            total_contacts >= 4,
+            "buried parity ran vacuously: {total_contacts} contacts"
+        );
+    }
+
+    fn contact_bits(normal: Vector3, depth: f32) -> (u32, u32, u32, u32) {
+        (
+            normal.x.to_bits(),
+            normal.y.to_bits(),
+            normal.z.to_bits(),
+            depth.to_bits(),
+        )
+    }
+
+    /// Bit-exact contact parity between the cell-indexed selection and a full scan, sampled over
+    /// a two-owner scene whose colliders straddle the shared seam.
+    #[test]
+    fn indexed_selection_reproduces_full_scan_contacts_across_a_landblock_seam() {
+        let west = Guid(0xda55_ffff);
+        let east = Guid(0xdb55_ffff);
+        let mut scene = CollisionScene::new();
+        for (owner, xs) in [(west, [20.0, 190.5]), (east, [1.5, 100.0])] {
+            let colliders = xs
+                .into_iter()
+                .enumerate()
+                .map(|(index, x)| {
+                    // Cylinders guarantee real contact geometry; the hollow BSP fixture used by
+                    // the selection tests never produces contacts.
+                    PlacedCollider::new(
+                        Arc::new(CollisionShape::Cylinder(
+                            holtburger_content::CollisionCylinder {
+                                low_point: Vector3::zero(),
+                                radius: 1.0,
+                                height: 4.0,
+                            },
+                        )),
+                        LandblockPlacement {
+                            // Vary y so seam probes cross multiple cells.
+                            origin: Vector3::new(x, 12.0 * (index as f32 + 1.0), -2.0),
+                            orientation: Quaternion::identity(),
+                        },
+                        ColliderScale::uniform(1.0).unwrap(),
+                        StaticColliderPlacement::OutdoorExplicit {
+                            source_index: index,
+                        },
+                    )
+                    .unwrap()
+                })
+                .collect();
+            scene
+                .insert(LandblockCollisionAsset {
+                    landblock_id: owner.0,
+                    terrain: TerrainCollisionSurface::empty(),
+                    static_geometry: LandblockColliders {
+                        colliders,
+                        cell_volumes: Vec::new(),
+                    },
+                })
+                .unwrap();
+        }
+
+        let placement = CollisionPlacement::outdoor();
+        let mut total_contacts = 0usize;
+        // Anchor-west probes spanning both owners, including straight over the seam and points
+        // near the varied collider rows.
+        for (x, y) in [
+            (19.5, 12.0),
+            (190.4, 24.0),
+            (191.9, 12.0),
+            (193.4, 24.0),
+            (292.0, 24.0),
+            (96.0, 96.0),
+        ] {
+            let center = Vector3::new(x, y, 0.0);
+            let mut indexed: Vec<_> = scene
+                .placement_contacts(PlacementRequest {
+                    anchor: west,
+                    center,
+                    radius: 1.2,
+                    placement: &placement,
+                })
+                .unwrap()
+                .into_iter()
+                .map(|contact| contact_bits(contact.normal, contact.depth))
+                .collect();
+            indexed.sort_unstable();
+            let full = full_scan_contacts(&scene, west, center, 1.2, &placement);
+            assert_eq!(
+                indexed, full,
+                "indexed selection diverged from the full scan at ({x}, {y})"
+            );
+            total_contacts += indexed.len();
+        }
+        assert!(
+            total_contacts >= 3,
+            "parity ran vacuously: only {total_contacts} contacts across all probes"
+        );
     }
 
     fn volume(selector: u16, portals: Vec<CellCollisionPortal>) -> CellVolume {
@@ -2521,8 +2936,8 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xdb55_ffff,
                 terrain: TerrainCollisionSurface {
-                    cells: Vec::new(),
                     entirely_water: true,
+                    ..TerrainCollisionSurface::empty()
                 },
                 static_geometry: LandblockColliders::default(),
             })
@@ -3458,23 +3873,29 @@ mod tests {
 
         let outdoors = CollisionPlacement::outdoor();
         assert_eq!(
-            scene.shadows.selected_colliders(&[owner], &outdoors),
+            scene
+                .shadows
+                .selected_colliders(owner_cells(owner), &outdoors),
             references([0, 1])
         );
 
         let interior = CollisionPlacement::interior(cell);
         assert_eq!(
-            scene.shadows.selected_colliders(&[owner], &interior),
+            scene
+                .shadows
+                .selected_colliders(owner_cells(owner), &interior),
             references([2, 3])
         );
 
         let straddling = CollisionPlacement::outdoor().merge_reached(interior);
         assert_eq!(
-            scene.shadows.selected_colliders(&[owner], &straddling),
+            scene
+                .shadows
+                .selected_colliders(owner_cells(owner), &straddling),
             references([0, 1, 2, 3])
         );
         assert_eq!(
-            scene.selected_colliders(&[owner], &straddling),
+            scene.selected_colliders(owner_cells(owner), &straddling),
             vec![
                 SelectedCollider {
                     reference: references([0])[0],
@@ -3527,13 +3948,13 @@ mod tests {
         assert_eq!(
             scene
                 .shadows
-                .selected_colliders(&[owner], &CollisionPlacement::interior(source)),
+                .selected_colliders(owner_cells(owner), &CollisionPlacement::interior(source)),
             references([0, 1])
         );
         assert_eq!(
             scene
                 .shadows
-                .selected_colliders(&[owner], &CollisionPlacement::interior(target)),
+                .selected_colliders(owner_cells(owner), &CollisionPlacement::interior(target)),
             references([0, 1]),
             "every part follows the authored placement's union membership"
         );
@@ -3584,9 +4005,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            scene
-                .shadows
-                .selected_colliders(&[target_owner], &CollisionPlacement::interior(target_cell)),
+            scene.shadows.selected_colliders(
+                owner_cells(target_owner),
+                &CollisionPlacement::interior(target_cell)
+            ),
             [ColliderReference {
                 owner: source_owner,
                 collider_index: 0,
@@ -3597,7 +4019,10 @@ mod tests {
         assert!(
             scene
                 .shadows
-                .selected_colliders(&[target_owner], &CollisionPlacement::interior(target_cell))
+                .selected_colliders(
+                    owner_cells(target_owner),
+                    &CollisionPlacement::interior(target_cell)
+                )
                 .is_empty(),
             "eviction retained a dangling cross-owner static shadow"
         );
@@ -3645,7 +4070,7 @@ mod tests {
         assert_eq!(
             scene
                 .shadows
-                .selected_colliders(&[original_owner], &CollisionPlacement::outdoor()),
+                .selected_colliders(owner_cells(original_owner), &CollisionPlacement::outdoor()),
             references([0]),
             "failed rebuild replaced the previously committed shadow index"
         );

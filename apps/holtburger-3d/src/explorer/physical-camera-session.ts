@@ -2,6 +2,7 @@ import {
 	evaluateHostPhysicalCameraPath,
 	type HostPhysicalCameraPath,
 	type GroundedCharacterEventOutcome,
+	type PhysicalCameraGroundState,
 	type PhysicalCameraMode,
 	type PhysicalCameraPlacement,
 	type PhysicalCameraTickStatus,
@@ -16,80 +17,24 @@ import type { EnvCellId } from "../lib/game/game-types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 /**
- * Retail's minimum upward surface-normal component for walkable support.
+ * Named host-resolved body profile plus body-owned collision exclusions.
  *
- * This is the TypeScript boundary mirror of `holtburger_world::RETAIL_WALKABLE_NORMAL_Z`.
- * Retail initializes `PhysicsGlobals::floor_z` with this expression and applies it in
- * `CPhysicsObj::is_valid_walkable` (`acclient.c:765983-765986`, `:304992-304995`).
+ * Solver physics is host-resolved from `holtburger-core`'s profile builders — the frontend names
+ * what it wants and its app-policy knobs only, so no retail solver constant is mirrored here
+ * (contact-slide plan, host-resolved body profiles addendum). The union mirrors the host's
+ * tagged enum: edge protection exists only on the grounded profile.
  */
-const RETAIL_WALKABLE_NORMAL_Z = Math.fround(Math.cos(3437.746770784939));
-
-interface PhysicalSphereDefinition {
-	/** Body-local AC-axis center in meters. */
-	readonly center: readonly [number, number, number];
-	/** Positive collision radius in meters. */
-	readonly radius: number;
-}
-
-interface PhysicalBodyDefinition {
-	/** Ordered role-bearing geometry supplied to the generic host validator. */
-	readonly spheres: readonly PhysicalSphereDefinition[];
-	/** Complete initial retail response state; the host never infers camera defaults. */
-	readonly responsePolicy: PhysicalBodyResponsePolicy;
+type PhysicalBodyProfileRequest = {
 	/** Optional collision domains ignored by this body. */
 	readonly collisionExclusions: readonly "entirely-water-barrier"[];
-	/** Implemented response semantics and finite solve configuration. */
-	readonly response:
-		| {
-				/** Unrestricted three-dimensional single-sphere response. */
-				readonly kind: "free-sphere";
-				/** Physical-fly solver limits. */
-				readonly config: PhysicalFlyResponseConfig;
-		  }
-		| {
-				/** Gravity, support, step, and edge response. */
-				readonly kind: "grounded";
-				/** Grounded solver and response policy. */
-				readonly config: GroundedResponseConfig;
-		  };
-}
-
-interface PhysicalBodyResponsePolicy {
-	/** Eligible static-impact response. */
-	readonly restitution:
-		| { readonly kind: "elastic"; readonly elasticity: number }
-		| { readonly kind: "inelastic" };
-	/** Authored supported-surface friction. */
-	readonly friction: number;
-	/** Ordinary stable support or explicit retail Sledding state. */
-	readonly surfaceMotion: "stable" | "sledding";
-	/** Whether path-facing supersedes Sledding velocity-facing. */
-	readonly alignPath: boolean;
-}
-
-interface PhysicalFlyResponseConfig {
-	/** Maximum distance covered by one anti-tunneling subdivision. */
-	readonly maximumSubstepDistance: number;
-	/** Finite subdivision budget for one host tick. */
-	readonly maximumSubsteps: number;
-	/** Finite contact-separation budget across one host tick. */
-	readonly maximumContactPasses: number;
-	/** Small outward separation after an accepted contact. */
-	readonly separationEpsilon: number;
-}
-
-interface GroundedResponseConfig extends PhysicalFlyResponseConfig {
-	/** Downward acceleration while airborne. */
-	readonly gravity: number;
-	/** Minimum upward normal component accepted as support. */
-	readonly walkableNormalZ: number;
-	/** Maximum step-up rise in meters. */
-	readonly stepUpHeight: number;
-	/** Maximum downward support search in meters. */
-	readonly stepDownHeight: number;
-	/** Policy for retaining support near finite authored edges. */
-	readonly edgeProtection: "none" | "creature";
-}
+} & (
+	| {
+			readonly profile: "retail-player-grounded";
+			/** Policy for retaining support near finite authored edges. */
+			readonly edgeProtection: "none" | "creature";
+	  }
+	| { readonly profile: "physical-fly-viewer" }
+);
 
 type PhysicalCameraSpeedEnvelope =
 	| {
@@ -156,61 +101,20 @@ function physicalFlyCameraSpeedEnvelope(): PhysicalCameraSpeedEnvelope {
 	};
 }
 
-/** Explorer product policy for its explicit generic camera bodies. */
-function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
+/** Explorer product policy for its camera bodies: named profiles plus app-policy knobs. */
+function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyProfileRequest {
 	if (mode === "physical-fly") {
 		return {
-			spheres: [{ center: [0, 0, 0], radius: 0.25 }],
+			profile: "physical-fly-viewer",
 			// Retail exempts viewer bodies from its whole-landblock ocean restriction.
 			collisionExclusions: ["entirely-water-barrier"],
-			responsePolicy: {
-				// Physical fly is a controlled kinematic camera: clip the incoming normal without rebound.
-				restitution: { kind: "elastic", elasticity: 0 },
-				friction: 0.95,
-				surfaceMotion: "stable",
-				alignPath: false,
-			},
-			response: {
-				kind: "free-sphere",
-				config: {
-					maximumSubstepDistance: 0.25,
-					maximumSubsteps: 32,
-					maximumContactPasses: 8,
-					separationEpsilon: 0.000_5,
-				},
-			},
 		};
 	}
 	return {
-		// Retail's authored human setup pair, projected in source order by SPHEREPATH::init_sphere
-		// (`acclient.c:302241-302291`). These are app factory data, not simulator profiles.
-		spheres: [
-			{ center: [0, 0, 0.475], radius: 0.48 },
-			{ center: [0, 0, 1.35], radius: 0.48 },
-		],
+		profile: "retail-player-grounded",
+		// Creature edge protection is Explorer UX policy: the walking camera holds at precipices.
+		edgeProtection: "creature",
 		collisionExclusions: [],
-		responsePolicy: {
-			// Retail CPhysicsObj/PhysicsDesc constructor defaults (`acclient.c:307850-307853`,
-			// `:318424-318427`); ordinary players do not set Sledding during movement.
-			restitution: { kind: "elastic", elasticity: 0.05 },
-			friction: 0.95,
-			surfaceMotion: "stable",
-			alignPath: false,
-		},
-		response: {
-			kind: "grounded",
-			config: {
-				gravity: -9.8,
-				walkableNormalZ: RETAIL_WALKABLE_NORMAL_Z,
-				stepUpHeight: 0.6,
-				stepDownHeight: 1.5,
-				edgeProtection: "creature",
-				maximumSubstepDistance: 0.24,
-				maximumSubsteps: 32,
-				maximumContactPasses: 8,
-				separationEpsilon: 0.000_5,
-			},
-		},
 	};
 }
 
@@ -239,7 +143,7 @@ export interface PhysicalCameraStatus {
 	readonly mode: PhysicalCameraMode | null;
 	readonly tick: PhysicalCameraTickStatus | "awaiting-first-path";
 	readonly cellId: EnvCellId | null;
-	readonly grounded: boolean;
+	readonly groundState: PhysicalCameraGroundState;
 	readonly constraintCount: number;
 	readonly droppedPaths: number;
 	readonly sceneResidency: PhysicalCameraSceneResidency | null;
@@ -486,7 +390,7 @@ export class PhysicalCameraSession {
 			mode: latest?.mode ?? null,
 			tick: latest?.status ?? "awaiting-first-path",
 			cellId: latest?.legs.at(-1)?.end.residency.envCellId ?? null,
-			grounded: latest?.grounded ?? false,
+			groundState: latest?.groundState ?? "unknown",
 			constraintCount: latest?.constraintCount ?? 0,
 			droppedPaths: this.#droppedPaths,
 			sceneResidency: latest?.sceneResidency ?? null,

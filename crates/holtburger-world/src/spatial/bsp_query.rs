@@ -3,16 +3,22 @@
 //! Queries stay in landblock space. Transforming the sphere into a non-uniformly scaled setup part
 //! would turn it into an ellipsoid; transforming planes and polygons instead preserves exact sphere
 //! distances and normals.
+//!
+//! The `Shape*` result types are shared with `volume_query`: both narrow phases report the same
+//! contact and support vocabulary to the scene's dispatch.
 
 use holtburger_common::{Plane, Sphere, Vector3};
-use holtburger_content::{CollisionPolygon, PlacedCollider};
+use holtburger_content::{BspSolid, CollisionPolygon, PlacedCollider};
 use holtburger_dat::physics::BspNode;
 
-const CONTACT_EPSILON: f32 = 0.000_2;
+/// Retail's contact epsilon, shared by the BSP and volume narrow phases. The decompile prints it
+/// as `0.00019999999`, the shortest decimal form of the same f32 bit pattern (0x3951B717) this
+/// literal produces — they are one constant (`acclient.c:346579`, `:344345`, `:347138`).
+pub(super) const CONTACT_EPSILON: f32 = 0.000_2;
 
 /// One separating contact in landblock-local space.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BspContact {
+pub struct ShapeContact {
     /// Outward-facing unit normal.
     pub normal: Vector3,
     /// Positive displacement required along `normal` to separate the sphere.
@@ -21,18 +27,18 @@ pub struct BspContact {
 
 /// One polygon surface reachable by lowering a sphere vertically.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BspSupport {
+pub struct ShapeSupport {
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
     /// Signed vertical correction from the requested center to tangency; positive rises.
     pub height_delta: f32,
     /// Authored feature reached by the bounded vertical probe.
-    pub feature: BspSupportFeature,
+    pub feature: ShapeSupportFeature,
 }
 
 /// Authored polygon feature reached by a support probe.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BspSupportFeature {
+pub enum ShapeSupportFeature {
     /// The finite polygon accepts an ordinary adjustment to its authored plane.
     Surface,
     /// The sphere reaches a finite edge but cannot adjust to the polygon plane.
@@ -46,7 +52,7 @@ pub enum BspSupportFeature {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BspPolygonObstruction {
     /// Radial sphere-to-polygon contact used only to separate overlapping geometry.
-    pub separation: BspContact,
+    pub separation: ShapeContact,
     /// Authored polygon normal; grounded response decides which side faces the body.
     pub polygon_normal: Vector3,
 }
@@ -54,13 +60,14 @@ pub struct BspPolygonObstruction {
 /// Returns contacts with solid BSP regions reached by a placed sphere.
 pub fn placed_solid_contacts(
     collider: &PlacedCollider,
+    solid: &BspSolid,
     center: Vector3,
     radius: f32,
     center_solid: bool,
-) -> Vec<BspContact> {
+) -> Vec<ShapeContact> {
     let mut contacts = Vec::new();
     descend(
-        &collider.shape.bsp,
+        &solid.bsp,
         collider,
         center,
         radius,
@@ -74,12 +81,14 @@ pub fn placed_solid_contacts(
 /// Returns contacts with authored BSP polygons reached by a placed sphere.
 pub fn placed_polygon_contacts(
     collider: &PlacedCollider,
+    solid: &BspSolid,
     center: Vector3,
     radius: f32,
-) -> Vec<BspContact> {
+) -> Vec<ShapeContact> {
     let mut contacts = Vec::new();
     visit_polygon_leaves(
-        &collider.shape.bsp,
+        &solid.bsp,
+        solid,
         collider,
         center,
         radius,
@@ -112,12 +121,14 @@ pub fn placed_polygon_contacts(
 /// Returns two-sided authored polygon contacts without discarding back-face identity.
 pub fn placed_polygon_obstructions(
     collider: &PlacedCollider,
+    solid: &BspSolid,
     center: Vector3,
     radius: f32,
 ) -> Vec<BspPolygonObstruction> {
     let mut contacts = Vec::new();
     visit_polygon_leaves(
-        &collider.shape.bsp,
+        &solid.bsp,
+        solid,
         collider,
         center,
         radius,
@@ -150,14 +161,16 @@ pub fn placed_polygon_obstructions(
 /// Returns authored polygon surfaces reached by one bounded vertical settle probe.
 pub fn placed_supports(
     collider: &PlacedCollider,
+    solid: &BspSolid,
     center: Vector3,
     radius: f32,
     maximum_drop: f32,
     maximum_rise: f32,
-) -> Vec<BspSupport> {
+) -> Vec<ShapeSupport> {
     let mut supports = Vec::new();
     visit_polygon_leaves(
-        &collider.shape.bsp,
+        &solid.bsp,
+        solid,
         collider,
         center,
         radius + maximum_drop.max(maximum_rise),
@@ -197,7 +210,7 @@ fn descend(
     radius: f32,
     center_check: bool,
     bounding_planes: &mut Vec<BoundingPlane>,
-    contacts: &mut Vec<BspContact>,
+    contacts: &mut Vec<ShapeContact>,
 ) {
     if !node_bounds_reach(node, collider, center, radius) {
         return;
@@ -288,6 +301,7 @@ fn descend(
 
 fn visit_polygon_leaves(
     node: &BspNode,
+    solid: &BspSolid,
     collider: &PlacedCollider,
     center: Vector3,
     radius: f32,
@@ -301,18 +315,18 @@ fn visit_polygon_leaves(
             for polygon in leaf
                 .poly_ids
                 .iter()
-                .filter_map(|polygon_id| collider.shape.polygons.get(polygon_id))
+                .filter_map(|polygon_id| solid.polygons.get(polygon_id))
             {
                 found(polygon);
             }
         }
         BspNode::Port(portal) => {
-            visit_polygon_leaves(&portal.pos, collider, center, radius, found);
-            visit_polygon_leaves(&portal.neg, collider, center, radius, found);
+            visit_polygon_leaves(&portal.pos, solid, collider, center, radius, found);
+            visit_polygon_leaves(&portal.neg, solid, collider, center, radius, found);
         }
         BspNode::Internal(internal) => {
             for branch in [&internal.pos, &internal.neg].into_iter().flatten() {
-                visit_polygon_leaves(branch, collider, center, radius, found);
+                visit_polygon_leaves(branch, solid, collider, center, radius, found);
             }
         }
     }
@@ -356,7 +370,7 @@ fn polygon_sphere_contact(
     plane_d: f32,
     center: Vector3,
     radius: f32,
-) -> Option<BspContact> {
+) -> Option<ShapeContact> {
     if vertices.len() < 3 {
         return None;
     }
@@ -396,7 +410,7 @@ fn polygon_sphere_contact(
     } else {
         normal * -1.0
     };
-    Some(BspContact {
+    Some(ShapeContact {
         normal: contact_normal,
         depth: radius - separation_length,
     })
@@ -410,7 +424,7 @@ pub(super) fn support_on_polygon(
     radius: f32,
     maximum_drop: f32,
     maximum_rise: f32,
-) -> Option<BspSupport> {
+) -> Option<ShapeSupport> {
     if vertices.len() < 3 || normal.z <= CONTACT_EPSILON {
         return None;
     }
@@ -433,11 +447,11 @@ pub(super) fn support_on_polygon(
             // Boundary points remain surface support. Otherwise shared polygon and terrain-triangle
             // seams would masquerade as precipices; the crossed-edge path begins only after the
             // adjusted contact point leaves the finite face.
-            minimum_support = Some((face_height_delta, BspSupportFeature::Surface));
+            minimum_support = Some((face_height_delta, ShapeSupportFeature::Surface));
         }
     }
 
-    if !matches!(minimum_support, Some((_, BspSupportFeature::Surface))) {
+    if !matches!(minimum_support, Some((_, ShapeSupportFeature::Surface))) {
         for index in 0..vertices.len() {
             let start = vertices[index];
             let end = vertices[(index + 1) % vertices.len()];
@@ -458,9 +472,9 @@ pub(super) fn support_on_polygon(
                     // (`CPolygon::adjust_sphere_to_plane`, acclient.c:344680-344734).
                     let (height_delta, feature) =
                         if adjustment_in_range && face_height_delta.abs() > CONTACT_EPSILON {
-                            (face_height_delta, BspSupportFeature::Surface)
+                            (face_height_delta, ShapeSupportFeature::Surface)
                         } else {
-                            (-drop, BspSupportFeature::Edge { inward_normal })
+                            (-drop, ShapeSupportFeature::Edge { inward_normal })
                         };
                     if minimum_support.is_none_or(|(current, _)| height_delta > current) {
                         minimum_support = Some((height_delta, feature));
@@ -471,7 +485,7 @@ pub(super) fn support_on_polygon(
     }
 
     let (height_delta, feature) = minimum_support?;
-    Some(BspSupport {
+    Some(ShapeSupport {
         normal,
         height_delta,
         feature,
@@ -581,8 +595,8 @@ fn shallowest_contact(
     bounding_planes: &[BoundingPlane],
     center: Vector3,
     radius: f32,
-) -> Option<BspContact> {
-    let mut shallowest: Option<BspContact> = None;
+) -> Option<ShapeContact> {
+    let mut shallowest: Option<ShapeContact> = None;
     for plane in bounding_planes {
         let distance = plane.normal.dot(&center) + plane.d;
         if distance > radius {
@@ -590,7 +604,7 @@ fn shallowest_contact(
         }
         let depth = radius - distance;
         if shallowest.is_none_or(|current| depth < current.depth) {
-            shallowest = Some(BspContact {
+            shallowest = Some(ShapeContact {
                 normal: plane.normal,
                 depth,
             });
@@ -630,8 +644,13 @@ mod tests {
             sphere: None,
             poly_ids: vec![1],
         });
+        let box_bounds = CollisionBox::from_points([
+            Vector3::new(-10.0, -10.0, -10.0),
+            Vector3::new(10.0, 10.0, 10.0),
+        ])
+        .unwrap();
         PlacedCollider {
-            shape: Arc::new(CollisionShape {
+            shape: Arc::new(CollisionShape::Bsp(BspSolid {
                 bsp: BspNode::Internal(InternalNode {
                     tag: *b"BPnn",
                     plane: Plane {
@@ -644,20 +663,15 @@ mod tests {
                     poly_ids: Vec::new(),
                 }),
                 bounds,
-                box_bounds: CollisionBox::from_points([
-                    Vector3::new(-10.0, -10.0, -10.0),
-                    Vector3::new(10.0, 10.0, 10.0),
-                ])
-                .unwrap(),
+                box_bounds,
                 polygons: HashMap::new(),
-            }),
+            })),
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
                 orientation: Quaternion::identity(),
             },
             scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds_center: bounds.center,
-            bounds_radius: bounds.radius,
+            bounds: box_bounds,
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
     }
@@ -665,16 +679,20 @@ mod tests {
     #[test]
     fn radius_only_solid_leaf_reach_is_not_center_penetration() {
         let collider = split_solid();
+        let solid = collider.shape.as_bsp().unwrap();
         assert!(
-            placed_solid_contacts(&collider, Vector3::new(0.75, 0.0, 0.0), 1.0, true).is_empty(),
+            placed_solid_contacts(&collider, solid, Vector3::new(0.75, 0.0, 0.0), 1.0, true)
+                .is_empty(),
             "radius-only traversal classified the empty-side center as solid"
         );
 
-        let inside = placed_solid_contacts(&collider, Vector3::new(-0.25, 0.0, 0.0), 1.0, true);
+        let inside =
+            placed_solid_contacts(&collider, solid, Vector3::new(-0.25, 0.0, 0.0), 1.0, true);
         assert_eq!(inside.len(), 1, "solid-side center lost its contact");
         assert_eq!(inside[0].normal, Vector3::new(1.0, 0.0, 0.0));
         assert!(
-            placed_solid_contacts(&collider, Vector3::new(-0.25, 0.0, 0.0), 1.0, false).is_empty(),
+            placed_solid_contacts(&collider, solid, Vector3::new(-0.25, 0.0, 0.0), 1.0, false)
+                .is_empty(),
             "disabled center-solid classification still treated the leaf interior as obstruction"
         );
     }

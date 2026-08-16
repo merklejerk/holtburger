@@ -1,9 +1,8 @@
 use std::sync::Mutex;
 
 use crate::host_simulation_runtime::{
-    EdgeProtectionRequest, GroundedConfigRequest, PhysicalBodyDefinitionRequest,
-    PhysicalCollisionExclusionRequest, PhysicalFlyConfigRequest, PhysicalResponseRequest,
-    PhysicalSphereRequest, SimulationInterestRequest, stable_response_policy_request,
+    EdgeProtectionRequest, PhysicalBodyProfileBodyRequest, PhysicalBodyProfileRequest,
+    PhysicalCollisionExclusionRequest, SimulationInterestRequest,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Plane, Quaternion, Vector3};
@@ -13,10 +12,7 @@ use holtburger_content::{
     TerrainCollisionSurface,
 };
 use holtburger_core::CharacterJumpKinematics;
-use holtburger_world::{
-    CollisionScene, MotionWaypoint, MotionWaypointPlacement, RETAIL_WALKABLE_NORMAL_Z,
-    SpatialBodyId,
-};
+use holtburger_world::{CollisionScene, MotionWaypoint, MotionWaypointPlacement, SpatialBodyId};
 
 use super::*;
 
@@ -172,50 +168,17 @@ fn registration(pose: WorldPosition, mode: PhysicalCameraMode) -> PhysicalCamera
     }
 }
 
-fn body_request(mode: PhysicalCameraMode) -> PhysicalBodyDefinitionRequest {
+fn body_request(mode: PhysicalCameraMode) -> PhysicalBodyProfileBodyRequest {
     match mode {
-        PhysicalCameraMode::PhysicalFly => PhysicalBodyDefinitionRequest {
+        PhysicalCameraMode::PhysicalFly => PhysicalBodyProfileBodyRequest {
+            profile: PhysicalBodyProfileRequest::PhysicalFlyViewer,
             collision_exclusions: vec![PhysicalCollisionExclusionRequest::EntirelyWaterBarrier],
-            spheres: vec![PhysicalSphereRequest {
-                center: [0.0, 0.0, 0.0],
-                radius: 0.25,
-            }],
-            response: PhysicalResponseRequest::FreeSphere {
-                config: PhysicalFlyConfigRequest {
-                    maximum_substep_distance: 0.25,
-                    maximum_substeps: 32,
-                    maximum_contact_passes: 8,
-                    separation_epsilon: 0.000_5,
-                },
-            },
-            response_policy: stable_response_policy_request(0.0),
         },
-        PhysicalCameraMode::GroundedWalk => PhysicalBodyDefinitionRequest {
-            collision_exclusions: Vec::new(),
-            spheres: vec![
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 0.475],
-                    radius: 0.48,
-                },
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 1.35],
-                    radius: 0.48,
-                },
-            ],
-            response: PhysicalResponseRequest::Grounded {
-                config: GroundedConfigRequest {
-                    gravity: -9.8,
-                    walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
-                    step_up_height: 0.6,
-                    step_down_height: 1.5,
-                    edge_protection: EdgeProtectionRequest::Creature,
-                    maximum_substep_distance: 0.24,
-                    maximum_substeps: 32,
-                    maximum_contact_passes: 8,
-                    separation_epsilon: 0.000_5,
-                },
+        PhysicalCameraMode::GroundedWalk => PhysicalBodyProfileBodyRequest {
+            profile: PhysicalBodyProfileRequest::RetailPlayerGrounded {
+                edge_protection: EdgeProtectionRequest::Creature,
             },
-            response_policy: stable_response_policy_request(0.05),
+            collision_exclusions: Vec::new(),
         },
     }
 }
@@ -960,7 +923,7 @@ fn grounded_tick_presents_eye_height_and_reports_support() {
 
     assert_eq!(path.mode, PhysicalCameraMode::GroundedWalk);
     assert_eq!(path.status, PhysicalCameraTickStatus::Solved);
-    assert!(path.grounded);
+    assert_eq!(path.ground_state, CameraGroundState::Supported);
     assert_eq!(path.constraint_count, 0);
     // The body runs 0.4 m and the viewer adds retail's 0.18 m in-head offset.
     assert!((final_path_point(&path).origin[0] - 96.58).abs() < 0.001);
@@ -993,7 +956,7 @@ fn press_and_release_delivered_out_of_order_launch_once_before_the_next_solve() 
         .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
         .unwrap()
         .unwrap();
-    assert!(supported.grounded);
+    assert_eq!(supported.ground_state, CameraGroundState::Supported);
 
     let release = grounded_event(
         session,
@@ -1025,7 +988,7 @@ fn press_and_release_delivered_out_of_order_launch_once_before_the_next_solve() 
         .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
         .unwrap()
         .unwrap();
-    assert!(!launched.grounded);
+    assert_ne!(launched.ground_state, CameraGroundState::Supported);
     let launched_body = runtime.simulation.physical_body_snapshot(body_id).unwrap();
     assert!(
         launched_body.velocity.z > 0.0,
@@ -1065,7 +1028,7 @@ fn press_and_release_delivered_out_of_order_launch_once_before_the_next_solve() 
         .unwrap()
         .unwrap();
     assert!(ballistic.character_event_outcomes.is_empty());
-    assert!(!ballistic.grounded);
+    assert_ne!(ballistic.ground_state, CameraGroundState::Supported);
     let ballistic_body = runtime.simulation.physical_body_snapshot(body_id).unwrap();
     assert_eq!(
         Vector3::new(ballistic_body.velocity.x, ballistic_body.velocity.y, 0.0),
@@ -1168,7 +1131,8 @@ fn lifecycle_gap_waits_for_the_missing_edge_and_rejects_duplicates_observably() 
             .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
             .unwrap()
             .unwrap()
-            .grounded
+            .ground_state
+            == CameraGroundState::Supported
     );
     let release = grounded_event(
         session,
@@ -1192,7 +1156,7 @@ fn lifecycle_gap_waits_for_the_missing_edge_and_rejects_duplicates_observably() 
         .unwrap()
         .unwrap();
     assert!(waiting.character_event_outcomes.is_empty());
-    assert!(waiting.grounded);
+    assert_eq!(waiting.ground_state, CameraGroundState::Supported);
 
     let begin = grounded_event(
         session,
@@ -1246,7 +1210,8 @@ fn release_after_scene_eviction_executes_once_in_open_space() {
             .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
             .unwrap()
             .unwrap()
-            .grounded
+            .ground_state
+            == CameraGroundState::Supported
     );
     runtime
         .queue_grounded_event(grounded_event(

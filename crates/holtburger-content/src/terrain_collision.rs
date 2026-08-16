@@ -35,6 +35,15 @@ pub struct TerrainCollisionSurface {
     pub cells: Vec<TerrainCollisionCell>,
     /// Whether every authored terrain vertex belongs to retail's water surface classes.
     pub entirely_water: bool,
+    /// Greatest triangle vertex height; `f32::NEG_INFINITY` for a surface with no cells, which
+    /// makes any derived burial depth clamp to zero.
+    pub maximum_height: f32,
+    /// Greatest `|planar normal| / vertical normal` (slope tangent) over all triangles.
+    ///
+    /// Together with `maximum_height`, this bounds how far a point below the surface can be from
+    /// the plumb column of any triangle whose plane it sits under — the fact a consumer needs to
+    /// bound spatial selection without scanning.
+    pub maximum_planar_shift_ratio: f32,
 }
 
 impl TerrainCollisionSurface {
@@ -43,6 +52,8 @@ impl TerrainCollisionSurface {
         Self {
             cells: Vec::new(),
             entirely_water: false,
+            maximum_height: f32::NEG_INFINITY,
+            maximum_planar_shift_ratio: 0.0,
         }
     }
 
@@ -109,6 +120,25 @@ impl TerrainCollisionSurface {
                 });
             }
         }
+        let mut maximum_height = f32::NEG_INFINITY;
+        let mut maximum_planar_shift_ratio = 0.0f32;
+        for cell in &cells {
+            for triangle in &cell.triangles {
+                for vertex in &triangle.vertices {
+                    maximum_height = maximum_height.max(vertex.z);
+                }
+                let planar = (triangle.normal.x * triangle.normal.x
+                    + triangle.normal.y * triangle.normal.y)
+                    .sqrt();
+                ensure!(
+                    triangle.normal.z > 0.0,
+                    "terrain triangles must face upward; got normal {:?}",
+                    triangle.normal
+                );
+                maximum_planar_shift_ratio =
+                    maximum_planar_shift_ratio.max(planar / triangle.normal.z);
+            }
+        }
         let entirely_water = terrain
             .terrain_samples
             .iter()
@@ -117,6 +147,8 @@ impl TerrainCollisionSurface {
         Ok(Self {
             cells,
             entirely_water,
+            maximum_height,
+            maximum_planar_shift_ratio,
         })
     }
 }

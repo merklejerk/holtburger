@@ -5,18 +5,31 @@ use holtburger_common::{Guid, Vector3};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Body-lifecycle ground classification, including the pre-classification `Unknown` state.
+///
+/// For bodies with local physics this is a projection of the solver-owned
+/// [`GroundState`](crate::GroundState), written at exactly one place (the grounded tick commit);
+/// for motion-snapshot bodies it is a server projection applied through
+/// `SpatialScene::apply_runtime_body_contact`. The planned unification (spawned-entity plan,
+/// 2026-08-16 reconciliation) makes `GroundState` the single persisted source once entity
+/// corrections flow through the solver.
 pub enum ContactState {
     #[default]
     Unknown,
     Airborne,
+    /// A retained contact plane below the walkable threshold: the body is on a surface it
+    /// cannot stand on, descending ballistically along it (retail `Contact && !OnWalkable`).
+    Sliding,
     Grounded,
 }
 
 impl ContactState {
-    pub const fn grounded(self) -> Option<bool> {
+    /// Whether the body has walkable support, once classified. `Sliding` answers `false`: the
+    /// body is on a surface, but not one it can stand on.
+    pub const fn walkable(self) -> Option<bool> {
         match self {
             Self::Unknown => None,
-            Self::Airborne => Some(false),
+            Self::Airborne | Self::Sliding => Some(false),
             Self::Grounded => Some(true),
         }
     }

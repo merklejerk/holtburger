@@ -219,6 +219,9 @@ demonstrate out-of-order or undetectable loss. They are not an eager correctness
   authoritative response policy under `SpatialBodyId::Entity`; frontend-local spawns submit explicit
   geometry plus policy and receive `Ephemeral` identity. Both enter the same validator and retained
   definition, while setup lookup and identity allocation stay outside simulation.
+  *(Superseded 2026-08-16 for the frontend contract: frontend-local spawns submit content
+  identity resolved through the shared core path; explicit geometry remains diagnostics-only —
+  see the contact-slide plan's host-resolved body profiles addendum.)*
 - Simulation interest is an explicit, revisioned application request realized by the app-local host
   service. Neither registration nor ticking may load, evict, or replace collision content. The
   2026-08-15 reconciliation below defines the current open-scene and residency behavior.
@@ -242,6 +245,40 @@ demonstrate out-of-order or undetectable loss. They are not an eager correctness
   representation without making that policy part of simulation.
 - Placement through absent topology is best effort. A later scene replacement does not inspect or
   mutate bodies, and seamless correction when geometry returns is explicitly not guaranteed.
+
+### 2026-08-16 Ground-State and Motion-Sync Reconciliation
+
+The two-threshold walkable model landed
+(`docs/plans/holtburger-grounded-landing-threshold-and-contact-slide-plan.md`): grounded bodies
+carry `GroundState { Supported | Sliding | Airborne }` with the contact plane, `ContactState`
+gained `Sliding`, and the host camera contract propagates the tri-state. That plan's decompile
+work also pinned the retail reconciliation model this plan's correction phases must follow:
+
+- **Retail syncs motion, never ground classification.** Other objects apply server position
+  updates through `InterpolationManager`'s node queue (deduped below 0.05m, capped at 20 nodes),
+  interpolating within `GetAutonomyBlipDistance` and snapping beyond it
+  (`acclient.c:371672-372100`); the self player is movement-autonomous with forced-position
+  corrections. Contact/OnWalkable/Sliding are re-derived **locally** by
+  `CPhysicsObj::SetPositionInternal` after every applied move (`acclient.c:310624-310760`). The
+  server never asserts a ground state.
+- **Consequence for spawned physical scenarios: corrections must flow through the local
+  solver.** When an entity carries a physical body, interpolation/correction output is solver
+  *input* — never a direct pose write that bypasses classification. That is what makes a
+  server-moved creature skidding down a slope classify `Sliding` locally with zero additional
+  wire data, and it is the retail-faithful resolution of the open "server contact vs local
+  ground state" question: there is no contest, because classification is never synced.
+- **`apply_runtime_body_contact` is a stopgap for bodies without local physics** (motion-snapshot
+  projections). Once an entity carries a `PhysicalBodyState`, its contact must come from its own
+  solve; the stopgap should refuse (loudly) to overwrite a physically-simulated body's
+  classification rather than silently desyncing it from the persisted `GroundState`.
+- **Sequenced follow-up**: after corrections-through-solver exist, `GroundState` becomes the
+  single persisted ground vocabulary and `ContactState` a one-place projection (plus `Unknown`
+  pre-classification) — recorded as directed debt in the contact-slide plan. Attempting that
+  cutover before this plan's correction phases would re-create the stopgap tension in a new
+  shape.
+- `SpatialSamplingConfig`'s interp/dead-reckon/snap is the coarse ancestor of retail's node
+  queue; whether Phase 4's continuous-correction semantics need the full queue fidelity is a
+  Phase 4 evidence question, not a presumption.
 
 ## Target Runtime Shape
 
@@ -460,6 +497,8 @@ the frontend receives only the presentation facts required to predict the same t
 - Add frontend `PlacementSystem` as the sole owner of `PresentationPlacement` and root-node writes.
 - Predict from absolute anchor/plan time, apply named decaying continuous correction, and snap on
   complete replacement, forced reposition, teleport, incompatible residency, or timeline reset.
+  For entities carrying physical bodies, corrections are solver input, never direct pose writes —
+  see the 2026-08-16 ground-state reconciliation.
 - For a named host-local physical prediction scenario, serialize the existing world-owned
   `PlacedMotionPath` with its accepted geometry. Attach the setup-resolved definition to the
   scenario's existing `SpatialBodyId::Entity` and tick it through the generic body runtime; do not

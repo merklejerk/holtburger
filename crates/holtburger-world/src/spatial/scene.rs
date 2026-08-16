@@ -8,6 +8,8 @@ use super::{
     physical_body::{physical_body_scene_residency, solve_physical_body_tick},
     physics::sample_mode_for_projection_state,
 };
+#[cfg(test)]
+use super::{GroundState, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z};
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
@@ -397,6 +399,13 @@ impl SpatialScene {
         true
     }
 
+    /// Applies a server-projected contact classification to a body **without local physics**.
+    ///
+    /// Retail never syncs ground classification: it syncs motion and re-derives contact locally
+    /// after every applied move (`CPhysicsObj::SetPositionInternal`, `acclient.c:310624-310760`).
+    /// This entry point exists only for motion-snapshot bodies that have no local solve to derive
+    /// from. A body carrying grounded physical response memory owns its classification through
+    /// `GroundState`; overwriting it here would silently desync the two, so the write is refused.
     pub fn apply_runtime_body_contact(
         &mut self,
         body_id: SpatialBodyId,
@@ -405,6 +414,18 @@ impl SpatialScene {
         let Some(body) = self.body_store.body_mut(body_id) else {
             return false;
         };
+        if body.physical.as_ref().is_some_and(|physical| {
+            matches!(
+                physical.response,
+                super::PhysicalBodyResponseState::Grounded { .. }
+            )
+        }) {
+            debug_assert!(
+                false,
+                "server contact projection must not overwrite a locally solved ground state;                  route motion through the solver instead (spawned-entity plan, 2026-08-16                  reconciliation)"
+            );
+            return false;
+        }
 
         body.contact = contact;
         true
@@ -544,6 +565,8 @@ mod physical_body_tests {
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
         walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+        landing_normal_z: RETAIL_LANDING_NORMAL_Z,
+        airborne_step_down_height: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,
@@ -839,6 +862,43 @@ mod physical_body_tests {
         assert_eq!(scene.body(id).unwrap(), &before);
     }
 
+    /// The server contact projection must not overwrite a locally solved ground state; routing
+    /// motion through the solver is the retail-faithful path (spawned-entity plan, 2026-08-16
+    /// reconciliation). Snapshot bodies without physics keep accepting projections.
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic(expected = "server contact projection"))]
+    fn contact_projection_refuses_grounded_physical_bodies() {
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let snapshot_id = SpatialBodyId::Entity(Guid(0x5000_0010));
+        scene.register_body(SpatialBody::new(
+            snapshot_id,
+            pose(Vector3::new(96.0, 96.0, 20.0)),
+            now,
+        ));
+        assert!(scene.apply_runtime_body_contact(snapshot_id, ContactState::Grounded));
+
+        let physical_id = SpatialBodyId::Entity(Guid(0x5000_0011));
+        scene.register_body(SpatialBody::new(
+            physical_id,
+            pose(Vector3::new(97.0, 96.0, 20.0)),
+            now,
+        ));
+        scene
+            .attach_physical_body(
+                physical_id,
+                grounded_definition(),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+            )
+            .unwrap();
+        // Debug builds panic on the guard; release builds refuse without mutating.
+        let accepted = scene.apply_runtime_body_contact(physical_id, ContactState::Grounded);
+        assert!(!accepted);
+        assert_eq!(scene.body(physical_id).unwrap().contact, ContactState::Unknown);
+    }
+
     #[test]
     fn sledding_support_retains_gravity_and_friction_for_one_or_two_spheres() {
         let collision = flat_collision_scene();
@@ -1106,12 +1166,12 @@ mod physical_body_tests {
             .unwrap();
         let stored = scene.body_mut(id).unwrap();
         stored.contact = ContactState::Grounded;
-        let PhysicalBodyResponseState::Grounded { support, .. } =
+        let PhysicalBodyResponseState::Grounded { ground, .. } =
             &mut stored.physical.as_mut().unwrap().response
         else {
             panic!("grounded definition produced non-grounded response state")
         };
-        *support = Some(GroundSupport {
+        *ground = GroundState::Supported(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         });
 
@@ -1220,7 +1280,7 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        let result = scene
+        scene
             .tick_physical_body(
                 id,
                 &collision,
@@ -1229,9 +1289,7 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .unwrap();
-        let motion = result.motion;
         let body = scene.body(id).unwrap();
-        assert!(motion.grounded);
         assert_eq!(body.contact, ContactState::Grounded);
         assert!((body.pose.coords.z - (start.z - TERRAIN_WATER_COLLISION_DEPTH)).abs() < 0.002);
     }
@@ -1282,12 +1340,12 @@ mod physical_body_tests {
         let stored = scene.body_mut(id).unwrap();
         stored.velocity = Vector3::new(1.0, 2.0, -3.0);
         stored.contact = ContactState::Grounded;
-        let PhysicalBodyResponseState::Grounded { support, .. } =
+        let PhysicalBodyResponseState::Grounded { ground, .. } =
             &mut stored.physical.as_mut().unwrap().response
         else {
             panic!("grounded definition produced non-grounded response state")
         };
-        *support = Some(GroundSupport {
+        *ground = GroundState::Supported(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         });
         let launch = GroundedLaunch::new(Vector3::new(8.0, 0.0, 6.0)).unwrap();

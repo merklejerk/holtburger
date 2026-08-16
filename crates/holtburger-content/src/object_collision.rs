@@ -1,12 +1,14 @@
 //! Static solid collision geometry placed in a landblock.
 //!
-//! Retail collides a moving sphere against the physics BSP of each placed part
-//! (`CPhysicsPart::find_obj_collisions`, `acclient.c:7214` `BSPTREE::check_walkable`), so solids
-//! here are the authored `GfxObj.physics_bsp` trees positioned by their placements. Objects
-//! without a physics BSP are not collision participants and are skipped rather than approximated
-//! by their draw geometry.
+//! Retail selects one collision representation per object (`CPhysicsObj::find_obj_collisions`,
+//! `acclient.c:304684-304745`): when any part carries a physics BSP (`PhysicsState::HasPhysicsBSP`,
+//! bit 0x10000, cached by ACE `PartArray.CacheHasPhysicsBSP`), the moving sphere collides against
+//! each placed part's BSP; otherwise it falls back to the setup's authored cylspheres, then its
+//! spheres. A bare `GfxObj` placement without a physics BSP has no setup and therefore no volumes,
+//! so it is not a collision participant — draw geometry is never approximated into collision.
 //!
-//! Shapes are shared by `GfxObj` identity: a landblock full of one tree holds one tree's BSP.
+//! BSP shapes are shared by `GfxObj` identity: a landblock full of one tree holds one tree's BSP.
+//! Volume shapes are shared by owning `SetupModel` identity.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,12 +23,44 @@ use crate::TerrainCollisionSurface;
 use crate::landblock::{LandblockAsset, LandblockObjectSourceFamily, LandblockPlacement};
 use crate::source_reader::ContentSourceReader;
 
-/// One authored physics shape, shared by every placement that references it.
+/// One authored collision shape, shared by every placement that references it.
+///
+/// The variants mirror retail's three collision representations. Exactly one applies per placed
+/// object, decided by the precedence documented on the module.
 #[derive(Debug)]
-pub struct CollisionShape {
+pub enum CollisionShape {
+    /// A part's physics BSP with its resolved polygons.
+    Bsp(BspSolid),
+    /// A setup-level collision cylinder.
+    ///
+    /// RETAIL QUIRK: the cylinder axis is world +Z regardless of placement orientation. Retail
+    /// transforms only the low point into the object's frame and keeps radius/height as scalars
+    /// (`CCylSphere::intersects_sphere`, `acclient.c:347305-347338`), so a tipped-over placement
+    /// still collides as an upright cylinder. Content was authored against this; tilting the
+    /// cylinder with the placement would change collision on every rotated volume static. No
+    /// census was run: the behavior is unconditional in the decompile.
+    Cylinder(CollisionCylinder),
+    /// A setup-level collision ball, used only when the setup has no cylspheres
+    /// (`acclient.c:304706`).
+    Ball(CollisionBall),
+}
+
+impl CollisionShape {
+    /// Returns the BSP solid when this shape is one.
+    pub fn as_bsp(&self) -> Option<&BspSolid> {
+        match self {
+            Self::Bsp(solid) => Some(solid),
+            Self::Cylinder(_) | Self::Ball(_) => None,
+        }
+    }
+}
+
+/// One authored physics BSP with the geometry its leaves reference.
+#[derive(Debug)]
+pub struct BspSolid {
     /// Physics BSP in object-local space.
     pub bsp: BspNode,
-    /// Object-local bounding sphere from the BSP root, used for broad-phase rejection.
+    /// Object-local bounding sphere from the BSP root, used to cull tree descent.
     pub bounds: Sphere,
     /// Object-local axis-aligned vertex bounds used by retail's static cell-shadow traversal.
     pub box_bounds: CollisionBox,
@@ -37,6 +71,26 @@ pub struct CollisionShape {
     pub polygons: HashMap<u16, CollisionPolygon>,
 }
 
+/// One authored setup collision cylinder in object-local space, axis +Z.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CollisionCylinder {
+    /// Object-local center of the cylinder's bottom disc.
+    pub low_point: Vector3,
+    /// Authored cylinder radius in meters.
+    pub radius: f32,
+    /// Authored cylinder height in meters, extending from `low_point` along +Z.
+    pub height: f32,
+}
+
+/// One authored setup collision ball in object-local space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CollisionBall {
+    /// Object-local ball center.
+    pub center: Vector3,
+    /// Authored ball radius in meters.
+    pub radius: f32,
+}
+
 /// Axis-aligned bounds of one authored collision part in object-local space.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CollisionBox {
@@ -45,6 +99,44 @@ pub struct CollisionBox {
 }
 
 impl CollisionBox {
+    /// Corner of least coordinates.
+    pub fn minimum(&self) -> Vector3 {
+        self.minimum
+    }
+
+    /// Corner of greatest coordinates.
+    pub fn maximum(&self) -> Vector3 {
+        self.maximum
+    }
+
+    /// Geometric center.
+    pub fn center(&self) -> Vector3 {
+        (self.minimum + self.maximum) * 0.5
+    }
+
+    /// Radius of the circumscribed sphere around `center`.
+    pub fn circumradius(&self) -> f32 {
+        ((self.maximum - self.minimum) * 0.5).length()
+    }
+
+    /// Whether a sphere reaches this box.
+    pub fn intersects_sphere(&self, center: Vector3, radius: f32) -> bool {
+        let clamped = Vector3::new(
+            center.x.clamp(self.minimum.x, self.maximum.x),
+            center.y.clamp(self.minimum.y, self.maximum.y),
+            center.z.clamp(self.minimum.z, self.maximum.z),
+        );
+        (center - clamped).length_squared() <= radius * radius
+    }
+
+    /// This box shifted by an offset, in the same frame.
+    pub fn translated(&self, offset: Vector3) -> Self {
+        Self {
+            minimum: self.minimum + offset,
+            maximum: self.maximum + offset,
+        }
+    }
+
     /// Resolves bounds from an authored vertex stream.
     pub fn from_points(points: impl IntoIterator<Item = Vector3>) -> Option<Self> {
         let mut points = points.into_iter();
@@ -167,9 +259,7 @@ impl ColliderScale {
     /// Builds a finite, component-wise positive scale.
     pub fn from_components(components: Vector3) -> Result<Self> {
         ensure!(
-            components.x.is_finite()
-                && components.y.is_finite()
-                && components.z.is_finite()
+            vector_is_finite(components)
                 && components.x > 0.0
                 && components.y > 0.0
                 && components.z > 0.0,
@@ -181,6 +271,12 @@ impl ColliderScale {
     /// Returns the authored component scale.
     pub fn components(self) -> Vector3 {
         self.components
+    }
+
+    /// Returns the single component of a uniform scale, or `None` when the components differ.
+    pub fn as_uniform(self) -> Option<f32> {
+        (self.components.x == self.components.y && self.components.y == self.components.z)
+            .then_some(self.components.x)
     }
 
     fn apply(self, value: Vector3) -> Vector3 {
@@ -201,13 +297,6 @@ impl ColliderScale {
 
     fn compose(self, local: Vector3) -> Result<Self> {
         Self::from_components(self.apply(local))
-    }
-
-    fn maximum_component(self) -> f32 {
-        self.components
-            .x
-            .max(self.components.y)
-            .max(self.components.z)
     }
 }
 
@@ -252,10 +341,9 @@ pub struct PlacedCollider {
     pub placement: LandblockPlacement,
     /// Component-wise scale applied to the shape.
     pub scale: ColliderScale,
-    /// Landblock-local bounding sphere, precomputed for broad-phase rejection.
-    pub bounds_center: Vector3,
-    /// Landblock-local bounding radius, including scale.
-    pub bounds_radius: f32,
+    /// Landblock-local axis-aligned bounds including scale, used for broad-phase rejection and
+    /// outdoor cell-shadow registration.
+    pub bounds: CollisionBox,
     /// Authored placement identity used to compile runtime cell residency for every part together.
     pub source_placement: StaticColliderPlacement,
 }
@@ -279,6 +367,93 @@ impl PlacedCollider {
             rotated.z + self.placement.origin.z,
         )
     }
+
+    /// The placed part box's eight corners in landblock space, before axis-aligned collapse.
+    ///
+    /// Retail's cell-shadow traversal tests the transformed part box corners against portal and
+    /// cell planes, so the rotated (non-axis-aligned) corners are the primitive; the stored
+    /// `bounds` field is their axis-aligned collapse. Volume shapes are already axis-aligned in
+    /// landblock space (the cylinder axis never tilts), so their corners and bounds coincide.
+    pub fn placed_box_corners(&self) -> [Vector3; 8] {
+        match &*self.shape {
+            CollisionShape::Bsp(solid) => solid
+                .box_bounds
+                .corners()
+                .map(|corner| self.point_to_landblock_space(corner)),
+            CollisionShape::Cylinder(_) | CollisionShape::Ball(_) => self.bounds.corners(),
+        }
+    }
+
+    /// Places a shared shape, deriving its landblock-space bounds.
+    ///
+    /// The sole construction door: bounds and the volume uniform-scale invariant are resolved
+    /// here once, so every collider — production or fixture — carries consistent derived facts.
+    /// Fails on a non-uniform volume scale: setup volumes are whole-object geometry, and retail
+    /// scales them by the object's scalar scale only (`acclient.c:347305`).
+    pub fn new(
+        shape: Arc<CollisionShape>,
+        placement: LandblockPlacement,
+        scale: ColliderScale,
+        source_placement: StaticColliderPlacement,
+    ) -> Result<Self> {
+        let bounds = placed_bounds(&shape, &placement, scale)?;
+        Ok(Self {
+            shape,
+            placement,
+            scale,
+            bounds,
+            source_placement,
+        })
+    }
+}
+
+/// Landblock-space axis-aligned bounds of one placed shape.
+fn placed_bounds(
+    shape: &CollisionShape,
+    placement: &LandblockPlacement,
+    scale: ColliderScale,
+) -> Result<CollisionBox> {
+    Ok(match shape {
+        CollisionShape::Bsp(solid) => {
+            let corners = solid.box_bounds.corners().map(|corner| {
+                let rotated = placement.orientation.rotate_vector(scale.apply(corner));
+                rotated + placement.origin
+            });
+            CollisionBox::from_points(corners).expect("a part box always has eight corners")
+        }
+        CollisionShape::Cylinder(cylinder) => {
+            let (uniform, transform) = uniform_placement(placement, scale)?;
+            let low = transform(cylinder.low_point);
+            let radius = cylinder.radius * uniform;
+            let height = cylinder.height * uniform;
+            CollisionBox {
+                minimum: Vector3::new(low.x - radius, low.y - radius, low.z),
+                maximum: Vector3::new(low.x + radius, low.y + radius, low.z + height),
+            }
+        }
+        CollisionShape::Ball(ball) => {
+            let (uniform, transform) = uniform_placement(placement, scale)?;
+            let center = transform(ball.center);
+            let radius = ball.radius * uniform;
+            CollisionBox {
+                minimum: center - Vector3::new(radius, radius, radius),
+                maximum: center + Vector3::new(radius, radius, radius),
+            }
+        }
+    })
+}
+
+/// Resolves the uniform scale a volume shape requires, with its point transform.
+fn uniform_placement<'a>(
+    placement: &'a LandblockPlacement,
+    scale: ColliderScale,
+) -> Result<(f32, impl Fn(Vector3) -> Vector3 + 'a)> {
+    let uniform = scale
+        .as_uniform()
+        .with_context(|| format!("setup volume shapes require uniform scale; got {scale:?}"))?;
+    Ok((uniform, move |point: Vector3| {
+        placement.orientation.rotate_vector(point * uniform) + placement.origin
+    }))
 }
 
 /// One interior cell's convex containment volume, in its own authored space.
@@ -547,7 +722,7 @@ impl LandblockColliderAssembler {
                                     cell.structure.environment_id, cell.structure.local_selector
                                 )
                             })?;
-                            Ok(Arc::new(CollisionShape {
+                            Ok(Arc::new(CollisionShape::Bsp(BspSolid {
                                 bsp: structure.physics_bsp.clone(),
                                 bounds,
                                 box_bounds,
@@ -555,21 +730,21 @@ impl LandblockColliderAssembler {
                                     &structure.physics_polygons,
                                     &structure.vertex_array,
                                 ),
-                            }))
+                            })))
                         }).transpose()?;
                     shapes.insert(key, resolved.clone());
                     resolved
                 }
             };
             if let Some(shape) = shape {
-                colliders.push(place(
+                colliders.push(PlacedCollider::new(
                     shape,
                     cell.placement,
                     ColliderScale::uniform(1.0)?,
                     StaticColliderPlacement::EnvCellShell {
                         cell_id: cell.env_cell_id,
                     },
-                ));
+                )?);
             }
 
             // Furniture, fixtures, and props inside the cell. These were never assembled, so every
@@ -680,10 +855,13 @@ impl LandblockColliderAssembler {
     }
 }
 
-/// Shapes resolved so far in one assembly, keyed by `GfxObj` DID.
+/// Shapes resolved so far in one assembly.
 #[derive(Debug, Default)]
 struct ShapeCache {
+    /// Per-part BSP shapes keyed by `GfxObj` DID.
     shapes: HashMap<u32, Option<Arc<CollisionShape>>>,
+    /// Setup-level volume shapes keyed by `SetupModel` DID.
+    volumes: HashMap<u32, Arc<Vec<Arc<CollisionShape>>>>,
 }
 
 impl ShapeCache {
@@ -709,12 +887,12 @@ impl ShapeCache {
                 .with_context(|| {
                     format!("GfxObj 0x{gfx_obj_id:08X} has a physics BSP but no vertices")
                 })?;
-                Some(Arc::new(CollisionShape {
+                Some(Arc::new(CollisionShape::Bsp(BspSolid {
                     bsp: bsp.clone(),
                     bounds,
                     box_bounds,
                     polygons: resolve_polygons(&gfx_obj.physics_polygons, &gfx_obj.vertex_array),
-                }))
+                })))
             }
             // A physics BSP whose root carries no sorting sphere cannot be broad-phase culled;
             // fail loudly rather than silently dropping a solid out of the collision world.
@@ -725,6 +903,63 @@ impl ShapeCache {
         };
         self.shapes.insert(gfx_obj_id, shape.clone());
         Ok(shape)
+    }
+
+    /// Resolve one setup's fallback volume shapes, empty when it authors none.
+    ///
+    /// Retail's precedence within the fallback is either/or: cylspheres when any exist, else
+    /// spheres (`CPhysicsObj::find_obj_collisions`, `acclient.c:304688-304745`). Five authored
+    /// setups carry both kinds, so collapsing this to a union would add collision content never
+    /// had.
+    fn setup_volumes(
+        &mut self,
+        setup_did: u32,
+        setup: &holtburger_dat::file_type::SetupModel,
+    ) -> Result<Arc<Vec<Arc<CollisionShape>>>> {
+        if let Some(cached) = self.volumes.get(&setup_did) {
+            return Ok(Arc::clone(cached));
+        }
+        let authored: Vec<Arc<CollisionShape>> = if !setup.cyl_spheres.is_empty() {
+            setup
+                .cyl_spheres
+                .iter()
+                .map(|cylinder| {
+                    ensure!(
+                        vector_is_finite(cylinder.origin)
+                            && cylinder.radius.is_finite()
+                            && cylinder.radius >= 0.0
+                            && cylinder.height.is_finite()
+                            && cylinder.height >= 0.0,
+                        "SetupModel 0x{setup_did:08X} authors a degenerate cylsphere: {cylinder:?}"
+                    );
+                    Ok(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                        low_point: cylinder.origin,
+                        radius: cylinder.radius,
+                        height: cylinder.height,
+                    })))
+                })
+                .collect::<Result<_>>()?
+        } else {
+            setup
+                .spheres
+                .iter()
+                .map(|sphere| {
+                    ensure!(
+                        vector_is_finite(sphere.center)
+                            && sphere.radius.is_finite()
+                            && sphere.radius >= 0.0,
+                        "SetupModel 0x{setup_did:08X} authors a degenerate collision sphere: {sphere:?}"
+                    );
+                    Ok(Arc::new(CollisionShape::Ball(CollisionBall {
+                        center: sphere.center,
+                        radius: sphere.radius,
+                    })))
+                })
+                .collect::<Result<_>>()?
+        };
+        let shared = Arc::new(authored);
+        self.volumes.insert(setup_did, Arc::clone(&shared));
+        Ok(shared)
     }
 }
 
@@ -759,12 +994,12 @@ fn append_placement(
     match input.family {
         LandblockObjectSourceFamily::GfxObj => {
             if let Some(shape) = shapes.shape(reader, input.source_did)? {
-                colliders.push(place(
+                colliders.push(PlacedCollider::new(
                     shape,
                     input.placement,
                     whole_object_scale,
                     input.identity,
-                ));
+                )?);
             }
         }
         LandblockObjectSourceFamily::SetupModel => {
@@ -795,10 +1030,12 @@ fn append_placement(
                     setup.parts.len()
                 );
             }
+            let mut any_part_bsp = false;
             for (part_index, part_id) in setup.parts.iter().enumerate() {
                 let Some(shape) = shapes.shape(reader, *part_id)? else {
                     continue;
                 };
+                any_part_bsp = true;
                 // Whole-object scale affects both part offsets and geometry. Per-part default scale
                 // affects that part's geometry only (`CPartArray::UpdateParts`, acclient.c:314128).
                 let part_placement = match part_frames {
@@ -823,7 +1060,27 @@ fn append_placement(
                             input.source_did
                         )
                     })?;
-                colliders.push(place(shape, part_placement, part_scale, input.identity));
+                colliders.push(PlacedCollider::new(
+                    shape,
+                    part_placement,
+                    part_scale,
+                    input.identity,
+                )?);
+            }
+            // Retail collides against per-part physics BSPs only when the object has
+            // `PhysicsState::HasPhysicsBSP` (any part carries one); otherwise it falls back to the
+            // setup's authored volumes (`CPhysicsObj::find_obj_collisions`, acclient.c:304684).
+            // 172 authored setups carry both representations, so emitting volumes alongside BSP
+            // parts would double-collide them.
+            if !any_part_bsp {
+                for shape in shapes.setup_volumes(input.source_did, &setup)?.iter() {
+                    colliders.push(PlacedCollider::new(
+                        Arc::clone(shape),
+                        input.placement,
+                        whole_object_scale,
+                        input.identity,
+                    )?);
+                }
             }
         }
         LandblockObjectSourceFamily::Other(_) => {}
@@ -850,26 +1107,9 @@ fn compose(
     }
 }
 
-fn place(
-    shape: Arc<CollisionShape>,
-    placement: LandblockPlacement,
-    scale: ColliderScale,
-    source_placement: StaticColliderPlacement,
-) -> PlacedCollider {
-    let scaled_center = scale.apply(shape.bounds.center);
-    let rotated_center = placement.orientation.rotate_vector(scaled_center);
-    PlacedCollider {
-        bounds_center: Vector3::new(
-            placement.origin.x + rotated_center.x,
-            placement.origin.y + rotated_center.y,
-            placement.origin.z + rotated_center.z,
-        ),
-        bounds_radius: shape.bounds.radius * scale.maximum_component(),
-        shape,
-        placement,
-        scale,
-        source_placement,
-    }
+/// Whether every component of a vector is finite.
+fn vector_is_finite(vector: Vector3) -> bool {
+    vector.x.is_finite() && vector.y.is_finite() && vector.z.is_finite()
 }
 
 fn bsp_root_sphere(node: &Option<BspNode>) -> Option<Sphere> {
@@ -911,7 +1151,7 @@ mod tests {
     }
 
     fn shape_with_bounds(center: Vector3, radius: f32) -> Arc<CollisionShape> {
-        Arc::new(CollisionShape {
+        Arc::new(CollisionShape::Bsp(BspSolid {
             bsp: BspNode::Leaf(BspLeaf {
                 index: 0,
                 solid: 1,
@@ -924,7 +1164,7 @@ mod tests {
                 maximum: center + Vector3::new(radius, radius, radius),
             },
             polygons: HashMap::new(),
-        })
+        }))
     }
 
     fn synthetic_cell_volume() -> CellVolume {
@@ -980,7 +1220,7 @@ mod tests {
 
     #[test]
     fn non_uniform_scale_transforms_points() {
-        let collider = place(
+        let collider = PlacedCollider::new(
             shape_with_bounds(Vector3::zero(), 1.0),
             LandblockPlacement {
                 origin: Vector3::new(10.0, 20.0, 30.0),
@@ -988,15 +1228,16 @@ mod tests {
             },
             ColliderScale::from_components(Vector3::new(2.0, 3.0, 4.0)).unwrap(),
             StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
-        );
+        )
+        .unwrap();
         let object_point = Vector3::new(1.0, 2.0, 3.0);
         let landblock_point = collider.point_to_landblock_space(object_point);
         assert_eq!(landblock_point, Vector3::new(12.0, 26.0, 42.0));
     }
 
     #[test]
-    fn non_uniform_scale_uses_inverse_transpose_for_normals_and_conservative_bounds() {
-        let collider = place(
+    fn non_uniform_scale_uses_inverse_transpose_for_normals_and_scaled_bounds() {
+        let collider = PlacedCollider::new(
             shape_with_bounds(Vector3::new(1.0, 1.0, 1.0), 2.0),
             LandblockPlacement {
                 origin: Vector3::zero(),
@@ -1004,9 +1245,12 @@ mod tests {
             },
             ColliderScale::from_components(Vector3::new(2.0, 3.0, 4.0)).unwrap(),
             StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
-        );
-        assert_eq!(collider.bounds_center, Vector3::new(2.0, 3.0, 4.0));
-        assert_eq!(collider.bounds_radius, 8.0);
+        )
+        .unwrap();
+        // Box bounds are the unit cube around (1, 1, 1) scaled to radius 2, then component-scaled.
+        assert_eq!(collider.bounds.minimum(), Vector3::new(-2.0, -3.0, -4.0));
+        assert_eq!(collider.bounds.maximum(), Vector3::new(6.0, 9.0, 12.0));
+        assert_eq!(collider.bounds.center(), Vector3::new(2.0, 3.0, 4.0));
 
         let transformed = collider.normal_to_landblock_space(Vector3::new(1.0, 1.0, 0.0));
         let expected = Vector3::new(0.5, 1.0 / 3.0, 0.0).normalize();
@@ -1014,8 +1258,178 @@ mod tests {
     }
 
     #[test]
+    fn rotated_bsp_bounds_cover_the_placed_corners() {
+        // A quarter turn around Z maps the box's +X reach onto +Y; the AABB must follow the
+        // rotated corners rather than rotating its min/max naively.
+        let half_angle = std::f32::consts::FRAC_PI_4;
+        let quarter_turn = Quaternion {
+            w: half_angle.cos(),
+            x: 0.0,
+            y: 0.0,
+            z: half_angle.sin(),
+        };
+        let collider = PlacedCollider::new(
+            shape_with_bounds(Vector3::new(1.0, 0.0, 0.0), 1.0),
+            LandblockPlacement {
+                origin: Vector3::new(100.0, 100.0, 0.0),
+                orientation: quarter_turn,
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+            StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+        )
+        .unwrap();
+        assert!((collider.bounds.center() - Vector3::new(100.0, 101.0, 0.0)).length() < 1e-5);
+        assert!((collider.bounds.minimum().x - 99.0).abs() < 1e-5);
+        assert!((collider.bounds.maximum().y - 102.0).abs() < 1e-5);
+    }
+
+    /// RETAIL QUIRK coverage: the placed cylinder never tilts with its placement
+    /// (`acclient.c:347305` transforms only the low point), so a rotated placement moves the low
+    /// point but keeps the box axis-aligned with world Z.
+    #[test]
+    fn placed_cylinder_bounds_stay_world_z_aligned_under_rotation() {
+        let half_angle = std::f32::consts::FRAC_PI_4;
+        let quarter_turn_about_y = Quaternion {
+            w: half_angle.cos(),
+            x: 0.0,
+            y: half_angle.sin(),
+            z: 0.0,
+        };
+        let collider = PlacedCollider::new(
+            Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::new(1.0, 0.0, 0.0),
+                radius: 0.5,
+                height: 4.0,
+            })),
+            LandblockPlacement {
+                origin: Vector3::new(10.0, 10.0, 5.0),
+                orientation: quarter_turn_about_y,
+            },
+            ColliderScale::uniform(2.0).unwrap(),
+            StaticColliderPlacement::OutdoorGenerated { source_index: 0 },
+        )
+        .unwrap();
+        // Scaled low point (2, 0, 0) rotates about Y onto -Z: placed low = (10, 10, 3).
+        let bounds = collider.bounds;
+        assert!((bounds.minimum() - Vector3::new(9.0, 9.0, 3.0)).length() < 1e-5);
+        // Height 4 × scale 2 extends straight up regardless of the rotation.
+        assert!((bounds.maximum() - Vector3::new(11.0, 11.0, 11.0)).length() < 1e-5);
+    }
+
+    #[test]
+    fn placed_ball_bounds_scale_and_translate() {
+        let collider = PlacedCollider::new(
+            Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::new(0.0, 0.0, 1.0),
+                radius: 1.5,
+            })),
+            LandblockPlacement {
+                origin: Vector3::new(50.0, 60.0, 0.0),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(2.0).unwrap(),
+            StaticColliderPlacement::OutdoorGenerated { source_index: 0 },
+        )
+        .unwrap();
+        assert_eq!(collider.bounds.center(), Vector3::new(50.0, 60.0, 2.0));
+        assert_eq!(collider.bounds.minimum(), Vector3::new(47.0, 57.0, -1.0));
+        assert_eq!(collider.bounds.maximum(), Vector3::new(53.0, 63.0, 5.0));
+    }
+
+    #[test]
+    fn volume_shapes_reject_non_uniform_scale_loudly() {
+        let error = PlacedCollider::new(
+            Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::zero(),
+                radius: 1.0,
+                height: 1.0,
+            })),
+            LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::from_components(Vector3::new(1.0, 2.0, 1.0)).unwrap(),
+            StaticColliderPlacement::OutdoorGenerated { source_index: 0 },
+        );
+        assert!(error.is_err(), "non-uniform volume scale must fail loudly");
+    }
+
+    #[test]
     fn invalid_collider_scales_fail_loudly() {
         assert!(ColliderScale::uniform(0.0).is_err());
         assert!(ColliderScale::from_components(Vector3::new(1.0, f32::NAN, 1.0)).is_err());
+    }
+
+    /// Retail's fallback is either/or: any authored cylsphere suppresses every authored sphere
+    /// (`CPhysicsObj::find_obj_collisions`, `acclient.c:304688`). Five authored setups carry both
+    /// (e.g. 0x02000F7B), so a union here would add collision content never had.
+    #[test]
+    fn cylspheres_suppress_spheres_in_the_volume_fallback() {
+        let mut setup = holtburger_dat::file_type::SetupModel {
+            id: 0x0200_0001,
+            flags: 0,
+            parts: Vec::new(),
+            parent_index: Vec::new(),
+            default_scale: Vec::new(),
+            holding_locations: Default::default(),
+            connection_points: Default::default(),
+            placement_frames: Default::default(),
+            cyl_spheres: vec![holtburger_dat::file_type::setup_model::CylSphere {
+                origin: Vector3::zero(),
+                radius: 1.0,
+                height: 2.0,
+            }],
+            spheres: vec![
+                Sphere {
+                    center: Vector3::zero(),
+                    radius: 1.0,
+                },
+                Sphere {
+                    center: Vector3::new(1.0, 0.0, 0.0),
+                    radius: 1.0,
+                },
+            ],
+            height: 0.0,
+            radius: 0.0,
+            step_up: 0.0,
+            step_down: 0.0,
+            sorting_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 0.0,
+            },
+            selection_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 0.0,
+            },
+            lights: Default::default(),
+            default_animation: None,
+            default_script: None,
+            default_motion_table: None,
+            default_sound_table: None,
+            default_script_table: None,
+        };
+
+        let mut cache = ShapeCache::default();
+        let volumes = cache.setup_volumes(setup.id, &setup).unwrap();
+        assert_eq!(volumes.len(), 1, "cylspheres must suppress spheres");
+        assert!(matches!(&*volumes[0], CollisionShape::Cylinder(_)));
+
+        setup.cyl_spheres.clear();
+        let mut cache = ShapeCache::default();
+        let volumes = cache.setup_volumes(setup.id, &setup).unwrap();
+        assert_eq!(volumes.len(), 2, "without cylspheres, spheres participate");
+        assert!(matches!(&*volumes[0], CollisionShape::Ball(_)));
+    }
+
+    #[test]
+    fn collision_box_sphere_intersection_clamps_to_faces() {
+        let bounds =
+            CollisionBox::from_points([Vector3::new(0.0, 0.0, 0.0), Vector3::new(2.0, 2.0, 2.0)])
+                .unwrap();
+        assert!(bounds.intersects_sphere(Vector3::new(3.0, 1.0, 1.0), 1.5));
+        assert!(!bounds.intersects_sphere(Vector3::new(3.0, 1.0, 1.0), 0.5));
+        // Corner reach uses true euclidean distance, not per-axis slack.
+        assert!(!bounds.intersects_sphere(Vector3::new(3.0, 3.0, 1.0), 1.2));
+        assert!(bounds.intersects_sphere(Vector3::new(3.0, 3.0, 1.0), 1.5));
     }
 }

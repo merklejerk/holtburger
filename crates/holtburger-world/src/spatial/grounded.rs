@@ -17,13 +17,29 @@ use super::collision::{
 /// `CPhysicsObj::is_valid_walkable` (`acclient.c:765983-765986`, `:304992-304995`).
 pub const RETAIL_WALKABLE_NORMAL_Z: f32 = 0.664_174_14;
 
+/// Retail's lenient landing allowance for bodies without walkable support.
+///
+/// A transition prepared while the body lacks `OnWalkable` writes `0.0871557` (cos 85°) into
+/// `SPHEREPATH::walkable_allowance` (`acclient.c:301469-301474`, `:301563-301569`, `:302009`),
+/// so a falling body accepts nearly any upward-tilted surface as a landing contact. The walking
+/// threshold above still decides whether that contact is walkable.
+pub const RETAIL_LANDING_NORMAL_Z: f32 = 0.087_155_7;
+
+/// Retail's step-down reach for bodies without walkable support (`acclient.c:301468`, `:301562`).
+pub const RETAIL_AIRBORNE_STEP_DOWN_HEIGHT: f32 = 0.04;
+
 /// Explicit limits and grounded-response policy for one solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundedConfig {
     /// Downward world acceleration in meters per second squared.
     pub gravity: f32,
-    /// Minimum upward normal component that may support the lower sphere.
+    /// Minimum upward normal component that may support the lower sphere while walking.
     pub walkable_normal_z: f32,
+    /// Minimum upward normal component a body without walkable support accepts as a landing
+    /// contact; landings between this and `walkable_normal_z` classify as contact-slide.
+    pub landing_normal_z: f32,
+    /// Step-down reach used by the lenient landing probe of a body without walkable support.
+    pub airborne_step_down_height: f32,
     /// Maximum non-recursive rise used by a lower-sphere step attempt.
     pub step_up_height: f32,
     /// Maximum vertical distance used to retain or acquire support after movement.
@@ -74,6 +90,55 @@ pub struct GroundSupport {
     pub normal: Vector3,
 }
 
+/// The body's derived ground state, mirroring retail's observable transient combinations
+/// (`CPhysicsObj::SetPositionInternal`, `acclient.c:310624-310760`).
+///
+/// This is the solver-owned source; the lifecycle-facing [`ContactState`](super::ContactState)
+/// (which adds `Unknown`) is projected from it at the grounded tick commit and must never be
+/// written back over a solved body (see `SpatialScene::apply_runtime_body_contact`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GroundState {
+    /// A contact plane at or above the walking threshold: retail `Contact && OnWalkable`.
+    Supported(GroundSupport),
+    /// A contact plane below the walking threshold: retail `Contact && !OnWalkable`. Gravity
+    /// stays applied and no friction runs (`calc_acceleration` acclient.c:306176,
+    /// `calc_friction` :304541); motion is ballistic with the plane retained for
+    /// classification and reporting.
+    Sliding(GroundSupport),
+    /// No contact plane.
+    Airborne,
+}
+
+impl GroundState {
+    /// The walkable support plane, when the body is supported.
+    pub fn walkable_support(self) -> Option<GroundSupport> {
+        match self {
+            Self::Supported(support) => Some(support),
+            Self::Sliding(_) | Self::Airborne => None,
+        }
+    }
+
+    /// The retained contact plane, walkable or sliding.
+    pub fn contact_plane(self) -> Option<GroundSupport> {
+        match self {
+            Self::Supported(support) | Self::Sliding(support) => Some(support),
+            Self::Airborne => None,
+        }
+    }
+
+    /// The settle transaction a non-launching tick of this resolved state permits.
+    ///
+    /// Launch ticks and the not-yet-classified lifecycle state are owned by
+    /// `grounded_settle_permission`, which projects from `ContactState`; this is the resolved
+    /// counterpart every request builder over a solved body should use.
+    pub fn settle_permission(self) -> SettlePermission {
+        match self {
+            Self::Supported(_) => SettlePermission::Walking,
+            Self::Sliding(_) | Self::Airborne => SettlePermission::Landing,
+        }
+    }
+}
+
 /// Last safely committed grounded body state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroundedBody {
@@ -83,8 +148,8 @@ pub struct GroundedBody {
     pub cell: Option<Guid>,
     /// Canonical full world-space linear velocity at the committed pose.
     pub velocity: Vector3,
-    /// Current lower-sphere support committed with `pose`.
-    pub support: Option<GroundSupport>,
+    /// Derived ground state committed with `pose`.
+    pub ground: GroundState,
 }
 
 /// One desired grounded-motion tick.
@@ -97,15 +162,30 @@ pub struct GroundedRequest {
     /// Finite world-space velocity used while supported; explicit controller drive is horizontal,
     /// while generic surface response may supply a full support-tangent vector.
     pub supported_velocity: Vector3,
-    /// Whether current contact state permits retail's walking step-down transaction.
-    /// Launch and established airborne ticks disable it; initial classification enables it.
-    pub may_step_down: bool,
+    /// Which settle transaction this tick's contact state permits.
+    pub settle: SettlePermission,
     /// Whether supported motion retains canonical velocity and gravity for retail Sledding.
     pub retain_supported_gravity: bool,
     /// Positive simulation interval in seconds.
     pub delta_seconds: f32,
     /// Body-owned optional collision-domain exclusions.
     pub filter: super::PhysicalCollisionFilter,
+}
+
+/// Which settle transaction retail's per-transition state permits.
+///
+/// Retail gates the ordinary walking step-down on the contact bit
+/// (`CTransition::transitional_insert`, `acclient.c:301550-301599`) and prepares the lenient
+/// 0.04m landing step-down for every other gravity-bound transition; a launch tick suppresses
+/// both until the body has left the ground.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettlePermission {
+    /// Launch tick: no settle transaction; only a direct walkable strike may reacquire ground.
+    Denied,
+    /// Airborne or sliding body: the lenient landing probe runs each tick.
+    Landing,
+    /// Walkable or not-yet-classified body: the full walking step-down transaction runs.
+    Walking,
 }
 
 /// Which finite grounded-solver budget refused a request.
@@ -178,14 +258,17 @@ struct SupportedPlacement {
     support: GroundSupport,
 }
 
-/// Result of retail's ordinary walkable step-down transaction.
+/// Result of one settle transaction (walking step-down or lenient landing).
 #[derive(Debug, Clone)]
 enum SettleResult {
-    /// A finite polygon face accepted the candidate and supplied a contact plane.
+    /// A face at or above the walking threshold accepted the candidate.
     Supported(SupportedPlacement),
+    /// A face admitted by the lenient landing allowance but below the walking threshold
+    /// accepted the candidate: retail `Contact && !OnWalkable`.
+    Sliding(SupportedPlacement),
     /// Only a finite edge was reachable, so creature response must use precipice sliding.
     Edge { inward_normal: Vector3 },
-    /// No walkable face or edge was reachable within the configured probe.
+    /// No admissible face or edge was reachable within the configured probe.
     Unsupported,
 }
 
@@ -219,10 +302,11 @@ pub fn solve_grounded(
         spheres: request.spheres,
         filter: request.filter,
     };
-    let supported = request.body.support.is_some();
-    let active_velocity = if supported && request.retain_supported_gravity {
-        request.body.velocity
-    } else if supported {
+    let supported = request.body.ground.walkable_support().is_some();
+    // Airborne and sliding bodies are ballistic: retail keeps gravity and skips friction for any
+    // state other than `Contact && OnWalkable` (`acclient.c:306176`, `:304541`). Sledding
+    // likewise retains canonical velocity while supported.
+    let active_velocity = if supported && !request.retain_supported_gravity {
         request.supported_velocity
     } else {
         request.body.velocity
@@ -246,7 +330,7 @@ pub fn solve_grounded(
 
     let mut displacement = active_velocity * request.delta_seconds;
     displacement.z = vertical_displacement;
-    if let Some(support) = request.body.support {
+    if let Some(support) = request.body.ground.walkable_support() {
         displacement = project_into_plane(displacement, support.normal);
     }
     let distance = displacement.length();
@@ -281,7 +365,8 @@ pub fn solve_grounded(
     let mut collision_normal = None;
 
     'substeps: for completed_substeps in 0..required_substeps {
-        let prior_support = body.support;
+        let prior_ground = body.ground;
+        let prior_support = prior_ground.walkable_support();
         let mut constrained_substep = apply_sliding_normal(substep, sliding_normal.take());
         let MovementCandidate {
             center: mut candidate,
@@ -309,7 +394,7 @@ pub fn solve_grounded(
                 .any(|entry| entry.role == SphereRole::Support && !entry.contacts.is_empty());
             if lower_blocked
                 && !lower_step_retried
-                && body.support.is_some()
+                && body.ground.walkable_support().is_some()
                 && config.step_up_height > 0.0
             {
                 if let Some(stepped) = step_up_candidate(context, &body, current, candidate)? {
@@ -321,7 +406,7 @@ pub fn solve_grounded(
                         reference_pose,
                         stepped.placement.committed_cell(),
                     );
-                    body.support = Some(stepped.support);
+                    body.ground = GroundState::Supported(stepped.support);
                     motion.push(MotionWaypoint {
                         center: current,
                         end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
@@ -433,17 +518,34 @@ pub fn solve_grounded(
                 placement: candidate_placement.clone(),
                 support,
             })
-        } else if request.may_step_down {
-            // Retail reaches its ordinary step-down branch only while OBJECTINFO state retains
-            // contact (`CTransition::transitional_insert`, acclient.c:301550-301599). Running the
-            // full walking probe after `LeaveGround` snaps an upward launch back to the floor.
-            step_down_candidate(context, &body, candidate)?
-        } else if contacted_walkable_support {
-            // An airborne sweep that actually struck a walkable lower contact may acquire that
-            // exact surface, but it does not inherit the much deeper walking step-down reach.
-            settle_candidate(context, &body, candidate, config.separation_epsilon * 2.0)?
         } else {
-            SettleResult::Unsupported
+            match request.settle {
+                // Retail reaches its ordinary step-down branch only while OBJECTINFO state
+                // retains contact (`CTransition::transitional_insert`, acclient.c:301550-301599).
+                // Running the full walking probe after `LeaveGround` snaps an upward launch back
+                // to the floor.
+                SettlePermission::Walking => {
+                    step_down_candidate(context, &body, candidate, candidate_placement.clone())?
+                }
+                // A body without walkable support runs retail's lenient 0.04m landing step-down
+                // every transition (`acclient.c:301563-301569`).
+                SettlePermission::Landing => {
+                    landing_candidate(context, &body, candidate, candidate_placement.clone())?
+                }
+                SettlePermission::Denied if contacted_walkable_support => {
+                    // A launch sweep that actually struck a walkable lower contact may acquire
+                    // that exact surface, but it does not inherit any step-down reach.
+                    settle_candidate(
+                        context,
+                        &body,
+                        candidate,
+                        candidate_placement.clone(),
+                        config.separation_epsilon * 2.0,
+                        config.walkable_normal_z,
+                    )?
+                }
+                SettlePermission::Denied => SettleResult::Unsupported,
+            }
         };
         match settle_result {
             SettleResult::Supported(settled) => {
@@ -454,7 +556,12 @@ pub fn solve_grounded(
                 );
                 candidate = settled.body_center;
                 candidate_placement = settled.placement;
-                body.support = Some(settled.support);
+                body.ground = GroundState::Supported(settled.support);
+            }
+            SettleResult::Sliding(settled) => {
+                candidate = settled.body_center;
+                candidate_placement = settled.placement;
+                body.ground = GroundState::Sliding(settled.support);
             }
             result @ (SettleResult::Edge { .. } | SettleResult::Unsupported)
                 if config.edge_protection == EdgeProtection::Creature =>
@@ -462,12 +569,14 @@ pub fn solve_grounded(
                 // Retail restores both the saved check position and saved cell before precipice
                 // response (`CTransition::edge_slide`, acclient.c:301354-301440). Rolling back the
                 // whole candidate keeps protection independent of whether this substep happened
-                // to cross a portal before support failed.
+                // to cross a portal before support failed. Because the protected body holds at
+                // its walkable pose, it stays `OnWalkable` and the lenient landing threshold can
+                // never reach it — matching retail's threshold selection by that same state.
                 if let Some(prior_support) = prior_support {
                     let inward_normal = match result {
                         SettleResult::Edge { inward_normal } => Some(inward_normal),
                         SettleResult::Unsupported => None,
-                        SettleResult::Supported(_) => unreachable!(),
+                        SettleResult::Supported(_) | SettleResult::Sliding(_) => unreachable!(),
                     };
                     match edge_slide_candidate(
                         context,
@@ -479,7 +588,7 @@ pub fn solve_grounded(
                         Some(slid) => {
                             candidate = slid.body_center;
                             candidate_placement = slid.placement;
-                            body.support = Some(slid.support);
+                            body.ground = GroundState::Supported(slid.support);
                         }
                         None => {
                             candidate = current;
@@ -491,15 +600,20 @@ pub fn solve_grounded(
                                 request.spheres,
                                 current,
                             )?;
-                            body.support = Some(prior_support);
+                            body.ground = GroundState::Supported(prior_support);
                         }
                     }
                 } else {
-                    body.support = None;
+                    body.ground = GroundState::Airborne;
                 }
             }
             SettleResult::Edge { .. } | SettleResult::Unsupported => {
-                body.support = None;
+                // Retail selects the walkable allowance at transition entry, so a failed walking
+                // step-down ends with an invalid contact plane and a cleared contact bit
+                // (`CPhysicsObj::SetPositionInternal`, acclient.c:310697-310719); the lenient
+                // landing rules apply only from the next transition. A crest walk-off therefore
+                // passes through a brief genuine airborne gap before the slide acquires.
+                body.ground = GroundState::Airborne;
             }
         }
 
@@ -569,20 +683,16 @@ fn remember_support_collision_normal(
     }
 }
 
+/// `candidate_placement` must be the transit placement for `candidate`; every caller already
+/// holds it, so the settle transaction does not repeat that query.
 fn settle_candidate(
     context: GroundedSolveContext<'_>,
     body: &GroundedBody,
     candidate: Vector3,
+    candidate_placement: CollisionPlacement,
     maximum_drop: f32,
+    acceptance_normal_z: f32,
 ) -> Result<SettleResult> {
-    let candidate_placement = transit_pair(
-        context.scene,
-        context.anchor,
-        body,
-        context.pose,
-        context.spheres,
-        candidate,
-    )?;
     // Retail lowers the complete candidate body, invalidates its CELLARRAY, and rebuilds that
     // collision-domain set before evaluating walkable surfaces (`CTransition::step_down`,
     // acclient.c:301354-301437). The vertical transaction must retain the candidate domains as
@@ -611,7 +721,7 @@ fn settle_candidate(
     let mut edge: Option<SupportContact> = None;
     for support in supports
         .into_iter()
-        .filter(|contact| contact.normal.z >= context.config.walkable_normal_z)
+        .filter(|contact| contact.normal.z >= acceptance_normal_z)
     {
         match support.feature {
             SupportFeature::Surface
@@ -666,23 +776,60 @@ fn settle_candidate(
         // that bridge at the candidate elevation only when the same bounded query proved a real
         // surface below. Edge reach by itself must not become ratcheting support.
         if let Some(edge) = edge {
-            return Ok(SettleResult::Supported(SupportedPlacement {
-                body_center: candidate,
-                placement: candidate_placement,
-                support: GroundSupport {
-                    normal: edge.normal,
+            return Ok(classified_settle(
+                context,
+                SupportedPlacement {
+                    body_center: candidate,
+                    placement: candidate_placement,
+                    support: GroundSupport {
+                        normal: edge.normal,
+                    },
                 },
-            }));
+            ));
         }
         return Ok(SettleResult::Unsupported);
     }
-    Ok(SettleResult::Supported(SupportedPlacement {
-        body_center: settled,
-        placement: settled_cells,
-        support: GroundSupport {
-            normal: support.normal,
+    Ok(classified_settle(
+        context,
+        SupportedPlacement {
+            body_center: settled,
+            placement: settled_cells,
+            support: GroundSupport {
+                normal: support.normal,
+            },
         },
-    }))
+    ))
+}
+
+/// Classifies an accepted settle by the walking threshold, mirroring retail's `OnWalkable`
+/// derivation from the committed contact plane (`acclient.c:310712-310717`).
+fn classified_settle(
+    context: GroundedSolveContext<'_>,
+    settled: SupportedPlacement,
+) -> SettleResult {
+    if settled.support.normal.z >= context.config.walkable_normal_z {
+        SettleResult::Supported(settled)
+    } else {
+        SettleResult::Sliding(settled)
+    }
+}
+
+/// Retail's lenient landing step-down for a body without walkable support: 0.04m reach, cos-85°
+/// acceptance (`acclient.c:301563-301569`), classified against the walking threshold.
+fn landing_candidate(
+    context: GroundedSolveContext<'_>,
+    body: &GroundedBody,
+    candidate: Vector3,
+    candidate_placement: CollisionPlacement,
+) -> Result<SettleResult> {
+    settle_candidate(
+        context,
+        body,
+        candidate,
+        candidate_placement,
+        context.config.airborne_step_down_height,
+        context.config.landing_normal_z,
+    )
 }
 
 fn step_up_candidate(
@@ -692,7 +839,22 @@ fn step_up_candidate(
     candidate: Vector3,
 ) -> Result<Option<SupportedPlacement>> {
     let raised = candidate + Vector3::new(0.0, 0.0, context.config.step_up_height);
-    match settle_candidate(context, body, raised, context.config.step_up_height)? {
+    let raised_placement = transit_pair(
+        context.scene,
+        context.anchor,
+        body,
+        context.pose,
+        context.spheres,
+        raised,
+    )?;
+    match settle_candidate(
+        context,
+        body,
+        raised,
+        raised_placement,
+        context.config.step_up_height,
+        context.config.walkable_normal_z,
+    )? {
         SettleResult::Supported(stepped)
             if stepped.body_center.z - current.z
                 <= context.config.step_up_height + context.config.separation_epsilon =>
@@ -707,8 +869,16 @@ fn step_down_candidate(
     context: GroundedSolveContext<'_>,
     body: &GroundedBody,
     candidate: Vector3,
+    candidate_placement: CollisionPlacement,
 ) -> Result<SettleResult> {
-    settle_candidate(context, body, candidate, context.config.step_down_height)
+    settle_candidate(
+        context,
+        body,
+        candidate,
+        candidate_placement,
+        context.config.step_down_height,
+        context.config.walkable_normal_z,
+    )
 }
 
 /// Applies retail's precipice ordering after the ordinary step-down path found no support
@@ -727,11 +897,22 @@ fn edge_slide_candidate(
     if edge_slide.length_squared() <= f32::EPSILON {
         return Ok(None);
     }
+    let slid = current + edge_slide;
+    let slid_placement = transit_pair(
+        context.scene,
+        context.anchor,
+        body,
+        context.pose,
+        context.spheres,
+        slid,
+    )?;
     match settle_candidate(
         context,
         body,
-        current + edge_slide,
+        slid,
+        slid_placement,
         context.config.step_down_height,
+        context.config.walkable_normal_z,
     )? {
         SettleResult::Supported(settled) => Ok(Some(settled)),
         _ => Ok(None),
@@ -926,6 +1107,10 @@ fn project_into_plane(vector: Vector3, normal: Vector3) -> Vector3 {
 #[path = "grounded_retail_differential.rs"]
 mod retail_differential;
 
+#[cfg(test)]
+#[path = "grounded_landing_retail_differential.rs"]
+mod landing_retail_differential;
+
 fn transit_pair(
     scene: &CollisionScene,
     anchor: Guid,
@@ -1054,10 +1239,10 @@ mod tests {
 
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
-        CollisionPolygon, CollisionShape, LandblockColliders, LandblockCollisionAsset,
-        LandblockPlacement, LandblockTerrain, PlacedCollider, StaticColliderPlacement,
-        TerrainCellDiagonals, TerrainCollisionSurface,
+        BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
+        CollisionBox, CollisionPolygon, CollisionShape, LandblockColliders,
+        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain, PlacedCollider,
+        StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
 
@@ -1071,6 +1256,8 @@ mod tests {
         GroundedConfig {
             gravity: -9.8,
             walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+            landing_normal_z: RETAIL_LANDING_NORMAL_Z,
+            airborne_step_down_height: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
             step_up_height: 0.6,
             step_down_height: 0.2,
             edge_protection: EdgeProtection::None,
@@ -1112,14 +1299,17 @@ mod tests {
             pose: pose(coords),
             cell: None,
             velocity: Vector3::zero(),
-            support: support.map(|normal| GroundSupport { normal }),
+            ground: match support {
+                Some(normal) => GroundState::Supported(GroundSupport { normal }),
+                None => GroundState::Airborne,
+            },
         }
     }
 
     fn polygon(id: u16, vertices: Vec<Vector3>, normal: Vector3, bounds: Sphere) -> PlacedCollider {
         let d = -normal.dot(&vertices[0]);
         let box_bounds = CollisionBox::from_points(vertices.iter().copied()).unwrap();
-        let shape = Arc::new(CollisionShape {
+        let shape = Arc::new(CollisionShape::Bsp(BspSolid {
             bsp: BspNode::Leaf(BspLeaf {
                 index: 0,
                 solid: 0,
@@ -1136,7 +1326,7 @@ mod tests {
                     d,
                 },
             )]),
-        });
+        }));
         PlacedCollider {
             shape,
             placement: LandblockPlacement {
@@ -1144,8 +1334,7 @@ mod tests {
                 orientation: Quaternion::identity(),
             },
             scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds_center: bounds.center,
-            bounds_radius: bounds.radius,
+            bounds: box_bounds,
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
     }
@@ -1385,7 +1574,7 @@ mod tests {
         supported_velocity: Vector3,
         delta_seconds: f32,
     ) -> GroundedOutcome {
-        let may_step_down = body.support.is_some();
+        let settle = body.ground.settle_permission();
         solve_grounded(
             scene,
             config,
@@ -1393,7 +1582,7 @@ mod tests {
                 body,
                 spheres,
                 supported_velocity,
-                may_step_down,
+                settle,
                 retain_supported_gravity: false,
                 delta_seconds,
                 filter: crate::PhysicalCollisionFilter::ALL,
@@ -1413,8 +1602,8 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: EAST,
                 terrain: TerrainCollisionSurface {
-                    cells: Vec::new(),
                     entirely_water: true,
+                    ..TerrainCollisionSurface::empty()
                 },
                 static_geometry: LandblockColliders::default(),
             })
@@ -1524,13 +1713,13 @@ mod tests {
             };
             let (next, achieved) = solved(solve(&scene, current, spheres, Vector3::zero(), 0.1));
             current = next;
-            if current.support.is_some() {
+            if current.ground.walkable_support().is_some() {
                 landing_velocities = Some((requested_vertical_velocity, achieved.z));
                 break;
             }
         }
         assert!(
-            current.support.is_some(),
+            current.ground.walkable_support().is_some(),
             "lower sphere never acquired support"
         );
         assert!(
@@ -1581,13 +1770,13 @@ mod tests {
         ));
         assert!((moved.pose.coords - Vector3::new(23.0, 24.0, 0.0)).length() < EPSILON);
         assert!((achieved - Vector3::new(3.0, 4.0, 0.0)).length() < EPSILON);
-        assert!(moved.support.is_some());
+        assert!(moved.ground.walkable_support().is_some());
     }
 
     #[test]
     fn physics_generated_supported_velocity_may_follow_a_slope_tangent() {
         let shallow = ramp(2, 20.0, 30.0, 10.0, 30.0, 2.0);
-        let normal = shallow.shape.polygons[&2].normal;
+        let normal = shallow.shape.as_bsp().unwrap().polygons[&2].normal;
         let scene = scene(vec![shallow]);
         let starting_height = 0.2 + lower_sphere().radius / normal.z - lower_sphere().center.z;
         let start = Vector3::new(21.0, 20.0, starting_height);
@@ -1607,7 +1796,13 @@ mod tests {
 
         assert!((moved.pose.coords - (start + tangent_velocity)).length() < EPSILON);
         assert!((achieved - tangent_velocity).length() < EPSILON);
-        assert_eq!(moved.support.map(|support| support.normal), Some(normal));
+        assert_eq!(
+            moved
+                .ground
+                .walkable_support()
+                .map(|support| support.normal),
+            Some(normal)
+        );
     }
 
     #[test]
@@ -1850,7 +2045,7 @@ mod tests {
     #[test]
     fn shallow_ramp_is_support_while_steep_face_is_only_a_constraint() {
         let shallow = ramp(2, 20.0, 30.0, 10.0, 30.0, 2.0);
-        let shallow_normal = shallow.shape.polygons[&2].normal;
+        let shallow_normal = shallow.shape.as_bsp().unwrap().polygons[&2].normal;
         let shallow_scene = scene(vec![shallow]);
         let starting_height =
             0.2 + lower_sphere().radius / shallow_normal.z - lower_sphere().center.z;
@@ -1881,7 +2076,10 @@ mod tests {
             "body left shallow ramp: {uphill:?}"
         );
         assert_eq!(
-            uphill.support.map(|support| support.normal),
+            uphill
+                .ground
+                .walkable_support()
+                .map(|support| support.normal),
             Some(shallow_normal)
         );
         let (downhill, _) = solved(solve(
@@ -1907,7 +2105,7 @@ mod tests {
         );
 
         let steep = ramp(3, 40.0, 42.0, 10.0, 30.0, 4.0);
-        let steep_normal = steep.shape.polygons[&3].normal;
+        let steep_normal = steep.shape.as_bsp().unwrap().polygons[&3].normal;
         assert!(steep_normal.z < config().walkable_normal_z);
         let steep_scene = scene(vec![steep]);
         let mut steep_start = body(Vector3::new(39.0, 20.0, 0.0), None);
@@ -1923,7 +2121,7 @@ mod tests {
             1.0,
         ));
         assert!(
-            constrained.support.is_none(),
+            constrained.ground.walkable_support().is_none(),
             "steep face fabricated support"
         );
         assert!(constraint_count > 0, "steep face did not constrain motion");
@@ -1963,7 +2161,10 @@ mod tests {
             "upper sphere did not veto pose"
         );
         assert_eq!(
-            blocked.support.map(|support| support.normal),
+            blocked
+                .ground
+                .walkable_support()
+                .map(|support| support.normal),
             Some(Vector3::new(0.0, 0.0, 1.0)),
             "upper sphere replaced lower support"
         );
@@ -2015,7 +2216,10 @@ mod tests {
             "upper back face routed to step-up"
         );
         assert_eq!(
-            blocked.support.map(|support| support.normal),
+            blocked
+                .ground
+                .walkable_support()
+                .map(|support| support.normal),
             Some(Vector3::new(0.0, 0.0, 1.0))
         );
         let (retreated, _) = solved(solve(
@@ -2052,7 +2256,7 @@ mod tests {
             (stepped.pose.coords.z - 0.4).abs() < EPSILON,
             "step did not settle on box top: {stepped:?}"
         );
-        assert!(stepped.support.is_some());
+        assert!(stepped.ground.walkable_support().is_some());
 
         let mut high_colliders = vec![floor()];
         high_colliders.extend(box_obstacle(4, 10.0, 14.0, 0.8));
@@ -2107,7 +2311,7 @@ mod tests {
             walked_off.pose.coords.x > 11.0,
             "unprotected body did not leave the ledge"
         );
-        assert!(walked_off.support.is_none());
+        assert!(walked_off.ground.walkable_support().is_none());
 
         let mut protected = config();
         protected.edge_protection = EdgeProtection::Creature;
@@ -2127,7 +2331,7 @@ mod tests {
             (held.pose.coords.y - 21.0).abs() < EPSILON,
             "edge protection ate tangent motion: {held:?}"
         );
-        assert!(held.support.is_some());
+        assert!(held.ground.walkable_support().is_some());
     }
 
     #[test]
@@ -2159,7 +2363,7 @@ mod tests {
             stepped_down.pose.coords.z.abs() < EPSILON,
             "short drop did not settle on the lower floor: {stepped_down:?}"
         );
-        assert!(stepped_down.support.is_some());
+        assert!(stepped_down.ground.walkable_support().is_some());
     }
 
     #[test]
@@ -2187,7 +2391,9 @@ mod tests {
         };
         let mut interior_floor = floor();
         interior_floor.placement.origin.z = -1.0;
-        interior_floor.bounds_center.z -= 1.0;
+        interior_floor.bounds = interior_floor
+            .bounds
+            .translated(Vector3::new(0.0, 0.0, -1.0));
         interior_floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id };
         let terrain = TerrainCollisionSurface::from_terrain(&LandblockTerrain {
             grid_size: 9,
@@ -2225,7 +2431,7 @@ mod tests {
 
         assert_eq!(solved_body.cell, Some(Guid(cell_id)));
         assert_eq!(solved_body.pose.landblock_id, Guid(cell_id));
-        assert!(solved_body.support.is_none());
+        assert!(solved_body.ground.walkable_support().is_none());
         for _ in 0..60 {
             (solved_body, _) = solved(solve(
                 &collision,
@@ -2234,7 +2440,7 @@ mod tests {
                 Vector3::zero(),
                 1.0 / 30.0,
             ));
-            if solved_body.support.is_some() {
+            if solved_body.ground.walkable_support().is_some() {
                 break;
             }
         }
@@ -2244,9 +2450,9 @@ mod tests {
             solved_body.pose.coords.x,
             solved_body.pose.coords.y,
             solved_body.pose.coords.z,
-            solved_body.support
+            solved_body.ground.walkable_support()
         );
-        assert!(solved_body.support.is_some());
+        assert!(solved_body.ground.walkable_support().is_some());
     }
 
     #[test]
@@ -2320,7 +2526,7 @@ mod tests {
             EAST & 0xffff_0000
         );
         assert!((crossed.pose.coords.x - 1.0).abs() < EPSILON);
-        assert!(crossed.support.is_some());
+        assert!(crossed.ground.walkable_support().is_some());
 
         let mut falling = body(Vector3::new(191.0, 20.0, 3.0), None);
         falling.velocity = Vector3::new(2.0, 0.0, -1.0);
@@ -2344,7 +2550,7 @@ mod tests {
             pose: pose(Vector3::new(191.0, 20.0, 3.0)),
             cell: None,
             velocity: Vector3::new(20.0, 0.0, -1.0),
-            support: None,
+            ground: GroundState::Airborne,
         };
         let mut incomplete = CollisionScene::new();
         for owner in test_halo_owners(&[LANDBLOCK, EAST]) {
@@ -2501,6 +2707,6 @@ mod tests {
         assert_eq!(pair_blocked.cell, Some(Guid(0xda55_0100)));
         assert_eq!(pair_blocked.pose.landblock_id, Guid(0xda55_0100));
         assert!((pair_blocked.pose.coords.x - 9.5).abs() < EPSILON);
-        assert!(pair_blocked.support.is_some());
+        assert!(pair_blocked.ground.walkable_support().is_some());
     }
 }

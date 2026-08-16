@@ -5,7 +5,7 @@ use holtburger_core::client::movement_types::{
 use holtburger_core::{CharacterJumpKinematics, CharacterMovementKinematics, JumpChargeProfile};
 use serde::{Deserialize, Serialize};
 
-use crate::host_simulation_runtime::{PhysicalBodyDefinitionRequest, PhysicalResponseRequest};
+use crate::host_simulation_runtime::{PhysicalBodyProfileBodyRequest, PhysicalBodyProfileRequest};
 
 /// Typed terminal failure for one exact physical-camera generation.
 #[derive(Debug, Clone, Serialize)]
@@ -43,16 +43,16 @@ pub enum PhysicalCameraMode {
 
 pub(super) fn camera_mode_matches_response(
     mode: PhysicalCameraMode,
-    response: PhysicalResponseRequest,
+    profile: PhysicalBodyProfileRequest,
 ) -> bool {
     matches!(
-        (mode, response),
+        (mode, profile),
         (
             PhysicalCameraMode::PhysicalFly,
-            PhysicalResponseRequest::FreeSphere { .. }
+            PhysicalBodyProfileRequest::PhysicalFlyViewer
         ) | (
             PhysicalCameraMode::GroundedWalk,
-            PhysicalResponseRequest::Grounded { .. }
+            PhysicalBodyProfileRequest::RetailPlayerGrounded { .. }
         )
     )
 }
@@ -429,8 +429,8 @@ pub struct PhysicalCameraRegistration {
     pub view_direction: [f32; 3],
     /// Explicit input/controller regime, independent from physical body geometry and response.
     pub control: PhysicalCameraControlRequest,
-    /// Explicit source-neutral geometry and response configuration for the generic body.
-    pub body: PhysicalBodyDefinitionRequest,
+    /// Named body profile plus body-owned collision exclusions; solver physics is host-resolved.
+    pub body: PhysicalBodyProfileBodyRequest,
 }
 
 /// Registration generation plus host-supplied charge presentation policy.

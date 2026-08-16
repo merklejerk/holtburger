@@ -4,16 +4,15 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, ensure};
+use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Vector3};
 use holtburger_content::LandblockCollisionAsset;
 use holtburger_core::ContentAssetService;
 use holtburger_world::{
-    CollisionScene, EdgeProtection, GroundedConfig, PhysicalBodyActuation, PhysicalBodyDefinition,
+    CollisionScene, EdgeProtection, PhysicalBodyActuation, PhysicalBodyDefinition,
     PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
-    PhysicalCollisionFilter, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
-    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PlacedMotionPath,
-    PlacementRecovery, SpatialBody, SpatialBodyId, SpatialScene,
+    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyId,
+    SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 
@@ -53,165 +52,14 @@ pub struct SimulationInterestReceipt {
     pub unavailable_landblock_ids: Vec<String>,
 }
 
-/// One explicit body-local sphere supplied by a setup adapter or frontend spawn.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PhysicalSphereRequest {
-    /// Body-local AC-axis center `[east, north, up]` in meters.
-    pub center: [f32; 3],
-    /// Positive radius in meters.
-    pub radius: f32,
-}
-
-/// Explicit free-sphere response configuration, independent from spawn provenance.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PhysicalFlyConfigRequest {
-    /// Maximum distance covered by one anti-tunneling subdivision.
-    pub maximum_substep_distance: f32,
-    /// Finite subdivision budget for one fixed tick.
-    pub maximum_substeps: usize,
-    /// Finite contact-separation budget across the tick.
-    pub maximum_contact_passes: usize,
-    /// Small outward separation applied after an accepted contact.
-    pub separation_epsilon: f32,
-}
-
-/// Explicit grounded response configuration, independent from shape production.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GroundedConfigRequest {
-    /// Downward acceleration integrated while the body is airborne.
-    pub gravity: f32,
-    /// Minimum upward contact-normal component accepted as walkable support.
-    pub walkable_normal_z: f32,
-    /// Minimum upward contact-normal component a body without walkable support accepts as a
-    /// landing; landings between this and `walkable_normal_z` classify as contact-slide.
-    pub landing_normal_z: f32,
-    /// Step-down reach of the lenient landing probe for bodies without walkable support.
-    pub airborne_step_down_height: f32,
-    /// Maximum vertical rise attempted by step-up response.
-    pub step_up_height: f32,
-    /// Maximum downward support search after horizontal motion.
-    pub step_down_height: f32,
-    /// Policy for retaining support near finite authored edges.
-    pub edge_protection: EdgeProtectionRequest,
-    /// Maximum distance covered by one anti-tunneling subdivision.
-    pub maximum_substep_distance: f32,
-    /// Finite subdivision budget for one fixed tick.
-    pub maximum_substeps: usize,
-    /// Finite contact-separation budget across the tick.
-    pub maximum_contact_passes: usize,
-    /// Small outward separation applied after an accepted contact.
-    pub separation_epsilon: f32,
-}
-
-/// Supported grounded edge policy at the serialized registration boundary.
-#[derive(Debug, Clone, Copy, Deserialize)]
+/// Serialized edge-protection policy choice.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum EdgeProtectionRequest {
-    /// Accept unsupported poses, including walking over an authored edge.
+    /// Accept the unsupported candidate and begin falling.
     None,
-    /// Protect only edges beyond the grounded short-drop policy.
+    /// Preserve the last supported pose when no supported edge slide is available.
     Creature,
-}
-
-/// Response semantics composed with caller-supplied geometry.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum PhysicalResponseRequest {
-    /// Collision-aware unrestricted three-dimensional motion.
-    FreeSphere {
-        /// Finite response configuration for the single supplied sphere.
-        config: PhysicalFlyConfigRequest,
-    },
-    /// Gravity, support, step, and edge response.
-    Grounded {
-        /// Finite response configuration for the role-ordered sphere set.
-        config: GroundedConfigRequest,
-    },
-}
-
-/// Explicit eligible-impact behavior at the serialized registration boundary.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum PhysicalRestitutionRequest {
-    /// Retail normal-component reflection with a bounded coefficient.
-    Elastic {
-        /// Requested coefficient; the world type applies retail's `[0.0, 0.1]` clamp.
-        elasticity: f32,
-    },
-    /// Zero complete velocity on an eligible impact.
-    Inelastic,
-}
-
-/// Explicit stable-versus-Sledding surface response.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PhysicalSurfaceMotionRequest {
-    /// Ordinary stable support response.
-    Stable,
-    /// Retail physics-state `Sledding` response.
-    Sledding,
-}
-
-/// Complete mutable response policy required from every frontend-created body.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PhysicalBodyResponsePolicyRequest {
-    /// Eligible impact behavior.
-    pub restitution: PhysicalRestitutionRequest,
-    /// Authored supported-surface friction in the inclusive unit interval.
-    pub friction: f32,
-    /// Stable or retail Sledding support behavior.
-    pub surface_motion: PhysicalSurfaceMotionRequest,
-    /// Whether path displacement supersedes Sledding velocity-facing.
-    pub align_path: bool,
-}
-
-impl PhysicalBodyResponsePolicyRequest {
-    pub(crate) fn resolve(self) -> Result<PhysicalBodyResponsePolicy> {
-        Ok(PhysicalBodyResponsePolicy {
-            restitution: match self.restitution {
-                PhysicalRestitutionRequest::Elastic { elasticity } => {
-                    PhysicalRestitution::Elastic(PhysicalElasticity::new(elasticity)?)
-                }
-                PhysicalRestitutionRequest::Inelastic => PhysicalRestitution::Inelastic,
-            },
-            friction: PhysicalFriction::new(self.friction)?,
-            surface_motion: match self.surface_motion {
-                PhysicalSurfaceMotionRequest::Stable => PhysicalSurfaceMotion::Stable,
-                PhysicalSurfaceMotionRequest::Sledding => PhysicalSurfaceMotion::Sledding,
-            },
-            align_path: self.align_path,
-        })
-    }
-}
-
-#[cfg(test)]
-pub(crate) const fn stable_response_policy_request(
-    elasticity: f32,
-) -> PhysicalBodyResponsePolicyRequest {
-    PhysicalBodyResponsePolicyRequest {
-        restitution: PhysicalRestitutionRequest::Elastic { elasticity },
-        friction: 0.95,
-        surface_motion: PhysicalSurfaceMotionRequest::Stable,
-        align_path: false,
-    }
-}
-
-/// Source-neutral serialized physical definition used by app-local body registration adapters.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PhysicalBodyDefinitionRequest {
-    /// Ordered role-bearing spheres; explicit registrations are never silently truncated.
-    pub spheres: Vec<PhysicalSphereRequest>,
-    /// Implemented response semantics and finite solver policy.
-    pub response: PhysicalResponseRequest,
-    /// Complete initial mutable response policy; no camera or entity defaults are inferred here.
-    pub response_policy: PhysicalBodyResponsePolicyRequest,
-    /// Explicit optional collision domains ignored by this body.
-    pub collision_exclusions: Vec<PhysicalCollisionExclusionRequest>,
 }
 
 /// Optional collision domain excluded by a frontend-created body.
@@ -223,6 +71,10 @@ pub enum PhysicalCollisionExclusionRequest {
 }
 
 /// Fully validated app-local body registration passed atomically into simulation state.
+///
+/// This native layer is the diagnostics door: harness fixtures and fault injection construct it
+/// (or a `PhysicalBodyDefinition`) directly, entering the same validators production profiles
+/// resolve through.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolvedPhysicalBodyRegistration {
     /// Validated geometry and solver response kind.
@@ -233,55 +85,56 @@ pub struct ResolvedPhysicalBodyRegistration {
     pub response_policy: PhysicalBodyResponsePolicy,
 }
 
-impl PhysicalBodyDefinitionRequest {
-    /// Validates the complete body registration without permitting partially resolved consumers.
+/// Named body profile resolved host-side from `holtburger-core`.
+///
+/// The frontend names what it wants plus its app-policy knobs; every retail solver constant is
+/// sourced from the core profile builders rather than mirrored across languages (contact-slide
+/// plan, host-resolved body profiles addendum).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(
+    tag = "profile",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum PhysicalBodyProfileRequest {
+    /// The retail player as a grounded body; edge protection stays frontend/UX policy.
+    RetailPlayerGrounded {
+        /// Policy for retaining support near finite authored edges.
+        edge_protection: EdgeProtectionRequest,
+    },
+    /// The retail render-viewer as a free-flying clip sphere.
+    PhysicalFlyViewer,
+}
+
+/// Frontend-facing body registration: a named profile plus body-owned collision exclusions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhysicalBodyProfileBodyRequest {
+    /// Named profile resolved by `holtburger-core`.
+    #[serde(flatten)]
+    pub profile: PhysicalBodyProfileRequest,
+    /// Explicit optional collision domains ignored by this body.
+    pub collision_exclusions: Vec<PhysicalCollisionExclusionRequest>,
+}
+
+impl PhysicalBodyProfileBodyRequest {
+    /// Resolves the named profile and exclusions into one validated registration.
     pub fn resolve(&self) -> Result<ResolvedPhysicalBodyRegistration> {
-        ensure!(
-            (1..=2).contains(&self.spheres.len()),
-            "physical body requires one or two spheres"
-        );
-        let sphere = |request: PhysicalSphereRequest| holtburger_common::Sphere {
-            center: Vector3::new(request.center[0], request.center[1], request.center[2]),
-            radius: request.radius,
-        };
-        let spheres = PhysicalSphereSet::new(
-            sphere(self.spheres[0]),
-            self.spheres.get(1).copied().map(sphere),
-        )?;
-        let definition = match self.response {
-            PhysicalResponseRequest::FreeSphere { config } => PhysicalBodyDefinition::free_sphere(
-                spheres,
-                PhysicalFlyConfig {
-                    maximum_substep_distance: config.maximum_substep_distance,
-                    maximum_substeps: config.maximum_substeps,
-                    maximum_contact_passes: config.maximum_contact_passes,
-                    separation_epsilon: config.separation_epsilon,
-                },
-            )?,
-            PhysicalResponseRequest::Grounded { config } => PhysicalBodyDefinition::grounded(
-                spheres,
-                GroundedConfig {
-                    gravity: config.gravity,
-                    walkable_normal_z: config.walkable_normal_z,
-                    landing_normal_z: config.landing_normal_z,
-                    airborne_step_down_height: config.airborne_step_down_height,
-                    step_up_height: config.step_up_height,
-                    step_down_height: config.step_down_height,
-                    edge_protection: match config.edge_protection {
-                        EdgeProtectionRequest::None => EdgeProtection::None,
-                        EdgeProtectionRequest::Creature => EdgeProtection::Creature,
-                    },
-                    maximum_substep_distance: config.maximum_substep_distance,
-                    maximum_substeps: config.maximum_substeps,
-                    maximum_contact_passes: config.maximum_contact_passes,
-                    separation_epsilon: config.separation_epsilon,
-                },
-            )?,
+        let profile = match self.profile {
+            PhysicalBodyProfileRequest::RetailPlayerGrounded { edge_protection } => {
+                holtburger_core::retail_player_grounded_profile(match edge_protection {
+                    EdgeProtectionRequest::None => EdgeProtection::None,
+                    EdgeProtectionRequest::Creature => EdgeProtection::Creature,
+                })?
+            }
+            PhysicalBodyProfileRequest::PhysicalFlyViewer => {
+                holtburger_core::physical_fly_viewer_profile()?
+            }
         };
         Ok(ResolvedPhysicalBodyRegistration {
-            definition,
+            definition: profile.definition,
             collision_filter: resolve_collision_filter(&self.collision_exclusions)?,
-            response_policy: self.response_policy.resolve()?,
+            response_policy: profile.response_policy,
         })
     }
 }
@@ -691,10 +544,11 @@ fn receipt(revision: u64, committed: bool, unavailable: &[Guid]) -> SimulationIn
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::{Quaternion, Sphere};
+    use holtburger_common::{Quaternion, Sphere, Vector3};
     use holtburger_content::{LandblockColliders, TerrainCollisionSurface};
     use holtburger_world::{
-        PhysicalBodyDefinition, PhysicalFlyConfig, PhysicalSphereSet, RETAIL_WALKABLE_NORMAL_Z,
+        PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction, PhysicalRestitution,
+        PhysicalSphereSet, PhysicalSurfaceMotion, RETAIL_WALKABLE_NORMAL_Z,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
@@ -812,52 +666,33 @@ mod tests {
     }
 
     #[test]
-    fn body_definition_request_accepts_arbitrary_geometry_without_profiles() {
-        let first = PhysicalBodyDefinitionRequest {
-            collision_exclusions: Vec::new(),
-            spheres: vec![PhysicalSphereRequest {
-                center: [0.1, -0.2, 0.3],
-                radius: 0.27,
-            }],
-            response: PhysicalResponseRequest::FreeSphere {
-                config: PhysicalFlyConfigRequest {
-                    maximum_substep_distance: 0.2,
-                    maximum_substeps: 8,
-                    maximum_contact_passes: 4,
-                    separation_epsilon: 0.001,
-                },
-            },
-            response_policy: stable_response_policy_request(0.0),
+    fn profile_requests_resolve_both_camera_profiles() {
+        let fly = PhysicalBodyProfileBodyRequest {
+            profile: PhysicalBodyProfileRequest::PhysicalFlyViewer,
+            collision_exclusions: vec![PhysicalCollisionExclusionRequest::EntirelyWaterBarrier],
         }
         .resolve()
         .unwrap();
-        let second = PhysicalBodyDefinitionRequest {
-            collision_exclusions: Vec::new(),
-            spheres: vec![PhysicalSphereRequest {
-                center: [-0.4, 0.5, 0.6],
-                radius: 0.73,
-            }],
-            response: PhysicalResponseRequest::FreeSphere {
-                config: PhysicalFlyConfigRequest {
-                    maximum_substep_distance: 0.2,
-                    maximum_substeps: 8,
-                    maximum_contact_passes: 4,
-                    separation_epsilon: 0.001,
-                },
-            },
-            response_policy: stable_response_policy_request(0.0),
-        }
-        .resolve()
-        .unwrap();
+        assert!(matches!(
+            fly.definition,
+            PhysicalBodyDefinition::FreeSphere { .. }
+        ));
 
-        assert_ne!(first.definition, second.definition);
-        assert!(
-            matches!(first.definition, PhysicalBodyDefinition::FreeSphere { sphere, .. }
-            if sphere.center == Vector3::new(0.1, -0.2, 0.3) && sphere.radius == 0.27)
-        );
-        assert!(
-            matches!(second.definition, PhysicalBodyDefinition::FreeSphere { sphere, .. }
-            if sphere.center == Vector3::new(-0.4, 0.5, 0.6) && sphere.radius == 0.73)
+        let grounded = PhysicalBodyProfileBodyRequest {
+            profile: PhysicalBodyProfileRequest::RetailPlayerGrounded {
+                edge_protection: EdgeProtectionRequest::Creature,
+            },
+            collision_exclusions: Vec::new(),
+        }
+        .resolve()
+        .unwrap();
+        let PhysicalBodyDefinition::Grounded { config, .. } = grounded.definition else {
+            panic!("retail player profile must resolve grounded");
+        };
+        assert_eq!(config.walkable_normal_z, RETAIL_WALKABLE_NORMAL_Z);
+        assert_eq!(
+            config.edge_protection,
+            holtburger_world::EdgeProtection::Creature
         );
     }
 
@@ -870,77 +705,6 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("duplicate"));
-    }
-
-    #[test]
-    fn body_definition_request_rejects_a_third_grounded_sphere_without_truncation() {
-        let error = PhysicalBodyDefinitionRequest {
-            collision_exclusions: Vec::new(),
-            spheres: vec![
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 0.4],
-                    radius: 0.5,
-                },
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 1.2],
-                    radius: 0.5,
-                },
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 2.0],
-                    radius: 0.5,
-                },
-            ],
-            response: PhysicalResponseRequest::Grounded {
-                config: GroundedConfigRequest {
-                    gravity: -9.8,
-                    walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
-                    landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
-                    airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
-                    step_up_height: 0.6,
-                    step_down_height: 1.5,
-                    edge_protection: EdgeProtectionRequest::Creature,
-                    maximum_substep_distance: 0.25,
-                    maximum_substeps: 8,
-                    maximum_contact_passes: 4,
-                    separation_epsilon: 0.001,
-                },
-            },
-            response_policy: stable_response_policy_request(0.05),
-        }
-        .resolve()
-        .unwrap_err();
-
-        assert!(error.to_string().contains("one or two spheres"));
-    }
-
-    #[test]
-    fn body_definition_request_rejects_response_shape_mismatch() {
-        let error = PhysicalBodyDefinitionRequest {
-            collision_exclusions: Vec::new(),
-            spheres: vec![
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 0.4],
-                    radius: 0.5,
-                },
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 1.2],
-                    radius: 0.5,
-                },
-            ],
-            response: PhysicalResponseRequest::FreeSphere {
-                config: PhysicalFlyConfigRequest {
-                    maximum_substep_distance: 0.25,
-                    maximum_substeps: 8,
-                    maximum_contact_passes: 4,
-                    separation_epsilon: 0.001,
-                },
-            },
-            response_policy: stable_response_policy_request(0.0),
-        }
-        .resolve()
-        .unwrap_err();
-
-        assert!(error.to_string().contains("upper constraint"));
     }
 
     #[test]
@@ -978,7 +742,14 @@ mod tests {
                 ResolvedPhysicalBodyRegistration {
                     definition,
                     collision_filter: PhysicalCollisionFilter::ALL,
-                    response_policy: stable_response_policy_request(0.0).resolve().unwrap(),
+                    response_policy: PhysicalBodyResponsePolicy {
+                        restitution: PhysicalRestitution::Elastic(
+                            PhysicalElasticity::new(0.0).unwrap(),
+                        ),
+                        friction: PhysicalFriction::new(0.95).unwrap(),
+                        surface_motion: PhysicalSurfaceMotion::Stable,
+                        align_path: false,
+                    },
                 },
                 None,
             )

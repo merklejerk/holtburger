@@ -34,7 +34,7 @@ use crate::host_fixed_tick_runtime::{
     HostFixedTickDisposition, HostFixedTickParticipant, HostFixedTickRegistration,
     HostFixedTickRuntime, HostFixedTickSlot,
 };
-use crate::host_simulation_runtime::{HostSimulationRuntime, PhysicalResponseRequest};
+use crate::host_simulation_runtime::HostSimulationRuntime;
 
 #[cfg(test)]
 use crate::host_simulation_runtime::CollisionSource;
@@ -112,15 +112,15 @@ impl HostCameraRuntime {
             body_pose.coords = body_pose.coords - grounded_viewer_offset(view_direction);
         }
         ensure!(
-            camera_mode_matches_response(mode, registration.body.response),
-            "physical camera mode does not match its explicit body response"
+            camera_mode_matches_response(mode, registration.body.profile),
+            "physical camera mode does not match its requested body profile"
         );
         let body_registration = registration.body.resolve()?;
-        let maximum_displacement_per_tick = match registration.body.response {
-            PhysicalResponseRequest::FreeSphere { config } => {
+        let maximum_displacement_per_tick = match body_registration.definition {
+            holtburger_world::PhysicalBodyDefinition::FreeSphere { config, .. } => {
                 config.maximum_substep_distance * config.maximum_substeps as f32
             }
-            PhysicalResponseRequest::Grounded { .. } => 0.0,
+            holtburger_world::PhysicalBodyDefinition::Grounded { .. } => 0.0,
         };
         ensure!(
             maximum_displacement_per_tick.is_finite(),

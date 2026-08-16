@@ -2,6 +2,7 @@ import {
 	evaluateHostPhysicalCameraPath,
 	type HostPhysicalCameraPath,
 	type GroundedCharacterEventOutcome,
+	type PhysicalCameraGroundState,
 	type PhysicalCameraMode,
 	type PhysicalCameraPlacement,
 	type PhysicalCameraTickStatus,
@@ -23,6 +24,22 @@ import { FRONTEND_TUNING } from "../lib/frontend-tuning";
  * `CPhysicsObj::is_valid_walkable` (`acclient.c:765983-765986`, `:304992-304995`).
  */
 const RETAIL_WALKABLE_NORMAL_Z = Math.fround(Math.cos(3437.746770784939));
+
+/**
+ * Retail's lenient landing allowance for bodies without walkable support (cos 85°).
+ *
+ * TypeScript boundary mirror of `holtburger_world::RETAIL_LANDING_NORMAL_Z`; retail writes it
+ * into `SPHEREPATH::walkable_allowance` for every transition prepared without `OnWalkable`
+ * (`acclient.c:301469-301474`, `:301563-301569`).
+ */
+const RETAIL_LANDING_NORMAL_Z = 0.0871557;
+
+/**
+ * Retail's step-down reach for bodies without walkable support
+ * (`acclient.c:301468`, `:301562`). Mirror of
+ * `holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT`.
+ */
+const RETAIL_AIRBORNE_STEP_DOWN_HEIGHT = 0.04;
 
 interface PhysicalSphereDefinition {
 	/** Body-local AC-axis center in meters. */
@@ -81,8 +98,13 @@ interface PhysicalFlyResponseConfig {
 interface GroundedResponseConfig extends PhysicalFlyResponseConfig {
 	/** Downward acceleration while airborne. */
 	readonly gravity: number;
-	/** Minimum upward normal component accepted as support. */
+	/** Minimum upward normal component accepted as walkable support. */
 	readonly walkableNormalZ: number;
+	/** Lenient landing acceptance for bodies without walkable support; landings between this and
+	 * `walkableNormalZ` classify as contact-slide. */
+	readonly landingNormalZ: number;
+	/** Step-down reach of the lenient landing probe. */
+	readonly airborneStepDownHeight: number;
 	/** Maximum step-up rise in meters. */
 	readonly stepUpHeight: number;
 	/** Maximum downward support search in meters. */
@@ -202,6 +224,8 @@ function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyDefinition {
 			config: {
 				gravity: -9.8,
 				walkableNormalZ: RETAIL_WALKABLE_NORMAL_Z,
+				landingNormalZ: RETAIL_LANDING_NORMAL_Z,
+				airborneStepDownHeight: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
 				stepUpHeight: 0.6,
 				stepDownHeight: 1.5,
 				edgeProtection: "creature",
@@ -239,7 +263,7 @@ export interface PhysicalCameraStatus {
 	readonly mode: PhysicalCameraMode | null;
 	readonly tick: PhysicalCameraTickStatus | "awaiting-first-path";
 	readonly cellId: EnvCellId | null;
-	readonly grounded: boolean;
+	readonly groundState: PhysicalCameraGroundState;
 	readonly constraintCount: number;
 	readonly droppedPaths: number;
 	readonly sceneResidency: PhysicalCameraSceneResidency | null;
@@ -486,7 +510,7 @@ export class PhysicalCameraSession {
 			mode: latest?.mode ?? null,
 			tick: latest?.status ?? "awaiting-first-path",
 			cellId: latest?.legs.at(-1)?.end.residency.envCellId ?? null,
-			grounded: latest?.grounded ?? false,
+			groundState: latest?.groundState ?? "unknown",
 			constraintCount: latest?.constraintCount ?? 0,
 			droppedPaths: this.#droppedPaths,
 			sceneResidency: latest?.sceneResidency ?? null,

@@ -77,6 +77,8 @@ mod tests {
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
         walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+        landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
+        airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,

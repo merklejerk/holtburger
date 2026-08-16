@@ -17,13 +17,14 @@ use holtburger_content::{
 use holtburger_dat::physics::{BspLeaf, BspNode};
 
 use super::{
-    GroundSupport, GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedObstruction,
-    GroundedOutcome, GroundedRequest, GroundedSolveContext, GroundedSphere,
-    RETAIL_WALKABLE_NORMAL_Z, RoleContacts, SettleResult, SphereRole, horizontal_response_normal,
+    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedConfig,
+    GroundedObstruction, GroundedOutcome, GroundedRequest, GroundedSolveContext, GroundedSphere,
+    RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
+    RoleContacts, SettlePermission, SettleResult, SphereRole, horizontal_response_normal,
     remember_next_sliding_normal, settle_candidate, solve_grounded, step_up_candidate,
 };
 use crate::spatial::collision::CollisionScene;
-use crate::spatial::physical_body::grounded_step_down_enabled;
+use crate::spatial::physical_body::grounded_settle_permission;
 use crate::{
     CellTransitRequest, CollisionPlacement, ContactState, EdgeProtection,
     GroundedObstructionRequest, PhysicalCollisionFilter, SphereSweep, SupportRequest,
@@ -40,22 +41,38 @@ fn retail_ordinary_step_down_enabled(has_contact: bool, leave_ground: bool) -> b
     has_contact && !leave_ground
 }
 
+/// Retail prepares the lenient 0.04m landing step-down for gravity-bound transitions without the
+/// contact bit (`acclient.c:301563-301569`); the walking transaction still requires contact
+/// (`:301550-301599`), and a launch tick suppresses both until the body leaves the ground.
 #[test]
-fn upward_launch_clears_retail_walking_step_down_while_initial_classification_may_probe() {
-    for (contact, launching, retail_has_contact) in [
-        (ContactState::Grounded, false, true),
-        (ContactState::Grounded, true, true),
-        (ContactState::Airborne, false, false),
+fn settle_permission_projects_retail_walking_and_landing_step_down_gates() {
+    for (contact, launching, expected) in [
+        // Walking transaction: retail contact bit set, not launching.
+        (ContactState::Grounded, false, SettlePermission::Walking),
+        // Launch tick: `LeaveGround` suppresses every settle transaction.
+        (ContactState::Grounded, true, SettlePermission::Denied),
+        (ContactState::Airborne, true, SettlePermission::Denied),
+        // Airborne and sliding transitions prepare the lenient landing step-down.
+        (ContactState::Airborne, false, SettlePermission::Landing),
+        (ContactState::Sliding, false, SettlePermission::Landing),
     ] {
+        assert_eq!(grounded_settle_permission(contact, launching), expected);
+        // Retail's *walking* transaction gate must agree with the Walking projection exactly.
         assert_eq!(
-            grounded_step_down_enabled(contact, launching),
-            retail_ordinary_step_down_enabled(retail_has_contact, launching),
+            grounded_settle_permission(contact, launching) == SettlePermission::Walking,
+            retail_ordinary_step_down_enabled(
+                matches!(contact, ContactState::Grounded | ContactState::Unknown),
+                launching
+            ),
         );
     }
 
     // Holtburger's explicit Unknown state exists only before the first collision transaction; it
-    // must probe support once so a newly registered body can classify a floor beneath it.
-    assert!(grounded_step_down_enabled(ContactState::Unknown, false));
+    // must run the walking probe once so a newly registered body can classify a floor beneath it.
+    assert_eq!(
+        grounded_settle_permission(ContactState::Unknown, false),
+        SettlePermission::Walking
+    );
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -334,7 +351,7 @@ fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
             .normalize_outdoor_cell(),
             cell: None,
             velocity: Vector3::zero(),
-            support: None,
+            ground: GroundState::Airborne,
         };
         let mut config = grounded_config();
         config.walkable_normal_z = RETAIL_WALKABLE_NORMAL_Z;
@@ -349,7 +366,17 @@ fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
             },
             &body,
             candidate,
+            super::transit_pair(
+                &scene,
+                Guid(LANDBLOCK),
+                &body,
+                body.pose,
+                grounded_pair(),
+                candidate,
+            )
+            .unwrap(),
             config.step_down_height,
+            config.walkable_normal_z,
         )
         .unwrap();
         assert_eq!(
@@ -564,7 +591,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
         },
         cell: Some(Guid(CELL)),
         velocity: Vector3::zero(),
-        support: Some(GroundSupport {
+        ground: GroundState::Supported(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         }),
     };
@@ -591,7 +618,17 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
         },
         &body,
         candidate,
+        super::transit_pair(
+            &scene,
+            Guid(LANDBLOCK),
+            &body,
+            body.pose,
+            grounded_pair(),
+            candidate,
+        )
+        .unwrap(),
         config.step_down_height,
+        config.walkable_normal_z,
     )
     .unwrap();
     let SettleResult::Supported(settled) = settled else {
@@ -653,7 +690,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        support: Some(GroundSupport {
+        ground: GroundState::Supported(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         }),
     };
@@ -712,7 +749,17 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         },
         &body,
         candidate,
+        super::transit_pair(
+            &scene,
+            Guid(LANDBLOCK),
+            &body,
+            body.pose,
+            grounded_pair(),
+            candidate,
+        )
+        .unwrap(),
         config.step_down_height,
+        config.walkable_normal_z,
     )
     .unwrap();
     let SettleResult::Supported(settled) = settled else {
@@ -810,13 +857,13 @@ fn zero_adjustment_edge_routes_to_retail_precipice_slide_instead_of_ratcheting_d
                 .normalize_outdoor_cell(),
                 cell: None,
                 velocity: Vector3::zero(),
-                support: Some(GroundSupport {
+                ground: GroundState::Supported(GroundSupport {
                     normal: Vector3::new(0.0, 0.0, 1.0),
                 }),
             },
             spheres: grounded_pair(),
             supported_velocity: requested_velocity,
-            may_step_down: true,
+            settle: SettlePermission::Walking,
             retain_supported_gravity: false,
             delta_seconds: 1.0,
         },
@@ -830,7 +877,7 @@ fn zero_adjustment_edge_routes_to_retail_precipice_slide_instead_of_ratcheting_d
         expected_displacement,
         "production precipice displacement",
     );
-    assert!(body.support.is_some());
+    assert!(body.ground.walkable_support().is_some());
 }
 
 #[test]
@@ -903,7 +950,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
             },
             cell: Some(Guid(FIRST_CELL)),
             velocity: Vector3::zero(),
-            support: Some(GroundSupport {
+            ground: GroundState::Supported(GroundSupport {
                 normal: Vector3::new(0.0, 0.0, 1.0),
             }),
         };
@@ -921,7 +968,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
                     body,
                     spheres: grounded_pair(),
                     supported_velocity: Vector3::new(speed, 0.0, 0.0),
-                    may_step_down: true,
+                    settle: SettlePermission::Walking,
                     retain_supported_gravity: false,
                     delta_seconds: 1.0 / 30.0,
                 },
@@ -941,7 +988,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
             "precipice was not protected at speed {speed}: {body:?}"
         );
         assert_eq!(body.cell, Some(Guid(FIRST_CELL)));
-        assert!(body.support.is_some());
+        assert!(body.ground.walkable_support().is_some());
 
         let held_x = body.pose.coords.x;
         let retreated = solve_grounded(
@@ -952,7 +999,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
                 body,
                 spheres: grounded_pair(),
                 supported_velocity: Vector3::new(-1.0, 0.0, 0.0),
-                may_step_down: true,
+                settle: SettlePermission::Walking,
                 retain_supported_gravity: false,
                 delta_seconds: 1.0 / 30.0,
             },
@@ -969,7 +1016,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
             "precipice hold trapped retreat at speed {speed}: {retreated:?}"
         );
         assert_eq!(retreated.cell, Some(Guid(FIRST_CELL)));
-        assert!(retreated.support.is_some());
+        assert!(retreated.ground.walkable_support().is_some());
     }
 }
 
@@ -1064,13 +1111,13 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
                 },
                 cell: Some(Guid(SAFE_CELL)),
                 velocity: Vector3::zero(),
-                support: Some(GroundSupport {
+                ground: GroundState::Supported(GroundSupport {
                     normal: Vector3::new(0.0, 0.0, 1.0),
                 }),
             },
             spheres: grounded_pair(),
             supported_velocity: drive_velocity,
-            may_step_down: true,
+            settle: SettlePermission::Walking,
             retain_supported_gravity: false,
             delta_seconds,
         },
@@ -1085,7 +1132,7 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
         "production corner response",
     );
     assert_eq!(body.cell, Some(Guid(SAFE_CELL)));
-    assert!(body.support.is_some());
+    assert!(body.ground.walkable_support().is_some());
 
     let retreat_velocity = Vector3::new(2.828, -2.828, 0.0);
     let expected_retreat = retail_wall_precipice_offset(
@@ -1101,7 +1148,7 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
             body,
             spheres: grounded_pair(),
             supported_velocity: retreat_velocity,
-            may_step_down: true,
+            settle: SettlePermission::Walking,
             retain_supported_gravity: false,
             delta_seconds,
         },
@@ -1121,7 +1168,7 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
         "production corner retreat differs beyond contact separation: actual={actual_retreat:?} expected={expected_retreat:?}"
     );
     assert_eq!(retreated.cell, Some(Guid(SAFE_CELL)));
-    assert!(retreated.support.is_some());
+    assert!(retreated.ground.walkable_support().is_some());
 }
 
 #[test]
@@ -1150,7 +1197,7 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
             .normalize_outdoor_cell(),
             cell: None,
             velocity: Vector3::zero(),
-            support: Some(GroundSupport {
+            ground: GroundState::Supported(GroundSupport {
                 normal: Vector3::new(0.0, 0.0, 1.0),
             }),
         };
@@ -1175,7 +1222,17 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
             },
             &body,
             candidate,
+            super::transit_pair(
+                &scene,
+                Guid(LANDBLOCK),
+                &body,
+                body.pose,
+                grounded_pair(),
+                candidate,
+            )
+            .unwrap(),
             config.step_down_height,
+            config.walkable_normal_z,
         )
         .unwrap();
         let SettleResult::Supported(settled) = settled else {
@@ -1213,7 +1270,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        support: Some(support),
+        ground: GroundState::Supported(support),
     };
     let blocked = solve_grounded(
         &scene,
@@ -1223,7 +1280,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
             body: body.clone(),
             spheres: grounded_pair(),
             supported_velocity: Vector3::new(1.0, 0.0, 0.0),
-            may_step_down: true,
+            settle: SettlePermission::Walking,
             retain_supported_gravity: false,
             delta_seconds: 0.5,
         },
@@ -1236,7 +1293,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         blocked.pose.coords.z.abs() < TEST_EPSILON,
         "failed step leaked its raised trial pose: {blocked:?}"
     );
-    assert_eq!(blocked.support, Some(support));
+    assert_eq!(blocked.ground.walkable_support(), Some(support));
 
     let retreated = solve_grounded(
         &scene,
@@ -1246,7 +1303,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
             body: blocked,
             spheres: grounded_pair(),
             supported_velocity: Vector3::new(-1.0, 0.0, 0.0),
-            may_step_down: true,
+            settle: SettlePermission::Walking,
             retain_supported_gravity: false,
             delta_seconds: 0.5,
         },
@@ -1300,7 +1357,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        support: Some(GroundSupport {
+        ground: GroundState::Supported(GroundSupport {
             normal: upper_normal,
         }),
     };
@@ -1314,7 +1371,15 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         spheres,
         filter: PhysicalCollisionFilter::ALL,
     };
-    let first = settle_candidate(context, &body, high, config.step_down_height).unwrap();
+    let first = settle_candidate(
+        context,
+        &body,
+        high,
+        super::transit_pair(&scene, Guid(LANDBLOCK), &body, body.pose, spheres, high).unwrap(),
+        config.step_down_height,
+        RETAIL_WALKABLE_NORMAL_Z,
+    )
+    .unwrap();
     let SettleResult::Supported(first) = first else {
         panic!("mound fixture did not acquire the retained slope: {first:?}");
     };
@@ -1324,7 +1389,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
     );
 
     body.pose.coords = first.body_center;
-    body.support = Some(first.support);
+    body.ground = GroundState::Supported(first.support);
     let second = solve_grounded(
         &scene,
         config,
@@ -1333,7 +1398,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
             body,
             spheres,
             supported_velocity: Vector3::zero(),
-            may_step_down: true,
+            settle: SettlePermission::Walking,
             retain_supported_gravity: false,
             delta_seconds: 1.0 / 30.0,
         },
@@ -1350,7 +1415,11 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         "retained mound slope fixed point",
     );
     assert_vector_close(
-        second.support.expect("retained mound support").normal,
+        second
+            .ground
+            .walkable_support()
+            .expect("retained mound support")
+            .normal,
         retained_normal,
         "retained mound slope normal",
     );
@@ -1376,7 +1445,7 @@ fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        support: Some(GroundSupport {
+        ground: GroundState::Supported(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         }),
     };
@@ -1464,7 +1533,7 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
                         .normalize_outdoor_cell(),
                         cell: None,
                         velocity: Vector3::zero(),
-                        support: Some(GroundSupport {
+                        ground: GroundState::Supported(GroundSupport {
                             normal: Vector3::new(0.0, 0.0, 1.0),
                         }),
                     };
@@ -1476,7 +1545,7 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
                             body,
                             spheres: grounded_pair(),
                             supported_velocity: Vector3::new(1.0, lateral_velocity, 0.0),
-                            may_step_down: true,
+                            settle: SettlePermission::Walking,
                             retain_supported_gravity: false,
                             delta_seconds: 0.5,
                         },
@@ -1506,6 +1575,8 @@ fn grounded_config() -> GroundedConfig {
     GroundedConfig {
         gravity: -9.8,
         walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+        landing_normal_z: RETAIL_LANDING_NORMAL_Z,
+        airborne_step_down_height: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
         step_up_height: 0.6,
         step_down_height: 0.2,
         edge_protection: EdgeProtection::None,

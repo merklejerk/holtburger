@@ -555,9 +555,8 @@ impl GlobalCellRange {
     }
 
     fn cells(self) -> impl Iterator<Item = (i32, i32)> {
-        (self.minimum.0..=self.maximum.0).flat_map(move |x| {
-            (self.minimum.1..=self.maximum.1).map(move |y| (x, y))
-        })
+        (self.minimum.0..=self.maximum.0)
+            .flat_map(move |x| (self.minimum.1..=self.maximum.1).map(move |y| (x, y)))
     }
 
     fn contains(self, cell: (i32, i32)) -> bool {
@@ -747,7 +746,12 @@ impl StaticShadowIndex {
     }
 
     /// Registers one placed collider into every global cell its bounds shadow.
-    fn stamp_outdoor(&mut self, owner: Guid, collider: &PlacedCollider, reference: ColliderReference) {
+    fn stamp_outdoor(
+        &mut self,
+        owner: Guid,
+        collider: &PlacedCollider,
+        reference: ColliderReference,
+    ) {
         let range = GlobalCellRange::from_local_extent(
             owner,
             collider.bounds.minimum(),
@@ -1128,8 +1132,7 @@ impl CollisionScene {
             if request.placement.reaches_outdoors {
                 // A settle probe is vertical, so its planar reach is only the sphere radius; the
                 // drop and rise change which triangles can be reached in Z, not in XY.
-                for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius)
-                {
+                for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius) {
                     for triangle in &cell.triangles {
                         let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
                         if let Some(support) = support_on_polygon(
@@ -1159,7 +1162,10 @@ impl CollisionScene {
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
-            if !collider.bounds.intersects_sphere(local_center, vertical_reach) {
+            if !collider
+                .bounds
+                .intersects_sphere(local_center, vertical_reach)
+            {
                 continue;
             }
             // One contract mapping for every shape's supports.
@@ -1762,8 +1768,7 @@ impl CollisionScene {
             };
             let local_center = anchor_to_landblock(request.center, request.anchor, *owner);
             if request.placement.reaches_outdoors {
-                for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius)
-                {
+                for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius) {
                     for triangle in &cell.triangles {
                         if let Some(contact) =
                             terrain_contact(triangle, local_center, request.radius)
@@ -1787,7 +1792,10 @@ impl CollisionScene {
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
-            if !collider.bounds.intersects_sphere(local_center, request.radius) {
+            if !collider
+                .bounds
+                .intersects_sphere(local_center, request.radius)
+            {
                 continue;
             }
             // One movement gate and contract mapping for every shape's contacts.
@@ -2262,7 +2270,9 @@ fn overlapped_terrain_cells(
     let side = holtburger_content::TERRAIN_GRID_CELLS as i32;
     let clamped_range = move |minimum: f32, maximum: f32| {
         let low = (minimum / OUTDOOR_CELL_METERS).floor().max(0.0) as i32;
-        let high = (maximum / OUTDOOR_CELL_METERS).floor().min((side - 1) as f32) as i32;
+        let high = (maximum / OUTDOOR_CELL_METERS)
+            .floor()
+            .min((side - 1) as f32) as i32;
         low..=high
     };
     // Authored surfaces always carry the full row-major grid, which direct indexing requires.
@@ -2277,7 +2287,11 @@ fn overlapped_terrain_cells(
                 .map(move |column| &terrain.cells[(row * side + column) as usize])
         })
     });
-    let scan = if indexed { 0..0 } else { 0..terrain.cells.len() };
+    let scan = if indexed {
+        0..0
+    } else {
+        0..terrain.cells.len()
+    };
     scan.map(|index| &terrain.cells[index])
         .chain(indexed_cells.into_iter().flatten())
 }
@@ -2582,8 +2596,8 @@ mod tests {
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
         BspSolid, ColliderScale, CollisionBox, CollisionShape, LandblockColliders,
-        LandblockPlacement,
-        OutdoorBuildingTransit, StaticColliderPlacement, TerrainCollisionSurface,
+        LandblockPlacement, OutdoorBuildingTransit, StaticColliderPlacement,
+        TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
 
@@ -2677,16 +2691,17 @@ mod tests {
                     StaticColliderPlacement::BuildingShell { .. }
                 ) || !placement.reaches_interior_in(*owner);
                 let shape_contacts: Vec<_> = match &*collider.shape {
-                    CollisionShape::Bsp(solid) => placed_solid_contacts(
-                        collider,
-                        solid,
-                        local_center,
-                        radius,
-                        center_solid,
-                    )
-                    .into_iter()
-                    .chain(placed_polygon_contacts(collider, solid, local_center, radius))
-                    .collect(),
+                    CollisionShape::Bsp(solid) => {
+                        placed_solid_contacts(collider, solid, local_center, radius, center_solid)
+                            .into_iter()
+                            .chain(placed_polygon_contacts(
+                                collider,
+                                solid,
+                                local_center,
+                                radius,
+                            ))
+                            .collect()
+                    }
                     CollisionShape::Cylinder(cylinder) => {
                         placed_cylinder_contact(collider, cylinder, local_center, radius)
                             .into_iter()
@@ -2713,9 +2728,7 @@ mod tests {
     fn indexed_terrain_selection_reproduces_full_scan_contacts_for_buried_centers() {
         let owner = Guid(0xda55_ffff);
         // A steep west-to-east ramp: heights rise 4m per 24m column.
-        let heights: Vec<f32> = (0..81)
-            .map(|index| (index / 9) as f32 * 4.0)
-            .collect();
+        let heights: Vec<f32> = (0..81).map(|index| (index / 9) as f32 * 4.0).collect();
         let mut scene = CollisionScene::new();
         scene
             .insert(LandblockCollisionAsset {
@@ -2727,8 +2740,9 @@ mod tests {
                         height_indices: vec![0; 81],
                         heights,
                         terrain_samples: vec![0; 81],
-                        cell_diagonals:
-                            holtburger_content::TerrainCellDiagonals::for_landblock(owner.0),
+                        cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(
+                            owner.0,
+                        ),
                     },
                 )
                 .unwrap(),
@@ -3859,19 +3873,25 @@ mod tests {
 
         let outdoors = CollisionPlacement::outdoor();
         assert_eq!(
-            scene.shadows.selected_colliders(owner_cells(owner), &outdoors),
+            scene
+                .shadows
+                .selected_colliders(owner_cells(owner), &outdoors),
             references([0, 1])
         );
 
         let interior = CollisionPlacement::interior(cell);
         assert_eq!(
-            scene.shadows.selected_colliders(owner_cells(owner), &interior),
+            scene
+                .shadows
+                .selected_colliders(owner_cells(owner), &interior),
             references([2, 3])
         );
 
         let straddling = CollisionPlacement::outdoor().merge_reached(interior);
         assert_eq!(
-            scene.shadows.selected_colliders(owner_cells(owner), &straddling),
+            scene
+                .shadows
+                .selected_colliders(owner_cells(owner), &straddling),
             references([0, 1, 2, 3])
         );
         assert_eq!(
@@ -3985,9 +4005,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            scene
-                .shadows
-                .selected_colliders(owner_cells(target_owner), &CollisionPlacement::interior(target_cell)),
+            scene.shadows.selected_colliders(
+                owner_cells(target_owner),
+                &CollisionPlacement::interior(target_cell)
+            ),
             [ColliderReference {
                 owner: source_owner,
                 collider_index: 0,
@@ -3998,7 +4019,10 @@ mod tests {
         assert!(
             scene
                 .shadows
-                .selected_colliders(owner_cells(target_owner), &CollisionPlacement::interior(target_cell))
+                .selected_colliders(
+                    owner_cells(target_owner),
+                    &CollisionPlacement::interior(target_cell)
+                )
                 .is_empty(),
             "eviction retained a dangling cross-owner static shadow"
         );

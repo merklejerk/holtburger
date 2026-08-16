@@ -313,9 +313,9 @@ mod tests {
     use holtburger_content::{
         BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
         CollisionBox, CollisionPolygon, CollisionShape, LandblockColliders,
-        LandblockCollisionAsset,
-        LandblockPlacement, LandblockTerrain, PlacedCollider, StaticColliderPlacement,
-        TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals, TerrainCollisionSurface,
+        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain, PlacedCollider,
+        StaticColliderPlacement, TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals,
+        TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode, InternalNode};
 
@@ -899,7 +899,10 @@ mod tests {
             Vector3::new(10.0, 5.0, 20.0),
             Vector3::new(10.0, 5.0, 0.0),
         ];
-        let building_solid = building.shape.as_bsp().expect("synthetic wall is a BSP solid");
+        let building_solid = building
+            .shape
+            .as_bsp()
+            .expect("synthetic wall is a BSP solid");
         building.shape = Arc::new(CollisionShape::Bsp(BspSolid {
             bsp: building_solid.bsp.clone(),
             bounds: building_solid.bounds,

@@ -195,6 +195,34 @@ pub struct PhysicalFlyCameraIntent {
     pub view_direction: [f32; 3],
 }
 
+/// Ground classification of the camera body, mirroring the world's `ContactState`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CameraGroundState {
+    /// No collision transaction has classified the body yet.
+    Unknown,
+    /// No contact plane.
+    Airborne,
+    /// A retained contact plane below the walkable threshold: descending along a surface the
+    /// body cannot stand on.
+    Sliding,
+    /// Walkable lower-sphere support.
+    Supported,
+}
+
+impl From<holtburger_world::ContactState> for CameraGroundState {
+    fn from(contact: holtburger_world::ContactState) -> Self {
+        // The contract renames `Grounded` to `Supported`: the camera surface reports the ground
+        // relationship, and "grounded" already names the walkable-only boolean elsewhere.
+        match contact {
+            holtburger_world::ContactState::Unknown => Self::Unknown,
+            holtburger_world::ContactState::Airborne => Self::Airborne,
+            holtburger_world::ContactState::Sliding => Self::Sliding,
+            holtburger_world::ContactState::Grounded => Self::Supported,
+        }
+    }
+}
+
 /// Browser-independent semantic character drive submitted to grounded camera control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -473,8 +501,8 @@ pub struct PhysicalCameraMotionPath {
     pub status: PhysicalCameraTickStatus,
     /// Installed collision residency, independent from solver completion.
     pub scene_residency: PhysicalCameraSceneResidency,
-    /// Whether grounded response committed lower-sphere support.
-    pub grounded: bool,
+    /// Ground classification committed by the latest solve.
+    pub ground_state: CameraGroundState,
     /// Distinct non-walkable planes encountered during the latest grounded solve.
     pub constraint_count: usize,
     /// Collision substeps consumed by this tick.

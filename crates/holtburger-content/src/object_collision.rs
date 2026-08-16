@@ -1060,7 +1060,12 @@ fn append_placement(
                             input.source_did
                         )
                     })?;
-                colliders.push(PlacedCollider::new(shape, part_placement, part_scale, input.identity)?);
+                colliders.push(PlacedCollider::new(
+                    shape,
+                    part_placement,
+                    part_scale,
+                    input.identity,
+                )?);
             }
             // Retail collides against per-part physics BSPs only when the object has
             // `PhysicsState::HasPhysicsBSP` (any part carries one); otherwise it falls back to the
@@ -1101,8 +1106,6 @@ fn compose(
         orientation: base.orientation.multiply(&local_orientation),
     }
 }
-
-
 
 /// Whether every component of a vector is finite.
 fn vector_is_finite(vector: Vector3) -> bool {
@@ -1420,11 +1423,9 @@ mod tests {
 
     #[test]
     fn collision_box_sphere_intersection_clamps_to_faces() {
-        let bounds = CollisionBox::from_points([
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(2.0, 2.0, 2.0),
-        ])
-        .unwrap();
+        let bounds =
+            CollisionBox::from_points([Vector3::new(0.0, 0.0, 0.0), Vector3::new(2.0, 2.0, 2.0)])
+                .unwrap();
         assert!(bounds.intersects_sphere(Vector3::new(3.0, 1.0, 1.0), 1.5));
         assert!(!bounds.intersects_sphere(Vector3::new(3.0, 1.0, 1.0), 0.5));
         // Corner reach uses true euclidean distance, not per-axis slack.

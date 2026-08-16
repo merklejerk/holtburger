@@ -1,6 +1,6 @@
 # Holtburger Grounded Landing Threshold and Contact-Slide Plan
 
-Status: Final — evidence-grounded, awaiting execution
+Status: Complete — implemented and verified 2026-08-16
 Created: 2026-08-15
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Ground-truth predecessor: `docs/plans/holtburger-setup-volume-colliders-and-cell-shadow-index-plan.md`
@@ -57,8 +57,10 @@ broadcastable sliding motion state.
   not new dynamics.
 - State transitions: airborne → slide (lenient landing), slide → grounded (contact normal
   reaches the walking threshold), slide → airborne (contact lost, with the LeaveGround-style
-  consequence), walkable → slide (walking off a crest re-lands leniently within the same tick's
-  solve rather than popping through a reported airborne state).
+  consequence), walkable → airborne → slide at a crest (corrected during execution: retail
+  selects the allowance at transition entry, so a failed walking step-down genuinely clears
+  contact and the lenient landing acquires the face on later transitions once ballistics close
+  the 0.04m reach — see Decisions).
 - Retail-differential coverage transliterated independently of production: landing acceptance
   thresholds, state derivation (`Contact`/`OnWalkable` from the contact plane), slide gravity
   and frictionlessness, crest walk-off continuity, and the ball-flank descent inherited from
@@ -242,10 +244,81 @@ None. All four draft questions were resolved with evidence — see Resolved Ques
    in `physical_body.rs`; the physical-fly solver has no walkable concept. Grounded-only scope
    confirmed.
 
+## Execution Record (2026-08-16)
+
+- **Phase 1** — `grounded_landing_retail_differential.rs`: transliterated oracle (allowance
+  selection, landing acceptance, `SetPositionInternal` transient derivation, gravity/friction
+  gates) with cited self-tests, including a vocabulary test pinning `GroundState`'s three
+  variants to retail's observable transient combinations.
+- **Phase 2** — `GroundState { Supported | Sliding | Airborne }` replaced
+  `Option<GroundSupport>` on `GroundedBody` and the persisted grounded response state, with
+  honest accessors (`walkable_support()` vs `contact_plane()`). `GroundedConfig` gained
+  `landing_normal_z` (0.0871557) and `airborne_step_down_height` (0.04). The request's
+  `may_step_down: bool` became `SettlePermission { Denied | Landing | Walking }` because the old
+  flag conflated launch gating with state selection; `grounded_step_down_enabled` became
+  `grounded_settle_permission`, and its differential was rewritten with the two-gate retail
+  mapping. `settle_candidate` gained the acceptance threshold; `landing_candidate` wraps it with
+  the lenient pair and results classify through the walking threshold exactly as
+  `SetPositionInternal` derives `OnWalkable`. Sliding ticks are ballistic (structurally: the
+  supported-velocity/gravity path only engages for `Supported`). All pre-existing grounded and
+  restitution differentials passed unchanged — no below-threshold expectations needed updating.
+- **Phase 3** — `ContactState` gained `Sliding`; jump readiness maps it to the
+  contact-without-walkable rejection (retail parity per `jump_is_allowed`); motion-basis
+  resolution treats it as physics-driven explicitly. The redundant `PhysicalBodyMotion.grounded`
+  bool was deleted (it duplicated the commit's `ContactState`), and the host camera contract now
+  carries `ground_state: CameraGroundState` end to end into the TS
+  `PhysicalCameraGroundState` and the Explorer status line. The frontend grounded config
+  contract gained `landingNormalZ`/`airborneStepDownHeight` with retail-mirror constants.
+- **Phases 4-5** — probe grounded routes report the tri-state and the artifact line reports
+  `terrain_max_slope_ratio` plus the steepest cell, which located real slide-steep content:
+  landblock 0x1EB6FFFF, cell (24,168), face normal z = 0.492. Runtime evidence there: a drop at
+  (42,186,107) produced 16 airborne ticks → **46 sliding ticks down the authored face** with
+  gravity accelerating the frictionless descent along the face tangent → 87 supported ticks at
+  rest on the flat below — retail's land-slide-settle sequence on production content.
+  Verification: workspace clippy clean; 326 world tests (16 landing-differential) plus full
+  workspace and 1066 frontend tests green.
+
+- (2026-08-16, quality pass) Four-angle review applied post-completion:
+  `GroundState::settle_permission()` became the single owner of the resolved-state projection
+  (six hand-rolled copies deleted across the harness, tests, and differentials);
+  `settle_candidate` now receives the caller's already-computed candidate placement, removing two
+  redundant transit queries per settle — including from the per-tick landing probe;
+  `From<ContactState> for CameraGroundState` moved the contract mapping onto the contract;
+  `ContactState::grounded()` was renamed `walkable()` to name which side `Sliding` falls on; the
+  differential suites now share input fixtures (`differential_fixtures.rs` — retail config,
+  creature pair, flat terrain), and a hollow discriminant-distinctness test was deleted.
+  Skipped with rationale: making the persisted grounded state the single vocabulary (GroundState
+  lacks `Unknown`; unifying it with `ContactState` is a further contract cutover — named debt
+  below); the settle-clone and steady-slide re-query micro-optimizations (marginal, and the
+  latter risks placement-semantics drift in oracle-guarded code); TS-authored solver constants
+  (pre-existing boundary-mirror pattern). Steep-slope probe route re-verified bit-identical
+  after the pass (16 airborne / 46 sliding / 87 supported ticks).
+- (2026-08-16, debt) `ContactState` (with `Unknown`, wire-adjacent) and `GroundState` (with the
+  contact plane, solver-resolved) remain two overlapping vocabularies with the projection at the
+  commit site; unifying them behind one source of truth is a candidate follow-up once the
+  dynamic-entity broadcast consumer clarifies which shape it needs.
+
 ## Decisions and Course Corrections
 
 - (2026-08-15) Plan created from the walkable-allowance gap discovered and sharpened during the
   setup-volume-colliders plan; see that plan's decision entry for the discovery evidence.
+- (2026-08-16, crest-model correction) The plan's "walkable → slide without an airborne pop"
+  transition was wrong, caught by its own differential: retail selects `walkable_allowance` at
+  transition entry, so a failed walking step-down ends with an invalid contact plane and a
+  cleared contact bit (`SetPositionInternal`, `acclient.c:310697-310719`) — the body is genuinely
+  airborne until ballistics bring the face within the 0.04m landing reach. For a 4 m/s walk-off
+  onto a 51° face that gap is ~30 ticks (t ≈ 2·v·slope/g), and retail's ballistics produce the
+  same gap. An initially implemented same-tick landing fall-through was removed as a divergence;
+  the crest differential now asserts the bounded airborne gap instead of continuity.
+- (2026-08-16, concession) `volume_query::uniform_scale` and the settle test wrapper still map
+  states outside the constructor door with an `expect`/local projection; both are documented
+  against `PlacedCollider::new` and `grounded_settle_permission` as the enforcing owners.
+- (2026-08-16, debt) The host contract's `PhysicalCameraStatus.groundState` reaches the Explorer
+  panel as a raw string; a future sliding-aware UI treatment (and the motion-state broadcast
+  consumer) remain with the dynamic-entity roadmap. The `surface_friction` walking-mode gate
+  audit (0.25 normal-velocity / speed / cos-10° branches) remains a candidate spin-out flagged
+  at the Phase 4 checkpoint; nothing in this plan's differentials contradicted the current
+  implementation.
 - (2026-08-15) Finalized after resolving all four draft questions from the decompile. The
   largest correction: the draft assumed retail's slide was friction-damped and budgeted a slide
   velocity/friction port; `calc_friction`'s `OnWalkable` gate proves the slide is frictionless

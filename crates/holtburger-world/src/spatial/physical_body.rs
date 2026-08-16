@@ -7,11 +7,11 @@ use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
-    CellTransitRequest, CollisionQueryError, CollisionScene, ContactState, GroundSupport,
-    GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome,
-    GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyBudget,
-    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
-    PlacedMotionPathRequest, SpatialBody, solve_grounded, solve_physical_fly,
+    CellTransitRequest, CollisionQueryError, CollisionScene, ContactState, GroundState,
+    GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
+    GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody,
+    PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
+    PlacedMotionPathRequest, SettlePermission, SpatialBody, solve_grounded, solve_physical_fly,
 };
 
 /// Invalid geometry rejected before a body enters authoritative world state.
@@ -291,12 +291,12 @@ pub enum PhysicalBodyResponseState {
         /// Current interior cell, or `None` while outdoors.
         cell: Option<Guid>,
     },
-    /// Placement, gravity, and support memory owned by grounded response.
+    /// Placement, gravity, and ground-state memory owned by grounded response.
     Grounded {
         /// Current support-sphere interior cell, or `None` while outdoors.
         cell: Option<Guid>,
-        /// Last committed walkable support for the lower sphere.
-        support: Option<GroundSupport>,
+        /// Last committed ground state for the lower sphere.
+        ground: GroundState,
         /// Retail's bounded consecutive stationary-fall transition stage.
         stationary_fall_frames: u8,
     },
@@ -338,7 +338,7 @@ impl PhysicalBodyState {
             }
             PhysicalBodyDefinition::Grounded { .. } => PhysicalBodyResponseState::Grounded {
                 cell,
-                support: None,
+                ground: GroundState::Airborne,
                 stationary_fall_frames: 0,
             },
         };
@@ -478,8 +478,6 @@ pub struct PhysicalBodyMotion {
     pub path: PlacedMotionPath,
     /// Result category for this fixed tick.
     pub status: PhysicalBodyTickStatus,
-    /// Whether grounded response committed walkable support.
-    pub grounded: bool,
     /// Distinct non-walkable planes encountered by grounded response.
     pub constraint_count: usize,
     /// Collision substeps consumed by the solve.
@@ -540,7 +538,7 @@ struct GroundedTickState {
     /// Prior support-sphere interior cell.
     cell: Option<Guid>,
     /// Prior committed walkable support.
-    support: Option<GroundSupport>,
+    ground: GroundState,
     /// Prior stationary-fall transition stage.
     stationary_fall_frames: u8,
 }
@@ -565,8 +563,6 @@ struct FreeSphereTickState {
 struct HeldTickDiagnostics {
     /// Budget category that prevented ordinary completion.
     status: PhysicalBodyTickStatus,
-    /// Whether the unchanged prior state retained walkable support.
-    grounded: bool,
     /// Distinct non-walkable constraints encountered before the stop.
     constraint_count: usize,
     /// Completed anti-tunneling subdivisions.
@@ -616,7 +612,7 @@ pub(super) fn solve_physical_body_tick(
             PhysicalBodyDefinition::Grounded { spheres, config },
             PhysicalBodyResponseState::Grounded {
                 cell,
-                support,
+                ground,
                 stationary_fall_frames,
             },
         ) => {
@@ -632,7 +628,7 @@ pub(super) fn solve_physical_body_tick(
                     response_policy: physical.response_policy,
                     collision_filter: physical.collision_filter,
                     cell: *cell,
-                    support: *support,
+                    ground: *ground,
                     stationary_fall_frames: *stationary_fall_frames,
                 },
                 actuation,
@@ -718,7 +714,6 @@ fn solve_free_sphere_tick(
                 motion: PhysicalBodyMotion {
                     path,
                     status: PhysicalBodyTickStatus::Solved,
-                    grounded: false,
                     constraint_count: 0,
                     substeps,
                     contact_passes,
@@ -737,7 +732,6 @@ fn solve_free_sphere_tick(
             state.sphere,
             HeldTickDiagnostics {
                 status: free_budget_status(budget),
-                grounded: false,
                 constraint_count: 0,
                 substeps,
                 contact_passes,
@@ -755,40 +749,40 @@ fn solve_grounded_body_tick(
 ) -> Result<PhysicalBodyTickCommit> {
     let response = PhysicalBodyResponseState::Grounded {
         cell: state.cell,
-        support: state.support,
+        ground: state.ground,
         stationary_fall_frames: state.stationary_fall_frames,
     };
     let mut grounded_body = GroundedBody {
         pose: body.pose,
         cell: state.cell,
         velocity: body.velocity,
-        support: state.support,
+        ground: state.ground,
     };
     // A newly attached grounded body has not yet had a collision transaction classify its
     // contact. Let explicit planar drive participate in that first transaction so a body placed
     // on a floor does not discard one tick of input. Once a solve commits `Airborne`, canonical
     // velocity remains ballistic and later drive cannot steer it.
     if body.contact == ContactState::Unknown
-        && grounded_body.support.is_none()
+        && grounded_body.ground.walkable_support().is_none()
         && let GroundedSupportedMotion::Driven(velocity) = actuation.supported_motion
     {
         grounded_body.velocity.x = velocity.x;
         grounded_body.velocity.y = velocity.y;
     }
-    let may_step_down = grounded_step_down_enabled(body.contact, actuation.launch.is_some());
+    let settle = grounded_settle_permission(body.contact, actuation.launch.is_some());
     if let Some(launch) = actuation.launch {
         ensure!(
-            grounded_body.support.is_some(),
+            grounded_body.ground.walkable_support().is_some(),
             "grounded launch requires current walkable support"
         );
         grounded_body.velocity = launch.velocity();
-        grounded_body.support = None;
+        grounded_body.ground = GroundState::Airborne;
     }
     let mut supported_velocity = match actuation.supported_motion {
         GroundedSupportedMotion::Driven(velocity) => velocity,
         GroundedSupportedMotion::Coasting => grounded_body.velocity,
     };
-    if let Some(support) = grounded_body.support {
+    if let Some(support) = grounded_body.ground.walkable_support() {
         match (
             state.response_policy.surface_motion,
             actuation.supported_motion,
@@ -822,7 +816,7 @@ fn solve_grounded_body_tick(
             body: grounded_body,
             spheres: state.spheres,
             supported_velocity,
-            may_step_down,
+            settle,
             retain_supported_gravity: physical_surface_retains_gravity(
                 state.response_policy.surface_motion,
             ),
@@ -856,13 +850,17 @@ fn solve_grounded_body_tick(
                 solved.cell
             );
             let mut pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
-            // Support identity belongs to the collision domain that produced it. A recovered
+            // Ground identity belongs to the collision domain that produced it. A recovered
             // placement deliberately drops that memory so the next ordinary tick reacquires it.
-            let support = if recovered { None } else { solved.support };
+            let mut ground = if recovered {
+                GroundState::Airborne
+            } else {
+                solved.ground
+            };
             let stationary_fall_frames = next_stationary_fall_frames(
                 state.stationary_fall_frames,
-                state.support,
-                support,
+                state.ground.walkable_support(),
+                ground.walkable_support(),
                 collision_normal,
                 achieved_velocity,
             );
@@ -871,16 +869,14 @@ fn solve_grounded_body_tick(
                 achieved_velocity,
                 restitution: state.response_policy.restitution,
                 collision_normal,
-                previously_walkable: state.support.is_some(),
-                current_support_normal: support.map(|current| current.normal),
+                previously_walkable: state.ground.walkable_support().is_some(),
+                current_support_normal: ground.walkable_support().map(|current| current.normal),
                 surface_motion: state.response_policy.surface_motion,
                 stationary_fall_frames,
             });
-            let support = if collision_response.separates_from_support {
-                None
-            } else {
-                support
-            };
+            if collision_response.separates_from_support {
+                ground = GroundState::Airborne;
+            }
             let velocity = collision_response.velocity;
             apply_grounded_facing(
                 &mut pose,
@@ -889,24 +885,22 @@ fn solve_grounded_body_tick(
                 state.response_policy,
                 actuation.control_heading,
             );
-            let grounded = support.is_some();
             Ok(PhysicalBodyTickCommit {
                 pose,
                 velocity,
-                contact: if grounded {
-                    ContactState::Grounded
-                } else {
-                    ContactState::Airborne
+                contact: match ground {
+                    GroundState::Supported(_) => ContactState::Grounded,
+                    GroundState::Sliding(_) => ContactState::Sliding,
+                    GroundState::Airborne => ContactState::Airborne,
                 },
                 response: PhysicalBodyResponseState::Grounded {
                     cell: committed_cell,
-                    support,
+                    ground,
                     stationary_fall_frames,
                 },
                 motion: PhysicalBodyMotion {
                     path,
                     status: PhysicalBodyTickStatus::Solved,
-                    grounded,
                     constraint_count,
                     substeps,
                     contact_passes,
@@ -926,7 +920,6 @@ fn solve_grounded_body_tick(
             state.spheres.support,
             HeldTickDiagnostics {
                 status: grounded_budget_status(budget),
-                grounded: state.support.is_some(),
                 constraint_count,
                 substeps,
                 contact_passes,
@@ -935,9 +928,25 @@ fn solve_grounded_body_tick(
     }
 }
 
-/// Projects retained generic contact into retail's ordinary walking step-down eligibility.
-pub(crate) const fn grounded_step_down_enabled(contact: ContactState, launching: bool) -> bool {
-    !launching && !matches!(contact, ContactState::Airborne)
+/// Projects retained generic contact into retail's per-transition settle eligibility.
+///
+/// Retail's ordinary walking step-down requires the OBJECTINFO contact bit
+/// (`CTransition::transitional_insert`, `acclient.c:301550-301599`); every other gravity-bound
+/// transition prepares the lenient 0.04m landing step-down (`acclient.c:301563-301569`); a
+/// launch tick suppresses both until the body has left the ground. `Unknown` classifies through
+/// the walking probe so a newly registered body can acquire the floor beneath it.
+pub(crate) const fn grounded_settle_permission(
+    contact: ContactState,
+    launching: bool,
+) -> SettlePermission {
+    if launching {
+        SettlePermission::Denied
+    } else {
+        match contact {
+            ContactState::Grounded | ContactState::Unknown => SettlePermission::Walking,
+            ContactState::Sliding | ContactState::Airborne => SettlePermission::Landing,
+        }
+    }
 }
 
 fn trace_body_reference_path(
@@ -1004,16 +1013,19 @@ fn held_motion_commit(
             cell: committed_cell,
         },
         PhysicalBodyResponseState::Grounded {
-            support,
+            ground,
             stationary_fall_frames,
             ..
         } => PhysicalBodyResponseState::Grounded {
             cell: committed_cell,
-            support: if recovered { None } else { support },
+            ground: if recovered {
+                GroundState::Airborne
+            } else {
+                ground
+            },
             stationary_fall_frames: if recovered { 0 } else { stationary_fall_frames },
         },
     };
-    let grounded = diagnostics.grounded && !recovered;
     Ok(PhysicalBodyTickCommit {
         pose,
         velocity: body.velocity,
@@ -1026,7 +1038,6 @@ fn held_motion_commit(
         motion: PhysicalBodyMotion {
             path,
             status: diagnostics.status,
-            grounded,
             constraint_count: diagnostics.constraint_count,
             substeps: diagnostics.substeps,
             contact_passes: diagnostics.contact_passes,
@@ -1356,6 +1367,8 @@ mod tests {
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
         walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+        landing_normal_z: crate::RETAIL_LANDING_NORMAL_Z,
+        airborne_step_down_height: crate::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,

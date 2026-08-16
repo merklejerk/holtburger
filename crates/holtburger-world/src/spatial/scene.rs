@@ -8,6 +8,8 @@ use super::{
     physical_body::{physical_body_scene_residency, solve_physical_body_tick},
     physics::sample_mode_for_projection_state,
 };
+#[cfg(test)]
+use super::{GroundState, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z};
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
@@ -544,6 +546,8 @@ mod physical_body_tests {
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
         walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+        landing_normal_z: RETAIL_LANDING_NORMAL_Z,
+        airborne_step_down_height: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,
@@ -1106,12 +1110,12 @@ mod physical_body_tests {
             .unwrap();
         let stored = scene.body_mut(id).unwrap();
         stored.contact = ContactState::Grounded;
-        let PhysicalBodyResponseState::Grounded { support, .. } =
+        let PhysicalBodyResponseState::Grounded { ground, .. } =
             &mut stored.physical.as_mut().unwrap().response
         else {
             panic!("grounded definition produced non-grounded response state")
         };
-        *support = Some(GroundSupport {
+        *ground = GroundState::Supported(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         });
 
@@ -1220,7 +1224,7 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        let result = scene
+        scene
             .tick_physical_body(
                 id,
                 &collision,
@@ -1229,9 +1233,7 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .unwrap();
-        let motion = result.motion;
         let body = scene.body(id).unwrap();
-        assert!(motion.grounded);
         assert_eq!(body.contact, ContactState::Grounded);
         assert!((body.pose.coords.z - (start.z - TERRAIN_WATER_COLLISION_DEPTH)).abs() < 0.002);
     }
@@ -1282,12 +1284,12 @@ mod physical_body_tests {
         let stored = scene.body_mut(id).unwrap();
         stored.velocity = Vector3::new(1.0, 2.0, -3.0);
         stored.contact = ContactState::Grounded;
-        let PhysicalBodyResponseState::Grounded { support, .. } =
+        let PhysicalBodyResponseState::Grounded { ground, .. } =
             &mut stored.physical.as_mut().unwrap().response
         else {
             panic!("grounded definition produced non-grounded response state")
         };
-        *support = Some(GroundSupport {
+        *ground = GroundState::Supported(GroundSupport {
             normal: Vector3::new(0.0, 0.0, 1.0),
         });
         let launch = GroundedLaunch::new(Vector3::new(8.0, 0.0, 6.0)).unwrap();

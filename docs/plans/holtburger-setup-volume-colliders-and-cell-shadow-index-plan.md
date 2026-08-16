@@ -425,7 +425,9 @@ None. Terrain indexing was ratified into Phase 5 (see Resolved Questions 3).
   thresholds differ only in the route off the flank (grounded slide vs airborne contact), and the
   same asymmetry applies to steep polygon/terrain slopes, which predate this plan. Closing it is
   a grounded-solver change (a landing/walking threshold pair), not a volume-query change —
-  tracked as `docs/plans/holtburger-grounded-landing-threshold-and-contact-slide-plan.md`.
+  closed by `docs/plans/holtburger-grounded-landing-threshold-and-contact-slide-plan.md`
+  (implemented 2026-08-16: `GroundState::Sliding`, the retail threshold pair, and the lenient
+  landing probe; the ball-flank descent is differential-tested there).
 
 - (2026-08-15) Plan created. Baseline census: 0xDA55FFFF → 575 colliders (BSP-only assembly);
   0xE63EFFFF → 0 colliders, 53/137 placements carrying authored volumes.

@@ -85,6 +85,11 @@ pub struct GroundedConfigRequest {
     pub gravity: f32,
     /// Minimum upward contact-normal component accepted as walkable support.
     pub walkable_normal_z: f32,
+    /// Minimum upward contact-normal component a body without walkable support accepts as a
+    /// landing; landings between this and `walkable_normal_z` classify as contact-slide.
+    pub landing_normal_z: f32,
+    /// Step-down reach of the lenient landing probe for bodies without walkable support.
+    pub airborne_step_down_height: f32,
     /// Maximum vertical rise attempted by step-up response.
     pub step_up_height: f32,
     /// Maximum downward support search after horizontal motion.
@@ -258,6 +263,8 @@ impl PhysicalBodyDefinitionRequest {
                 GroundedConfig {
                     gravity: config.gravity,
                     walkable_normal_z: config.walkable_normal_z,
+                    landing_normal_z: config.landing_normal_z,
+                    airborne_step_down_height: config.airborne_step_down_height,
                     step_up_height: config.step_up_height,
                     step_down_height: config.step_down_height,
                     edge_protection: match config.edge_protection {
@@ -887,6 +894,8 @@ mod tests {
                 config: GroundedConfigRequest {
                     gravity: -9.8,
                     walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+                    landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
+                    airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
                     step_up_height: 0.6,
                     step_down_height: 1.5,
                     edge_protection: EdgeProtectionRequest::Creature,

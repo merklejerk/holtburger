@@ -84,7 +84,11 @@ pub(super) fn placed_ball_contact(
     ball_contact(placed_ball(collider, ball), center, radius)
 }
 
-fn cylinder_contact(cylinder: PlacedCylinder, center: Vector3, radius: f32) -> Option<ShapeContact> {
+fn cylinder_contact(
+    cylinder: PlacedCylinder,
+    center: Vector3,
+    radius: f32,
+) -> Option<ShapeContact> {
     let epsilon = CONTACT_EPSILON;
     let displacement = center - cylinder.low;
     // Retail's XY gate: `radsum² >= dx² + dy²` with the shrunk radius sum (`acclient.c:346578`).
@@ -113,7 +117,11 @@ fn cylinder_contact(cylinder: PlacedCylinder, center: Vector3, radius: f32) -> O
     // (`AC1Legacy::Vector3::normalize_check_small`).
     if side_depth < cap_depth && xy_distance > epsilon {
         Some(ShapeContact {
-            normal: Vector3::new(displacement.x / xy_distance, displacement.y / xy_distance, 0.0),
+            normal: Vector3::new(
+                displacement.x / xy_distance,
+                displacement.y / xy_distance,
+                0.0,
+            ),
             depth: side_depth,
         })
     } else {
@@ -375,7 +383,9 @@ mod tests {
     #[test]
     fn cylinder_support_cuts_off_sharply_at_the_radius_sum() {
         let collider = cylinder_collider(Vector3::zero(), 0.85, 3.0, 1.0);
-        assert!(volume_support(&collider, Vector3::new(101.36, 100.0, 14.0), 0.5, 1.5, 0.6).is_none());
+        assert!(
+            volume_support(&collider, Vector3::new(101.36, 100.0, 14.0), 0.5, 1.5, 0.6).is_none()
+        );
     }
 
     #[test]
@@ -401,7 +411,9 @@ mod tests {
     #[test]
     fn ball_support_misses_outside_the_cap() {
         let collider = ball_collider(Vector3::zero(), 1.0, 1.0);
-        assert!(volume_support(&collider, Vector3::new(101.6, 100.0, 12.0), 0.5, 1.5, 0.6).is_none());
+        assert!(
+            volume_support(&collider, Vector3::new(101.6, 100.0, 12.0), 0.5, 1.5, 0.6).is_none()
+        );
     }
 }
 

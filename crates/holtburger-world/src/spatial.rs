@@ -1,12 +1,14 @@
 mod bsp_query;
 mod collision;
-mod volume_query;
+#[cfg(test)]
+mod differential_fixtures;
 mod grounded;
 mod physical_body;
 mod physical_fly;
 mod physics;
 mod scene;
 mod types;
+mod volume_query;
 
 pub use physics::{
     BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics, advance_body_kinematics,
@@ -29,9 +31,10 @@ pub use collision::{
     SupportContact, SupportFeature, SupportRequest,
 };
 pub use grounded::{
-    EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
-    GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere, RETAIL_WALKABLE_NORMAL_Z,
-    solve_grounded,
+    EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
+    GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
+    RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
+    SettlePermission, solve_grounded,
 };
 pub use physical_body::{
     GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation, PhysicalBodyActuationError,

@@ -12,8 +12,8 @@ use holtburger_content::{
 use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
 use holtburger_world::{
-    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, GroundedBody,
-    GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
+    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, GroundState,
+    GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
     GroundedRequest, GroundedSphere, MotionWaypoint, MotionWaypointPlacement,
     PhysicalCollisionFilter, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome,
     PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
@@ -44,6 +44,8 @@ const PHYSICAL_FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
 const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
     gravity: -9.8,
     walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+    landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
+    airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
     step_up_height: 0.6,
     step_down_height: 1.5,
     edge_protection: EdgeProtection::Creature,
@@ -118,6 +120,15 @@ struct GroundedRouteSpec {
     drive_ticks: usize,
     /// Ordered grounded collider roles submitted to the production solver.
     spheres: GroundedBodySpheres,
+}
+
+/// Compact tri-state label for route output.
+fn ground_label(body: &GroundedBody) -> &'static str {
+    match body.ground {
+        GroundState::Supported(_) => "supported",
+        GroundState::Sliding(_) => "sliding",
+        GroundState::Airborne => "airborne",
+    }
 }
 
 fn main() -> Result<()> {
@@ -204,12 +215,43 @@ fn main() -> Result<()> {
             .sum::<usize>()
     );
     println!(
-        "artifact terrain_cells={} terrain_triangles={} placed_colliders={} cell_volumes={}",
+        "artifact terrain_cells={} terrain_triangles={} placed_colliders={} cell_volumes={} terrain_max_slope_ratio={:.3}",
         collision.terrain.cells.len(),
         collision.terrain.cells.len() * 2,
         collision.static_geometry.colliders.len(),
-        collision.static_geometry.cell_volumes.len()
+        collision.static_geometry.cell_volumes.len(),
+        collision.terrain.maximum_planar_shift_ratio
     );
+    let cell_slope = |cell: &holtburger_content::TerrainCollisionCell| {
+        cell.triangles
+            .iter()
+            .map(|triangle| {
+                (triangle.normal.x * triangle.normal.x + triangle.normal.y * triangle.normal.y)
+                    .sqrt()
+                    / triangle.normal.z
+            })
+            .fold(0.0f32, f32::max)
+    };
+    if let Some((index, _)) = collision
+        .terrain
+        .cells
+        .iter()
+        .map(cell_slope)
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+    {
+        println!(
+            "terrain_steepest_cell index={index} west_south_corner=({},{})",
+            (index % 8) * 24,
+            (index / 8) * 24
+        );
+        for triangle in &collision.terrain.cells[index].triangles {
+            println!(
+                "terrain_steepest_triangle normal=({:.3},{:.3},{:.3}) vertices={:?}",
+                triangle.normal.x, triangle.normal.y, triangle.normal.z, triangle.vertices
+            );
+        }
+    }
     println!(
         "placement_records total={} consumed={} inert_unsupported_family={} inert_no_physics={}",
         placements.records,
@@ -1105,7 +1147,7 @@ fn probe_explicit_grounded_route(
         },
         cell: route.cell,
         velocity: Vector3::zero(),
-        support: None,
+        ground: GroundState::Airborne,
     };
     let support_center = route.start + route.spheres.support.center;
     let placement = scene.transit_cell(CellTransitRequest {
@@ -1180,10 +1222,10 @@ fn emit_grounded_route_tick(
         scene,
         GROUNDED_CONFIG,
         GroundedRequest {
+            settle: request.body.ground.settle_permission(),
             body: request.body,
             spheres,
             supported_velocity: request.requested_velocity,
-            may_step_down: true,
             retain_supported_gravity: false,
             delta_seconds: HOST_TICK_SECONDS,
             filter: PhysicalCollisionFilter::ALL,
@@ -1206,7 +1248,7 @@ fn emit_grounded_route_tick(
             };
             let support_normal = format_ground_support(&body);
             println!(
-                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} grounded={} support_normal={support_normal} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} ground={} support_normal={support_normal} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
                 start.x,
                 start.y,
                 start.z,
@@ -1220,7 +1262,7 @@ fn emit_grounded_route_tick(
                 achieved_velocity.y,
                 achieved_velocity.z,
                 format_cell(body.cell),
-                body.support.is_some(),
+                ground_label(&body),
                 body.velocity.x,
                 body.velocity.y,
                 body.velocity.z,
@@ -1235,12 +1277,12 @@ fn emit_grounded_route_tick(
             constraint_count,
         } => {
             println!(
-                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} grounded={} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} ground={} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
                 body.pose.coords.x,
                 body.pose.coords.y,
                 body.pose.coords.z,
                 format_cell(body.cell),
-                body.support.is_some(),
+                ground_label(&body),
                 body.velocity.x,
                 body.velocity.y,
                 body.velocity.z,
@@ -1251,7 +1293,7 @@ fn emit_grounded_route_tick(
 }
 
 fn format_ground_support(body: &GroundedBody) -> String {
-    let Some(support) = body.support else {
+    let Some(support) = body.ground.walkable_support() else {
         return "none".to_owned();
     };
     format!(
@@ -1392,7 +1434,7 @@ fn probe_grounded_outside_portals(
     }
     if let Some((waypoint, direction, trace)) = traversable_pair
         .iter()
-        .find(|(_, _, trace)| trace.body.support.is_some())
+        .find(|(_, _, trace)| trace.body.ground.walkable_support().is_some())
     {
         let exited = exit_outside_portal(scene, trace.body.clone(), *direction, production_pair())?;
         println!(
@@ -1418,7 +1460,7 @@ fn probe_grounded_outside_portals(
             trace.body.pose.coords.x,
             trace.body.pose.coords.y,
             trace.body.pose.coords.z,
-            trace.body.support.is_some(),
+            trace.body.ground.walkable_support().is_some(),
             trace.constraint_count,
             exited
                 .body
@@ -1427,7 +1469,7 @@ fn probe_grounded_outside_portals(
             exited.body.pose.coords.x,
             exited.body.pose.coords.y,
             exited.body.pose.coords.z,
-            exited.body.support.is_some(),
+            exited.body.ground.walkable_support().is_some(),
         );
     } else {
         if let Some((waypoint, direction, trace)) = traversable_pair.first() {
@@ -1471,7 +1513,7 @@ fn probe_grounded_outside_portals(
             pair.pose.coords.x,
             pair.pose.coords.y,
             pair.pose.coords.z,
-            pair.support.is_some(),
+            pair.ground.walkable_support().is_some(),
             pair_constraint_count,
         );
     }
@@ -1496,10 +1538,10 @@ fn exit_outside_portal(
             scene,
             GROUNDED_CONFIG,
             GroundedRequest {
+                settle: body.ground.settle_permission(),
                 body,
                 spheres,
                 supported_velocity: entry_direction * -WALK_SPEED,
-                may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
@@ -1646,7 +1688,7 @@ fn traverse_outside_portal(
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        support: None,
+        ground: GroundState::Airborne,
     };
     let registration = scene.transit_cell(CellTransitRequest {
         previous_cell: None,
@@ -1672,10 +1714,10 @@ fn traverse_outside_portal(
             scene,
             GROUNDED_CONFIG,
             GroundedRequest {
+                settle: body.ground.settle_permission(),
                 body,
                 spheres,
                 supported_velocity: Vector3::zero(),
-                may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
@@ -1714,10 +1756,10 @@ fn traverse_outside_portal(
             scene,
             GROUNDED_CONFIG,
             GroundedRequest {
+                settle: body.ground.settle_permission(),
                 body,
                 spheres,
                 supported_velocity: direction * WALK_SPEED,
-                may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
@@ -1873,13 +1915,13 @@ fn solved_grounded(outcome: GroundedOutcome) -> Result<SolvedGrounded> {
             constraint_count,
         } => {
             anyhow::bail!(
-                "grounded portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} grounded={} constraints={} after {substeps} substeps/{contact_passes} passes",
+                "grounded portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} ground={} constraints={} after {substeps} substeps/{contact_passes} passes",
                 body.pose.coords.x,
                 body.pose.coords.y,
                 body.pose.coords.z,
                 body.cell
                     .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
-                body.support.is_some(),
+                ground_label(&body),
                 constraint_count,
             )
         }

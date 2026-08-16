@@ -7,9 +7,9 @@
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::{
-    ColliderScale, CollisionBall, CollisionCylinder, CollisionShape,
-    LandblockColliders, LandblockCollisionAsset, LandblockPlacement, LandblockTerrain,
-    PlacedCollider, StaticColliderPlacement, TerrainCollisionSurface,
+    ColliderScale, CollisionBall, CollisionCylinder, CollisionShape, LandblockColliders,
+    LandblockCollisionAsset, LandblockPlacement, PlacedCollider, StaticColliderPlacement,
+    TerrainCollisionSurface,
 };
 use std::sync::Arc;
 
@@ -18,9 +18,8 @@ use super::{
 };
 use crate::spatial::collision::CollisionScene;
 use crate::{
-    EdgeProtection, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedConfig,
-    GroundedOutcome, GroundedRequest, GroundedSphere, PhysicalCollisionFilter,
-    RETAIL_WALKABLE_NORMAL_Z, solve_grounded,
+    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome,
+    GroundedRequest, PhysicalCollisionFilter, SettlePermission, solve_grounded,
 };
 
 const LANDBLOCK: u32 = 0xe63e_ffff;
@@ -57,7 +56,12 @@ fn retail_cylinder_rest_z(low_z: f32, height: f32, sphere_radius: f32) -> f32 {
 
 /// Ball rest height from `CSphere::step_sphere_down` (`acclient.c:343736`): the shrunk radius sum
 /// is un-shrunk (`radsuma = radsum + ε`) before solving the vertical tangency.
-fn retail_ball_rest_z(ball_center: Vector3, ball_radius: f32, sphere_radius: f32, center: Vector3) -> f32 {
+fn retail_ball_rest_z(
+    ball_center: Vector3,
+    ball_radius: f32,
+    sphere_radius: f32,
+    center: Vector3,
+) -> f32 {
     let radsum = (ball_radius + sphere_radius - RETAIL_EPSILON) + RETAIL_EPSILON;
     let dx = center.x - ball_center.x;
     let dy = center.y - ball_center.y;
@@ -87,9 +91,14 @@ fn volume_support(
     maximum_rise: f32,
 ) -> Option<super::super::bsp_query::ShapeSupport> {
     match &*collider.shape {
-        CollisionShape::Cylinder(cylinder) => {
-            placed_cylinder_support(collider, cylinder, center, radius, maximum_drop, maximum_rise)
-        }
+        CollisionShape::Cylinder(cylinder) => placed_cylinder_support(
+            collider,
+            cylinder,
+            center,
+            radius,
+            maximum_drop,
+            maximum_rise,
+        ),
         CollisionShape::Ball(ball) => {
             placed_ball_support(collider, ball, center, radius, maximum_drop, maximum_rise)
         }
@@ -140,8 +149,7 @@ fn cylinder_contact_presence_matches_the_retail_overlap_predicate() {
     for x_step in -30i32..=30 {
         for z_step in -12i32..=52 {
             let center = low + Vector3::new(x_step as f32 * 0.05, 0.0, z_step as f32 * 0.1);
-            let retail =
-                retail_cylsphere_collides(cyl_height, sphere_radius, center - low, radsum);
+            let retail = retail_cylsphere_collides(cyl_height, sphere_radius, center - low, radsum);
             let ours = volume_contact(&collider, center, sphere_radius).is_some();
             if retail != ours {
                 boundary_disagreements.push((center, retail, ours));
@@ -258,50 +266,18 @@ fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
 }
 
 fn flat_terrain() -> TerrainCollisionSurface {
-    TerrainCollisionSurface::from_terrain(&LandblockTerrain {
-        grid_size: 9,
-        tile_size: 24.0,
-        height_indices: vec![0; 81],
-        heights: vec![0.0; 81],
-        terrain_samples: vec![0; 81],
-        cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(LANDBLOCK),
-    })
-    .unwrap()
+    crate::spatial::differential_fixtures::flat_terrain(LANDBLOCK)
 }
 
 fn grounded_config() -> GroundedConfig {
-    GroundedConfig {
-        gravity: -9.8,
-        walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
-        step_up_height: 0.6,
-        step_down_height: 1.5,
-        edge_protection: EdgeProtection::None,
-        maximum_substep_distance: 0.24,
-        maximum_substeps: 32,
-        maximum_contact_passes: 8,
-        separation_epsilon: 0.000_5,
-    }
+    crate::spatial::differential_fixtures::retail_creature_config()
 }
 
 fn grounded_pair() -> GroundedBodySpheres {
-    GroundedBodySpheres {
-        support: GroundedSphere {
-            center: Vector3::new(0.0, 0.0, 0.475),
-            radius: 0.48,
-        },
-        upper: Some(GroundedSphere {
-            center: Vector3::new(0.0, 0.0, 1.35),
-            radius: 0.48,
-        }),
-    }
+    crate::spatial::differential_fixtures::retail_creature_pair()
 }
 
-fn drive(
-    scene: &CollisionScene,
-    start: Vector3,
-    velocity: Vector3,
-    ticks: usize,
-) -> GroundedBody {
+fn drive(scene: &CollisionScene, start: Vector3, velocity: Vector3, ticks: usize) -> GroundedBody {
     drive_body(scene, start, velocity, ticks, true)
 }
 
@@ -321,9 +297,13 @@ fn drive_body(
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        support: supported.then_some(GroundSupport {
-            normal: Vector3::new(0.0, 0.0, 1.0),
-        }),
+        ground: if supported {
+            GroundState::Supported(GroundSupport {
+                normal: Vector3::new(0.0, 0.0, 1.0),
+            })
+        } else {
+            GroundState::Airborne
+        },
     };
     for _ in 0..ticks {
         let outcome = solve_grounded(
@@ -334,7 +314,7 @@ fn drive_body(
                 body: body.clone(),
                 spheres: grounded_pair(),
                 supported_velocity: velocity,
-                may_step_down: true,
+                settle: SettlePermission::Walking,
                 retain_supported_gravity: false,
                 delta_seconds: 1.0 / 30.0,
             },
@@ -365,7 +345,10 @@ fn body_settles_grounded_on_a_stump_top() {
         30,
         false,
     );
-    assert!(settled.support.is_some(), "body never acquired stump support");
+    assert!(
+        settled.ground.walkable_support().is_some(),
+        "body never acquired stump support"
+    );
     assert!(
         (settled.pose.coords.z - expected_z).abs() < 0.01,
         "settled at {} instead of retail's {expected_z}",
@@ -398,7 +381,10 @@ fn body_walking_into_a_trunk_stops_at_the_radial_wall() {
         "body stopped implausibly far from the trunk: {}",
         stopped.pose.coords.x
     );
-    assert!(stopped.support.is_some(), "body lost ground support at the trunk");
+    assert!(
+        stopped.ground.walkable_support().is_some(),
+        "body lost ground support at the trunk"
+    );
 }
 
 /// A low stump within the step-up budget is mounted like any low walkable step.
@@ -419,7 +405,7 @@ fn body_steps_up_onto_a_low_stump() {
         "body did not mount the stump: z {}",
         mounted.pose.coords.z
     );
-    assert!(mounted.support.is_some());
+    assert!(mounted.ground.walkable_support().is_some());
     assert!(
         (mounted.pose.coords.x - 50.0).abs() < 1.0,
         "body did not advance onto the stump: x {}",
@@ -446,5 +432,8 @@ fn body_walks_off_a_stump_onto_the_terrain_below() {
         "body failed to step down off the stump: z {}",
         departed.pose.coords.z
     );
-    assert!(departed.support.is_some(), "body lost terrain support after departure");
+    assert!(
+        departed.ground.walkable_support().is_some(),
+        "body lost terrain support after departure"
+    );
 }

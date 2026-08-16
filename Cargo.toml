@@ -9,6 +9,7 @@ members = [
     "crates/holtburger-scripting",
     "crates/holtburger-session",
     "crates/holtburger-world",
+    "crates/holtburger-weenie-catalog",
     "apps/holtburger-cli",
     "apps/holtburger-3d/src-tauri",
     "apps/holtburger-tools",
@@ -33,6 +34,7 @@ holtburger-common = { path = "crates/holtburger-common" }
 holtburger-dat = { path = "crates/holtburger-dat" }
 holtburger-protocol = { path = "crates/holtburger-protocol" }
 holtburger-scripting = { path = "crates/holtburger-scripting" }
+holtburger-weenie-catalog = { path = "crates/holtburger-weenie-catalog" }
 tokio = { version = "1", features = ["full"] }
 byteorder = "1.5"
 anyhow = "1.0"

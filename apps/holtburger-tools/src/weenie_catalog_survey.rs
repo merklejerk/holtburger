@@ -1,0 +1,1015 @@
+//! Deterministic census over an offline weenie catalog and normal mounted client content.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Cursor;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use holtburger_content::ContentRepository;
+use holtburger_dat::file_type::{GfxObj, MotionKinematics, SetupModel};
+use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
+use holtburger_weenie_catalog::{PhysicsBoolOverrides, WeenieCatalog, WeenieTemplate};
+use serde::Serialize;
+
+const DEFAULT_PHYSICS_STATE: u32 = 0x0040_0C08;
+const STATIC: u32 = 0x0000_0001;
+const ETHEREAL: u32 = 0x0000_0004;
+const REPORT_COLLISIONS: u32 = 0x0000_0008;
+const IGNORE_COLLISIONS: u32 = 0x0000_0010;
+const NO_DRAW: u32 = 0x0000_0020;
+const MISSILE: u32 = 0x0000_0040;
+const GRAVITY: u32 = 0x0000_0400;
+const LIGHTING_ON: u32 = 0x0000_0800;
+const SCRIPTED_COLLISION: u32 = 0x0000_8000;
+const HAS_PHYSICS_BSP: u32 = 0x0001_0000;
+const INELASTIC: u32 = 0x0002_0000;
+const HAS_DEFAULT_ANIM: u32 = 0x0004_0000;
+const HAS_DEFAULT_SCRIPT: u32 = 0x0008_0000;
+const REPORT_COLLISIONS_AS_ENVIRONMENT: u32 = 0x0020_0000;
+const EDGE_SLIDE: u32 = 0x0040_0000;
+const FROZEN: u32 = 0x0100_0000;
+const KNOWN_PHYSICS_BITS: u32 = 0x01FF_FFFF;
+
+/// Stable, machine-readable Phase R0 measurements.
+#[derive(Debug, Serialize)]
+pub struct WeenieCatalogSurvey {
+    /// Catalog source label embedded by the exporter.
+    pub provenance: String,
+    /// Catalog-only facts that require no client content.
+    pub catalog: CatalogSurvey,
+    /// Setup/GfxObj facts resolved through the normal content repository.
+    pub content: ContentSurvey,
+}
+
+/// Catalog-only population measurements.
+#[derive(Debug, Serialize)]
+pub struct CatalogSurvey {
+    /// Number of WCID records.
+    pub records: usize,
+    /// Distribution of encoded record bytes.
+    pub encoded_payload_bytes: IntegerDistribution,
+    /// Counts of absent optional facts.
+    pub missing: BTreeMap<&'static str, u64>,
+    /// Counts by raw ACE `WeenieType` value.
+    pub weenie_types: BTreeMap<i32, u64>,
+    /// Counts by optional raw base physics mask.
+    pub base_physics_masks: BTreeMap<String, u64>,
+    /// Absent/false/true counts for every exported bool override.
+    pub bool_overrides: BTreeMap<&'static str, OptionalBoolDistribution>,
+    /// Per-record palette-range cardinality.
+    pub sub_palette_counts: BTreeMap<usize, u64>,
+    /// Per-record texture-substitution cardinality.
+    pub texture_change_counts: BTreeMap<usize, u64>,
+    /// Per-record animation-part-substitution cardinality.
+    pub anim_part_change_counts: BTreeMap<usize, u64>,
+    /// Palette ranges with zero packed length.
+    pub zero_length_sub_palettes: u64,
+    /// Palette ranges whose expanded color interval exceeds the 2048-color palette.
+    pub out_of_bounds_sub_palettes: u64,
+    /// Overlapping palette-range pairs within one WCID.
+    pub overlapping_sub_palette_pairs: u64,
+    /// Present default scales that cannot produce positive finite geometry.
+    pub invalid_default_scales: u64,
+    /// Present default-scale distribution.
+    pub default_scale: FloatDistribution,
+    /// Present friction distribution.
+    pub friction: FloatDistribution,
+    /// Present elasticity distribution.
+    pub elasticity: FloatDistribution,
+    /// Present launch-speed magnitude distribution.
+    pub maximum_velocity: FloatDistribution,
+    /// Present projectile rotation-speed distribution.
+    pub rotation_speed: FloatDistribution,
+}
+
+/// Client-content measurements and the effective masks derived from them.
+#[derive(Debug, Serialize)]
+pub struct ContentSurvey {
+    /// Number of distinct non-null setup DIDs referenced by templates.
+    pub referenced_setups: usize,
+    /// Distinct setup DIDs decoded successfully.
+    pub decoded_setups: usize,
+    /// Distinct setup resources that could not be read.
+    pub unavailable_setups: usize,
+    /// Distinct setup resources that were present but malformed.
+    pub malformed_setups: usize,
+    /// First bounded examples of setup failures.
+    pub setup_failure_samples: Vec<String>,
+    /// Setup part-count distribution.
+    pub part_counts: BTreeMap<usize, u64>,
+    /// Ordinary setup sphere-count distribution.
+    pub sphere_counts: BTreeMap<usize, u64>,
+    /// Setup cylsphere-count distribution.
+    pub cylsphere_counts: BTreeMap<usize, u64>,
+    /// Ordinary sphere-radius distribution.
+    pub sphere_radii: FloatDistribution,
+    /// Cylsphere-radius distribution.
+    pub cylsphere_radii: FloatDistribution,
+    /// Cylsphere-height distribution.
+    pub cylsphere_heights: FloatDistribution,
+    /// Setups whose part list contains at least one physics BSP.
+    pub setups_with_physics_bsp: usize,
+    /// Setups that name a default animation.
+    pub setups_with_default_animation: usize,
+    /// Setups that name a default physics script.
+    pub setups_with_default_script: usize,
+    /// Physics-BSP setups that also name a default animation.
+    pub physics_bsp_setups_with_default_animation: usize,
+    /// Physics-BSP setups that also name a default physics script.
+    pub physics_bsp_setups_with_default_script: usize,
+    /// Distinct referenced GfxObjs that could not be read or decoded.
+    pub unavailable_or_malformed_gfx_objs: usize,
+    /// Effective mask counts for templates whose setup decoded.
+    pub effective_physics_masks: BTreeMap<String, u64>,
+    /// Effective per-bit population for templates whose setup decoded.
+    pub effective_physics_bits: BTreeMap<&'static str, u64>,
+    /// Effective collision/reporting bit combinations, keyed by the masked value.
+    pub collision_filter_masks: BTreeMap<String, u64>,
+    /// Moving-query geometry chosen by retail's sphere-path initialization.
+    pub moving_geometry_classes: BTreeMap<&'static str, u64>,
+    /// Dynamic-target geometry selected by the retail collision branch.
+    pub target_geometry_classes: BTreeMap<&'static str, u64>,
+    /// Counts of overlapping state-selected solver roles.
+    pub state_participation: StateParticipationCounts,
+    /// Templates retaining bits outside ACE's currently named mask.
+    pub templates_with_unknown_physics_bits: u64,
+    /// Explicit rule used to derive the reported effective mask.
+    pub effective_mask_rule: &'static str,
+    /// Bounded deterministic WCID examples for measured branches and rejection cases.
+    pub representative_samples: BTreeMap<&'static str, Vec<RepresentativeTemplate>>,
+    /// Authored locomotion vectors from the derived HBA motion-kinematics asset.
+    pub motion_kinematics: MotionKinematicsSurvey,
+}
+
+/// Population and magnitude ranges of authored cyclic motion vectors.
+#[derive(Debug, Default, Serialize)]
+pub struct MotionKinematicsSurvey {
+    /// Setup-to-default-motion-table mappings.
+    pub setup_defaults: usize,
+    /// Distinct decoded motion tables.
+    pub motion_tables: usize,
+    /// Stance/command cycle entries across all motion tables.
+    pub cycle_entries: usize,
+    /// Magnitudes of present authored velocity vectors in metres per second.
+    pub velocity_magnitudes: FloatDistribution,
+    /// Magnitudes of present authored angular-velocity vectors in radians per second.
+    pub omega_magnitudes: FloatDistribution,
+}
+
+/// Count and percentile summary for non-negative integer values.
+#[derive(Debug, Default, Serialize)]
+pub struct IntegerDistribution {
+    /// Number of samples.
+    pub count: usize,
+    /// Sum of all samples.
+    pub total: u64,
+    /// Minimum sample.
+    pub min: u64,
+    /// Median sample.
+    pub p50: u64,
+    /// 95th-percentile sample.
+    pub p95: u64,
+    /// 99th-percentile sample.
+    pub p99: u64,
+    /// Maximum sample.
+    pub max: u64,
+}
+
+/// Count and range summary for finite floating-point values.
+#[derive(Debug, Default, Serialize)]
+pub struct FloatDistribution {
+    /// Number of present samples.
+    pub count: usize,
+    /// Minimum sample, absent when the population is empty.
+    pub min: Option<f64>,
+    /// Maximum sample, absent when the population is empty.
+    pub max: Option<f64>,
+}
+
+/// Three-way population of an optional boolean.
+#[derive(Debug, Default, Serialize)]
+pub struct OptionalBoolDistribution {
+    /// Property row absent.
+    pub absent: u64,
+    /// Explicit false row.
+    pub false_count: u64,
+    /// Explicit true row.
+    pub true_count: u64,
+}
+
+/// State-only participation counts; live motion, parentage, and insertion policy remain separate.
+#[derive(Debug, Default, Serialize)]
+pub struct StateParticipationCounts {
+    /// Bodies not blocked from fixed-tick integration by `Static` or `Frozen`.
+    pub integration_eligible: u64,
+    /// Bodies blocked from fixed-tick integration by `Static` or `Frozen`.
+    pub integration_blocked: u64,
+    /// Bodies with target geometry that is not suppressed by `Ethereal|IgnoreCollisions`.
+    pub dynamic_collision_targets: u64,
+    /// Bodies suppressed as targets by `Ethereal|IgnoreCollisions`.
+    pub state_suppressed_targets: u64,
+    /// Bodies with no setup target geometry in the selected retail branch.
+    pub geometry_absent_targets: u64,
+}
+
+/// One deterministic catalog example retained to make a measured branch reproducible.
+#[derive(Debug, Clone, Serialize)]
+pub struct RepresentativeTemplate {
+    /// Catalog identity.
+    pub wcid: u32,
+    /// Human-facing name from the source row.
+    pub name: String,
+    /// Raw ACE object category.
+    pub weenie_type: i32,
+    /// Referenced setup DID.
+    pub setup_did: u32,
+    /// Raw optional ACE default scale.
+    pub default_scale: Option<f64>,
+    /// Effective mask calculated by this survey.
+    pub effective_mask: String,
+    /// Dynamic-target geometry branch.
+    pub target_geometry: &'static str,
+}
+
+#[derive(Debug)]
+struct SetupFacts {
+    has_physics_bsp: bool,
+    has_default_animation: bool,
+    has_default_script: bool,
+    sphere_count: usize,
+    cylsphere_count: usize,
+}
+
+/// Surveys every catalog record and every distinct referenced setup through mounted HBA content.
+pub fn survey_weenie_catalog(
+    catalog_path: &Path,
+    content: &ContentRepository,
+) -> Result<WeenieCatalogSurvey> {
+    let catalog = WeenieCatalog::open(catalog_path)
+        .with_context(|| format!("could not open catalog {}", catalog_path.display()))?;
+    let mut templates = Vec::with_capacity(catalog.len());
+    let encoded_lengths = catalog
+        .records()
+        .map(|record| u64::from(record.encoded_length))
+        .collect::<Vec<_>>();
+    for record in catalog.records() {
+        let template = catalog
+            .lookup(record.wcid)
+            .with_context(|| format!("could not decode catalog WCID {}", record.wcid))?
+            .with_context(|| format!("catalog index lost WCID {}", record.wcid))?;
+        templates.push(template);
+    }
+
+    let catalog_survey = survey_templates(&templates, encoded_lengths);
+    let content_survey = survey_content(&templates, content)?;
+    Ok(WeenieCatalogSurvey {
+        provenance: catalog.provenance().to_owned(),
+        catalog: catalog_survey,
+        content: content_survey,
+    })
+}
+
+fn survey_templates(templates: &[WeenieTemplate], encoded_lengths: Vec<u64>) -> CatalogSurvey {
+    let mut missing = BTreeMap::new();
+    let mut weenie_types = BTreeMap::new();
+    let mut base_physics_masks = BTreeMap::new();
+    let mut bool_overrides = bool_distributions();
+    let mut sub_palette_counts = BTreeMap::new();
+    let mut texture_change_counts = BTreeMap::new();
+    let mut anim_part_change_counts = BTreeMap::new();
+    let mut default_scale = FloatDistribution::default();
+    let mut friction = FloatDistribution::default();
+    let mut elasticity = FloatDistribution::default();
+    let mut maximum_velocity = FloatDistribution::default();
+    let mut rotation_speed = FloatDistribution::default();
+    let mut zero_length_sub_palettes = 0;
+    let mut out_of_bounds_sub_palettes = 0;
+    let mut overlapping_sub_palette_pairs = 0;
+    let mut invalid_default_scales = 0;
+
+    for template in templates {
+        count_missing(&mut missing, "name", template.name.is_none());
+        count_missing(&mut missing, "setup_did", template.setup_did.is_none());
+        count_missing(
+            &mut missing,
+            "motion_table_did",
+            template.motion_table_did.is_none(),
+        );
+        count_missing(
+            &mut missing,
+            "sound_table_did",
+            template.sound_table_did.is_none(),
+        );
+        count_missing(
+            &mut missing,
+            "physics_effect_table_did",
+            template.physics_effect_table_did.is_none(),
+        );
+        count_missing(
+            &mut missing,
+            "palette_base_did",
+            template.palette_base_did.is_none(),
+        );
+        count_missing(
+            &mut missing,
+            "default_scale",
+            template.default_scale.is_none(),
+        );
+        count_missing(&mut missing, "friction", template.friction.is_none());
+        count_missing(&mut missing, "elasticity", template.elasticity.is_none());
+        count_missing(
+            &mut missing,
+            "maximum_velocity",
+            template.maximum_velocity.is_none(),
+        );
+        count_missing(
+            &mut missing,
+            "rotation_speed",
+            template.rotation_speed.is_none(),
+        );
+        count_missing(
+            &mut missing,
+            "base_physics_mask",
+            template.physics.base_mask.is_none(),
+        );
+        *weenie_types.entry(template.weenie_type).or_default() += 1;
+        let base_key = template
+            .physics
+            .base_mask
+            .map_or_else(|| "absent".to_owned(), mask_key);
+        *base_physics_masks.entry(base_key).or_default() += 1;
+        count_overrides(&mut bool_overrides, &template.physics.overrides);
+        increment_histogram(&mut sub_palette_counts, template.sub_palettes.len());
+        increment_histogram(&mut texture_change_counts, template.texture_changes.len());
+        increment_histogram(
+            &mut anim_part_change_counts,
+            template.anim_part_changes.len(),
+        );
+        default_scale.observe(template.default_scale);
+        friction.observe(template.friction);
+        elasticity.observe(template.elasticity);
+        maximum_velocity.observe(template.maximum_velocity);
+        rotation_speed.observe(template.rotation_speed);
+        if template.default_scale.is_some_and(|scale| scale <= 0.0) {
+            invalid_default_scales += 1;
+        }
+        zero_length_sub_palettes += template
+            .sub_palettes
+            .iter()
+            .filter(|palette| palette.length == 0)
+            .count() as u64;
+        out_of_bounds_sub_palettes += template
+            .sub_palettes
+            .iter()
+            .filter(|palette| {
+                (u32::from(palette.offset) + u32::from(palette.length)).saturating_mul(8) > 2048
+            })
+            .count() as u64;
+        for (index, left) in template.sub_palettes.iter().enumerate() {
+            for right in &template.sub_palettes[index + 1..] {
+                let left_end = u32::from(left.offset) + u32::from(left.length);
+                let right_end = u32::from(right.offset) + u32::from(right.length);
+                if u32::from(left.offset) < right_end && u32::from(right.offset) < left_end {
+                    overlapping_sub_palette_pairs += 1;
+                }
+            }
+        }
+    }
+
+    CatalogSurvey {
+        records: templates.len(),
+        encoded_payload_bytes: integer_distribution(encoded_lengths),
+        missing,
+        weenie_types,
+        base_physics_masks,
+        bool_overrides,
+        sub_palette_counts,
+        texture_change_counts,
+        anim_part_change_counts,
+        zero_length_sub_palettes,
+        out_of_bounds_sub_palettes,
+        overlapping_sub_palette_pairs,
+        invalid_default_scales,
+        default_scale,
+        friction,
+        elasticity,
+        maximum_velocity,
+        rotation_speed,
+    }
+}
+
+fn survey_content(
+    templates: &[WeenieTemplate],
+    content: &ContentRepository,
+) -> Result<ContentSurvey> {
+    let setup_ids = templates
+        .iter()
+        .filter_map(|template| template.setup_did)
+        .collect::<BTreeSet<_>>();
+    let mut setup_facts = BTreeMap::new();
+    let mut unavailable_setups = 0;
+    let mut malformed_setups = 0;
+    let mut setup_failure_samples = Vec::new();
+    let mut part_counts = BTreeMap::new();
+    let mut sphere_counts = BTreeMap::new();
+    let mut cylsphere_counts = BTreeMap::new();
+    let mut sphere_radii = FloatDistribution::default();
+    let mut cylsphere_radii = FloatDistribution::default();
+    let mut cylsphere_heights = FloatDistribution::default();
+    let mut gfx_facts = BTreeMap::<u32, Option<bool>>::new();
+
+    for setup_id in &setup_ids {
+        let resource =
+            match content.read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, *setup_id)) {
+                Ok(resource) => resource,
+                Err(error) => {
+                    unavailable_setups += 1;
+                    push_failure(
+                        &mut setup_failure_samples,
+                        format!("0x{setup_id:08X}: unavailable: {error:#}"),
+                    );
+                    continue;
+                }
+            };
+        let setup = match SetupModel::unpack(&mut Cursor::new(resource.bytes)) {
+            Ok(setup) => setup,
+            Err(error) => {
+                malformed_setups += 1;
+                push_failure(
+                    &mut setup_failure_samples,
+                    format!("0x{setup_id:08X}: malformed: {error}"),
+                );
+                continue;
+            }
+        };
+        increment_histogram(&mut part_counts, setup.parts.len());
+        increment_histogram(&mut sphere_counts, setup.spheres.len());
+        increment_histogram(&mut cylsphere_counts, setup.cyl_spheres.len());
+        for sphere in &setup.spheres {
+            sphere_radii.observe(Some(f64::from(sphere.radius)));
+        }
+        for cylsphere in &setup.cyl_spheres {
+            cylsphere_radii.observe(Some(f64::from(cylsphere.radius)));
+            cylsphere_heights.observe(Some(f64::from(cylsphere.height)));
+        }
+        let has_physics_bsp = setup.parts.iter().any(|part_id| {
+            gfx_facts
+                .entry(*part_id)
+                .or_insert_with(|| {
+                    content
+                        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, *part_id))
+                        .ok()
+                        .and_then(|resource| GfxObj::unpack(&mut Cursor::new(resource.bytes)).ok())
+                        .map(|gfx| gfx.physics_bsp.is_some())
+                })
+                .is_some_and(|has_bsp| has_bsp)
+        });
+        setup_facts.insert(
+            *setup_id,
+            SetupFacts {
+                has_physics_bsp,
+                has_default_animation: setup.default_animation.is_some(),
+                has_default_script: setup.default_script.is_some(),
+                sphere_count: setup.spheres.len(),
+                cylsphere_count: setup.cyl_spheres.len(),
+            },
+        );
+    }
+
+    let mut effective_physics_masks = BTreeMap::new();
+    let mut effective_physics_bits = physics_bit_counts();
+    let mut collision_filter_masks = BTreeMap::new();
+    let mut moving_geometry_classes = BTreeMap::new();
+    let mut target_geometry_classes = BTreeMap::new();
+    let mut state_participation = StateParticipationCounts::default();
+    let mut representative_samples = BTreeMap::new();
+    let mut templates_with_unknown_physics_bits = 0;
+    for template in templates {
+        let Some(setup) = template.setup_did.and_then(|id| setup_facts.get(&id)) else {
+            continue;
+        };
+        let mask = effective_mask(template, setup);
+        *effective_physics_masks.entry(mask_key(mask)).or_default() += 1;
+        for (name, bit) in physics_bits() {
+            if mask & bit != 0 {
+                *effective_physics_bits.entry(name).or_default() += 1;
+            }
+        }
+        if mask & !KNOWN_PHYSICS_BITS != 0 {
+            templates_with_unknown_physics_bits += 1;
+        }
+        let filter_mask = mask
+            & (ETHEREAL | REPORT_COLLISIONS | IGNORE_COLLISIONS | REPORT_COLLISIONS_AS_ENVIRONMENT);
+        *collision_filter_masks
+            .entry(mask_key(filter_mask))
+            .or_default() += 1;
+
+        let moving_geometry = match setup.sphere_count {
+            0 => "dummy_sphere",
+            1 => "one_sphere",
+            _ => "two_spheres",
+        };
+        *moving_geometry_classes.entry(moving_geometry).or_default() += 1;
+        let target_geometry = target_geometry_class(mask, setup);
+        *target_geometry_classes.entry(target_geometry).or_default() += 1;
+
+        if mask & (STATIC | FROZEN) == 0 {
+            state_participation.integration_eligible += 1;
+        } else {
+            state_participation.integration_blocked += 1;
+        }
+        if mask & (ETHEREAL | IGNORE_COLLISIONS) == (ETHEREAL | IGNORE_COLLISIONS) {
+            state_participation.state_suppressed_targets += 1;
+        } else if target_geometry == "none" {
+            state_participation.geometry_absent_targets += 1;
+        } else {
+            state_participation.dynamic_collision_targets += 1;
+        }
+        let sample = RepresentativeTemplate {
+            wcid: template.wcid,
+            name: template
+                .name
+                .clone()
+                .unwrap_or_else(|| template.class_name.clone()),
+            weenie_type: template.weenie_type,
+            setup_did: template.setup_did.expect("resolved setup has a DID"),
+            default_scale: template.default_scale,
+            effective_mask: mask_key(mask),
+            target_geometry,
+        };
+        push_sample(&mut representative_samples, target_geometry, &sample);
+        push_sample(&mut representative_samples, moving_geometry, &sample);
+        if template.weenie_type == 10 {
+            push_sample(&mut representative_samples, "creature", &sample);
+        }
+        if mask & MISSILE != 0 {
+            push_sample(&mut representative_samples, "missile", &sample);
+        }
+        if mask & REPORT_COLLISIONS_AS_ENVIRONMENT != 0 {
+            push_sample(
+                &mut representative_samples,
+                "reports_as_environment",
+                &sample,
+            );
+        } else if mask & REPORT_COLLISIONS != 0 {
+            push_sample(&mut representative_samples, "reports_collisions", &sample);
+        }
+        if mask & (ETHEREAL | IGNORE_COLLISIONS) == (ETHEREAL | IGNORE_COLLISIONS) {
+            push_sample(&mut representative_samples, "nonblocking_target", &sample);
+        }
+        if !template.sub_palettes.is_empty()
+            || !template.texture_changes.is_empty()
+            || !template.anim_part_changes.is_empty()
+        {
+            push_sample(&mut representative_samples, "appearance_changes", &sample);
+        }
+        if template.default_scale.is_some_and(|scale| scale <= 0.0) {
+            push_sample(&mut representative_samples, "invalid_scale", &sample);
+        }
+        if template
+            .sub_palettes
+            .iter()
+            .any(|palette| palette.length == 0)
+        {
+            push_sample(&mut representative_samples, "zero_length_palette", &sample);
+        }
+    }
+
+    let motion_kinematics = content
+        .read_asset::<MotionKinematics>("motion kinematics table")
+        .context("could not survey authored motion kinematics")?;
+
+    Ok(ContentSurvey {
+        referenced_setups: setup_ids.len(),
+        decoded_setups: setup_facts.len(),
+        unavailable_setups,
+        malformed_setups,
+        setup_failure_samples,
+        part_counts,
+        sphere_counts,
+        cylsphere_counts,
+        sphere_radii,
+        cylsphere_radii,
+        cylsphere_heights,
+        setups_with_physics_bsp: setup_facts
+            .values()
+            .filter(|facts| facts.has_physics_bsp)
+            .count(),
+        setups_with_default_animation: setup_facts
+            .values()
+            .filter(|facts| facts.has_default_animation)
+            .count(),
+        setups_with_default_script: setup_facts
+            .values()
+            .filter(|facts| facts.has_default_script)
+            .count(),
+        physics_bsp_setups_with_default_animation: setup_facts
+            .values()
+            .filter(|facts| facts.has_physics_bsp && facts.has_default_animation)
+            .count(),
+        physics_bsp_setups_with_default_script: setup_facts
+            .values()
+            .filter(|facts| facts.has_physics_bsp && facts.has_default_script)
+            .count(),
+        unavailable_or_malformed_gfx_objs: gfx_facts.values().filter(|fact| fact.is_none()).count(),
+        effective_physics_masks,
+        effective_physics_bits,
+        collision_filter_masks,
+        moving_geometry_classes,
+        target_geometry_classes,
+        state_participation,
+        templates_with_unknown_physics_bits,
+        effective_mask_rule: "ACE base mask or PhysicsGlobals.DefaultState; apply the eleven nullable PropertyBool overrides; replace HasPhysicsBSP from setup parts; for Static templates replace HasDefaultAnim/HasDefaultScript from setup defaults",
+        representative_samples,
+        motion_kinematics: survey_motion_kinematics(&motion_kinematics),
+    })
+}
+
+fn survey_motion_kinematics(motion: &MotionKinematics) -> MotionKinematicsSurvey {
+    let mut survey = MotionKinematicsSurvey {
+        setup_defaults: motion.setup_model_defaults.len(),
+        motion_tables: motion.motion_tables.len(),
+        ..MotionKinematicsSurvey::default()
+    };
+    for table in motion.motion_tables.values() {
+        for (_, kinematics) in table.iter_cycle_kinematics() {
+            survey.cycle_entries += 1;
+            survey.velocity_magnitudes.observe(
+                kinematics
+                    .velocity
+                    .map(|velocity| f64::from(velocity.length())),
+            );
+            survey
+                .omega_magnitudes
+                .observe(kinematics.omega.map(|omega| f64::from(omega.length())));
+        }
+    }
+    survey
+}
+
+fn target_geometry_class(mask: u32, setup: &SetupFacts) -> &'static str {
+    if mask & HAS_PHYSICS_BSP != 0 {
+        "physics_bsp"
+    } else if setup.cylsphere_count > 0 {
+        "cylspheres"
+    } else if setup.sphere_count > 0 {
+        "spheres"
+    } else {
+        "none"
+    }
+}
+
+fn effective_mask(template: &WeenieTemplate, setup: &SetupFacts) -> u32 {
+    let mut mask = template.physics.base_mask.unwrap_or(DEFAULT_PHYSICS_STATE);
+    for (bit, value) in [
+        (ETHEREAL, template.physics.overrides.ethereal),
+        (
+            REPORT_COLLISIONS,
+            template.physics.overrides.report_collisions,
+        ),
+        (
+            IGNORE_COLLISIONS,
+            template.physics.overrides.ignore_collisions,
+        ),
+        (NO_DRAW, template.physics.overrides.no_draw),
+        (GRAVITY, template.physics.overrides.gravity),
+        (LIGHTING_ON, template.physics.overrides.lighting),
+        (
+            SCRIPTED_COLLISION,
+            template.physics.overrides.scripted_collision,
+        ),
+        (INELASTIC, template.physics.overrides.inelastic),
+        (
+            REPORT_COLLISIONS_AS_ENVIRONMENT,
+            template.physics.overrides.report_collisions_as_environment,
+        ),
+        (EDGE_SLIDE, template.physics.overrides.allow_edge_slide),
+        (FROZEN, template.physics.overrides.frozen),
+    ] {
+        if let Some(enabled) = value {
+            set_bit(&mut mask, bit, enabled);
+        }
+    }
+    set_bit(&mut mask, HAS_PHYSICS_BSP, setup.has_physics_bsp);
+    let is_static = mask & STATIC != 0;
+    set_bit(
+        &mut mask,
+        HAS_DEFAULT_ANIM,
+        is_static && setup.has_default_animation,
+    );
+    set_bit(
+        &mut mask,
+        HAS_DEFAULT_SCRIPT,
+        is_static && setup.has_default_script,
+    );
+    mask
+}
+
+fn set_bit(mask: &mut u32, bit: u32, enabled: bool) {
+    if enabled {
+        *mask |= bit;
+    } else {
+        *mask &= !bit;
+    }
+}
+
+fn bool_distributions() -> BTreeMap<&'static str, OptionalBoolDistribution> {
+    [
+        "ethereal",
+        "report_collisions",
+        "ignore_collisions",
+        "no_draw",
+        "gravity",
+        "lighting",
+        "scripted_collision",
+        "inelastic",
+        "report_collisions_as_environment",
+        "allow_edge_slide",
+        "frozen",
+    ]
+    .into_iter()
+    .map(|name| (name, OptionalBoolDistribution::default()))
+    .collect()
+}
+
+fn count_overrides(
+    counts: &mut BTreeMap<&'static str, OptionalBoolDistribution>,
+    overrides: &PhysicsBoolOverrides,
+) {
+    for (name, value) in [
+        ("ethereal", overrides.ethereal),
+        ("report_collisions", overrides.report_collisions),
+        ("ignore_collisions", overrides.ignore_collisions),
+        ("no_draw", overrides.no_draw),
+        ("gravity", overrides.gravity),
+        ("lighting", overrides.lighting),
+        ("scripted_collision", overrides.scripted_collision),
+        ("inelastic", overrides.inelastic),
+        (
+            "report_collisions_as_environment",
+            overrides.report_collisions_as_environment,
+        ),
+        ("allow_edge_slide", overrides.allow_edge_slide),
+        ("frozen", overrides.frozen),
+    ] {
+        counts
+            .get_mut(name)
+            .expect("all bool names are initialized")
+            .observe(value);
+    }
+}
+
+fn physics_bit_counts() -> BTreeMap<&'static str, u64> {
+    physics_bits()
+        .into_iter()
+        .map(|(name, _)| (name, 0))
+        .collect()
+}
+
+fn physics_bits() -> [(&'static str, u32); 25] {
+    [
+        ("Static", 0x0000_0001),
+        ("Unused1", 0x0000_0002),
+        ("Ethereal", 0x0000_0004),
+        ("ReportCollisions", 0x0000_0008),
+        ("IgnoreCollisions", 0x0000_0010),
+        ("NoDraw", 0x0000_0020),
+        ("Missile", 0x0000_0040),
+        ("Pushable", 0x0000_0080),
+        ("AlignPath", 0x0000_0100),
+        ("PathClipped", 0x0000_0200),
+        ("Gravity", 0x0000_0400),
+        ("LightingOn", 0x0000_0800),
+        ("ParticleEmitter", 0x0000_1000),
+        ("Unused2", 0x0000_2000),
+        ("Hidden", 0x0000_4000),
+        ("ScriptedCollision", 0x0000_8000),
+        ("HasPhysicsBSP", 0x0001_0000),
+        ("Inelastic", 0x0002_0000),
+        ("HasDefaultAnim", 0x0004_0000),
+        ("HasDefaultScript", 0x0008_0000),
+        ("Cloaked", 0x0010_0000),
+        ("ReportCollisionsAsEnvironment", 0x0020_0000),
+        ("EdgeSlide", 0x0040_0000),
+        ("Sledding", 0x0080_0000),
+        ("Frozen", 0x0100_0000),
+    ]
+}
+
+fn mask_key(mask: u32) -> String {
+    format!("0x{mask:08X}")
+}
+
+fn count_missing(counts: &mut BTreeMap<&'static str, u64>, name: &'static str, missing: bool) {
+    let count = counts.entry(name).or_default();
+    if missing {
+        *count += 1;
+    }
+}
+
+fn increment_histogram(counts: &mut BTreeMap<usize, u64>, value: usize) {
+    *counts.entry(value).or_default() += 1;
+}
+
+fn push_failure(samples: &mut Vec<String>, failure: String) {
+    const MAX_FAILURE_SAMPLES: usize = 20;
+    if samples.len() < MAX_FAILURE_SAMPLES {
+        samples.push(failure);
+    }
+}
+
+fn push_sample(
+    samples: &mut BTreeMap<&'static str, Vec<RepresentativeTemplate>>,
+    category: &'static str,
+    sample: &RepresentativeTemplate,
+) {
+    const MAX_REPRESENTATIVE_SAMPLES: usize = 5;
+    let category_samples = samples.entry(category).or_default();
+    if category_samples.len() < MAX_REPRESENTATIVE_SAMPLES {
+        category_samples.push(sample.clone());
+    }
+}
+
+fn integer_distribution(mut values: Vec<u64>) -> IntegerDistribution {
+    if values.is_empty() {
+        return IntegerDistribution::default();
+    }
+    values.sort_unstable();
+    IntegerDistribution {
+        count: values.len(),
+        total: values.iter().sum(),
+        min: values[0],
+        p50: percentile(&values, 50),
+        p95: percentile(&values, 95),
+        p99: percentile(&values, 99),
+        max: *values.last().expect("nonempty values have a maximum"),
+    }
+}
+
+fn percentile(values: &[u64], percentile: usize) -> u64 {
+    let index = (values.len() - 1) * percentile / 100;
+    values[index]
+}
+
+impl FloatDistribution {
+    fn observe(&mut self, value: Option<f64>) {
+        let Some(value) = value else { return };
+        self.count += 1;
+        self.min = Some(self.min.map_or(value, |current| current.min(value)));
+        self.max = Some(self.max.map_or(value, |current| current.max(value)));
+    }
+}
+
+impl OptionalBoolDistribution {
+    fn observe(&mut self, value: Option<bool>) {
+        match value {
+            None => self.absent += 1,
+            Some(false) => self.false_count += 1,
+            Some(true) => self.true_count += 1,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::Vector3;
+    use holtburger_dat::file_type::{MotionCommandKinematics, MotionKinematicsTable};
+    use holtburger_weenie_catalog::{SubPalette, TemplatePhysics};
+
+    fn template() -> WeenieTemplate {
+        WeenieTemplate {
+            wcid: 42,
+            class_name: "ace42-test".to_owned(),
+            weenie_type: 10,
+            name: Some("Test".to_owned()),
+            setup_did: Some(0x0200_0042),
+            motion_table_did: None,
+            sound_table_did: None,
+            physics_effect_table_did: None,
+            palette_base_did: None,
+            default_scale: Some(1.0),
+            friction: None,
+            elasticity: None,
+            maximum_velocity: None,
+            rotation_speed: None,
+            physics: TemplatePhysics::default(),
+            sub_palettes: Vec::new(),
+            texture_changes: Vec::new(),
+            anim_part_changes: Vec::new(),
+        }
+    }
+
+    fn setup() -> SetupFacts {
+        SetupFacts {
+            has_physics_bsp: false,
+            has_default_animation: false,
+            has_default_script: false,
+            sphere_count: 1,
+            cylsphere_count: 0,
+        }
+    }
+
+    #[test]
+    fn effective_mask_applies_explicit_false_and_setup_bits() {
+        let mut template = template();
+        template.physics.base_mask = Some(GRAVITY | REPORT_COLLISIONS | HAS_PHYSICS_BSP);
+        template.physics.overrides.gravity = Some(false);
+        template.physics.overrides.ignore_collisions = Some(true);
+
+        let mask = effective_mask(&template, &setup());
+
+        assert_eq!(mask & GRAVITY, 0);
+        assert_ne!(mask & REPORT_COLLISIONS, 0);
+        assert_ne!(mask & IGNORE_COLLISIONS, 0);
+        assert_eq!(mask & HAS_PHYSICS_BSP, 0);
+    }
+
+    #[test]
+    fn target_geometry_uses_bsp_then_cylsphere_then_sphere() {
+        let mut setup = setup();
+        assert_eq!(target_geometry_class(0, &setup), "spheres");
+        setup.cylsphere_count = 1;
+        assert_eq!(target_geometry_class(0, &setup), "cylspheres");
+        setup.has_physics_bsp = true;
+        assert_eq!(
+            target_geometry_class(HAS_PHYSICS_BSP, &setup),
+            "physics_bsp"
+        );
+    }
+
+    #[test]
+    fn catalog_survey_reports_palette_and_scale_hazards() {
+        let mut template = template();
+        template.default_scale = Some(0.0);
+        template.maximum_velocity = Some(0.0);
+        template.rotation_speed = Some(2.0);
+        template.sub_palettes = vec![
+            SubPalette {
+                sub_palette_did: 1,
+                offset: 0,
+                length: 0,
+            },
+            SubPalette {
+                sub_palette_did: 2,
+                offset: 250,
+                length: 10,
+            },
+            SubPalette {
+                sub_palette_did: 3,
+                offset: 252,
+                length: 2,
+            },
+        ];
+
+        let survey = survey_templates(&[template], vec![100]);
+
+        assert_eq!(survey.invalid_default_scales, 1);
+        assert_eq!(survey.zero_length_sub_palettes, 1);
+        assert_eq!(survey.out_of_bounds_sub_palettes, 1);
+        assert_eq!(survey.overlapping_sub_palette_pairs, 1);
+        assert_eq!(survey.maximum_velocity.count, 1);
+        assert_eq!(survey.maximum_velocity.min, Some(0.0));
+        assert_eq!(survey.maximum_velocity.max, Some(0.0));
+        assert_eq!(survey.rotation_speed.count, 1);
+        assert_eq!(survey.rotation_speed.min, Some(2.0));
+        assert_eq!(survey.rotation_speed.max, Some(2.0));
+    }
+
+    #[test]
+    fn integer_distribution_uses_stable_percentile_floor() {
+        let distribution = integer_distribution((1..=100).collect());
+
+        assert_eq!(distribution.min, 1);
+        assert_eq!(distribution.p50, 50);
+        assert_eq!(distribution.p95, 95);
+        assert_eq!(distribution.p99, 99);
+        assert_eq!(distribution.max, 100);
+    }
+
+    #[test]
+    fn motion_census_measures_authored_vector_magnitudes() {
+        let mut motion = MotionKinematics::new();
+        motion.setup_model_defaults.insert(1, 2);
+        let mut table = MotionKinematicsTable::new(2, 3);
+        table.insert_cycle_kinematics(
+            3,
+            4,
+            MotionCommandKinematics {
+                velocity: Some(Vector3::new(3.0, 4.0, 0.0)),
+                omega: Some(Vector3::new(0.0, 0.0, 2.0)),
+            },
+        );
+        motion.motion_tables.insert(2, table);
+
+        let survey = survey_motion_kinematics(&motion);
+
+        assert_eq!(survey.setup_defaults, 1);
+        assert_eq!(survey.motion_tables, 1);
+        assert_eq!(survey.cycle_entries, 1);
+        assert_eq!(survey.velocity_magnitudes.min, Some(5.0));
+        assert_eq!(survey.velocity_magnitudes.max, Some(5.0));
+        assert_eq!(survey.omega_magnitudes.min, Some(2.0));
+        assert_eq!(survey.omega_magnitudes.max, Some(2.0));
+    }
+}

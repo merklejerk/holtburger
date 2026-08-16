@@ -1,6 +1,7 @@
-Place a combined namespaced HBA bundle in this folder:
+Place generated runtime content in this folder:
 
-- Preferred: `assets.hba`
+- Required client assets: `assets.hba`
+- Optional Explorer weenie catalog: `weenies.hwc`
 
 The bundled release and Flatpak packaging ship a namespaced `assets.hba` archive. It contains the current TUI-required portal content under `eor/portal`, the required derived runtime asset under `holtburger/core`, and may also include `eor/cell` content in the same file. The runtime discovers HBA namespaces from archive metadata, so filenames are no longer used to infer archive scope.
 
@@ -15,3 +16,13 @@ cargo run -p holtburger-tools --bin dat2hba -- \
 ```
 
 Raw retail DATs are tooling inputs only. Normal client startup expects the generated `assets.hba` bundle, not bare `.dat` files.
+
+`weenies.hwc` is the canonical/default location for the optional offline ACE World-derived catalog.
+It remains a separate host-only flat file rather than an HBA namespace. Generate or replace it
+atomically with:
+
+```bash
+cargo run -p holtburger-tools --bin export-weenie-catalog -- \
+	--database-url-env ACE_WORLD_SQL_URL \
+	--provenance <ACE-World-revision-or-operator-label>
+```

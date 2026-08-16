@@ -1,51 +1,55 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: Proposed — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; not started
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 1B next
 Created: 2026-08-16
-Refined: 2026-08-16 — catalog-first census, canonical scene indexing, quiescent-body pruning,
-collection fixed tick, evidence-selected dynamic geometry/collision lifecycle, and Explorer entity UX
+Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
+production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
+collection, adaptive time-sliced dynamic contact/reporting, and focused Explorer entity UX
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
 Predecessor: `docs/plans/holtburger-3d-spawned-entity-explorer-runtime-plan.md`
 
 ## Preemption Scope
 
 This plan replaces the predecessor's execution order and first consumer. The predecessor remains a
-historical evidence record for the completed convergence, snapshot-recovery audit, motion evidence
-gates, and host-physics reconciliations. Its queued seven-phase implementation must not be executed.
+historical evidence record for the completed shared-path work, reload audit, motion evidence checks,
+and host-physics fixes. Its queued seven-phase implementation must not be executed.
 
-The replacement milestone is one complete shared dynamic-entity realization/event path whose first real
+The replacement milestone is one complete shared dynamic-entity creation/event path whose first real
 consumer is an Explorer command that spawns a WCID from an optional, offline ACE World-derived weenie
-catalog. An app-local Explorer registry owns that live instance, feeds a source-neutral definition
-into the shared solver and frontend contracts, and reuses the current template, animation, effects,
+catalog. An app-local Explorer registry owns that live instance, feeds a definition that does not
+depend on whether Explorer or a server created the entity, feeds it into the shared solver and
+frontend contracts, and reuses the current template, animation, effects,
 scene, and renderer systems. The client keeps `WorldState` as its distinct entity authority and
 feeds the same path from decoded server facts later; no server spawning, packets, session, or
 transport are implemented here.
 
-Physical participation is mutable entity state, not a spawn-time yes/no choice. The catalog retains
+Solver participation is mutable entity state, not a spawn-time yes/no choice. The catalog retains
 the complete ACE template physics-state inputs, the Explorer resolves them with DAT/setup-derived
-facts, and the shared runtime applies complete state replacements through reversible physical-body
-attachment/reconfiguration while retaining the entity's spatial pose owner.
+facts, and the shared runtime can add, remove, or reconfigure collision/physics state without
+deleting the body that owns the entity's world pose.
 
 The following predecessor contracts survive unchanged:
 
 1. Producer authority remains composition-specific: `WorldState` for a client and an app-local
-   registry for Explorer. Both feed the same source-neutral solver and projection contracts.
-2. One focused reconstructable snapshot after startup/page reload plus ordered live deltas.
+   registry for Explorer. Both feed the same shared solver commands and frontend-view contracts.
+2. One dedicated snapshot that can rebuild the frontend after startup/page reload, plus ordered live
+   updates.
 3. No frontend motion-table selection, authoritative placement, collision decisions, or per-frame
    host transform stream.
 4. No second template cache, animation system, effect dispatcher, pose system, projection grammar,
    or solver integration path within a composition.
-5. Explorer UX and catalog discovery remain app-local; shared realization and event mechanics remain
-   source-neutral.
-6. Feed epochs, global entity sequences, permanent generation tombstones, a stateful projector, and
-   a stateful realization service require measured evidence and are not prerequisites.
+5. Explorer UX and catalog discovery remain app-local; shared creation and event mechanics do not
+   depend on the entity source.
+6. Per-batch sequence numbers, global entity sequence numbers, permanent records of deleted
+   generations, and stateful view-builder/creation services require measured evidence and are not
+   prerequisites.
 
 ## Context and Boundaries
 
 ### Goal
 
 From the Explorer, spawn a real WCID at an explicit world pose into an app-local entity registry,
-feed it through the same source-neutral solver/frontend realization contract available to
+feed it through the same shared solver/frontend creation contract available to
 `WorldState`, render and animate it through the existing dynamic presentation runtime, advance its
 `SpatialBodyId::Entity` through shared environment and dynamic-body collision, reconstruct it after
 frontend reload, and despawn it without leaked registry, body, asset, effect, scene, or renderer
@@ -121,9 +125,9 @@ which producer registry supplied them.
   the effective initial state exactly.
 - A source-neutral complete physics-state replacement operation shared by Explorer scenarios and the
   existing client `SetState` path.
-- Reversible physical participation: every dynamic entity retains one spatial pose body while its
-  optional physical attachment, collision participation, response policy, and fixed-tick
-  participation are installed, detached, or reconfigured from the effective state.
+- Reversible solver participation: every dynamic entity retains one body that owns its world pose.
+  Collision shape, collision response, and fixed-tick work can be added, removed, or reconfigured
+  from the effective state without deleting that pose body.
 - Shared source-neutral body commands, reliable committed solver outcomes, and pure projection
   functions used by client `WorldState` and the Explorer host.
 - An app-local Explorer entity registry with ordered spawn, despawn, and complete replacement. It
@@ -140,14 +144,14 @@ which producer registry supplied them.
   and generation-safe resource ownership for spawned entities.
 - Setup-resolved grounded physical bodies, fixed-tick solver advancement, locally derived ground
   state, placed paths, non-gating scene residency, and sparse placement presentation.
-- Dynamic body-to-body pair discovery, flag-driven filtering, narrow-phase contact/response, and
-  collision-report events shared by Explorer and client compositions. The census selects the
-  simplest adequate implementation; it does not gate this scope.
+- Dynamic body-to-body candidate lookup, flag-driven filtering, exact shape contact/response
+  (the narrow phase), and source-neutral collision-report outcomes available to composition-owned
+  consumers. The census selects the simplest adequate implementation; it does not gate this scope.
 - Lossless dynamic-target geometry selected from setup spheres, cylspheres, or physics BSP according
   to retail/ACE rules, distinct from the movement/ground-response spheres where the rules differ.
-- Collision start/end lifecycle with retained touch state and forced teardown, rather than
-  stateless per-tick hit notifications.
-- Solver-owned active/quiescent tracking that omits proven resting bodies from integration while
+- Collision start/end reporting that remembers active contacts and ends them during removal, rather
+  than emitting unrelated hit notifications every tick.
+- Solver-owned active/settled tracking that omits proven resting bodies from integration while
   retaining their pose, lifecycle, spatial-index membership, target collision, presentation, and
   collision-report maintenance.
 - Content-built motion selection and resolved frontend animation/kinematics sufficient for explicit
@@ -178,6 +182,9 @@ which producer registry supplied them.
 - Reusing Explorer camera input mapping, viewer offsets, camera dimensions, or camera event contracts
   as entity mechanics.
 - Per-render-frame host transforms, frontend portal traversal, or frontend raw motion-table decoding.
+- Explorer collision-history panels, recent-event logs, diagnostic timelines, production counters,
+  or retained diagnostic records. The solver keeps only contact state required to produce correct
+  start/refresh/end semantics; focused tests and harnesses observe emitted outcomes externally.
 - A second Explorer physical-body registry beside `HostSimulationRuntime`, spawned-only solver, or
   body-driven collision loading policy.
 - Silently ignoring a set physics-state bit or treating the complete mask as one `collidable`
@@ -228,17 +235,17 @@ which producer registry supplied them.
 
 1. A weenie is a static template; an entity is a live authoritative instance. No type may blur the
    distinction, and no shared solver or projection contract may claim producer authority.
-2. The first WCID must traverse the same source-neutral realization and projection contracts a later
+2. The first WCID must traverse the same shared creation and frontend-view contracts a later
    decoded server spawn will use, without sharing registries or pre-building the server adapter.
-3. Semantic and physical authority remain separate. Ordered orchestration, compensation, and a
-   projection join prevent partial publication; no cross-store transaction or duplicated pose is
-   introduced.
-4. One owner per composition owns each fact. Catalog owns templates; `WorldState` or Explorer registry
-   owns live semantics; its composition-local spatial runtime owns bodies; frontend owns
+3. Entity facts and solver state remain separate. Prepare fallible work first, undo an unexpected
+   partial install, and publish only after both owners contain the entity. This avoids both a
+   cross-store transaction and a second copy of the pose.
+4. One owner in each runtime owns each fact. Catalog owns templates; `WorldState` or Explorer registry
+   owns live entity facts; that runtime's spatial system owns bodies; frontend owns
    presentation; renderer owns batching.
-5. Every live entity has one spatial pose owner; physical solver state is an optional, reversible
-   attachment selected from the current effective `PhysicsState`, never the condition for entity
-   existence.
+5. Every live entity has one body that owns its world pose. Collision/physics state is optional and
+   reversible, selected from the current effective `PhysicsState`, and never required for the entity
+   itself to exist.
 6. The existing authored presentation runtime is generalized by subtraction: extract static-layer
    assumptions from its input rather than wrap it with a second spawned system.
 7. Solver output is entity placement truth for locally simulated bodies. Ground classification is
@@ -250,7 +257,7 @@ which producer registry supplied them.
 10. Unsupported source facts fail with WCID and provenance, and every shared field/event/operation
     has a named same-phase producer and consumer. No guessed fallback or future-only scaffolding may
     make malformed input look valid.
-11. Quiescence removes integration work, never the body. Resting bodies remain indexed collision
+11. The settled state removes integration work, never the body. Resting bodies remain indexed collision
     targets and visible entities, and every state-changing input has one explicit wake path.
 
 ## Selected Ownership and Data Flow
@@ -266,16 +273,16 @@ Explorer spawn command (WCID + pose) -+
                                       |                    (client semantic authority)
                                       +---------+----------+
                                                 |
-                                  source-neutral definitions/commands
+                                  shared definitions/commands
                                                 |
-                              composition-local SpatialScene/solver
+                              each runtime's SpatialScene/solver
                                                 |
                                   committed body outcomes/snapshots
                                       +---------+----------+
                                       |                    |
-                         named semantic consumers     pure projection join
+                         named entity-state updates   assemble frontend view
                                                            |
-                                      focused dynamic-entity snapshot/deltas
+                                      dedicated dynamic-entity snapshot/updates
                                                            |
                          narrow app-local Tauri relay
                                                            |
@@ -284,8 +291,8 @@ Explorer spawn command (WCID + pose) -+
         template / animation / scripts / effects / placement / renderer
 ```
 
-The future network path joins at the source-neutral definition/command, committed-outcome, and
-projection contracts. It keeps `WorldState` as its authority and uses `WorldState`'s own
+The future network path begins using shared code at the entity definition, solver command/outcome,
+and frontend-view contracts. It keeps `WorldState` as its authority and uses `WorldState`'s own
 `SpatialScene`; it does not read the Explorer catalog. The Explorer path keeps its app-local registry
 and uses `HostSimulationRuntime`'s own `SpatialScene`; it does not synthesize protocol messages.
 Shared means identical downstream contracts and behavior, not a shared state instance or a universal
@@ -334,27 +341,26 @@ effective `PhysicsState` is the same source-neutral value supplied by a future d
 
 ### Producer Registries and the Shared Event Path
 
-The two semantic producer authorities are intentionally distinct, and each sits outside its
-composition's physical authority:
+The two entity registries are intentionally distinct, and each sits outside its runtime's solver:
 
 - client composition: `WorldState::EntityManager` above the separate `WorldState.scene` body store;
 - Explorer composition: an app-local `ExplorerEntityRegistry` above
   `HostSimulationRuntime`'s body store.
 
 Neither registry is generalized into a universal store and Explorer does not instantiate
-`WorldState`. The shared seam begins only after a producer has assembled source-neutral entity facts.
-It consists of focused definition/body-command contracts, reliable committed solver outcomes,
-solver snapshots, and pure frontend projection. Existing synchronous returns are the default
+`WorldState`. Shared code begins only after a registry has assembled the entity definition.
+It consists of small definition/body-command contracts, reliable committed solver outcomes,
+solver snapshots, and pure functions that assemble frontend views. Existing synchronous returns are the default
 in-process delivery mechanism; do not add an async event bus, stateful funnel object, or trait unless
 landed consumers prove it removes more code than it adds.
 
 `SpatialScene` is the sole physical-state authority. Every live dynamic entity keeps one
-`SpatialBody` for pose/kinematics/projection, while `SpatialBody::physical` is an optional and
-reversible solver attachment. The producer registry owns the current complete effective
-`PhysicsState` as semantic input. It may consume committed body outcomes when a named semantic rule
+`SpatialBody` for pose, motion, and frontend views, while `SpatialBody::physical` is optional
+collision/physics state. The producer registry owns the current complete effective
+`PhysicsState` as an entity input. It may consume committed body outcomes when a named entity rule
 needs them, but it does not mirror pose, velocity, contact, response, residency, or placed-path state.
-Projection joins the producer's semantic record with the current body view. The frontend receives
-the resulting source-neutral view event; it does not become the backend event bus.
+A pure function combines the registry record with the current body view. The frontend receives the
+resulting shared view event; it does not become the backend event bus.
 
 The clean cutover removes `SpatialScene::entity_poses` as a second pose store. Entity range/liveness
 queries read canonical `SpatialBody` poses through a scene-owned coarse membership index, while the
@@ -370,16 +376,16 @@ in `WorldState.scene`.
 
 ### Spawn Definition and Publication
 
-The catalog record, Explorer request, decoded setup, and derived body profile collapse into one
-validated source-neutral definition (final name fixed during Phase 2). It contains semantic
+The catalog record, Explorer request, decoded setup, and derived body profile produce one validated
+shared definition (final name fixed during Phase 2). It contains entity
 appearance, behavior references, motion source, explicit initial pose/time, and either a complete
 effective physics state plus every resolved geometry/response fact its current supported bits
 require. It never contains a catalog path, SQL row, frontend node, asset payload, producer-registry
 handle, or optional fields whose absence triggers an implicit runtime fallback.
 
-One pure reconciliation decision compares the previous and next effective physics state and produces
-the required spatial operations: retain pose-only body, attach physical state, detach physical state,
-or replace/reconfigure physical state while preserving compatible pose/kinematics and clearing
+One pure decision compares the previous and next effective physics state and produces the required
+spatial operations: retain a pose-only body; add, remove, or reconfigure collision/physics state;
+preserve compatible pose/motion; and clear
 incompatible contact/response memory. The same operation handles initial spawn and later complete
 state replacement; consumers never hand-edit individual solver fields from bit changes.
 
@@ -389,12 +395,12 @@ the received semantic mask, stops any now-invalid local simulation, and reports 
 physical interpretation rather than continuing under stale behavior or rejecting server truth.
 
 The Explorer driver reserves identity and validates replacement policy in its own registry; the
-client continues to obtain identity/lifecycle from server-driven `WorldState`. All fallible content,
+client continues to obtain identity/lifecycle from server-driven `WorldState`. All content loading,
 definition, and body preparation completes before either authority mutates. The composition then
-serializes semantic registration and body installation, compensates an unpublished partial install
-if an unexpected commit step fails, and publishes only the complete projection join.
+updates the registry and installs the body in a defined order, removes an unpublished partial install
+if an unexpected commit step fails, and publishes only after the frontend view can be assembled.
 
-This is ordered choreography, not a cross-store transaction. A solver rejection emits no committed
+This is an ordered pair of updates, not a cross-store transaction. A solver rejection emits no committed
 outcome. Failure to deliver a frontend event does not roll back accepted simulation; the complete
 snapshot repairs presentation. Complete replacement retires the old scheduler participation and
 body before publishing the successor. A composition-local instance generation rejects a late
@@ -402,7 +408,7 @@ outcome from retired work; no global sequence or permanent tombstone is introduc
 
 ### Projection and Recovery
 
-One focused `DynamicEntitySnapshot` contains every frontend-relevant dynamic entity joined with
+One dedicated `DynamicEntitySnapshot` contains every frontend-relevant dynamic entity together with
 appearance, behavior identity, body pose/kinematics/contact/residency, semantic motion, and one host
 timeline mapping. Immutable assets are referenced by content identity. Animated attachment state
 remains absent until its deferred scenario exists. Every field has a same-phase frontend consumer.
@@ -411,9 +417,9 @@ Startup and recovery are one state machine:
 
 1. register the Rust receiver and frontend listener;
 2. enter `awaiting-snapshot` and request current state;
-3. ignore entity/body/motion deltas until the focused snapshot arrives;
-4. atomically reconcile the frontend mirror; and
-5. apply later focused deltas in order.
+3. ignore entity/body/motion updates until the snapshot arrives;
+4. replace the frontend mirror as one operation; and
+5. apply later updates in order.
 
 The startup/page-reload snapshot is reconstruction, not a delivery-recovery protocol. Do not add an
 intermediary broadcast channel, feed sequence, acknowledgement, or automatic recovery without
@@ -423,26 +429,26 @@ measured need on the selected real Tauri boundary.
 
 One dynamic-entity subsystem participant owns the Explorer entity collection's fixed tick; individual
 entities never reserve scheduler slots. The participant visits eligible bodies through an explicit
-total ordering for `SpatialBodyId` rather than `HashMap` iteration and emits at most one focused Tauri
-advance batch per fixed epoch. Static or otherwise unscheduled bodies may remain dynamic collision
+total ordering for `SpatialBodyId` rather than `HashMap` iteration and emits at most one Tauri
+advance batch per fixed tick. Settled or otherwise unscheduled bodies may remain dynamic collision
 targets without being tick participants, while the synthetic Explorer camera remains outside dynamic
 entity collision unless its camera policy explicitly opts in.
 
 Scheduling eligibility from the effective physics state is distinct from solver activity. An eligible
-body becomes quiescent only after the Phase R0-proven number of consecutive accepted ticks establish
+body becomes settled only after the Phase R0-proven number of consecutive accepted ticks establish
 stable support, canonical zero velocity/omega, no current actuation or acceleration, and no pending
-response or accepted motion path. Quiescence is solver-owned derived state, not a catalog fact,
+response or accepted motion path. Settled state is derived and owned by the solver, not a catalog fact,
 registry semantic, frontend authority, or synonym for `Static`/`Frozen`. The collection participant
-continues its cheap stable-order scan at the 50-300-body milestone and simply omits quiescent bodies
+continues its cheap stable-order scan at the 50-300-body milestone and simply omits settled bodies
 from integration and mover-side queries; do not add sleep islands, per-body timers, or a second
 active-body registry without Phase R2 evidence.
 
-A quiescent body retains its canonical pose, physical attachment, dynamic-shadow membership, target
+A settled body retains its canonical pose, collision/physics state, spatial-index membership, target
 geometry, report state, and presentation. Motion/actuation, velocity/acceleration/omega replacement,
-teleport, physical-state reconciliation, a change to loaded static world collision, and a dynamic peer
+teleport, a physics-state change, a change to loaded terrain/interior collision data, and a dynamic peer
 interaction explicitly wake it before the next required solve. The loaded collision changes when the
 host adds or removes relevant landblock collision assets; it does not replace bodies or either entity
-registry. The first implementation may wake every quiescent body after that change rather than
+registry. The first implementation may wake every settled body after that change rather than
 introduce support-dependency graphs. Phase R0 determines whether animated parts or physics scripts
 mutate target collision geometry; such updates either keep the relevant physical work active or
 explicitly dirty the target geometry without conflating visual animation with body integration.
@@ -460,16 +466,16 @@ Missing environment collision owners remain open space and never suspend bodies 
 dynamic peers remain independently eligible according to current physics-state and object-info
 filters. Broad-phase queries cover swept conservative bounds and provisional reached cells, not only
 the mover's previously committed buckets, so fast motion and portal entry cannot miss a target.
-Focused per-body outcomes are collected into the epoch batch. A failed body solve leaves that body's
+Changed per-body outcomes are collected into the tick batch. A failed body solve leaves that body's
 previous accepted state intact without rolling back unrelated bodies.
 
-Collision reporting is retained physical state, not tick-local deduplication. A touched pair refreshes
-its proven lifetime record; first touch, expiry, reporting-state replacement, teleport, detach,
-replacement, and despawn produce the ACE/retail-proven start/end outcomes. Expiry consumes an injected
-clock so focused tests never sleep. Phase 5A extends the projection with active reported contacts and
-recent start/end outcomes for the Explorer selected-entity inspector, giving the shared report
-contract a real milestone consumer without moving gameplay into the solver.
-Report expiry and forced-end maintenance remain serviced for quiescent bodies according to the Phase
+Collision reporting retains only the physical state required for correct lifecycle semantics; it is
+not a diagnostic history. A touched pair refreshes its active lifetime record; first touch, expiry,
+reporting-state replacement, teleport, detach, replacement, and despawn produce the ACE/retail-proven
+start/end outcomes. Expiry consumes an injected clock so focused tests never sleep. Composition-owned
+interested parties may consume committed report outcomes, but Explorer does not relay or retain them
+merely to populate diagnostics, counters, history, or a collision inspector.
+Report expiry and forced-end maintenance remain serviced for settled bodies according to the Phase
 R0-proven lifecycle; skipping integration cannot silently freeze or fabricate a contact lifetime.
 
 The frontend receives sparse accepted path/anchor facts and evaluates presentation at render cadence.
@@ -480,6 +486,9 @@ reset explicitly clear prediction and correction state.
 ## Phased Implementation
 
 ### Phase 0: Bootstrap the Export Contract
+
+Progress: Complete (2026-08-16). The source trace and bootstrap contract are recorded in
+`docs/ace_world_weenie_catalog.md`.
 
 #### Deliverables
 
@@ -504,10 +513,27 @@ reset explicitly clear prediction and correction state.
 
 #### Decisions and Course Corrections
 
-- Populate during execution. Stop for user review if the ACE schema cannot preserve a required
-  distinction without importing unrelated gameplay tables.
+- The bootstrap record retains optional raw ACE template inputs; it does not require setup, fall back
+  from display name to class name, expand palette ranges, narrow database doubles, or calculate the
+  effective physics mask.
+- Only the eleven `PropertyBool` values consumed by ACE's `CalculatedPhysicsState()` are physics
+  overrides. Bits without property-bool counterparts remain losslessly represented by the optional
+  raw base mask; setup/runtime-derived bits remain DAT work for Phase R0.
+- ACE appearance tables contain semantic sets rather than an order column. Canonical export order is
+  animation index, texture `(part index, old DID, new DID)`, and palette
+  `(offset, length, subpalette DID)`. Phase R0 must stop for review if real overlapping palette ranges
+  make consumer-visible behavior depend on an order the database does not preserve.
+- `PhysicsState` and wire `PhysicsDescriptionFlag` remain separate namespaces. No presence bit enters
+  the catalog payload.
+- Debt carried into Phase 1: implement every rejection named by the Phase 0 contract with a focused
+  synthetic fixture, including database-constraint violations that a valid production schema cannot
+  produce.
 
 ### Phase 1: Build the Offline Explorer Weenie Catalog
+
+Progress: Complete (2026-08-16). `holtburger-weenie-catalog` owns the `.hwc` version 1 semantic
+record, codec, reader, deterministic failure-atomic writer, and focused fixtures;
+`holtburger-tools::export-weenie-catalog` owns one-connection ACE World extraction.
 
 #### Deliverables
 
@@ -545,10 +571,53 @@ reset explicitly clear prediction and correction state.
 
 #### Decisions and Course Corrections
 
-- Do not add mmap, compression, checksums, secondary indexes, or template caching unless Phase R0
-  measurements prove the simple reader insufficient.
+- Final names are crate `holtburger-weenie-catalog`, extension `.hwc`, magic `HBWCAT`, and format
+  version 1. `docs/ace_world_weenie_catalog.md` specifies every byte, limit, source field, and
+  canonical ordering rule.
+- The reader retains provenance plus the fixed 16-byte-per-record index, uses binary search, and
+  performs a positioned payload read on lookup. It has no database, HBA, content, world, protocol,
+  Tauri, or frontend dependency.
+- The exporter uses `mysql` 28 selected by Cargo, one direct connection, and nine bulk ordered
+  queries. It exports every `weenie` parent, including missing-setup/name records required by R0,
+  rather than issuing N+1 WCID queries or applying runtime fallbacks.
+- The writer canonicalizes source ordering, validates and compares every record after reopening the
+  temporary catalog, then atomically publishes it. A rejected replacement preserves an existing
+  catalog.
+- The Explorer host does not take an unused catalog-crate dependency in this phase. Phase 3 adds it
+  with the first app-local discovery/lookup consumer; current dependency-graph checks already prove
+  MySQL is confined to `holtburger-tools`.
+- Concession: version 1 uses bounded in-memory payload vectors during the one-shot export. The runtime
+  still reads one record at a time. R0 must measure payload/file size before a streaming writer is
+  considered.
+- Debt carried into R0: run the exporter against the selected real ACE World revision, record its
+  provenance, and use that generated catalog plus normal DAT content for the required distributions.
+  No generated runtime asset is checked in by this phase.
+- Do not add mmap, compression, checksums, secondary indexes, streaming output, or template caching
+  unless Phase R0 measurements prove the simple implementation insufficient.
 
 ### Phase R0: Survey the Catalog and Freeze the Runtime Scope
+
+Progress: Complete (2026-08-16). `docs/ace_dynamic_entity_runtime_survey.md` records the complete
+consumer matrices, measured populations, source assignments, supported/deferred boundaries,
+representative WCIDs, and shared-boundary dry run. The offline survey command measures the generated catalog
+through normal mounted HBA content without reopening SQL. The selected ACE World revision contains
+43,913 records and 4,858,241 encoded payload bytes (109-byte median, 159-byte p99, 476-byte maximum),
+so the fixed sorted index plus positioned record read remains the final runtime lookup design. All
+3,909 referenced setups and their referenced GfxObjs decode from `dats`; the population contains
+37,497 sphere, 4,349 cylsphere, 1,254 physics-BSP, and 813 geometry-absent target branches. The
+survey found no overlapping or out-of-bounds palette ranges, but it found three zero-length palette
+ranges and eight non-positive scales for explicit representative handling.
+
+R0 encountered a consumer-visible collision-report source disagreement. Retail retains one record
+per directional recipient, emits only on first touch, silently refreshes later touches, and expires
+the record after one second (or after the next positive interval for an ethereal target). ACE's
+current `track_object_collision` overwrites its dictionary entry and calls the collision callback on
+every observed touch. Retail's complete `set_state` also does not reconcile report/filter bits during
+an existing contact; only the specialized hidden transition forces ends and restarts retained
+contacts on unhide. The selected contract preserves retail's first-touch/silent-refresh lifetime but
+deliberately closes the raw-state-toggle hole: loss of reporting eligibility forces a balanced end,
+and restored eligibility starts a new lifetime only when a later solve reconfirms contact. This is a
+deliberate retail divergence, not an inferred retail behavior.
 
 #### Deliverables
 
@@ -589,28 +658,28 @@ reset explicitly clear prediction and correction state.
   timeout in isolation.
 - Determine whether idle animation, physics scripts, cylspheres, or per-part physics BSP change
   dynamic target geometry while the root body remains stationary. Name whether each case prevents
-  integration quiescence, requires a target-geometry refresh only, or is outside the supported first
+  settling, requires a target-geometry refresh only, or is outside the supported first
   population.
 - Pick 3-10 named WCIDs covering ordinary creatures, simple objects, pose-only bodies, varied sphere
   geometry, collision-filter/reporting differences, appearance substitutions, default behavior, and
   malformed input. Record why each differs.
 - Treat 50-300 spawned entities per populated landblock as the first-milestone workload envelope.
-  Combine that known range with measured catalog geometry to validate dynamic-body stamping into the
+  Combine that known range with measured catalog geometry to validate assigning dynamic bodies to the
   existing global 24 m outdoor-cell lattice, exact reached-EnvCell buckets, deterministic visit/pair
-  ordering, narrow-phase/contact model, convergence rule, and collision-report contract. Include
-  outdoor/EnvCell portal straddling and the active interest window; body-body collision is committed
+  ordering, exact shape/contact model, convergence rule, and collision-report contract. Include
+  outdoor/EnvCell portal straddling and the currently simulated area; body-body collision is committed
   scope.
 - Census authored and live-instance speed/acceleration bounds for the representative shapes,
-  especially `Missile`, and compare per-tick displacement with target dimensions. Select and prove
-  swept time-of-impact, bounded substeps, or another authoritative narrow-phase rule; swept bucket
-  lookup alone must not be mistaken for continuous contact detection.
+  especially `Missile`, and compare per-tick displacement with target dimensions. Prove the selected
+  adaptive slice distance and maximum slice count against that envelope; swept bucket lookup alone
+  must not be mistaken for a contact test.
 - Prove directional pair-processing and report ownership when both bodies are scheduled. Name which
   body solve may apply each response and which retained per-recipient record emits lifecycle events,
   so a pair is neither double-impulsed nor silently skipped by stable visitation.
 - Audit the bootstrap catalog schema against the results. Delete survey-only fields with no runtime
   consumer, add only proven missing runtime facts, revise the still-unreleased format version as
   needed, and regenerate fixtures before Phase 2 contracts consume it.
-- Dry-run the source-neutral realization seam from both `WorldState` and
+- Walk the proposed shared creation path from both `WorldState` and
   `HostSimulationRuntime`. List which inputs each producer can supply, which body/projection
   operations are genuinely identical, which committed solver outcomes have named consumers, and
   which ordering/publication guarantees must remain composition-local.
@@ -629,16 +698,16 @@ reset explicitly clear prediction and correction state.
   every deferred branch has a reachable rejection with WCID and reason.
 - Collision report acceptance distinguishes start, retained touch, refresh, natural end, and forced
   end; it does not reduce the lifecycle to one event per tick.
-- The activity census produces one explicit quiescence predicate, consecutive-stable-tick threshold,
+- The activity census produces one explicit settled-state predicate, consecutive-stable-tick threshold,
   and complete wake matrix. It distinguishes integration, target-geometry maintenance, collision-
   report maintenance, animation, `Static`, and `Frozen`; no wall-clock inactivity heuristic is used.
 - The measured sphere geometry and 50-300-entities-per-populated-landblock envelope validate outdoor
   global-cell stamping, update/rebuild policy, and cross-landblock candidate handling. EnvCells use
   their existing reached-cell partition unless a measured single-cell workload proves subdivision is
   necessary.
-- The selected narrow phase cannot tunnel through the smallest supported representative target at
-  the largest supported per-tick displacement, and two scheduled bodies process/report a pair with
-  one explicit deterministic ownership rule.
+- The selected narrow phase detects the supported representative crossings within the measured
+  displacement/shape envelope, rejects an over-budget solve before partial commit, and processes/
+  reports two scheduled bodies with one explicit deterministic ownership rule.
 - The finalized catalog contains only facts consumed by runtime realization or retained provenance,
   and its fixed index/record choices are justified by measured distributions.
 - The boundary dry-run proves that neither producer registry nor `SpatialScene` instance must move,
@@ -650,97 +719,166 @@ reset explicitly clear prediction and correction state.
 - Record the catalog revision and the selected collision algorithm before Phase 2. Stop for user
   review if ACE and retail disagree on consumer-visible behavior or the observed collision model
   requires a materially broader gameplay simulation than contact/report production.
+- Selected catalog provenance is ACE World base `v0.8.8`, patch `v0.9.294`, version
+  `last_Modified = 2026-06-20 18:22:29`. The generated survey artifact remains local and is not a
+  checked-in runtime asset.
+- Correction: ACE `PropertyBool` value 1 is `Stuck`, not `Static`. `Static` is live
+  `PhysicsObj.State`, and none of the 43,871 present template base masks set it. The bootstrap
+  catalog therefore remains at eleven nullable physics overrides; no `Static` property or format
+  revision is added.
+- Collision reports use retail first-touch, silent-refresh, and expiry semantics rather than ACE's
+  repeated callback behavior. Complete state replacement that removes reporting eligibility emits a
+  forced end; restoring eligibility does not fabricate a start from stale contact data, and the next
+  confirmed touch begins a new lifetime. Later implementation must carry a `RETAIL DIVERGENCE:`
+  marker with the retail `set_state` citation and the state-transition fixture census.
+- Correction: the live SQL follow-up found 103 of 104 missile templates carry
+  `PropertyFloat::MaximumVelocity`, while five carry `RotationSpeed`; ACE consumes them to construct
+  launch velocity/omega. Both optional scalars now live in the unreleased version-1 record, and the
+  selected live database regenerated `dats/weenies.hwc`. Actual velocity and omega remain live
+  instance state. Every retained field has a runtime or presentation consumer; the real 5.3 MiB file and
+  sub-500-byte records still do not justify mmap, compression, streaming output, caching, or another
+  index.
+- Correction: the selected ACE database and production source paths provide no reachable `Static`,
+  `Sledding`, or `Pushable` state change. Preserve those bits but reject local simulation when set;
+  do not build speculative response or scheduling behavior. `Frozen` remains supported because ACE
+  broadcasts it during delayed PK logout. Other proven state broadcasts remain in scope.
+- Moving collision uses retail's dummy-or-first-two sphere path, while peer target geometry retains
+  the complete retail branch: physics BSP, otherwise all cylspheres, otherwise all ordinary spheres.
+  Dynamic narrow phase uniformly samples those branches with adaptive time slices; it does not add a
+  second continuous time-of-impact implementation beside the existing time-sliced solver. Each pair
+  derives its slice count from a conservative relative path length that includes translation and the
+  rotational arc of each body's furthest collision point. Its pair slice distance is the smaller of
+  the smallest participating moving/target collision scale and the 0.05 m runtime maximum. The solve
+  has a 128-slice budget; a higher required count is an error. The measured 100 m/s opposing-velocity
+  case requires 67 slices at 30 Hz. A larger integrated path rejects the directional solve before
+  any pose, response, or report is committed.
+- Each directional pair test samples both bodies' planned transforms from the same immutable
+  tick-start snapshot, including orientation, so moving or rotating offset target geometry is not
+  treated as stationary. A single query of the full-path conservative bounds supplies one stable,
+  sorted/deduplicated candidate set; individual slices do not query the spatial index again.
+- Correction: continuous swept contact was initially selected from the speed/radius census alone.
+  Dry-running that choice against the solver showed it would introduce parallel collision machinery
+  for sphere, cylsphere, and physics-BSP targets. Uniform bounded slicing reuses the solver's existing
+  collision path and is sufficient for the measured first-population envelope. Continuous contact is
+  deferred unless Phase R2 measurements demonstrate a case bounded slicing cannot serve.
+- Dynamic broad phase reuses global 24 m outdoor cells and exact reached EnvCells. Stable directional
+  body solves update only their own body; a peer response wakes the peer for bounded later
+  convergence. No new spatial tree, atomic simultaneous batch, or EnvCell subdivision is added for
+  the 50-300 body envelope.
+- Settling requires one accepted stable tick with walkable support, canonical zero velocity/omega,
+  no acceleration/drive, and no pending response/path. It skips integration/mover work only; target
+  indexing and report expiry remain live. Phase 1B must name a host-owned dirty/update path for each
+  supported animated physics-BSP or scale-changing-script combination; all others reject physical
+  realization rather than retaining stale geometry.
+- The representative real population is WCID 1 Clay, 21 Corpse, 147 Crate, 158 Large Urn, 239
+  Brazier, 400 Carsith the Weaponsmith, 1499 Flame Bolt, 34621 Killagurg, and 27437 Dark Monolith.
+  Synthetic fixtures cover proven live-only states absent from the catalog and explicit rejection of
+  representable-but-unproduced states.
 
-### Phase 2: Land Shared Definitions and Committed Solver Outcomes
+### Phase 1A: Close Survey-Discovered Catalog Gaps
+
+Progress: Complete (2026-08-16). The unreleased version-1 record now retains optional maximum
+velocity and rotation speed, both tools default to the canonical `dats/weenies.hwc` layout, and the
+selected live ACE World database regenerated and revalidated the artifact.
+
+#### Deliverables
+
+- Extend the unreleased version-1 catalog record with optional finite `maximum_velocity` and
+  `rotation_speed` values sourced from ACE World float property types 26 and 27. Preserve absence and
+  explicit zero distinctly; do not store a direction, velocity vector, target, spell, or combat
+  policy.
+- Update the exporter query, semantic model, codec contract, fixed fixtures, and format documentation,
+  then regenerate the canonical `dats/weenies.hwc` artifact from the selected live ACE World database.
+- Keep `dats/weenies.hwc` beside `dats/assets.hba` as the canonical portable/install layout. Export
+  and survey tools default there; Explorer Phase 3 derives the sibling catalog from the selected HBA
+  directory unless an explicit app-local catalog override is supplied.
+- Re-run the catalog/DAT survey and update its size/hash/distributions. Do not retain the
+  pre-correction artifact or introduce catalog format compatibility for an unreleased local file.
+
+#### Acceptance Criteria
+
+- The default exporter atomically replaces `dats/weenies.hwc`, and the default survey reads it plus
+  `dats/assets.hba` without path arguments or a SQL connection.
+- Flame Bolt resolves maximum velocity 15 m/s; Whirling Blade resolves rotation speed 2 revolutions/s;
+  Rockfall preserves explicit zero; Crimson Night Gem Setting preserves absence.
+- Equal SQL rows and provenance still produce byte-identical files, every catalog fixture passes,
+  and MySQL remains outside runtime dependencies.
+- No launch vector, target identity, seeking behavior, combat state, or fallback speed enters the
+  catalog.
+
+#### Decisions and Course Corrections
+
+- The catalog supplies launch magnitudes, not motion. Missiles remain ordinary solver bodies with
+  live vectors. ACE tracking leads the initial shot from target velocity; it is not continuous
+  seeking and is outside the first Explorer launch scenario.
+
+### Phase 1B: Close the Mutable Target-Geometry Boundary
+
+#### Deliverables
+
+- Census the one physics-BSP setup with a default animation and the 23 physics-BSP setups with
+  default scripts. Record the affected WCIDs, whether the animation moves physical parts, and which
+  decoded script hooks can change scale or another collision transform.
+- Trace how retail and ACE keep per-part physics-BSP transforms and script-driven scale synchronized
+  with collision queries. Name the authoritative state owner and update path; do not make frontend
+  presentation state authoritative input to the host solver.
+- Select the smallest first-population boundary from the measured cases. Support a host-owned update
+  only when existing decoded semantic facts can drive it cleanly; otherwise reject physical
+  realization for the affected combination with WCID/setup/reason rather than freezing stale target
+  geometry or adding a speculative host animation runtime.
+- Update the physical-composite contract, representative WCIDs, and later collision acceptance cases
+  with the selected supported and rejected combinations.
+
+#### Acceptance Criteria
+
+- Every catalog-reachable animated or script-mutated physics-BSP setup has a named supported update
+  path or an explicit reachable rejection.
+- Ordinary setup spheres and cylspheres remain root-pose/scale geometry and require no idle refresh.
+- No frontend callback, diagnostic record, polling bridge, or second animation clock is introduced to
+  feed collision truth back into the host.
+- Phase 2 can freeze its physical facts without an unresolved owner for mutable target geometry.
+
+#### Decisions and Course Corrections
+
+- Prefer an explicit first-population rejection over a host-side animation/script subsystem unless
+  the census proves a representative WCID requires that machinery.
+
+### Phase 2: Freeze Shared Entity and Physics Decisions
 
 #### Deliverables
 
 - Define the validated source-neutral dynamic-entity definition and prepared realization facts. They
   carry identity, appearance, placement, body, and presentation inputs, but no producer-registry
   handle, server/catalog provenance, Tauri type, or storage policy.
-- Add the app-local `ExplorerEntityRegistry` as Explorer's semantic instance authority. It owns
-  identity, lifecycle, current source-neutral facts, and replacement policy; it is not a Tauri DTO
-  cache or a narrowed copy of `WorldState`.
 - Extract only the reusable operations proven by both compositions: content/body resolution,
   validation, body commands against a supplied `SpatialScene`, complete committed body outcomes, and
   pure projection inputs. Prefer focused functions, concrete values, and existing scene APIs.
-- Make physical attachment explicitly optional and reversible on an existing `SpatialBody`. Add one
-  focused attach/detach/reconfigure operation that returns the old/new physical participation and
-  preserves pose/kinematics while clearing response memory made invalid by the transition.
 - Replace movement-sphere-only assumptions with the smallest Phase R0-proven physical composite:
   movement/ground response geometry, dynamic-target geometry, scheduling eligibility, dynamic
   collision participation, response, and reporting are distinct decisions but one validated value.
   Reuse geometry when the authoritative branches are identical; do not duplicate it for type-shape
   convenience.
-- Add solver-owned active/quiescent state to the physical body composite. It records only the minimal
-  consecutive-stability evidence needed by the proven predicate; scheduling eligibility remains a
-  separate result of effective-state reconciliation. Producer registries never mirror activity.
-- Centralize activity invalidation on scene/body operations so actuation, kinematic replacement,
-  teleport, physical reconfiguration, and a change to loaded static world collision cannot forget to
-  wake affected bodies. Prefer waking all quiescent bodies after that collision changes over a
-  speculative support-dependency graph.
 - Add the pure effective-physics-state resolver and state-transition decision from the Phase R0
   matrix. Initial Explorer catalog resolution and existing client `SetState` updates invoke the same
   logic; neither producer re-derives bit semantics.
-- Keep the client composition unchanged in shape: `WorldState` retains its `EntityManager` and
-  `SpatialScene`. Adapt its existing entity/body path only where needed to consume the same
-  source-neutral operations and prove that the seam is real. This is a structural reuse check over
-  existing client behavior, not implementation of server spawning.
-- Keep the Explorer composition unchanged in shape: `HostSimulationRuntime` retains its
-  `SpatialScene`; camera and Explorer entity bodies use that one Explorer-local store under distinct
-  `SpatialBodyId` variants.
-- Add a focused host operation for registering/upserting a caller-supplied
-  `SpatialBodyId::Entity`. Keep ephemeral ID allocation as camera/frontend policy; the simulation
-  runtime never allocates or rewrites Explorer entity identity.
 - Give `SpatialBodyId` one explicit total order consumed by fixed ticks, candidate deduplication, and
   collision lifecycle keys. Hash-map or registration iteration order is never observable.
-- Collapse `SpatialScene::entity_poses` into canonical body poses and route registration, accepted
-  pose updates, physical attachment changes, teleport, and removal through scene operations that also
-  maintain coarse entity and dynamic-shadow memberships. Delete caller-side index choreography and
-  prove existing range/liveness queries against the body-owned pose.
 - Add the lossless semantic appearance composite currently discarded by the client `Entity`, with
   explicit ordered substitutions and source content identities required by presentation. The shared
   projection consumes the composite without owning either producer registry.
-- Make spawn/complete-replace/despawn ordered at the outer producer runtime. Complete preparation
-  precedes mutation; an unexpected partial install is compensated before publication, and projection
-  joins semantic plus solver state only when both exist.
 - Return committed solver outcomes synchronously from the existing body operations. Let registries
-  consume only named semantic consequences; never copy the complete physical state into them. Add an
-  internal publisher only if Phase R0 finds a concrete consumer that cannot use the returned value.
-- Add app-local Explorer GUID allocation and prove reset, repeated spawn, same-WCID independent
-  identity, same-GUID replacement, and exhaustion behavior. Do not expose allocation policy in
-  shared types.
+  consume only named semantic consequences; never copy the complete physical state into them or add
+  an internal publisher without a concrete asynchronous consumer.
 
 #### Acceptance Criteria
 
-- Explorer does not construct, wrap, or depend on `WorldState`; its registry is the only Explorer
-  semantic entity authority.
-- Exactly one `SpatialScene` exists in the Explorer host composition and owns camera plus entity
-  bodies under distinct `SpatialBodyId` variants. The client retains its separate scene.
-- Existing client `WorldState` tests pass without moving its entity manager or scene into a common
-  store.
-- Equal source-neutral definitions produce equivalent committed body outcomes and projected views in
-  focused Explorer-registry and `WorldState` fixtures.
-- Failed definition/body validation produces no committed outcome or projected event. Any
-  unpublished partial semantic/body install is compensated.
-- Successful physical spawn publishes only after the semantic record and
-  `SpatialBodyId::Entity` both exist.
-- A retired instance generation ignores late fixed-tick outcomes after same-GUID replacement.
-- Toggling the named gravity/collision/response/scheduling flags installs, detaches, or reconfigures
-  physical state exactly once without removing the semantic entity or its pose body.
-- A static/unscheduled collision target remains indexed without reserving a fixed-tick slot, while an
-  environment-only synthetic camera body is excluded from entity collision by explicit camera policy.
-- A quiescent eligible body remains registered, projectable, indexed, and target-collidable while
-  consuming no integration solve; every Phase R0 wake input reactivates it through one scene-owned
-  operation without producer-registry choreography.
-- Every body pose mutation updates or invalidates all derived memberships in the same scene operation;
-  no stale `entity_poses`, landblock, outdoor-cell, or EnvCell entry survives.
-- Existing client `SetState` tests prove that a complete mask replacement reconciles its
-  `WorldState.scene` through the same operation and emits the resulting semantic/body events.
-- A client `SetState` containing an unsupported combination preserves the new complete mask, retires
-  invalid local solver participation, and reports one explicit unsupported interpretation; Explorer
-  spawn with the same mask publishes nothing.
-- Despawn and replacement remove every old body and semantic state exactly once.
+- Equal source facts produce equal definitions, physical-participation decisions, transition
+  decisions, and committed-outcome shapes without consulting either producer registry.
+- Every retained field has a named solver, presentation, or projection consumer; unsupported mutable
+  target geometry follows the Phase 1B boundary rather than acquiring an implicit fallback.
+- The effective-state and transition fixtures cover every representative bit combination, preserve
+  unknown/unsupported semantic truth, and never flatten collision, response, reporting, or scheduling
+  into one boolean.
 - Catalog, SQL, Explorer registry/scenario, Tauri, and frontend types are absent from shared
   world/core contracts.
 
@@ -750,7 +888,104 @@ reset explicitly clear prediction and correction state.
   `SpatialScene` to move between compositions, an async backend event bus, or a generic runtime
   hierarchy. The intended seam is value contracts and operations, not a shared runtime owner.
 
-### Phase 3: Land Focused Projection and Recoverable Host Delivery
+### Phase 2A: Make `SpatialScene` the Canonical Body Authority
+
+#### Deliverables
+
+- Make collision/physics state explicitly optional and reversible on an existing `SpatialBody`.
+  Add one focused add/remove/reconfigure operation that returns the old/new solver participation,
+  preserves compatible pose/kinematics, and clears only invalid response memory.
+- Collapse `SpatialScene::entity_poses` into canonical body poses. Route registration, accepted pose
+  updates, physical-state replacement, teleport, and removal through scene operations that maintain
+  every derived membership; delete caller-side index choreography.
+- Keep `WorldState`'s `EntityManager` and `SpatialScene` composition intact while adapting its existing
+  body and `SetState` paths to the Phase 2 decisions and outcomes. This proves structural reuse without
+  implementing server spawning.
+- Add the focused host operation for a caller-supplied `SpatialBodyId::Entity`; the host simulation
+  never allocates or rewrites producer identity.
+
+#### Acceptance Criteria
+
+- Every body pose mutation updates or invalidates all derived memberships atomically; no stale
+  `entity_poses`, landblock, outdoor-cell, or EnvCell entry survives.
+- Toggling supported gravity/collision/response/scheduling facts installs, detaches, or reconfigures
+  physical state once without removing the semantic entity or pose body.
+- Existing client `SetState` fixtures use the shared transition decision, retain unsupported server
+  truth while retiring invalid local simulation, and pass without moving either client store.
+- Explorer camera and entity IDs can coexist in the host scene under explicit policies, while the
+  client retains its separate scene.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
+### Phase 2B: Land Explorer Registry and Lifecycle
+
+#### Deliverables
+
+- Add the app-local `ExplorerEntityRegistry` as Explorer's sole semantic instance authority. It owns
+  identity, lifecycle, current source-neutral facts, replacement policy, and instance generation; it
+  is not a Tauri DTO cache or a narrowed `WorldState`.
+- Add app-local Explorer GUID allocation and prove reset, repeated spawn, same-WCID independent
+  identity, same-GUID replacement, and exhaustion. Shared types accept identity but never allocate it.
+- Make spawn, complete replacement, and despawn ordered at the outer producer runtime. Preparation
+  completes before mutation, unexpected unpublished partial installation is compensated, and a
+  retired instance generation rejects late outcomes.
+- Join registry semantics with current scene facts only at projection time. The registry consumes
+  named semantic consequences and never mirrors complete solver state.
+
+#### Acceptance Criteria
+
+- Explorer does not construct, wrap, or depend on `WorldState`; its registry is its only semantic
+  authority and `HostSimulationRuntime` remains its only body store.
+- Failed preparation or installation publishes nothing and leaves no semantic/body residue.
+- Successful physical spawn becomes publishable only after both its semantic record and
+  `SpatialBodyId::Entity` exist; pose-only spawn remains a valid lifecycle.
+- Despawn and replacement remove the old semantic/body generation exactly once, and late work cannot
+  mutate its successor.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
+### Phase 3: Compose the Catalog-Backed Explorer Host
+
+#### Deliverables
+
+- Add an app-local Explorer entity driver that resolves a catalog template plus DAT/setup facts into
+  the Phase 2 definition and invokes shared body operations against the Explorer registry and
+  host simulation. Dependencies—catalog, content, clock, identity allocator, registry, host
+  simulation—are injected. The driver obtains collision snapshots through the host simulation rather
+  than a parallel service.
+- Add app-local catalog discovery/configuration and capability reporting. The default is
+  `weenies.hwc` beside the selected HBA content: join it to a selected directory or use the parent of
+  a selected `.hba` file. An explicit app-local catalog override wins. Do not scan for arbitrary
+  `.hwc` files or teach `ContentRepository` about the catalog. Absence disables only Explorer WCID
+  spawning; malformed or incompatible configured files report their exact failure, and MySQL remains
+  absent from the Tauri host's runtime dependency graph.
+- Add focused host operations for catalog capability, reset, spawn-by-WCID-at-candidate-pose,
+  despawn, and complete effective-physics-state replacement. The
+  Explorer spawn request carries the current host-projected camera pose as a prior-cell hint plus an
+  explicit candidate point; the host normalizes outdoor coordinates and resolves final EnvCell
+  placement through existing collision transit. The operations serialize through the driver and
+  never mutate a second entity store. Complete replacement is exercised through focused production
+  contracts unless an Explorer scenario proves it needs its own command.
+
+#### Acceptance Criteria
+
+- Catalog absence disables only Explorer WCID creation with an exact capability reason; malformed or
+  incompatible configured files fail distinctly and MySQL is absent from runtime dependencies.
+- Equal catalog/setup/request facts create equal prepared definitions and committed host outcomes.
+- Camera-relative spawning performs no frontend landblock normalization or portal traversal; the
+  committed entity pose is the host-resolved result or one exact failure.
+- Host composition tests cover missing WCID, preparation failure, repeated WCID identities,
+  replacement, despawn, and catalog override precedence without requiring Tauri or a browser.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
+### Phase 3A: Land Focused Projection and Recoverable Delivery
 
 #### Deliverables
 
@@ -762,37 +997,20 @@ reset explicitly clear prediction and correction state.
   fellowship/vendor/trade state, or reuse the whole client feed.
 - Replace runtime-body-only reset/snapshot vocabulary only where the focused dynamic snapshot
   supersedes it. Do not generalize unrelated client snapshot machinery.
-- Add an app-local Explorer entity driver that resolves a catalog template plus DAT/setup facts into
-  the Phase 2 definition and invokes the shared body operations against the Explorer registry and
-  host simulation. Dependencies—catalog, content, clock, identity allocator, registry, host
-  simulation, and projection—are injected. The driver obtains collision snapshots through the host
-  simulation rather than a parallel service.
-- Add app-local catalog discovery/configuration and capability reporting. Absence disables only
-  Explorer WCID spawning; malformed or incompatible configured files report their exact failure, and
-  MySQL remains absent from the Tauri host's runtime dependency graph.
-- Add typed Tauri commands for catalog capability, reset, spawn-by-WCID-at-candidate-pose, despawn,
-  and complete effective-physics-state replacement for the named flag-transition scenarios. The
-  Explorer spawn command carries the current host-projected camera pose as a prior-cell hint plus an
-  explicit candidate point; the host normalizes outdoor coordinates and resolves final EnvCell
-  placement through existing collision transit. Commands serialize into the driver and never mutate
-  a second Tauri entity store. Exercise complete entity replacement through focused
-  production-contract tests unless an Explorer scenario proves it needs its own command.
-- Select one narrow Tauri relay, register the frontend listener before requesting delivery, and
-  implement listener-before-request plus explicit page-reload reconstruction.
-- Add tests for mutation-before-snapshot, mutation-after-snapshot, deltas while awaiting snapshot,
-  listener restart, webview reload handshake, and unrelated event preservation.
+- Add typed Tauri commands for the Phase 3 host operations and one narrow delivery relay. Register the
+  frontend listener before requesting state and implement explicit page-reload reconstruction.
+- Test mutation before/after snapshot, deltas while awaiting snapshot, listener restart, webview
+  reload handshake, and unrelated event preservation.
 
 #### Acceptance Criteria
 
-- One focused snapshot reconstructs every projected dynamic entity/body without replay history.
-- No entity delta applies while awaiting a replacement snapshot.
-- The Explorer and existing client projection paths produce equal view entities from equal
-  source-neutral entity and current-body facts.
-- Tauri carries projected semantic contracts, not raw catalog records, MySQL rows, or `Entity` dumps.
-- Camera-relative spawning performs no frontend landblock normalization or portal traversal; the
-  committed entity pose is the host-resolved result or one exact failure.
-- No channel, feed sequence, acknowledgement, or automatic recovery exists without a measured
-  requirement.
+- One focused snapshot reconstructs every projected dynamic entity/body without replay history, and
+  no entity delta applies while awaiting replacement.
+- Explorer and client projection produce equal view entities from equal source-neutral semantic and
+  body facts.
+- Tauri carries projected contracts, not raw catalog records, MySQL rows, or `Entity` dumps.
+- No intermediary channel, feed sequence, acknowledgement, automatic recovery, diagnostic event log,
+  or retained delivery history exists without a measured requirement.
 
 #### Decisions and Course Corrections
 
@@ -860,10 +1078,10 @@ reset explicitly clear prediction and correction state.
   its producer/consumer table and format version decision.
 - Audit lifecycle ownership and resource release under repeated spawn/despawn/replacement and page
   reload before solver state adds another mutable subsystem.
-- Re-dry-run Phases 5-7, including Phase 5A, against the landed value/event contracts, Explorer
+- Re-dry-run Phases 5-7, including Phases 5A-5D, against the landed value/event contracts, Explorer
   registry, relay, and frontend placement contracts.
-- Reconcile the Phase R0 collision design against the now-landed body/event contracts before Phase
-  5A; do not let frontend integration accidentally dictate solver shapes.
+- Reconcile the Phase R0 collision design against the now-landed body/event contracts before Phases
+  5B-5D; do not let frontend integration accidentally dictate solver shapes.
 
 ### Phase 5: Attach Spawned Entities to the Shared Solver
 
@@ -880,14 +1098,15 @@ reset explicitly clear prediction and correction state.
   at least attach, detach, gravity on/off, collision participation on/off, frozen/unfrozen, and every
   response-policy transition present in the representative census. Preserve pose and compatible
   velocity; clear incompatible contact, response, path, prediction, and scheduler state exactly once.
+- Add the focused Explorer launch scenario: an explicit direction plus positive catalog maximum
+  velocity produces live velocity; nonzero rotation speed produces live omega and disables
+  align-path as ACE does. Ordinary spawn remains at rest. Missing or zero launch speed rejects only
+  the launch operation, not a pose-only spawn.
 - Add one Explorer dynamic-entity collection participant using one `HostFixedTickRuntime` slot. Each
   epoch it snapshots explicit simulation interest, obtains the stable eligible-body order, resolves
   current actuation, invokes focused host solves under one collection tick, rejects outcomes from
   retired instance generations, and collects committed placed-path/body outcomes. No entity reserves
   its own scheduler slot or reacquires the host simulation lock independently.
-- Evaluate the Phase R0 quiescence predicate after accepted solves and skip integration/mover queries
-  for quiescent bodies while retaining the stable-order collection scan. Animation, presentation,
-  target indexing, and collision-report lifetime remain independently serviced.
 - Preserve the landed ground vocabulary and contact plane. Supported/sliding/airborne is derived by
   the local solver; catalog and scenario commands cannot assert it.
 - Route teleport and forced reset through explicit registry/body operations that clear response,
@@ -896,27 +1115,25 @@ reset explicitly clear prediction and correction state.
   `MissingOwner`/`OutsideLandscape` without loading, suspending, or evicting collision.
 - Serialize accepted placed paths or sparse anchors with host time and correction kind. Frontend
   placement evaluates the path at render cadence and never performs portal traversal.
-- Emit at most one focused dynamic-body advance batch per fixed epoch, containing only changed
+- Emit at most one dynamic-body update batch per fixed tick, containing only changed
   projected bodies. Do not turn 300 bodies at 30 Hz into 9,000 Tauri events per second.
 - Add deterministic zero-actuation settle/fall/slide scenarios before locomotion: supported floor,
   steep contact-slide, airborne fall, cross-owner traversal, missing-owner open space, and teleport.
-- Add deterministic quiescence scenarios: stable supported entry after the proven tick count, no
-  entry while airborne/sliding/Sledding/responding, and wake on drive, launch, velocity/acceleration/
-  omega, teleport, physical-state replacement, and changes to loaded static world collision.
 
 #### Acceptance Criteria
 
 - A spawned creature falls or settles through the existing physical solver and visibly follows the
   accepted placed path without per-frame host messages.
-- A pose-only entity remains present and projectable with no physical attachment; enabling and later
+- Flame Bolt launches at 15 m/s along the explicit scenario direction; Whirling Blade receives its
+  2-revolutions-per-second omega; Rockfall's explicit zero and Crimson Night Gem Setting's absent
+  speed both reject launch without preventing ordinary pose-only spawn.
+- A pose-only entity remains present and visible to projection with no collision/physics state; enabling and later
   disabling its supported physics state attaches and detaches solver participation reversibly.
 - Camera and entity bodies coexist in the Explorer host store and can tick against the same exact
   collision snapshot without affecting each other's identity or response state.
-- One collection scheduler registration visits every eligible Explorer entity; static/frozen/
-  pose-only and quiescent bodies consume no integration solve, no entity consumes its own scheduler
-  slot, and one epoch produces at most one Tauri advance event.
-- Quiescence changes neither body/index/frontend counts nor pose. Waking resumes from the retained
-  canonical state, and changes to loaded static world collision may conservatively wake all bodies.
+- One collection scheduler registration visits every eligible Explorer entity; frozen and pose-only
+  bodies consume no integration solve, no entity consumes its own scheduler slot, and one tick
+  produces at most one Tauri advance event.
 - A rejected solve produces no committed outcome. A frontend delivery failure leaves accepted solver
   state intact and converges through the focused snapshot.
 - Ground state is locally derived and the old `apply_runtime_body_contact` stopgap loudly refuses to
@@ -931,7 +1148,37 @@ reset explicitly clear prediction and correction state.
 - Populate during execution. Any deliberate observable retail departure requires the project's
   `RETAIL QUIRK` or `RETAIL DIVERGENCE` marker with decompile citation, consequence, and census.
 
-### Phase 5A: Add Dynamic Body Collision and Reporting
+### Phase 5A: Add Settled-State Pruning and Wake Reconciliation
+
+#### Deliverables
+
+- Add solver-owned active/settled state containing only the minimal consecutive-stability evidence
+  required by the Phase R0 predicate. Scheduling eligibility remains a separate effective-state
+  result, and producer registries never mirror activity.
+- After accepted solves, settle only bodies with stable walkable support, canonical zero
+  velocity/omega, no acceleration or drive, and no pending response/path. Retain the stable collection
+  scan while skipping integration and mover queries.
+- Centralize wake invalidation in scene/body operations for drive, launch, velocity/acceleration/omega,
+  teleport, physical reconfiguration, and loaded static collision changes. Conservatively wake all
+  settled bodies after a relevant loaded-scene change; do not add support graphs or sleep islands.
+- Keep presentation, animation, target indexing, and later collision-report lifetime independent from
+  root integration.
+
+#### Acceptance Criteria
+
+- A settled body retains identity, pose, presentation, spatial memberships, and target eligibility
+  while consuming no integration solve.
+- Airborne, sliding, responding, accelerating, driven, or path-following bodies cannot settle.
+- Every proven wake input reactivates through one scene-owned operation before its required solve;
+  producer registries perform no wake choreography.
+- The 50/300-body path still uses one stable collection scan and no second active-body registry,
+  per-body timer, dependency graph, or production activity metric.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
+### Phase 5B: Add Dynamic Target Geometry and Candidate Discovery
 
 #### Deliverables
 
@@ -951,69 +1198,105 @@ reset explicitly clear prediction and correction state.
 - Do not subdivide an EnvCell in the first implementation. Phase R2 may add an EnvCell-local index
   only if a measured single-cell population makes its bounded candidate scan miss the fixed-tick
   budget.
-- Implement the ACE/retail-proven dynamic collision eligibility and reporting decisions from the
-  complete effective masks, including ethereal/ignore/report flags and
-  `ReportCollisionsAsEnvironment`. Do not conflate physical response, report production, and the
-  identity/classification presented to a report consumer.
-- Resolve mover geometry against the Phase R0-supported peer target branches—setup spheres,
-  cylspheres, and/or per-part physics BSP—alongside environment contact. Do not substitute movement
-  spheres for target geometry merely because both are spatial primitives. Commit each accepted body
-  independently, update or invalidate its broad-phase entry according to the selected maintenance
-  policy, and allow peer response to converge within a documented bounded number of ticks. Stable
-  visitation—not simultaneous atomicity—provides reproducibility.
-- Apply the Phase R0-selected continuous-contact rule and deterministic directional pair ownership.
-  Broad-phase swept bounds are candidate discovery, not proof of a hit; response and report refresh
-  occur only from the authoritative narrow-phase result.
-- Define the smallest source-neutral collision start/end values and retained active-contact record
-  proven by ACE/retail and the selected-entity inspector. First touch emits start, subsequent touches
-  refresh without another start, expiry emits end, and forced teardown/state changes emit the proven
-  end/restart sequence. Keep contact response and per-recipient report classification distinct; the
-  solver does not implement combat, AI, damage, or Explorer UI policy.
-- Extend the focused snapshot/deltas and `ExplorerEntitiesPanel.svelte` selected-entity inspector
-  with active reported contacts and recent start/end outcomes. Batch report changes with the epoch's
-  focused body advance rather than emitting one Tauri event per pair.
-- Reconcile attach, detach, complete state replacement, teleport, despawn, and same-GUID replacement
-  while bodies are touching. Each transition clears only invalid contact/response/report state and
-  cannot leave a retired body in pair discovery.
-- Treat a quiescent body as a normal broad-phase target. Contact from an active mover wakes a
-  response-eligible peer for deterministic later convergence; report-only contact follows the proven
-  lifecycle without requiring unnecessary integration. A quiescent target is never removed from
-  candidate discovery.
-- Add focused unit scenarios for disjoint/overlapping/moving pairs, every supported target-geometry
-  branch, static versus pushable participants, explicit camera exclusion, reciprocal and
-  environment-classified reports, filtered contacts, first-touch/refresh/natural-end/forced-end,
-  high-displacement crossing/tunneling bounds, two-scheduled-body pair ownership, three-body ordering,
-  simultaneous environment contact, one-body solve rejection, swept
-  cross-landblock overlap, outdoor/EnvCell portal straddling, shared/adjacent EnvCells, and 50/300-body
-  outdoor-cell workloads, active-mover contact with an unscheduled `Static` target and with quiescent
-  pushable/report-only targets, and report expiry while integration is skipped. Inject time for report
-  expiry; tests never sleep.
+- Resolve the Phase 1B-supported peer target branches—setup spheres, cylspheres, and per-part physics
+  BSP—without substituting movement spheres merely because both are spatial primitives. Unsupported
+  mutable target geometry fails at preparation with its recorded reason.
+- Add focused discovery fixtures for cross-landblock bounds, outdoor/EnvCell portal straddling,
+  shared/adjacent EnvCells, fast/provisional movement, settled targets, camera exclusion, every
+  supported target branch, and 50/300-body bucket populations.
 
 #### Acceptance Criteria
 
-- Representative dynamic pairs make contact and converge to the Phase R0-proven response within the
-  documented tick bound. Reversing registry insertion order leaves stable-ID visitation and results
-  unchanged.
-- Filtered pairs neither respond nor report; response-only and reportable pairs differ exactly where
-  the effective masks require them to.
+- Outdoor bodies reuse global 24 m cells and interior bodies reuse reached EnvCells; no second generic
+  index, EnvCell subdivision, pair cache, or concurrency mechanism exists.
+- Swept/provisional queries discover fast, cross-boundary, and portal-straddling candidates outside
+  both bodies' prior committed buckets, then return stable sorted/deduplicated body IDs.
+- Every supported target branch owns its authoritative conservative bounds and membership updates;
+  unsupported mutable geometry follows Phase 1B rather than becoming stale solver truth.
+- Settled targets remain discoverable and the synthetic camera remains excluded by explicit policy.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
+### Phase 5C: Add Directional Dynamic Contact and Response
+
+#### Deliverables
+
+- Implement the ACE/retail-proven dynamic collision eligibility and response decisions from the
+  complete effective masks, including ethereal/ignore flags. Retain the already-derived report
+  eligibility/classification facts for Phase 5D, but do not produce or store report events here.
+- Resolve mover geometry against the Phase 5B target branches alongside environment contact. Commit
+  each accepted body independently and allow peer response to converge within a documented bounded
+  number of ticks. Stable visitation—not simultaneous atomicity—provides reproducibility.
+- Apply the Phase R0-selected adaptive time-sliced narrow phase and deterministic directional pair
+  ownership. Query full-path swept conservative bounds once, then test the fixed candidate set at
+  pair-specific slices of both planned transforms. Include the tick-start placement and each slice
+  endpoint. Broad-phase bounds are candidate discovery, not proof of a hit; response and report
+  refresh occur only from a sampled narrow-phase contact.
+- Compute `pair_slice_distance` as the smaller of the participating collision scale and
+  `maximum_dynamic_slice_distance`, then compute
+  `required_slices = max(1, ceil(conservative_relative_path_length / pair_slice_distance))`.
+  Conservative path length includes relative translation plus the rotational travel of each body's
+  furthest collision point. The first runtime constants are 0.05 m and 128 slices, justified by the
+  R0 census rather than copied into tests. If a pair needs more slices, reject that body's directional
+  solve before partial commit and report the body/pair/path length/budget; never clamp the count or
+  silently skip the pair.
+- Add focused response fixtures for disjoint/overlapping/moving pairs, every supported target branch,
+  filtered/response-only pairs, exact slice boundaries, over-budget rejection, opposing and rotating
+  peers, two-scheduled-body ownership, three-body ordering, simultaneous environment contact, and
+  one-body rejection.
+
+#### Acceptance Criteria
+
+- Representative pairs contact and converge within the documented tick bound; reversing registry
+  insertion order does not change stable-ID visitation or results.
+- Filtered pairs do not respond, response-only pairs respond without manufacturing reports, and a
+  mutually scheduled pair receives no duplicate impulse.
+- Representative sphere, cylsphere, and physics-BSP targets cannot be crossed inside the supported
+  displacement/shape envelope. Over-budget work rejects before pose, response, or report publication.
+- A rejected directional solve preserves that body and does not roll back unrelated accepted bodies.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
+### Phase 5D: Add Minimal Collision-Report Lifecycles
+
+#### Deliverables
+
+- Define the smallest source-neutral collision start/end values and retained active-contact record
+  proven by ACE/retail. First touch emits start, later touches refresh without another start, expiry
+  emits end, and forced teardown/state changes emit the proven end/restart sequence. Keep response
+  and per-recipient report classification distinct; the solver implements no gameplay or UI policy.
+- Return report outcomes in the committed collection result so a composition-owned interested party
+  can consume them. Explorer adds no collision panel, Tauri report relay, snapshot field, recent-event
+  history, counter, diagnostic store, or production log merely to demonstrate the contract.
+- Reconcile attach, detach, complete state replacement, teleport, despawn, and same-GUID replacement
+  while bodies are touching. Each transition clears only invalid contact/response/report state and
+  cannot leave a retired body in pair discovery.
+- Treat a settled body as a normal spatial-index candidate. Contact from an active mover wakes a
+  response-eligible peer for deterministic later convergence; report-only contact follows the proven
+  lifecycle without requiring unnecessary integration. A settled target is never removed from
+  candidate discovery.
+- Add focused report fixtures for reciprocal and environment-classified recipients, filtered and
+  report-only contact, first-touch/refresh/natural-end/forced-end, active-mover contact with settled
+  response-eligible/report-only targets, and expiry while integration is skipped. Inject time; tests
+  never sleep, and any event capture lives only in the test or harness consumer.
+
+#### Acceptance Criteria
+
 - Every reportable contact produces one start, refreshes retained state without repeated starts, and
-  produces the correct natural or forced end plus per-recipient environment classification. The
-  selected-entity inspector reconstructs active contacts from a snapshot and displays later
-  lifecycle outcomes without becoming collision authority.
+  produces the correct natural or forced end plus per-recipient environment classification.
 - A rejected body solve preserves that body's previous accepted state and emits no report from the
   rejected attempt; already accepted unrelated bodies are not rolled back.
 - Detach, despawn, teleport, and replacement during contact leave no stale pair, response, scheduler,
   or report state.
-- Quiescent targets remain discoverable; pushable contact wakes exactly the required response work,
+- Settled targets remain discoverable; response-eligible contact wakes exactly the required work,
   while report lifecycle time advances correctly even when neither body integrates.
-- Outdoor bodies reuse the existing global-cell spatial vocabulary and interior bodies reuse reached
-  EnvCell identity. No second generic spatial index, EnvCell subdivision, pair cache, or concurrency
-  mechanism exists without a measured consumer.
-- A fast mover and a portal-straddling mover discover peers through swept/provisional domains, and
-  each supported target-geometry branch is exercised without treating movement spheres as a fallback.
-- The smallest supported target cannot be crossed at the largest supported per-tick displacement
-  without the selected narrow phase detecting contact, and a mutually scheduled pair receives no
-  duplicate response or lifecycle transition.
+- The solver retains no emitted-outcome history beyond the minimal active-contact record needed for
+  future refresh/end semantics, and Explorer production state contains no collision diagnostics,
+  history, counters, or inspector projection.
 
 #### Decisions and Course Corrections
 
@@ -1024,40 +1307,51 @@ reset explicitly clear prediction and correction state.
 
 - Run the named 50- and 300-body landblock workloads plus adjacent-landblock boundary cases. Record
   broad-phase candidates, narrow-phase tests by target-geometry branch, fixed-tick time, convergence
-  ticks, report lifecycle volume, scheduler-slot count, active/quiescent counts, integration solves
-  skipped, wake reasons, and Tauri batch/event count; these diagnostics exist only to decide the
-  remaining design and are not production metrics.
+  ticks, report lifecycle volume, scheduler-slot count, active/settled counts, integration solves
+  skipped, wake reasons, and Tauri batch/event count. Capture these in the harness invocation and
+  resulting plan evidence only; they are temporary decision inputs, not production metrics, DTOs,
+  histories, registries, or runtime state.
 - Audit outdoor-cell and reached-EnvCell maintenance, stable visitation, contact convergence,
   swept/provisional queries, transition cleanup, and report start/refresh/end behavior against real
   catalog-derived geometries. Add EnvCell-local subdivision only if a recorded single-cell case
   exceeds the fixed-tick budget.
-- Audit quiescence churn and wake correctness across the representative workload. Keep the stable
+- Audit settled-state churn and wake correctness across the representative workload. Keep the stable
   collection scan unless its measured cost is material; do not add sleep islands, dependency graphs,
-  per-body timers, or a second active-body index merely because many bodies become quiescent.
+  per-body timers, or a second active-body index merely because many bodies become settled.
 - Re-dry-run motion and end-to-end Phases 6-8 against the landed solver outcomes. Revise path,
   correction, scheduling, and harness contracts before motion builds on accidental solver behavior.
 - Record newly supported and still-unsupported physics-state combinations by WCID, then update the
   remaining acceptance matrix and cleanup targets.
 
+### Phase R3: Close Motion Composition Evidence
+
+- Complete the retail/ACE trace for transition, interruption, reversal, speed scaling, finite
+  links/cycles, animation ranges/rates, and animation position-frame composition with velocity/omega.
+- Dry-run the landed solver path, absolute host time, frontend placement owner, and animation staging
+  against stand, move, turn, stop, teleport, pause, resume, and deterministic-step scenarios.
+- Decide the single owner and composition rule for root animation contribution before extending
+  runtime motion types. Stop for review if retail evidence remains ambiguous.
+- Record only the source facts and resulting contract decision; do not land a motion-event history,
+  timeline recorder, production trace buffer, or diagnostic state model.
+
 ### Phase 6: Resolve and Execute Entity Motion
 
 #### Deliverables
 
-- Complete the Phase R0 retail/ACE evidence for transition, interruption, reversal, speed scaling,
-  finite links/cycles, animation ranges/rates, and animation position-frame composition with
-  velocity/omega.
 - Extend the existing content-owned `MotionKinematics` asset and focused source-neutral resolution
-  functions from client HBA/DAT facts where the Phase R0 scenarios prove a gap. They consume parsed
+  functions from client HBA/DAT facts where the Phase R3 scenarios prove a gap. They consume parsed
   motion facts and never content paths or a `WorldState` instance. Do not introduce separate
   `MotionCatalog` or `MotionResolver` services unless the concrete data access can no longer fit the
   existing seams cleanly.
 - Replace reduced `MotionKinematics` as the authoritative selector where the named scenarios require
-  richer facts. Retain a reduced diagnostic projection only with a distinct consumer.
+  richer facts. Delete the reduced form unless a named runtime consumer still requires it.
 - Resolve semantic entity motion once into the smallest host-owned value whose selected animation
   and solver kinematics derive from the same authored motion records and effective host time. Name a
   new plan type only when the proven fields require one.
 - Add typed Explorer stand, forward, turn, stop, pause, resume, deterministic-step, and timeline-reset
-  commands. Scenario policy chooses commands; the shared motion resolver chooses authored semantics.
+  commands for the noninteractive scenario surface. Scenario policy chooses commands; the shared
+  motion resolver chooses authored semantics. Do not grow the production `Entities` panel into a
+  motion-debug console without a separate product requirement.
 - Project focused plan updates with absolute effective time. Frontend stages referenced animations,
   starts late-ready plans at the correct semantic cursor, uses existing hook catch-up, and samples
   smoothly without another pose path.
@@ -1083,22 +1377,25 @@ reset explicitly clear prediction and correction state.
 
 #### Deliverables
 
-- Add a host-backed scenario suite covering catalog unavailable/corrupt, absent WCID, repeated WCID
+- Complete the host-backed scenario suite accumulated with the implementation phases, covering
+  catalog unavailable/corrupt, absent WCID, repeated WCID
   identities, spawn/despawn, complete replacement, stand/move/turn/stop, settle/fall/slide, continuous
   path, teleport, missing collision owner, listener restart, page reload, late assets, pause/resume,
   deterministic step, timeline reset, pose-only spawn, physical attach/detach, two-body contact,
   filtered/report-only contact, contact-time replacement, and the Phase R0 representative
   physics-state transitions.
-- Include mixed active/quiescent populations, active-peer wake of a pushable target, report-only
-  contact without unnecessary integration, wake after loaded static world collision changes, and
-  continued visual animation while root-body integration is quiescent.
+- Include mixed active/settled populations, active-peer wake of a response-eligible dynamic target,
+  report-only contact without unnecessary integration, wake after loaded static world collision
+  changes, and continued visual animation while root-body integration is settled.
 - Run both 50- and 300-entity visible landblock scenarios through the real host/browser boundary,
-  including mixed scheduled/static targets and at least one catalog-proven geometry mix.
-- Extend the noninteractive browser harness with typed commands and machine-readable dynamic-entity
-  state: live Explorer registry entities, host bodies, frontend owners, pending stages, behavior
-  owners, placed paths, renderer contributions, browser errors, and relevant resource counts.
-- Add focused fault injection for catalog decode, content lookup, template preparation, solver
-  acceptance, physics-state reconciliation, and frontend publication.
+  including mixed active/settled targets and at least one catalog-proven geometry mix.
+- Compose the noninteractive browser harness from production commands/snapshots plus test-owned
+  observers for browser errors and resource baselines. Phase-scoped tests own any deeper entity/body/
+  stage observation; do not add a production diagnostic command, mirror, event recorder, or metrics
+  registry for the final harness.
+- Use dependency-injected test faults for catalog decode, content lookup, template preparation,
+  solver acceptance, physics-state reconciliation, and frontend publication. No runtime debug mode or
+  retained fault-control surface ships.
 - Record ad hoc measurements only where a design decision requires them. Do not add production
   metrics for catalog lookup, spawn, ticks, publication, resources, uploads, or draws without a
   scenario where the value changes a decision.
@@ -1121,10 +1418,11 @@ reset explicitly clear prediction and correction state.
 - Host traffic scales with semantic mutations, fixed solver paths, and sparse anchors—not render
   frames or frontend portal crossings.
 - The 300-entity scenario uses one collection scheduler participant and at most one focused advance
-  event per fixed epoch; frontend owner, renderer contribution, and resource counts match the live
+  event per fixed tick; frontend owner, renderer contribution, and resource counts match the live
   registry population and return to baseline after teardown.
 - The scenario uses no live ACE Server/MySQL connection after the catalog has been generated.
-- No metric, field, or diagnostic survives without a scenario where it changes or a named consumer.
+- No diagnostic field, event history, test observer, fault switch, or measurement hook survives in
+  production merely because the final scenario used it.
 
 #### Decisions and Course Corrections
 
@@ -1182,7 +1480,7 @@ reset explicitly clear prediction and correction state.
 | Complete replacement              | Every old body, plan, effect, path, stage, and lease retires                              |
 | Listener before snapshot          | Earlier deltas superseded; later deltas apply normally                                    |
 | Listener/page restart             | Listener registers first; one snapshot reconstructs current state                         |
-| Pose-only entity                  | Entity and spatial pose remain projected with no physical attachment or fixed tick        |
+| Pose-only entity                  | Entity and spatial pose remain visible with no collision/physics state or fixed tick       |
 | Physics-state attach/detach       | Same identity/pose body gains and loses solver participation without residue              |
 | Physics-state reconfigure         | Gravity/collision/response/scheduling transitions clear only incompatible mutable state   |
 | Complete state replacement        | Explorer and client paths derive equal operations from the same previous/next masks       |
@@ -1197,13 +1495,13 @@ reset explicitly clear prediction and correction state.
 | Quiescent integration pruning     | Stable bodies skip solves but retain pose, indexes, target collision, reports, and visuals |
 | Quiescent wake matrix             | Every proven drive/state/scene/contact input wakes before its required response            |
 | Quiescent report maintenance      | Injected time advances proven contact expiry/end behavior without body integration         |
-| Epoch transport batching          | One fixed epoch emits at most one changed-body/report batch across the Tauri boundary      |
+| Tick transport batching           | One fixed tick emits at most one changed-body batch across the Tauri boundary              |
 | Dynamic pair response             | Stable-ID order converges within the bound despite reversed registration order            |
 | Dynamic target geometry           | Every census-supported sphere/cylsphere/BSP branch uses its authoritative target shape    |
 | Dynamic pair filtering            | Effective masks independently select response, report production, and report identity     |
 | Camera collision policy           | Synthetic camera is excluded unless explicit scenario policy opts it in                   |
 | Swept candidate discovery         | Fast/cross-portal movement finds peers outside both bodies' prior committed buckets        |
-| Continuous dynamic contact        | Largest supported step cannot tunnel through the smallest supported target                |
+| Adaptive dynamic contact          | Measured crossings are detected; over-budget displacement rejects before partial commit   |
 | Pair processing ownership         | Two scheduled peers receive the proven response/report lifecycle exactly once             |
 | Incremental solve rejection       | Rejected body attempt preserves it without rolling back unrelated accepted bodies         |
 | Contact report lifecycle          | First touch/refresh/natural end/forced end occur once with no stale retained report state  |
@@ -1253,23 +1551,25 @@ harness or a focused noninteractive harness.
 | Catalog defaults diverge from server-created objects | ACE factory/networking trace and representative parity fixtures; no legacy constant copied by faith       |
 | Explorer GUID policy contaminates shared contracts   | App-local allocator; shared contract accepts identity but never allocates or brands its provenance        |
 | Solver and frontend both advance root motion         | One resolved host rule and one frontend placement owner; root contribution gate in Phase 6                |
-| Fixed tick races collision replacement               | Tick captures one immutable `Arc<CollisionScene>`; staged replacement remains atomic                      |
+| Fixed tick overlaps loaded collision-data update     | Tick keeps one immutable terrain/interior collision snapshot; the next tick sees the update              |
 | Physics mask collapses into one collidable flag      | Per-bit ACE/retail matrix plus complete-mask transition fixtures; no silent inert bits                    |
-| Detach deletes entity pose/lifecycle                 | Keep `SpatialBody` registered; mutate only optional physical attachment and scheduler participation       |
+| Removing solver state deletes entity pose/lifecycle  | Keep `SpatialBody` registered; mutate only collision/physics state and scheduler participation             |
 | State transition retains incompatible response       | One reconciliation decision names preserved and cleared state for every transition                        |
 | Pose and indexes become competing authorities        | Delete `entity_poses`; scene operations derive every membership from the canonical body pose              |
-| Movement geometry is mistaken for target geometry    | R0 census/proof selects sphere/cylsphere/BSP target branches before the physical composite freezes        |
+| Movement geometry is mistaken for target geometry    | R0 selects sphere/cylsphere/BSP branches; Phase 1B closes mutable BSP/script ownership before definitions freeze |
+| Frontend animation becomes collision authority       | Phase 1B supports a host-owned semantic update or rejects the measured combination; never feed visual state backward |
 | Dynamic shadows duplicate existing spatial domains  | Reuse global 24 m outdoor cells and reached EnvCells; subdivide interiors only from measured need         |
 | Committed buckets miss a fast or cross-portal mover  | Query swept conservative bounds plus provisional reached cells before narrow phase                        |
-| Swept broad phase is mistaken for continuous contact | Census displacement/shape bounds and prove swept TOI or bounded substeps in narrow phase                  |
+| Swept broad phase is mistaken for proof of contact    | Query candidates once, then prove contact with bounded adaptive slices of both planned transforms         |
 | Both scheduled bodies process a pair twice           | Freeze directional response and per-recipient lifecycle ownership before implementation                  |
 | Incremental pair solving becomes nondeterministic    | Stable body/pair ordering and a measured convergence bound; do not promise simultaneous atomic state      |
 | Collision hits are reduced to per-tick occurrences   | Retain first-touch/refresh/end state with injected time and forced teardown transitions                   |
-| Entity count multiplies scheduler/transport overhead | One collection participant and at most one changed-body/report Tauri batch per fixed epoch                |
-| Resting bodies still consume full solver work        | Solver-owned quiescence skips integration/mover queries while retaining a cheap stable scan               |
-| Quiescence becomes a second lifecycle authority      | Keep it derived on physical state; registry, index membership, presentation, and identity remain intact    |
-| Quiescent bodies disappear as collision targets      | Retain dynamic-shadow membership and wake response-eligible targets from active-peer contact              |
-| Quiescence freezes collision-report expiry           | Service the proven report lifecycle independently with the injected clock                                 |
+| Diagnostics become a shadow product architecture     | Tests/harnesses own transient observation; ship no collision inspector, history, counters, recorder, or diagnostic DTO |
+| Entity count multiplies scheduler/transport overhead | One collection participant and at most one changed-body Tauri batch per fixed tick                        |
+| Resting bodies still consume full solver work        | Solver-owned settled state skips integration/mover queries while retaining a cheap stable scan            |
+| Settled state becomes a second lifecycle authority   | Keep it derived on physical state; registry, index membership, presentation, and identity remain intact    |
+| Settled bodies disappear as collision targets        | Retain spatial-index membership and wake response-eligible targets from active-peer contact               |
+| Settled state freezes collision-report expiry        | Service the proven report lifecycle independently with the injected clock                                 |
 | Wake dependencies grow into a physics island system  | Centralize wake operations and conservatively wake all when loaded static world collision changes          |
 | Synthetic camera accidentally blocks spawned bodies | Make dynamic collision participation explicit and keep camera environment-only by default                |
 | Frontend guesses an interior placement cell          | Send prior-cell hint plus candidate point; host collision transit resolves the committed EnvCell          |
@@ -1279,9 +1579,9 @@ harness or a focused noninteractive harness.
 
 ## Definition of Done
 
-- [ ] Offline exporter produces a deterministic, validated, WCID-indexed host catalog from ACE World
+- [x] Offline exporter produces a deterministic, validated, WCID-indexed host catalog from ACE World
       without embedding MySQL in the runtime.
-- [ ] The catalog has a canonical portable byte contract—endianness, widths, encoding, ordering, and
+- [x] The catalog has a canonical portable byte contract—endianness, widths, encoding, ordering, and
       decode limits are explicit rather than serializer defaults.
 - [ ] Catalog is optional, app-local, and entirely outside HBA/`ContentRepository`/browser contracts.
 - [ ] Client `WorldState` and the app-local Explorer registry remain distinct semantic authorities
@@ -1290,7 +1590,7 @@ harness or a focused noninteractive harness.
       existing `HostSimulationRuntime` store.
 - [ ] The catalog preserves complete template physics-state inputs and the Explorer derives the same
       effective initial mask as ACE for every representative fixture.
-- [ ] Every dynamic entity retains one pose body while physical attachment and fixed-tick
+- [ ] Every dynamic entity retains one pose body while collision/physics state and fixed-tick
       participation remain optional, reversible, and driven by complete physics-state replacement.
 - [ ] `SpatialScene` owns the only physical pose and all derived landblock/outdoor/EnvCell
       memberships; no `entity_poses` mirror or caller-managed index choreography remains.
@@ -1305,22 +1605,23 @@ harness or a focused noninteractive harness.
 - [ ] Spawned entities advance through the existing fixed cadence, installed collision snapshot,
       generic solver, placed paths, and locally derived ground state.
 - [ ] One collection scheduler participant visits eligible Explorer entities in stable body order,
-      integrates only active bodies, and emits at most one focused changed-body/report batch per
-      fixed epoch.
-- [ ] Solver-owned quiescence skips integration and mover-side queries only after the proven stable
+      integrates only active bodies, and emits at most one focused changed-body batch per
+      fixed tick.
+- [ ] Solver-owned settled state skips integration and mover-side queries only after the proven stable
       predicate, retains body/index/target/report/presentation state, and wakes through every
       Phase R0-proven drive, state, scene, geometry, and peer-contact input.
 - [ ] Collision-report lifetime and target-geometry maintenance remain correct while root-body
-      integration is quiescent; no sleep islands, per-body timers, dependency graph, or second active-
+      integration is settled; no sleep islands, per-body timers, dependency graph, or second active-
       body registry lands without Phase R2 evidence.
 - [ ] The shared solver performs deterministic flag-filtered body-to-body contact and response,
       reuses outdoor global-cell and reached-EnvCell partitioning, handles 50-300 entities per
       populated landblock, queries swept/provisional domains, exercises every census-supported target
-      geometry branch, prevents tunneling across its supported displacement/shape envelope, processes
-      each directional pair deterministically, and converges within the recorded tick bound.
+      geometry branch, adaptively samples both planned transforms across its supported path/shape
+      envelope, rejects over-budget work before partial commit, processes each directional pair
+      deterministically, and converges within the recorded tick bound.
 - [ ] Collision reporting retains proven first-touch/refresh/natural-end/forced-end state with
-      explicit per-recipient classification, and the selected-entity inspector reconstructs active
-      contacts without becoming collision authority.
+      explicit per-recipient classification and no emitted-outcome history or Explorer diagnostic
+      projection.
 - [ ] Host motion resolution selects animation and solver kinematics once from the same authored
       records; raw motion tables remain outside the frontend.
 - [ ] Frontend presentation is smooth between host updates and applies root contribution exactly once.
@@ -1334,23 +1635,14 @@ harness or a focused noninteractive harness.
 - [ ] Formatting, checks, lint, tests, Clippy with warnings denied, and representative host/browser
       gates pass.
 
-## Open Questions
+## Open Question
 
-1. Which ACE World database/revision is the first exporter source, and how is its stable provenance
-   label obtained? Resolve in Phase 0 before the file header is fixed.
-2. Which named WCIDs form the representative first population? Resolve from the Phase R0 catalog
-   survey; do not choose from memory.
-3. How does each effective ACE physics-state bit affect pose-body retention, physical attachment,
-   scheduling, collision domains/reporting, response, and presentation for the first population?
-   Resolve from ACE/retail call sites and the Phase R0 catalog/DAT survey before the spawn definition
-   is fixed.
-4. Does the current reduced motion-kinematics archive contain every fact required by the named
-   locomotion scenarios? Resolve in Phase R0; Phase 6 expands only the proven gap.
-5. Does any representative EnvCell contain enough simultaneously participating bodies to require
-   subdivision beyond its natural reached-cell bucket? Measure in Phase R2; do not add an interior
-   sub-index from outdoor population counts.
-6. Which setup-sphere, cylsphere, and per-part physics-BSP target branches occur in the representative
-   population, and which can the first narrow phase support without guessing? Resolve in Phase R0;
-   every other observed branch must have a reachable rejection rather than a movement-sphere fallback.
+Do any of the measured animated/scripted physics-BSP setups require host-owned mutable target
+geometry in the representative first population, or can Phase 1B reject those combinations without
+losing a required WCID? Census the actual animation and decoded script operations before choosing.
+
+Does any representative EnvCell contain enough simultaneously participating bodies to require
+subdivision beyond its natural reached-cell bucket? Measure in Phase R2; do not add an interior
+sub-index from outdoor population counts.
 
 These are execution evidence gates, not invitations to guess or add fallback behavior.

@@ -293,10 +293,19 @@ None. All four draft questions were resolved with evidence — see Resolved Ques
   latter risks placement-semantics drift in oracle-guarded code); TS-authored solver constants
   (pre-existing boundary-mirror pattern). Steep-slope probe route re-verified bit-identical
   after the pass (16 airborne / 46 sliding / 87 supported ticks).
-- (2026-08-16, debt) `ContactState` (with `Unknown`, wire-adjacent) and `GroundState` (with the
-  contact plane, solver-resolved) remain two overlapping vocabularies with the projection at the
-  commit site; unifying them behind one source of truth is a candidate follow-up once the
-  dynamic-entity broadcast consumer clarifies which shape it needs.
+- (2026-08-16, debt — direction resolved) `ContactState` (with `Unknown`, wire-adjacent) and
+  `GroundState` (with the contact plane, solver-resolved) remain two overlapping vocabularies
+  with the projection at the commit site. The unification shape is now known from retail:
+  ground classification is **never synced** — retail syncs position/motion only (other objects
+  through `InterpolationManager`'s node queue with blip-beyond-`GetAutonomyBlipDistance`,
+  `acclient.c:371672+`; self via autonomous updates with forced-position corrections) and
+  re-derives Contact/OnWalkable locally in `SetPositionInternal` after every applied move. The
+  follow-up therefore makes `GroundState` the single solver-derived source, `ContactState` a
+  one-place projection (plus `Unknown` pre-classification), and restricts
+  `apply_runtime_body_contact` to bodies without local physics (with a loud guard) — landing
+  when dynamic entities gain physical bodies. Our `SpatialSamplingConfig`
+  interp/dead-reckon/snap machinery is the coarse ancestor of retail's node queue; fidelity
+  upgrades to it are dynamic-entity roadmap scope.
 
 ## Decisions and Course Corrections
 

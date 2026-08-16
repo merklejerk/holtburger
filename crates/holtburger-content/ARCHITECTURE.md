@@ -75,14 +75,19 @@ CellStruct triangulation, render bounds, or BVH is produced.
 diagonal rule. The diagonal grid travels with `LandblockTerrain`; both host obstruction triangles
 and the frontend stride-one mesh consume it rather than maintaining separate hashes.
 
-[`src/object_collision.rs`](src/object_collision.rs) resolves authored physics BSPs and polygons
-for explicit objects, generated scenery, building shells, EnvCell structures, and indoor statics.
-Shapes remain shared through the resolved-asset cache while placements retain component-wise
-SetupModel part scales. Each placed part retains a stable authored-placement identity and
-object-local vertex box so the resident world can reproduce retail's multipart static-shadow
-traversal without cloning geometry. Interior containment volumes derive from the distinct cell BSP,
-retain portal neighbors, and preserve the matched building index/origin on outside portals.
-`LandblockColliders` is the atomic merge unit for placed shapes and volumes.
+[`src/object_collision.rs`](src/object_collision.rs) resolves each placement's retail collision
+representation for explicit objects, generated scenery, building shells, EnvCell structures, and
+indoor statics: per-part physics BSPs with polygons when any part carries one, otherwise the
+setup's authored cylsphere volumes, otherwise its collision spheres
+(`CPhysicsObj::find_obj_collisions` precedence). Shapes remain shared through the resolved-asset
+cache while placements retain component-wise SetupModel part scales; volume shapes require the
+uniform whole-object scale retail applies to them. Every placed collider carries a landblock-space
+axis-aligned bounds box for broad-phase rejection and cell-shadow registration, and each placed
+part retains a stable authored-placement identity and its pre-collapse placed box corners so the
+resident world can reproduce retail's multipart static-shadow traversal without cloning geometry.
+Interior containment volumes derive from the distinct cell BSP, retain portal neighbors, and
+preserve the matched building index/origin on outside portals. `LandblockColliders` is the atomic
+merge unit for placed shapes and volumes.
 
 These artifacts deliberately contain no grounding, walkability, step, edge, movement-response, or
 residency policy. They also do not bake cross-cell memberships: that fact depends on the complete

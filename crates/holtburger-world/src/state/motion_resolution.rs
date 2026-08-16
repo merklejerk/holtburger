@@ -169,7 +169,11 @@ impl WorldState {
         omega: Vector3,
         motion_snapshot: Option<EntityMotionSnapshot>,
     ) -> Option<SolveProjectionBasis> {
-        if matches!(contact, ContactState::Airborne) || velocity.z.abs() > MOTION_EPSILON {
+        // Sliding motion is physics-driven like airborne motion; only walkable support selects
+        // the grounded animation basis.
+        if matches!(contact, ContactState::Airborne | ContactState::Sliding)
+            || velocity.z.abs() > MOTION_EPSILON
+        {
             return vector_projection_basis(velocity, omega);
         }
 

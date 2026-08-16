@@ -22,6 +22,16 @@ export type PhysicalCameraSceneResidency =
 /** Host-owned physical response selected for one camera session. */
 export type PhysicalCameraMode = "physical-fly" | "grounded-walk";
 
+/**
+ * Ground classification of the camera body: walkable support, a retained sub-walkable contact
+ * plane (sliding), airborne, or not yet classified.
+ */
+export type PhysicalCameraGroundState =
+	| "unknown"
+	| "airborne"
+	| "sliding"
+	| "supported";
+
 /** Every Explorer camera authority mode. */
 export type ExplorerCameraMode = "free-fly" | PhysicalCameraMode;
 
@@ -83,8 +93,8 @@ export interface HostPhysicalCameraPath {
 	readonly status: PhysicalCameraTickStatus;
 	/** Installed collision residency, independent from solver completion. */
 	readonly sceneResidency: PhysicalCameraSceneResidency;
-	/** Whether grounded response retained walkable lower-sphere support. */
-	readonly grounded: boolean;
+	/** Ground classification committed by the latest solve. */
+	readonly groundState: PhysicalCameraGroundState;
 	/** Distinct non-walkable planes encountered during the latest grounded solve. */
 	readonly constraintCount: number;
 	/** Collision substeps consumed by this tick. */

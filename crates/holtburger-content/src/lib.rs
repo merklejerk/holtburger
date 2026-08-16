@@ -48,9 +48,10 @@ pub use material_graph::{
     ResolvedTextureChange, ResolvedTextureMaterial,
 };
 pub use object_collision::{
-    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
-    CollisionPolygon, CollisionShape, LandblockColliderAssembler, LandblockColliders,
-    LandblockCollisionAsset, OutdoorBuildingTransit, PlacedCollider, StaticColliderPlacement,
+    BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
+    CollisionBall, CollisionBox, CollisionCylinder, CollisionPolygon, CollisionShape,
+    LandblockColliderAssembler, LandblockColliders, LandblockCollisionAsset,
+    OutdoorBuildingTransit, PlacedCollider, StaticColliderPlacement,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

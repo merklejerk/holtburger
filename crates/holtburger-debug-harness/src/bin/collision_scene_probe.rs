@@ -12,11 +12,12 @@ use holtburger_content::{
 use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
 use holtburger_world::{
-    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, GroundedBody,
-    GroundedBodySpheres, GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
-    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PhysicalFlyBody,
-    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPathRequest,
-    PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, solve_grounded, solve_physical_fly,
+    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, GroundState,
+    GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
+    GroundedRequest, GroundedSphere, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalCollisionFilter, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome,
+    PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
+    SphereSweep, SupportRequest, solve_grounded, solve_physical_fly,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -43,6 +44,8 @@ const PHYSICAL_FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
 const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
     gravity: -9.8,
     walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+    landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
+    airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
     step_up_height: 0.6,
     step_down_height: 1.5,
     edge_protection: EdgeProtection::Creature,
@@ -97,6 +100,9 @@ struct Args {
     /// Grounded sphere roles used by the explicit route.
     #[arg(long, value_enum, default_value_t = GroundedRouteBody::Pair)]
     grounded_body: GroundedRouteBody,
+    /// Time this many grounded-obstruction and support query pairs across the assembled scene.
+    #[arg(long, default_value_t = 0)]
+    query_benchmark: usize,
 }
 
 /// One fully validated, deterministic grounded product-route replay.
@@ -114,6 +120,15 @@ struct GroundedRouteSpec {
     drive_ticks: usize,
     /// Ordered grounded collider roles submitted to the production solver.
     spheres: GroundedBodySpheres,
+}
+
+/// Compact tri-state label for route output.
+fn ground_label(body: &GroundedBody) -> &'static str {
+    match body.ground {
+        GroundState::Supported(_) => "supported",
+        GroundState::Sliding(_) => "sliding",
+        GroundState::Airborne => "airborne",
+    }
 }
 
 fn main() -> Result<()> {
@@ -200,12 +215,43 @@ fn main() -> Result<()> {
             .sum::<usize>()
     );
     println!(
-        "artifact terrain_cells={} terrain_triangles={} placed_colliders={} cell_volumes={}",
+        "artifact terrain_cells={} terrain_triangles={} placed_colliders={} cell_volumes={} terrain_max_slope_ratio={:.3}",
         collision.terrain.cells.len(),
         collision.terrain.cells.len() * 2,
         collision.static_geometry.colliders.len(),
-        collision.static_geometry.cell_volumes.len()
+        collision.static_geometry.cell_volumes.len(),
+        collision.terrain.maximum_planar_shift_ratio
     );
+    let cell_slope = |cell: &holtburger_content::TerrainCollisionCell| {
+        cell.triangles
+            .iter()
+            .map(|triangle| {
+                (triangle.normal.x * triangle.normal.x + triangle.normal.y * triangle.normal.y)
+                    .sqrt()
+                    / triangle.normal.z
+            })
+            .fold(0.0f32, f32::max)
+    };
+    if let Some((index, _)) = collision
+        .terrain
+        .cells
+        .iter()
+        .map(cell_slope)
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+    {
+        println!(
+            "terrain_steepest_cell index={index} west_south_corner=({},{})",
+            (index % 8) * 24,
+            (index / 8) * 24
+        );
+        for triangle in &collision.terrain.cells[index].triangles {
+            println!(
+                "terrain_steepest_triangle normal=({:.3},{:.3},{:.3}) vertices={:?}",
+                triangle.normal.x, triangle.normal.y, triangle.normal.z, triangle.vertices
+            );
+        }
+    }
     println!(
         "placement_records total={} consumed={} inert_unsupported_family={} inert_no_physics={}",
         placements.records,
@@ -220,6 +266,10 @@ fn main() -> Result<()> {
         placements.setup_parts - placements.collidable_setup_parts
     );
     println!(
+        "setup_volumes fallback_records={} emitted_volume_colliders={}",
+        placements.volume_records, placements.emitted_volumes
+    );
+    println!(
         "cell_structures collidable={} inert_missing_root_bounds={} volumes={}",
         collidable_cell_structures,
         unbounded_cell_structures,
@@ -230,8 +280,13 @@ fn main() -> Result<()> {
             .get(*collider_index)
             .with_context(|| format!("collider index {collider_index} is out of range"))?;
         let collider = &collision.static_geometry.colliders[*collider_index];
+        let shape_kind = match &*collider.shape {
+            holtburger_content::CollisionShape::Bsp(_) => "bsp",
+            holtburger_content::CollisionShape::Cylinder(_) => "cylinder",
+            holtburger_content::CollisionShape::Ball(_) => "ball",
+        };
         println!(
-            "collider[{collider_index}]={provenance} origin=({:.6},{:.6},{:.6}) rotation=({:.6},{:.6},{:.6},{:.6}) bounds=({:.6},{:.6},{:.6};{:.6}) polygons={} domain={:?}",
+            "collider[{collider_index}]={provenance} shape={shape_kind} origin=({:.6},{:.6},{:.6}) rotation=({:.6},{:.6},{:.6},{:.6}) bounds=({:.6},{:.6},{:.6})..({:.6},{:.6},{:.6}) domain={:?}",
             collider.placement.origin.x,
             collider.placement.origin.y,
             collider.placement.origin.z,
@@ -239,28 +294,47 @@ fn main() -> Result<()> {
             collider.placement.orientation.x,
             collider.placement.orientation.y,
             collider.placement.orientation.z,
-            collider.bounds_center.x,
-            collider.bounds_center.y,
-            collider.bounds_center.z,
-            collider.bounds_radius,
-            collider.shape.polygons.len(),
+            collider.bounds.minimum().x,
+            collider.bounds.minimum().y,
+            collider.bounds.minimum().z,
+            collider.bounds.maximum().x,
+            collider.bounds.maximum().y,
+            collider.bounds.maximum().z,
             collider.source_placement,
         );
-        let mut polygons = collider.shape.polygons.iter().collect::<Vec<_>>();
-        polygons.sort_by_key(|(polygon_id, _)| **polygon_id);
-        for (polygon_id, polygon) in polygons {
-            let normal = collider.normal_to_landblock_space(polygon.normal);
-            let vertices = polygon
-                .vertices
-                .iter()
-                .map(|vertex| collider.point_to_landblock_space(*vertex))
-                .collect::<Vec<_>>();
-            println!(
-                "collider[{collider_index}].polygon[{polygon_id}] normal=({:.6},{:.6},{:.6}) vertices={vertices:?}",
-                normal.x, normal.y, normal.z
-            );
+        match &*collider.shape {
+            holtburger_content::CollisionShape::Bsp(solid) => {
+                let mut polygons = solid.polygons.iter().collect::<Vec<_>>();
+                polygons.sort_by_key(|(polygon_id, _)| **polygon_id);
+                for (polygon_id, polygon) in polygons {
+                    let normal = collider.normal_to_landblock_space(polygon.normal);
+                    let vertices = polygon
+                        .vertices
+                        .iter()
+                        .map(|vertex| collider.point_to_landblock_space(*vertex))
+                        .collect::<Vec<_>>();
+                    println!(
+                        "collider[{collider_index}].polygon[{polygon_id}] normal=({:.6},{:.6},{:.6}) vertices={vertices:?}",
+                        normal.x, normal.y, normal.z
+                    );
+                }
+                describe_bsp(*collider_index, collider, &solid.bsp, "root");
+            }
+            holtburger_content::CollisionShape::Cylinder(cylinder) => {
+                let low = collider.point_to_landblock_space(cylinder.low_point);
+                println!(
+                    "collider[{collider_index}].cylinder low=({:.6},{:.6},{:.6}) radius={:.6} height={:.6}",
+                    low.x, low.y, low.z, cylinder.radius, cylinder.height
+                );
+            }
+            holtburger_content::CollisionShape::Ball(ball) => {
+                let center = collider.point_to_landblock_space(ball.center);
+                println!(
+                    "collider[{collider_index}].ball center=({:.6},{:.6},{:.6}) radius={:.6}",
+                    center.x, center.y, center.z, ball.radius
+                );
+            }
         }
-        describe_bsp(*collider_index, collider, &collider.shape.bsp, "root");
     }
     if let Some(portal_cell) = args.portal_cell {
         for portal in interior
@@ -287,6 +361,9 @@ fn main() -> Result<()> {
         "world_query high_altitude_placement_contacts={}",
         high_altitude_contacts.len()
     );
+    if args.query_benchmark > 0 {
+        benchmark_static_queries(&scene, landblock.landblock_id, args.query_benchmark)?;
+    }
     if let Some(route) = explicit_grounded_route {
         probe_explicit_grounded_route(&scene, landblock.landblock_id, route)?;
     } else {
@@ -448,20 +525,97 @@ fn append_source_provenance(
         0x01 => {}
         0x02 => {
             let setup = decode_cache.setup_model(repository, source_did)?;
+            let mut any_part_bsp = false;
             for (part_index, part_id) in setup.parts.iter().enumerate() {
                 if decode_cache
                     .gfx_obj(repository, *part_id)?
                     .physics_bsp
                     .is_some()
                 {
+                    any_part_bsp = true;
                     provenance.push(format!(
                         "{placement} source=0x{source_did:08X} part[{part_index}]=0x{part_id:08X}"
+                    ));
+                }
+            }
+            // Mirror assembly's retail precedence: setup volumes participate only when no part
+            // carries a physics BSP, and cylspheres suppress spheres. Recomputed from source on
+            // purpose — this census is the independent oracle the collider-count parity check
+            // compares assembly against.
+            if !any_part_bsp {
+                let (label, count) = if setup.cyl_spheres.is_empty() {
+                    ("sphere", setup.spheres.len())
+                } else {
+                    ("cylsphere", setup.cyl_spheres.len())
+                };
+                for volume_index in 0..count {
+                    provenance.push(format!(
+                        "{placement} source=0x{source_did:08X} {label}[{volume_index}]"
                     ));
                 }
             }
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// Times static queries at deterministic scattered positions over the installed 5x5 scene.
+///
+/// This measures broad-phase selection plus narrow phase for the current per-landblock scan, so
+/// the Phase 5 cell index change can be sized against the same command.
+fn benchmark_static_queries(
+    scene: &CollisionScene,
+    landblock_id: u32,
+    query_count: usize,
+) -> Result<()> {
+    let anchor = Guid(landblock_id);
+    let placement = CollisionPlacement::outdoor();
+    // Deterministic low-discrepancy walk over the landblock interior at a plausible body height.
+    let position = |index: usize| {
+        let golden = 0.618_034_f32;
+        let x = 4.0 + ((index as f32 * golden) % 1.0) * 184.0;
+        let y = 4.0 + ((index as f32 * golden * golden) % 1.0) * 184.0;
+        Vector3::new(x, y, 40.0)
+    };
+    let start = std::time::Instant::now();
+    let mut total_obstructions = 0usize;
+    for index in 0..query_count {
+        let center = position(index);
+        total_obstructions += scene
+            .grounded_obstructions(GroundedObstructionRequest {
+                sweep: SphereSweep {
+                    anchor,
+                    start: center,
+                    end: center + Vector3::new(0.13, 0.0, 0.0),
+                    radius: 0.48,
+                },
+                placement: &placement,
+            })?
+            .len();
+    }
+    let obstruction_elapsed = start.elapsed();
+    let start = std::time::Instant::now();
+    let mut total_supports = 0usize;
+    for index in 0..query_count {
+        let center = position(index);
+        total_supports += scene
+            .support_contacts(SupportRequest {
+                anchor,
+                center,
+                radius: 0.48,
+                maximum_drop: 1.5,
+                maximum_rise: 0.6,
+                placement: &placement,
+            })?
+            .len();
+    }
+    let support_elapsed = start.elapsed();
+    println!(
+        "query_benchmark count={query_count} obstruction_us_per_query={:.2} support_us_per_query={:.2} obstructions={total_obstructions} supports={total_supports}",
+        obstruction_elapsed.as_secs_f64() * 1e6 / query_count as f64,
+        support_elapsed.as_secs_f64() * 1e6 / query_count as f64,
+    );
     Ok(())
 }
 
@@ -993,7 +1147,7 @@ fn probe_explicit_grounded_route(
         },
         cell: route.cell,
         velocity: Vector3::zero(),
-        support: None,
+        ground: GroundState::Airborne,
     };
     let support_center = route.start + route.spheres.support.center;
     let placement = scene.transit_cell(CellTransitRequest {
@@ -1068,10 +1222,10 @@ fn emit_grounded_route_tick(
         scene,
         GROUNDED_CONFIG,
         GroundedRequest {
+            settle: request.body.ground.settle_permission(),
             body: request.body,
             spheres,
             supported_velocity: request.requested_velocity,
-            may_step_down: true,
             retain_supported_gravity: false,
             delta_seconds: HOST_TICK_SECONDS,
             filter: PhysicalCollisionFilter::ALL,
@@ -1094,7 +1248,7 @@ fn emit_grounded_route_tick(
             };
             let support_normal = format_ground_support(&body);
             println!(
-                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} grounded={} support_normal={support_normal} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} ground={} support_normal={support_normal} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
                 start.x,
                 start.y,
                 start.z,
@@ -1108,7 +1262,7 @@ fn emit_grounded_route_tick(
                 achieved_velocity.y,
                 achieved_velocity.z,
                 format_cell(body.cell),
-                body.support.is_some(),
+                ground_label(&body),
                 body.velocity.x,
                 body.velocity.y,
                 body.velocity.z,
@@ -1123,12 +1277,12 @@ fn emit_grounded_route_tick(
             constraint_count,
         } => {
             println!(
-                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} grounded={} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
+                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} ground={} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
                 body.pose.coords.x,
                 body.pose.coords.y,
                 body.pose.coords.z,
                 format_cell(body.cell),
-                body.support.is_some(),
+                ground_label(&body),
                 body.velocity.x,
                 body.velocity.y,
                 body.velocity.z,
@@ -1139,7 +1293,7 @@ fn emit_grounded_route_tick(
 }
 
 fn format_ground_support(body: &GroundedBody) -> String {
-    let Some(support) = body.support else {
+    let Some(support) = body.ground.walkable_support() else {
         return "none".to_owned();
     };
     format!(
@@ -1280,7 +1434,7 @@ fn probe_grounded_outside_portals(
     }
     if let Some((waypoint, direction, trace)) = traversable_pair
         .iter()
-        .find(|(_, _, trace)| trace.body.support.is_some())
+        .find(|(_, _, trace)| trace.body.ground.walkable_support().is_some())
     {
         let exited = exit_outside_portal(scene, trace.body.clone(), *direction, production_pair())?;
         println!(
@@ -1306,7 +1460,7 @@ fn probe_grounded_outside_portals(
             trace.body.pose.coords.x,
             trace.body.pose.coords.y,
             trace.body.pose.coords.z,
-            trace.body.support.is_some(),
+            trace.body.ground.walkable_support().is_some(),
             trace.constraint_count,
             exited
                 .body
@@ -1315,7 +1469,7 @@ fn probe_grounded_outside_portals(
             exited.body.pose.coords.x,
             exited.body.pose.coords.y,
             exited.body.pose.coords.z,
-            exited.body.support.is_some(),
+            exited.body.ground.walkable_support().is_some(),
         );
     } else {
         if let Some((waypoint, direction, trace)) = traversable_pair.first() {
@@ -1359,7 +1513,7 @@ fn probe_grounded_outside_portals(
             pair.pose.coords.x,
             pair.pose.coords.y,
             pair.pose.coords.z,
-            pair.support.is_some(),
+            pair.ground.walkable_support().is_some(),
             pair_constraint_count,
         );
     }
@@ -1384,10 +1538,10 @@ fn exit_outside_portal(
             scene,
             GROUNDED_CONFIG,
             GroundedRequest {
+                settle: body.ground.settle_permission(),
                 body,
                 spheres,
                 supported_velocity: entry_direction * -WALK_SPEED,
-                may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
@@ -1534,7 +1688,7 @@ fn traverse_outside_portal(
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        support: None,
+        ground: GroundState::Airborne,
     };
     let registration = scene.transit_cell(CellTransitRequest {
         previous_cell: None,
@@ -1560,10 +1714,10 @@ fn traverse_outside_portal(
             scene,
             GROUNDED_CONFIG,
             GroundedRequest {
+                settle: body.ground.settle_permission(),
                 body,
                 spheres,
                 supported_velocity: Vector3::zero(),
-                may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
@@ -1602,10 +1756,10 @@ fn traverse_outside_portal(
             scene,
             GROUNDED_CONFIG,
             GroundedRequest {
+                settle: body.ground.settle_permission(),
                 body,
                 spheres,
                 supported_velocity: direction * WALK_SPEED,
-                may_step_down: true,
                 retain_supported_gravity: false,
                 delta_seconds: HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
@@ -1761,13 +1915,13 @@ fn solved_grounded(outcome: GroundedOutcome) -> Result<SolvedGrounded> {
             constraint_count,
         } => {
             anyhow::bail!(
-                "grounded portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} grounded={} constraints={} after {substeps} substeps/{contact_passes} passes",
+                "grounded portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} ground={} constraints={} after {substeps} substeps/{contact_passes} passes",
                 body.pose.coords.x,
                 body.pose.coords.y,
                 body.pose.coords.z,
                 body.cell
                     .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
-                body.support.is_some(),
+                ground_label(&body),
                 constraint_count,
             )
         }
@@ -1808,6 +1962,10 @@ struct PlacementCensus {
     no_physics_records: usize,
     setup_parts: usize,
     collidable_setup_parts: usize,
+    /// Records collidable only through the setup volume fallback.
+    volume_records: usize,
+    /// Cylinder and ball colliders those records emit.
+    emitted_volumes: usize,
 }
 
 impl PlacementCensus {
@@ -1839,7 +1997,22 @@ impl PlacementCensus {
                     }
                 }
                 self.collidable_setup_parts += collidable_parts;
-                collidable_parts
+                if collidable_parts > 0 {
+                    collidable_parts
+                } else {
+                    // Assembly's retail volume fallback: cylspheres, else spheres, only when no
+                    // part carries a physics BSP. Independently recomputed as the parity oracle.
+                    let volumes = if setup.cyl_spheres.is_empty() {
+                        setup.spheres.len()
+                    } else {
+                        setup.cyl_spheres.len()
+                    };
+                    if volumes > 0 {
+                        self.volume_records += 1;
+                        self.emitted_volumes += volumes;
+                    }
+                    volumes
+                }
             }
             _ => {
                 self.unsupported_records += 1;

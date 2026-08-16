@@ -245,7 +245,8 @@ fn character_jump_readiness(body: &SpatialBody) -> CharacterJumpReadiness {
     match body.contact {
         ContactState::Grounded => CharacterJumpReadiness::Supported,
         ContactState::Airborne => CharacterJumpReadiness::Airborne,
-        ContactState::Unknown => CharacterJumpReadiness::Unsupported,
+        // Retail denies a jump with contact but no walkable support.
+        ContactState::Sliding | ContactState::Unknown => CharacterJumpReadiness::Unsupported,
     }
 }
 

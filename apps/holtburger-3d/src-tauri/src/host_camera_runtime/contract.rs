@@ -5,7 +5,7 @@ use holtburger_core::client::movement_types::{
 use holtburger_core::{CharacterJumpKinematics, CharacterMovementKinematics, JumpChargeProfile};
 use serde::{Deserialize, Serialize};
 
-use crate::host_simulation_runtime::{PhysicalBodyDefinitionRequest, PhysicalResponseRequest};
+use crate::host_simulation_runtime::PhysicalBodyProfileBodyRequest;
 
 /// Typed terminal failure for one exact physical-camera generation.
 #[derive(Debug, Clone, Serialize)]
@@ -41,18 +41,20 @@ pub enum PhysicalCameraMode {
     GroundedWalk,
 }
 
+/// The real invariant is camera mode ↔ solver response kind, so it is checked against the
+/// resolved definition rather than re-enumerating profile names.
 pub(super) fn camera_mode_matches_response(
     mode: PhysicalCameraMode,
-    response: PhysicalResponseRequest,
+    definition: holtburger_world::PhysicalBodyDefinition,
 ) -> bool {
     matches!(
-        (mode, response),
+        (mode, definition),
         (
             PhysicalCameraMode::PhysicalFly,
-            PhysicalResponseRequest::FreeSphere { .. }
+            holtburger_world::PhysicalBodyDefinition::FreeSphere { .. }
         ) | (
             PhysicalCameraMode::GroundedWalk,
-            PhysicalResponseRequest::Grounded { .. }
+            holtburger_world::PhysicalBodyDefinition::Grounded { .. }
         )
     )
 }
@@ -193,6 +195,34 @@ pub struct PhysicalFlyCameraIntent {
     pub world_velocity: [f32; 3],
     /// Unit first-person view direction in AC world axes.
     pub view_direction: [f32; 3],
+}
+
+/// Ground classification of the camera body, mirroring the world's `ContactState`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CameraGroundState {
+    /// No collision transaction has classified the body yet.
+    Unknown,
+    /// No contact plane.
+    Airborne,
+    /// A retained contact plane below the walkable threshold: descending along a surface the
+    /// body cannot stand on.
+    Sliding,
+    /// Walkable lower-sphere support.
+    Supported,
+}
+
+impl From<holtburger_world::ContactState> for CameraGroundState {
+    fn from(contact: holtburger_world::ContactState) -> Self {
+        // The contract renames `Grounded` to `Supported`: the camera surface reports the ground
+        // relationship, and "grounded" already names the walkable-only boolean elsewhere.
+        match contact {
+            holtburger_world::ContactState::Unknown => Self::Unknown,
+            holtburger_world::ContactState::Airborne => Self::Airborne,
+            holtburger_world::ContactState::Sliding => Self::Sliding,
+            holtburger_world::ContactState::Grounded => Self::Supported,
+        }
+    }
 }
 
 /// Browser-independent semantic character drive submitted to grounded camera control.
@@ -401,8 +431,8 @@ pub struct PhysicalCameraRegistration {
     pub view_direction: [f32; 3],
     /// Explicit input/controller regime, independent from physical body geometry and response.
     pub control: PhysicalCameraControlRequest,
-    /// Explicit source-neutral geometry and response configuration for the generic body.
-    pub body: PhysicalBodyDefinitionRequest,
+    /// Named body profile plus body-owned collision exclusions; solver physics is host-resolved.
+    pub body: PhysicalBodyProfileBodyRequest,
 }
 
 /// Registration generation plus host-supplied charge presentation policy.
@@ -473,8 +503,8 @@ pub struct PhysicalCameraMotionPath {
     pub status: PhysicalCameraTickStatus,
     /// Installed collision residency, independent from solver completion.
     pub scene_residency: PhysicalCameraSceneResidency,
-    /// Whether grounded response committed lower-sphere support.
-    pub grounded: bool,
+    /// Ground classification committed by the latest solve.
+    pub ground_state: CameraGroundState,
     /// Distinct non-walkable planes encountered during the latest grounded solve.
     pub constraint_count: usize,
     /// Collision substeps consumed by this tick.

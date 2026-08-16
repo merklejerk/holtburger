@@ -278,7 +278,7 @@ impl WorldState {
     }
 
     fn apply_player_contact_state(&mut self, contact: ContactState, events: &mut Vec<WorldEvent>) {
-        let Some(grounded) = contact.grounded() else {
+        let Some(grounded) = contact.walkable() else {
             return;
         };
 

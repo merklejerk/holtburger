@@ -15,8 +15,8 @@ _Last updated: 2026-08-09_
 - Keep one staged dynamic presentation runtime: immutable templates own geometry and atlas residency;
   animation owns semantic traversal and smooth rigid-part sampling; effects own persistent visual
   state; entity publication applies the complete sample.
-- Keep explorer camera policy in the explorer. Shared runtime APIs expose facts and directed query
-  primitives rather than implementing a future game client's movement controller.
+- Keep explorer camera policy in the explorer. The host owns physical placement and motion paths;
+  frontend runtime APIs expose only the facts needed for free-fly placement and rendering.
 - Make portal rendering correct by construction: fixed-capacity scope-window traversal, path-free
   arrival propagation, one packed tile per selected authored scope, and deferred scope envelopes.
 
@@ -241,8 +241,9 @@ still consumes the retained directed aperture topology from an already-known pla
 ## 6. Authored and Effective Apertures
 
 An authored aperture is material-free planar triangle geometry in landblock space. It retains its
-plane, accepted traversal side, bounds, source identity, and polygon provenance. It is used by
-directed spatial queries and never replaced by rendering preprocessing.
+plane, accepted traversal side, bounds, source identity, and polygon provenance. The renderer uses
+it for directed entry-side, junction, and topology decisions; visibility preprocessing never
+replaces it.
 
 Each directed crossing also names one effective visibility aperture:
 
@@ -253,7 +254,7 @@ Each directed crossing also names one effective visibility aperture:
 
 This preprocessing occurs once at the app-local host boundary. The renderer consumes the result
 directly; it does not recompute reciprocal intersections per frame. Effective apertures constrain
-visibility and masks only. They do not alter containment, collision, or portal-crossing queries.
+visibility and masks only. Physical placement and crossing remain host-owned collision concerns.
 
 The browser realizer projects each indexed authored or synthesized aperture into one producer
 object shared by its directed crossing references. `SceneGraph` retains one defensive copy per
@@ -296,8 +297,8 @@ offset; material-free apertures retain unbiased `LEQUAL`, and every non-mask pas
 disables the offset. Near-plane ownership-transfer masks use `ALWAYS` and carry no source-surface
 depth policy.
 
-A same-domain topology boundary remains available to spatial queries and propagates clipped
-scope coverage, but produces no mask because ordinary depth already unifies its endpoint domain.
+A same-domain topology boundary remains in the renderer topology and propagates clipped scope
+coverage, but produces no mask because ordinary depth already unifies its endpoint domain.
 Outdoor/indoor transitions render directly into one renderer-owned full-size color plus
 depth-stencil target. Exterior color and depth render once per view. The same contribution path
 handles opaque, alpha-tested, transparent, and additive content. The target is lazy, extent-keyed,
@@ -311,7 +312,7 @@ retained across a switch back to flat mode, and disposed on resize or renderer d
 | Tauri adapter         | app-local projection, HBLB/HBEC encoding, effective aperture preprocessing | scene revisions, camera policy, WebGL state              |
 | browser assets/commit | strict decoding and source-to-plan conversion                              | runtime currentness or GPU handles                       |
 | runtime/systems       | revision ownership, scene publication, topology, logical resources         | DAT discovery or portal draw scheduling                  |
-| scene graph           | transforms, scope facts, culling, containment, directed query primitives   | explorer policy or stencil policy                        |
+| scene graph           | transforms, scope facts, culling, containment, portal topology views       | explorer policy or stencil policy                        |
 | renderer              | per-view visibility windows, graph schedule, passes, targets, device state | scene mutation or authoritative residency                |
 | explorer              | free-fly controls, initial placement, render-mode UX                       | canonical topology or future client movement policy      |
 

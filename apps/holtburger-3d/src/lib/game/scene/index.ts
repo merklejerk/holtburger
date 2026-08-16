@@ -66,7 +66,7 @@ export interface ScenePointResidencyCandidates {
 	readonly envCells: readonly SceneEnvCellPointCandidate[];
 }
 
-/** Stable identity for one directed query crossing. */
+/** Stable identity for one directed portal-topology crossing. */
 export type PortalCrossingId = `portal-crossing:${string}`;
 /** Stable identity for one proof-backed indoor visibility island. */
 type SceneVisibilityIslandId = `env-cell-island:${string}`;
@@ -84,7 +84,7 @@ interface ScenePortalAperture {
 	};
 }
 
-/** Directed aperture crossing used by scoped spatial queries. */
+/** Directed aperture crossing retained for renderer portal planning. */
 export interface ScenePortalCrossingInput {
 	readonly id: PortalCrossingId;
 	readonly source: SceneScope;
@@ -116,7 +116,7 @@ export interface ScenePortalCrossingInput {
 				readonly kind: "exterior-transition";
 				readonly exteriorLandblockId: LandblockId;
 		  };
-	/** Authored directed geometry used exclusively by topology and spatial queries. */
+	/** Authored directed geometry used for entry-side, junction, and topology decisions. */
 	readonly sourceAperture: ScenePortalAperture;
 	/** Host-resolved geometry used exclusively by render planning and material-free masks. */
 	readonly visibilityAperture: ScenePortalAperture;

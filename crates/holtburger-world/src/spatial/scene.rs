@@ -896,7 +896,10 @@ mod physical_body_tests {
         // Debug builds panic on the guard; release builds refuse without mutating.
         let accepted = scene.apply_runtime_body_contact(physical_id, ContactState::Grounded);
         assert!(!accepted);
-        assert_eq!(scene.body(physical_id).unwrap().contact, ContactState::Unknown);
+        assert_eq!(
+            scene.body(physical_id).unwrap().contact,
+            ContactState::Unknown
+        );
     }
 
     #[test]

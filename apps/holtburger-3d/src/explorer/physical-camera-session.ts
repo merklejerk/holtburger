@@ -102,7 +102,9 @@ function physicalFlyCameraSpeedEnvelope(): PhysicalCameraSpeedEnvelope {
 }
 
 /** Explorer product policy for its camera bodies: named profiles plus app-policy knobs. */
-function physicalCameraBody(mode: PhysicalCameraMode): PhysicalBodyProfileRequest {
+function physicalCameraBody(
+	mode: PhysicalCameraMode,
+): PhysicalBodyProfileRequest {
 	if (mode === "physical-fly") {
 		return {
 			profile: "physical-fly-viewer",

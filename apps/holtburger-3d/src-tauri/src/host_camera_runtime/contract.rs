@@ -5,7 +5,7 @@ use holtburger_core::client::movement_types::{
 use holtburger_core::{CharacterJumpKinematics, CharacterMovementKinematics, JumpChargeProfile};
 use serde::{Deserialize, Serialize};
 
-use crate::host_simulation_runtime::{PhysicalBodyProfileBodyRequest, PhysicalBodyProfileRequest};
+use crate::host_simulation_runtime::PhysicalBodyProfileBodyRequest;
 
 /// Typed terminal failure for one exact physical-camera generation.
 #[derive(Debug, Clone, Serialize)]
@@ -41,18 +41,20 @@ pub enum PhysicalCameraMode {
     GroundedWalk,
 }
 
+/// The real invariant is camera mode ↔ solver response kind, so it is checked against the
+/// resolved definition rather than re-enumerating profile names.
 pub(super) fn camera_mode_matches_response(
     mode: PhysicalCameraMode,
-    profile: PhysicalBodyProfileRequest,
+    definition: holtburger_world::PhysicalBodyDefinition,
 ) -> bool {
     matches!(
-        (mode, profile),
+        (mode, definition),
         (
             PhysicalCameraMode::PhysicalFly,
-            PhysicalBodyProfileRequest::PhysicalFlyViewer
+            holtburger_world::PhysicalBodyDefinition::FreeSphere { .. }
         ) | (
             PhysicalCameraMode::GroundedWalk,
-            PhysicalBodyProfileRequest::RetailPlayerGrounded { .. }
+            holtburger_world::PhysicalBodyDefinition::Grounded { .. }
         )
     )
 }

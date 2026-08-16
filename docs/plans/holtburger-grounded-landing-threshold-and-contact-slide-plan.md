@@ -427,6 +427,18 @@ Acceptance: `tsc` clean, vitest green; grep proves no solver-physics constant re
   resolved config field-for-field to the former TS values) plus the full host camera suite
   (jump/walk/fly/ground-state) through the profile path.
 - Verification: workspace clippy clean; all workspace tests and 1066 frontend tests green.
+- **Quality pass (2026-08-16):** the shared `retail_grounded_body(spheres, edge_protection)`
+  builder was extracted so the spawner path consumes the retail grounded config unchanged —
+  closing a missed Phase A acceptance ("shaped so that path can consume it unchanged"), with a
+  test proving spawn-sphere and player-profile configs are identical. Policy construction now
+  uses the world crate's `PhysicalElasticity::{DEFAULT, ZERO}`/`PhysicalFriction::DEFAULT`
+  consts (deleting duplicated literals, citations, and four expects); profiles return
+  `PhysicalBodyDefinitionError` (the setup-scale error was unreachable from them); the camera
+  mode invariant checks the resolved definition's response kind instead of re-enumerating
+  profile names; the TS request is a discriminated union mirroring the serde tag; and the core
+  file was reorganized so production code precedes the test modules. Skipped with rationale:
+  relocating the profile request enum to the camera contract (the spawner serde request will
+  colocate with it in the simulation runtime; revisit when that lands).
 
 ## Decisions and Course Corrections
 

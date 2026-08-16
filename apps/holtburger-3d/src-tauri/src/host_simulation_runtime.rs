@@ -743,10 +743,8 @@ mod tests {
                     definition,
                     collision_filter: PhysicalCollisionFilter::ALL,
                     response_policy: PhysicalBodyResponsePolicy {
-                        restitution: PhysicalRestitution::Elastic(
-                            PhysicalElasticity::new(0.0).unwrap(),
-                        ),
-                        friction: PhysicalFriction::new(0.95).unwrap(),
+                        restitution: PhysicalRestitution::Elastic(PhysicalElasticity::ZERO),
+                        friction: PhysicalFriction::DEFAULT,
                         surface_motion: PhysicalSurfaceMotion::Stable,
                         align_path: false,
                     },

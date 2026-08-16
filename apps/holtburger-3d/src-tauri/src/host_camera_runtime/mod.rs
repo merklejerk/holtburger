@@ -111,11 +111,11 @@ impl HostCameraRuntime {
         if mode == PhysicalCameraMode::GroundedWalk {
             body_pose.coords = body_pose.coords - grounded_viewer_offset(view_direction);
         }
-        ensure!(
-            camera_mode_matches_response(mode, registration.body.profile),
-            "physical camera mode does not match its requested body profile"
-        );
         let body_registration = registration.body.resolve()?;
+        ensure!(
+            camera_mode_matches_response(mode, body_registration.definition),
+            "physical camera mode does not match its resolved body response"
+        );
         let maximum_displacement_per_tick = match body_registration.definition {
             holtburger_world::PhysicalBodyDefinition::FreeSphere { config, .. } => {
                 config.maximum_substep_distance * config.maximum_substeps as f32

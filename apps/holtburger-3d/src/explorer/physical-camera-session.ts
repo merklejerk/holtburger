@@ -21,16 +21,20 @@ import { FRONTEND_TUNING } from "../lib/frontend-tuning";
  *
  * Solver physics is host-resolved from `holtburger-core`'s profile builders — the frontend names
  * what it wants and its app-policy knobs only, so no retail solver constant is mirrored here
- * (contact-slide plan, host-resolved body profiles addendum).
+ * (contact-slide plan, host-resolved body profiles addendum). The union mirrors the host's
+ * tagged enum: edge protection exists only on the grounded profile.
  */
-interface PhysicalBodyProfileRequest {
-	/** Named profile resolved by the host. */
-	readonly profile: "retail-player-grounded" | "physical-fly-viewer";
-	/** Policy for retaining support near finite authored edges; grounded profile only. */
-	readonly edgeProtection?: "none" | "creature";
+type PhysicalBodyProfileRequest = {
 	/** Optional collision domains ignored by this body. */
 	readonly collisionExclusions: readonly "entirely-water-barrier"[];
-}
+} & (
+	| {
+			readonly profile: "retail-player-grounded";
+			/** Policy for retaining support near finite authored edges. */
+			readonly edgeProtection: "none" | "creature";
+	  }
+	| { readonly profile: "physical-fly-viewer" }
+);
 
 type PhysicalCameraSpeedEnvelope =
 	| {

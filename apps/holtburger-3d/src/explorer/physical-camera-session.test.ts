@@ -125,23 +125,8 @@ describe("PhysicalCameraSession", () => {
 		expect(test.calls[0]?.command).toBe("start_physical_camera");
 		expect(test.calls[0]?.args?.registration).toEqual({
 			body: {
+				profile: "physical-fly-viewer",
 				collisionExclusions: ["entirely-water-barrier"],
-				responsePolicy: {
-					alignPath: false,
-					friction: 0.95,
-					restitution: { elasticity: 0, kind: "elastic" },
-					surfaceMotion: "stable",
-				},
-				response: {
-					config: {
-						maximumContactPasses: 8,
-						maximumSubstepDistance: 0.25,
-						maximumSubsteps: 32,
-						separationEpsilon: 0.000_5,
-					},
-					kind: "free-sphere",
-				},
-				spheres: [{ center: [0, 0, 0], radius: 0.25 }],
 			},
 			control: {
 				kind: "physical-fly",
@@ -281,7 +266,7 @@ describe("PhysicalCameraSession", () => {
 		});
 	});
 
-	it("registers grounded walk with retail's floor-normal threshold", async () => {
+	it("registers grounded walk through the host-resolved retail player profile", async () => {
 		const test = harness();
 		const session = new PhysicalCameraSession(test.transport);
 		await session.start(placement(), [0, 1, 0], "grounded-walk");
@@ -296,19 +281,9 @@ describe("PhysicalCameraSession", () => {
 				kind: "grounded-character",
 			},
 			body: {
+				profile: "retail-player-grounded",
+				edgeProtection: "creature",
 				collisionExclusions: [],
-				responsePolicy: {
-					alignPath: false,
-					friction: 0.95,
-					restitution: { elasticity: 0.05, kind: "elastic" },
-					surfaceMotion: "stable",
-				},
-				response: {
-					kind: "grounded",
-					config: {
-						walkableNormalZ: Math.fround(Math.cos(3437.746770784939)),
-					},
-				},
 			},
 		});
 	});

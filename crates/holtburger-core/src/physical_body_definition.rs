@@ -54,6 +54,69 @@ pub fn resolve_setup_physical_spheres(
     Ok(PhysicalSphereSet::new(primary, spheres.next())?)
 }
 
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    use holtburger_world::{
+        EdgeProtection, GroundedConfig, PhysicalBodyDefinition, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+        RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
+    };
+
+    fn grounded_config(profile: &ResolvedBodyProfile) -> GroundedConfig {
+        let PhysicalBodyDefinition::Grounded { config, .. } = profile.definition else {
+            panic!("retail player profile must be grounded");
+        };
+        config
+    }
+
+    /// The profile's thresholds are the world constants themselves — no mirrored literals.
+    #[test]
+    fn retail_player_profile_sources_the_world_threshold_constants() {
+        let profile = retail_player_grounded_profile(EdgeProtection::Creature).unwrap();
+        let config = grounded_config(&profile);
+        assert_eq!(config.walkable_normal_z, RETAIL_WALKABLE_NORMAL_Z);
+        assert_eq!(config.landing_normal_z, RETAIL_LANDING_NORMAL_Z);
+        assert_eq!(
+            config.airborne_step_down_height,
+            RETAIL_AIRBORNE_STEP_DOWN_HEIGHT
+        );
+        assert_eq!(config.edge_protection, EdgeProtection::Creature);
+        // Former frontend-authored values, pinned at their new owner: any change here is a
+        // deliberate profile decision, not contract drift.
+        assert_eq!(config.gravity, -9.8);
+        assert_eq!(config.step_up_height, 0.6);
+        assert_eq!(config.step_down_height, 1.5);
+        assert_eq!(config.maximum_substep_distance, 0.24);
+        assert_eq!(config.maximum_substeps, 32);
+        assert_eq!(config.maximum_contact_passes, 8);
+        assert_eq!(config.separation_epsilon, 0.000_5);
+    }
+
+    /// Edge protection is caller policy; both choices produce otherwise identical configs.
+    #[test]
+    fn edge_protection_is_the_only_caller_variable() {
+        let creature =
+            grounded_config(&retail_player_grounded_profile(EdgeProtection::Creature).unwrap());
+        let none = grounded_config(&retail_player_grounded_profile(EdgeProtection::None).unwrap());
+        assert_eq!(
+            GroundedConfig {
+                edge_protection: EdgeProtection::Creature,
+                ..none
+            },
+            creature
+        );
+    }
+
+    #[test]
+    fn fly_viewer_profile_is_a_single_free_sphere() {
+        let profile = physical_fly_viewer_profile().unwrap();
+        assert!(matches!(
+            profile.definition,
+            PhysicalBodyDefinition::FreeSphere { .. }
+        ));
+    }
+}
+
 fn scaled_sphere(sphere: Sphere, scale: f32) -> Sphere {
     Sphere {
         center: sphere.center * scale,
@@ -261,4 +324,112 @@ mod tests {
                 .definition
         );
     }
+}
+
+/// One fully resolved named body profile: validated geometry, solver config, and response policy.
+///
+/// Profiles keep solver physics out of frontend contracts: the frontend names a profile and its
+/// app-policy knobs, and every retail constant is sourced here from `holtburger_world` rather
+/// than mirrored across languages.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedBodyProfile {
+    /// Validated geometry and solver response kind.
+    pub definition: holtburger_world::PhysicalBodyDefinition,
+    /// Initial mutable contact response.
+    pub response_policy: holtburger_world::PhysicalBodyResponsePolicy,
+}
+
+/// The retail player as a grounded body: authored human sphere pair, PhysicsDesc response
+/// defaults, and the retail two-threshold grounded config.
+///
+/// The sphere pair is retail's authored human setup pair projected in source order by
+/// `SPHEREPATH::init_sphere` (`acclient.c:302241-302291`); response defaults are the
+/// CPhysicsObj/PhysicsDesc constructor values (`acclient.c:307850-307853`, `:318424-318427`).
+/// This profile is a synthetic explorer/camera body at scale one — real characters resolve their
+/// own setup and scale through `resolve_setup_physical_spheres` at spawn time.
+///
+/// Edge protection stays a caller choice: it is frontend/UX policy, not a retail body fact.
+pub fn retail_player_grounded_profile(
+    edge_protection: holtburger_world::EdgeProtection,
+) -> Result<ResolvedBodyProfile, SetupPhysicalShapeError> {
+    let spheres = holtburger_world::PhysicalSphereSet::new(
+        Sphere {
+            center: Vector3::new(0.0, 0.0, 0.475),
+            radius: 0.48,
+        },
+        Some(Sphere {
+            center: Vector3::new(0.0, 0.0, 1.35),
+            radius: 0.48,
+        }),
+    )?;
+    let definition = holtburger_world::PhysicalBodyDefinition::grounded(
+        spheres,
+        holtburger_world::GroundedConfig {
+            gravity: -9.8,
+            walkable_normal_z: holtburger_world::RETAIL_WALKABLE_NORMAL_Z,
+            landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
+            airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+            step_up_height: 0.6,
+            step_down_height: 1.5,
+            edge_protection,
+            maximum_substep_distance: 0.24,
+            maximum_substeps: 32,
+            maximum_contact_passes: 8,
+            separation_epsilon: 0.000_5,
+        },
+    )?;
+    Ok(ResolvedBodyProfile {
+        definition,
+        response_policy: retail_player_response_policy(),
+    })
+}
+
+/// Retail's ordinary player response defaults: elasticity 0.05, friction 0.95, stable surface
+/// motion without path alignment (`acclient.c:307850-307853`, `:318424-318427`).
+fn retail_player_response_policy() -> holtburger_world::PhysicalBodyResponsePolicy {
+    holtburger_world::PhysicalBodyResponsePolicy {
+        restitution: holtburger_world::PhysicalRestitution::Elastic(
+            holtburger_world::PhysicalElasticity::new(0.05)
+                .expect("retail elasticity constant is in range"),
+        ),
+        friction: holtburger_world::PhysicalFriction::new(0.95)
+            .expect("retail friction constant is in range"),
+        surface_motion: holtburger_world::PhysicalSurfaceMotion::Stable,
+        align_path: false,
+    }
+}
+
+/// The retail render-viewer as a free-flying sphere: retail's viewer sphere radius
+/// (`acclient.c:139301-139305`) with a controlled-kinematic clip response (zero elasticity: clip
+/// the incoming normal without rebound).
+pub fn physical_fly_viewer_profile() -> Result<ResolvedBodyProfile, SetupPhysicalShapeError> {
+    let spheres = holtburger_world::PhysicalSphereSet::new(
+        Sphere {
+            center: Vector3::zero(),
+            radius: 0.25,
+        },
+        None,
+    )?;
+    let definition = holtburger_world::PhysicalBodyDefinition::free_sphere(
+        spheres,
+        holtburger_world::PhysicalFlyConfig {
+            maximum_substep_distance: 0.25,
+            maximum_substeps: 32,
+            maximum_contact_passes: 8,
+            separation_epsilon: 0.000_5,
+        },
+    )?;
+    Ok(ResolvedBodyProfile {
+        definition,
+        response_policy: holtburger_world::PhysicalBodyResponsePolicy {
+            restitution: holtburger_world::PhysicalRestitution::Elastic(
+                holtburger_world::PhysicalElasticity::new(0.0)
+                    .expect("zero elasticity is in range"),
+            ),
+            friction: holtburger_world::PhysicalFriction::new(0.95)
+                .expect("retail friction constant is in range"),
+            surface_motion: holtburger_world::PhysicalSurfaceMotion::Stable,
+            align_path: false,
+        },
+    })
 }

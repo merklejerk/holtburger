@@ -34,6 +34,7 @@ pub use content_assets::{
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use physical_body_definition::{
-    RETAIL_DUMMY_MOTION_SPHERE, SetupPhysicalShapeError, resolve_setup_physical_spheres,
+    RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile, SetupPhysicalShapeError,
+    physical_fly_viewer_profile, resolve_setup_physical_spheres, retail_player_grounded_profile,
 };
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

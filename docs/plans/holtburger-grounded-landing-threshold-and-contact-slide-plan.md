@@ -397,10 +397,36 @@ Acceptance: `tsc` clean, vitest green; grep proves no solver-physics constant re
 
 ### Addendum Definition of Done
 
-- [ ] Phases A-C accepted as above
-- [ ] Three-way constant mirror deleted (Rust prod + oracle only; oracle stays independent)
-- [ ] Superseded comments and reconciliation lines updated in the same change
-- [ ] Decision recorded here: sphere source (literals vs authored setup resolution)
+- [x] Phases A-C accepted as above (executed 2026-08-16)
+- [x] Three-way constant mirror deleted (Rust prod + oracle only; oracle stays independent)
+- [x] Superseded comments and reconciliation lines updated in the same change
+- [x] Decision recorded: sphere source (literals vs authored setup resolution) — see below
+
+### Addendum Execution Record (2026-08-16)
+
+- **Phase A** — `holtburger-core::physical_body_definition` gained `ResolvedBodyProfile`,
+  `retail_player_grounded_profile(edge_protection)`, and `physical_fly_viewer_profile()`, with
+  constants sourced from `holtburger_world::RETAIL_*` and tests pinning every former
+  frontend-authored value at its new owner. **Sphere-source decision: cited literals.** The
+  camera profile is a synthetic explorer body at scale one; real characters carry per-setup,
+  per-scale geometry and resolve through `resolve_setup_physical_spheres` at spawn — resolving
+  the camera from a specific authored setup would bind it to one character's identity for zero
+  behavioral difference. **Concession:** the plan's "solver budgets stay overridable" was
+  trimmed by YAGNI — no consumer overrides them, so the profiles carry fixed budget defaults
+  and override plumbing waits for a consumer.
+- **Phase B** — `PhysicalBodyProfileRequest` (serde-tagged, kebab) + `PhysicalBodyProfileBodyRequest`
+  replaced the raw config payloads in the camera contract; mode-matching and the displacement
+  budget now read the resolved definition. **Plan-wording correction:** the "raw-geometry request
+  shape survives behind the diagnostics door" clause assumed the *serde* request family had
+  diagnostic consumers — it had none (harness and tests construct the native
+  `ResolvedPhysicalBodyRegistration`/`PhysicalBodyDefinition` directly), so the dead serde family
+  was deleted per clean-cutover rules and the diagnostics door is documented as the native layer.
+- **Phase C** — the TS contract collapsed to profile + app knobs; all three retail-constant
+  mirrors, the sphere/policy literals, and the superseded "app factory data" comment are gone.
+  Acceptance greps clean on both sides; equivalence is proven structurally (core tests pin the
+  resolved config field-for-field to the former TS values) plus the full host camera suite
+  (jump/walk/fly/ground-state) through the profile path.
+- Verification: workspace clippy clean; all workspace tests and 1066 frontend tests green.
 
 ## Decisions and Course Corrections
 

@@ -1,9 +1,8 @@
 use std::sync::Mutex;
 
 use crate::host_simulation_runtime::{
-    EdgeProtectionRequest, GroundedConfigRequest, PhysicalBodyDefinitionRequest,
-    PhysicalCollisionExclusionRequest, PhysicalFlyConfigRequest, PhysicalResponseRequest,
-    PhysicalSphereRequest, SimulationInterestRequest, stable_response_policy_request,
+    EdgeProtectionRequest, PhysicalBodyProfileBodyRequest, PhysicalBodyProfileRequest,
+    PhysicalCollisionExclusionRequest, SimulationInterestRequest,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Plane, Quaternion, Vector3};
@@ -13,10 +12,7 @@ use holtburger_content::{
     TerrainCollisionSurface,
 };
 use holtburger_core::CharacterJumpKinematics;
-use holtburger_world::{
-    CollisionScene, MotionWaypoint, MotionWaypointPlacement, RETAIL_WALKABLE_NORMAL_Z,
-    SpatialBodyId,
-};
+use holtburger_world::{CollisionScene, MotionWaypoint, MotionWaypointPlacement, SpatialBodyId};
 
 use super::*;
 
@@ -172,52 +168,17 @@ fn registration(pose: WorldPosition, mode: PhysicalCameraMode) -> PhysicalCamera
     }
 }
 
-fn body_request(mode: PhysicalCameraMode) -> PhysicalBodyDefinitionRequest {
+fn body_request(mode: PhysicalCameraMode) -> PhysicalBodyProfileBodyRequest {
     match mode {
-        PhysicalCameraMode::PhysicalFly => PhysicalBodyDefinitionRequest {
+        PhysicalCameraMode::PhysicalFly => PhysicalBodyProfileBodyRequest {
+            profile: PhysicalBodyProfileRequest::PhysicalFlyViewer,
             collision_exclusions: vec![PhysicalCollisionExclusionRequest::EntirelyWaterBarrier],
-            spheres: vec![PhysicalSphereRequest {
-                center: [0.0, 0.0, 0.0],
-                radius: 0.25,
-            }],
-            response: PhysicalResponseRequest::FreeSphere {
-                config: PhysicalFlyConfigRequest {
-                    maximum_substep_distance: 0.25,
-                    maximum_substeps: 32,
-                    maximum_contact_passes: 8,
-                    separation_epsilon: 0.000_5,
-                },
-            },
-            response_policy: stable_response_policy_request(0.0),
         },
-        PhysicalCameraMode::GroundedWalk => PhysicalBodyDefinitionRequest {
-            collision_exclusions: Vec::new(),
-            spheres: vec![
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 0.475],
-                    radius: 0.48,
-                },
-                PhysicalSphereRequest {
-                    center: [0.0, 0.0, 1.35],
-                    radius: 0.48,
-                },
-            ],
-            response: PhysicalResponseRequest::Grounded {
-                config: GroundedConfigRequest {
-                    gravity: -9.8,
-                    walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
-                    landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
-                    airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
-                    step_up_height: 0.6,
-                    step_down_height: 1.5,
-                    edge_protection: EdgeProtectionRequest::Creature,
-                    maximum_substep_distance: 0.24,
-                    maximum_substeps: 32,
-                    maximum_contact_passes: 8,
-                    separation_epsilon: 0.000_5,
-                },
+        PhysicalCameraMode::GroundedWalk => PhysicalBodyProfileBodyRequest {
+            profile: PhysicalBodyProfileRequest::RetailPlayerGrounded {
+                edge_protection: EdgeProtectionRequest::Creature,
             },
-            response_policy: stable_response_policy_request(0.05),
+            collision_exclusions: Vec::new(),
         },
     }
 }

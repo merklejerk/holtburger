@@ -32,7 +32,7 @@ import {
 	multiplyMat4,
 	transformPoint3,
 } from "../src/lib/game/math/matrices";
-import { Vec3 } from "../src/lib/game/math/types";
+import { type Mat4, Vec3 } from "../src/lib/game/math/types";
 import { planEnvCellMaterialization } from "../src/lib/game/commit/env-cell-materialization";
 import { assembleStaticObjectArtifact } from "../src/lib/game/commit/static-object-artifact";
 import { prepareStaticObjectGeometry } from "../src/lib/game/commit/static-object-geometry-worker";
@@ -2545,6 +2545,10 @@ function createDrySceneWorkload(
 	content: ArchiveContentArtifacts,
 	pose: TracePose,
 ): PortalDrySceneWorkload {
+	const view = createViewMat4(
+		pose.position,
+		createCameraRotationRadians(pose.yaw, pose.pitch),
+	);
 	const byScope = new Map<string, MutableDryScopeWorkload>();
 	const requireScope = (scope: SceneScope): MutableDryScopeWorkload => {
 		const key = scopeKey(scope);
@@ -2582,6 +2586,7 @@ function createDrySceneWorkload(
 					physicalKey: `env-shell:${shell.placement.landblockId}/${shellIndex}/${drawIndex}`,
 					placementLandblockId: shell.placement.landblockId,
 					pose,
+					view,
 				});
 			}
 		}
@@ -2607,6 +2612,7 @@ function createDrySceneWorkload(
 					physicalKey: `static:${artifactIndex}/${objectIndex}/${drawIndex}`,
 					placementLandblockId: object.placement.landblockId,
 					pose,
+					view,
 				});
 			}
 			for (const [
@@ -2623,6 +2629,7 @@ function createDrySceneWorkload(
 					physicalKey: `static-template:${artifactIndex}/${objectIndex}/${templateIndex}`,
 					placementLandblockId: object.placement.landblockId,
 					pose,
+					view,
 				});
 			}
 		}
@@ -2666,6 +2673,7 @@ function appendDryDraw(
 		readonly physicalKey: string;
 		readonly placementLandblockId: LandblockId;
 		readonly pose: TracePose;
+		readonly view: Mat4;
 	},
 ): void {
 	if (input.ordering === "opaque" || input.ordering === "alpha-test") {
@@ -2688,8 +2696,15 @@ function appendDryDraw(
 	const x = input.center.x + offset.x - input.pose.position.x;
 	const y = input.center.y - input.pose.position.y;
 	const z = input.center.z + offset.z - input.pose.position.z;
+	const anchorCenter = new Vec3(
+		input.center.x + offset.x,
+		input.center.y,
+		input.center.z + offset.z,
+	);
+	const viewCenter = transformPoint3(input.view, anchorCenter);
 	target.deferred.push({
 		batchKey: input.batchKey,
+		cameraDepth: -viewCenter.z,
 		distanceSquared: x * x + y * y + z * z,
 		kind: input.ordering,
 		submissionKey: input.physicalKey,

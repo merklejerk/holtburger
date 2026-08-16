@@ -18,30 +18,35 @@ import {
 const TRANSPARENT_TUNING = FRONTEND_TUNING.rendering.transparentObjects;
 
 describe("orderTransparentObjectRanges", () => {
-	it("orders near depth buckets back-to-front while preserving order inside a bucket", () => {
-		const nearBucketWidth =
-			TRANSPARENT_TUNING.nearDistance / TRANSPARENT_TUNING.depthBucketCount;
+	it("orders nearby ranges exactly back-to-front by camera depth", () => {
 		const ordered = orderTransparentObjectRanges(
 			[
-				entry("near-a", nearBucketWidth / 4),
-				entry("far", TRANSPARENT_TUNING.nearDistance - 1),
-				entry("near-b", nearBucketWidth / 2),
+				entry("radially-farther", 12, 4),
+				entry("depth-farther", 10, 9),
+				entry("depth-nearer", 8, 2),
 			],
 			() => null,
 		);
 
 		expect(ordered.near.map(({ range }) => range)).toEqual([
-			"far",
-			"near-a",
-			"near-b",
+			"depth-farther",
+			"radially-farther",
+			"depth-nearer",
 		]);
 		expect(ordered.far).toEqual([]);
 		expect(ordered.trace).toEqual({
-			batchKeyEvaluationCount: 3,
-			depthBandClassificationCount: 3,
-			depthBucketVisitCount: TRANSPARENT_TUNING.depthBucketCount,
-			nearSquareRootCount: 3,
+			distanceClassificationCount: 3,
+			farBatchKeyEvaluationCount: 0,
 		});
+	});
+
+	it("breaks equal-depth ties by stable physical identity", () => {
+		const ordered = orderTransparentObjectRanges(
+			[entry("z", 4, 3), entry("a", 4, 3)],
+			() => null,
+		);
+
+		expect(ordered.near.map(({ range }) => range)).toEqual(["a", "z"]);
 	});
 
 	it("groups far ranges by first-seen batching cohort", () => {
@@ -60,6 +65,7 @@ describe("orderTransparentObjectRanges", () => {
 			"b-1",
 		]);
 		expect(ordered.near).toEqual([]);
+		expect(ordered.trace.farBatchKeyEvaluationCount).toBe(3);
 	});
 
 	it("separates far candidates from the near camera-sorted phase", () => {
@@ -75,56 +81,20 @@ describe("orderTransparentObjectRanges", () => {
 		expect(ordered.near.map(({ range }) => range)).toEqual(["near-first"]);
 	});
 
-	it("groups cohorts within each near bucket without crossing depth bands", () => {
-		const bucketWidth =
-			TRANSPARENT_TUNING.nearDistance / TRANSPARENT_TUNING.depthBucketCount;
-		const farBucketStart = TRANSPARENT_TUNING.nearDistance - bucketWidth;
-		const sourceOrder = [
-			{
-				distanceSquared: (farBucketStart + bucketWidth / 4) ** 2,
-				range: { cohort: "a", id: "far-a-1" },
-			},
-			{
-				distanceSquared: 1,
-				range: { cohort: "a", id: "near-a" },
-			},
-			{
-				distanceSquared: (farBucketStart + bucketWidth / 2) ** 2,
-				range: { cohort: "b", id: "far-b" },
-			},
-			{
-				distanceSquared: (farBucketStart + (bucketWidth * 3) / 4) ** 2,
-				range: { cohort: "a", id: "far-a-2" },
-			},
-		];
-		const batchKey = ({ cohort }: (typeof sourceOrder)[number]["range"]) =>
-			cohort;
-
-		expect(
-			orderTransparentObjectRanges(sourceOrder, batchKey).near.map(
-				({ range }) => range.id,
-			),
-		).toEqual(["far-a-1", "far-a-2", "far-b", "near-a"]);
-		const far = orderTransparentObjectRanges(
-			sourceOrder.map((entry) => ({
-				...entry,
-				distanceSquared:
-					entry.distanceSquared + TRANSPARENT_TUNING.nearDistance ** 2 * 4,
-			})),
-			batchKey,
-		).far;
-		expect(far.map(({ range }) => range.id)).toEqual([
-			"far-a-1",
-			"near-a",
-			"far-a-2",
-			"far-b",
-		]);
+	it.each([
+		["camera depth", { ...entry("range", 1), cameraDepth: Number.NaN }],
+		["camera distance", { ...entry("range", 1), distanceSquared: -1 }],
+		["stable identity", { ...entry("range", 1), stableId: "" }],
+	])("rejects invalid transparent %s", (_label, range) => {
+		expect(() => orderTransparentObjectRanges([range], () => null)).toThrow(
+			`Transparent object ${_label}`,
+		);
 	});
 });
 
 describe("createObjectSubmissionPhases", () => {
 	it("partitions one physical population and globally orders transparency", () => {
-		const distanceCalls: string[] = [];
+		const sortFactCalls: string[] = [];
 		const batchCalls: string[] = [];
 		const objects = [
 			{ cohort: null, distance: 0, id: "wall", ordering: "opaque" },
@@ -153,8 +123,12 @@ describe("createObjectSubmissionPhases", () => {
 		const phases = createObjectSubmissionPhases(
 			objects,
 			(object) => {
-				distanceCalls.push(object.id);
-				return object.distance ** 2;
+				sortFactCalls.push(object.id);
+				return {
+					cameraDepth: object.distance,
+					distanceSquared: object.distance ** 2,
+					stableId: object.id,
+				};
 			},
 			(object) => {
 				batchCalls.push(object.id);
@@ -169,19 +143,8 @@ describe("createObjectSubmissionPhases", () => {
 		]);
 		expect(phases.transparent.near.map(({ id }) => id)).toEqual(["near-glass"]);
 		expect(phases.additive.map(({ id }) => id)).toEqual(["glow"]);
-		expect(distanceCalls).toEqual(["far-glass-a", "near-glass", "far-glass-b"]);
-		expect(batchCalls).toHaveLength(distanceCalls.length);
-		expect(batchCalls.toSorted()).toEqual(distanceCalls.toSorted());
-	});
-
-	it("rejects invalid transparent camera distances", () => {
-		expect(() =>
-			createObjectSubmissionPhases(
-				[{ ordering: "transparent" }] as const,
-				() => Number.NaN,
-				() => null,
-			),
-		).toThrow("camera distance must be finite and non-negative");
+		expect(sortFactCalls).toEqual(["far-glass-a", "near-glass", "far-glass-b"]);
+		expect(batchCalls).toEqual(["far-glass-a", "far-glass-b"]);
 	});
 });
 
@@ -606,8 +569,17 @@ describe("objectBlendPolicy", () => {
 	});
 });
 
-function entry(stableId: string, x: number) {
-	return { distanceSquared: x * x, range: stableId };
+function entry(
+	stableId: string,
+	radialDistance: number,
+	cameraDepth = radialDistance,
+) {
+	return {
+		cameraDepth,
+		distanceSquared: radialDistance * radialDistance,
+		range: stableId,
+		stableId,
+	};
 }
 
 interface TestIdentity {

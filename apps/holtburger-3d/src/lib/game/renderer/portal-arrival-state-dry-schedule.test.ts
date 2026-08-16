@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { SceneScope } from "../scene";
 import { scopeKey } from "../scene/scope";
 import {
@@ -41,6 +40,7 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 					deferred: [
 						{
 							batchKey: "glass",
+							cameraDepth: 4,
 							distanceSquared: 20,
 							kind: "transparent",
 							submissionKey: "outdoor-glass",
@@ -113,11 +113,8 @@ describe("createPortalArrivalStateDryScheduleTrace", () => {
 			scopeVisibilityEnvelopeReductionInstanceCount: 4,
 			traversalCrossingCount: 2,
 			traversalDepth: 2,
-			transparentBatchKeyEvaluationCount: 1,
-			transparentDepthBandClassificationCount: 1,
-			transparentDepthBucketVisitCount:
-				FRONTEND_TUNING.rendering.transparentObjects.depthBucketCount,
-			transparentNearSquareRootCount: 1,
+			transparentDistanceClassificationCount: 1,
+			transparentFarBatchKeyEvaluationCount: 0,
 		});
 	});
 

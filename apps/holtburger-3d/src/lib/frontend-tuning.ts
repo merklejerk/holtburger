@@ -260,9 +260,7 @@ export const FRONTEND_TUNING = {
 		 */
 		solidTerrainFogCoverage: 0.33,
 		transparentObjects: {
-			/** Number of coarse camera-depth bands used for near transparent objects. */
-			depthBucketCount: 8,
-			/** Radius within which transparent objects retain coarse depth ordering. */
+			/** Radius within which transparent objects receive exact camera-depth ordering. */
 			nearDistance: 16,
 		},
 	},

@@ -49,7 +49,8 @@ pub use material_graph::{
 };
 pub use object_collision::{
     CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBox,
-    CollisionPolygon, CollisionShape, LandblockColliderAssembler, LandblockColliders,
+    BspSolid, CollisionBall, CollisionCylinder, CollisionPolygon, CollisionShape,
+    LandblockColliderAssembler, LandblockColliders,
     LandblockCollisionAsset, OutdoorBuildingTransit, PlacedCollider, StaticColliderPlacement,
 };
 pub use repository::ContentRepository;

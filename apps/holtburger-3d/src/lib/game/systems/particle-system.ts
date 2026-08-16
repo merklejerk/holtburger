@@ -130,9 +130,66 @@ function resolveSceneOrigin(
 	return particle.frozenOrigin ?? liveOrigin;
 }
 
-/** Retail's roll shape: `RollDice(-1, 1) * rand + base` — additive, never multiplicative. */
-function rolled(roll: UniformRoll, base: number, rand: number): number {
-	return base + (roll() * 2 - 1) * rand;
+/** Sample retail's inclusive mathematical interval using the injected uniform roll. */
+function sampleUniformRange(
+	roll: UniformRoll,
+	minimum: number,
+	maximum: number,
+): number {
+	return minimum + roll() * (maximum - minimum);
+}
+
+/** Sample retail's additive `RollDice(-1, 1) * variance + base` distribution. */
+function sampleSymmetricVariance(
+	roll: UniformRoll,
+	base: number,
+	variance: number,
+): number {
+	return base + (roll() * 2 - 1) * variance;
+}
+
+/** Retail clamps both independently randomized scale endpoints to `[0.1, 10]`. */
+function sampleScale(
+	roll: UniformRoll,
+	base: number,
+	variance: number,
+): number {
+	return Math.min(
+		10,
+		Math.max(0.1, sampleSymmetricVariance(roll, base, variance)),
+	);
+}
+
+/** Retail clamps both independently randomized translucency endpoints to `[0, 1]`. */
+function sampleTranslucency(
+	roll: UniformRoll,
+	base: number,
+	variance: number,
+): number {
+	return Math.min(
+		1,
+		Math.max(0, sampleSymmetricVariance(roll, base, variance)),
+	);
+}
+
+/**
+ * Owner-relative geometric extent of one emitter activation.
+ *
+ * RETAIL DIVERGENCE: retail uses only `max(max_offset, max_a * lifespan)` for its sorting sphere
+ * (acclient.c:312431-312445). That omits acceleration, hook displacement, scale, and mesh geometry;
+ * restoring it would cull whole cohorts while particles remain visible. The 2026-08-15 census
+ * covered all 2,051 emitters and found 834 drawable definitions underbounded by the former
+ * unit-mesh size term alone.
+ */
+function drawableEnvelopeRadius(
+	emitter: DrawableParticleEmitter,
+	hookOffset: AcVector3,
+): number {
+	return (
+		Math.hypot(...hookOffset) +
+		emitter.centerReach +
+		emitter.mesh.radius * emitter.maximumScale
+	);
 }
 
 /** One live particle: spawn constants plus a birth time, and nothing else. */
@@ -374,7 +431,7 @@ export class ParticleSystem {
 			);
 			if (existing >= 0) this.#removeEmitter(existing, "replaced");
 		}
-		const envelopeRadius = Math.hypot(...hookOffset) + emitter.envelopeRadius;
+		const envelopeRadius = drawableEnvelopeRadius(emitter, hookOffset);
 		const instance: EmitterInstance = {
 			emittedCount: 0,
 			emitter,
@@ -502,7 +559,7 @@ export class ParticleSystem {
 		this.#recordsUsed = 0;
 		for (const instance of this.#instances) {
 			const info = instance.emitter.info;
-			const meshId = instance.emitter.meshId;
+			const meshId = instance.emitter.mesh.id;
 			// An unshipped motion type has no formula in either evaluator; drawing it motionless
 			// would misrepresent it as working.
 			if (info.motionType === null) continue;
@@ -797,6 +854,42 @@ export class ParticleSystem {
 		const info = instance.emitter.info;
 		if (instance.particles.length >= info.maxParticles) return;
 		const roll = this.#roll;
+		// Retail resolves every random field before `Particle::Init`, in this exact order
+		// (acclient.c:318125-318158). Preserve it so a deterministic source produces the same
+		// per-field sequence instead of merely the same marginal distributions.
+		const lifespan = Math.max(
+			0,
+			sampleSymmetricVariance(roll, info.lifespan, info.lifespanRand),
+		);
+		const finalTranslucency = sampleTranslucency(
+			roll,
+			info.finalTrans,
+			info.transRand,
+		);
+		const startTranslucency = sampleTranslucency(
+			roll,
+			info.startTrans,
+			info.transRand,
+		);
+		const finalScale = sampleScale(roll, info.finalScale, info.scaleRand);
+		const startScale = sampleScale(roll, info.startScale, info.scaleRand);
+		const authoredC = scaledVector(
+			info.c,
+			sampleUniformRange(roll, info.minC, info.maxC),
+		);
+		const authoredB = scaledVector(
+			info.b,
+			sampleUniformRange(roll, info.minB, info.maxB),
+		);
+		const authoredA = scaledVector(
+			info.a,
+			sampleUniformRange(roll, info.minA, info.maxA),
+		);
+		const authoredOffset = this.#spawnOffset(
+			info.offsetDir,
+			info.minOffset,
+			info.maxOffset,
+		);
 		// Retail snapshots the owner's frame at spawn (`start_frame`, acclient.c:317743) and rotates
 		// the constants into it once, so `Update` never sees a frame again. Doing the same here keeps
 		// the motion evaluators — CPU and GLSL alike — free of any notion of an owner.
@@ -818,16 +911,10 @@ export class ParticleSystem {
 			inFrame(
 				// Retail sums the hook offset and the random offset and rotates the result once, so
 				// the hook offset turns with the owner exactly as the random one does.
-				addAcVectors(
-					instance.hookOffset,
-					this.#spawnOffset(info.offsetDir, info.minOffset, info.maxOffset),
-				),
+				addAcVectors(instance.hookOffset, authoredOffset),
 				true,
 			),
-			inFrame(
-				scaledVector(info.c, rolled(roll, info.minC, info.maxC - info.minC)),
-				rotated.c,
-			),
+			inFrame(authoredC, rotated.c),
 		);
 		instance.particles.push({
 			birthTime: timeSeconds,
@@ -836,21 +923,15 @@ export class ParticleSystem {
 			// of here, so both kinds of emitter get it.
 			frozenOrigin: info.followsParent ? null : parentOrigin,
 			spawn: {
-				a: inFrame(
-					scaledVector(info.a, rolled(roll, info.minA, info.maxA - info.minA)),
-					rotated.a,
-				),
-				b: inFrame(
-					scaledVector(info.b, rolled(roll, info.minB, info.maxB - info.minB)),
-					rotated.b,
-				),
+				a: inFrame(authoredA, rotated.a),
+				b: inFrame(authoredB, rotated.b),
 				c: derived.c,
-				finalScale: info.finalScale,
-				finalTranslucency: info.finalTrans,
-				lifespan: Math.max(0, rolled(roll, info.lifespan, info.lifespanRand)),
+				finalScale,
+				finalTranslucency,
+				lifespan,
 				offset: derived.offset,
-				startScale: info.startScale,
-				startTranslucency: info.startTrans,
+				startScale,
+				startTranslucency,
 			},
 		});
 		instance.emittedCount += 1;

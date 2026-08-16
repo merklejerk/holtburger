@@ -4,27 +4,37 @@ import type { ParticleEmitterSource } from "../../assets/particle-emitter-source
 import type { DatAssetId } from "../game-types";
 import { PreparedAssetRepository } from "./prepared-asset-repository";
 
+/** Authored behavior fields after preparation separates the interdependent drawable mesh fact. */
+type ParticleEmitterBehaviorInfo = Omit<
+	DecodedParticleEmitterInfo,
+	"hardwareMesh"
+>;
+
 /**
  * An emitter retail can instantiate because it names a hardware GfxObj.
  *
- * Immutable and shared by every emitter instance that references it. Carries the exact conservative
- * motion envelope alongside the authored fields, computed once here. Retail derives its own sphere as
- * `max(max_offset, max_a * lifespan)` (acclient.c:312431-312445), which is velocity-only and
- * provably under-bounds the parabolic motion types; ours accounts for the acceleration terms too.
+ * Immutable and shared by every emitter instance that references it. Carries the exact
+ * conservative center reach and appearance extrema alongside the authored fields, computed once
+ * here. Retail derives its own sphere as `max(max_offset, max_a * lifespan)`
+ * (acclient.c:312431-312445), which is velocity-only and provably under-bounds the parabolic motion
+ * types; ours accounts for the acceleration terms and drawable geometry too.
  */
 export interface DrawableParticleEmitter {
 	readonly kind: "drawable";
 	readonly id: DatAssetId;
-	readonly info: DecodedParticleEmitterInfo;
-	/** Validated 0x01 mesh ID consumed by staging and final GPU batching. */
-	readonly meshId: DatAssetId;
+	/** Authored emitter fields, with the prepared mesh decision removed from this representation. */
+	readonly info: ParticleEmitterBehaviorInfo;
+	/** One validated geometric mesh fact consumed by staging, culling, and final GPU batching. */
+	readonly mesh: {
+		readonly id: DatAssetId;
+		readonly radius: number;
+	};
 	/**
-	 * Radius, from the emitter origin, containing every particle for its whole lifespan.
-	 *
-	 * Used as the emitter-granularity cull bound. Conservative by construction: it takes the
-	 * maximum roll of every randomized term rather than an expected value.
+	 * Maximum distance reached by a particle center, excluding hook displacement and mesh extent.
 	 */
-	readonly envelopeRadius: number;
+	readonly centerReach: number;
+	/** Maximum endpoint scale after retail's additive variance and `[0.1, 10]` clamp. */
+	readonly maximumScale: number;
 }
 
 /** An authored emitter retail refuses before allocating particle state. */
@@ -65,20 +75,17 @@ function prepareParticleEmitter(
 	// Retail rejects INVALID_DID before allocating the particle object or any parts
 	// (`ParticleEmitter::SetInfo`, acclient.c:318011-318081). The archive authors this on 29 of
 	// 2,051 emitters; staging those zero IDs would poison otherwise-valid mesh batches.
-	if (decoded.hwGfxObjId === "0x00000000") {
+	if (decoded.hardwareMesh === null) {
 		return { id: decoded.id, kind: "retail-inert" };
 	}
-	if (!decoded.hwGfxObjId.toLowerCase().startsWith("0x01")) {
-		throw new Error(
-			`Particle emitter ${decoded.id} hardware mesh ${decoded.hwGfxObjId} is not a GfxObj.`,
-		);
-	}
+	const { hardwareMesh, ...info } = decoded;
 	return {
-		envelopeRadius: emitterEnvelopeRadius(decoded),
+		centerReach: emitterCenterReach(info),
 		id: decoded.id,
-		info: decoded,
+		info,
 		kind: "drawable",
-		meshId: decoded.hwGfxObjId,
+		maximumScale: maximumParticleScale(info),
+		mesh: hardwareMesh,
 	};
 }
 
@@ -90,10 +97,8 @@ function prepareParticleEmitter(
  * bounding all three unconditionally is conservative for every type, including the ones that use
  * only a subset, and avoids a per-type bound table that would have to track formula changes.
  */
-export function emitterEnvelopeRadius(
-	info: DecodedParticleEmitterInfo,
-): number {
-	const lifespan = info.lifespan + Math.max(0, info.lifespanRand);
+export function emitterCenterReach(info: ParticleEmitterBehaviorInfo): number {
+	const lifespan = Math.max(0, info.lifespan + Math.abs(info.lifespanRand));
 	// Each constant is scaled by a roll in [min, max], so the widest magnitude uses the larger end.
 	const reach = (
 		vector: readonly [number, number, number],
@@ -105,14 +110,26 @@ export function emitterEnvelopeRadius(
 	const a = reach(info.a, info.minA, info.maxA);
 	const b = reach(info.b, info.minB, info.maxB);
 	const c = reach(info.c, info.minC, info.maxC);
-	// A particle is a mesh, not a point, so its own scale extends the bound. `scaleRand` is additive
-	// on top of the authored endpoints, matching retail's `RollDice(-1,1) * rand + base`.
-	const maxScale =
-		Math.max(info.startScale, info.finalScale) + Math.max(0, info.scaleRand);
+	const maximumOffset = Math.max(
+		Math.abs(info.minOffset),
+		Math.abs(info.maxOffset),
+	);
 	return (
-		Math.abs(info.maxOffset) +
-		motionReach(info.motionType, a, b, c, lifespan, Math.abs(info.maxOffset)) +
-		Math.max(0, maxScale)
+		maximumOffset +
+		motionReach(info.motionType, a, b, c, lifespan, maximumOffset)
+	);
+}
+
+/** Maximum scale either independently randomized endpoint can attain under retail's clamp. */
+export function maximumParticleScale(
+	info: ParticleEmitterBehaviorInfo,
+): number {
+	return Math.min(
+		10,
+		Math.max(
+			0.1,
+			Math.max(info.startScale, info.finalScale) + Math.abs(info.scaleRand),
+		),
 	);
 }
 

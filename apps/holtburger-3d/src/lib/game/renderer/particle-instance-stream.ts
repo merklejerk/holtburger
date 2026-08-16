@@ -13,9 +13,9 @@ import type { AcVector3, RenderVector3 } from "../../assets/ac-frame";
  * | -----: | --------------- | ----------------------------------------------- |
  * |      0 | `aOriginBirth`  | spawn origin xyz, birth time                    |
  * |      4 | `aOffsetLife`   | spawn offset xyz, lifespan                      |
- * |      8 | `aMotionA`      | rolled `a`                                      |
- * |     11 | `aMotionB`      | rolled `b`                                      |
- * |     14 | `aMotionC`      | rolled `c`                                      |
+ * |      8 | `aMotionA`      | sampled `a`                                     |
+ * |     11 | `aMotionB`      | sampled `b`                                     |
+ * |     14 | `aMotionC`      | sampled `c`                                     |
  * |     17 | `aAppearance`   | start/final scale, start/final translucency     |
  */
 export const PARTICLE_INSTANCE_FLOAT_COUNT = 21;

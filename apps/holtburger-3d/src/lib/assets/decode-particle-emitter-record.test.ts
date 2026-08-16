@@ -14,7 +14,7 @@ function encode(overrides: Record<string, unknown> = {}): Uint8Array {
 		finalScale: 2,
 		finalTrans: 1,
 		followsParent: false,
-		hwGfxObjId: "0x01000ff4",
+		hardwareMesh: { id: "0x01000ff4", radius: 2.5 },
 		initialParticles: 2,
 		isPersistent: true,
 		lifespan: 4,
@@ -61,7 +61,7 @@ describe("decodeParticleEmitterRecord", () => {
 		const decoded = decodeParticleEmitterRecord(encode(), "0x3200020c");
 
 		expect(decoded.id).toBe("0x3200020c");
-		expect(decoded.hwGfxObjId).toBe("0x01000ff4");
+		expect(decoded.hardwareMesh).toEqual({ id: "0x01000ff4", radius: 2.5 });
 		expect(decoded.motionType).toBe(2);
 		expect(decoded.isPersistent).toBe(true);
 	});
@@ -98,4 +98,32 @@ describe("decodeParticleEmitterRecord", () => {
 			"returned 0x3200020c for 0x32000999",
 		);
 	});
+
+	it("decodes retail's zero-hardware-DID case as one absent mesh fact", () => {
+		expect(
+			decodeParticleEmitterRecord(encode({ hardwareMesh: null }), "0x3200020c")
+				.hardwareMesh,
+		).toBeNull();
+	});
+
+	it("refuses a drawable hardware mesh outside the GfxObj family", () => {
+		expect(() =>
+			decodeParticleEmitterRecord(
+				encode({ hardwareMesh: { id: "0x02000001", radius: 1 } }),
+				"0x3200020c",
+			),
+		).toThrow("hardware mesh 0x02000001 is not a GfxObj");
+	});
+
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+		"refuses unusable mesh radius %s",
+		(radius) => {
+			expect(() =>
+				decodeParticleEmitterRecord(
+					encode({ hardwareMesh: { id: "0x01000ff4", radius } }),
+					"0x3200020c",
+				),
+			).toThrow("manifest is invalid");
+		},
+	);
 });

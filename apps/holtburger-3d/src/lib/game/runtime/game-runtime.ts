@@ -468,7 +468,7 @@ export class GameRuntime {
 		if (emitterInfoIds.size === 0) return;
 		const meshIds = [...emitterInfoIds].flatMap((id) => {
 			const emitter = this.#particleEmitters.getReady(id);
-			return emitter?.kind === "drawable" ? [emitter.meshId] : [];
+			return emitter?.kind === "drawable" ? [emitter.mesh.id] : [];
 		});
 		if (meshIds.length === 0) return;
 		const batch = await this.#particleMeshes.prepare(meshIds);

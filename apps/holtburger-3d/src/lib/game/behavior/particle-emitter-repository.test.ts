@@ -4,7 +4,8 @@ import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-em
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import type { DatAssetId } from "../game-types";
 import {
-	emitterEnvelopeRadius,
+	emitterCenterReach,
+	maximumParticleScale,
 	ParticleEmitterRepository,
 } from "./particle-emitter-repository";
 
@@ -21,7 +22,10 @@ function emitter(
 		finalScale: 1,
 		finalTrans: 1,
 		followsParent: false,
-		hwGfxObjId: "0x01000ff4" as DatAssetId,
+		hardwareMesh: {
+			id: "0x01000ff4" as DatAssetId,
+			radius: 2.5,
+		},
 		id: "0x3200020c" as DatAssetId,
 		initialParticles: 2,
 		isPersistent: true,
@@ -58,20 +62,20 @@ class FixtureSource implements ParticleEmitterSource {
 	destroy(): void {}
 }
 
-describe("emitterEnvelopeRadius", () => {
+describe("emitterCenterReach", () => {
 	/**
 	 * Explode's `c` is replaced at spawn by a unit direction, so the authored magnitude never
 	 * reaches the trajectory and must not reach the bound either.
 	 */
 	it("ignores the authored c magnitude for an exploding emitter", () => {
-		const modest = emitterEnvelopeRadius(
+		const modest = emitterCenterReach(
 			emitter({
 				a: acVector3([1, 0, 0]),
 				c: acVector3([1, 0, 0]),
 				motionType: 6,
 			}),
 		);
-		const enormous = emitterEnvelopeRadius(
+		const enormous = emitterCenterReach(
 			emitter({
 				a: acVector3([1, 0, 0]),
 				c: acVector3([1000, 0, 0]),
@@ -84,10 +88,10 @@ describe("emitterEnvelopeRadius", () => {
 
 	/** Implode derives `c` from the spawn offset, so its reach scales with the offset. */
 	it("scales an imploding emitter's bound by its spawn offset", () => {
-		const near = emitterEnvelopeRadius(
+		const near = emitterCenterReach(
 			emitter({ c: acVector3([1, 0, 0]), maxOffset: 1, motionType: 7 }),
 		);
-		const far = emitterEnvelopeRadius(
+		const far = emitterCenterReach(
 			emitter({ c: acVector3([1, 0, 0]), maxOffset: 10, motionType: 7 }),
 		);
 
@@ -95,37 +99,33 @@ describe("emitterEnvelopeRadius", () => {
 	});
 
 	it("bounds a purely linear emitter by velocity times lifespan", () => {
-		// 3 m/s for 2 s, plus the particle's own unit scale.
+		// 3 m/s for 2 s; drawable mesh extent is composed later with the activation hook.
 		expect(
-			emitterEnvelopeRadius(
-				emitter({ a: acVector3([3, 0, 0]), motionType: 2 }),
-			),
-		).toBeCloseTo(7);
+			emitterCenterReach(emitter({ a: acVector3([3, 0, 0]), motionType: 2 })),
+		).toBeCloseTo(6);
 	});
 
 	it("accounts for acceleration, which retail's own sphere ignores", () => {
 		// Retail's max(max_offset, max_a * lifespan) would return 0 here and clip the particles.
-		// Half b t squared over 2 s is 2, plus unit scale.
+		// Half b t squared over 2 s is 2.
 		expect(
-			emitterEnvelopeRadius(
-				emitter({ b: acVector3([1, 0, 0]), motionType: 3 }),
-			),
-		).toBeCloseTo(3);
+			emitterCenterReach(emitter({ b: acVector3([1, 0, 0]), motionType: 3 })),
+		).toBeCloseTo(2);
 	});
 
 	it("holds a still emitter to its offset, with no travel term at all", () => {
 		expect(
-			emitterEnvelopeRadius(
+			emitterCenterReach(
 				emitter({ a: acVector3([9, 0, 0]), maxOffset: 2, motionType: 1 }),
 			),
-		).toBeCloseTo(3);
+		).toBeCloseTo(2);
 	});
 
 	it("bounds Swarm by its oscillation amplitude rather than by a cubed lifespan", () => {
 		// `c` is an amplitude and `b` a frequency, so neither accumulates with time. Treating them
 		// as polynomial coefficients produced a 410 m envelope for a fly swarm reaching about four,
 		// and an envelope that large never culls anything.
-		const swarm = emitterEnvelopeRadius(
+		const swarm = emitterCenterReach(
 			emitter({
 				a: acVector3([0, 0, 0.1]),
 				b: acVector3([2, 2, 0.2]),
@@ -137,26 +137,52 @@ describe("emitterEnvelopeRadius", () => {
 			}),
 		);
 
-		// |c| + |a| * 5.5 + offset 1 + scale 1.
-		expect(swarm).toBeCloseTo(1.414 + 0.55 + 1 + 1, 2);
+		// |c| + |a| * 5.5 + offset 1.
+		expect(swarm).toBeCloseTo(1.414 + 0.55 + 1, 2);
 		expect(swarm).toBeLessThan(10);
 	});
 
-	it("includes the randomized tail of lifespan and scale, not their base values", () => {
-		const base = emitterEnvelopeRadius(emitter({ a: acVector3([1, 0, 0]) }));
-		const randomized = emitterEnvelopeRadius(
-			emitter({ a: acVector3([1, 0, 0]), lifespanRand: 2, scaleRand: 1 }),
+	it("includes the widest lifespan tail regardless of variance sign", () => {
+		const base = emitterCenterReach(
+			emitter({ a: acVector3([1, 0, 0]), motionType: 2 }),
 		);
-		expect(randomized).toBeGreaterThan(base);
+		const positive = emitterCenterReach(
+			emitter({ a: acVector3([1, 0, 0]), lifespanRand: 2, motionType: 2 }),
+		);
+		const negative = emitterCenterReach(
+			emitter({ a: acVector3([1, 0, 0]), lifespanRand: -2, motionType: 2 }),
+		);
+		expect(positive).toBeGreaterThan(base);
+		expect(negative).toBe(positive);
 	});
 
-	it("bounds a stationary emitter by its spawn offset and particle size", () => {
-		expect(emitterEnvelopeRadius(emitter({ maxOffset: 5 }))).toBeCloseTo(6);
+	it("uses the largest absolute spawn-offset endpoint", () => {
+		expect(
+			emitterCenterReach(emitter({ maxOffset: 2, minOffset: -5 })),
+		).toBeCloseTo(5);
+	});
+});
+
+describe("maximumParticleScale", () => {
+	it("includes additive variance and retail's upper clamp", () => {
+		expect(
+			maximumParticleScale(
+				emitter({ finalScale: 9, scaleRand: -3, startScale: 1 }),
+			),
+		).toBe(10);
+	});
+
+	it("applies retail's lower clamp even to malformed negative endpoints", () => {
+		expect(
+			maximumParticleScale(
+				emitter({ finalScale: -2, scaleRand: 0, startScale: -1 }),
+			),
+		).toBe(0.1);
 	});
 });
 
 describe("ParticleEmitterRepository", () => {
-	it("shares one preparation and exposes the derived envelope", async () => {
+	it("shares one preparation and exposes the derived geometric facts", async () => {
 		const source = new FixtureSource();
 		const repository = new ParticleEmitterRepository(source);
 
@@ -170,8 +196,9 @@ describe("ParticleEmitterRepository", () => {
 		expect(first.asset.kind).toBe("drawable");
 		if (first.asset.kind !== "drawable")
 			throw new Error("Expected drawable fixture.");
-		expect(first.asset.envelopeRadius).toBeGreaterThan(0);
-		expect(first.asset.meshId).toBe("0x01000ff4");
+		expect(first.asset.centerReach).toBeGreaterThanOrEqual(0);
+		expect(first.asset.maximumScale).toBe(1);
+		expect(first.asset.mesh).toEqual({ id: "0x01000ff4", radius: 2.5 });
 		first.release();
 		second.release();
 		expect(repository.getDiagnostics().assetCount).toBe(0);
@@ -179,7 +206,7 @@ describe("ParticleEmitterRepository", () => {
 
 	it("classifies retail's zero hardware mesh as intentionally inert", async () => {
 		const repository = new ParticleEmitterRepository(
-			new FixtureSource({ hwGfxObjId: "0x00000000" as DatAssetId }),
+			new FixtureSource({ hardwareMesh: null }),
 		);
 
 		const handle = await repository.acquire("0x320003b7");
@@ -189,15 +216,5 @@ describe("ParticleEmitterRepository", () => {
 			kind: "retail-inert",
 		});
 		handle.release();
-	});
-
-	it("fails loudly for a nonzero hardware ID outside the GfxObj family", async () => {
-		const repository = new ParticleEmitterRepository(
-			new FixtureSource({ hwGfxObjId: "0x02000001" as DatAssetId }),
-		);
-
-		await expect(repository.acquire("0x32000001")).rejects.toThrow(
-			"hardware mesh 0x02000001 is not a GfxObj",
-		);
 	});
 });

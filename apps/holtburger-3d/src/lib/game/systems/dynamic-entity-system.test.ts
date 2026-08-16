@@ -391,6 +391,18 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const poseBounds = system.getPublishedPresentationBounds(nodeId)?.clone();
 		if (!meshBounds || !poseBounds)
 			throw new Error("Entity published no bounds.");
+		const particleOnlyFrustum = {
+			cameraPosition: Vec3.zero(),
+			// The owner proxy at x=0 is outside; a radius-five particle envelope crosses this plane.
+			planes: [{ constant: -2.5, x: 1, y: 0, z: 0 }],
+		};
+		expect(
+			scene.queryFlatFrustum(
+				particleOnlyFrustum,
+				"0x0001ffff",
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
+		).not.toContain(nodeId);
 
 		envelopeRadius = 5;
 		system.publishPresentation([presentationSample(prepared, 0)]);
@@ -401,6 +413,13 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
 			expandBounds(poseBounds, 5),
 		);
+		expect(
+			scene.queryFlatFrustum(
+				particleOnlyFrustum,
+				"0x0001ffff",
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
+		).toContain(nodeId);
 		expect(system.getDiagnostics()).toMatchObject({
 			lastParticleEnvelopeChangeCount: 1,
 			lastParticleEnvelopeQueryCount: 1,

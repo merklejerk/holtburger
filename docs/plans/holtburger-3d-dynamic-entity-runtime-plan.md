@@ -1,7 +1,7 @@
 # Holtburger 3D Dynamic Entity Runtime Roadmap
 
-Status: Roadmap — authored effects complete; spawned-entity plan is the mainline next step, with
-the weather/sky-script plan unblocked as a parallel track
+Status: Roadmap — authored effects complete; Explorer weenie dynamic runtime is the mainline next
+step, with the weather/sky-script plan unblocked as a parallel track
 Created: 2026-07-31
 Evidence pass: 2026-07-31
 Roadmap split: 2026-07-31
@@ -12,20 +12,21 @@ Open-scene reconciliation: 2026-08-15
 ## Goal
 
 Reach high-fidelity authored world presentation first, then extend the proven frontend runtime to
-spawned entities through one authoritative world runtime and a reconstructable view-event path driven
-by explorer scenarios or a future network client.
+spawned entities through source-neutral definitions, committed solver outcomes, and a reconstructable
+view-event path.
+Explorer scenarios and a future network client retain distinct entity authorities above that seam.
 
 ## Convergence Provenance
 
-| Concern                           | Status                    | Evidence or owner                                                                                                                                |
-| --------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                                                                                                       |
-| Donor first slice                 | Complete on `claude` only | `c938a438`                                                                                                                                       |
-| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`                                                                                  |
-| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                                                                                                    |
-| Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day                                                                                  |
-| Host physical-body topology       | Implemented 2026-08-15    | External simulation interest, generic bodies, total installed-scene collision, non-gating residency, and placed paths landed                     |
-| Spawned execution                 | Queued                    | Must consume the existing generic body/store and source-neutral definition boundary; no second spawned physics registry                         |
+| Concern                           | Status                    | Evidence or owner                                                                                                                       |
+| --------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical first slice             | Complete on `3d-next`     | `c09eb3c2`                                                                                                                              |
+| Donor first slice                 | Complete on `claude` only | `c938a438`                                                                                                                              |
+| Selected convergence architecture | Complete                  | `holtburger-3d-dynamic-entity-architecture-convergence-plan.md`                                                                         |
+| Claude effects and host topology  | Donor-proven              | Reimplemented only behind canonical contracts                                                                                           |
+| Effects execution                 | Complete 2026-08-07       | All phases landed; reopened Phase 8 cleanup closed the same day                                                                         |
+| Host physical-body topology       | Implemented 2026-08-15    | External simulation interest, generic bodies, total installed-scene collision, non-gating residency, and placed paths landed            |
+| Dynamic entity execution          | Queued                    | Preempted by the Explorer WCID/catalog/solver milestone; must share value/event contracts without merging client and Explorer authority |
 
 ## Why This Roadmap Is Split
 
@@ -56,10 +57,10 @@ Plan: [holtburger-3d-dynamic-entity-architecture-convergence-plan.md](holtburger
 Progress: Complete on `3d-next` (2026-08-01).
 
 This completed execution record preserves the canonical animation slice, converges template
-materialization and proven effects, then audits and rewrites the spawned plan around one world
-runtime, one complete initial snapshot plus ordered deltas, and two drivers. The authored-effects plan
-is the next queued
-execution plan; it is not active until separately authorized.
+materialization and proven effects, then audited the spawned plan around one complete initial
+snapshot plus ordered deltas and two drivers. Its earlier one-world-runtime conclusion is superseded
+by Stage 3's distinct producer registries and shared downstream contracts. The authored-effects plan was
+the next queued execution plan; it is now complete.
 
 ### 1. Static-Authored Animation Fidelity
 
@@ -75,7 +76,7 @@ Outcome:
 - Semantic hooks and fractional visual interpolation remain distinct.
 - Required visual hooks such as `SetOmega` execute deterministically.
 - Appearance-time part selection is prepared here; timed `ReplaceObjectHook` behavior remains in the
-  effects plan and entity attachments remain in the spawned-entity plan.
+  effects plan and entity attachments remain deferred until a concrete dynamic-runtime consumer.
 - Authored placement and residency remain authoritative, matching retail's static-animation
   null-root-offset behavior.
 - Script-only behavior remains explicitly deferred with valid static presentation.
@@ -104,41 +105,61 @@ Outcome:
 This plan completes authored behavior fidelity before mutable runtime entities broaden lifecycle and
 authority requirements.
 
-### 3. Spawned Entities and Explorer Runtime
+### 3. Explorer Weenie Dynamic Runtime
 
-Plan: [holtburger-3d-spawned-entity-explorer-runtime-plan.md](holtburger-3d-spawned-entity-explorer-runtime-plan.md)
+Plan: [holtburger-3d-explorer-weenie-dynamic-runtime-plan.md](holtburger-3d-explorer-weenie-dynamic-runtime-plan.md)
 
-Progress: Queued — next mainline plan now that the authored-effects plan is complete; convergence
-audit and rewrite complete (2026-08-01), host-physics reconciliation recorded (2026-08-12), and
-open installed-scene semantics reconciled (2026-08-15).
+Progress: Proposed — preempts the earlier spawned-entity plan (2026-08-16). The first consumer is
+Explorer-initiated WCID spawning from an optional offline ACE World-derived catalog, with distinct
+producer registries feeding source-neutral body definitions, committed solver outcomes, and pure
+projection mechanics reusable by a future network client.
 
 Outcome:
 
-- Explorer scenarios and a future network client drive the same `holtburger-world` runtime and
-  projected view contract.
-- Spawned lifecycle and mutations cross Tauri through the existing view-event path with a complete
-  initial snapshot and explicit resnapshot after detected receiver lag.
-- World state owns canonical appearance, lifecycle operations, placement, attachment, and motion facts.
-- Host-local physical prediction reuses the existing `SpatialBody` physical composite, per-tick
-  scene residency, and world-owned placed-motion path. A server spawn resolves setup geometry plus
-  response policy into the same definition accepted from an explicit frontend spawn; source
-  provenance does not fork simulation.
-- Spawned attach/detach provides the concrete lifecycle consumer for shared animated parent-part
-  following.
-- `MotionCatalog` and `MotionResolver` produce shared `ResolvedMotionPlan` values in Rust.
+- An offline tool exports consumer-backed ACE World weenie facts into an optional host-only flat
+  catalog; the application has no runtime ACE Server/MySQL dependency. The thin export/catalog
+  pipeline lands before runtime contracts so a catalog-plus-DAT survey can select representative
+  WCIDs and evidence-backed physics shapes.
+- Explorer WCID scenarios and a future network client retain separate entity registries while
+  consuming the same source-neutral definition, body-operation, committed-outcome, and projection
+  contracts.
+- Dynamic lifecycle crosses Tauri through one focused initial snapshot and focused deltas, with
+  listener-first reconstruction after startup or page reload and no speculative delivery-recovery
+  protocol.
+- Each producer registry owns its semantic lifecycle while its composition-local `SpatialScene` owns
+  physical state. Ordered installation plus projection joining prevents partial publication without
+  a cross-store transaction.
+- Complete ACE template physics-state inputs are cataloged losslessly. Every entity retains one pose
+  body while effective-state replacement reversibly attaches, detaches, or reconfigures optional
+  solver participation; the existing client `SetState` path consumes the same transition logic.
+- Explorer prediction reuses `HostSimulationRuntime`'s existing spatial-body store, solver, per-tick
+  scene residency, and placed paths. A client uses its separate `WorldState` scene; catalog provenance
+  does not fork the downstream mechanics.
+- One collection fixed-tick participant visits Explorer entities in stable body order, integrates
+  active bodies, and relays at most one focused changed-body/report batch per epoch; static collision
+  targets need no scheduler slot and the synthetic camera remains environment-only unless explicitly
+  opted in.
+- Solver-owned quiescence prunes integration and mover-side queries for proven resting bodies without
+  removing their canonical pose, dynamic-shadow membership, target collision, report maintenance, or
+  presentation. Explicit drive/state/scene/contact inputs wake them; no sleep-island system is assumed.
+- The shared fixed tick includes deterministic, physics-state-filtered dynamic candidate discovery
+  reusing global 24 m outdoor cells and reached EnvCells, sized for 50-300 spawned entities per
+  populated landblock, plus census-selected target geometry, narrow-phase contact/response, bounded
+  incremental convergence, an evidence-selected continuous-contact rule, and retained collision
+  start/end reporting.
+- Existing `MotionKinematics` data and focused resolution functions are extended only as the named
+  motion scenarios require; no catalog/resolver service hierarchy is assumed up front.
 - The frontend executes plans and sparse placement anchors without consuming raw motion tables or
   per-frame host transforms.
-- Spawned entities reuse the authored visual, behavior, effect, presentation, and renderer systems.
-- App-local explorer and client composition remain policy boundaries over shared world/core mechanics,
-  with no second authoritative runtime or speculative base-runtime hierarchy.
-- Spawned motion may consume the landed `holtburger-world` collision queries and generic physical-
-  body tick when a concrete scenario requires local prediction. Bodies continue through absent
-  collision as open space and report final-owner residency, but never load, retain, or evict
-  collision themselves. Spawned entities do not consume the Explorer camera adapter, camera
-  dimensions, input mapping, or camera transport.
+- Dynamic entities reuse the authored visual, behavior, effect, presentation, and renderer systems.
+- App-local Explorer and client composition remain distinct authority and policy boundaries over
+  shared world/core mechanics, with no speculative base-runtime hierarchy.
+- Dynamic motion consumes the landed `holtburger-world` collision queries and generic physical-body
+  tick. Bodies continue through absent collision as open space and report final-owner residency, but
+  never load, retain, or evict collision themselves. Entities do not consume Explorer camera policy.
 
-This plan establishes a durable growth seam for later explorer physics demonstrations, which require
-a separate concrete scenario and plan.
+Focused appearance mutation and animated attachments remain deferred until a concrete Explorer or
+client scenario consumes each operation.
 
 ## Cross-Plan Architectural Contracts
 
@@ -149,8 +170,9 @@ These contracts survive every roadmap stage:
 3. `holtburger-dat` owns parsed static file formats.
 4. `holtburger-content` owns runtime content discovery, bootstrap assembly, and static reference-data
    queries.
-5. `holtburger-world` owns authoritative entity, appearance, placement, attachment, spatial, and
-   semantic motion invariants.
+5. `holtburger-world` owns the client's authoritative entity, appearance, placement, attachment,
+   spatial, and semantic motion invariants plus source-neutral spatial primitives. It does not own
+   the Explorer registry.
 6. `holtburger-core` owns reusable client behaviors/orchestration only after concrete consumers prove
    sharing.
 7. `apps/holtburger-3d/src-tauri` owns the narrow app-local host composition and projection adapter.
@@ -161,16 +183,28 @@ These contracts survive every roadmap stage:
 10. Renderer batching remains renderer policy and never determines domain/resource identity.
 11. Unsupported behavior is observable with provenance; diagnostics never drive runtime decisions.
 12. No plan may introduce dormant infrastructure assigned to a later plan.
-13. Explorer and future network drivers mutate the same world-domain model and publish one complete
-    initial snapshot plus the existing ordered focused deltas.
-14. Feed epochs, global entity sequences, permanent generation tombstones, and a stateful projector
-    require measured need; they are not roadmap prerequisites.
+13. Explorer and future network drivers retain distinct producer registries, feed the same
+    source-neutral definition/solver-outcome/projection contracts, and publish one focused dynamic
+    snapshot plus ordered deltas through their own outer feeds.
+14. Feed epochs, global entity sequences, permanent generation tombstones, an async backend event
+    bus, a stateful realization service, and a stateful projector require measured need; they are not
+    roadmap prerequisites.
 15. Application policy owns simulation interest. Physical bodies query the resulting immutable
     installed collision snapshot, treat absent products as open space, report final-owner residency
     without gating motion, and cannot load, retain, or evict collision content.
-16. Server-owned, local-player, and frontend-owned bodies share one validated geometry-plus-response
-    definition and one `SpatialBody` store; identity allocation and setup lookup remain producer
+16. Within each runtime composition, server-owned, local-player, or Explorer-owned bodies share one
+    validated geometry-plus-response definition and one `SpatialBody` store. Explorer and client
+    compositions do not share a store instance; identity allocation and setup lookup remain producer
     concerns.
+17. The optional Explorer weenie catalog is a separately generated host reference asset, not HBA
+    client content and not a `ContentRepository` mount. Only its source-neutral spawn facts cross
+    into shared realization contracts.
+18. A dynamic entity's `SpatialBody` remains its pose owner even when it has no physical attachment.
+    Complete effective physics-state replacement—not entity respawn or one collidable boolean—drives
+    reversible solver and scheduler participation.
+19. Body-to-body collision is required dynamic-runtime behavior, not census-gated optional scope.
+    Catalog/DAT measurements select the simplest correct pair-discovery strategy and representative
+    fixtures before solver contracts are frozen.
 
 ## Shared Evidence
 
@@ -238,12 +272,14 @@ The effects plan does not declare authored particles and sound complete merely b
 ports exist. The measured `CreateParticle` and `SoundTweaked` workload requires concrete visible and
 audible consumers.
 
-### Explorer Is a Driver, Not Another World Runtime
+### Explorer Is a Distinct Producer Above the Shared Contracts
 
 Explorer scenarios remain the intended producer for spawned test entities and later simulation.
-They enter only after authored presentation systems are proven and drive the same world-domain
-mutations and projected events as a future network client. A narrow app-local composition adapter may
-own scenario policy and deterministic controls; it may not become a second authoritative entity model.
+They enter only after authored presentation systems are proven. An app-local Explorer registry owns
+their semantic lifecycle, while the future network client retains `WorldState`; both feed the same
+source-neutral definition, committed-outcome, and projected-event contracts. The narrow app-local
+composition owns scenario policy and deterministic controls without pretending to be a client
+runtime.
 
 ### The Sky Pass Is a Parallel Track; Weather Comes After Effects
 
@@ -269,8 +305,8 @@ That plan now exists:
 sky-script deferral has a named owner). Its schedule: Phase 0 evidence is executable at any time
 against DAT content and the decompile; every implementation phase is gated behind a mandatory
 boundary dry-run (its Phase R) when the effects plan completes. It runs as a parallel track after
-the effects plan, alongside — not ahead of, and not blocking — the spawned-entity plan, which has
-no dependency on weather in either direction.
+the effects plan, alongside — not ahead of, and not blocking — the Explorer weenie dynamic-runtime
+plan, which has no dependency on weather in either direction.
 
 **Weather is deliberately not a roadmap Definition-of-Done item (ratified 2026-08-06).** It is a
 follow-on feature that consumes this roadmap's output rather than a condition for the roadmap being
@@ -285,9 +321,9 @@ each with its consuming phase.
 
 ### No Universal Runtime Base Class
 
-Explorer and network-client composition remain local. Shared motion, spatial, world, and projection
-behavior lives in `world`/`core` when concrete consumers prove it; scenario policy, sessions, and
-transport remain local. No universal runtime base class is introduced.
+Explorer and network-client composition remain local. Shared motion, spatial operations, and
+projection behavior live in `world`/`core` when concrete consumers prove it; entity authority,
+scenario policy, sessions, and transport remain local. No universal runtime base class is introduced.
 
 ## Overall Definition of Done
 
@@ -295,9 +331,20 @@ transport remain local. No universal runtime base class is introduced.
       performance evidence.
 - [x] The static-authored effects plan is complete with real script, particle, and sound consumers
       (2026-08-07).
-- [ ] The spawned entity/Explorer runtime plan is complete across the Rust/Tauri/TypeScript boundary.
-- [ ] Authored and spawned entities reuse one frontend template, behavior, presentation, effect, and renderer
-      architecture.
+- [ ] The Explorer weenie dynamic runtime is complete across the catalog/Rust/Tauri/TypeScript
+      boundary.
+- [ ] Catalog-created and server-updated entities preserve the complete effective physics-state mask;
+      one shared transition rule keeps their pose bodies alive while solver participation remains
+      optional and reversible.
+- [ ] Dynamic bodies collide through one deterministic flag-filtered solve reusing outdoor-cell and
+      reached-EnvCell partitioning, converge within the recorded tick bound, and maintain proven
+      collision start/refresh/end lifecycles without tunneling or whole-world rollback.
+- [ ] The Explorer workload uses one collection scheduler participant, one focused advance batch per
+      epoch, canonical body poses, and scene-owned derived spatial memberships at 50-300 entities.
+- [ ] Proven quiescent bodies skip integration while remaining indexed collision targets, and every
+      state-changing input has one tested wake path without a second active-body authority.
+- [ ] Authored and spawned entities reuse one frontend template, behavior, presentation, effect, and
+      renderer architecture.
 - [ ] Static authored fidelity does not depend on motion tables, sparse anchors, or a spawned host.
 - [ ] Raw motion tables and authoritative world mutation remain outside the frontend.
 - [ ] No plan leaves dormant scaffolding, silent unsupported behavior, or obsolete compatibility

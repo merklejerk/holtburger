@@ -1,12 +1,13 @@
 # Holtburger 3D Spawned Entity and Explorer Runtime Plan
 
-Status: Queued — prerequisites complete; host-physics reconciliation recorded
+Status: Preempted 2026-08-16 by `holtburger-3d-explorer-weenie-dynamic-runtime-plan.md`
 Created: 2026-07-31
 Rewritten: 2026-08-01 from the convergence world/feed audit
 Refined: 2026-08-01 after recovery-scope review
 Reconciled: 2026-08-12 after the generic host physical-body and simulation-interest cutover
 Reconciled: 2026-08-15 after the open installed-collision-scene cutover
 Parent roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`
+Preemptor: `docs/plans/holtburger-3d-explorer-weenie-dynamic-runtime-plan.md`
 Prerequisites:
 
 - `docs/plans/holtburger-3d-static-authored-animation-runtime-plan.md`

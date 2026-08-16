@@ -206,6 +206,8 @@ fn body_request(mode: PhysicalCameraMode) -> PhysicalBodyDefinitionRequest {
                 config: GroundedConfigRequest {
                     gravity: -9.8,
                     walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+                    landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
+                    airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
                     step_up_height: 0.6,
                     step_down_height: 1.5,
                     edge_protection: EdgeProtectionRequest::Creature,
@@ -960,7 +962,7 @@ fn grounded_tick_presents_eye_height_and_reports_support() {
 
     assert_eq!(path.mode, PhysicalCameraMode::GroundedWalk);
     assert_eq!(path.status, PhysicalCameraTickStatus::Solved);
-    assert!(path.grounded);
+    assert_eq!(path.ground_state, CameraGroundState::Supported);
     assert_eq!(path.constraint_count, 0);
     // The body runs 0.4 m and the viewer adds retail's 0.18 m in-head offset.
     assert!((final_path_point(&path).origin[0] - 96.58).abs() < 0.001);
@@ -993,7 +995,7 @@ fn press_and_release_delivered_out_of_order_launch_once_before_the_next_solve() 
         .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
         .unwrap()
         .unwrap();
-    assert!(supported.grounded);
+    assert_eq!(supported.ground_state, CameraGroundState::Supported);
 
     let release = grounded_event(
         session,
@@ -1025,7 +1027,7 @@ fn press_and_release_delivered_out_of_order_launch_once_before_the_next_solve() 
         .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
         .unwrap()
         .unwrap();
-    assert!(!launched.grounded);
+    assert_ne!(launched.ground_state, CameraGroundState::Supported);
     let launched_body = runtime.simulation.physical_body_snapshot(body_id).unwrap();
     assert!(
         launched_body.velocity.z > 0.0,
@@ -1065,7 +1067,7 @@ fn press_and_release_delivered_out_of_order_launch_once_before_the_next_solve() 
         .unwrap()
         .unwrap();
     assert!(ballistic.character_event_outcomes.is_empty());
-    assert!(!ballistic.grounded);
+    assert_ne!(ballistic.ground_state, CameraGroundState::Supported);
     let ballistic_body = runtime.simulation.physical_body_snapshot(body_id).unwrap();
     assert_eq!(
         Vector3::new(ballistic_body.velocity.x, ballistic_body.velocity.y, 0.0),
@@ -1168,7 +1170,8 @@ fn lifecycle_gap_waits_for_the_missing_edge_and_rejects_duplicates_observably() 
             .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
             .unwrap()
             .unwrap()
-            .grounded
+            .ground_state
+            == CameraGroundState::Supported
     );
     let release = grounded_event(
         session,
@@ -1192,7 +1195,7 @@ fn lifecycle_gap_waits_for_the_missing_edge_and_rejects_duplicates_observably() 
         .unwrap()
         .unwrap();
     assert!(waiting.character_event_outcomes.is_empty());
-    assert!(waiting.grounded);
+    assert_eq!(waiting.ground_state, CameraGroundState::Supported);
 
     let begin = grounded_event(
         session,
@@ -1246,7 +1249,8 @@ fn release_after_scene_eviction_executes_once_in_open_space() {
             .tick(session, Duration::from_secs_f64(1.0 / HOST_TICK_HZ))
             .unwrap()
             .unwrap()
-            .grounded
+            .ground_state
+            == CameraGroundState::Supported
     );
     runtime
         .queue_grounded_event(grounded_event(

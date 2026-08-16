@@ -128,10 +128,18 @@ existing implicit `tick()` policy:
   gravity, support, walkability, step, slope, or ledge behavior and does not run from `tick()` until
   the app-local Phase 1c host registers and drives a camera body.
 - `solve_grounded` is a separate bounded response over one required lower/support sphere and one
-  optional upper/constraint sphere. It alone owns gravity, walkability, committed support, one
-  next-substep sliding normal, and achieved velocity. A solve-local set counts distinct encountered
-  planes for diagnostics but cannot influence motion. The upper sphere participates in obstruction
-  and placement but cannot become support or choose the committed cell.
+  optional upper/constraint sphere. It alone owns gravity, walkability, the committed ground
+  state, one next-substep sliding normal, and achieved velocity. A solve-local set counts distinct
+  encountered planes for diagnostics but cannot influence motion. The upper sphere participates in
+  obstruction and placement but cannot become support or choose the committed cell.
+- The ground state is retail's two-threshold model: a walking body settles through the ordinary
+  step-down against the strict walkable threshold, while a body without walkable support runs the
+  lenient 0.04m landing probe (cos-85° acceptance) every tick. A landing between the thresholds
+  commits `GroundState::Sliding` — the contact plane is retained for classification and reporting
+  while motion stays ballistic (gravity retained, no friction), mirroring retail's
+  `Contact && !OnWalkable` transients. The walking threshold is re-derived from the committed
+  contact plane, so slides settle to walkable support where the surface flattens and release to
+  airborne when the plane falls out of the landing probe's reach.
 - Grounded step-up and step-down are separate, non-recursive operations over a shared vertical
   settle/placement primitive. A raised candidate is confirmed against both spheres before commit;
   a failed candidate cannot leak pose or contact state.

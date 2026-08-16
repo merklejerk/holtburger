@@ -37,7 +37,7 @@ function path(
 		],
 		status: "solved",
 		sceneResidency: { state: "resident" },
-		grounded: false,
+		groundState: "airborne",
 		constraintCount: 0,
 		substeps: 1,
 		contactPasses: 1,

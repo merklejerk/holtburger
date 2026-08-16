@@ -9,14 +9,19 @@ pub enum ContactState {
     #[default]
     Unknown,
     Airborne,
+    /// A retained contact plane below the walkable threshold: the body is on a surface it
+    /// cannot stand on, descending ballistically along it (retail `Contact && !OnWalkable`).
+    Sliding,
     Grounded,
 }
 
 impl ContactState {
-    pub const fn grounded(self) -> Option<bool> {
+    /// Whether the body has walkable support, once classified. `Sliding` answers `false`: the
+    /// body is on a surface, but not one it can stand on.
+    pub const fn walkable(self) -> Option<bool> {
         match self {
             Self::Unknown => None,
-            Self::Airborne => Some(false),
+            Self::Airborne | Self::Sliding => Some(false),
             Self::Grounded => Some(true),
         }
     }

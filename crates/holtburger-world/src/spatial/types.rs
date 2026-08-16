@@ -5,6 +5,14 @@ use holtburger_common::{Guid, Vector3};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Body-lifecycle ground classification, including the pre-classification `Unknown` state.
+///
+/// For bodies with local physics this is a projection of the solver-owned
+/// [`GroundState`](crate::GroundState), written at exactly one place (the grounded tick commit);
+/// for motion-snapshot bodies it is a server projection applied through
+/// `SpatialScene::apply_runtime_body_contact`. The planned unification (spawned-entity plan,
+/// 2026-08-16 reconciliation) makes `GroundState` the single persisted source once entity
+/// corrections flow through the solver.
 pub enum ContactState {
     #[default]
     Unknown,

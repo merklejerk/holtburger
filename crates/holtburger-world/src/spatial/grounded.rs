@@ -92,6 +92,10 @@ pub struct GroundSupport {
 
 /// The body's derived ground state, mirroring retail's observable transient combinations
 /// (`CPhysicsObj::SetPositionInternal`, `acclient.c:310624-310760`).
+///
+/// This is the solver-owned source; the lifecycle-facing [`ContactState`](super::ContactState)
+/// (which adds `Unknown`) is projected from it at the grounded tick commit and must never be
+/// written back over a solved body (see `SpatialScene::apply_runtime_body_contact`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GroundState {
     /// A contact plane at or above the walking threshold: retail `Contact && OnWalkable`.

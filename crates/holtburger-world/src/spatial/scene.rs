@@ -399,6 +399,13 @@ impl SpatialScene {
         true
     }
 
+    /// Applies a server-projected contact classification to a body **without local physics**.
+    ///
+    /// Retail never syncs ground classification: it syncs motion and re-derives contact locally
+    /// after every applied move (`CPhysicsObj::SetPositionInternal`, `acclient.c:310624-310760`).
+    /// This entry point exists only for motion-snapshot bodies that have no local solve to derive
+    /// from. A body carrying grounded physical response memory owns its classification through
+    /// `GroundState`; overwriting it here would silently desync the two, so the write is refused.
     pub fn apply_runtime_body_contact(
         &mut self,
         body_id: SpatialBodyId,
@@ -407,6 +414,18 @@ impl SpatialScene {
         let Some(body) = self.body_store.body_mut(body_id) else {
             return false;
         };
+        if body.physical.as_ref().is_some_and(|physical| {
+            matches!(
+                physical.response,
+                super::PhysicalBodyResponseState::Grounded { .. }
+            )
+        }) {
+            debug_assert!(
+                false,
+                "server contact projection must not overwrite a locally solved ground state;                  route motion through the solver instead (spawned-entity plan, 2026-08-16                  reconciliation)"
+            );
+            return false;
+        }
 
         body.contact = contact;
         true
@@ -841,6 +860,43 @@ mod physical_body_tests {
 
         assert_eq!(error.to_string(), "adapter rejected presentation");
         assert_eq!(scene.body(id).unwrap(), &before);
+    }
+
+    /// The server contact projection must not overwrite a locally solved ground state; routing
+    /// motion through the solver is the retail-faithful path (spawned-entity plan, 2026-08-16
+    /// reconciliation). Snapshot bodies without physics keep accepting projections.
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic(expected = "server contact projection"))]
+    fn contact_projection_refuses_grounded_physical_bodies() {
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let snapshot_id = SpatialBodyId::Entity(Guid(0x5000_0010));
+        scene.register_body(SpatialBody::new(
+            snapshot_id,
+            pose(Vector3::new(96.0, 96.0, 20.0)),
+            now,
+        ));
+        assert!(scene.apply_runtime_body_contact(snapshot_id, ContactState::Grounded));
+
+        let physical_id = SpatialBodyId::Entity(Guid(0x5000_0011));
+        scene.register_body(SpatialBody::new(
+            physical_id,
+            pose(Vector3::new(97.0, 96.0, 20.0)),
+            now,
+        ));
+        scene
+            .attach_physical_body(
+                physical_id,
+                grounded_definition(),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+            )
+            .unwrap();
+        // Debug builds panic on the guard; release builds refuse without mutating.
+        let accepted = scene.apply_runtime_body_contact(physical_id, ContactState::Grounded);
+        assert!(!accepted);
+        assert_eq!(scene.body(physical_id).unwrap().contact, ContactState::Unknown);
     }
 
     #[test]

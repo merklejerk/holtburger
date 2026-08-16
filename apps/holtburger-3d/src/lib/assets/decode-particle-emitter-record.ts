@@ -16,7 +16,12 @@ const manifestSchema = z.object({
 	motionType: z.number().int().positive().nullable(),
 	emitsPerSecond: z.boolean(),
 	emitsPerMeter: z.boolean(),
-	hwGfxObjId: datId,
+	hardwareMesh: z
+		.object({
+			id: datId,
+			radius: finite.nonnegative(),
+		})
+		.nullable(),
 	birthrateSeconds: finite.nonnegative(),
 	maxParticles: z.number().int().nonnegative(),
 	initialParticles: z.number().int().nonnegative(),
@@ -57,15 +62,18 @@ export type DecodedParticleEmitterInfo = Omit<
 	| "transport"
 	| "byteOrder"
 	| "emitterInfoId"
-	| "hwGfxObjId"
+	| "hardwareMesh"
 	| "a"
 	| "b"
 	| "c"
 	| "offsetDir"
 > & {
 	readonly id: DatAssetId;
-	readonly hwGfxObjId: DatAssetId;
-	/** Motion and offset vectors, already converted out of AC's Z-up axes. */
+	/** Complete drawable-mesh fact, or `null` for retail's zero-hardware-DID inert case. */
+	readonly hardwareMesh: {
+		readonly id: DatAssetId;
+		readonly radius: number;
+	} | null;
 	/**
 	 * Motion constants, deliberately left in AC's authored axes.
 	 *
@@ -131,18 +139,30 @@ export function decodeParticleEmitterRecord(
 			`Particle emitter ${manifest.emitterInfoId} authors no emission trigger.`,
 		);
 	}
-	const { transport, byteOrder, emitterInfoId, hwGfxObjId, ...rest } = manifest;
+	if (
+		manifest.hardwareMesh !== null &&
+		!manifest.hardwareMesh.id.toLowerCase().startsWith("0x01")
+	) {
+		throw new Error(
+			`Particle emitter ${manifest.emitterInfoId} hardware mesh ${manifest.hardwareMesh.id} is not a GfxObj.`,
+		);
+	}
+	const { transport, byteOrder, emitterInfoId, hardwareMesh, ...rest } =
+		manifest;
 	void transport;
 	void byteOrder;
 	return {
 		...rest,
-		// Motion and offset vectors are authored in AC's Z-up axes; convert once here so no
-		// consumer, CPU or GPU, has to remember the convention.
+		// Brand the authored Z-up values at the decode boundary; spawn and motion own the later
+		// frame rotation and render-axis conversion.
 		a: acVector3(manifest.a),
 		b: acVector3(manifest.b),
 		c: acVector3(manifest.c),
 		offsetDir: acVector3(manifest.offsetDir),
-		hwGfxObjId: hwGfxObjId as DatAssetId,
+		hardwareMesh:
+			hardwareMesh === null
+				? null
+				: { id: hardwareMesh.id as DatAssetId, radius: hardwareMesh.radius },
 		id: emitterInfoId as DatAssetId,
 	};
 }

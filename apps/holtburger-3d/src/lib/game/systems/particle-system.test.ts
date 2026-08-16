@@ -10,11 +10,10 @@ import { createRotationMat4 } from "../math/matrices";
 import type { AcVector3, SceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import type { BehaviorTarget } from "../behavior/behavior-event-router";
-import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
 import type { DrawableParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
-import { ParticleSystem } from "./particle-system";
+import { ParticleSystem, type UniformRoll } from "./particle-system";
 
 const TARGET: BehaviorTarget = {
 	generation: 1,
@@ -29,9 +28,19 @@ const ORIGIN: SceneVector3 = sceneVector3([0, 0, 0]);
 const NO_OFFSET: AcVector3 = acVector3([0, 0, 0]);
 
 function prepared(
-	overrides: Partial<DecodedParticleEmitterInfo> = {},
+	overrides: Partial<DrawableParticleEmitter["info"]> = {},
+	derived: {
+		readonly centerReach?: number;
+		readonly maximumScale?: number;
+		readonly meshRadius?: number;
+	} = {},
 ): DrawableParticleEmitter {
-	const info: DecodedParticleEmitterInfo = {
+	const meshRadius = derived.meshRadius ?? 1;
+	const mesh = {
+		id: "0x01000ff4" as DatAssetId,
+		radius: meshRadius,
+	};
+	const info: DrawableParticleEmitter["info"] = {
 		a: acVector3([1, 0, 0]),
 		b: acVector3([0, 0, 0]),
 		birthrateSeconds: 1,
@@ -41,7 +50,6 @@ function prepared(
 		finalScale: 1,
 		finalTrans: 1,
 		followsParent: false,
-		hwGfxObjId: "0x01000ff4" as DatAssetId,
 		id: "0x3200020c" as DatAssetId,
 		initialParticles: 0,
 		isPersistent: true,
@@ -67,20 +75,30 @@ function prepared(
 		...overrides,
 	};
 	return {
-		envelopeRadius: 10,
+		centerReach: derived.centerReach ?? 10,
 		id: info.id,
 		info,
 		kind: "drawable",
-		meshId: info.hwGfxObjId,
+		maximumScale: derived.maximumScale ?? 1,
+		mesh,
 	};
 }
 
-/**
- * Mid-range roll keeps every randomized term at its authored base.
- *
- * Emitter resolution and the clock are only exercised through `createEmitter`; the tests that drive
- * `create` directly pass their own time explicitly.
- */
+/** Deterministic finite source that fails loudly if spawn consumes an unexpected extra roll. */
+function rollSequence(values: readonly number[]): UniformRoll {
+	let index = 0;
+	return () => {
+		const value = values[index];
+		if (value === undefined) {
+			throw new Error(
+				`Particle spawn requested roll ${index + 1} unexpectedly.`,
+			);
+		}
+		index += 1;
+		return value;
+	};
+}
+
 /** A quarter turn about AC's up axis, the case the waterfall report turned on. */
 const YAWED_QUARTER_TURN = acRotationFromRenderTransform(
 	createRotationMat4(new Quat(Math.SQRT1_2, 0, Math.SQRT1_2, 0)),
@@ -107,6 +125,89 @@ const runtime = (
 	});
 
 describe("ParticleSystem", () => {
+	it.each([
+		{ expectedFactor: 0.3, roll: 0 },
+		{ expectedFactor: 0.5, roll: 0.5 },
+		{ expectedFactor: 0.7, roll: 1 },
+	])(
+		"keeps waterfall mist 0x320004A3 in its [0.3, 0.7] motion interval at roll $roll",
+		({ expectedFactor, roll }) => {
+			const particles = runtime({ roll: () => roll });
+			particles.create(
+				TARGET,
+				prepared({
+					a: acVector3([1, 0, 0]),
+					b: acVector3([0, 0, -40]),
+					c: acVector3([0, 1, 0]),
+					initialParticles: 1,
+					maxA: 0.7,
+					maxB: 0.7,
+					maxC: 0.7,
+					minA: 0.3,
+					minB: 0.3,
+					minC: 0.3,
+					motionType: 10,
+				}),
+				NO_OFFSET,
+				0,
+				0,
+				ORIGIN,
+			);
+
+			const spawn = particles.collectCohorts()[0]!.particles[0]!;
+			expect(spawn.a[0]).toBeCloseTo(expectedFactor);
+			expect(spawn.b[2]).toBeCloseTo(-40 * expectedFactor);
+			expect(spawn.c[1]).toBeCloseTo(expectedFactor);
+			expect(spawn.b[2]).toBeLessThan(0);
+		},
+	);
+
+	it("samples and clamps every appearance endpoint with its own retail-ordered roll", () => {
+		const particles = runtime({
+			// lifespan, final/start trans, final/start scale, C, B, A, then zero offset direction.
+			roll: rollSequence([0, 1, 0, 1, 0, 0.25, 0.5, 0.75, 0.5, 0.5, 0.5]),
+		});
+		particles.create(
+			TARGET,
+			prepared({
+				a: acVector3([4, 0, 0]),
+				b: acVector3([0, 3, 0]),
+				c: acVector3([0, 0, 2]),
+				finalScale: 9.5,
+				finalTrans: 0.8,
+				initialParticles: 1,
+				lifespan: 10,
+				lifespanRand: 2,
+				maxA: 0.6,
+				maxB: 0.6,
+				maxC: 0.6,
+				minA: 0.2,
+				minB: 0.2,
+				minC: 0.2,
+				scaleRand: 2,
+				startScale: 0.2,
+				startTrans: 0.2,
+				transRand: 0.5,
+			}),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const spawn = particles.collectCohorts()[0]!.particles[0]!;
+		expect(spawn).toMatchObject({
+			finalScale: 10,
+			finalTranslucency: 1,
+			lifespan: 8,
+			startScale: 0.1,
+			startTranslucency: 0,
+		});
+		expect(spawn.a[0]).toBeCloseTo(2);
+		expect(spawn.b[1]).toBeCloseTo(1.2);
+		expect(spawn.c[2]).toBeCloseTo(0.6);
+	});
+
 	it("releases initial particles immediately, before any interval applies", () => {
 		const particles = runtime();
 
@@ -531,9 +632,32 @@ describe("ParticleSystem", () => {
 		const particles = runtime();
 		particles.create(TARGET, prepared(), acVector3([0, 0, 4]), 0, 0, ORIGIN);
 
-		// envelopeRadius is 10 in the fixture, displaced 4 by the hook offset.
-		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(14);
+		// Center reach 10 plus unit mesh extent 1, displaced 4 by the hook offset.
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(15);
 	});
+
+	it.each([
+		{ expected: 3.5, meshRadius: 0.5 },
+		{ expected: 5, meshRadius: 1 },
+		{ expected: 8, meshRadius: 2 },
+	])(
+		"includes a radius-$meshRadius mesh in the drawable envelope",
+		({ expected, meshRadius }) => {
+			const particles = runtime();
+			particles.create(
+				TARGET,
+				prepared({}, { centerReach: 2, maximumScale: 3, meshRadius }),
+				NO_OFFSET,
+				0,
+				0,
+				ORIGIN,
+			);
+
+			expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(
+				expected,
+			);
+		},
+	);
 
 	it("contributes nothing for a target with no live emitters", () => {
 		// Zero rather than null, so a caller adds it to presentation bounds unconditionally.
@@ -545,7 +669,7 @@ describe("ParticleSystem", () => {
 		particles.create(TARGET, prepared(), acVector3([0, 0, 0]), 0, 0, ORIGIN);
 		particles.create(TARGET, prepared(), acVector3([0, 0, 20]), 0, 0, ORIGIN);
 
-		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(30);
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(31);
 	});
 
 	it("repairs only a removed widest emitter's owner aggregate", () => {
@@ -556,8 +680,8 @@ describe("ParticleSystem", () => {
 
 		particles.destroy(TARGET, 2);
 
-		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(10);
-		expect(particles.envelopeRadiusFor(SECOND_TARGET.targetId)).toBeCloseTo(10);
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeCloseTo(11);
+		expect(particles.envelopeRadiusFor(SECOND_TARGET.targetId)).toBeCloseTo(11);
 		expect(particles.getDiagnostics()).toMatchObject({
 			emitterOwnerCount: 2,
 			maximumEmitterCountPerOwner: 1,
@@ -914,10 +1038,11 @@ describe("ParticleSystem", () => {
 	it("gives each exploding particle its own unit direction", () => {
 		let index = 0;
 		const particles = runtime({
-			// A varying roll, so successive particles draw different angles.
+			// An irrational step avoids accidentally repeating when the retail spawn sequence gains or
+			// loses an independently sampled field.
 			roll: () => {
 				index += 1;
-				return (index % 7) / 7;
+				return (index * 0.618_033_988_749_894_9) % 1;
 			},
 		});
 		particles.create(

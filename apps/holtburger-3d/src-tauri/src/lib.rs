@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use holtburger_content::{
     ActiveRegionData, ContentDecodeCache, ContentRepository, LandblockTerrain, TexturePixelFormat,
 };
@@ -388,7 +388,28 @@ pub async fn load_particle_emitter_bytes(
     let ContentAsset::ParticleEmitterInfo(info) = asset else {
         unreachable!("ParticleEmitterInfo request must return a ParticleEmitterInfo")
     };
-    serialize_particle_emitter_record_binary(&info)
+    if info.hw_gfx_obj_id == 0 {
+        return serialize_particle_emitter_record_binary(&info, None);
+    }
+    ensure!(
+        info.hw_gfx_obj_id >> 24 == 0x01,
+        "ParticleEmitterInfo 0x{:08X} hardware mesh 0x{:08X} is not a GfxObj",
+        info.id,
+        info.hw_gfx_obj_id
+    );
+    let mesh_asset = runtime
+        .load(ContentAssetRequest::GfxObj(info.hw_gfx_obj_id))
+        .await
+        .with_context(|| {
+            format!(
+                "Could not load ParticleEmitterInfo 0x{:08X} hardware mesh 0x{:08X}",
+                info.id, info.hw_gfx_obj_id
+            )
+        })?;
+    let ContentAsset::GfxObj(mesh) = mesh_asset else {
+        unreachable!("GfxObj request must return a GfxObj")
+    };
+    serialize_particle_emitter_record_binary(&info, Some(&mesh))
 }
 
 /// Build the canonical typed audio response used by Tauri and focused host tests.

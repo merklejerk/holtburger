@@ -21,7 +21,15 @@ export interface PreparedAnimation {
 	readonly framesPerSecond: number;
 	/** Frame-major rigid-part transforms indexed by `frame * partCount + part`. */
 	readonly partFrames: readonly Mat4[];
-	/** Optional frame-major root offsets retained but unused by static-default playback. */
+	// RETAIL DIVERGENCE: retail composes these authored root position frames into the object's
+	// world frame every update (`CPhysicsObj::UpdatePositionInternal`, acclient.c:308262-308298).
+	// Holtburger keeps the spawned-dynamic root solver-owned and never applies position frames;
+	// `sampleAnimationPose` reads only `partFrames`. Consequence: WCID 36449 Bats — the single
+	// canonical-catalog template whose setup-default clip carries root frames (rotation only,
+	// zero translation) — animates without its authored root rotation until the deferred
+	// authored-root-motion plan lands. Correcting this locally would route frontend animation
+	// back into collision authority.
+	/** Optional frame-major root offsets retained but never applied to the entity root. */
 	readonly positionFrames: readonly Mat4[];
 	readonly hooks: readonly DecodedAnimationHook[];
 }

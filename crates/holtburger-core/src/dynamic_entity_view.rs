@@ -2,7 +2,6 @@
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
-use holtburger_world::entity::{EntityMotionDirective, EntityMotionSnapshot};
 use holtburger_world::{
     ContactState, EffectiveEntityPhysicsState, EntityAppearance, PhysicalBodyParticipation,
     RuntimeSpatialBodyView, SpatialSampleMode,
@@ -42,7 +41,7 @@ pub struct DynamicEntityIdentityView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPresentationView {
-    /// Setup, motion, sound, and physics-effect identities.
+    /// Setup, sound, and physics-effect identities.
     pub content: DynamicEntityContent,
     /// Lossless ordered material and part substitutions.
     pub appearance: EntityAppearance,
@@ -118,47 +117,6 @@ pub struct DynamicEntityPlacementView {
     pub sample_mode: DynamicEntitySampleModeView,
 }
 
-/// Semantic motion snapshot retained without exposing raw motion-table assets.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DynamicEntityMotionView {
-    /// Current interpreted stance value.
-    pub current_style: Option<u16>,
-    /// Current interpreted forward command.
-    pub forward_command: Option<u16>,
-    /// Current interpreted sidestep command.
-    pub sidestep_command: Option<u16>,
-    /// Current interpreted turn command.
-    pub turn_command: Option<u16>,
-    /// Authored forward command scale.
-    pub forward_speed: Option<f32>,
-    /// Authored sidestep command scale.
-    pub sidestep_speed: Option<f32>,
-    /// Authored turn command scale.
-    pub turn_speed: Option<f32>,
-    /// Optional semantic turn directive.
-    pub directive: Option<DynamicEntityMotionDirectiveView>,
-}
-
-/// Serializable semantic directive whose source identities remain producer-neutral.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
-pub enum DynamicEntityMotionDirectiveView {
-    TurnToHeading {
-        desired_heading: f32,
-        speed: f32,
-    },
-    TurnToObject {
-        target: Guid,
-        desired_heading: Option<f32>,
-        speed: f32,
-    },
-}
-
 /// Producer-neutral facts accepted by the pure view projector.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicEntityViewSource {
@@ -214,8 +172,6 @@ pub struct DynamicEntityView {
     pub physics: DynamicEntityPhysicsView,
     /// Current canonical placement and kinematics.
     pub placement: DynamicEntityPlacementView,
-    /// Current semantic motion, if any.
-    pub motion: Option<DynamicEntityMotionView>,
 }
 
 /// One complete replacement snapshot; no replay history is required to reconstruct it.
@@ -362,7 +318,6 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             contact: source.body.contact.into(),
             sample_mode: source.body.sample_mode.into(),
         },
-        motion: source.body.motion_state.map(Into::into),
     }
 }
 
@@ -393,44 +348,6 @@ impl From<SpatialSampleMode> for DynamicEntitySampleModeView {
             SpatialSampleMode::SimulatingMotionState => Self::SimulatingMotionState,
             SpatialSampleMode::SimulatingVelocity => Self::SimulatingVelocity,
             SpatialSampleMode::Suspended => Self::Suspended,
-        }
-    }
-}
-
-impl From<EntityMotionSnapshot> for DynamicEntityMotionView {
-    fn from(value: EntityMotionSnapshot) -> Self {
-        Self {
-            current_style: value.current_style.map(|style| style.interpreted()),
-            forward_command: value.forward_command.map(|command| command.raw()),
-            sidestep_command: value.sidestep_command.map(|command| command.raw()),
-            turn_command: value.turn_command.map(|command| command.raw()),
-            forward_speed: value.forward_speed.map(|speed| speed.to_f32()),
-            sidestep_speed: value.sidestep_speed.map(|speed| speed.to_f32()),
-            turn_speed: value.turn_speed.map(|speed| speed.to_f32()),
-            directive: value.directive.map(Into::into),
-        }
-    }
-}
-
-impl From<EntityMotionDirective> for DynamicEntityMotionDirectiveView {
-    fn from(value: EntityMotionDirective) -> Self {
-        match value {
-            EntityMotionDirective::TurnToHeading {
-                desired_heading,
-                speed,
-            } => Self::TurnToHeading {
-                desired_heading: desired_heading.to_f32(),
-                speed: speed.to_f32(),
-            },
-            EntityMotionDirective::TurnToObject {
-                target,
-                desired_heading,
-                speed,
-            } => Self::TurnToObject {
-                target,
-                desired_heading: desired_heading.map(|heading| heading.to_f32()),
-                speed: speed.to_f32(),
-            },
         }
     }
 }

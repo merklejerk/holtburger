@@ -722,7 +722,7 @@ fn transition_decision(
     prepared_physics_available: bool,
 ) -> Result<EntityPhysicsTransitionDecision, ExplorerEntityRuntimeError> {
     let projection = simulation.project_dynamic_entity(&instance.definition)?;
-    let physical_body_attached = matches!(
+    let solver_participation_enabled = matches!(
         projection.participation,
         holtburger_world::PhysicalBodyParticipation::Physical
     );
@@ -731,8 +731,8 @@ fn transition_decision(
         next,
         EntityPhysicsTransitionContext {
             intent: next_intent,
-            prepared_physics_available: prepared_physics_available || physical_body_attached,
-            physical_body_attached,
+            prepared_physics_available: prepared_physics_available || solver_participation_enabled,
+            solver_participation_enabled,
             prepared_definition_changed: false,
         },
     ))
@@ -742,8 +742,13 @@ fn validate_transition_replacement(
     action: holtburger_world::EntityPhysicalTransitionAction,
     has_replacement: bool,
 ) -> Result<(), ExplorerEntityRuntimeError> {
-    use holtburger_world::EntityPhysicalTransitionAction::{Attach, Reconfigure};
-    match (matches!(action, Attach | Reconfigure), has_replacement) {
+    use holtburger_world::EntityPhysicalTransitionAction::{
+        EnableSolverParticipation, Reconfigure,
+    };
+    match (
+        matches!(action, EnableSolverParticipation | Reconfigure),
+        has_replacement,
+    ) {
         (true, false) => Err(ExplorerEntityRuntimeError::MissingPreparedPhysics),
         (false, true) => Err(ExplorerEntityRuntimeError::UnexpectedPreparedPhysics),
         _ => Ok(()),
@@ -799,7 +804,6 @@ mod tests {
             },
             content: DynamicEntityContent {
                 setup_did: 0x0200_0001,
-                motion_table_did: None,
                 sound_table_did: None,
                 physics_effect_table_did: None,
             },

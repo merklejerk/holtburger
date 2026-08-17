@@ -2036,7 +2036,23 @@ surface was added.
 
 ### Phase 6: Close the Physics-Only Motion Boundary
 
-Progress: Scope decision complete (2026-08-17); focused cleanup and capability fixture pending.
+Progress: Complete (2026-08-17). The focused dynamic-entity view no longer carries
+`motion_table_did` or the semantic `motion` object; the shared projector, client adapter, Explorer
+driver, and frontend feed schema shrank together, and a boundary-decode contract test proves a host
+emitting either field cannot deliver it past the Tauri feed. Physical-state `Attach`/`Detach`
+vocabulary landed as `EnableSolverParticipation`/`DisableSolverParticipation` transition actions,
+`SolverParticipationEnabled`/`SolverParticipationDisabled` reconfiguration outcomes, and
+`install_physical_body`; object parenting and animated-attachment vocabulary is untouched. The
+spawned root-frame gate (`sampleAnimationPose` reads only `partFrames`) carries the measured
+`RETAIL DIVERGENCE:` marker citing `acclient.c:308262-308298` with the WCID 36449 census, and a
+synthetic fixture proves non-identity position-frame translation and rotation cannot reach sampled
+part poses. A new `ExplorerSimulationControl` at the collection scheduler boundary provides
+pause/resume and exactly-once queued deterministic stepping over an injected clock; paused ticks
+skip integration without touching entity, body, or report state. No Tauri command exposes the
+control yet: the browser harness reaches the runtime through the dev content host rather than
+Tauri IPC, and no Explorer UI consumer exists, so the packaged app's collection simply never
+pauses. Phase 7B or a later Entities-tab control adds the production surface when a real caller
+lands. `MotionKinematics`, client motion resolution, and `BasicSpatialPhysics` are unchanged.
 
 Scope review (2026-08-17): authored root motion is explicitly deferred. The current
 `PhysicalBodyActuation` expresses velocity-shaped physical work, the accepted `PlacedMotionPath`

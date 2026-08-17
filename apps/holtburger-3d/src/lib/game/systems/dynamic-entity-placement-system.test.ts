@@ -106,7 +106,6 @@ function dynamicEntity(x: number): DynamicEntityView {
 	return {
 		generation: 1,
 		identity: { guid: 1, name: "Entity", wcid: 1 },
-		motion: null,
 		physics: {
 			cloaked: false,
 			defaultAnimation: false,
@@ -137,7 +136,6 @@ function dynamicEntity(x: number): DynamicEntityView {
 				textureChanges: [],
 			},
 			content: {
-				motionTableDid: null,
 				physicsEffectTableDid: null,
 				setupDid: 0x0200_0001,
 				soundTableDid: null,

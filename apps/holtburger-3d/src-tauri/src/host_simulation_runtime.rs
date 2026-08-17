@@ -282,7 +282,7 @@ impl HostSimulationRuntime {
         now: std::time::Instant,
     ) -> Result<SpatialBodyId> {
         let body_id = self.register_ephemeral_body(pose, now);
-        if let Err(error) = self.attach_physical_body(body_id, registration, retained_cell) {
+        if let Err(error) = self.install_physical_body(body_id, registration, retained_cell) {
             self.remove_body(body_id);
             return Err(error);
         }
@@ -397,8 +397,8 @@ impl HostSimulationRuntime {
             .expect("prevalidated dynamic entity body lost its dynamic physical invariant"))
     }
 
-    /// Attaches a source-neutral physical definition.
-    pub fn attach_physical_body(
+    /// Installs a source-neutral physical definition, enabling solver participation.
+    pub fn install_physical_body(
         &self,
         body_id: SpatialBodyId,
         registration: ResolvedPhysicalBodyRegistration,
@@ -407,7 +407,7 @@ impl HostSimulationRuntime {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         state
             .bodies
-            .attach_physical_body(
+            .install_physical_body(
                 body_id,
                 registration.definition,
                 registration.collision_filter,
@@ -997,7 +997,7 @@ mod tests {
         )
         .unwrap();
         service
-            .attach_physical_body(
+            .install_physical_body(
                 body_id,
                 ResolvedPhysicalBodyRegistration {
                     definition,

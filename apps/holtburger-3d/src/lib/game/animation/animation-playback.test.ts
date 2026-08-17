@@ -74,4 +74,38 @@ describe("sampleAnimationPose", () => {
 		expect(sampleAnimationPose(animation, 0.5)[0]?.m41).toBe(5);
 		expect(sampleAnimationPose(animation, 2.5)[0]?.m41).toBe(100);
 	});
+
+	it("ignores authored root position frames while articulated playback continues", () => {
+		const first = Mat4.identity();
+		const second = Mat4.identity();
+		second.m41 = 10;
+		const third = Mat4.identity();
+		third.m41 = 20;
+		const withoutRootFrames: PreparedAnimation = {
+			frameCount: 3,
+			framesPerSecond: 30,
+			hooks: [],
+			id: "0x03000001",
+			partCount: 1,
+			partFrames: [first, second, third],
+			positionFrames: [],
+		};
+		// Non-identity root translation and rotation per frame, mirroring a WCID 36449-style clip.
+		const halfAngle = Math.PI / 6;
+		const rootRotation = createRotationMat4(
+			new Quat(Math.cos(halfAngle), 0, 0, Math.sin(halfAngle)),
+		);
+		rootRotation.m41 = 7;
+		rootRotation.m42 = -3;
+		const withRootFrames: PreparedAnimation = {
+			...withoutRootFrames,
+			positionFrames: [rootRotation, rootRotation, rootRotation],
+		};
+
+		for (const framePosition of [0, 0.5, 1.25, 2.5]) {
+			expect(sampleAnimationPose(withRootFrames, framePosition)).toEqual(
+				sampleAnimationPose(withoutRootFrames, framePosition),
+			);
+		}
+	});
 });

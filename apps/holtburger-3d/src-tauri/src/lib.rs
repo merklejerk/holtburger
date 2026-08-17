@@ -26,7 +26,7 @@ mod env_cell_source;
 pub mod explorer_entity_delivery;
 pub mod explorer_entity_driver;
 pub mod explorer_entity_runtime;
-mod explorer_entity_simulation;
+pub mod explorer_entity_simulation;
 pub mod explorer_weenie_catalog;
 pub mod gfx_obj_geometry;
 mod host_camera_runtime;
@@ -1571,6 +1571,9 @@ pub fn run() {
                             app.handle().clone(),
                         ),
                     ),
+                    // Test/scenario boundaries construct their own control; the packaged app has
+                    // no pause consumer yet, so its collection simply never pauses.
+                    Arc::new(explorer_entity_simulation::ExplorerSimulationControl::default()),
                 )),
             );
             fixed_tick_runtime_for_setup.spawn();

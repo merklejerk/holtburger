@@ -51,7 +51,6 @@ function entity(guid: number) {
 		presentation: {
 			content: {
 				setupDid: 0x02000001,
-				motionTableDid: null,
 				soundTableDid: null,
 				physicsEffectTableDid: null,
 			},
@@ -85,7 +84,6 @@ function entity(guid: number) {
 			contact: "unknown" as const,
 			sampleMode: "authoritative-only" as const,
 		},
-		motion: null,
 	};
 }
 

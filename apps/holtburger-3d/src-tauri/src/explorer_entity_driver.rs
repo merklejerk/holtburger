@@ -46,7 +46,7 @@ pub struct ExplorerEntitySpawnRequest {
     pub candidate: Vector3,
     /// Explicit candidate root orientation.
     pub rotation: Quaternion,
-    /// Whether to attach local physics or retain a canonical pose-only body.
+    /// Whether to enable local solver participation or retain a canonical pose-only body.
     pub physical_intent: EntityPhysicalIntent,
 }
 
@@ -403,7 +403,6 @@ impl ExplorerEntityDriver {
             },
             content: DynamicEntityContent {
                 setup_did,
-                motion_table_did: template.motion_table_did,
                 sound_table_did: template.sound_table_did,
                 physics_effect_table_did: template.physics_effect_table_did,
             },
@@ -484,7 +483,8 @@ impl ExplorerEntityDriver {
             .plan_physics_state(guid, generation, next, physical_intent)?;
         let replacement = if matches!(
             decision.action,
-            EntityPhysicalTransitionAction::Attach | EntityPhysicalTransitionAction::Reconfigure
+            EntityPhysicalTransitionAction::EnableSolverParticipation
+                | EntityPhysicalTransitionAction::Reconfigure
         ) {
             let mut definition = self.entities.instance(guid, generation)?.definition;
             definition.physics = next;
@@ -1135,7 +1135,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_physics_state_replacement_attaches_reconfigures_and_detaches() {
+    fn complete_physics_state_replacement_enables_reconfigures_and_disables_participation() {
         let (_entities, driver) = driver(vec![template(12)], false);
         let spawned = driver
             .spawn_by_wcid(request(12, EntityPhysicalIntent::PoseOnly))
@@ -1143,7 +1143,7 @@ mod tests {
         let guid = spawned.instance.definition.identity.guid;
         let generation = spawned.instance.generation;
 
-        let attached = driver
+        let enabled = driver
             .replace_physics_state(
                 guid,
                 generation,
@@ -1152,8 +1152,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            attached.body.physical_change.change,
-            holtburger_world::PhysicalBodyReconfiguration::Attached
+            enabled.body.physical_change.change,
+            holtburger_world::PhysicalBodyReconfiguration::SolverParticipationEnabled
         );
         let reconfigured = driver
             .replace_physics_state(
@@ -1167,7 +1167,7 @@ mod tests {
             reconfigured.body.physical_change.change,
             holtburger_world::PhysicalBodyReconfiguration::Reconfigured
         );
-        let detached = driver
+        let disabled = driver
             .replace_physics_state(
                 guid,
                 generation,
@@ -1176,11 +1176,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            detached.body.physical_change.change,
-            holtburger_world::PhysicalBodyReconfiguration::Detached
+            disabled.body.physical_change.change,
+            holtburger_world::PhysicalBodyReconfiguration::SolverParticipationDisabled
         );
         assert_eq!(
-            detached.instance.physical_intent,
+            disabled.instance.physical_intent,
             EntityPhysicalIntent::PoseOnly
         );
     }

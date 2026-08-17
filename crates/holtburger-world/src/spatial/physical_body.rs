@@ -368,7 +368,7 @@ pub(crate) struct DynamicBodyRuntimeState {
     pub(crate) placement: CollisionPlacement,
 }
 
-/// Physical definition and response memory attached to one spatial body.
+/// Physical definition and response memory owned by one spatial body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicalBodyState {
     /// Validated geometry and response policy shared by every spawn source.
@@ -394,8 +394,10 @@ pub enum PhysicalBodyParticipation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhysicalBodyReconfiguration {
     Unchanged,
-    Attached,
-    Detached,
+    /// The pose body gained collision/physics state.
+    SolverParticipationEnabled,
+    /// The pose body lost collision/physics state without retiring.
+    SolverParticipationDisabled,
     Reconfigured,
 }
 
@@ -952,7 +954,7 @@ fn solve_grounded_body_tick(
     };
     grounded_body.velocity =
         grounded_body.velocity + actuation.external_acceleration * delta_seconds;
-    // A newly attached grounded body has not yet had a collision transaction classify its
+    // A newly installed grounded body has not yet had a collision transaction classify its
     // contact. Let explicit planar drive participate in that first transaction so a body placed
     // on a floor does not discard one tick of input. Once a solve commits `Airborne`, canonical
     // velocity remains ballistic and later drive cannot steer it.

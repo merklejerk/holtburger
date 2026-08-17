@@ -205,6 +205,8 @@ pub struct GroundedBodyActuation {
     launch: Option<GroundedLaunch>,
     /// Optional controller-selected world heading applied before body-policy facing overrides.
     control_heading: Option<f32>,
+    /// World-space acceleration contributed by generic dynamic-body kinematics this tick.
+    external_acceleration: Vector3,
 }
 
 /// Source of planar velocity while a grounded body retains support.
@@ -228,21 +230,33 @@ impl GroundedBodyActuation {
             supported_motion: GroundedSupportedMotion::Driven(supported_planar_velocity),
             launch: None,
             control_heading: None,
+            external_acceleration: Vector3::zero(),
         })
     }
 
     /// Advances retained supported velocity without a character-drive override.
-    pub const fn coast() -> Self {
+    pub fn coast() -> Self {
         Self {
             supported_motion: GroundedSupportedMotion::Coasting,
             launch: None,
             control_heading: None,
+            external_acceleration: Vector3::zero(),
         }
     }
 
     pub fn with_launch(mut self, launch: GroundedLaunch) -> Self {
         self.launch = Some(launch);
         self
+    }
+
+    /// Adds one finite world-space acceleration without reinterpreting it as controller drive.
+    pub fn with_external_acceleration(
+        mut self,
+        acceleration: Vector3,
+    ) -> std::result::Result<Self, PhysicalBodyActuationError> {
+        validate_finite_velocity(acceleration)?;
+        self.external_acceleration = acceleration;
+        Ok(self)
     }
 
     /// Applies the controller's absolute world heading without changing ballistic velocity.
@@ -858,6 +872,8 @@ fn solve_grounded_body_tick(
         velocity: body.velocity,
         ground: state.ground,
     };
+    grounded_body.velocity =
+        grounded_body.velocity + actuation.external_acceleration * delta_seconds;
     // A newly attached grounded body has not yet had a collision transaction classify its
     // contact. Let explicit planar drive participate in that first transaction so a body placed
     // on a floor does not discard one tick of input. Once a solve commits `Airborne`, canonical

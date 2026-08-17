@@ -70,7 +70,10 @@
 		parseExplorerWcid,
 		type ExplorerCatalogCapability,
 	} from "./explorer-entity-commands";
-	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
+	import type {
+		DynamicEntityEvent,
+		DynamicEntityView,
+	} from "../lib/game/runtime/dynamic-entity-feed";
 	import { Vec3 } from "../lib/game/math/types";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import {
@@ -672,6 +675,25 @@
 		return completion;
 	}
 
+	/** Route high-frequency accepted paths without restarting visual resource reconciliation. */
+	function acceptDynamicEntityEvent(event: DynamicEntityEvent): void {
+		const session = dynamicEntitySession;
+		if (session === undefined) return;
+		spawnedEntities = session.mirror.entities();
+		if (event.kind !== "advanced") {
+			void reconcileSpawnedEntities();
+			return;
+		}
+		const runtime = gameRuntime;
+		if (runtime === undefined) return;
+		try {
+			runtime.applySpawnedDynamicEntityAdvances(event.batch, performance.now());
+			spawnedEntityPresentationError = null;
+		} catch (error) {
+			spawnedEntityPresentationError = `Dynamic-entity path presentation: ${errorMessage(error)}`;
+		}
+	}
+
 	async function spawnExplorerEntity(
 		rawWcid: string,
 		distance: number,
@@ -689,6 +711,7 @@
 			placement,
 			physicalCameraInput(controller).viewDirection,
 			distance,
+			"simulated",
 		);
 		await session.spawn(request);
 		await dynamicEntityReconciliation;
@@ -797,9 +820,9 @@
 					tauriExplorerDynamicEntityTransport(),
 				);
 				dynamicEntitySession = entitySession;
-				unsubscribeDynamicEntities = entitySession.subscribe(() => {
-					void reconcileSpawnedEntities();
-				});
+				unsubscribeDynamicEntities = entitySession.subscribe(
+					acceptDynamicEntityEvent,
+				);
 				await entitySession.start();
 				entityCatalog = await entitySession.catalogCapability();
 				if (destroyed) return;

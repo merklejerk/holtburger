@@ -1319,7 +1319,17 @@ WCIDs share one template, one surviving owner retains it, and final removal rele
 
 Progress: In progress (2026-08-16). R1 confirmed the landed definition/body/state-transition seams
 and selected the single collection-transaction, existing-feed batch, and shared placed-path cutovers.
-The collection participant and accepted fixed-tick entity motion path are next.
+The first vertical slice is now landed: `SpatialScene` derives one stable sorted eligible-entity scan
+from attached physical state; one Explorer participant captures tick-start bodies and one immutable
+collision snapshot under a single collection transaction; pose-only and frozen entities consume no
+solve. Changed accepted results publish at most one `advanced` batch on the existing focused feed.
+The frontend mirror accepts only newer exact-generation advances, while the sole dynamic-placement
+owner evaluates their placed paths at render cadence using the path core extracted from physical
+camera presentation. Late visual readiness installs the mirror's latest accepted endpoint rather
+than retaining spawn-time pose. Focused host tests prove two eligible siblings are visited in stable
+GUID order and one changed collection tick produces one batch; frontend path/mirror/session/runtime
+tests and all current static gates pass. Launch, explicit teleport/reset operations, scenario
+interest, full zero-actuation scenarios, and the Phase 5A-5D solver work remain.
 
 #### Deliverables
 
@@ -1385,7 +1395,16 @@ The collection participant and accepted fixed-tick entity motion path are next.
 
 #### Decisions and Course Corrections
 
-- Populate during execution. Any deliberate observable retail departure requires the project's
+- A Tauri advance-publication failure is reported immediately but does not unregister the collection
+  participant or roll back already accepted solver state. The focused snapshot is the recovery
+  contract; retaining failed events or adding delivery diagnostics would create a second history.
+- Transient path playback lives only in `DynamicEntityPlacementSystem`. The semantic mirror retains
+  the latest complete endpoint, and `GameRuntime` retains that desired current view while visual
+  preparation is pending. No path queue/history is required for late resource readiness.
+- The current collection solve still sees static collision only. Its tick-start body capture is the
+  input seam Phase 5B/5C will use for directional peer candidates; this progress does not claim
+  body-body collision early.
+- Any deliberate observable retail departure requires the project's
   `RETAIL QUIRK` or `RETAIL DIVERGENCE` marker with decompile citation, consequence, and census.
 
 ### Phase 5A: Add Settled-State Pruning and Wake Reconciliation

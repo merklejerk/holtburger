@@ -239,6 +239,86 @@ impl DynamicEntitySnapshot {
     }
 }
 
+/// Why one accepted placement path supersedes frontend interpolation state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DynamicEntityPlacementAdvanceKind {
+    /// Ordinary fixed-tick integration; render frames interpolate the complete accepted path.
+    Integrated,
+    /// Explicit discontinuous relocation; consumers snap and clear the previous path.
+    Teleport,
+    /// Forced authority reset; consumers snap and clear all prior correction state.
+    Reset,
+}
+
+/// One authoritative entity root pose at a placed-path boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityPathPoint {
+    /// Root pose whose cell selector and coordinates become authoritative together.
+    pub pose: WorldPosition,
+}
+
+/// One placement-stable entity path leg ending at an authoritative root pose.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityPathLeg {
+    /// Strictly increasing normalized fixed-tick fraction in `(0, 1]`.
+    pub end_fraction: f32,
+    /// Root pose committed at this exact boundary.
+    pub end: DynamicEntityPathPoint,
+}
+
+/// Complete accepted entity root path through one host fixed tick.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityPlacedPath {
+    /// Authoritative root pose at normalized fraction zero.
+    pub initial: DynamicEntityPathPoint,
+    /// Nonempty placed geometry ending at normalized fraction one.
+    pub legs: Vec<DynamicEntityPathLeg>,
+}
+
+/// One changed current entity plus the path that produced its accepted placement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityAdvance {
+    /// Complete current semantic/body projection for snapshot convergence and UI state.
+    pub entity: Box<DynamicEntityView>,
+    /// Correction semantics applied before consuming `path`.
+    pub kind: DynamicEntityPlacementAdvanceKind,
+    /// Host-accepted path evaluated by presentation at render cadence.
+    pub path: DynamicEntityPlacedPath,
+}
+
+/// At most one ordered changed-entity publication for one host fixed tick.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityAdvanceBatch {
+    /// Host instant at which this fixed tick completed.
+    pub host_time: DynamicEntityHostTime,
+    /// Positive playback duration shared by every path in this epoch.
+    pub duration_ms: f64,
+    /// Changed current generations in stable GUID order.
+    pub advances: Vec<DynamicEntityAdvance>,
+}
+
+impl DynamicEntityAdvanceBatch {
+    /// Establishes stable publication order without creating retained delivery history.
+    pub fn new(
+        host_time: DynamicEntityHostTime,
+        duration_ms: f64,
+        mut advances: Vec<DynamicEntityAdvance>,
+    ) -> Self {
+        advances.sort_by_key(|advance| advance.entity.identity.guid);
+        Self {
+            host_time,
+            duration_ms,
+            advances,
+        }
+    }
+}
+
 /// Minimal focused delivery grammar repaired by requesting another complete snapshot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -250,6 +330,7 @@ pub enum DynamicEntityEvent {
     Snapshot { snapshot: DynamicEntitySnapshot },
     Upserted { entity: Box<DynamicEntityView> },
     Removed { guid: Guid, generation: u64 },
+    Advanced { batch: DynamicEntityAdvanceBatch },
 }
 
 /// Projects one semantic/body join without consulting either producer registry.

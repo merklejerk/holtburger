@@ -40,7 +40,9 @@ use crate::host_simulation_runtime::HostSimulationRuntime;
 use crate::host_simulation_runtime::CollisionSource;
 
 #[cfg(test)]
-use presentation::{landblock_key, scene_point_to_pose, transit_presented_viewer_path};
+use crate::placed_motion_presentation::landblock_key;
+#[cfg(test)]
+use presentation::{scene_point_to_pose, transit_presented_viewer_path};
 
 #[cfg(test)]
 use crate::host_fixed_tick_runtime::HOST_FIXED_TICK_HZ as HOST_TICK_HZ;

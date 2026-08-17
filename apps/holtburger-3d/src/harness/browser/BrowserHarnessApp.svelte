@@ -627,6 +627,7 @@
 			},
 			direction,
 			distance,
+			"pose-only",
 		);
 		const entity = await entityHost.spawn(request);
 		spawnedEntities = [

@@ -16,9 +16,10 @@ use holtburger_core::{
 };
 use holtburger_world::{
     CollisionScene, DynamicPhysicalBodyDefinition, EdgeProtection, EntityPhysicsTransitionDecision,
-    PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
-    PhysicalBodyTickResult, PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath,
-    PlacementRecovery, SpatialBody, SpatialBodyId, SpatialScene,
+    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
+    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyId,
+    SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 
@@ -378,36 +379,70 @@ impl HostSimulationRuntime {
             .cloned()
             .with_context(|| format!("physical body {body_id:?} is not registered"))?;
         let actuation = build_actuation(&previous)?;
-        let (result, accepted) = state.bodies.tick_physical_body_transaction(
-            body_id,
-            &scene,
+        tick_body_transaction(
+            &mut state,
+            scene,
+            previous,
             actuation,
             delta_seconds,
             now,
-            |current, result| {
-                accept(&HostPhysicalBodyTick {
-                    previous: previous.clone(),
-                    current: current.clone(),
-                    result: result.clone(),
-                    collision: Arc::clone(&scene),
-                })
-            },
-        )?;
-        report_body_placement_recoveries(body_id, &result);
-        let current = state
+            accept,
+        )
+    }
+
+    /// Advances every state-eligible dynamic entity in one locked collection epoch.
+    ///
+    /// Identity order and body facts are captured before the first solve. Each accepted solve
+    /// commits independently, while every body observes the same immutable static-collision scene.
+    /// The later peer-collision phase can consume this same tick-start snapshot without changing
+    /// registry ownership or introducing a whole-world rollback transaction.
+    pub fn tick_dynamic_entity_collection(
+        &self,
+        delta_seconds: f32,
+        now: std::time::Instant,
+    ) -> Result<Vec<HostPhysicalBodyTick>> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        let scene = Arc::clone(&state.scene);
+        let tick_start = state
             .bodies
-            .body(body_id)
-            .cloned()
-            .expect("physical body vanished during a locked host tick");
-        Ok((
-            HostPhysicalBodyTick {
+            .scheduled_dynamic_entity_ids()
+            .into_iter()
+            .map(|body_id| {
+                state
+                    .bodies
+                    .body(body_id)
+                    .cloned()
+                    .expect("scheduled dynamic body vanished while collection lock was held")
+            })
+            .collect::<Vec<_>>();
+        let mut ticks = Vec::with_capacity(tick_start.len());
+        for previous in tick_start {
+            let definition = previous
+                .physical
+                .as_ref()
+                .expect("scheduled dynamic body lost its physical definition")
+                .definition;
+            let actuation = match definition {
+                PhysicalBodyDefinition::FreeSphere { .. } => PhysicalBodyActuation::free_flight(
+                    previous.velocity + previous.acceleration * delta_seconds,
+                )?,
+                PhysicalBodyDefinition::Grounded { .. } => PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast()
+                        .with_external_acceleration(previous.acceleration)?,
+                ),
+            };
+            let (tick, ()) = tick_body_transaction(
+                &mut state,
+                Arc::clone(&scene),
                 previous,
-                current,
-                result,
-                collision: scene,
-            },
-            accepted,
-        ))
+                actuation,
+                delta_seconds,
+                now,
+                |_| Ok(()),
+            )?;
+            ticks.push(tick);
+        }
+        Ok(ticks)
     }
 
     #[cfg(test)]
@@ -534,6 +569,48 @@ impl HostSimulationRuntime {
             .expect("simulation interest target lock poisoned");
         target.session == session && target.revision == revision && target.owners == *owners
     }
+}
+
+fn tick_body_transaction<T>(
+    state: &mut HostSimulationState,
+    scene: Arc<CollisionScene>,
+    previous: SpatialBody,
+    actuation: PhysicalBodyActuation,
+    delta_seconds: f32,
+    now: std::time::Instant,
+    accept: impl FnOnce(&HostPhysicalBodyTick) -> Result<T>,
+) -> Result<(HostPhysicalBodyTick, T)> {
+    let body_id = previous.id;
+    let (result, accepted) = state.bodies.tick_physical_body_transaction(
+        body_id,
+        &scene,
+        actuation,
+        delta_seconds,
+        now,
+        |current, result| {
+            accept(&HostPhysicalBodyTick {
+                previous: previous.clone(),
+                current: current.clone(),
+                result: result.clone(),
+                collision: Arc::clone(&scene),
+            })
+        },
+    )?;
+    report_body_placement_recoveries(body_id, &result);
+    let current = state
+        .bodies
+        .body(body_id)
+        .cloned()
+        .expect("physical body vanished during a locked host tick");
+    Ok((
+        HostPhysicalBodyTick {
+            previous,
+            current,
+            result,
+            collision: scene,
+        },
+        accepted,
+    ))
 }
 
 fn report_body_placement_recoveries(body_id: SpatialBodyId, result: &PhysicalBodyTickResult) {

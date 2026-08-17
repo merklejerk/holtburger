@@ -26,7 +26,7 @@ export interface ExplorerDynamicEntityTransport {
 export class ExplorerDynamicEntitySession {
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ExplorerDynamicEntityTransport;
-	readonly #listeners = new Set<() => void>();
+	readonly #listeners = new Set<(event: DynamicEntityEvent) => void>();
 	readonly #waiters = new Set<{
 		readonly reached: () => boolean;
 		readonly resolve: () => void;
@@ -107,14 +107,15 @@ export class ExplorerDynamicEntitySession {
 	}
 
 	/** Observe accepted current-state changes without creating another entity authority. */
-	subscribe(listener: () => void): () => void {
+	subscribe(listener: (event: DynamicEntityEvent) => void): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
 	}
 
 	#receive(payload: unknown): void {
-		if (!this.mirror.apply(decodeDynamicEntityEvent(payload))) return;
-		for (const listener of this.#listeners) listener();
+		const event = decodeDynamicEntityEvent(payload);
+		if (!this.mirror.apply(event)) return;
+		for (const listener of this.#listeners) listener(event);
 		for (const waiter of [...this.#waiters]) {
 			if (!waiter.reached()) continue;
 			this.#waiters.delete(waiter);

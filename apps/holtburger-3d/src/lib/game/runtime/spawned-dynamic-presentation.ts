@@ -1,6 +1,7 @@
 import { acFrameTransform } from "../../assets/ac-frame";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { Vec3 } from "../math/types";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import type { DynamicEntityView } from "./dynamic-entity-feed";
@@ -44,7 +45,13 @@ export function adaptSpawnedDynamicPresentation(
 export function spawnedDynamicPlacement(
 	entity: DynamicEntityView,
 ): ScenePlacement {
-	const pose = entity.placement.pose;
+	return spawnedDynamicPlacementFromPose(entity.placement.pose);
+}
+
+/** Convert one host-authored root pose while preserving its exact placement selector. */
+export function spawnedDynamicPlacementFromPose(
+	pose: DynamicEntityView["placement"]["pose"],
+): ScenePlacement {
 	const cellId = pose.landblockId >>> 0;
 	const selector = cellId & 0xffff;
 	return {
@@ -63,6 +70,66 @@ export function spawnedDynamicPlacement(
 			[1, 1, 1],
 		),
 	};
+}
+
+/** Interpolate one placement-stable half-open path leg in its starting residency. */
+export function interpolateSpawnedDynamicPlacement(
+	start: DynamicEntityView["placement"]["pose"],
+	end: DynamicEntityView["placement"]["pose"],
+	fraction: number,
+): ScenePlacement {
+	const startPlacement = spawnedDynamicPlacementFromPose(start);
+	const startOwner = landblockCoordinates(start.landblockId);
+	const endOwner = landblockCoordinates(end.landblockId);
+	const startWorldX =
+		startOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.coords.x;
+	const startWorldY =
+		startOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.coords.y;
+	const endWorldX = endOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.coords.x;
+	const endWorldY = endOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.coords.y;
+	const rotation = interpolateQuaternion(
+		start.rotation,
+		end.rotation,
+		fraction,
+	);
+	return {
+		envCellId: startPlacement.envCellId,
+		landblockId: startPlacement.landblockId,
+		localTransform: acFrameTransform(
+			{
+				origin: [
+					start.coords.x + (endWorldX - startWorldX) * fraction,
+					start.coords.y + (endWorldY - startWorldY) * fraction,
+					start.coords.z + (end.coords.z - start.coords.z) * fraction,
+				],
+				orientation: [rotation.w, rotation.x, rotation.y, rotation.z],
+			},
+			[1, 1, 1],
+		),
+	};
+}
+
+function landblockCoordinates(cellId: number): { x: number; y: number } {
+	return { x: (cellId >>> 24) & 0xff, y: (cellId >>> 16) & 0xff };
+}
+
+function interpolateQuaternion(
+	start: DynamicEntityView["placement"]["pose"]["rotation"],
+	end: DynamicEntityView["placement"]["pose"]["rotation"],
+	fraction: number,
+): DynamicEntityView["placement"]["pose"]["rotation"] {
+	const dot =
+		start.w * end.w + start.x * end.x + start.y * end.y + start.z * end.z;
+	const sign = dot < 0 ? -1 : 1;
+	const w = start.w + (end.w * sign - start.w) * fraction;
+	const x = start.x + (end.x * sign - start.x) * fraction;
+	const y = start.y + (end.y * sign - start.y) * fraction;
+	const z = start.z + (end.z * sign - start.z) * fraction;
+	const length = Math.hypot(w, x, y, z);
+	if (!Number.isFinite(length) || length <= Number.EPSILON) {
+		throw new Error("Dynamic-entity path produced an invalid rotation.");
+	}
+	return { w: w / length, x: x / length, y: y / length, z: z / length };
 }
 
 function datId(value: number): string {

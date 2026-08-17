@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::{
-    MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK, WorldPosition, outdoor_landblock_owner_at,
+    MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK, WorldPosition,
 };
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_world::{
@@ -10,6 +10,9 @@ use holtburger_world::{
 };
 
 use crate::host_simulation_runtime::{HostPhysicalBodyTick, report_placed_motion_recoveries};
+use crate::placed_motion_presentation::{
+    landblock_key, present_placed_motion_point, reanchor_point,
+};
 
 use super::{
     ActiveCamera, FIRST_PERSON_FORWARD_OFFSET, HUMAN_EYE_HEIGHT, PhysicalCameraMode,
@@ -260,20 +263,13 @@ fn serialize_path_point(
     anchor: Guid,
     point: &PlacedMotionPoint,
 ) -> Result<PhysicalCameraPathPoint> {
-    let owner = match point.placement().committed_cell() {
-        Some(cell) => landblock_key(cell),
-        None => owner_for_anchor_point(anchor, point.center())?,
-    };
-    let origin = reanchor_point(point.center(), anchor, owner);
+    let presented = present_placed_motion_point(anchor, point)?;
     Ok(PhysicalCameraPathPoint {
         residency: PhysicalCameraResidency {
-            landblock_id: format!("0x{:08x}", owner.0),
-            env_cell_id: point
-                .placement()
-                .committed_cell()
-                .map(|cell| format!("0x{:08x}", cell.0)),
+            landblock_id: format!("0x{:08x}", presented.owner.0),
+            env_cell_id: presented.cell.map(|cell| format!("0x{:08x}", cell.0)),
         },
-        origin: [origin.x, origin.y, origin.z],
+        origin: [presented.coords.x, presented.coords.y, presented.coords.z],
     })
 }
 
@@ -294,23 +290,19 @@ fn presented_viewer_from_path(
     direction: Vector3,
 ) -> Result<PresentedViewer> {
     let point = path.final_point();
-    let cell = point.placement().committed_cell();
-    let owner = cell
-        .map(landblock_key)
-        .map_or_else(|| owner_for_anchor_point(path.anchor(), point.center()), Ok)?;
-    let coords = reanchor_point(point.center(), path.anchor(), owner);
+    let presented = present_placed_motion_point(path.anchor(), point)?;
     let mut pose = WorldPosition {
-        landblock_id: Guid(owner.0 & 0xffff_0000),
-        coords,
+        landblock_id: Guid(presented.owner.0 & 0xffff_0000),
+        coords: presented.coords,
         rotation: Quaternion::identity(),
     }
     .normalize_outdoor_cell();
-    if let Some(cell) = cell {
+    if let Some(cell) = presented.cell {
         pose.landblock_id = cell;
     }
     Ok(PresentedViewer {
         pose,
-        cell,
+        cell: presented.cell,
         direction,
     })
 }
@@ -341,27 +333,6 @@ fn camera_scene_residency(residency: PhysicalBodySceneResidency) -> PhysicalCame
     }
 }
 
-fn owner_for_anchor_point(anchor: Guid, point: Vector3) -> Result<Guid> {
-    let anchor = landblock_key(anchor);
-    ensure!(
-        point.x.is_finite() && point.y.is_finite(),
-        "presented camera viewer position must be finite"
-    );
-    Ok(outdoor_landblock_owner_at(anchor, point).unwrap_or(anchor))
-}
-
-fn reanchor_point(point: Vector3, source_owner: Guid, target_owner: Guid) -> Vector3 {
-    let source_x = ((source_owner.0 >> 24) & 0xff) as i32;
-    let source_y = ((source_owner.0 >> 16) & 0xff) as i32;
-    let target_x = ((target_owner.0 >> 24) & 0xff) as i32;
-    let target_y = ((target_owner.0 >> 16) & 0xff) as i32;
-    Vector3::new(
-        point.x + (source_x - target_x) as f32 * METERS_PER_LANDBLOCK,
-        point.y + (source_y - target_y) as f32 * METERS_PER_LANDBLOCK,
-        point.z,
-    )
-}
-
 /// Converts a canonical render-scene point into an outdoor AC pose.
 pub(super) fn scene_point_to_pose(scene_point: [f32; 3]) -> Result<WorldPosition> {
     ensure!(
@@ -388,8 +359,4 @@ pub(super) fn scene_point_to_pose(scene_point: [f32; 3]) -> Result<WorldPosition
         rotation: Quaternion::identity(),
     }
     .normalize_outdoor_cell())
-}
-
-pub(super) fn landblock_key(id: Guid) -> Guid {
-    Guid((id.0 & 0xffff_0000) | 0xffff)
 }

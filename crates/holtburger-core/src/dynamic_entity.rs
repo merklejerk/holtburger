@@ -1,13 +1,14 @@
 //! Shared dynamic-entity definitions, content preparation, and state reconciliation decisions.
 
 use std::collections::BTreeSet;
+use std::f32::consts::TAU;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WeenieType;
+use holtburger_common::properties::{PhysicsState, WeenieType};
 use holtburger_common::{Guid, Placement, Quaternion, Vector3};
 use holtburger_content::{
     ColliderScale, CollisionShape, ContentRepository, MaterialAppearanceInput,
@@ -20,13 +21,14 @@ use holtburger_dat::file_type::{
 };
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::{
-    DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EdgeProtection,
-    EffectiveEntityPhysicsState, EntityAppearance, EntityPhysicalTransitionAction,
+    DynamicBodyCollisionDefinition, DynamicBodyKinematics, DynamicPhysicalBodyDefinition,
+    EdgeProtection, EffectiveEntityPhysicsState, EntityAppearance, EntityPhysicalTransitionAction,
     EntityPhysicsSetupFacts, EntityPhysicsTransitionDecision, PhysicalBodyParticipation,
     PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
     PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
     PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
     RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    resolve_effective_entity_physics_state,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -144,6 +146,26 @@ pub enum DynamicEntityDefinitionError {
     InvalidRotationSpeed,
 }
 
+/// Fully resolved one-shot launch consequences shared by producer compositions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicEntityLaunchPlan {
+    /// Finite live vectors plus the resulting align-path response policy.
+    pub kinematics: DynamicBodyKinematics,
+    /// Complete semantic state after ACE's rotation-speed align-path override.
+    pub physics: EffectiveEntityPhysicsState,
+}
+
+/// A launch request that cannot be resolved from immutable definition facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DynamicEntityLaunchError {
+    #[error("dynamic-entity launch direction must be finite and nonzero")]
+    InvalidDirection,
+    #[error("dynamic-entity launch requires catalog maximum velocity")]
+    MissingMaximumVelocity,
+    #[error("dynamic-entity launch requires positive catalog maximum velocity")]
+    ZeroMaximumVelocity,
+}
+
 impl DynamicEntityDefinition {
     /// Validates all source scalar domains and resolves ACE coefficient defaults once.
     pub fn prepare(
@@ -193,6 +215,52 @@ impl DynamicEntityDefinition {
             physics: input.physics,
         })
     }
+}
+
+/// Resolves explicit direction against catalog speed and ACE's authored spin convention.
+///
+/// ACE assigns projectile omega on local X as `2π * RotationSpeed` and clears `AlignPath` when
+/// that value is nonzero (`SpellProjectile.Setup` and `Creature.SetProjectilePhysicsState`).
+pub fn resolve_dynamic_entity_launch(
+    definition: &DynamicEntityDefinition,
+    direction: Vector3,
+) -> Result<DynamicEntityLaunchPlan, DynamicEntityLaunchError> {
+    if !direction.x.is_finite() || !direction.y.is_finite() || !direction.z.is_finite() {
+        return Err(DynamicEntityLaunchError::InvalidDirection);
+    }
+    let direction_length = direction.length();
+    if !direction_length.is_finite() || direction_length <= f32::EPSILON {
+        return Err(DynamicEntityLaunchError::InvalidDirection);
+    }
+    let maximum_velocity = definition
+        .maximum_velocity
+        .ok_or(DynamicEntityLaunchError::MissingMaximumVelocity)?;
+    if maximum_velocity <= f32::EPSILON {
+        return Err(DynamicEntityLaunchError::ZeroMaximumVelocity);
+    }
+    let rotation_speed = definition.rotation_speed.unwrap_or(0.0);
+    let omega = if rotation_speed > f32::EPSILON {
+        Vector3::new(TAU * rotation_speed, 0.0, 0.0)
+    } else {
+        Vector3::zero()
+    };
+    let semantic = if rotation_speed > f32::EPSILON {
+        definition.physics.semantic & !PhysicsState::ALIGN_PATH
+    } else {
+        definition.physics.semantic
+    };
+    let physics = resolve_effective_entity_physics_state(semantic);
+    let kinematics = DynamicBodyKinematics::new(
+        direction / direction_length * maximum_velocity,
+        Vector3::zero(),
+        omega,
+        physics.response.align_path,
+    )
+    .expect("validated launch facts must produce finite kinematics");
+    Ok(DynamicEntityLaunchPlan {
+        kinematics,
+        physics,
+    })
 }
 
 /// Physical preparation rejection with enough identity to explain the exact source failure.
@@ -461,6 +529,21 @@ pub fn dynamic_entity_projection_input(
     let body = scene
         .body(body_id)
         .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+    dynamic_entity_projection_input_from_body(definition, body)
+}
+
+/// Joins immutable semantic facts with one already-captured canonical body.
+///
+/// Collection adapters use this form while holding their producer generation stable, avoiding a
+/// second simulation lock acquisition merely to restate the body that just committed.
+pub fn dynamic_entity_projection_input_from_body(
+    definition: &DynamicEntityDefinition,
+    body: &SpatialBody,
+) -> Result<DynamicEntityProjectionInput, DynamicEntityBodyOperationError> {
+    let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    if body.id != body_id {
+        return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
+    }
     Ok(DynamicEntityProjectionInput {
         identity: definition.identity.clone(),
         content: definition.content,

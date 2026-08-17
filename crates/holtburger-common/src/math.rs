@@ -134,6 +134,23 @@ impl Quaternion {
         }
     }
 
+    /// Builds a unit rotation from one finite nonzero axis and a finite angle in radians.
+    pub fn from_axis_angle(axis: Vector3, angle: f32) -> Option<Self> {
+        let axis_length = axis.length();
+        if !axis_length.is_finite() || axis_length <= f32::EPSILON || !angle.is_finite() {
+            return None;
+        }
+        let unit = axis / axis_length;
+        let half = angle * 0.5;
+        let sin = half.sin();
+        Some(Self {
+            w: half.cos(),
+            x: unit.x * sin,
+            y: unit.y * sin,
+            z: unit.z * sin,
+        })
+    }
+
     /// Converts a quaternion to a heading (yaw) in radians.
     /// AC heading matches the official client: 0 at West, 90 at North, 180 at East, 270 at South.
     pub fn to_heading(&self) -> f32 {

@@ -5,11 +5,12 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
 
+use anyhow::Context;
 use holtburger_common::Guid;
 use holtburger_core::{
     DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
-    DynamicEntityProjectionInput,
+    DynamicEntityProjectionInput, dynamic_entity_projection_input_from_body,
 };
 use holtburger_world::{DynamicPhysicalBodyDefinition, SpatialBodyId};
 use holtburger_world::{
@@ -17,7 +18,7 @@ use holtburger_world::{
     EntityPhysicsTransitionDecision, decide_entity_physics_state_transition,
 };
 
-use crate::host_simulation_runtime::HostSimulationRuntime;
+use crate::host_simulation_runtime::{HostPhysicalBodyTick, HostSimulationRuntime};
 
 const EXPLORER_GUID_START: u32 = 0xf000_0001;
 const EXPLORER_GUID_END: u32 = 0xffff_fffe;
@@ -152,6 +153,16 @@ pub struct ExplorerEntityProjection {
     pub generation: u64,
     /// Source-neutral semantic facts joined with the current canonical body view.
     pub input: DynamicEntityProjectionInput,
+}
+
+/// One accepted fixed-tick body path paired with its still-current semantic generation.
+pub struct ExplorerEntityPhysicalTick {
+    /// Current instance generation held stable across the collection transaction.
+    pub generation: u64,
+    /// Source-neutral semantic/body projection read from the committed body without relocking.
+    pub input: DynamicEntityProjectionInput,
+    /// Complete accepted solver path and immutable collision snapshot used by the solve.
+    pub solved: HostPhysicalBodyTick,
 }
 
 /// Committed semantic/body facts from one complete effective-state replacement.
@@ -315,9 +326,9 @@ impl ExplorerEntityRegistry {
 
 /// Ordered Explorer composition joining its semantic registry to its distinct host body scene.
 pub struct ExplorerEntityRuntime {
-    // Lifecycle and snapshot operations always acquire this registry lock before entering the
-    // simulation runtime. Fixed-tick adapters must check generations before/after a simulation
-    // transaction and never call back here while the simulation lock is held.
+    // Every operation acquires this registry lock before entering the simulation runtime. The
+    // collection tick holds it across one simulation transaction, so instance generations cannot
+    // retire between solve acceptance and projection and no callback inverts the lock order.
     registry: Mutex<ExplorerEntityRegistry>,
     simulation: Arc<HostSimulationRuntime>,
 }
@@ -543,6 +554,46 @@ impl ExplorerEntityRuntime {
             .collect()
     }
 
+    /// Advances every eligible physical instance in one generation-stable collection transaction.
+    ///
+    /// Only frontend-relevant body/path changes leave this boundary. Stable entities still remain
+    /// in the scene-owned scan; Phase 5A may skip their integration without a second active set.
+    pub fn tick_physical_collection(
+        &self,
+        delta_seconds: f32,
+        now: std::time::Instant,
+    ) -> anyhow::Result<Vec<ExplorerEntityPhysicalTick>> {
+        let registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        self.simulation
+            .tick_dynamic_entity_collection(delta_seconds, now)?
+            .into_iter()
+            .filter(physical_tick_changed)
+            .map(|solved| {
+                let SpatialBodyId::Entity(guid) = solved.current.id else {
+                    anyhow::bail!("dynamic-entity collection returned a non-entity body")
+                };
+                let instance = registry.entities.get(&guid).with_context(|| {
+                    format!(
+                        "dynamic-entity body 0x{:08X} has no Explorer semantic instance",
+                        guid.0
+                    )
+                })?;
+                let input = dynamic_entity_projection_input_from_body(
+                    &instance.definition,
+                    &solved.current,
+                )?;
+                Ok(ExplorerEntityPhysicalTick {
+                    generation: instance.generation,
+                    input,
+                    solved,
+                })
+            })
+            .collect()
+    }
+
     /// Tests whether an asynchronous outcome still targets the current live generation.
     pub fn is_current(&self, guid: Guid, generation: u64) -> bool {
         self.registry
@@ -552,6 +603,17 @@ impl ExplorerEntityRuntime {
             .get(&guid)
             .is_some_and(|instance| instance.generation == generation)
     }
+}
+
+fn physical_tick_changed(tick: &HostPhysicalBodyTick) -> bool {
+    tick.previous.runtime_view() != tick.current.runtime_view()
+        || tick
+            .result
+            .motion
+            .path
+            .legs()
+            .iter()
+            .any(|leg| leg.end() != tick.result.motion.path.initial())
 }
 
 fn validate_prepared_intent(
@@ -780,6 +842,68 @@ mod tests {
             PhysicalBodyParticipation::Physical
         );
         assert_eq!(runtime.snapshot().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn collection_tick_visits_only_eligible_physical_instances_in_guid_order() {
+        let (_simulation, runtime) = runtime(0xf000_0100, 0xf000_0103);
+        let pose_only_guid = runtime.reserve_guid().unwrap();
+        let frozen_guid = runtime.reserve_guid().unwrap();
+        let first_active_guid = runtime.reserve_guid().unwrap();
+        let second_active_guid = runtime.reserve_guid().unwrap();
+        runtime
+            .spawn_prepared(
+                definition(pose_only_guid, 1, 0.0),
+                EntityPhysicalIntent::PoseOnly,
+                None,
+            )
+            .unwrap();
+
+        let mut frozen_definition = definition(frozen_guid, 2, 1.0);
+        frozen_definition.physics =
+            resolve_effective_entity_physics_state(PhysicsState::GRAVITY | PhysicsState::FROZEN);
+        let mut frozen_physical = physical();
+        frozen_physical.entity_collision.scheduling = EntityPhysicsScheduling::Frozen;
+        runtime
+            .spawn_prepared(
+                frozen_definition,
+                EntityPhysicalIntent::Simulated,
+                Some(frozen_physical),
+            )
+            .unwrap();
+        let first = runtime
+            .spawn_prepared(
+                definition(first_active_guid, 3, 2.0),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+        let second = runtime
+            .spawn_prepared(
+                definition(second_active_guid, 4, 3.0),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+
+        let ticks = runtime
+            .tick_physical_collection(1.0 / 30.0, Instant::now())
+            .unwrap();
+
+        assert_eq!(
+            ticks
+                .iter()
+                .map(|tick| (tick.input.identity.guid, tick.generation))
+                .collect::<Vec<_>>(),
+            [
+                (first_active_guid, first.instance.generation),
+                (second_active_guid, second.instance.generation),
+            ]
+        );
+        assert!(ticks.iter().all(|tick| {
+            tick.solved.result.motion.path.anchor() == Guid(0xda55_ffff)
+                && tick.solved.result.motion.path.legs().last().is_some()
+        }));
     }
 
     #[test]

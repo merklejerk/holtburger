@@ -8,9 +8,16 @@ import type { DatAssetId } from "../game-types";
 import { placeSpatialAudio } from "./audio-spatialization";
 import type { SpatialAudioPlacement } from "./audio-spatialization";
 
-/** A playing voice, from the system's point of view. */
+/** A playing voice, from the system's point of view: steerable while it lives. */
 export interface AudioVoice {
 	stop(): void;
+	/**
+	 * Update the voice's gain and pan mid-playback.
+	 *
+	 * Called once per frame while the voice lives; on a finished or stopped voice it is a no-op
+	 * rather than an error, because the system sweeps lazily and a race here has no consequence.
+	 */
+	setPlacement(gain: number, pan: number): void;
 	/**
 	 * Whether playback has ended on its own.
 	 *
@@ -19,6 +26,47 @@ export interface AudioVoice {
 	 * guarding against firing after a steal or after shutdown. A flag has no lifetime question.
 	 */
 	readonly finished: boolean;
+}
+
+/**
+ * Where a sound's gain and pan come from, for its whole playback.
+ *
+ * A discriminated union so the illegal states cannot be spelled: a world sound has a fixed emitting
+ * point and a fixed authored volume; a listener-locked bed has neither — no position at all, and a
+ * gain supplier read live each frame. This mirrors the ambient invariant that the surroundings
+ * scale exactly one of gain and probability: a `"world"` sound's static volume is correct, not an
+ * omission.
+ */
+export type AudioPlacementSource =
+	| {
+			readonly mode: "world";
+			/** Scene space, matching the listener; spatialization is purely relative. */
+			readonly position: SceneVector3;
+			readonly volume: number;
+	  }
+	| {
+			readonly mode: "listener";
+			/**
+			 * Live gain for a head-locked sound, read once per frame and at trigger time.
+			 *
+			 * A supplier rather than a number because the value belongs to its producer — ambient
+			 * share re-weighted as the listener moves — and reads `0` once that producer retires it,
+			 * which fades the voice out instead of stranding it at its last gain.
+			 */
+			readonly volume: () => number;
+	  };
+
+/**
+ * A playing voice plus the facts needed to re-place it each frame.
+ *
+ * Facts, not derived results: gain and pan are recomputed from these against the current listener,
+ * never stored. A world position is the emitting point sampled at trigger time — voices deliberately
+ * do not follow their emitters, only the listener.
+ */
+interface LiveVoice {
+	readonly voice: AudioVoice;
+	readonly source: AudioPlacementSource;
+	readonly category: AudioCategory;
 }
 
 /**
@@ -87,9 +135,8 @@ export interface AudioTrigger {
 	readonly soundId: DatAssetId;
 	/** Play chance rolled once at trigger time. */
 	readonly probability: number;
-	readonly volume: number;
-	/** Scene space, matching the listener; spatialization is purely relative. */
-	readonly position: SceneVector3;
+	/** Where gain and pan come from, at trigger time and for the whole playback. */
+	readonly source: AudioPlacementSource;
 	/** Selects which user volume scales this sound; retail's `is_ambient` as a name rather than a flag. */
 	readonly category: AudioCategory;
 }
@@ -114,7 +161,10 @@ export interface AudioDiagnostics {
 	readonly stolenCount: number;
 	/** Declined by the authored probability roll before any spatial work. */
 	readonly lostProbabilityRollCount: number;
-	/** Below retail's audible floor for the current listener pose. */
+	/**
+	 * Below retail's audible floor for the listener pose at the moment of placement — at trigger
+	 * time, or at replay time for a warmed sound whose listener moved out of earshot mid-decode.
+	 */
 	readonly inaudibleCount: number;
 	/** Placed audibly, but the device had no buffer ready; each of these is warmed and retried. */
 	readonly deviceRefusedCount: number;
@@ -131,8 +181,16 @@ export interface AudioDiagnostics {
  *
  * The evidence-backed scope is small on purpose: no looping, no streaming, no mixing graph, no stop
  * API. Retail's hook path has none of those — repeating ambience is a separate `Ambient` scheduler
- * that is out of scope — and spatial parameters are computed once at trigger time and never
- * updated, so a moving source does not re-pan.
+ * that produces triggers through the same door.
+ *
+ * RETAIL DIVERGENCE: retail never updates a playing voice's spatial parameters. `GetAttenuation`
+ * has exactly four call sites in the whole binary (acclient.c:366516, 366859, 366879, 366904),
+ * every one inside a sound-*starting* function; gain and pan were fixed at trigger time for the
+ * voice's whole life. We re-place every live voice against the current listener each frame
+ * (`advance`). Safe to depart: no shipped content can depend on a sound *failing* to track a
+ * listener — the difference is pure presentation — and a free-flying camera makes frozen placement
+ * audibly wrong within a single multi-second voice. The 1999 constraint (DirectSound buffers, CPU
+ * budget) no longer applies.
  *
  * Voices deliberately **outlive their emitting owner**. Retail's playing voices are fire-and-forget
  * copies with no back-pointer, so a sound triggered by an object finishes after that object is
@@ -143,7 +201,7 @@ export class AudioSystem {
 	readonly #device: AudioDevice;
 	readonly #roll: () => number;
 	readonly #voiceLimit: number;
-	readonly #voices: AudioVoice[] = [];
+	readonly #voices: LiveVoice[] = [];
 	readonly #clock: () => number;
 	readonly #maximumWarmupReplaySeconds: number;
 	#playedCount = 0;
@@ -164,9 +222,8 @@ export class AudioSystem {
 	};
 
 	/**
-	 * @param voiceLimit Maximum simultaneous voices; the oldest is stolen when the budget is full.
-	 * Retail runs 16 voices with priority-based stealing, but hook sounds all carry priority 0 and
-	 * lose every contest, so a plain oldest-steal is the same behavior with less machinery.
+	 * @param voiceLimit Maximum simultaneous voices; the quietest is stolen when the budget is
+	 * full (see `#claimVoiceSlot` for the divergence from retail's priority-and-age stealing).
 	 */
 	constructor(
 		device: AudioDevice,
@@ -217,13 +274,7 @@ export class AudioSystem {
 			this.#lostProbabilityRollCount += 1;
 			return "lost-probability-roll";
 		}
-		const placement = placeSpatialAudio(
-			trigger.position,
-			this.#listener.position,
-			this.#listener.right,
-			trigger.volume,
-			this.#categoryVolume(trigger.category),
-		);
+		const placement = this.#place(trigger.source, trigger.category);
 		// Below retail's audible floor the sound is not played at all, rather than played silently.
 		if (placement === null) {
 			this.#inaudibleCount += 1;
@@ -239,36 +290,90 @@ export class AudioSystem {
 			// The buffer is not decoded yet. Warm it and replay, rather than dropping the sound
 			// outright: the same path serves authored hooks and anything the network triggers
 			// later, neither of which can be enumerated ahead of time.
-			this.#warmAndReplay(trigger.soundId, placement, this.#clock());
+			this.#warmAndReplay(trigger, this.#clock());
 			this.#deviceRefusedCount += 1;
 			return "device-refused";
 		}
-		this.#voices.push(voice);
-		this.#playedCount += 1;
+		this.#retain(voice, trigger);
 		return "played";
+	}
+
+	/** Record a started voice with the facts `advance` re-places it from. */
+	#retain(voice: AudioVoice, trigger: AudioTrigger): void {
+		this.#voices.push({
+			category: trigger.category,
+			source: trigger.source,
+			voice,
+		});
+		this.#playedCount += 1;
+	}
+
+	/**
+	 * One placement from one source, against the listener as it is right now.
+	 *
+	 * A listener-locked source is placed at the listener's own position, which lands in the flat
+	 * radius — full supplied gain, zero pan — without any special case in the retail curve.
+	 */
+	#place(
+		source: AudioPlacementSource,
+		category: AudioCategory,
+	): SpatialAudioPlacement | null {
+		const listener = this.#listener;
+		return placeSpatialAudio(
+			source.mode === "world" ? source.position : listener.position,
+			listener.position,
+			listener.right,
+			source.mode === "world" ? source.volume : source.volume(),
+			this.#categoryVolume(category),
+		);
+	}
+
+	/**
+	 * Re-place every live voice against the current listener, once per frame.
+	 *
+	 * Takes no clock: placement is a pure function of the listener pose and settings as they are
+	 * right now. A voice that has receded below the audible floor is silenced rather than stopped —
+	 * a free-flying camera routinely leaves and re-enters earshot, and stopping would make the
+	 * return trip silently lossy.
+	 */
+	advance(): void {
+		this.#sweepFinishedVoices();
+		for (const live of this.#voices) {
+			const placement = this.#place(live.source, live.category);
+			live.voice.setPlacement(placement?.gain ?? 0, placement?.pan ?? 0);
+		}
+	}
+
+	/** Retire voices that ended on their own; shared by the frame path and the budget path. */
+	#sweepFinishedVoices(): void {
+		for (let index = this.#voices.length - 1; index >= 0; index -= 1) {
+			if (this.#voices[index]!.voice.finished) this.#voices.splice(index, 1);
+		}
 	}
 
 	/**
 	 * Decode a cold sound, then play it once if the moment has not passed.
 	 *
-	 * Gain and pan are the ones resolved at trigger time, which is retail's rule: spatial
-	 * parameters are fixed when the sound fires and never updated, so replaying with them is the
-	 * same sound arriving late rather than a differently-placed one.
+	 * Placement is computed at replay time from the trigger's facts, not carried from the trigger:
+	 * the listener may have moved during the decode, and a voice must start where it would already
+	 * have been steered to. A sound that fell below the audible floor during the decode is not
+	 * started — the same gate the trigger applies, at the moment that now matters.
 	 */
-	#warmAndReplay(
-		soundId: DatAssetId,
-		placement: SpatialAudioPlacement,
-		triggeredAt: number,
-	): void {
-		void this.#device.prepare(soundId).then(() => {
+	#warmAndReplay(trigger: AudioTrigger, triggeredAt: number): void {
+		void this.#device.prepare(trigger.soundId).then(() => {
 			if (this.#destroyed) return;
 			if (this.#clock() - triggeredAt > this.#maximumWarmupReplaySeconds) {
 				this.#warmupExpiredCount += 1;
 				return;
 			}
+			const placement = this.#place(trigger.source, trigger.category);
+			if (placement === null) {
+				this.#inaudibleCount += 1;
+				return;
+			}
 			this.#claimVoiceSlot();
 			const voice = this.#device.playOneShot(
-				soundId,
+				trigger.soundId,
 				placement.gain,
 				placement.pan,
 			);
@@ -278,24 +383,39 @@ export class AudioSystem {
 				this.#warmupRefusedCount += 1;
 				return;
 			}
-			this.#voices.push(voice);
-			this.#playedCount += 1;
+			this.#retain(voice, trigger);
 			this.#warmedPlayedCount += 1;
 		});
 	}
 
 	/**
-	 * Retire voices that ended on their own, then steal the oldest if the budget is still full.
+	 * Retire voices that ended on their own, then steal the quietest if the budget is still full.
+	 *
+	 * RETAIL DIVERGENCE: retail steals by priority and age. Stealing by *current gain* — which the
+	 * retained facts let us compute at this instant — cuts the voice contributing least to the mix,
+	 * so an overflow is as close to inaudible as a steal can be; a voice already silenced below the
+	 * audible floor is the ideal victim. Ties go to the oldest, which preserves retail's behavior
+	 * exactly when every contender is equally loud.
 	 *
 	 * Sweeping here rather than continuously is deliberate: the budget is read at exactly this
 	 * instant, and a voice that finished between triggers is not competing with anything until now.
 	 */
 	#claimVoiceSlot(): void {
-		for (let index = this.#voices.length - 1; index >= 0; index -= 1) {
-			if (this.#voices[index]!.finished) this.#voices.splice(index, 1);
-		}
+		this.#sweepFinishedVoices();
 		if (this.#voices.length < this.#voiceLimit) return;
-		this.#voices.shift()?.stop();
+		let quietestIndex = 0;
+		let quietestGain = Infinity;
+		for (let index = 0; index < this.#voices.length; index += 1) {
+			const live = this.#voices[index]!;
+			const gain = this.#place(live.source, live.category)?.gain ?? 0;
+			// Strict comparison: the earliest voice at the minimum wins, so equal-gain contests
+			// steal the oldest.
+			if (gain < quietestGain) {
+				quietestGain = gain;
+				quietestIndex = index;
+			}
+		}
+		this.#voices.splice(quietestIndex, 1)[0]?.voice.stop();
 		this.#stolenCount += 1;
 	}
 
@@ -306,7 +426,7 @@ export class AudioSystem {
 	 */
 	destroy(): void {
 		this.#destroyed = true;
-		for (const voice of this.#voices) voice.stop();
+		for (const live of this.#voices) live.voice.stop();
 		this.#voices.length = 0;
 	}
 

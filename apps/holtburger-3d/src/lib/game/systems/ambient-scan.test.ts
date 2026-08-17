@@ -9,13 +9,16 @@ import {
 	ambientWeight,
 } from "./ambient-weighting";
 import {
+	AmbientBakeRegistry,
 	EMPTY_AMBIENT_SCAN_RESULT,
+	accumulateAmbientWeights,
+	bakeAmbientBlock,
 	placeAmbientSound,
 	scanAmbientSources,
 	type AmbientDescriptor,
+	type AmbientTableResolver,
 	type AmbientTerrainBlock,
 } from "./ambient-scan";
-import { acVector3 } from "../../assets/ac-frame";
 
 const GRID_SIZE = 9;
 const TILE_SIZE = 24;
@@ -33,12 +36,24 @@ function descriptor(
 		isContinuous: false,
 		maxRate: 12,
 		minRate: 3,
+		slot: 0,
 		soundTableId: "0x20000017",
 		soundType: 70,
 		tableIndex: 0,
 		volume: 1,
 		...overrides,
 	};
+}
+
+const AUTHORED = descriptor();
+const BY_SLOT: readonly AmbientDescriptor[] = [AUTHORED];
+
+/** Bake fixture blocks through the production resolver path, as the runtime does. */
+function baked(
+	blocks: readonly AmbientTerrainBlock[],
+	resolve: AmbientTableResolver = resolver,
+) {
+	return blocks.map((block) => bakeAmbientBlock(block, resolve));
 }
 
 /** One landblock whose every cell carries `sample`, with its corner at `origin`. */
@@ -55,8 +70,8 @@ function block(
 	};
 }
 
-const resolver = (terrainCode: number, sceneTypeIndex: number) =>
-	terrainCode === 3 && sceneTypeIndex === 1 ? [descriptor()] : null;
+const resolver: AmbientTableResolver = (terrainCode, sceneTypeIndex) =>
+	terrainCode === 3 && sceneTypeIndex === 1 ? [AUTHORED] : null;
 
 describe("ambientWeight", () => {
 	it("is flat inside the minimum distance and inverse-square beyond it", () => {
@@ -83,22 +98,16 @@ describe("ambientDirection", () => {
 		{ delta: [70, 70, 0], expected: AMBIENT_DIRECTION.northeast },
 		{ delta: [70, -70, 0], expected: AMBIENT_DIRECTION.southeast },
 	])("buckets $delta", ({ delta, expected }) => {
-		expect(ambientDirection(acVector3(delta as [number, number, number]))).toBe(
-			expected,
-		);
+		expect(ambientDirection(delta[0]!, delta[1]!)).toBe(expected);
 	});
 
 	it("has no direction for a source the listener is standing on", () => {
-		expect(ambientDirection(acVector3([1, 1, 0]))).toBe(
-			AMBIENT_DIRECTION.inViewerBlock,
-		);
+		expect(ambientDirection(1, 1)).toBe(AMBIENT_DIRECTION.inViewerBlock);
 	});
 
 	it("keeps a dominant axis rather than rounding to a diagonal", () => {
 		// |y| / |x| is 3, past the 2:1 dominance ratio, so this is north rather than northeast.
-		expect(ambientDirection(acVector3([30, 90, 0]))).toBe(
-			AMBIENT_DIRECTION.north,
-		);
+		expect(ambientDirection(30, 90)).toBe(AMBIENT_DIRECTION.north);
 	});
 });
 
@@ -108,11 +117,11 @@ describe("scanAmbientSources", () => {
 		const middle = sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]);
 		const result = scanAmbientSources(
 			middle,
-			[block(AUTHORED_SAMPLE, [0, 0, 0])],
-			resolver,
+			baked([block(AUTHORED_SAMPLE, [0, 0, 0])]),
+			BY_SLOT,
 		);
 
-		const accumulation = result.accumulations.get("0:70");
+		const accumulation = result.accumulations.get(AUTHORED.slot);
 		expect(accumulation).toBeDefined();
 		expect(accumulation!.soundCount).toBeGreaterThan(0);
 		expect(accumulation!.directions.size).toBe(8);
@@ -125,14 +134,14 @@ describe("scanAmbientSources", () => {
 		const listener = sceneVector3([4 * TILE_SIZE, 0, 0]);
 		const result = scanAmbientSources(
 			listener,
-			[
+			baked([
 				block(SILENT_SAMPLE, [0, 0, 0]),
 				block(AUTHORED_SAMPLE, [0, 0, -3 * TILE_SIZE]),
-			],
-			resolver,
+			]),
+			BY_SLOT,
 		);
 
-		const accumulation = result.accumulations.get("0:70");
+		const accumulation = result.accumulations.get(AUTHORED.slot);
 		expect(accumulation).toBeDefined();
 		const directions = [...accumulation!.directions.keys()];
 		expect(directions).toContain(AMBIENT_DIRECTION.north);
@@ -148,8 +157,8 @@ describe("scanAmbientSources", () => {
 		const far = block(AUTHORED_SAMPLE, [10_000, 0, 0]);
 		const listener = sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]);
 
-		const withFar = scanAmbientSources(listener, [near, far], resolver);
-		const withoutFar = scanAmbientSources(listener, [near], resolver);
+		const withFar = scanAmbientSources(listener, baked([near, far]), BY_SLOT);
+		const withoutFar = scanAmbientSources(listener, baked([near]), BY_SLOT);
 
 		// The distant block contributes nothing, so including it must not change the result at all.
 		expect(withFar.examinedCellCount).toBe(withoutFar.examinedCellCount);
@@ -161,8 +170,8 @@ describe("scanAmbientSources", () => {
 		const listener = sceneVector3([0, 0, 5000]);
 		const result = scanAmbientSources(
 			listener,
-			[block(AUTHORED_SAMPLE, [0, 0, 0])],
-			resolver,
+			baked([block(AUTHORED_SAMPLE, [0, 0, 0])]),
+			BY_SLOT,
 		);
 
 		expect(result.accumulations.size).toBe(0);
@@ -171,14 +180,14 @@ describe("scanAmbientSources", () => {
 	});
 
 	it("gives a continuous descriptor weight but never a direction", () => {
-		const continuousResolver = () => [descriptor({ isContinuous: true })];
+		const continuous = descriptor({ isContinuous: true });
 		const result = scanAmbientSources(
 			sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]),
-			[block(AUTHORED_SAMPLE, [0, 0, 0])],
-			continuousResolver,
+			baked([block(AUTHORED_SAMPLE, [0, 0, 0])], () => [continuous]),
+			[continuous],
 		);
 
-		const accumulation = result.accumulations.get("0:70");
+		const accumulation = result.accumulations.get(continuous.slot);
 		expect(accumulation!.soundCount).toBeGreaterThan(0);
 		// Retail's `ConstantSound::AddTo` accumulates weight and nothing else; it is played centred.
 		expect(accumulation!.directions.size).toBe(0);
@@ -188,12 +197,12 @@ describe("scanAmbientSources", () => {
 		const listener = sceneVector3([4 * TILE_SIZE, 0, 0]);
 		const result = scanAmbientSources(
 			listener,
-			[block(AUTHORED_SAMPLE, [0, 0, -3 * TILE_SIZE])],
-			resolver,
+			baked([block(AUTHORED_SAMPLE, [0, 0, -3 * TILE_SIZE])]),
+			BY_SLOT,
 		);
 
 		const band = result.accumulations
-			.get("0:70")!
+			.get(AUTHORED.slot)!
 			.directions.get(AMBIENT_DIRECTION.north);
 		expect(band).toBeDefined();
 		// Several rows of cells contribute, so the band spans more than one cell's ±10 m.
@@ -283,5 +292,166 @@ describe("placeAmbientSound", () => {
 		expect(EMPTY_AMBIENT_SCAN_RESULT.accumulations.size).toBe(0);
 		expect(EMPTY_AMBIENT_SCAN_RESULT.totalWeight).toBe(0);
 		expect(EMPTY_AMBIENT_SCAN_RESULT.examinedCellCount).toBe(0);
+	});
+});
+
+describe("scanAmbientSources weighting of shared cells", () => {
+	/**
+	 * Regression: a cell whose table authors several sounds is still ONE source. Retail adds its
+	 * weight to `total_weight` once per cell (`Ambient::AddSound`), then contributes to every
+	 * descriptor; counting it per descriptor divides every share by the table size, which silenced
+	 * most production ambience (tables author ~10-12 sounds each).
+	 */
+	it("counts a multi-descriptor cell's weight once in the total", () => {
+		const first = descriptor({ slot: 0, soundType: 70 });
+		const second = descriptor({ slot: 1, soundType: 71 });
+		const listener = sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]);
+		const single = scanAmbientSources(
+			listener,
+			baked([block(AUTHORED_SAMPLE, [0, 0, 0])], () => [first]),
+			[first],
+		);
+		const paired = scanAmbientSources(
+			listener,
+			baked([block(AUTHORED_SAMPLE, [0, 0, 0])], () => [first, second]),
+			[first, second],
+		);
+
+		// Same ground, same listener: the total must not depend on how many sounds it authors.
+		expect(paired.totalWeight).toBeCloseTo(single.totalWeight, 3);
+		// And each descriptor still receives the full cell weight.
+		expect(paired.accumulations.get(0)!.soundCount).toBeCloseTo(
+			single.accumulations.get(0)!.soundCount,
+			3,
+		);
+	});
+
+	it("keeps the weight pass total in agreement on multi-descriptor ground", () => {
+		const first = descriptor({ slot: 0, soundType: 70 });
+		const second = descriptor({ slot: 1, soundType: 71 });
+		const listener = sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]);
+		const blocks = baked([block(AUTHORED_SAMPLE, [0, 0, 0])], () => [
+			first,
+			second,
+		]);
+
+		const scanned = scanAmbientSources(listener, blocks, [first, second]);
+		const weights = new Float32Array(2);
+		const total = accumulateAmbientWeights(listener, blocks, weights);
+
+		expect(total).toBeCloseTo(scanned.totalWeight, 3);
+		expect(weights[0]).toBeCloseTo(scanned.accumulations.get(0)!.soundCount, 3);
+		expect(weights[1]).toBeCloseTo(scanned.accumulations.get(1)!.soundCount, 3);
+	});
+});
+
+describe("bakeAmbientBlock", () => {
+	it("bakes one entry per authoring cell, deduplicating slot lists by table", () => {
+		const authored = bakeAmbientBlock(
+			block(AUTHORED_SAMPLE, [0, 0, 0]),
+			resolver,
+		);
+		const silent = bakeAmbientBlock(block(SILENT_SAMPLE, [0, 0, 0]), resolver);
+
+		// 8x8 cells, all sharing one deduplicated slot list.
+		expect(authored.cellX.length).toBe(64);
+		expect(authored.slotLists).toEqual([[AUTHORED.slot]]);
+		expect(silent.cellX.length).toBe(0);
+		expect(silent.slotLists).toEqual([]);
+	});
+});
+
+describe("accumulateAmbientWeights", () => {
+	it("agrees with the schedule scan on per-slot weight and total", () => {
+		// The two passes walk the same baked entries with the same weight curve; this is the gate
+		// that keeps a bed's live gain and its scheduling from ever disagreeing.
+		const listener = sceneVector3([4 * TILE_SIZE, 0, 0]);
+		const blocks = baked([
+			block(AUTHORED_SAMPLE, [0, 0, 0]),
+			block(AUTHORED_SAMPLE, [0, 0, -3 * TILE_SIZE]),
+		]);
+
+		const scan = scanAmbientSources(listener, blocks, BY_SLOT);
+		const weights = new Float32Array(BY_SLOT.length);
+		const total = accumulateAmbientWeights(listener, blocks, weights);
+
+		expect(total).toBeCloseTo(scan.totalWeight, 3);
+		expect(weights[AUTHORED.slot]).toBeCloseTo(
+			scan.accumulations.get(AUTHORED.slot)!.soundCount,
+			3,
+		);
+	});
+
+	it("fills a caller-owned buffer, resetting it between calls", () => {
+		const listener = sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]);
+		const blocks = baked([block(AUTHORED_SAMPLE, [0, 0, 0])]);
+		const weights = new Float32Array(BY_SLOT.length);
+
+		const first = accumulateAmbientWeights(listener, blocks, weights);
+		const second = accumulateAmbientWeights(listener, blocks, weights);
+
+		// Same listener, same ground: an accumulating (rather than reset) buffer would double.
+		expect(second).toBeCloseTo(first);
+		expect(weights[AUTHORED.slot]).toBeCloseTo(first);
+	});
+
+	it("rejects a baked slot the buffer cannot hold rather than dropping it", () => {
+		const blocks = baked([block(AUTHORED_SAMPLE, [0, 0, 0])]);
+		expect(() =>
+			accumulateAmbientWeights(
+				sceneVector3([4 * TILE_SIZE, 0, -4 * TILE_SIZE]),
+				blocks,
+				new Float32Array(0),
+			),
+		).toThrow("beyond the weight buffer");
+	});
+});
+
+describe("AmbientBakeRegistry", () => {
+	const terrain = (
+		landblockId: string,
+		origin: readonly [number, number, number],
+	) => ({
+		block: block(AUTHORED_SAMPLE, origin),
+		landblockId,
+	});
+
+	it("bakes on revision change, drops released blocks, and skips unchanged revisions", () => {
+		const registry = new AmbientBakeRegistry();
+
+		expect(
+			registry.reconcile(1, () => [terrain("a", [0, 0, 0])], resolver),
+		).toBe(true);
+		expect([...registry.blocks()]).toHaveLength(1);
+		// Same revision: the terrain thunk must not even be called.
+		expect(
+			registry.reconcile(
+				1,
+				() => {
+					throw new Error("unchanged revision must not list terrain");
+				},
+				resolver,
+			),
+		).toBe(false);
+		expect([...registry.blocks()]).toHaveLength(1);
+
+		expect(
+			registry.reconcile(2, () => [terrain("b", [192, 0, 0])], resolver),
+		).toBe(true);
+		const remaining = [...registry.blocks()];
+		expect(remaining).toHaveLength(1);
+		expect(remaining[0]!.origin[0]).toBe(192);
+	});
+
+	it("reads the authored cell size from installed terrain and forgets it on clear", () => {
+		const registry = new AmbientBakeRegistry();
+		expect(registry.cellSize).toBeNull();
+
+		registry.reconcile(1, () => [terrain("a", [0, 0, 0])], resolver);
+		expect(registry.cellSize).toBe(TILE_SIZE);
+
+		registry.clear();
+		expect(registry.cellSize).toBeNull();
+		expect([...registry.blocks()]).toHaveLength(0);
 	});
 });

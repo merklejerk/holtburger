@@ -1,6 +1,10 @@
 import type { SceneVector3 } from "../../assets/ac-frame";
 import type { DatAssetId } from "../game-types";
-import type { AudioTrigger, AudioTriggerOutcome } from "./audio-system";
+import type {
+	AudioPlacementSource,
+	AudioTrigger,
+	AudioTriggerOutcome,
+} from "./audio-system";
 import type { UniformRoll } from "./particle-system";
 import { AMBIENT_MIN_VOLUME } from "./ambient-weighting";
 import { placeAmbientSound, type AmbientScanResult } from "./ambient-scan";
@@ -41,25 +45,38 @@ export interface AmbientSystemDependencies {
 		soundType: number,
 	) => AmbientSoundSelection | null;
 	readonly play: (trigger: AudioTrigger) => AudioTriggerOutcome;
-	/** Where to centre a sound that has no direction of its own. */
+	/** Where an intermittent firing is placed relative to; the listener as of this frame. */
 	readonly listenerPosition: () => SceneVector3;
+	/**
+	 * Fill `outWeights` with each slot's presence weight from the current listener; returns the
+	 * total. Pure wiring to the baked terrain — the indoor gate is applied here, by the system,
+	 * through `listenerHearsOutdoors`.
+	 */
+	readonly accumulateWeights: (outWeights: Float32Array) => number;
+	/**
+	 * Whether outdoor terrain ambience reaches the listener where it stands (retail's
+	 * `SeenOutside` gate). One fact consumed by both cadences — the schedule and the per-frame bed
+	 * weights — so the two can never disagree about being indoors; a bed fades at the dungeon door
+	 * instead of following the listener in.
+	 */
+	readonly listenerHearsOutdoors: () => boolean;
 }
 
 /** One scheduled descriptor: what the scan found, plus when it next comes due. */
 interface ScheduledAmbient {
-	readonly key: string;
+	/** The descriptor's region-assigned slot, its identity across scan, schedule, and weights. */
+	readonly slot: number;
 	readonly soundTableId: DatAssetId;
 	readonly soundType: number;
 	readonly isContinuous: boolean;
 	readonly minRate: number;
 	readonly maxRate: number;
 	/**
-	 * Gain for a continuous sound, or the authored volume for an intermittent one.
-	 *
-	 * The surroundings scale exactly one of gain and probability, never both: a constant sound gets
-	 * louder where more of the ground authors it, an intermittent one gets likelier.
+	 * The descriptor's authored volume: an intermittent firing's gain as-is, and the value live
+	 * share re-scales each frame for a playing bed. Crossing-time share never persists here — it
+	 * drives only the discrete audibility and retirement decisions inside `refresh`.
 	 */
-	volume: number;
+	readonly authoredVolume: number;
 	/** Weighted play chance for an intermittent sound; unused by a continuous one, which always plays. */
 	playChance: number;
 	/** Clock time this descriptor next comes due. */
@@ -103,7 +120,18 @@ const MAXIMUM_SCHEDULE_LAG_INTERVALS = 1;
 
 export class AmbientSystem {
 	readonly #dependencies: AmbientSystemDependencies;
-	readonly #scheduled = new Map<string, ScheduledAmbient>();
+	readonly #scheduled = new Map<number, ScheduledAmbient>();
+	/**
+	 * Per-slot presence weights recomputed each `advance`, sized to the region's slot registry.
+	 *
+	 * `null` until a region installs; a bed supplier reading it then is a schedule that outlived
+	 * its region, which `resetForRegion` prevents by clearing the schedule with the buffer.
+	 */
+	#liveWeights: Float32Array | null = null;
+	/** Total of `#liveWeights` from the same pass; zero when nothing (or nothing outdoors) is heard. */
+	#liveTotalWeight = 0;
+	/** Continuous descriptors currently scheduled, maintained by `refresh`, read every frame. */
+	#continuousScheduledCount = 0;
 	#firedCount = 0;
 	#playedCount = 0;
 	#suppressedCount = 0;
@@ -115,6 +143,20 @@ export class AmbientSystem {
 	}
 
 	/**
+	 * Adopt a freshly installed region's slot space.
+	 *
+	 * Clears the schedule outright: slots are meaningful only within one region's registry, and a
+	 * surviving entry would silently mean a different sound. A bed still playing reads `0` from its
+	 * supplier the moment its slot is gone, so old-region ambience fades rather than strands.
+	 */
+	resetForRegion(slotCount: number): void {
+		this.#scheduled.clear();
+		this.#continuousScheduledCount = 0;
+		this.#liveWeights = new Float32Array(slotCount);
+		this.#liveTotalWeight = 0;
+	}
+
+	/**
 	 * Apply a fresh scan: re-weight what is still audible, schedule what has become audible, and
 	 * retire what no longer has a contributor.
 	 *
@@ -122,13 +164,13 @@ export class AmbientSystem {
 	 * A descriptor that survives keeps its clock, so walking past a river does not restart its sound.
 	 */
 	refresh(scan: AmbientScanResult, timeSeconds: number): void {
-		for (const [key, accumulation] of scan.accumulations) {
+		for (const [slot, accumulation] of scan.accumulations) {
 			const { descriptor } = accumulation;
 			// `total_weight` normalizes each descriptor's share of the surroundings
 			// (`UpdateSound`, acclient.c:367445 and 367532).
 			const share =
 				scan.totalWeight > 0 ? accumulation.soundCount / scan.totalWeight : 0;
-			const existing = this.#scheduled.get(key);
+			const existing = this.#scheduled.get(slot);
 			const volume = descriptor.isContinuous
 				? descriptor.volume * share
 				: descriptor.volume;
@@ -142,18 +184,18 @@ export class AmbientSystem {
 				: playChance > 0;
 			if (!audible) {
 				if (existing) {
-					this.#scheduled.delete(key);
+					this.#scheduled.delete(slot);
 					this.#retiredCount += 1;
 				}
 				continue;
 			}
 			if (existing) {
-				existing.volume = volume;
 				existing.playChance = playChance;
 				existing.directions = accumulation.directions;
 				continue;
 			}
-			this.#scheduled.set(key, {
+			this.#scheduled.set(slot, {
+				authoredVolume: descriptor.volume,
 				dueAt:
 					timeSeconds +
 					this.#interval(
@@ -163,30 +205,71 @@ export class AmbientSystem {
 					),
 				directions: accumulation.directions,
 				isContinuous: descriptor.isContinuous,
-				key,
+				slot,
 				maxRate: descriptor.maxRate,
 				minRate: descriptor.minRate,
 				playChance,
 				soundTableId: descriptor.soundTableId as DatAssetId,
 				soundType: descriptor.soundType,
-				volume,
 			});
 		}
 
-		for (const key of [...this.#scheduled.keys()]) {
-			if (scan.accumulations.has(key)) continue;
-			this.#scheduled.delete(key);
+		for (const slot of [...this.#scheduled.keys()]) {
+			if (scan.accumulations.has(slot)) continue;
+			this.#scheduled.delete(slot);
 			this.#retiredCount += 1;
 		}
+		// Recomputed once per crossing so the per-frame weight gate is a single integer test.
+		let continuousCount = 0;
+		for (const scheduled of this.#scheduled.values()) {
+			if (scheduled.isContinuous) continuousCount += 1;
+		}
+		this.#continuousScheduledCount = continuousCount;
 	}
 
-	/** Fire every descriptor that has come due, and re-arm it. */
+	/** Refresh live bed weights, then fire every descriptor that has come due and re-arm it. */
 	advance(timeSeconds: number): void {
+		this.#refreshLiveWeights();
 		for (const scheduled of this.#scheduled.values()) {
 			if (scheduled.dueAt > timeSeconds) continue;
 			this.#fire(scheduled);
 			this.#rearm(scheduled, timeSeconds);
 		}
+	}
+
+	/**
+	 * Recompute per-slot weights for playing beds, once per frame.
+	 *
+	 * Skipped entirely while no continuous descriptor is scheduled: intermittent sounds read their
+	 * share at crossing time, so the per-frame pass would feed nothing.
+	 */
+	#refreshLiveWeights(): void {
+		const weights = this.#liveWeights;
+		if (weights === null) return;
+		if (
+			this.#continuousScheduledCount === 0 ||
+			!this.#dependencies.listenerHearsOutdoors()
+		) {
+			// Suppliers read through the total, so zeroing it silences every bed without touching
+			// the (stale, unread) weight buffer.
+			this.#liveTotalWeight = 0;
+			return;
+		}
+		this.#liveTotalWeight = this.#dependencies.accumulateWeights(weights);
+	}
+
+	/**
+	 * A playing bed's gain right now: authored volume scaled by this frame's share.
+	 *
+	 * Reads through the schedule so a retired or region-cleared slot yields `0` and the voice fades
+	 * out, rather than holding its last gain with no source behind it.
+	 */
+	#liveBedVolume(slot: number): number {
+		const scheduled = this.#scheduled.get(slot);
+		const weights = this.#liveWeights;
+		if (!scheduled || weights === null || this.#liveTotalWeight <= 0) return 0;
+		const weight = weights[slot] ?? 0;
+		return (scheduled.authoredVolume * weight) / this.#liveTotalWeight;
 	}
 
 	getDiagnostics(): AmbientDiagnostics {
@@ -220,30 +303,45 @@ export class AmbientSystem {
 		}
 		const outcome = this.#dependencies.play({
 			category: "ambient",
-			position: this.#place(scheduled),
 			probability: selection.probability,
 			soundId: selection.soundId,
-			volume: scheduled.volume,
+			source: this.#source(scheduled),
 		});
 		this.#firedCount += 1;
 		if (outcome === "played") this.#playedCount += 1;
 	}
 
 	/**
-	 * Where one firing lands: inside the ground that authored it, or centred when it has no direction.
+	 * How one firing is placed: a bed is head-locked with live share as its gain, an intermittent
+	 * sound lands inside the ground that authored it.
 	 *
-	 * Rolled per firing rather than per scan, so successive calls of the same bird come from different
-	 * points within the same stretch of forest.
+	 * One decision for mode and position, so they cannot disagree — the old shape synthesized a fake
+	 * position at the listener for the continuous case, which live tracking would have dragged
+	 * audibly behind a moving camera.
+	 *
+	 * Intermittent placement is rolled per firing rather than per scan, so successive calls of the
+	 * same bird come from different points within the same stretch of forest.
 	 */
-	#place(scheduled: ScheduledAmbient): SceneVector3 {
-		const listenerPosition = this.#dependencies.listenerPosition();
-		return (
-			placeAmbientSound(
-				scheduled.directions,
-				listenerPosition,
-				this.#dependencies.roll,
-			) ?? listenerPosition
+	#source(scheduled: ScheduledAmbient): AudioPlacementSource {
+		if (scheduled.isContinuous) {
+			return {
+				mode: "listener",
+				volume: () => this.#liveBedVolume(scheduled.slot),
+			};
+		}
+		const position = placeAmbientSound(
+			scheduled.directions,
+			this.#dependencies.listenerPosition(),
+			this.#dependencies.roll,
 		);
+		if (position === null) {
+			// An intermittent descriptor is only scheduled with contributors, and every contributor
+			// widens at least one band; an empty placement here is a scan invariant broken.
+			throw new Error(
+				`Scheduled intermittent ambient slot ${scheduled.slot} has no directional contributors.`,
+			);
+		}
+		return { mode: "world", position, volume: scheduled.authoredVolume };
 	}
 
 	#rearm(scheduled: ScheduledAmbient, timeSeconds: number): void {

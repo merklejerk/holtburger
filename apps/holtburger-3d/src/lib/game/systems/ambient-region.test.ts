@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	ambientSoundTableIds,
-	createAmbientTableResolver,
+	createAmbientRegionResolution,
 	type AmbientRegionFacts,
 } from "./ambient-region";
 
@@ -43,9 +43,9 @@ const FACTS: AmbientRegionFacts = {
 	],
 };
 
-describe("createAmbientTableResolver", () => {
+describe("createAmbientRegionResolution", () => {
 	it("chains a cell's terrain and scene type through to its table's descriptors", () => {
-		const resolve = createAmbientTableResolver(FACTS);
+		const { resolve } = createAmbientRegionResolution(FACTS);
 
 		// Terrain 0, local scene 0 -> region scene type 1 -> table 0.
 		expect(resolve(0, 0)?.[0]).toMatchObject({
@@ -62,7 +62,7 @@ describe("createAmbientTableResolver", () => {
 	});
 
 	it("treats the scene-type field as a local index, not a region-wide one", () => {
-		const resolve = createAmbientTableResolver(FACTS);
+		const { resolve } = createAmbientRegionResolution(FACTS);
 
 		// Terrain 1 lists only one scene type, so local index 0 resolves and 1 does not exist.
 		expect(resolve(1, 0)).not.toBeNull();
@@ -71,17 +71,29 @@ describe("createAmbientTableResolver", () => {
 
 	it("yields null for a classification whose table is missing", () => {
 		// Terrain 2's scene type names table 9, which the region does not author.
-		expect(createAmbientTableResolver(FACTS)(2, 0)).toBeNull();
+		expect(createAmbientRegionResolution(FACTS).resolve(2, 0)).toBeNull();
 	});
 
 	it("yields null for a terrain type the region does not author", () => {
-		expect(createAmbientTableResolver(FACTS)(31, 0)).toBeNull();
+		expect(createAmbientRegionResolution(FACTS).resolve(31, 0)).toBeNull();
 	});
 
 	it("shares one descriptor list between every classification reaching the same table", () => {
-		const resolve = createAmbientTableResolver(FACTS);
+		const { resolve } = createAmbientRegionResolution(FACTS);
 		// Terrain 0 local 1 and terrain 1 local 0 both reach region scene type 0, hence table 1.
 		expect(resolve(0, 1)).toBe(resolve(1, 0));
+	});
+
+	it("assigns each distinct descriptor a unique slot and registers it by that slot", () => {
+		const { descriptorsBySlot, resolve } = createAmbientRegionResolution(FACTS);
+
+		expect(descriptorsBySlot.map((entry) => entry.slot)).toEqual(
+			descriptorsBySlot.map((_, index) => index),
+		);
+		// The registry and the classification lookup hand out the same objects, so slot identity
+		// and resolution identity cannot drift apart.
+		const resolved = resolve(0, 0)![0]!;
+		expect(descriptorsBySlot[resolved.slot]).toBe(resolved);
 	});
 });
 

@@ -109,6 +109,59 @@
 	 */
 	const PARTICLE_SEED = query.get("particleSeed");
 	/**
+	 * Record every voice the runtime starts and every per-frame placement it receives.
+	 *
+	 * Replaces the refusing stub device so live-placement evidence exists headlessly: the harness
+	 * cannot listen, but a gain/pan series over a camera flyby proves what a listener would hear.
+	 */
+	const AUDIO_TRACE = query.get("audioTrace") === "1";
+
+	interface AudioTraceVoice {
+		readonly soundId: string;
+		/** Flyby step active when the voice started; -1 outside a flyby. */
+		readonly startedAtStep: number;
+		/** Trigger-time placement first, then one sample per `setPlacement`. */
+		readonly samples: Array<{ gain: number; pan: number; step: number }>;
+		stopped: boolean;
+	}
+	const audioTraceVoices: AudioTraceVoice[] = [];
+	let audioFlybyStep = -1;
+	/**
+	 * Whether the active region carried ambient records at all, for diagnosing a silent flyby:
+	 * "no sound authored" and "installed but produced nothing" need different investigations.
+	 */
+	let ambientRegionEvidence: { hasScenes: boolean; hasSound: boolean } | null =
+		null;
+
+	/** Always-ready device whose voices record their steering instead of producing sound. */
+	function recordingAudioDevice() {
+		return {
+			playOneShot: (soundId: string, gain: number, pan: number) => {
+				const voice: AudioTraceVoice = {
+					samples: [{ gain, pan, step: audioFlybyStep }],
+					soundId,
+					startedAtStep: audioFlybyStep,
+					stopped: false,
+				};
+				audioTraceVoices.push(voice);
+				return {
+					finished: false,
+					setPlacement: (nextGain: number, nextPan: number) => {
+						voice.samples.push({
+							gain: nextGain,
+							pan: nextPan,
+							step: audioFlybyStep,
+						});
+					},
+					stop: () => {
+						voice.stopped = true;
+					},
+				};
+			},
+			prepare: async () => {},
+		};
+	}
+	/**
 	 * Fixed milliseconds of runtime time per frame, or null to follow the wall clock.
 	 *
 	 * The runtime takes its whole notion of time as one argument to `render`, so nothing inside it
@@ -838,8 +891,12 @@
 					contentSource,
 					contentSource,
 					// The harness renders headlessly; authored audio has no observable output here,
-					// so a device that refuses playback keeps the runtime honest without a context.
-					{ playOneShot: () => null, prepare: async () => {} },
+					// so by default a refusing device keeps the runtime honest without a context.
+					// Under `audioTrace=1` a recording device stands in, so live placement leaves
+					// machine-readable evidence instead of silence.
+					AUDIO_TRACE
+						? recordingAudioDevice()
+						: { playOneShot: () => null, prepare: async () => {} },
 					contentSource,
 					contentSource,
 					contentSource,
@@ -856,6 +913,10 @@
 					await staticDetailOwner.install(contentSource.activeRegion),
 				);
 				const ambientRegion = contentSource.activeRegion.data;
+				ambientRegionEvidence = {
+					hasScenes: Boolean(ambientRegion.scenes),
+					hasSound: Boolean(ambientRegion.sound),
+				};
 				if (ambientRegion.sound && ambientRegion.scenes) {
 					await runtime.installAmbientRegion({
 						sceneTypes: ambientRegion.scenes.types.map((type) => ({
@@ -902,8 +963,69 @@
 					});
 					longTaskObserver.observe({ buffered: true, type: "longtask" });
 				}
+				/**
+				 * Fly the camera (and with it the listener) through interpolated positions, pumping
+				 * real frames at each step, and return every voice's placement series.
+				 *
+				 * The flyby is the runtime-verification probe for live spatial audio: a `"world"`
+				 * voice's gain must rise and fall with distance and its pan sweep through zero as
+				 * the camera passes it; a bed must hold zero pan while its gain follows share.
+				 */
+				async function probeAudioFlyby(
+					rawLandblockId: string,
+					from: readonly [number, number, number],
+					to: readonly [number, number, number],
+					steps: number,
+					framesPerStep: number,
+					cameraYawDegrees: number,
+					cameraPitchDegrees: number,
+				) {
+					if (!AUDIO_TRACE) {
+						throw new Error("probeAudioFlyby requires audioTrace=1.");
+					}
+					if (!Number.isInteger(steps) || steps < 2) {
+						throw new Error("Audio flyby needs at least two steps.");
+					}
+					const nextFrame = () =>
+						new Promise<void>((resolve) => {
+							window.requestAnimationFrame(() => resolve());
+						});
+					for (let step = 0; step < steps; step += 1) {
+						audioFlybyStep = step;
+						const t = step / (steps - 1);
+						setOutdoorCamera(
+							rawLandblockId,
+							[
+								from[0] + (to[0] - from[0]) * t,
+								from[1] + (to[1] - from[1]) * t,
+								from[2] + (to[2] - from[2]) * t,
+							],
+							cameraYawDegrees,
+							cameraPitchDegrees,
+						);
+						for (let frame = 0; frame < framesPerStep; frame += 1) {
+							await nextFrame();
+						}
+					}
+					audioFlybyStep = -1;
+					const dynamics = runtime?.getAuthoredDynamicRuntimeDiagnostics();
+					return {
+						ambientRegion: ambientRegionEvidence,
+						ambientBakes: dynamics?.ambientBakes ?? null,
+						ambient: dynamics?.ambient ?? null,
+						audio: dynamics?.audio ?? null,
+						steps,
+						voices: audioTraceVoices.map((voice) => ({
+							samples: voice.samples,
+							soundId: voice.soundId,
+							startedAtStep: voice.startedAtStep,
+							stopped: voice.stopped,
+						})),
+					};
+				}
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
 					clearSceneInterest,
+					probeAudioFlyby,
 					focusExplorerOutdoor,
 					probePortalExecution,
 					requestSceneInterest,

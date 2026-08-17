@@ -1,8 +1,6 @@
 import {
 	acVector3,
 	acVectorToRender,
-	renderVector3,
-	renderVectorToAc,
 	sceneVector3,
 } from "../../assets/ac-frame";
 import type { SceneVector3 } from "../../assets/ac-frame";
@@ -21,14 +19,21 @@ import {
 	type AmbientDistanceBand,
 } from "./ambient-weighting";
 import { sceneTypeIndexOf, terrainCodeOf } from "../terrain/terrain-sample";
+import { clamp } from "../math/vector-utils";
 
 /**
- * The per-cell scan that decides which ambience the listener can hear, and how much of it.
+ * The per-cell walk that decides which ambience the listener can hear, and how much of it.
  *
  * Ambience is not a property of a region: it is a property of the ground within earshot. Retail walks
  * the landblock cell grid and treats every cell as a source (acclient.c:338010-338052), so a river to
- * the north is audible from the north because the water cells *are* north. This module is that walk,
- * kept free of clocks and playback so it can be tested as a function of position.
+ * the north is audible from the north because the water cells *are* north.
+ *
+ * The walk is split by lifetime. What a cell *contributes* depends only on authored terrain and the
+ * installed region, so it is baked once per landblock at terrain install (`bakeAmbientBlock`) into
+ * flat arrays. How much it contributes *from here* depends on the listener, so it is streamed: the
+ * schedule scan (`scanAmbientSources`) runs on cell crossings and the per-slot weight pass
+ * (`accumulateAmbientWeights`) is cheap enough to run every frame. Both stay free of clocks and
+ * playback so they can be tested as functions of position.
  */
 
 /** One installed landblock's authored terrain, in the canonical row-major order. */
@@ -45,6 +50,13 @@ export interface AmbientTerrainBlock {
 
 /** One authored ambient sound, flattened out of its region table. */
 export interface AmbientDescriptor {
+	/**
+	 * This descriptor's index in the region's slot registry, assigned once at region install.
+	 *
+	 * The identity used everywhere downstream — baked entries, scan accumulations, and the
+	 * schedule — so no consumer rebuilds a composite key from `tableIndex` and `soundType`.
+	 */
+	readonly slot: number;
 	/** Index into the region's ambient tables; a table's identity, since several share an `stbId`. */
 	readonly tableIndex: number;
 	/** Sound-table DID this descriptor's `soundType` is resolved against. */
@@ -64,6 +76,177 @@ export type AmbientTableResolver = (
 	sceneTypeIndex: number,
 ) => readonly AmbientDescriptor[] | null;
 
+/**
+ * One landblock's sound-authoring ground, baked flat at terrain install.
+ *
+ * One entry per contributing **cell**, referencing a shared slot list — not one per
+ * (cell, descriptor) pair. The distinction is retail's weighting semantics, not storage thrift: a
+ * cell is one source however many sounds its table authors, so its weight enters `total_weight`
+ * exactly once and then reaches every slot on its list (`Ambient::AddSound`). Flattening to
+ * per-descriptor entries once divided every share by the table size and silenced most production
+ * ambience.
+ *
+ * Parallel `Float32Array` lanes rather than objects, because the per-frame weight pass iterates
+ * every cell in earshot and must not chase pointers or allocate. Positions are block-local so the
+ * arrays stay small-valued; the origin is added during the walk, which also keeps the retained data
+ * in the frames the app allows retention in.
+ */
+export interface BakedAmbientBlock {
+	/** Scene-space position of the block's row-0, column-0 vertex. */
+	readonly origin: SceneVector3;
+	/** Axis-aligned horizontal extent, for rejecting the whole block before touching entries. */
+	readonly span: number;
+	/** Block-local X per contributing cell (eastward, render axes). */
+	readonly cellX: Float32Array;
+	/** Block-local Y per contributing cell: its authored height. */
+	readonly cellY: Float32Array;
+	/** Block-local Z per contributing cell (southward-positive render axes; rows run north as -Z). */
+	readonly cellZ: Float32Array;
+	/** Per cell, an index into `slotLists`, parallel with the position lanes. */
+	readonly cellSlotList: Uint16Array;
+	/** The distinct slot lists this block's cells author, deduplicated by table. */
+	readonly slotLists: readonly (readonly number[])[];
+}
+
+/**
+ * Bake one landblock's contribution entries, resolving each cell's classification exactly once.
+ *
+ * Everything here is listener-independent; nothing baked ever goes stale from camera movement. The
+ * bake is invalidated only by the block leaving residency or the region (and so the slot registry)
+ * being reinstalled, both of which drop the whole baked block.
+ */
+export function bakeAmbientBlock(
+	block: AmbientTerrainBlock,
+	resolve: AmbientTableResolver,
+): BakedAmbientBlock {
+	const cellsPerSide = block.gridSize - 1;
+	const cellX: number[] = [];
+	const cellY: number[] = [];
+	const cellZ: number[] = [];
+	const cellSlotList: number[] = [];
+	const slotLists: (readonly number[])[] = [];
+	// Every descriptor in a resolved list shares its table, so the table index is the list's
+	// identity — robust even if a resolver hands out fresh arrays per call.
+	const listIndexByTable = new Map<number, number>();
+	for (let row = 0; row < cellsPerSide; row += 1) {
+		for (let column = 0; column < cellsPerSide; column += 1) {
+			const vertex = row * block.gridSize + column;
+			const sample = block.terrainSamples[vertex];
+			const height = block.heights[vertex];
+			if (sample === undefined || height === undefined) {
+				throw new Error(
+					`Ambient bake reached vertex ${vertex} outside its terrain block.`,
+				);
+			}
+			const descriptors = resolve(
+				terrainCodeOf(sample),
+				sceneTypeIndexOf(sample),
+			);
+			if (!descriptors || descriptors.length === 0) continue;
+			const tableIndex = descriptors[0]!.tableIndex;
+			let listIndex = listIndexByTable.get(tableIndex);
+			if (listIndex === undefined) {
+				listIndex = slotLists.length;
+				slotLists.push(descriptors.map((descriptor) => descriptor.slot));
+				listIndexByTable.set(tableIndex, listIndex);
+			}
+			// Canonical rows run south to north, which is render-local -Z.
+			cellX.push(column * block.tileSize);
+			cellY.push(height);
+			cellZ.push(-row * block.tileSize);
+			cellSlotList.push(listIndex);
+		}
+	}
+	return {
+		cellSlotList: Uint16Array.from(cellSlotList),
+		cellX: Float32Array.from(cellX),
+		cellY: Float32Array.from(cellY),
+		cellZ: Float32Array.from(cellZ),
+		origin: block.origin,
+		slotLists,
+		span: cellsPerSide * block.tileSize,
+	};
+}
+
+/** One landblock's terrain paired with its identity, which the bake registry reconciles by. */
+export interface InstalledAmbientTerrain {
+	readonly landblockId: string;
+	readonly block: AmbientTerrainBlock;
+}
+
+/**
+ * The baked blocks currently in residency, reconciled lazily against the terrain system.
+ *
+ * Keyed on the terrain installation revision rather than on install/release events: the revision
+ * already bumps on both, so a cheap diff of landblock ids on revision change replaces observer
+ * plumbing. Cleared whenever the region reinstalls, because baked slot ids belong to one region's
+ * slot registry.
+ */
+export class AmbientBakeRegistry {
+	readonly #blocks = new Map<string, BakedAmbientBlock>();
+	#revision: number | null = null;
+	#cellSize: number | null = null;
+
+	/**
+	 * Bring the baked set up to date with the installed terrain; returns whether anything changed.
+	 *
+	 * Takes a thunk rather than an iterable so the unchanged-revision path — the every-frame case —
+	 * costs one number comparison and builds nothing.
+	 */
+	reconcile(
+		revision: number,
+		listTerrain: () => Iterable<InstalledAmbientTerrain>,
+		resolve: AmbientTableResolver,
+	): boolean {
+		if (revision === this.#revision) return false;
+		this.#revision = revision;
+		const seen = new Set<string>();
+		for (const { landblockId, block } of listTerrain()) {
+			seen.add(landblockId);
+			if (!this.#blocks.has(landblockId)) {
+				this.#blocks.set(landblockId, bakeAmbientBlock(block, resolve));
+			}
+			this.#cellSize ??= block.tileSize;
+		}
+		for (const landblockId of [...this.#blocks.keys()]) {
+			if (!seen.has(landblockId)) this.#blocks.delete(landblockId);
+		}
+		return true;
+	}
+
+	/** Drop every bake; required on region reinstall, whose new slot registry orphans baked slots. */
+	clear(): void {
+		this.#blocks.clear();
+		this.#revision = null;
+		this.#cellSize = null;
+	}
+
+	blocks(): IterableIterator<BakedAmbientBlock> {
+		return this.#blocks.values();
+	}
+
+	/** Bake facts for diagnosing silent ambience: how much authoring ground is even known. */
+	getDiagnostics(): AmbientBakeDiagnostics {
+		let entryCount = 0;
+		for (const block of this.#blocks.values()) {
+			entryCount += block.cellX.length;
+		}
+		return { blockCount: this.#blocks.size, entryCount };
+	}
+
+	/** The authored terrain cell size, from the installed blocks; `null` until any block installs. */
+	get cellSize(): number | null {
+		return this.#cellSize;
+	}
+}
+
+/** How much sound-authoring ground the bake registry currently knows. */
+export interface AmbientBakeDiagnostics {
+	readonly blockCount: number;
+	/** Contributing cells across every baked block; zero explains total ambient silence. */
+	readonly entryCount: number;
+}
+
 /** One descriptor's accumulated presence in the listener's surroundings. */
 interface AmbientAccumulation {
 	readonly descriptor: AmbientDescriptor;
@@ -79,11 +262,11 @@ interface AmbientAccumulation {
 
 /** What one scan found around the listener. */
 export interface AmbientScanResult {
-	/** One entry per descriptor with any contributor, keyed by `${tableIndex}:${soundType}`. */
-	readonly accumulations: ReadonlyMap<string, AmbientAccumulation>;
+	/** One entry per descriptor with any contributor, keyed by descriptor slot. */
+	readonly accumulations: ReadonlyMap<number, AmbientAccumulation>;
 	/** Summed weight across every contributing cell, which normalizes each descriptor's share. */
 	readonly totalWeight: number;
-	/** Cells examined, for diagnosing a scan that found nothing. */
+	/** Contribution entries examined, for diagnosing a scan that found nothing. */
 	readonly examinedCellCount: number;
 }
 
@@ -94,86 +277,116 @@ export const EMPTY_AMBIENT_SCAN_RESULT: AmbientScanResult = Object.freeze({
 	examinedCellCount: 0,
 });
 
-/** Identity of one descriptor within the region; several tables share an `stbId`, so index is the key. */
-function ambientDescriptorKey(descriptor: AmbientDescriptor): string {
-	return `${descriptor.tableIndex}:${descriptor.soundType}`;
+/**
+ * Walk every audible baked cell, visiting each with its weight and geometry; returns the summed
+ * weight and the count of cells in range.
+ *
+ * The single owner of the cell-weighting semantics both consumers share — block rejection, deltas,
+ * the weight curve, slot-list resolution, and the retail invariant that one cell is one source: its
+ * weight enters the total once, however many sounds its table authors (`Ambient::AddSound`).
+ * Getting that invariant wrong in one of two copies once silenced most production ambience, which
+ * is why there are no longer two copies.
+ *
+ * The visitor is a plain call per audible cell — tens of cells at 60 Hz on the frame path — and
+ * both call sites pass allocation-free visitors.
+ */
+function walkAudibleAmbientCells(
+	listenerPosition: SceneVector3,
+	blocks: Iterable<BakedAmbientBlock>,
+	visit: (
+		slotList: readonly number[],
+		weight: number,
+		deltaX: number,
+		deltaZ: number,
+		distanceSquared: number,
+	) => void,
+): { totalWeight: number; examinedCellCount: number } {
+	let totalWeight = 0;
+	let examinedCellCount = 0;
+	for (const block of blocks) {
+		if (!blockWithinAmbientRange(block, listenerPosition)) continue;
+		for (let cell = 0; cell < block.cellX.length; cell += 1) {
+			const deltaX = block.origin[0] + block.cellX[cell]! - listenerPosition[0];
+			const deltaY = block.origin[1] + block.cellY[cell]! - listenerPosition[1];
+			const deltaZ = block.origin[2] + block.cellZ[cell]! - listenerPosition[2];
+			const distanceSquared =
+				deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+			if (distanceSquared > AMBIENT_MAX_DISTANCE_SQUARED) continue;
+			examinedCellCount += 1;
+			const weight = ambientWeight(distanceSquared);
+			if (weight === 0) continue;
+			totalWeight += weight;
+			const slotList = block.slotLists[block.cellSlotList[cell]!];
+			if (!slotList) {
+				throw new Error(
+					`Baked ambient cell ${cell} names an unknown slot list.`,
+				);
+			}
+			visit(slotList, weight, deltaX, deltaZ, distanceSquared);
+		}
+	}
+	return { examinedCellCount, totalWeight };
 }
 
 /**
- * Accumulate every ambient descriptor audible from `listenerPosition`.
+ * Accumulate every ambient descriptor audible from `listenerPosition`, for the schedule.
  *
- * The listener-to-cell offset is converted into AC axes once per cell, because direction bucketing
- * compares x against y in AC's compass plane and would bucket into the wrong quadrant otherwise.
+ * Runs on cell crossings, not per frame, so its per-call result allocation is O(descriptors within
+ * earshot) — a few dozen small objects at walking pace — and deliberately not pooled. The per-frame
+ * path is `accumulateAmbientWeights`, which allocates nothing.
  */
 export function scanAmbientSources(
 	listenerPosition: SceneVector3,
-	blocks: Iterable<AmbientTerrainBlock>,
-	resolveDescriptors: AmbientTableResolver,
+	blocks: Iterable<BakedAmbientBlock>,
+	descriptorsBySlot: readonly AmbientDescriptor[],
 ): AmbientScanResult {
-	const accumulations = new Map<string, AmbientAccumulation>();
-	let totalWeight = 0;
-	let examinedCellCount = 0;
+	const accumulations = new Map<number, AmbientAccumulation>();
+	const { examinedCellCount, totalWeight } = walkAudibleAmbientCells(
+		listenerPosition,
+		blocks,
+		(slotList, weight, deltaX, deltaZ, distanceSquared) => {
+			// A scene-position difference is a render-axis displacement; compass bucketing compares
+			// eastward against northward in AC's plane, which is render +X against render -Z.
+			const direction = ambientDirection(deltaX, -deltaZ);
+			const distance = Math.sqrt(distanceSquared);
+			for (const slot of slotList) {
+				const descriptor = descriptorsBySlot[slot];
+				if (!descriptor) {
+					throw new Error(`Baked ambient entry names unknown slot ${slot}.`);
+				}
+				accumulate(accumulations, descriptor, weight, direction, distance);
+			}
+		},
+	);
+	return { accumulations, examinedCellCount, totalWeight };
+}
 
-	for (const block of blocks) {
-		const cellsPerSide = block.gridSize - 1;
-		// Reject a whole landblock before walking its cells. The scene keeps far more terrain resident
-		// than ambience can reach — 25 blocks in a typical explorer view against the 9 that can hold a
-		// cell within earshot — so without this the scan visits about 1,600 cells to find the ~70 that
-		// matter.
-		if (
-			!blockWithinAmbientRange(
-				block,
-				cellsPerSide * block.tileSize,
-				listenerPosition,
-			)
-		) {
-			continue;
-		}
-		for (let row = 0; row < cellsPerSide; row += 1) {
-			for (let column = 0; column < cellsPerSide; column += 1) {
-				const vertex = row * block.gridSize + column;
-				const sample = block.terrainSamples[vertex];
-				const height = block.heights[vertex];
-				if (sample === undefined || height === undefined) {
+/**
+ * Sum each slot's presence weight from `listenerPosition` into `outWeights`; returns the total.
+ *
+ * The per-frame half of the split walk: no directions, no bands, no descriptor objects, and no
+ * allocation — the caller owns the buffer, sized to the region's slot count.
+ */
+export function accumulateAmbientWeights(
+	listenerPosition: SceneVector3,
+	blocks: Iterable<BakedAmbientBlock>,
+	outWeights: Float32Array,
+): number {
+	outWeights.fill(0);
+	return walkAudibleAmbientCells(
+		listenerPosition,
+		blocks,
+		(slotList, weight) => {
+			for (const slot of slotList) {
+				if (slot >= outWeights.length) {
 					throw new Error(
-						`Ambient scan reached vertex ${vertex} outside its terrain block.`,
+						`Baked ambient entry names slot ${slot} beyond the weight buffer.`,
 					);
 				}
-				// Canonical rows run south to north, which is render-local -Z.
-				const deltaX =
-					block.origin[0] + column * block.tileSize - listenerPosition[0];
-				const deltaY = block.origin[1] + height - listenerPosition[1];
-				const deltaZ =
-					block.origin[2] - row * block.tileSize - listenerPosition[2];
-				const distanceSquared =
-					deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
-				if (distanceSquared > AMBIENT_MAX_DISTANCE_SQUARED) continue;
-
-				examinedCellCount += 1;
-				const weight = ambientWeight(distanceSquared);
-				if (weight === 0) continue;
-				const descriptors = resolveDescriptors(
-					terrainCodeOf(sample),
-					sceneTypeIndexOf(sample),
-				);
-				if (!descriptors || descriptors.length === 0) continue;
-
-				// A difference of two scene positions is a render-axis displacement, which the
-				// anchor's pure translation cannot affect; converting it is the whole reason the
-				// compass comparison below lands in the right quadrant.
-				const direction = ambientDirection(
-					renderVectorToAc(renderVector3([deltaX, deltaY, deltaZ])),
-				);
-				const distance = Math.sqrt(distanceSquared);
-				totalWeight += weight;
-				for (const descriptor of descriptors) {
-					accumulate(accumulations, descriptor, weight, direction, distance);
-				}
+				outWeights[slot]! += weight;
 			}
-		}
-	}
-
-	return { accumulations, examinedCellCount, totalWeight };
+		},
+	).totalWeight;
 }
 
 /**
@@ -232,26 +445,25 @@ export function placeAmbientSound(
 }
 
 /**
- * Whether any cell of one landblock can lie within the ambient radius.
+ * Whether any entry of one baked block can lie within the ambient radius.
  *
  * Tests the listener against the block's axis-aligned span, so it rejects only blocks that provably
- * cannot contribute. Height is deliberately ignored here: the per-cell test below uses the real
- * vertex height, and a block-level bound would need the terrain's height range to stay conservative.
+ * cannot contribute. Height is deliberately ignored here: the per-entry test uses the real vertex
+ * height, and a block-level bound would need the terrain's height range to stay conservative.
  */
 function blockWithinAmbientRange(
-	block: AmbientTerrainBlock,
-	span: number,
+	block: BakedAmbientBlock,
 	listenerPosition: SceneVector3,
 ): boolean {
 	// Canonical rows run south to north, which is render-local -Z, so the block spans -span in z.
 	const nearestX = clamp(
 		listenerPosition[0],
 		block.origin[0],
-		block.origin[0] + span,
+		block.origin[0] + block.span,
 	);
 	const nearestZ = clamp(
 		listenerPosition[2],
-		block.origin[2] - span,
+		block.origin[2] - block.span,
 		block.origin[2],
 	);
 	const deltaX = nearestX - listenerPosition[0];
@@ -259,23 +471,18 @@ function blockWithinAmbientRange(
 	return deltaX * deltaX + deltaZ * deltaZ <= AMBIENT_MAX_DISTANCE_SQUARED;
 }
 
-function clamp(value: number, minimum: number, maximum: number): number {
-	return Math.min(maximum, Math.max(minimum, value));
-}
-
-/** Fold one cell's contribution into one descriptor (`Ambient::AddSound` → `AmbientSound::AddTo`). */
+/** Fold one entry's contribution into one descriptor (`Ambient::AddSound` → `AmbientSound::AddTo`). */
 function accumulate(
-	accumulations: Map<string, AmbientAccumulation>,
+	accumulations: Map<number, AmbientAccumulation>,
 	descriptor: AmbientDescriptor,
 	weight: number,
 	direction: AmbientDirection,
 	distance: number,
 ): void {
-	const key = ambientDescriptorKey(descriptor);
-	let accumulation = accumulations.get(key);
+	let accumulation = accumulations.get(descriptor.slot);
 	if (!accumulation) {
 		accumulation = { descriptor, directions: new Map(), soundCount: 0 };
-		accumulations.set(key, accumulation);
+		accumulations.set(descriptor.slot, accumulation);
 	}
 	accumulation.soundCount += weight;
 	// A continuous sound is played centred and never positioned, so retail's `ConstantSound::AddTo`

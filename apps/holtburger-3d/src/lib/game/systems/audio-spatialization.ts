@@ -2,9 +2,10 @@ import type { RenderVector3, SceneVector3 } from "../../assets/ac-frame";
 /**
  * Retail's positional audio math, transcribed from `SoundManager` (acclient.c:366427-366519).
  *
- * Deliberately a pure module: gain and pan are computed **once at trigger time** from the emitting
- * object's position and never updated, so a moving source does not re-pan. That is retail's
- * behavior, and it is also why this needs no per-frame work at all.
+ * Deliberately a pure module: one placement from one listener pose, no state. Retail called this
+ * once at trigger time and never again; we additionally call it per frame for every live voice
+ * (the divergence is owned and marked by `AudioSystem`), which is why it stays allocation-light —
+ * scalar arithmetic plus one small result object per audible placement.
  */
 
 /** Below this distance retail applies no attenuation and no panning. */
@@ -62,12 +63,12 @@ export function placeSpatialAudio(
 	categoryVolume: number,
 ): SpatialAudioPlacement | null {
 	if (!(volume > 0) || !(categoryVolume > 0)) return null;
-	const delta = [
-		sourcePosition[0] - listenerPosition[0],
-		sourcePosition[1] - listenerPosition[1],
-		sourcePosition[2] - listenerPosition[2],
-	] as const;
-	const distance = Math.hypot(delta[0], delta[1], delta[2]);
+	// Scalars rather than a delta tuple: this runs per live voice per frame, and the components are
+	// only ever read element-wise below.
+	const deltaX = sourcePosition[0] - listenerPosition[0];
+	const deltaY = sourcePosition[1] - listenerPosition[1];
+	const deltaZ = sourcePosition[2] - listenerPosition[2];
+	const distance = Math.hypot(deltaX, deltaY, deltaZ);
 
 	// Inside the flat radius retail neither attenuates nor pans, so a sound at the listener's own
 	// position is centred rather than dividing by zero.
@@ -89,10 +90,16 @@ export function placeSpatialAudio(
 		listenerRight[2],
 	);
 	if (rightLength === 0) return { gain, pan: 0 };
+	// RETAIL DIVERGENCE: retail pans by the sine of the *horizontal* heading difference
+	// (acclient.c:366509-366514), discarding the vertical offset entirely; this projects the full 3D
+	// delta and normalizes by 3D distance, which softens pan for steeply overhead or underfoot
+	// sources. Deliberate product choice: stereo pan is pure presentation that no shipped content
+	// can observe, and vertical-aware panning is the behavior a modern client wants. "Correcting"
+	// this to retail would hard-pan sources directly above the listener.
 	const projection =
-		(delta[0] * listenerRight[0] +
-			delta[1] * listenerRight[1] +
-			delta[2] * listenerRight[2]) /
+		(deltaX * listenerRight[0] +
+			deltaY * listenerRight[1] +
+			deltaZ * listenerRight[2]) /
 		(rightLength * distance);
 	return { gain, pan: Math.max(-1, Math.min(1, projection)) };
 }

@@ -729,6 +729,18 @@ eslint all clean.
 
 ## Decisions and Course Corrections
 
+- **2026-08-17 — "Too quiet on average" root-caused to the pan law; retail's transcribed.** The
+  distance curve was never the problem — the positioned ambient path runs the same
+  `GetAttenuation(distance, …)` as hooks (`PlaySoundInternal(SoundBufRef*, const Position*, …)`,
+  acclient.c:366489-366518). The divergence was the panner: `SoundBuf::Play` clamps pan to ±15 and
+  hands DirectSound `SetPan(100 × pan)` (acclient.c:369202-369232) — single-channel attenuation, at
+  most 15 dB on the *far* channel, never touching the near one — while `StereoPannerNode` is
+  equal-power: −3 dB in both ears for every centred sound (every bed, everything in the flat
+  radius) and total far-ear silence at full pan. `WebAudioDevice` now reproduces retail's law with
+  a master gain fanned into per-channel gains and a merger, marked `RETAIL QUIRK` with the
+  citation; tests pin full-both-channels at centre and the 15 dB shadow at full pan. A second,
+  correct contributor acknowledged: live tracking fades receding voices that frozen playback used
+  to hold loud.
 - **2026-08-17 — Pre-commit quality pass (4-angle review), ~15 findings applied.** The structural
   ones: the two baked-cell walks collapsed into one `walkAudibleAmbientCells` owner of the
   cell-weighting semantics (the invariant whose duplication caused the share regression now has one

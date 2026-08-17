@@ -6,6 +6,22 @@ const GAIN_EPSILON = 1e-4;
 /** Pan change below which a re-target is dropped. */
 const PAN_EPSILON = 1e-3;
 
+/**
+ * RETAIL QUIRK: the far channel is attenuated by at most 15 dB, and the near channel is never
+ * attenuated at all. `SoundBuf::Play` clamps pan to ±15 and hands DirectSound `SetPan(100 × pan)`
+ * (acclient.c:369202-369232) — hundredths-of-a-dB units that turn one channel down and leave the
+ * other alone. "Correcting" this to an equal-power panner drops every centred sound (every ambient
+ * bed, everything inside the flat radius) by 3 dB in both ears and silences the far ear completely
+ * at full pan; the entire shipped mix was tuned against full-both-channels playback and audibly
+ * thins without it.
+ */
+const MAXIMUM_PAN_SHADOW_DECIBELS = 15;
+
+/** The far channel's gain under retail's pan law; the near channel is always 1. */
+function panShadowGain(pan: number): number {
+	return 10 ** ((-MAXIMUM_PAN_SHADOW_DECIBELS * Math.abs(pan)) / 20);
+}
+
 /** Loads one authored sound's decoder-ready bytes and its media type. */
 export interface AudioAssetSource {
 	loadAudio(soundId: DatAssetId): Promise<ArrayBuffer>;
@@ -26,6 +42,10 @@ export interface AudioAssetSource {
  * Live placement updates go through `setTargetAtTime` rather than writing `AudioParam.value`: a
  * direct per-frame assignment steps the signal once per frame and zippers audibly. The smoothing
  * constant is injected because it is a tuning judgement, not an adapter detail.
+ *
+ * Panning follows retail's single-channel-attenuation law rather than an equal-power panner (see
+ * MAXIMUM_PAN_SHADOW_DECIBELS). Stereo-authored buffers are mixed down by the channel fan-out,
+ * matching how retail's mono hook and ambient waves actually shipped.
  */
 export class WebAudioDevice implements AudioDevice {
 	readonly #context: AudioContext;
@@ -63,9 +83,21 @@ export class WebAudioDevice implements AudioDevice {
 		source.buffer = buffer;
 		const gainNode = this.#context.createGain();
 		gainNode.gain.value = gain;
-		const panner = this.#context.createStereoPanner();
-		panner.pan.value = pan;
-		source.connect(gainNode).connect(panner).connect(this.#context.destination);
+		// Retail's pan law needs independent channel gains (see MAXIMUM_PAN_SHADOW_DECIBELS), which
+		// no StereoPannerNode can express: master gain fans out to a left and a right gain, merged
+		// into the two output channels.
+		const leftGain = this.#context.createGain();
+		const rightGain = this.#context.createGain();
+		const shadow = panShadowGain(pan);
+		leftGain.gain.value = pan > 0 ? shadow : 1;
+		rightGain.gain.value = pan < 0 ? shadow : 1;
+		const merger = this.#context.createChannelMerger(2);
+		source.connect(gainNode);
+		gainNode.connect(leftGain);
+		gainNode.connect(rightGain);
+		leftGain.connect(merger, 0, 0);
+		rightGain.connect(merger, 0, 1);
+		merger.connect(this.#context.destination);
 		let finished = false;
 		// Web Audio reports the exact end, including a stop we requested, so the voice needs no
 		// duration bookkeeping to know it is done.
@@ -99,8 +131,18 @@ export class WebAudioDevice implements AudioDevice {
 				lastPan = nextPan;
 				const now = this.#context.currentTime;
 				const smoothing = this.#placementSmoothingSeconds;
+				const nextShadow = panShadowGain(nextPan);
 				gainNode.gain.setTargetAtTime(nextGain, now, smoothing);
-				panner.pan.setTargetAtTime(nextPan, now, smoothing);
+				leftGain.gain.setTargetAtTime(
+					nextPan > 0 ? nextShadow : 1,
+					now,
+					smoothing,
+				);
+				rightGain.gain.setTargetAtTime(
+					nextPan < 0 ? nextShadow : 1,
+					now,
+					smoothing,
+				);
 			},
 			stop: () => {
 				if (stopped) return;

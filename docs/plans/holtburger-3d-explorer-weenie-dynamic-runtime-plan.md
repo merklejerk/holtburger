@@ -1997,7 +1997,14 @@ motion history, timeline recorder, or diagnostic state was added for this checkp
 
 ### Phase R4: Stabilize the Reduced Milestone Boundary
 
-Progress: Pending.
+Progress: Complete (2026-08-17). The committed Phase 5D/R2/R3 tranche passed formatting, workspace
+Clippy with warnings denied, and the complete workspace test suite. The ownership-boundary diff
+review found no temporary probes, production counters, ignored real-asset tests, or diagnostic
+vocabulary; the only report-count accessor is `#[cfg(test)]`, and the new collection-tick type is
+app-local in `src-tauri`. The plan, survey evidence, deferred
+`holtburger-authored-root-motion-physics-integration-plan.md`, and parent roadmap agree on the
+temporary motion boundary and remaining execution order. No behavior, adapter, or observation
+surface was added.
 
 #### Deliverables
 
@@ -2021,7 +2028,11 @@ Progress: Pending.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- The review found one omission against the Phase R0 decision: the state-toggle report
+  reconciliation in `SpatialScene` lacked its mandated `RETAIL DIVERGENCE:` marker. The marker now
+  cites retail `set_state` (`acclient.c:310307-310335`), reverified to reconcile only lighting,
+  `NoDraw`, and `Hidden`, and names the state-transition fixture census. No reconciliation behavior
+  changed.
 
 ### Phase 6: Close the Physics-Only Motion Boundary
 

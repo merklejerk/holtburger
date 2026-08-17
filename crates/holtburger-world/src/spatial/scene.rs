@@ -169,6 +169,14 @@ fn wake_dynamic_runtime(body: &mut SpatialBody) -> bool {
     true
 }
 
+// RETAIL DIVERGENCE: retail `CPhysicsObj::set_state` (`acclient.c:310307-310335`) reconciles only
+// lighting, `NoDraw`, and `Hidden`; only `set_hidden` forces retained report ends, so a raw state
+// toggle leaves stale contact records with no balancing edge. The compatibility rules below close
+// that hole per the Phase R0 decision: losing report eligibility forces a balanced end, and
+// restored eligibility starts a new lifetime only when a later solve reconfirms contact. The
+// state-transition fixtures (`reporting_toggle_ends_only_outgoing_lifetime_and_restart_waits_for_touch`
+// and the reconfiguration report tests) census the affected transitions; reproducing retail would
+// let source-neutral consumers observe unbalanced or fabricated lifetimes.
 fn static_report_recipient_compatible(
     previous: Option<&PhysicalBodyState>,
     next: Option<&PhysicalBodyState>,

@@ -2253,6 +2253,38 @@ was added; every injected failure reaches its owning unit through an existing de
 
 ### Phase 7B: Prove the Product and Workload Boundary
 
+Progress: Complete (2026-08-17). Three real browser-harness scenarios ran against the canonical
+`dats/weenies.hwc` plus `dats/assets.hba` on landblock `0xda55ffff`, composed from production
+commands and snapshots with test-owned observers only. All runs reported zero browser console
+errors.
+
+Single supported WCID (147 Crate, simulated, 30 ticks): catalog lookup, registry publication,
+visual preparation, 30 changed solver ticks falling under gravity with a growing accepted path,
+frontend hydration at `visibleDynamicEntityCount` 1 / 3 parts, and exact despawn returning every
+named runtime count to zero.
+
+Two-entity contact and response (WCID 1499 Flame Bolt launched along AC +x into WCID 34621
+Killagurg, 3 m apart, 20 ticks): the mover stopped at x=98.48 with zero velocity, cleared exactly
+`MISSILE|ALIGN_PATH|PATH_CLIPPED` (0x340) from its semantic mask, and pushed the target from x=99
+to x=99.39 with +1.0 m/s retained. A control run with the target moved to 40 m separation let the
+same launch reach x=106.0 still travelling at 15 m/s, proving the peer — not static geometry or an
+exhausted launch — produced the response. The physical camera never participated.
+
+300-entity mixed population (WCIDs 147, 34621, and 1 interleaved across a 2.5 m lattice, 90
+ticks): 300 entities resolved to `templateCount` 3, rendered 299 visible entities and 8,832 parts,
+and returned every count to zero after one bulk despawn. Advanced-body counts per tick fell from
+300 to 1, so the run genuinely exercised the mixed active/settled population and quiescent
+integration pruning at product scale.
+
+Future server handoff (documentation only, no adapter implemented): a decoded server create
+supplies identity, WCID, name, appearance, object scale, and the complete semantic `PhysicsState`
+that the Explorer currently reads from the catalog record and the spawn request; `SetState`
+supplies the later complete mask that `replace_physics_state` currently receives from an Explorer
+command. The setup/DAT-derived facts, effective-state resolution, transition decision, body
+commands, solver, projection, and frontend feed are already source-neutral and unchanged. The
+Explorer-only inputs that disappear are catalog lookup, app-local GUID allocation, camera-relative
+candidate placement, and the scenario commands (launch, relocate, replace).
+
 #### Deliverables
 
 - Run one supported representative WCID through the real Explorer UI/Tauri boundary: catalog lookup,
@@ -2291,7 +2323,31 @@ was added; every injected failure reaches its owning unit through an existing de
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- The harness gained `spawnExplorerEntityFleet` and `despawnExplorerEntityFleet` globals plus
+  `--entity-pair-wcid`, `--entity-pair-target-wcid`, `--entity-pair-separation`,
+  `--entity-population-wcid` (comma-separated for a geometry mix), and
+  `--entity-population-count`. All of it is harness-owned diagnostic infrastructure; no production
+  contract, command, or counter was added. The fleet spawn passes the desired offset as the view
+  direction and its length as the distance, so it reuses the production candidate resolution
+  instead of introducing a second placement path.
+- The pair scenario initially used WCID 147 Crate as its target and did not clear the mover's
+  projectile state. Investigation rather than assumption established why: Crate carries
+  `IgnoreCollisions`, which the Phase R0 matrix defines as a directional collision/report filter
+  that leaves `target` Solid while zeroing `accepts_peer_reports`. The crate therefore correctly
+  blocks the missile while refusing to be a report subject, so `clears_projectile_state` stays
+  false. This is the landed R0 design, not a defect; the scenario moved to a report-accepting
+  creature target to exercise the clearing path as well. Both targets remain useful and the
+  separation control distinguishes a real peer response from any other stop.
+- The 300-entity per-tick timings are harness round-trip measurements across CDP and the dev
+  content host, so they are reported as `harnessRoundTripMs` and are explicitly not a fixed-tick
+  solver budget. R2 already measured the 50- and 300-body host-solver workloads; this scenario
+  proves ownership, visibility, pruning, and teardown instead of re-timing the solver.
+- Focused appearance mutation and animated parenting still have no concrete Explorer scenario. No
+  follow-on plan is authored and no dormant operation is appended; they stay out of scope until a
+  named consumer exists.
+- Debt: the population run reaches 299 settled and 1 still-integrating body rather than a fully
+  quiescent population. The residual body is adequate for proving the pruning transition, but a
+  later workload plan may want a terrain-aware lattice that settles completely.
 
 ### Phase 8: Clean Cutover and Architecture Audit
 

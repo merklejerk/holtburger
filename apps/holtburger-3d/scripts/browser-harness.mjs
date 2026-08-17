@@ -168,6 +168,11 @@ function parseArgs(args) {
 		isolateAuthoredDynamics: false,
 		excludeAuthoredDynamics: false,
 		spawnWcid: null,
+		entityPairWcid: null,
+		entityPairTargetWcid: null,
+		entityPairSeparation: 3,
+		entityPopulationWcid: null,
+		entityPopulationCount: 300,
 		spawnDistance: 5,
 		spawnSimulated: false,
 		launchDirection: null,
@@ -297,6 +302,32 @@ function parseArgs(args) {
 				break;
 			case "--spawn-wcid":
 				parsed.spawnWcid = requireValue(args, ++index, arg);
+				break;
+			case "--entity-pair-wcid":
+				parsed.entityPairWcid = requireValue(args, ++index, arg);
+				break;
+			case "--entity-pair-target-wcid":
+				parsed.entityPairTargetWcid = requireValue(args, ++index, arg);
+				break;
+			case "--entity-pair-separation":
+				parsed.entityPairSeparation = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isFinite(parsed.entityPairSeparation) ||
+					parsed.entityPairSeparation <= 0
+				) {
+					throw new Error(
+						"--entity-pair-separation must be positive and finite.",
+					);
+				}
+				break;
+			case "--entity-population-wcid":
+				parsed.entityPopulationWcid = requireValue(args, ++index, arg);
+				break;
+			case "--entity-population-count":
+				parsed.entityPopulationCount = parsePositiveInteger(
+					requireValue(args, ++index, arg),
+					arg,
+				);
 				break;
 			case "--spawn-distance":
 				parsed.spawnDistance = Number(requireValue(args, ++index, arg));
@@ -710,13 +741,22 @@ function parseArgs(args) {
 	if (parsed.spawnSimulated && parsed.spawnWcid === null) {
 		throw new Error("--spawn-simulated requires --spawn-wcid.");
 	}
+	// The pair and population scenarios spawn simulated fleets of their own, so they satisfy the
+	// same requirement without --spawn-simulated.
+	const simulatedScenario =
+		parsed.spawnSimulated ||
+		parsed.entityPairWcid !== null ||
+		parsed.entityPopulationWcid !== null;
 	if (
 		(parsed.launchDirection !== null || parsed.entityTicks > 0) &&
-		!parsed.spawnSimulated
+		!simulatedScenario
 	) {
 		throw new Error(
-			"--launch-direction and --entity-ticks require --spawn-simulated.",
+			"--launch-direction and --entity-ticks require a simulated entity scenario.",
 		);
+	}
+	if (parsed.entityPairWcid !== null && parsed.entityTicks === 0) {
+		throw new Error("--entity-pair-wcid requires --entity-ticks.");
 	}
 	return parsed;
 }
@@ -770,6 +810,19 @@ Options:
                          Keep outdoor statics but strip promoted dynamics.
   --spawn-wcid <id>     Spawn one decimal or 0x WCID through the real catalog host, capture it,
                          then exact-despawn it and assert shared-runtime resource cleanup.
+  --entity-pair-wcid <id>
+                        Launch this simulated WCID along AC +x into the pair target. Needs a
+                        catalog maximum velocity, so pick a missile-class template.
+  --entity-pair-target-wcid <id>
+                        Solid target for the pair run. Default: the same WCID as the mover.
+  --entity-pair-separation <m>
+                        AC +x separation between pair mover and target. Default: 3. Raise it to
+                        run a no-contact control against the same launch.
+  --entity-population-wcid <id[,id...]>
+                        Spawn a lattice of simulated entities for the population workload run.
+                        Pass several WCIDs to interleave target-geometry branches.
+  --entity-population-count <n>
+                        Entities in the population run. Default: 300
   --spawn-distance <n>  Camera-relative spawn distance. Default: 5
   --spawn-simulated    Attach the spawned entity to the shared host solver instead of pose-only.
   --launch-direction <x,y,z>
@@ -849,6 +902,53 @@ Options:
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --chrome-path <path>  Chrome executable. Default: ${DEFAULT_CHROME_PATH}
 `);
+}
+
+/**
+ * Lattice offsets in AC axes, camera-relative, spaced so bodies start clear of each other.
+ *
+ * Rows advance north and columns east; the whole lattice sits ahead of the camera so every body is
+ * inside one populated landblock and visible to the renderer.
+ */
+function populationOffsets(count) {
+	const spacing = 2.5;
+	const columns = Math.ceil(Math.sqrt(count));
+	const offsets = [];
+	for (let index = 0; index < count; index += 1) {
+		const column = index % columns;
+		const row = Math.floor(index / columns);
+		offsets.push([
+			(column - (columns - 1) / 2) * spacing,
+			12 + row * spacing,
+			0,
+		]);
+	}
+	return offsets;
+}
+
+/**
+ * Teardown census view: the same ownership counts the single-spawn lifecycle reports, minus the
+ * per-entity list, which is unreadable at population scale.
+ */
+function summarizeEntityRuntimeState(state) {
+	const summary = summarizeEntityLifecycleState(state);
+	return {
+		currentEntityCount: summary.currentEntities.length,
+		visibleDynamicEntityCount: summary.visibleDynamicEntityCount,
+		visibleDynamicPartCount: state.metrics?.visibleDynamicPartCount ?? null,
+		runtime: summary.runtime,
+	};
+}
+
+function summarizeDurations(durations) {
+	if (durations.length === 0) return null;
+	const sorted = [...durations].sort((left, right) => left - right);
+	return {
+		count: sorted.length,
+		p50: sorted[Math.floor(sorted.length * 0.5)],
+		p95: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))],
+		maximum: sorted[sorted.length - 1],
+	};
 }
 
 function assertPortalScopeAtlasFixture(state) {
@@ -990,6 +1090,8 @@ function briefHarnessReport(result) {
 			({ level }) => level === "error" || level === "exception",
 		),
 		entityLifecycle: summarizeEntityLifecycle(result.entityLifecycle),
+		entityPair: result.entityPair,
+		entityPopulation: result.entityPopulation,
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
 		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
@@ -1612,6 +1714,160 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[],
 			);
 		}
+		let entityPair = null;
+		if (options.entityPairWcid !== null) {
+			// Two solid bodies 3 m apart along AC +x. Launching the first along +x drives a real
+			// peer contact through the shared solver; the camera body is never a participant.
+			const movers = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntityFleet",
+				[options.entityPairWcid, [[0, 12, 0]], "simulated"],
+			);
+			const targets = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntityFleet",
+				[
+					options.entityPairTargetWcid ?? options.entityPairWcid,
+					[[options.entityPairSeparation, 12, 0]],
+					"simulated",
+				],
+			);
+			const pair = [...movers, ...targets];
+			await delay(300);
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.launchExplorerEntity",
+				[pair[0].identity.guid, pair[0].generation, [1, 0, 0]],
+			);
+			const pairTicks = [];
+			for (let tick = 0; tick < options.entityTicks; tick += 1) {
+				pairTicks.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.tickExplorerEntities",
+						[options.entityTickMs],
+					),
+				);
+			}
+			await delay(300);
+			const contactState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+			const retired = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.despawnExplorerEntityFleet",
+				[],
+			);
+			await delay(200);
+			entityPair = {
+				spawned: pair.map((entity) => ({
+					guid: entity.identity.guid,
+					generation: entity.generation,
+					pose: entity.placement.pose.coords,
+				})),
+				tickCount: pairTicks.filter((event) => event !== null).length,
+				// Final placement of both bodies. The mover starts at x=0 relative to the target's
+				// x=+3; a blocking response leaves it short of the target rather than past it.
+				finalPlacements: contactState.spawnedEntities.map((entity) => ({
+					guid: entity.identity.guid,
+					wcid: entity.identity.wcid,
+					coords: entity.placement.pose.coords,
+					velocity: entity.placement.velocity,
+					contact: entity.placement.contact,
+					semanticMask: entity.physics.semanticMask,
+				})),
+				contactState: summarizeEntityRuntimeState(contactState),
+				retiredCount: retired,
+				teardownState: summarizeEntityRuntimeState(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+						[],
+					),
+				),
+			};
+		}
+		let entityPopulation = null;
+		if (options.entityPopulationWcid !== null) {
+			// A comma-separated list interleaves catalog-proven target-geometry branches across the
+			// lattice, so one run covers physics-BSP, cylsphere, and sphere targets together.
+			const populationWcids = options.entityPopulationWcid.split(",");
+			const offsets = populationOffsets(options.entityPopulationCount);
+			const populationStart = Date.now();
+			const population = [];
+			for (const [index, wcid] of populationWcids.entries()) {
+				const share = offsets.filter(
+					(_, offsetIndex) => offsetIndex % populationWcids.length === index,
+				);
+				if (share.length === 0) continue;
+				population.push(
+					...(await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntityFleet",
+						[wcid, share, "simulated"],
+					)),
+				);
+			}
+			const spawnMs = Date.now() - populationStart;
+			await delay(500);
+			const populatedState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+			const tickDurations = [];
+			// Advanced-body count per tick. A settled body leaves the integration scan, so this
+			// series falling below the population is the observable proof of quiescent pruning at
+			// product scale; it reads a production event rather than adding a runtime counter.
+			const advancedPerTick = [];
+			for (let tick = 0; tick < options.entityTicks; tick += 1) {
+				const started = Date.now();
+				const event = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.tickExplorerEntities",
+					[options.entityTickMs],
+				);
+				tickDurations.push(Date.now() - started);
+				advancedPerTick.push(event === null ? 0 : event.batch.advances.length);
+			}
+			await delay(300);
+			const settledState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+			const retired = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.despawnExplorerEntityFleet",
+				[],
+			);
+			await delay(400);
+			entityPopulation = {
+				wcids: populationWcids,
+				requestedCount: options.entityPopulationCount,
+				spawnedCount: population.length,
+				spawnMs,
+				populatedState: summarizeEntityRuntimeState(populatedState),
+				settledState: summarizeEntityRuntimeState(settledState),
+				harnessRoundTripMs: summarizeDurations(tickDurations),
+				advancedPerTick: {
+					first: advancedPerTick[0] ?? null,
+					last: advancedPerTick[advancedPerTick.length - 1] ?? null,
+					minimum: advancedPerTick.length ? Math.min(...advancedPerTick) : null,
+					maximum: advancedPerTick.length ? Math.max(...advancedPerTick) : null,
+				},
+				retiredCount: retired,
+				teardownState: summarizeEntityRuntimeState(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+						[],
+					),
+				),
+			};
+		}
 		if (options.cameraEndYawDegrees !== null) {
 			await evaluate(
 				client,
@@ -1963,6 +2219,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			cameraSweepScreenshots,
 			glRenderer,
 			consoleMessages,
+			entityPair,
+			entityPopulation,
 			entityLifecycle:
 				spawnedEntity === null
 					? null

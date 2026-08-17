@@ -16,7 +16,10 @@
 		createLandblockWorldOrigin,
 		OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	} from "../../lib/game/landblocks";
-	import { createCameraRotationRadians } from "../../lib/game/math/camera-orientation";
+	import {
+		createCameraAxesRadians,
+		createCameraRotationRadians,
+	} from "../../lib/game/math/camera-orientation";
 	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
 	import type { Camera } from "../../lib/game/runtime/types";
 	import { Vec3 } from "../../lib/game/math/types";
@@ -50,6 +53,13 @@
 		type TextureFilteringPolicy,
 	} from "../../lib/game/renderer/texture-filtering-policy";
 	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
+	import { resolvePhysicalCameraViewDirection } from "../../lib/game/motion/host-physical-camera-path";
+	import {
+		createExplorerSpawnRequest,
+		parseExplorerWcid,
+	} from "../../explorer/explorer-entity-commands";
+	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
+	import { HttpExplorerEntityHost } from "./http-explorer-entity-host";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -207,6 +217,16 @@
 		readonly setWeather: (enabled: boolean) => void;
 		/** Withdraw every requested scene layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
+		/** Spawn one real catalog-backed entity through the app-local host and shared runtime. */
+		readonly spawnExplorerEntity: (
+			wcid: string,
+			distance: number,
+		) => Promise<DynamicEntityView>;
+		/** Retire one exact harness-spawned generation through the same host lifecycle. */
+		readonly despawnExplorerEntity: (
+			guid: number,
+			generation: number,
+		) => Promise<void>;
 		/** Exercise the public portal compositor without changing continuous frame settings. */
 		readonly probePortalExecution: (
 			envCellId: string,
@@ -252,6 +272,8 @@
 		readonly portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
+		/** Current harness-only projection of the app-local host registry. */
+		readonly spawnedEntities: readonly DynamicEntityView[];
 		readonly ready: boolean;
 		/** CSS and physical viewport dimensions that determine visible work. */
 		readonly viewport: BrowserHarnessViewportEvidence;
@@ -329,6 +351,8 @@
 		longestLongTaskMs: 0,
 	});
 	let contentSource: HttpLandblockContentSource | undefined;
+	let entityHost: HttpExplorerEntityHost | undefined;
+	let spawnedEntities: readonly DynamicEntityView[] = [];
 	let runtime: GameRuntime | undefined;
 	let renderer: WebGL2Renderer | undefined;
 	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
@@ -576,6 +600,57 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	async function spawnExplorerEntity(
+		rawWcid: string,
+		distance: number,
+	): Promise<DynamicEntityView> {
+		if (!runtime || !entityHost || cameraEvidence === null)
+			throw new Error("Browser harness entity spawn requires a current camera and runtime.");
+		const yaw = (cameraEvidence.yawDegrees * Math.PI) / 180;
+		const pitch = (cameraEvidence.pitchDegrees * Math.PI) / 180;
+		const axes = createCameraAxesRadians(yaw, pitch);
+		const direction = resolvePhysicalCameraViewDirection({
+			forward: [axes.forward.x, axes.forward.y, axes.forward.z],
+			right: [axes.right.x, axes.right.y, axes.right.z],
+			up: [axes.up.x, axes.up.y, axes.up.z],
+		});
+		const request = createExplorerSpawnRequest(
+			parseExplorerWcid(rawWcid),
+			{
+				position: sceneVec3(new Vec3(...cameraEvidence.position)),
+				residency: {
+					envCellId: cameraEvidence.envCellId,
+					landblockId: cameraEvidence.landblockId,
+				},
+			},
+			direction,
+			distance,
+		);
+		const entity = await entityHost.spawn(request);
+		spawnedEntities = [
+			...spawnedEntities.filter(
+				(current) => current.identity.guid !== entity.identity.guid,
+			),
+			entity,
+		];
+		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+		return entity;
+	}
+
+	async function despawnExplorerEntity(
+		guid: number,
+		generation: number,
+	): Promise<void> {
+		if (!runtime || !entityHost)
+			throw new Error("Browser harness entity despawn requires an active runtime.");
+		await entityHost.despawn(guid, generation);
+		spawnedEntities = spawnedEntities.filter(
+			(entity) =>
+				entity.identity.guid !== guid || entity.generation !== generation,
+		);
+		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+	}
+
 	function setLayerVisibility(
 		layer: keyof FrameSettings["layerVisibility"],
 		visible: boolean,
@@ -805,6 +880,7 @@
 		const start = async (): Promise<void> => {
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
+				entityHost = new HttpExplorerEntityHost(hostUrl);
 				const landblockSource = ISOLATE_AUTHORED_DYNAMICS
 					? new DynamicOnlyLandblockSource(contentSource)
 					: EXCLUDE_AUTHORED_DYNAMICS
@@ -843,7 +919,7 @@
 					contentSource,
 					contentSource,
 					contentSource,
-					null,
+					contentSource,
 					PARTICLE_SEED === null
 						? undefined
 						: seededRoll(Number(PARTICLE_SEED)),
@@ -903,8 +979,9 @@
 					});
 					longTaskObserver.observe({ buffered: true, type: "longtask" });
 				}
-				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
+					hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
 					clearSceneInterest,
+					despawnExplorerEntity,
 					focusExplorerOutdoor,
 					probePortalExecution,
 					requestSceneInterest,
@@ -923,6 +1000,7 @@
 					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,
 					resetTiming,
+					spawnExplorerEntity,
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;
@@ -961,6 +1039,7 @@
 							staticObjects,
 							sourceBatches:
 								contentSource?.getLandblockSourceBatchDiagnostics() ?? [],
+							spawnedEntities,
 							timing: timingSnapshot(),
 							textureFilteringCapabilities,
 							viewport: {

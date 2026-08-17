@@ -1,5 +1,4 @@
-import { sceneVec3 } from "../../assets/ac-frame";
-import { Mat4, Vec3 } from "../math/types";
+import { Mat4 } from "../math/types";
 import type {
 	ResolvedOutdoorStaticLayerSource,
 	ResolvedStaticObjectLayerSource,
@@ -9,16 +8,9 @@ import type { StaticObjectLayerArtifact } from "./artifacts";
 import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
-import {
-	placeObjectLights,
-	type PlacedStaticLight,
-} from "./interior-static-lighting";
-import {
-	RUNTIME_LIGHT_RANGE_SCALE,
-	type RuntimeLight,
-} from "../environment/runtime-lights";
-import { createLandblockWorldOrigin } from "../landblocks";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import type { PlacedStaticLight } from "./interior-static-lighting";
+import type { RuntimeLight } from "../environment/runtime-lights";
+import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
 
 /**
  * Gather the authored lights an outdoor layer's residents emit, in canonical scene space.
@@ -35,39 +27,26 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 function gatherLayerLights(
 	source: ResolvedOutdoorStaticLayerSource,
 ): readonly RuntimeLight[] {
-	const origin = createLandblockWorldOrigin(source.landblockId);
-	const placed: PlacedStaticLight[] = [];
+	const gathered: RuntimeLight[] = [];
 	for (const resident of source.staticResidents) {
-		placeObjectLights(
-			resident.presentation.lights,
-			resident.placement.localTransform,
-			placed,
+		gathered.push(
+			...resolveObjectRuntimeLights(
+				resident.presentation.lights,
+				resident.placement.localTransform,
+				source.landblockId,
+			),
 		);
 	}
 	for (const dynamic of source.dynamicSources) {
-		placeObjectLights(
-			dynamic.presentation.lights,
-			dynamic.placement.localTransform,
-			placed,
+		gathered.push(
+			...resolveObjectRuntimeLights(
+				dynamic.presentation.lights,
+				dynamic.placement.localTransform,
+				source.landblockId,
+			),
 		);
 	}
-	return placed.map((light) => ({
-		// Landblock-local plus the landblock's own origin: canonical scene space.
-		position: sceneVec3(
-			new Vec3(
-				light.position.x + origin.x,
-				light.position.y,
-				light.position.z + origin.z,
-			),
-		),
-		color: light.color,
-		range: light.falloff * RUNTIME_LIGHT_RANGE_SCALE,
-		// Scaled before falloff, so an authored 100 stops blowing out the inner half of the
-		// lamp's radius instead of merely being clamped there.
-		intensity:
-			light.intensity *
-			FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
-	}));
+	return gathered;
 }
 
 /** Assemble a logical static-object artifact after geometry and texture-requirement validation. */

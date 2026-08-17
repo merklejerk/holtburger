@@ -3,6 +3,13 @@ import {
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
 } from "../lib/game/runtime/dynamic-entity-feed";
+import {
+	decodeExplorerCatalogCapability,
+	decodeExplorerEntityMutationReceipt,
+	type ExplorerCatalogCapability,
+	type ExplorerEntityMutationReceipt,
+	type ExplorerEntitySpawnRequest,
+} from "./explorer-entity-commands";
 
 const DYNAMIC_ENTITY_EVENT = "explorer-dynamic-entity";
 
@@ -19,6 +26,12 @@ export interface ExplorerDynamicEntityTransport {
 export class ExplorerDynamicEntitySession {
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ExplorerDynamicEntityTransport;
+	readonly #listeners = new Set<() => void>();
+	readonly #waiters = new Set<{
+		readonly reached: () => boolean;
+		readonly resolve: () => void;
+		readonly reject: (reason: Error) => void;
+	}>();
 	#unlisten: (() => void) | null = null;
 
 	constructor(
@@ -52,15 +65,84 @@ export class ExplorerDynamicEntitySession {
 		this.#unlisten?.();
 		this.#unlisten = null;
 		this.mirror.awaitSnapshot();
+		for (const waiter of this.#waiters) {
+			waiter.reject(
+				new Error("Dynamic-entity session stopped before command publication."),
+			);
+		}
+		this.#waiters.clear();
 	}
 
-	/** Invoke one typed-by-caller Explorer host operation over the same Tauri transport. */
-	invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
-		return this.#transport.invoke(command, args);
+	/** Read the immutable optional catalog capability selected by the host at composition. */
+	async catalogCapability(): Promise<ExplorerCatalogCapability> {
+		return decodeExplorerCatalogCapability(
+			await this.#transport.invoke("explorer_catalog_capability"),
+		);
+	}
+
+	/** Spawn one explicit catalog-backed candidate and validate its committed identity. */
+	async spawn(
+		request: ExplorerEntitySpawnRequest,
+	): Promise<ExplorerEntityMutationReceipt> {
+		const receipt = decodeExplorerEntityMutationReceipt(
+			await this.#transport.invoke("spawn_explorer_entity", { request }),
+		);
+		await this.#waitForCurrent(receipt, true);
+		return receipt;
+	}
+
+	/** Despawn one exact live generation and validate the retired identity. */
+	async despawn(
+		guid: number,
+		generation: number,
+	): Promise<ExplorerEntityMutationReceipt> {
+		const receipt = decodeExplorerEntityMutationReceipt(
+			await this.#transport.invoke("despawn_explorer_entity", {
+				guid,
+				generation,
+			}),
+		);
+		await this.#waitForCurrent(receipt, false);
+		return receipt;
+	}
+
+	/** Observe accepted current-state changes without creating another entity authority. */
+	subscribe(listener: () => void): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
 	}
 
 	#receive(payload: unknown): void {
-		this.mirror.apply(decodeDynamicEntityEvent(payload));
+		if (!this.mirror.apply(decodeDynamicEntityEvent(payload))) return;
+		for (const listener of this.#listeners) listener();
+		for (const waiter of [...this.#waiters]) {
+			if (!waiter.reached()) continue;
+			this.#waiters.delete(waiter);
+			waiter.resolve();
+		}
+	}
+
+	/** Pair command completion with the focused event the host publishes before returning. */
+	async #waitForCurrent(
+		receipt: ExplorerEntityMutationReceipt,
+		present: boolean,
+	): Promise<void> {
+		const reached = (): boolean => {
+			const current = this.mirror
+				.entities()
+				.find((entity) => entity.identity.guid === receipt.guid);
+			return present
+				? current?.generation === receipt.generation
+				: current === undefined;
+		};
+		if (reached()) return;
+		await new Promise<void>((resolve, reject) => {
+			this.#waiters.add({
+				reached,
+				reject: (reason) => reject(reason),
+				resolve,
+			});
+		});
 	}
 }
 

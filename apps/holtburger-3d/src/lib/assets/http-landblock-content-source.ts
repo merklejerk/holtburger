@@ -31,6 +31,9 @@ import type {
 	LandblockSourceBatchSource,
 	LandblockSourceLayer,
 } from "./landblock-source-batch";
+import type { DynamicEntityVisualSource } from "./dynamic-entity-visual-source";
+import type { DynamicEntityView } from "../game/runtime/dynamic-entity-feed";
+import { decodeDynamicEntityVisual } from "./decode-dynamic-entity-visual";
 
 /** One observed host batch retained only by the browser harness source adapter. */
 export interface HttpLandblockSourceBatchDiagnostic {
@@ -54,6 +57,7 @@ export class HttpLandblockContentSource
 		ParticleEmitterSource,
 		SoundTableSource,
 		ParticleMeshSource,
+		DynamicEntityVisualSource,
 		SkySourceLoader
 {
 	readonly #baseUrl: URL;
@@ -159,6 +163,15 @@ export class HttpLandblockContentSource
 		return decodePhysicsScriptRecord(
 			await this.#postBinary("physics-script", { scriptId }),
 			scriptId,
+		);
+	}
+
+	async load(presentation: DynamicEntityView["presentation"]) {
+		return decodeDynamicEntityVisual(
+			await this.#postBinary("dynamic-entity-visual", {
+				setupDid: presentation.content.setupDid,
+				appearance: presentation.appearance,
+			}),
 		);
 	}
 

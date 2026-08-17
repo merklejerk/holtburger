@@ -65,6 +65,12 @@
 		ExplorerDynamicEntitySession,
 		tauriExplorerDynamicEntityTransport,
 	} from "./explorer-dynamic-entity-session";
+	import {
+		createExplorerSpawnRequest,
+		parseExplorerWcid,
+		type ExplorerCatalogCapability,
+	} from "./explorer-entity-commands";
+	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 	import { Vec3 } from "../lib/game/math/types";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import {
@@ -103,6 +109,12 @@
 	let groundedCharacterInput: GroundedCharacterInput | undefined;
 	let simulationInterestController: SimulationInterestController | undefined;
 	let dynamicEntitySession: ExplorerDynamicEntitySession | undefined;
+	let unsubscribeDynamicEntities: (() => void) | undefined;
+	let dynamicEntityReconciliation: Promise<void> = Promise.resolve();
+	let dynamicEntityReconciliationRevision = 0;
+	let entityCatalog = $state<ExplorerCatalogCapability | null>(null);
+	let spawnedEntities = $state<readonly DynamicEntityView[]>([]);
+	let spawnedEntityPresentationError = $state<string | null>(null);
 	let physicalSimulationAnchor: string | null = null;
 	let cameraMode = $state<ExplorerCameraMode>("free-fly");
 	let cameraModePending = $state(false);
@@ -636,6 +648,62 @@
 		);
 	}
 
+	/** Project the one authoritative mirror into Svelte and the shared presentation runtime. */
+	function reconcileSpawnedEntities(): Promise<void> {
+		const session = dynamicEntitySession;
+		if (session === undefined) return Promise.resolve();
+		const entities = session.mirror.entities();
+		spawnedEntities = entities;
+		const runtime = gameRuntime;
+		if (runtime === undefined) return Promise.resolve();
+		const revision = ++dynamicEntityReconciliationRevision;
+		spawnedEntityPresentationError = null;
+		const completion = runtime.reconcileSpawnedDynamicEntities(entities);
+		dynamicEntityReconciliation = completion;
+		void completion.catch((error: unknown) => {
+			if (revision !== dynamicEntityReconciliationRevision) return;
+			const wcids = entities.map(({ identity }) => identity.wcid).join(", ");
+			const provenance =
+				entityCatalog?.status === "available"
+					? entityCatalog.provenance
+					: "catalog unavailable";
+			spawnedEntityPresentationError = `Presentation reconciliation for WCID ${wcids || "<none>"} (${provenance}): ${errorMessage(error)}`;
+		});
+		return completion;
+	}
+
+	async function spawnExplorerEntity(
+		rawWcid: string,
+		distance: number,
+	): Promise<void> {
+		const session = dynamicEntitySession;
+		const coordinator = cameraCoordinator;
+		const controller = cameraController;
+		if (!session || !coordinator || !controller)
+			throw new Error("Explorer entity spawning requires an active runtime.");
+		const placement = coordinator.presentedPlacement();
+		if (placement === null)
+			throw new Error("Spawn requires a currently presented camera placement.");
+		const request = createExplorerSpawnRequest(
+			parseExplorerWcid(rawWcid),
+			placement,
+			physicalCameraInput(controller).viewDirection,
+			distance,
+		);
+		await session.spawn(request);
+		await dynamicEntityReconciliation;
+	}
+
+	async function despawnExplorerEntity(
+		entity: DynamicEntityView,
+	): Promise<void> {
+		const session = dynamicEntitySession;
+		if (!session)
+			throw new Error("Explorer entity despawn requires an active runtime.");
+		await session.despawn(entity.identity.guid, entity.generation);
+		await dynamicEntityReconciliation;
+	}
+
 	onMount(() => {
 		const canvas = canvasElement;
 		if (canvas === null) {
@@ -663,6 +731,7 @@
 			const controller = cameraController;
 			const physicalSession = physicalCameraSession;
 			const entitySession = dynamicEntitySession;
+			const entityUnsubscribe = unsubscribeDynamicEntities;
 			gameRuntime = undefined;
 			runtimeReady = false;
 			cameraLocation = null;
@@ -681,6 +750,12 @@
 			cameraController = undefined;
 			physicalCameraSession = undefined;
 			dynamicEntitySession = undefined;
+			unsubscribeDynamicEntities = undefined;
+			dynamicEntityReconciliationRevision += 1;
+			dynamicEntityReconciliation = Promise.resolve();
+			entityCatalog = null;
+			spawnedEntities = [];
+			spawnedEntityPresentationError = null;
 			groundedCharacterInput = undefined;
 			jumpChargeExtent = null;
 			simulationInterestController = undefined;
@@ -690,6 +765,7 @@
 			physicalCameraStatus = null;
 			teardown = (async () => {
 				stopFrameLoop();
+				entityUnsubscribe?.();
 				entitySession?.stop();
 				coordinator?.dispose();
 				controller?.dispose();
@@ -717,10 +793,15 @@
 
 		const start = async (): Promise<void> => {
 			try {
-				dynamicEntitySession = new ExplorerDynamicEntitySession(
+				const entitySession = new ExplorerDynamicEntitySession(
 					tauriExplorerDynamicEntityTransport(),
 				);
-				await dynamicEntitySession.start();
+				dynamicEntitySession = entitySession;
+				unsubscribeDynamicEntities = entitySession.subscribe(() => {
+					void reconcileSpawnedEntities();
+				});
+				await entitySession.start();
+				entityCatalog = await entitySession.catalogCapability();
 				if (destroyed) return;
 				activeRegionSource = TauriActiveRegionSource.build();
 				activeRegion = await activeRegionSource.load();
@@ -759,6 +840,7 @@
 					new RuntimeTickProfiler(),
 				);
 				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
+				void reconcileSpawnedEntities();
 				// Ambience is selected by the ground rather than by a hook, so nothing else pulls its
 				// sound tables in; installing the region's facts is what stages them.
 				if (activeRegion?.data.sound && activeRegion.data.scenes) {
@@ -979,6 +1061,11 @@
 			{authoredDynamicRuntimeDiagnostics}
 			{readStaticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}
+			{entityCatalog}
+			{spawnedEntities}
+			{spawnedEntityPresentationError}
+			{spawnExplorerEntity}
+			{despawnExplorerEntity}
 		/>
 	</div>
 </div>

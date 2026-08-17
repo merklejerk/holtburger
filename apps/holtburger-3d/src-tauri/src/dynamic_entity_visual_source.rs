@@ -30,7 +30,7 @@ struct DynamicEntityVisualManifest {
 }
 
 /// Resolve and serialize every immutable visual dependency for one exact entity appearance.
-pub(crate) async fn load_dynamic_entity_visual_source_bytes(
+pub async fn load_dynamic_entity_visual_source_bytes(
     runtime: &ContentAssetRuntime,
     setup_did: u32,
     appearance: EntityAppearance,

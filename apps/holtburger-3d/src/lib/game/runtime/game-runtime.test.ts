@@ -27,6 +27,9 @@ import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
+import type { DynamicEntityView } from "./dynamic-entity-feed";
+import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
+import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 
 /** No runtime test stages a particle mesh, so any load here is a defect worth surfacing. */
 const PARTICLE_MESH_SOURCE: ParticleMeshSource = {
@@ -640,6 +643,202 @@ describe("GameRuntime view and interest control", () => {
 		await runtime.destroy();
 	});
 });
+
+describe("GameRuntime spawned dynamic presentation", () => {
+	it("shares one immutable visual load while retaining independent live owners", async () => {
+		const visual = spawnedVisual();
+		const load = vi.fn(async () => visual);
+		const runtime = await buildSpawnRuntime({ load });
+
+		await runtime.reconcileSpawnedDynamicEntities([
+			spawnedEntity(1, 1),
+			spawnedEntity(2, 1),
+		]);
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(2);
+
+		await runtime.reconcileSpawnedDynamicEntities([spawnedEntity(2, 1)]);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(1);
+		await runtime.reconcileSpawnedDynamicEntities([]);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(0);
+		await runtime.destroy();
+	});
+
+	it("replaces one GUID generation and updates same-generation state without reloading", async () => {
+		const load = vi.fn(async () => spawnedVisual());
+		const runtime = await buildSpawnRuntime({ load });
+		await runtime.reconcileSpawnedDynamicEntities([spawnedEntity(7, 1)]);
+		await runtime.reconcileSpawnedDynamicEntities([
+			spawnedEntity(7, 1, { noDraw: true }),
+		]);
+		await runtime.reconcileSpawnedDynamicEntities([spawnedEntity(7, 2)]);
+
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(1);
+		await runtime.destroy();
+	});
+
+	it("cannot publish a visual load that completes after exact removal", async () => {
+		let resolveVisual!: (value: DecodedStaticPresentation) => void;
+		const source: DynamicEntityVisualSource = {
+			load: () =>
+				new Promise((resolve) => {
+					resolveVisual = resolve;
+				}),
+		};
+		const runtime = await buildSpawnRuntime(source);
+		const stale = runtime.reconcileSpawnedDynamicEntities([
+			spawnedEntity(9, 1),
+		]);
+		await runtime.reconcileSpawnedDynamicEntities([]);
+		resolveVisual(spawnedVisual());
+		await stale;
+
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(0);
+		await runtime.destroy();
+	});
+});
+
+async function buildSpawnRuntime(
+	dynamicEntityVisualSource: DynamicEntityVisualSource,
+): Promise<GameRuntime> {
+	const device: GameRuntimeRenderDevice = {
+		buildRenderer: async () => ({
+			async destroy() {},
+			drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+		}),
+		resources: TEST_RESOURCES,
+	};
+	return GameRuntime.build(
+		device,
+		{ prepareLandblockLayers: async () => [] },
+		{} as TexturePixelSource,
+		ANIMATION_SOURCE,
+		PHYSICS_SCRIPT_SOURCE,
+		{ playOneShot: () => null, prepare: async () => {} },
+		PARTICLE_EMITTER_SOURCE,
+		SOUND_TABLE_SOURCE,
+		PARTICLE_MESH_SOURCE,
+		dynamicEntityVisualSource,
+	);
+}
+
+function spawnedEntity(
+	guid: number,
+	generation: number,
+	physics: Partial<DynamicEntityView["physics"]> = {},
+): DynamicEntityView {
+	return {
+		generation,
+		identity: { guid, name: `Entity ${guid}`, wcid: 42 },
+		motion: null,
+		physics: {
+			cloaked: false,
+			defaultAnimation: true,
+			defaultScript: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+			participation: "pose-only",
+			semanticMask: 0,
+			...physics,
+		},
+		placement: {
+			acceleration: { x: 0, y: 0, z: 0 },
+			contact: "unknown",
+			omega: { x: 0, y: 0, z: 0 },
+			pose: {
+				coords: { x: guid, y: 2, z: 3 },
+				landblockId: 0x0001ffff,
+				rotation: { w: 1, x: 0, y: 0, z: 0 },
+			},
+			sampleMode: "authoritative-only",
+			velocity: { x: 0, y: 0, z: 0 },
+		},
+		presentation: {
+			appearance: {
+				paletteDid: null,
+				partChanges: [],
+				subPalettes: [],
+				textureChanges: [],
+			},
+			content: {
+				motionTableDid: null,
+				physicsEffectTableDid: null,
+				setupDid: 0x02000001,
+				soundTableDid: null,
+			},
+			objectScale: 1,
+		},
+	};
+}
+
+function spawnedVisual(): DecodedStaticPresentation {
+	return {
+		behavior: {
+			animationId: "0x03000001",
+			kind: "animation-only",
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
+		localBounds: null,
+		presentation: {
+			appearanceKey: "setup:0x02000001|base",
+			holdingLocations: new Map(),
+			id: "presentation:spawned",
+			lights: [],
+			parts: [
+				{
+					defaultScale: new Vec3(1, 1, 1),
+					geometry: {
+						bounds: AABB3.zero(),
+						id: "geometry:spawned",
+						indices: new Uint32Array([0, 1, 2]),
+						materialSideKinds: new Uint8Array([0]),
+						materialSideTypes: new Uint8Array([0]),
+						materialSlotIndices: new Uint16Array([0]),
+						materialStippling: new Uint8Array([0]),
+						materialWrapModes: new Uint8Array([0]),
+						normals: new Float32Array(9),
+						positions: new Float32Array(9),
+						sourceDiagnostics: { rejectedDegenerateTriangles: [] },
+						textureCoordinates: new Float32Array(6),
+					},
+					materials: [
+						{
+							color: [1, 1, 1, 1],
+							diffuseScale: 1,
+							id: "material:spawned",
+							kind: "solid-color",
+							luminosity: 0,
+							rawSurfaceFlags: 0,
+							translucency: 0,
+						},
+					],
+					partIndex: 0,
+				},
+			],
+			placementPoses: new Map([
+				[0, { partTransforms: [Mat4.identity()], placementId: 0 }],
+			]),
+			selectionBounds: null,
+			sortingBounds: null,
+			sourceAssetId: "0x02000001",
+		},
+		setupId: "0x02000001",
+	};
+}
 
 function sceneInterest(anchorLandblockId: string) {
 	return {

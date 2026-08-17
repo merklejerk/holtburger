@@ -34,7 +34,7 @@ impl ExplorerEntityDelivery {
     }
 
     /// Orders one source mutation/snapshot capture through its actual boundary publication.
-    pub(crate) fn with_ordered_publication<T>(&self, operation: impl FnOnce() -> T) -> T {
+    pub fn with_ordered_publication<T>(&self, operation: impl FnOnce() -> T) -> T {
         let _publication = self
             .publication
             .lock()

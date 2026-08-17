@@ -147,6 +147,11 @@ export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 	return dynamicEntityEventSchema.parse(value);
 }
 
+/** Validate one focused current entity returned by a diagnostic host boundary. */
+export function decodeDynamicEntityView(value: unknown): DynamicEntityView {
+	return dynamicEntityViewSchema.parse(value);
+}
+
 /** Current focused entity mirror with explicit snapshot-recovery state. */
 export class DynamicEntityMirror {
 	#awaitingSnapshot = true;
@@ -164,8 +169,8 @@ export class DynamicEntityMirror {
 		this.#timeline = null;
 	}
 
-	/** Apply one validated snapshot or ordered live mutation. */
-	apply(event: DynamicEntityEvent): void {
+	/** Apply one validated snapshot or ordered live mutation and report whether current state changed. */
+	apply(event: DynamicEntityEvent): boolean {
 		if (event.kind === "snapshot") {
 			const replacement = new Map<number, DynamicEntityView>();
 			for (const entity of event.snapshot.entities) {
@@ -183,26 +188,28 @@ export class DynamicEntityMirror {
 				frontendSeconds: this.#nowSeconds(),
 			};
 			this.#awaitingSnapshot = false;
-			return;
+			return true;
 		}
 
-		if (this.#awaitingSnapshot) return;
+		if (this.#awaitingSnapshot) return false;
 		if (event.kind === "upserted") {
 			const current = this.#entities.get(event.entity.identity.guid);
 			if (
 				current !== undefined &&
 				current.generation > event.entity.generation
 			) {
-				return;
+				return false;
 			}
 			this.#entities.set(event.entity.identity.guid, event.entity);
-			return;
+			return current !== event.entity;
 		}
 
 		const current = this.#entities.get(event.guid);
 		if (current?.generation === event.generation) {
 			this.#entities.delete(event.guid);
+			return true;
 		}
+		return false;
 	}
 
 	/** Stable current population for UI and presentation reconciliation. */

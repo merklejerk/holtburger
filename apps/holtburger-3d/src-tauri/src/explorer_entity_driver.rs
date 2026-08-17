@@ -12,8 +12,8 @@ use holtburger_content::ContentRepository;
 use holtburger_core::{
     DynamicEntityContent, DynamicEntityDefinition, DynamicEntityDefinitionError,
     DynamicEntityDefinitionInput, DynamicEntityIdentity, DynamicEntityInitialState,
-    DynamicEntityPhysicalPreparationError, DynamicEntitySetupPreparation,
-    prepare_dynamic_entity_physics, prepare_dynamic_entity_setup,
+    DynamicEntityLaunchError, DynamicEntityPhysicalPreparationError, DynamicEntitySetupPreparation,
+    prepare_dynamic_entity_physics, prepare_dynamic_entity_setup, resolve_dynamic_entity_launch,
 };
 use holtburger_weenie_catalog::WeenieTemplate;
 use holtburger_world::{
@@ -25,9 +25,9 @@ use holtburger_world::{
 use serde::Deserialize;
 
 use crate::explorer_entity_runtime::{
-    ExplorerEntityDespawnOutcome, ExplorerEntityPhysicsStateOutcome,
-    ExplorerEntityReplacementOutcome, ExplorerEntityRuntime, ExplorerEntityRuntimeError,
-    ExplorerEntitySpawnOutcome,
+    ExplorerEntityDespawnOutcome, ExplorerEntityLaunchOutcome, ExplorerEntityPhysicsStateOutcome,
+    ExplorerEntityRelocationOutcome, ExplorerEntityReplacementOutcome, ExplorerEntityRuntime,
+    ExplorerEntityRuntimeError, ExplorerEntitySpawnOutcome,
 };
 use crate::explorer_weenie_catalog::{
     ExplorerCatalogCapability, ExplorerCatalogLookupError, ExplorerWeenieCatalogSource,
@@ -48,6 +48,56 @@ pub struct ExplorerEntitySpawnRequest {
     pub rotation: Quaternion,
     /// Whether to attach local physics or retain a canonical pose-only body.
     pub physical_intent: EntityPhysicalIntent,
+}
+
+/// One exact-generation launch using catalog-authored speed and explicit world direction.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerEntityLaunchRequest {
+    /// Exact current entity identity.
+    pub guid: Guid,
+    /// Exact current instance generation.
+    pub generation: u64,
+    /// Finite nonzero world-space direction; magnitude is intentionally ignored.
+    pub direction: Vector3,
+}
+
+/// Explicit correction semantics for one discontinuous Explorer relocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExplorerEntityRelocationKind {
+    /// Ordinary discontinuous placement that supersedes interpolation.
+    Teleport,
+    /// Forced authority/timeline correction that also clears prediction state.
+    Reset,
+}
+
+impl ExplorerEntityRelocationKind {
+    /// Projects app-local command vocabulary into the source-neutral feed contract.
+    pub const fn advance_kind(self) -> holtburger_core::DynamicEntityPlacementAdvanceKind {
+        match self {
+            Self::Teleport => holtburger_core::DynamicEntityPlacementAdvanceKind::Teleport,
+            Self::Reset => holtburger_core::DynamicEntityPlacementAdvanceKind::Reset,
+        }
+    }
+}
+
+/// One exact-generation host-resolved teleport or forced reset.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerEntityRelocationRequest {
+    /// Exact current entity identity.
+    pub guid: Guid,
+    /// Exact current instance generation.
+    pub generation: u64,
+    /// Current host-projected camera pose used as portal history and coordinate anchor.
+    pub camera_pose: WorldPosition,
+    /// Candidate root point in `camera_pose`'s landblock frame.
+    pub candidate: Vector3,
+    /// Explicit candidate root orientation.
+    pub rotation: Quaternion,
+    /// Frontend correction semantics for this discontinuity.
+    pub kind: ExplorerEntityRelocationKind,
 }
 
 /// One exact live generation plus the complete catalog-backed facts for its successor.
@@ -78,6 +128,8 @@ pub enum ExplorerEntityDriverError {
     InvalidScalar { wcid: u32, field: &'static str },
     /// The source-neutral definition rejected catalog/request facts.
     Definition(DynamicEntityDefinitionError),
+    /// Immutable catalog facts or the requested direction cannot produce a launch.
+    Launch(DynamicEntityLaunchError),
     /// DAT/setup or physical preparation rejected the selected template.
     Preparation(DynamicEntityPhysicalPreparationError),
     /// Candidate normalization or portal placement failed.
@@ -110,6 +162,7 @@ impl Display for ExplorerEntityDriverError {
                 )
             }
             Self::Definition(source) => Display::fmt(source, formatter),
+            Self::Launch(source) => Display::fmt(source, formatter),
             Self::Preparation(source) => Display::fmt(source, formatter),
             Self::Placement(reason) => formatter.write_str(reason),
             Self::Runtime(source) => Display::fmt(source, formatter),
@@ -122,6 +175,7 @@ impl Error for ExplorerEntityDriverError {
         match self {
             Self::Catalog(source) => Some(source),
             Self::Definition(source) => Some(source),
+            Self::Launch(source) => Some(source),
             Self::Preparation(source) => Some(source),
             Self::Runtime(source) => Some(source),
             _ => None,
@@ -138,6 +192,12 @@ impl From<ExplorerCatalogLookupError> for ExplorerEntityDriverError {
 impl From<DynamicEntityDefinitionError> for ExplorerEntityDriverError {
     fn from(value: DynamicEntityDefinitionError) -> Self {
         Self::Definition(value)
+    }
+}
+
+impl From<DynamicEntityLaunchError> for ExplorerEntityDriverError {
+    fn from(value: DynamicEntityLaunchError) -> Self {
+        Self::Launch(value)
     }
 }
 
@@ -349,7 +409,7 @@ impl ExplorerEntityDriver {
             },
             appearance: appearance(&template),
             initial: DynamicEntityInitialState {
-                pose: candidate_pose(request)?,
+                pose: candidate_pose(request.camera_pose, request.candidate, request.rotation)?,
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 omega: Vector3::zero(),
@@ -437,6 +497,50 @@ impl ExplorerEntityDriver {
             .map_err(ExplorerEntityDriverError::from)
     }
 
+    /// Resolves and applies one exact-generation catalog-speed launch.
+    pub fn launch(
+        &self,
+        request: ExplorerEntityLaunchRequest,
+    ) -> Result<ExplorerEntityLaunchOutcome, ExplorerEntityDriverError> {
+        let _operation = self
+            .operation
+            .lock()
+            .expect("Explorer entity driver lock poisoned");
+        let instance = self.entities.instance(request.guid, request.generation)?;
+        let launch = resolve_dynamic_entity_launch(&instance.definition, request.direction)?;
+        self.entities
+            .launch(request.guid, request.generation, launch, self.clock.now())
+            .map_err(ExplorerEntityDriverError::from)
+    }
+
+    /// Host-resolves and applies one exact-generation discontinuous relocation.
+    pub fn relocate(
+        &self,
+        request: ExplorerEntityRelocationRequest,
+    ) -> Result<ExplorerEntityRelocationOutcome, ExplorerEntityDriverError> {
+        let _operation = self
+            .operation
+            .lock()
+            .expect("Explorer entity driver lock poisoned");
+        let instance = self.entities.instance(request.guid, request.generation)?;
+        let setup = self.content.prepare_setup(
+            instance.definition.identity.wcid,
+            instance.definition.content.setup_did,
+            instance.definition.object_scale,
+        )?;
+        let candidate = candidate_pose(request.camera_pose, request.candidate, request.rotation)?;
+        let pose = resolve_spawn_placement(
+            &self.simulation.snapshot(),
+            request.camera_pose,
+            candidate,
+            setup.movement_spheres.primary().center,
+            setup.movement_spheres.primary().radius,
+        )?;
+        self.entities
+            .relocate(request.guid, request.generation, pose, self.clock.now())
+            .map_err(ExplorerEntityDriverError::from)
+    }
+
     /// Clears every Explorer entity while preserving monotonic generation history.
     pub fn reset(&self) -> Result<(), ExplorerEntityDriverError> {
         let _operation = self
@@ -520,17 +624,19 @@ fn appearance(template: &WeenieTemplate) -> EntityAppearance {
 }
 
 fn candidate_pose(
-    request: ExplorerEntitySpawnRequest,
+    camera_pose: WorldPosition,
+    candidate: Vector3,
+    rotation: Quaternion,
 ) -> Result<WorldPosition, ExplorerEntityDriverError> {
-    if request.camera_pose.landblock_id == Guid::NULL {
+    if camera_pose.landblock_id == Guid::NULL {
         return Err(ExplorerEntityDriverError::Placement(
-            "Explorer spawn camera pose has no landblock".to_owned(),
+            "Explorer entity candidate camera pose has no landblock".to_owned(),
         ));
     }
     WorldPosition {
-        landblock_id: Guid(request.camera_pose.landblock_id.0 & 0xffff_0000),
-        coords: request.candidate,
-        rotation: request.rotation,
+        landblock_id: Guid(camera_pose.landblock_id.0 & 0xffff_0000),
+        coords: candidate,
+        rotation,
     }
     .normalize_outdoor_landblock_frame()
     .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))
@@ -834,6 +940,130 @@ mod tests {
         assert_eq!(
             wire["snapshot"]["entities"][0]["placement"]["pose"]["landblockId"],
             first.body.body.runtime_pose.landblock_id.0
+        );
+    }
+
+    #[test]
+    fn launch_applies_catalog_speed_and_spin_without_invalidating_pose_only_spawns() {
+        let mut flame_bolt = template(239);
+        flame_bolt.maximum_velocity = Some(15.0);
+        let mut whirling_blade = template(300);
+        whirling_blade.maximum_velocity = Some(15.0);
+        whirling_blade.rotation_speed = Some(2.0);
+        whirling_blade.physics.base_mask =
+            Some((PhysicsState::GRAVITY | PhysicsState::ALIGN_PATH).bits());
+        let mut rockfall = template(301);
+        rockfall.maximum_velocity = Some(0.0);
+        let gem_setting = template(302);
+        let (entities, driver) = driver(
+            vec![flame_bolt, whirling_blade, rockfall, gem_setting],
+            false,
+        );
+
+        let flame = driver
+            .spawn_by_wcid(request(239, EntityPhysicalIntent::Simulated))
+            .unwrap();
+        let flame_launch = driver
+            .launch(ExplorerEntityLaunchRequest {
+                guid: flame.instance.definition.identity.guid,
+                generation: flame.instance.generation,
+                direction: Vector3::new(3.0, 4.0, 0.0),
+            })
+            .unwrap();
+        assert_eq!(flame_launch.body.velocity, Vector3::new(9.0, 12.0, 0.0));
+
+        let blade = driver
+            .spawn_by_wcid(request(300, EntityPhysicalIntent::Simulated))
+            .unwrap();
+        let blade_launch = driver
+            .launch(ExplorerEntityLaunchRequest {
+                guid: blade.instance.definition.identity.guid,
+                generation: blade.instance.generation,
+                direction: Vector3::new(1.0, 0.0, 0.0),
+            })
+            .unwrap();
+        assert_eq!(
+            blade_launch.body.omega,
+            Vector3::new(2.0 * std::f32::consts::TAU, 0.0, 0.0)
+        );
+        assert!(
+            !blade_launch
+                .instance
+                .definition
+                .physics
+                .semantic
+                .contains(PhysicsState::ALIGN_PATH)
+        );
+
+        for (wcid, expected) in [
+            (301, DynamicEntityLaunchError::ZeroMaximumVelocity),
+            (302, DynamicEntityLaunchError::MissingMaximumVelocity),
+        ] {
+            let spawned = driver
+                .spawn_by_wcid(request(wcid, EntityPhysicalIntent::PoseOnly))
+                .unwrap();
+            assert!(matches!(
+                driver.launch(ExplorerEntityLaunchRequest {
+                    guid: spawned.instance.definition.identity.guid,
+                    generation: spawned.instance.generation,
+                    direction: Vector3::new(1.0, 0.0, 0.0),
+                }),
+                Err(ExplorerEntityDriverError::Launch(actual)) if actual == expected
+            ));
+            assert_eq!(
+                entities
+                    .instance(
+                        spawned.instance.definition.identity.guid,
+                        spawned.instance.generation,
+                    )
+                    .unwrap(),
+                spawned.instance
+            );
+        }
+    }
+
+    #[test]
+    fn relocation_preserves_generation_and_publishes_an_explicit_snap_kind() {
+        let mut launchable = template(239);
+        launchable.maximum_velocity = Some(15.0);
+        let (entities, driver) = driver(vec![launchable], false);
+        let spawned = driver
+            .spawn_by_wcid(request(239, EntityPhysicalIntent::Simulated))
+            .unwrap();
+        let guid = spawned.instance.definition.identity.guid;
+        driver
+            .launch(ExplorerEntityLaunchRequest {
+                guid,
+                generation: spawned.instance.generation,
+                direction: Vector3::new(1.0, 0.0, 0.0),
+            })
+            .unwrap();
+        let relocation = ExplorerEntityRelocationRequest {
+            guid,
+            generation: spawned.instance.generation,
+            camera_pose: request(239, EntityPhysicalIntent::Simulated).camera_pose,
+            candidate: Vector3::new(10.0, 20.0, 30.0),
+            rotation: Quaternion::identity(),
+            kind: ExplorerEntityRelocationKind::Teleport,
+        };
+
+        let relocated = driver.relocate(relocation).unwrap();
+
+        assert_eq!(relocated.instance.generation, spawned.instance.generation);
+        assert_eq!(relocated.body.runtime_pose.coords, relocation.candidate);
+        assert_eq!(relocated.body.velocity, Vector3::zero());
+        assert_eq!(relocated.body.acceleration, Vector3::zero());
+        assert_eq!(relocated.body.omega, Vector3::zero());
+        let correction = crate::explorer_entity_delivery::ExplorerEntityDelivery::new(entities)
+            .corrected(guid, relocation.kind.advance_kind())
+            .unwrap();
+        let wire = serde_json::to_value(correction).unwrap();
+        assert_eq!(wire["kind"], "advanced");
+        assert_eq!(wire["batch"]["durationMs"], 0.0);
+        assert_eq!(wire["batch"]["advances"][0]["kind"], "teleport");
+        assert_eq!(
+            wire["batch"]["advances"][0]["path"]["legs"][0]["end"]["pose"]["coords"]["x"],
+            10.0
         );
     }
 

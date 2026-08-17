@@ -131,6 +131,12 @@ try {
 	if (options.spawnWcid !== null) {
 		assertSpawnedEntityLifecycle(result);
 	}
+	if (options.launchDirection !== null) {
+		assertLaunchedEntityLifecycle(result);
+	}
+	if (options.relocateKind !== null) {
+		assertRelocatedEntityLifecycle(result, options.relocateKind);
+	}
 } finally {
 	await Promise.allSettled(children.toReversed().map(stopChild));
 	await Promise.allSettled(
@@ -163,6 +169,12 @@ function parseArgs(args) {
 		excludeAuthoredDynamics: false,
 		spawnWcid: null,
 		spawnDistance: 5,
+		spawnSimulated: false,
+		launchDirection: null,
+		entityTicks: 0,
+		entityTickMs: 1000 / 30,
+		relocateKind: null,
+		relocateDistance: 10,
 		cameraLandblockId: null,
 		relocateLandblockId: null,
 		envCellCameraId: null,
@@ -293,6 +305,47 @@ function parseArgs(args) {
 					parsed.spawnDistance <= 0
 				) {
 					throw new Error("--spawn-distance must be positive and finite.");
+				}
+				break;
+			case "--spawn-simulated":
+				parsed.spawnSimulated = true;
+				break;
+			case "--launch-direction":
+				parsed.launchDirection = parsePoint(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				if (Math.hypot(...parsed.launchDirection) === 0) {
+					throw new Error("--launch-direction must be nonzero.");
+				}
+				break;
+			case "--entity-ticks":
+				parsed.entityTicks = parsePositiveInteger(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				break;
+			case "--entity-tick-ms":
+				parsed.entityTickMs = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.entityTickMs) || parsed.entityTickMs <= 0) {
+					throw new Error("--entity-tick-ms must be positive and finite.");
+				}
+				break;
+			case "--relocate-kind": {
+				const kind = requireValue(args, ++index, arg);
+				if (kind !== "teleport" && kind !== "reset") {
+					throw new Error("--relocate-kind must be teleport or reset.");
+				}
+				parsed.relocateKind = kind;
+				break;
+			}
+			case "--relocate-distance":
+				parsed.relocateDistance = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isFinite(parsed.relocateDistance) ||
+					parsed.relocateDistance <= 0
+				) {
+					throw new Error("--relocate-distance must be positive and finite.");
 				}
 				break;
 			case "--camera-landblock":
@@ -555,6 +608,9 @@ function parseArgs(args) {
 	) {
 		throw new Error("--terrain-radius must be no less than --building-radius.");
 	}
+	if (parsed.relocateKind !== null && parsed.spawnWcid === null) {
+		throw new Error("--relocate-kind requires --spawn-wcid.");
+	}
 	if (
 		parsed.envCellRadius !== null &&
 		parsed.envCellRadius > parsed.buildingRadius
@@ -651,6 +707,17 @@ function parseArgs(args) {
 			"Portal execution requires an EnvCell camera and position.",
 		);
 	}
+	if (parsed.spawnSimulated && parsed.spawnWcid === null) {
+		throw new Error("--spawn-simulated requires --spawn-wcid.");
+	}
+	if (
+		(parsed.launchDirection !== null || parsed.entityTicks > 0) &&
+		!parsed.spawnSimulated
+	) {
+		throw new Error(
+			"--launch-direction and --entity-ticks require --spawn-simulated.",
+		);
+	}
 	return parsed;
 }
 
@@ -704,6 +771,15 @@ Options:
   --spawn-wcid <id>     Spawn one decimal or 0x WCID through the real catalog host, capture it,
                          then exact-despawn it and assert shared-runtime resource cleanup.
   --spawn-distance <n>  Camera-relative spawn distance. Default: 5
+  --spawn-simulated    Attach the spawned entity to the shared host solver instead of pose-only.
+  --launch-direction <x,y,z>
+                        Launch the exact spawned generation using catalog speed/spin.
+  --entity-ticks <n>   Advance the entity collection by n explicit harness-controlled ticks.
+  --entity-tick-ms <n> Duration of each explicit entity tick. Default: ${1000 / 30}
+  --relocate-kind <teleport|reset>
+                        Apply one host-resolved correction after explicit entity ticks.
+  --relocate-distance <n>
+                        Camera-relative correction distance. Default: 10
   --camera-yaw <degrees>    Initial and relocation camera yaw. Default: 0
   --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
   --camera-position <x,y,z>
@@ -954,6 +1030,29 @@ function briefHarnessReport(result) {
 function summarizeEntityLifecycle(lifecycle) {
 	if (lifecycle === null) return null;
 	return {
+		advances: summarizeEntityAdvances(lifecycle.advances),
+		launched:
+			lifecycle.launched === null
+				? null
+				: {
+						generation: lifecycle.launched.generation,
+						guid: lifecycle.launched.identity.guid,
+						placement: lifecycle.launched.placement,
+					},
+		relocated:
+			lifecycle.relocated === null
+				? null
+				: {
+						durationMilliseconds: lifecycle.relocated.batch.durationMs,
+						advances: lifecycle.relocated.batch.advances.map(
+							({ entity, kind }) => ({
+								generation: entity.generation,
+								guid: entity.identity.guid,
+								kind,
+								placement: entity.placement,
+							}),
+						),
+					},
 		spawned: {
 			generation: lifecycle.spawned.generation,
 			identity: lifecycle.spawned.identity,
@@ -963,13 +1062,98 @@ function summarizeEntityLifecycle(lifecycle) {
 	};
 }
 
+function summarizeEntityAdvances(events) {
+	const changed = events.filter((event) => event !== null);
+	const summarize = (event) =>
+		event === undefined
+			? null
+			: {
+					durationMilliseconds: event.batch.durationMs,
+					entities: event.batch.advances.map(({ entity, path }) => ({
+						generation: entity.generation,
+						guid: entity.identity.guid,
+						endpoint: entity.placement.pose,
+						contact: entity.placement.contact,
+						pathLegCount: path.legs.length,
+					})),
+				};
+	return {
+		requestedTickCount: events.length,
+		changedTickCount: changed.length,
+		first: summarize(changed[0]),
+		last: summarize(changed.at(-1)),
+	};
+}
+
+function assertLaunchedEntityLifecycle(result) {
+	const lifecycle = result.entityLifecycle;
+	if (lifecycle?.launched === null || lifecycle?.launched === undefined) {
+		throw new Error(
+			"Launch scenario did not return a current launched entity.",
+		);
+	}
+	const { velocity } = lifecycle.launched.placement;
+	if (Math.hypot(velocity.x, velocity.y, velocity.z) <= 0) {
+		throw new Error("Launch scenario returned zero current velocity.");
+	}
+	const advance = lifecycle.advances.find((event) => event !== null);
+	if (advance === undefined || advance.kind !== "advanced") {
+		throw new Error(
+			"Launch scenario produced no changed-entity advance batch.",
+		);
+	}
+	if (
+		!advance.batch.advances.some(
+			({ entity }) =>
+				entity.identity.guid === lifecycle.spawned.identity.guid &&
+				entity.generation === lifecycle.spawned.generation,
+		)
+	) {
+		throw new Error("Launch advance omitted the exact spawned generation.");
+	}
+}
+
+function assertRelocatedEntityLifecycle(result, expectedKind) {
+	const event = result.entityLifecycle?.relocated;
+	if (event?.kind !== "advanced" || event.batch.durationMs !== 0) {
+		throw new Error(
+			"Relocation scenario did not produce a zero-duration correction batch.",
+		);
+	}
+	const [advance] = event.batch.advances;
+	if (advance?.kind !== expectedKind) {
+		throw new Error(
+			`Relocation scenario returned ${advance?.kind ?? "no"} correction instead of ${expectedKind}.`,
+		);
+	}
+	const placement = advance.entity.placement;
+	if (
+		Math.hypot(
+			placement.velocity.x,
+			placement.velocity.y,
+			placement.velocity.z,
+			placement.acceleration.x,
+			placement.acceleration.y,
+			placement.acceleration.z,
+			placement.omega.x,
+			placement.omega.y,
+			placement.omega.z,
+		) !== 0
+	) {
+		throw new Error("Relocation correction did not clear live kinematics.");
+	}
+}
+
 function summarizeEntityLifecycleState(state) {
 	const dynamics = state.authoredDynamics;
 	return {
-		currentEntities: state.spawnedEntities.map(({ generation, identity }) => ({
-			generation,
-			identity,
-		})),
+		currentEntities: state.spawnedEntities.map(
+			({ generation, identity, placement }) => ({
+				generation,
+				identity,
+				placement,
+			}),
+		),
 		visibleDynamicEntityCount: state.metrics?.visibleDynamicEntityCount ?? null,
 		runtime:
 			dynamics === null
@@ -1369,13 +1553,50 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			[],
 		);
 		let spawnedEntity = null;
+		let launchedEntity = null;
+		let relocatedEntity = null;
+		const entityAdvanceEvents = [];
 		let spawnedEntityState = null;
 		if (options.spawnWcid !== null) {
 			spawnedEntity = await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntity",
+				options.spawnSimulated
+					? "globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnSimulatedExplorerEntity"
+					: "globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntity",
 				[options.spawnWcid, options.spawnDistance],
 			);
+			if (options.launchDirection !== null) {
+				launchedEntity = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.launchExplorerEntity",
+					[
+						spawnedEntity.identity.guid,
+						spawnedEntity.generation,
+						options.launchDirection,
+					],
+				);
+			}
+			for (let tick = 0; tick < options.entityTicks; tick += 1) {
+				entityAdvanceEvents.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.tickExplorerEntities",
+						[options.entityTickMs],
+					),
+				);
+			}
+			if (options.relocateKind !== null) {
+				relocatedEntity = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.relocateExplorerEntity",
+					[
+						spawnedEntity.identity.guid,
+						spawnedEntity.generation,
+						options.relocateDistance,
+						options.relocateKind,
+					],
+				);
+			}
 			await delay(500);
 			spawnedEntityState = await evaluate(
 				client,
@@ -1738,6 +1959,9 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				spawnedEntity === null
 					? null
 					: {
+							advances: entityAdvanceEvents,
+							launched: launchedEntity,
+							relocated: relocatedEntity,
 							spawned: spawnedEntity,
 							spawnedState: spawnedEntityState,
 							despawnedState: despawnedEntityState,

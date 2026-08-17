@@ -71,15 +71,22 @@ describe("DynamicEntityPlacementSystem", () => {
 		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(10);
 
 		placements.applyPath(root, advance(10, 20), 100, 2_000);
+		const reset = advance(20, 99);
+		reset.kind = "reset";
+		placements.applyPath(root, reset, 0, 2_025);
+		placements.advance(2_050);
+		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(99);
+
+		placements.applyPath(root, advance(99, 100), 100, 3_000);
 		const corrected = Mat4.identity();
-		corrected.m41 = 99;
+		corrected.m41 = 101;
 		placements.updateRoot(root, {
 			envCellId: null,
 			landblockId: "0x0102ffff",
 			localTransform: corrected,
 		});
-		placements.advance(2_050);
-		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(99);
+		placements.advance(3_050);
+		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(101);
 	});
 });
 

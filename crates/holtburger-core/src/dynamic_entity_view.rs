@@ -297,7 +297,7 @@ pub struct DynamicEntityAdvance {
 pub struct DynamicEntityAdvanceBatch {
     /// Host instant at which this fixed tick completed.
     pub host_time: DynamicEntityHostTime,
-    /// Positive playback duration shared by every path in this epoch.
+    /// Positive integrated playback duration, or zero for correction-only snap batches.
     pub duration_ms: f64,
     /// Changed current generations in stable GUID order.
     pub advances: Vec<DynamicEntityAdvance>,

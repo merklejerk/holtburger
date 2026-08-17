@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	decodeDynamicEntityEvent,
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
 	type DynamicEntityView,
@@ -68,7 +69,7 @@ function upserted(value: DynamicEntityView): DynamicEntityEvent {
 function advanced(
 	value: DynamicEntityView,
 	hostSeconds: number,
-): DynamicEntityEvent {
+): Extract<DynamicEntityEvent, { kind: "advanced" }> {
 	return {
 		kind: "advanced",
 		batch: {
@@ -94,6 +95,20 @@ function advanced(
 }
 
 describe("DynamicEntityMirror", () => {
+	it("accepts zero-duration correction snaps but not zero-duration integration", () => {
+		const value = entity(7, 2);
+		const correction = advanced(value, 2);
+		correction.batch.durationMs = 0;
+		correction.batch.advances[0]!.kind = "reset";
+		expect(decodeDynamicEntityEvent(correction)).toEqual(correction);
+
+		const integrated = advanced(value, 3);
+		integrated.batch.durationMs = 0;
+		expect(() => decodeDynamicEntityEvent(integrated)).toThrow(
+			"duration must be positive",
+		);
+	});
+
 	it("reconstructs atomically and ignores deltas while awaiting a snapshot", () => {
 		const mirror = new DynamicEntityMirror(() => 10);
 		mirror.apply(upserted(entity(1, 1)));

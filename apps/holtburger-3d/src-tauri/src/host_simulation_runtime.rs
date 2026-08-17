@@ -15,11 +15,11 @@ use holtburger_core::{
     replace_dynamic_entity_body,
 };
 use holtburger_world::{
-    CollisionScene, DynamicPhysicalBodyDefinition, EdgeProtection, EntityPhysicsTransitionDecision,
-    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
-    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyId,
-    SpatialScene,
+    CollisionScene, DynamicBodyKinematics, DynamicPhysicalBodyDefinition, EdgeProtection,
+    EntityPhysicsTransitionDecision, GroundedBodyActuation, PhysicalBodyActuation,
+    PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyTickResult,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 
@@ -339,6 +339,44 @@ impl HostSimulationRuntime {
     ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         apply_dynamic_entity_physics_transition(&mut state.bodies, body_id, decision, replacement)
+    }
+
+    /// Replaces one physical dynamic entity's live vectors and incompatible response memory.
+    pub fn apply_dynamic_entity_kinematics(
+        &self,
+        body_id: SpatialBodyId,
+        kinematics: DynamicBodyKinematics,
+        now: std::time::Instant,
+    ) -> Result<RuntimeSpatialBodyView, DynamicEntityBodyOperationError> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        let body = state
+            .bodies
+            .body(body_id)
+            .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+        if body.physical.is_none() {
+            return Err(DynamicEntityBodyOperationError::NotPhysical { body_id });
+        }
+        Ok(state
+            .bodies
+            .apply_dynamic_body_kinematics(body_id, kinematics, now)
+            .expect("prevalidated physical dynamic body lost its collision definition"))
+    }
+
+    /// Applies one discontinuous dynamic-entity relocation and clears pose-dependent state.
+    pub fn relocate_dynamic_entity(
+        &self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        now: std::time::Instant,
+    ) -> Result<RuntimeSpatialBodyView, DynamicEntityBodyOperationError> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        if state.bodies.body(body_id).is_none() {
+            return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
+        }
+        Ok(state
+            .bodies
+            .relocate_dynamic_body(body_id, pose, now)
+            .expect("prevalidated dynamic entity body lost its dynamic physical invariant"))
     }
 
     /// Attaches a source-neutral physical definition.

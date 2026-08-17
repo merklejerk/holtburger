@@ -1196,8 +1196,8 @@ fn validate(config: GroundedConfig, request: &GroundedRequest) -> Result<()> {
         "grounded delta seconds must be finite and positive"
     );
     ensure!(
-        config.gravity.is_finite() && config.gravity < 0.0,
-        "grounded gravity must be finite and negative"
+        config.gravity.is_finite() && config.gravity <= 0.0,
+        "grounded gravity must be finite and non-positive"
     );
     ensure!(
         config.walkable_normal_z.is_finite()
@@ -1589,6 +1589,28 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn zero_gravity_body_retains_linear_airborne_motion() {
+        let mut zero_gravity = config();
+        zero_gravity.gravity = 0.0;
+        let mut moving = body(Vector3::new(10.0, 20.0, 30.0), None);
+        moving.velocity = Vector3::new(3.0, 0.0, 0.0);
+
+        let GroundedOutcome::Solved { body, .. } = solve_with_config(
+            &CollisionScene::new(),
+            zero_gravity,
+            moving,
+            pair(),
+            Vector3::zero(),
+            0.5,
+        ) else {
+            panic!("zero-gravity linear motion must remain inside the ordinary solver")
+        };
+
+        assert_eq!(body.pose.coords, Vector3::new(11.5, 20.0, 30.0));
+        assert_eq!(body.velocity, Vector3::new(3.0, 0.0, 0.0));
     }
 
     #[test]

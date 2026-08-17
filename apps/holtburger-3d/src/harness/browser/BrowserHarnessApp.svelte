@@ -53,12 +53,20 @@
 		type TextureFilteringPolicy,
 	} from "../../lib/game/renderer/texture-filtering-policy";
 	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
-	import { resolvePhysicalCameraViewDirection } from "../../lib/game/motion/host-physical-camera-path";
 	import {
+		resolvePhysicalCameraViewDirection,
+		type PhysicalCameraPlacement,
+	} from "../../lib/game/motion/host-physical-camera-path";
+	import {
+		createExplorerLaunchRequest,
+		createExplorerRelocationRequest,
 		createExplorerSpawnRequest,
 		parseExplorerWcid,
 	} from "../../explorer/explorer-entity-commands";
-	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
+	import type {
+		DynamicEntityEvent,
+		DynamicEntityView,
+	} from "../../lib/game/runtime/dynamic-entity-feed";
 	import { HttpExplorerEntityHost } from "./http-explorer-entity-host";
 
 	const CAMERA_FOV_DEGREES = 90;
@@ -222,6 +230,28 @@
 			wcid: string,
 			distance: number,
 		) => Promise<DynamicEntityView>;
+		/** Spawn one simulated body for deterministic host-solver scenarios. */
+		readonly spawnSimulatedExplorerEntity: (
+			wcid: string,
+			distance: number,
+		) => Promise<DynamicEntityView>;
+		/** Apply catalog-authored launch speed/spin to one exact generation. */
+		readonly launchExplorerEntity: (
+			guid: number,
+			generation: number,
+			direction: readonly [number, number, number],
+		) => Promise<DynamicEntityView>;
+		/** Advance the host collection by one explicit deterministic duration. */
+		readonly tickExplorerEntities: (
+			durationMilliseconds: number,
+		) => Promise<DynamicEntityEvent | null>;
+		/** Apply a host-resolved discontinuity and synchronously snap frontend placement. */
+		readonly relocateExplorerEntity: (
+			guid: number,
+			generation: number,
+			distance: number,
+			kind: "teleport" | "reset",
+		) => Promise<DynamicEntityEvent>;
 		/** Retire one exact harness-spawned generation through the same host lifecycle. */
 		readonly despawnExplorerEntity: (
 			guid: number,
@@ -604,30 +634,36 @@
 		rawWcid: string,
 		distance: number,
 	): Promise<DynamicEntityView> {
-		if (!runtime || !entityHost || cameraEvidence === null)
+		return spawnExplorerEntityWithIntent(rawWcid, distance, "pose-only");
+	}
+
+	async function spawnSimulatedExplorerEntity(
+		rawWcid: string,
+		distance: number,
+	): Promise<DynamicEntityView> {
+		return spawnExplorerEntityWithIntent(rawWcid, distance, "simulated");
+	}
+
+	async function spawnExplorerEntityWithIntent(
+		rawWcid: string,
+		distance: number,
+		physicalIntent: "pose-only" | "simulated",
+	): Promise<DynamicEntityView> {
+		if (!runtime || !entityHost)
 			throw new Error(
 				"Browser harness entity spawn requires a current camera and runtime.",
 			);
-		const yaw = (cameraEvidence.yawDegrees * Math.PI) / 180;
-		const pitch = (cameraEvidence.pitchDegrees * Math.PI) / 180;
-		const axes = createCameraAxesRadians(yaw, pitch);
-		const direction = resolvePhysicalCameraViewDirection({
-			forward: [axes.forward.x, axes.forward.y, axes.forward.z],
-			right: [axes.right.x, axes.right.y, axes.right.z],
-			up: [axes.up.x, axes.up.y, axes.up.z],
-		});
+		const { direction, placement } = entityScenarioAnchor();
+		if (physicalIntent === "simulated")
+			await entityHost.ensureSimulationInterest(
+				placement.residency.landblockId,
+			);
 		const request = createExplorerSpawnRequest(
 			parseExplorerWcid(rawWcid),
-			{
-				position: sceneVec3(new Vec3(...cameraEvidence.position)),
-				residency: {
-					envCellId: cameraEvidence.envCellId,
-					landblockId: cameraEvidence.landblockId,
-				},
-			},
+			placement,
 			direction,
 			distance,
-			"pose-only",
+			physicalIntent,
 		);
 		const entity = await entityHost.spawn(request);
 		spawnedEntities = [
@@ -638,6 +674,120 @@
 		];
 		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
 		return entity;
+	}
+
+	function entityScenarioAnchor(): {
+		readonly placement: PhysicalCameraPlacement;
+		readonly direction: readonly [number, number, number];
+	} {
+		if (cameraEvidence === null)
+			throw new Error("Entity scenario requires a current camera.");
+		const yaw = (cameraEvidence.yawDegrees * Math.PI) / 180;
+		const pitch = (cameraEvidence.pitchDegrees * Math.PI) / 180;
+		const axes = createCameraAxesRadians(yaw, pitch);
+		return {
+			placement: {
+				position: sceneVec3(new Vec3(...cameraEvidence.position)),
+				residency: {
+					envCellId: cameraEvidence.envCellId,
+					landblockId: cameraEvidence.landblockId,
+				},
+			},
+			direction: resolvePhysicalCameraViewDirection({
+				forward: [axes.forward.x, axes.forward.y, axes.forward.z],
+				right: [axes.right.x, axes.right.y, axes.right.z],
+				up: [axes.up.x, axes.up.y, axes.up.z],
+			}),
+		};
+	}
+
+	async function launchExplorerEntity(
+		guid: number,
+		generation: number,
+		direction: readonly [number, number, number],
+	): Promise<DynamicEntityView> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity launch requires an active runtime.",
+			);
+		const entity = await entityHost.launch(
+			createExplorerLaunchRequest(guid, generation, direction),
+		);
+		spawnedEntities = spawnedEntities.map((current) =>
+			current.identity.guid === guid && current.generation === generation
+				? entity
+				: current,
+		);
+		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+		return entity;
+	}
+
+	async function tickExplorerEntities(
+		durationMilliseconds: number,
+	): Promise<DynamicEntityEvent | null> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity tick requires an active runtime.",
+			);
+		if (!Number.isFinite(durationMilliseconds) || durationMilliseconds <= 0)
+			throw new Error("Entity tick duration must be positive and finite.");
+		const event = await entityHost.tick(durationMilliseconds);
+		if (event === null) return null;
+		applyDynamicEntityAdvanceEvent(event);
+		return event;
+	}
+
+	async function relocateExplorerEntity(
+		guid: number,
+		generation: number,
+		distance: number,
+		kind: "teleport" | "reset",
+	): Promise<DynamicEntityEvent> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity relocation requires an active runtime.",
+			);
+		const { direction, placement } = entityScenarioAnchor();
+		const event = await entityHost.relocate(
+			createExplorerRelocationRequest(
+				guid,
+				generation,
+				placement,
+				direction,
+				distance,
+				kind,
+			),
+		);
+		applyDynamicEntityAdvanceEvent(event);
+		return event;
+	}
+
+	function applyDynamicEntityAdvanceEvent(event: DynamicEntityEvent): void {
+		if (!runtime)
+			throw new Error("Dynamic-entity advance requires an active runtime.");
+		if (event.kind !== "advanced")
+			throw new Error(
+				`Dynamic-entity operation returned unexpected ${event.kind} event.`,
+			);
+		for (const advance of event.batch.advances) {
+			const current = spawnedEntities.find(
+				(entity) => entity.identity.guid === advance.entity.identity.guid,
+			);
+			if (current?.generation !== advance.entity.generation)
+				throw new Error(
+					`Dynamic-entity operation returned unknown generation ${advance.entity.generation} for 0x${advance.entity.identity.guid.toString(16)}.`,
+				);
+		}
+		runtime.applySpawnedDynamicEntityAdvances(event.batch, performance.now());
+		const advanced = new Map(
+			event.batch.advances.map((advance) => [
+				advance.entity.identity.guid,
+				advance.entity,
+			]),
+		);
+		spawnedEntities = spawnedEntities.map(
+			(entity) => advanced.get(entity.identity.guid) ?? entity,
+		);
 	}
 
 	async function despawnExplorerEntity(
@@ -988,7 +1138,9 @@
 					clearSceneInterest,
 					despawnExplorerEntity,
 					focusExplorerOutdoor,
+					launchExplorerEntity,
 					probePortalExecution,
+					relocateExplorerEntity,
 					requestSceneInterest,
 					setCameraLandblock,
 					setEnvCellCamera,
@@ -1006,6 +1158,8 @@
 					setTextureFiltering,
 					resetTiming,
 					spawnExplorerEntity,
+					spawnSimulatedExplorerEntity,
+					tickExplorerEntities,
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;

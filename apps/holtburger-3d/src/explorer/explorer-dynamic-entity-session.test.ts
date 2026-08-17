@@ -90,6 +90,34 @@ function entity(guid: number) {
 }
 
 describe("ExplorerDynamicEntitySession", () => {
+	it("waits for a same-generation mutation event instead of mistaking prior state for completion", async () => {
+		const transport = new FakeTransport();
+		const session = new ExplorerDynamicEntitySession(transport);
+		await session.start();
+
+		transport.invoke = async (command: string): Promise<unknown> => {
+			transport.calls.push(`invoke:${command}`);
+			return { guid: 2, generation: 1 };
+		};
+		let completed = false;
+		const launch = session
+			.launch({
+				guid: 2,
+				generation: 1,
+				direction: { x: 1, y: 0, z: 0 },
+			})
+			.then(() => {
+				completed = true;
+			});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(completed).toBe(false);
+
+		transport.emit({ kind: "upserted", entity: entity(2) });
+		await launch;
+		expect(completed).toBe(true);
+	});
+
 	it("listens before requesting state and reconstructs again after listener restart", async () => {
 		const transport = new FakeTransport();
 		const session = new ExplorerDynamicEntitySession(transport);

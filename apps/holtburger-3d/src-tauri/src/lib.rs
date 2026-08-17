@@ -1020,6 +1020,75 @@ async fn replace_explorer_entity_physics_state(
     .map_err(|error| format!("Explorer entity state replacement task failed: {error}"))?
 }
 
+/// Applies one catalog-speed launch and publishes the complete resulting current view.
+#[tauri::command]
+async fn launch_explorer_entity(
+    app: tauri::AppHandle,
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+    delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
+    request: explorer_entity_driver::ExplorerEntityLaunchRequest,
+) -> Result<ExplorerEntityMutationReceipt, String> {
+    let driver = Arc::clone(&driver);
+    let delivery = Arc::clone(&delivery);
+    tokio::task::spawn_blocking(move || {
+        delivery.with_ordered_publication(|| {
+            let outcome = driver.launch(request).map_err(|error| error.to_string())?;
+            let receipt = ExplorerEntityMutationReceipt {
+                guid: request.guid,
+                generation: outcome.instance.generation,
+            };
+            let event = delivery
+                .upserted(receipt.guid)
+                .map_err(|error| error.to_string())?;
+            app.emit(
+                explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
+                event,
+            )
+            .map_err(|error| format!("Explorer entity launched but publication failed: {error}"))?;
+            Ok(receipt)
+        })
+    })
+    .await
+    .map_err(|error| format!("Explorer entity launch task failed: {error}"))?
+}
+
+/// Applies one host-resolved teleport/reset and publishes a correction-only snap batch.
+#[tauri::command]
+async fn relocate_explorer_entity(
+    app: tauri::AppHandle,
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+    delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
+    request: explorer_entity_driver::ExplorerEntityRelocationRequest,
+) -> Result<ExplorerEntityMutationReceipt, String> {
+    let driver = Arc::clone(&driver);
+    let delivery = Arc::clone(&delivery);
+    tokio::task::spawn_blocking(move || {
+        delivery.with_ordered_publication(|| {
+            let kind = request.kind.advance_kind();
+            let outcome = driver
+                .relocate(request)
+                .map_err(|error| error.to_string())?;
+            let receipt = ExplorerEntityMutationReceipt {
+                guid: request.guid,
+                generation: outcome.instance.generation,
+            };
+            let event = delivery
+                .corrected(receipt.guid, kind)
+                .map_err(|error| error.to_string())?;
+            app.emit(
+                explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
+                event,
+            )
+            .map_err(|error| {
+                format!("Explorer entity relocated but publication failed: {error}")
+            })?;
+            Ok(receipt)
+        })
+    })
+    .await
+    .map_err(|error| format!("Explorer entity relocation task failed: {error}"))?
+}
+
 /// Clears the Explorer registry/body population and publishes an empty reconstruction snapshot.
 #[tauri::command]
 async fn reset_explorer_entities(
@@ -1521,6 +1590,8 @@ pub fn run() {
             spawn_explorer_entity,
             despawn_explorer_entity,
             replace_explorer_entity_physics_state,
+            launch_explorer_entity,
+            relocate_explorer_entity,
             reset_explorer_entities,
             start_simulation_interest_session,
             replace_simulation_interest,

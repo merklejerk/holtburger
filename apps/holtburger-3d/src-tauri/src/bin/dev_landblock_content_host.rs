@@ -4,12 +4,12 @@ use holtburger_3d::{
     dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes,
     explorer_entity_delivery::ExplorerEntityDelivery,
     explorer_entity_driver::{
-        DatExplorerEntityContentPreparer, ExplorerEntityDriver, ExplorerEntitySpawnRequest,
-        SystemExplorerEntityClock,
+        DatExplorerEntityContentPreparer, ExplorerEntityDriver, ExplorerEntityLaunchRequest,
+        ExplorerEntityRelocationRequest, ExplorerEntitySpawnRequest, SystemExplorerEntityClock,
     },
     explorer_entity_runtime::ExplorerEntityRuntime,
     explorer_weenie_catalog::ExplorerWeenieCatalog,
-    host_simulation_runtime::{CollisionSource, HostSimulationRuntime},
+    host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
     load_active_region_data_bytes, load_animation_bytes, load_landblock_source_batch_bytes,
     load_particle_emitter_bytes, load_particle_meshes_bytes, load_physics_script_bytes,
     load_sky_source_bytes, load_sound_table_bytes, load_texture_pixels_bytes,
@@ -18,7 +18,7 @@ use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{ContentAssetRuntime, ContentAssetService};
 use holtburger_world::EntityAppearance;
 use serde::{Deserialize, Serialize};
-use std::{path::Path, sync::Arc, time::Instant};
+use std::{path::Path, sync::Arc, time::Duration, time::Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -96,6 +96,12 @@ struct ExplorerEntityDespawnRequest {
     generation: u64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerEntityTickRequest {
+    duration_milliseconds: f64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExplorerEntityMutationReceipt {
@@ -107,6 +113,8 @@ struct DevHostState {
     content: ContentAssetRuntime,
     entities: Arc<ExplorerEntityDriver>,
     delivery: Arc<ExplorerEntityDelivery>,
+    runtime: Arc<ExplorerEntityRuntime>,
+    simulation: Arc<HostSimulationRuntime>,
 }
 
 #[tokio::main]
@@ -292,6 +300,104 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 Err(error) => write_error(&mut stream, error).await,
             }
         }
+        ("POST", "/explorer-entity-launch") => {
+            let request = serde_json::from_slice::<ExplorerEntityLaunchRequest>(&request.body)?;
+            let result = state.delivery.with_ordered_publication(|| {
+                let outcome = state.entities.launch(request)?;
+                state
+                    .delivery
+                    .entity(outcome.instance.definition.identity.guid)
+                    .map_err(Into::into)
+            });
+            match result {
+                Ok(entity) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&entity)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/explorer-entity-tick") => {
+            let request = serde_json::from_slice::<ExplorerEntityTickRequest>(&request.body)?;
+            let result = state.delivery.with_ordered_publication(|| {
+                anyhow::ensure!(
+                    request.duration_milliseconds.is_finite()
+                        && request.duration_milliseconds > 0.0,
+                    "Explorer entity tick duration must be positive and finite"
+                );
+                let duration = Duration::from_secs_f64(request.duration_milliseconds / 1_000.0);
+                let ticks = state
+                    .runtime
+                    .tick_physical_collection(duration.as_secs_f32(), Instant::now())?;
+                state.delivery.advanced(ticks, duration)
+            });
+            match result {
+                Ok(event) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&event)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/explorer-entity-relocate") => {
+            let request = serde_json::from_slice::<ExplorerEntityRelocationRequest>(&request.body)?;
+            let result = state.delivery.with_ordered_publication(|| {
+                let kind = request.kind.advance_kind();
+                let outcome = state.entities.relocate(request)?;
+                state
+                    .delivery
+                    .corrected(outcome.instance.definition.identity.guid, kind)
+                    .map_err(Into::into)
+            });
+            match result {
+                Ok(event) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&event)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/simulation-interest-session") => {
+            let session = state.simulation.reserve_interest_session();
+            write_response(
+                &mut stream,
+                200,
+                "application/json",
+                &serde_json::to_vec(&session)?,
+            )
+            .await
+        }
+        ("POST", "/simulation-interest") => {
+            let request = serde_json::from_slice::<SimulationInterestRequest>(&request.body)?;
+            let simulation = Arc::clone(&state.simulation);
+            match tokio::task::spawn_blocking(move || simulation.replace_interest(request)).await? {
+                Ok(receipt) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
         _ => write_response(&mut stream, 404, "text/plain; charset=utf-8", b"not found").await,
     }
 }
@@ -312,12 +418,14 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
         Arc::new(DatExplorerEntityContentPreparer::new(repository)),
         Arc::new(SystemExplorerEntityClock),
         Arc::clone(&runtime),
-        simulation,
+        Arc::clone(&simulation),
     ));
     Ok(DevHostState {
         content,
-        delivery: Arc::new(ExplorerEntityDelivery::new(runtime)),
+        delivery: Arc::new(ExplorerEntityDelivery::new(Arc::clone(&runtime))),
         entities,
+        runtime,
+        simulation,
     })
 }
 

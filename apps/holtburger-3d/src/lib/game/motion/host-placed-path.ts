@@ -54,6 +54,13 @@ export function validateHostPlacedPath<Point>(
 	if (!Number.isFinite(durationMs) || durationMs <= 0) {
 		throw new Error("Host placed-path duration must be positive and finite.");
 	}
+	validateHostPlacedPathShape(path);
+}
+
+/** Validate nonempty normalized leg structure independently from playback duration. */
+export function validateHostPlacedPathShape<Point>(
+	path: HostPlacedPath<Point>,
+): void {
 	if (path.legs.length === 0) {
 		throw new Error("Host placed path must contain at least one leg.");
 	}

@@ -7,13 +7,15 @@ import {
 	type AudioTrigger,
 	type AudioVoice,
 } from "./audio-system";
+import type { SceneVector3 } from "../../assets/ac-frame";
 
 const SOUND = "0x0a000207" as DatAssetId;
 
-/** A voice whose completion the test drives, and which counts its own stops. */
+/** A voice whose completion the test drives, recording its stops and every re-placement. */
 interface FakeVoice extends AudioVoice {
 	finished: boolean;
 	stopCalls: number;
+	placements: Array<{ gain: number; pan: number }>;
 }
 
 function build(
@@ -36,6 +38,10 @@ function build(
 			played.push({ gain, pan, soundId });
 			const voice: FakeVoice = {
 				finished: false,
+				placements: [],
+				setPlacement: (nextGain, nextPan) => {
+					voice.placements.push({ gain: nextGain, pan: nextPan });
+				},
 				stop: () => {
 					voice.stopCalls += 1;
 				},
@@ -59,14 +65,33 @@ function build(
 	return { played, prepared, stops, system };
 }
 
-function trigger(overrides: Partial<AudioTrigger> = {}): AudioTrigger {
+function trigger(
+	overrides: {
+		position?: SceneVector3;
+		volume?: number;
+		probability?: number;
+		category?: AudioTrigger["category"];
+	} = {},
+): AudioTrigger {
 	return {
-		category: "effect",
-		position: sceneVector3([0, 0, 0]),
+		category: overrides.category ?? "effect",
+		probability: overrides.probability ?? 1,
+		soundId: SOUND,
+		source: {
+			mode: "world",
+			position: overrides.position ?? sceneVector3([0, 0, 0]),
+			volume: overrides.volume ?? 1,
+		},
+	};
+}
+
+/** A head-locked trigger whose gain is supplied live, as ambient beds are. */
+function bedTrigger(volume: () => number): AudioTrigger {
+	return {
+		category: "ambient",
 		probability: 1,
 		soundId: SOUND,
-		volume: 1,
-		...overrides,
+		source: { mode: "listener", volume },
 	};
 }
 
@@ -119,7 +144,11 @@ describe("AudioSystem", () => {
 		const roll = vi.fn(() => 0.99);
 		const system = new AudioSystem(
 			{
-				playOneShot: () => ({ finished: false, stop: () => {} }),
+				playOneShot: () => ({
+					finished: false,
+					setPlacement: () => {},
+					stop: () => {},
+				}),
 				prepare: async () => {},
 			},
 			roll,
@@ -174,6 +203,173 @@ describe("AudioSystem", () => {
 
 		expect(played[0]!.gain).toBeCloseTo(0.25);
 		expect(played[0]!.pan).toBeCloseTo(1);
+	});
+
+	it("re-places a live voice as the listener recedes, with strictly lower gain", () => {
+		const { stops, system } = build();
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.trigger(trigger({ position: sceneVector3([10, 0, 0]) }));
+
+		system.setListener({
+			position: sceneVector3([-10, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.advance();
+
+		const voice = stops[0]!;
+		expect(voice.placements).toHaveLength(1);
+		// 20 m away instead of 10: 25/400 against the trigger-time 25/100.
+		expect(voice.placements[0]!.gain).toBeCloseTo(25 / 400);
+		expect(voice.placements[0]!.gain).toBeLessThan(0.25);
+	});
+
+	it("flips pan when the listener crosses to the source's other side", () => {
+		const { stops, system } = build();
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.trigger(trigger({ position: sceneVector3([10, 0, 0]) }));
+
+		system.setListener({
+			position: sceneVector3([20, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.advance();
+
+		expect(stops[0]!.placements[0]!.pan).toBeCloseTo(-1);
+	});
+
+	it("silences a voice past the audible floor instead of stopping it, and brings it back", () => {
+		const { stops, system } = build();
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.trigger(trigger({ position: sceneVector3([10, 0, 0]) }));
+
+		// A free-flying camera leaves and re-enters earshot routinely; stopping here would make the
+		// return trip silently lossy.
+		system.setListener({
+			position: sceneVector3([500, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.advance();
+		const voice = stops[0]!;
+		expect(voice.stopCalls).toBe(0);
+		expect(voice.placements.at(-1)).toEqual({ gain: 0, pan: 0 });
+
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.advance();
+		expect(voice.placements.at(-1)!.gain).toBeCloseTo(0.25);
+	});
+
+	it("sweeps finished voices on advance without re-placing them", () => {
+		const { stops, system } = build();
+		system.trigger(trigger());
+		stops[0]!.finished = true;
+
+		system.advance();
+
+		expect(stops[0]!.placements).toHaveLength(0);
+		expect(system.getDiagnostics().activeVoiceCount).toBe(0);
+	});
+
+	it("keeps a listener-locked voice centred at its supplied gain across movement", () => {
+		const { stops, system } = build();
+		let bed = 0.8;
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		expect(system.trigger(bedTrigger(() => bed))).toBe("played");
+
+		system.setListener({
+			position: sceneVector3([300, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.advance();
+
+		// Head-locked: distance to the listener is always zero, so gain follows the supplier and
+		// pan stays centred no matter where the camera goes.
+		expect(stops[0]!.placements.at(-1)).toEqual({ gain: 0.8, pan: 0 });
+
+		bed = 0.2;
+		system.advance();
+		expect(stops[0]!.placements.at(-1)).toEqual({ gain: 0.2, pan: 0 });
+	});
+
+	it("fades a listener-locked voice whose supplier has gone quiet, without stopping it", () => {
+		const { stops, system } = build();
+		let bed = 0.8;
+		system.trigger(bedTrigger(() => bed));
+
+		bed = 0;
+		system.advance();
+
+		// A supplier reading zero is a retired or region-cleared bed; the voice glides out.
+		expect(stops[0]!.stopCalls).toBe(0);
+		expect(stops[0]!.placements.at(-1)).toEqual({ gain: 0, pan: 0 });
+	});
+
+	it("does not start a listener-locked voice whose supplier is already silent", () => {
+		const { played, system } = build();
+
+		expect(system.trigger(bedTrigger(() => 0))).toBe("inaudible");
+		expect(played).toHaveLength(0);
+	});
+
+	it("applies a live settings change to a playing voice on the next advance", () => {
+		const { stops, system } = build();
+		system.trigger(trigger());
+
+		system.setSettings({ ambientVolume: 1, effectVolume: 0.5 });
+		system.advance();
+
+		expect(stops[0]!.placements[0]!.gain).toBeCloseTo(0.5);
+	});
+
+	it("steals the quietest voice, not the oldest, when the budget is full", () => {
+		const { stops, system } = build({ voiceLimit: 2 });
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		// Oldest but loud (on top of the listener); newer but faint (80 m out).
+		system.trigger(trigger({ position: sceneVector3([0, 0, 0]) }));
+		system.trigger(trigger({ position: sceneVector3([80, 0, 0]) }));
+
+		system.trigger(trigger({ position: sceneVector3([0, 0, 0]) }));
+
+		expect(stops[0]!.stopCalls).toBe(0);
+		expect(stops[1]!.stopCalls).toBe(1);
+	});
+
+	it("prefers a voice silenced below the floor as the steal victim, whatever its age", () => {
+		const { stops, system } = build({ voiceLimit: 2 });
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.trigger(trigger({ position: sceneVector3([10, 0, 0]) }));
+		system.trigger(trigger({ position: sceneVector3([0, 0, 0]) }));
+		// The listener flies away from the first voice's source only.
+		system.setListener({
+			position: sceneVector3([-500, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		system.trigger(trigger({ position: sceneVector3([-500, 0, 0]) }));
+
+		// Both retained voices are far away now, but the first is farther; it reads gain 0 and is
+		// the least audible cut available.
+		expect(stops[0]!.stopCalls).toBe(1);
+		expect(stops[1]!.stopCalls).toBe(0);
 	});
 
 	it("steals the oldest voice when the budget is full", () => {
@@ -242,6 +438,50 @@ describe("AudioSystem", () => {
 		});
 	});
 
+	it("places a warmed replay from the listener at replay time, not trigger time", async () => {
+		const { played, system } = build({ coldSounds: new Set([SOUND]) });
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+
+		system.trigger(trigger({ position: sceneVector3([10, 0, 0]) }));
+		// The listener moves while the buffer decodes; the late start must not snap to where the
+		// listener used to be.
+		system.setListener({
+			position: sceneVector3([20, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(played).toHaveLength(1);
+		expect(played[0]!.pan).toBeCloseTo(-1);
+	});
+
+	it("does not start a warmed sound the listener has left earshot of", async () => {
+		const { played, system } = build({ coldSounds: new Set([SOUND]) });
+		system.setListener({
+			position: sceneVector3([0, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+
+		system.trigger(trigger({ position: sceneVector3([10, 0, 0]) }));
+		system.setListener({
+			position: sceneVector3([500, 0, 0]),
+			right: renderVector3([1, 0, 0]),
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(played).toHaveLength(0);
+		expect(system.getDiagnostics()).toMatchObject({
+			inaudibleCount: 1,
+			playedCount: 0,
+			warmupExpiredCount: 0,
+		});
+	});
+
 	it("drops a warmed sound whose moment has passed instead of playing it late", async () => {
 		let now = 0;
 		const { played, system } = build({
@@ -251,8 +491,8 @@ describe("AudioSystem", () => {
 		});
 
 		system.trigger(trigger());
-		// Retail fixes gain and pan at trigger time, so a very late replay would place the sound
-		// where the listener no longer is.
+		// The bound is temporal: a sound this late belongs to a moment that has passed, however
+		// correctly it would now be placed.
 		now = 5;
 		await Promise.resolve();
 		await Promise.resolve();

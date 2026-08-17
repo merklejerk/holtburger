@@ -72,7 +72,9 @@ The same split applies to entity motion coming back from the server:
 
 Render-oriented consumers should keep that boundary explicit: core publishes a frontend-facing runtime-body view contract over `ClientViewEvent`, frontends keep mirrored read caches keyed by `SpatialBodyId`, and those caches are updated mechanically rather than ticked into an independent truth.
 
-Projection lifecycle is intentionally authoritative-first. Delta-only motion and kinematics events may refresh cached projection inputs for already tracked entities, but they do not bootstrap tracking and they do not resume suspended projection on their own. Phase 1 freezes the long-term sync model as initial snapshot plus deltas with explicit reset-and-resnapshot recovery. Bootstrap and recovery must therefore come from dedicated runtime-body snapshot/reset events rather than from event-free local ticking.
+Projection lifecycle is intentionally authoritative-first. Delta-only motion and kinematics events may refresh cached projection inputs for already tracked entities, but they do not bootstrap tracking and they do not resume suspended projection on their own. The sync model is an initial snapshot plus deltas, with an explicit reset-and-resnapshot on forced repositions and teleports. Bootstrap and reset must therefore come from dedicated runtime-body snapshot/reset events rather than from event-free local ticking.
+
+This is the client runtime-body contract and is distinct from the focused dynamic-entity feed described under Shared Dynamic Entity Contracts. That feed hydrates once per mount or webview remount through a listener-before-snapshot request and has no reset, replay, acknowledgement, or delivery-recovery protocol.
 
 The required delivery contract for frontend-owned navigation or rendering is:
 
@@ -196,6 +198,32 @@ We do not need a flag day refactor. The current movement behavior can evolve inc
     - Frontends decide when to invoke or suspend a controller based on local UX needs.
 
 The end state is a core library that owns robust movement and interaction primitives, plus a catalog of optional higher-level controllers that clients can compose as needed.
+
+## Shared Dynamic Entity Contracts
+
+`dynamic_entity.rs` and `dynamic_entity_view.rs` own the source-neutral seam between an entity
+producer and everything downstream. Shared code begins only after a producer registry has
+assembled its facts, and it never claims producer authority.
+
+- `DynamicEntityDefinition` is the validated definition: identity, immutable content identities,
+  lossless appearance, explicit initial pose and kinematics, validated scalars, and the complete
+  effective `EffectiveEntityPhysicsState`. It holds no catalog path, SQL row, frontend node, asset
+  payload, or producer handle.
+- Content preparation (`prepare_dynamic_entity_setup`, `prepare_dynamic_entity_physics`) resolves
+  DAT/setup facts and rejects unsupported combinations with typed reasons — including the measured
+  moving-physics-BSP boundary — before any scene mutation.
+- The body operations (`install_dynamic_entity_body`, `replace_dynamic_entity_body`,
+  `remove_dynamic_entity_body`, `apply_dynamic_entity_physics_transition`) apply the shared
+  transition decision to a caller-supplied `SpatialScene`. The client uses `WorldState`'s scene and
+  the Explorer uses the host simulation's; the operations are identical and hold no state.
+- `project_dynamic_entity_view` is a pure join of registry semantics with the current committed
+  body view. It is the only producer of `DynamicEntityView`, so the client adapter
+  (`client/dynamic_entity_view.rs`) and the Explorer host emit identical shapes. The view carries
+  no semantic motion object and no motion-table identity; solver-owned placement is the entity
+  root's only authority.
+
+Two producer registries remain intentionally distinct — `WorldState` for the network client and an
+app-local registry for the Explorer — and neither is generalized into a universal store.
 
 ## Dependencies
 - **`holtburger-session`**: Network tracking, transport, and packet parsing.

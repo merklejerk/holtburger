@@ -196,11 +196,19 @@ transparent submission, carries instance alpha without widening the persistent i
 uses stable transparent ordering. Effect teardown and owner replacement clear persistent ramps,
 rotation, and per-part state before an identity can be reused.
 
-This section describes the landed static-authored runtime only, which now includes the complete
-authored effects runtime: scripts, particles, and audio. Spawned entities remain queued behind it. Their selected architecture extends this presentation runtime through one
-world-owned entity model and the existing view-event path, expanded with one complete initial
-snapshot and resnapshot after detected receiver lag. No second dynamic system, stateful feed
-projector, or frontend placement authority is currently implemented.
+This section describes a runtime that now serves both authored and spawned dynamic entities. The
+authored effects runtime — scripts, particles, and audio — is complete, and spawned entities reuse
+it through one source-neutral presentation input rather than a second dynamic system.
+
+A spawned entity enters through an app-local Explorer registry above the host simulation's own
+`SpatialScene`, crosses a narrow Tauri relay as one focused `DynamicEntityView`, and is realized by
+the same template repository, animation system, effect dispatcher, and renderer path the authored
+layer uses. The frontend mirror hydrates on mount or webview remount by registering its listener
+and then requesting one current-state snapshot; there is no replay, acknowledgement, or
+delivery-recovery protocol. Solver output owns the entity root: the placement system evaluates
+accepted sparse paths at render cadence, while animation and effects write visual-root and part
+state only. No second dynamic system, stateful feed projector, or frontend placement authority
+exists.
 
 ## 5. Scene Graph and Spatial Queries
 

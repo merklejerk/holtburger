@@ -15,7 +15,7 @@ import {
 
 const DYNAMIC_ENTITY_EVENT = "explorer-dynamic-entity";
 
-/** Injectable Tauri boundary for listener-before-request recovery and focused commands. */
+/** Injectable Tauri boundary for listener-before-request hydration and focused commands. */
 export interface ExplorerDynamicEntityTransport {
 	listen(
 		event: string,

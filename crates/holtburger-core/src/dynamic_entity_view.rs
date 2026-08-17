@@ -1,4 +1,4 @@
-//! Source-neutral frontend projection and recoverable dynamic-entity delivery values.
+//! Source-neutral frontend projection and dynamic-entity delivery values.
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};

@@ -16,7 +16,7 @@
 //! produced, matching retail's binary structure.
 
 use holtburger_common::Vector3;
-use holtburger_content::{CollisionBall, CollisionCylinder, PlacedCollider};
+use holtburger_content::{CollisionBall, CollisionCylinder, PlacedCollisionShape};
 
 use super::bsp_query::{CONTACT_EPSILON, ShapeContact, ShapeSupport, ShapeSupportFeature};
 
@@ -38,16 +38,19 @@ struct PlacedBall {
     radius: f32,
 }
 
-/// Uniform scale of a volume collider; `PlacedCollider::new` is the sole construction door and
+/// Uniform scale of placed volume geometry; construction rejects non-uniform volume scales, so this
 /// rejects non-uniform volume scales, so this cannot fail on a constructed collider.
-fn uniform_scale(collider: &PlacedCollider) -> f32 {
+fn uniform_scale(collider: &PlacedCollisionShape) -> f32 {
     collider
         .scale
         .as_uniform()
         .expect("volume colliders are constructed with uniform scale")
 }
 
-fn placed_cylinder(collider: &PlacedCollider, cylinder: &CollisionCylinder) -> PlacedCylinder {
+fn placed_cylinder(
+    collider: &PlacedCollisionShape,
+    cylinder: &CollisionCylinder,
+) -> PlacedCylinder {
     let scale = uniform_scale(collider);
     PlacedCylinder {
         low: collider.point_to_landblock_space(cylinder.low_point),
@@ -56,7 +59,7 @@ fn placed_cylinder(collider: &PlacedCollider, cylinder: &CollisionCylinder) -> P
     }
 }
 
-fn placed_ball(collider: &PlacedCollider, ball: &CollisionBall) -> PlacedBall {
+fn placed_ball(collider: &PlacedCollisionShape, ball: &CollisionBall) -> PlacedBall {
     let scale = uniform_scale(collider);
     PlacedBall {
         center: collider.point_to_landblock_space(ball.center),
@@ -66,7 +69,7 @@ fn placed_ball(collider: &PlacedCollider, ball: &CollisionBall) -> PlacedBall {
 
 /// Returns the separating contact with one placed cylinder, when the sphere overlaps it.
 pub(super) fn placed_cylinder_contact(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     cylinder: &CollisionCylinder,
     center: Vector3,
     radius: f32,
@@ -76,7 +79,7 @@ pub(super) fn placed_cylinder_contact(
 
 /// Returns the separating contact with one placed ball, when the sphere overlaps it.
 pub(super) fn placed_ball_contact(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     ball: &CollisionBall,
     center: Vector3,
     radius: f32,
@@ -158,7 +161,7 @@ fn ball_contact(ball: PlacedBall, center: Vector3, radius: f32) -> Option<ShapeC
 
 /// Returns the surface reached by settling a sphere vertically onto one placed cylinder.
 pub(super) fn placed_cylinder_support(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     cylinder: &CollisionCylinder,
     center: Vector3,
     radius: f32,
@@ -176,7 +179,7 @@ pub(super) fn placed_cylinder_support(
 
 /// Returns the surface reached by settling a sphere vertically onto one placed ball.
 pub(super) fn placed_ball_support(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     ball: &CollisionBall,
     center: Vector3,
     radius: f32,
@@ -263,7 +266,7 @@ mod tests {
     use holtburger_common::Quaternion;
     use holtburger_content::{
         ColliderScale, CollisionBall, CollisionCylinder, CollisionShape, LandblockPlacement,
-        StaticColliderPlacement,
+        PlacedCollider, StaticColliderPlacement,
     };
 
     use super::*;

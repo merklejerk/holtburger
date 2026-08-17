@@ -427,9 +427,9 @@ pub enum StaticColliderPlacement {
     },
 }
 
-/// One placed instance of a shared shape, in landblock-local space.
+/// Source-neutral placed collision geometry in landblock-local space.
 #[derive(Debug, Clone)]
-pub struct PlacedCollider {
+pub struct PlacedCollisionShape {
     /// Shared authored shape.
     pub shape: Arc<CollisionShape>,
     /// Landblock-local placement of the shape's origin.
@@ -439,11 +439,9 @@ pub struct PlacedCollider {
     /// Landblock-local axis-aligned bounds including scale, used for broad-phase rejection and
     /// outdoor cell-shadow registration.
     pub bounds: CollisionBox,
-    /// Authored placement identity used to compile runtime cell residency for every part together.
-    pub source_placement: StaticColliderPlacement,
 }
 
-impl PlacedCollider {
+impl PlacedCollisionShape {
     /// Transforms an object-local normal with the inverse-transpose scale rule.
     pub fn normal_to_landblock_space(&self, object_normal: Vector3) -> Vector3 {
         self.placement
@@ -489,7 +487,6 @@ impl PlacedCollider {
         shape: Arc<CollisionShape>,
         placement: LandblockPlacement,
         scale: ColliderScale,
-        source_placement: StaticColliderPlacement,
     ) -> Result<Self> {
         let bounds = placed_bounds(&shape, &placement, scale)?;
         Ok(Self {
@@ -497,6 +494,43 @@ impl PlacedCollider {
             placement,
             scale,
             bounds,
+        })
+    }
+}
+
+/// One static placed collider plus its authored residency identity.
+#[derive(Debug, Clone)]
+pub struct PlacedCollider {
+    /// Source-neutral placed geometry consumed by broad and narrow phases.
+    pub geometry: PlacedCollisionShape,
+    /// Authored placement identity used to compile runtime cell residency for every part together.
+    pub source_placement: StaticColliderPlacement,
+}
+
+impl std::ops::Deref for PlacedCollider {
+    type Target = PlacedCollisionShape;
+
+    fn deref(&self) -> &Self::Target {
+        &self.geometry
+    }
+}
+
+impl std::ops::DerefMut for PlacedCollider {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.geometry
+    }
+}
+
+impl PlacedCollider {
+    /// Places static collision geometry and retains only its static residency identity separately.
+    pub fn new(
+        shape: Arc<CollisionShape>,
+        placement: LandblockPlacement,
+        scale: ColliderScale,
+        source_placement: StaticColliderPlacement,
+    ) -> Result<Self> {
+        Ok(Self {
+            geometry: PlacedCollisionShape::new(shape, placement, scale)?,
             source_placement,
         })
     }

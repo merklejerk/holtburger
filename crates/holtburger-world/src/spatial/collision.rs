@@ -2550,31 +2550,33 @@ mod tests {
             radius: 1.0,
         };
         PlacedCollider {
-            shape: Arc::new(CollisionShape::Bsp(BspSolid {
-                bsp: BspNode::Leaf(BspLeaf {
-                    index: 0,
-                    solid: 0,
-                    sphere: Some(bounds),
-                    poly_ids: Vec::new(),
-                }),
-                bounds,
-                box_bounds: CollisionBox::from_points([
-                    Vector3::new(-1.0, -1.0, -1.0),
-                    Vector3::new(1.0, 1.0, 1.0),
+            geometry: holtburger_content::PlacedCollisionShape {
+                shape: Arc::new(CollisionShape::Bsp(BspSolid {
+                    bsp: BspNode::Leaf(BspLeaf {
+                        index: 0,
+                        solid: 0,
+                        sphere: Some(bounds),
+                        poly_ids: Vec::new(),
+                    }),
+                    bounds,
+                    box_bounds: CollisionBox::from_points([
+                        Vector3::new(-1.0, -1.0, -1.0),
+                        Vector3::new(1.0, 1.0, 1.0),
+                    ])
+                    .unwrap(),
+                    polygons: HashMap::new(),
+                })),
+                placement: LandblockPlacement {
+                    origin: center,
+                    orientation: Quaternion::identity(),
+                },
+                scale: ColliderScale::uniform(1.0).unwrap(),
+                bounds: CollisionBox::from_points([
+                    center - Vector3::new(1.0, 1.0, 1.0),
+                    center + Vector3::new(1.0, 1.0, 1.0),
                 ])
                 .unwrap(),
-                polygons: HashMap::new(),
-            })),
-            placement: LandblockPlacement {
-                origin: center,
-                orientation: Quaternion::identity(),
             },
-            scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds: CollisionBox::from_points([
-                center - Vector3::new(1.0, 1.0, 1.0),
-                center + Vector3::new(1.0, 1.0, 1.0),
-            ])
-            .unwrap(),
             source_placement,
         }
     }

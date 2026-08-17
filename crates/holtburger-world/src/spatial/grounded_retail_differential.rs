@@ -1658,30 +1658,32 @@ fn placed_polygon_with_normal(id: u16, vertices: Vec<Vector3>, normal: Vector3) 
             .fold(0.0, f32::max),
     };
     PlacedCollider {
-        shape: Arc::new(CollisionShape::Bsp(BspSolid {
-            bsp: BspNode::Leaf(BspLeaf {
-                index: 0,
-                solid: 0,
-                sphere: Some(bounds),
-                poly_ids: vec![id],
-            }),
-            bounds,
-            box_bounds,
-            polygons: HashMap::from([(
-                id,
-                CollisionPolygon {
-                    vertices,
-                    normal,
-                    d,
-                },
-            )]),
-        })),
-        placement: LandblockPlacement {
-            origin: Vector3::zero(),
-            orientation: Quaternion::identity(),
+        geometry: holtburger_content::PlacedCollisionShape {
+            shape: Arc::new(CollisionShape::Bsp(BspSolid {
+                bsp: BspNode::Leaf(BspLeaf {
+                    index: 0,
+                    solid: 0,
+                    sphere: Some(bounds),
+                    poly_ids: vec![id],
+                }),
+                bounds,
+                box_bounds,
+                polygons: HashMap::from([(
+                    id,
+                    CollisionPolygon {
+                        vertices,
+                        normal,
+                        d,
+                    },
+                )]),
+            })),
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            scale: ColliderScale::uniform(1.0).unwrap(),
+            bounds: box_bounds,
         },
-        scale: ColliderScale::uniform(1.0).unwrap(),
-        bounds: box_bounds,
         source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
     }
 }

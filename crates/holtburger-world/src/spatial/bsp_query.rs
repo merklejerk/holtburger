@@ -8,7 +8,7 @@
 //! contact and support vocabulary to the scene's dispatch.
 
 use holtburger_common::{Plane, Sphere, Vector3};
-use holtburger_content::{BspSolid, CollisionPolygon, PlacedCollider};
+use holtburger_content::{BspSolid, CollisionPolygon, PlacedCollisionShape};
 use holtburger_dat::physics::BspNode;
 
 /// Retail's contact epsilon, shared by the BSP and volume narrow phases. The decompile prints it
@@ -59,7 +59,7 @@ pub struct BspPolygonObstruction {
 
 /// Returns contacts with solid BSP regions reached by a placed sphere.
 pub fn placed_solid_contacts(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     solid: &BspSolid,
     center: Vector3,
     radius: f32,
@@ -80,7 +80,7 @@ pub fn placed_solid_contacts(
 
 /// Returns contacts with authored BSP polygons reached by a placed sphere.
 pub fn placed_polygon_contacts(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     solid: &BspSolid,
     center: Vector3,
     radius: f32,
@@ -120,7 +120,7 @@ pub fn placed_polygon_contacts(
 
 /// Returns two-sided authored polygon contacts without discarding back-face identity.
 pub fn placed_polygon_obstructions(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     solid: &BspSolid,
     center: Vector3,
     radius: f32,
@@ -160,7 +160,7 @@ pub fn placed_polygon_obstructions(
 
 /// Returns authored polygon surfaces reached by one bounded vertical settle probe.
 pub fn placed_supports(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     solid: &BspSolid,
     center: Vector3,
     radius: f32,
@@ -205,7 +205,7 @@ pub fn placed_supports(
 
 fn descend(
     node: &BspNode,
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     center: Vector3,
     radius: f32,
     center_check: bool,
@@ -302,7 +302,7 @@ fn descend(
 fn visit_polygon_leaves(
     node: &BspNode,
     solid: &BspSolid,
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     center: Vector3,
     radius: f32,
     found: &mut impl FnMut(&CollisionPolygon),
@@ -334,7 +334,7 @@ fn visit_polygon_leaves(
 
 fn node_bounds_reach(
     node: &BspNode,
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     center: Vector3,
     radius: f32,
 ) -> bool {
@@ -346,7 +346,7 @@ fn node_bounds_reach(
     bounds.is_none_or(|bounds| transformed_sphere(bounds, collider).intersects(&center, radius))
 }
 
-fn transformed_sphere(bounds: Sphere, collider: &PlacedCollider) -> Sphere {
+fn transformed_sphere(bounds: Sphere, collider: &PlacedCollisionShape) -> Sphere {
     let scale = collider.scale.components();
     Sphere {
         center: collider.point_to_landblock_space(bounds.center),
@@ -354,7 +354,7 @@ fn transformed_sphere(bounds: Sphere, collider: &PlacedCollider) -> Sphere {
     }
 }
 
-fn transform_plane(plane: Plane, collider: &PlacedCollider) -> Plane {
+fn transform_plane(plane: Plane, collider: &PlacedCollisionShape) -> Plane {
     let normal = collider.normal_to_landblock_space(plane.normal);
     let local_point = plane.normal * (-plane.d / plane.normal.length_squared());
     let point = collider.point_to_landblock_space(local_point);
@@ -650,28 +650,30 @@ mod tests {
         ])
         .unwrap();
         PlacedCollider {
-            shape: Arc::new(CollisionShape::Bsp(BspSolid {
-                bsp: BspNode::Internal(InternalNode {
-                    tag: *b"BPnn",
-                    plane: Plane {
-                        normal: Vector3::new(1.0, 0.0, 0.0),
-                        d: 0.0,
-                    },
-                    pos: Some(Box::new(empty)),
-                    neg: Some(Box::new(solid)),
-                    sphere: Some(bounds),
-                    poly_ids: Vec::new(),
-                }),
-                bounds,
-                box_bounds,
-                polygons: HashMap::new(),
-            })),
-            placement: LandblockPlacement {
-                origin: Vector3::zero(),
-                orientation: Quaternion::identity(),
+            geometry: holtburger_content::PlacedCollisionShape {
+                shape: Arc::new(CollisionShape::Bsp(BspSolid {
+                    bsp: BspNode::Internal(InternalNode {
+                        tag: *b"BPnn",
+                        plane: Plane {
+                            normal: Vector3::new(1.0, 0.0, 0.0),
+                            d: 0.0,
+                        },
+                        pos: Some(Box::new(empty)),
+                        neg: Some(Box::new(solid)),
+                        sphere: Some(bounds),
+                        poly_ids: Vec::new(),
+                    }),
+                    bounds,
+                    box_bounds,
+                    polygons: HashMap::new(),
+                })),
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                scale: ColliderScale::uniform(1.0).unwrap(),
+                bounds: box_bounds,
             },
-            scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds: box_bounds,
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
     }

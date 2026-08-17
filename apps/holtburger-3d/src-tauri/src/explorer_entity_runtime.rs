@@ -17,6 +17,7 @@ use holtburger_world::{DynamicPhysicalBodyDefinition, RuntimeSpatialBodyView, Sp
 use holtburger_world::{
     EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
     EntityPhysicsTransitionDecision, decide_entity_physics_state_transition,
+    resolve_effective_entity_physics_state,
 };
 
 use crate::host_simulation_runtime::{HostPhysicalBodyTick, HostSimulationRuntime};
@@ -633,7 +634,7 @@ impl ExplorerEntityRuntime {
         delta_seconds: f32,
         now: std::time::Instant,
     ) -> anyhow::Result<Vec<ExplorerEntityPhysicalTick>> {
-        let registry = self
+        let mut registry = self
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
@@ -645,12 +646,17 @@ impl ExplorerEntityRuntime {
                 let SpatialBodyId::Entity(guid) = solved.current.id else {
                     anyhow::bail!("dynamic-entity collection returned a non-entity body")
                 };
-                let instance = registry.entities.get(&guid).with_context(|| {
+                let instance = registry.entities.get_mut(&guid).with_context(|| {
                     format!(
                         "dynamic-entity body 0x{:08X} has no Explorer semantic instance",
                         guid.0
                     )
                 })?;
+                if let Some(change) = solved.result.dynamic_state_change {
+                    instance.definition.physics = resolve_effective_entity_physics_state(
+                        instance.definition.physics.semantic & !change.cleared,
+                    );
+                }
                 let input = dynamic_entity_projection_input_from_body(
                     &instance.definition,
                     &solved.current,
@@ -676,7 +682,8 @@ impl ExplorerEntityRuntime {
 }
 
 fn physical_tick_changed(tick: &HostPhysicalBodyTick) -> bool {
-    tick.previous.runtime_view() != tick.current.runtime_view()
+    tick.result.dynamic_state_change.is_some()
+        || tick.previous.runtime_view() != tick.current.runtime_view()
         || tick
             .result
             .motion
@@ -744,7 +751,9 @@ mod tests {
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PhysicsState, WeenieType};
     use holtburger_common::{Quaternion, Sphere, Vector3};
-    use holtburger_content::{ColliderScale, LandblockCollisionAsset};
+    use holtburger_content::{
+        ColliderScale, CollisionBall, CollisionShape, LandblockCollisionAsset,
+    };
     use holtburger_core::{
         DynamicEntityContent, DynamicEntityDefinitionInput, DynamicEntityIdentity,
         DynamicEntityInitialState,
@@ -846,6 +855,7 @@ mod tests {
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
+                    accepts_peer_reports: true,
                     missile: false,
                     path_clipped: false,
                 },
@@ -860,6 +870,16 @@ mod tests {
                 default_script_available: false,
             },
         }
+    }
+
+    fn physical_with_ball_target() -> DynamicPhysicalBodyDefinition {
+        let mut physical = physical();
+        physical.entity_collision.target_geometry.fallback_shapes =
+            vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            }))];
+        physical
     }
 
     #[test]
@@ -974,6 +994,59 @@ mod tests {
             tick.solved.result.motion.path.anchor() == Guid(0xda55_ffff)
                 && tick.solved.result.motion.path.legs().last().is_some()
         }));
+    }
+
+    #[test]
+    fn missile_contact_updates_solver_and_explorer_semantics_in_one_collection_transaction() {
+        let (_simulation, runtime) = runtime(0xf000_0110, 0xf000_0111);
+        let mover_guid = runtime.reserve_guid().unwrap();
+        let target_guid = runtime.reserve_guid().unwrap();
+        let mut mover_definition = definition(mover_guid, 1499, 0.0);
+        mover_definition.initial.velocity = Vector3::new(10.0, 0.0, 0.0);
+        mover_definition.physics = resolve_effective_entity_physics_state(
+            PhysicsState::GRAVITY
+                | PhysicsState::MISSILE
+                | PhysicsState::ALIGN_PATH
+                | PhysicsState::PATH_CLIPPED
+                | PhysicsState::INELASTIC,
+        );
+        let mut mover_physical = physical_with_ball_target();
+        mover_physical.response_policy.restitution = PhysicalRestitution::Inelastic;
+        mover_physical.response_policy.align_path = true;
+        mover_physical.entity_collision.dynamic_collision.missile = true;
+        mover_physical
+            .entity_collision
+            .dynamic_collision
+            .path_clipped = true;
+        let mover = runtime
+            .spawn_prepared(
+                mover_definition,
+                EntityPhysicalIntent::Simulated,
+                Some(mover_physical),
+            )
+            .unwrap();
+        runtime
+            .spawn_prepared(
+                definition(target_guid, 1, 1.2),
+                EntityPhysicalIntent::Simulated,
+                Some(physical_with_ball_target()),
+            )
+            .unwrap();
+
+        let ticks = runtime
+            .tick_physical_collection(0.1, Instant::now())
+            .unwrap();
+        let mover_tick = ticks
+            .iter()
+            .find(|tick| tick.input.identity.guid == mover_guid)
+            .unwrap();
+        assert!(mover_tick.solved.result.dynamic_state_change.is_some());
+        assert_eq!(mover_tick.generation, mover.instance.generation);
+        let physics = runtime.project(mover_guid).unwrap().input.physics;
+        assert!(!physics.semantic.contains(PhysicsState::MISSILE));
+        assert!(!physics.semantic.contains(PhysicsState::ALIGN_PATH));
+        assert!(!physics.semantic.contains(PhysicsState::PATH_CLIPPED));
+        assert!(physics.semantic.contains(PhysicsState::INELASTIC));
     }
 
     #[test]

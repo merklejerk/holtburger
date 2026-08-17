@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 5B complete, Phase 5C next
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 5C complete, Phase 5D next
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -1574,6 +1574,16 @@ populations, and full swept-range discovery beyond the mover's initial bucket.
 
 ### Phase 5C: Add Directional Dynamic Contact and Response
 
+Progress: Complete (2026-08-17). The collection tick now captures one immutable tick-start body
+snapshot, spatial index, and environment-only motion plan before any body commits. Each active mover
+gets one directional attempt against the fixed candidate set; accepted movers commit independently,
+while a contacted settled peer is woken for a later tick. Dynamic narrow phase reuses the same
+source-neutral placed sphere, cylsphere, and physics-BSP geometry as static collision, with adaptive
+pair slicing over both planned transforms and a typed hard-budget rejection. Focused fixtures cover
+the supported target branches, policy filters, high-speed missiles, opposing/rotating movers,
+deterministic three-body selection, exact slice limits, isolated rejection, and simultaneous floor
+and peer contact.
+
 #### Deliverables
 
 - Implement the ACE/retail-proven dynamic collision eligibility and response decisions from the
@@ -1612,7 +1622,37 @@ populations, and full swept-range discovery beyond the mover's initial bucket.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Extract `PlacedCollisionShape` from the static-collider wrapper instead of forging static source
+  identity for dynamic bodies. Static and dynamic narrow phase now share transform and geometry math
+  without sharing ownership semantics.
+- Freeze all tick-start body state and environment trajectories before directional commits. This is
+  the selected eventual-consistency model: each mover changes only itself, stable body-ID ordering is
+  reproducible, and a woken peer participates on a later tick rather than receiving an atomic paired
+  impulse.
+- Give each body one attempt per prepared collection epoch, including a rejected attempt. A peer
+  woken by an earlier mover cannot consume mutable mid-tick state or integrate twice.
+- Query one full-path candidate set, apply a pair-level swept-bounds rejection, and only then enforce
+  the adaptive slice budget. The pair filter prevents unrelated bodies that merely share a coarse
+  24 m bucket from causing false over-budget failures.
+- On a blocking peer contact, re-solve only the accepted partial interval against the environment.
+  This preserves floor/support and other environment state at the contact point without running the
+  complete environment solver at every dynamic sample.
+- Add `accepts_peer_reports` to the effective dynamic collision policy. `IgnoreCollisions` suppresses
+  both the body's own response and peer reports about it; keeping this derived fact in the contract
+  avoids consumers reconstructing mask semantics.
+- Missile targets remain excluded from peer targeting, matching the source evidence. An accepted
+  eligible object impact by a targetless missile clears `Missile`, `AlignPath`, and `PathClipped` as
+  one named committed physics-state consequence. The Explorer registry, which owns the authored
+  state, consumes that consequence synchronously; the solver does not gain a registry or event-bus
+  dependency.
+- A dynamic block truncates the accepted path and holds the mover at contact for the remainder of
+  the tick; the computed rebound velocity applies on the next tick. This is the deliberate bounded
+  eventual-consistency concession, avoiding remaining-tick reintegration and paired atomic solving.
+- A typed per-body slice-budget error is logged immediately by the host and collection processing
+  continues. No collision diagnostic history, counter, registry, or frontend surface is retained.
+- Report-only contacts are detected but not retained or published in this phase. Phase 5D owns
+  contact lifetimes and source-neutral outcomes; static-environment missile report/state consequences
+  remain part of that reconciliation rather than being inferred here.
 
 ### Phase 5D: Add Minimal Collision-Report Lifecycles
 

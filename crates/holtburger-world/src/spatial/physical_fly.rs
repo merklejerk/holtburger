@@ -442,19 +442,21 @@ mod tests {
             polygons: HashMap::from([(1, polygon)]),
         }));
         PlacedCollider {
-            shape,
-            placement: LandblockPlacement {
-                origin: Vector3::zero(),
-                orientation: Quaternion::identity(),
+            geometry: holtburger_content::PlacedCollisionShape {
+                shape,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                scale: ColliderScale::uniform(1.0).unwrap(),
+                // The synthetic solid fills the half-space, not just its boundary polygon, so its
+                // broad-phase box covers the whole authored bounding sphere.
+                bounds: CollisionBox::from_points([
+                    bounds.center - Vector3::new(bounds.radius, bounds.radius, bounds.radius),
+                    bounds.center + Vector3::new(bounds.radius, bounds.radius, bounds.radius),
+                ])
+                .unwrap(),
             },
-            scale: ColliderScale::uniform(1.0).unwrap(),
-            // The synthetic solid fills the half-space, not just its boundary polygon, so its
-            // broad-phase box covers the whole authored bounding sphere.
-            bounds: CollisionBox::from_points([
-                bounds.center - Vector3::new(bounds.radius, bounds.radius, bounds.radius),
-                bounds.center + Vector3::new(bounds.radius, bounds.radius, bounds.radius),
-            ])
-            .unwrap(),
             source_placement: if is_building {
                 StaticColliderPlacement::BuildingShell { source_index: 0 }
             } else {
@@ -507,17 +509,19 @@ mod tests {
             )]),
         }));
         PlacedCollider {
-            shape,
-            placement: LandblockPlacement {
-                origin: Vector3::zero(),
-                orientation: Quaternion::identity(),
+            geometry: holtburger_content::PlacedCollisionShape {
+                shape,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                scale: ColliderScale::uniform(1.0).unwrap(),
+                bounds: CollisionBox::from_points([
+                    Vector3::new(x, 0.0, 0.0),
+                    Vector3::new(x, 40.0, 20.0),
+                ])
+                .unwrap(),
             },
-            scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds: CollisionBox::from_points([
-                Vector3::new(x, 0.0, 0.0),
-                Vector3::new(x, 40.0, 20.0),
-            ])
-            .unwrap(),
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
     }
@@ -699,7 +703,7 @@ mod tests {
     fn non_uniformly_scaled_bsp_plane_keeps_world_space_sphere_math_exact() {
         let wall = wall_x(5.0);
         let wall = PlacedCollider::new(
-            wall.shape,
+            wall.shape.clone(),
             wall.placement,
             ColliderScale::from_components(Vector3::new(2.0, 3.0, 4.0)).unwrap(),
             wall.source_placement,

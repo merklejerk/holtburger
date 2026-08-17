@@ -1264,6 +1264,7 @@ mod tests {
                 dynamic_collision: holtburger_world::EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
+                    accepts_peer_reports: true,
                     missile: false,
                     path_clipped: false,
                 },

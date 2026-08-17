@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::position::outdoor_landblock_owner_at;
+use holtburger_common::properties::PhysicsState;
 use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
@@ -176,7 +177,7 @@ pub enum PhysicalBodyActuationError {
 }
 
 /// Validated one-shot launch velocity produced by an actor-specific resolver.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GroundedLaunch {
     /// Full world-space velocity committed atomically when support is left.
     velocity: Vector3,
@@ -197,7 +198,7 @@ impl GroundedLaunch {
 }
 
 /// Grounded-character actuation with replaceable support drive and an optional launch edge.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GroundedBodyActuation {
     /// Explicit controller drive or generic retained-velocity coasting while supported.
     supported_motion: GroundedSupportedMotion,
@@ -273,7 +274,7 @@ impl GroundedBodyActuation {
 }
 
 /// Response-specific one-tick actuation for a registered physical body.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PhysicalBodyActuation {
     /// Unrestricted collision-aware three-dimensional target velocity.
     FreeFlight {
@@ -536,6 +537,13 @@ impl PhysicalSphereSet {
         self.upper_constraint
     }
 
+    /// Authored mover spheres in retail role order.
+    pub fn iter(self) -> impl Iterator<Item = GroundedSphere> {
+        [Some(self.primary), self.upper_constraint]
+            .into_iter()
+            .flatten()
+    }
+
     fn require_single(self) -> Result<GroundedSphere, PhysicalBodyDefinitionError> {
         if self.upper_constraint.is_some() {
             return Err(PhysicalBodyDefinitionError::FreeSphereHasUpperConstraint);
@@ -660,6 +668,15 @@ pub struct PhysicalBodyTickResult {
     pub motion: PhysicalBodyMotion,
     /// Non-gating final primary-sphere collision residency.
     pub scene_residency: PhysicalBodySceneResidency,
+    /// Named semantic consequence committed with a confirmed dynamic-body impact.
+    pub dynamic_state_change: Option<DynamicBodyPhysicsStateChange>,
+}
+
+/// Source-neutral complete-state mutation a producer applies to its semantic authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DynamicBodyPhysicsStateChange {
+    /// Physics-state bits cleared by the accepted collision consequence.
+    pub cleared: PhysicsState,
 }
 
 #[derive(Debug, Clone)]
@@ -1104,7 +1121,7 @@ pub(crate) const fn grounded_settle_permission(
     }
 }
 
-fn trace_body_reference_path(
+pub(super) fn trace_body_reference_path(
     scene: &CollisionScene,
     initial_pose: WorldPosition,
     previous_cell: Option<Guid>,

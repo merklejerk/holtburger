@@ -1328,13 +1328,15 @@ mod tests {
             )]),
         }));
         PlacedCollider {
-            shape,
-            placement: LandblockPlacement {
-                origin: Vector3::zero(),
-                orientation: Quaternion::identity(),
+            geometry: holtburger_content::PlacedCollisionShape {
+                shape,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                scale: ColliderScale::uniform(1.0).unwrap(),
+                bounds: box_bounds,
             },
-            scale: ColliderScale::uniform(1.0).unwrap(),
-            bounds: box_bounds,
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
     }

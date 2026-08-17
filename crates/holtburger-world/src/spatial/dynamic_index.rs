@@ -5,10 +5,11 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
-use holtburger_content::{CollisionBox, LandblockPlacement};
+use holtburger_content::{CollisionBox, LandblockPlacement, PlacedCollisionShape};
 
 use super::cell_index::GlobalCellRange;
 use super::{CollisionPlacement, SpatialBody, SpatialBodyId};
+use crate::EntityCollisionParticipation;
 
 /// Scene-owned dynamic equivalent of retail's outdoor and EnvCell shadow lists.
 #[derive(Debug, Clone, Default)]
@@ -34,6 +35,12 @@ impl DynamicShadowIndex {
             else {
                 continue;
             };
+            if dynamic.collision.dynamic_collision.target
+                == EntityCollisionParticipation::Suppressed
+                || dynamic.collision.dynamic_collision.missile
+            {
+                continue;
+            }
             let bounds = target_bounds(body).with_context(|| {
                 format!("could not place dynamic target geometry for {:?}", body.id)
             })?;
@@ -100,27 +107,42 @@ impl DynamicShadowIndex {
 
 /// Current conservative bounds for the effective target-geometry branch.
 pub(crate) fn target_bounds(body: &SpatialBody) -> Result<Vec<CollisionBox>> {
+    Ok(placed_target_shapes(body, body.pose, owner(body.pose))?
+        .into_iter()
+        .map(|shape| shape.bounds)
+        .collect())
+}
+
+/// Places the effective target branch in one caller-selected landblock frame.
+pub(crate) fn placed_target_shapes(
+    body: &SpatialBody,
+    pose: WorldPosition,
+    anchor: Guid,
+) -> Result<Vec<PlacedCollisionShape>> {
     let dynamic = body
         .physical
         .as_ref()
         .and_then(|physical| physical.dynamic.as_ref())
         .context("body has no dynamic physical state")?;
     let geometry = &dynamic.collision.target_geometry;
-    let root = root_placement(body.pose);
+    let root = root_placement(
+        pose.reanchor_to_landblock_owner(anchor)
+            .context("could not reanchor dynamic target geometry")?,
+    );
     if dynamic.collision.uses_physics_bsp {
         geometry
             .physics_bsp_parts
             .iter()
             .map(|part| {
                 let placement = compose_part(&root, part.local_origin, part.local_orientation);
-                CollisionBox::from_placed_shape(&part.shape, &placement, part.scale)
+                PlacedCollisionShape::new(part.shape.clone(), placement, part.scale)
             })
             .collect()
     } else {
         geometry
             .fallback_shapes
             .iter()
-            .map(|shape| CollisionBox::from_placed_shape(shape, &root, geometry.fallback_scale))
+            .map(|shape| PlacedCollisionShape::new(shape.clone(), root, geometry.fallback_scale))
             .collect()
     }
 }

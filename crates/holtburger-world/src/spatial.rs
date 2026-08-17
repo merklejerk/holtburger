@@ -4,6 +4,7 @@ mod collision;
 #[cfg(test)]
 mod differential_fixtures;
 mod dynamic_body;
+mod dynamic_contact;
 mod dynamic_index;
 mod grounded;
 mod physical_body;
@@ -37,6 +38,9 @@ pub use dynamic_body::{
     DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, PreparedEntityBspPart,
     PreparedEntityTargetGeometry,
 };
+pub use dynamic_contact::{
+    DynamicContactBudgetExceeded, MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES,
+};
 pub use grounded::{
     EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
     GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
@@ -45,13 +49,14 @@ pub use grounded::{
 };
 pub(crate) use physical_body::DynamicBodyActivity;
 pub use physical_body::{
-    GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation, PhysicalBodyActuationError,
-    PhysicalBodyDefinition, PhysicalBodyDefinitionError, PhysicalBodyMotion,
-    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
-    PhysicalBodyResponsePolicy, PhysicalBodyResponsePolicyError, PhysicalBodyResponseState,
-    PhysicalBodySceneResidency, PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus,
-    PhysicalCollisionExclusions, PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction,
-    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, resolve_physical_body_cell,
+    DynamicBodyPhysicsStateChange, GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation,
+    PhysicalBodyActuationError, PhysicalBodyDefinition, PhysicalBodyDefinitionError,
+    PhysicalBodyMotion, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
+    PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
+    PhysicalBodyResponsePolicyError, PhysicalBodyResponseState, PhysicalBodySceneResidency,
+    PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalCollisionExclusions,
+    PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
+    PhysicalSphereSet, PhysicalSurfaceMotion, resolve_physical_body_cell,
 };
 pub use physical_fly::{
     PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,

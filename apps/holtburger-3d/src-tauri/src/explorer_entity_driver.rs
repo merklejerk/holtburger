@@ -799,6 +799,7 @@ mod tests {
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
+                    accepts_peer_reports: true,
                     missile: false,
                     path_clipped: false,
                 },

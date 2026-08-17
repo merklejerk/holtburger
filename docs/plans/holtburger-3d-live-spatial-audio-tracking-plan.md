@@ -729,6 +729,15 @@ eslint all clean.
 
 ## Decisions and Course Corrections
 
+- **2026-08-17 — Loudness contour added** (`FRONTEND_TUNING.audio.loudnessCurveExponent`, default
+  0.75, marked `RETAIL DIVERGENCE`): each voice's linear gain passes through `gain ** exponent` at
+  the device boundary, lifting quiet-to-mid distant ambience with fixed points at 0 and 1. Applied
+  at the last moment before the param write, so the audibility floor, diagnostics, and quietest-
+  steal decisions all still reason in unshaped retail gain — which sounds play is unchanged, only
+  how loud the quiet ones are. `1` restores retail exactly; the pan shadow stays dB-exact. A
+  mix-bus `DynamicsCompressorNode` was considered and rejected: it compresses the summed waveform
+  program-dependently (pumping), where the contour shapes each voice's distance gain
+  deterministically.
 - **2026-08-17 — "Too quiet on average" root-caused to the pan law; retail's transcribed.** The
   distance curve was never the problem — the positioned ambient path runs the same
   `GetAttenuation(distance, …)` as hooks (`PlaySoundInternal(SoundBufRef*, const Position*, …)`,

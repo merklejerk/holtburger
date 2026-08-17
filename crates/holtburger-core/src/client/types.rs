@@ -31,6 +31,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::DynamicEntityEvent;
+
 pub use holtburger_world::WorldEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -342,6 +344,8 @@ pub enum ClientViewEvent {
     RuntimeBodiesReset {
         cause: RuntimeBodyResetCause,
     },
+    /// Focused reconstructible entity presentation feed carried inside the broader client surface.
+    DynamicEntity(DynamicEntityEvent),
     PlayerGroundedUpdated {
         grounded: bool,
     },

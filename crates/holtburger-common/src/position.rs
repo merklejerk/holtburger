@@ -26,6 +26,7 @@ pub fn outdoor_landblock_owner_at(anchor: Guid, local_point: Vector3) -> Option<
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct WorldPosition {
     pub landblock_id: Guid,
     pub coords: Vector3,

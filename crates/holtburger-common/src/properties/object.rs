@@ -258,3 +258,17 @@ pub enum WeenieType {
     PetDevice = 70,
     CombatPet = 71,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WeenieType;
+
+    #[test]
+    fn weenie_type_conversion_covers_the_complete_ace_numeric_domain() {
+        assert_eq!(WeenieType::from_repr(0), Some(WeenieType::Undef));
+        assert_eq!(WeenieType::from_repr(31), Some(WeenieType::Unknown31));
+        assert_eq!(WeenieType::from_repr(71), Some(WeenieType::CombatPet));
+        assert_eq!(WeenieType::from_repr(-1), None);
+        assert_eq!(WeenieType::from_repr(72), None);
+    }
+}

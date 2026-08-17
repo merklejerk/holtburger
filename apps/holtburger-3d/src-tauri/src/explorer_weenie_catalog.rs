@@ -97,11 +97,12 @@ pub struct ExplorerWeenieCatalog {
 }
 
 impl ExplorerWeenieCatalog {
-    /// Applies app-local override precedence and opens the resulting exact catalog path.
+    /// Applies one already-resolved app-local override and opens the resulting exact catalog path.
+    ///
+    /// Environment policy stays outside this deterministic constructor so injected host tests cannot
+    /// be changed by an operator's process environment.
     pub fn discover(selected_content: Option<&Path>, explicit_override: Option<PathBuf>) -> Self {
-        let selected =
-            explicit_override.or_else(|| std::env::var_os(CATALOG_OVERRIDE_ENV).map(PathBuf::from));
-        match selected.or_else(|| selected_content.and_then(default_catalog_path)) {
+        match explicit_override.or_else(|| selected_content.and_then(default_catalog_path)) {
             Some(path) => Self::open(path),
             None => Self {
                 capability: ExplorerCatalogCapability::Unavailable {
@@ -112,6 +113,14 @@ impl ExplorerWeenieCatalog {
                 catalog: None,
             },
         }
+    }
+
+    /// Resolves the production process override before applying deterministic discovery policy.
+    pub fn discover_from_environment(selected_content: Option<&Path>) -> Self {
+        Self::discover(
+            selected_content,
+            std::env::var_os(CATALOG_OVERRIDE_ENV).map(PathBuf::from),
+        )
     }
 
     fn open(path: PathBuf) -> Self {

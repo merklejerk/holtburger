@@ -11,6 +11,7 @@ use holtburger_core::{
 use holtburger_dat::file_type::region::{LandSurfType, TerrainDesc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tauri::Emitter;
 
 pub use landblock_source_batch::LandblockSourceLayer;
 pub use sky_source::load_sky_source_bytes;
@@ -21,6 +22,7 @@ mod behavior_hook_source;
 mod binary_source_record;
 pub mod cell_struct_projection;
 mod env_cell_source;
+mod explorer_entity_delivery;
 pub mod explorer_entity_driver;
 pub mod explorer_entity_runtime;
 pub mod explorer_weenie_catalog;
@@ -831,6 +833,193 @@ fn start_simulation_interest_session(
     runtime.reserve_interest_session()
 }
 
+/// Stable lifecycle identity returned after one focused Explorer mutation commits and publishes.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerEntityMutationReceipt {
+    /// App-local live identity.
+    guid: holtburger_common::Guid,
+    /// Monotonic instance generation guarding late frontend realization.
+    generation: u64,
+}
+
+/// Complete effective-state replacement requested by one Explorer scenario.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplaceExplorerEntityPhysicsStateRequest {
+    /// Exact current entity identity.
+    guid: holtburger_common::Guid,
+    /// Exact current instance generation.
+    generation: u64,
+    /// Complete semantic mask; individual bits are never patched at this boundary.
+    semantic_mask: u32,
+    /// Explicit local physical realization policy.
+    physical_intent: holtburger_world::EntityPhysicalIntent,
+}
+
+/// Returns the optional app-local WCID catalog capability without touching entity state.
+#[tauri::command]
+fn explorer_catalog_capability(
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+) -> explorer_weenie_catalog::ExplorerCatalogCapability {
+    driver.catalog_capability()
+}
+
+/// Emits one complete current snapshot after the frontend has installed its listener.
+#[tauri::command]
+fn request_explorer_dynamic_entity_snapshot(
+    app: tauri::AppHandle,
+    delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
+) -> Result<(), String> {
+    delivery.with_ordered_publication(|| {
+        let event = delivery
+            .snapshot_event()
+            .map_err(|error| error.to_string())?;
+        app.emit(
+            explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
+            event,
+        )
+        .map_err(|error| format!("failed to publish Explorer dynamic-entity snapshot: {error}"))
+    })
+}
+
+/// Prepares and commits one catalog WCID at the explicit host-resolved candidate pose.
+#[tauri::command]
+async fn spawn_explorer_entity(
+    app: tauri::AppHandle,
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+    delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
+    request: explorer_entity_driver::ExplorerEntitySpawnRequest,
+) -> Result<ExplorerEntityMutationReceipt, String> {
+    let driver = Arc::clone(&driver);
+    let delivery = Arc::clone(&delivery);
+    tokio::task::spawn_blocking(move || {
+        delivery.with_ordered_publication(|| {
+            let outcome = driver
+                .spawn_by_wcid(request)
+                .map_err(|error| error.to_string())?;
+            let receipt = ExplorerEntityMutationReceipt {
+                guid: outcome.instance.definition.identity.guid,
+                generation: outcome.instance.generation,
+            };
+            let event = delivery
+                .upserted(receipt.guid)
+                .map_err(|error| error.to_string())?;
+            app.emit(
+                explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
+                event,
+            )
+            .map_err(|error| format!("Explorer entity spawned but publication failed: {error}"))?;
+            Ok(receipt)
+        })
+    })
+    .await
+    .map_err(|error| format!("Explorer entity spawn task failed: {error}"))?
+}
+
+/// Removes one exact Explorer entity generation and publishes its focused removal.
+#[tauri::command]
+async fn despawn_explorer_entity(
+    app: tauri::AppHandle,
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+    delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
+    guid: holtburger_common::Guid,
+    generation: u64,
+) -> Result<ExplorerEntityMutationReceipt, String> {
+    let driver = Arc::clone(&driver);
+    let delivery = Arc::clone(&delivery);
+    tokio::task::spawn_blocking(move || {
+        delivery.with_ordered_publication(|| {
+            let outcome = driver
+                .despawn(guid, generation)
+                .map_err(|error| error.to_string())?;
+            let receipt = ExplorerEntityMutationReceipt {
+                guid,
+                generation: outcome.instance.generation,
+            };
+            app.emit(
+                explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
+                delivery.removed(guid, receipt.generation),
+            )
+            .map_err(|error| {
+                format!("Explorer entity despawned but publication failed: {error}")
+            })?;
+            Ok(receipt)
+        })
+    })
+    .await
+    .map_err(|error| format!("Explorer entity despawn task failed: {error}"))?
+}
+
+/// Applies one complete semantic state and publishes the resulting current entity view.
+#[tauri::command]
+async fn replace_explorer_entity_physics_state(
+    app: tauri::AppHandle,
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+    delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
+    request: ReplaceExplorerEntityPhysicsStateRequest,
+) -> Result<ExplorerEntityMutationReceipt, String> {
+    let driver = Arc::clone(&driver);
+    let delivery = Arc::clone(&delivery);
+    tokio::task::spawn_blocking(move || {
+        delivery.with_ordered_publication(|| {
+            let outcome = driver
+                .replace_physics_state(
+                    request.guid,
+                    request.generation,
+                    holtburger_common::properties::PhysicsState::from_bits_retain(
+                        request.semantic_mask,
+                    ),
+                    request.physical_intent,
+                )
+                .map_err(|error| error.to_string())?;
+            let receipt = ExplorerEntityMutationReceipt {
+                guid: request.guid,
+                generation: outcome.instance.generation,
+            };
+            let event = delivery
+                .upserted(receipt.guid)
+                .map_err(|error| error.to_string())?;
+            app.emit(
+                explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
+                event,
+            )
+            .map_err(|error| {
+                format!("Explorer entity state changed but publication failed: {error}")
+            })?;
+            Ok(receipt)
+        })
+    })
+    .await
+    .map_err(|error| format!("Explorer entity state replacement task failed: {error}"))?
+}
+
+/// Clears the Explorer registry/body population and publishes an empty reconstruction snapshot.
+#[tauri::command]
+async fn reset_explorer_entities(
+    app: tauri::AppHandle,
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+    delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
+) -> Result<(), String> {
+    let driver = Arc::clone(&driver);
+    let delivery = Arc::clone(&delivery);
+    tokio::task::spawn_blocking(move || {
+        delivery.with_ordered_publication(|| {
+            driver.reset().map_err(|error| error.to_string())?;
+            let event = delivery
+                .snapshot_event()
+                .map_err(|error| error.to_string())?;
+            app.emit(
+                explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
+                event,
+            )
+            .map_err(|error| format!("Explorer entities reset but publication failed: {error}"))
+        })
+    })
+    .await
+    .map_err(|error| format!("Explorer entity reset task failed: {error}"))?
+}
+
 fn surface_texture_asset_id(texture_id: u32) -> String {
     format!("surface-texture/0x{texture_id:08x}")
 }
@@ -1244,13 +1433,14 @@ pub fn run() {
     let explorer_entities = Arc::new(explorer_entity_runtime::ExplorerEntityRuntime::new(
         Arc::clone(&simulation),
     ));
-    let catalog = Arc::new(explorer_weenie_catalog::ExplorerWeenieCatalog::discover(
-        content_state
-            .repository
-            .source_description()
-            .map(std::path::Path::new),
-        None,
-    ));
+    let catalog = Arc::new(
+        explorer_weenie_catalog::ExplorerWeenieCatalog::discover_from_environment(
+            content_state
+                .repository
+                .source_description()
+                .map(std::path::Path::new),
+        ),
+    );
     let explorer_entity_driver = Arc::new(explorer_entity_driver::ExplorerEntityDriver::new(
         catalog,
         Arc::new(
@@ -1261,6 +1451,9 @@ pub fn run() {
         Arc::new(explorer_entity_driver::SystemExplorerEntityClock),
         Arc::clone(&explorer_entities),
         Arc::clone(&simulation),
+    ));
+    let explorer_entity_delivery = Arc::new(explorer_entity_delivery::ExplorerEntityDelivery::new(
+        Arc::clone(&explorer_entities),
     ));
     let fixed_tick_runtime = Arc::new(host_fixed_tick_runtime::HostFixedTickRuntime::new());
     let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
@@ -1277,10 +1470,17 @@ pub fn run() {
         .manage(simulation)
         .manage(explorer_entities)
         .manage(explorer_entity_driver)
+        .manage(explorer_entity_delivery)
         .manage(fixed_tick_runtime)
         .manage(camera_runtime)
         .invoke_handler(tauri::generate_handler![
             host_status,
+            explorer_catalog_capability,
+            request_explorer_dynamic_entity_snapshot,
+            spawn_explorer_entity,
+            despawn_explorer_entity,
+            replace_explorer_entity_physics_state,
+            reset_explorer_entities,
             start_simulation_interest_session,
             replace_simulation_interest,
             start_physical_camera,

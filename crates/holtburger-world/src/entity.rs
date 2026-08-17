@@ -315,6 +315,11 @@ impl HasPropertiesMut for Entity {
 }
 
 impl Entity {
+    /// Current server instance sequence used as the client composition's realization generation.
+    pub const fn instance_sequence(&self) -> u16 {
+        self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX]
+    }
+
     pub fn motion_command(&self) -> Option<InterpretedMotionCommand> {
         self.motion_snapshot
             .and_then(EntityMotionSnapshot::motion_command)

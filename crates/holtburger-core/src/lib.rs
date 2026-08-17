@@ -2,6 +2,7 @@ pub mod character_gen;
 pub mod client;
 pub mod content_assets;
 pub mod dynamic_entity;
+pub mod dynamic_entity_view;
 pub mod errors;
 pub mod physical_body_definition;
 pub mod soul_emote_motion;
@@ -42,6 +43,13 @@ pub use dynamic_entity::{
     apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
     install_dynamic_entity_body, material_appearance_input, prepare_dynamic_entity_physics,
     prepare_dynamic_entity_setup, remove_dynamic_entity_body, replace_dynamic_entity_body,
+};
+pub use dynamic_entity_view::{
+    DynamicEntityContactView, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
+    DynamicEntityMotionDirectiveView, DynamicEntityMotionView, DynamicEntityPhysicsView,
+    DynamicEntityPlacementView, DynamicEntityPresentationView, DynamicEntitySampleModeView,
+    DynamicEntitySnapshot, DynamicEntityView, DynamicEntityViewSource,
+    PhysicalBodyParticipationView, project_dynamic_entity_view,
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use physical_body_definition::{

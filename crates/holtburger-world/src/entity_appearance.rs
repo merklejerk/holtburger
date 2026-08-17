@@ -1,12 +1,14 @@
 //! Lossless source-neutral appearance facts owned by a live entity.
 
 use holtburger_protocol::messages::object::types::ModelData;
+use serde::{Deserialize, Serialize};
 
 /// Ordered semantic appearance substitutions for one live entity.
 ///
 /// Values use expanded palette color units and full content identities. Protocol packing and
 /// catalog storage conventions are normalized by their source adapters before this value is built.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntityAppearance {
     /// Optional base palette applied before subpalette ranges.
     pub palette_did: Option<u32>,
@@ -19,7 +21,8 @@ pub struct EntityAppearance {
 }
 
 /// One replacement palette applied to an expanded color interval.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntitySubPalette {
     /// Replacement palette resource id.
     pub palette_did: u32,
@@ -30,7 +33,8 @@ pub struct EntitySubPalette {
 }
 
 /// One texture substitution addressed within a setup part.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntityTextureChange {
     /// Zero-based setup part index.
     pub part_index: u8,
@@ -41,7 +45,8 @@ pub struct EntityTextureChange {
 }
 
 /// One setup-part GfxObj substitution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntityPartChange {
     /// Zero-based setup part index.
     pub part_index: u8,

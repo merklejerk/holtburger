@@ -11,6 +11,7 @@ pub mod character_kinematics;
 pub mod character_motion;
 mod character_selection;
 mod commands;
+mod dynamic_entity_view;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -42,6 +43,8 @@ pub struct ClientRuntime {
     active_busy_operation: Option<PendingBusyOperation>,
     state: ClientState,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
+    /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
+    dynamic_entity_time_origin: Instant,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
@@ -217,6 +220,7 @@ impl ClientRuntime {
         self.emit_fellowship_state_updated();
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
+        self.emit_dynamic_entity_snapshot();
         self.emit_runtime_body_snapshot();
     }
 
@@ -360,6 +364,7 @@ impl ClientRuntime {
                     .send(ClientViewEvent::EntitySpawned {
                         entity: data.entity.clone(),
                     });
+                self.emit_dynamic_entity_upsert(data.entity.guid);
                 self.emit_self_movement_kinematics_updated();
             }
             WorldEvent::TeleportStarted { sequence } => {
@@ -375,6 +380,7 @@ impl ClientRuntime {
                     .send(ClientViewEvent::EntitySpawned {
                         entity: entity.clone(),
                     });
+                self.emit_dynamic_entity_upsert(entity.guid);
                 if entity.guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
                 }
@@ -385,6 +391,7 @@ impl ClientRuntime {
                     .send(ClientViewEvent::EntityReplaced {
                         entity: entity.clone(),
                     });
+                self.emit_dynamic_entity_upsert(entity.guid);
                 if entity.guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
                 }
@@ -414,11 +421,13 @@ impl ClientRuntime {
                     .send(ClientViewEvent::EntityIdentified {
                         entity: entity.clone(),
                     });
+                self.emit_dynamic_entity_upsert(entity.guid);
             }
-            WorldEvent::EntityDespawned(guid) => {
+            WorldEvent::EntityDespawned { guid, generation } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityDespawned { guid: *guid });
+                self.emit_dynamic_entity_removed(*guid, *generation);
                 if *guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
                 }
@@ -430,6 +439,7 @@ impl ClientRuntime {
                         guid: *guid,
                         updates: updates.clone(),
                     });
+                self.emit_dynamic_entity_upsert(*guid);
                 if *guid == self.world.player.guid
                     && Self::updates_affect_self_movement_kinematics(updates.as_slice())
                 {
@@ -443,6 +453,7 @@ impl ClientRuntime {
                         guid: *guid,
                         pos: *pos,
                     });
+                self.emit_dynamic_entity_upsert(*guid);
             }
             WorldEvent::EntityVectorUpdated {
                 guid,
@@ -456,6 +467,7 @@ impl ClientRuntime {
                         velocity: *velocity,
                         omega: *omega,
                     });
+                self.emit_dynamic_entity_upsert(*guid);
             }
             WorldEvent::EntityMotionUpdated { guid, snapshot } => {
                 let _ = self
@@ -464,6 +476,7 @@ impl ClientRuntime {
                         guid: *guid,
                         snapshot: *snapshot,
                     });
+                self.emit_dynamic_entity_upsert(*guid);
             }
             WorldEvent::PlayerGroundedUpdated { grounded } => {
                 let _ = self
@@ -489,6 +502,7 @@ impl ClientRuntime {
                         pos: *pos,
                         sequence: *sequence,
                     });
+                self.emit_dynamic_entity_upsert(*guid);
             }
             WorldEvent::RuntimeBodyChanged { body_id } => {
                 if let Some(body) = self.world.runtime_body_view(*body_id) {
@@ -497,6 +511,9 @@ impl ClientRuntime {
                         .send(ClientViewEvent::RuntimeBodyUpserted {
                             body: Box::new(body),
                         });
+                }
+                if let Some(guid) = body_id.authoritative_guid() {
+                    self.emit_dynamic_entity_upsert(guid);
                 }
             }
             WorldEvent::RuntimeBodyRemoved { body_id } => {
@@ -508,8 +525,11 @@ impl ClientRuntime {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::RuntimeBodiesReset { cause: *cause });
+                self.emit_dynamic_entity_snapshot();
             }
-            WorldEvent::EntityStateUpdated { .. } => {}
+            WorldEvent::EntityStateUpdated { guid, .. } => {
+                self.emit_dynamic_entity_upsert(*guid);
+            }
             WorldEvent::ServerTimeUpdate(time) => {
                 let _ = self
                     .client_view_event_tx

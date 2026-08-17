@@ -5,6 +5,7 @@ use holtburger_session::Session;
 use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldBootstrap, WorldState};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::broadcast;
 
 use super::{
@@ -148,6 +149,7 @@ impl ClientRuntimeBuilder {
             active_busy_operation: None,
             state: ClientState::Connected,
             client_view_event_tx,
+            dynamic_entity_time_origin: Instant::now(),
             command_rx: None,
             message_dump_dir: self.message_dump_dir,
             message_counter: 0,
@@ -170,6 +172,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         active_busy_operation: None,
         state: ClientState::Connected,
         client_view_event_tx,
+        dynamic_entity_time_origin: Instant::now(),
         command_rx: None,
         message_dump_dir: None,
         message_counter: 0,

@@ -1,6 +1,7 @@
 //! Source-neutral interpretation of complete entity physics-state replacements.
 
 use holtburger_common::properties::PhysicsState;
+use serde::{Deserialize, Serialize};
 
 /// ACE's physics state when a template has no explicit `PropertyInt::PhysicsState`.
 ///
@@ -180,7 +181,8 @@ impl EffectiveEntityPhysicsState {
 }
 
 /// Whether a producer requests local physical realization for this semantic entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum EntityPhysicalIntent {
     /// Keep only the canonical pose body; presentation remains valid.
     PoseOnly,

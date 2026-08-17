@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 2B next
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 4 next
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -1037,6 +1037,14 @@ late-generation rejection, despawn, and full reset.
 
 ### Phase 3: Compose the Catalog-Backed Explorer Host
 
+Progress: Complete (2026-08-16). The app-local driver now serializes catalog lookup, setup/DAT
+preparation, host-owned placement, spawn, same-GUID complete replacement, despawn, reset, and
+complete physics-state replacement over the Phase 2B runtime. Production composition discovers the
+optional canonical `weenies.hwc` sibling (or an explicit `HOLTBURGER_WEENIE_CATALOG` override),
+retains missing versus invalid capability reasons, and has no MySQL/MariaDB/SQL runtime dependency.
+Focused host tests cover missing WCID, preparation failure, equal repeated-WCID realization,
+replacement, despawn, state attach/reconfigure/detach, catalog selection, and override precedence.
+
 #### Deliverables
 
 - Add an app-local Explorer entity driver that resolves a catalog template plus DAT/setup facts into
@@ -1070,9 +1078,39 @@ late-generation rejection, despawn, and full reset.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Catalog discovery has a deterministic constructor that accepts an already-resolved override and a
+  separate production constructor that reads `HOLTBURGER_WEENIE_CATALOG`. Operator environment can
+  therefore select the exact asset without contaminating injected tests or introducing scanning.
+- Setup-only preparation resolves the placement sphere for every entity. Pose-only realization does
+  not prepare solver target geometry, which keeps WCID 52077 eligible for later bodyless visual
+  realization while physical attachment still crosses the strict geometry boundary.
+- The authoritative ACE `WeenieType` domain extends through `CombatPet = 71`, not the client's old
+  `LifeStone = 25` endpoint. The shared enum now represents the complete ACE numeric domain; an
+  out-of-domain catalog value fails before publication instead of being narrowed by the Explorer.
+- Identity allocation remains owned by `ExplorerEntityRegistry` and reaches the injected driver
+  through `ExplorerEntityRuntime`. A separately injected driver allocator would split identity
+  authority and make reset/replacement policy easier to violate; focused registry construction still
+  injects bounded ranges for exhaustion tests.
+- Complete replacement is a focused production driver operation but is not exposed as an Explorer
+  command. The current UX has no replacement scenario; Phase 3A exposes only the lifecycle commands
+  a named frontend consumer needs.
+- Failed preparation may consume an Explorer GUID without publishing it. GUIDs are cheap bounded
+  session-local identities, while trying to reclaim them would couple fallible preparation to
+  allocator rollback. Reset deliberately restarts GUID allocation, and monotonic instance
+  generations preserve late-work safety across reuse.
 
 ### Phase 3A: Land Focused Projection and Recoverable Delivery
+
+Progress: Complete (2026-08-16). `holtburger-core` now owns one serializable source-neutral entity
+view, stable snapshot, pure projector, host-timeline anchor, and snapshot/upsert/remove grammar. The
+client adapts its `WorldState` entity/body facts into the focused feed while retaining unrelated
+`ClientViewEvent` consumers; Explorer projects its distinct registry/body join directly. Typed Tauri
+commands expose catalog capability, snapshot request, spawn, despawn, reset, and complete physics
+state replacement. `ExplorerApp` installs the listener before requesting state, and the frontend
+mirror ignores deltas while awaiting an atomic replacement snapshot. Focused Rust and TypeScript
+tests cover equal client/Explorer projection, current-state reconstruction, deltas around recovery,
+listener restart, stale generations, duplicate snapshot identities, wire casing, and preservation of
+the broader client entity event.
 
 #### Deliverables
 
@@ -1101,7 +1139,24 @@ late-generation rejection, despawn, and full reset.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- The focused presentation identity contains GUID, WCID, and resolved name but not `WeenieType`.
+  ACE object creation does not supply the server template category, and presentation has no named
+  consumer for it; Explorer retains it in the semantic definition where dynamic collision filtering
+  does consume it. Projecting it would force the client to invent source data.
+- Snapshot capture and actual Tauri publication share one app-local ordering gate with every Explorer
+  mutation publication. Without it, async command continuations could publish a later delta before
+  the snapshot baseline, causing the awaiting frontend to discard the only evidence of that
+  mutation. The gate retains no events, sequence, acknowledgement, replay, or diagnostics.
+- Focused remove events carry the retired producer generation. This lets a late Explorer command
+  continuation or client event remove only its own instance rather than a same-GUID successor; no
+  permanent tombstone or global feed sequence is required. The client uses its server object-instance
+  sequence, while Explorer uses its monotonic app-local generation.
+- The snapshot's composition-local monotonic host instant is paired with frontend receipt time and
+  retained as one clock mapping by the mirror. Untimed upsert/remove events do not carry a field with
+  no current consumer; Phase 6 may add absolute effective time only to motion facts that use it.
+- The existing client runtime-body snapshot/deltas remain for the TUI's `RuntimeBodyViewCache`, which
+  also carries local-player concerns outside this focused presentation feed. They are not reused by
+  Explorer and are deferred to the Phase 8 consumer audit rather than deleted prematurely.
 
 ### Phase 4: Generalize and Reuse Frontend Dynamic Presentation
 

@@ -319,11 +319,14 @@ impl WorldState {
             return false;
         }
 
-        if self.remove_entity(guid).is_some() {
+        if let Some(removed) = self.remove_entity(guid) {
             if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
                 events.push(WorldEvent::RuntimeBodyRemoved { body_id });
             }
-            events.push(WorldEvent::EntityDespawned(guid));
+            events.push(WorldEvent::EntityDespawned {
+                guid,
+                generation: u64::from(removed.instance_sequence()),
+            });
             true
         } else {
             self.entity_lifecycle.clear(guid);

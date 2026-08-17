@@ -2047,13 +2047,11 @@ vocabulary landed as `EnableSolverParticipation`/`DisableSolverParticipation` tr
 spawned root-frame gate (`sampleAnimationPose` reads only `partFrames`) carries the measured
 `RETAIL DIVERGENCE:` marker citing `acclient.c:308262-308298` with the WCID 36449 census, and a
 synthetic fixture proves non-identity position-frame translation and rotation cannot reach sampled
-part poses. A new `ExplorerSimulationControl` at the collection scheduler boundary provides
-pause/resume and exactly-once queued deterministic stepping over an injected clock; paused ticks
-skip integration without touching entity, body, or report state. No Tauri command exposes the
-control yet: the browser harness reaches the runtime through the dev content host rather than
-Tauri IPC, and no Explorer UI consumer exists, so the packaged app's collection simply never
-pauses. Phase 7B or a later Entities-tab control adds the production surface when a real caller
-lands. `MotionKinematics`, client motion resolution, and `BasicSpatialPhysics` are unchanged.
+part poses. Deterministic fixed stepping at the collection boundary is exercised through the dev
+content host's `POST /explorer-entity-tick`, which drives one exact
+`tick_physical_collection` per request with an explicit duration; the browser harness scenarios in
+Phase 7B use that path for every entity tick. `MotionKinematics`, client motion resolution, and
+`BasicSpatialPhysics` are unchanged.
 
 Scope review (2026-08-17): authored root motion is explicitly deferred. The current
 `PhysicalBodyActuation` expresses velocity-shaped physical work, the accepted `PlacedMotionPath`
@@ -2131,8 +2129,9 @@ before the follow-on plan, update the census and marker consequence before accep
   semantic `motion` object from that feed; neither has a runtime consumer under this scope. Preserve
   catalog motion-table facts for the offline census and preserve backend client motion state for
   existing client behavior, but do not project either as a placeholder for the follow-on plan.
-- Exercise pause/resume and deterministic fixed stepping at the collection scheduler boundary. These
-  control physical integration time; they do not introduce a semantic animation-motion timeline.
+- Exercise deterministic fixed stepping of the collection through an explicit per-tick duration.
+  This controls physical integration time; it does not introduce a semantic animation-motion
+  timeline. Do not add a scheduler pause gate without a named caller.
 - Reuse the already implemented typed launch and relocation scenario operations for moving-body
   coverage. Do not add stand/walk/run/turn/stop commands in this plan.
 - Leave `MotionKinematics`, client motion resolution, and `BasicSpatialPhysics` unchanged. Add no
@@ -2147,7 +2146,8 @@ before the follow-on plan, update the census and marker consequence before accep
 - The production and representative scenario surfaces cannot execute authored root motion. A focused
   capability test proves that no semantic motion command/DTO exists, and a synthetic fixture proves
   ignored animation root frames cannot mutate the solver-owned root.
-- Pause/resume and deterministic-step tests use injected scheduler time and never sleep.
+- Deterministic-step scenarios drive one exact collection tick per explicit duration and never
+  sleep.
 - Superseded or late-ready visual preparation cannot affect a replacement entity.
 - Raw motion tables, semantic motion commands, and placeholder root-path types remain absent from
   Tauri DTOs and TypeScript.
@@ -2412,6 +2412,20 @@ spatial, explorer-entity, or weenie-catalog paths, and no `#[allow(dead_code)]` 
   where reset-and-resnapshot on forced repositions and teleports is landed and tested; only its
   reference to a retired plan phase was stale. The paragraph now names the contract explicitly and
   distinguishes it from the focused dynamic-entity feed, which has no recovery protocol.
+- `ExplorerSimulationControl` was deleted rather than kept as dormant scaffolding. It gated
+  `ExplorerEntitySimulation::fixed_tick` with a pause flag and a queued-step counter, so it ran on
+  the packaged app's 30 Hz hot path while its state could never change: nothing outside its own
+  tests could call `set_paused` or `request_step`. The predicted consumer did not materialize —
+  Phase 7B's scenarios drive `tick_physical_collection` directly through the dev content host's
+  `POST /explorer-entity-tick`, bypassing the scheduler and the gate entirely, which already gives
+  exact deterministic stepping. Removing it also reverted a `pub mod` visibility bump that existed
+  only to keep the unreachable mutators out of dead-code detection. The Phase 6 deliverable and
+  acceptance criterion were rewritten to describe the stepping path that actually exists. If an
+  Explorer pause affordance is ever wanted, it arrives with its UI caller.
+- Observation for a later plan, not acted on here: the dev content host duplicates the body of
+  `ExplorerEntitySimulation::fixed_tick` — ordered publication, collection tick, advance — while
+  sharing only the pieces beneath it. Two drive paths onto one collection tick is tolerable; a
+  third should collapse the seam.
 - The two remaining parent-roadmap checkboxes stay open on purpose. They are cross-plan conditions
   and the deferred `holtburger-authored-root-motion-physics-integration-plan.md` has not run yet;
   checking them now would claim completion this milestone cannot deliver.
@@ -2614,8 +2628,6 @@ Carried debt, each with a named later owner rather than a guess or fallback:
   fast-mover cases only; interior portal traversal is proven for static motion paths.
 - Frontend teardown asserts entity and template counts return to baseline, not GPU texture,
   geometry, or animation-acquisition counts.
-- `ExplorerSimulationControl` has no production command surface; a later Explorer control or
-  workload plan adds one when a real caller exists.
 - The 300-entity population run settles 299 of 300 bodies; a terrain-aware lattice would settle
   completely.
 

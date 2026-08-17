@@ -8,7 +8,9 @@ import {
 	decodeExplorerEntityMutationReceipt,
 	type ExplorerCatalogCapability,
 	type ExplorerEntityMutationReceipt,
+	type ExplorerEntityRelocationRequest,
 	type ExplorerEntitySpawnRequest,
+	type LaunchExplorerEntityRequest,
 } from "./explorer-entity-commands";
 
 const DYNAMIC_ENTITY_EVENT = "explorer-dynamic-entity";
@@ -33,6 +35,7 @@ export class ExplorerDynamicEntitySession {
 		readonly reject: (reason: Error) => void;
 	}>();
 	#unlisten: (() => void) | null = null;
+	#acceptedRevision = 0;
 
 	constructor(
 		transport: ExplorerDynamicEntityTransport,
@@ -84,10 +87,11 @@ export class ExplorerDynamicEntitySession {
 	async spawn(
 		request: ExplorerEntitySpawnRequest,
 	): Promise<ExplorerEntityMutationReceipt> {
+		const afterRevision = this.#acceptedRevision;
 		const receipt = decodeExplorerEntityMutationReceipt(
 			await this.#transport.invoke("spawn_explorer_entity", { request }),
 		);
-		await this.#waitForCurrent(receipt, true);
+		await this.#waitForCurrent(receipt, true, afterRevision);
 		return receipt;
 	}
 
@@ -96,13 +100,38 @@ export class ExplorerDynamicEntitySession {
 		guid: number,
 		generation: number,
 	): Promise<ExplorerEntityMutationReceipt> {
+		const afterRevision = this.#acceptedRevision;
 		const receipt = decodeExplorerEntityMutationReceipt(
 			await this.#transport.invoke("despawn_explorer_entity", {
 				guid,
 				generation,
 			}),
 		);
-		await this.#waitForCurrent(receipt, false);
+		await this.#waitForCurrent(receipt, false, afterRevision);
+		return receipt;
+	}
+
+	/** Launch one exact physical generation and await its complete upsert. */
+	async launch(
+		request: LaunchExplorerEntityRequest,
+	): Promise<ExplorerEntityMutationReceipt> {
+		const afterRevision = this.#acceptedRevision;
+		const receipt = decodeExplorerEntityMutationReceipt(
+			await this.#transport.invoke("launch_explorer_entity", { request }),
+		);
+		await this.#waitForCurrent(receipt, true, afterRevision);
+		return receipt;
+	}
+
+	/** Apply one exact teleport/reset and await its correction batch. */
+	async relocate(
+		request: ExplorerEntityRelocationRequest,
+	): Promise<ExplorerEntityMutationReceipt> {
+		const afterRevision = this.#acceptedRevision;
+		const receipt = decodeExplorerEntityMutationReceipt(
+			await this.#transport.invoke("relocate_explorer_entity", { request }),
+		);
+		await this.#waitForCurrent(receipt, true, afterRevision);
 		return receipt;
 	}
 
@@ -115,6 +144,7 @@ export class ExplorerDynamicEntitySession {
 	#receive(payload: unknown): void {
 		const event = decodeDynamicEntityEvent(payload);
 		if (!this.mirror.apply(event)) return;
+		this.#acceptedRevision += 1;
 		for (const listener of this.#listeners) listener(event);
 		for (const waiter of [...this.#waiters]) {
 			if (!waiter.reached()) continue;
@@ -127,8 +157,10 @@ export class ExplorerDynamicEntitySession {
 	async #waitForCurrent(
 		receipt: ExplorerEntityMutationReceipt,
 		present: boolean,
+		afterRevision: number,
 	): Promise<void> {
 		const reached = (): boolean => {
+			if (this.#acceptedRevision <= afterRevision) return false;
 			const current = this.mirror
 				.entities()
 				.find((entity) => entity.identity.guid === receipt.guid);

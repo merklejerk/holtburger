@@ -370,6 +370,51 @@ impl SpatialScene {
         Some(body.runtime_view())
     }
 
+    /// Relocates one dynamic body and clears every pose-dependent response/kinematic fact.
+    pub fn relocate_dynamic_body(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        now: Instant,
+    ) -> Option<RuntimeSpatialBodyView> {
+        let mut body = self.body_store.body(body_id)?.clone();
+        if let Some(physical) = body.physical.as_ref() {
+            let entity_collision = physical.entity_collision.clone()?;
+            let definition = DynamicPhysicalBodyDefinition {
+                movement: physical.definition,
+                response_policy: physical.response_policy,
+                entity_collision,
+            };
+            body.physical = Some(PhysicalBodyState::new_dynamic(
+                definition,
+                physical.collision_filter,
+                pose.is_indoors().then_some(pose.landblock_id),
+            ));
+        }
+        body.authoritative_pose = Some(pose);
+        body.pose = pose;
+        body.velocity = Vector3::zero();
+        body.acceleration = Vector3::zero();
+        body.omega = Vector3::zero();
+        body.motion_state = None;
+        body.contact = if body.physical.is_some() {
+            ContactState::Airborne
+        } else {
+            ContactState::Unknown
+        };
+        body.sampling.mode = if body.physical.is_some() {
+            SpatialSampleMode::SimulatingVelocity
+        } else {
+            SpatialSampleMode::AuthoritativeOnly
+        };
+        body.sampling.last_authoritative_update = now;
+        body.sampling.last_derived_at = now;
+        let view = body.runtime_view();
+        self.update_body(body)
+            .expect("prevalidated dynamic body vanished during relocation");
+        Some(view)
+    }
+
     /// Advances one registered physical body without consulting content or interest policy.
     pub fn tick_physical_body(
         &mut self,
@@ -893,6 +938,151 @@ mod physical_body_tests {
             scene.scheduled_dynamic_entity_ids(),
             [eligible_low, eligible_high]
         );
+    }
+
+    #[test]
+    fn dynamic_kinematics_replace_response_memory_and_integrate_world_axis_rotation() {
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let initial_rotation =
+            Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), std::f32::consts::FRAC_PI_2)
+                .unwrap();
+        let mut scene = SpatialScene::new();
+        let mut initial_pose = pose(Vector3::new(10.0, 20.0, 30.0));
+        initial_pose.rotation = initial_rotation;
+        scene.register_body(SpatialBody::new(id, initial_pose, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(
+                    free_definition(Vector3::zero(), 0.5),
+                    true,
+                )),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+
+        let omega = Vector3::new(std::f32::consts::TAU, 0.0, 0.0);
+        let view = scene
+            .apply_dynamic_body_kinematics(
+                id,
+                DynamicBodyKinematics::new(
+                    Vector3::new(1.0, 0.0, 0.0),
+                    Vector3::new(0.0, 0.0, -9.8),
+                    omega,
+                    false,
+                )
+                .unwrap(),
+                now,
+            )
+            .unwrap();
+        assert_eq!(view.velocity, Vector3::new(1.0, 0.0, 0.0));
+        assert_eq!(view.acceleration, Vector3::new(0.0, 0.0, -9.8));
+        assert_eq!(view.omega, omega);
+        assert_eq!(view.contact, ContactState::Airborne);
+        assert!(matches!(
+            view.sample_mode,
+            SpatialSampleMode::SimulatingVelocity
+        ));
+        assert!(
+            !scene
+                .body(id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .response_policy
+                .align_path
+        );
+
+        scene
+            .tick_physical_body(
+                id,
+                &CollisionScene::new(),
+                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                0.25,
+                now + Duration::from_millis(250),
+            )
+            .unwrap();
+        let expected = Quaternion::from_axis_angle(omega, std::f32::consts::FRAC_PI_2)
+            .unwrap()
+            .multiply(&initial_rotation);
+        let actual = scene.body(id).unwrap().pose.rotation;
+        for (actual, expected) in [
+            (actual.w, expected.w),
+            (actual.x, expected.x),
+            (actual.y, expected.y),
+            (actual.z, expected.z),
+        ] {
+            assert!((actual - expected).abs() <= 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn dynamic_relocation_clears_pose_dependent_state_and_moves_membership_atomically() {
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(10.0, 20.0, 30.0)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), true)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        scene
+            .apply_dynamic_body_kinematics(
+                id,
+                DynamicBodyKinematics::new(
+                    Vector3::new(1.0, 2.0, 3.0),
+                    Vector3::new(0.0, 0.0, -9.8),
+                    Vector3::new(4.0, 5.0, 6.0),
+                    false,
+                )
+                .unwrap(),
+                now,
+            )
+            .unwrap();
+        let relocated_pose = WorldPosition {
+            landblock_id: Guid(0xdb55_0001),
+            coords: Vector3::new(2.0, 3.0, 4.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let relocated = scene
+            .relocate_dynamic_body(id, relocated_pose, now + Duration::from_secs(1))
+            .unwrap();
+
+        assert_eq!(relocated.runtime_pose, relocated_pose);
+        assert_eq!(relocated.velocity, Vector3::zero());
+        assert_eq!(relocated.acceleration, Vector3::zero());
+        assert_eq!(relocated.omega, Vector3::zero());
+        assert_eq!(relocated.contact, ContactState::Airborne);
+        assert!(
+            !scene
+                .get_in_landblock(Guid(0xda55_ffff))
+                .is_some_and(|entities| entities.contains(&Guid(0x7000_0001)))
+        );
+        assert!(
+            scene
+                .get_in_landblock(Guid(0xdb55_ffff))
+                .is_some_and(|entities| entities.contains(&Guid(0x7000_0001)))
+        );
+        assert!(matches!(
+            scene.body(id).unwrap().physical.as_ref().unwrap().response,
+            PhysicalBodyResponseState::Grounded {
+                ground: GroundState::Airborne,
+                stationary_fall_frames: 0,
+                ..
+            }
+        ));
     }
 
     #[test]

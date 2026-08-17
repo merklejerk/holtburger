@@ -67,6 +67,32 @@ export interface ExplorerEntitySpawnRequest {
 	readonly physicalIntent: "pose-only" | "simulated";
 }
 
+/** Explicit one-shot launch; catalog facts own speed and spin. */
+export interface LaunchExplorerEntityRequest {
+	readonly guid: number;
+	readonly generation: number;
+	readonly direction: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
+}
+
+/** Explicit discontinuous relocation; the host remains portal/cell authority. */
+export interface ExplorerEntityRelocationRequest {
+	readonly guid: number;
+	readonly generation: number;
+	readonly cameraPose: ExplorerEntitySpawnRequest["cameraPose"];
+	readonly candidate: ExplorerEntitySpawnRequest["candidate"];
+	readonly rotation: ExplorerEntitySpawnRequest["rotation"];
+	readonly kind: "teleport" | "reset";
+}
+
+type CameraRelativeEntityCandidate = Pick<
+	ExplorerEntitySpawnRequest,
+	"cameraPose" | "candidate" | "rotation"
+>;
+
 /** Validate catalog capability before it can alter Explorer controls. */
 export function decodeExplorerCatalogCapability(
 	value: unknown,
@@ -107,8 +133,38 @@ export function createExplorerSpawnRequest(
 ): ExplorerEntitySpawnRequest {
 	if (!Number.isInteger(wcid) || wcid < 0 || wcid > 0xffff_ffff)
 		throw new Error("WCID must fit an unsigned 32-bit integer.");
+	return {
+		wcid,
+		...createCameraRelativeEntityCandidate(placement, viewDirection, distance),
+		physicalIntent,
+	};
+}
+
+/** Build one camera-relative teleport/reset request for an exact live generation. */
+export function createExplorerRelocationRequest(
+	guid: number,
+	generationValue: number,
+	placement: PhysicalCameraPlacement,
+	viewDirection: readonly [number, number, number],
+	distance: number,
+	kind: ExplorerEntityRelocationRequest["kind"],
+): ExplorerEntityRelocationRequest {
+	validateEntityIdentity(guid, generationValue);
+	return {
+		guid,
+		generation: generationValue,
+		...createCameraRelativeEntityCandidate(placement, viewDirection, distance),
+		kind,
+	};
+}
+
+function createCameraRelativeEntityCandidate(
+	placement: PhysicalCameraPlacement,
+	viewDirection: readonly [number, number, number],
+	distance: number,
+): CameraRelativeEntityCandidate {
 	if (!Number.isFinite(distance) || distance <= 0)
-		throw new Error("Spawn distance must be positive and finite.");
+		throw new Error("Entity candidate distance must be positive and finite.");
 	if (!viewDirection.every(Number.isFinite))
 		throw new Error("Camera view direction must be finite.");
 	const directionLength = Math.hypot(...viewDirection);
@@ -128,7 +184,6 @@ export function createExplorerSpawnRequest(
 	) as [number, number, number];
 	const identityRotation = { w: 1, x: 0, y: 0, z: 0 } as const;
 	return {
-		wcid,
 		cameraPose: {
 			landblockId: numericCellId(
 				placement.residency.envCellId ?? placement.residency.landblockId,
@@ -145,8 +200,30 @@ export function createExplorerSpawnRequest(
 		},
 		// Initial Explorer UX creates neutral-world-orientation objects; rotation is never host-defaulted.
 		rotation: identityRotation,
-		physicalIntent,
 	};
+}
+
+/** Validate one harness/scenario direction without inventing speed at the frontend. */
+export function createExplorerLaunchRequest(
+	guid: number,
+	generationValue: number,
+	direction: readonly [number, number, number],
+): LaunchExplorerEntityRequest {
+	validateEntityIdentity(guid, generationValue);
+	if (!direction.every(Number.isFinite) || Math.hypot(...direction) === 0)
+		throw new Error("Launch direction must be finite and nonzero.");
+	return {
+		guid,
+		generation: generationValue,
+		direction: { x: direction[0], y: direction[1], z: direction[2] },
+	};
+}
+
+function validateEntityIdentity(guid: number, generationValue: number): void {
+	if (!Number.isInteger(guid) || guid < 0 || guid > 0xffff_ffff)
+		throw new Error("Entity GUID must fit an unsigned 32-bit integer.");
+	if (!Number.isSafeInteger(generationValue) || generationValue < 0)
+		throw new Error("Entity generation must be a nonnegative safe integer.");
 }
 
 function numericCellId(value: string): number {

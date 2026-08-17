@@ -10,9 +10,10 @@ use holtburger_common::Guid;
 use holtburger_core::{
     DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
-    DynamicEntityProjectionInput, dynamic_entity_projection_input_from_body,
+    DynamicEntityLaunchPlan, DynamicEntityProjectionInput,
+    dynamic_entity_projection_input_from_body,
 };
-use holtburger_world::{DynamicPhysicalBodyDefinition, SpatialBodyId};
+use holtburger_world::{DynamicPhysicalBodyDefinition, RuntimeSpatialBodyView, SpatialBodyId};
 use holtburger_world::{
     EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
     EntityPhysicsTransitionDecision, decide_entity_physics_state_transition,
@@ -174,6 +175,24 @@ pub struct ExplorerEntityPhysicsStateOutcome {
     pub decision: EntityPhysicsTransitionDecision,
     /// Canonical body facts read after the transition committed.
     pub body: DynamicEntityBodyCommitOutcome,
+}
+
+/// Current semantic/body facts after one exact-generation launch commits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplorerEntityLaunchOutcome {
+    /// Updated current semantic instance; launch does not replace its generation.
+    pub instance: ExplorerEntityInstance,
+    /// Canonical body view after live kinematics and response memory were replaced.
+    pub body: RuntimeSpatialBodyView,
+}
+
+/// Current semantic/body facts after one discontinuous exact-generation relocation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplorerEntityRelocationOutcome {
+    /// Unchanged current semantic generation.
+    pub instance: ExplorerEntityInstance,
+    /// Canonical relocated body with pose-dependent state cleared.
+    pub body: RuntimeSpatialBodyView,
 }
 
 #[derive(Debug, Clone)]
@@ -464,6 +483,57 @@ impl ExplorerEntityRuntime {
             instance: current.clone(),
             decision,
             body: outcome,
+        })
+    }
+
+    /// Applies one resolved launch while the exact semantic generation remains stable.
+    pub fn launch(
+        &self,
+        guid: Guid,
+        expected_generation: u64,
+        launch: DynamicEntityLaunchPlan,
+        now: std::time::Instant,
+    ) -> Result<ExplorerEntityLaunchOutcome, ExplorerEntityRuntimeError> {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        registry.require_generation(guid, expected_generation)?;
+        let body = self.simulation.apply_dynamic_entity_kinematics(
+            SpatialBodyId::Entity(guid),
+            launch.kinematics,
+            now,
+        )?;
+        let current = registry
+            .entities
+            .get_mut(&guid)
+            .expect("prevalidated entity vanished while registry lock was held");
+        current.definition.physics = launch.physics;
+        Ok(ExplorerEntityLaunchOutcome {
+            instance: current.clone(),
+            body,
+        })
+    }
+
+    /// Relocates one exact semantic generation without replacing its identity.
+    pub fn relocate(
+        &self,
+        guid: Guid,
+        expected_generation: u64,
+        pose: holtburger_common::position::WorldPosition,
+        now: std::time::Instant,
+    ) -> Result<ExplorerEntityRelocationOutcome, ExplorerEntityRuntimeError> {
+        let registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        let instance = registry.require_generation(guid, expected_generation)?;
+        let body =
+            self.simulation
+                .relocate_dynamic_entity(SpatialBodyId::Entity(guid), pose, now)?;
+        Ok(ExplorerEntityRelocationOutcome {
+            instance: instance.clone(),
+            body,
         })
     }
 

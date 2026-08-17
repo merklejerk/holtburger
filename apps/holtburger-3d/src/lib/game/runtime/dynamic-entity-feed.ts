@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { validateHostPlacedPath } from "../motion/host-placed-path";
+import {
+	validateHostPlacedPath,
+	validateHostPlacedPathShape,
+} from "../motion/host-placed-path";
 
 const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
@@ -144,7 +147,7 @@ const dynamicEntityAdvanceSchema = z.object({
 
 const dynamicEntityAdvanceBatchSchema = z.object({
 	hostTime: hostTimeSchema,
-	durationMs: finiteNumber.positive(),
+	durationMs: finiteNumber.nonnegative(),
 	advances: z.array(dynamicEntityAdvanceSchema).nonempty(),
 });
 
@@ -180,7 +183,11 @@ export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 	const event = dynamicEntityEventSchema.parse(value);
 	if (event.kind === "advanced") {
 		for (const advance of event.batch.advances) {
-			validateHostPlacedPath(advance.path, event.batch.durationMs);
+			if (advance.kind === "integrated") {
+				validateHostPlacedPath(advance.path, event.batch.durationMs);
+			} else {
+				validateHostPlacedPathShape(advance.path);
+			}
 		}
 	}
 	return event;

@@ -219,7 +219,7 @@ impl DynamicEntityDefinition {
 
 /// Resolves explicit direction against catalog speed and ACE's authored spin convention.
 ///
-/// ACE assigns projectile omega on local X as `2π * RotationSpeed` and clears `AlignPath` when
+/// ACE assigns projectile omega on world X as `2π * RotationSpeed` and clears `AlignPath` when
 /// that value is nonzero (`SpellProjectile.Setup` and `Creature.SetProjectilePhysicsState`).
 pub fn resolve_dynamic_entity_launch(
     definition: &DynamicEntityDefinition,
@@ -333,6 +333,8 @@ pub enum DynamicEntityBodyOperationError {
     AlreadyRegistered { body_id: SpatialBodyId },
     #[error("dynamic entity body {body_id:?} is not registered")]
     NotRegistered { body_id: SpatialBodyId },
+    #[error("dynamic entity body {body_id:?} has no physical participation")]
+    NotPhysical { body_id: SpatialBodyId },
     #[error("physics transition {action:?} requires a prepared physical definition")]
     MissingReplacement {
         action: EntityPhysicalTransitionAction,
@@ -1137,6 +1139,57 @@ mod tests {
             DynamicEntityDefinition::prepare(input),
             Err(DynamicEntityDefinitionError::InvalidMaximumVelocity)
         );
+    }
+
+    #[test]
+    fn launch_uses_catalog_speed_and_ace_world_x_spin_policy() {
+        let mut input = definition_input();
+        input.maximum_velocity = Some(15.0);
+        input.rotation_speed = Some(2.0);
+        input.physics = resolve_effective_entity_physics_state(
+            PhysicsState::GRAVITY | PhysicsState::ALIGN_PATH,
+        );
+        let definition = DynamicEntityDefinition::prepare(input).unwrap();
+
+        let launch =
+            resolve_dynamic_entity_launch(&definition, Vector3::new(3.0, 4.0, 0.0)).unwrap();
+
+        assert_eq!(launch.kinematics.velocity(), Vector3::new(9.0, 12.0, 0.0));
+        assert_eq!(launch.kinematics.acceleration(), Vector3::zero());
+        assert_eq!(launch.kinematics.omega(), Vector3::new(2.0 * TAU, 0.0, 0.0));
+        assert!(!launch.kinematics.align_path());
+        assert!(!launch.physics.semantic.contains(PhysicsState::ALIGN_PATH));
+    }
+
+    #[test]
+    fn launch_rejects_only_invalid_direction_or_unusable_catalog_speed() {
+        let definition = DynamicEntityDefinition::prepare(definition_input()).unwrap();
+        assert_eq!(
+            resolve_dynamic_entity_launch(&definition, Vector3::new(1.0, 0.0, 0.0)),
+            Err(DynamicEntityLaunchError::MissingMaximumVelocity)
+        );
+
+        let mut input = definition_input();
+        input.maximum_velocity = Some(0.0);
+        let zero_speed = DynamicEntityDefinition::prepare(input).unwrap();
+        assert_eq!(
+            resolve_dynamic_entity_launch(&zero_speed, Vector3::new(1.0, 0.0, 0.0)),
+            Err(DynamicEntityLaunchError::ZeroMaximumVelocity)
+        );
+
+        let mut input = definition_input();
+        input.maximum_velocity = Some(15.0);
+        let launchable = DynamicEntityDefinition::prepare(input).unwrap();
+        for direction in [
+            Vector3::zero(),
+            Vector3::new(f32::NAN, 0.0, 0.0),
+            Vector3::new(f32::INFINITY, 0.0, 0.0),
+        ] {
+            assert_eq!(
+                resolve_dynamic_entity_launch(&launchable, direction),
+                Err(DynamicEntityLaunchError::InvalidDirection)
+            );
+        }
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import type { LandblockId } from "../lib/game/game-types";
 import { getLandblockCoordinates } from "../lib/game/landblocks";
+import { z } from "zod";
 
 /** Current Explorer policy radius for collision simulation, independent from render residency radii. */
 const SIMULATION_INTEREST_RADIUS = 2;
@@ -20,6 +21,19 @@ export interface SimulationInterestReceipt {
 	readonly committed: boolean;
 	/** Requested owners for which static collision content does not exist. */
 	readonly unavailableLandblockIds: readonly LandblockId[];
+}
+
+const simulationInterestReceiptSchema = z.object({
+	revision: z.number().int().nonnegative(),
+	committed: z.boolean(),
+	unavailableLandblockIds: z.array(z.string()),
+});
+
+/** Validate one untrusted transport acknowledgement before policy observes it. */
+export function decodeSimulationInterestReceipt(
+	value: unknown,
+): SimulationInterestReceipt {
+	return simulationInterestReceiptSchema.parse(value);
 }
 
 /** Injectable boundary that keeps Tauri mechanics out of interest policy. */

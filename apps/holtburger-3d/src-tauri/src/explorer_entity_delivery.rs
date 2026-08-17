@@ -133,6 +133,39 @@ impl ExplorerEntityDelivery {
         }))
     }
 
+    /// Builds one correction-only snap batch after a discontinuous relocation commits.
+    pub fn corrected(
+        &self,
+        guid: Guid,
+        kind: DynamicEntityPlacementAdvanceKind,
+    ) -> Result<DynamicEntityEvent, ExplorerEntityRuntimeError> {
+        assert!(
+            !matches!(kind, DynamicEntityPlacementAdvanceKind::Integrated),
+            "correction publication cannot masquerade as integrated motion"
+        );
+        let entity = self.entity(guid)?;
+        let point = DynamicEntityPathPoint {
+            pose: entity.placement.pose,
+        };
+        Ok(DynamicEntityEvent::Advanced {
+            batch: DynamicEntityAdvanceBatch::new(
+                self.host_time(),
+                0.0,
+                vec![DynamicEntityAdvance {
+                    entity: Box::new(entity),
+                    kind,
+                    path: DynamicEntityPlacedPath {
+                        initial: point,
+                        legs: vec![DynamicEntityPathLeg {
+                            end_fraction: 1.0,
+                            end: point,
+                        }],
+                    },
+                }],
+            ),
+        })
+    }
+
     fn host_time(&self) -> DynamicEntityHostTime {
         DynamicEntityHostTime::new(self.origin.elapsed().as_secs_f64())
             .expect("monotonic elapsed time must be finite and nonnegative")

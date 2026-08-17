@@ -577,9 +577,10 @@ record, codec, reader, deterministic failure-atomic writer, and focused fixtures
 - The reader retains provenance plus the fixed 16-byte-per-record index, uses binary search, and
   performs a positioned payload read on lookup. It has no database, HBA, content, world, protocol,
   Tauri, or frontend dependency.
-- The exporter uses `mysql` 28 selected by Cargo, one direct connection, and nine bulk ordered
-  queries. It exports every `weenie` parent, including missing-setup/name records required by R0,
-  rather than issuing N+1 WCID queries or applying runtime fallbacks.
+- The exporter uses optional feature `weenie-catalog-export` to confine Cargo's `mysql` 28 dependency
+  and exporter module to the required-feature binary. It holds one direct connection and issues nine
+  bulk ordered queries. It exports every `weenie` parent, including missing-setup/name records
+  required by R0, rather than issuing N+1 WCID queries or applying runtime fallbacks.
 - The writer canonicalizes source ordering, validates and compares every record after reopening the
   temporary catalog, then atomically publishes it. A rejected replacement preserves an existing
   catalog.
@@ -594,6 +595,11 @@ record, codec, reader, deterministic failure-atomic writer, and focused fixtures
   No generated runtime asset is checked in by this phase.
 - Do not add mmap, compression, checksums, secondary indexes, streaming output, or template caching
   unless Phase R0 measurements prove the simple implementation insufficient.
+- Completion audit closed the Phase 0 rejection-fixture debt: synthetic tests now reach duplicate
+  parents/scalars/all three appearance keys, every selected-table unexpected property branch,
+  nonfinite database floats, invalid bool values, palette and part-index narrowing, string/collection
+  bounds, catalog/record bounds, and the public WCID/field error context. These remain focused
+  validation tests rather than a generic diagnostic framework.
 
 ### Phase R0: Survey the Catalog and Freeze the Runtime Scope
 
@@ -774,6 +780,11 @@ deliberate retail divergence, not an inferred retail behavior.
   Brazier, 400 Carsith the Weaponsmith, 1499 Flame Bolt, 34621 Killagurg, and 27437 Dark Monolith.
   Synthetic fixtures cover proven live-only states absent from the catalog and explicit rejection of
   representable-but-unproduced states.
+- Completion audit reran the default offline survey from `dats/weenies.hwc` plus `dats/assets.hba`.
+  Provenance, 43,913 records, 4,858,241 payload bytes, all 3,909 decoded setups, the four target-
+  geometry populations, 99 effective masks, motion bounds, palette hazards, and scale hazards match
+  the recorded evidence without a database connection. The local artifact remains ignored and its
+  SHA-256 remains `a18482447dd77c70c0c7fb6088be72cbd2d85fbc1fad045b3049de2731817f5d`.
 
 ### Phase 1A: Close Survey-Discovered Catalog Gaps
 
@@ -1525,6 +1536,7 @@ cargo fmt --all -- --check
 cargo check --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test -p holtburger-tools --features weenie-catalog-export --lib --bin export-weenie-catalog
 npm --prefix apps/holtburger-3d run format:check
 npm --prefix apps/holtburger-3d run check
 npm --prefix apps/holtburger-3d run lint

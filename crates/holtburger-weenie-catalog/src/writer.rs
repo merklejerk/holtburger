@@ -19,12 +19,7 @@ pub fn write_catalog_atomic(
 ) -> Result<(), CatalogWriteError> {
     let path = path.as_ref();
     validate_provenance(provenance)?;
-    if templates.len() > MAX_CATALOG_RECORDS {
-        return Err(CatalogWriteError::RecordCount {
-            count: templates.len(),
-            limit: MAX_CATALOG_RECORDS,
-        });
-    }
+    validate_record_count(templates.len())?;
 
     let mut templates = templates.to_vec();
     for template in &mut templates {
@@ -72,13 +67,7 @@ pub fn write_catalog_atomic(
             wcid: template.wcid,
             reason: error.to_string(),
         })?;
-        if payload.is_empty() || payload.len() > MAX_RECORD_BYTES {
-            return Err(CatalogWriteError::RecordLength {
-                wcid: template.wcid,
-                length: payload.len(),
-                limit: MAX_RECORD_BYTES,
-            });
-        }
+        validate_record_length(template.wcid, payload.len())?;
         let payload_length =
             u32::try_from(payload.len()).map_err(|_| CatalogWriteError::RecordLength {
                 wcid: template.wcid,
@@ -199,6 +188,27 @@ fn validate_provenance(provenance: &str) -> Result<(), CatalogWriteError> {
     Ok(())
 }
 
+fn validate_record_count(count: usize) -> Result<(), CatalogWriteError> {
+    if count > MAX_CATALOG_RECORDS {
+        return Err(CatalogWriteError::RecordCount {
+            count,
+            limit: MAX_CATALOG_RECORDS,
+        });
+    }
+    Ok(())
+}
+
+fn validate_record_length(wcid: u32, length: usize) -> Result<(), CatalogWriteError> {
+    if length == 0 || length > MAX_RECORD_BYTES {
+        return Err(CatalogWriteError::RecordLength {
+            wcid,
+            length,
+            limit: MAX_RECORD_BYTES,
+        });
+    }
+    Ok(())
+}
+
 fn write_error(path: &Path, source: io::Error) -> CatalogWriteError {
     CatalogWriteError::Write {
         path: path.to_path_buf(),
@@ -306,4 +316,37 @@ pub enum CatalogWriteError {
         #[source]
         source: io::Error,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portable_writer_limits_have_reachable_distinct_rejections() {
+        assert!(matches!(
+            validate_provenance(""),
+            Err(CatalogWriteError::ProvenanceLength { length: 0, .. })
+        ));
+        assert!(matches!(
+            validate_provenance(&"x".repeat(MAX_PROVENANCE_BYTES + 1)),
+            Err(CatalogWriteError::ProvenanceLength { .. })
+        ));
+        assert!(matches!(
+            validate_record_count(MAX_CATALOG_RECORDS + 1),
+            Err(CatalogWriteError::RecordCount { .. })
+        ));
+        assert!(matches!(
+            validate_record_length(42, 0),
+            Err(CatalogWriteError::RecordLength {
+                wcid: 42,
+                length: 0,
+                ..
+            })
+        ));
+        assert!(matches!(
+            validate_record_length(42, MAX_RECORD_BYTES + 1),
+            Err(CatalogWriteError::RecordLength { wcid: 42, .. })
+        ));
+    }
 }

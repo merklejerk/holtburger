@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tempfile::tempdir;
 
-use crate::codec::{HEADER_LENGTH, INDEX_ENTRY_LENGTH};
+use crate::codec::{HEADER_LENGTH, INDEX_ENTRY_LENGTH, MAX_STRING_BYTES};
 use crate::{
     AnimPartChange, CatalogLookupError, CatalogOpenError, CatalogWriteError, PhysicsBoolOverrides,
     SubPalette, TemplatePhysics, TextureChange, WeenieCatalog, WeenieTemplate,
@@ -223,6 +223,19 @@ fn nonfinite_source_float_is_rejected_with_wcid_and_field() {
 
     assert!(matches!(error, CatalogWriteError::Record { wcid: 9, .. }));
     assert!(error.to_string().contains("friction"));
+}
+
+#[test]
+fn oversized_source_string_is_rejected_with_wcid_and_field() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("oversized-string.hwc");
+    let mut value = template(10);
+    value.class_name = "x".repeat(MAX_STRING_BYTES + 1);
+
+    let error = write_catalog_atomic(&path, "ACE-World-test", &[value]).unwrap_err();
+
+    assert!(matches!(error, CatalogWriteError::Record { wcid: 10, .. }));
+    assert!(error.to_string().contains("class_name"));
 }
 
 #[test]

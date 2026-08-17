@@ -184,7 +184,8 @@ indexed payload fails strict decoding.
 explicitly named environment variable so credentials do not need to appear in process arguments:
 
 ```console
-cargo run -p holtburger-tools --bin export-weenie-catalog -- \
+cargo run -p holtburger-tools --features weenie-catalog-export \
+  --bin export-weenie-catalog -- \
   --database-url-env ACE_WORLD_SQL_URL \
   --provenance <ACE-World-revision-or-operator-label>
 ```

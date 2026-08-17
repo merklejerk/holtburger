@@ -1,6 +1,7 @@
 pub mod dat2hba;
 pub mod error;
 pub mod spell_export;
+#[cfg(feature = "weenie-catalog-export")]
 pub mod weenie_catalog_export;
 pub mod weenie_catalog_survey;
 

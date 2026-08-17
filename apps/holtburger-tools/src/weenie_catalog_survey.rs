@@ -6,8 +6,11 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use holtburger_content::ContentRepository;
+use holtburger_dat::file_type::motion_table::{AnimData, MotionData};
 use holtburger_dat::file_type::setup_model::{AnimationHook, AnimationHookPayload};
-use holtburger_dat::file_type::{Animation, GfxObj, MotionKinematics, PhysicsScript, SetupModel};
+use holtburger_dat::file_type::{
+    Animation, DatFileType, GfxObj, MotionKinematics, MotionTable, PhysicsScript, SetupModel,
+};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_weenie_catalog::{PhysicsBoolOverrides, WeenieCatalog, WeenieTemplate};
 use serde::Serialize;
@@ -30,6 +33,10 @@ const REPORT_COLLISIONS_AS_ENVIRONMENT: u32 = 0x0020_0000;
 const EDGE_SLIDE: u32 = 0x0040_0000;
 const FROZEN: u32 = 0x0100_0000;
 const KNOWN_PHYSICS_BITS: u32 = 0x01FF_FFFF;
+const FIXED_TICKS_PER_SECOND: f64 = 30.0;
+const ROOT_IDENTITY_EPSILON: f64 = 1.0e-6;
+const REPRESENTATIVE_SPEED_MULTIPLIER: f64 = 3.0;
+const REPRESENTATIVE_WCIDS: [u32; 10] = [1, 21, 147, 158, 239, 400, 1499, 34621, 27437, 52077];
 
 /// Stable, machine-readable Phase R0 measurements.
 #[derive(Debug, Serialize)]
@@ -144,6 +151,8 @@ pub struct ContentSurvey {
     pub representative_samples: BTreeMap<&'static str, Vec<RepresentativeTemplate>>,
     /// Authored locomotion vectors from the derived HBA motion-kinematics asset.
     pub motion_kinematics: MotionKinematicsSurvey,
+    /// Ordered animation root-transform facts from raw motion tables and animations.
+    pub authored_root_motion: AuthoredRootMotionSurvey,
 }
 
 /// One physics-BSP setup that authors a default animation or physics script.
@@ -260,6 +269,112 @@ pub struct MotionKinematicsSurvey {
     pub omega_magnitudes: FloatDistribution,
 }
 
+/// Population evidence used to choose the Phase 6 solver root-motion contract.
+#[derive(Debug, Default, Serialize)]
+pub struct AuthoredRootMotionSurvey {
+    /// Raw motion tables present in the mounted content population.
+    pub motion_tables: usize,
+    /// Motion-data records across cycles, modifiers, and links.
+    pub motion_data_entries: usize,
+    /// Animation range/rate records across all motion-data records.
+    pub animation_entries: usize,
+    /// Distinct animations referenced by those records.
+    pub referenced_animations: usize,
+    /// Referenced animations carrying authored root-position frames.
+    pub animations_with_position_frames: usize,
+    /// Referenced animations with a non-identity root translation.
+    pub animations_with_translation: usize,
+    /// Referenced animations with a non-identity root rotation.
+    pub animations_with_rotation: usize,
+    /// Motion tables whose selected ranges contain authored root-position frames.
+    pub motion_tables_with_position_frames: usize,
+    /// Motion tables whose selected ranges contain non-identity root translation.
+    pub motion_tables_with_translation: usize,
+    /// Motion tables whose selected ranges contain non-identity root rotation.
+    pub motion_tables_with_rotation: usize,
+    /// Authored root-position frames across distinct referenced animations.
+    pub position_frames: usize,
+    /// Magnitudes of non-identity authored root translations in metres.
+    pub translation_magnitudes: FloatDistribution,
+    /// Angles of non-identity authored root rotations in radians.
+    pub rotation_angles: FloatDistribution,
+    /// Maximum possible authored frame boundaries crossed in one 30 Hz tick at stored rate.
+    pub frame_boundaries_per_tick_1x: IntegerDistribution,
+    /// Same bound under an explicit 3x speed-modifier stress case.
+    pub frame_boundaries_per_tick_3x: IntegerDistribution,
+    /// Root-transform animation entries able to cross more than one boundary per tick at stored rate.
+    pub multi_boundary_entries_1x: usize,
+    /// Root-transform animation entries able to cross more than one boundary per tick at 3x rate.
+    pub multi_boundary_entries_3x: usize,
+    /// Catalog templates whose effective target is a physics BSP and whose motion table references root transforms.
+    pub physics_bsp_templates_with_root_motion: usize,
+    /// Catalog templates naming a motion table through an override or setup default.
+    pub catalog_templates_with_motion_table_reference: usize,
+    /// Catalog templates whose named motion table exists in mounted content and decoded.
+    pub catalog_templates_with_decoded_motion_table: usize,
+    /// Missing effective motion-table DIDs and the number of affected templates.
+    pub unavailable_motion_table_references: BTreeMap<String, u64>,
+    /// Catalog templates whose resolved table contains selected root-position frames.
+    pub catalog_templates_with_position_frames: usize,
+    /// Catalog templates whose resolved table contains non-identity root translation.
+    pub catalog_templates_with_translation: usize,
+    /// Catalog templates whose resolved table contains non-identity root rotation.
+    pub catalog_templates_with_rotation: usize,
+    /// Every catalog template combining a physics-BSP target with table-reachable root motion.
+    pub physics_bsp_root_motion_templates: Vec<PhysicsBspRootMotionTemplateSurvey>,
+    /// Root-motion reachability for the plan's fixed representative WCID population.
+    pub representative_templates: Vec<RepresentativeRootMotionSurvey>,
+    /// Numeric tolerance used only to classify an authored transform as identity.
+    pub identity_epsilon: f64,
+}
+
+/// One catalog template proving that a physics-BSP target can also resolve root motion.
+#[derive(Debug, Serialize)]
+pub struct PhysicsBspRootMotionTemplateSurvey {
+    /// Catalog WCID.
+    pub wcid: u32,
+    /// Human-facing catalog name.
+    pub name: String,
+    /// Effective motion table.
+    pub motion_table_did: String,
+    /// Whether selected ranges contain non-identity root translation.
+    pub has_translation: bool,
+    /// Whether selected ranges contain non-identity root rotation.
+    pub has_rotation: bool,
+}
+
+/// Motion-table and root-transform facts for one representative catalog template.
+#[derive(Debug, Serialize)]
+pub struct RepresentativeRootMotionSurvey {
+    /// Catalog WCID.
+    pub wcid: u32,
+    /// Human-facing catalog name.
+    pub name: String,
+    /// Effective motion-table reference and its mounted-content availability, when named.
+    pub motion_table: Option<RepresentativeMotionTableSurvey>,
+    /// Whether the resolved table references any authored root-position frame.
+    pub has_position_frames: bool,
+    /// Whether those selected ranges contain non-identity root translation.
+    pub has_translation: bool,
+    /// Whether those selected ranges contain non-identity root rotation.
+    pub has_rotation: bool,
+    /// Whether retail's effective dynamic-target branch is a physics BSP.
+    pub physics_bsp_target: bool,
+    /// Maximum possible frame boundaries crossed per tick at stored rate.
+    pub max_frame_boundaries_per_tick_1x: u64,
+    /// Maximum possible frame boundaries crossed per tick under the explicit 3x stress case.
+    pub max_frame_boundaries_per_tick_3x: u64,
+}
+
+/// One representative template's effective motion-table reference.
+#[derive(Debug, Serialize)]
+pub struct RepresentativeMotionTableSurvey {
+    /// Motion-table resource id.
+    pub did: String,
+    /// Whether the resource exists in mounted content and decoded.
+    pub available: bool,
+}
+
 /// Count and percentile summary for non-negative integer values.
 #[derive(Debug, Default, Serialize)]
 pub struct IntegerDistribution {
@@ -344,6 +459,7 @@ struct SetupFacts {
     parts: Vec<u32>,
     default_animation: Option<u32>,
     default_script: Option<u32>,
+    default_motion_table: Option<u32>,
     sphere_count: usize,
     cylsphere_count: usize,
 }
@@ -596,6 +712,7 @@ fn survey_content(
                 parts: setup.parts,
                 default_animation: setup.default_animation,
                 default_script: setup.default_script,
+                default_motion_table: setup.default_motion_table,
                 sphere_count: setup.spheres.len(),
                 cylsphere_count: setup.cyl_spheres.len(),
             },
@@ -713,6 +830,7 @@ fn survey_content(
         &physics_bsp_appearance.effective_parts_by_wcid,
         content,
     )?;
+    let authored_root_motion = survey_authored_root_motion(templates, &setup_facts, content)?;
 
     Ok(ContentSurvey {
         referenced_setups: setup_ids.len(),
@@ -759,6 +877,7 @@ fn survey_content(
         effective_mask_rule: "ACE base mask or PhysicsGlobals.DefaultState; apply the eleven nullable PropertyBool overrides; replace HasPhysicsBSP from setup parts; for Static templates replace HasDefaultAnim/HasDefaultScript from setup defaults",
         representative_samples,
         motion_kinematics: survey_motion_kinematics(&motion_kinematics),
+        authored_root_motion,
     })
 }
 
@@ -1103,6 +1222,279 @@ fn survey_motion_kinematics(motion: &MotionKinematics) -> MotionKinematicsSurvey
     survey
 }
 
+#[derive(Debug, Default)]
+struct MotionTableRootFacts {
+    has_position_frames: bool,
+    has_translation: bool,
+    has_rotation: bool,
+    max_frame_boundaries_per_tick_1x: u64,
+    max_frame_boundaries_per_tick_3x: u64,
+}
+
+#[derive(Debug, Default)]
+struct AnimationRootFacts {
+    has_position_frames: bool,
+    has_translation: bool,
+    has_rotation: bool,
+}
+
+fn survey_authored_root_motion(
+    templates: &[WeenieTemplate],
+    setups: &BTreeMap<u32, SetupFacts>,
+    content: &ContentRepository,
+) -> Result<AuthoredRootMotionSurvey> {
+    let motion_table_ids = content
+        .resource_index()
+        .iter()
+        .filter(|entry| {
+            entry.namespace == EOR_PORTAL_NAMESPACE
+                && entry.type_id == DatFileType::MotionTable as u32
+        })
+        .map(|entry| entry.file_id)
+        .collect::<BTreeSet<_>>();
+    let mut motion_tables = BTreeMap::new();
+    let mut referenced_animation_ids = BTreeSet::new();
+    let mut motion_data_entries = 0;
+    let mut animation_entries = 0;
+
+    for motion_table_id in motion_table_ids {
+        let resource = content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, motion_table_id))
+            .with_context(|| format!("could not read motion table 0x{motion_table_id:08X}"))?;
+        let table = MotionTable::read(&mut Cursor::new(resource.bytes))
+            .with_context(|| format!("could not decode motion table 0x{motion_table_id:08X}"))?;
+        for data in motion_data_records(&table) {
+            motion_data_entries += 1;
+            animation_entries += data.anims.len();
+            referenced_animation_ids.extend(data.anims.iter().map(|anim| anim.anim_id));
+        }
+        motion_tables.insert(motion_table_id, table);
+    }
+
+    let mut animations = BTreeMap::new();
+    let mut survey = AuthoredRootMotionSurvey {
+        motion_tables: motion_tables.len(),
+        motion_data_entries,
+        animation_entries,
+        referenced_animations: referenced_animation_ids.len(),
+        identity_epsilon: ROOT_IDENTITY_EPSILON,
+        ..AuthoredRootMotionSurvey::default()
+    };
+    for animation_id in referenced_animation_ids {
+        let resource = content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, animation_id))
+            .with_context(|| format!("could not read motion animation 0x{animation_id:08X}"))?;
+        let animation = Animation::read(&mut Cursor::new(resource.bytes))
+            .with_context(|| format!("could not decode motion animation 0x{animation_id:08X}"))?;
+        let mut facts = AnimationRootFacts {
+            has_position_frames: !animation.pos_frames.is_empty(),
+            ..AnimationRootFacts::default()
+        };
+        survey.position_frames += animation.pos_frames.len();
+        for frame in &animation.pos_frames {
+            let translation = f64::from(frame.origin.length());
+            if !translation.is_finite() {
+                anyhow::bail!("animation 0x{animation_id:08X} has a non-finite root translation");
+            }
+            if translation > ROOT_IDENTITY_EPSILON {
+                facts.has_translation = true;
+                survey.translation_magnitudes.observe(Some(translation));
+            }
+            let rotation = root_rotation_angle(frame.orientation).with_context(|| {
+                format!("animation 0x{animation_id:08X} has an invalid root rotation")
+            })?;
+            if rotation > ROOT_IDENTITY_EPSILON {
+                facts.has_rotation = true;
+                survey.rotation_angles.observe(Some(rotation));
+            }
+        }
+        survey.animations_with_position_frames += usize::from(facts.has_position_frames);
+        survey.animations_with_translation += usize::from(facts.has_translation);
+        survey.animations_with_rotation += usize::from(facts.has_rotation);
+        animations.insert(animation_id, animation);
+    }
+
+    let mut table_facts = BTreeMap::new();
+    let mut boundaries_1x = Vec::new();
+    let mut boundaries_3x = Vec::new();
+    for (motion_table_id, table) in &motion_tables {
+        let mut facts = MotionTableRootFacts::default();
+        for data in motion_data_records(table) {
+            for anim in &data.anims {
+                let animation = animations
+                    .get(&anim.anim_id)
+                    .expect("every referenced animation was decoded");
+                let selected = selected_position_frames(animation, anim);
+                if selected.is_empty() {
+                    continue;
+                }
+                facts.has_position_frames = true;
+                for frame in selected {
+                    facts.has_translation |=
+                        f64::from(frame.origin.length()) > ROOT_IDENTITY_EPSILON;
+                    facts.has_rotation |=
+                        root_rotation_angle(frame.orientation)? > ROOT_IDENTITY_EPSILON;
+                }
+                let at_1x = maximum_frame_boundaries_per_tick(anim.framerate, 1.0)?;
+                let at_3x = maximum_frame_boundaries_per_tick(
+                    anim.framerate,
+                    REPRESENTATIVE_SPEED_MULTIPLIER,
+                )?;
+                boundaries_1x.push(at_1x);
+                boundaries_3x.push(at_3x);
+                survey.multi_boundary_entries_1x += usize::from(at_1x > 1);
+                survey.multi_boundary_entries_3x += usize::from(at_3x > 1);
+                facts.max_frame_boundaries_per_tick_1x =
+                    facts.max_frame_boundaries_per_tick_1x.max(at_1x);
+                facts.max_frame_boundaries_per_tick_3x =
+                    facts.max_frame_boundaries_per_tick_3x.max(at_3x);
+            }
+        }
+        table_facts.insert(*motion_table_id, facts);
+    }
+    survey.frame_boundaries_per_tick_1x = integer_distribution(boundaries_1x);
+    survey.frame_boundaries_per_tick_3x = integer_distribution(boundaries_3x);
+    survey.motion_tables_with_position_frames = table_facts
+        .values()
+        .filter(|facts| facts.has_position_frames)
+        .count();
+    survey.motion_tables_with_translation = table_facts
+        .values()
+        .filter(|facts| facts.has_translation)
+        .count();
+    survey.motion_tables_with_rotation = table_facts
+        .values()
+        .filter(|facts| facts.has_rotation)
+        .count();
+
+    for template in templates {
+        let setup = template.setup_did.and_then(|id| setups.get(&id));
+        let motion_table_did = template
+            .motion_table_did
+            .or_else(|| setup.and_then(|facts| facts.default_motion_table));
+        let facts = motion_table_did.and_then(|id| table_facts.get(&id));
+        let physics_bsp_target = setup.is_some_and(|setup| {
+            target_geometry_class(effective_mask(template, setup), setup) == "physics_bsp"
+        });
+        survey.catalog_templates_with_motion_table_reference +=
+            usize::from(motion_table_did.is_some());
+        survey.catalog_templates_with_decoded_motion_table += usize::from(facts.is_some());
+        if let Some(motion_table_did) = motion_table_did
+            && facts.is_none()
+        {
+            *survey
+                .unavailable_motion_table_references
+                .entry(resource_key(motion_table_did))
+                .or_default() += 1;
+        }
+        survey.catalog_templates_with_position_frames +=
+            usize::from(facts.is_some_and(|facts| facts.has_position_frames));
+        survey.catalog_templates_with_translation +=
+            usize::from(facts.is_some_and(|facts| facts.has_translation));
+        survey.catalog_templates_with_rotation +=
+            usize::from(facts.is_some_and(|facts| facts.has_rotation));
+        if physics_bsp_target && facts.is_some_and(|facts| facts.has_position_frames) {
+            survey.physics_bsp_templates_with_root_motion += 1;
+            survey
+                .physics_bsp_root_motion_templates
+                .push(PhysicsBspRootMotionTemplateSurvey {
+                    wcid: template.wcid,
+                    name: template
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| template.class_name.clone()),
+                    motion_table_did: resource_key(
+                        motion_table_did.expect("root-motion facts require a motion table"),
+                    ),
+                    has_translation: facts.is_some_and(|facts| facts.has_translation),
+                    has_rotation: facts.is_some_and(|facts| facts.has_rotation),
+                });
+        }
+        if REPRESENTATIVE_WCIDS.contains(&template.wcid) {
+            survey
+                .representative_templates
+                .push(RepresentativeRootMotionSurvey {
+                    wcid: template.wcid,
+                    name: template
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| template.class_name.clone()),
+                    motion_table: motion_table_did.map(|did| RepresentativeMotionTableSurvey {
+                        did: resource_key(did),
+                        available: facts.is_some(),
+                    }),
+                    has_position_frames: facts.is_some_and(|facts| facts.has_position_frames),
+                    has_translation: facts.is_some_and(|facts| facts.has_translation),
+                    has_rotation: facts.is_some_and(|facts| facts.has_rotation),
+                    physics_bsp_target,
+                    max_frame_boundaries_per_tick_1x: facts
+                        .map_or(0, |facts| facts.max_frame_boundaries_per_tick_1x),
+                    max_frame_boundaries_per_tick_3x: facts
+                        .map_or(0, |facts| facts.max_frame_boundaries_per_tick_3x),
+                });
+        }
+    }
+    survey
+        .physics_bsp_root_motion_templates
+        .sort_by_key(|template| template.wcid);
+    survey
+        .representative_templates
+        .sort_by_key(|template| template.wcid);
+    if survey.representative_templates.len() != REPRESENTATIVE_WCIDS.len() {
+        anyhow::bail!(
+            "catalog contains {} of {} required representative WCIDs",
+            survey.representative_templates.len(),
+            REPRESENTATIVE_WCIDS.len()
+        );
+    }
+    Ok(survey)
+}
+
+fn motion_data_records(table: &MotionTable) -> impl Iterator<Item = &MotionData> {
+    table
+        .cycles
+        .values()
+        .chain(table.modifiers.values())
+        .chain(table.links.values().flat_map(|links| links.values()))
+}
+
+fn selected_position_frames<'a>(
+    animation: &'a Animation,
+    anim: &AnimData,
+) -> &'a [holtburger_dat::graphics::Frame] {
+    if animation.pos_frames.is_empty() {
+        return &[];
+    }
+    let last = animation.pos_frames.len() - 1;
+    let low = usize::try_from(anim.low_frame.max(0))
+        .unwrap_or(0)
+        .min(last);
+    let high = if anim.high_frame < 0 {
+        last
+    } else {
+        usize::try_from(anim.high_frame).unwrap_or(last).min(last)
+    };
+    let high = high.max(low);
+    &animation.pos_frames[low..=high]
+}
+
+fn root_rotation_angle(rotation: holtburger_common::Quaternion) -> Result<f64> {
+    let [w, x, y, z] = [rotation.w, rotation.x, rotation.y, rotation.z].map(f64::from);
+    let norm = (w * w + x * x + y * y + z * z).sqrt();
+    if !norm.is_finite() || norm <= f64::EPSILON {
+        anyhow::bail!("root quaternion has non-finite or zero norm");
+    }
+    Ok(2.0 * (w / norm).abs().clamp(0.0, 1.0).acos())
+}
+
+fn maximum_frame_boundaries_per_tick(framerate: f32, speed_multiplier: f64) -> Result<u64> {
+    let frames = f64::from(framerate).abs() * speed_multiplier / FIXED_TICKS_PER_SECOND;
+    if !frames.is_finite() || frames > u64::MAX as f64 {
+        anyhow::bail!("invalid animation framerate {framerate}");
+    }
+    Ok(frames.ceil() as u64)
+}
+
 fn target_geometry_class(mask: u32, setup: &SetupFacts) -> &'static str {
     if mask & HAS_PHYSICS_BSP != 0 {
         "physics_bsp"
@@ -1368,6 +1760,7 @@ mod tests {
             parts: Vec::new(),
             default_animation: None,
             default_script: None,
+            default_motion_table: None,
             sphere_count: 1,
             cylsphere_count: 0,
         }
@@ -1474,6 +1867,62 @@ mod tests {
         assert_eq!(survey.velocity_magnitudes.max, Some(5.0));
         assert_eq!(survey.omega_magnitudes.min, Some(2.0));
         assert_eq!(survey.omega_magnitudes.max, Some(2.0));
+    }
+
+    #[test]
+    fn root_motion_census_uses_authored_ranges_and_tick_boundary_bounds() {
+        let frames = (0..4)
+            .map(|index| {
+                let mut frame = Frame::default();
+                frame.origin.x = index as f32;
+                frame
+            })
+            .collect::<Vec<_>>();
+        let animation = Animation {
+            id: 1,
+            flags: AnimationFlags::POS_FRAMES,
+            num_parts: 0,
+            num_frames: 4,
+            pos_frames: frames,
+            part_frames: Vec::new(),
+        };
+        let selected = selected_position_frames(
+            &animation,
+            &AnimData {
+                anim_id: 1,
+                low_frame: 1,
+                high_frame: 2,
+                framerate: 31.0,
+            },
+        );
+
+        assert_eq!(selected.len(), 2);
+        assert_eq!(selected[0].origin.x, 1.0);
+        assert_eq!(selected[1].origin.x, 2.0);
+        assert_eq!(maximum_frame_boundaries_per_tick(30.0, 1.0).unwrap(), 1);
+        assert_eq!(maximum_frame_boundaries_per_tick(31.0, 1.0).unwrap(), 2);
+        assert_eq!(maximum_frame_boundaries_per_tick(-20.0, 3.0).unwrap(), 2);
+    }
+
+    #[test]
+    fn root_rotation_classification_accepts_quaternion_sign_equivalence() {
+        let negative_identity = holtburger_common::Quaternion {
+            w: -1.0,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let quarter_turn = holtburger_common::Quaternion::from_axis_angle(
+            Vector3::new(0.0, 0.0, 1.0),
+            std::f32::consts::FRAC_PI_2,
+        )
+        .unwrap();
+
+        assert_eq!(root_rotation_angle(negative_identity).unwrap(), 0.0);
+        assert!(
+            (root_rotation_angle(quarter_turn).unwrap() - std::f64::consts::FRAC_PI_2).abs()
+                < 1.0e-6
+        );
     }
 
     #[test]

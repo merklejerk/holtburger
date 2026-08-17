@@ -21,6 +21,9 @@ mod behavior_hook_source;
 mod binary_source_record;
 pub mod cell_struct_projection;
 mod env_cell_source;
+pub mod explorer_entity_driver;
+pub mod explorer_entity_runtime;
+pub mod explorer_weenie_catalog;
 pub mod gfx_obj_geometry;
 mod host_camera_runtime;
 mod host_fixed_tick_runtime;
@@ -71,6 +74,8 @@ const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
 #[derive(Clone)]
 struct HostContentState {
     runtime: ContentAssetRuntime,
+    /// Immutable repository used by app-local dynamic-entity preparation.
+    repository: Arc<ContentRepository>,
     /// Shared synchronous service used to realize explicitly requested simulation collision.
     service: Arc<ContentAssetService>,
 }
@@ -83,9 +88,11 @@ impl HostContentState {
 
     /// Builds the app-local host state from an already discovered or injected repository.
     fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
-        let service = ContentAssetService::new(repository, Arc::new(ContentDecodeCache::new()));
+        let service =
+            ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
         Ok(Self {
             runtime: ContentAssetRuntime::new(service.clone()),
+            repository,
             service: Arc::new(service),
         })
     }
@@ -1234,6 +1241,27 @@ pub fn run() {
     let simulation = Arc::new(host_simulation_runtime::HostSimulationRuntime::new(
         collision_source,
     ));
+    let explorer_entities = Arc::new(explorer_entity_runtime::ExplorerEntityRuntime::new(
+        Arc::clone(&simulation),
+    ));
+    let catalog = Arc::new(explorer_weenie_catalog::ExplorerWeenieCatalog::discover(
+        content_state
+            .repository
+            .source_description()
+            .map(std::path::Path::new),
+        None,
+    ));
+    let explorer_entity_driver = Arc::new(explorer_entity_driver::ExplorerEntityDriver::new(
+        catalog,
+        Arc::new(
+            explorer_entity_driver::DatExplorerEntityContentPreparer::new(Arc::clone(
+                &content_state.repository,
+            )),
+        ),
+        Arc::new(explorer_entity_driver::SystemExplorerEntityClock),
+        Arc::clone(&explorer_entities),
+        Arc::clone(&simulation),
+    ));
     let fixed_tick_runtime = Arc::new(host_fixed_tick_runtime::HostFixedTickRuntime::new());
     let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
         Arc::clone(&simulation),
@@ -1247,6 +1275,8 @@ pub fn run() {
         })
         .manage(content_state)
         .manage(simulation)
+        .manage(explorer_entities)
+        .manage(explorer_entity_driver)
         .manage(fixed_tick_runtime)
         .manage(camera_runtime)
         .invoke_handler(tauri::generate_handler![

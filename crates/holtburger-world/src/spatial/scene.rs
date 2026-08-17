@@ -739,6 +739,7 @@ mod physical_body_tests {
             entity_collision: DynamicBodyCollisionDefinition {
                 target_geometry: PreparedEntityTargetGeometry {
                     physics_bsp_parts: Vec::new(),
+                    fallback_setup_did: 0x0200_0001,
                     fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
                         center: Vector3::zero(),
                         radius: 0.5,

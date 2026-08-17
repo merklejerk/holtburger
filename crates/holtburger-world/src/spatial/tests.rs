@@ -105,6 +105,98 @@ fn get_entities_in_range_uses_canonical_body_pose() {
 }
 
 #[test]
+fn every_canonical_pose_commit_moves_or_clears_coarse_membership() {
+    let mut scene = SpatialScene::new();
+    let guid = Guid(0x7000_0001);
+    let body_id = SpatialBodyId::Entity(guid);
+    let first = WorldPosition {
+        landblock_id: Guid(0x1010_0001),
+        ..Default::default()
+    };
+    let second = WorldPosition {
+        landblock_id: Guid(0x2020_0002),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..Default::default()
+    };
+    let third = WorldPosition {
+        landblock_id: Guid(0x3030_0003),
+        coords: Vector3::new(4.0, 5.0, 6.0),
+        ..Default::default()
+    };
+    register_entity_pose(&mut scene, guid, first);
+    assert!(
+        scene
+            .get_in_landblock(first.landblock_id)
+            .unwrap()
+            .contains(&guid)
+    );
+
+    assert!(scene.apply_runtime_body_pose(body_id, second, SpatialSampleMode::SimulatingVelocity));
+    assert!(
+        scene
+            .get_in_landblock(first.landblock_id)
+            .is_none_or(|members| !members.contains(&guid))
+    );
+    assert!(
+        scene
+            .get_in_landblock(second.landblock_id)
+            .unwrap()
+            .contains(&guid)
+    );
+
+    assert!(
+        scene.apply_solved_runtime_body_kinematics(&SolvedBodyKinematics {
+            body_id,
+            pose: third,
+            velocity: Vector3::new(1.0, 0.0, 0.0),
+            omega: Vector3::zero(),
+            contact: ContactState::Airborne,
+            projection_state: None,
+        })
+    );
+    assert!(
+        scene
+            .get_in_landblock(second.landblock_id)
+            .is_none_or(|members| !members.contains(&guid))
+    );
+    assert!(
+        scene
+            .get_in_landblock(third.landblock_id)
+            .unwrap()
+            .contains(&guid)
+    );
+
+    assert!(scene.remove_body(body_id).is_some());
+    assert!(
+        scene
+            .get_in_landblock(third.landblock_id)
+            .is_none_or(|members| !members.contains(&guid))
+    );
+}
+
+#[test]
+fn ephemeral_camera_and_entity_bodies_coexist_without_sharing_entity_membership() {
+    let mut scene = SpatialScene::new();
+    let entity_guid = Guid(0x7000_0002);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x4040_0001),
+        ..Default::default()
+    };
+    let camera_id = scene.register_ephemeral_body(pose, Instant::now());
+    register_entity_pose(&mut scene, entity_guid, pose);
+
+    assert!(matches!(camera_id, SpatialBodyId::Ephemeral(_)));
+    assert!(scene.body(camera_id).is_some());
+    assert!(
+        scene
+            .get_in_landblock(pose.landblock_id)
+            .unwrap()
+            .contains(&entity_guid)
+    );
+    assert_eq!(scene.get_in_landblock(pose.landblock_id).unwrap().len(), 1);
+}
+
+#[test]
 fn project_pose_by_velocity_keeps_indoor_landblock_stable() {
     let authoritative = WorldPosition {
         landblock_id: Guid(0x016C_0155),

@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 2/2A underway
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 2B next
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -878,11 +878,12 @@ animation, and transitive physics-script closure. The only physically mutable ca
 
 ### Phase 2: Freeze Shared Entity and Physics Decisions
 
-Progress: In progress (2026-08-16). The shared effective-state resolver, transition decision,
+Progress: Complete (2026-08-16). The shared effective-state resolver, transition decision,
 source-neutral definition and preparation path, prepared dynamic-body contracts, reversible scene
 operations, synchronous committed outcomes, lossless client appearance/state integration, and
-explicit `SpatialBodyId` ordering have landed. Remaining Phase 2 work is the contract/comment audit
-and final acceptance sweep after the canonical-scene cutover stabilizes.
+explicit `SpatialBodyId` ordering have landed. The final audit covers every retained semantic bit,
+typed unsupported/missing-preparation dispositions, producer-neutral boundaries, field consumers,
+and independently decoded but content-identical prepared geometry.
 
 #### Deliverables
 
@@ -936,18 +937,22 @@ and final acceptance sweep after the canonical-scene cutover stabilizes.
 - Acceleration is now part of the canonical body kinematics composite instead of an out-of-band
   producer fact. Body operations return committed outcomes synchronously; no diagnostic history or
   internal asynchronous publisher was introduced.
+- Prepared geometry compatibility uses immutable SetupModel/GfxObj identities plus placement facts,
+  not decoded `Arc` pointer identity. Re-preparing the same content therefore preserves compatible
+  response memory instead of manufacturing a geometry change.
 - Stop for user review if sharing requires either producer to surrender authority, either
   `SpatialScene` to move between compositions, an async backend event bus, or a generic runtime
   hierarchy. The intended seam is value contracts and operations, not a shared runtime owner.
 
 ### Phase 2A: Make `SpatialScene` the Canonical Body Authority
 
-Progress: In progress (2026-08-16). Optional physical participation and focused
+Progress: Complete (2026-08-16). Optional physical participation and focused
 attach/detach/reconfigure operations are implemented. The separate entity-pose side store has been
 removed; registration, accepted movement, solver commits, suspension, reset, and removal now maintain
 coarse landblock membership from the canonical body pose. The client `SetState` path exercises the
-shared reversible transition. Focused membership/transition acceptance tests and the final stale-index
-audit remain before this phase is complete.
+shared reversible transition. Focused tests prove runtime and solved pose movement, removal cleanup,
+boundary landblocks, canonical range queries, physical replacement, and Explorer-style ephemeral
+camera/entity coexistence; the stale side-index and direct-mutation audits are clean.
 
 #### Deliverables
 
@@ -980,8 +985,19 @@ audit remain before this phase is complete.
   body would violate the invariant that every live dynamic entity has one canonical pose.
 - Landblock membership is derived inside `SpatialScene` from each accepted canonical body pose.
   Producer mutations no longer maintain a parallel pose/index choreography.
+- Canonical owner normalization exposed that the previous neighbor scan excluded coordinate-zero
+  landblocks and depended on an exact-key fallback to mask it. The scan now includes the full byte
+  range, and boundary coverage is retained as an acceptance fixture.
 
 ### Phase 2B: Land Explorer Registry and Lifecycle
+
+Progress: Complete (2026-08-16). The app-local `ExplorerEntityRegistry` owns bounded GUID
+allocation, monotonic instance generations, current source-neutral definitions, replacement, and
+reset. `ExplorerEntityRuntime` orders it over the existing `HostSimulationRuntime`, publishes only
+after body installation, joins solver facts only during projection, compensates failed same-GUID
+body replacement, and removes an exact generation once. Focused tests cover range reset/exhaustion,
+same-WCID independent spawns, pose-only and physical bodies, failed installation, replacement,
+late-generation rejection, despawn, and full reset.
 
 #### Deliverables
 
@@ -1008,7 +1024,16 @@ audit remain before this phase is complete.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Explorer GUIDs use an app-local bounded `0xF0000001..=0xFFFFFFFE` range. The range and allocator do
+  not enter shared contracts; focused tests inject a tiny range to prove exhaustion without an
+  artificial production limit.
+- Instance generations never reset, even when GUID allocation resets. A reused GUID therefore
+  cannot make work from a retired pre-reset instance current again.
+- Lifecycle lock order is registry then host simulation. Later fixed-tick adapters must check the
+  generation before and after the scene transaction and must not call the registry while the scene
+  lock is held; this prevents a registry/simulation lock inversion without adding a combined owner.
+- The registry retains no pose, participation, response, or collision state. Snapshot/projection
+  holds the semantic generation stable while reading the canonical body from host simulation.
 
 ### Phase 3: Compose the Catalog-Backed Explorer Host
 

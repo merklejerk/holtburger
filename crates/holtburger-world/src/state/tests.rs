@@ -3106,6 +3106,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
         entity_collision: crate::DynamicBodyCollisionDefinition {
             target_geometry: crate::PreparedEntityTargetGeometry {
                 physics_bsp_parts: Vec::new(),
+                fallback_setup_did: 0x0200_0001,
                 fallback_shapes: Vec::new(),
                 fallback_scale: holtburger_content::ColliderScale::uniform(1.0).unwrap(),
             },

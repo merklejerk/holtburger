@@ -7,12 +7,18 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_content::LandblockCollisionAsset;
-use holtburger_core::ContentAssetService;
+use holtburger_core::{
+    ContentAssetService, DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
+    DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
+    DynamicEntityProjectionInput, apply_dynamic_entity_physics_transition,
+    dynamic_entity_projection_input, install_dynamic_entity_body, remove_dynamic_entity_body,
+    replace_dynamic_entity_body,
+};
 use holtburger_world::{
-    CollisionScene, EdgeProtection, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
-    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, SpatialBody, SpatialBodyId,
-    SpatialScene,
+    CollisionScene, DynamicPhysicalBodyDefinition, EdgeProtection, EntityPhysicsTransitionDecision,
+    PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
+    PhysicalBodyTickResult, PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath,
+    PlacementRecovery, SpatialBody, SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 
@@ -262,6 +268,76 @@ impl HostSimulationRuntime {
             return Err(error);
         }
         Ok(body_id)
+    }
+
+    /// Installs one caller-identified dynamic entity into the canonical host body scene.
+    pub fn install_dynamic_entity(
+        &self,
+        definition: &DynamicEntityDefinition,
+        physical: Option<DynamicPhysicalBodyDefinition>,
+    ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        install_dynamic_entity_body(&mut state.bodies, definition, physical)
+    }
+
+    /// Replaces one same-GUID dynamic body while preserving the old body on failure.
+    pub fn replace_dynamic_entity(
+        &self,
+        definition: &DynamicEntityDefinition,
+        physical: Option<DynamicPhysicalBodyDefinition>,
+    ) -> Result<DynamicEntityBodyReplacementOutcome, DynamicEntityBodyOperationError> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        replace_dynamic_entity_body(&mut state.bodies, definition, physical)
+    }
+
+    /// Removes one caller-identified dynamic entity body from the canonical host scene.
+    pub fn remove_dynamic_entity(
+        &self,
+        body_id: SpatialBodyId,
+    ) -> Result<DynamicEntityBodyRemovalOutcome, DynamicEntityBodyOperationError> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        remove_dynamic_entity_body(&mut state.bodies, body_id)
+    }
+
+    /// Removes a complete registry-owned entity set after validating that every body exists.
+    pub fn remove_dynamic_entities(
+        &self,
+        body_ids: &[SpatialBodyId],
+    ) -> Result<Vec<DynamicEntityBodyRemovalOutcome>, DynamicEntityBodyOperationError> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        let mut unique = HashSet::with_capacity(body_ids.len());
+        for &body_id in body_ids {
+            if !unique.insert(body_id) || state.bodies.body(body_id).is_none() {
+                return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
+            }
+        }
+        Ok(body_ids
+            .iter()
+            .map(|&body_id| {
+                remove_dynamic_entity_body(&mut state.bodies, body_id)
+                    .expect("prevalidated body vanished while the host scene lock was held")
+            })
+            .collect())
+    }
+
+    /// Joins producer semantics with the current canonical body only at projection time.
+    pub fn project_dynamic_entity(
+        &self,
+        definition: &DynamicEntityDefinition,
+    ) -> Result<DynamicEntityProjectionInput, DynamicEntityBodyOperationError> {
+        let state = self.state.lock().expect("host simulation lock poisoned");
+        dynamic_entity_projection_input(definition, &state.bodies)
+    }
+
+    /// Applies one shared complete-state transition to an existing dynamic entity body.
+    pub fn apply_dynamic_entity_physics(
+        &self,
+        body_id: SpatialBodyId,
+        decision: EntityPhysicsTransitionDecision,
+        replacement: Option<DynamicPhysicalBodyDefinition>,
+    ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        apply_dynamic_entity_physics_transition(&mut state.bodies, body_id, decision, replacement)
     }
 
     /// Attaches a source-neutral physical definition.

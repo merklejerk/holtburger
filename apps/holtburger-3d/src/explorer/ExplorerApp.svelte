@@ -7,6 +7,7 @@
 	import { TauriParticleEmitterSource } from "../lib/assets/tauri-particle-emitter-source";
 	import { TauriSoundTableSource } from "../lib/assets/tauri-sound-table-source";
 	import { TauriParticleMeshSource } from "../lib/assets/tauri-particle-mesh-source";
+	import { TauriDynamicEntityVisualSource } from "../lib/assets/tauri-dynamic-entity-visual-source";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -751,6 +752,7 @@
 					TauriParticleEmitterSource.build(),
 					TauriSoundTableSource.build(),
 					TauriParticleMeshSource.build(),
+					new TauriDynamicEntityVisualSource(),
 					undefined,
 					// The Explorer is a development surface and its Frame panel reports tick
 					// timing; the thin client route passes nothing and pays nothing.

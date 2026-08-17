@@ -21,6 +21,7 @@ mod audio_source;
 mod behavior_hook_source;
 mod binary_source_record;
 pub mod cell_struct_projection;
+mod dynamic_entity_visual_source;
 mod env_cell_source;
 mod explorer_entity_delivery;
 pub mod explorer_entity_driver;
@@ -158,6 +159,13 @@ struct LoadParticleMeshesRequest {
     hw_gfx_obj_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadDynamicEntityVisualRequest {
+    setup_did: u32,
+    appearance: holtburger_world::EntityAppearance,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HostStatus {
@@ -236,6 +244,22 @@ async fn load_animation(
     let bytes = load_animation_bytes(&state.runtime, &request.animation_id)
         .await
         .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Loads one exact SetupModel appearance and its complete immutable render-resource closure.
+#[tauri::command]
+async fn load_dynamic_entity_visual(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadDynamicEntityVisualRequest,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes(
+        &state.runtime,
+        request.setup_did,
+        request.appearance,
+    )
+    .await
+    .map_err(format_error)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -1490,6 +1514,7 @@ pub fn run() {
             stop_physical_camera,
             load_active_region_data,
             load_animation,
+            load_dynamic_entity_visual,
             load_audio,
             load_sound_table,
             load_particle_emitter,

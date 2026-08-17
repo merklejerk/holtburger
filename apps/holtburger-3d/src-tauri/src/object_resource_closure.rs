@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
 use holtburger_common::Placement;
 use holtburger_content::{ResolvedMaterialRecipe, ResolvedMaterialSource};
-use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
+use holtburger_core::{
+    ContentAsset, ContentAssetRequest, ContentAssetRuntime, SetupAppearanceRequest,
+};
 use serde_json::{Value, json};
 
 use crate::{
@@ -23,7 +25,8 @@ use crate::{
 pub(crate) struct ObjectResourceClosure {
     pub(crate) buffers: StaticGeometryBuffers,
     pub(crate) definitions: Vec<Value>,
-    definition_ids: BTreeMap<u32, String>,
+    gfx_definition_ids: BTreeMap<u32, String>,
+    setup_definition_ids: HashMap<SetupAppearanceRequest, String>,
     pub(crate) geometries: Vec<Value>,
     geometry_ids: BTreeMap<u32, String>,
     pub(crate) materials: BTreeMap<String, Value>,
@@ -50,7 +53,7 @@ impl ObjectResourceClosure {
         runtime: &ContentAssetRuntime,
         gfx_obj_id: u32,
     ) -> Result<String> {
-        if let Some(existing) = self.definition_ids.get(&gfx_obj_id) {
+        if let Some(existing) = self.gfx_definition_ids.get(&gfx_obj_id) {
             return Ok(existing.clone());
         }
         let asset = runtime
@@ -70,7 +73,7 @@ impl ObjectResourceClosure {
             "geometryId": geometry_id,
             "materialIds": material_ids,
         }));
-        self.definition_ids.insert(gfx_obj_id, id.clone());
+        self.gfx_definition_ids.insert(gfx_obj_id, id.clone());
         Ok(id)
     }
 
@@ -79,9 +82,20 @@ impl ObjectResourceClosure {
         runtime: &ContentAssetRuntime,
         setup_model_id: u32,
     ) -> Result<String> {
-        if let Some(existing) = self.definition_ids.get(&setup_model_id) {
+        self.add_setup_model_appearance(runtime, SetupAppearanceRequest::base(setup_model_id))
+            .await
+    }
+
+    /// Add one exact SetupModel appearance, sharing its resource closure with sibling definitions.
+    pub(crate) async fn add_setup_model_appearance(
+        &mut self,
+        runtime: &ContentAssetRuntime,
+        request: SetupAppearanceRequest,
+    ) -> Result<String> {
+        if let Some(existing) = self.setup_definition_ids.get(&request) {
             return Ok(existing.clone());
         }
+        let setup_model_id = request.setup_model_id;
         let setup_asset = runtime
             .load(ContentAssetRequest::SetupModel(setup_model_id))
             .await?;
@@ -89,9 +103,7 @@ impl ObjectResourceClosure {
             unreachable!("SetupModel request must return a SetupModel")
         };
         let appearance_asset = runtime
-            .load(ContentAssetRequest::SetupAppearance(
-                holtburger_core::SetupAppearanceRequest::base(setup_model_id),
-            ))
+            .load(ContentAssetRequest::SetupAppearance(request.clone()))
             .await?;
         let ContentAsset::SetupAppearance(appearance) = appearance_asset else {
             unreachable!("SetupAppearance request must return a SetupAppearance")
@@ -127,7 +139,14 @@ impl ObjectResourceClosure {
                 "materialIds": material_ids,
             }));
         }
-        let id = format!("setup-model/{setup_model_id:08x}");
+        let id = if request.appearance.obj_desc.is_none() {
+            format!("setup-model/{setup_model_id:08x}")
+        } else {
+            format!(
+                "setup-model/{setup_model_id:08x}/{}",
+                appearance.appearance_key
+            )
+        };
         self.definitions.push(json!({
             "id": id,
             "kind": "setup-model",
@@ -143,7 +162,7 @@ impl ObjectResourceClosure {
             "defaultScriptTableId": setup_model.default_script_table.map(dat_id),
             "defaultSoundTableId": setup_model.default_sound_table.map(dat_id),
         }));
-        self.definition_ids.insert(setup_model_id, id.clone());
+        self.setup_definition_ids.insert(request, id.clone());
         Ok(id)
     }
 

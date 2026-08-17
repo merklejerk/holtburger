@@ -8,7 +8,7 @@ import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { EffectSystem } from "./effect-system";
 import { SoundTableRepository } from "../behavior/sound-table-repository";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
-import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
+import type { PlacedDynamicPresentationSource } from "./dynamic-presentation-source";
 import {
 	createObjectGeometryKey,
 	type GeometrySource,
@@ -23,6 +23,7 @@ import type {
 import { INCLUDE_ALL_SCENE_CULLING_GROUPS, SceneGraph } from "../scene";
 import type { DynamicPresentationSample } from "./animation-system";
 import { DynamicEntitySystem } from "./dynamic-entity-system";
+import { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system";
 import {
 	InlineObjectVisualTemplatePreparer,
 	ObjectVisualTemplateRepository,
@@ -57,14 +58,18 @@ describe("DynamicEntitySystem authored ownership", () => {
 	it("promotes a script-only resident and stages its behavior closure", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		// 0x330003d8 leads into the self-cycling 0x330003cc, so the closure spans two scripts.
-		const scriptOnly: AuthoredDynamicSource = {
-			...source("script-only"),
-			behavior: {
+		const base = source("script-only");
+		const scriptOnly: PlacedDynamicPresentationSource = {
+			...base,
+			source: {
+				...base.source,
+				behavior: {
 				animationId: null,
 				kind: "script-only",
 				physicsScriptId: "0x330003d8",
 				physicsScriptTableId: null,
 				soundTableId: null,
+				},
 			},
 		};
 
@@ -201,14 +206,20 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const installation = system.replaceOwner("layer", [
 			{
 				...shared,
-				identity: { kind: "authored", sourceId: "first" },
 				placement: { ...shared.placement, localTransform: firstPlacement },
-				scale: new Vec3(2, 3, 4),
+				source: {
+					...shared.source,
+					identity: "first",
+					scale: new Vec3(2, 3, 4),
+				},
 			},
 			{
 				...shared,
-				identity: { kind: "authored", sourceId: "second" },
-				scale: new Vec3(5, 6, 7),
+				source: {
+					...shared.source,
+					identity: "second",
+					scale: new Vec3(5, 6, 7),
+				},
 			},
 		]);
 
@@ -250,8 +261,8 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const shared = source("shared-translucency");
 		const installation = system.replaceOwner("layer", [
-			{ ...shared, identity: { kind: "authored", sourceId: "first" } },
-			{ ...shared, identity: { kind: "authored", sourceId: "second" } },
+			{ ...shared, source: { ...shared.source, identity: "first" } },
+			{ ...shared, source: { ...shared.source, identity: "second" } },
 		]);
 		expect(await installation.ready).toBe("ready");
 		const prepared = installation.getPreparedEntities();
@@ -312,13 +323,15 @@ describe("DynamicEntitySystem authored ownership", () => {
 			new FixtureAnimationSource(2),
 		);
 		const base = source("published-bounds", [0, 1]);
-		const firstPart = requiredAt(base.presentation.parts, 0);
-		const secondPart = requiredAt(base.presentation.parts, 1);
-		const boundedSource: AuthoredDynamicSource = {
+		const firstPart = requiredAt(base.source.presentation.parts, 0);
+		const secondPart = requiredAt(base.source.presentation.parts, 1);
+		const boundedSource: PlacedDynamicPresentationSource = {
 			...base,
-			presentation: {
-				...base.presentation,
-				parts: [
+			source: {
+				...base.source,
+				presentation: {
+					...base.source.presentation,
+					parts: [
 					{
 						...firstPart,
 						geometry: {
@@ -334,9 +347,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 							bounds: new AABB3(Vec3.zero(), new Vec3(1, 1, 1)),
 						},
 					},
-				],
+					],
+				},
+				scale: new Vec3(2, 3, 4),
 			},
-			scale: new Vec3(2, 3, 4),
 		};
 		const installation = system.replaceOwner("layer", [boundedSource]);
 		expect(await installation.ready).toBe("ready");
@@ -520,6 +534,7 @@ function createSystem(
 	);
 	const system = new DynamicEntitySystem<string>(
 		scene,
+		new DynamicEntityPlacementSystem(scene),
 		templates,
 		new AnimationAssetRepository(animationSource),
 		new PhysicsScriptRepository({
@@ -553,7 +568,7 @@ function createSystem(
 function source(
 	id: string,
 	partIndices: readonly number[] = [0],
-): AuthoredDynamicSource {
+): PlacedDynamicPresentationSource {
 	const presentation: ResolvedObjectPresentation = {
 		appearanceKey: `appearance:${id}`,
 		lights: [],
@@ -582,23 +597,25 @@ function source(
 		sourceAssetId: `setup-model/${id}`,
 	};
 	return {
-		behavior: {
-			animationId: "0x03000001",
-			kind: "animation-only",
-			physicsScriptId: null,
-			physicsScriptTableId: null,
-			soundTableId: null,
-		},
-		identity: { kind: "authored", sourceId: id },
-		localBounds: AABB3.zero(),
 		placement: {
 			envCellId: null,
 			landblockId: "0x0001ffff",
 			localTransform: Mat4.identity(),
 		},
-		presentation,
-		scale: new Vec3(1, 1, 1),
-		setupId: "0x02000001",
+		source: {
+			behavior: {
+				animationId: "0x03000001",
+				kind: "animation-only",
+				physicsScriptId: null,
+				physicsScriptTableId: null,
+				soundTableId: null,
+			},
+			identity: id,
+			localBounds: AABB3.zero(),
+			presentation,
+			scale: new Vec3(1, 1, 1),
+			setupId: "0x02000001",
+		},
 	};
 }
 
@@ -646,10 +663,10 @@ function prepared(id: string): ObjectVisualTemplate {
 	};
 	const visualSource = source(id);
 	return {
-		appearanceKey: visualSource.presentation.appearanceKey,
+		appearanceKey: visualSource.source.presentation.appearanceKey,
 		baseBounds: AABB3.zero(),
 		geometry: [geometrySource],
-		key: objectVisualTemplateKey(visualSource),
+		key: objectVisualTemplateKey(visualSource.source),
 		parts: [
 			{
 				defaultScale: new Vec3(1, 1, 1),

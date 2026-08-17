@@ -51,6 +51,12 @@ interface ScriptRecord {
 	runawayCount: number;
 }
 
+/** Fully validated replacement generation held outside active script clocks until commit. */
+export interface StagedPhysicsScriptOwner {
+	commit(): void;
+	release(): void;
+}
+
 export interface PhysicsScriptDiagnostics {
 	readonly activeOwnerCount: number;
 	readonly activeScriptCount: number;
@@ -106,29 +112,66 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			throw new Error("Cannot install into a destroyed physics script system.");
 		if (this.#records.has(target.targetId))
 			throw new Error(`Script state for ${target.targetId} already exists.`);
-		if (!Number.isFinite(timeSeconds))
-			throw new Error("Script activation time must be finite.");
-		const root = closure.scripts.get(closure.rootId);
-		if (!root)
-			throw new Error(
-				`Script closure for ${closure.rootId} does not contain its root.`,
-			);
-		this.#records.set(target.targetId, {
-			activations: [
-				{ nextRecordIndex: 0, script: root, startTime: timeSeconds },
-			],
-			closure,
-			lastTimeSeconds: timeSeconds,
-			pending: [],
-			runawayCount: 0,
-			target,
-		});
+		this.#records.set(
+			target.targetId,
+			createScriptRecord(target, closure, timeSeconds),
+		);
 		let targets = this.#owners.get(ownerId);
 		if (!targets) {
 			targets = new Set();
 			this.#owners.set(ownerId, targets);
 		}
 		targets.add(target.targetId);
+	}
+
+	/** Stage a complete owner replacement without dispatching against unpublished targets. */
+	stageOwner(
+		ownerId: TOwnerId,
+		installations: readonly {
+			readonly target: BehaviorTarget;
+			readonly closure: PreparedPhysicsScriptClosure;
+			readonly timeSeconds: number;
+		}[],
+	): StagedPhysicsScriptOwner {
+		if (this.#destroyed)
+			throw new Error("Cannot stage into a destroyed physics script system.");
+		const records = new Map<BehaviorTargetId, ScriptRecord>();
+		for (const installation of installations) {
+			if (
+				records.has(installation.target.targetId) ||
+				this.#records.has(installation.target.targetId)
+			) {
+				throw new Error(
+					`Script state for ${installation.target.targetId} already exists.`,
+				);
+			}
+			records.set(
+				installation.target.targetId,
+				createScriptRecord(
+					installation.target,
+					installation.closure,
+					installation.timeSeconds,
+				),
+			);
+		}
+		let state: "staged" | "committed" | "released" = "staged";
+		return {
+			commit: () => {
+				if (state !== "staged")
+					throw new Error(`Cannot commit script stage in state ${state}.`);
+				if (this.#destroyed)
+					throw new Error("Cannot commit into a destroyed physics script system.");
+				this.removeOwner(ownerId);
+				for (const [targetId, record] of records)
+					this.#records.set(targetId, record);
+				if (records.size > 0)
+					this.#owners.set(ownerId, new Set(records.keys()));
+				state = "committed";
+			},
+			release: () => {
+				if (state === "staged") state = "released";
+			},
+		};
 	}
 
 	/** Whether this system still holds the exact target and generation a command targets. */
@@ -374,4 +417,26 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		}
 		return latest ?? record.lastTimeSeconds ?? 0;
 	}
+}
+
+function createScriptRecord(
+	target: BehaviorTarget,
+	closure: PreparedPhysicsScriptClosure,
+	timeSeconds: number,
+): ScriptRecord {
+	if (!Number.isFinite(timeSeconds))
+		throw new Error("Script activation time must be finite.");
+	const root = closure.scripts.get(closure.rootId);
+	if (!root)
+		throw new Error(
+			`Script closure for ${closure.rootId} does not contain its root.`,
+		);
+	return {
+		activations: [{ nextRecordIndex: 0, script: root, startTime: timeSeconds }],
+		closure,
+		lastTimeSeconds: timeSeconds,
+		pending: [],
+		runawayCount: 0,
+		target,
+	};
 }

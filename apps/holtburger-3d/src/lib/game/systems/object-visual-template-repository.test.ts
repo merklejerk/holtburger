@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
+import type { DynamicPresentationSource } from "./dynamic-presentation-source";
 import type { GeometrySource } from "../geometry/types";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
@@ -78,7 +78,7 @@ describe("ObjectVisualTemplateRepository", () => {
 			atlas,
 		);
 		const base = source("textured", "appearance:textured");
-		const visual: AuthoredDynamicSource = {
+		const visual: DynamicPresentationSource = {
 			...base,
 			presentation: {
 				...base.presentation,
@@ -279,7 +279,7 @@ function createRepository(
 	return new ObjectVisualTemplateRepository(geometry, atlas, preparer);
 }
 
-function source(id: string, appearanceKey: string): AuthoredDynamicSource {
+function source(id: string, appearanceKey: string): DynamicPresentationSource {
 	return {
 		behavior: {
 			animationId: "0x03000001",
@@ -288,13 +288,8 @@ function source(id: string, appearanceKey: string): AuthoredDynamicSource {
 			physicsScriptTableId: null,
 			soundTableId: null,
 		},
-		identity: { kind: "authored", sourceId: id },
+		identity: id,
 		localBounds: AABB3.zero(),
-		placement: {
-			envCellId: null,
-			landblockId: "0x0001ffff",
-			localTransform: Mat4.identity(),
-		},
 		presentation: {
 			appearanceKey,
 			lights: [],
@@ -368,7 +363,7 @@ class CountingPreparer implements ObjectVisualTemplatePreparer {
 	readonly #inline = new InlineObjectVisualTemplatePreparer();
 	count = 0;
 
-	prepare(source: AuthoredDynamicSource): Promise<ObjectVisualTemplate> {
+	prepare(source: DynamicPresentationSource): Promise<ObjectVisualTemplate> {
 		this.count += 1;
 		return this.#inline.prepare(source);
 	}

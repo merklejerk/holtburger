@@ -10,10 +10,14 @@ import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository"
 import type { EffectSystem } from "./effect-system";
 import type { SoundTableRepository } from "../behavior/sound-table-repository";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
-import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
+import type {
+	DynamicPresentationSource,
+	PlacedDynamicPresentationSource,
+} from "./dynamic-presentation-source";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
 import type { SceneGraph, SceneNodeId } from "../scene";
+import type { ScenePlacement } from "../scene";
 import { scopeKey } from "../scene/scope";
 import {
 	resolveObjectPresentationBounds,
@@ -42,12 +46,21 @@ import {
 	prepareDynamicAnimation,
 	type PreparedDynamicAnimation,
 } from "../animation/prepared-dynamic-animation";
+import type { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system";
+
+/** Presentation-owned consequences of one complete producer physics-state projection. */
+export interface DynamicEntityPresentationState {
+	readonly noDraw: boolean;
+	readonly hidden: boolean;
+	readonly cloaked: boolean;
+	readonly lighting: boolean;
+}
 
 interface DynamicEntityRecord {
 	readonly rootNodeId: SceneNodeId;
 	readonly visualRootNodeId: SceneNodeId;
-	/** Closed authored source retained for animation staging and deterministic phase identity. */
-	readonly source: AuthoredDynamicSource;
+	/** Source-neutral visual facts retained for behavior staging and deterministic phase identity. */
+	readonly source: DynamicPresentationSource;
 	renderable: DynamicEntityRenderable;
 	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
@@ -78,6 +91,7 @@ interface DynamicEntityRecord {
 	cullingBounds: AABB3 | null;
 	/** Envelope already folded into both culling bounds, so a change republishes them. */
 	appliedEnvelopeRadius: number;
+	presentationState: DynamicEntityPresentationState;
 }
 
 interface DynamicOwnerRecord<TTemplateOwnerId extends string> {
@@ -121,7 +135,7 @@ interface StagedBehaviorAssets {
 interface PreparedDynamicEntity {
 	readonly animation: PreparedDynamicAnimation;
 	readonly nodeId: SceneNodeId;
-	readonly source: AuthoredDynamicSource;
+	readonly source: DynamicPresentationSource;
 	/** Staged script closure, or `null` for a resident whose setup owns no default script. */
 	readonly scriptClosure: PreparedPhysicsScriptClosure | null;
 	/** The resident's installed sound table, or `null` when its setup installs none. */
@@ -134,6 +148,7 @@ export class DynamicEntitySystem<
 	TTemplateOwnerId extends string = TOwnerId,
 > {
 	readonly #scene: SceneGraph;
+	readonly #placements: DynamicEntityPlacementSystem;
 	readonly #templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>;
 	readonly #animations: AnimationAssetRepository;
 	readonly #scripts: PhysicsScriptRepository;
@@ -169,6 +184,7 @@ export class DynamicEntitySystem<
 
 	constructor(
 		scene: SceneGraph,
+		placements: DynamicEntityPlacementSystem,
 		templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>,
 		animations: AnimationAssetRepository,
 		scripts: PhysicsScriptRepository,
@@ -189,6 +205,7 @@ export class DynamicEntitySystem<
 		particleEnvelopeRadiusOf: (nodeId: SceneNodeId) => number,
 	) {
 		this.#scene = scene;
+		this.#placements = placements;
 		this.#templates = templates;
 		this.#animations = animations;
 		this.#scripts = scripts;
@@ -199,23 +216,26 @@ export class DynamicEntitySystem<
 		this.#particleEnvelopeRadiusOf = particleEnvelopeRadiusOf;
 	}
 
-	/** Replace one authored layer's complete promoted population as a single owner generation. */
+	/** Replace one producer's complete dynamic population as a single owner generation. */
 	replaceOwner(
 		ownerId: TOwnerId,
-		sources: readonly AuthoredDynamicSource[],
+		placedSources: readonly PlacedDynamicPresentationSource[],
 	): DynamicOwnerInstallation {
 		if (this.#destroyed)
 			throw new Error("Cannot install a destroyed dynamic system.");
 		const entities: DynamicEntityRecord[] = [];
 		try {
-			for (const source of sources) entities.push(this.#createEntity(source));
+			for (const source of placedSources)
+				entities.push(this.#createEntity(source));
 		} catch (cause) {
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			throw cause;
 		}
 		let templatePreparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>;
 		try {
-			templatePreparation = this.#templates.stageOwner(sources);
+			templatePreparation = this.#templates.stageOwner(
+				placedSources.map(({ source }) => source),
+			);
 		} catch (cause) {
 			for (const entity of entities) this.#destroyEntityTree(entity);
 			throw cause;
@@ -319,15 +339,14 @@ export class DynamicEntitySystem<
 		};
 	}
 
-	#createEntity(resident: AuthoredDynamicSource): DynamicEntityRecord {
-		const rootNodeId = this.#scene.createNode({
-			...resident.placement,
-			cullingGroup: "dynamic",
+	#createEntity(resident: PlacedDynamicPresentationSource): DynamicEntityRecord {
+		const source = resident.source;
+		const rootNodeId = this.#placements.createRoot(
+			resident.placement,
 			// The staged generation publishes conservative bounds with playback activation.
-			localBounds: null,
-			parentId: null,
-		});
-		const pose = defaultPose(resident.presentation);
+			null,
+		);
+		const pose = defaultPose(source.presentation);
 		let parts: readonly ActiveDynamicPart[];
 		const visualRootNodeId = this.#scene.createNode({
 			localBounds: null,
@@ -338,9 +357,9 @@ export class DynamicEntitySystem<
 			parts = createActiveParts(
 				this.#scene,
 				visualRootNodeId,
-				resident.presentation,
+				source.presentation,
 				pose,
-				resident.scale,
+				source.scale,
 			);
 		} catch (cause) {
 			this.#scene.destroyNode(visualRootNodeId);
@@ -355,11 +374,17 @@ export class DynamicEntitySystem<
 			articulatedPose: pose,
 			renderable: { parts },
 			rootNodeId,
-			source: resident,
+			source,
 			preparedAnimation: null,
-			publishedPresentationBounds: staticPresentationBounds(resident),
+			publishedPresentationBounds: staticPresentationBounds(source),
 			cullingBounds: null,
 			appliedEnvelopeRadius: 0,
+			presentationState: {
+				cloaked: false,
+				hidden: false,
+				lighting: false,
+				noDraw: false,
+			},
 			visualRootNodeId,
 		};
 		return record;
@@ -409,6 +434,8 @@ export class DynamicEntitySystem<
 	): readonly VisibleRigidPartContribution[] | null {
 		const entity = this.#entities.get(nodeId);
 		if (!entity) return null;
+		if (entity.presentationState.noDraw || entity.presentationState.hidden)
+			return [];
 		return entity.renderable.parts.flatMap((part) => {
 			const translucency = part.renderState.translucency;
 			// Retail sets the skip-draw bit only at exactly full translucency.
@@ -441,12 +468,29 @@ export class DynamicEntitySystem<
 						ordering === "transparent"
 							? {
 									center: activeDrawUnit.transparentSortCenter,
-									stableId: `${entity.source.identity.sourceId}/part:${part.partIndex}/${drawUnit.batchKey}`,
+									stableId: `${entity.source.identity}/part:${part.partIndex}/${drawUnit.batchKey}`,
 								}
 							: null,
 				};
 			});
 		});
+	}
+
+	/** Apply one complete producer placement through the sole dynamic-root writer. */
+	updatePlacement(nodeId: SceneNodeId, placement: ScenePlacement): void {
+		if (!this.#entities.has(nodeId))
+			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		this.#placements.updateRoot(nodeId, placement);
+	}
+
+	/** Replace presentation-only physics consequences without rebuilding entity resources. */
+	updatePresentationState(
+		nodeId: SceneNodeId,
+		state: DynamicEntityPresentationState,
+	): void {
+		const entity = this.#entities.get(nodeId);
+		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		entity.presentationState = state;
 	}
 
 	/** Inspect complete preparation without exposing repository handles or mutable staging state. */
@@ -690,19 +734,19 @@ export class DynamicEntitySystem<
 				const template = templates.get(objectVisualTemplateKey(entity.source));
 				if (!template) {
 					throw new Error(
-						`Visual template for ${entity.source.identity.sourceId} was not prepared.`,
+						`Visual template for ${entity.source.identity} was not prepared.`,
 					);
 				}
 				const animationResult = animationResults[index];
 				if (animationResult?.status !== "fulfilled") {
 					throw new Error(
-						`Animation for ${entity.source.identity.sourceId} settled without a result.`,
+						`Animation for ${entity.source.identity} settled without a result.`,
 					);
 				}
 				const scriptResult = scriptResults[index];
 				if (scriptResult?.status !== "fulfilled") {
 					throw new Error(
-						`Script closure for ${entity.source.identity.sourceId} settled without a result.`,
+						`Script closure for ${entity.source.identity} settled without a result.`,
 					);
 				}
 
@@ -830,11 +874,15 @@ export class DynamicEntitySystem<
 		const updatedParts = entity.renderable.parts.map((part) => {
 			const transform =
 				sample.articulatedPose.partToObjectTransforms[part.partIndex];
-			const renderState = sample.effects.partRenderStates[part.partIndex];
-			if (!transform || !renderState)
+			const sampledRenderState =
+				sample.effects.partRenderStates[part.partIndex];
+			if (!transform || !sampledRenderState)
 				throw new Error(
 					`Dynamic entity ${entity.rootNodeId} has an incomplete presentation for part ${part.partIndex}.`,
 				);
+			const renderState = entity.presentationState.cloaked
+				? part.renderState
+				: sampledRenderState;
 			return { part, renderState, transform };
 		});
 		const publishedPresentationBounds = expandBounds(
@@ -903,11 +951,11 @@ export class DynamicEntitySystem<
 			this.#scene.destroyNode(part.nodeId);
 		}
 		this.#scene.destroyNode(entity.visualRootNodeId);
-		this.#scene.destroyNode(entity.rootNodeId);
+		this.#placements.destroyRoot(entity.rootNodeId);
 	}
 }
 
-function staticPresentationBounds(source: AuthoredDynamicSource) {
+function staticPresentationBounds(source: DynamicPresentationSource) {
 	const pose = defaultPose(source.presentation);
 	const bounds = resolveObjectPresentationBounds(
 		source.presentation.parts,

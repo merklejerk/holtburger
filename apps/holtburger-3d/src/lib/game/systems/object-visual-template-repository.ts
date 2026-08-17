@@ -1,4 +1,4 @@
-import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
+import type { DynamicPresentationSource } from "./dynamic-presentation-source";
 import {
 	createObjectGeometryKey,
 	type GeometrySource,
@@ -43,13 +43,13 @@ export interface PartVisualTemplate {
 
 /** CPU-heavy visual preparation boundary injected into the sharing/lifetime manager. */
 export interface ObjectVisualTemplatePreparer {
-	prepare(source: AuthoredDynamicSource): Promise<ObjectVisualTemplate>;
+	prepare(source: DynamicPresentationSource): Promise<ObjectVisualTemplate>;
 	destroy(): Promise<void>;
 }
 
 /** Main-thread preparer used until visual-template work moves behind a worker boundary. */
 export class InlineObjectVisualTemplatePreparer implements ObjectVisualTemplatePreparer {
-	async prepare(source: AuthoredDynamicSource): Promise<ObjectVisualTemplate> {
+	async prepare(source: DynamicPresentationSource): Promise<ObjectVisualTemplate> {
 		return prepareObjectVisualTemplate(source);
 	}
 
@@ -98,7 +98,7 @@ export interface ObjectVisualTemplateRepositoryDiagnostics {
 /** Dynamic-system boundary independent of the repository's concrete atlas claim type. */
 export interface ObjectVisualTemplateRepositoryPort<TOwnerId extends string> {
 	stageOwner(
-		sources: readonly AuthoredDynamicSource[],
+		sources: readonly DynamicPresentationSource[],
 	): StagedObjectVisualTemplateOwner<TOwnerId>;
 	dropOwner(ownerId: TOwnerId): void;
 	getDiagnostics(): ObjectVisualTemplateRepositoryDiagnostics;
@@ -174,13 +174,13 @@ export class ObjectVisualTemplateRepository<
 
 	/** Prepare and share an exact template set without changing any committed owner. */
 	stageOwner(
-		sources: readonly AuthoredDynamicSource[],
+		sources: readonly DynamicPresentationSource[],
 	): StagedObjectVisualTemplateOwner<TOwnerId> {
 		if (this.#destroyed)
 			throw new Error("Cannot prepare templates with a destroyed repository.");
 		const requirements = new Map<
 			ObjectVisualTemplateKey,
-			{ readonly fingerprint: string; readonly source: AuthoredDynamicSource }
+			{ readonly fingerprint: string; readonly source: DynamicPresentationSource }
 		>();
 		for (const source of sources) {
 			const key = objectVisualTemplateKey(source);
@@ -287,7 +287,7 @@ export class ObjectVisualTemplateRepository<
 	#startEntry(
 		key: ObjectVisualTemplateKey,
 		fingerprint: string,
-		source: AuthoredDynamicSource,
+		source: DynamicPresentationSource,
 	): TemplateEntry<TOwnerId, TClaim> {
 		const entry: TemplateEntry<TOwnerId, TClaim> = {
 			fingerprint,
@@ -304,7 +304,7 @@ export class ObjectVisualTemplateRepository<
 
 	async #prepareEntry(
 		entry: TemplateEntry<TOwnerId, TClaim>,
-		source: AuthoredDynamicSource,
+		source: DynamicPresentationSource,
 	): Promise<ObjectVisualTemplate> {
 		let atlasClaim: TClaim | null = null;
 		let geometryRetained = false;
@@ -513,7 +513,7 @@ function objectVisualTemplateResourceOwnerId(
 
 /** Derive canonical template identity exclusively from immutable resolved content facts. */
 export function objectVisualTemplateKey(
-	source: AuthoredDynamicSource,
+	source: DynamicPresentationSource,
 ): ObjectVisualTemplateKey {
 	return `object-visual-template:${source.setupId}/${source.presentation.appearanceKey}` as ObjectVisualTemplateKey;
 }
@@ -526,7 +526,7 @@ function partVisualTemplateKey(
 }
 
 function prepareObjectVisualTemplate(
-	source: AuthoredDynamicSource,
+	source: DynamicPresentationSource,
 ): ObjectVisualTemplate {
 	const key = objectVisualTemplateKey(source);
 	const textureRequirements = new Map<AssetTextureKey, AssetTextureFact>();
@@ -601,7 +601,7 @@ function objectGeometryData(part: ResolvedObjectPart): ObjectGeometryData {
 	};
 }
 
-function sourceFingerprint(source: AuthoredDynamicSource): string {
+function sourceFingerprint(source: DynamicPresentationSource): string {
 	return JSON.stringify({
 		appearanceKey: source.presentation.appearanceKey,
 		parts: source.presentation.parts.map((part) => ({

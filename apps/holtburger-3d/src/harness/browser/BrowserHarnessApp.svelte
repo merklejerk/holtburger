@@ -843,6 +843,7 @@
 					contentSource,
 					contentSource,
 					contentSource,
+					null,
 					PARTICLE_SEED === null
 						? undefined
 						: seededRoll(Number(PARTICLE_SEED)),

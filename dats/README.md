@@ -22,7 +22,8 @@ It remains a separate host-only flat file rather than an HBA namespace. Generate
 atomically with:
 
 ```bash
-cargo run -p holtburger-tools --bin export-weenie-catalog -- \
+cargo run -p holtburger-tools --features weenie-catalog-export \
+	--bin export-weenie-catalog -- \
 	--database-url-env ACE_WORLD_SQL_URL \
 	--provenance <ACE-World-revision-or-operator-label>
 ```

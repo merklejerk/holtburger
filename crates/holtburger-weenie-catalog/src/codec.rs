@@ -619,3 +619,23 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, CodecError> {
         value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
     ]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_string_and_collection_limits_have_reachable_rejections() {
+        let string_error = validate_string(&"x".repeat(MAX_STRING_BYTES + 1), "class_name")
+            .expect_err("oversized source string must fail");
+        assert!(string_error.to_string().contains("field class_name"));
+
+        let count_error = validate_count(MAX_COLLECTION_ENTRIES + 1, "texture_changes")
+            .expect_err("oversized source collection must fail");
+        assert!(
+            count_error
+                .to_string()
+                .contains("collection texture_changes")
+        );
+    }
+}

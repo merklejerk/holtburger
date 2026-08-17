@@ -669,6 +669,20 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_wcid_is_rejected_before_properties_are_projected() {
+        let mut rows = base_rows();
+        rows.weenies.push(WeenieRow {
+            wcid: 42,
+            class_name: "duplicate".to_owned(),
+            weenie_type: 10,
+        });
+
+        let error = project_rows(rows).unwrap_err();
+
+        assert_eq!(error, ProjectionError::DuplicateWcid { wcid: 42 });
+    }
+
+    #[test]
     fn duplicate_scalar_is_rejected_without_map_overwrite() {
         let mut rows = base_rows();
         rows.dids.extend([
@@ -718,6 +732,99 @@ mod tests {
     }
 
     #[test]
+    fn nonfinite_database_float_is_rejected_before_catalog_encoding() {
+        let mut rows = base_rows();
+        rows.floats.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_FLOAT_FRICTION,
+            value: f64::INFINITY,
+        });
+
+        let error = project_rows(rows).unwrap_err();
+
+        assert_eq!(
+            error,
+            ProjectionError::NonFiniteFloat {
+                wcid: 42,
+                property_type: PROPERTY_FLOAT_FRICTION,
+            }
+        );
+    }
+
+    #[test]
+    fn every_selected_scalar_table_rejects_an_unexpected_property_type() {
+        let mut did_rows = base_rows();
+        did_rows.dids.push(ScalarRow {
+            wcid: 42,
+            property_type: u16::MAX,
+            value: 1,
+        });
+        assert!(matches!(
+            project_rows(did_rows),
+            Err(ProjectionError::UnexpectedProperty {
+                table: "weenie_properties_d_i_d",
+                ..
+            })
+        ));
+
+        let mut float_rows = base_rows();
+        float_rows.floats.push(ScalarRow {
+            wcid: 42,
+            property_type: u16::MAX,
+            value: 1.0,
+        });
+        assert!(matches!(
+            project_rows(float_rows),
+            Err(ProjectionError::UnexpectedProperty {
+                table: "weenie_properties_float",
+                ..
+            })
+        ));
+
+        let mut int_rows = base_rows();
+        int_rows.ints.push(ScalarRow {
+            wcid: 42,
+            property_type: u16::MAX,
+            value: 1,
+        });
+        assert!(matches!(
+            project_rows(int_rows),
+            Err(ProjectionError::UnexpectedProperty {
+                table: "weenie_properties_int",
+                ..
+            })
+        ));
+
+        let mut string_rows = base_rows();
+        string_rows.strings.push(ScalarRow {
+            wcid: 42,
+            property_type: u16::MAX,
+            value: "unexpected".to_owned(),
+        });
+        assert!(matches!(
+            project_rows(string_rows),
+            Err(ProjectionError::UnexpectedProperty {
+                table: "weenie_properties_string",
+                ..
+            })
+        ));
+
+        let mut bool_rows = base_rows();
+        bool_rows.bools.push(ScalarRow {
+            wcid: 42,
+            property_type: u16::MAX,
+            value: 1,
+        });
+        assert!(matches!(
+            project_rows(bool_rows),
+            Err(ProjectionError::UnexpectedProperty {
+                table: "weenie_properties_bool",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn orphan_property_is_rejected() {
         let mut rows = base_rows();
         rows.strings.push(ScalarRow {
@@ -738,24 +845,75 @@ mod tests {
     }
 
     #[test]
-    fn wide_part_index_is_rejected_with_source_table() {
-        let mut rows = base_rows();
-        rows.anim_parts.push(AnimPartRow {
+    fn wide_part_indexes_are_rejected_with_each_source_table() {
+        let mut texture_rows = base_rows();
+        texture_rows.textures.push(TextureRow {
+            wcid: 42,
+            part_index: 256,
+            old_texture_did: 1,
+            new_texture_did: 2,
+        });
+        assert!(matches!(
+            project_rows(texture_rows),
+            Err(ProjectionError::ValueOutOfRange {
+                wcid: 42,
+                table: "weenie_properties_texture_map",
+                field: "part_index",
+                ..
+            })
+        ));
+
+        let mut anim_rows = base_rows();
+        anim_rows.anim_parts.push(AnimPartRow {
             wcid: 42,
             part_index: 256,
             animation_part_did: 1,
         });
-
-        let error = project_rows(rows).unwrap_err();
-
         assert!(matches!(
-            error,
-            ProjectionError::ValueOutOfRange {
+            project_rows(anim_rows),
+            Err(ProjectionError::ValueOutOfRange {
                 wcid: 42,
                 table: "weenie_properties_anim_part",
                 field: "part_index",
                 ..
-            }
+            })
+        ));
+    }
+
+    #[test]
+    fn wide_palette_ranges_reject_offset_and_length_independently() {
+        let mut offset_rows = base_rows();
+        offset_rows.palettes.push(PaletteRow {
+            wcid: 42,
+            sub_palette_did: 1,
+            offset: u32::from(u16::MAX) + 1,
+            length: 1,
+        });
+        assert!(matches!(
+            project_rows(offset_rows),
+            Err(ProjectionError::ValueOutOfRange {
+                wcid: 42,
+                table: "weenie_properties_palette",
+                field: "offset",
+                ..
+            })
+        ));
+
+        let mut length_rows = base_rows();
+        length_rows.palettes.push(PaletteRow {
+            wcid: 42,
+            sub_palette_did: 1,
+            offset: 1,
+            length: u32::from(u16::MAX) + 1,
+        });
+        assert!(matches!(
+            project_rows(length_rows),
+            Err(ProjectionError::ValueOutOfRange {
+                wcid: 42,
+                table: "weenie_properties_palette",
+                field: "length",
+                ..
+            })
         ));
     }
 
@@ -785,6 +943,53 @@ mod tests {
                 wcid: 42,
                 collection: "texture_changes"
             }
+        ));
+    }
+
+    #[test]
+    fn duplicate_palette_and_animation_keys_are_rejected() {
+        let mut palette_rows = base_rows();
+        palette_rows.palettes.extend([
+            PaletteRow {
+                wcid: 42,
+                sub_palette_did: 1,
+                offset: 2,
+                length: 3,
+            },
+            PaletteRow {
+                wcid: 42,
+                sub_palette_did: 1,
+                offset: 2,
+                length: 3,
+            },
+        ]);
+        assert!(matches!(
+            project_rows(palette_rows),
+            Err(ProjectionError::DuplicateAppearanceKey {
+                wcid: 42,
+                collection: "sub_palettes"
+            })
+        ));
+
+        let mut anim_rows = base_rows();
+        anim_rows.anim_parts.extend([
+            AnimPartRow {
+                wcid: 42,
+                part_index: 1,
+                animation_part_did: 2,
+            },
+            AnimPartRow {
+                wcid: 42,
+                part_index: 1,
+                animation_part_did: 3,
+            },
+        ]);
+        assert!(matches!(
+            project_rows(anim_rows),
+            Err(ProjectionError::DuplicateAppearanceKey {
+                wcid: 42,
+                collection: "anim_part_changes"
+            })
         ));
     }
 }

@@ -68,6 +68,8 @@ function voiceGains(gains: FakeParam[], voiceIndex: number) {
 const FULL_PAN_SHADOW = 10 ** (-15 / 20);
 
 const SMOOTHING = 0.02;
+/** Identity contour: tests reason in retail-linear gain unless shaping is the subject. */
+const LINEAR = 1;
 
 function fakeSource(): AudioAssetSource & { loads: DatAssetId[] } {
 	const loads: DatAssetId[] = [];
@@ -85,7 +87,7 @@ describe("WebAudioDevice", () => {
 	it("skips an undecoded sound and starts its decode for later", async () => {
 		const { context, started } = fakeContext();
 		const source = fakeSource();
-		const device = new WebAudioDevice(context, source, SMOOTHING);
+		const device = new WebAudioDevice(context, source, SMOOTHING, LINEAR);
 
 		// Playing an ambient one-shot late is worse than not playing it, so the first call skips.
 		expect(device.playOneShot(SOUND, 1, 0)).toBeNull();
@@ -99,7 +101,7 @@ describe("WebAudioDevice", () => {
 	it("decodes each sound exactly once across concurrent requests", async () => {
 		const { context } = fakeContext();
 		const source = fakeSource();
-		const device = new WebAudioDevice(context, source, SMOOTHING);
+		const device = new WebAudioDevice(context, source, SMOOTHING, LINEAR);
 
 		await Promise.all([device.prepare(SOUND), device.prepare(SOUND)]);
 		await device.prepare(SOUND);
@@ -109,7 +111,7 @@ describe("WebAudioDevice", () => {
 
 	it("tolerates stopping a voice that already ended", async () => {
 		const { context } = fakeContext();
-		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
 		await device.prepare(SOUND);
 		const voice = device.playOneShot(SOUND, 1, 0)!;
 
@@ -120,7 +122,7 @@ describe("WebAudioDevice", () => {
 
 	it("steers a live voice through setTargetAtTime rather than stepping the params", async () => {
 		const { context, gains } = fakeContext();
-		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
 		await device.prepare(SOUND);
 		const voice = device.playOneShot(SOUND, 1, 0)!;
 
@@ -143,7 +145,7 @@ describe("WebAudioDevice", () => {
 		// RETAIL QUIRK: DirectSound pan attenuates the far channel only; centred means no
 		// attenuation anywhere, not the -3 dB per ear an equal-power panner would apply.
 		const { context, gains } = fakeContext();
-		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
 		await device.prepare(SOUND);
 		device.playOneShot(SOUND, 0.8, 0)!;
 
@@ -155,7 +157,7 @@ describe("WebAudioDevice", () => {
 
 	it("keeps the far ear at a 15 dB shadow at full pan instead of silencing it", async () => {
 		const { context, gains } = fakeContext();
-		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
 		await device.prepare(SOUND);
 		device.playOneShot(SOUND, 1, 1)!;
 
@@ -168,7 +170,7 @@ describe("WebAudioDevice", () => {
 
 	it("ignores placement on a voice that ended or was stopped", async () => {
 		const { context, gains, started } = fakeContext();
-		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
 		await device.prepare(SOUND);
 
 		const ended = device.playOneShot(SOUND, 1, 0)!;
@@ -186,14 +188,38 @@ describe("WebAudioDevice", () => {
 
 	it("rejects a non-positive smoothing constant", () => {
 		const { context } = fakeContext();
-		expect(() => new WebAudioDevice(context, fakeSource(), 0)).toThrow(
+		expect(() => new WebAudioDevice(context, fakeSource(), 0, LINEAR)).toThrow(
 			"positive duration",
 		);
 	});
 
+	it("rejects a non-positive loudness curve exponent", () => {
+		const { context } = fakeContext();
+		expect(
+			() => new WebAudioDevice(context, fakeSource(), SMOOTHING, 0),
+		).toThrow("must be positive");
+	});
+
+	it("shapes gain through the loudness contour, at start and when steered", async () => {
+		// RETAIL DIVERGENCE (see frontend-tuning): exponent < 1 lifts quiet gains toward the mids
+		// with fixed points at 0 and 1; the channel shadow stays dB-exact retail pan law.
+		const { context, gains } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, 0.5);
+		await device.prepare(SOUND);
+		const voice = device.playOneShot(SOUND, 0.04, 1)!;
+
+		const { left, master, right } = voiceGains(gains, 0);
+		expect(master.value).toBeCloseTo(0.2);
+		expect(right.value).toBe(1);
+		expect(left.value).toBeCloseTo(FULL_PAN_SHADOW);
+
+		voice.setPlacement(0.25, 1);
+		expect(master.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
+	});
+
 	it("refuses playback after destruction", async () => {
 		const { context } = fakeContext();
-		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
 		await device.prepare(SOUND);
 
 		device.destroy();

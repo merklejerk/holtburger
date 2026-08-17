@@ -51,6 +51,7 @@ export class WebAudioDevice implements AudioDevice {
 	readonly #context: AudioContext;
 	readonly #source: AudioAssetSource;
 	readonly #placementSmoothingSeconds: number;
+	readonly #loudnessCurveExponent: number;
 	readonly #buffers = new Map<DatAssetId, AudioBuffer>();
 	readonly #pending = new Set<DatAssetId>();
 	#destroyed = false;
@@ -59,13 +60,28 @@ export class WebAudioDevice implements AudioDevice {
 		context: AudioContext,
 		source: AudioAssetSource,
 		placementSmoothingSeconds: number,
+		loudnessCurveExponent: number,
 	) {
 		if (!(placementSmoothingSeconds > 0)) {
 			throw new Error("Placement smoothing must be a positive duration.");
 		}
+		if (!(loudnessCurveExponent > 0)) {
+			throw new Error("Loudness curve exponent must be positive.");
+		}
 		this.#context = context;
 		this.#source = source;
 		this.#placementSmoothingSeconds = placementSmoothingSeconds;
+		this.#loudnessCurveExponent = loudnessCurveExponent;
+	}
+
+	/**
+	 * Presentation loudness contour over the retail-linear gain (see the tuning constant).
+	 *
+	 * Applied at the last moment before the param write, so game policy — the audibility floor,
+	 * diagnostics, steal decisions — all reason in unshaped retail gain.
+	 */
+	#shapeGain(gain: number): number {
+		return gain ** this.#loudnessCurveExponent;
 	}
 
 	playOneShot(
@@ -82,7 +98,7 @@ export class WebAudioDevice implements AudioDevice {
 		const source = this.#context.createBufferSource();
 		source.buffer = buffer;
 		const gainNode = this.#context.createGain();
-		gainNode.gain.value = gain;
+		gainNode.gain.value = this.#shapeGain(gain);
 		// Retail's pan law needs independent channel gains (see MAXIMUM_PAN_SHADOW_DECIBELS), which
 		// no StereoPannerNode can express: master gain fans out to a left and a right gain, merged
 		// into the two output channels.
@@ -132,7 +148,11 @@ export class WebAudioDevice implements AudioDevice {
 				const now = this.#context.currentTime;
 				const smoothing = this.#placementSmoothingSeconds;
 				const nextShadow = panShadowGain(nextPan);
-				gainNode.gain.setTargetAtTime(nextGain, now, smoothing);
+				gainNode.gain.setTargetAtTime(
+					this.#shapeGain(nextGain),
+					now,
+					smoothing,
+				);
 				leftGain.gain.setTargetAtTime(
 					nextPan > 0 ? nextShadow : 1,
 					now,

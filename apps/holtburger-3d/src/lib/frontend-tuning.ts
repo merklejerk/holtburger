@@ -28,6 +28,17 @@ export const FRONTEND_TUNING = {
 		 */
 		placementSmoothingSeconds: 0.02,
 		/**
+		 * Exponent shaping each voice's linear gain before it reaches the device: `gain ** exponent`.
+		 *
+		 * RETAIL DIVERGENCE: retail plays the attenuation curve's linear gain as-is. Gains live in
+		 * (0, 1], so an exponent below 1 lifts quiet-to-mid sounds while leaving silence and full
+		 * volume untouched (at 0.75: 0.02 → 0.053, 0.1 → 0.18, 0.5 → 0.6, 1 → 1) — a loudness
+		 * contour for distant ambience, not a mix change content can observe structurally. The
+		 * audibility floor still judges unshaped retail gains, so *which* sounds play is unchanged;
+		 * only how loud the quiet ones are. `1` restores retail exactly. Tune by ear.
+		 */
+		loudnessCurveExponent: 0.75,
+		/**
 		 * How late a warmed sound may still be played, in seconds.
 		 *
 		 * The device refuses a sound whose buffer has not decoded, so the first trigger of any sound

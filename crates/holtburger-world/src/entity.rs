@@ -1,5 +1,6 @@
 use crate::attachment::PhysicsAttachment;
 use crate::book::BookData;
+use crate::entity_appearance::EntityAppearance;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
 use holtburger_common::position::WorldPosition;
@@ -258,6 +259,8 @@ pub struct Entity {
     pub weenie_flags: WeenieHeaderFlag,
     pub weenie_flags2: WeenieHeaderFlag2,
     pub physics_state: PhysicsState,
+    /// Lossless ordered visual substitutions normalized from the producer's source format.
+    pub appearance: EntityAppearance,
     /// Set while another object owns this entity's position. See [`PhysicsAttachment`].
     pub attachment: Option<PhysicsAttachment>,
     pub autonomous_movement: bool,
@@ -422,6 +425,7 @@ impl Entity {
         );
 
         self.physics_state = data.physics_state;
+        self.appearance = EntityAppearance::from(&data.model_data);
         // The wire carries placement in the ANIMFRAME slot, defaulting to 0 when the flag is
         // absent, exactly as `PhysicsDesc` initializes `animframe_id` (`acclient.c:318475`).
         self.attachment = data.parent.and_then(|parent| {
@@ -492,6 +496,7 @@ impl Entity {
             weenie_flags2: WeenieHeaderFlag2::empty(),
 
             physics_state: PhysicsState::NONE,
+            appearance: EntityAppearance::default(),
             attachment: None,
             autonomous_movement: false,
             motion_snapshot: None,

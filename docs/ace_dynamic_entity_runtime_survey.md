@@ -39,6 +39,73 @@ repository. Setup geometry ranges are:
 | Physics-BSP setups with a default animation | 1 |
 | Physics-BSP setups with a default script | 23 |
 
+### Physics-BSP Default Behavior
+
+The machine-readable survey now expands every catalog-reachable physics-BSP setup with default
+behavior into its exact templates, physics-BSP part indexes, decoded animation, and transitive
+`CallPES` script closure. There are 23 distinct setups and 52 templates; one setup appears in both
+the animation and script counts above.
+
+Retail caches the `HasPhysicsBSP` branch from setup parts during `InitPartArrayObject`, before
+`DoObjDescChanges` applies animation-part substitutions, and does not recache afterward
+(`acclient.c` `CPhysicsObj::InitPartArrayObject`, `CPhysicsObj::DoObjDescChanges`). The survey now
+applies every catalog animation-part substitution and checks both the base and replacement GfxObj.
+No template replaces a BSP-bearing part with another part, removes a BSP, or adds a BSP to a setup
+whose cached branch lacks one. The 1,254-template branch count and the crystal moving-part census are
+therefore unchanged. Prepared geometry must still apply substitutions before selecting actual parts;
+the measured zero means this is an enforced ordering rule, not permission to ignore appearance.
+
+| Setup | Default script | Affected WCIDs |
+| --- | --- | --- |
+| `0x020003CB` | `0x33000010` | 7472, 7800, 29800 |
+| `0x02000840` | `0x3300089B` | 7786 |
+| `0x02000A02` | `0x33000A90` | 9197, 35842, 36775, 87356, 87357 |
+| `0x02000BC8` | `0x33000BFD` | 246 |
+| `0x02000BDE` | `0x33000C06` | 14467, 22615 |
+| `0x02000C07` | `0x33000C18` | 14564, 14803, 51401, 51415, 51416 |
+| `0x02000C08` | `0x33000C1C` | 14597 |
+| `0x02000C09` | `0x33000C1A` | 14595, 51284, 51559, 51582 |
+| `0x02000C0A` | `0x33000C1F` | 14600 |
+| `0x02000C0B` | `0x33000C1E` | 14599, 36602 |
+| `0x02000C0C` | `0x33000C1D` | 14598, 51313, 51560, 51629, 51641 |
+| `0x02000C0D` | `0x33000C1B` | 14596 |
+| `0x02000F8A` | `0x33000DB9` | 24587 |
+| `0x0200102F` | `0x33000E08` | 25993 |
+| `0x02001338` | `0x33000EE4` | 29103 |
+| `0x02001662` | `0x330010EA` | 34400 |
+| `0x020016F2` | `0x3300113E` | 36652 |
+| `0x020016F3` | `0x3300113F` | 36650, 36653, 36702, 51410, 51422 |
+| `0x020016F9` | `0x33001142` | 87385 |
+| `0x020017BA` | `0x33001195` | 37056 |
+| `0x02001BE0` | `0x33001359` | 51647, 52009, 52094, 52095, 52096 |
+| `0x02001BF2` | `0x3300135F` | 52077, 52078, 72157 |
+| `0x02001C2B` | `0x3300138A` | 52699 |
+
+Across each setup-owned script closure, the only decoded hook types are 68 `CreateParticle`, six
+`SoundTweaked`, and ten `CallPES` occurrences. Shared chained scripts are counted once per owning
+setup. There is no `Scale`, `Ethereal`, `SetOmega`, `CreateBlockingParticle`, or other hook that
+changes collision truth. The script-only 49-template population can therefore use stable prepared
+physics-BSP geometry; its default scripts remain presentation behavior.
+
+Setup `0x02001BF2` additionally names animation `0x03000E19`. It has 120 frames, no root-position
+frames or hooks, and varies the local frame of all nine physics-BSP parts. Its three templates are
+WCID 52077 Rynthid Assessment Crystal, 52078 Rynthid Assessment Crystal, and 72157 Sparking Crystal.
+
+Retail and ACE keep this collision truth inside the physics object. `CPartArray::Update` advances its
+`CSequence`; `CPartArray::UpdateParts` combines the owner frame, current part-animation frame, and
+part scale into each `CPhysicsPart::pos`; then `CPhysicsPart::find_obj_collisions` transforms the
+query through that exact part pose before consulting the GfxObj physics BSP (`acclient.c`
+`CPartArray::Update`, `CPartArray::UpdateParts`, `CPhysicsPart::find_obj_collisions`; ACE
+`PartArray.Update`, `PartArray.UpdateParts`, `PhysicsPart.FindObjCollisions`). Scale hooks use the
+same owner and update every part scale through `CPhysicsObj::SetScale`/`SetScaleInternal`.
+
+The host has decoded animation assets but no authoritative part-animation clock. The browser clock
+is presentation-owned and cannot feed solver truth back to the host. The first runtime therefore
+rejects solver-body realization for setup `0x02001BF2`, naming WCID, setup, and moving-BSP reason;
+this applies even when the current collision state suppresses the target because that state is
+reversible. A deliberately bodyless visual realization may still use the frontend animation. This
+keeps one clock and avoids building a host animation/script subsystem for three catalog templates.
+
 Retail's moving query uses a dummy sphere when the setup has no ordinary spheres and clamps an
 ordinary-sphere list to its first two entries (`PhysicsObj.transition`, `SpherePath.InitSphere`;
 `acclient.c` `CPhysicsObj::transition`, `SPHEREPATH::init_sphere`). The template population is 6,074
@@ -271,14 +338,16 @@ expiry remain serviced. Geometry has a separate dirty lane:
 - setup spheres and cylspheres move only with root pose/scale and need no idle refresh;
 - per-part physics BSP follows animated part frames, so a physical part animation dirties target
   geometry without necessarily integrating the root;
-- physics scripts may change scale (`SetScale`), which dirties every shape and spatial membership;
-  lighting/translucency-only scripts do not; and
-- unsupported script hooks or animated physics-BSP combinations are rejected with WCID and reason
-  until their decoded operation can classify the update.
+- a future physics script containing `SetScale`, `Ethereal`, `SetOmega`, or another collision hook
+  must either produce a host-owned update or reject physical realization; the measured 23-setup
+  population contains no such hook; and
+- setup `0x02001BF2` rejects solver-body realization because its default animation moves all nine
+  physics-BSP parts. Script-only default behavior does not dirty collision geometry.
 
-The census contains one physics-BSP setup with a default animation and 23 with default scripts, but
-no template derives `HasDefaultAnim` or `HasDefaultScript` because no template is static. Synthetic
-live-state fixtures still cover both bits.
+Default animations and scripts initialize for dynamic objects; `HasDefaultAnim` and
+`HasDefaultScript` only keep default behavior updating on the separate static-object path. The
+absence of those effective bits in this non-static catalog does not make setup defaults inert.
+Synthetic live-state fixtures still cover both bits.
 
 ## Representative First Population
 
@@ -293,6 +362,7 @@ live-state fixtures still cover both bits.
 | 1499 | Flame Bolt | Missile/path/align/inelastic high-displacement case |
 | 34621 | Killagurg | Appearance substitutions and authored zero-length palette range |
 | 27437 | Dark Monolith | Reachable rejection for zero scale |
+| 52077 | Rynthid Assessment Crystal | Reachable solver-body rejection for animated physics-BSP parts |
 
 Synthetic fixtures supplement the real population for the production-reachable `Frozen` transition;
 explicit `Static`, `Sledding`, and unused-bit rejection; default animation/script; parentage; viewer

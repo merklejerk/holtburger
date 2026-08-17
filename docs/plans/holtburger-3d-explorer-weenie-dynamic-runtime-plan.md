@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 1B next
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 2 next
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -777,8 +777,9 @@ deliberate retail divergence, not an inferred retail behavior.
   supported animated physics-BSP or scale-changing-script combination; all others reject physical
   realization rather than retaining stale geometry.
 - The representative real population is WCID 1 Clay, 21 Corpse, 147 Crate, 158 Large Urn, 239
-  Brazier, 400 Carsith the Weaponsmith, 1499 Flame Bolt, 34621 Killagurg, and 27437 Dark Monolith.
-  Synthetic fixtures cover proven live-only states absent from the catalog and explicit rejection of
+  Brazier, 400 Carsith the Weaponsmith, 1499 Flame Bolt, 34621 Killagurg, 27437 Dark Monolith, and
+  52077 Rynthid Assessment Crystal. The crystal is the measured animated-physics-BSP rejection;
+  synthetic fixtures cover proven live-only states absent from the catalog and explicit rejection of
   representable-but-unproduced states.
 - Completion audit reran the default offline survey from `dats/weenies.hwc` plus `dats/assets.hba`.
   Provenance, 43,913 records, 4,858,241 payload bytes, all 3,909 decoded setups, the four target-
@@ -825,6 +826,11 @@ selected live ACE World database regenerated and revalidated the artifact.
 
 ### Phase 1B: Close the Mutable Target-Geometry Boundary
 
+Progress: Complete (2026-08-16). The offline survey now expands all 23 distinct physics-BSP setups
+with default behavior into exact setup/template identities, BSP part indexes, decoded default
+animation, and transitive physics-script closure. The only physically mutable case is setup
+`0x02001BF2`, whose 120-frame animation moves all nine BSP parts for WCIDs 52077, 52078, and 72157.
+
 #### Deliverables
 
 - Census the one physics-BSP setup with a default animation and the 23 physics-BSP setups with
@@ -851,8 +857,24 @@ selected live ACE World database regenerated and revalidated the artifact.
 
 #### Decisions and Course Corrections
 
-- Prefer an explicit first-population rejection over a host-side animation/script subsystem unless
-  the census proves a representative WCID requires that machinery.
+- Retail and ACE own current part pose in the physics object's sequence/part array and consume that
+  exact pose during physics-BSP collision. The browser animation clock is presentation authority and
+  will not feed the host solver.
+- The measured script closures contain only `CreateParticle`, `SoundTweaked`, and `CallPES`; none
+  changes scale, root motion, collision state, or collision geometry. Their 49 script-only templates
+  retain stable physical BSP geometry while presentation owns the effects.
+- Solver-body preparation rejects setup `0x02001BF2` with WCID, setup, animation, and moving-part
+  reason, even when current collision flags suppress the target because those flags are reversible.
+  Bodyless visual realization remains valid. This is a three-template YAGNI boundary, not a reason
+  to add a host animation/script subsystem.
+- A future default script with a decoded `Scale`, `Ethereal`, `SetOmega`, blocking-particle, or other
+  collision-relevant hook must gain an explicit host-owned update path or fail the same preparation
+  boundary. Presentation-only hooks do not dirty collision geometry.
+- Phase 2 dry-run found that ObjDesc animation-part substitutions apply after retail caches the
+  setup-selected `HasPhysicsBSP` branch. The extended catalog/HBA census found zero BSP-changing
+  substitutions, including the three crystal templates, so the measured branch and rejection remain
+  valid. Prepared target geometry still applies appearance substitutions before resolving actual
+  part shapes; it may not infer that ordering from the current zero population.
 
 ### Phase 2: Freeze Shared Entity and Physics Decisions
 
@@ -869,6 +891,10 @@ selected live ACE World database regenerated and revalidated the artifact.
   collision participation, response, and reporting are distinct decisions but one validated value.
   Reuse geometry when the authoritative branches are identical; do not duplicate it for type-shape
   convenience.
+- Make stable target geometry a validated preparation result. Animated physics-BSP setup
+  `0x02001BF2` produces a typed unsupported-physical-realization error carrying WCID, setup,
+  animation, and moving part indexes; the same check runs on initial body installation and later
+  body attachment. A semantic/bodyless entity does not invent target geometry or lose presentation.
 - Add the pure effective-physics-state resolver and state-transition decision from the Phase R0
   matrix. Initial Explorer catalog resolution and existing client `SetState` updates invoke the same
   logic; neither producer re-derives bit semantics.
@@ -1214,7 +1240,8 @@ selected live ACE World database regenerated and revalidated the artifact.
   mutable target geometry fails at preparation with its recorded reason.
 - Add focused discovery fixtures for cross-landblock bounds, outdoor/EnvCell portal straddling,
   shared/adjacent EnvCells, fast/provisional movement, settled targets, camera exclusion, every
-  supported target branch, and 50/300-body bucket populations.
+  supported target branch, 50/300-body bucket populations, and WCID 52077 failing body preparation
+  before it can enter any target bucket.
 
 #### Acceptance Criteria
 
@@ -1394,7 +1421,8 @@ selected live ACE World database regenerated and revalidated the artifact.
   path, teleport, missing collision owner, listener restart, page reload, late assets, pause/resume,
   deterministic step, timeline reset, pose-only spawn, physical attach/detach, two-body contact,
   filtered/report-only contact, contact-time replacement, and the Phase R0 representative
-  physics-state transitions.
+  physics-state transitions. Cover WCID 52077 separately: bodyless visual realization can animate,
+  while physical attachment rejects with its setup/animation/moving-part reason and leaves no body.
 - Include mixed active/settled populations, active-peer wake of a response-eligible dynamic target,
   report-only contact without unnecessary integration, wake after loaded static world collision
   changes, and continued visual animation while root-body integration is settled.
@@ -1417,8 +1445,10 @@ selected live ACE World database regenerated and revalidated the artifact.
 
 #### Acceptance Criteria
 
-- Entering a representative WCID and pose produces one visible, animated, solver-backed entity over
-  the real host/browser boundary.
+- Entering a supported representative WCID and pose produces one visible, animated, solver-backed
+  entity over the real host/browser boundary.
+- WCID 52077 can remain a bodyless animated visual, but initial physical realization and later body
+  attachment both reject before publication or scene mutation with the same typed reason.
 - The entity reconstructs after page reload with equivalent semantic, physical-participation, and
   presentation state.
 - Repeated spawn/despawn/replacement returns every tracked owner/resource/body count to baseline.
@@ -1509,6 +1539,7 @@ selected live ACE World database regenerated and revalidated the artifact.
 | Tick transport batching           | One fixed tick emits at most one changed-body batch across the Tauri boundary              |
 | Dynamic pair response             | Stable-ID order converges within the bound despite reversed registration order            |
 | Dynamic target geometry           | Every census-supported sphere/cylsphere/BSP branch uses its authoritative target shape    |
+| Animated physics-BSP rejection    | WCID 52077 body install/attach fails before scene mutation; bodyless animation remains valid |
 | Dynamic pair filtering            | Effective masks independently select response, report production, and report identity     |
 | Camera collision policy           | Synthetic camera is excluded unless explicit scenario policy opts it in                   |
 | Swept candidate discovery         | Fast/cross-portal movement finds peers outside both bodies' prior committed buckets        |
@@ -1648,10 +1679,6 @@ harness or a focused noninteractive harness.
       gates pass.
 
 ## Open Question
-
-Do any of the measured animated/scripted physics-BSP setups require host-owned mutable target
-geometry in the representative first population, or can Phase 1B reject those combinations without
-losing a required WCID? Census the actual animation and decoded script operations before choosing.
 
 Does any representative EnvCell contain enough simultaneously participating bodies to require
 subdivision beyond its natural reached-cell bucket? Measure in Phase R2; do not add an interior

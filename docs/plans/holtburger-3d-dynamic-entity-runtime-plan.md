@@ -1,7 +1,8 @@
 # Holtburger 3D Dynamic Entity Runtime Roadmap
 
-Status: Roadmap — authored effects complete; Explorer weenie dynamic runtime is the mainline next
-step, with the weather/sky-script plan unblocked as a parallel track
+Status: Roadmap — authored effects and the Explorer weenie dynamic runtime are complete
+(2026-08-17); the deferred `holtburger-authored-root-motion-physics-integration-plan.md` is the
+mainline next step, with the weather/sky-script plan unblocked as a parallel track
 Created: 2026-07-31
 Evidence pass: 2026-07-31
 Roadmap split: 2026-07-31
@@ -333,22 +334,22 @@ scenario policy, sessions, and transport remain local. No universal runtime base
       performance evidence.
 - [x] The static-authored effects plan is complete with real script, particle, and sound consumers
       (2026-08-07).
-- [ ] The Explorer weenie dynamic runtime is complete across the catalog/Rust/Tauri/TypeScript
-      boundary.
-- [ ] Catalog-created and server-updated entities preserve the complete effective physics-state mask;
+- [x] The Explorer weenie dynamic runtime is complete across the catalog/Rust/Tauri/TypeScript
+      boundary (2026-08-17).
+- [x] Catalog-created and server-updated entities preserve the complete effective physics-state mask;
       one shared transition rule keeps their pose bodies alive while solver participation remains
       optional and reversible.
-- [ ] Dynamic bodies collide through one deterministic flag-filtered solve reusing outdoor-cell and
+- [x] Dynamic bodies collide through one deterministic flag-filtered solve reusing outdoor-cell and
       reached-EnvCell partitioning, converge within the recorded tick bound, and maintain proven
       collision start/refresh/end lifecycles without tunneling or whole-world rollback.
-- [ ] The Explorer workload uses one collection scheduler participant, one focused advance batch per
+- [x] The Explorer workload uses one collection scheduler participant, one focused advance batch per
       epoch, canonical body poses, and scene-owned derived spatial memberships at 50-300 entities.
-- [ ] Proven quiescent bodies skip integration while remaining indexed collision targets, and every
+- [x] Proven quiescent bodies skip integration while remaining indexed collision targets, and every
       state-changing input has one tested wake path without a second active-body authority.
-- [ ] Authored and spawned entities reuse one frontend template, behavior, presentation, effect, and
+- [x] Authored and spawned entities reuse one frontend template, behavior, presentation, effect, and
       renderer architecture.
-- [ ] Static authored fidelity does not depend on motion tables, sparse anchors, or a spawned host.
-- [ ] Raw motion tables and authoritative world mutation remain outside the frontend.
+- [x] Static authored fidelity does not depend on motion tables, sparse anchors, or a spawned host.
+- [x] Raw motion tables and authoritative world mutation remain outside the frontend.
 - [ ] No plan leaves dormant scaffolding, silent unsupported behavior, or obsolete compatibility
       paths for a later plan to clean up implicitly.
 - [ ] Each plan records course corrections and passes its own formatting, lint, test, harness, and

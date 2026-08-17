@@ -171,7 +171,7 @@ export function decodeDynamicEntityView(value: unknown): DynamicEntityView {
 	return dynamicEntityViewSchema.parse(value);
 }
 
-/** Current focused entity mirror with explicit snapshot-recovery state. */
+/** Current focused entity mirror with explicit awaiting-snapshot hydration state. */
 export class DynamicEntityMirror {
 	#awaitingSnapshot = true;
 	#entities = new Map<number, DynamicEntityView>();
@@ -183,7 +183,7 @@ export class DynamicEntityMirror {
 		this.#nowSeconds = nowSeconds;
 	}
 
-	/** Enter recovery without treating queued deltas as a reconstruction protocol. */
+	/** Await the next current-state snapshot; deltas arriving first are superseded, not replayed. */
 	awaitSnapshot(): void {
 		this.#awaitingSnapshot = true;
 		this.#timeline = null;

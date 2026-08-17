@@ -145,7 +145,7 @@ describe("ExplorerDynamicEntitySession", () => {
 		let changes = 0;
 		const unsubscribe = session.subscribe(() => (changes += 1));
 		await session.start();
-		// The pre-snapshot upsert is ignored; only the recovery snapshot is observable.
+		// The pre-snapshot upsert is ignored; only the hydration snapshot is observable.
 		expect(changes).toBe(1);
 		transport.emit({ kind: "removed", guid: 2, generation: 2 });
 		expect(changes).toBe(1);

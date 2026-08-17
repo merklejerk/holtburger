@@ -3582,7 +3582,7 @@ mod physical_body_tests {
         body.velocity = Vector3::new(1.0, 2.0, 3.0);
         scene.register_body(body);
 
-        let attached = scene
+        let enabled = scene
             .set_dynamic_physical_body(
                 id,
                 Some(dynamic_definition(grounded_definition(), false)),
@@ -3591,11 +3591,11 @@ mod physical_body_tests {
             )
             .unwrap();
         assert_eq!(
-            attached.change,
+            enabled.change,
             PhysicalBodyReconfiguration::SolverParticipationEnabled
         );
-        assert_eq!(attached.before, PhysicalBodyParticipation::PoseOnly);
-        assert_eq!(attached.after, PhysicalBodyParticipation::Physical);
+        assert_eq!(enabled.before, PhysicalBodyParticipation::PoseOnly);
+        assert_eq!(enabled.after, PhysicalBodyParticipation::Physical);
         let retained_response = scene
             .body(id)
             .unwrap()

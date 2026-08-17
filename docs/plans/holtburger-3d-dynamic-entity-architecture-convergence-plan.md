@@ -97,7 +97,9 @@ but they never satisfy a canonical implementation deliverable by themselves.
 - Canonical roadmap: `docs/plans/holtburger-3d-dynamic-entity-runtime-plan.md`.
 - Canonical completed slice: `docs/plans/holtburger-3d-static-authored-animation-runtime-plan.md`.
 - Canonical queued effects work: `docs/plans/holtburger-3d-static-authored-effects-runtime-plan.md`.
-- Canonical queued spawned work: `docs/plans/holtburger-3d-spawned-entity-explorer-runtime-plan.md`.
+- Canonical spawned work: `docs/plans/holtburger-3d-explorer-weenie-dynamic-runtime-plan.md`,
+  complete 2026-08-17. It preempted `holtburger-3d-spawned-entity-explorer-runtime-plan.md`, which
+  remains a historical evidence record only.
 - Donor baseline execution record:
   `.worktrees/claude/docs/plans/holtburger-3d-static-dynamics-baseline-plan.md`.
 - Donor full-fidelity proposal:

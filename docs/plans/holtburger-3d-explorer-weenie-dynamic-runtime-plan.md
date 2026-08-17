@@ -1,6 +1,7 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase R4 stabilization next, authored root motion deferred
+Status: Complete 2026-08-17 — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`;
+authored root motion deferred to `holtburger-authored-root-motion-physics-integration-plan.md`
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -2351,6 +2352,24 @@ candidate placement, and the scenario commands (launch, relocate, replace).
 
 ### Phase 8: Clean Cutover and Architecture Audit
 
+Progress: Complete (2026-08-17). A full-repository sweep for superseded vocabulary and dead code
+found six sites, all corrected: one leftover `attached` local in a solver-participation scene test,
+and five comments describing focused-feed hydration as "recovery" in
+`holtburger-core::dynamic_entity_view`, the frontend feed mirror, and the Explorer session module.
+The crate boundary docs for `holtburger-world` (dynamic entity bodies), `holtburger-core` (shared
+dynamic entity contracts), and `holtburger-weenie-catalog` (host boundary and the deliberately
+unprojected `motion_table_did`) now describe the landed shape, as does
+`apps/holtburger-3d/ARCHITECTURE_AUDIT.md`, which previously still called spawned entities queued
+behind the authored runtime. The parent roadmap's Definition of Done and status line record this
+milestone complete and name the deferred authored-root-motion plan as the next mainline step.
+
+The sweep also confirmed several things that look stale but are correct and were left alone: object
+parenting and animated-attachment vocabulary, GL framebuffer attachments, the catalog's retained
+`motion_table_did`, the negative boundary-contract test that feeds a `motion` object to the decoder,
+`RuntimeBodyViewCache` (live TUI consumer), and the client adapter beside the shared projector
+(proven equivalent rather than duplicated). Zero TODO/FIXME markers exist in the dynamic-entity,
+spatial, explorer-entity, or weenie-catalog paths, and no `#[allow(dead_code)]` was introduced.
+
 #### Deliverables
 
 - Delete superseded runtime-body-only snapshot/cache vocabulary, authored-only visual-input naming,
@@ -2388,7 +2407,18 @@ candidate placement, and the scenario commands (launch, relocate, replace).
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- The `holtburger-core` architecture paragraph describing "reset-and-resnapshot recovery" was
+  retained rather than swept. Investigation showed it documents the client runtime-body contract,
+  where reset-and-resnapshot on forced repositions and teleports is landed and tested; only its
+  reference to a retired plan phase was stale. The paragraph now names the contract explicitly and
+  distinguishes it from the focused dynamic-entity feed, which has no recovery protocol.
+- The two remaining parent-roadmap checkboxes stay open on purpose. They are cross-plan conditions
+  and the deferred `holtburger-authored-root-motion-physics-integration-plan.md` has not run yet;
+  checking them now would claim completion this milestone cannot deliver.
+- Final gate run: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -D warnings`,
+  `cargo test --workspace` (42 test binaries, no failures), `npm run format:check`, `npm run check`,
+  `npm run lint`, `npm run lint:dead` (Knip, clean), and `npm run test:ts` (161 files, 1,099 tests)
+  all pass, alongside the three recorded Phase 7B browser scenarios.
 
 ## Verification Matrix
 
@@ -2512,67 +2542,81 @@ harness or a focused noninteractive harness.
       without embedding MySQL in the runtime.
 - [x] The catalog has a canonical portable byte contract—endianness, widths, encoding, ordering, and
       decode limits are explicit rather than serializer defaults.
-- [ ] Catalog is optional, app-local, and entirely outside HBA/`ContentRepository`/browser contracts.
-- [ ] Client `WorldState` and the app-local Explorer registry remain distinct semantic authorities
+- [x] Catalog is optional, app-local, and entirely outside HBA/`ContentRepository`/browser contracts.
+- [x] Client `WorldState` and the app-local Explorer registry remain distinct semantic authorities
       feeding the same source-neutral definition, solver-outcome, and projection contracts.
-- [ ] Each composition retains its own `SpatialScene`; Explorer camera and entity bodies share the
+- [x] Each composition retains its own `SpatialScene`; Explorer camera and entity bodies share the
       existing `HostSimulationRuntime` store.
-- [ ] The catalog preserves complete template physics-state inputs and the Explorer derives the same
+- [x] The catalog preserves complete template physics-state inputs and the Explorer derives the same
       effective initial mask as ACE for every representative fixture.
-- [ ] Every dynamic entity retains one pose body while collision/physics state and fixed-tick
+- [x] Every dynamic entity retains one pose body while collision/physics state and fixed-tick
       participation remain optional, reversible, and driven by complete physics-state replacement.
-- [ ] `SpatialScene` owns the only physical pose and all derived landblock/outdoor/EnvCell
+- [x] `SpatialScene` owns the only physical pose and all derived landblock/outdoor/EnvCell
       memberships; no `entity_poses` mirror or caller-managed index choreography remains.
-- [ ] Existing client `SetState` and Explorer scenario updates use the same per-bit reconciliation
+- [x] Existing client `SetState` and Explorer scenario updates use the same per-bit reconciliation
       decision; no defined bit is silently discarded or flattened into a collidable boolean.
-- [ ] Physical spawn, complete replacement, and despawn use ordered orchestration, compensate
+- [x] Physical spawn, complete replacement, and despawn use ordered orchestration, compensate
       unpublished partial installation, and never duplicate solver-owned physical state in a registry.
-- [ ] One focused dynamic-entity snapshot hydrates every frontend-relevant entity on initial mount or
+- [x] One focused dynamic-entity snapshot hydrates every frontend-relevant entity on initial mount or
       webview remount without replay history, whole-client machinery, or a delivery-recovery protocol.
-- [ ] Explorer spawn-by-WCID crosses the real Tauri boundary into the existing template, animation,
+- [x] Explorer spawn-by-WCID crosses the real Tauri boundary into the existing template, animation,
       script, particle, audio, effect, scene, and renderer systems.
-- [ ] Spawned entities advance through the existing fixed cadence, installed collision snapshot,
+- [x] Spawned entities advance through the existing fixed cadence, installed collision snapshot,
       generic solver, placed paths, and locally derived ground state.
-- [ ] One collection scheduler participant visits eligible Explorer entities in stable body order,
+- [x] One collection scheduler participant visits eligible Explorer entities in stable body order,
       integrates only active bodies, and emits at most one focused changed-body batch per
       fixed tick.
-- [ ] Solver-owned settled state skips integration and mover-side queries only after the proven stable
+- [x] Solver-owned settled state skips integration and mover-side queries only after the proven stable
       predicate, retains body/index/target/report/presentation state, and wakes through every
       Phase R0-proven drive, state, scene, geometry, and peer-contact input.
-- [ ] Collision-report lifetime and target-geometry maintenance remain correct while root-body
+- [x] Collision-report lifetime and target-geometry maintenance remain correct while root-body
       integration is settled; no sleep islands, per-body timers, dependency graph, or second active-
       body registry lands without Phase R2 evidence.
 - [x] Grounded static-contact correction remains bounded per substep, commits its latest finite
       candidate when overlap remains, continues ordinary displacement, prevents residual bodies from
       settling, and converges without retry bookkeeping or frontend-visible diagnostic state.
-- [ ] The shared solver performs deterministic flag-filtered body-to-body contact and response,
+- [x] The shared solver performs deterministic flag-filtered body-to-body contact and response,
       reuses outdoor global-cell and reached-EnvCell partitioning, handles 50-300 entities per
       populated landblock, queries swept/provisional domains, exercises every census-supported target
       geometry branch, adaptively samples both planned transforms across its supported path/shape
       envelope, rejects over-budget work before partial commit, processes each directional pair
       deterministically, and converges within the recorded tick bound.
-- [ ] Collision reporting retains proven first-touch/refresh/natural-end/forced-end state with
+- [x] Collision reporting retains proven first-touch/refresh/natural-end/forced-end state with
       explicit per-recipient classification and no emitted-outcome history or Explorer diagnostic
       projection.
-- [ ] Physics-driven entity motion uses retained velocity/acceleration/omega, launch, relocation,
+- [x] Physics-driven entity motion uses retained velocity/acceleration/omega, launch, relocation,
       gravity, and collision response without adding semantic motion or root-path placeholders.
-- [ ] Frontend presentation is smooth between physical host updates; the scoped command surface
+- [x] Frontend presentation is smooth between physical host updates; the scoped command surface
       cannot select authored root motion, ignored setup-default root frames retain solver-owned root
       placement, and the measured `RETAIL DIVERGENCE` marker records the one-WCID consequence.
-- [ ] Catalog absence/corruption, missing WCID, frontend remount, late assets, solver failures,
+- [x] Catalog absence/corruption, missing WCID, frontend remount, late assets, solver failures,
       relocation, replacement, teardown, and representative physics-state transitions have
       explicit tests or harness scenarios.
-- [ ] Repeated lifecycle scenarios return all registry/body/frontend/resource counts to baseline.
-- [ ] No duplicate authority or downstream path exists inside either composition, and no database
+- [x] Repeated lifecycle scenarios return all registry/body/frontend/resource counts to baseline.
+- [x] No duplicate authority or downstream path exists inside either composition, and no database
       engine, generic runtime hierarchy, or speculative server adapter survives.
-- [ ] Architecture docs and parent roadmap match the landed ownership model.
-- [ ] Formatting, checks, lint, tests, Clippy with warnings denied, and representative host/browser
+- [x] Architecture docs and parent roadmap match the landed ownership model.
+- [x] Formatting, checks, lint, tests, Clippy with warnings denied, and representative host/browser
       gates pass.
 
 ## Open Questions
 
-None block the remaining milestone. Reached EnvCells remain the complete interior partition for this
-scope. R2 found no evidence that another interior index would change a decision, so EnvCell
-subdivision is deferred until a measured real workload exceeds the fixed-tick budget.
+None remain for this milestone. Reached EnvCells stayed the complete interior partition; R2 found no
+evidence that another interior index would change a decision, so EnvCell subdivision is deferred
+until a measured real workload exceeds the fixed-tick budget.
+
+Carried debt, each with a named later owner rather than a guess or fallback:
+
+- Authored root motion and its `MotionKinematics` replacement belong to
+  `holtburger-authored-root-motion-physics-integration-plan.md`. Setup-default root frames remain
+  ignored under the measured one-WCID retail divergence until it runs.
+- Cross-EnvCell-portal dynamic peer candidate discovery is proven for outdoor cross-landblock and
+  fast-mover cases only; interior portal traversal is proven for static motion paths.
+- Frontend teardown asserts entity and template counts return to baseline, not GPU texture,
+  geometry, or animation-acquisition counts.
+- `ExplorerSimulationControl` has no production command surface; a later Explorer control or
+  workload plan adds one when a real caller exists.
+- The 300-entity population run settles 299 of 300 bodies; a terrain-aware lattice would settle
+  completely.
 
 These are execution evidence gates, not invitations to guess or add fallback behavior.

@@ -170,6 +170,36 @@ Collision integration uses an anchor landblock's local coordinates across one so
 accumulate large absolute-world `f32` coordinates; doing so produced measurable centimeter-scale
 drift at `0xDA55FFFF`. Owner-local conversion occurs only at collision lookup and pose commit.
 
+#### Dynamic entity bodies
+
+Dynamic entities extend the same scene without a second store or solver:
+
+- Every live dynamic entity keeps exactly one `SpatialBody` that owns its world pose.
+  `SpatialBody::physical` is optional collision/physics state, and `set_dynamic_physical_body`
+  adds, removes, or reconfigures it reversibly. Disabling solver participation never retires the
+  pose body, and compatible movement geometry preserves contact/placement response memory.
+- `SpatialScene` owns every derived membership. Coarse landblock membership and the dynamic
+  shadow index are updated inside registration, pose commit, physical-state replacement,
+  relocation, and removal, so no caller choreographs a second index and no `entity_poses` mirror
+  exists.
+- Scheduling eligibility comes from the effective `PhysicsState`; solver activity is separate. A
+  body settles after one accepted tick with walkable support, canonical zero velocity/omega, no
+  acceleration or drive, and no pending response or path. Settling skips integration and
+  mover-side queries only: pose, index membership, target geometry, report lifetimes, and
+  presentation all remain live, and every state-changing input wakes the body explicitly.
+- Dynamic peers are discovered through the same spatial domains as static collision — global 24 m
+  outdoor cells and exact reached EnvCells — queried once over full swept conservative bounds so a
+  fast or cell-crossing mover cannot miss a target. Each directional pair then proves contact with
+  bounded adaptive slices of both bodies' planned transforms sampled from one immutable tick-start
+  snapshot; an over-budget solve is an error that rejects before any pose, response, or report
+  commits.
+- Target geometry follows retail's branch order — physics BSP, otherwise all cylspheres, otherwise
+  all ordinary spheres — and is distinct from the movement spheres used for the mover's own query.
+- `collision_report.rs` retains only the directional contact state required for correct lifecycle
+  semantics: first touch starts, later touches refresh silently, and expiry or an invalidating
+  transition ends. It is not a diagnostic history, and expiry is serviced with an injected clock
+  even while a body is settled.
+
 ### Lifecycle / retention helpers
 Files: [src/state/liveness.rs](src/state/liveness.rs), [src/state/mutations.rs](src/state/mutations.rs)
 

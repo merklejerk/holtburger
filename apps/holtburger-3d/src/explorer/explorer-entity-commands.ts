@@ -107,6 +107,31 @@ export function decodeExplorerEntityMutationReceipt(
 	return explorerEntityMutationReceiptSchema.parse(value);
 }
 
+/**
+ * Camera-relative spawn distance offered by the Explorer's spawn control, in metres.
+ *
+ * A number input validates its value against the ladder `minimum + step * k`, so these three must
+ * stay mutually consistent: a default off that ladder makes the browser reject the untouched form
+ * before any handler runs. They live together here so the relationship is visible and tested
+ * rather than split across HTML attributes and a state initializer.
+ */
+export const EXPLORER_SPAWN_DISTANCE = {
+	minimum: 0.5,
+	step: 0.5,
+	default: 5,
+} as const;
+
+/** Whether a distance sits on the control's valid step ladder. */
+export function isExplorerSpawnDistanceOnStep(distance: number): boolean {
+	const steps =
+		(distance - EXPLORER_SPAWN_DISTANCE.minimum) / EXPLORER_SPAWN_DISTANCE.step;
+	return (
+		Number.isFinite(steps) &&
+		steps >= 0 &&
+		Math.abs(steps - Math.round(steps)) < 1e-9
+	);
+}
+
 /** Parse one intentionally narrow decimal or `0x` WCID input. */
 export function parseExplorerWcid(raw: string): number {
 	const value = raw.trim();

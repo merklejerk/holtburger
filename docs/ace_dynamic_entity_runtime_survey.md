@@ -302,6 +302,14 @@ environment channel. `ReportCollisionsAsEnvironment` performs the same conversio
 peer (`acclient.c`: `track_object_collision`, `report_collision_end`,
 `report_object_collision`, `set_hidden`, `teleport_hook`, `exit_world`).
 
+Retail's environment channel is asymmetric: `report_environment_collision` retains one collapsed
+boolean and emits a start callback, while separation only clears that boolean and emits no end.
+`ReportCollisionsAsEnvironment` bypasses the object collision table and inherits that behavior.
+The runtime deliberately normalizes object and environment-classified contacts to the balanced
+directional lifecycle below. Dynamic environment-classified contacts retain peer identity so a
+forced body transition can end exactly the affected records. This is a compatibility divergence,
+not retail behavior (`acclient.c`: `report_environment_collision`, `report_object_collision_end`).
+
 ACE currently overwrites its dictionary record and invokes its callback on every observed touch.
 The shared event contract selects retail's first-touch/silent-refresh lifetime because it is an event
 lifecycle rather than a server gameplay callback loop.
@@ -329,8 +337,9 @@ and omega have reached canonical zero. No wall-clock inactivity threshold is use
 A body settles only when it has stable walkable support, canonical zero velocity and omega, no
 acceleration, no drive/motion work, and no pending response or accepted path. Wake operations are:
 motion/actuation; velocity, acceleration, or omega replacement; teleport; complete physics-state
-replacement; attach/detach; peer response; scale or target-geometry mutation; and relevant loaded
-terrain/interior collision changes. A loaded-world change may initially wake all settled bodies.
+replacement; solver-participation enable/disable; peer response; scale or target-geometry mutation;
+and relevant loaded terrain/interior collision changes. A loaded-world change may initially wake all
+settled bodies.
 
 Settling skips integration and mover queries only. Spatial target membership and collision-report
 expiry remain serviced. Geometry has a separate dirty lane:
@@ -388,4 +397,58 @@ Current `EntityMotionSnapshot` covers stance, simultaneous forward/sidestep/turn
 plus turn-to-heading/object directives. `MotionKinematics` resolves cycle velocity/omega. It is enough
 for spawn-at-rest and basic stand/move/turn/stop. It does not represent move-to-position/object path
 progress, animation transition phase, queued sequence state, start frame, or framerate. Those are
-explicit Phase 6 locomotion gaps, not reasons to widen the Phase 2 spawn contract.
+shared locomotion gaps, not reasons to widen the dynamic-entity creation contract. The active
+Explorer milestone does not execute semantic motion commands; the dedicated
+`holtburger-authored-root-motion-physics-integration-plan.md` owns their resolution.
+
+## Authored Root-Motion Census
+
+The default offline survey now enumerates raw motion-table resources from the mounted HBA index,
+decodes every animation referenced by cycles, modifiers, and links, applies each selected frame
+range, and resolves each catalog template's effective motion table from its explicit override or
+setup default. This evidence remains tool output; no runtime registry, trace buffer, or diagnostic
+record was added.
+
+The canonical `dats/weenies.hwc` and `dats/assets.hba` population contains 436 motion tables, 62,210
+motion-data records, 79,162 animation entries, and 1,938 distinct referenced animations. Of those
+animations, 353 carry position frames, 341 have non-identity root translation, and 20 have
+non-identity root rotation. The selected ranges expose position frames in 205 motion tables,
+translation in 203, and rotation in 48. Across the catalog, 13,996 templates name an effective
+motion table and 13,992 resolve one from the canonical HBA. The other four all reference unavailable
+table `0x09000085`; the survey reports that population separately rather than classifying it as
+identity motion. Of the decoded population, 7,903 can reach position frames, 7,901 can reach
+translation, and 1,497 can reach rotation.
+
+There are 21,244 animation entries whose selected ranges carry position frames. The maximum possible
+authored frame-boundary crossings during one 30 Hz tick are calculated as
+`ceil(abs(stored_framerate) * speed_modifier / 30)`. At stored rate, the distribution has p50 1,
+p95/p99 3, and maximum 8; 4,854 entries can cross more than one boundary. At the explicitly labeled
+3x stress rate, the distribution has p50 3, p95/p99 9, and maximum 24; 19,703 entries can cross more
+than one boundary. The identity classification tolerance is `1e-6`; quaternion sign-equivalent
+identity rotations are normalized before classification.
+
+Exactly one catalog record combines effective physics-BSP target geometry with table-reachable root
+motion: WCID 46320 Security Station resolves motion table `0x090000A1`, which reaches root
+translation but not root rotation. In the representative population, WCIDs 1 Clay, 21 Corpse, and
+400 Carsith the Weaponsmith resolve `0x09000001`, reach root translation, and can cross at most four
+authored boundaries per stored-rate tick. WCID 34621 Killagurg resolves `0x09000009`, reaches root
+translation, and can cross at most one. The remaining six representatives do not reach root
+transforms; WCID 147 Crate has no motion table, while WCID 52077 Rynthid Assessment Crystal resolves
+`0x09000227` without position frames. None of the ten representative tables reaches root rotation.
+Table-reachable means selected by at least one authored cycle, modifier, or link in the effective
+table. It is a conservative contract bound, not proof that the first Explorer command surface or
+every ACE gameplay path issues every measured record.
+
+These measurements close the evidence task and establish that root-motion/physics unification is a
+cross-cutting effort rather than a local Explorer feature. Ordered multi-frame translation is common,
+root rotation is catalog-reachable, and a moving physics-BSP target exists. The active dynamic-entity
+plan therefore moves entities only through physical vectors or explicit relocation and exposes no
+semantic command capable of selecting authored root motion. The two shipped setup-default clips with
+position frames (`0x03000BB7` and `0x03000BDE`) have zero translation but non-identity root rotation;
+their setups are `0x02001694` and `0x02001752`. Only setup `0x02001752` is referenced by the canonical
+catalog, through WCID 36449 Bats. Bats remains spawnable, but its authored root rotation is
+deliberately ignored under a
+`RETAIL DIVERGENCE` marker with this one-WCID census while solver-owned physical motion remains
+authoritative. Exact shared integration is deferred to
+`holtburger-authored-root-motion-physics-integration-plan.md`; no endpoint approximation is selected
+here.

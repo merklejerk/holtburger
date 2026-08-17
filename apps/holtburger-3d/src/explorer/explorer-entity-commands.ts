@@ -64,7 +64,7 @@ export interface ExplorerEntitySpawnRequest {
 		readonly y: number;
 		readonly z: number;
 	};
-	readonly physicalIntent: "pose-only";
+	readonly physicalIntent: "pose-only" | "simulated";
 }
 
 /** Validate catalog capability before it can alter Explorer controls. */
@@ -103,6 +103,7 @@ export function createExplorerSpawnRequest(
 	placement: PhysicalCameraPlacement,
 	viewDirection: readonly [number, number, number],
 	distance: number,
+	physicalIntent: ExplorerEntitySpawnRequest["physicalIntent"],
 ): ExplorerEntitySpawnRequest {
 	if (!Number.isInteger(wcid) || wcid < 0 || wcid > 0xffff_ffff)
 		throw new Error("WCID must fit an unsigned 32-bit integer.");
@@ -144,8 +145,7 @@ export function createExplorerSpawnRequest(
 		},
 		// Initial Explorer UX creates neutral-world-orientation objects; rotation is never host-defaulted.
 		rotation: identityRotation,
-		// Phase 4 proves presentation first. Phase 5 replaces this explicit policy with solver intent.
-		physicalIntent: "pose-only",
+		physicalIntent,
 	};
 }
 

@@ -6,6 +6,11 @@ import {
 } from "../landblocks";
 import type { SceneResidency } from "../scene";
 import { Vec3 } from "../math/types";
+import {
+	evaluateHostPlacedPath,
+	type HostPlacedPath,
+	validateHostPlacedPath,
+} from "./host-placed-path";
 
 /** Solver completion or finite-budget result for one fixed host tick. */
 export type PhysicalCameraTickStatus =
@@ -66,15 +71,8 @@ interface HostPhysicalCameraPathPoint {
 }
 
 /** One placement-stable motion leg ending at an authoritative point. */
-interface HostPhysicalCameraPathLeg {
-	/** Monotonic normalized fixed-tick fraction at this boundary. */
-	readonly endFraction: number;
-	/** Point and residency that become authoritative at the exact boundary. */
-	readonly end: HostPhysicalCameraPathPoint;
-}
-
 /** One fixed-tick, host-solved placed-motion path in AC axes. */
-export interface HostPhysicalCameraPath {
+export interface HostPhysicalCameraPath extends HostPlacedPath<HostPhysicalCameraPathPoint> {
 	/** Runtime generation; paths from an earlier handoff are stale. */
 	readonly session: number;
 	/** Monotonic path counter within the session. */
@@ -83,13 +81,6 @@ export interface HostPhysicalCameraPath {
 	readonly mode: PhysicalCameraMode;
 	/** Positive fixed-tick playback duration. */
 	readonly durationMs: number;
-	/** Authoritative point at normalized tick fraction zero. */
-	readonly initial: HostPhysicalCameraPathPoint;
-	/** Non-empty accepted geometry and placement transitions. */
-	readonly legs: readonly [
-		HostPhysicalCameraPathLeg,
-		...HostPhysicalCameraPathLeg[],
-	];
 	readonly status: PhysicalCameraTickStatus;
 	/** Installed collision residency, independent from solver completion. */
 	readonly sceneResidency: PhysicalCameraSceneResidency;
@@ -124,51 +115,17 @@ export function evaluateHostPhysicalCameraPath(
 	path: HostPhysicalCameraPath,
 	elapsedMs: number,
 ): PhysicalCameraPlacement {
-	validateHostPhysicalCameraPath(path);
-	const progress = Math.min(Math.max(elapsedMs / path.durationMs, 0), 1);
-	let start = path.initial;
-	let startFraction = 0;
-	for (const leg of path.legs) {
-		if (progress < leg.endFraction) {
-			const localProgress =
-				(progress - startFraction) / (leg.endFraction - startFraction);
-			return interpolatePathPoints(start, leg.end, localProgress);
-		}
-		if (progress === leg.endFraction) return pathPointPlacement(leg.end);
-		start = leg.end;
-		startFraction = leg.endFraction;
-	}
-	return pathPointPlacement(start);
+	return evaluateHostPlacedPath(path, path.durationMs, elapsedMs, {
+		interpolate: interpolatePathPoints,
+		present: pathPointPlacement,
+	});
 }
 
 /** Reject malformed host paths at the transport boundary instead of sampling incoherent state. */
 export function validateHostPhysicalCameraPath(
 	path: HostPhysicalCameraPath,
 ): void {
-	if (!Number.isFinite(path.durationMs) || path.durationMs <= 0) {
-		throw new Error(
-			"Host physical-camera path duration must be positive and finite.",
-		);
-	}
-	if (path.legs.length === 0) {
-		throw new Error("Host physical-camera path must contain at least one leg.");
-	}
-	let previous = 0;
-	for (const leg of path.legs) {
-		if (
-			!Number.isFinite(leg.endFraction) ||
-			leg.endFraction <= previous ||
-			leg.endFraction > 1
-		) {
-			throw new Error(
-				"Host physical-camera path fractions must increase through (0, 1].",
-			);
-		}
-		previous = leg.endFraction;
-	}
-	if (previous !== 1) {
-		throw new Error("Host physical-camera path must end at tick fraction one.");
-	}
+	validateHostPlacedPath(path, path.durationMs);
 }
 
 function interpolatePathPoints(

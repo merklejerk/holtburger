@@ -49,6 +49,10 @@ import {
 import type { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
+import type {
+	DynamicEntityAdvance,
+	DynamicEntityAdvanceBatch,
+} from "../runtime/dynamic-entity-feed";
 
 /** Presentation-owned consequences of one complete producer physics-state projection. */
 export interface DynamicEntityPresentationState {
@@ -485,6 +489,18 @@ export class DynamicEntitySystem<
 		if (!this.#entities.has(nodeId))
 			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
 		this.#placements.updateRoot(nodeId, placement);
+	}
+
+	/** Apply one host-accepted transient path through the sole dynamic-root placement owner. */
+	updatePlacementPath(
+		nodeId: SceneNodeId,
+		advance: DynamicEntityAdvance,
+		durationMs: DynamicEntityAdvanceBatch["durationMs"],
+		startedAtMs: number,
+	): void {
+		if (!this.#entities.has(nodeId))
+			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		this.#placements.applyPath(nodeId, advance, durationMs, startedAtMs);
 	}
 
 	/** Replace presentation-only physics consequences without rebuilding entity resources. */

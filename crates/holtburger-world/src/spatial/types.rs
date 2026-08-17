@@ -111,6 +111,55 @@ pub struct AuthoritativeBodyKinematics {
     pub omega: Vector3,
 }
 
+/// Complete finite vector replacement for one locally simulated dynamic body.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicBodyKinematics {
+    velocity: Vector3,
+    acceleration: Vector3,
+    omega: Vector3,
+    align_path: bool,
+}
+
+impl DynamicBodyKinematics {
+    /// Validates the vector contract once before any scene mutation can observe it.
+    pub fn new(
+        velocity: Vector3,
+        acceleration: Vector3,
+        omega: Vector3,
+        align_path: bool,
+    ) -> Option<Self> {
+        [velocity, acceleration, omega]
+            .into_iter()
+            .all(vector_is_finite)
+            .then_some(Self {
+                velocity,
+                acceleration,
+                omega,
+                align_path,
+            })
+    }
+
+    pub const fn velocity(self) -> Vector3 {
+        self.velocity
+    }
+
+    pub const fn acceleration(self) -> Vector3 {
+        self.acceleration
+    }
+
+    pub const fn omega(self) -> Vector3 {
+        self.omega
+    }
+
+    pub const fn align_path(self) -> bool {
+        self.align_path
+    }
+}
+
+fn vector_is_finite(vector: Vector3) -> bool {
+    vector.x.is_finite() && vector.y.is_finite() && vector.z.is_finite()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeBodyResetCause {
     InitialHydration,

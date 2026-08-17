@@ -26,6 +26,7 @@ mod env_cell_source;
 pub mod explorer_entity_delivery;
 pub mod explorer_entity_driver;
 pub mod explorer_entity_runtime;
+mod explorer_entity_simulation;
 pub mod explorer_weenie_catalog;
 pub mod gfx_obj_geometry;
 mod host_camera_runtime;
@@ -39,6 +40,7 @@ mod outdoor_static_source;
 mod particle_emitter_source;
 mod particle_mesh_source;
 mod physics_script_source;
+mod placed_motion_presentation;
 pub mod polygon_geometry;
 pub mod portal_geometry;
 pub mod portal_visibility;
@@ -1480,13 +1482,28 @@ pub fn run() {
         Arc::clone(&explorer_entities),
     ));
     let fixed_tick_runtime = Arc::new(host_fixed_tick_runtime::HostFixedTickRuntime::new());
+    let explorer_entity_tick_slot = fixed_tick_runtime.reserve_slot();
     let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
         Arc::clone(&simulation),
         Arc::clone(&fixed_tick_runtime),
     ));
     let fixed_tick_runtime_for_setup = Arc::clone(&fixed_tick_runtime);
+    let explorer_entities_for_setup = Arc::clone(&explorer_entities);
+    let explorer_entity_delivery_for_setup = Arc::clone(&explorer_entity_delivery);
     tauri::Builder::default()
-        .setup(move |_| {
+        .setup(move |app| {
+            fixed_tick_runtime_for_setup.install(
+                explorer_entity_tick_slot,
+                Arc::new(explorer_entity_simulation::ExplorerEntitySimulation::new(
+                    explorer_entities_for_setup,
+                    explorer_entity_delivery_for_setup,
+                    Arc::new(
+                        explorer_entity_simulation::TauriDynamicEntityEventSink::new(
+                            app.handle().clone(),
+                        ),
+                    ),
+                )),
+            );
             fixed_tick_runtime_for_setup.spawn();
             Ok(())
         })

@@ -172,7 +172,10 @@ import {
 	adaptSpawnedDynamicPresentation,
 	spawnedDynamicPlacement,
 } from "./spawned-dynamic-presentation";
-import type { DynamicEntityView } from "./dynamic-entity-feed";
+import type {
+	DynamicEntityAdvanceBatch,
+	DynamicEntityView,
+} from "./dynamic-entity-feed";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import {
 	computeSceneInterest,
@@ -442,8 +445,8 @@ export class GameRuntime {
 		DynamicGenerationResourceOwnerId
 	>;
 	readonly #dynamicEntityVisualSource: DynamicEntityVisualSource | null;
-	/** Desired producer generations are liveness tokens, not a second semantic entity mirror. */
-	readonly #spawnedDesiredGenerations = new Map<number, number>();
+	/** Latest desired current views are liveness tokens and late-readiness endpoints, not authority. */
+	readonly #spawnedDesiredEntities = new Map<number, DynamicEntityView>();
 	/** Installed frontend resources keyed by producer identity. */
 	readonly #spawnedPresentations = new Map<
 		number,
@@ -1147,14 +1150,14 @@ export class GameRuntime {
 				);
 			requested.set(guid, entity);
 		}
-		for (const guid of [...this.#spawnedDesiredGenerations.keys()]) {
+		for (const guid of [...this.#spawnedDesiredEntities.keys()]) {
 			if (!requested.has(guid)) this.#removeSpawnedDynamicEntity(guid);
 		}
 		const preparations: Promise<void>[] = [];
 		for (const entity of requested.values()) {
 			const guid = entity.identity.guid;
 			const visualKey = dynamicVisualKey(entity);
-			this.#spawnedDesiredGenerations.set(guid, entity.generation);
+			this.#spawnedDesiredEntities.set(guid, entity);
 			const visual = this.#retainSpawnedVisual(guid, visualKey, entity);
 			const preparation = this.#upsertSpawnedDynamicEntity(
 				entity,
@@ -1177,29 +1180,66 @@ export class GameRuntime {
 		}
 	}
 
+	/** Apply one accepted host tick without re-running asynchronous visual reconciliation. */
+	applySpawnedDynamicEntityAdvances(
+		batch: DynamicEntityAdvanceBatch,
+		receivedAtMs: number,
+	): void {
+		if (this.#destroyed)
+			throw new Error(
+				"Cannot advance spawned entities after runtime shutdown.",
+			);
+		for (const advance of batch.advances) {
+			const entity = advance.entity;
+			const guid = entity.identity.guid;
+			const desired = this.#spawnedDesiredEntities.get(guid);
+			if (desired?.generation !== entity.generation) continue;
+			if (dynamicVisualKey(desired) !== dynamicVisualKey(entity)) {
+				throw new Error(
+					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts within generation ${entity.generation}.`,
+				);
+			}
+			this.#spawnedDesiredEntities.set(guid, entity);
+			const installed = this.#spawnedPresentations.get(guid);
+			if (installed?.generation !== entity.generation) continue;
+			this.#applySpawnedPresentationState(installed.nodeId, entity);
+			this.#dynamics.updatePlacementPath(
+				installed.nodeId,
+				advance,
+				batch.durationMs,
+				receivedAtMs,
+			);
+		}
+	}
+
 	async #upsertSpawnedDynamicEntity(
 		entity: DynamicEntityView,
 		visualKey: string,
 		visual: Promise<DecodedStaticPresentation>,
 	): Promise<void> {
 		const guid = entity.identity.guid;
-		const current = this.#spawnedPresentations.get(guid);
-		if (current?.generation === entity.generation) {
-			if (current.visualKey !== visualKey) {
+		const installedCurrent = this.#spawnedPresentations.get(guid);
+		if (installedCurrent?.generation === entity.generation) {
+			if (installedCurrent.visualKey !== visualKey) {
 				throw new Error(
 					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts without changing generation.`,
 				);
 			}
-			this.#applySpawnedDynamicState(current.nodeId, entity);
+			this.#applySpawnedDynamicState(installedCurrent.nodeId, entity);
 			return;
 		}
 		const resolved = await visual;
-		if (this.#spawnedDesiredGenerations.get(guid) !== entity.generation) return;
+		if (
+			this.#spawnedDesiredEntities.get(guid)?.generation !== entity.generation
+		)
+			return;
 		const ownerId = spawnedDynamicOwnerId(guid);
 		const activation = await this.#prepareDynamicOwner(ownerId, [
 			adaptSpawnedDynamicPresentation(entity, resolved),
 		]);
-		if (this.#spawnedDesiredGenerations.get(guid) !== entity.generation) {
+		if (
+			this.#spawnedDesiredEntities.get(guid)?.generation !== entity.generation
+		) {
 			activation.release();
 			return;
 		}
@@ -1217,7 +1257,13 @@ export class GameRuntime {
 			ownerId,
 			visualKey,
 		});
-		this.#applySpawnedDynamicState(nodeId, entity);
+		const latestDesired = this.#spawnedDesiredEntities.get(guid);
+		if (latestDesired?.generation !== entity.generation) {
+			throw new Error(
+				`Dynamic entity ${formatDynamicGuid(guid)} changed generation during synchronous activation commit.`,
+			);
+		}
+		this.#applySpawnedDynamicState(nodeId, latestDesired);
 	}
 
 	#applySpawnedDynamicState(
@@ -1225,6 +1271,13 @@ export class GameRuntime {
 		entity: DynamicEntityView,
 	): void {
 		this.#dynamics.updatePlacement(nodeId, spawnedDynamicPlacement(entity));
+		this.#applySpawnedPresentationState(nodeId, entity);
+	}
+
+	#applySpawnedPresentationState(
+		nodeId: SceneNodeId,
+		entity: DynamicEntityView,
+	): void {
 		this.#dynamics.updatePresentationState(nodeId, {
 			cloaked: entity.physics.cloaked,
 			hidden: entity.physics.hidden,
@@ -1271,7 +1324,7 @@ export class GameRuntime {
 	}
 
 	#removeSpawnedDynamicEntity(guid: number): void {
-		this.#spawnedDesiredGenerations.delete(guid);
+		this.#spawnedDesiredEntities.delete(guid);
 		const visualKey = this.#spawnedVisualKeys.get(guid);
 		if (visualKey !== undefined) this.#releaseSpawnedVisual(guid, visualKey);
 		const installed = this.#spawnedPresentations.get(guid);
@@ -1628,6 +1681,7 @@ export class GameRuntime {
 	tick(): void {
 		if (this.#destroyed) return;
 		this.#drainCommitArtifacts();
+		this.#dynamicPlacements.advance(performance.now());
 	}
 
 	/** Advance ordered runtime state and draw one frontend-scheduled frame. */
@@ -1734,7 +1788,7 @@ export class GameRuntime {
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
-		for (const guid of [...this.#spawnedDesiredGenerations.keys()])
+		for (const guid of [...this.#spawnedDesiredEntities.keys()])
 			this.#removeSpawnedDynamicEntity(guid);
 		this.#spawnedVisuals.clear();
 		this.#spawnedVisualKeys.clear();

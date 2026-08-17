@@ -1,15 +1,24 @@
 //! Narrow Explorer adapter from current registry/body facts to the shared focused view feed.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::time::Instant;
 
-use holtburger_common::Guid;
+use anyhow::{Result, ensure};
+use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Quaternion};
 use holtburger_core::{
-    DynamicEntityEvent, DynamicEntityHostTime, DynamicEntitySnapshot, DynamicEntityView,
+    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityEvent, DynamicEntityHostTime,
+    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPlacedPath,
+    DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot, DynamicEntityView,
     DynamicEntityViewSource, project_dynamic_entity_view,
 };
+use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
 
-use crate::explorer_entity_runtime::{ExplorerEntityRuntime, ExplorerEntityRuntimeError};
+use crate::explorer_entity_runtime::{
+    ExplorerEntityPhysicalTick, ExplorerEntityRuntime, ExplorerEntityRuntimeError,
+};
+use crate::placed_motion_presentation::present_placed_motion_point;
 
 /// One Tauri event name for snapshots and incremental entity changes.
 pub const EXPLORER_DYNAMIC_ENTITY_EVENT: &str = "explorer-dynamic-entity";
@@ -85,10 +94,137 @@ impl ExplorerEntityDelivery {
         })
     }
 
+    /// Builds the sole changed-entity batch for one accepted fixed-tick collection epoch.
+    pub fn advanced(
+        &self,
+        ticks: Vec<ExplorerEntityPhysicalTick>,
+        duration: Duration,
+    ) -> Result<Option<DynamicEntityEvent>> {
+        if ticks.is_empty() {
+            return Ok(None);
+        }
+        ensure!(
+            duration.as_secs_f64().is_finite() && !duration.is_zero(),
+            "dynamic-entity path duration must be positive and finite"
+        );
+        let advances = ticks
+            .into_iter()
+            .map(|tick| {
+                let path = serialize_entity_path(
+                    &tick.solved.result.motion.path,
+                    tick.solved.previous.pose,
+                    tick.solved.current.pose,
+                )?;
+                Ok(DynamicEntityAdvance {
+                    entity: Box::new(project_dynamic_entity_view(
+                        DynamicEntityViewSource::from_projection(tick.generation, tick.input),
+                    )),
+                    kind: DynamicEntityPlacementAdvanceKind::Integrated,
+                    path,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Some(DynamicEntityEvent::Advanced {
+            batch: DynamicEntityAdvanceBatch::new(
+                self.host_time(),
+                duration.as_secs_f64() * 1_000.0,
+                advances,
+            ),
+        }))
+    }
+
     fn host_time(&self) -> DynamicEntityHostTime {
         DynamicEntityHostTime::new(self.origin.elapsed().as_secs_f64())
             .expect("monotonic elapsed time must be finite and nonnegative")
     }
+}
+
+fn serialize_entity_path(
+    path: &PlacedMotionPath,
+    previous: WorldPosition,
+    current: WorldPosition,
+) -> Result<DynamicEntityPlacedPath> {
+    Ok(DynamicEntityPlacedPath {
+        initial: serialize_entity_path_point(path, path.initial(), previous.rotation)?,
+        legs: path
+            .legs()
+            .iter()
+            .map(|leg| {
+                Ok(DynamicEntityPathLeg {
+                    end_fraction: leg.end_fraction(),
+                    end: serialize_entity_path_point(
+                        path,
+                        leg.end(),
+                        interpolate_rotation(
+                            previous.rotation,
+                            current.rotation,
+                            leg.end_fraction(),
+                        )?,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+    })
+}
+
+fn serialize_entity_path_point(
+    path: &PlacedMotionPath,
+    point: &PlacedMotionPoint,
+    rotation: Quaternion,
+) -> Result<DynamicEntityPathPoint> {
+    let presented = present_placed_motion_point(path.anchor(), point)?;
+    let mut pose = WorldPosition {
+        landblock_id: Guid(presented.owner.0 & 0xffff_0000),
+        coords: presented.coords,
+        rotation,
+    }
+    .normalize_outdoor_cell();
+    if let Some(cell) = presented.cell {
+        pose.landblock_id = cell;
+    }
+    Ok(DynamicEntityPathPoint { pose })
+}
+
+/// Shortest-arc normalized interpolation keeps authored quaternion signs from causing a long flip.
+fn interpolate_rotation(
+    start: Quaternion,
+    mut end: Quaternion,
+    fraction: f32,
+) -> Result<Quaternion> {
+    ensure!(
+        fraction.is_finite() && (0.0..=1.0).contains(&fraction),
+        "dynamic-entity path rotation fraction must be finite and normalized"
+    );
+    let dot = start.w * end.w + start.x * end.x + start.y * end.y + start.z * end.z;
+    if dot < 0.0 {
+        end = Quaternion {
+            w: -end.w,
+            x: -end.x,
+            y: -end.y,
+            z: -end.z,
+        };
+    }
+    let candidate = Quaternion {
+        w: start.w + (end.w - start.w) * fraction,
+        x: start.x + (end.x - start.x) * fraction,
+        y: start.y + (end.y - start.y) * fraction,
+        z: start.z + (end.z - start.z) * fraction,
+    };
+    let length = (candidate.w * candidate.w
+        + candidate.x * candidate.x
+        + candidate.y * candidate.y
+        + candidate.z * candidate.z)
+        .sqrt();
+    ensure!(
+        length.is_finite() && length > f32::EPSILON,
+        "dynamic-entity path rotation must be finite and nonzero"
+    );
+    Ok(Quaternion {
+        w: candidate.w / length,
+        x: candidate.x / length,
+        y: candidate.y / length,
+        z: candidate.z / length,
+    })
 }
 
 #[cfg(test)]

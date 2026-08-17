@@ -2,10 +2,11 @@
 use super::PhysicalCollisionFilter;
 use super::{
     AuthoritativeBodySync, BasicSpatialPhysics, CollisionScene, ContactState,
-    DynamicPhysicalBodyDefinition, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
-    PhysicalBodyState, PhysicalBodyTickResult, RuntimeSpatialBodyView, SolvedBodyKinematics,
-    SpatialBody, SpatialBodyId, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
+    DynamicBodyKinematics, DynamicPhysicalBodyDefinition, PhysicalBodyActuation,
+    PhysicalBodyDefinition, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
+    PhysicalBodyReconfigurationOutcome, PhysicalBodyState, PhysicalBodyTickResult,
+    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialPhysics,
+    SpatialSampleMode, SpatialSamplingConfig,
     physical_body::{physical_body_scene_residency, solve_physical_body_tick},
     physics::sample_mode_for_projection_state,
 };
@@ -13,7 +14,7 @@ use super::{
 use super::{GroundState, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z};
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Vector3};
+use holtburger_common::{Guid, Quaternion, Vector3};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -89,6 +90,19 @@ fn coarse_membership_owner(pose: WorldPosition) -> Option<Guid> {
     (pose.landblock_id != Guid::NULL).then_some(Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff))
 }
 
+fn integrate_angular_velocity(
+    rotation: Quaternion,
+    omega: Vector3,
+    delta_seconds: f32,
+) -> Quaternion {
+    let speed = omega.length();
+    if speed <= f32::EPSILON {
+        return rotation;
+    }
+    Quaternion::from_axis_angle(omega, speed * delta_seconds)
+        .map_or(rotation, |delta| delta.multiply(&rotation))
+}
+
 #[derive(Clone)]
 pub struct SpatialScene {
     landblock_map: HashMap<Guid, HashSet<Guid>>,
@@ -141,6 +155,29 @@ impl SpatialScene {
 
     pub fn body_for_guid(&self, guid: Guid) -> Option<&SpatialBody> {
         self.body_store.body_for_guid(guid)
+    }
+
+    /// Returns physically attached dynamic entities whose complete state permits integration.
+    ///
+    /// The canonical body store remains the only population. Callers receive a stable identity
+    /// order without maintaining a second scheduler registry; pose-only, frozen, static, camera,
+    /// and local-player bodies are excluded by construction.
+    pub fn scheduled_dynamic_entity_ids(&self) -> Vec<SpatialBodyId> {
+        let mut body_ids = self
+            .body_store
+            .bodies
+            .values()
+            .filter_map(|body| {
+                let SpatialBodyId::Entity(_) = body.id else {
+                    return None;
+                };
+                let collision = body.physical.as_ref()?.entity_collision.as_ref()?;
+                (collision.scheduling == crate::EntityPhysicsScheduling::Eligible)
+                    .then_some(body.id)
+            })
+            .collect::<Vec<_>>();
+        body_ids.sort_unstable();
+        body_ids
     }
 
     #[cfg(test)]
@@ -296,6 +333,43 @@ impl SpatialScene {
         })
     }
 
+    /// Replaces live local kinematics and clears incompatible response memory in one scene write.
+    ///
+    /// Launch, wake, and later scenario corrections use this seam instead of mutating public body
+    /// fields or teaching producer registries to choreograph solver state.
+    pub fn apply_dynamic_body_kinematics(
+        &mut self,
+        body_id: SpatialBodyId,
+        kinematics: DynamicBodyKinematics,
+        now: Instant,
+    ) -> Option<RuntimeSpatialBodyView> {
+        let body = self.body_store.body_mut(body_id)?;
+        let physical = body.physical.as_ref()?;
+        let entity_collision = physical.entity_collision.clone()?;
+        let mut response_policy = physical.response_policy;
+        response_policy.align_path = kinematics.align_path();
+        let replacement = DynamicPhysicalBodyDefinition {
+            movement: physical.definition,
+            response_policy,
+            entity_collision,
+        };
+        let collision_filter = physical.collision_filter;
+        let retained_cell = physical.response.cell();
+
+        body.physical = Some(PhysicalBodyState::new_dynamic(
+            replacement,
+            collision_filter,
+            retained_cell,
+        ));
+        body.velocity = kinematics.velocity();
+        body.acceleration = kinematics.acceleration();
+        body.omega = kinematics.omega();
+        body.contact = ContactState::Airborne;
+        body.sampling.mode = SpatialSampleMode::SimulatingVelocity;
+        body.sampling.last_derived_at = now;
+        Some(body.runtime_view())
+    }
+
     /// Advances one registered physical body without consulting content or interest policy.
     pub fn tick_physical_body(
         &mut self,
@@ -346,6 +420,8 @@ impl SpatialScene {
         };
         let mut tentative = body;
         tentative.pose = commit.pose;
+        tentative.pose.rotation =
+            integrate_angular_velocity(tentative.pose.rotation, tentative.omega, delta_seconds);
         tentative.velocity = commit.velocity;
         tentative.contact = commit.contact;
         let physical = tentative
@@ -764,6 +840,59 @@ mod physical_body_tests {
                 default_script_available: false,
             },
         }
+    }
+
+    #[test]
+    fn scheduled_dynamic_entities_are_stable_and_derived_from_attached_state() {
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let eligible_high = SpatialBodyId::Entity(Guid(0x7000_0009));
+        let eligible_low = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let frozen = SpatialBodyId::Entity(Guid(0x7000_0002));
+        let static_body = SpatialBodyId::Entity(Guid(0x7000_0003));
+        let pose_only = SpatialBodyId::Entity(Guid(0x7000_0004));
+        let camera = SpatialBodyId::Ephemeral(1);
+
+        for body_id in [
+            eligible_high,
+            frozen,
+            pose_only,
+            camera,
+            static_body,
+            eligible_low,
+        ] {
+            scene.register_body(SpatialBody::new(body_id, pose(Vector3::zero()), now));
+        }
+        for body_id in [eligible_high, eligible_low, camera] {
+            scene
+                .set_dynamic_physical_body(
+                    body_id,
+                    Some(dynamic_definition(grounded_definition(), false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+        }
+        for (body_id, scheduling) in [
+            (frozen, EntityPhysicsScheduling::Frozen),
+            (static_body, EntityPhysicsScheduling::Static),
+        ] {
+            let mut definition = dynamic_definition(grounded_definition(), false);
+            definition.entity_collision.scheduling = scheduling;
+            scene
+                .set_dynamic_physical_body(
+                    body_id,
+                    Some(definition),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            scene.scheduled_dynamic_entity_ids(),
+            [eligible_low, eligible_high]
+        );
     }
 
     #[test]

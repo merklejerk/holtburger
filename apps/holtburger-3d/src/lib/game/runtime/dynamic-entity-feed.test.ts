@@ -65,6 +65,34 @@ function upserted(value: DynamicEntityView): DynamicEntityEvent {
 	};
 }
 
+function advanced(
+	value: DynamicEntityView,
+	hostSeconds: number,
+): DynamicEntityEvent {
+	return {
+		kind: "advanced",
+		batch: {
+			hostTime: { seconds: hostSeconds },
+			durationMs: 1000 / 30,
+			advances: [
+				{
+					entity: value,
+					kind: "integrated",
+					path: {
+						initial: { pose: value.placement.pose },
+						legs: [
+							{
+								endFraction: 1,
+								end: { pose: value.placement.pose },
+							},
+						],
+					},
+				},
+			],
+		},
+	};
+}
+
 describe("DynamicEntityMirror", () => {
 	it("reconstructs atomically and ignores deltas while awaiting a snapshot", () => {
 		const mirror = new DynamicEntityMirror(() => 10);
@@ -114,5 +142,23 @@ describe("DynamicEntityMirror", () => {
 			"duplicate GUID",
 		);
 		expect(mirror.entities()).toEqual([entity(1, 1)]);
+	});
+
+	it("accepts only newer exact-generation advance batches", () => {
+		const mirror = new DynamicEntityMirror();
+		mirror.apply(snapshot(entity(7, 2)));
+		const stale = entity(7, 1);
+		stale.placement.pose.coords.x = 9;
+		expect(mirror.apply(advanced(stale, 2))).toBe(false);
+
+		const current = entity(7, 2);
+		current.placement.pose.coords.x = 10;
+		expect(mirror.apply(advanced(current, 3))).toBe(true);
+		expect(mirror.entities()[0].placement.pose.coords.x).toBe(10);
+
+		const late = entity(7, 2);
+		late.placement.pose.coords.x = 11;
+		expect(mirror.apply(advanced(late, 2.5))).toBe(false);
+		expect(mirror.entities()[0].placement.pose.coords.x).toBe(10);
 	});
 });

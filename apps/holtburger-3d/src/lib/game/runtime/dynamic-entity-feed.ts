@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateHostPlacedPath } from "../motion/host-placed-path";
 
 const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
@@ -122,6 +123,31 @@ const dynamicEntitySnapshotSchema = z.object({
 	entities: z.array(dynamicEntityViewSchema),
 });
 
+const dynamicEntityPathPointSchema = z.object({ pose: worldPositionSchema });
+const dynamicEntityPathSchema = z.object({
+	initial: dynamicEntityPathPointSchema,
+	legs: z
+		.array(
+			z.object({
+				endFraction: finiteNumber,
+				end: dynamicEntityPathPointSchema,
+			}),
+		)
+		.nonempty(),
+});
+
+const dynamicEntityAdvanceSchema = z.object({
+	entity: dynamicEntityViewSchema,
+	kind: z.enum(["integrated", "teleport", "reset"]),
+	path: dynamicEntityPathSchema,
+});
+
+const dynamicEntityAdvanceBatchSchema = z.object({
+	hostTime: hostTimeSchema,
+	durationMs: finiteNumber.positive(),
+	advances: z.array(dynamicEntityAdvanceSchema).nonempty(),
+});
+
 const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("snapshot"),
@@ -136,14 +162,28 @@ const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 		guid,
 		generation: nonNegativeInteger,
 	}),
+	z.object({
+		kind: z.literal("advanced"),
+		batch: dynamicEntityAdvanceBatchSchema,
+	}),
 ]);
 
 export type DynamicEntityView = z.infer<typeof dynamicEntityViewSchema>;
+export type DynamicEntityAdvance = z.infer<typeof dynamicEntityAdvanceSchema>;
+export type DynamicEntityAdvanceBatch = z.infer<
+	typeof dynamicEntityAdvanceBatchSchema
+>;
 export type DynamicEntityEvent = z.infer<typeof dynamicEntityEventSchema>;
 
 /** Validates the narrow Tauri boundary before mutable frontend state observes it. */
 export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
-	return dynamicEntityEventSchema.parse(value);
+	const event = dynamicEntityEventSchema.parse(value);
+	if (event.kind === "advanced") {
+		for (const advance of event.batch.advances) {
+			validateHostPlacedPath(advance.path, event.batch.durationMs);
+		}
+	}
+	return event;
 }
 
 /** Validate one focused current entity returned by a diagnostic host boundary. */
@@ -156,6 +196,7 @@ export class DynamicEntityMirror {
 	#awaitingSnapshot = true;
 	#entities = new Map<number, DynamicEntityView>();
 	#timeline: { hostSeconds: number; frontendSeconds: number } | null = null;
+	#lastAdvanceHostSeconds: number | null = null;
 	readonly #nowSeconds: () => number;
 
 	constructor(nowSeconds = () => performance.now() / 1_000) {
@@ -166,6 +207,7 @@ export class DynamicEntityMirror {
 	awaitSnapshot(): void {
 		this.#awaitingSnapshot = true;
 		this.#timeline = null;
+		this.#lastAdvanceHostSeconds = null;
 	}
 
 	/** Apply one validated snapshot or ordered live mutation and report whether current state changed. */
@@ -186,6 +228,7 @@ export class DynamicEntityMirror {
 				hostSeconds: event.snapshot.hostTime.seconds,
 				frontendSeconds: this.#nowSeconds(),
 			};
+			this.#lastAdvanceHostSeconds = event.snapshot.hostTime.seconds;
 			this.#awaitingSnapshot = false;
 			return true;
 		}
@@ -201,6 +244,31 @@ export class DynamicEntityMirror {
 			}
 			this.#entities.set(event.entity.identity.guid, event.entity);
 			return current !== event.entity;
+		}
+		if (event.kind === "advanced") {
+			if (
+				this.#lastAdvanceHostSeconds !== null &&
+				event.batch.hostTime.seconds <= this.#lastAdvanceHostSeconds
+			) {
+				return false;
+			}
+			this.#lastAdvanceHostSeconds = event.batch.hostTime.seconds;
+			const seen = new Set<number>();
+			let changed = false;
+			for (const advance of event.batch.advances) {
+				const entityGuid = advance.entity.identity.guid;
+				if (seen.has(entityGuid)) {
+					throw new Error(
+						`Dynamic-entity advance contains duplicate GUID 0x${entityGuid.toString(16).padStart(8, "0")}.`,
+					);
+				}
+				seen.add(entityGuid);
+				const current = this.#entities.get(entityGuid);
+				if (current?.generation !== advance.entity.generation) continue;
+				this.#entities.set(entityGuid, advance.entity);
+				changed = true;
+			}
+			return changed;
 		}
 
 		const current = this.#entities.get(event.guid);

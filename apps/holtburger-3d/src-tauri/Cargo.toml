@@ -28,6 +28,7 @@ tokio.workspace = true
 geo = "0.33.1"
 hex.workspace = true
 log.workspace = true
+holtburger-weenie-catalog.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

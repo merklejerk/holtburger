@@ -347,8 +347,11 @@ pub enum PhysicalBodyReconfiguration {
 /// Complete synchronous consequence of a committed physical-state replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalBodyReconfigurationOutcome {
+    /// Participation immediately before the operation.
     pub before: PhysicalBodyParticipation,
+    /// Participation immediately after the operation.
     pub after: PhysicalBodyParticipation,
+    /// Exact scene mutation that committed.
     pub change: PhysicalBodyReconfiguration,
     /// Exact movement geometry matched, so contact/placement response memory remained valid.
     pub response_memory_preserved: bool,

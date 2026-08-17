@@ -35,12 +35,13 @@ pub use content_assets::{
 };
 pub use dynamic_entity::{
     DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
-    DynamicEntityBodyRemovalOutcome, DynamicEntityContent, DynamicEntityDefinition,
-    DynamicEntityDefinitionError, DynamicEntityDefinitionInput, DynamicEntityIdentity,
-    DynamicEntityInitialState, DynamicEntityPhysicalPreparationError, DynamicEntityProjectionInput,
+    DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityContent,
+    DynamicEntityDefinition, DynamicEntityDefinitionError, DynamicEntityDefinitionInput,
+    DynamicEntityIdentity, DynamicEntityInitialState, DynamicEntityPhysicalPreparationError,
+    DynamicEntityProjectionInput, DynamicEntitySetupPreparation,
     apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
     install_dynamic_entity_body, material_appearance_input, prepare_dynamic_entity_physics,
-    remove_dynamic_entity_body,
+    prepare_dynamic_entity_setup, remove_dynamic_entity_body, replace_dynamic_entity_body,
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use physical_body_definition::{

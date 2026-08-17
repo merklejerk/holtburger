@@ -101,9 +101,13 @@ pub enum AuthoritativeBodySync {
 /// One complete producer-authoritative pose and vector replacement.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AuthoritativeBodyKinematics {
+    /// Producer-authoritative world pose.
     pub pose: WorldPosition,
+    /// Producer-authoritative world-space linear velocity.
     pub velocity: Vector3,
+    /// Producer-authoritative world-space linear acceleration.
     pub acceleration: Vector3,
+    /// Producer-authoritative world-space angular velocity.
     pub omega: Vector3,
 }
 
@@ -166,6 +170,7 @@ pub struct SpatialEntitySample {
     pub authoritative_pose: WorldPosition,
     pub projected_pose: WorldPosition,
     pub velocity: Vector3,
+    /// Current producer-authored world-space linear acceleration.
     pub acceleration: Vector3,
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,
@@ -178,6 +183,7 @@ pub struct RuntimeSpatialBodyView {
     pub authoritative_pose: Option<WorldPosition>,
     pub runtime_pose: WorldPosition,
     pub velocity: Vector3,
+    /// Current canonical world-space linear acceleration.
     pub acceleration: Vector3,
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,
@@ -191,6 +197,7 @@ pub struct SpatialBody {
     pub authoritative_pose: Option<WorldPosition>,
     pub pose: WorldPosition,
     pub velocity: Vector3,
+    /// Canonical world-space linear acceleration retained for dynamic integration.
     pub acceleration: Vector3,
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,

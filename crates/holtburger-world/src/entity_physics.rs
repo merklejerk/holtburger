@@ -18,16 +18,27 @@ pub const DEFAULT_ENTITY_PHYSICS_STATE: PhysicsState = PhysicsState::from_bits_r
 /// Absence preserves the base-mask bit. Explicit `false` clears it and explicit `true` sets it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EntityPhysicsStateOverrides {
+    /// Nullable replacement for `Ethereal`.
     pub ethereal: Option<bool>,
+    /// Nullable replacement for `ReportCollisions`.
     pub report_collisions: Option<bool>,
+    /// Nullable replacement for `IgnoreCollisions`.
     pub ignore_collisions: Option<bool>,
+    /// Nullable replacement for `NoDraw`.
     pub no_draw: Option<bool>,
+    /// Nullable replacement for `Gravity`.
     pub gravity: Option<bool>,
+    /// Nullable replacement for `LightingOn`.
     pub lighting: Option<bool>,
+    /// Nullable replacement for `ScriptedCollision`.
     pub scripted_collision: Option<bool>,
+    /// Nullable replacement for `Inelastic`.
     pub inelastic: Option<bool>,
+    /// Nullable replacement for `ReportCollisionsAsEnvironment`.
     pub report_collisions_as_environment: Option<bool>,
+    /// Nullable replacement for `EdgeSlide`.
     pub edge_slide: Option<bool>,
+    /// Nullable replacement for `Frozen`.
     pub frozen: Option<bool>,
 }
 
@@ -111,11 +122,17 @@ pub struct EntityCollisionReportPolicy {
 /// Presentation-owned consequences of a complete physics-state replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityPhysicsPresentation {
+    /// `NoDraw` suppresses ordinary rendering without changing physics.
     pub no_draw: bool,
+    /// `Hidden` suppresses presentation and locally observable collision/reporting.
     pub hidden: bool,
+    /// `Cloaked` selects presentation-owned translucency behavior.
     pub cloaked: bool,
+    /// Whether authored lighting participates in presentation.
     pub lighting: bool,
+    /// Whether the state requests the setup default animation.
     pub default_animation: bool,
+    /// Whether the state requests the setup default physics script.
     pub default_script: bool,
 }
 
@@ -133,10 +150,15 @@ pub struct EffectiveEntityPhysicsState {
     pub unsupported_local_simulation: PhysicsState,
     /// Known gameplay marker preserved without changing the proven physical contact path.
     pub unsupported_gameplay: PhysicsState,
+    /// Fixed-tick scheduling decision derived from the semantic mask.
     pub scheduling: EntityPhysicsScheduling,
+    /// Directional peer collision decisions derived from the semantic mask.
     pub dynamic_collision: EntityDynamicCollisionPolicy,
+    /// Environment and peer response decisions derived from the semantic mask.
     pub response: EntityPhysicsResponse,
+    /// Directional contact reporting decision derived from the semantic mask.
     pub reporting: EntityCollisionReportPolicy,
+    /// Presentation consequences derived from the semantic mask.
     pub presentation: EntityPhysicsPresentation,
     /// Selects the prepared physics-BSP target branch rather than setup fallback volumes.
     pub uses_physics_bsp: bool,
@@ -169,8 +191,11 @@ pub enum EntityPhysicalIntent {
 /// Facts outside the state mask required to choose a scene operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityPhysicsTransitionContext {
+    /// Producer policy for whether this entity should be locally simulated.
     pub intent: EntityPhysicalIntent,
+    /// Whether immutable content preparation produced a usable physical definition.
     pub prepared_physics_available: bool,
+    /// Whether the canonical pose body currently carries physical state.
     pub physical_body_attached: bool,
     /// Scale, geometry, category, or another prepared non-state fact changed.
     pub prepared_definition_changed: bool,
@@ -202,7 +227,9 @@ pub enum EntityPhysicalTransitionAction {
 /// Pure state-replacement decision consumed by both producer compositions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityPhysicsTransitionDecision {
+    /// Exact mutation to apply to the canonical scene body.
     pub action: EntityPhysicalTransitionAction,
+    /// Resulting local physical disposition, including typed unsupported cases.
     pub disposition: EntityPhysicalDisposition,
     /// Existing directional report lifetimes must end before the replacement is committed.
     pub force_end_reports: bool,
@@ -475,22 +502,57 @@ mod tests {
     #[test]
     fn unknown_and_known_unsupported_bits_remain_visible() {
         let unknown = 0x8000_0000;
+        let unsupported = PhysicsState::STATIC
+            | PhysicsState::UNUSED1
+            | PhysicsState::PUSHABLE
+            | PhysicsState::PARTICLE_EMITTER
+            | PhysicsState::UNUSED2
+            | PhysicsState::SLEDDING;
         let semantic = PhysicsState::from_bits_retain(
-            PhysicsState::PUSHABLE.bits() | PhysicsState::SCRIPTED_COLLISION.bits() | unknown,
+            unsupported.bits() | PhysicsState::SCRIPTED_COLLISION.bits() | unknown,
         );
         let resolved = resolve_effective_entity_physics_state(semantic);
 
         assert_eq!(resolved.semantic.bits(), semantic.bits());
         assert_eq!(resolved.unknown_bits, unknown);
-        assert_eq!(
-            resolved.unsupported_local_simulation,
-            PhysicsState::PUSHABLE
-        );
+        assert_eq!(resolved.unsupported_local_simulation, unsupported);
         assert_eq!(
             resolved.unsupported_gameplay,
             PhysicsState::SCRIPTED_COLLISION
         );
         assert!(!resolved.supports_local_simulation());
+    }
+
+    #[test]
+    fn remaining_supported_bits_keep_their_distinct_named_decisions() {
+        let semantic = PhysicsState::MISSILE
+            | PhysicsState::PATH_CLIPPED
+            | PhysicsState::ALIGN_PATH
+            | PhysicsState::GRAVITY
+            | PhysicsState::LIGHTING_ON
+            | PhysicsState::HAS_PHYSICS_BSP
+            | PhysicsState::INELASTIC
+            | PhysicsState::HAS_DEFAULT_ANIM
+            | PhysicsState::HAS_DEFAULT_SCRIPT
+            | PhysicsState::CLOAKED
+            | PhysicsState::EDGE_SLIDE
+            | PhysicsState::FROZEN;
+        let resolved = resolve_effective_entity_physics_state(semantic);
+
+        assert_eq!(resolved.semantic, semantic);
+        assert_eq!(resolved.scheduling, EntityPhysicsScheduling::Frozen);
+        assert!(resolved.dynamic_collision.missile);
+        assert!(resolved.dynamic_collision.path_clipped);
+        assert!(resolved.response.align_path);
+        assert!(resolved.response.gravity);
+        assert!(resolved.response.inelastic);
+        assert!(resolved.response.edge_slide);
+        assert!(resolved.presentation.lighting);
+        assert!(resolved.presentation.default_animation);
+        assert!(resolved.presentation.default_script);
+        assert!(resolved.presentation.cloaked);
+        assert!(resolved.uses_physics_bsp);
+        assert!(resolved.supports_local_simulation());
     }
 
     #[test]
@@ -565,5 +627,27 @@ mod tests {
 
         assert_eq!(decision.action, EntityPhysicalTransitionAction::None);
         assert_eq!(decision.disposition, EntityPhysicalDisposition::PoseOnly);
+    }
+
+    #[test]
+    fn simulated_intent_reports_missing_preparation_without_mutating_a_body() {
+        let next = resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
+        let decision = decide_entity_physics_state_transition(
+            None,
+            next,
+            EntityPhysicsTransitionContext {
+                intent: EntityPhysicalIntent::Simulated,
+                prepared_physics_available: false,
+                physical_body_attached: false,
+                prepared_definition_changed: false,
+            },
+        );
+
+        assert_eq!(decision.action, EntityPhysicalTransitionAction::None);
+        assert_eq!(
+            decision.disposition,
+            EntityPhysicalDisposition::MissingPreparedPhysics
+        );
+        assert!(!decision.wake_solver);
     }
 }

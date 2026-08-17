@@ -2283,6 +2283,7 @@ dependencies = [
  "holtburger-content",
  "holtburger-core",
  "holtburger-dat",
+ "holtburger-weenie-catalog",
  "holtburger-world",
  "log",
  "serde",

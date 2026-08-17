@@ -124,14 +124,13 @@ Outcome:
   consuming the same source-neutral definition, body-operation, committed-outcome, and projection
   contracts.
 - Dynamic lifecycle crosses Tauri through one focused initial snapshot and focused deltas, with
-  listener-first reconstruction after startup or page reload and no speculative delivery-recovery
-  protocol.
+  listener-first hydration on initial mount or webview remount and no delivery-recovery protocol.
 - Each producer registry owns its semantic lifecycle while its composition-local `SpatialScene` owns
   physical state. Ordered installation plus projection joining prevents partial publication without
   a cross-store transaction.
 - Complete ACE template physics-state inputs are cataloged losslessly. Every entity retains one pose
-  body while effective-state replacement reversibly attaches, detaches, or reconfigures optional
-  solver participation; the existing client `SetState` path consumes the same transition logic.
+  body while effective-state replacement reversibly enables, disables, or reconfigures solver
+  participation; the existing client `SetState` path consumes the same transition logic.
 - Explorer prediction reuses `HostSimulationRuntime`'s existing spatial-body store, solver, per-tick
   scene residency, and placed paths. A client uses its separate `WorldState` scene; catalog provenance
   does not fork the downstream mechanics.
@@ -147,8 +146,11 @@ Outcome:
   populated landblock, plus census-selected target geometry, narrow-phase contact/response, bounded
   incremental convergence, an evidence-selected continuous-contact rule, and retained collision
   start/end reporting.
-- Existing `MotionKinematics` data and focused resolution functions are extended only as the named
-  motion scenarios require; no catalog/resolver service hierarchy is assumed up front.
+- The Explorer milestone leaves existing `MotionKinematics` and client command projection unchanged.
+  Spawned roots move through physical vectors or explicit relocation, no semantic Explorer operation
+  selects authored root motion, and setup-default position-frame root transforms are temporarily
+  ignored under the measured one-WCID retail divergence. The dedicated
+  `holtburger-authored-root-motion-physics-integration-plan.md` owns the later shared clean cutover.
 - The frontend executes plans and sparse placement anchors without consuming raw motion tables or
   per-frame host transforms.
 - Dynamic entities reuse the authored visual, behavior, effect, presentation, and renderer systems.
@@ -199,7 +201,7 @@ These contracts survive every roadmap stage:
 17. The optional Explorer weenie catalog is a separately generated host reference asset, not HBA
     client content and not a `ContentRepository` mount. Only its source-neutral spawn facts cross
     into shared realization contracts.
-18. A dynamic entity's `SpatialBody` remains its pose owner even when it has no physical attachment.
+18. A dynamic entity's `SpatialBody` remains its pose owner even when solver participation is disabled.
     Complete effective physics-state replacement—not entity respawn or one collidable boolean—drives
     reversible solver and scheduler participation.
 19. Body-to-body collision is required dynamic-runtime behavior, not census-gated optional scope.

@@ -66,11 +66,11 @@ describe("DynamicEntitySystem authored ownership", () => {
 			source: {
 				...base.source,
 				behavior: {
-				animationId: null,
-				kind: "script-only",
-				physicsScriptId: "0x330003d8",
-				physicsScriptTableId: null,
-				soundTableId: null,
+					animationId: null,
+					kind: "script-only",
+					physicsScriptId: "0x330003d8",
+					physicsScriptTableId: null,
+					soundTableId: null,
 				},
 			},
 		};
@@ -301,8 +301,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			{
 				color: { red: 0.1, green: 0.2, blue: 0.3 },
 				intensity:
-					100 *
-					FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
+					100 * FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
 				position: { x: 13, y: 2, z: -189 },
 				range: 4 * RUNTIME_LIGHT_RANGE_SCALE,
 			},
@@ -435,21 +434,21 @@ describe("DynamicEntitySystem authored ownership", () => {
 				presentation: {
 					...base.source.presentation,
 					parts: [
-					{
-						...firstPart,
-						geometry: {
-							...firstPart.geometry,
-							bounds: new AABB3(new Vec3(5, 0, -1), new Vec3(6, 1, 1)),
+						{
+							...firstPart,
+							geometry: {
+								...firstPart.geometry,
+								bounds: new AABB3(new Vec3(5, 0, -1), new Vec3(6, 1, 1)),
+							},
 						},
-					},
-					{
-						...secondPart,
-						defaultScale: new Vec3(1, 0.5, 2),
-						geometry: {
-							...secondPart.geometry,
-							bounds: new AABB3(Vec3.zero(), new Vec3(1, 1, 1)),
+						{
+							...secondPart,
+							defaultScale: new Vec3(1, 0.5, 2),
+							geometry: {
+								...secondPart.geometry,
+								bounds: new AABB3(Vec3.zero(), new Vec3(1, 1, 1)),
+							},
 						},
-					},
 					],
 				},
 				scale: new Vec3(2, 3, 4),

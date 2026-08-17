@@ -288,7 +288,10 @@ function parseArgs(args) {
 				break;
 			case "--spawn-distance":
 				parsed.spawnDistance = Number(requireValue(args, ++index, arg));
-				if (!Number.isFinite(parsed.spawnDistance) || parsed.spawnDistance <= 0) {
+				if (
+					!Number.isFinite(parsed.spawnDistance) ||
+					parsed.spawnDistance <= 0
+				) {
 					throw new Error("--spawn-distance must be positive and finite.");
 				}
 				break;
@@ -910,7 +913,7 @@ function briefHarnessReport(result) {
 		consoleMessages: result.consoleMessages.filter(
 			({ level }) => level === "error" || level === "exception",
 		),
-		entityLifecycle: result.entityLifecycle,
+		entityLifecycle: summarizeEntityLifecycle(result.entityLifecycle),
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
 		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
@@ -945,6 +948,47 @@ function briefHarnessReport(result) {
 							staticObjects.texture.residentSourceCount,
 					},
 		timing: result.state.timing,
+	};
+}
+
+function summarizeEntityLifecycle(lifecycle) {
+	if (lifecycle === null) return null;
+	return {
+		spawned: {
+			generation: lifecycle.spawned.generation,
+			identity: lifecycle.spawned.identity,
+		},
+		spawnedState: summarizeEntityLifecycleState(lifecycle.spawnedState),
+		despawnedState: summarizeEntityLifecycleState(lifecycle.despawnedState),
+	};
+}
+
+function summarizeEntityLifecycleState(state) {
+	const dynamics = state.authoredDynamics;
+	return {
+		currentEntities: state.spawnedEntities.map(({ generation, identity }) => ({
+			generation,
+			identity,
+		})),
+		visibleDynamicEntityCount: state.metrics?.visibleDynamicEntityCount ?? null,
+		runtime:
+			dynamics === null
+				? null
+				: {
+						activeAnimationCount: dynamics.animation.activePlaybackCount,
+						activeAudioCount: dynamics.audio.activeVoiceCount,
+						activeParticleCount: dynamics.particles.particleCount,
+						activeParticleEmitterCount: dynamics.particles.emitterCount,
+						activePhysicsScriptCount: dynamics.physicsScripts.activeScriptCount,
+						activeSkyScriptCount: dynamics.skyScripts.activeCount,
+						animationAssetCount:
+							dynamics.dynamics.animationResources.assetCount,
+						animationReferenceCount:
+							dynamics.dynamics.animationResources.referenceCount,
+						entityCount: dynamics.dynamics.entityCount,
+						residentEffectStateCount: dynamics.effects.residentEffectStateCount,
+						templateCount: dynamics.dynamics.templates.templateCount,
+					},
 	};
 }
 
@@ -1081,15 +1125,20 @@ function assertSpawnedEntityLifecycle(result) {
 	}
 	const initialDynamics = result.initialState.authoredDynamics?.dynamics;
 	const spawnedDynamics = lifecycle.spawnedState?.authoredDynamics?.dynamics;
-	const despawnedDynamics = lifecycle.despawnedState?.authoredDynamics?.dynamics;
+	const despawnedDynamics =
+		lifecycle.despawnedState?.authoredDynamics?.dynamics;
 	if (!initialDynamics || !spawnedDynamics || !despawnedDynamics) {
 		throw new Error("Spawned-entity scenario omitted dynamic runtime state.");
 	}
 	if (lifecycle.spawnedState.spawnedEntities.length !== 1) {
-		throw new Error("Spawned-entity scenario did not retain exactly one current entity.");
+		throw new Error(
+			"Spawned-entity scenario did not retain exactly one current entity.",
+		);
 	}
 	if (spawnedDynamics.entityCount !== initialDynamics.entityCount + 1) {
-		throw new Error("Catalog spawn did not add exactly one shared-runtime dynamic entity.");
+		throw new Error(
+			"Catalog spawn did not add exactly one shared-runtime dynamic entity.",
+		);
 	}
 	if (
 		(lifecycle.spawnedState.metrics?.visibleDynamicEntityCount ?? 0) <=
@@ -1098,7 +1147,9 @@ function assertSpawnedEntityLifecycle(result) {
 		throw new Error("Catalog spawn did not become a visible dynamic entity.");
 	}
 	if (lifecycle.despawnedState.spawnedEntities.length !== 0) {
-		throw new Error("Exact despawn left a current entity in the harness projection.");
+		throw new Error(
+			"Exact despawn left a current entity in the harness projection.",
+		);
 	}
 	if (despawnedDynamics.entityCount !== initialDynamics.entityCount) {
 		throw new Error("Exact despawn retained a shared-runtime dynamic entity.");

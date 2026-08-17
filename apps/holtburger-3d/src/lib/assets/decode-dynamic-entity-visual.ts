@@ -68,7 +68,9 @@ export function decodeDynamicEntityVisual(
 	}
 	const sectionDataOffset = HEADER_LENGTH + manifestLength;
 	if (sectionDataOffset > response.byteLength) {
-		throw new Error("Dynamic entity visual manifest exceeds the binary response.");
+		throw new Error(
+			"Dynamic entity visual manifest exceeds the binary response.",
+		);
 	}
 	const parsed = manifestSchema.safeParse(
 		JSON.parse(
@@ -104,16 +106,17 @@ export function decodeDynamicEntityVisual(
 		]),
 	);
 	if (geometries.size !== manifest.geometries.length) {
-		throw new Error("Dynamic entity visual contains duplicate geometry identities.");
+		throw new Error(
+			"Dynamic entity visual contains duplicate geometry identities.",
+		);
 	}
 	const materials = new Map(
-		manifest.materials.map((entry) => [
-			entry.id,
-			decodeStaticMaterial(entry),
-		]),
+		manifest.materials.map((entry) => [entry.id, decodeStaticMaterial(entry)]),
 	);
 	if (materials.size !== manifest.materials.length) {
-		throw new Error("Dynamic entity visual contains duplicate material identities.");
+		throw new Error(
+			"Dynamic entity visual contains duplicate material identities.",
+		);
 	}
 	const definitions = new Map(
 		manifest.definitions.map((definition) => [

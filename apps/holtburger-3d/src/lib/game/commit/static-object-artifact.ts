@@ -8,16 +8,14 @@ import type { StaticObjectLayerArtifact } from "./artifacts";
 import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
-import type { PlacedStaticLight } from "./interior-static-lighting";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
 
 /**
  * Gather the authored lights an outdoor layer's residents emit, in canonical scene space.
  *
- * Composing offsets with placements is the same operation the interior bake performs, so it
- * reuses `placeObjectLights`; only the falloff-to-range conversion differs, because runtime
- * lights take retail's hardware `rangeAdjust` rather than the burn-in's `static_light_factor`.
+ * Runtime lights use retail's hardware `rangeAdjust` rather than the interior burn-in's
+ * `static_light_factor`.
  *
  * Placements are landblock-local, which the bake consumes directly because its vertices are
  * landblock-local too. Runtime lights instead cross landblock boundaries and are compared against

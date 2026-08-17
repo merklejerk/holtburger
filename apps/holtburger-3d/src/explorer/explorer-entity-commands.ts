@@ -41,7 +41,11 @@ export interface ExplorerEntitySpawnRequest {
 	readonly wcid: number;
 	readonly cameraPose: {
 		readonly landblockId: number;
-		readonly coords: { readonly x: number; readonly y: number; readonly z: number };
+		readonly coords: {
+			readonly x: number;
+			readonly y: number;
+			readonly z: number;
+		};
 		readonly rotation: {
 			readonly w: number;
 			readonly x: number;
@@ -49,7 +53,11 @@ export interface ExplorerEntitySpawnRequest {
 			readonly z: number;
 		};
 	};
-	readonly candidate: { readonly x: number; readonly y: number; readonly z: number };
+	readonly candidate: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
 	readonly rotation: {
 		readonly w: number;
 		readonly x: number;

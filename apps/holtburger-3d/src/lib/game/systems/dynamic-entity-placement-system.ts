@@ -11,7 +11,10 @@ export class DynamicEntityPlacementSystem {
 	}
 
 	/** Create one staged root at the producer's accepted placement. */
-	createRoot(placement: ScenePlacement, localBounds: AABB3 | null): SceneNodeId {
+	createRoot(
+		placement: ScenePlacement,
+		localBounds: AABB3 | null,
+	): SceneNodeId {
 		const nodeId = this.#scene.createNode({
 			...placement,
 			cullingGroup: "dynamic",

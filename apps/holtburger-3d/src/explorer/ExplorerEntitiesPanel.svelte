@@ -98,10 +98,7 @@
 			<span>Distance</span>
 			<input bind:value={distance} type="number" min="0.1" step="0.5" />
 		</label>
-		<button
-			type="submit"
-			disabled={!runtimeReady || !catalogReady || pending}
-		>
+		<button type="submit" disabled={!runtimeReady || !catalogReady || pending}>
 			{pending ? "Working…" : "Spawn in front"}
 		</button>
 	</form>
@@ -129,8 +126,14 @@
 						onclick={() => (selectedGuid = entity.identity.guid)}
 					>
 						<strong>{entity.identity.name}</strong>
-						<span>{formatGuid(entity.identity.guid)} · WCID {entity.identity.wcid}</span>
-						<span>Live gen {entity.generation} · {entity.physics.participation}</span>
+						<span
+							>{formatGuid(entity.identity.guid)} · WCID {entity.identity
+								.wcid}</span
+						>
+						<span
+							>Live gen {entity.generation} · {entity.physics
+								.participation}</span
+						>
 					</button>
 					<button
 						type="button"
@@ -147,10 +150,22 @@
 
 	{#if selected !== null}
 		<dl class="entity-details">
-			<div><dt>Lifecycle</dt><dd>Live generation {selected.generation}</dd></div>
-			<div><dt>Physical</dt><dd>{selected.physics.participation}</dd></div>
-			<div><dt>Contact</dt><dd>{selected.placement.contact}</dd></div>
-			<div><dt>Sampling</dt><dd>{selected.placement.sampleMode}</dd></div>
+			<div>
+				<dt>Lifecycle</dt>
+				<dd>Live generation {selected.generation}</dd>
+			</div>
+			<div>
+				<dt>Physical</dt>
+				<dd>{selected.physics.participation}</dd>
+			</div>
+			<div>
+				<dt>Contact</dt>
+				<dd>{selected.placement.contact}</dd>
+			</div>
+			<div>
+				<dt>Sampling</dt>
+				<dd>{selected.placement.sampleMode}</dd>
+			</div>
 		</dl>
 	{/if}
 </section>

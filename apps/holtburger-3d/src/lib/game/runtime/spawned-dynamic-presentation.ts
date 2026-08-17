@@ -25,9 +25,7 @@ export function adaptSpawnedDynamicPresentation(
 				soundTableId:
 					entity.presentation.content.soundTableDid === null
 						? visual.behavior.soundTableId
-						: (datId(
-								entity.presentation.content.soundTableDid,
-							) as DatAssetId),
+						: (datId(entity.presentation.content.soundTableDid) as DatAssetId),
 			},
 			identity: `dynamic-entity:${formatGuid(entity.identity.guid)}/${entity.generation}`,
 			localBounds: visual.localBounds,

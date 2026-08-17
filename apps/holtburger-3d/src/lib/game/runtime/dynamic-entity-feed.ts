@@ -139,7 +139,6 @@ const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type DynamicEntityView = z.infer<typeof dynamicEntityViewSchema>;
-export type DynamicEntitySnapshot = z.infer<typeof dynamicEntitySnapshotSchema>;
 export type DynamicEntityEvent = z.infer<typeof dynamicEntityEventSchema>;
 
 /** Validates the narrow Tauri boundary before mutable frontend state observes it. */

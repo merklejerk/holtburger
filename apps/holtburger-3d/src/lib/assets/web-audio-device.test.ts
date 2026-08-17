@@ -18,8 +18,8 @@ interface FakeSourceNode {
 function fakeContext() {
 	const started: FakeSourceNode[] = [];
 	const stopped: unknown[] = [];
+	/** Gain params in creation order: master, left channel, right channel — per voice. */
 	const gains: FakeParam[] = [];
-	const pans: FakeParam[] = [];
 	const node = () => ({
 		connect: vi.fn(function (this: unknown, next: unknown) {
 			return next;
@@ -46,14 +46,26 @@ function fakeContext() {
 			};
 			return source;
 		},
+		createChannelMerger: () => node(),
 		createGain: () => ({ ...node(), gain: param(gains) }),
-		createStereoPanner: () => ({ ...node(), pan: param(pans) }),
 		currentTime: 42,
 		decodeAudioData: async () => ({}) as AudioBuffer,
 		destination: {},
 	} as unknown as AudioContext;
-	return { context, gains, pans, started, stopped };
+	return { context, gains, started, stopped };
 }
+
+/** Per-voice view over the flat creation-ordered gain params. */
+function voiceGains(gains: FakeParam[], voiceIndex: number) {
+	return {
+		left: gains[voiceIndex * 3 + 1]!,
+		master: gains[voiceIndex * 3]!,
+		right: gains[voiceIndex * 3 + 2]!,
+	};
+}
+
+/** Retail's far-channel shadow at full pan: 15 dB down. */
+const FULL_PAN_SHADOW = 10 ** (-15 / 20);
 
 const SMOOTHING = 0.02;
 
@@ -107,17 +119,51 @@ describe("WebAudioDevice", () => {
 	});
 
 	it("steers a live voice through setTargetAtTime rather than stepping the params", async () => {
-		const { context, gains, pans } = fakeContext();
+		const { context, gains } = fakeContext();
 		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
 		await device.prepare(SOUND);
 		const voice = device.playOneShot(SOUND, 1, 0)!;
 
 		voice.setPlacement(0.5, -0.25);
 
+		const { left, master, right } = voiceGains(gains, 0);
 		// Initial values are set directly (the signal starts there); updates must glide.
-		expect(gains[0]!.value).toBe(1);
-		expect(gains[0]!.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
-		expect(pans[0]!.setTargetAtTime).toHaveBeenCalledWith(-0.25, 42, SMOOTHING);
+		expect(master.value).toBe(1);
+		expect(master.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
+		// Pan -0.25 puts the source to the left: left ear untouched, right ear shadowed.
+		expect(left.setTargetAtTime).toHaveBeenCalledWith(1, 42, SMOOTHING);
+		expect(right.setTargetAtTime).toHaveBeenCalledWith(
+			10 ** ((-15 * 0.25) / 20),
+			42,
+			SMOOTHING,
+		);
+	});
+
+	it("plays a centred sound at full gain in both channels, as retail does", async () => {
+		// RETAIL QUIRK: DirectSound pan attenuates the far channel only; centred means no
+		// attenuation anywhere, not the -3 dB per ear an equal-power panner would apply.
+		const { context, gains } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		await device.prepare(SOUND);
+		device.playOneShot(SOUND, 0.8, 0)!;
+
+		const { left, master, right } = voiceGains(gains, 0);
+		expect(master.value).toBeCloseTo(0.8);
+		expect(left.value).toBe(1);
+		expect(right.value).toBe(1);
+	});
+
+	it("keeps the far ear at a 15 dB shadow at full pan instead of silencing it", async () => {
+		const { context, gains } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING);
+		await device.prepare(SOUND);
+		device.playOneShot(SOUND, 1, 1)!;
+
+		const { left, right } = voiceGains(gains, 0);
+		// Full right pan: right ear untouched, left ear shadowed but never silent.
+		expect(right.value).toBe(1);
+		expect(left.value).toBeCloseTo(FULL_PAN_SHADOW);
+		expect(left.value).toBeGreaterThan(0.17);
 	});
 
 	it("ignores placement on a voice that ended or was stopped", async () => {

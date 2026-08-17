@@ -1260,4 +1260,154 @@ mod tests {
             .unwrap();
         assert!(after_reset.instance.generation > second.instance.generation);
     }
+
+    /// Both producer compositions must derive the same operation from one pair of masks. This
+    /// walks the exact sequence the client `SetState` path asserts in
+    /// `holtburger_world::state::tests::set_state_reconfigures_then_disables_dynamic_client_physics_without_losing_semantic_truth`
+    /// (GRAVITY, then FROZEN, then PUSHABLE). If either producer's context construction drifts,
+    /// one of the two tests fails rather than both silently agreeing on a new answer.
+    #[test]
+    fn explorer_derives_the_same_transition_actions_as_the_client_set_state_path() {
+        let (_simulation, runtime) = runtime(0xf000_0070, 0xf000_0080);
+        let guid = runtime.reserve_guid().unwrap();
+        let spawned = runtime
+            .spawn_prepared(
+                definition(guid, 1, 0.0),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+        let generation = spawned.instance.generation;
+
+        // FROZEN keeps a simulated body but changes scheduling: reconfigure, never retire.
+        let frozen = runtime
+            .plan_physics_state(
+                guid,
+                generation,
+                resolve_effective_entity_physics_state(PhysicsState::FROZEN),
+                EntityPhysicalIntent::Simulated,
+            )
+            .unwrap();
+        assert_eq!(
+            frozen.action,
+            holtburger_world::EntityPhysicalTransitionAction::Reconfigure
+        );
+
+        // PUSHABLE has no reachable local simulation, so both producers disable participation
+        // while the semantic mask survives.
+        let pushable = runtime
+            .plan_physics_state(
+                guid,
+                generation,
+                resolve_effective_entity_physics_state(PhysicsState::PUSHABLE),
+                EntityPhysicalIntent::Simulated,
+            )
+            .unwrap();
+        assert_eq!(
+            pushable.action,
+            holtburger_world::EntityPhysicalTransitionAction::DisableSolverParticipation
+        );
+        assert!(
+            matches!(
+                pushable.disposition,
+                holtburger_world::EntityPhysicalDisposition::UnsupportedState { .. }
+            ),
+            "the unsupported reason must stay typed rather than collapsing to pose-only"
+        );
+    }
+
+    /// A settled body stops integrating, so a change to the loaded static world would otherwise
+    /// leave it resting on collision geometry that no longer exists. The host wakes the whole
+    /// settled population conservatively; this proves that wiring, not just the scene primitive.
+    #[test]
+    fn loaded_collision_change_wakes_settled_dynamic_entities() {
+        /// Serves flat ground so the fixture body can prove stable support and settle.
+        struct FlatGroundSource;
+
+        impl crate::host_simulation_runtime::CollisionSource for FlatGroundSource {
+            fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
+                Ok(Some(LandblockCollisionAsset {
+                    landblock_id,
+                    terrain: holtburger_content::TerrainCollisionSurface::from_terrain(
+                        &holtburger_content::LandblockTerrain {
+                            grid_size: 9,
+                            tile_size: 24.0,
+                            height_indices: vec![0; 81],
+                            heights: vec![0.0; 81],
+                            terrain_samples: vec![0; 81],
+                            cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(
+                                landblock_id,
+                            ),
+                        },
+                    )?,
+                    static_geometry: holtburger_content::LandblockColliders::default(),
+                }))
+            }
+        }
+
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(FlatGroundSource)));
+        let runtime = ExplorerEntityRuntime::with_guid_range(
+            Arc::clone(&simulation),
+            0xf000_0050,
+            0xf000_0060,
+        );
+        let session = simulation.reserve_interest_session();
+        simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 1,
+                landblock_ids: vec!["0xda55ffff".to_owned()],
+            })
+            .unwrap();
+
+        let guid = runtime.reserve_guid().unwrap();
+        runtime
+            .spawn_prepared(
+                definition(guid, 1, 0.0),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+
+        // Integrate until the body proves stable support and settles out of the scan.
+        let start = Instant::now();
+        let mut settled_at = None;
+        for step in 0..240 {
+            let now = start + std::time::Duration::from_millis(step * 33);
+            let tick = simulation
+                .tick_dynamic_entity_collection(1.0 / 30.0, now)
+                .unwrap();
+            if tick.bodies.is_empty() {
+                settled_at = Some(now);
+                break;
+            }
+        }
+        let settled_at = settled_at.expect("the grounded fixture body must settle");
+        assert!(
+            simulation
+                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at)
+                .unwrap()
+                .bodies
+                .is_empty(),
+            "a settled body must stay out of the integration scan"
+        );
+
+        // Replacing interest with a different owner changes loaded collision.
+        simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 2,
+                landblock_ids: vec!["0xdb55ffff".to_owned()],
+            })
+            .unwrap();
+
+        assert!(
+            !simulation
+                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at)
+                .unwrap()
+                .bodies
+                .is_empty(),
+            "a loaded static-world collision change must wake settled bodies before the next solve"
+        );
+    }
 }

@@ -7,12 +7,14 @@ use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
-    CellTransitRequest, CollisionQueryError, CollisionScene, ContactState, GroundState,
-    GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
-    GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody,
-    PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
+    CellTransitRequest, CollisionQueryError, CollisionScene, ContactState,
+    DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, GroundState, GroundSupport,
+    GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome,
+    GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyBudget,
+    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
     PlacedMotionPathRequest, SettlePermission, SpatialBody, solve_grounded, solve_physical_fly,
 };
+use crate::EffectiveEntityPhysicsState;
 
 /// Invalid geometry rejected before a body enters authoritative world state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -320,8 +322,36 @@ pub struct PhysicalBodyState {
     pub collision_filter: PhysicalCollisionFilter,
     /// Mutable authored/network response state, independent from immutable geometry.
     pub response_policy: PhysicalBodyResponsePolicy,
+    /// Entity-specific peer collision facts; absent for camera and other generic bodies.
+    pub entity_collision: Option<DynamicBodyCollisionDefinition>,
     /// Response-only state; the containing `SpatialBody` remains the sole pose owner.
     pub response: PhysicalBodyResponseState,
+}
+
+/// Whether a canonical spatial body currently carries solver/collision state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicalBodyParticipation {
+    PoseOnly,
+    Physical,
+}
+
+/// Committed mutation performed by the reversible physical-state operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicalBodyReconfiguration {
+    Unchanged,
+    Attached,
+    Detached,
+    Reconfigured,
+}
+
+/// Complete synchronous consequence of a committed physical-state replacement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhysicalBodyReconfigurationOutcome {
+    pub before: PhysicalBodyParticipation,
+    pub after: PhysicalBodyParticipation,
+    pub change: PhysicalBodyReconfiguration,
+    /// Exact movement geometry matched, so contact/placement response memory remained valid.
+    pub response_memory_preserved: bool,
 }
 
 impl PhysicalBodyState {
@@ -346,8 +376,75 @@ impl PhysicalBodyState {
             definition,
             collision_filter,
             response_policy,
+            entity_collision: None,
             response,
         }
+    }
+
+    /// Builds a dynamic entity body while retaining one canonical generic response state.
+    pub fn new_dynamic(
+        definition: DynamicPhysicalBodyDefinition,
+        collision_filter: PhysicalCollisionFilter,
+        cell: Option<Guid>,
+    ) -> Self {
+        let DynamicPhysicalBodyDefinition {
+            movement,
+            response_policy,
+            entity_collision,
+        } = definition;
+        let mut state = Self::new(movement, collision_filter, response_policy, cell);
+        state.entity_collision = Some(entity_collision);
+        state
+    }
+
+    /// Rebuilds immutable dynamic policy from a complete state while retaining authored geometry.
+    pub fn dynamic_definition_for_state(
+        &self,
+        state: EffectiveEntityPhysicsState,
+    ) -> Option<DynamicPhysicalBodyDefinition> {
+        if !state.supports_local_simulation() {
+            return None;
+        }
+        let mut entity_collision = self.entity_collision.clone()?;
+        if (state.presentation.default_animation && !entity_collision.default_animation_available)
+            || (state.presentation.default_script && !entity_collision.default_script_available)
+        {
+            return None;
+        }
+        let movement = match self.definition {
+            PhysicalBodyDefinition::FreeSphere { .. } => self.definition,
+            PhysicalBodyDefinition::Grounded {
+                spheres,
+                mut config,
+            } => {
+                config.gravity = if state.response.gravity { -9.8 } else { 0.0 };
+                config.edge_protection = if state.response.edge_slide {
+                    super::EdgeProtection::Creature
+                } else {
+                    super::EdgeProtection::None
+                };
+                PhysicalBodyDefinition::Grounded { spheres, config }
+            }
+        };
+        let response_policy = PhysicalBodyResponsePolicy {
+            restitution: if state.response.inelastic {
+                PhysicalRestitution::Inelastic
+            } else {
+                PhysicalRestitution::Elastic(entity_collision.elasticity)
+            },
+            friction: self.response_policy.friction,
+            surface_motion: PhysicalSurfaceMotion::Stable,
+            align_path: state.response.align_path,
+        };
+        entity_collision.scheduling = state.scheduling;
+        entity_collision.dynamic_collision = state.dynamic_collision;
+        entity_collision.reporting = state.reporting;
+        entity_collision.uses_physics_bsp = state.uses_physics_bsp;
+        Some(DynamicPhysicalBodyDefinition {
+            movement,
+            response_policy,
+            entity_collision,
+        })
     }
 }
 

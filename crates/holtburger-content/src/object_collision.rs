@@ -16,6 +16,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, ensure};
 use holtburger_common::attachment::Placement;
 use holtburger_common::{Plane, Quaternion, Sphere, Vector3};
+use holtburger_dat::file_type::{GfxObj, SetupModel};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
 
@@ -238,6 +239,88 @@ fn resolve_polygons(
             CollisionPolygon::resolve(polygon, vertices).map(|resolved| (*id, resolved))
         })
         .collect()
+}
+
+/// Resolves one decoded GfxObj's shared physics-BSP shape.
+///
+/// `None` is the authoritative result when the part has no physics BSP. A BSP with incomplete
+/// broad-phase facts is rejected rather than silently disappearing from collision.
+pub fn resolve_gfx_obj_collision_shape(
+    gfx_obj_id: u32,
+    gfx_obj: &GfxObj,
+) -> Result<Option<Arc<CollisionShape>>> {
+    match (&gfx_obj.physics_bsp, bsp_root_sphere(&gfx_obj.physics_bsp)) {
+        (Some(bsp), Some(bounds)) => {
+            let box_bounds = CollisionBox::from_points(
+                gfx_obj
+                    .vertex_array
+                    .vertices
+                    .values()
+                    .map(|vertex| vertex.origin),
+            )
+            .with_context(|| {
+                format!("GfxObj 0x{gfx_obj_id:08X} has a physics BSP but no vertices")
+            })?;
+            Ok(Some(Arc::new(CollisionShape::Bsp(BspSolid {
+                bsp: bsp.clone(),
+                bounds,
+                box_bounds,
+                polygons: resolve_polygons(&gfx_obj.physics_polygons, &gfx_obj.vertex_array),
+            }))))
+        }
+        (Some(_), None) => {
+            anyhow::bail!("GfxObj 0x{gfx_obj_id:08X} physics BSP root has no bounding sphere")
+        }
+        (None, _) => Ok(None),
+    }
+}
+
+/// Resolves one setup's complete retail fallback target branch.
+///
+/// Retail uses every cylsphere when any exists, otherwise every ordinary sphere. It never unions
+/// the two lists, including the five authored setups that carry both.
+pub fn resolve_setup_volume_collision_shapes(
+    setup_did: u32,
+    setup: &SetupModel,
+) -> Result<Vec<Arc<CollisionShape>>> {
+    if !setup.cyl_spheres.is_empty() {
+        setup
+            .cyl_spheres
+            .iter()
+            .map(|cylinder| {
+                ensure!(
+                    vector_is_finite(cylinder.origin)
+                        && cylinder.radius.is_finite()
+                        && cylinder.radius >= 0.0
+                        && cylinder.height.is_finite()
+                        && cylinder.height >= 0.0,
+                    "SetupModel 0x{setup_did:08X} authors a degenerate cylsphere: {cylinder:?}"
+                );
+                Ok(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                    low_point: cylinder.origin,
+                    radius: cylinder.radius,
+                    height: cylinder.height,
+                })))
+            })
+            .collect()
+    } else {
+        setup
+            .spheres
+            .iter()
+            .map(|sphere| {
+                ensure!(
+                    vector_is_finite(sphere.center)
+                        && sphere.radius.is_finite()
+                        && sphere.radius >= 0.0,
+                    "SetupModel 0x{setup_did:08X} authors a degenerate collision sphere: {sphere:?}"
+                );
+                Ok(Arc::new(CollisionShape::Ball(CollisionBall {
+                    center: sphere.center,
+                    radius: sphere.radius,
+                })))
+            })
+            .collect()
+    }
 }
 
 /// Component-wise geometry scale applied to one placed collision shape.
@@ -875,32 +958,7 @@ impl ShapeCache {
             return Ok(cached.clone());
         }
         let gfx_obj = reader.gfx_obj(gfx_obj_id)?;
-        let shape = match (&gfx_obj.physics_bsp, bsp_root_sphere(&gfx_obj.physics_bsp)) {
-            (Some(bsp), Some(bounds)) => {
-                let box_bounds = CollisionBox::from_points(
-                    gfx_obj
-                        .vertex_array
-                        .vertices
-                        .values()
-                        .map(|vertex| vertex.origin),
-                )
-                .with_context(|| {
-                    format!("GfxObj 0x{gfx_obj_id:08X} has a physics BSP but no vertices")
-                })?;
-                Some(Arc::new(CollisionShape::Bsp(BspSolid {
-                    bsp: bsp.clone(),
-                    bounds,
-                    box_bounds,
-                    polygons: resolve_polygons(&gfx_obj.physics_polygons, &gfx_obj.vertex_array),
-                })))
-            }
-            // A physics BSP whose root carries no sorting sphere cannot be broad-phase culled;
-            // fail loudly rather than silently dropping a solid out of the collision world.
-            (Some(_), None) => {
-                anyhow::bail!("GfxObj 0x{gfx_obj_id:08X} physics BSP root has no bounding sphere")
-            }
-            (None, _) => None,
-        };
+        let shape = resolve_gfx_obj_collision_shape(gfx_obj_id, &gfx_obj)?;
         self.shapes.insert(gfx_obj_id, shape.clone());
         Ok(shape)
     }
@@ -914,49 +972,12 @@ impl ShapeCache {
     fn setup_volumes(
         &mut self,
         setup_did: u32,
-        setup: &holtburger_dat::file_type::SetupModel,
+        setup: &SetupModel,
     ) -> Result<Arc<Vec<Arc<CollisionShape>>>> {
         if let Some(cached) = self.volumes.get(&setup_did) {
             return Ok(Arc::clone(cached));
         }
-        let authored: Vec<Arc<CollisionShape>> = if !setup.cyl_spheres.is_empty() {
-            setup
-                .cyl_spheres
-                .iter()
-                .map(|cylinder| {
-                    ensure!(
-                        vector_is_finite(cylinder.origin)
-                            && cylinder.radius.is_finite()
-                            && cylinder.radius >= 0.0
-                            && cylinder.height.is_finite()
-                            && cylinder.height >= 0.0,
-                        "SetupModel 0x{setup_did:08X} authors a degenerate cylsphere: {cylinder:?}"
-                    );
-                    Ok(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
-                        low_point: cylinder.origin,
-                        radius: cylinder.radius,
-                        height: cylinder.height,
-                    })))
-                })
-                .collect::<Result<_>>()?
-        } else {
-            setup
-                .spheres
-                .iter()
-                .map(|sphere| {
-                    ensure!(
-                        vector_is_finite(sphere.center)
-                            && sphere.radius.is_finite()
-                            && sphere.radius >= 0.0,
-                        "SetupModel 0x{setup_did:08X} authors a degenerate collision sphere: {sphere:?}"
-                    );
-                    Ok(Arc::new(CollisionShape::Ball(CollisionBall {
-                        center: sphere.center,
-                        radius: sphere.radius,
-                    })))
-                })
-                .collect::<Result<_>>()?
-        };
+        let authored = resolve_setup_volume_collision_shapes(setup_did, setup)?;
         let shared = Arc::new(authored);
         self.volumes.insert(setup_did, Arc::clone(&shared));
         Ok(shared)

@@ -90,10 +90,29 @@ pub fn retail_grounded_body(
     spheres: PhysicalSphereSet,
     edge_protection: EdgeProtection,
 ) -> Result<ResolvedBodyProfile, PhysicalBodyDefinitionError> {
+    retail_grounded_body_with_policy(
+        spheres,
+        edge_protection,
+        -9.8,
+        stable_policy(PhysicalElasticity::DEFAULT),
+    )
+}
+
+/// Retail grounded solver geometry with entity-resolved gravity and response policy.
+///
+/// Dynamic entity preparation derives these values from the complete effective physics state and
+/// authored coefficients. Camera/player convenience profiles continue using
+/// [`retail_grounded_body`] so frontend policy cannot leak into this operation.
+pub fn retail_grounded_body_with_policy(
+    spheres: PhysicalSphereSet,
+    edge_protection: EdgeProtection,
+    gravity: f32,
+    response_policy: PhysicalBodyResponsePolicy,
+) -> Result<ResolvedBodyProfile, PhysicalBodyDefinitionError> {
     let definition = PhysicalBodyDefinition::grounded(
         spheres,
         GroundedConfig {
-            gravity: -9.8,
+            gravity,
             walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
             landing_normal_z: RETAIL_LANDING_NORMAL_Z,
             airborne_step_down_height: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
@@ -108,7 +127,7 @@ pub fn retail_grounded_body(
     )?;
     Ok(ResolvedBodyProfile {
         definition,
-        response_policy: stable_policy(PhysicalElasticity::DEFAULT),
+        response_policy,
     })
 }
 

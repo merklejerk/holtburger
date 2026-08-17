@@ -596,6 +596,7 @@ mod tests {
                     authoritative_pose: Some(authoritative_pose),
                     runtime_pose,
                     velocity: Vector3::zero(),
+                    acceleration: Vector3::zero(),
                     omega: Vector3::zero(),
                     motion_state: None,
                     contact: ContactState::Grounded,

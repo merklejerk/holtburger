@@ -107,6 +107,7 @@ pub(super) fn runtime_body_view(
         authoritative_pose: Some(authoritative_pose),
         runtime_pose,
         velocity: Vector3::zero(),
+        acceleration: Vector3::zero(),
         omega: Vector3::zero(),
         motion_state: None,
         contact: holtburger_world::ContactState::Grounded,

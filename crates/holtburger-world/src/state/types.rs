@@ -452,7 +452,6 @@ impl WorldState {
         let omega = entity.omega;
 
         self.entities.insert(entity);
-        self.scene.update_entity(guid, pos.landblock_id, pos);
         self.reconcile_authoritative_body(
             guid,
             pos,
@@ -465,7 +464,6 @@ impl WorldState {
     pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {
         let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
-            self.scene.remove_entity(guid, entity.position.landblock_id);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
             // Pending links live only as long as the entities at either end of them.

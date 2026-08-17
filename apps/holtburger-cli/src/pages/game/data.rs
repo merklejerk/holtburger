@@ -455,10 +455,17 @@ impl GameData {
             }
 
             let pose = self.player_pos?;
-            let (velocity, omega, motion_state) = self
+            let (velocity, acceleration, omega, motion_state) = self
                 .entities
                 .get(&guid)
-                .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot))
+                .map(|entity| {
+                    (
+                        entity.velocity,
+                        entity.acceleration,
+                        entity.omega,
+                        entity.motion_snapshot,
+                    )
+                })
                 .unwrap_or_default();
 
             return Some(SpatialEntitySample {
@@ -466,6 +473,7 @@ impl GameData {
                 authoritative_pose: pose,
                 projected_pose: pose,
                 velocity,
+                acceleration,
                 omega,
                 motion_state,
                 projection_mode: holtburger_world::SpatialSampleMode::AuthoritativeOnly,
@@ -596,6 +604,7 @@ mod tests {
                     authoritative_pose: Some(authoritative_pose),
                     runtime_pose,
                     velocity: Vector3::zero(),
+                    acceleration: Vector3::zero(),
                     omega: Vector3::zero(),
                     motion_state: None,
                     contact: ContactState::Grounded,
@@ -772,6 +781,7 @@ mod tests {
                     authoritative_pose: Some(authoritative_player),
                     runtime_pose: authoritative_player,
                     velocity: Vector3::zero(),
+                    acceleration: Vector3::zero(),
                     omega: Vector3::zero(),
                     motion_state: Some(cached_motion),
                     contact: ContactState::Grounded,

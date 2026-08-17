@@ -411,13 +411,8 @@ impl WorldState {
             self.clear_container_preview(guid);
         }
 
-        if let Some(old_lb) = self
-            .entities
-            .get(guid)
-            .map(|existing| existing.position.landblock_id)
-        {
+        if self.entities.get(guid).is_some() {
             self.entities.insert(entity.clone());
-            self.scene.update_entity(guid, old_lb, entity.position);
             self.reconcile_authoritative_body(
                 guid,
                 entity.position,

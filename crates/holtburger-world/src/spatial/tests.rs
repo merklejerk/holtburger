@@ -13,6 +13,19 @@ fn make_position(x: f32, y: f32, heading_rad: f32) -> WorldPosition {
     }
 }
 
+fn register_entity_pose(scene: &mut SpatialScene, guid: Guid, pose: WorldPosition) {
+    assert!(
+        scene
+            .register_body(SpatialBody::new(
+                SpatialBodyId::Entity(guid),
+                pose,
+                Instant::now(),
+            ))
+            .is_none(),
+        "test entity body should not replace an existing body"
+    );
+}
+
 #[test]
 fn test_spatial_neighbors() {
     let mut scene = SpatialScene::new();
@@ -22,17 +35,17 @@ fn test_spatial_neighbors() {
     let lb_a = (10 << 24) | (10 << 16) | 0xFFFF;
     let lb_b = (11 << 24) | (10 << 16) | 0xFFFF;
 
-    scene.update_entity(
+    register_entity_pose(
+        &mut scene,
         guid_a,
-        Guid(lb_a),
         WorldPosition {
             landblock_id: Guid(lb_a),
             ..Default::default()
         },
     );
-    scene.update_entity(
+    register_entity_pose(
+        &mut scene,
         guid_b,
-        Guid(lb_b),
         WorldPosition {
             landblock_id: Guid(lb_b),
             ..Default::default()
@@ -52,7 +65,7 @@ fn test_spatial_neighbors() {
 }
 
 #[test]
-fn get_entities_in_range_uses_pose_index() {
+fn get_entities_in_range_uses_canonical_body_pose() {
     let mut scene = SpatialScene::new();
     let center_guid = Guid(0x1000_0001);
     let near_guid = Guid(0x1000_0002);
@@ -64,19 +77,19 @@ fn get_entities_in_range_uses_pose_index() {
         ..Default::default()
     };
 
-    scene.update_entity(center_guid, landblock, center);
-    scene.update_entity(
+    register_entity_pose(&mut scene, center_guid, center);
+    register_entity_pose(
+        &mut scene,
         near_guid,
-        landblock,
         WorldPosition {
             landblock_id: landblock,
             coords: Vector3::new(13.0, 14.0, 0.0),
             ..Default::default()
         },
     );
-    scene.update_entity(
+    register_entity_pose(
+        &mut scene,
         far_guid,
-        landblock,
         WorldPosition {
             landblock_id: landblock,
             coords: Vector3::new(40.0, 40.0, 0.0),
@@ -502,9 +515,12 @@ fn reconcile_authoritative_body_resets_sampling_on_forced_reposition() {
     scene.register_body(SpatialBody::new(body_id, start_pose, start));
     scene.reconcile_authoritative_body(
         body_id,
-        reset_pose,
-        Vector3::new(4.0, 5.0, 6.0),
-        Vector3::new(0.0, 0.0, 1.0),
+        AuthoritativeBodyKinematics {
+            pose: reset_pose,
+            velocity: Vector3::new(4.0, 5.0, 6.0),
+            acceleration: Vector3::zero(),
+            omega: Vector3::new(0.0, 0.0, 1.0),
+        },
         AuthoritativeBodySync::Reset,
         start + Duration::from_secs(1),
     );

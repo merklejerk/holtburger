@@ -149,7 +149,6 @@ pub(crate) fn handle_event(
                         entity.position.landblock_id = Guid::NULL;
 
                         if old_lb != Guid::NULL {
-                            state.scene.remove_entity(guid, old_lb);
                             state.retire_authoritative_body_for_guid(guid);
                         }
 

@@ -52,6 +52,7 @@ pub use object_collision::{
     CollisionBall, CollisionBox, CollisionCylinder, CollisionPolygon, CollisionShape,
     LandblockColliderAssembler, LandblockColliders, LandblockCollisionAsset,
     OutdoorBuildingTransit, PlacedCollider, StaticColliderPlacement,
+    resolve_gfx_obj_collision_shape, resolve_setup_volume_collision_shapes,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

@@ -2,6 +2,7 @@ use super::PhysicalBodyState;
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
+use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -49,6 +50,29 @@ impl SpatialBodyId {
             Self::Ephemeral(_) => None,
         }
     }
+
+    const fn ordering_key(self) -> (u8, u64) {
+        match self {
+            // Entity bodies precede the synthetic local-player body, which precedes app-owned
+            // ephemeral bodies. This order is a fixed simulation contract, not enum declaration
+            // order or hash-map iteration order.
+            Self::Entity(guid) => (0, guid.0 as u64),
+            Self::LocalPlayer(guid) => (1, guid.0 as u64),
+            Self::Ephemeral(id) => (2, id),
+        }
+    }
+}
+
+impl PartialOrd for SpatialBodyId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SpatialBodyId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ordering_key().cmp(&other.ordering_key())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -72,6 +96,15 @@ pub enum SelfPlayerDriveProjectionState {
 pub enum AuthoritativeBodySync {
     Snapshot,
     Reset,
+}
+
+/// One complete producer-authoritative pose and vector replacement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AuthoritativeBodyKinematics {
+    pub pose: WorldPosition,
+    pub velocity: Vector3,
+    pub acceleration: Vector3,
+    pub omega: Vector3,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +166,7 @@ pub struct SpatialEntitySample {
     pub authoritative_pose: WorldPosition,
     pub projected_pose: WorldPosition,
     pub velocity: Vector3,
+    pub acceleration: Vector3,
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,
     pub projection_mode: SpatialSampleMode,
@@ -144,6 +178,7 @@ pub struct RuntimeSpatialBodyView {
     pub authoritative_pose: Option<WorldPosition>,
     pub runtime_pose: WorldPosition,
     pub velocity: Vector3,
+    pub acceleration: Vector3,
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,
     pub contact: ContactState,
@@ -156,6 +191,7 @@ pub struct SpatialBody {
     pub authoritative_pose: Option<WorldPosition>,
     pub pose: WorldPosition,
     pub velocity: Vector3,
+    pub acceleration: Vector3,
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,
     pub contact: ContactState,
@@ -171,6 +207,7 @@ impl SpatialBody {
             authoritative_pose: Some(pose),
             pose,
             velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
             omega: Vector3::zero(),
             motion_state: None,
             contact: ContactState::Unknown,
@@ -185,6 +222,7 @@ impl SpatialBody {
             authoritative_pose: None,
             pose,
             velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
             omega: Vector3::zero(),
             motion_state: None,
             contact: ContactState::Unknown,
@@ -201,6 +239,7 @@ impl SpatialBody {
             authoritative_pose,
             projected_pose: self.pose,
             velocity: self.velocity,
+            acceleration: self.acceleration,
             omega: self.omega,
             motion_state: self.motion_state,
             projection_mode: self.sampling.mode,
@@ -213,6 +252,7 @@ impl SpatialBody {
             authoritative_pose: self.authoritative_pose,
             runtime_pose: self.pose,
             velocity: self.velocity,
+            acceleration: self.acceleration,
             omega: self.omega,
             motion_state: self.motion_state,
             contact: self.contact,
@@ -313,4 +353,33 @@ pub struct SpatialSolveRequest {
 pub struct SpatialSolveBatch {
     pub solved: Vec<SolvedBodyKinematics>,
     pub events: Vec<SpatialBodyEvent>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spatial_body_order_is_explicit_across_identity_authorities() {
+        let mut ids = [
+            SpatialBodyId::Ephemeral(1),
+            SpatialBodyId::LocalPlayer(Guid(1)),
+            SpatialBodyId::Entity(Guid(2)),
+            SpatialBodyId::Entity(Guid(1)),
+            SpatialBodyId::Ephemeral(0),
+        ];
+
+        ids.sort();
+
+        assert_eq!(
+            ids,
+            [
+                SpatialBodyId::Entity(Guid(1)),
+                SpatialBodyId::Entity(Guid(2)),
+                SpatialBodyId::LocalPlayer(Guid(1)),
+                SpatialBodyId::Ephemeral(0),
+                SpatialBodyId::Ephemeral(1),
+            ]
+        );
+    }
 }

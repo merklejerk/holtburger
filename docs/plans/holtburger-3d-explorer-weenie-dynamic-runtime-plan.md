@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 2 next
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 2/2A underway
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -878,6 +878,12 @@ animation, and transitive physics-script closure. The only physically mutable ca
 
 ### Phase 2: Freeze Shared Entity and Physics Decisions
 
+Progress: In progress (2026-08-16). The shared effective-state resolver, transition decision,
+source-neutral definition and preparation path, prepared dynamic-body contracts, reversible scene
+operations, synchronous committed outcomes, lossless client appearance/state integration, and
+explicit `SpatialBodyId` ordering have landed. Remaining Phase 2 work is the contract/comment audit
+and final acceptance sweep after the canonical-scene cutover stabilizes.
+
 #### Deliverables
 
 - Define the validated source-neutral dynamic-entity definition and prepared realization facts. They
@@ -921,11 +927,27 @@ animation, and transitive physics-script closure. The only physically mutable ca
 
 #### Decisions and Course Corrections
 
+- Effective physics state retains the source mask and unsupported/unknown truth while deriving
+  scheduling, collision participation, response, reporting, and presentation independently. Client
+  `SetState` and Explorer-ready preparation use the same resolver and transition decision.
+- Prepared target geometry and physical-body definitions live in `holtburger-world`, which owns
+  `SpatialScene`; `holtburger-core` remains the content-resolution and source-neutral operation
+  adapter. This avoids a dependency inversion where the scene would need core-owned types.
+- Acceleration is now part of the canonical body kinematics composite instead of an out-of-band
+  producer fact. Body operations return committed outcomes synchronously; no diagnostic history or
+  internal asynchronous publisher was introduced.
 - Stop for user review if sharing requires either producer to surrender authority, either
   `SpatialScene` to move between compositions, an async backend event bus, or a generic runtime
   hierarchy. The intended seam is value contracts and operations, not a shared runtime owner.
 
 ### Phase 2A: Make `SpatialScene` the Canonical Body Authority
+
+Progress: In progress (2026-08-16). Optional physical participation and focused
+attach/detach/reconfigure operations are implemented. The separate entity-pose side store has been
+removed; registration, accepted movement, solver commits, suspension, reset, and removal now maintain
+coarse landblock membership from the canonical body pose. The client `SetState` path exercises the
+shared reversible transition. Focused membership/transition acceptance tests and the final stale-index
+audit remain before this phase is complete.
 
 #### Deliverables
 
@@ -954,7 +976,10 @@ animation, and transitive physics-script closure. The only physically mutable ca
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- A live attached entity keeps its pose body and detaches only physical participation. Removing the
+  body would violate the invariant that every live dynamic entity has one canonical pose.
+- Landblock membership is derived inside `SpatialScene` from each accepted canonical body pose.
+  Producer mutations no longer maintain a parallel pose/index choreography.
 
 ### Phase 2B: Land Explorer Registry and Lifecycle
 

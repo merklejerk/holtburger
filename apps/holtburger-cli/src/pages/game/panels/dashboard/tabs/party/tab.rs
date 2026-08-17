@@ -286,6 +286,7 @@ mod tests {
                     authoritative_pose: Some(authoritative_pose),
                     runtime_pose,
                     velocity: holtburger_common::Vector3::zero(),
+                    acceleration: holtburger_common::Vector3::zero(),
                     omega: holtburger_common::Vector3::zero(),
                     motion_state: None,
                     contact: holtburger_world::ContactState::Grounded,

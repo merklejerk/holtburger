@@ -3,9 +3,9 @@ use crate::attachment::PhysicsAttachment;
 use crate::context::WorldContextExt;
 use crate::entity::EntityPositionSyncOutcome;
 use crate::spatial::{
-    AuthoritativeBodySync, ContactState, RuntimeBodyResetCause, RuntimeSpatialBodyView,
-    SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
-    SpatialSamplingConfig,
+    AuthoritativeBodyKinematics, AuthoritativeBodySync, ContactState, RuntimeBodyResetCause,
+    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId,
+    SpatialSampleMode, SpatialSamplingConfig,
 };
 use crate::state::types::PendingChildLink;
 use holtburger_common::math::Quaternion;
@@ -48,11 +48,20 @@ impl WorldState {
             return;
         }
 
+        let acceleration = self
+            .entities
+            .get(guid)
+            .map(|entity| entity.acceleration)
+            .unwrap_or_else(Vector3::zero);
+
         self.scene.reconcile_authoritative_body(
             body_id,
-            pose,
-            velocity,
-            omega,
+            AuthoritativeBodyKinematics {
+                pose,
+                velocity,
+                acceleration,
+                omega,
+            },
             sync,
             Instant::now(),
         );
@@ -123,6 +132,7 @@ impl WorldState {
                 authoritative_pose: Some(entity.position),
                 runtime_pose: entity.position,
                 velocity: entity.velocity,
+                acceleration: entity.acceleration,
                 omega: entity.omega,
                 motion_state: entity.motion_snapshot,
                 contact: ContactState::Unknown,
@@ -146,12 +156,20 @@ impl WorldState {
         let Some((_, pose, velocity, omega)) = self.runtime_kinematics_for_guid(guid) else {
             return false;
         };
+        let acceleration = self
+            .entities
+            .get(guid)
+            .map(|entity| entity.acceleration)
+            .unwrap_or_else(Vector3::zero);
 
         self.scene.reconcile_authoritative_body(
             body_id,
-            pose,
-            velocity,
-            omega,
+            AuthoritativeBodyKinematics {
+                pose,
+                velocity,
+                acceleration,
+                omega,
+            },
             AuthoritativeBodySync::Snapshot,
             Instant::now(),
         );
@@ -293,7 +311,6 @@ impl WorldState {
     fn emit_entity_position_sync(
         &mut self,
         guid: Guid,
-        old_lb: Guid,
         pos: WorldPosition,
         outcome: EntityPositionSyncOutcome,
         events: &mut Vec<WorldEvent>,
@@ -301,7 +318,6 @@ impl WorldState {
         match outcome {
             EntityPositionSyncOutcome::Rejected => {}
             EntityPositionSyncOutcome::Moved => {
-                self.scene.update_entity(guid, old_lb, pos);
                 let (velocity, omega) = self
                     .entities
                     .get(guid)
@@ -320,7 +336,6 @@ impl WorldState {
                 events.push(WorldEvent::EntityMoved { guid, pos })
             }
             EntityPositionSyncOutcome::Reset { sequence } => {
-                self.scene.update_entity(guid, old_lb, pos);
                 let (velocity, omega) = self
                     .entities
                     .get(guid)
@@ -486,7 +501,6 @@ impl WorldState {
             return false;
         };
 
-        let old_lb = entity.position.landblock_id;
         let pos = pos_pack.pos;
         let outcome = entity.apply_server_position_update(
             pos,
@@ -511,7 +525,7 @@ impl WorldState {
             }
         }
 
-        self.emit_entity_position_sync(guid, old_lb, pos, outcome, events);
+        self.emit_entity_position_sync(guid, pos, outcome, events);
         if let Some((velocity, omega)) = velocity_event {
             events.push(WorldEvent::EntityVectorUpdated {
                 guid,
@@ -531,7 +545,6 @@ impl WorldState {
             return false;
         };
 
-        let old_lb = entity.position.landblock_id;
         let pos = data.position;
         let outcome = entity.apply_server_position_update(
             pos,
@@ -542,7 +555,7 @@ impl WorldState {
             Some(data.server_control_sequence),
         );
         let accepted = !matches!(outcome, EntityPositionSyncOutcome::Rejected);
-        self.emit_entity_position_sync(data.guid, old_lb, pos, outcome, events);
+        self.emit_entity_position_sync(data.guid, pos, outcome, events);
         accepted
     }
 
@@ -584,13 +597,11 @@ impl WorldState {
                 .unwrap_or_default();
         }
 
-        let old_lb = self.player_landblock().unwrap_or(Guid::NULL);
         if let Some(entity) = self.player_entity_mut() {
             entity.position = pos;
         } else {
             return None;
         }
-        self.scene.update_entity(guid, old_lb, pos);
         let (velocity, omega) = self
             .entities
             .get(guid)
@@ -724,11 +735,9 @@ impl WorldState {
                 return false;
             };
 
-            let old_lb = entity.position.landblock_id;
             entity.position = position;
             self.emit_entity_position_sync(
                 guid,
-                old_lb,
                 position,
                 EntityPositionSyncOutcome::Moved,
                 events,
@@ -820,17 +829,16 @@ impl WorldState {
         rotation: Quaternion,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        let (old_lb, pos) = {
+        let pos = {
             let Some(entity) = self.entities.get_mut(guid) else {
                 return false;
             };
 
-            let old_lb = entity.position.landblock_id;
             entity.position.rotation = rotation;
-            (old_lb, entity.position)
+            entity.position
         };
 
-        self.emit_entity_position_sync(guid, old_lb, pos, EntityPositionSyncOutcome::Moved, events);
+        self.emit_entity_position_sync(guid, pos, EntityPositionSyncOutcome::Moved, events);
         true
     }
 
@@ -843,7 +851,6 @@ impl WorldState {
 
             entity.position.landblock_id = Guid::NULL;
             let position = entity.position;
-            self.scene.remove_entity(guid, old_lb);
             self.retire_authoritative_body_for_guid(guid);
             Some(position)
         } else {
@@ -970,14 +977,27 @@ impl WorldState {
             return false;
         };
 
-        let old_lb = entity.position.landblock_id;
         entity.position = parent_position;
-        // An attached object does not simulate: its motion is entirely its parent's.
-        self.retire_authoritative_body_for_guid(guid);
+        // An attached object retains a canonical pose body but does not carry independent physics.
+        self.reconcile_authoritative_body(
+            guid,
+            parent_position,
+            Vector3::zero(),
+            Vector3::zero(),
+            AuthoritativeBodySync::Snapshot,
+        );
         if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
-            Self::emit_runtime_body_removed(events, body_id);
+            let initial_cell = parent_position
+                .is_indoors()
+                .then_some(parent_position.landblock_id);
+            let _ = self.scene.set_dynamic_physical_body(
+                body_id,
+                None,
+                crate::PhysicalCollisionFilter::ALL,
+                initial_cell,
+            );
+            Self::emit_runtime_body_changed(events, body_id);
         }
-        self.scene.update_entity(guid, old_lb, parent_position);
         events.push(WorldEvent::EntityMoved {
             guid,
             pos: parent_position,
@@ -1206,12 +1226,86 @@ impl WorldState {
             self.player.instance_sequence = data.instance_sequence;
         }
 
-        if let Some(entity) = self.entities.get_mut(data.guid) {
-            entity.physics_state = data.physics_state;
+        if self.entities.get(data.guid).is_some() {
+            let next = crate::resolve_effective_entity_physics_state(data.physics_state);
+            let previous = self
+                .entities
+                .get(data.guid)
+                .expect("entity presence was checked above")
+                .physics;
+            let body_id = self.authoritative_body_id_for_guid(data.guid);
+            let (intent, physical_body_attached, replacement) =
+                body_id.and_then(|body_id| self.scene.body(body_id)).map_or(
+                    (crate::EntityPhysicalIntent::PoseOnly, false, None),
+                    |body| {
+                        let dynamic = body
+                            .physical
+                            .as_ref()
+                            .is_some_and(|physical| physical.entity_collision.is_some());
+                        let replacement = body
+                            .physical
+                            .as_ref()
+                            .and_then(|physical| physical.dynamic_definition_for_state(next));
+                        (
+                            if dynamic {
+                                crate::EntityPhysicalIntent::Simulated
+                            } else {
+                                crate::EntityPhysicalIntent::PoseOnly
+                            },
+                            dynamic,
+                            replacement,
+                        )
+                    },
+                );
+            let transition = crate::decide_entity_physics_state_transition(
+                Some(previous),
+                next,
+                crate::EntityPhysicsTransitionContext {
+                    intent,
+                    prepared_physics_available: replacement.is_some(),
+                    physical_body_attached,
+                    prepared_definition_changed: false,
+                },
+            );
+
+            let entity = self
+                .entities
+                .get_mut(data.guid)
+                .expect("entity presence was checked above");
+            entity.physics = next;
             entity.properties.hydrate_from_set_state(data);
+            if let Some(body_id) = body_id {
+                let replacement = match transition.action {
+                    crate::EntityPhysicalTransitionAction::Attach
+                    | crate::EntityPhysicalTransitionAction::Reconfigure => replacement,
+                    crate::EntityPhysicalTransitionAction::Detach => None,
+                    crate::EntityPhysicalTransitionAction::None => {
+                        events.push(WorldEvent::EntityStateUpdated {
+                            guid: data.guid,
+                            physics_state: data.physics_state,
+                            transition,
+                        });
+                        return true;
+                    }
+                };
+                let initial_cell = self
+                    .scene
+                    .body(body_id)
+                    .and_then(|body| body.pose.is_indoors().then_some(body.pose.landblock_id));
+                if let Some(outcome) = self.scene.set_dynamic_physical_body(
+                    body_id,
+                    replacement,
+                    crate::PhysicalCollisionFilter::ALL,
+                    initial_cell,
+                ) && outcome.change != crate::PhysicalBodyReconfiguration::Unchanged
+                {
+                    Self::emit_runtime_body_changed(events, body_id);
+                }
+            }
             events.push(WorldEvent::EntityStateUpdated {
                 guid: data.guid,
                 physics_state: data.physics_state,
+                transition,
             });
             true
         } else {

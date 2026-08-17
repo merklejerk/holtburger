@@ -235,6 +235,14 @@
 			wcid: string,
 			distance: number,
 		) => Promise<DynamicEntityView>;
+		/** Spawn many entities at exact camera-relative AC-axis offsets for pair/population runs. */
+		readonly spawnExplorerEntityFleet: (
+			wcid: string,
+			offsets: readonly (readonly [number, number, number])[],
+			physicalIntent: "pose-only" | "simulated",
+		) => Promise<readonly DynamicEntityView[]>;
+		/** Retire every live harness-spawned generation through the same host lifecycle. */
+		readonly despawnExplorerEntityFleet: () => Promise<number>;
 		/** Apply catalog-authored launch speed/spin to one exact generation. */
 		readonly launchExplorerEntity: (
 			guid: number,
@@ -701,6 +709,60 @@
 		};
 	}
 
+	/**
+	 * Spawn many entities at exact camera-relative offsets in AC world axes.
+	 *
+	 * The host resolves a candidate as `camera + normalize(direction) * distance`, so passing the
+	 * desired offset as the direction and its length as the distance places each entity exactly.
+	 * Pair and population scenarios need deterministic separation; the single-spawn path's shared
+	 * view direction would stack every entity on one point.
+	 */
+	async function spawnExplorerEntityFleet(
+		rawWcid: string,
+		offsets: readonly (readonly [number, number, number])[],
+		physicalIntent: "pose-only" | "simulated",
+	): Promise<readonly DynamicEntityView[]> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity fleet requires a current camera and runtime.",
+			);
+		if (offsets.length === 0)
+			throw new Error("Entity fleet requires at least one offset.");
+		const { placement } = entityScenarioAnchor();
+		if (physicalIntent === "simulated")
+			await entityHost.ensureSimulationInterest(
+				placement.residency.landblockId,
+			);
+		const wcid = parseExplorerWcid(rawWcid);
+		const spawned: DynamicEntityView[] = [];
+		for (const offset of offsets) {
+			const distance = Math.hypot(...offset);
+			if (!Number.isFinite(distance) || distance <= 0)
+				throw new Error("Each entity fleet offset must be finite and nonzero.");
+			const entity = await entityHost.spawn(
+				createExplorerSpawnRequest(
+					wcid,
+					placement,
+					offset,
+					distance,
+					physicalIntent,
+				),
+			);
+			spawned.push(entity);
+		}
+		spawnedEntities = [
+			...spawnedEntities.filter(
+				(current) =>
+					!spawned.some(
+						(entity) => entity.identity.guid === current.identity.guid,
+					),
+			),
+			...spawned,
+		];
+		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+		return spawned;
+	}
+
 	async function launchExplorerEntity(
 		guid: number,
 		generation: number,
@@ -804,6 +866,20 @@
 				entity.identity.guid !== guid || entity.generation !== generation,
 		);
 		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+	}
+
+	/** Retire every live harness-spawned generation, so teardown census has one exact call. */
+	async function despawnExplorerEntityFleet(): Promise<number> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity despawn requires an active runtime.",
+			);
+		const retiring = [...spawnedEntities];
+		for (const entity of retiring)
+			await entityHost.despawn(entity.identity.guid, entity.generation);
+		spawnedEntities = [];
+		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+		return retiring.length;
 	}
 
 	function setLayerVisibility(
@@ -1158,6 +1234,8 @@
 					setTextureFiltering,
 					resetTiming,
 					spawnExplorerEntity,
+					spawnExplorerEntityFleet,
+					despawnExplorerEntityFleet,
 					spawnSimulatedExplorerEntity,
 					tickExplorerEntities,
 					state: () => {

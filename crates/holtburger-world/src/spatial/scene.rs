@@ -1,17 +1,20 @@
 #[cfg(test)]
 use super::PhysicalCollisionFilter;
+use super::dynamic_index::DynamicShadowIndex;
 use super::{
-    AuthoritativeBodySync, BasicSpatialPhysics, CollisionScene, ContactState,
-    DynamicBodyKinematics, DynamicPhysicalBodyDefinition, PhysicalBodyActuation,
+    AuthoritativeBodySync, BasicSpatialPhysics, CollisionScene, ContactState, DynamicBodyActivity,
+    DynamicBodyKinematics, DynamicPhysicalBodyDefinition, GroundState, PhysicalBodyActuation,
     PhysicalBodyDefinition, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
     PhysicalBodyReconfigurationOutcome, PhysicalBodyState, PhysicalBodyTickResult,
-    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialPhysics,
-    SpatialSampleMode, SpatialSamplingConfig,
-    physical_body::{physical_body_scene_residency, solve_physical_body_tick},
+    PhysicalBodyTickStatus, RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody,
+    SpatialBodyId, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
+    physical_body::{
+        physical_body_scene_residency, resolve_physical_body_placement, solve_physical_body_tick,
+    },
     physics::sample_mode_for_projection_state,
 };
 #[cfg(test)]
-use super::{GroundState, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z};
+use super::{RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z};
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
@@ -103,10 +106,55 @@ fn integrate_angular_velocity(
         .map_or(rotation, |delta| delta.multiply(&rotation))
 }
 
+fn accepted_dynamic_tick_is_stable(
+    body: &SpatialBody,
+    previous_response: &super::PhysicalBodyResponseState,
+    result: &PhysicalBodyTickResult,
+    actuation_permits_settling: bool,
+) -> bool {
+    let Some(physical) = body.physical.as_ref() else {
+        return false;
+    };
+    actuation_permits_settling
+        && result.motion.status == PhysicalBodyTickStatus::Solved
+        && body.contact == ContactState::Grounded
+        && body.velocity == Vector3::zero()
+        && body.acceleration == Vector3::zero()
+        && body.omega == Vector3::zero()
+        && body.motion_state.is_none()
+        && physical.response == *previous_response
+        && matches!(
+            physical.response,
+            super::PhysicalBodyResponseState::Grounded {
+                ground: GroundState::Supported(_),
+                ..
+            }
+        )
+        && result
+            .motion
+            .path
+            .legs()
+            .iter()
+            .all(|leg| leg.end() == result.motion.path.initial())
+}
+
+fn wake_dynamic_runtime(body: &mut SpatialBody) -> bool {
+    let Some(dynamic) = body
+        .physical
+        .as_mut()
+        .and_then(|physical| physical.dynamic.as_mut())
+    else {
+        return false;
+    };
+    dynamic.activity = DynamicBodyActivity::Active;
+    true
+}
+
 #[derive(Clone)]
 pub struct SpatialScene {
     landblock_map: HashMap<Guid, HashSet<Guid>>,
     body_store: SpatialBodyStore,
+    dynamic_shadows: DynamicShadowIndex,
     physics: Arc<dyn SpatialPhysics>,
 }
 
@@ -125,6 +173,7 @@ impl SpatialScene {
         Self {
             landblock_map: HashMap::new(),
             body_store: SpatialBodyStore::default(),
+            dynamic_shadows: DynamicShadowIndex::default(),
             physics,
         }
     }
@@ -171,13 +220,61 @@ impl SpatialScene {
                 let SpatialBodyId::Entity(_) = body.id else {
                     return None;
                 };
-                let collision = body.physical.as_ref()?.entity_collision.as_ref()?;
-                (collision.scheduling == crate::EntityPhysicsScheduling::Eligible)
+                let dynamic = body.physical.as_ref()?.dynamic.as_ref()?;
+                (dynamic.collision.scheduling == crate::EntityPhysicsScheduling::Eligible
+                    && dynamic.activity == DynamicBodyActivity::Active)
                     .then_some(body.id)
             })
             .collect::<Vec<_>>();
         body_ids.sort_unstable();
         body_ids
+    }
+
+    /// Rebuilds exact tick-start target membership and returns the stable active mover scan.
+    pub fn prepare_dynamic_entity_collection(
+        &mut self,
+        collision: &CollisionScene,
+    ) -> anyhow::Result<Vec<SpatialBodyId>> {
+        self.refresh_all_dynamic_body_placements(collision);
+        let next = DynamicShadowIndex::compile(self.body_store.bodies.values())?;
+        self.dynamic_shadows = next;
+        Ok(self.scheduled_dynamic_entity_ids())
+    }
+
+    /// Queries the prepared tick-start target index with swept bounds and provisional domains.
+    pub fn dynamic_candidates_for_extent(
+        &self,
+        mover: SpatialBodyId,
+        anchor: Guid,
+        minimum: Vector3,
+        maximum: Vector3,
+        placement: &super::CollisionPlacement,
+    ) -> Vec<SpatialBodyId> {
+        self.dynamic_shadows
+            .candidates(mover, anchor, minimum, maximum, placement)
+    }
+
+    /// Reactivates one dynamic body without changing semantic or physical policy.
+    pub fn wake_dynamic_body(&mut self, body_id: SpatialBodyId) -> bool {
+        self.body_store
+            .body_mut(body_id)
+            .is_some_and(wake_dynamic_runtime)
+    }
+
+    /// Conservatively reactivates all settled bodies after loaded collision topology changes.
+    pub fn wake_all_settled_dynamic_bodies(&mut self) {
+        for body in self.body_store.bodies.values_mut() {
+            let Some(dynamic) = body
+                .physical
+                .as_mut()
+                .and_then(|physical| physical.dynamic.as_mut())
+            else {
+                continue;
+            };
+            if dynamic.activity == DynamicBodyActivity::Settled {
+                dynamic.activity = DynamicBodyActivity::Active;
+            }
+        }
     }
 
     #[cfg(test)]
@@ -298,15 +395,25 @@ impl SpatialScene {
             ),
             (Some(previous), Some(replacement)) => {
                 let retained_cell = previous.response.cell().or(initial_cell);
+                let retained_placement = previous
+                    .dynamic
+                    .as_ref()
+                    .map(|dynamic| dynamic.placement.clone());
                 let mut next =
                     PhysicalBodyState::new_dynamic(replacement, collision_filter, retained_cell);
                 let unchanged = previous.definition == next.definition
                     && previous.collision_filter == next.collision_filter
                     && previous.response_policy == next.response_policy
-                    && previous.entity_collision == next.entity_collision;
+                    && previous.dynamic.as_ref().map(|dynamic| &dynamic.collision)
+                        == next.dynamic.as_ref().map(|dynamic| &dynamic.collision);
                 let preserve_response = previous.definition == next.definition;
                 if preserve_response {
                     next.response = previous.response;
+                    if let (Some(next), Some(placement)) =
+                        (next.dynamic.as_mut(), retained_placement)
+                    {
+                        next.placement = placement;
+                    }
                 }
                 (
                     Some(next),
@@ -345,7 +452,7 @@ impl SpatialScene {
     ) -> Option<RuntimeSpatialBodyView> {
         let body = self.body_store.body_mut(body_id)?;
         let physical = body.physical.as_ref()?;
-        let entity_collision = physical.entity_collision.clone()?;
+        let entity_collision = physical.dynamic.as_ref()?.collision.clone();
         let mut response_policy = physical.response_policy;
         response_policy.align_path = kinematics.align_path();
         let replacement = DynamicPhysicalBodyDefinition {
@@ -355,12 +462,16 @@ impl SpatialScene {
         };
         let collision_filter = physical.collision_filter;
         let retained_cell = physical.response.cell();
+        let retained_placement = physical.dynamic.as_ref()?.placement.clone();
 
-        body.physical = Some(PhysicalBodyState::new_dynamic(
-            replacement,
-            collision_filter,
-            retained_cell,
-        ));
+        let mut replacement =
+            PhysicalBodyState::new_dynamic(replacement, collision_filter, retained_cell);
+        replacement
+            .dynamic
+            .as_mut()
+            .expect("dynamic definition produced generic physical state")
+            .placement = retained_placement;
+        body.physical = Some(replacement);
         body.velocity = kinematics.velocity();
         body.acceleration = kinematics.acceleration();
         body.omega = kinematics.omega();
@@ -379,7 +490,7 @@ impl SpatialScene {
     ) -> Option<RuntimeSpatialBodyView> {
         let mut body = self.body_store.body(body_id)?.clone();
         if let Some(physical) = body.physical.as_ref() {
-            let entity_collision = physical.entity_collision.clone()?;
+            let entity_collision = physical.dynamic.as_ref()?.collision.clone();
             let definition = DynamicPhysicalBodyDefinition {
                 movement: physical.definition,
                 response_policy: physical.response_policy,
@@ -413,6 +524,50 @@ impl SpatialScene {
         self.update_body(body)
             .expect("prevalidated dynamic body vanished during relocation");
         Some(view)
+    }
+
+    /// Re-derives one dynamic body's exact static-collision domains at its current pose.
+    fn refresh_dynamic_body_placement(
+        &mut self,
+        body_id: SpatialBodyId,
+        collision: &CollisionScene,
+    ) -> bool {
+        let Some(body) = self.body_store.body_mut(body_id) else {
+            return false;
+        };
+        let Some(physical) = body.physical.as_mut() else {
+            return false;
+        };
+        let Some(dynamic) = physical.dynamic.as_mut() else {
+            return false;
+        };
+        dynamic.placement = resolve_physical_body_placement(
+            collision,
+            body.pose,
+            physical.definition,
+            physical.response.cell(),
+        )
+        .expect("validated physical body produced invalid placement query geometry");
+        true
+    }
+
+    /// Re-derives exact domains for every dynamic body after loaded collision topology changes.
+    fn refresh_all_dynamic_body_placements(&mut self, collision: &CollisionScene) {
+        let body_ids = self
+            .body_store
+            .bodies
+            .iter()
+            .filter_map(|(body_id, body)| {
+                body.physical
+                    .as_ref()
+                    .and_then(|physical| physical.dynamic.as_ref())
+                    .map(|_| *body_id)
+            })
+            .collect::<Vec<_>>();
+        for body_id in body_ids {
+            let refreshed = self.refresh_dynamic_body_placement(body_id, collision);
+            debug_assert!(refreshed, "captured dynamic body vanished during refresh");
+        }
     }
 
     /// Advances one registered physical body without consulting content or interest policy.
@@ -458,6 +613,13 @@ impl SpatialScene {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("spatial body {body_id:?} has no physical definition"))?
             .definition;
+        let previous_response = body
+            .physical
+            .as_ref()
+            .expect("physical definition was just validated")
+            .response
+            .clone();
+        let actuation_permits_settling = actuation.permits_dynamic_settling();
         let commit = solve_physical_body_tick(collision, &body, actuation, delta_seconds)?;
         let result = PhysicalBodyTickResult {
             motion: commit.motion.clone(),
@@ -474,6 +636,24 @@ impl SpatialScene {
             .as_mut()
             .expect("physical definition vanished during single-threaded solve");
         physical.response = commit.response;
+        let stable = accepted_dynamic_tick_is_stable(
+            &tentative,
+            &previous_response,
+            &result,
+            actuation_permits_settling,
+        );
+        if let Some(dynamic) = tentative
+            .physical
+            .as_mut()
+            .and_then(|physical| physical.dynamic.as_mut())
+        {
+            dynamic.placement = result.motion.path.final_point().placement().clone();
+            dynamic.activity = if stable {
+                DynamicBodyActivity::Settled
+            } else {
+                DynamicBodyActivity::Active
+            };
+        }
         tentative.sampling.mode = SpatialSampleMode::SimulatingVelocity;
         tentative.sampling.last_derived_at = now;
         let accepted = accept(&tentative, &result)?;
@@ -516,6 +696,7 @@ impl SpatialScene {
             body.pose = kinematics.pose;
             body.sampling.mode = mode;
         }
+        wake_dynamic_runtime(&mut body);
 
         self.register_body(body);
     }
@@ -573,6 +754,7 @@ impl SpatialScene {
         };
 
         body.motion_state = motion_state;
+        wake_dynamic_runtime(body);
     }
 
     pub fn update_runtime_body_motion_state(
@@ -605,6 +787,7 @@ impl SpatialScene {
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
         body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
+        wake_dynamic_runtime(&mut body);
         self.register_body(body);
     }
 
@@ -620,6 +803,7 @@ impl SpatialScene {
 
         body.pose = pose;
         body.sampling.mode = sample_mode;
+        wake_dynamic_runtime(&mut body);
         self.update_body(body)
             .expect("runtime body vanished during single-threaded pose update");
         true
@@ -654,6 +838,7 @@ impl SpatialScene {
         }
 
         body.contact = contact;
+        wake_dynamic_runtime(body);
         true
     }
 
@@ -671,6 +856,7 @@ impl SpatialScene {
             solved.velocity,
             solved.omega,
         );
+        wake_dynamic_runtime(&mut body);
         self.update_body(body)
             .expect("runtime body vanished during single-threaded solve commit");
         true
@@ -701,6 +887,7 @@ impl SpatialScene {
             }
             body.sampling.mode = SpatialSampleMode::Suspended;
             body.sampling.last_derived_at = now;
+            wake_dynamic_runtime(&mut body);
             self.update_body(body)
                 .expect("runtime body vanished during single-threaded suspension");
         }
@@ -765,17 +952,18 @@ mod physical_body_tests {
         GroundedLaunch, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
         PhysicalBodyResponseState, PhysicalBodySceneResidency, PhysicalBodyTickStatus,
         PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityTargetGeometry,
-        RETAIL_WALKABLE_NORMAL_Z,
+        PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart,
+        PreparedEntityTargetGeometry, RETAIL_WALKABLE_NORMAL_Z,
     };
     use holtburger_common::properties::WeenieType;
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBall,
-        CollisionShape, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
-        LandblockTerrain, TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals,
-        TerrainCollisionSurface,
+        BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
+        CollisionBall, CollisionBox, CollisionCylinder, CollisionShape, LandblockColliders,
+        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain,
+        TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals, TerrainCollisionSurface,
     };
+    use holtburger_dat::physics::{BspLeaf, BspNode};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -851,6 +1039,28 @@ mod physical_body_tests {
         movement: PhysicalBodyDefinition,
         align_path: bool,
     ) -> DynamicPhysicalBodyDefinition {
+        dynamic_definition_with_geometry(
+            movement,
+            align_path,
+            PreparedEntityTargetGeometry {
+                physics_bsp_parts: Vec::new(),
+                fallback_setup_did: 0x0200_0001,
+                fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                }))],
+                fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+            },
+            false,
+        )
+    }
+
+    fn dynamic_definition_with_geometry(
+        movement: PhysicalBodyDefinition,
+        align_path: bool,
+        target_geometry: PreparedEntityTargetGeometry,
+        uses_physics_bsp: bool,
+    ) -> DynamicPhysicalBodyDefinition {
         DynamicPhysicalBodyDefinition {
             movement,
             response_policy: PhysicalBodyResponsePolicy {
@@ -858,15 +1068,7 @@ mod physical_body_tests {
                 ..stable_policy()
             },
             entity_collision: DynamicBodyCollisionDefinition {
-                target_geometry: PreparedEntityTargetGeometry {
-                    physics_bsp_parts: Vec::new(),
-                    fallback_setup_did: 0x0200_0001,
-                    fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
-                        center: Vector3::zero(),
-                        radius: 0.5,
-                    }))],
-                    fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-                },
+                target_geometry,
                 scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
@@ -878,13 +1080,44 @@ mod physical_body_tests {
                     enabled: true,
                     as_environment: false,
                 },
-                uses_physics_bsp: false,
+                uses_physics_bsp,
                 weenie_type: WeenieType::Creature,
                 elasticity: PhysicalElasticity::DEFAULT,
                 default_animation_available: false,
                 default_script_available: false,
             },
         }
+    }
+
+    fn bsp_shape(center: Vector3, radius: f32) -> Arc<CollisionShape> {
+        Arc::new(CollisionShape::Bsp(BspSolid {
+            bsp: BspNode::Leaf(BspLeaf {
+                index: 0,
+                solid: 1,
+                sphere: Some(Sphere { center, radius }),
+                poly_ids: Vec::new(),
+            }),
+            bounds: Sphere { center, radius },
+            box_bounds: CollisionBox::from_points([
+                center - Vector3::new(radius, radius, radius),
+                center + Vector3::new(radius, radius, radius),
+            ])
+            .unwrap(),
+            polygons: HashMap::new(),
+        }))
+    }
+
+    fn dynamic_activity(scene: &SpatialScene, body_id: SpatialBodyId) -> DynamicBodyActivity {
+        scene
+            .body(body_id)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .dynamic
+            .as_ref()
+            .unwrap()
+            .activity
     }
 
     #[test]
@@ -938,6 +1171,409 @@ mod physical_body_tests {
             scene.scheduled_dynamic_entity_ids(),
             [eligible_low, eligible_high]
         );
+    }
+
+    #[test]
+    fn one_unchanged_supported_tick_settles_until_a_scene_owned_wake() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let start = pose(Vector3::new(90.0, 96.0, 0.005));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(id, start, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                0.1,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        assert_eq!(scene.body(id).unwrap().contact, ContactState::Grounded);
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+        let supported_pose = scene.body(id).unwrap().pose;
+
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                0.1,
+                now + Duration::from_millis(200),
+            )
+            .unwrap();
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Settled);
+        assert!(scene.scheduled_dynamic_entity_ids().is_empty());
+        assert_eq!(scene.body(id).unwrap().pose, supported_pose);
+        assert!(
+            scene
+                .get_in_landblock(Guid(0xda55_ffff))
+                .is_some_and(|members| members.contains(&Guid(0x7000_0001)))
+        );
+
+        assert!(scene.wake_dynamic_body(id));
+        assert_eq!(scene.scheduled_dynamic_entity_ids(), [id]);
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::grounded_drive(Vector3::zero()).unwrap(),
+                0.1,
+                now + Duration::from_millis(300),
+            )
+            .unwrap();
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+
+        scene
+            .body_mut(id)
+            .unwrap()
+            .physical
+            .as_mut()
+            .unwrap()
+            .dynamic
+            .as_mut()
+            .unwrap()
+            .activity = DynamicBodyActivity::Settled;
+        scene.wake_all_settled_dynamic_bodies();
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+    }
+
+    #[test]
+    fn kinematics_relocation_and_reconfiguration_reactivate_settled_bodies() {
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(id, pose(Vector3::zero()), now));
+        let definition = dynamic_definition(grounded_definition(), true);
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(definition.clone()),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+
+        let settle_for_test = |scene: &mut SpatialScene| {
+            scene
+                .body_mut(id)
+                .unwrap()
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap()
+                .activity = DynamicBodyActivity::Settled;
+        };
+
+        settle_for_test(&mut scene);
+        scene
+            .apply_dynamic_body_kinematics(
+                id,
+                DynamicBodyKinematics::new(
+                    Vector3::new(1.0, 0.0, 0.0),
+                    Vector3::zero(),
+                    Vector3::zero(),
+                    true,
+                )
+                .unwrap(),
+                now,
+            )
+            .unwrap();
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+
+        settle_for_test(&mut scene);
+        scene
+            .relocate_dynamic_body(
+                id,
+                pose(Vector3::new(1.0, 2.0, 3.0)),
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+
+        settle_for_test(&mut scene);
+        scene
+            .set_dynamic_physical_body(id, Some(definition), PhysicalCollisionFilter::ALL, None)
+            .unwrap();
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+
+        settle_for_test(&mut scene);
+        scene.update_runtime_body_motion_state(id, None);
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+    }
+
+    #[test]
+    fn three_hundred_body_scan_skips_settled_bodies_without_losing_stable_order() {
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        for offset in (0..300_u32).rev() {
+            let id = SpatialBodyId::Entity(Guid(0x7000_0000 + offset));
+            scene.register_body(SpatialBody::new(id, pose(Vector3::zero()), now));
+            scene
+                .set_dynamic_physical_body(
+                    id,
+                    Some(dynamic_definition(grounded_definition(), false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            if offset % 2 == 0 {
+                scene
+                    .body_mut(id)
+                    .unwrap()
+                    .physical
+                    .as_mut()
+                    .unwrap()
+                    .dynamic
+                    .as_mut()
+                    .unwrap()
+                    .activity = DynamicBodyActivity::Settled;
+            }
+        }
+
+        let scheduled = scene
+            .prepare_dynamic_entity_collection(&CollisionScene::new())
+            .unwrap();
+        assert_eq!(scheduled.len(), 150);
+        assert!(scheduled.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(scheduled.iter().all(|body_id| {
+            let SpatialBodyId::Entity(guid) = body_id else {
+                return false;
+            };
+            guid.0 % 2 == 1
+        }));
+        assert_eq!(scene.iter_runtime_body_views().count(), 300);
+        assert_eq!(
+            scene
+                .dynamic_candidates_for_extent(
+                    SpatialBodyId::Ephemeral(999),
+                    Guid(0xda55_ffff),
+                    Vector3::new(-1.0, -1.0, -1.0),
+                    Vector3::new(1.0, 1.0, 1.0),
+                    &crate::CollisionPlacement::outdoor(),
+                )
+                .len(),
+            300
+        );
+    }
+
+    #[test]
+    fn dynamic_outdoor_shadows_cross_landblocks_and_exclude_non_entity_bodies() {
+        let now = Instant::now();
+        let target = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let camera = SpatialBodyId::Ephemeral(1);
+        let mut scene = SpatialScene::new();
+        for body_id in [target, camera] {
+            scene.register_body(SpatialBody::new(
+                body_id,
+                pose(Vector3::new(191.75, 12.0, 1.0)),
+                now,
+            ));
+            scene
+                .set_dynamic_physical_body(
+                    body_id,
+                    Some(dynamic_definition(grounded_definition(), false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+        }
+        scene
+            .body_mut(target)
+            .unwrap()
+            .physical
+            .as_mut()
+            .unwrap()
+            .dynamic
+            .as_mut()
+            .unwrap()
+            .activity = DynamicBodyActivity::Settled;
+
+        scene
+            .prepare_dynamic_entity_collection(&CollisionScene::new())
+            .unwrap();
+        assert_eq!(
+            scene.dynamic_candidates_for_extent(
+                SpatialBodyId::Entity(Guid(0x7000_0099)),
+                Guid(0xdb55_ffff),
+                Vector3::new(0.0, 11.0, 0.0),
+                Vector3::new(1.0, 13.0, 2.0),
+                &crate::CollisionPlacement::outdoor(),
+            ),
+            [target]
+        );
+    }
+
+    #[test]
+    fn fifty_body_bucket_uses_full_swept_bounds_for_provisional_discovery() {
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        for offset in 0..50_u32 {
+            let id = SpatialBodyId::Entity(Guid(0x7000_0000 + offset));
+            scene.register_body(SpatialBody::new(
+                id,
+                pose(Vector3::new(offset as f32 * 2.0, 12.0, 1.0)),
+                now,
+            ));
+            scene
+                .set_dynamic_physical_body(
+                    id,
+                    Some(dynamic_definition(grounded_definition(), false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+        }
+        scene
+            .prepare_dynamic_entity_collection(&CollisionScene::new())
+            .unwrap();
+
+        let initial_cell_only = scene.dynamic_candidates_for_extent(
+            SpatialBodyId::Ephemeral(999),
+            Guid(0xda55_ffff),
+            Vector3::new(0.0, 11.0, 0.0),
+            Vector3::new(1.0, 13.0, 2.0),
+            &crate::CollisionPlacement::outdoor(),
+        );
+        let full_sweep = scene.dynamic_candidates_for_extent(
+            SpatialBodyId::Ephemeral(999),
+            Guid(0xda55_ffff),
+            Vector3::new(0.0, 11.0, 0.0),
+            Vector3::new(99.0, 13.0, 2.0),
+            &crate::CollisionPlacement::outdoor(),
+        );
+
+        assert!(initial_cell_only.len() < 50);
+        assert_eq!(full_sweep.len(), 50);
+        assert!(full_sweep.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn dynamic_interior_membership_and_target_branch_bounds_are_exact() {
+        let now = Instant::now();
+        let bsp_id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let cylinder_id = SpatialBodyId::Entity(Guid(0x7000_0002));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            bsp_id,
+            pose(Vector3::new(10.0, 20.0, 30.0)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                bsp_id,
+                Some(dynamic_definition_with_geometry(
+                    grounded_definition(),
+                    false,
+                    PreparedEntityTargetGeometry {
+                        physics_bsp_parts: vec![PreparedEntityBspPart {
+                            part_index: 0,
+                            gfx_obj_did: 0x0100_0001,
+                            local_origin: Vector3::new(5.0, 0.0, 0.0),
+                            local_orientation: Quaternion::identity(),
+                            scale: ColliderScale::uniform(2.0).unwrap(),
+                            shape: bsp_shape(Vector3::zero(), 1.0),
+                        }],
+                        fallback_setup_did: 0x0200_0001,
+                        fallback_shapes: Vec::new(),
+                        fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+                    },
+                    true,
+                )),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let interior_a = Guid(0xda55_0100);
+        let interior_b = Guid(0xda55_0101);
+        scene
+            .body_mut(bsp_id)
+            .unwrap()
+            .physical
+            .as_mut()
+            .unwrap()
+            .dynamic
+            .as_mut()
+            .unwrap()
+            .placement = crate::CollisionPlacement::outdoor()
+            .merge_reached(crate::CollisionPlacement::interior(interior_a))
+            .merge_reached(crate::CollisionPlacement::interior(interior_b));
+
+        scene.register_body(SpatialBody::new(
+            cylinder_id,
+            pose(Vector3::new(40.0, 50.0, 60.0)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                cylinder_id,
+                Some(dynamic_definition_with_geometry(
+                    grounded_definition(),
+                    false,
+                    PreparedEntityTargetGeometry {
+                        physics_bsp_parts: Vec::new(),
+                        fallback_setup_did: 0x0200_0002,
+                        fallback_shapes: vec![Arc::new(CollisionShape::Cylinder(
+                            CollisionCylinder {
+                                low_point: Vector3::new(1.0, 2.0, 3.0),
+                                radius: 2.0,
+                                height: 4.0,
+                            },
+                        ))],
+                        fallback_scale: ColliderScale::uniform(1.5).unwrap(),
+                    },
+                    false,
+                )),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+
+        scene.dynamic_shadows =
+            DynamicShadowIndex::compile(scene.body_store.bodies.values()).unwrap();
+        assert_eq!(
+            scene.dynamic_candidates_for_extent(
+                cylinder_id,
+                Guid(0xda55_ffff),
+                Vector3::zero(),
+                Vector3::zero(),
+                &crate::CollisionPlacement::interior(interior_b),
+            ),
+            [bsp_id]
+        );
+        assert!(
+            scene
+                .dynamic_candidates_for_extent(
+                    cylinder_id,
+                    Guid(0xda55_ffff),
+                    Vector3::zero(),
+                    Vector3::zero(),
+                    &crate::CollisionPlacement::interior(Guid(0xda55_0102)),
+                )
+                .is_empty()
+        );
+
+        let bsp_bounds =
+            crate::spatial::dynamic_index::target_bounds(scene.body(bsp_id).unwrap()).unwrap()[0];
+        assert_eq!(bsp_bounds.minimum(), Vector3::new(13.0, 18.0, 28.0));
+        assert_eq!(bsp_bounds.maximum(), Vector3::new(17.0, 22.0, 32.0));
+        let cylinder_bounds =
+            crate::spatial::dynamic_index::target_bounds(scene.body(cylinder_id).unwrap()).unwrap()
+                [0];
+        assert_eq!(cylinder_bounds.minimum(), Vector3::new(38.5, 50.0, 64.5));
+        assert_eq!(cylinder_bounds.maximum(), Vector3::new(44.5, 56.0, 70.5));
     }
 
     #[test]

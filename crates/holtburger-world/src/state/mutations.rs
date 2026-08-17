@@ -1241,7 +1241,7 @@ impl WorldState {
                         let dynamic = body
                             .physical
                             .as_ref()
-                            .is_some_and(|physical| physical.entity_collision.is_some());
+                            .is_some_and(|physical| physical.dynamic.is_some());
                         let replacement = body
                             .physical
                             .as_ref()

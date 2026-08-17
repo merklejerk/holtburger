@@ -1,8 +1,10 @@
 mod bsp_query;
+mod cell_index;
 mod collision;
 #[cfg(test)]
 mod differential_fixtures;
 mod dynamic_body;
+mod dynamic_index;
 mod grounded;
 mod physical_body;
 mod physical_fly;
@@ -41,6 +43,7 @@ pub use grounded::{
     RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
     SettlePermission, solve_grounded,
 };
+pub(crate) use physical_body::DynamicBodyActivity;
 pub use physical_body::{
     GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation, PhysicalBodyActuationError,
     PhysicalBodyDefinition, PhysicalBodyDefinitionError, PhysicalBodyMotion,

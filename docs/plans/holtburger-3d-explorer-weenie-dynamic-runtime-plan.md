@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 4 next
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 4 in progress
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -1160,6 +1160,15 @@ the broader client entity event.
 
 ### Phase 4: Generalize and Reuse Frontend Dynamic Presentation
 
+Progress: In progress (2026-08-16). The source-neutral presentation input, authored and spawned
+adapters, host `HBDV` visual closure, sole dynamic-root placement writer, atomic visual/behavior
+staging, focused mirror-to-runtime reconciliation, presentation-state consequences, dynamic setup
+lights, and initial `Entities` panel are implemented. Focused TypeScript/Svelte checks and 47 tests
+cover decoding, coordinate conversion, source adaptation, placement ownership, shared visual loads,
+same-GUID replacement, late-load removal, state transitions, and script staging. The remaining gate
+is the canonical real-content browser/Tauri-boundary scenario plus its lifecycle evidence; Phase R1
+has not begun.
+
 #### Deliverables
 
 - Extract one source-neutral dynamic presentation input from `AuthoredDynamicSource`: visual
@@ -1210,7 +1219,41 @@ the broader client entity event.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- `DynamicPresentationSource` contains only source-neutral immutable visual/behavior facts. Authored
+  and spawned adapters retain placement and producer identity policy outside that contract; no
+  placement optional or Explorer scope concept was added to the shared visual input.
+- `GameRuntime` reuses its one `ObjectVisualTemplateRepository`, `DynamicEntitySystem`, animation,
+  script, particle, effect, audio, geometry, texture, and atlas paths. Spawned reconciliation retains
+  generation/currentness and resource-key metadata only; the `DynamicEntityMirror` remains the sole
+  frontend semantic current-entity authority.
+- The session emits a state-change notification only after the mirror accepts an event. Svelte keeps
+  a current view projection, not an event log or diagnostic history. Reconciliation errors replace
+  one inline current error and carry the affected WCID set plus catalog provenance.
+- Complete visual and behavior dependencies, including particle meshes, are staged before the
+  synchronous owner commit. Replacement/despawn destroys existing emitters immediately and removes
+  animation, script, sound-table, dynamic-root, template, atlas, and geometry ownership through the
+  same owner retirement path.
+- Retail `CPhysicsObj::set_state` mutates only lighting, no-draw, and hidden presentation state
+  (`acclient.c:310307-310344`); `CPhysicsPart::SetTranslucency` ignores writes while cloaked
+  (`acclient.c:303936`). The frontend therefore suppresses draws for no-draw/hidden, preserves the
+  last part translucency while cloaked, and does not invent cloak alpha. Default setup animation and
+  script activation remain setup-owned initialization rather than being restarted by state-bit
+  replacement.
+- Dynamic setup lights follow the current unscaled object frame. Retail copies the object frame into
+  each `LIGHTOBJ` (`LIGHTLIST::set_frame`, `acclient.c:312960-312970`) while
+  `CPartArray::SetScaleInternal` changes only part gfx scales (`acclient.c:313765-313806`). Lighting
+  state enables or removes the setup lights independently from no-draw/hidden, matching
+  `CPhysicsObj::set_state`.
+- Explorer spawn UX accepts only decimal or `0x` WCIDs and an explicit visible distance. It snapshots
+  the currently presented camera once, converts canonical scene position and view direction into AC
+  landblock-local coordinates, sends identity candidate orientation, and requests explicit
+  `pose-only` participation. The host remains the only portal/EnvCell placement authority; Phase 5
+  changes the explicit physical intent without replacing this UI/host placement seam.
+- Current debt/gate: extend the canonical browser harness with the existing host composition and
+  dynamic visual endpoint, then prove a representative catalog WCID renders, shares resources,
+  despawns without retained owners, and survives replacement/resnapshot. Do not add retained
+  diagnostics merely for this proof; harness-only observations may read existing current-state
+  diagnostics.
 
 ### Phase R1: Visible-Entity Resteering Checkpoint
 

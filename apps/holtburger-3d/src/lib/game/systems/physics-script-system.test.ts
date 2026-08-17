@@ -177,6 +177,40 @@ describe("PhysicsScriptSystem", () => {
 		expect(harness.repository.getDiagnostics().referenceCount).toBe(0);
 	});
 
+	it("stages a complete owner replacement without exposing or retiring either side early", async () => {
+		const closure = await harness.repository.acquireClosure("0x33000711");
+		harness.system.install("owner", TARGET, closure, 0);
+		const successor = {
+			generation: 2,
+			targetId: behaviorTargetId("node-2"),
+		};
+		const stage = harness.system.stageOwner("owner", [
+			{ closure, target: successor, timeSeconds: 10 },
+		]);
+		expect(harness.system.holds(TARGET)).toBe(true);
+		expect(harness.system.holds(successor)).toBe(false);
+
+		stage.commit();
+		expect(harness.system.holds(TARGET)).toBe(false);
+		expect(harness.system.holds(successor)).toBe(true);
+		expect(() => stage.commit()).toThrow("state committed");
+	});
+
+	it("releases an uncommitted stage without disturbing the active owner", async () => {
+		const closure = await harness.repository.acquireClosure("0x33000711");
+		harness.system.install("owner", TARGET, closure, 0);
+		const stage = harness.system.stageOwner("owner", [
+			{
+				closure,
+				target: { generation: 2, targetId: behaviorTargetId("node-2") },
+				timeSeconds: 10,
+			},
+		]);
+		stage.release();
+		expect(harness.system.holds(TARGET)).toBe(true);
+		expect(() => stage.commit()).toThrow("state released");
+	});
+
 	it("refuses a clock that moves backwards rather than inventing an interpretation", async () => {
 		const closure = await harness.repository.acquireClosure("0x33000711");
 		harness.system.install("owner", TARGET, closure, 0);

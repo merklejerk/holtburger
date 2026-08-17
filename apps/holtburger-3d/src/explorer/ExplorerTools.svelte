@@ -21,6 +21,9 @@
 	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
 	import type { PhysicalCameraStatus } from "./physical-camera-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-camera-path";
+	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
+	import type { ExplorerCatalogCapability } from "./explorer-entity-commands";
+	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 
 	type ExplorerTabId =
 		| "world"
@@ -105,6 +108,16 @@
 		readonly readStaticObjectRuntimeDiagnostics: () => StaticObjectRuntimeDiagnostics | null;
 		/** Explicit diagnostic readback of one active packed atlas page. */
 		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
+		readonly entityCatalog: ExplorerCatalogCapability | null;
+		readonly spawnedEntities: readonly DynamicEntityView[];
+		readonly spawnedEntityPresentationError: string | null;
+		readonly spawnExplorerEntity: (
+			wcid: string,
+			distance: number,
+		) => Promise<void>;
+		readonly despawnExplorerEntity: (
+			entity: DynamicEntityView,
+		) => Promise<void>;
 	}
 
 	let {
@@ -149,6 +162,11 @@
 		authoredDynamicRuntimeDiagnostics,
 		readStaticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
+		entityCatalog,
+		spawnedEntities,
+		spawnedEntityPresentationError,
+		spawnExplorerEntity,
+		despawnExplorerEntity,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -180,7 +198,7 @@
 			id: "entities",
 			icon: "👤",
 			label: "Entities",
-			stub: "Entity search and selection controls will live here.",
+			stub: "Catalog-backed Explorer entity controls.",
 		},
 		{
 			id: "logs",
@@ -292,6 +310,15 @@
 							<ExplorerTexturesPanel
 								readDiagnostics={readStaticObjectRuntimeDiagnostics}
 								{readTextureAtlasPage}
+							/>
+						{:else if activeTab.id === "entities"}
+							<ExplorerEntitiesPanel
+								{runtimeReady}
+								catalog={entityCatalog}
+								entities={spawnedEntities}
+								presentationError={spawnedEntityPresentationError}
+								spawn={spawnExplorerEntity}
+								despawn={despawnExplorerEntity}
 							/>
 						{:else}
 							<p>{activeTab.stub}</p>

@@ -1,12 +1,24 @@
 use anyhow::Context;
 use holtburger_3d::{
-    LandblockSourceLayer, discover_content_runtime, load_active_region_data_bytes,
-    load_animation_bytes, load_landblock_source_batch_bytes, load_particle_emitter_bytes,
-    load_particle_meshes_bytes, load_physics_script_bytes, load_sky_source_bytes,
-    load_sound_table_bytes, load_texture_pixels_bytes,
+    LandblockSourceLayer,
+    dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes,
+    explorer_entity_delivery::ExplorerEntityDelivery,
+    explorer_entity_driver::{
+        DatExplorerEntityContentPreparer, ExplorerEntityDriver, ExplorerEntitySpawnRequest,
+        SystemExplorerEntityClock,
+    },
+    explorer_entity_runtime::ExplorerEntityRuntime,
+    explorer_weenie_catalog::ExplorerWeenieCatalog,
+    host_simulation_runtime::{CollisionSource, HostSimulationRuntime},
+    load_active_region_data_bytes, load_animation_bytes, load_landblock_source_batch_bytes,
+    load_particle_emitter_bytes, load_particle_meshes_bytes, load_physics_script_bytes,
+    load_sky_source_bytes, load_sound_table_bytes, load_texture_pixels_bytes,
 };
+use holtburger_content::{ContentDecodeCache, ContentRepository};
+use holtburger_core::{ContentAssetRuntime, ContentAssetService};
+use holtburger_world::EntityAppearance;
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
+use std::{path::Path, sync::Arc, time::Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -70,10 +82,37 @@ struct SoundTableRequest {
     sound_table_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DynamicEntityVisualRequest {
+    setup_did: u32,
+    appearance: EntityAppearance,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerEntityDespawnRequest {
+    guid: holtburger_common::Guid,
+    generation: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerEntityMutationReceipt {
+    guid: holtburger_common::Guid,
+    generation: u64,
+}
+
+struct DevHostState {
+    content: ContentAssetRuntime,
+    entities: Arc<ExplorerEntityDriver>,
+    delivery: Arc<ExplorerEntityDelivery>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = parse_args()?;
-    let runtime = discover_content_runtime()?;
+    let state = Arc::new(discover_host_state()?);
     let listener = TcpListener::bind((args.host.as_str(), args.port)).await?;
     let address = listener.local_addr()?;
     println!(
@@ -86,19 +125,17 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         let (stream, _) = listener.accept().await?;
-        let runtime = runtime.clone();
+        let state = Arc::clone(&state);
         tokio::spawn(async move {
-            if let Err(error) = handle_connection(stream, &runtime).await {
+            if let Err(error) = handle_connection(stream, &state).await {
                 eprintln!("[holtburger-3d-dev-landblock-content-host] request failed: {error:#}");
             }
         });
     }
 }
 
-async fn handle_connection(
-    mut stream: TcpStream,
-    runtime: &holtburger_core::ContentAssetRuntime,
-) -> anyhow::Result<()> {
+async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyhow::Result<()> {
+    let runtime = &state.content;
     let request = read_request(&mut stream).await?;
     match (request.method.as_str(), request.path.as_str()) {
         ("OPTIONS", _) => write_response(&mut stream, 204, "text/plain", &[]).await,
@@ -196,8 +233,92 @@ async fn handle_connection(
                 Err(error) => write_error(&mut stream, error).await,
             }
         }
+        ("POST", "/dynamic-entity-visual") => {
+            let request = serde_json::from_slice::<DynamicEntityVisualRequest>(&request.body)?;
+            match load_dynamic_entity_visual_source_bytes(
+                runtime,
+                request.setup_did,
+                request.appearance,
+            )
+            .await
+            {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/explorer-entity-spawn") => {
+            let request = serde_json::from_slice::<ExplorerEntitySpawnRequest>(&request.body)?;
+            let result = state.delivery.with_ordered_publication(|| {
+                let outcome = state.entities.spawn_by_wcid(request)?;
+                state
+                    .delivery
+                    .entity(outcome.instance.definition.identity.guid)
+                    .map_err(Into::into)
+            });
+            match result {
+                Ok(entity) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&entity)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/explorer-entity-despawn") => {
+            let request = serde_json::from_slice::<ExplorerEntityDespawnRequest>(&request.body)?;
+            let result = state.delivery.with_ordered_publication(|| {
+                let outcome = state.entities.despawn(request.guid, request.generation)?;
+                Ok::<_, anyhow::Error>(ExplorerEntityMutationReceipt {
+                    guid: request.guid,
+                    generation: outcome.instance.generation,
+                })
+            });
+            match result {
+                Ok(receipt) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
         _ => write_response(&mut stream, 404, "text/plain; charset=utf-8", b"not found").await,
     }
+}
+
+fn discover_host_state() -> anyhow::Result<DevHostState> {
+    let repository = Arc::new(ContentRepository::discover(None)?);
+    let service =
+        ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
+    let content = ContentAssetRuntime::new(service.clone());
+    let collision_source: Arc<dyn CollisionSource> = Arc::new(service);
+    let simulation = Arc::new(HostSimulationRuntime::new(collision_source));
+    let runtime = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
+    let catalog = Arc::new(ExplorerWeenieCatalog::discover_from_environment(
+        repository.source_description().map(Path::new),
+    ));
+    let entities = Arc::new(ExplorerEntityDriver::new(
+        catalog,
+        Arc::new(DatExplorerEntityContentPreparer::new(repository)),
+        Arc::new(SystemExplorerEntityClock),
+        Arc::clone(&runtime),
+        simulation,
+    ));
+    Ok(DevHostState {
+        content,
+        delivery: Arc::new(ExplorerEntityDelivery::new(runtime)),
+        entities,
+    })
 }
 
 async fn write_error(stream: &mut TcpStream, error: anyhow::Error) -> anyhow::Result<()> {

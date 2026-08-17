@@ -94,6 +94,7 @@ try {
 						initialState: result.initialState,
 						landblockId: options.landblockId,
 						lifecycleState: result.lifecycleState,
+						entityLifecycle: result.entityLifecycle,
 						relocationState: result.relocationState,
 						metrics: result.state.metrics,
 						ready: result.state.ready,
@@ -127,6 +128,9 @@ try {
 	if (options.fixture === "portal-scope-atlas") {
 		assertPortalScopeAtlasFixture(result.state);
 	}
+	if (options.spawnWcid !== null) {
+		assertSpawnedEntityLifecycle(result);
+	}
 } finally {
 	await Promise.allSettled(children.toReversed().map(stopChild));
 	await Promise.allSettled(
@@ -157,6 +161,8 @@ function parseArgs(args) {
 		disabledLayersBeforeCapture: [],
 		isolateAuthoredDynamics: false,
 		excludeAuthoredDynamics: false,
+		spawnWcid: null,
+		spawnDistance: 5,
 		cameraLandblockId: null,
 		relocateLandblockId: null,
 		envCellCameraId: null,
@@ -276,6 +282,15 @@ function parseArgs(args) {
 				break;
 			case "--exclude-authored-dynamics":
 				parsed.excludeAuthoredDynamics = true;
+				break;
+			case "--spawn-wcid":
+				parsed.spawnWcid = requireValue(args, ++index, arg);
+				break;
+			case "--spawn-distance":
+				parsed.spawnDistance = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.spawnDistance) || parsed.spawnDistance <= 0) {
+					throw new Error("--spawn-distance must be positive and finite.");
+				}
 				break;
 			case "--camera-landblock":
 				parsed.cameraLandblockId = requireValue(args, ++index, arg);
@@ -683,6 +698,9 @@ Options:
                          Keep terrain and promoted outdoor dynamics but strip outdoor statics.
   --exclude-authored-dynamics
                          Keep outdoor statics but strip promoted dynamics.
+  --spawn-wcid <id>     Spawn one decimal or 0x WCID through the real catalog host, capture it,
+                         then exact-despawn it and assert shared-runtime resource cleanup.
+  --spawn-distance <n>  Camera-relative spawn distance. Default: 5
   --camera-yaw <degrees>    Initial and relocation camera yaw. Default: 0
   --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
   --camera-position <x,y,z>
@@ -892,6 +910,7 @@ function briefHarnessReport(result) {
 		consoleMessages: result.consoleMessages.filter(
 			({ level }) => level === "error" || level === "exception",
 		),
+		entityLifecycle: result.entityLifecycle,
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
 		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
@@ -1052,6 +1071,43 @@ function assertFilteringCycle(initialState, states) {
 				`Filtering cycle ${policy} changed resident resources without a content request.`,
 			);
 		}
+	}
+}
+
+function assertSpawnedEntityLifecycle(result) {
+	const lifecycle = result.entityLifecycle;
+	if (lifecycle === null) {
+		throw new Error("Spawned-entity scenario produced no lifecycle evidence.");
+	}
+	const initialDynamics = result.initialState.authoredDynamics?.dynamics;
+	const spawnedDynamics = lifecycle.spawnedState?.authoredDynamics?.dynamics;
+	const despawnedDynamics = lifecycle.despawnedState?.authoredDynamics?.dynamics;
+	if (!initialDynamics || !spawnedDynamics || !despawnedDynamics) {
+		throw new Error("Spawned-entity scenario omitted dynamic runtime state.");
+	}
+	if (lifecycle.spawnedState.spawnedEntities.length !== 1) {
+		throw new Error("Spawned-entity scenario did not retain exactly one current entity.");
+	}
+	if (spawnedDynamics.entityCount !== initialDynamics.entityCount + 1) {
+		throw new Error("Catalog spawn did not add exactly one shared-runtime dynamic entity.");
+	}
+	if (
+		(lifecycle.spawnedState.metrics?.visibleDynamicEntityCount ?? 0) <=
+		(result.initialState.metrics?.visibleDynamicEntityCount ?? 0)
+	) {
+		throw new Error("Catalog spawn did not become a visible dynamic entity.");
+	}
+	if (lifecycle.despawnedState.spawnedEntities.length !== 0) {
+		throw new Error("Exact despawn left a current entity in the harness projection.");
+	}
+	if (despawnedDynamics.entityCount !== initialDynamics.entityCount) {
+		throw new Error("Exact despawn retained a shared-runtime dynamic entity.");
+	}
+	if (
+		despawnedDynamics.templates.templateCount !==
+		initialDynamics.templates.templateCount
+	) {
+		throw new Error("Exact despawn retained an immutable visual template.");
 	}
 }
 
@@ -1261,6 +1317,21 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
+		let spawnedEntity = null;
+		let spawnedEntityState = null;
+		if (options.spawnWcid !== null) {
+			spawnedEntity = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntity",
+				[options.spawnWcid, options.spawnDistance],
+			);
+			await delay(500);
+			spawnedEntityState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+		}
 		if (options.cameraEndYawDegrees !== null) {
 			await evaluate(
 				client,
@@ -1593,11 +1664,33 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					captureBeyondViewport: false,
 					format: "png",
 				});
+		let despawnedEntityState = null;
+		if (spawnedEntity !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.despawnExplorerEntity",
+				[spawnedEntity.identity.guid, spawnedEntity.generation],
+			);
+			await delay(100);
+			despawnedEntityState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+		}
 		return {
 			ambientOcclusionCycleStates,
 			cameraSweepScreenshots,
 			glRenderer,
 			consoleMessages,
+			entityLifecycle:
+				spawnedEntity === null
+					? null
+					: {
+							spawned: spawnedEntity,
+							spawnedState: spawnedEntityState,
+							despawnedState: despawnedEntityState,
+						},
 			generatedDisabledState,
 			initialState,
 			filteringCycleStates,

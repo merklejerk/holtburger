@@ -1688,6 +1688,7 @@ export class GameRuntime {
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
+			dynamicLights: this.#dynamics.getRuntimeLights(),
 			environment: {
 				...this.#environment,
 				distanceFog: resolveTerrainCoverageFog(

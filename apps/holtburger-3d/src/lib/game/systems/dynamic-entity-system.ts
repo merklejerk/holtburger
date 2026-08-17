@@ -47,6 +47,8 @@ import {
 	type PreparedDynamicAnimation,
 } from "../animation/prepared-dynamic-animation";
 import type { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system";
+import type { RuntimeLight } from "../environment/runtime-lights";
+import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
 
 /** Presentation-owned consequences of one complete producer physics-state projection. */
 export interface DynamicEntityPresentationState {
@@ -491,6 +493,25 @@ export class DynamicEntitySystem<
 		const entity = this.#entities.get(nodeId);
 		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
 		entity.presentationState = state;
+	}
+
+	/** Resolve every enabled setup light from its current object frame into canonical scene space. */
+	getRuntimeLights(): readonly RuntimeLight[] {
+		const lights: RuntimeLight[] = [];
+		for (const entity of this.#entities.values()) {
+			if (!entity.presentationState.lighting) continue;
+			const placement = this.#scene.getResolvedPlacement(entity.rootNodeId);
+			if (!placement)
+				throw new Error(`Dynamic entity ${entity.rootNodeId} no longer exists.`);
+			lights.push(
+				...resolveObjectRuntimeLights(
+					entity.source.presentation.lights,
+					placement.localToLandblock,
+					placement.landblockId,
+				),
+			);
+		}
+		return lights;
 	}
 
 	/** Inspect complete preparation without exposing repository handles or mutable staging state. */

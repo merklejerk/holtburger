@@ -801,7 +801,7 @@ export class WebGL2Renderer implements Renderer {
 		// Dynamic lights are frame-global and reach every draw, so they are assembled once here
 		// rather than per role. Positions stay in canonical scene space; the bind rebases them.
 		const camera = input.views[0]?.camera.placement.position ?? null;
-		const dynamicCandidates: RuntimeLight[] = [];
+		const dynamicCandidates: RuntimeLight[] = [...input.dynamicLights];
 		if (camera && input.frameSettings.viewerLightEnabled) {
 			// Retail attaches the viewer light at the camera itself when no character carries it
 			// (`SmartBox::set_viewer`, acclient.c:137890).

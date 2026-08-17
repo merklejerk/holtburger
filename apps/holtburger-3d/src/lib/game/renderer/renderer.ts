@@ -3,6 +3,7 @@ import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import type { LandblockLights } from "../environment/outdoor-light-index";
+import type { RuntimeLight } from "../environment/runtime-lights";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 
 /** Minimal read side of the outdoor light index the renderer depends on. */
@@ -129,6 +130,8 @@ export interface FrameInput {
 	 * landblocks it actually draws, and the index memoizes across frames.
 	 */
 	readonly outdoorLights: OutdoorLightLookup;
+	/** Current entity-owned point lights already composed into canonical scene space. */
+	readonly dynamicLights: readonly RuntimeLight[];
 	/** Dynamic display choices applied to this frame. */
 	readonly frameSettings: FrameSettings;
 	readonly views: readonly FrameViewInput[];

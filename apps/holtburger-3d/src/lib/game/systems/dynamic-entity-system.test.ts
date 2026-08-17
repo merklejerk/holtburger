@@ -33,6 +33,8 @@ import {
 	type ObjectVisualTemplate,
 	type ObjectVisualTemplatePreparer,
 } from "./object-visual-template-repository";
+import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
 	it("installs and removes a promoted owner population as one set", async () => {
@@ -257,6 +259,64 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toContain(installation.nodeIds[0]);
 	});
 
+	it("publishes enabled setup lights from the unscaled current object frame", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const base = source("lamp");
+		const localTransform = Mat4.identity();
+		localTransform.m41 = 12;
+		const installation = system.replaceOwner("layer", [
+			{
+				...base,
+				placement: { ...base.placement, localTransform },
+				source: {
+					...base.source,
+					presentation: {
+						...base.source.presentation,
+						lights: [
+							{
+								color: { red: 0.1, green: 0.2, blue: 0.3 },
+								falloff: 4,
+								intensity: 100,
+								offset: new Vec3(1, 2, 3),
+							},
+						],
+					},
+					// Retail light frames do not inherit CPartArray's gfx-object scale.
+					scale: new Vec3(5, 5, 5),
+				},
+			},
+		]);
+		expect(await installation.ready).toBe("ready");
+		commit(installation);
+		const nodeId = requiredAt(installation.nodeIds, 0);
+		expect(system.getRuntimeLights()).toEqual([]);
+
+		system.updatePresentationState(nodeId, {
+			cloaked: false,
+			hidden: false,
+			lighting: true,
+			noDraw: true,
+		});
+		expect(system.getRuntimeLights()).toEqual([
+			{
+				color: { red: 0.1, green: 0.2, blue: 0.3 },
+				intensity:
+					100 *
+					FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
+				position: { x: 13, y: 2, z: -189 },
+				range: 4 * RUNTIME_LIGHT_RANGE_SCALE,
+			},
+		]);
+
+		system.updatePresentationState(nodeId, {
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+		});
+		expect(system.getRuntimeLights()).toEqual([]);
+	});
+
 	it("publishes translucency through alpha, transparent ordering, sorting, and full suppression", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const shared = source("shared-translucency");
@@ -309,6 +369,49 @@ describe("DynamicEntitySystem authored ownership", () => {
 			instance: { color: { a: 1 } },
 			transparentSort: null,
 		});
+		system.updatePresentationState(firstNodeId, {
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: true,
+		});
+		expect(system.getVisibleContributions(firstNodeId)).toEqual([]);
+		system.updatePresentationState(firstNodeId, {
+			cloaked: false,
+			hidden: true,
+			lighting: false,
+			noDraw: false,
+		});
+		expect(system.getVisibleContributions(firstNodeId)).toEqual([]);
+
+		system.updatePresentationState(firstNodeId, {
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+		});
+		system.publishPresentation([presentationSample(firstPrepared, 0.2)]);
+		system.updatePresentationState(firstNodeId, {
+			cloaked: true,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+		});
+		// Retail ignores later SetTranslucency writes while cloaked; it does not invent cloak alpha.
+		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
+		expect(system.getVisibleContributions(firstNodeId)?.[0]).toMatchObject({
+			instance: { color: { a: 0.8 } },
+		});
+		system.updatePresentationState(firstNodeId, {
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+		});
+		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
+		expect(
+			system.getVisibleContributions(firstNodeId)?.[0]?.instance.color.a,
+		).toBeCloseTo(0.2);
 		expect(system.getDiagnostics()).toMatchObject({
 			lastParticleEnvelopeChangeCount: 0,
 			lastParticleEnvelopeQueryCount: 1,

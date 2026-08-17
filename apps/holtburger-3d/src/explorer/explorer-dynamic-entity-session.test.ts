@@ -112,4 +112,24 @@ describe("ExplorerDynamicEntitySession", () => {
 			transport.calls.filter((call) => call.startsWith("listen:")),
 		).toHaveLength(2);
 	});
+
+	it("notifies subscribers only when an accepted event changes the mirror", async () => {
+		const transport = new FakeTransport();
+		const session = new ExplorerDynamicEntitySession(transport);
+		let changes = 0;
+		const unsubscribe = session.subscribe(() => (changes += 1));
+		await session.start();
+		// The pre-snapshot upsert is ignored; only the recovery snapshot is observable.
+		expect(changes).toBe(1);
+		transport.emit({ kind: "removed", guid: 2, generation: 2 });
+		expect(changes).toBe(1);
+		transport.emit({ kind: "removed", guid: 2, generation: 1 });
+		expect(changes).toBe(2);
+		unsubscribe();
+		transport.emit({
+			kind: "snapshot",
+			snapshot: { hostTime: { seconds: 2 }, entities: [entity(4)] },
+		});
+		expect(changes).toBe(2);
+	});
 });

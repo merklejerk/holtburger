@@ -3108,6 +3108,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
             dynamic_collision: crate::EntityDynamicCollisionPolicy {
                 target: crate::EntityCollisionParticipation::Solid,
                 mover_accepts_response: true,
+                accepts_peer_reports: true,
                 missile: false,
                 path_clipped: false,
             },

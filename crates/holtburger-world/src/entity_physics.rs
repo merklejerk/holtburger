@@ -92,6 +92,8 @@ pub struct EntityDynamicCollisionPolicy {
     pub target: EntityCollisionParticipation,
     /// Whether this entity accepts response when acting as the directional mover.
     pub mover_accepts_response: bool,
+    /// Whether a peer may retain a collision report naming this entity.
+    pub accepts_peer_reports: bool,
     /// Missile filtering is a distinct pair predicate with live target/category inputs.
     pub missile: bool,
     /// Retained projectile path marker cleared by an accepted missile collision.
@@ -383,6 +385,7 @@ pub fn resolve_effective_entity_physics_state(
         dynamic_collision: EntityDynamicCollisionPolicy {
             target,
             mover_accepts_response: !hidden && !ignore_collisions,
+            accepts_peer_reports: !hidden && !ignore_collisions,
             missile: semantic.contains(PhysicsState::MISSILE),
             path_clipped: semantic.contains(PhysicsState::PATH_CLIPPED),
         },
@@ -479,6 +482,7 @@ mod tests {
             EntityCollisionParticipation::Suppressed
         );
         assert!(!resolved.dynamic_collision.mover_accepts_response);
+        assert!(!resolved.dynamic_collision.accepts_peer_reports);
         assert!(resolved.reporting.enabled);
         assert!(resolved.reporting.as_environment);
         assert!(resolved.response.inelastic);
@@ -497,6 +501,7 @@ mod tests {
             EntityCollisionParticipation::Suppressed
         );
         assert!(!resolved.dynamic_collision.mover_accepts_response);
+        assert!(!resolved.dynamic_collision.accepts_peer_reports);
         assert!(!resolved.reporting.enabled);
         assert!(resolved.presentation.hidden);
     }

@@ -51,7 +51,7 @@ pub use object_collision::{
     BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
     CollisionBall, CollisionBox, CollisionCylinder, CollisionPolygon, CollisionShape,
     LandblockColliderAssembler, LandblockColliders, LandblockCollisionAsset,
-    OutdoorBuildingTransit, PlacedCollider, StaticColliderPlacement,
+    OutdoorBuildingTransit, PlacedCollider, PlacedCollisionShape, StaticColliderPlacement,
     resolve_gfx_obj_collision_shape, resolve_setup_volume_collision_shapes,
 };
 pub use repository::ContentRepository;

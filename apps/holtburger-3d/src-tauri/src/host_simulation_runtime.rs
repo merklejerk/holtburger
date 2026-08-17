@@ -15,11 +15,12 @@ use holtburger_core::{
     replace_dynamic_entity_body,
 };
 use holtburger_world::{
-    CollisionScene, DynamicBodyKinematics, DynamicPhysicalBodyDefinition, EdgeProtection,
-    EntityPhysicsTransitionDecision, GroundedBodyActuation, PhysicalBodyActuation,
-    PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyTickResult,
-    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    CollisionScene, DynamicBodyKinematics, DynamicContactBudgetExceeded,
+    DynamicPhysicalBodyDefinition, EdgeProtection, EntityPhysicsTransitionDecision,
+    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
+    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, RuntimeSpatialBodyView,
+    SpatialBody, SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 
@@ -206,6 +207,15 @@ pub struct HostPhysicalBodyTick {
     pub result: PhysicalBodyTickResult,
     /// Exact immutable topology snapshot used by the solve.
     pub collision: Arc<CollisionScene>,
+}
+
+struct HostPhysicalBodyTickRequest {
+    scene: Arc<CollisionScene>,
+    previous: SpatialBody,
+    actuation: PhysicalBodyActuation,
+    delta_seconds: f32,
+    now: std::time::Instant,
+    dynamic_contacts: bool,
 }
 
 /// Host service that realizes explicit application simulation interest into immutable scenes.
@@ -419,11 +429,14 @@ impl HostSimulationRuntime {
         let actuation = build_actuation(&previous)?;
         tick_body_transaction(
             &mut state,
-            scene,
-            previous,
-            actuation,
-            delta_seconds,
-            now,
+            HostPhysicalBodyTickRequest {
+                scene,
+                previous,
+                actuation,
+                delta_seconds,
+                now,
+                dynamic_contacts: false,
+            },
             accept,
         )
     }
@@ -441,44 +454,42 @@ impl HostSimulationRuntime {
     ) -> Result<Vec<HostPhysicalBodyTick>> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = Arc::clone(&state.scene);
-        let tick_start = state
-            .bodies
-            .prepare_dynamic_entity_collection(&scene)?
-            .into_iter()
-            .map(|body_id| {
-                state
-                    .bodies
-                    .body(body_id)
-                    .cloned()
-                    .expect("scheduled dynamic body vanished while collection lock was held")
-            })
-            .collect::<Vec<_>>();
+        let tick_start =
+            state
+                .bodies
+                .prepare_dynamic_entity_collection(&scene, delta_seconds, |previous| {
+                    dynamic_entity_coasting_actuation(previous, delta_seconds)
+                })?;
         let mut ticks = Vec::with_capacity(tick_start.len());
-        for previous in tick_start {
-            let definition = previous
-                .physical
-                .as_ref()
-                .expect("scheduled dynamic body lost its physical definition")
-                .definition;
-            let actuation = match definition {
-                PhysicalBodyDefinition::FreeSphere { .. } => PhysicalBodyActuation::free_flight(
-                    previous.velocity + previous.acceleration * delta_seconds,
-                )?,
-                PhysicalBodyDefinition::Grounded { .. } => PhysicalBodyActuation::Grounded(
-                    GroundedBodyActuation::coast()
-                        .with_external_acceleration(previous.acceleration)?,
-                ),
-            };
-            let (tick, ()) = tick_body_transaction(
+        for (body_id, actuation) in tick_start {
+            let previous = state
+                .bodies
+                .body(body_id)
+                .cloned()
+                .expect("scheduled dynamic body vanished while collection lock was held");
+            let solved = tick_body_transaction(
                 &mut state,
-                Arc::clone(&scene),
-                previous,
-                actuation,
-                delta_seconds,
-                now,
+                HostPhysicalBodyTickRequest {
+                    scene: Arc::clone(&scene),
+                    previous,
+                    actuation,
+                    delta_seconds,
+                    now,
+                    dynamic_contacts: true,
+                },
                 |_| Ok(()),
-            )?;
-            ticks.push(tick);
+            );
+            match solved {
+                Ok((tick, ())) => ticks.push(tick),
+                Err(error)
+                    if error
+                        .downcast_ref::<DynamicContactBudgetExceeded>()
+                        .is_some() =>
+                {
+                    eprintln!("Explorer dynamic-entity solve rejected: {error:#}");
+                }
+                Err(error) => return Err(error),
+            }
         }
         Ok(ticks)
     }
@@ -617,29 +628,45 @@ impl HostSimulationRuntime {
 
 fn tick_body_transaction<T>(
     state: &mut HostSimulationState,
-    scene: Arc<CollisionScene>,
-    previous: SpatialBody,
-    actuation: PhysicalBodyActuation,
-    delta_seconds: f32,
-    now: std::time::Instant,
+    request: HostPhysicalBodyTickRequest,
     accept: impl FnOnce(&HostPhysicalBodyTick) -> Result<T>,
 ) -> Result<(HostPhysicalBodyTick, T)> {
-    let body_id = previous.id;
-    let (result, accepted) = state.bodies.tick_physical_body_transaction(
-        body_id,
-        &scene,
+    let HostPhysicalBodyTickRequest {
+        scene,
+        previous,
         actuation,
         delta_seconds,
         now,
-        |current, result| {
-            accept(&HostPhysicalBodyTick {
-                previous: previous.clone(),
-                current: current.clone(),
-                result: result.clone(),
-                collision: Arc::clone(&scene),
-            })
-        },
-    )?;
+        dynamic_contacts,
+    } = request;
+    let body_id = previous.id;
+    let accept_tick = |current: &SpatialBody, result: &PhysicalBodyTickResult| {
+        accept(&HostPhysicalBodyTick {
+            previous: previous.clone(),
+            current: current.clone(),
+            result: result.clone(),
+            collision: Arc::clone(&scene),
+        })
+    };
+    let (result, accepted) = if dynamic_contacts {
+        state.bodies.tick_dynamic_physical_body_transaction(
+            body_id,
+            &scene,
+            actuation,
+            delta_seconds,
+            now,
+            accept_tick,
+        )?
+    } else {
+        state.bodies.tick_physical_body_transaction(
+            body_id,
+            &scene,
+            actuation,
+            delta_seconds,
+            now,
+            accept_tick,
+        )?
+    };
     report_body_placement_recoveries(body_id, &result);
     let current = state
         .bodies
@@ -655,6 +682,26 @@ fn tick_body_transaction<T>(
         },
         accepted,
     ))
+}
+
+fn dynamic_entity_coasting_actuation(
+    previous: &SpatialBody,
+    delta_seconds: f32,
+) -> Result<PhysicalBodyActuation> {
+    let definition = previous
+        .physical
+        .as_ref()
+        .context("scheduled dynamic body lost its physical definition")?
+        .definition;
+    match definition {
+        PhysicalBodyDefinition::FreeSphere { .. } => PhysicalBodyActuation::free_flight(
+            previous.velocity + previous.acceleration * delta_seconds,
+        )
+        .map_err(Into::into),
+        PhysicalBodyDefinition::Grounded { .. } => Ok(PhysicalBodyActuation::Grounded(
+            GroundedBodyActuation::coast().with_external_acceleration(previous.acceleration)?,
+        )),
+    }
 }
 
 fn report_body_placement_recoveries(body_id: SpatialBodyId, result: &PhysicalBodyTickResult) {

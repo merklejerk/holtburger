@@ -1130,7 +1130,9 @@ export class GameRuntime {
 		entities: readonly DynamicEntityView[],
 	): Promise<void> {
 		if (this.#destroyed)
-			throw new Error("Cannot reconcile spawned entities after runtime shutdown.");
+			throw new Error(
+				"Cannot reconcile spawned entities after runtime shutdown.",
+			);
 		if (this.#dynamicEntityVisualSource === null && entities.length > 0) {
 			throw new Error(
 				"This runtime has no dynamic-entity visual source capability.",

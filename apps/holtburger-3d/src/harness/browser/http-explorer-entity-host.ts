@@ -35,7 +35,11 @@ export class HttpExplorerEntityHost {
 	}
 }
 
-async function postJson(baseUrl: URL, path: string, body: unknown): Promise<unknown> {
+async function postJson(
+	baseUrl: URL,
+	path: string,
+	body: unknown,
+): Promise<unknown> {
 	const response = await fetch(new URL(path, baseUrl), {
 		body: JSON.stringify(body),
 		headers: { "content-type": "application/json" },

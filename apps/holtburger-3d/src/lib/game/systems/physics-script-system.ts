@@ -160,7 +160,9 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 				if (state !== "staged")
 					throw new Error(`Cannot commit script stage in state ${state}.`);
 				if (this.#destroyed)
-					throw new Error("Cannot commit into a destroyed physics script system.");
+					throw new Error(
+						"Cannot commit into a destroyed physics script system.",
+					);
 				this.removeOwner(ownerId);
 				for (const [targetId, record] of records)
 					this.#records.set(targetId, record);

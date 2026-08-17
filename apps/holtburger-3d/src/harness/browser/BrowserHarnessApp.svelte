@@ -605,7 +605,9 @@
 		distance: number,
 	): Promise<DynamicEntityView> {
 		if (!runtime || !entityHost || cameraEvidence === null)
-			throw new Error("Browser harness entity spawn requires a current camera and runtime.");
+			throw new Error(
+				"Browser harness entity spawn requires a current camera and runtime.",
+			);
 		const yaw = (cameraEvidence.yawDegrees * Math.PI) / 180;
 		const pitch = (cameraEvidence.pitchDegrees * Math.PI) / 180;
 		const axes = createCameraAxesRadians(yaw, pitch);
@@ -642,7 +644,9 @@
 		generation: number,
 	): Promise<void> {
 		if (!runtime || !entityHost)
-			throw new Error("Browser harness entity despawn requires an active runtime.");
+			throw new Error(
+				"Browser harness entity despawn requires an active runtime.",
+			);
 		await entityHost.despawn(guid, generation);
 		spawnedEntities = spawnedEntities.filter(
 			(entity) =>
@@ -979,7 +983,7 @@
 					});
 					longTaskObserver.observe({ buffered: true, type: "longtask" });
 				}
-					hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
+				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
 					clearSceneInterest,
 					despawnExplorerEntity,
 					focusExplorerOutdoor,

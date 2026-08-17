@@ -6,10 +6,7 @@ import { createLandblockWorldOrigin } from "../landblocks";
 import type { Mat4 } from "../math/types";
 import { Vec3 } from "../math/types";
 import type { ResolvedObjectLight } from "../resolution/presentation";
-import {
-	RUNTIME_LIGHT_RANGE_SCALE,
-	type RuntimeLight,
-} from "./runtime-lights";
+import { RUNTIME_LIGHT_RANGE_SCALE, type RuntimeLight } from "./runtime-lights";
 
 /** Compose setup-authored object lights into canonical scene space for draw-time evaluation. */
 export function resolveObjectRuntimeLights(

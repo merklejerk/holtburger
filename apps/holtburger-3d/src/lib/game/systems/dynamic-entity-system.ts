@@ -341,7 +341,9 @@ export class DynamicEntitySystem<
 		};
 	}
 
-	#createEntity(resident: PlacedDynamicPresentationSource): DynamicEntityRecord {
+	#createEntity(
+		resident: PlacedDynamicPresentationSource,
+	): DynamicEntityRecord {
 		const source = resident.source;
 		const rootNodeId = this.#placements.createRoot(
 			resident.placement,
@@ -502,7 +504,9 @@ export class DynamicEntitySystem<
 			if (!entity.presentationState.lighting) continue;
 			const placement = this.#scene.getResolvedPlacement(entity.rootNodeId);
 			if (!placement)
-				throw new Error(`Dynamic entity ${entity.rootNodeId} no longer exists.`);
+				throw new Error(
+					`Dynamic entity ${entity.rootNodeId} no longer exists.`,
+				);
 			lights.push(
 				...resolveObjectRuntimeLights(
 					entity.source.presentation.lights,

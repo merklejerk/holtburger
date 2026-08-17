@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 4 in progress
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 5 in progress
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -1160,14 +1160,18 @@ the broader client entity event.
 
 ### Phase 4: Generalize and Reuse Frontend Dynamic Presentation
 
-Progress: In progress (2026-08-16). The source-neutral presentation input, authored and spawned
+Progress: Complete (2026-08-16). The source-neutral presentation input, authored and spawned
 adapters, host `HBDV` visual closure, sole dynamic-root placement writer, atomic visual/behavior
 staging, focused mirror-to-runtime reconciliation, presentation-state consequences, dynamic setup
 lights, and initial `Entities` panel are implemented. Focused TypeScript/Svelte checks and 47 tests
 cover decoding, coordinate conversion, source adaptation, placement ownership, shared visual loads,
-same-GUID replacement, late-load removal, state transitions, and script staging. The remaining gate
-is the canonical real-content browser/Tauri-boundary scenario plus its lifecycle evidence; Phase R1
-has not begun.
+same-GUID replacement, late-load removal, state transitions, and script staging. The canonical
+browser harness spawned real catalog WCID 239 (`Brazier`) through the app-local host and `HBDV`
+boundary, rendered its ten parts in front of the camera, and exactly despawned it. Current-entity,
+dynamic-runtime, effect-state, and template counts returned from one to zero with no browser error;
+the captured image was inspected rather than inferred from renderer counters. The complete app gates
+pass: 1,092 TypeScript tests, 136 Rust tests, Svelte/TypeScript checks, Prettier, ESLint/Knip, and
+Clippy with warnings denied.
 
 #### Deliverables
 
@@ -1249,13 +1253,32 @@ has not begun.
   landblock-local coordinates, sends identity candidate orientation, and requests explicit
   `pose-only` participation. The host remains the only portal/EnvCell placement authority; Phase 5
   changes the explicit physical intent without replacing this UI/host placement seam.
-- Current debt/gate: extend the canonical browser harness with the existing host composition and
-  dynamic visual endpoint, then prove a representative catalog WCID renders, shares resources,
-  despawns without retained owners, and survives replacement/resnapshot. Do not add retained
-  diagnostics merely for this proof; harness-only observations may read existing current-state
-  diagnostics.
+- The canonical browser harness reuses the existing host composition and dynamic visual endpoint.
+  Its `--brief` report projects only current identities and named lifecycle counters; it does not
+  retain event history or add production diagnostics. Replacement/resnapshot and shared-resource
+  teardown remain covered at the owning unit boundaries rather than growing a diagnostic registry
+  to restate those owners.
 
 ### Phase R1: Visible-Entity Resteering Checkpoint
+
+Progress: Complete (2026-08-16). The real host/browser matrix exercised all ten Phase R0 WCIDs.
+Clay (1), Corpse (21), Crate (147), Large Urn (158), Brazier (239), Carsith the Weaponsmith (400),
+Killagurg (34621), and Rynthid Assessment Crystal (52077) rendered and returned entity/effect/
+template ownership to baseline after exact despawn. Flame Bolt (1499) also completed the same
+lifecycle, but its small visual is rejected by the normal 64-square-pixel footprint policy at five
+meters; setting the existing harness threshold to zero made it visible without a product/runtime
+special case. Dark Monolith (27437) rejected before publication because its authored zero scale
+cannot produce valid movement geometry. The crystal remains a valid bodyless animated visual;
+its measured moving physics-BSP rejection belongs only to initial or later physical attachment.
+
+The schema audit found no format change. Every field is consumed by current definition,
+presentation, physical preparation, or the committed launch/motion phases; `class_name` remains the
+one explicitly retained source-provenance field used by the offline survey and never substitutes for
+the optional display name. The page-reload path installs the listener before requesting one current
+snapshot, and restart tests reconstruct from that snapshot without replay. Host tests cover repeated
+same-WCID identities, complete replacement, stale-generation rejection, reset, attach/reconfigure/
+detach, and compensation before semantic publication. Frontend tests now assert that two equal
+WCIDs share one template, one surviving owner retains it, and final removal releases it.
 
 - Exercise the Phase 4 vertical slice with every Phase R0 representative WCID and record unsupported
   or malformed source facts by WCID.
@@ -1268,14 +1291,42 @@ has not begun.
 - Reconcile the Phase R0 collision design against the now-landed body/event contracts before Phases
   5B-5D; do not let frontend integration accidentally dictate solver shapes.
 
+#### Decisions and Course Corrections
+
+- Phase 5 builds on already-landed setup preparation, pose-body registration, optional physical
+  attachment, and complete physics-state transition operations. It must not replace those seams with
+  a scheduler-owned entity registry.
+- One Explorer collection participant will enter one `HostSimulationRuntime` collection transaction
+  per fixed tick. That transaction captures stable eligible IDs and an immutable tick-start body
+  snapshot once, then commits accepted directional body solves independently in stable ID order.
+  This preserves the Phase R0 pair-sampling contract without requiring atomic whole-world rollback
+  or repeatedly acquiring the simulation lock.
+- Fixed-tick motion extends the existing `DynamicEntityEvent` channel with one changed-entity batch;
+  it does not add a second relay or emit one event per entity. Lifecycle upsert/remove events remain
+  distinct from high-frequency accepted placement paths.
+- Extract the placement-point/leg validation and evaluation core from the existing physical-camera
+  path contract. Camera and entity envelopes keep their own identity/status fields, but there will
+  not be a second portal-path interpolation implementation in the frontend.
+- Phase 5B extracts the existing global 24 m cell key/range primitive from `collision.rs` for both
+  static and dynamic shadow indexes. `SpatialScene` owns the dynamic membership maps; the existing
+  coarse landblock membership is not precise enough and is not repurposed as the peer broad phase.
+  Exact reached-EnvCell membership continues to come from `CollisionPlacement`.
+- Phase 7 uses an explicitly disabled footprint threshold when proving tiny missile visuals. Normal
+  Explorer rendering retains the shared object-culling policy; a semantically live entity is not
+  guaranteed to contribute a draw at every camera distance.
+
 ### Phase 5: Attach Spawned Entities to the Shared Solver
+
+Progress: In progress (2026-08-16). R1 confirmed the landed definition/body/state-transition seams
+and selected the single collection-transaction, existing-feed batch, and shared placed-path cutovers.
+The collection participant and accepted fixed-tick entity motion path are next.
 
 #### Deliverables
 
-- Resolve the spawned template's SetupModel and runtime scale through the existing content service;
+- Build on the landed resolution of the spawned template's SetupModel and runtime scale through the existing content service;
   resolve its ordinary motion spheres through `resolve_setup_physical_spheres`; combine them with the
   current effective physics state to select the Phase R0-proven physical participation and response.
-- Register every entity pose as `SpatialBodyId::Entity` in `HostSimulationRuntime`'s existing
+- Build on the landed registration of every entity pose as `SpatialBodyId::Entity` in `HostSimulationRuntime`'s existing
   `SpatialScene`; attach solver state only when selected by the effective physics state. The camera
   remains `Ephemeral`; both use the same Explorer-local store and immutable collision snapshot when
   physically participating.
@@ -1288,20 +1339,24 @@ has not begun.
   align-path as ACE does. Ordinary spawn remains at rest. Missing or zero launch speed rejects only
   the launch operation, not a pose-only spawn.
 - Add one Explorer dynamic-entity collection participant using one `HostFixedTickRuntime` slot. Each
-  epoch it snapshots explicit simulation interest, obtains the stable eligible-body order, resolves
-  current actuation, invokes focused host solves under one collection tick, rejects outcomes from
-  retired instance generations, and collects committed placed-path/body outcomes. No entity reserves
-  its own scheduler slot or reacquires the host simulation lock independently.
+  epoch it enters one host collection transaction, snapshots explicit simulation interest, obtains
+  the stable eligible-body order and immutable tick-start body facts, resolves current actuation,
+  invokes focused solves, rejects outcomes from retired instance generations, and collects committed
+  placed-path/body outcomes. No entity reserves its own scheduler slot or reacquires the host
+  simulation lock independently.
 - Preserve the landed ground vocabulary and contact plane. Supported/sliding/airborne is derived by
   the local solver; catalog and scenario commands cannot assert it.
 - Route teleport and forced reset through explicit registry/body operations that clear response,
   prediction, path, and frontend correction state coherently.
 - Add app-local scenario simulation-interest policy around named entity/camera owners. Bodies report
   `MissingOwner`/`OutsideLandscape` without loading, suspending, or evicting collision.
-- Serialize accepted placed paths or sparse anchors with host time and correction kind. Frontend
-  placement evaluates the path at render cadence and never performs portal traversal.
-- Emit at most one dynamic-body update batch per fixed tick, containing only changed
-  projected bodies. Do not turn 300 bodies at 30 Hz into 9,000 Tauri events per second.
+- Extract source-neutral placed-path point/leg validation and evaluation from the existing physical
+  camera path implementation. Serialize accepted entity paths or sparse anchors with host time and
+  correction kind; frontend placement evaluates the shared path core at render cadence and never
+  performs portal traversal.
+- Add one changed-entity batch variant to the existing focused dynamic-entity event channel and emit
+  at most one such batch per fixed tick. Do not turn 300 bodies at 30 Hz into 9,000 Tauri events per
+  second or create a parallel motion relay.
 - Add deterministic zero-actuation settle/fall/slide scenarios before locomotion: supported floor,
   steep contact-slide, airborne fall, cross-owner traversal, missing-owner open space, and teleport.
 
@@ -1370,7 +1425,7 @@ has not begun.
 - Add one `SpatialScene`-owned dynamic shadow index over all physically participating bodies and visit
   scheduled bodies in stable `SpatialBodyId` order. Preserve focused single-body solving; do not
   introduce a whole-world transaction merely to make simultaneous contact look mathematically tidy.
-- Extract or reuse the existing collision-domain keying rather than creating a competing generic
+- Extract the existing `collision.rs` global-cell range/keying primitive rather than creating a competing generic
   index: stamp conservative bounds for the Phase R0-proven target geometry into every overlapped
   global 24 m outdoor cell and register the body in every exact EnvCell reached by its
   `CollisionPlacement`. A portal-straddling body registers in both domains; cross-landblock outdoor

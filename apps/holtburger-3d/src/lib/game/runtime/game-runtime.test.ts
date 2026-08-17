@@ -658,14 +658,26 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.templates
+				.templateCount,
+		).toBe(1);
 
 		await runtime.reconcileSpawnedDynamicEntities([spawnedEntity(2, 1)]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(1);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.templates
+				.templateCount,
+		).toBe(1);
 		await runtime.reconcileSpawnedDynamicEntities([]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(0);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.templates
+				.templateCount,
 		).toBe(0);
 		await runtime.destroy();
 	});

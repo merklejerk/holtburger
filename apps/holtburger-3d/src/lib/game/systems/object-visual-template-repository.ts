@@ -49,7 +49,9 @@ export interface ObjectVisualTemplatePreparer {
 
 /** Main-thread preparer used until visual-template work moves behind a worker boundary. */
 export class InlineObjectVisualTemplatePreparer implements ObjectVisualTemplatePreparer {
-	async prepare(source: DynamicPresentationSource): Promise<ObjectVisualTemplate> {
+	async prepare(
+		source: DynamicPresentationSource,
+	): Promise<ObjectVisualTemplate> {
 		return prepareObjectVisualTemplate(source);
 	}
 
@@ -180,7 +182,10 @@ export class ObjectVisualTemplateRepository<
 			throw new Error("Cannot prepare templates with a destroyed repository.");
 		const requirements = new Map<
 			ObjectVisualTemplateKey,
-			{ readonly fingerprint: string; readonly source: DynamicPresentationSource }
+			{
+				readonly fingerprint: string;
+				readonly source: DynamicPresentationSource;
+			}
 		>();
 		for (const source of sources) {
 			const key = objectVisualTemplateKey(source);

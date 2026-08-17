@@ -13,7 +13,9 @@ use holtburger_core::{
     DynamicEntityLaunchPlan, DynamicEntityProjectionInput,
     dynamic_entity_projection_input_from_body,
 };
-use holtburger_world::{DynamicPhysicalBodyDefinition, RuntimeSpatialBodyView, SpatialBodyId};
+use holtburger_world::{
+    CollisionReportOutcome, DynamicPhysicalBodyDefinition, RuntimeSpatialBodyView, SpatialBodyId,
+};
 use holtburger_world::{
     EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
     EntityPhysicsTransitionDecision, decide_entity_physics_state_transition,
@@ -194,6 +196,8 @@ pub struct ExplorerEntityRelocationOutcome {
     pub instance: ExplorerEntityInstance,
     /// Canonical relocated body with pose-dependent state cleared.
     pub body: RuntimeSpatialBodyView,
+    /// Forced report ends returned to the composition but never relayed to the Explorer frontend.
+    pub collision_reports: Vec<CollisionReportOutcome>,
 }
 
 #[derive(Debug, Clone)]
@@ -529,12 +533,13 @@ impl ExplorerEntityRuntime {
             .lock()
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
-        let body =
+        let relocation =
             self.simulation
                 .relocate_dynamic_entity(SpatialBodyId::Entity(guid), pose, now)?;
         Ok(ExplorerEntityRelocationOutcome {
             instance: instance.clone(),
-            body,
+            body: relocation.body,
+            collision_reports: relocation.collision_reports,
         })
     }
 
@@ -640,6 +645,7 @@ impl ExplorerEntityRuntime {
             .expect("Explorer entity registry lock poisoned");
         self.simulation
             .tick_dynamic_entity_collection(delta_seconds, now)?
+            .bodies
             .into_iter()
             .filter(physical_tick_changed)
             .map(|solved| {
@@ -761,10 +767,10 @@ mod tests {
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityAppearance,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
-        EntityPhysicsScheduling, PhysicalBodyParticipation, PhysicalBodyResponsePolicy,
-        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
-        PhysicalSurfaceMotion, PreparedEntityTargetGeometry,
-        resolve_effective_entity_physics_state,
+        EntityPhysicsScheduling, PhysicalBodyDefinition, PhysicalBodyParticipation,
+        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
     };
     use std::time::Instant;
 
@@ -879,6 +885,33 @@ mod tests {
                 center: Vector3::zero(),
                 radius: 0.5,
             }))];
+        physical
+    }
+
+    fn report_only_physical() -> DynamicPhysicalBodyDefinition {
+        let mut physical = physical_with_ball_target();
+        physical.movement = PhysicalBodyDefinition::free_sphere(
+            PhysicalSphereSet::new(
+                Sphere {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                },
+                None,
+            )
+            .unwrap(),
+            PhysicalFlyConfig {
+                maximum_substep_distance: 0.25,
+                maximum_substeps: 32,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.000_5,
+            },
+        )
+        .unwrap();
+        physical.entity_collision.reporting.enabled = true;
+        physical
+            .entity_collision
+            .dynamic_collision
+            .mover_accepts_response = false;
         physical
     }
 
@@ -1047,6 +1080,59 @@ mod tests {
         assert!(!physics.semantic.contains(PhysicsState::ALIGN_PATH));
         assert!(!physics.semantic.contains(PhysicsState::PATH_CLIPPED));
         assert!(physics.semantic.contains(PhysicsState::INELASTIC));
+    }
+
+    #[test]
+    fn report_only_collection_outcomes_do_not_become_explorer_projection_ticks() {
+        let (simulation, runtime) = runtime(0xf000_0120, 0xf000_0121);
+        let mut guids = Vec::new();
+        for (index, wcid) in [1, 2].into_iter().enumerate() {
+            let guid = runtime.reserve_guid().unwrap();
+            guids.push(guid);
+            let mut definition = definition(guid, wcid, index as f32 * 2.0);
+            definition.physics = resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY | PhysicsState::REPORT_COLLISIONS,
+            );
+            runtime
+                .spawn_prepared(
+                    definition,
+                    EntityPhysicalIntent::Simulated,
+                    Some(report_only_physical()),
+                )
+                .unwrap();
+        }
+
+        let baseline_at = Instant::now();
+        let baseline = simulation
+            .tick_dynamic_entity_collection(0.1, baseline_at)
+            .unwrap();
+        assert!(baseline.collision_reports.is_empty());
+        simulation
+            .relocate_dynamic_entity(
+                SpatialBodyId::Entity(guids[1]),
+                WorldPosition {
+                    landblock_id: Guid(0xda55_0001),
+                    coords: Vector3::zero(),
+                    rotation: Quaternion::identity(),
+                },
+                baseline_at + std::time::Duration::from_millis(100),
+            )
+            .unwrap();
+        let collection = simulation
+            .tick_dynamic_entity_collection(
+                0.1,
+                baseline_at + std::time::Duration::from_millis(200),
+            )
+            .unwrap();
+        assert_eq!(collection.collision_reports.len(), 2);
+        assert_eq!(collection.bodies.len(), 2);
+        assert!(
+            collection
+                .bodies
+                .iter()
+                .all(|tick| !physical_tick_changed(tick))
+        );
+        assert_eq!(runtime.snapshot().unwrap().len(), 2);
     }
 
     #[test]

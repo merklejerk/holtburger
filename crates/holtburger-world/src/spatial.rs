@@ -1,6 +1,7 @@
 mod bsp_query;
 mod cell_index;
 mod collision;
+mod collision_report;
 #[cfg(test)]
 mod differential_fixtures;
 mod dynamic_body;
@@ -18,7 +19,7 @@ pub use physics::{
     BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics, advance_body_kinematics,
     project_pose_forward_distance,
 };
-pub use scene::SpatialScene;
+pub use scene::{DynamicBodyRelocationOutcome, SpatialScene};
 pub use types::*;
 
 #[cfg(test)]
@@ -33,6 +34,10 @@ pub use collision::{
     PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint,
     PlacementRecovery, PlacementRequest, PlacementRestrictionRequest, SphereSweep, StaticContact,
     SupportContact, SupportFeature, SupportRequest,
+};
+pub use collision_report::{
+    CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,
+    CollisionReportPhase, CollisionReportSource,
 };
 pub use dynamic_body::{
     DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, PreparedEntityBspPart,

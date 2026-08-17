@@ -10,6 +10,10 @@ use holtburger_content::{CollisionShape, PlacedCollisionShape};
 use thiserror::Error;
 
 use super::bsp_query::{ShapeContact, placed_polygon_contacts, placed_solid_contacts};
+use super::collision_report::{
+    CollisionReportClassification, CollisionReportContact, CollisionReportSource,
+    CollisionReportTouch,
+};
 use super::dynamic_index::{DynamicShadowIndex, placed_target_shapes};
 use super::physical_body::{
     DynamicBodyRuntimeState, PhysicalBodyTickCommit, solve_physical_body_tick,
@@ -60,6 +64,13 @@ pub(crate) struct DynamicResponseContact {
     pub(crate) state_change: Option<DynamicBodyPhysicsStateChange>,
 }
 
+/// Confirmed report touches plus the optional blocking peer selected for mover response.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DynamicContactResolution {
+    pub(crate) response: Option<DynamicResponseContact>,
+    pub(crate) report_touches: Vec<CollisionReportTouch>,
+}
+
 /// Applies the earliest stable blocking contact to an environment-only body plan.
 pub(crate) fn resolve_dynamic_contacts(
     collision: &CollisionScene,
@@ -69,21 +80,25 @@ pub(crate) fn resolve_dynamic_contacts(
     commit: &mut PhysicalBodyTickCommit,
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
-) -> Result<Option<DynamicResponseContact>> {
+) -> Result<DynamicContactResolution> {
     let Some(mover_dynamic) = mover
         .physical
         .as_ref()
         .and_then(|physical| physical.dynamic.as_ref())
     else {
-        return Ok(None);
+        return Ok(DynamicContactResolution::default());
     };
     let mover_reports = mover_dynamic.collision.reporting.enabled;
     let mover_responds = mover_dynamic
         .collision
         .dynamic_collision
         .mover_accepts_response;
-    if !mover_reports && !mover_responds {
-        return Ok(None);
+    let mover_accepts_peer_reports = mover_dynamic
+        .collision
+        .dynamic_collision
+        .accepts_peer_reports;
+    if !mover_reports && !mover_responds && !mover_accepts_peer_reports {
+        return Ok(DynamicContactResolution::default());
     }
 
     let anchor = commit.motion.path.anchor();
@@ -93,6 +108,7 @@ pub(crate) fn resolve_dynamic_contacts(
     let candidates = index.candidates(mover.id, anchor, minimum, maximum, &placement);
 
     let mut selected = None::<SelectedBlockingContact>;
+    let mut sampled_report_touches = Vec::new();
     for peer_id in candidates {
         let Some(peer) = tick_start.get(&peer_id) else {
             continue;
@@ -106,15 +122,20 @@ pub(crate) fn resolve_dynamic_contacts(
         if pair_is_filtered(mover_dynamic, peer_dynamic) {
             continue;
         }
-        let report_eligible = mover_reports
+        let mover_report_eligible = mover_reports
             && peer_dynamic
+                .collision
+                .dynamic_collision
+                .accepts_peer_reports;
+        let peer_report_eligible = peer_dynamic.collision.reporting.enabled
+            && mover_dynamic
                 .collision
                 .dynamic_collision
                 .accepts_peer_reports;
         let response_eligible = mover_responds
             && peer_dynamic.collision.dynamic_collision.target
                 == EntityCollisionParticipation::Solid;
-        if !report_eligible && !response_eligible {
+        if !mover_report_eligible && !peer_report_eligible && !response_eligible {
             continue;
         }
 
@@ -141,8 +162,18 @@ pub(crate) fn resolve_dynamic_contacts(
         let Some(contact) = pair.first_contact(required_slices)? else {
             continue;
         };
-        // Phase 5D consumes confirmed report-only touches. Until then they deliberately do not
-        // mutate pose, response memory, or any retained diagnostic/event state.
+        if mover_report_eligible {
+            sampled_report_touches.push(SampledReportTouch {
+                fraction: contact.fraction,
+                touch: dynamic_report_touch(mover.id, peer_id, peer_dynamic),
+            });
+        }
+        if peer_report_eligible {
+            sampled_report_touches.push(SampledReportTouch {
+                fraction: contact.fraction,
+                touch: dynamic_report_touch(peer_id, mover.id, mover_dynamic),
+            });
+        }
         if !response_eligible {
             continue;
         }
@@ -166,19 +197,64 @@ pub(crate) fn resolve_dynamic_contacts(
     }
 
     let Some(selected) = selected else {
-        return Ok(None);
+        return Ok(DynamicContactResolution {
+            response: None,
+            report_touches: accepted_report_touches(sampled_report_touches, 1.0),
+        });
     };
+    let report_touches = accepted_report_touches(sampled_report_touches, selected.fraction);
     apply_blocking_contact(collision, mover, commit, actuation, delta_seconds, selected)?;
-    Ok(Some(DynamicResponseContact {
-        peer: selected.peer,
-        state_change: selected
-            .clears_projectile_state
-            .then_some(DynamicBodyPhysicsStateChange {
-                cleared: PhysicsState::MISSILE
-                    | PhysicsState::ALIGN_PATH
-                    | PhysicsState::PATH_CLIPPED,
-            }),
-    }))
+    Ok(DynamicContactResolution {
+        response: Some(DynamicResponseContact {
+            peer: selected.peer,
+            state_change: selected.clears_projectile_state.then_some(
+                DynamicBodyPhysicsStateChange {
+                    cleared: PhysicsState::MISSILE
+                        | PhysicsState::ALIGN_PATH
+                        | PhysicsState::PATH_CLIPPED,
+                },
+            ),
+        }),
+        report_touches,
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SampledReportTouch {
+    fraction: f32,
+    touch: CollisionReportTouch,
+}
+
+fn accepted_report_touches(
+    touches: Vec<SampledReportTouch>,
+    accepted_fraction: f32,
+) -> Vec<CollisionReportTouch> {
+    touches
+        .into_iter()
+        .filter_map(|sampled| (sampled.fraction <= accepted_fraction).then_some(sampled.touch))
+        .collect()
+}
+
+fn dynamic_report_touch(
+    recipient: SpatialBodyId,
+    peer: SpatialBodyId,
+    source: &DynamicBodyRuntimeState,
+) -> CollisionReportTouch {
+    CollisionReportTouch {
+        contact: CollisionReportContact {
+            recipient,
+            source: CollisionReportSource::DynamicBody {
+                peer,
+                classification: if source.collision.reporting.as_environment {
+                    CollisionReportClassification::Environment
+                } else {
+                    CollisionReportClassification::Object
+                },
+            },
+        },
+        source_is_ethereal: source.collision.dynamic_collision.target
+            == EntityCollisionParticipation::Ethereal,
+    }
 }
 
 fn pair_is_filtered(mover: &DynamicBodyRuntimeState, peer: &DynamicBodyRuntimeState) -> bool {
@@ -487,6 +563,8 @@ fn apply_blocking_contact(
     commit.motion.constraint_count = partial.motion.constraint_count;
     commit.motion.substeps = partial.motion.substeps;
     commit.motion.contact_passes = partial.motion.contact_passes;
+    commit.environment_contact = partial.environment_contact;
+    commit.residual_contacts = partial.residual_contacts;
     Ok(())
 }
 

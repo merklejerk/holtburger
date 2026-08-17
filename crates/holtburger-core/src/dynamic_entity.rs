@@ -28,6 +28,7 @@ use holtburger_world::{
     PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
     RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::physical_body_definition::{
@@ -48,7 +49,8 @@ pub struct DynamicEntityIdentity {
 }
 
 /// Immutable content identities required by presentation and behavior resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DynamicEntityContent {
     /// SetupModel identity that owns parts, volumes, and default behavior.
     pub setup_did: u32,

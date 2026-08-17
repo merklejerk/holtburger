@@ -60,6 +60,10 @@
 	import { tauriPhysicalCameraTransport } from "./physical-camera-transport";
 	import { SimulationInterestController } from "./simulation-interest";
 	import { tauriSimulationInterestTransport } from "./simulation-interest-transport";
+	import {
+		ExplorerDynamicEntitySession,
+		tauriExplorerDynamicEntityTransport,
+	} from "./explorer-dynamic-entity-session";
 	import { Vec3 } from "../lib/game/math/types";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import {
@@ -97,6 +101,7 @@
 	let physicalCameraSession: PhysicalCameraSession | undefined;
 	let groundedCharacterInput: GroundedCharacterInput | undefined;
 	let simulationInterestController: SimulationInterestController | undefined;
+	let dynamicEntitySession: ExplorerDynamicEntitySession | undefined;
 	let physicalSimulationAnchor: string | null = null;
 	let cameraMode = $state<ExplorerCameraMode>("free-fly");
 	let cameraModePending = $state(false);
@@ -656,6 +661,7 @@
 			const coordinator = cameraCoordinator;
 			const controller = cameraController;
 			const physicalSession = physicalCameraSession;
+			const entitySession = dynamicEntitySession;
 			gameRuntime = undefined;
 			runtimeReady = false;
 			cameraLocation = null;
@@ -673,6 +679,7 @@
 			cameraCoordinator = undefined;
 			cameraController = undefined;
 			physicalCameraSession = undefined;
+			dynamicEntitySession = undefined;
 			groundedCharacterInput = undefined;
 			jumpChargeExtent = null;
 			simulationInterestController = undefined;
@@ -682,6 +689,7 @@
 			physicalCameraStatus = null;
 			teardown = (async () => {
 				stopFrameLoop();
+				entitySession?.stop();
 				coordinator?.dispose();
 				controller?.dispose();
 				try {
@@ -708,6 +716,11 @@
 
 		const start = async (): Promise<void> => {
 			try {
+				dynamicEntitySession = new ExplorerDynamicEntitySession(
+					tauriExplorerDynamicEntityTransport(),
+				);
+				await dynamicEntitySession.start();
+				if (destroyed) return;
 				activeRegionSource = TauriActiveRegionSource.build();
 				activeRegion = await activeRegionSource.load();
 				if (destroyed) return;

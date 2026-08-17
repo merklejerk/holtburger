@@ -84,7 +84,11 @@ pub enum WorldEvent {
     RuntimeBodiesReset {
         cause: RuntimeBodyResetCause,
     },
-    EntityDespawned(Guid),
+    EntityDespawned {
+        guid: Guid,
+        /// Retired server instance sequence used to reject a late focused removal.
+        generation: u64,
+    },
     VitalUpdated(stats::Vital),
     AttributeUpdated(stats::Attribute),
     SkillUpdated(stats::Skill),

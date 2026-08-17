@@ -67,7 +67,7 @@ impl ClientRuntime {
                     self.sync_remote_body_tracking(body_id);
                 }
             }
-            WorldEvent::EntityDespawned(guid) => {
+            WorldEvent::EntityDespawned { guid, .. } => {
                 self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
             }
             WorldEvent::RuntimeBodyChanged { body_id } => {

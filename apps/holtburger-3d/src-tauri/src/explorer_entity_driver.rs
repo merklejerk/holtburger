@@ -22,10 +22,12 @@ use holtburger_world::{
     EntityPhysicsStateOverrides, EntitySubPalette, EntityTextureChange,
     calculate_effective_entity_physics_state, resolve_effective_entity_physics_state,
 };
+use serde::Deserialize;
 
 use crate::explorer_entity_runtime::{
-    ExplorerEntityDespawnOutcome, ExplorerEntityPhysicsStateOutcome, ExplorerEntityRuntime,
-    ExplorerEntityRuntimeError, ExplorerEntitySpawnOutcome,
+    ExplorerEntityDespawnOutcome, ExplorerEntityPhysicsStateOutcome,
+    ExplorerEntityReplacementOutcome, ExplorerEntityRuntime, ExplorerEntityRuntimeError,
+    ExplorerEntitySpawnOutcome,
 };
 use crate::explorer_weenie_catalog::{
     ExplorerCatalogCapability, ExplorerCatalogLookupError, ExplorerWeenieCatalogSource,
@@ -33,7 +35,8 @@ use crate::explorer_weenie_catalog::{
 use crate::host_simulation_runtime::HostSimulationRuntime;
 
 /// Explicit host-owned spawn placement; `candidate` uses the camera pose's landblock frame.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExplorerEntitySpawnRequest {
     /// WCID selected for one exact catalog point lookup.
     pub wcid: u32,
@@ -45,6 +48,17 @@ pub struct ExplorerEntitySpawnRequest {
     pub rotation: Quaternion,
     /// Whether to attach local physics or retain a canonical pose-only body.
     pub physical_intent: EntityPhysicalIntent,
+}
+
+/// One exact live generation plus the complete catalog-backed facts for its successor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExplorerEntityReplaceRequest {
+    /// Existing Explorer identity retained across complete replacement.
+    pub guid: Guid,
+    /// Current generation that must be retired by this operation.
+    pub generation: u64,
+    /// Complete source request used to prepare the successor before mutation.
+    pub replacement: ExplorerEntitySpawnRequest,
 }
 
 /// Failure from one serialized catalog-backed Explorer entity operation.
@@ -245,6 +259,45 @@ impl ExplorerEntityDriver {
             .operation
             .lock()
             .expect("Explorer entity driver lock poisoned");
+        let guid = self.entities.reserve_guid()?;
+        let (definition, physical) = self.prepare_by_wcid(guid, request)?;
+        self.entities
+            .spawn_prepared(definition, request.physical_intent, physical)
+            .map_err(ExplorerEntityDriverError::from)
+    }
+
+    /// Fully prepares and atomically replaces one exact generation under its existing GUID.
+    pub fn replace_by_wcid(
+        &self,
+        request: ExplorerEntityReplaceRequest,
+    ) -> Result<ExplorerEntityReplacementOutcome, ExplorerEntityDriverError> {
+        let _operation = self
+            .operation
+            .lock()
+            .expect("Explorer entity driver lock poisoned");
+        self.entities.instance(request.guid, request.generation)?;
+        let (definition, physical) = self.prepare_by_wcid(request.guid, request.replacement)?;
+        self.entities
+            .replace_prepared(
+                definition,
+                request.generation,
+                request.replacement.physical_intent,
+                physical,
+            )
+            .map_err(ExplorerEntityDriverError::from)
+    }
+
+    fn prepare_by_wcid(
+        &self,
+        guid: Guid,
+        request: ExplorerEntitySpawnRequest,
+    ) -> Result<
+        (
+            DynamicEntityDefinition,
+            Option<DynamicPhysicalBodyDefinition>,
+        ),
+        ExplorerEntityDriverError,
+    > {
         let template = self
             .catalog
             .lookup(request.wcid)?
@@ -271,7 +324,6 @@ impl ExplorerEntityDriver {
                 },
             ));
         }
-        let guid = self.entities.reserve_guid()?;
         let mut definition = DynamicEntityDefinition::prepare(DynamicEntityDefinitionInput {
             identity: DynamicEntityIdentity {
                 guid,
@@ -325,9 +377,7 @@ impl ExplorerEntityDriver {
             setup.movement_spheres.primary().center,
             setup.movement_spheres.primary().radius,
         )?;
-        self.entities
-            .spawn_prepared(definition, request.physical_intent, physical)
-            .map_err(ExplorerEntityDriverError::from)
+        Ok((definition, physical))
     }
 
     /// Despawns one exact current instance generation through the serialized driver.
@@ -748,17 +798,75 @@ mod tests {
             first.instance.definition.identity.guid,
             second.instance.definition.identity.guid
         );
-        assert_eq!(
-            first.instance.definition.identity.wcid,
-            second.instance.definition.identity.wcid
-        );
-        assert_eq!(first.body.body.runtime_pose, second.body.body.runtime_pose);
+        let mut normalized_definition = second.instance.definition.clone();
+        normalized_definition.identity.guid = first.instance.definition.identity.guid;
+        assert_eq!(first.instance.definition, normalized_definition);
+        let mut normalized_body = second.body.clone();
+        normalized_body.body.body_id = first.body.body.body_id;
+        assert_eq!(first.body, normalized_body);
         assert_eq!(
             first.body.body.runtime_pose.landblock_id,
             Guid(0xdb55_0005),
             "host must normalize the candidate into its eastern landblock"
         );
         assert_eq!(entities.snapshot().unwrap().len(), 2);
+        let delivery =
+            crate::explorer_entity_delivery::ExplorerEntityDelivery::new(Arc::clone(&entities));
+        let snapshot = delivery.snapshot().unwrap();
+        assert_eq!(
+            snapshot
+                .entities
+                .iter()
+                .map(|entity| entity.identity.guid)
+                .collect::<Vec<_>>(),
+            vec![
+                first.instance.definition.identity.guid,
+                second.instance.definition.identity.guid
+            ]
+        );
+        let wire = serde_json::to_value(
+            crate::explorer_entity_delivery::ExplorerEntityDelivery::new(Arc::clone(&entities))
+                .snapshot_event()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(wire["kind"], "snapshot");
+        assert_eq!(
+            wire["snapshot"]["entities"][0]["placement"]["pose"]["landblockId"],
+            first.body.body.runtime_pose.landblock_id.0
+        );
+    }
+
+    #[test]
+    fn catalog_backed_replacement_retains_guid_and_retires_the_exact_generation() {
+        let (entities, driver) = driver(vec![template(42), template(43)], false);
+        let first = driver
+            .spawn_by_wcid(request(42, EntityPhysicalIntent::Simulated))
+            .unwrap();
+        let guid = first.instance.definition.identity.guid;
+        let replaced = driver
+            .replace_by_wcid(ExplorerEntityReplaceRequest {
+                guid,
+                generation: first.instance.generation,
+                replacement: request(43, EntityPhysicalIntent::PoseOnly),
+            })
+            .unwrap();
+
+        assert_eq!(replaced.removed, first.instance);
+        assert_eq!(replaced.installed.definition.identity.guid, guid);
+        assert_eq!(replaced.installed.definition.identity.wcid, 43);
+        assert_ne!(replaced.installed.generation, replaced.removed.generation);
+        assert_eq!(
+            replaced.body.installed.participation,
+            holtburger_world::PhysicalBodyParticipation::PoseOnly
+        );
+        assert_eq!(entities.snapshot().unwrap().len(), 1);
+        assert!(matches!(
+            driver.despawn(guid, first.instance.generation),
+            Err(ExplorerEntityDriverError::Runtime(
+                ExplorerEntityRuntimeError::StaleGeneration { .. }
+            ))
+        ));
     }
 
     #[test]

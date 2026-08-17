@@ -2214,7 +2214,7 @@ fn test_inventory_remove_object() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid))
+            .any(|e| matches!(e, WorldEvent::EntityDespawned { guid, .. } if *guid == obj_guid))
     );
 }
 
@@ -2565,11 +2565,9 @@ fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
             .entity_lifecycle_state(guid)
             .is_some_and(|state| state.explicit_delete_requested)
     );
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(target) if *target == guid))
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid: target, .. } if *target == guid)
+    ));
 }
 
 #[test]
@@ -2990,11 +2988,9 @@ fn test_tick_sweeps_explicit_delete_without_movement() {
     let events = state.tick();
 
     assert!(state.entities.get(target_guid).is_none());
-    assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
+    ));
 }
 
 #[test]
@@ -3018,11 +3014,9 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
     let events = state.tick();
 
     assert!(state.entities.get(target_guid).is_none());
-    assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
+    ));
 }
 
 #[test]
@@ -3246,11 +3240,9 @@ fn test_tick_runs_sweep_without_player_guid() {
     let events = state.tick();
 
     assert!(state.entities.get(guid).is_none());
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(target) if *target == guid))
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid: target, .. } if *target == guid)
+    ));
 }
 
 #[test]
@@ -3328,11 +3320,9 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
     let events = state.tick();
 
     assert!(state.entities.get(target_guid).is_none());
-    assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
+    ));
 }
 
 #[test]
@@ -3384,11 +3374,9 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
 
     assert!(state.entities.get(target_guid).is_some());
     assert!(state.entity_lifecycle_state(target_guid).is_none());
-    assert!(
-        !tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
+    assert!(!tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
+    ));
 }
 
 #[test]
@@ -3543,11 +3531,9 @@ fn test_reset_trade_sweeps_preview_only_entities() {
         .expect("expected immediate prune eligibility after trade reset");
 
     assert!(state.entities.get(preview_guid).is_some());
-    assert!(
-        !events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
     assert!(
         state
             .trade
@@ -3562,11 +3548,9 @@ fn test_reset_trade_sweeps_preview_only_entities() {
 
     let tick_events = state.tick();
     assert!(state.entities.get(preview_guid).is_none());
-    assert!(
-        tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 }
 
 #[test]
@@ -3657,11 +3641,9 @@ fn test_close_trade_sweeps_preview_only_entities() {
             .iter()
             .any(|event| matches!(event, WorldEvent::TradeStateUpdated(None)))
     );
-    assert!(
-        !events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 
     state.server_time = Some(ServerTimeSync {
         server_time: deadline + 1.0,
@@ -3670,11 +3652,9 @@ fn test_close_trade_sweeps_preview_only_entities() {
 
     let tick_events = state.tick();
     assert!(state.entities.get(preview_guid).is_none());
-    assert!(
-        tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 }
 
 #[test]
@@ -3729,11 +3709,9 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
             .entity_lifecycle_state(owned_guid)
             .is_some_and(|state| state.trade_preview)
     );
-    assert!(
-        !events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 
     state.server_time = Some(ServerTimeSync {
         server_time: deadline + 1.0,
@@ -3742,11 +3720,9 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
 
     let tick_events = state.tick();
     assert!(state.entities.get(preview_guid).is_none());
-    assert!(
-        tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 }
 
 #[test]
@@ -3874,11 +3850,9 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
             .entity_lifecycle_state(item_guid)
             .is_some_and(|state| state.prune_deadline.is_some())
     );
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
+    ));
 
     state.server_time = Some(ServerTimeSync {
         server_time: deadline + 1.0,
@@ -3887,11 +3861,9 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
 
     let tick_events = state.tick();
     assert!(state.entities.get(item_guid).is_none());
-    assert!(
-        tick_events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
+    assert!(tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
+    ));
 }
 
 #[test]
@@ -4119,11 +4091,9 @@ fn test_close_ground_container_preserves_entity_with_other_retention() {
     assert!(state.entities.get(item_guid).is_some());
     assert!(state.entity_lifecycle_state(item_guid).is_none());
     assert!(state.player.inventory.contains(&item_guid));
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
+    ));
 }
 
 #[test]
@@ -4363,11 +4333,9 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
     let events = state.tick();
 
     assert!(state.entities.get(item_guid).is_none());
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
+    ));
 }
 
 #[test]
@@ -4442,11 +4410,9 @@ fn test_remove_entity_marks_contained_dependents_for_prune() {
     let events = state.tick();
 
     assert!(state.entities.get(item_guid).is_none());
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
+    ));
 }
 
 #[test]

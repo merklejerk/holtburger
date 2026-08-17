@@ -2,9 +2,10 @@
 use super::PhysicalCollisionFilter;
 use super::{
     AuthoritativeBodySync, BasicSpatialPhysics, CollisionScene, ContactState,
-    PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyState, PhysicalBodyTickResult,
-    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialPhysics,
-    SpatialSampleMode, SpatialSamplingConfig,
+    DynamicPhysicalBodyDefinition, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
+    PhysicalBodyState, PhysicalBodyTickResult, RuntimeSpatialBodyView, SolvedBodyKinematics,
+    SpatialBody, SpatialBodyId, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
     physical_body::{physical_body_scene_residency, solve_physical_body_tick},
     physics::sample_mode_for_projection_state,
 };
@@ -82,18 +83,15 @@ impl SpatialBodyStore {
         self.next_ephemeral_body_id += 1;
         body_id
     }
+}
 
-    fn register_ephemeral_body(&mut self, pose: WorldPosition, now: Instant) -> SpatialBodyId {
-        let body_id = self.allocate_ephemeral_body_id();
-        self.register_body(SpatialBody::new_ephemeral(body_id, pose, now));
-        body_id
-    }
+fn coarse_membership_owner(pose: WorldPosition) -> Option<Guid> {
+    (pose.landblock_id != Guid::NULL).then_some(Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff))
 }
 
 #[derive(Clone)]
 pub struct SpatialScene {
     landblock_map: HashMap<Guid, HashSet<Guid>>,
-    entity_poses: HashMap<Guid, WorldPosition>,
     body_store: SpatialBodyStore,
     physics: Arc<dyn SpatialPhysics>,
 }
@@ -112,7 +110,6 @@ impl SpatialScene {
     pub fn new_with_physics(physics: Arc<dyn SpatialPhysics>) -> Self {
         Self {
             landblock_map: HashMap::new(),
-            entity_poses: HashMap::new(),
             body_store: SpatialBodyStore::default(),
             physics,
         }
@@ -146,20 +143,35 @@ impl SpatialScene {
         self.body_store.body_for_guid(guid)
     }
 
+    #[cfg(test)]
     pub fn body_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
         self.body_store.body_mut(body_id)
     }
 
     pub fn register_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
-        self.body_store.register_body(body)
+        let body_id = body.id;
+        let new_pose = body.pose;
+        let previous = self.body_store.register_body(body);
+        self.replace_body_membership(
+            body_id,
+            previous.as_ref().map(|body| body.pose),
+            Some(new_pose),
+        );
+        previous
     }
 
     pub fn update_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
-        self.body_store.update_body(body)
+        let body_id = body.id;
+        let new_pose = body.pose;
+        let previous = self.body_store.update_body(body)?;
+        self.replace_body_membership(body_id, Some(previous.pose), Some(new_pose));
+        Some(previous)
     }
 
     pub fn remove_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
-        self.body_store.remove_body(body_id)
+        let removed = self.body_store.remove_body(body_id)?;
+        self.replace_body_membership(body_id, Some(removed.pose), None);
+        Some(removed)
     }
 
     pub fn allocate_ephemeral_body_id(&mut self) -> SpatialBodyId {
@@ -167,7 +179,34 @@ impl SpatialScene {
     }
 
     pub fn register_ephemeral_body(&mut self, pose: WorldPosition, now: Instant) -> SpatialBodyId {
-        self.body_store.register_ephemeral_body(pose, now)
+        let body_id = self.body_store.allocate_ephemeral_body_id();
+        self.register_body(SpatialBody::new_ephemeral(body_id, pose, now));
+        body_id
+    }
+
+    fn replace_body_membership(
+        &mut self,
+        body_id: SpatialBodyId,
+        previous_pose: Option<WorldPosition>,
+        next_pose: Option<WorldPosition>,
+    ) {
+        let Some(guid) = body_id.authoritative_guid() else {
+            return;
+        };
+        let previous_owner = previous_pose.and_then(coarse_membership_owner);
+        let next_owner = next_pose.and_then(coarse_membership_owner);
+        if previous_owner != next_owner
+            && let Some(owner) = previous_owner
+            && let Some(members) = self.landblock_map.get_mut(&owner)
+        {
+            members.remove(&guid);
+            if members.is_empty() {
+                self.landblock_map.remove(&owner);
+            }
+        }
+        if let Some(owner) = next_owner {
+            self.landblock_map.entry(owner).or_default().insert(guid);
+        }
     }
 
     /// Attaches one source-neutral physical definition to an already registered body.
@@ -187,6 +226,74 @@ impl SpatialScene {
             retained_cell,
         ));
         Some(())
+    }
+
+    /// Adds, removes, or reconfigures dynamic-entity physics without replacing its pose body.
+    ///
+    /// Pose and kinematics always survive. Exact movement geometry preserves response memory;
+    /// changed geometry rebuilds only that response memory while retaining the current cell hint.
+    pub fn set_dynamic_physical_body(
+        &mut self,
+        body_id: SpatialBodyId,
+        replacement: Option<DynamicPhysicalBodyDefinition>,
+        collision_filter: super::PhysicalCollisionFilter,
+        initial_cell: Option<Guid>,
+    ) -> Option<PhysicalBodyReconfigurationOutcome> {
+        let body = self.body_store.body_mut(body_id)?;
+        let previous = body.physical.take();
+        let before = if previous.is_some() {
+            PhysicalBodyParticipation::Physical
+        } else {
+            PhysicalBodyParticipation::PoseOnly
+        };
+
+        let (next, change, response_memory_preserved) = match (previous, replacement) {
+            (None, None) => (None, PhysicalBodyReconfiguration::Unchanged, false),
+            (Some(_), None) => (None, PhysicalBodyReconfiguration::Detached, false),
+            (None, Some(replacement)) => (
+                Some(PhysicalBodyState::new_dynamic(
+                    replacement,
+                    collision_filter,
+                    initial_cell,
+                )),
+                PhysicalBodyReconfiguration::Attached,
+                false,
+            ),
+            (Some(previous), Some(replacement)) => {
+                let retained_cell = previous.response.cell().or(initial_cell);
+                let mut next =
+                    PhysicalBodyState::new_dynamic(replacement, collision_filter, retained_cell);
+                let unchanged = previous.definition == next.definition
+                    && previous.collision_filter == next.collision_filter
+                    && previous.response_policy == next.response_policy
+                    && previous.entity_collision == next.entity_collision;
+                let preserve_response = previous.definition == next.definition;
+                if preserve_response {
+                    next.response = previous.response;
+                }
+                (
+                    Some(next),
+                    if unchanged {
+                        PhysicalBodyReconfiguration::Unchanged
+                    } else {
+                        PhysicalBodyReconfiguration::Reconfigured
+                    },
+                    preserve_response,
+                )
+            }
+        };
+        let after = if next.is_some() {
+            PhysicalBodyParticipation::Physical
+        } else {
+            PhysicalBodyParticipation::PoseOnly
+        };
+        body.physical = next;
+        Some(PhysicalBodyReconfigurationOutcome {
+            before,
+            after,
+            change,
+            response_memory_preserved,
+        })
     }
 
     /// Advances one registered physical body without consulting content or interest policy.
@@ -249,8 +356,7 @@ impl SpatialScene {
         tentative.sampling.mode = SpatialSampleMode::SimulatingVelocity;
         tentative.sampling.last_derived_at = now;
         let accepted = accept(&tentative, &result)?;
-        self.body_store
-            .update_body(tentative)
+        self.update_body(tentative)
             .expect("physical body vanished during single-threaded solve");
         Ok((result, accepted))
     }
@@ -258,9 +364,7 @@ impl SpatialScene {
     pub fn reconcile_authoritative_body(
         &mut self,
         body_id: SpatialBodyId,
-        pose: WorldPosition,
-        velocity: Vector3,
-        omega: Vector3,
+        kinematics: super::AuthoritativeBodyKinematics,
         sync: AuthoritativeBodySync,
         now: Instant,
     ) {
@@ -270,9 +374,8 @@ impl SpatialScene {
         };
 
         let mut body = self
-            .body_store
             .remove_body(body_id)
-            .unwrap_or_else(|| SpatialBody::new(body_id, pose, now));
+            .unwrap_or_else(|| SpatialBody::new(body_id, kinematics.pose, now));
 
         let preserve_local_runtime_pose = matches!(body_id, SpatialBodyId::LocalPlayer(_))
             && matches!(sync, AuthoritativeBodySync::Snapshot)
@@ -281,22 +384,23 @@ impl SpatialScene {
                 SpatialSampleMode::SimulatingMotionState | SpatialSampleMode::SimulatingVelocity
             );
 
-        body.authoritative_pose = Some(pose);
-        body.velocity = velocity;
-        body.omega = omega;
+        body.authoritative_pose = Some(kinematics.pose);
+        body.velocity = kinematics.velocity;
+        body.acceleration = kinematics.acceleration;
+        body.omega = kinematics.omega;
         body.motion_state = None;
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
         if !preserve_local_runtime_pose {
-            body.pose = pose;
+            body.pose = kinematics.pose;
             body.sampling.mode = mode;
         }
 
-        self.body_store.register_body(body);
+        self.register_body(body);
     }
 
     pub fn retire_authoritative_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
-        self.body_store.remove_body(body_id)
+        self.remove_body(body_id)
     }
 
     #[cfg(test)]
@@ -310,7 +414,6 @@ impl SpatialScene {
         now: Instant,
     ) {
         let mut body = self
-            .body_store
             .remove_body(body_id)
             .unwrap_or_else(|| SpatialBody::new(body_id, pose, now));
 
@@ -323,7 +426,7 @@ impl SpatialScene {
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
 
-        self.body_store.register_body(body);
+        self.register_body(body);
     }
 
     #[cfg(test)]
@@ -366,22 +469,22 @@ impl SpatialScene {
         now: Instant,
         clear_kinematics: bool,
     ) {
-        let body = self
-            .body_store
-            .bodies
-            .entry(body_id)
-            .or_insert_with(|| SpatialBody::new(body_id, pose, now));
+        let mut body = self
+            .remove_body(body_id)
+            .unwrap_or_else(|| SpatialBody::new(body_id, pose, now));
 
         body.authoritative_pose = Some(pose);
         body.pose = pose;
         if clear_kinematics {
             body.velocity = Vector3::zero();
+            body.acceleration = Vector3::zero();
             body.omega = Vector3::zero();
             body.motion_state = None;
         }
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
         body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
+        self.register_body(body);
     }
 
     pub fn apply_runtime_body_pose(
@@ -390,12 +493,14 @@ impl SpatialScene {
         pose: WorldPosition,
         sample_mode: SpatialSampleMode,
     ) -> bool {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(mut body) = self.body_store.body(body_id).cloned() else {
             return false;
         };
 
         body.pose = pose;
         body.sampling.mode = sample_mode;
+        self.update_body(body)
+            .expect("runtime body vanished during single-threaded pose update");
         true
     }
 
@@ -432,7 +537,7 @@ impl SpatialScene {
     }
 
     pub fn apply_solved_runtime_body_kinematics(&mut self, solved: &SolvedBodyKinematics) -> bool {
-        let Some(body) = self.body_store.body_mut(solved.body_id) else {
+        let Some(mut body) = self.body_store.body(solved.body_id).cloned() else {
             return false;
         };
 
@@ -445,6 +550,8 @@ impl SpatialScene {
             solved.velocity,
             solved.omega,
         );
+        self.update_body(body)
+            .expect("runtime body vanished during single-threaded solve commit");
         true
     }
 
@@ -461,39 +568,34 @@ impl SpatialScene {
     }
 
     pub fn suspend_runtime_bodies(&mut self, now: Instant) {
-        for body in self.body_store.bodies.values_mut() {
+        let body_ids = self.body_store.bodies.keys().copied().collect::<Vec<_>>();
+        for body_id in body_ids {
+            let mut body = self
+                .body_store
+                .body(body_id)
+                .cloned()
+                .expect("body id came from the same single-threaded store");
             if let Some(authoritative_pose) = body.authoritative_pose {
                 body.pose = authoritative_pose;
             }
             body.sampling.mode = SpatialSampleMode::Suspended;
             body.sampling.last_derived_at = now;
+            self.update_body(body)
+                .expect("runtime body vanished during single-threaded suspension");
         }
-    }
-
-    pub fn update_entity(&mut self, guid: Guid, old_lb: Guid, pose: WorldPosition) {
-        let new_lb = pose.landblock_id;
-        if old_lb != new_lb
-            && let Some(set) = self.landblock_map.get_mut(&old_lb)
-        {
-            set.remove(&guid);
-        }
-        self.landblock_map.entry(new_lb).or_default().insert(guid);
-        self.entity_poses.insert(guid, pose);
-    }
-
-    pub fn remove_entity(&mut self, guid: Guid, lb: Guid) {
-        if let Some(set) = self.landblock_map.get_mut(&lb) {
-            set.remove(&guid);
-        }
-        self.entity_poses.remove(&guid);
     }
 
     pub fn get_in_landblock(&self, lb: Guid) -> Option<&HashSet<Guid>> {
-        self.landblock_map.get(&lb)
+        let owner = Guid((lb.0 & 0xffff_0000) | 0xffff);
+        self.landblock_map.get(&owner)
     }
 
     pub fn get_nearby_entities(&self, lb: Guid) -> HashSet<Guid> {
         let mut nearby = HashSet::new();
+
+        if lb == Guid::NULL {
+            return nearby;
+        }
 
         let x = (lb >> 24) & 0xFF;
         let y = (lb >> 16) & 0xFF;
@@ -502,7 +604,7 @@ impl SpatialScene {
             for dy in -1..=1 {
                 let nx = x as i32 + dx;
                 let ny = y as i32 + dy;
-                if nx > 0 && nx < 255 && ny > 0 && ny < 255 {
+                if (0..=255).contains(&nx) && (0..=255).contains(&ny) {
                     let neighbor_lb = ((nx as u32) << 24) | ((ny as u32) << 16) | 0xFFFF;
                     if let Some(set) = self.landblock_map.get(&Guid(neighbor_lb)) {
                         for &guid in set {
@@ -510,12 +612,6 @@ impl SpatialScene {
                         }
                     }
                 }
-            }
-        }
-
-        if let Some(set) = self.landblock_map.get(&lb) {
-            for &guid in set {
-                nearby.insert(guid);
             }
         }
 
@@ -530,9 +626,9 @@ impl SpatialScene {
         self.get_nearby_entities(pos.landblock_id)
             .into_iter()
             .filter(|guid| {
-                self.entity_poses
-                    .get(guid)
-                    .is_some_and(|candidate| pos.distance_to(candidate) <= radius)
+                self.body_store
+                    .body_for_guid(*guid)
+                    .is_some_and(|body| pos.distance_to(&body.pose) <= radius)
             })
             .collect()
     }
@@ -542,18 +638,24 @@ impl SpatialScene {
 mod physical_body_tests {
     use super::*;
     use crate::{
-        EdgeProtection, GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
-        PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyResponseState,
-        PhysicalBodySceneResidency, PhysicalBodyTickStatus, PhysicalElasticity, PhysicalFlyConfig,
-        PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EdgeProtection,
+        EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
+        EntityPhysicsScheduling, GroundSupport, GroundedBodyActuation, GroundedConfig,
+        GroundedLaunch, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
+        PhysicalBodyResponseState, PhysicalBodySceneResidency, PhysicalBodyTickStatus,
+        PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction, PhysicalRestitution,
+        PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityTargetGeometry,
         RETAIL_WALKABLE_NORMAL_Z,
     };
+    use holtburger_common::properties::WeenieType;
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, LandblockColliders,
-        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain,
-        TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals, TerrainCollisionSurface,
+        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, CollisionBall,
+        CollisionShape, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
+        LandblockTerrain, TERRAIN_WATER_COLLISION_DEPTH, TerrainCellDiagonals,
+        TerrainCollisionSurface,
     };
+    use std::sync::Arc;
     use std::time::Duration;
 
     const FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
@@ -622,6 +724,128 @@ mod physical_body_tests {
             surface_motion: PhysicalSurfaceMotion::Stable,
             align_path: false,
         }
+    }
+
+    fn dynamic_definition(
+        movement: PhysicalBodyDefinition,
+        align_path: bool,
+    ) -> DynamicPhysicalBodyDefinition {
+        DynamicPhysicalBodyDefinition {
+            movement,
+            response_policy: PhysicalBodyResponsePolicy {
+                align_path,
+                ..stable_policy()
+            },
+            entity_collision: DynamicBodyCollisionDefinition {
+                target_geometry: PreparedEntityTargetGeometry {
+                    physics_bsp_parts: Vec::new(),
+                    fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                        center: Vector3::zero(),
+                        radius: 0.5,
+                    }))],
+                    fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+                },
+                scheduling: EntityPhysicsScheduling::Eligible,
+                dynamic_collision: EntityDynamicCollisionPolicy {
+                    target: EntityCollisionParticipation::Solid,
+                    mover_accepts_response: true,
+                    missile: false,
+                    path_clipped: false,
+                },
+                reporting: EntityCollisionReportPolicy {
+                    enabled: true,
+                    as_environment: false,
+                },
+                uses_physics_bsp: false,
+                weenie_type: WeenieType::Creature,
+                elasticity: PhysicalElasticity::DEFAULT,
+                default_animation_available: false,
+                default_script_available: false,
+            },
+        }
+    }
+
+    #[test]
+    fn dynamic_physics_is_reversible_and_preserves_only_compatible_response_memory() {
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let mut scene = SpatialScene::new();
+        let mut body = SpatialBody::new(id, pose(Vector3::new(10.0, 20.0, 30.0)), now);
+        body.velocity = Vector3::new(1.0, 2.0, 3.0);
+        scene.register_body(body);
+
+        let attached = scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        assert_eq!(attached.change, PhysicalBodyReconfiguration::Attached);
+        assert_eq!(attached.before, PhysicalBodyParticipation::PoseOnly);
+        assert_eq!(attached.after, PhysicalBodyParticipation::Physical);
+        let retained_response = scene
+            .body(id)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .response
+            .clone();
+
+        let policy_only = scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), true)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            policy_only.change,
+            PhysicalBodyReconfiguration::Reconfigured
+        );
+        assert!(policy_only.response_memory_preserved);
+        assert_eq!(
+            scene.body(id).unwrap().physical.as_ref().unwrap().response,
+            retained_response
+        );
+
+        let geometry_change = scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(
+                    free_definition(Vector3::zero(), 0.25),
+                    false,
+                )),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            geometry_change.change,
+            PhysicalBodyReconfiguration::Reconfigured
+        );
+        assert!(!geometry_change.response_memory_preserved);
+        assert!(matches!(
+            scene.body(id).unwrap().physical.as_ref().unwrap().response,
+            PhysicalBodyResponseState::FreeSphere { .. }
+        ));
+        assert_eq!(
+            scene.body(id).unwrap().velocity,
+            Vector3::new(1.0, 2.0, 3.0)
+        );
+
+        let detached = scene
+            .set_dynamic_physical_body(id, None, PhysicalCollisionFilter::ALL, None)
+            .unwrap();
+        assert_eq!(detached.change, PhysicalBodyReconfiguration::Detached);
+        assert!(scene.body(id).unwrap().physical.is_none());
+        assert_eq!(
+            scene.body(id).unwrap().pose.coords,
+            Vector3::new(10.0, 20.0, 30.0)
+        );
     }
 
     fn collision_scene(center_cell: Option<u16>) -> CollisionScene {

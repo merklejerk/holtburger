@@ -15,11 +15,11 @@ use crate::{
 use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WorldObjectExt as _,
+    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WeenieType, WorldObjectExt as _,
     WorldObjectProperties, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{
-    CharacterOption, CharacterOptions1, CharacterOptions2, ParentLocation, Placement,
+    CharacterOption, CharacterOptions1, CharacterOptions2, ParentLocation, Placement, Quaternion,
 };
 use holtburger_content::SoulEmoteCatalog;
 use holtburger_dat::file_type::{
@@ -533,9 +533,12 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
 
     state.scene.reconcile_authoritative_body(
         SpatialBodyId::Entity(guid),
-        pose,
-        Vector3::zero(),
-        Vector3::zero(),
+        crate::AuthoritativeBodyKinematics {
+            pose,
+            velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
+            omega: Vector3::zero(),
+        },
         crate::AuthoritativeBodySync::Snapshot,
         Instant::now(),
     );
@@ -587,9 +590,12 @@ fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
 
     state.scene.reconcile_authoritative_body(
         SpatialBodyId::Entity(guid),
-        pose,
-        Vector3::new(0.0, 0.0, 4.0),
-        Vector3::new(0.0, 0.0, 0.5),
+        crate::AuthoritativeBodyKinematics {
+            pose,
+            velocity: Vector3::new(0.0, 0.0, 4.0),
+            acceleration: Vector3::zero(),
+            omega: Vector3::new(0.0, 0.0, 0.5),
+        },
         crate::AuthoritativeBodySync::Snapshot,
         Instant::now(),
     );
@@ -3043,7 +3049,7 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
         .player_entity()
         .expect("local player entity should exist");
     assert_eq!(
-        player_entity.physics_state,
+        player_entity.physics.semantic,
         PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS
     );
     assert_eq!(
@@ -3062,9 +3068,141 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
         [WorldEvent::EntityStateUpdated {
             guid,
             physics_state,
+            transition,
         }] if *guid == state.player.guid
             && *physics_state
                 == (PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS)
+            && transition.action == crate::EntityPhysicalTransitionAction::None
+    ));
+}
+
+fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
+    let movement = crate::PhysicalBodyDefinition::free_sphere(
+        crate::PhysicalSphereSet::new(
+            holtburger_common::Sphere {
+                center: Vector3::zero(),
+                radius: 0.5,
+            },
+            None,
+        )
+        .unwrap(),
+        crate::PhysicalFlyConfig {
+            maximum_substep_distance: 0.25,
+            maximum_substeps: 8,
+            maximum_contact_passes: 4,
+            separation_epsilon: 0.001,
+        },
+    )
+    .unwrap();
+    let response_policy = crate::PhysicalBodyResponsePolicy {
+        restitution: crate::PhysicalRestitution::Elastic(crate::PhysicalElasticity::DEFAULT),
+        friction: crate::PhysicalFriction::DEFAULT,
+        surface_motion: crate::PhysicalSurfaceMotion::Stable,
+        align_path: false,
+    };
+    crate::DynamicPhysicalBodyDefinition {
+        movement,
+        response_policy,
+        entity_collision: crate::DynamicBodyCollisionDefinition {
+            target_geometry: crate::PreparedEntityTargetGeometry {
+                physics_bsp_parts: Vec::new(),
+                fallback_shapes: Vec::new(),
+                fallback_scale: holtburger_content::ColliderScale::uniform(1.0).unwrap(),
+            },
+            scheduling: crate::EntityPhysicsScheduling::Eligible,
+            dynamic_collision: crate::EntityDynamicCollisionPolicy {
+                target: crate::EntityCollisionParticipation::Solid,
+                mover_accepts_response: true,
+                missile: false,
+                path_clipped: false,
+            },
+            reporting: crate::EntityCollisionReportPolicy {
+                enabled: false,
+                as_environment: false,
+            },
+            uses_physics_bsp: false,
+            weenie_type: WeenieType::Creature,
+            elasticity: crate::PhysicalElasticity::DEFAULT,
+            default_animation_available: false,
+            default_script_available: false,
+        },
+    }
+}
+
+#[test]
+fn set_state_reconfigures_then_detaches_dynamic_client_physics_without_losing_semantic_truth() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x7000_0001);
+    let pose = WorldPosition {
+        landblock_id: Guid(0xDA55_0020),
+        coords: Vector3::new(96.0, 96.0, 20.0),
+        rotation: Quaternion::identity(),
+    };
+    state.add_entity(Entity::new(guid, "Remote".to_owned(), pose));
+    let body_id = SpatialBodyId::Entity(guid);
+    state
+        .scene
+        .set_dynamic_physical_body(
+            body_id,
+            Some(set_state_dynamic_definition()),
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    let mut frozen_events = Vec::new();
+    assert!(state.apply_set_state_update(
+        &SetStateData {
+            guid,
+            physics_state: PhysicsState::FROZEN,
+            instance_sequence: 0,
+            state_sequence: 1,
+        },
+        &mut frozen_events,
+    ));
+    assert_eq!(
+        state
+            .scene
+            .body(body_id)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .entity_collision
+            .as_ref()
+            .unwrap()
+            .scheduling,
+        crate::EntityPhysicsScheduling::Frozen
+    );
+    assert!(matches!(
+        frozen_events.last(),
+        Some(WorldEvent::EntityStateUpdated { transition, .. })
+            if transition.action == crate::EntityPhysicalTransitionAction::Reconfigure
+    ));
+
+    let mut unsupported_events = Vec::new();
+    assert!(state.apply_set_state_update(
+        &SetStateData {
+            guid,
+            physics_state: PhysicsState::PUSHABLE,
+            instance_sequence: 0,
+            state_sequence: 2,
+        },
+        &mut unsupported_events,
+    ));
+    assert!(state.scene.body(body_id).unwrap().physical.is_none());
+    assert_eq!(
+        state.entities.get(guid).unwrap().physics.semantic,
+        PhysicsState::PUSHABLE
+    );
+    assert!(matches!(
+        unsupported_events.last(),
+        Some(WorldEvent::EntityStateUpdated { transition, .. })
+            if transition.action == crate::EntityPhysicalTransitionAction::Detach
+                && matches!(
+                    transition.disposition,
+                    crate::EntityPhysicalDisposition::UnsupportedState { .. }
+                )
     ));
 }
 

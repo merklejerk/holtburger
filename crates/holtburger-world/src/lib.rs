@@ -16,6 +16,7 @@ pub mod crafting;
 pub mod damage;
 pub mod entity;
 pub mod entity_appearance;
+pub mod entity_physics;
 pub mod events;
 pub mod handlers;
 pub mod hydration;
@@ -35,31 +36,43 @@ pub use bootstrap::WorldBootstrap;
 pub use entity_appearance::{
     EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange,
 };
+pub use entity_physics::{
+    DEFAULT_ENTITY_PHYSICS_STATE, EffectiveEntityPhysicsState, EntityCollisionParticipation,
+    EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityPhysicalDisposition,
+    EntityPhysicalIntent, EntityPhysicalTransitionAction, EntityPhysicsPresentation,
+    EntityPhysicsResponse, EntityPhysicsScheduling, EntityPhysicsSetupFacts,
+    EntityPhysicsStateInput, EntityPhysicsStateOverrides, EntityPhysicsTransitionContext,
+    EntityPhysicsTransitionDecision, calculate_effective_entity_physics_state,
+    decide_entity_physics_state_transition, resolve_effective_entity_physics_state,
+};
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{
-    AuthoritativeBodySync, BasicSpatialPhysics, CellTransitRequest, CollisionPlacement,
-    CollisionQueryError, CollisionScene, CollisionSceneUpdateError, ContactState, EdgeProtection,
+    AuthoritativeBodyKinematics, AuthoritativeBodySync, BasicSpatialPhysics, CellTransitRequest,
+    CollisionPlacement, CollisionQueryError, CollisionScene, CollisionSceneUpdateError,
+    ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EdgeProtection,
     GroundState, GroundSupport, GroundedBody, GroundedBodyActuation, GroundedBodySpheres,
     GroundedBudget, GroundedConfig, GroundedLaunch, GroundedObstruction,
     GroundedObstructionRequest, GroundedOutcome, GroundedRequest, GroundedSphere,
     LocalDriveControl, LocalDriveGait, MotionWaypoint, MotionWaypointPlacement,
     MovementObstructionRequest, MovementRestrictionRequest, NoopSpatialPhysics,
     PhysicalBodyActuation, PhysicalBodyActuationError, PhysicalBodyDefinition,
-    PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyResponsePolicy,
+    PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyParticipation,
+    PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
     PhysicalBodyResponsePolicyError, PhysicalBodyResponseState, PhysicalBodySceneResidency,
     PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalCollisionExclusions,
     PhysicalCollisionFilter, PhysicalElasticity, PhysicalFlyBody, PhysicalFlyBudget,
     PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PhysicalFriction,
     PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PlacedMotionLeg,
     PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery,
-    PlacementRequest, PlacementRestrictionRequest, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
-    RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z, RuntimeBodyResetCause,
-    RuntimeSpatialBodyView, SelfPlayerDriveProjectionState, SettlePermission, SolveBodyInput,
-    SolveProjectionBasis, SolvedBodyKinematics, SpatialBody, SpatialBodyEvent, SpatialBodyId,
-    SpatialEntitySample, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
-    SpatialSamplingState, SpatialScene, SpatialSolveBatch, SpatialSolveRequest, SphereSweep,
-    StaticContact, SupportContact, SupportFeature, SupportRequest, advance_body_kinematics,
-    project_pose_forward_distance, resolve_physical_body_cell, solve_grounded, solve_physical_fly,
+    PlacementRequest, PlacementRestrictionRequest, PreparedEntityBspPart,
+    PreparedEntityTargetGeometry, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
+    RETAIL_WALKABLE_NORMAL_Z, RuntimeBodyResetCause, RuntimeSpatialBodyView,
+    SelfPlayerDriveProjectionState, SettlePermission, SolveBodyInput, SolveProjectionBasis,
+    SolvedBodyKinematics, SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample,
+    SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
+    SpatialSolveBatch, SpatialSolveRequest, SphereSweep, StaticContact, SupportContact,
+    SupportFeature, SupportRequest, advance_body_kinematics, project_pose_forward_distance,
+    resolve_physical_body_cell, solve_grounded, solve_physical_fly,
 };
 pub use state::{
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,

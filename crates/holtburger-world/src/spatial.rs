@@ -2,6 +2,7 @@ mod bsp_query;
 mod collision;
 #[cfg(test)]
 mod differential_fixtures;
+mod dynamic_body;
 mod grounded;
 mod physical_body;
 mod physical_fly;
@@ -30,6 +31,10 @@ pub use collision::{
     PlacementRecovery, PlacementRequest, PlacementRestrictionRequest, SphereSweep, StaticContact,
     SupportContact, SupportFeature, SupportRequest,
 };
+pub use dynamic_body::{
+    DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, PreparedEntityBspPart,
+    PreparedEntityTargetGeometry,
+};
 pub use grounded::{
     EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
     GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
@@ -39,6 +44,7 @@ pub use grounded::{
 pub use physical_body::{
     GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation, PhysicalBodyActuationError,
     PhysicalBodyDefinition, PhysicalBodyDefinitionError, PhysicalBodyMotion,
+    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
     PhysicalBodyResponsePolicy, PhysicalBodyResponsePolicyError, PhysicalBodyResponseState,
     PhysicalBodySceneResidency, PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus,
     PhysicalCollisionExclusions, PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction,

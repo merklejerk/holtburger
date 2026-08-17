@@ -6,7 +6,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use holtburger_content::ContentRepository;
-use holtburger_dat::file_type::{GfxObj, MotionKinematics, SetupModel};
+use holtburger_dat::file_type::setup_model::{AnimationHook, AnimationHookPayload};
+use holtburger_dat::file_type::{Animation, GfxObj, MotionKinematics, PhysicsScript, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_weenie_catalog::{PhysicsBoolOverrides, WeenieCatalog, WeenieTemplate};
 use serde::Serialize;
@@ -117,6 +118,10 @@ pub struct ContentSurvey {
     pub physics_bsp_setups_with_default_animation: usize,
     /// Physics-BSP setups that also name a default physics script.
     pub physics_bsp_setups_with_default_script: usize,
+    /// Exact catalog-reachable physics-BSP setups with authored default behavior.
+    pub physics_bsp_default_behavior_setups: Vec<PhysicsBspDefaultBehaviorSetupSurvey>,
+    /// Appearance substitutions that change a part consulted by the physics-BSP target branch.
+    pub physics_bsp_appearance_changes: Vec<PhysicsBspAppearanceChangeSurvey>,
     /// Distinct referenced GfxObjs that could not be read or decoded.
     pub unavailable_or_malformed_gfx_objs: usize,
     /// Effective mask counts for templates whose setup decoded.
@@ -139,6 +144,105 @@ pub struct ContentSurvey {
     pub representative_samples: BTreeMap<&'static str, Vec<RepresentativeTemplate>>,
     /// Authored locomotion vectors from the derived HBA motion-kinematics asset.
     pub motion_kinematics: MotionKinematicsSurvey,
+}
+
+/// One physics-BSP setup that authors a default animation or physics script.
+#[derive(Debug, Clone, Serialize)]
+pub struct PhysicsBspDefaultBehaviorSetupSurvey {
+    /// Setup resource id.
+    pub setup_did: String,
+    /// Every catalog template that references this setup.
+    pub templates: Vec<PhysicsBspDefaultBehaviorTemplateSurvey>,
+    /// Zero-based setup part indexes whose GfxObj contains a physics BSP.
+    pub physics_bsp_part_indices: Vec<usize>,
+    /// Default-animation behavior, when authored by the setup.
+    pub default_animation: Option<DefaultAnimationSurvey>,
+    /// Default-script behavior and transitive `CallPES` closure, when authored by the setup.
+    pub default_script: Option<DefaultScriptSurvey>,
+}
+
+/// Catalog identity retained for a physics-BSP default-behavior census entry.
+#[derive(Debug, Clone, Serialize)]
+pub struct PhysicsBspDefaultBehaviorTemplateSurvey {
+    /// Catalog WCID.
+    pub wcid: u32,
+    /// Human-facing name, falling back to the source class name.
+    pub name: String,
+    /// Effective BSP-bearing part indexes after this template's animation-part substitutions.
+    pub effective_physics_bsp_part_indices: Vec<usize>,
+}
+
+/// One template whose appearance changes whether one or more parts carry a physics BSP.
+#[derive(Debug, Clone, Serialize)]
+pub struct PhysicsBspAppearanceChangeSurvey {
+    /// Catalog WCID.
+    pub wcid: u32,
+    /// Human-facing template name.
+    pub name: String,
+    /// Setup resource whose base parts select the physics-BSP branch.
+    pub setup_did: String,
+    /// Retail's branch decision cached from the unmodified setup before substitutions apply.
+    pub cached_physics_bsp_branch: bool,
+    /// Collision-relevant part substitutions in source order.
+    pub substitutions: Vec<PhysicsBspPartSubstitutionSurvey>,
+}
+
+/// One animation-part substitution where either the old or replacement part carries a physics BSP.
+#[derive(Debug, Clone, Serialize)]
+pub struct PhysicsBspPartSubstitutionSurvey {
+    /// Zero-based setup part index.
+    pub part_index: usize,
+    /// Base setup GfxObj resource id.
+    pub base_part_did: String,
+    /// Replacement GfxObj resource id.
+    pub replacement_part_did: String,
+    /// Whether the base part carries a physics BSP.
+    pub base_has_physics_bsp: bool,
+    /// Whether the replacement part carries a physics BSP.
+    pub replacement_has_physics_bsp: bool,
+}
+
+/// Collision-relevant facts decoded from one setup default animation.
+#[derive(Debug, Clone, Serialize)]
+pub struct DefaultAnimationSurvey {
+    /// Animation resource id.
+    pub animation_did: String,
+    /// Number of authored frames.
+    pub frames: u32,
+    /// Whether the animation carries root-position frames.
+    pub has_position_frames: bool,
+    /// Physics-BSP parts whose local frame differs during the animation.
+    pub moving_physics_bsp_part_indices: Vec<usize>,
+    /// Count of every authored hook type across all animation frames.
+    pub hook_types: BTreeMap<&'static str, u64>,
+    /// Hooks requiring host physics semantics rather than frontend-only presentation.
+    pub collision_relevant_hooks: Vec<CollisionRelevantHookSurvey>,
+}
+
+/// Collision-relevant facts decoded from a setup default script and its chained scripts.
+#[derive(Debug, Clone, Serialize)]
+pub struct DefaultScriptSurvey {
+    /// Root script resource id named by the setup.
+    pub root_script_did: String,
+    /// Deterministically sorted transitive script resource ids reached through `CallPES`.
+    pub script_dids: Vec<String>,
+    /// Count of every authored hook type in the transitive closure.
+    pub hook_types: BTreeMap<&'static str, u64>,
+    /// Hooks requiring host physics semantics rather than frontend-only presentation.
+    pub collision_relevant_hooks: Vec<CollisionRelevantHookSurvey>,
+}
+
+/// One authored hook whose execution can alter collision geometry, transforms, or filtering.
+#[derive(Debug, Clone, Serialize)]
+pub struct CollisionRelevantHookSurvey {
+    /// Script DID for script hooks; animation DID for animation-frame hooks.
+    pub source_did: String,
+    /// Script start time, absent for animation-frame hooks.
+    pub start_time_seconds: Option<f64>,
+    /// Stable decoded hook name.
+    pub hook: &'static str,
+    /// Why the hook is relevant to host collision truth.
+    pub effect: &'static str,
 }
 
 /// Population and magnitude ranges of authored cyclic motion vectors.
@@ -236,8 +340,18 @@ struct SetupFacts {
     has_physics_bsp: bool,
     has_default_animation: bool,
     has_default_script: bool,
+    physics_bsp_part_indices: Vec<usize>,
+    parts: Vec<u32>,
+    default_animation: Option<u32>,
+    default_script: Option<u32>,
     sphere_count: usize,
     cylsphere_count: usize,
+}
+
+#[derive(Debug)]
+struct PhysicsBspAppearanceSurvey {
+    effective_parts_by_wcid: BTreeMap<u32, Vec<usize>>,
+    changes: Vec<PhysicsBspAppearanceChangeSurvey>,
 }
 
 /// Surveys every catalog record and every distinct referenced setup through mounted HBA content.
@@ -452,29 +566,44 @@ fn survey_content(
             cylsphere_radii.observe(Some(f64::from(cylsphere.radius)));
             cylsphere_heights.observe(Some(f64::from(cylsphere.height)));
         }
-        let has_physics_bsp = setup.parts.iter().any(|part_id| {
-            gfx_facts
-                .entry(*part_id)
-                .or_insert_with(|| {
-                    content
-                        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, *part_id))
-                        .ok()
-                        .and_then(|resource| GfxObj::unpack(&mut Cursor::new(resource.bytes)).ok())
-                        .map(|gfx| gfx.physics_bsp.is_some())
-                })
-                .is_some_and(|has_bsp| has_bsp)
-        });
+        let physics_bsp_part_indices = setup
+            .parts
+            .iter()
+            .enumerate()
+            .filter_map(|(part_index, part_id)| {
+                gfx_facts
+                    .entry(*part_id)
+                    .or_insert_with(|| {
+                        content
+                            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, *part_id))
+                            .ok()
+                            .and_then(|resource| {
+                                GfxObj::unpack(&mut Cursor::new(resource.bytes)).ok()
+                            })
+                            .map(|gfx| gfx.physics_bsp.is_some())
+                    })
+                    .is_some_and(|has_bsp| has_bsp)
+                    .then_some(part_index)
+            })
+            .collect::<Vec<_>>();
         setup_facts.insert(
             *setup_id,
             SetupFacts {
-                has_physics_bsp,
+                has_physics_bsp: !physics_bsp_part_indices.is_empty(),
                 has_default_animation: setup.default_animation.is_some(),
                 has_default_script: setup.default_script.is_some(),
+                physics_bsp_part_indices,
+                parts: setup.parts,
+                default_animation: setup.default_animation,
+                default_script: setup.default_script,
                 sphere_count: setup.spheres.len(),
                 cylsphere_count: setup.cyl_spheres.len(),
             },
         );
     }
+
+    let physics_bsp_appearance =
+        survey_physics_bsp_appearance(templates, &setup_facts, content, &mut gfx_facts)?;
 
     let mut effective_physics_masks = BTreeMap::new();
     let mut effective_physics_bits = physics_bit_counts();
@@ -578,6 +707,12 @@ fn survey_content(
     let motion_kinematics = content
         .read_asset::<MotionKinematics>("motion kinematics table")
         .context("could not survey authored motion kinematics")?;
+    let physics_bsp_default_behavior_setups = survey_physics_bsp_default_behavior_setups(
+        templates,
+        &setup_facts,
+        &physics_bsp_appearance.effective_parts_by_wcid,
+        content,
+    )?;
 
     Ok(ContentSurvey {
         referenced_setups: setup_ids.len(),
@@ -611,6 +746,8 @@ fn survey_content(
             .values()
             .filter(|facts| facts.has_physics_bsp && facts.has_default_script)
             .count(),
+        physics_bsp_default_behavior_setups,
+        physics_bsp_appearance_changes: physics_bsp_appearance.changes,
         unavailable_or_malformed_gfx_objs: gfx_facts.values().filter(|fact| fact.is_none()).count(),
         effective_physics_masks,
         effective_physics_bits,
@@ -623,6 +760,325 @@ fn survey_content(
         representative_samples,
         motion_kinematics: survey_motion_kinematics(&motion_kinematics),
     })
+}
+
+fn survey_physics_bsp_appearance(
+    templates: &[WeenieTemplate],
+    setup_facts: &BTreeMap<u32, SetupFacts>,
+    content: &ContentRepository,
+    gfx_facts: &mut BTreeMap<u32, Option<bool>>,
+) -> Result<PhysicsBspAppearanceSurvey> {
+    let mut effective_parts_by_wcid = BTreeMap::new();
+    let mut changes = Vec::new();
+    for template in templates {
+        let Some(setup_did) = template.setup_did else {
+            continue;
+        };
+        let Some(setup) = setup_facts.get(&setup_did) else {
+            continue;
+        };
+        let mut effective_parts = setup.parts.clone();
+        let mut substitutions = Vec::new();
+        for change in &template.anim_part_changes {
+            let part_index = usize::from(change.part_index);
+            let base_part_did = *setup.parts.get(part_index).with_context(|| {
+                format!(
+                    "WCID {} setup 0x{setup_did:08X} has no animation-part index {part_index}",
+                    template.wcid
+                )
+            })?;
+            let base_has_physics_bsp = require_gfx_bsp_fact(base_part_did, content, gfx_facts)?;
+            let replacement_has_physics_bsp =
+                require_gfx_bsp_fact(change.animation_part_did, content, gfx_facts)?;
+            effective_parts[part_index] = change.animation_part_did;
+            if base_has_physics_bsp != replacement_has_physics_bsp
+                || (base_has_physics_bsp && base_part_did != change.animation_part_did)
+            {
+                substitutions.push(PhysicsBspPartSubstitutionSurvey {
+                    part_index,
+                    base_part_did: resource_key(base_part_did),
+                    replacement_part_did: resource_key(change.animation_part_did),
+                    base_has_physics_bsp,
+                    replacement_has_physics_bsp,
+                });
+            }
+        }
+        if setup.has_physics_bsp {
+            let mut effective_indices = Vec::new();
+            for (part_index, part_did) in effective_parts.iter().enumerate() {
+                if require_gfx_bsp_fact(*part_did, content, gfx_facts)? {
+                    effective_indices.push(part_index);
+                }
+            }
+            effective_parts_by_wcid.insert(template.wcid, effective_indices);
+        }
+        if !substitutions.is_empty() {
+            changes.push(PhysicsBspAppearanceChangeSurvey {
+                wcid: template.wcid,
+                name: template
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| template.class_name.clone()),
+                setup_did: resource_key(setup_did),
+                cached_physics_bsp_branch: setup.has_physics_bsp,
+                substitutions,
+            });
+        }
+    }
+    Ok(PhysicsBspAppearanceSurvey {
+        effective_parts_by_wcid,
+        changes,
+    })
+}
+
+fn require_gfx_bsp_fact(
+    gfx_did: u32,
+    content: &ContentRepository,
+    gfx_facts: &mut BTreeMap<u32, Option<bool>>,
+) -> Result<bool> {
+    let fact = gfx_facts.entry(gfx_did).or_insert_with(|| {
+        content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_did))
+            .ok()
+            .and_then(|resource| GfxObj::unpack(&mut Cursor::new(resource.bytes)).ok())
+            .map(|gfx| gfx.physics_bsp.is_some())
+    });
+    (*fact).with_context(|| format!("could not decode GfxObj 0x{gfx_did:08X}"))
+}
+
+fn survey_physics_bsp_default_behavior_setups(
+    templates: &[WeenieTemplate],
+    setup_facts: &BTreeMap<u32, SetupFacts>,
+    effective_bsp_parts_by_wcid: &BTreeMap<u32, Vec<usize>>,
+    content: &ContentRepository,
+) -> Result<Vec<PhysicsBspDefaultBehaviorSetupSurvey>> {
+    let mut templates_by_setup =
+        BTreeMap::<u32, Vec<PhysicsBspDefaultBehaviorTemplateSurvey>>::new();
+    for template in templates {
+        if let Some(setup_did) = template.setup_did {
+            templates_by_setup.entry(setup_did).or_default().push(
+                PhysicsBspDefaultBehaviorTemplateSurvey {
+                    wcid: template.wcid,
+                    name: template
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| template.class_name.clone()),
+                    effective_physics_bsp_part_indices: effective_bsp_parts_by_wcid
+                        .get(&template.wcid)
+                        .cloned()
+                        .unwrap_or_default(),
+                },
+            );
+        }
+    }
+
+    let mut surveys = Vec::new();
+    let mut script_cache = BTreeMap::<u32, DefaultScriptSurvey>::new();
+    for (setup_did, facts) in setup_facts {
+        if !facts.has_physics_bsp
+            || (facts.default_animation.is_none() && facts.default_script.is_none())
+        {
+            continue;
+        }
+        let default_animation = facts
+            .default_animation
+            .map(|animation_did| {
+                survey_default_animation(animation_did, &facts.physics_bsp_part_indices, content)
+            })
+            .transpose()
+            .with_context(|| {
+                format!("could not survey default animation for setup 0x{setup_did:08X}")
+            })?;
+        let default_script = if let Some(script_did) = facts.default_script {
+            let survey = if let Some(survey) = script_cache.get(&script_did) {
+                survey.clone()
+            } else {
+                let survey = survey_default_script(script_did, content).with_context(|| {
+                    format!("could not survey default script for setup 0x{setup_did:08X}")
+                })?;
+                script_cache.insert(script_did, survey.clone());
+                survey
+            };
+            Some(survey)
+        } else {
+            None
+        };
+        surveys.push(PhysicsBspDefaultBehaviorSetupSurvey {
+            setup_did: resource_key(*setup_did),
+            templates: templates_by_setup
+                .get(setup_did)
+                .cloned()
+                .unwrap_or_default(),
+            physics_bsp_part_indices: facts.physics_bsp_part_indices.clone(),
+            default_animation,
+            default_script,
+        });
+    }
+    Ok(surveys)
+}
+
+fn survey_default_animation(
+    animation_did: u32,
+    physics_bsp_part_indices: &[usize],
+    content: &ContentRepository,
+) -> Result<DefaultAnimationSurvey> {
+    let resource = content
+        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, animation_did))
+        .with_context(|| format!("could not read animation 0x{animation_did:08X}"))?;
+    let animation = Animation::read(&mut Cursor::new(resource.bytes))
+        .with_context(|| format!("could not decode animation 0x{animation_did:08X}"))?;
+    let moving_physics_bsp_part_indices =
+        moving_physics_bsp_parts(&animation, physics_bsp_part_indices).with_context(|| {
+            format!("animation 0x{animation_did:08X} has incomplete physics-BSP part frames")
+        })?;
+
+    let mut hook_types = BTreeMap::new();
+    let mut collision_relevant_hooks = Vec::new();
+    for frame in &animation.part_frames {
+        for hook in &frame.hooks {
+            observe_hook(
+                hook,
+                animation_did,
+                None,
+                &mut hook_types,
+                &mut collision_relevant_hooks,
+            );
+        }
+    }
+    Ok(DefaultAnimationSurvey {
+        animation_did: resource_key(animation_did),
+        frames: animation.num_frames,
+        has_position_frames: !animation.pos_frames.is_empty(),
+        moving_physics_bsp_part_indices,
+        hook_types,
+        collision_relevant_hooks,
+    })
+}
+
+fn moving_physics_bsp_parts(
+    animation: &Animation,
+    physics_bsp_part_indices: &[usize],
+) -> Result<Vec<usize>> {
+    let mut moving = Vec::new();
+    for &part_index in physics_bsp_part_indices {
+        let frames = animation
+            .part_frames
+            .iter()
+            .map(|frame| frame.frames.get(part_index))
+            .collect::<Option<Vec<_>>>()
+            .with_context(|| format!("missing physics-BSP part index {part_index}"))?;
+        if frames
+            .first()
+            .is_some_and(|first| frames.iter().skip(1).any(|frame| *frame != *first))
+        {
+            moving.push(part_index);
+        }
+    }
+    Ok(moving)
+}
+
+fn survey_default_script(
+    root_script_did: u32,
+    content: &ContentRepository,
+) -> Result<DefaultScriptSurvey> {
+    let mut pending = BTreeSet::from([root_script_did]);
+    let mut visited = BTreeSet::new();
+    let mut hook_types = BTreeMap::new();
+    let mut collision_relevant_hooks = Vec::new();
+    while let Some(script_did) = pending.pop_first() {
+        if !visited.insert(script_did) {
+            continue;
+        }
+        let resource = content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, script_did))
+            .with_context(|| format!("could not read physics script 0x{script_did:08X}"))?;
+        let script = PhysicsScript::read(&mut Cursor::new(resource.bytes))
+            .with_context(|| format!("could not decode physics script 0x{script_did:08X}"))?;
+        for record in &script.records {
+            observe_hook(
+                &record.hook,
+                script_did,
+                Some(record.start_time),
+                &mut hook_types,
+                &mut collision_relevant_hooks,
+            );
+            if let AnimationHookPayload::CallPes(call) = record.hook.payload {
+                pending.insert(call.script_id);
+            }
+        }
+    }
+    Ok(DefaultScriptSurvey {
+        root_script_did: resource_key(root_script_did),
+        script_dids: visited.into_iter().map(resource_key).collect(),
+        hook_types,
+        collision_relevant_hooks,
+    })
+}
+
+fn observe_hook(
+    hook: &AnimationHook,
+    source_did: u32,
+    start_time_seconds: Option<f64>,
+    hook_types: &mut BTreeMap<&'static str, u64>,
+    collision_relevant_hooks: &mut Vec<CollisionRelevantHookSurvey>,
+) {
+    let hook_name = animation_hook_name(hook.hook_type);
+    *hook_types.entry(hook_name).or_default() += 1;
+    if let Some(effect) = collision_relevant_effect(hook.hook_type) {
+        collision_relevant_hooks.push(CollisionRelevantHookSurvey {
+            source_did: resource_key(source_did),
+            start_time_seconds,
+            hook: hook_name,
+            effect,
+        });
+    }
+}
+
+fn animation_hook_name(hook_type: u32) -> &'static str {
+    match hook_type {
+        0 => "NoOp",
+        1 => "Sound",
+        2 => "SoundTable",
+        3 => "Attack",
+        4 => "AnimationDone",
+        5 => "ReplaceObject",
+        6 => "Ethereal",
+        7 => "TransparentPart",
+        8 => "Luminous",
+        9 => "LuminousPart",
+        10 => "Diffuse",
+        11 => "DiffusePart",
+        12 => "Scale",
+        13 => "CreateParticle",
+        14 => "DestroyParticle",
+        15 => "StopParticle",
+        16 => "NoDraw",
+        17 => "DefaultScript",
+        18 => "DefaultScriptPart",
+        19 => "CallPES",
+        20 => "Transparent",
+        21 => "SoundTweaked",
+        22 => "SetOmega",
+        23 => "TextureVelocity",
+        24 => "TextureVelocityPart",
+        25 => "SetLight",
+        26 => "CreateBlockingParticle",
+        _ => "Unknown",
+    }
+}
+
+fn collision_relevant_effect(hook_type: u32) -> Option<&'static str> {
+    match hook_type {
+        6 => Some("changes collision filtering through Ethereal state"),
+        12 => Some("changes the scale of every collision shape"),
+        22 => Some("changes root angular velocity and therefore collision transforms"),
+        26 => Some("creates a separately blocking particle object"),
+        _ => None,
+    }
+}
+
+fn resource_key(id: u32) -> String {
+    format!("0x{id:08X}")
 }
 
 fn survey_motion_kinematics(motion: &MotionKinematics) -> MotionKinematicsSurvey {
@@ -874,7 +1330,10 @@ impl OptionalBoolDistribution {
 mod tests {
     use super::*;
     use holtburger_common::Vector3;
+    use holtburger_dat::file_type::animation::AnimationFlags;
+    use holtburger_dat::file_type::setup_model::AnimationFrame;
     use holtburger_dat::file_type::{MotionCommandKinematics, MotionKinematicsTable};
+    use holtburger_dat::graphics::Frame;
     use holtburger_weenie_catalog::{SubPalette, TemplatePhysics};
 
     fn template() -> WeenieTemplate {
@@ -905,6 +1364,10 @@ mod tests {
             has_physics_bsp: false,
             has_default_animation: false,
             has_default_script: false,
+            physics_bsp_part_indices: Vec::new(),
+            parts: Vec::new(),
+            default_animation: None,
+            default_script: None,
             sphere_count: 1,
             cylsphere_count: 0,
         }
@@ -1011,5 +1474,48 @@ mod tests {
         assert_eq!(survey.velocity_magnitudes.max, Some(5.0));
         assert_eq!(survey.omega_magnitudes.min, Some(2.0));
         assert_eq!(survey.omega_magnitudes.max, Some(2.0));
+    }
+
+    #[test]
+    fn bsp_part_census_detects_only_frames_that_vary() {
+        let part_frame = |first_x, second_x| {
+            [first_x, second_x].map(|x| {
+                let mut frame = Frame::default();
+                frame.origin.x = x;
+                frame
+            })
+        };
+        let moving = part_frame(0.0, 1.0);
+        let fixed = part_frame(2.0, 2.0);
+        let animation = Animation {
+            id: 1,
+            flags: AnimationFlags::empty(),
+            num_parts: 2,
+            num_frames: 2,
+            pos_frames: Vec::new(),
+            part_frames: vec![
+                AnimationFrame {
+                    frames: vec![moving[0].clone(), fixed[0].clone()],
+                    hooks: Vec::new(),
+                },
+                AnimationFrame {
+                    frames: vec![moving[1].clone(), fixed[1].clone()],
+                    hooks: Vec::new(),
+                },
+            ],
+        };
+
+        assert_eq!(moving_physics_bsp_parts(&animation, &[0, 1]).unwrap(), [0]);
+        assert!(moving_physics_bsp_parts(&animation, &[2]).is_err());
+    }
+
+    #[test]
+    fn collision_relevant_hook_classification_excludes_script_chaining() {
+        assert_eq!(collision_relevant_effect(19), None);
+        assert_eq!(
+            collision_relevant_effect(12),
+            Some("changes the scale of every collision shape")
+        );
+        assert_eq!(animation_hook_name(22), "SetOmega");
     }
 }

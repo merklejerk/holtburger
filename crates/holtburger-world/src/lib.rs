@@ -15,6 +15,7 @@ pub mod context;
 pub mod crafting;
 pub mod damage;
 pub mod entity;
+pub mod entity_appearance;
 pub mod events;
 pub mod handlers;
 pub mod hydration;
@@ -31,6 +32,9 @@ pub mod vendor;
 pub use self::state::WorldState;
 pub use attachment::{AttachmentError, PhysicsAttachment};
 pub use bootstrap::WorldBootstrap;
+pub use entity_appearance::{
+    EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange,
+};
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{
     AuthoritativeBodySync, BasicSpatialPhysics, CellTransitRequest, CollisionPlacement,

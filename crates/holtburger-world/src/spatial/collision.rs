@@ -17,6 +17,7 @@ use super::bsp_query::{
     ShapeSupportFeature, placed_polygon_contacts, placed_polygon_obstructions,
     placed_solid_contacts, placed_supports, support_on_polygon,
 };
+use super::cell_index::{GlobalCellRange, OUTDOOR_CELL_METERS};
 use super::volume_query::{
     placed_ball_contact, placed_ball_support, placed_cylinder_contact, placed_cylinder_support,
 };
@@ -508,67 +509,6 @@ struct PlacementMotionSegment<'a> {
     /// Installed outdoor owners touched by this segment.
     touched: &'a [Guid],
 }
-
-/// Inclusive rectangle of global 24m outdoor cell coordinates.
-///
-/// Global coordinates are `landblock_coordinate * 8 + local_cell`, the same frame retail's
-/// per-cell static shadow lists live in (`CPhysicsObj::add_shadows_to_cells`,
-/// `acclient.c:306734`). They are unbounded integers, so cross-landblock spans need no seams.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct GlobalCellRange {
-    minimum: (i32, i32),
-    maximum: (i32, i32),
-}
-
-impl GlobalCellRange {
-    /// The cells overlapped by an anchor-local axis-aligned XY extent.
-    ///
-    /// Coordinates are intersected with the finite landscape lattice (256 x 256 landblocks of
-    /// 8 x 8 cells): nothing is ever registered outside it, so an extent reaching beyond —
-    /// including the noncanonical far-outside poses the scene-edge policy permits — selects the
-    /// lattice-overlapping part or nothing, without overflowing or iterating unbounded cells.
-    fn from_local_extent(anchor: Guid, minimum: Vector3, maximum: Vector3) -> Self {
-        const LATTICE_CELLS: i64 = 256 * 8;
-        let anchor_x = ((anchor.0 >> 24) & 0xff) as i64 * 8;
-        let anchor_y = ((anchor.0 >> 16) & 0xff) as i64 * 8;
-        let cell = |anchor_base: i64, coordinate: f32| {
-            let local = (coordinate / OUTDOOR_CELL_METERS).floor();
-            // f32-to-i64 casts saturate, so an extreme-but-finite coordinate stays well-defined
-            // before the lattice clamp.
-            anchor_base
-                .saturating_add(local as i64)
-                .clamp(-1, LATTICE_CELLS) as i32
-        };
-        Self {
-            minimum: (cell(anchor_x, minimum.x), cell(anchor_y, minimum.y)),
-            maximum: (cell(anchor_x, maximum.x), cell(anchor_y, maximum.y)),
-        }
-    }
-
-    /// The cells overlapped by a sphere query with extra planar reach.
-    fn from_sphere(anchor: Guid, center: Vector3, reach: f32) -> Self {
-        Self::from_local_extent(
-            anchor,
-            center - Vector3::new(reach, reach, 0.0),
-            center + Vector3::new(reach, reach, 0.0),
-        )
-    }
-
-    fn cells(self) -> impl Iterator<Item = (i32, i32)> {
-        (self.minimum.0..=self.maximum.0)
-            .flat_map(move |x| (self.minimum.1..=self.maximum.1).map(move |y| (x, y)))
-    }
-
-    fn contains(self, cell: (i32, i32)) -> bool {
-        cell.0 >= self.minimum.0
-            && cell.0 <= self.maximum.0
-            && cell.1 >= self.minimum.1
-            && cell.1 <= self.maximum.1
-    }
-}
-
-/// Side length of one outdoor land cell in meters.
-const OUTDOOR_CELL_METERS: f32 = 24.0;
 
 /// Scene-derived equivalent of retail's outdoor and EnvCell static shadow lists.
 #[derive(Debug, Clone, Default)]

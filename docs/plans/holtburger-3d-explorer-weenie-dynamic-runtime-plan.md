@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Dynamic Runtime Plan
 
-Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 5 in progress
+Status: In progress — preempts `holtburger-3d-spawned-entity-explorer-runtime-plan.md`; Phase 5B complete, Phase 5C next
 Created: 2026-08-16
 Refined: 2026-08-16 — evidence-bounded target geometry, atomic implementation milestones, no
 production diagnostic history, shared scene indexing, settled-body pruning, one fixed-tick
@@ -1317,19 +1317,32 @@ WCIDs share one template, one surviving owner retains it, and final removal rele
 
 ### Phase 5: Attach Spawned Entities to the Shared Solver
 
-Progress: In progress (2026-08-16). R1 confirmed the landed definition/body/state-transition seams
-and selected the single collection-transaction, existing-feed batch, and shared placed-path cutovers.
-The first vertical slice is now landed: `SpatialScene` derives one stable sorted eligible-entity scan
-from attached physical state; one Explorer participant captures tick-start bodies and one immutable
+Progress: Complete (2026-08-17). `SpatialScene` derives one stable sorted eligible-entity scan from
+attached physical state; one Explorer participant captures tick-start bodies and one immutable
 collision snapshot under a single collection transaction; pose-only and frozen entities consume no
 solve. Changed accepted results publish at most one `advanced` batch on the existing focused feed.
 The frontend mirror accepts only newer exact-generation advances, while the sole dynamic-placement
 owner evaluates their placed paths at render cadence using the path core extracted from physical
 camera presentation. Late visual readiness installs the mirror's latest accepted endpoint rather
-than retaining spawn-time pose. Focused host tests prove two eligible siblings are visited in stable
-GUID order and one changed collection tick produces one batch; frontend path/mirror/session/runtime
-tests and all current static gates pass. Launch, explicit teleport/reset operations, scenario
-interest, full zero-actuation scenarios, and the Phase 5A-5D solver work remain.
+than retaining spawn-time pose.
+
+Catalog-backed launch now normalizes the explicit scenario direction, applies optional maximum
+velocity, converts ACE rotation speed from revolutions per second to world-X radians per second, and
+clears align-path when spin is present. Flame Bolt (1499) launched at exactly 15 m/s. Whirling Blade
+(1636) launched at 15 m/s with 12.566371 rad/s omega and rotated 24 degrees during one 33.333333 ms
+tick. Missing, zero, and invalid launch inputs reject only the operation. Generation-stable
+teleport/reset operations reuse one scene relocation primitive, atomically update coarse membership,
+clear pose-dependent response and kinematics, and publish one zero-duration snap correction; a live
+Flame Bolt reset preserved identity/generation and cleared velocity, acceleration, and omega.
+
+The HTTP scenario host now installs the same revisioned camera-centered simulation-interest owner set
+as the production host before physical spawn. A real Killagurg (34621) became visible immediately,
+fell from z=65.11325 to z=20.00715 through the shared solver, reached grounded canonical zero velocity
+on changed tick 102, emitted no change for ticks 103-120, and exact-despawned back to zero entity,
+template, and effect ownership. Existing focused solver fixtures cover supported floor, steep slide,
+airborne fall, cross-owner traversal, missing-owner open space, and teleport/reset. Rust world/core/
+host suites, focused frontend feed/session/placement suites, Clippy with warnings denied, Svelte/
+TypeScript checks, and formatting pass. Phases 5A-5D remain.
 
 #### Deliverables
 
@@ -1404,10 +1417,48 @@ interest, full zero-actuation scenarios, and the Phase 5A-5D solver work remain.
 - The current collection solve still sees static collision only. Its tick-start body capture is the
   input seam Phase 5B/5C will use for directional peer candidates; this progress does not claim
   body-body collision early.
+- ACE projectile omega is a world-X angular velocity. Retail `CPhysicsObj::update_object` scales
+  `m_omegaVector` and `Frame::grotate` left-multiplies the delta quaternion; treating it as a local
+  axis would produce the wrong orientation for already-rotated bodies.
+- A collidable no-gravity body is valid. `GroundedConfig` therefore accepts finite non-positive
+  gravity rather than requiring a negative value; zero preserves ordinary collision while retaining
+  explicit linear airborne motion. The former validation contradicted the catalog's independent
+  Gravity and collision-participation flags.
+- Integrated advance batches require positive duration. Teleport/reset correction batches use zero
+  duration because they describe a snap, not elapsed simulation. The shared frontend path validator
+  accepts that shape only for correction kinds and clears any active interpolation.
+- Teleport and reset share the same scene-owned state mutation and differ only in the published
+  correction semantic. The host resolves the destination through current setup movement geometry;
+  the frontend never performs portal traversal or asserts contact.
+- Same-generation commands wait for an accepted feed revision later than command invocation. Merely
+  observing the already-current generation is insufficient proof that launch or relocation delivery
+  completed.
+- The browser harness captures one immediate post-spawn state for visual/lifecycle assertions and one
+  post-operation state for the final physical outcome. Tick evidence is reduced to counts plus the
+  first and last changed batch; no production or harness diagnostic history is introduced.
 - Any deliberate observable retail departure requires the project's
   `RETAIL QUIRK` or `RETAIL DIVERGENCE` marker with decompile citation, consequence, and census.
 
 ### Phase 5A: Add Settled-State Pruning and Wake Reconciliation
+
+Progress: Complete (2026-08-17). Dynamic-only physical state now pairs the existing prepared
+collision definition with a crate-owned `Active | Settled` activity value; app and producer code
+cannot manufacture activity or project it into semantic/frontend state. Because R0 selected one
+stable accepted tick, no counter is retained. The accepted-tick commit settles only after walkable
+`GroundState::Supported` remains unchanged, velocity/acceleration/omega are canonical zero, no
+motion snapshot or actuation remains, and every accepted path point equals its initial point.
+Support acquisition, placement repair, airborne/sliding response, explicit drive (including zero
+drive), acceleration, omega, launch, and any changed response therefore remain active.
+
+The existing stable body-store scan now filters settled bodies while retaining them in the canonical
+scene and coarse memberships. Kinematic replacement, authoritative vectors/motion, runtime pose,
+contact projection where permitted, relocation/reset, physical replacement, and explicit scene wake
+operations reactivate through `SpatialScene`. A committed simulation-interest residency change wakes
+all settled dynamic bodies; no support graph is retained. A reverse-insertion 300-body fixture proves
+stable ordering with 150 settled bodies skipped and all 300 bodies still present. The real Killagurg
+scenario remains presentation-identical after pruning: 102 changed fall/landing ticks, then no
+changed batches through tick 120, with exact teardown to zero ownership. The 350-test world suite,
+cross-crate checks, Clippy with warnings denied, formatting, and the browser scenario pass.
 
 #### Deliverables
 
@@ -1435,9 +1486,38 @@ interest, full zero-actuation scenarios, and the Phase 5A-5D solver work remain.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- The one-tick R0 threshold collapses the minimal evidence to a two-state activity value; retaining
+  a stable-tick count would be dead state. Activity is grouped with dynamic-only collision state so a
+  generic camera body cannot accidentally acquire it, but remains crate-private so registries and
+  frontends cannot become competing authorities.
+- The tick that first acquires support does not settle even if its final vectors are zero: its
+  response or collision placement changed. One subsequent unchanged accepted tick supplies the
+  required stable evidence.
+- Explicit zero drive is still actuation. Treating it as coasting would let the solver discard a
+  controller-owned command merely because its current magnitude is zero.
+- Loaded collision residency changes conservatively wake every settled dynamic body. At 50-300
+  bodies this is simpler and safer than support dependency tracking; Phase R2 may revisit only with
+  measured evidence.
+- Settled state is deliberately absent from runtime views, events, snapshots, counters, and Explorer
+  diagnostics. The stable scan and focused fixtures are the proof surface.
 
 ### Phase 5B: Add Dynamic Target Geometry and Candidate Discovery
+
+Progress: Complete (2026-08-17). The static collision global-cell range is now a shared spatial
+primitive, and `SpatialScene` owns one dynamic shadow index rebuilt from the canonical body store at
+the start of each entity collection tick. The rebuild stamps conservative target bounds into every
+overlapped outdoor 24 m cell and every reached EnvCell, then returns stable sorted/deduplicated
+candidates from the mover's complete swept range and provisional placement. Settled targets remain
+indexed, while camera and other non-entity bodies are excluded explicitly.
+
+Dynamic physical state now retains the complete accepted `CollisionPlacement`, not only its committed
+cell. Tick preparation refreshes every placement from the same immutable collision snapshot used by
+the collection solve before atomically replacing the index. Target bounds cover fallback spheres and
+cylspheres plus each placed physics-BSP part; the transform math is shared with static collision
+through a source-neutral placed-shape bounds helper rather than inventing static source identity for
+dynamic bodies. Focused fixtures prove cross-landblock stamping, outdoor/EnvCell portal straddling,
+exact transformed target bounds, camera exclusion, settled-target discovery, stable 50/300-body
+populations, and full swept-range discovery beyond the mover's initial bucket.
 
 #### Deliverables
 
@@ -1477,7 +1557,20 @@ interest, full zero-actuation scenarios, and the Phase 5A-5D solver work remain.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Rebuild the index once per collection tick. At the expected 50-300 bodies per landblock this keeps
+  mutation paths and failure behavior simple, provides one coherent tick-start snapshot, and avoids
+  an incremental registry, pair cache, or synchronization machinery before evidence warrants it.
+- Preserve complete movement-sphere collision placement on the canonical physical body. A committed
+  cell alone loses provisional portal membership and would make fast entry undiscoverable; deriving
+  placement independently inside the index would create a second collision authority.
+- Share only source-neutral placed-shape bounds between static and dynamic collision. Dynamic targets
+  do not manufacture `StaticColliderPlacement` identity merely to reuse existing transform math.
+- Outdoor bodies use the extracted global 24 m cell keying and interiors use exact reached EnvCells.
+  No EnvCell subdivision exists; Phase R2 may revisit that only if measured single-cell populations
+  exceed the fixed-tick budget.
+- Empty effective target geometry produces no shadow membership. Unsupported mutable geometry is
+  still rejected during body preparation, before physical attachment, rather than entering the index
+  with stale or substitute movement geometry.
 
 ### Phase 5C: Add Directional Dynamic Contact and Response
 

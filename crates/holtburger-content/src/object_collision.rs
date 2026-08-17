@@ -110,6 +110,18 @@ impl CollisionBox {
         self.maximum
     }
 
+    /// Places one shared shape and returns its landblock-local axis-aligned bounds.
+    ///
+    /// Dynamic and static shadow indexes use this same transform so broad-phase membership cannot
+    /// drift by object provenance.
+    pub fn from_placed_shape(
+        shape: &CollisionShape,
+        placement: &LandblockPlacement,
+        scale: ColliderScale,
+    ) -> Result<Self> {
+        placed_bounds(shape, placement, scale)
+    }
+
     /// Geometric center.
     pub fn center(&self) -> Vector3 {
         (self.minimum + self.maximum) * 0.5

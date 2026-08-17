@@ -443,7 +443,7 @@ impl HostSimulationRuntime {
         let scene = Arc::clone(&state.scene);
         let tick_start = state
             .bodies
-            .scheduled_dynamic_entity_ids()
+            .prepare_dynamic_entity_collection(&scene)?
             .into_iter()
             .map(|body_id| {
                 state
@@ -562,7 +562,7 @@ impl HostSimulationRuntime {
             .collect::<Vec<_>>();
 
         let mut insertions = Vec::new();
-        let mut next_resident = resident;
+        let mut next_resident = resident.clone();
         let mut unavailable = Vec::new();
         for owner in missing {
             match self
@@ -583,6 +583,7 @@ impl HostSimulationRuntime {
         let next_scene = scene
             .staged_residency_change(insertions, &stale)
             .context("could not rebuild simulation-interest collision scene")?;
+        let collision_changed = next_resident != resident;
 
         let target = self
             .target
@@ -597,6 +598,11 @@ impl HostSimulationRuntime {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         state.scene = Arc::new(next_scene);
         state.resident = next_resident;
+        if collision_changed {
+            // Support dependencies are intentionally not tracked. The 50-300 body target makes a
+            // conservative wake cheaper and safer until Phase R2 supplies evidence otherwise.
+            state.bodies.wake_all_settled_dynamic_bodies();
+        }
         Ok(receipt(request.revision, true, &unavailable))
     }
 

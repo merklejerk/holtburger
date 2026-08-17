@@ -1058,6 +1058,7 @@ function summarizeEntityLifecycle(lifecycle) {
 			identity: lifecycle.spawned.identity,
 		},
 		spawnedState: summarizeEntityLifecycleState(lifecycle.spawnedState),
+		completedState: summarizeEntityLifecycleState(lifecycle.completedState),
 		despawnedState: summarizeEntityLifecycleState(lifecycle.despawnedState),
 	};
 }
@@ -1557,6 +1558,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		let relocatedEntity = null;
 		const entityAdvanceEvents = [];
 		let spawnedEntityState = null;
+		let completedEntityState = null;
 		if (options.spawnWcid !== null) {
 			spawnedEntity = await evaluate(
 				client,
@@ -1564,6 +1566,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					? "globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnSimulatedExplorerEntity"
 					: "globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntity",
 				[options.spawnWcid, options.spawnDistance],
+			);
+			await delay(500);
+			spawnedEntityState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
 			);
 			if (options.launchDirection !== null) {
 				launchedEntity = await evaluate(
@@ -1598,7 +1606,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				);
 			}
 			await delay(500);
-			spawnedEntityState = await evaluate(
+			completedEntityState = await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
@@ -1960,6 +1968,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					? null
 					: {
 							advances: entityAdvanceEvents,
+							completedState: completedEntityState,
 							launched: launchedEntity,
 							relocated: relocatedEntity,
 							spawned: spawnedEntity,

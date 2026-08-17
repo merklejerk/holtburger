@@ -7,7 +7,7 @@ use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
-    CellTransitRequest, CollisionQueryError, CollisionScene, ContactState,
+    CellTransitRequest, CollisionPlacement, CollisionQueryError, CollisionScene, ContactState,
     DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, GroundState, GroundSupport,
     GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome,
     GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyBudget,
@@ -297,6 +297,21 @@ impl PhysicalBodyActuation {
             supported_planar_velocity,
         )?))
     }
+
+    /// Whether this tick input contains no controller, launch, acceleration, or flight work.
+    pub(crate) fn permits_dynamic_settling(&self) -> bool {
+        match self {
+            Self::FreeFlight { velocity } => *velocity == Vector3::zero(),
+            Self::Grounded(actuation) => {
+                matches!(
+                    actuation.supported_motion,
+                    GroundedSupportedMotion::Coasting
+                ) && actuation.launch.is_none()
+                    && actuation.control_heading.is_none()
+                    && actuation.external_acceleration == Vector3::zero()
+            }
+        }
+    }
 }
 
 /// Response-owned state retained with a generic body's single authoritative pose.
@@ -327,6 +342,26 @@ impl PhysicalBodyResponseState {
     }
 }
 
+/// Solver-owned integration activity for a physically participating dynamic body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DynamicBodyActivity {
+    /// The collection participant must attempt this body's next eligible solve.
+    Active,
+    /// Stable support was accepted with no remaining root-motion work.
+    Settled,
+}
+
+/// Dynamic-only physical state kept as one invariant-bearing optional unit.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DynamicBodyRuntimeState {
+    /// Prepared target geometry and effective collision/scheduling policy.
+    pub(crate) collision: DynamicBodyCollisionDefinition,
+    /// Solver-owned activity, independent from semantic and presentation state.
+    pub(crate) activity: DynamicBodyActivity,
+    /// Complete collision-domain membership accepted for the current root pose.
+    pub(crate) placement: CollisionPlacement,
+}
+
 /// Physical definition and response memory attached to one spatial body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicalBodyState {
@@ -336,8 +371,8 @@ pub struct PhysicalBodyState {
     pub collision_filter: PhysicalCollisionFilter,
     /// Mutable authored/network response state, independent from immutable geometry.
     pub response_policy: PhysicalBodyResponsePolicy,
-    /// Entity-specific peer collision facts; absent for camera and other generic bodies.
-    pub entity_collision: Option<DynamicBodyCollisionDefinition>,
+    /// Entity-specific collision and activity state; absent for generic physical bodies.
+    pub(crate) dynamic: Option<DynamicBodyRuntimeState>,
     /// Response-only state; the containing `SpatialBody` remains the sole pose owner.
     pub response: PhysicalBodyResponseState,
 }
@@ -393,7 +428,7 @@ impl PhysicalBodyState {
             definition,
             collision_filter,
             response_policy,
-            entity_collision: None,
+            dynamic: None,
             response,
         }
     }
@@ -410,7 +445,11 @@ impl PhysicalBodyState {
             entity_collision,
         } = definition;
         let mut state = Self::new(movement, collision_filter, response_policy, cell);
-        state.entity_collision = Some(entity_collision);
+        state.dynamic = Some(DynamicBodyRuntimeState {
+            collision: entity_collision,
+            activity: DynamicBodyActivity::Active,
+            placement: cell.map_or_else(CollisionPlacement::outdoor, CollisionPlacement::interior),
+        });
         state
     }
 
@@ -422,7 +461,7 @@ impl PhysicalBodyState {
         if !state.supports_local_simulation() {
             return None;
         }
-        let mut entity_collision = self.entity_collision.clone()?;
+        let mut entity_collision = self.dynamic.as_ref()?.collision.clone();
         if (state.presentation.default_animation && !entity_collision.default_animation_available)
             || (state.presentation.default_script && !entity_collision.default_script_available)
         {
@@ -1435,17 +1474,34 @@ pub fn resolve_physical_body_cell(
     definition: PhysicalBodyDefinition,
     seed_cell: Option<Guid>,
 ) -> Result<Option<Guid>, CollisionQueryError> {
+    Ok(resolve_physical_body_placement(scene, pose, definition, seed_cell)?.committed_cell())
+}
+
+/// Resolves the complete initial collision-domain membership for every movement sphere.
+pub(crate) fn resolve_physical_body_placement(
+    scene: &CollisionScene,
+    pose: WorldPosition,
+    definition: PhysicalBodyDefinition,
+    seed_cell: Option<Guid>,
+) -> Result<CollisionPlacement, CollisionQueryError> {
     let primary = definition.spheres().primary();
     let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
     let center = pose.coords + pose.rotation.rotate_vector(primary.center);
-    Ok(scene
-        .transit_cell(CellTransitRequest {
+    let mut placement = scene.transit_cell(CellTransitRequest {
+        previous_cell: seed_cell,
+        anchor,
+        center,
+        radius: primary.radius,
+    })?;
+    if let Some(upper) = definition.spheres().upper_constraint() {
+        placement = placement.merge_reached(scene.transit_cell(CellTransitRequest {
             previous_cell: seed_cell,
             anchor,
-            center,
-            radius: primary.radius,
-        })?
-        .committed_cell())
+            center: pose.coords + pose.rotation.rotate_vector(upper.center),
+            radius: upper.radius,
+        })?);
+    }
+    Ok(placement)
 }
 
 fn validate_sphere(sphere: Sphere) -> Result<GroundedSphere, PhysicalBodyDefinitionError> {

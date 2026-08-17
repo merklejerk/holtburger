@@ -3163,9 +3163,10 @@ fn set_state_reconfigures_then_detaches_dynamic_client_physics_without_losing_se
             .physical
             .as_ref()
             .unwrap()
-            .entity_collision
+            .dynamic
             .as_ref()
             .unwrap()
+            .collision
             .scheduling,
         crate::EntityPhysicsScheduling::Frozen
     );

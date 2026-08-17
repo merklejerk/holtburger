@@ -15,12 +15,12 @@ use holtburger_core::{
     replace_dynamic_entity_body,
 };
 use holtburger_world::{
-    CollisionScene, DynamicBodyKinematics, DynamicContactBudgetExceeded,
-    DynamicPhysicalBodyDefinition, EdgeProtection, EntityPhysicsTransitionDecision,
-    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionExclusions,
-    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, RuntimeSpatialBodyView,
-    SpatialBody, SpatialBodyId, SpatialScene,
+    CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
+    DynamicContactBudgetExceeded, DynamicPhysicalBodyDefinition, EdgeProtection,
+    EntityPhysicsTransitionDecision, GroundedBodyActuation, PhysicalBodyActuation,
+    PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyTickResult,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 
@@ -209,6 +209,14 @@ pub struct HostPhysicalBodyTick {
     pub collision: Arc<CollisionScene>,
 }
 
+/// One committed collection epoch with body motion and report edges kept orthogonal.
+pub struct HostDynamicEntityCollectionTick {
+    /// Stable-ID directional body commits accepted during this epoch.
+    pub bodies: Vec<HostPhysicalBodyTick>,
+    /// First-touch and end edges; silent refreshes are intentionally absent.
+    pub collision_reports: Vec<CollisionReportOutcome>,
+}
+
 struct HostPhysicalBodyTickRequest {
     scene: Arc<CollisionScene>,
     previous: SpatialBody,
@@ -378,7 +386,7 @@ impl HostSimulationRuntime {
         body_id: SpatialBodyId,
         pose: WorldPosition,
         now: std::time::Instant,
-    ) -> Result<RuntimeSpatialBodyView, DynamicEntityBodyOperationError> {
+    ) -> Result<DynamicBodyRelocationOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         if state.bodies.body(body_id).is_none() {
             return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
@@ -451,7 +459,7 @@ impl HostSimulationRuntime {
         &self,
         delta_seconds: f32,
         now: std::time::Instant,
-    ) -> Result<Vec<HostPhysicalBodyTick>> {
+    ) -> Result<HostDynamicEntityCollectionTick> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = Arc::clone(&state.scene);
         let tick_start =
@@ -491,7 +499,15 @@ impl HostSimulationRuntime {
                 Err(error) => return Err(error),
             }
         }
-        Ok(ticks)
+        let mut collision_reports = ticks
+            .iter()
+            .flat_map(|tick| tick.result.collision_reports.iter().copied())
+            .collect::<Vec<_>>();
+        collision_reports.extend(state.bodies.finish_dynamic_entity_collection(now)?);
+        Ok(HostDynamicEntityCollectionTick {
+            bodies: ticks,
+            collision_reports,
+        })
     }
 
     #[cfg(test)]

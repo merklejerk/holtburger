@@ -193,16 +193,14 @@ pub enum SettlePermission {
 pub enum GroundedBudget {
     /// The requested tick requires too many anti-tunneling substeps.
     Substeps,
-    /// Contact separation did not converge inside one substep's pass budget.
-    Contacts,
 }
 
 /// Observable result of one grounded solve.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GroundedOutcome {
-    /// The tick completed and all body state was committed atomically.
+    /// The tick completed and the latest finite body state was committed.
     Solved {
-        /// New safely committed state.
+        /// New committed state.
         body: GroundedBody,
         /// Achieved world-space velocity derived from committed displacement.
         achieved_velocity: Vector3,
@@ -216,6 +214,8 @@ pub enum GroundedOutcome {
         contact_passes: usize,
         /// Distinct non-walkable planes encountered during this solve.
         constraint_count: usize,
+        /// Whether the final committed body placement still intersects static environment geometry.
+        residual_contacts: bool,
     },
     /// A finite safety budget was reached; the last safe state is held.
     BudgetExceeded {
@@ -350,7 +350,6 @@ pub fn solve_grounded(
     }
 
     let substep = displacement / required_substeps as f32;
-    let original = request.body.clone();
     let mut body = request.body;
     body.velocity = next_velocity;
     // Retail carries one collision normal into the next substep, then clears it before collision
@@ -375,7 +374,6 @@ pub fn solve_grounded(
         } = movement_candidate(context, &body, current, constrained_substep)?;
         let mut contacted_walkable_support =
             has_walkable_support_contact(&role_contacts, config.walkable_normal_z);
-        let mut converged = false;
         let mut lower_step_retried = false;
 
         for _ in 0..config.maximum_contact_passes {
@@ -383,7 +381,6 @@ pub fn solve_grounded(
             contacted_walkable_support |=
                 has_walkable_support_contact(&role_contacts, config.walkable_normal_z);
             if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
-                converged = true;
                 break;
             }
 
@@ -487,20 +484,16 @@ pub fn solve_grounded(
                 request.filter,
             )?;
             if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
-                converged = true;
                 break;
             }
         }
 
-        if !converged {
-            return Ok(GroundedOutcome::BudgetExceeded {
-                body: original,
-                budget: GroundedBudget::Contacts,
-                substeps: completed_substeps,
-                contact_passes,
-                constraint_count: encountered_constraints.len(),
-            });
-        }
+        // RETAIL DIVERGENCE: Retail restores `check_pos` to `curr_pos` after an adjusted or slid
+        // transition (`CTransition::validate_transition`, acclient.c:300941-300972), then lets the
+        // outer substep loop continue (acclient.c:301938-301946). We retain the latest finite
+        // corrected candidate instead. Restoring retail's hold behavior makes one WCID 1 body in
+        // the representative 300-body census retry the same thin building-shell edge forever;
+        // the representative 50-body census otherwise converged without this edge case.
 
         // Retail's zero-step transitional path rebuilds placement but does not run step-down
         // (`CTransition::find_transitional_position`, acclient.c:301820-301996). Reacquiring
@@ -632,6 +625,25 @@ pub fn solve_grounded(
         });
     }
 
+    let final_placement = transit_pair(
+        scene,
+        anchor,
+        &body,
+        reference_pose,
+        request.spheres,
+        current,
+    )?;
+    let residual_contacts = placement_contacts(
+        scene,
+        anchor,
+        current,
+        reference_pose,
+        request.spheres,
+        &final_placement,
+        request.filter,
+    )?
+    .iter()
+    .any(|entry| !entry.contacts.is_empty());
     let achieved_velocity = (current - start) / request.delta_seconds;
     Ok(GroundedOutcome::Solved {
         achieved_velocity,
@@ -641,6 +653,7 @@ pub fn solve_grounded(
         substeps: required_substeps,
         contact_passes,
         constraint_count: encountered_constraints.len(),
+        residual_contacts,
     })
 }
 
@@ -1294,6 +1307,19 @@ mod tests {
         }
     }
 
+    fn close_pair() -> GroundedBodySpheres {
+        GroundedBodySpheres {
+            support: GroundedSphere {
+                center: Vector3::new(0.0, 0.0, 0.475),
+                radius: 0.48,
+            },
+            upper: Some(GroundedSphere {
+                center: Vector3::new(0.0, 0.0, 1.35),
+                radius: 0.48,
+            }),
+        }
+    }
+
     fn body(coords: Vector3, support: Option<Vector3>) -> GroundedBody {
         GroundedBody {
             pose: pose(coords),
@@ -1501,6 +1527,38 @@ mod tests {
         )
     }
 
+    fn thin_sloped_shell_edge() -> Vec<PlacedCollider> {
+        let bounds = Sphere {
+            center: Vector3::new(41.745, 119.25, 23.25),
+            radius: 6.0,
+        };
+        vec![
+            polygon(
+                1,
+                vec![
+                    Vector3::new(37.12, 119.75, 22.8),
+                    Vector3::new(46.87, 119.75, 22.8),
+                    Vector3::new(47.37, 119.25, 22.65),
+                ],
+                Vector3::new(0.0, 0.287348, -0.957826),
+                bounds,
+            ),
+            polygon(
+                2,
+                vec![
+                    Vector3::new(47.37, 119.25, 23.0),
+                    Vector3::new(46.87, 119.75, 22.8),
+                    Vector3::new(37.12, 119.75, 22.8),
+                    Vector3::new(36.12, 118.75, 23.2),
+                    Vector3::new(36.12, 116.75, 24.0),
+                    Vector3::new(44.87, 116.75, 24.0),
+                ],
+                Vector3::new(0.0, 0.371391, 0.928477),
+                bounds,
+            ),
+        ]
+    }
+
     fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
         let mut scene = CollisionScene::new();
         insert_test_halo(&mut scene, &[LANDBLOCK]);
@@ -1613,6 +1671,47 @@ mod tests {
 
         assert_eq!(body.pose.coords, Vector3::new(11.5, 20.0, 30.0));
         assert_eq!(body.velocity, Vector3::new(3.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn thin_shell_residual_commits_and_finishes_the_requested_substeps() {
+        let scene = scene(thin_sloped_shell_edge());
+        let mut falling = body(Vector3::new(39.003_113, 120.106_17, 21.772_526), None);
+        falling.velocity = Vector3::new(-0.000_000_648_894_3, -9.048_64, 3.934_283_7);
+
+        let GroundedOutcome::Solved {
+            mut body,
+            motion,
+            substeps,
+            contact_passes,
+            residual_contacts,
+            ..
+        } = solve(&scene, falling, close_pair(), Vector3::zero(), 1.0 / 30.0)
+        else {
+            panic!("bounded contact correction must still complete the ordinary tick")
+        };
+
+        assert_eq!(substeps, 2);
+        assert_eq!(motion.len(), substeps);
+        assert_eq!(motion.last().unwrap().end_fraction, 1.0);
+        assert!(contact_passes >= config().maximum_contact_passes);
+        assert!(residual_contacts);
+        assert!(body.pose.coords.x.is_finite());
+        assert!(body.pose.coords.y.is_finite());
+        assert!(body.pose.coords.z.is_finite());
+
+        let residual_y = body.pose.coords.y;
+        body.velocity = Vector3::new(0.0, 5.0, 0.0);
+        let GroundedOutcome::Solved {
+            body: cleared,
+            residual_contacts,
+            ..
+        } = solve(&scene, body, close_pair(), Vector3::zero(), 0.1)
+        else {
+            panic!("ordinary motion away from a residual contact must remain solvable")
+        };
+        assert!(!residual_contacts);
+        assert!(cleared.pose.coords.y > residual_y);
     }
 
     #[test]

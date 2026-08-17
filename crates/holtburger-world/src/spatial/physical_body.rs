@@ -8,13 +8,18 @@ use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
-    CellTransitRequest, CollisionPlacement, CollisionQueryError, CollisionScene, ContactState,
-    DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, GroundState, GroundSupport,
-    GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome,
-    GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody, PhysicalFlyBudget,
-    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
+    CellTransitRequest, CollisionPlacement, CollisionQueryError, CollisionReportOutcome,
+    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition,
+    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
+    GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody,
+    PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
     PlacedMotionPathRequest, SettlePermission, SpatialBody, solve_grounded, solve_physical_fly,
 };
+
+/// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
+const RETAIL_SMALL_VELOCITY_SQUARED: f32 = 0.25 * 0.25;
+/// Retail compares the squared speed to the floor with its ordinary physics epsilon.
+const RETAIL_PHYSICS_EPSILON: f32 = 0.000_2;
 use crate::EffectiveEntityPhysicsState;
 
 /// Invalid geometry rejected before a body enters authoritative world state.
@@ -395,7 +400,7 @@ pub enum PhysicalBodyReconfiguration {
 }
 
 /// Complete synchronous consequence of a committed physical-state replacement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhysicalBodyReconfigurationOutcome {
     /// Participation immediately before the operation.
     pub before: PhysicalBodyParticipation,
@@ -405,6 +410,8 @@ pub struct PhysicalBodyReconfigurationOutcome {
     pub change: PhysicalBodyReconfiguration,
     /// Exact movement geometry matched, so contact/placement response memory remained valid.
     pub response_memory_preserved: bool,
+    /// Forced report ends caused by directional contract or geometry invalidation.
+    pub collision_reports: Vec<CollisionReportOutcome>,
 }
 
 impl PhysicalBodyState {
@@ -670,6 +677,8 @@ pub struct PhysicalBodyTickResult {
     pub scene_residency: PhysicalBodySceneResidency,
     /// Named semantic consequence committed with a confirmed dynamic-body impact.
     pub dynamic_state_change: Option<DynamicBodyPhysicsStateChange>,
+    /// First-touch report edges committed by this body transaction; refreshes remain silent.
+    pub collision_reports: Vec<CollisionReportOutcome>,
 }
 
 /// Source-neutral complete-state mutation a producer applies to its semantic authority.
@@ -692,6 +701,10 @@ pub(super) struct PhysicalBodyTickCommit {
     pub response: PhysicalBodyResponseState,
     /// Placed motion returned to the caller.
     pub motion: PhysicalBodyMotion,
+    /// Whether the accepted static-environment solve confirmed contact this tick.
+    pub environment_contact: bool,
+    /// Whether the final accepted placement still requires bounded contact correction.
+    pub residual_contacts: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -888,6 +901,8 @@ fn solve_free_sphere_tick(
                     substeps,
                     contact_passes,
                 },
+                environment_contact: collision_normal.is_some(),
+                residual_contacts: false,
             })
         }
         PhysicalFlyOutcome::BudgetExceeded {
@@ -925,7 +940,14 @@ fn solve_grounded_body_tick(
     let mut grounded_body = GroundedBody {
         pose: body.pose,
         cell: state.cell,
-        velocity: body.velocity,
+        velocity: match actuation.supported_motion {
+            // Retail zeros retained velocity below `SmallVelocity` before applying acceleration
+            // and integrating the next offset (`CPhysicsObj::UpdatePhysicsInternal`,
+            // `acclient.c:306106-306153`). Explicit controller drive and launch are separate
+            // commands and must not be erased by this retained-response canonicalization.
+            GroundedSupportedMotion::Coasting => canonical_retained_velocity(body.velocity),
+            GroundedSupportedMotion::Driven(_) => body.velocity,
+        },
         ground: state.ground,
     };
     grounded_body.velocity =
@@ -1005,6 +1027,7 @@ fn solve_grounded_body_tick(
             substeps,
             contact_passes,
             constraint_count,
+            residual_contacts,
         } => {
             let path = trace_body_reference_path(
                 scene,
@@ -1077,6 +1100,8 @@ fn solve_grounded_body_tick(
                     substeps,
                     contact_passes,
                 },
+                environment_contact: collision_normal.is_some() || ground.contact_plane().is_some(),
+                residual_contacts,
             })
         }
         GroundedOutcome::BudgetExceeded {
@@ -1097,6 +1122,14 @@ fn solve_grounded_body_tick(
                 contact_passes,
             },
         ),
+    }
+}
+
+fn canonical_retained_velocity(velocity: Vector3) -> Vector3 {
+    if velocity.length_squared() - RETAIL_SMALL_VELOCITY_SQUARED < RETAIL_PHYSICS_EPSILON {
+        Vector3::zero()
+    } else {
+        velocity
     }
 }
 
@@ -1214,6 +1247,8 @@ fn held_motion_commit(
             substeps: diagnostics.substeps,
             contact_passes: diagnostics.contact_passes,
         },
+        environment_contact: false,
+        residual_contacts: false,
     })
 }
 
@@ -1242,7 +1277,6 @@ fn free_budget_status(budget: PhysicalFlyBudget) -> PhysicalBodyTickStatus {
 fn grounded_budget_status(budget: GroundedBudget) -> PhysicalBodyTickStatus {
     match budget {
         GroundedBudget::Substeps => PhysicalBodyTickStatus::SubstepBudgetExceeded,
-        GroundedBudget::Contacts => PhysicalBodyTickStatus::ContactBudgetExceeded,
     }
 }
 

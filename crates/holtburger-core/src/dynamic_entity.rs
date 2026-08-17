@@ -21,14 +21,14 @@ use holtburger_dat::file_type::{
 };
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::{
-    DynamicBodyCollisionDefinition, DynamicBodyKinematics, DynamicPhysicalBodyDefinition,
-    EdgeProtection, EffectiveEntityPhysicsState, EntityAppearance, EntityPhysicalTransitionAction,
-    EntityPhysicsSetupFacts, EntityPhysicsTransitionDecision, PhysicalBodyParticipation,
-    PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
-    PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-    PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
-    resolve_effective_entity_physics_state,
+    CollisionReportOutcome, DynamicBodyCollisionDefinition, DynamicBodyKinematics,
+    DynamicPhysicalBodyDefinition, EdgeProtection, EffectiveEntityPhysicsState, EntityAppearance,
+    EntityPhysicalTransitionAction, EntityPhysicsSetupFacts, EntityPhysicsTransitionDecision,
+    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
+    PhysicalBodyResponsePolicy, PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity,
+    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+    PreparedEntityBspPart, PreparedEntityTargetGeometry, RuntimeSpatialBodyView, SpatialBody,
+    SpatialBodyId, SpatialScene, resolve_effective_entity_physics_state,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -359,6 +359,8 @@ pub struct DynamicEntityBodyRemovalOutcome {
     pub body: RuntimeSpatialBodyView,
     /// Physical participation immediately before removal.
     pub participation: PhysicalBodyParticipation,
+    /// Balanced forced ends for every report lifetime involving the retired body.
+    pub collision_reports: Vec<CollisionReportOutcome>,
 }
 
 /// Exact old/new body facts returned after a complete same-identity replacement commits.
@@ -402,30 +404,8 @@ pub fn install_dynamic_entity_body(
     if scene.body(body_id).is_some() {
         return Err(DynamicEntityBodyOperationError::AlreadyRegistered { body_id });
     }
-    let mut body = SpatialBody::new(
-        body_id,
-        definition.initial.pose,
-        definition.initial.created_at,
-    );
-    body.velocity = definition.initial.velocity;
-    body.acceleration = definition.initial.acceleration;
-    body.omega = definition.initial.omega;
+    let (body, physical_change) = build_dynamic_entity_body(definition, physical);
     scene.register_body(body);
-
-    let initial_cell = definition
-        .initial
-        .pose
-        .is_indoors()
-        .then_some(definition.initial.pose.landblock_id);
-    let Some(physical_change) = scene.set_dynamic_physical_body(
-        body_id,
-        physical,
-        PhysicalCollisionFilter::ALL,
-        initial_cell,
-    ) else {
-        let _ = scene.remove_body(body_id);
-        return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
-    };
     committed_body_outcome(scene, body_id, physical_change)
 }
 
@@ -442,22 +422,7 @@ pub fn apply_dynamic_entity_physics_transition(
         .pose;
     let initial_cell = pose.is_indoors().then_some(pose.landblock_id);
     let requested = match decision.action {
-        EntityPhysicalTransitionAction::None => {
-            let body = scene
-                .body(body_id)
-                .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
-            let participation = participation(body.physical.is_some());
-            return Ok(DynamicEntityBodyCommitOutcome {
-                body: body.runtime_view(),
-                participation,
-                physical_change: PhysicalBodyReconfigurationOutcome {
-                    before: participation,
-                    after: participation,
-                    change: PhysicalBodyReconfiguration::Unchanged,
-                    response_memory_preserved: body.physical.is_some(),
-                },
-            });
-        }
+        EntityPhysicalTransitionAction::None => None,
         EntityPhysicalTransitionAction::Attach | EntityPhysicalTransitionAction::Reconfigure => {
             Some(
                 replacement.ok_or(DynamicEntityBodyOperationError::MissingReplacement {
@@ -467,14 +432,35 @@ pub fn apply_dynamic_entity_physics_transition(
         }
         EntityPhysicalTransitionAction::Detach => None,
     };
-    let physical_change = scene
-        .set_dynamic_physical_body(
-            body_id,
-            requested,
-            PhysicalCollisionFilter::ALL,
-            initial_cell,
-        )
-        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+    let mut forced_report_ends = if decision.force_end_reports {
+        scene.force_end_collision_reports_for_recipient(body_id)
+    } else {
+        Vec::new()
+    };
+    let mut physical_change = if decision.action == EntityPhysicalTransitionAction::None {
+        let body = scene
+            .body(body_id)
+            .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+        let participation = participation(body.physical.is_some());
+        PhysicalBodyReconfigurationOutcome {
+            before: participation,
+            after: participation,
+            change: PhysicalBodyReconfiguration::Unchanged,
+            response_memory_preserved: body.physical.is_some(),
+            collision_reports: Vec::new(),
+        }
+    } else {
+        scene
+            .set_dynamic_physical_body(
+                body_id,
+                requested,
+                PhysicalCollisionFilter::ALL,
+                initial_cell,
+            )
+            .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?
+    };
+    forced_report_ends.append(&mut physical_change.collision_reports);
+    physical_change.collision_reports = forced_report_ends;
     committed_body_outcome(scene, body_id, physical_change)
 }
 
@@ -483,43 +469,84 @@ pub fn remove_dynamic_entity_body(
     scene: &mut SpatialScene,
     body_id: SpatialBodyId,
 ) -> Result<DynamicEntityBodyRemovalOutcome, DynamicEntityBodyOperationError> {
-    let removed = scene
-        .remove_body(body_id)
+    let (removed, collision_reports) = scene
+        .remove_body_with_collision_reports(body_id)
         .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
     Ok(DynamicEntityBodyRemovalOutcome {
         body: removed.runtime_view(),
         participation: participation(removed.physical.is_some()),
+        collision_reports,
     })
 }
 
 /// Replaces one same-identity body atomically from the caller's point of view.
 ///
-/// The previous body is restored exactly if successor installation unexpectedly fails. Semantic
-/// publication remains producer-owned and occurs only after this operation returns success.
+/// The complete successor is constructed before the one scene replacement. Semantic publication
+/// remains producer-owned and occurs only after this operation returns success.
 pub fn replace_dynamic_entity_body(
     scene: &mut SpatialScene,
     definition: &DynamicEntityDefinition,
     physical: Option<DynamicPhysicalBodyDefinition>,
 ) -> Result<DynamicEntityBodyReplacementOutcome, DynamicEntityBodyOperationError> {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    if scene.body(body_id).is_none() {
+        return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
+    }
+    let (successor, physical_change) = build_dynamic_entity_body(definition, physical);
+    let collision_reports = scene.force_end_collision_reports_for_body(body_id);
     let removed_body = scene
-        .remove_body(body_id)
-        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+        .register_body(successor)
+        .expect("prevalidated same-identity replacement lost its previous body");
     let removed = DynamicEntityBodyRemovalOutcome {
         body: removed_body.runtime_view(),
         participation: participation(removed_body.physical.is_some()),
+        collision_reports,
     };
-    match install_dynamic_entity_body(scene, definition, physical) {
-        Ok(installed) => Ok(DynamicEntityBodyReplacementOutcome { removed, installed }),
-        Err(error) => {
-            let displaced = scene.register_body(removed_body);
-            debug_assert!(
-                displaced.is_none(),
-                "failed successor installation left a body under the replaced identity"
-            );
-            Err(error)
+    let installed = committed_body_outcome(scene, body_id, physical_change)?;
+    Ok(DynamicEntityBodyReplacementOutcome { removed, installed })
+}
+
+fn build_dynamic_entity_body(
+    definition: &DynamicEntityDefinition,
+    physical: Option<DynamicPhysicalBodyDefinition>,
+) -> (SpatialBody, PhysicalBodyReconfigurationOutcome) {
+    let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    let mut body = SpatialBody::new(
+        body_id,
+        definition.initial.pose,
+        definition.initial.created_at,
+    );
+    body.velocity = definition.initial.velocity;
+    body.acceleration = definition.initial.acceleration;
+    body.omega = definition.initial.omega;
+    let physical_change = if let Some(physical) = physical {
+        let initial_cell = definition
+            .initial
+            .pose
+            .is_indoors()
+            .then_some(definition.initial.pose.landblock_id);
+        body.physical = Some(PhysicalBodyState::new_dynamic(
+            physical,
+            PhysicalCollisionFilter::ALL,
+            initial_cell,
+        ));
+        PhysicalBodyReconfigurationOutcome {
+            before: PhysicalBodyParticipation::PoseOnly,
+            after: PhysicalBodyParticipation::Physical,
+            change: PhysicalBodyReconfiguration::Attached,
+            response_memory_preserved: false,
+            collision_reports: Vec::new(),
         }
-    }
+    } else {
+        PhysicalBodyReconfigurationOutcome {
+            before: PhysicalBodyParticipation::PoseOnly,
+            after: PhysicalBodyParticipation::PoseOnly,
+            change: PhysicalBodyReconfiguration::Unchanged,
+            response_memory_preserved: false,
+            collision_reports: Vec::new(),
+        }
+    };
+    (body, physical_change)
 }
 
 /// Joins immutable semantic facts with the scene's current committed body view.
@@ -1082,11 +1109,12 @@ fn world_position_is_finite(position: WorldPosition) -> bool {
 mod tests {
     use super::*;
     use holtburger_common::properties::PhysicsState;
+    use holtburger_content::CollisionBall;
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EntityCollisionParticipation, EntityPartChange,
         EntityPhysicalIntent, EntityPhysicsTransitionContext, EntitySubPalette,
-        EntityTextureChange, PhysicalSphereSet, decide_entity_physics_state_transition,
-        resolve_effective_entity_physics_state,
+        EntityTextureChange, GroundedBodyActuation, PhysicalBodyActuation, PhysicalSphereSet,
+        decide_entity_physics_state_transition, resolve_effective_entity_physics_state,
     };
 
     fn definition_input() -> DynamicEntityDefinitionInput {
@@ -1257,7 +1285,10 @@ mod tests {
                 target_geometry: PreparedEntityTargetGeometry {
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
-                    fallback_shapes: Vec::new(),
+                    fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                        center: Vector3::new(0.0, 0.0, 0.5),
+                        radius: 0.5,
+                    }))],
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 },
                 scheduling: holtburger_world::EntityPhysicsScheduling::Eligible,
@@ -1366,5 +1397,87 @@ mod tests {
             scene.body(body_id).unwrap().velocity,
             replacement.initial.velocity
         );
+    }
+
+    #[test]
+    fn same_identity_replacement_returns_balanced_ends_for_both_report_directions() {
+        let created_at = Instant::now();
+        let mut first_input = definition_input();
+        first_input.initial.created_at = created_at;
+        first_input.initial.pose = WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        let first = DynamicEntityDefinition::prepare(first_input).unwrap();
+        let mut peer_input = definition_input();
+        peer_input.identity.guid = Guid(0x7000_0002);
+        peer_input.initial = first.initial;
+        let peer = DynamicEntityDefinition::prepare(peer_input).unwrap();
+        let first_id = SpatialBodyId::Entity(first.identity.guid);
+        let peer_id = SpatialBodyId::Entity(peer.identity.guid);
+        let mut scene = SpatialScene::new();
+        install_dynamic_entity_body(&mut scene, &first, Some(prepared_physics())).unwrap();
+        install_dynamic_entity_body(&mut scene, &peer, Some(prepared_physics())).unwrap();
+
+        let collision = holtburger_world::CollisionScene::new();
+        let prepared = scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, |_| {
+                Ok(PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast(),
+                ))
+            })
+            .unwrap();
+        let touched_at = created_at + std::time::Duration::from_millis(100);
+        let mut started = Vec::new();
+        for (body_id, actuation) in prepared {
+            let result = scene
+                .tick_dynamic_physical_body_transaction(
+                    body_id,
+                    &collision,
+                    actuation,
+                    0.1,
+                    touched_at,
+                    |_, _| Ok(()),
+                )
+                .unwrap()
+                .0;
+            started.extend(result.collision_reports);
+        }
+        started.extend(scene.finish_dynamic_entity_collection(touched_at).unwrap());
+        assert_eq!(started.len(), 2);
+
+        let mut despawn_scene = scene.clone();
+        let despawned = remove_dynamic_entity_body(&mut despawn_scene, first_id).unwrap();
+        assert_eq!(despawned.collision_reports.len(), 2);
+        assert!(despawn_scene.body(first_id).is_none());
+
+        let mut replacement_input = definition_input();
+        replacement_input.initial.created_at = touched_at;
+        replacement_input.initial.pose = WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::new(10.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let replacement = DynamicEntityDefinition::prepare(replacement_input).unwrap();
+        let replaced = replace_dynamic_entity_body(&mut scene, &replacement, None).unwrap();
+
+        assert_eq!(replaced.removed.collision_reports.len(), 2);
+        assert!(replaced.removed.collision_reports.iter().any(|report| {
+            report.contact.recipient == first_id
+                && matches!(
+                    report.contact.source,
+                    holtburger_world::CollisionReportSource::DynamicBody { peer, .. }
+                        if peer == peer_id
+                )
+        }));
+        assert!(replaced.removed.collision_reports.iter().any(|report| {
+            report.contact.recipient == peer_id
+                && matches!(
+                    report.contact.source,
+                    holtburger_world::CollisionReportSource::DynamicBody { peer, .. }
+                        if peer == first_id
+                )
+        }));
     }
 }

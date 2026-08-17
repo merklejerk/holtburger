@@ -211,6 +211,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 
 		runtime.updateSceneInterest({
@@ -359,6 +360,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -390,6 +392,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -434,6 +437,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 		const events: SceneAvailabilityEvent[] = [];
 		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
@@ -475,6 +479,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
@@ -508,6 +513,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
@@ -561,6 +567,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
@@ -606,6 +613,7 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_EMITTER_SOURCE,
 			SOUND_TABLE_SOURCE,
 			PARTICLE_MESH_SOURCE,
+			null,
 		);
 
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));

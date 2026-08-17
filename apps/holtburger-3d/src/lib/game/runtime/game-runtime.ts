@@ -9,6 +9,8 @@ import {
 	type SceneVector3,
 } from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
+import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
+import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import { animationHookCommand } from "../../assets/decode-animation-record";
@@ -46,6 +48,7 @@ import {
 import { TerrainSystem } from "../terrain/terrain-system";
 import { StaticObjectSystem } from "../systems/static-object-system";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
+import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
 import {
 	InlineObjectVisualTemplatePreparer,
 	ObjectVisualTemplateRepository,
@@ -150,6 +153,9 @@ import {
 	terrainSourceToOwnerId,
 	type TerrainResourceOwnerId,
 	type OwnerId,
+	type DynamicOwnerId,
+	type SpawnedDynamicOwnerId,
+	spawnedDynamicOwnerId,
 } from "./owner-ids";
 import type { ActiveRegionStaticDetailBinding } from "../resolution/active-region-static-detail";
 import {
@@ -157,11 +163,17 @@ import {
 	type StaticDetailRole,
 } from "../resolution/static-detail-role";
 import {
-	residentKey,
 	type AuthoredDynamicSource,
 	type ResolvedOutdoorStaticLayerSource,
 	type ResolvedStaticObjectLayerSource,
 } from "../resolution/landblock-layer";
+import { adaptAuthoredDynamicPresentation } from "../resolution/authored-dynamic-presentation";
+import {
+	adaptSpawnedDynamicPresentation,
+	spawnedDynamicPlacement,
+} from "./spawned-dynamic-presentation";
+import type { DynamicEntityView } from "./dynamic-entity-feed";
+import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import {
 	computeSceneInterest,
 	isOutdoorStaticLayer,
@@ -254,6 +266,8 @@ export interface GameRuntimeDependencies {
 	readonly particleEmitterSource: ParticleEmitterSource;
 	readonly soundTableSource: SoundTableSource;
 	readonly particleMeshSource: ParticleMeshSource;
+	/** Optional live-entity visual capability; null for runtimes that never consume a focused feed. */
+	readonly dynamicEntityVisualSource: DynamicEntityVisualSource | null;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -288,6 +302,18 @@ export interface GameRuntimeRenderDevice {
 interface PendingCommitArtifact {
 	readonly artifact: LandblockLayerCommit;
 	readonly revision: SceneInterestRevision;
+}
+
+interface SpawnedDynamicPresentationRecord {
+	readonly generation: number;
+	readonly nodeId: SceneNodeId;
+	readonly ownerId: SpawnedDynamicOwnerId;
+	readonly visualKey: string;
+}
+
+interface CachedDynamicVisual {
+	readonly completion: Promise<DecodedStaticPresentation>;
+	readonly users: Set<number>;
 }
 
 /** One activated authored-dynamic resident or valid static visual fallback. */
@@ -369,10 +395,24 @@ function ambientScanCellKey(position: SceneVector3): string {
 	return `${Math.floor(position[0] / AMBIENT_SCAN_CELL_SIZE)}:${Math.floor(position[2] / AMBIENT_SCAN_CELL_SIZE)}`;
 }
 
+/** Exact immutable visual lookup identity; motion and mutable physics never enter this key. */
+function dynamicVisualKey(entity: DynamicEntityView): string {
+	return JSON.stringify({
+		appearance: entity.presentation.appearance,
+		setupDid: entity.presentation.content.setupDid,
+	});
+}
+
+function formatDynamicGuid(guid: number): string {
+	return `0x${(guid >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
 export class GameRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
 	readonly #scene = new SceneGraph();
+	/** Sole frontend writer of dynamic entity root placement and residency. */
+	readonly #dynamicPlacements = new DynamicEntityPlacementSystem(this.#scene);
 	/** Logical geometry bindings and shared owner retention. */
 	readonly #geometry: GeometryManager<ResourceOwnerId>;
 	/** Logical texture preparation, device bindings, and shared owner retention. */
@@ -398,9 +438,19 @@ export class GameRuntime {
 	readonly #instances: StaticInstanceStreamManager<ResourceOwnerId>;
 	/** Dynamic roots, articulated part nodes, and presentation preparation. */
 	readonly #dynamics: DynamicEntitySystem<
-		OwnerId,
+		DynamicOwnerId,
 		DynamicGenerationResourceOwnerId
 	>;
+	readonly #dynamicEntityVisualSource: DynamicEntityVisualSource | null;
+	/** Desired producer generations are liveness tokens, not a second semantic entity mirror. */
+	readonly #spawnedDesiredGenerations = new Map<number, number>();
+	/** Installed frontend resources keyed by producer identity. */
+	readonly #spawnedPresentations = new Map<
+		number,
+		SpawnedDynamicPresentationRecord
+	>();
+	readonly #spawnedVisualKeys = new Map<number, string>();
+	readonly #spawnedVisuals = new Map<string, CachedDynamicVisual>();
 	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
 	readonly #envCells: EnvCellSystem<OwnerId, ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
@@ -417,6 +467,11 @@ export class GameRuntime {
 	readonly #particleMeshes: ParticleMeshCache;
 	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
 	readonly #targetSoundTables = new Map<BehaviorTargetId, DecodedSoundTable>();
+	/** Exact behavior targets installed by each shared dynamic owner. */
+	readonly #dynamicBehaviorTargets = new Map<
+		DynamicOwnerId,
+		ReadonlySet<BehaviorTargetId>
+	>();
 	/**
 	 * Sky-module-owned behavior targets, which have no scene residency at all.
 	 *
@@ -426,7 +481,9 @@ export class GameRuntime {
 	readonly #skyTargets = new Map<BehaviorTargetId, SkyBehaviorTarget>();
 	/** Runs the scripts authored on sky objects; owns their staging and lifetime. */
 	readonly #skyScripts: SkyScriptSystem;
-	readonly #physicsScriptSystem: PhysicsScriptSystem<OwnerId | SkyOwnerId>;
+	readonly #physicsScriptSystem: PhysicsScriptSystem<
+		DynamicOwnerId | SkyOwnerId
+	>;
 	readonly #audio: AudioSystem;
 	readonly #ambient: AmbientSystem;
 	/** Where ambience is centred; the listener's own position, kept for the scan and for playback. */
@@ -475,19 +532,6 @@ export class GameRuntime {
 		// Only a newly loaded batch reaches residency; already-known meshes never re-upload.
 		if (batch !== null)
 			await this.#renderer?.particles?.install(batch, this.#texturePreparer);
-	}
-
-	/** Keep committed mesh staging owned through shutdown and report host/device failures once. */
-	#stageCommittedParticleMeshes(
-		prepared: readonly {
-			readonly scriptClosure: PreparedPhysicsScriptClosure | null;
-		}[],
-	): void {
-		this.#trackRealizationContinuation(
-			this.#stageParticleMeshes(prepared).catch((cause) => {
-				console.error(new Error("Particle mesh staging failed.", { cause }));
-			}),
-		);
 	}
 
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
@@ -661,6 +705,7 @@ export class GameRuntime {
 		dependencies: GameRuntimeDependencies,
 	) {
 		this.#tickProfiler = dependencies.tickProfiler;
+		this.#dynamicEntityVisualSource = dependencies.dynamicEntityVisualSource;
 		this.#terrainGenerator = dependencies.terrainGenerator;
 		this.#texturePreparer = dependencies.texturePreparer;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
@@ -844,6 +889,7 @@ export class GameRuntime {
 		});
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
+			this.#dynamicPlacements,
 			new ObjectVisualTemplateRepository<
 				DynamicGenerationResourceOwnerId,
 				AtlasRequirementHandle<ResourceOwnerId>
@@ -878,8 +924,9 @@ export class GameRuntime {
 		});
 		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
 		// by design. A holder breaks the construction cycle without making the router mutable.
-		const scriptWiring: { system?: PhysicsScriptSystem<OwnerId | SkyOwnerId> } =
-			{};
+		const scriptWiring: {
+			system?: PhysicsScriptSystem<DynamicOwnerId | SkyOwnerId>;
+		} = {};
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
 				audio: {
@@ -1038,6 +1085,7 @@ export class GameRuntime {
 		particleEmitterSource: ParticleEmitterSource,
 		soundTableSource: SoundTableSource,
 		particleMeshSource: ParticleMeshSource,
+		dynamicEntityVisualSource: DynamicEntityVisualSource | null,
 		roll?: UniformRoll,
 		tickProfiler?: RuntimeTickProfiler,
 	): Promise<GameRuntime> {
@@ -1051,6 +1099,7 @@ export class GameRuntime {
 			particleEmitterSource,
 			physicsScriptSource,
 			particleMeshSource,
+			dynamicEntityVisualSource,
 			roll,
 			soundTableSource,
 			tickProfiler,
@@ -1074,6 +1123,160 @@ export class GameRuntime {
 		dependencies: GameRuntimeDependencies,
 	): GameRuntime {
 		return new GameRuntime(renderResources, commitPipeline, dependencies);
+	}
+
+	/** Reconcile the focused producer mirror into shared dynamic presentation ownership. */
+	async reconcileSpawnedDynamicEntities(
+		entities: readonly DynamicEntityView[],
+	): Promise<void> {
+		if (this.#destroyed)
+			throw new Error("Cannot reconcile spawned entities after runtime shutdown.");
+		if (this.#dynamicEntityVisualSource === null && entities.length > 0) {
+			throw new Error(
+				"This runtime has no dynamic-entity visual source capability.",
+			);
+		}
+		const requested = new Map<number, DynamicEntityView>();
+		for (const entity of entities) {
+			const guid = entity.identity.guid;
+			if (requested.has(guid))
+				throw new Error(
+					`Spawned dynamic reconciliation repeats GUID ${formatDynamicGuid(guid)}.`,
+				);
+			requested.set(guid, entity);
+		}
+		for (const guid of [...this.#spawnedDesiredGenerations.keys()]) {
+			if (!requested.has(guid)) this.#removeSpawnedDynamicEntity(guid);
+		}
+		const preparations: Promise<void>[] = [];
+		for (const entity of requested.values()) {
+			const guid = entity.identity.guid;
+			const visualKey = dynamicVisualKey(entity);
+			this.#spawnedDesiredGenerations.set(guid, entity.generation);
+			const visual = this.#retainSpawnedVisual(guid, visualKey, entity);
+			const preparation = this.#upsertSpawnedDynamicEntity(
+				entity,
+				visualKey,
+				visual,
+			);
+			this.#trackRealizationContinuation(preparation);
+			preparations.push(preparation);
+		}
+		const outcomes = await Promise.allSettled(preparations);
+		const failures = outcomes.flatMap((outcome) =>
+			outcome.status === "rejected" ? [outcome.reason] : [],
+		);
+		if (failures.length === 1) throw failures[0];
+		if (failures.length > 1) {
+			throw new AggregateError(
+				failures,
+				`${failures.length} spawned dynamic entities failed presentation reconciliation.`,
+			);
+		}
+	}
+
+	async #upsertSpawnedDynamicEntity(
+		entity: DynamicEntityView,
+		visualKey: string,
+		visual: Promise<DecodedStaticPresentation>,
+	): Promise<void> {
+		const guid = entity.identity.guid;
+		const current = this.#spawnedPresentations.get(guid);
+		if (current?.generation === entity.generation) {
+			if (current.visualKey !== visualKey) {
+				throw new Error(
+					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts without changing generation.`,
+				);
+			}
+			this.#applySpawnedDynamicState(current.nodeId, entity);
+			return;
+		}
+		const resolved = await visual;
+		if (this.#spawnedDesiredGenerations.get(guid) !== entity.generation) return;
+		const ownerId = spawnedDynamicOwnerId(guid);
+		const activation = await this.#prepareDynamicOwner(ownerId, [
+			adaptSpawnedDynamicPresentation(entity, resolved),
+		]);
+		if (this.#spawnedDesiredGenerations.get(guid) !== entity.generation) {
+			activation.release();
+			return;
+		}
+		const [nodeId] = activation.nodeIds;
+		if (nodeId === undefined || activation.nodeIds.length !== 1) {
+			activation.release();
+			throw new Error(
+				`Dynamic entity ${formatDynamicGuid(guid)} prepared ${activation.nodeIds.length} scene roots.`,
+			);
+		}
+		activation.commit();
+		this.#spawnedPresentations.set(guid, {
+			generation: entity.generation,
+			nodeId,
+			ownerId,
+			visualKey,
+		});
+		this.#applySpawnedDynamicState(nodeId, entity);
+	}
+
+	#applySpawnedDynamicState(
+		nodeId: SceneNodeId,
+		entity: DynamicEntityView,
+	): void {
+		this.#dynamics.updatePlacement(nodeId, spawnedDynamicPlacement(entity));
+		this.#dynamics.updatePresentationState(nodeId, {
+			cloaked: entity.physics.cloaked,
+			hidden: entity.physics.hidden,
+			lighting: entity.physics.lighting,
+			noDraw: entity.physics.noDraw,
+		});
+	}
+
+	#retainSpawnedVisual(
+		guid: number,
+		visualKey: string,
+		entity: DynamicEntityView,
+	): Promise<DecodedStaticPresentation> {
+		const previousKey = this.#spawnedVisualKeys.get(guid);
+		if (previousKey !== undefined && previousKey !== visualKey) {
+			this.#releaseSpawnedVisual(guid, previousKey);
+		}
+		this.#spawnedVisualKeys.set(guid, visualKey);
+		let cached = this.#spawnedVisuals.get(visualKey);
+		if (cached === undefined) {
+			const source = this.#dynamicEntityVisualSource;
+			if (source === null)
+				throw new Error(
+					"This runtime has no dynamic-entity visual source capability.",
+				);
+			const completion = source.load(entity.presentation);
+			cached = { completion, users: new Set() };
+			this.#spawnedVisuals.set(visualKey, cached);
+			void completion.catch(() => {
+				if (this.#spawnedVisuals.get(visualKey) === cached)
+					this.#spawnedVisuals.delete(visualKey);
+			});
+		}
+		cached.users.add(guid);
+		return cached.completion;
+	}
+
+	#releaseSpawnedVisual(guid: number, visualKey: string): void {
+		const cached = this.#spawnedVisuals.get(visualKey);
+		cached?.users.delete(guid);
+		if (cached?.users.size === 0) this.#spawnedVisuals.delete(visualKey);
+		if (this.#spawnedVisualKeys.get(guid) === visualKey)
+			this.#spawnedVisualKeys.delete(guid);
+	}
+
+	#removeSpawnedDynamicEntity(guid: number): void {
+		this.#spawnedDesiredGenerations.delete(guid);
+		const visualKey = this.#spawnedVisualKeys.get(guid);
+		if (visualKey !== undefined) this.#releaseSpawnedVisual(guid, visualKey);
+		const installed = this.#spawnedPresentations.get(guid);
+		if (installed !== undefined) {
+			this.#retireDynamicOwner(installed.ownerId);
+			this.#spawnedPresentations.delete(guid);
+		}
 	}
 
 	/** Replace frontend-owned static content interest without moving the camera. */
@@ -1528,6 +1731,10 @@ export class GameRuntime {
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
+		for (const guid of [...this.#spawnedDesiredGenerations.keys()])
+			this.#removeSpawnedDynamicEntity(guid);
+		this.#spawnedVisuals.clear();
+		this.#spawnedVisualKeys.clear();
 		this.#destroyed = true;
 		this.#sceneInterestCoordinator.destroy();
 		this.#commitArtifacts.length = 0;
@@ -1825,6 +2032,117 @@ export class GameRuntime {
 		);
 	}
 
+	/** Stage every visual and behavior dependency before one dynamic owner can publish. */
+	async #prepareDynamicOwner(
+		ownerId: DynamicOwnerId,
+		sources: readonly PlacedDynamicPresentationSource[],
+	) {
+		if (this.#destroyed)
+			throw new Error("Cannot prepare dynamics after runtime shutdown.");
+		const installation = this.#dynamics.replaceOwner(ownerId, sources);
+		const outcome = await installation.ready;
+		if (outcome === "superseded")
+			throw new Error(`Dynamic owner ${ownerId} preparation was superseded.`);
+		const prepared = installation.getPreparedEntities();
+		let animationStage: ReturnType<
+			AnimationSystem<ResourceOwnerId>["stageOwner"]
+		>;
+		try {
+			animationStage = this.#animation.stageOwner(
+				ownerId,
+				prepared.flatMap(({ animation, nodeId, source }) =>
+					animation.kind === "activatable"
+						? [
+								{
+									animation: animation.animation,
+									residentIdentity: source.identity,
+									target: {
+										generation: installation.generation,
+										targetId: behaviorTargetId(nodeId),
+									},
+								},
+							]
+						: [],
+				),
+			);
+		} catch (cause) {
+			installation.release();
+			throw cause;
+		}
+		let scriptStage: ReturnType<
+			PhysicsScriptSystem<DynamicOwnerId | SkyOwnerId>["stageOwner"]
+		> | null = null;
+		try {
+			scriptStage = this.#physicsScriptSystem.stageOwner(
+				ownerId,
+				prepared.flatMap(({ nodeId, scriptClosure }) =>
+					scriptClosure === null
+						? []
+						: [
+								{
+									closure: scriptClosure,
+									target: {
+										generation: installation.generation,
+										targetId: behaviorTargetId(nodeId),
+									},
+									timeSeconds: this.#lastFrameTimeSeconds,
+								},
+							],
+				),
+			);
+			// Particle meshes are part of an emitter's drawable closure, not a post-publish warmup.
+			await this.#stageParticleMeshes(prepared);
+			installation.prepareCommit(animationStage.samples);
+		} catch (cause) {
+			animationStage.release();
+			scriptStage?.release();
+			installation.release();
+			throw cause;
+		}
+		if (scriptStage === null)
+			throw new Error("Dynamic script staging completed without a stage.");
+		const committedScriptStage = scriptStage;
+		const nextTargets = new Set(
+			prepared.map(({ nodeId }) => behaviorTargetId(nodeId)),
+		);
+		let state: "prepared" | "committed" | "released" = "prepared";
+		return {
+			prepared,
+			nodeIds: installation.nodeIds,
+			generation: installation.generation,
+			commit: () => {
+				if (state !== "prepared")
+					throw new Error(`Cannot commit dynamic owner in state ${state}.`);
+				const previousTargets = this.#dynamicBehaviorTargets.get(ownerId);
+				// No script or animation can advance between these synchronous commits. Publishing
+				// the entity last makes the complete replacement observable as one runtime action.
+				animationStage.commit();
+				committedScriptStage.commit();
+				installation.commit();
+				for (const targetId of previousTargets ?? []) {
+					this.#particles.destroy({ generation: 0, targetId }, 0);
+					this.#targetSoundTables.delete(targetId);
+				}
+				for (const entity of prepared) {
+					if (entity.soundTable !== null)
+						this.#targetSoundTables.set(
+							behaviorTargetId(entity.nodeId),
+							entity.soundTable,
+						);
+				}
+				this.#dynamicBehaviorTargets.set(ownerId, nextTargets);
+				state = "committed";
+			},
+			release: () => {
+				if (state !== "prepared") return;
+				animationStage.release();
+				committedScriptStage.release();
+				installation.release();
+				state = "released";
+			},
+		};
+	}
+
 	async #prepareStaticAuthoredDynamics(
 		ownerId: OwnerId,
 		layer: LandblockLayerKind,
@@ -1842,35 +2160,11 @@ export class GameRuntime {
 				);
 			}
 		}
-		const installation = this.#dynamics.replaceOwner(ownerId, sources);
-		const outcome = await installation.ready;
-		if (outcome === "superseded")
-			throw new Error("Authored dynamic preparation was superseded.");
-		const prepared = installation.getPreparedEntities();
-		let animationStage: ReturnType<AnimationSystem<OwnerId>["stageOwner"]>;
-		try {
-			animationStage = this.#animation.stageOwner(
-				ownerId,
-				prepared.flatMap(({ animation, nodeId, source }) =>
-					animation.kind === "activatable"
-						? [
-								{
-									animation: animation.animation,
-									residentIdentity: residentKey(source.identity),
-									target: {
-										generation: installation.generation,
-										targetId: behaviorTargetId(nodeId),
-									},
-								},
-							]
-						: [],
-				),
-			);
-		} catch (cause) {
-			installation.release();
-			throw cause;
-		}
-		const diagnostics = prepared.map(
+		const activation = await this.#prepareDynamicOwner(
+			ownerId,
+			sources.map(adaptAuthoredDynamicPresentation),
+		);
+		const diagnostics = activation.prepared.map(
 			({ animation, source }): AuthoredDynamicResidentDiagnostic => ({
 				blockingHooks:
 					animation.kind === "retain-static-presentation"
@@ -1888,61 +2182,17 @@ export class GameRuntime {
 					animation.kind === "activatable"
 						? "animated"
 						: "static-visual-fallback",
-				residentId: residentKey(source.identity),
+				residentId: source.identity,
 				setupSourceId: source.setupId,
 			}),
 		);
-		let state: "prepared" | "committed" | "released" = "prepared";
-		try {
-			installation.prepareCommit(animationStage.samples);
-		} catch (cause) {
-			animationStage.release();
-			installation.release();
-			throw cause;
-		}
 		return {
 			commit: () => {
-				if (state !== "prepared")
-					throw new Error(`Cannot commit dynamic companion in state ${state}.`);
-				try {
-					installation.commit();
-					animationStage.commit();
-					// Script clocks start only after the generation publishes, so a resident cannot
-					// dispatch a command against a node that is not yet in the scene.
-					// Mesh residency is requested here, once a generation commits, so a
-					// `CreateParticle` reached later finds its mesh already staged.
-					this.#stageCommittedParticleMeshes(prepared);
-					for (const entity of prepared) {
-						if (entity.soundTable !== null)
-							this.#targetSoundTables.set(
-								behaviorTargetId(entity.nodeId),
-								entity.soundTable,
-							);
-						if (entity.scriptClosure === null) continue;
-						this.#physicsScriptSystem.install(
-							ownerId,
-							{
-								generation: installation.generation,
-								targetId: behaviorTargetId(entity.nodeId),
-							},
-							entity.scriptClosure,
-							this.#lastFrameTimeSeconds,
-						);
-					}
-				} catch (cause) {
-					animationStage.release();
-					installation.release();
-					state = "released";
-					throw cause;
-				}
-				state = "committed";
+				activation.commit();
 				this.#authoredDynamicResidents.set(ownerId, diagnostics);
 			},
 			release: () => {
-				if (state !== "prepared") return;
-				animationStage.release();
-				installation.release();
-				state = "released";
+				activation.release();
 			},
 		};
 	}
@@ -1963,27 +2213,24 @@ export class GameRuntime {
 		this.#authoredDynamicResidents.delete(ownerId);
 		this.#staticObjectLayerDiagnostics.delete(ownerId);
 		this.#envCellLayerDiagnostics.delete(ownerId);
-		this.#animation.removeOwner(ownerId);
-		this.#physicsScriptSystem.removeOwner(ownerId);
-		for (const targetId of this.#targetSoundTables.keys()) {
-			// A sound table is installed from a resident's own setup, so every key is a scene node
-			// today. A non-scene target has no placement that could have gone stale, and is removed
-			// by whichever module owns it rather than swept here.
-			const nodeId = sceneNodeIdOf(targetId);
-			if (
-				nodeId !== null &&
-				this.#scene.getResolvedPlacement(nodeId) === undefined
-			)
-				this.#targetSoundTables.delete(targetId);
-		}
-		// Emitters need no explicit removal: `#dynamics.removeOwner` destroys their nodes, and the
-		// particle runtime drops any emitter whose target stops publishing a transform.
-		this.#dynamics.removeOwner(ownerId);
+		this.#retireDynamicOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);
 		if (layer === LandblockLayerKind.Terrain) {
 			this.#terrain.removeOwner(terrainSourceToOwnerId(landblockId));
 		}
 		this.#textures.dropOwner(ownerId);
+	}
+
+	/** Retire every presentation and behavior resource for one exact dynamic owner immediately. */
+	#retireDynamicOwner(ownerId: DynamicOwnerId): void {
+		for (const targetId of this.#dynamicBehaviorTargets.get(ownerId) ?? []) {
+			this.#particles.destroy({ generation: 0, targetId }, 0);
+			this.#targetSoundTables.delete(targetId);
+		}
+		this.#dynamicBehaviorTargets.delete(ownerId);
+		this.#animation.removeOwner(ownerId);
+		this.#physicsScriptSystem.removeOwner(ownerId);
+		this.#dynamics.removeOwner(ownerId);
 	}
 
 	#publishSceneAvailability(event: SceneAvailabilityEvent): void {

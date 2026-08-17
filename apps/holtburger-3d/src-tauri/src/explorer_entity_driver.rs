@@ -719,8 +719,20 @@ mod tests {
         }
     }
 
+    /// Injected outcome of physical preparation, so each rejection reaches the driver by its own
+    /// typed reason rather than one opaque failure flag.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum FixturePhysical {
+        /// Preparation succeeds and yields the ordinary grounded fixture body.
+        Prepares,
+        /// Generic DAT/content failure.
+        FailsContent,
+        /// The measured WCID 52077 boundary: a default animation moves physics-BSP parts.
+        FailsAnimatedPhysicsBsp,
+    }
+
     struct FixtureContent {
-        fail_physical: bool,
+        physical: FixturePhysical,
     }
 
     impl ExplorerEntityContentPreparer for FixtureContent {
@@ -747,12 +759,23 @@ mod tests {
             &self,
             definition: &DynamicEntityDefinition,
         ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
-            if self.fail_physical {
-                return Err(DynamicEntityPhysicalPreparationError::Content {
-                    wcid: definition.identity.wcid,
-                    resource_did: definition.content.setup_did,
-                    source: anyhow!("injected physical preparation failure"),
-                });
+            match self.physical {
+                FixturePhysical::Prepares => {}
+                FixturePhysical::FailsContent => {
+                    return Err(DynamicEntityPhysicalPreparationError::Content {
+                        wcid: definition.identity.wcid,
+                        resource_did: definition.content.setup_did,
+                        source: anyhow!("injected physical preparation failure"),
+                    });
+                }
+                FixturePhysical::FailsAnimatedPhysicsBsp => {
+                    return Err(DynamicEntityPhysicalPreparationError::AnimatedPhysicsBsp {
+                        wcid: definition.identity.wcid,
+                        setup_did: definition.content.setup_did,
+                        animation_did: 0x0300_0227,
+                        moving_part_indices: vec![3],
+                    });
+                }
             }
             let mut physical = physical();
             physical.entity_collision.scheduling = definition.physics.scheduling;
@@ -844,18 +867,28 @@ mod tests {
 
     fn driver(
         templates: Vec<WeenieTemplate>,
-        fail_physical: bool,
+        physical: FixturePhysical,
     ) -> (Arc<ExplorerEntityRuntime>, ExplorerEntityDriver) {
-        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
-        let entities = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
-        let driver = ExplorerEntityDriver::new(
+        driver_with_catalog(
             Arc::new(MemoryCatalog {
                 templates: templates
                     .into_iter()
                     .map(|template| (template.wcid, template))
                     .collect(),
             }),
-            Arc::new(FixtureContent { fail_physical }),
+            physical,
+        )
+    }
+
+    fn driver_with_catalog(
+        catalog: Arc<dyn ExplorerWeenieCatalogSource>,
+        physical: FixturePhysical,
+    ) -> (Arc<ExplorerEntityRuntime>, ExplorerEntityDriver) {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let entities = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
+        let driver = ExplorerEntityDriver::new(
+            catalog,
+            Arc::new(FixtureContent { physical }),
             Arc::new(FixedClock(Instant::now())),
             Arc::clone(&entities),
             simulation,
@@ -879,7 +912,7 @@ mod tests {
 
     #[test]
     fn missing_wcid_and_preparation_failure_leave_no_entity_or_body() {
-        let (entities, driver) = driver(vec![template(7)], true);
+        let (entities, driver) = driver(vec![template(7)], FixturePhysical::FailsContent);
         assert!(matches!(
             driver.spawn_by_wcid(request(8, EntityPhysicalIntent::Simulated)),
             Err(ExplorerEntityDriverError::MissingWcid { wcid: 8 })
@@ -893,7 +926,7 @@ mod tests {
 
     #[test]
     fn repeated_wcid_spawns_are_equal_except_for_identity_and_keep_host_placement() {
-        let (entities, driver) = driver(vec![template(42)], false);
+        let (entities, driver) = driver(vec![template(42)], FixturePhysical::Prepares);
         let first = driver
             .spawn_by_wcid(request(42, EntityPhysicalIntent::Simulated))
             .unwrap();
@@ -958,7 +991,7 @@ mod tests {
         let gem_setting = template(302);
         let (entities, driver) = driver(
             vec![flame_bolt, whirling_blade, rockfall, gem_setting],
-            false,
+            FixturePhysical::Prepares,
         );
 
         let flame = driver
@@ -1027,7 +1060,7 @@ mod tests {
     fn relocation_preserves_generation_and_publishes_an_explicit_snap_kind() {
         let mut launchable = template(239);
         launchable.maximum_velocity = Some(15.0);
-        let (entities, driver) = driver(vec![launchable], false);
+        let (entities, driver) = driver(vec![launchable], FixturePhysical::Prepares);
         let spawned = driver
             .spawn_by_wcid(request(239, EntityPhysicalIntent::Simulated))
             .unwrap();
@@ -1070,7 +1103,8 @@ mod tests {
 
     #[test]
     fn catalog_backed_replacement_retains_guid_and_retires_the_exact_generation() {
-        let (entities, driver) = driver(vec![template(42), template(43)], false);
+        let (entities, driver) =
+            driver(vec![template(42), template(43)], FixturePhysical::Prepares);
         let first = driver
             .spawn_by_wcid(request(42, EntityPhysicalIntent::Simulated))
             .unwrap();
@@ -1102,7 +1136,7 @@ mod tests {
 
     #[test]
     fn pose_only_spawn_and_exact_generation_despawn_use_the_same_driver() {
-        let (entities, driver) = driver(vec![template(9)], false);
+        let (entities, driver) = driver(vec![template(9)], FixturePhysical::Prepares);
         let spawned = driver
             .spawn_by_wcid(request(9, EntityPhysicalIntent::PoseOnly))
             .unwrap();
@@ -1123,7 +1157,7 @@ mod tests {
     fn invalid_type_is_rejected_before_registry_publication() {
         let mut invalid = template(10);
         invalid.weenie_type = 999;
-        let (entities, driver) = driver(vec![invalid], false);
+        let (entities, driver) = driver(vec![invalid], FixturePhysical::Prepares);
         assert!(matches!(
             driver.spawn_by_wcid(request(10, EntityPhysicalIntent::PoseOnly)),
             Err(ExplorerEntityDriverError::InvalidWeenieType {
@@ -1136,7 +1170,7 @@ mod tests {
 
     #[test]
     fn complete_physics_state_replacement_enables_reconfigures_and_disables_participation() {
-        let (_entities, driver) = driver(vec![template(12)], false);
+        let (_entities, driver) = driver(vec![template(12)], FixturePhysical::Prepares);
         let spawned = driver
             .spawn_by_wcid(request(12, EntityPhysicalIntent::PoseOnly))
             .unwrap();
@@ -1187,11 +1221,125 @@ mod tests {
 
     #[test]
     fn lifecycle_body_errors_remain_typed() {
-        let (_entities, driver) = driver(vec![template(11)], false);
+        let (_entities, driver) = driver(vec![template(11)], FixturePhysical::Prepares);
         let error = driver.despawn(Guid(0xf000_0001), 1).unwrap_err();
         assert!(matches!(
             error,
             ExplorerEntityDriverError::Runtime(ExplorerEntityRuntimeError::NotRegistered { .. })
         ));
+    }
+
+    /// The measured WCID 52077 boundary. Moving physics-BSP geometry has no supported target
+    /// representation, so solver participation must be refused at both entry points while the
+    /// template stays a valid pose-only visual.
+    #[test]
+    fn animated_physics_bsp_rejects_solver_participation_but_remains_a_valid_visual() {
+        let (entities, driver) = driver(
+            vec![template(52077)],
+            FixturePhysical::FailsAnimatedPhysicsBsp,
+        );
+
+        let simulated = driver
+            .spawn_by_wcid(request(52077, EntityPhysicalIntent::Simulated))
+            .unwrap_err();
+        assert!(
+            matches!(
+                simulated,
+                ExplorerEntityDriverError::Preparation(
+                    DynamicEntityPhysicalPreparationError::AnimatedPhysicsBsp { wcid, .. }
+                ) if wcid == 52077
+            ),
+            "simulated spawn must name the moving physics-BSP reason, got {simulated:?}"
+        );
+        assert!(
+            entities.snapshot().unwrap().is_empty(),
+            "a rejected solver spawn must not leave a registry or body record"
+        );
+
+        // The same template still realizes as a pose-only entity: the rejection is about local
+        // physical simulation, not about the object existing or animating.
+        let visual = driver
+            .spawn_by_wcid(request(52077, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+        assert_eq!(
+            visual.body.participation,
+            holtburger_world::PhysicalBodyParticipation::PoseOnly
+        );
+        assert_eq!(entities.snapshot().unwrap().len(), 1);
+
+        // Later solver enablement rejects with the same typed reason and leaves the live pose-only
+        // entity untouched, so a failed upgrade cannot strand a half-physical instance.
+        let upgrade = driver
+            .replace_physics_state(
+                visual.instance.definition.identity.guid,
+                visual.instance.generation,
+                PhysicsState::GRAVITY,
+                EntityPhysicalIntent::Simulated,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(
+                upgrade,
+                ExplorerEntityDriverError::Preparation(
+                    DynamicEntityPhysicalPreparationError::AnimatedPhysicsBsp { wcid, .. }
+                ) if wcid == 52077
+            ),
+            "later solver enablement must reject for the same reason, got {upgrade:?}"
+        );
+        let survivor = entities.snapshot().unwrap();
+        assert_eq!(survivor.len(), 1, "the pose-only entity must survive");
+        assert_eq!(
+            survivor[0].input.participation,
+            holtburger_world::PhysicalBodyParticipation::PoseOnly
+        );
+    }
+
+    /// An absent catalog is a capability boundary, not a spawn that silently produces nothing.
+    #[test]
+    fn unavailable_catalog_reports_its_reason_and_refuses_every_spawn() {
+        use crate::explorer_weenie_catalog::ExplorerCatalogUnavailableKind;
+
+        struct UnavailableCatalog;
+
+        impl ExplorerWeenieCatalogSource for UnavailableCatalog {
+            fn capability(&self) -> ExplorerCatalogCapability {
+                ExplorerCatalogCapability::Unavailable {
+                    path: None,
+                    kind: ExplorerCatalogUnavailableKind::MissingContentLocation,
+                    reason: "no weenie catalog beside the selected content".to_owned(),
+                }
+            }
+
+            fn lookup(
+                &self,
+                _wcid: u32,
+            ) -> Result<Option<WeenieTemplate>, ExplorerCatalogLookupError> {
+                Err(ExplorerCatalogLookupError::Unavailable {
+                    reason: "no weenie catalog beside the selected content".to_owned(),
+                })
+            }
+        }
+
+        let (entities, driver) =
+            driver_with_catalog(Arc::new(UnavailableCatalog), FixturePhysical::Prepares);
+
+        assert!(matches!(
+            driver.catalog_capability(),
+            ExplorerCatalogCapability::Unavailable { .. }
+        ));
+        let error = driver
+            .spawn_by_wcid(request(1, EntityPhysicalIntent::Simulated))
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ExplorerEntityDriverError::Catalog(ExplorerCatalogLookupError::Unavailable { .. })
+            ),
+            "spawning must surface the exact capability reason, got {error:?}"
+        );
+        assert!(
+            entities.snapshot().unwrap().is_empty(),
+            "an unavailable catalog must never produce a fallback entity"
+        );
     }
 }

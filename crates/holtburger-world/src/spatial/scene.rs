@@ -2371,6 +2371,97 @@ mod physical_body_tests {
         assert!(result.collision_reports.is_empty());
     }
 
+    /// Complete state replacement is reversible mid-contact. Removing a peer's solid participation
+    /// while it is actively blocking must stop blocking on the very next solve without retiring
+    /// the peer's pose body or corrupting the mover's retained response state.
+    #[test]
+    fn contact_time_replacement_removes_blocking_without_retiring_the_peer_body() {
+        let now = Instant::now();
+        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
+        let geometry = || {
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            })))
+        };
+        let mut scene = SpatialScene::new();
+        install_free_dynamic(
+            &mut scene,
+            mover,
+            Vector3::zero(),
+            Vector3::new(10.0, 0.0, 0.0),
+            geometry(),
+            now,
+        );
+        install_free_dynamic(
+            &mut scene,
+            target,
+            Vector3::new(1.2, 0.0, 0.0),
+            Vector3::zero(),
+            geometry(),
+            now,
+        );
+        let collision = CollisionScene::new();
+
+        // The solid peer blocks and reverses the mover.
+        let blocked = tick_prepared_collection(&mut scene, &collision, 0.1, now);
+        assert!(
+            scene.body(mover).unwrap().velocity.x < 0.0,
+            "a solid peer must reverse the mover before replacement"
+        );
+        assert!(!blocked.is_empty(), "the blocking touch must report");
+
+        // Replace the peer's complete state with an ethereal, non-responding one. Its pose body
+        // survives; only collision participation changes.
+        let physical = scene.body(target).unwrap().physical.as_ref().unwrap();
+        let mut ethereal = DynamicPhysicalBodyDefinition {
+            movement: physical.definition,
+            response_policy: physical.response_policy,
+            entity_collision: physical.dynamic.as_ref().unwrap().collision.clone(),
+        };
+        ethereal.entity_collision.dynamic_collision.target = EntityCollisionParticipation::Ethereal;
+        let target_pose = scene.body(target).unwrap().pose;
+        let outcome = scene
+            .set_dynamic_physical_body(target, Some(ethereal), PhysicalCollisionFilter::ALL, None)
+            .unwrap();
+        assert_eq!(outcome.change, PhysicalBodyReconfiguration::Reconfigured);
+        assert_eq!(
+            scene.body(target).unwrap().pose,
+            target_pose,
+            "contact-time replacement must not move the peer"
+        );
+        assert!(
+            scene.body(target).unwrap().physical.is_some(),
+            "an ethereal peer keeps solver participation; only its response role changed"
+        );
+
+        // Drive the mover back into the peer: it must now pass through.
+        scene
+            .apply_dynamic_body_kinematics(
+                mover,
+                DynamicBodyKinematics::new(
+                    Vector3::new(10.0, 0.0, 0.0),
+                    Vector3::zero(),
+                    Vector3::zero(),
+                    false,
+                )
+                .unwrap(),
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        tick_prepared_collection(
+            &mut scene,
+            &collision,
+            0.1,
+            now + Duration::from_millis(200),
+        );
+        assert!(
+            scene.body(mover).unwrap().velocity.x > 0.0,
+            "an ethereal peer must not reverse the mover after contact-time replacement"
+        );
+    }
+
     #[test]
     fn settled_report_only_peer_starts_both_directions_and_expires_without_integration() {
         let created_at = Instant::now();

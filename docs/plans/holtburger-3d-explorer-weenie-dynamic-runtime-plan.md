@@ -2166,6 +2166,30 @@ before the follow-on plan, update the census and marker consequence before accep
 
 ### Phase 7A: Audit Focused Correctness
 
+Progress: Complete (2026-08-17). The complete verification matrix was mapped against the landed
+Rust and TypeScript suites. Of 42 scenario rows, 36 already had a named focused proof, one
+(visible 300-entity lifecycle) belongs to Phase 7B, and five were genuine gaps now closed with one
+focused test each:
+
+- `animated_physics_bsp_rejects_solver_participation_but_remains_a_valid_visual` — the measured
+  WCID 52077 boundary. Both entry points (initial spawn and later solver enablement) reject with
+  the same typed moving-physics-BSP reason before scene mutation, while the template still
+  realizes as a live pose-only visual that survives the rejected upgrade.
+- `unavailable_catalog_reports_its_reason_and_refuses_every_spawn` — an absent catalog is a
+  capability boundary; spawning surfaces the exact reason and produces no fallback entity.
+- `contact_time_replacement_removes_blocking_without_retiring_the_peer_body` — complete state
+  replacement mid-contact removes solid participation, keeps the peer's pose body and solver
+  participation, and stops blocking on the next solve.
+- `loaded_collision_change_wakes_settled_dynamic_entities` — the app-level wiring from a loaded
+  static-world collision change to the conservative settled-population wake, which previously had
+  only a synthetic scene-primitive test.
+- `explorer_derives_the_same_transition_actions_as_the_client_set_state_path` — both producers
+  derive the same action from the same mask pair, walking the exact GRAVITY/FROZEN/PUSHABLE
+  sequence the client `SetState` test asserts.
+
+No production fault command, debug mode, diagnostic mirror, event recorder, or metrics registry
+was added; every injected failure reaches its owning unit through an existing dependency seam.
+
 #### Deliverables
 
 - Map the final verification matrix to the focused Rust host/world/core and TypeScript tests already
@@ -2205,7 +2229,27 @@ before the follow-on plan, update the census and marker consequence before accep
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Each new gap test was falsified before acceptance: inverting the behavior under test (keeping the
+  replaced peer solid, disabling the production wake) makes the corresponding test fail. A test that
+  passes against both the correct and the broken implementation proves nothing.
+- The driver fixture's `fail_physical: bool` became a `FixturePhysical` enum so each rejection
+  reaches the driver by its own typed reason instead of one opaque failure flag. This was required
+  to express the animated-physics-BSP case and removes a magic boolean from nine call sites.
+- An audit claim that `contact_projection_refuses_grounded_physical_bodies`
+  (`spatial/scene.rs`) lacked a `#[test]` attribute and never ran was investigated and found false:
+  the attribute is present with a `#[cfg_attr(debug_assertions, should_panic)]` between it and the
+  function. The test runs and passes. No change was made.
+- Debt: cross-EnvCell-portal dynamic peer candidate discovery is proven only for outdoor
+  cross-landblock and fast-mover cases (`scene.rs` swept-bounds and fast-missile tests). Interior
+  portal traversal is proven for static motion paths but not for dynamic peer lookup. R2 measured
+  no interior workload that would change a decision, so this remains recorded debt rather than a
+  new test against an unmeasured scenario.
+- Debt: frontend teardown asserts entity and template counts return to baseline, not GPU texture,
+  geometry, or animation-acquisition counts. Phase 7B's resource-baseline scenario is the named
+  consumer for the wider census.
+- Debt: the Tauri command layer itself has no direct tests; stale-generation rejection and error
+  mapping are proven in the driver and runtime beneath it. The commands are thin argument-forwarding
+  wrappers, so a test at that seam would restate the layer below rather than add a proof.
 
 ### Phase 7B: Prove the Product and Workload Boundary
 

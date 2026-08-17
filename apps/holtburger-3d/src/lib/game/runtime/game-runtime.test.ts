@@ -753,7 +753,6 @@ function spawnedEntity(
 	return {
 		generation,
 		identity: { guid, name: `Entity ${guid}`, wcid: 42 },
-		motion: null,
 		physics: {
 			cloaked: false,
 			defaultAnimation: true,
@@ -785,7 +784,6 @@ function spawnedEntity(
 				textureChanges: [],
 			},
 			content: {
-				motionTableDid: null,
 				physicsEffectTableDid: null,
 				setupDid: 0x02000001,
 				soundTableDid: null,

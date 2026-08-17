@@ -3126,7 +3126,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
 }
 
 #[test]
-fn set_state_reconfigures_then_detaches_dynamic_client_physics_without_losing_semantic_truth() {
+fn set_state_reconfigures_then_disables_dynamic_client_physics_without_losing_semantic_truth() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x7000_0001);
     let pose = WorldPosition {
@@ -3195,7 +3195,7 @@ fn set_state_reconfigures_then_detaches_dynamic_client_physics_without_losing_se
     assert!(matches!(
         unsupported_events.last(),
         Some(WorldEvent::EntityStateUpdated { transition, .. })
-            if transition.action == crate::EntityPhysicalTransitionAction::Detach
+            if transition.action == crate::EntityPhysicalTransitionAction::DisableSolverParticipation
                 && matches!(
                     transition.disposition,
                     crate::EntityPhysicalDisposition::UnsupportedState { .. }

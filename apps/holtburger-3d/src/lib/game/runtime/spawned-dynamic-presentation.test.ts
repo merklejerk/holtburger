@@ -101,7 +101,6 @@ function fixtureEntity(): DynamicEntityView {
 	return {
 		generation: 3,
 		identity: { guid: 7, name: "Fixture", wcid: 42 },
-		motion: null,
 		physics: {
 			cloaked: false,
 			defaultAnimation: false,
@@ -132,7 +131,6 @@ function fixtureEntity(): DynamicEntityView {
 				textureChanges: [],
 			},
 			content: {
-				motionTableDid: null,
 				physicsEffectTableDid: null,
 				setupDid: 0x02000001,
 				soundTableDid: 0x20000002,

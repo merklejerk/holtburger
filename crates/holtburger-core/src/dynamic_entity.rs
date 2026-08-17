@@ -56,8 +56,6 @@ pub struct DynamicEntityIdentity {
 pub struct DynamicEntityContent {
     /// SetupModel identity that owns parts, volumes, and default behavior.
     pub setup_did: u32,
-    /// Optional MotionTable identity used by animation and motion resolution.
-    pub motion_table_did: Option<u32>,
     /// Optional SoundTable identity used by presentation effects.
     pub sound_table_did: Option<u32>,
     /// Optional PhysicsEffectTable identity used by presentation effects.
@@ -423,14 +421,13 @@ pub fn apply_dynamic_entity_physics_transition(
     let initial_cell = pose.is_indoors().then_some(pose.landblock_id);
     let requested = match decision.action {
         EntityPhysicalTransitionAction::None => None,
-        EntityPhysicalTransitionAction::Attach | EntityPhysicalTransitionAction::Reconfigure => {
-            Some(
-                replacement.ok_or(DynamicEntityBodyOperationError::MissingReplacement {
-                    action: decision.action,
-                })?,
-            )
-        }
-        EntityPhysicalTransitionAction::Detach => None,
+        EntityPhysicalTransitionAction::EnableSolverParticipation
+        | EntityPhysicalTransitionAction::Reconfigure => Some(replacement.ok_or(
+            DynamicEntityBodyOperationError::MissingReplacement {
+                action: decision.action,
+            },
+        )?),
+        EntityPhysicalTransitionAction::DisableSolverParticipation => None,
     };
     let mut forced_report_ends = if decision.force_end_reports {
         scene.force_end_collision_reports_for_recipient(body_id)
@@ -533,7 +530,7 @@ fn build_dynamic_entity_body(
         PhysicalBodyReconfigurationOutcome {
             before: PhysicalBodyParticipation::PoseOnly,
             after: PhysicalBodyParticipation::Physical,
-            change: PhysicalBodyReconfiguration::Attached,
+            change: PhysicalBodyReconfiguration::SolverParticipationEnabled,
             response_memory_preserved: false,
             collision_reports: Vec::new(),
         }
@@ -1127,7 +1124,6 @@ mod tests {
             },
             content: DynamicEntityContent {
                 setup_did: 0x0200_0001,
-                motion_table_did: None,
                 sound_table_did: None,
                 physics_effect_table_did: None,
             },
@@ -1340,27 +1336,27 @@ mod tests {
         );
 
         let previous = definition.physics;
-        let attach = decide_entity_physics_state_transition(
+        let enable = decide_entity_physics_state_transition(
             Some(previous),
             previous,
             EntityPhysicsTransitionContext {
                 intent: EntityPhysicalIntent::Simulated,
                 prepared_physics_available: true,
-                physical_body_attached: false,
+                solver_participation_enabled: false,
                 prepared_definition_changed: false,
             },
         );
-        let attached = apply_dynamic_entity_physics_transition(
+        let enabled = apply_dynamic_entity_physics_transition(
             &mut scene,
             body_id,
-            attach,
+            enable,
             Some(prepared_physics()),
         )
         .unwrap();
-        assert_eq!(attached.participation, PhysicalBodyParticipation::Physical);
+        assert_eq!(enabled.participation, PhysicalBodyParticipation::Physical);
         assert_eq!(
-            attached.physical_change.change,
-            PhysicalBodyReconfiguration::Attached
+            enabled.physical_change.change,
+            PhysicalBodyReconfiguration::SolverParticipationEnabled
         );
 
         let removed = remove_dynamic_entity_body(&mut scene, body_id).unwrap();

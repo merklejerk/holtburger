@@ -200,7 +200,7 @@ pub struct EntityPhysicsTransitionContext {
     /// Whether immutable content preparation produced a usable physical definition.
     pub prepared_physics_available: bool,
     /// Whether the canonical pose body currently carries physical state.
-    pub physical_body_attached: bool,
+    pub solver_participation_enabled: bool,
     /// Scale, geometry, category, or another prepared non-state fact changed.
     pub prepared_definition_changed: bool,
 }
@@ -223,8 +223,10 @@ pub enum EntityPhysicalDisposition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityPhysicalTransitionAction {
     None,
-    Attach,
-    Detach,
+    /// Install collision/physics state on the retained pose body.
+    EnableSolverParticipation,
+    /// Remove collision/physics state while the pose body survives.
+    DisableSolverParticipation,
     Reconfigure,
 }
 
@@ -245,7 +247,7 @@ pub struct EntityPhysicsTransitionDecision {
 ///
 /// This function deliberately does not choose Explorer rejection versus authoritative-client
 /// retention. Both receive the same unsupported disposition: Explorer rejects before publication;
-/// the client preserves semantic truth and applies the returned detach when necessary.
+/// the client preserves semantic truth and applies the returned participation disable when necessary.
 pub fn decide_entity_physics_state_transition(
     previous: Option<EffectiveEntityPhysicsState>,
     next: EffectiveEntityPhysicsState,
@@ -264,7 +266,7 @@ pub fn decide_entity_physics_state_transition(
         }
         EntityPhysicalIntent::Simulated => EntityPhysicalDisposition::Physical,
     };
-    let action = match (context.physical_body_attached, disposition) {
+    let action = match (context.solver_participation_enabled, disposition) {
         (true, EntityPhysicalDisposition::Physical)
             if context.prepared_definition_changed
                 || previous.is_none_or(|previous| !previous.physical_decisions_equal(next)) =>
@@ -272,8 +274,10 @@ pub fn decide_entity_physics_state_transition(
             EntityPhysicalTransitionAction::Reconfigure
         }
         (true, EntityPhysicalDisposition::Physical) => EntityPhysicalTransitionAction::None,
-        (false, EntityPhysicalDisposition::Physical) => EntityPhysicalTransitionAction::Attach,
-        (true, _) => EntityPhysicalTransitionAction::Detach,
+        (false, EntityPhysicalDisposition::Physical) => {
+            EntityPhysicalTransitionAction::EnableSolverParticipation
+        }
+        (true, _) => EntityPhysicalTransitionAction::DisableSolverParticipation,
         (false, _) => EntityPhysicalTransitionAction::None,
     };
     let force_end_reports = previous.is_some_and(|previous| previous.reporting.enabled)
@@ -290,7 +294,7 @@ pub fn decide_entity_physics_state_transition(
         wake_solver: scheduling_woke
             || matches!(
                 action,
-                EntityPhysicalTransitionAction::Attach
+                EntityPhysicalTransitionAction::EnableSolverParticipation
                     | EntityPhysicalTransitionAction::Reconfigure
             ),
     }
@@ -572,7 +576,7 @@ mod tests {
         let context = EntityPhysicsTransitionContext {
             intent: EntityPhysicalIntent::Simulated,
             prepared_physics_available: true,
-            physical_body_attached: true,
+            solver_participation_enabled: true,
             prepared_definition_changed: false,
         };
 
@@ -587,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn transition_detaches_unsupported_state_without_losing_its_mask() {
+    fn transition_disables_participation_for_unsupported_state_without_losing_its_mask() {
         let previous = resolve_effective_entity_physics_state(PhysicsState::REPORT_COLLISIONS);
         let next = resolve_effective_entity_physics_state(
             PhysicsState::REPORT_COLLISIONS | PhysicsState::PUSHABLE,
@@ -598,12 +602,15 @@ mod tests {
             EntityPhysicsTransitionContext {
                 intent: EntityPhysicalIntent::Simulated,
                 prepared_physics_available: true,
-                physical_body_attached: true,
+                solver_participation_enabled: true,
                 prepared_definition_changed: false,
             },
         );
 
-        assert_eq!(decision.action, EntityPhysicalTransitionAction::Detach);
+        assert_eq!(
+            decision.action,
+            EntityPhysicalTransitionAction::DisableSolverParticipation
+        );
         assert_eq!(
             decision.disposition,
             EntityPhysicalDisposition::UnsupportedState {
@@ -627,7 +634,7 @@ mod tests {
             EntityPhysicsTransitionContext {
                 intent: EntityPhysicalIntent::PoseOnly,
                 prepared_physics_available: true,
-                physical_body_attached: false,
+                solver_participation_enabled: false,
                 prepared_definition_changed: false,
             },
         );
@@ -645,7 +652,7 @@ mod tests {
             EntityPhysicsTransitionContext {
                 intent: EntityPhysicalIntent::Simulated,
                 prepared_physics_available: false,
-                physical_body_attached: false,
+                solver_participation_enabled: false,
                 prepared_definition_changed: false,
             },
         );

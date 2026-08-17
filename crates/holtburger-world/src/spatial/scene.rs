@@ -306,7 +306,7 @@ impl SpatialScene {
         self.body_store.body_for_guid(guid)
     }
 
-    /// Returns physically attached dynamic entities whose complete state permits integration.
+    /// Returns solver-participating dynamic entities whose complete state permits integration.
     ///
     /// The canonical body store remains the only population. Callers receive a stable identity
     /// order without maintaining a second scheduler registry; pose-only, frozen, static, camera,
@@ -529,8 +529,8 @@ impl SpatialScene {
         }
     }
 
-    /// Attaches one source-neutral physical definition to an already registered body.
-    pub fn attach_physical_body(
+    /// Installs one source-neutral physical definition, enabling solver participation on a registered body.
+    pub fn install_physical_body(
         &mut self,
         body_id: SpatialBodyId,
         definition: PhysicalBodyDefinition,
@@ -570,14 +570,18 @@ impl SpatialScene {
 
         let (next, change, response_memory_preserved) = match (previous, replacement) {
             (None, None) => (None, PhysicalBodyReconfiguration::Unchanged, false),
-            (Some(_), None) => (None, PhysicalBodyReconfiguration::Detached, false),
+            (Some(_), None) => (
+                None,
+                PhysicalBodyReconfiguration::SolverParticipationDisabled,
+                false,
+            ),
             (None, Some(replacement)) => (
                 Some(PhysicalBodyState::new_dynamic(
                     replacement,
                     collision_filter,
                     initial_cell,
                 )),
-                PhysicalBodyReconfiguration::Attached,
+                PhysicalBodyReconfiguration::SolverParticipationEnabled,
                 false,
             ),
             (Some(previous), Some(replacement)) => {
@@ -1643,7 +1647,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn scheduled_dynamic_entities_are_stable_and_derived_from_attached_state() {
+    fn scheduled_dynamic_entities_are_stable_and_derived_from_installed_state() {
         let now = Instant::now();
         let mut scene = SpatialScene::new();
         let eligible_high = SpatialBodyId::Entity(Guid(0x7000_0009));
@@ -2731,18 +2735,18 @@ mod physical_body_tests {
             2
         );
 
-        let mut detached_scene = scene.clone();
-        let detached = detached_scene
+        let mut disabled_scene = scene.clone();
+        let disabled = disabled_scene
             .set_dynamic_physical_body(peer, None, PhysicalCollisionFilter::ALL, None)
             .unwrap();
-        assert_eq!(detached.collision_reports.len(), 2);
-        assert!(detached_scene.body(peer).unwrap().physical.is_none());
+        assert_eq!(disabled.collision_reports.len(), 2);
+        assert!(disabled_scene.body(peer).unwrap().physical.is_none());
         assert!(
-            !detached_scene
+            !disabled_scene
                 .scheduled_dynamic_entity_ids()
                 .contains(&peer)
         );
-        assert_eq!(detached_scene.active_collision_report_count(), 0);
+        assert_eq!(disabled_scene.active_collision_report_count(), 0);
 
         let physical = scene.body(mover).unwrap().physical.as_ref().unwrap();
         let mut disabled_definition = DynamicPhysicalBodyDefinition {
@@ -3496,7 +3500,10 @@ mod physical_body_tests {
                 None,
             )
             .unwrap();
-        assert_eq!(attached.change, PhysicalBodyReconfiguration::Attached);
+        assert_eq!(
+            attached.change,
+            PhysicalBodyReconfiguration::SolverParticipationEnabled
+        );
         assert_eq!(attached.before, PhysicalBodyParticipation::PoseOnly);
         assert_eq!(attached.after, PhysicalBodyParticipation::Physical);
         let retained_response = scene
@@ -3551,10 +3558,13 @@ mod physical_body_tests {
             Vector3::new(1.0, 2.0, 3.0)
         );
 
-        let detached = scene
+        let disabled = scene
             .set_dynamic_physical_body(id, None, PhysicalCollisionFilter::ALL, None)
             .unwrap();
-        assert_eq!(detached.change, PhysicalBodyReconfiguration::Detached);
+        assert_eq!(
+            disabled.change,
+            PhysicalBodyReconfiguration::SolverParticipationDisabled
+        );
         assert!(scene.body(id).unwrap().physical.is_none());
         assert_eq!(
             scene.body(id).unwrap().pose.coords,
@@ -3684,7 +3694,7 @@ mod physical_body_tests {
         ));
         let ephemeral_id = scene.register_ephemeral_body(pose(Vector3::new(97.0, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 entity_id,
                 grounded_definition(),
                 PhysicalCollisionFilter::ALL,
@@ -3693,7 +3703,7 @@ mod physical_body_tests {
             )
             .unwrap();
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 ephemeral_id,
                 free_definition(Vector3::new(0.2, -0.1, 0.3), 0.27),
                 PhysicalCollisionFilter::ALL,
@@ -3746,7 +3756,7 @@ mod physical_body_tests {
         ));
         for body_id in [entity, local_player, ephemeral] {
             scene
-                .attach_physical_body(
+                .install_physical_body(
                     body_id,
                     definition,
                     PhysicalCollisionFilter::ALL,
@@ -3775,7 +3785,7 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.25),
                 PhysicalCollisionFilter::ALL,
@@ -3823,7 +3833,7 @@ mod physical_body_tests {
             now,
         ));
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 physical_id,
                 grounded_definition(),
                 PhysicalCollisionFilter::ALL,
@@ -3867,7 +3877,7 @@ mod physical_body_tests {
                 ..stable_policy()
             };
             scene
-                .attach_physical_body(id, definition, PhysicalCollisionFilter::ALL, sledding, None)
+                .install_physical_body(id, definition, PhysicalCollisionFilter::ALL, sledding, None)
                 .unwrap();
             scene
                 .tick_physical_body(
@@ -3907,7 +3917,7 @@ mod physical_body_tests {
         let start = Vector3::new(90.0, 96.0, 0.005);
         let id = scene.register_ephemeral_body(pose(start), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 grounded_definition(),
                 PhysicalCollisionFilter::ALL,
@@ -3961,7 +3971,7 @@ mod physical_body_tests {
                 ..stable_policy()
             };
             scene
-                .attach_physical_body(
+                .install_physical_body(
                     id,
                     free_definition(Vector3::zero(), 0.25),
                     PhysicalCollisionFilter::ALL,
@@ -3992,7 +4002,7 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::new(0.1, 0.0, 0.2), 0.25),
                 PhysicalCollisionFilter::ALL,
@@ -4042,7 +4052,7 @@ mod physical_body_tests {
             now,
         );
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.25),
                 PhysicalCollisionFilter::ALL,
@@ -4097,7 +4107,7 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 grounded_definition(),
                 PhysicalCollisionFilter::ALL,
@@ -4176,7 +4186,7 @@ mod physical_body_tests {
             let start = Vector3::new(90.0 + index as f32, 96.0, 0.005);
             let id = scene.register_ephemeral_body(pose(start), now);
             scene
-                .attach_physical_body(
+                .install_physical_body(
                     id,
                     definition,
                     PhysicalCollisionFilter::ALL,
@@ -4210,7 +4220,7 @@ mod physical_body_tests {
         let start = Vector3::new(96.0, 96.0, 0.005);
         let id = scene.register_ephemeral_body(pose(start), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 grounded_definition(),
                 PhysicalCollisionFilter::excluding(
@@ -4242,7 +4252,7 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 grounded_definition(),
                 PhysicalCollisionFilter::ALL,
@@ -4270,7 +4280,7 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(96.0, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 grounded_definition(),
                 PhysicalCollisionFilter::ALL,
@@ -4327,7 +4337,7 @@ mod physical_body_tests {
             now,
         );
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.25),
                 PhysicalCollisionFilter::ALL,
@@ -4369,7 +4379,7 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(191.9, 96.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::new(0.2, 0.0, 0.0), 0.25),
                 PhysicalCollisionFilter::ALL,
@@ -4414,7 +4424,7 @@ mod physical_body_tests {
         let mut scene = SpatialScene::new();
         let id = scene.register_ephemeral_body(pose(Vector3::new(99.8, 10.0, 20.0)), now);
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.1),
                 PhysicalCollisionFilter::ALL,
@@ -4491,7 +4501,7 @@ mod physical_body_tests {
             now,
         );
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.1),
                 PhysicalCollisionFilter::ALL,
@@ -4554,7 +4564,7 @@ mod physical_body_tests {
             now,
         );
         scene
-            .attach_physical_body(
+            .install_physical_body(
                 id,
                 free_definition(Vector3::zero(), 0.1),
                 PhysicalCollisionFilter::ALL,

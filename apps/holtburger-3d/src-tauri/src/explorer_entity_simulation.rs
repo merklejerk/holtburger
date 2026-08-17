@@ -1,6 +1,7 @@
 //! One fixed-tick participant for the complete Explorer dynamic-entity collection.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Error;
@@ -36,11 +37,53 @@ impl DynamicEntityEventSink for TauriDynamicEntityEventSink {
     }
 }
 
+/// Scheduler-boundary control over collection integration time.
+///
+/// Pausing skips whole fixed ticks, so no integration time elapses; it never mutates entity,
+/// body, or collision-report state and never unregisters the participant. A queued step permits
+/// exactly one ordinary fixed-delta tick while paused, which keeps stepping deterministic: every
+/// integrated tick uses the same cadence the running scheduler would.
+#[derive(Default)]
+pub struct ExplorerSimulationControl {
+    paused: AtomicBool,
+    pending_steps: AtomicU32,
+}
+
+impl ExplorerSimulationControl {
+    /// Pauses or resumes collection integration; resuming discards no state.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+        if !paused {
+            self.pending_steps.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// Queues exactly one fixed-delta integration step; only observed while paused.
+    pub fn request_step(&self) {
+        self.pending_steps.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whether the next fixed tick should integrate, consuming one queued step while paused.
+    fn take_tick(&self) -> bool {
+        if !self.paused.load(Ordering::Relaxed) {
+            return true;
+        }
+        self.pending_steps
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |pending| {
+                pending.checked_sub(1)
+            })
+            .is_ok()
+    }
+}
+
 /// Collection-owned simulation adapter installed in exactly one stable scheduler slot.
 pub struct ExplorerEntitySimulation {
     entities: Arc<ExplorerEntityRuntime>,
     delivery: Arc<ExplorerEntityDelivery>,
     sink: Arc<dyn DynamicEntityEventSink>,
+    control: Arc<ExplorerSimulationControl>,
+    /// Injected host clock so pause/step and report-expiry tests never sleep.
+    clock: Box<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl ExplorerEntitySimulation {
@@ -49,21 +92,38 @@ impl ExplorerEntitySimulation {
         entities: Arc<ExplorerEntityRuntime>,
         delivery: Arc<ExplorerEntityDelivery>,
         sink: Arc<dyn DynamicEntityEventSink>,
+        control: Arc<ExplorerSimulationControl>,
+    ) -> Self {
+        Self::with_clock(entities, delivery, sink, control, Box::new(Instant::now))
+    }
+
+    /// Composes the participant over an explicit host clock.
+    pub fn with_clock(
+        entities: Arc<ExplorerEntityRuntime>,
+        delivery: Arc<ExplorerEntityDelivery>,
+        sink: Arc<dyn DynamicEntityEventSink>,
+        control: Arc<ExplorerSimulationControl>,
+        clock: Box<dyn Fn() -> Instant + Send + Sync>,
     ) -> Self {
         Self {
             entities,
             delivery,
             sink,
+            control,
+            clock,
         }
     }
 }
 
 impl HostFixedTickParticipant for ExplorerEntitySimulation {
     fn fixed_tick(&self, delta: Duration) -> anyhow::Result<HostFixedTickDisposition> {
+        if !self.control.take_tick() {
+            return Ok(HostFixedTickDisposition::Continue);
+        }
         let event = self.delivery.with_ordered_publication(|| {
             let ticks = self
                 .entities
-                .tick_physical_collection(delta.as_secs_f32(), Instant::now())?;
+                .tick_physical_collection(delta.as_secs_f32(), (self.clock)())?;
             self.delivery.advanced(ticks, delta)
         })?;
         if let Some(event) = event
@@ -139,7 +199,12 @@ mod tests {
         let entities = Arc::new(ExplorerEntityRuntime::new(simulation));
         let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
         let sink = Arc::new(RecordingSink::default());
-        let participant = ExplorerEntitySimulation::new(entities, delivery, sink.clone());
+        let participant = ExplorerEntitySimulation::new(
+            entities,
+            delivery,
+            sink.clone(),
+            Arc::new(ExplorerSimulationControl::default()),
+        );
 
         assert_eq!(
             participant
@@ -164,7 +229,12 @@ mod tests {
             .unwrap();
         let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
         let sink = Arc::new(RecordingSink::default());
-        let participant = ExplorerEntitySimulation::new(entities, delivery, sink.clone());
+        let participant = ExplorerEntitySimulation::new(
+            entities,
+            delivery,
+            sink.clone(),
+            Arc::new(ExplorerSimulationControl::default()),
+        );
 
         participant
             .fixed_tick(Duration::from_secs_f64(1.0 / HOST_FIXED_TICK_HZ))
@@ -186,6 +256,100 @@ mod tests {
         );
     }
 
+    #[test]
+    fn paused_collection_skips_integration_and_resume_continues_from_retained_state() {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let entities = Arc::new(ExplorerEntityRuntime::new(simulation));
+        let guid = entities.reserve_guid().unwrap();
+        entities
+            .spawn_prepared(
+                definition(guid),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+        let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
+        let sink = Arc::new(RecordingSink::default());
+        let control = Arc::new(ExplorerSimulationControl::default());
+        let origin = Instant::now();
+        let participant = ExplorerEntitySimulation::with_clock(
+            entities,
+            delivery,
+            sink.clone(),
+            Arc::clone(&control),
+            Box::new(move || origin),
+        );
+        let delta = Duration::from_secs_f64(1.0 / HOST_FIXED_TICK_HZ);
+
+        control.set_paused(true);
+        for _ in 0..3 {
+            assert_eq!(
+                participant.fixed_tick(delta).unwrap(),
+                HostFixedTickDisposition::Continue,
+                "paused ticks keep the participant registered"
+            );
+        }
+        assert!(
+            sink.events.lock().unwrap().is_empty(),
+            "paused ticks integrate nothing and publish nothing"
+        );
+
+        control.set_paused(false);
+        participant.fixed_tick(delta).unwrap();
+        let events = sink.events.lock().unwrap();
+        assert!(
+            matches!(events.as_slice(), [DynamicEntityEvent::Advanced { .. }]),
+            "resume integrates the retained falling body on the next ordinary tick"
+        );
+    }
+
+    #[test]
+    fn queued_steps_integrate_exactly_once_per_request_while_paused() {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let entities = Arc::new(ExplorerEntityRuntime::new(simulation));
+        let guid = entities.reserve_guid().unwrap();
+        entities
+            .spawn_prepared(
+                definition(guid),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+        let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
+        let sink = Arc::new(RecordingSink::default());
+        let control = Arc::new(ExplorerSimulationControl::default());
+        let origin = Instant::now();
+        let participant = ExplorerEntitySimulation::with_clock(
+            entities,
+            delivery,
+            sink.clone(),
+            Arc::clone(&control),
+            Box::new(move || origin),
+        );
+        let delta = Duration::from_secs_f64(1.0 / HOST_FIXED_TICK_HZ);
+
+        control.set_paused(true);
+        control.request_step();
+        participant.fixed_tick(delta).unwrap();
+        participant.fixed_tick(delta).unwrap();
+        assert_eq!(
+            sink.events.lock().unwrap().len(),
+            1,
+            "one queued step permits exactly one integrated fixed tick"
+        );
+
+        // Resuming discards queued steps: pause again and confirm no stale step leaks through.
+        control.request_step();
+        control.set_paused(false);
+        control.set_paused(true);
+        participant.fixed_tick(delta).unwrap();
+        assert_eq!(
+            sink.events.lock().unwrap().len(),
+            1,
+            "resume clears queued steps instead of banking them"
+        );
+    }
+
     fn definition(guid: Guid) -> DynamicEntityDefinition {
         DynamicEntityDefinition::prepare(DynamicEntityDefinitionInput {
             identity: DynamicEntityIdentity {
@@ -196,7 +360,6 @@ mod tests {
             },
             content: DynamicEntityContent {
                 setup_did: 0x0200_0001,
-                motion_table_did: None,
                 sound_table_did: None,
                 physics_effect_table_did: None,
             },

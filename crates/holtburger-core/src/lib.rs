@@ -48,8 +48,7 @@ pub use dynamic_entity::{
 };
 pub use dynamic_entity_view::{
     DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityContactView, DynamicEntityEvent,
-    DynamicEntityHostTime, DynamicEntityIdentityView, DynamicEntityMotionDirectiveView,
-    DynamicEntityMotionView, DynamicEntityPathLeg, DynamicEntityPathPoint,
+    DynamicEntityHostTime, DynamicEntityIdentityView, DynamicEntityPathLeg, DynamicEntityPathPoint,
     DynamicEntityPhysicsView, DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind,
     DynamicEntityPlacementView, DynamicEntityPresentationView, DynamicEntitySampleModeView,
     DynamicEntitySnapshot, DynamicEntityView, DynamicEntityViewSource,

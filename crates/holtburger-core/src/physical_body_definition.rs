@@ -355,7 +355,7 @@ mod tests {
         world.register_body(SpatialBody::new(entity, pose, now));
         let ephemeral = world.register_ephemeral_body(pose, now);
         world
-            .attach_physical_body(
+            .install_physical_body(
                 entity,
                 setup_definition,
                 PhysicalCollisionFilter::ALL,
@@ -364,7 +364,7 @@ mod tests {
             )
             .unwrap();
         world
-            .attach_physical_body(
+            .install_physical_body(
                 ephemeral,
                 explicit_definition,
                 PhysicalCollisionFilter::ALL,

@@ -51,20 +51,6 @@ const appearanceSchema = z.object({
 	),
 });
 
-const motionDirectiveSchema = z.discriminatedUnion("kind", [
-	z.object({
-		kind: z.literal("turn-to-heading"),
-		desiredHeading: finiteNumber,
-		speed: finiteNumber,
-	}),
-	z.object({
-		kind: z.literal("turn-to-object"),
-		target: guid,
-		desiredHeading: finiteNumber.nullable(),
-		speed: finiteNumber,
-	}),
-]);
-
 const dynamicEntityViewSchema = z.object({
 	generation: nonNegativeInteger,
 	identity: z.object({
@@ -75,7 +61,6 @@ const dynamicEntityViewSchema = z.object({
 	presentation: z.object({
 		content: z.object({
 			setupDid: guid,
-			motionTableDid: guid.nullable(),
 			soundTableDid: guid.nullable(),
 			physicsEffectTableDid: guid.nullable(),
 		}),
@@ -105,18 +90,6 @@ const dynamicEntityViewSchema = z.object({
 			"suspended",
 		]),
 	}),
-	motion: z
-		.object({
-			currentStyle: nonNegativeInteger.max(0xffff).nullable(),
-			forwardCommand: nonNegativeInteger.max(0xffff).nullable(),
-			sidestepCommand: nonNegativeInteger.max(0xffff).nullable(),
-			turnCommand: nonNegativeInteger.max(0xffff).nullable(),
-			forwardSpeed: finiteNumber.nullable(),
-			sidestepSpeed: finiteNumber.nullable(),
-			turnSpeed: finiteNumber.nullable(),
-			directive: motionDirectiveSchema.nullable(),
-		})
-		.nullable(),
 });
 
 const hostTimeSchema = z.object({ seconds: finiteNumber.nonnegative() });

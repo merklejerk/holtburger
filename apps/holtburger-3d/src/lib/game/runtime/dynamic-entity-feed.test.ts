@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	decodeDynamicEntityEvent,
+	decodeDynamicEntityView,
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
 	type DynamicEntityView,
@@ -14,7 +15,6 @@ function entity(guid: number, generation: number): DynamicEntityView {
 		presentation: {
 			content: {
 				setupDid: 0x02000001,
-				motionTableDid: 0x09000001,
 				soundTableDid: null,
 				physicsEffectTableDid: null,
 			},
@@ -48,7 +48,6 @@ function entity(guid: number, generation: number): DynamicEntityView {
 			contact: "unknown",
 			sampleMode: "authoritative-only",
 		},
-		motion: null,
 	};
 }
 
@@ -93,6 +92,36 @@ function advanced(
 		},
 	};
 }
+
+describe("dynamic-entity view contract", () => {
+	it("freezes the physics-only view shape crossing the Tauri boundary", () => {
+		// The milestone's scoped command surface cannot select authored root motion, so the
+		// focused feed carries no semantic motion object and no raw motion-table identity.
+		// Growing this contract is a deliberate plan decision, not a passthrough: even a host
+		// that emits such fields cannot deliver them past this boundary.
+		const view = entity(1, 1);
+		const decoded = decodeDynamicEntityView({
+			...view,
+			motion: { forwardCommand: 3 },
+			presentation: {
+				...view.presentation,
+				content: { ...view.presentation.content, motionTableDid: 0x09000001 },
+			},
+		});
+		expect(Object.keys(decoded).sort()).toEqual([
+			"generation",
+			"identity",
+			"physics",
+			"placement",
+			"presentation",
+		]);
+		expect(Object.keys(decoded.presentation.content).sort()).toEqual([
+			"physicsEffectTableDid",
+			"setupDid",
+			"soundTableDid",
+		]);
+	});
+});
 
 describe("DynamicEntityMirror", () => {
 	it("accepts zero-duration correction snaps but not zero-duration integration", () => {

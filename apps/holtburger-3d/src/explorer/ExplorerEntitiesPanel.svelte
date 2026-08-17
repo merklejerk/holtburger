@@ -1,6 +1,9 @@
 <script lang="ts">
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
-	import type { ExplorerCatalogCapability } from "./explorer-entity-commands";
+	import {
+		EXPLORER_SPAWN_DISTANCE,
+		type ExplorerCatalogCapability,
+	} from "./explorer-entity-commands";
 
 	interface Props {
 		readonly runtimeReady: boolean;
@@ -20,7 +23,7 @@
 		despawn,
 	}: Props = $props();
 	let wcid = $state("");
-	let distance = $state(5);
+	let distance = $state(EXPLORER_SPAWN_DISTANCE.default);
 	let pending = $state(false);
 	let operationError = $state<string | null>(null);
 	let selectedGuid = $state<number | null>(null);
@@ -71,58 +74,80 @@
 	}
 </script>
 
-<section class="entities-panel" aria-label="Explorer entities">
+<div class="explorer-entities-panel">
 	{#if catalog === null}
-		<p class="catalog-state">Reading offline weenie catalog capability…</p>
+		<p class="explorer-entities-note">
+			Reading offline weenie catalog capability…
+		</p>
 	{:else if catalog.status === "available"}
-		<p class="catalog-state">
+		<p class="explorer-entities-note">
 			Catalog: {catalog.recordCount.toLocaleString()} records · {catalog.provenance}
 		</p>
-		<p class="catalog-path" title={catalog.path}>{catalog.path}</p>
+		<p class="explorer-entities-note truncate" title={catalog.path}>
+			{catalog.path}
+		</p>
 	{:else}
-		<p class="catalog-state unavailable">WCID spawning unavailable</p>
-		<p class="catalog-reason">{catalog.reason}</p>
+		<p class="explorer-entities-note invalid">WCID spawning unavailable</p>
+		<p class="explorer-entities-note">{catalog.reason}</p>
 	{/if}
 
-	<form onsubmit={submitSpawn}>
-		<label>
-			<span>WCID</span>
-			<input
-				bind:value={wcid}
-				placeholder="12345 or 0x3039"
-				spellcheck="false"
-				autocomplete="off"
-			/>
-		</label>
-		<label>
-			<span>Distance</span>
-			<input bind:value={distance} type="number" min="0.1" step="0.5" />
-		</label>
-		<button type="submit" disabled={!runtimeReady || !catalogReady || pending}>
-			{pending ? "Working…" : "Spawn in front"}
-		</button>
+	<form class="explorer-entities-form" onsubmit={submitSpawn}>
+		<fieldset
+			class="explorer-section"
+			disabled={!runtimeReady || !catalogReady || pending}
+		>
+			<legend>Spawn</legend>
+			<div class="explorer-entities-spawn-controls">
+				<label class="explorer-form-field">
+					<span>WCID</span>
+					<input
+						class="explorer-control"
+						bind:value={wcid}
+						placeholder="12345 or 0x3039"
+						spellcheck="false"
+						autocomplete="off"
+					/>
+				</label>
+				<label class="explorer-form-field">
+					<span>Distance</span>
+					<input
+						class="explorer-control"
+						bind:value={distance}
+						type="number"
+						min={EXPLORER_SPAWN_DISTANCE.minimum}
+						step={EXPLORER_SPAWN_DISTANCE.step}
+					/>
+				</label>
+			</div>
+			<button class="explorer-action" type="submit">
+				{pending ? "Working…" : "Spawn in front"}
+			</button>
+		</fieldset>
 	</form>
 
 	{#if operationError !== null}
-		<p class="entity-error" role="alert">{operationError}</p>
+		<p class="explorer-entities-note invalid" role="alert">{operationError}</p>
 	{/if}
 	{#if presentationError !== null}
-		<p class="entity-error" role="alert">{presentationError}</p>
+		<p class="explorer-entities-note invalid" role="alert">
+			{presentationError}
+		</p>
 	{/if}
 
-	<div class="entity-list-heading">
-		<span>Current spawned entities</span>
+	<div class="explorer-entities-heading">
+		<p class="ac-section-label">Current spawned entities</p>
 		<span>{entities.length}</span>
 	</div>
 	{#if entities.length === 0}
-		<p class="empty">No Explorer-spawned entities.</p>
+		<p class="explorer-entities-note">No Explorer-spawned entities.</p>
 	{:else}
-		<ul class="entity-list">
+		<ul class="explorer-selectable-list explorer-entities-list">
 			{#each entities as entity (entity.identity.guid)}
-				<li class:selected={entity.identity.guid === selectedGuid}>
+				<li class="explorer-entities-row">
 					<button
 						type="button"
-						class="entity-select"
+						class="explorer-selectable-row"
+						class:active={entity.identity.guid === selectedGuid}
 						onclick={() => (selectedGuid = entity.identity.guid)}
 					>
 						<strong>{entity.identity.name}</strong>
@@ -137,7 +162,7 @@
 					</button>
 					<button
 						type="button"
-						class="despawn"
+						class="explorer-action"
 						disabled={pending}
 						onclick={() => submitDespawn(entity)}
 					>
@@ -149,133 +174,99 @@
 	{/if}
 
 	{#if selected !== null}
-		<dl class="entity-details">
-			<div>
-				<dt>Lifecycle</dt>
-				<dd>Live generation {selected.generation}</dd>
+		<div class="ac-param-panel">
+			<div class="ac-param-row">
+				<span class="ac-param-key">Lifecycle</span>
+				<code>Live generation {selected.generation}</code>
 			</div>
-			<div>
-				<dt>Physical</dt>
-				<dd>{selected.physics.participation}</dd>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Physical</span>
+				<code>{selected.physics.participation}</code>
 			</div>
-			<div>
-				<dt>Contact</dt>
-				<dd>{selected.placement.contact}</dd>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Contact</span>
+				<code>{selected.placement.contact}</code>
 			</div>
-			<div>
-				<dt>Sampling</dt>
-				<dd>{selected.placement.sampleMode}</dd>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Sampling</span>
+				<code>{selected.placement.sampleMode}</code>
 			</div>
-		</dl>
+		</div>
 	{/if}
-</section>
+</div>
 
 <style>
-	.entities-panel,
-	form,
-	label,
-	.entity-select {
-		display: flex;
-		flex-direction: column;
+	.explorer-entities-panel {
+		display: grid;
+		gap: 12px;
 	}
 
-	.entities-panel,
-	form {
-		gap: 0.6rem;
-	}
-
-	.catalog-state,
-	.catalog-path,
-	.catalog-reason,
-	.entity-error,
-	.empty {
+	.explorer-entities-note {
 		margin: 0;
+		color: var(--ac-ink-muted);
+		font-size: 0.76rem;
+		line-height: 1.3;
 	}
 
-	.catalog-path,
-	.catalog-reason,
-	.entity-select span,
-	.empty,
-	dt {
-		font-size: 0.75rem;
-		opacity: 0.75;
+	.explorer-entities-note.invalid {
+		color: #ff9c8f;
 	}
 
-	.catalog-path {
+	.explorer-entities-note.truncate {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.unavailable,
-	.entity-error {
-		color: #ffb4a8;
+	.explorer-entities-form {
+		display: grid;
+		min-width: 0;
 	}
 
-	label {
-		gap: 0.2rem;
-		font-size: 0.75rem;
+	.explorer-entities-spawn-controls {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 7rem);
+		gap: 8px;
+		align-items: end;
 	}
 
-	input,
-	button {
-		font: inherit;
-	}
-
-	.entity-list-heading {
-		display: flex;
-		justify-content: space-between;
-		border-bottom: 1px solid rgb(255 255 255 / 16%);
-		padding-bottom: 0.25rem;
-	}
-
-	.entity-list {
-		display: flex;
-		flex-direction: column;
-		gap: 0.35rem;
-		list-style: none;
-		margin: 0;
-		padding: 0;
-	}
-
-	.entity-list li {
+	.explorer-entities-heading {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 0.35rem;
-		padding: 0.35rem;
-		border: 1px solid transparent;
+		gap: 8px;
+		align-items: baseline;
 	}
 
-	.entity-list li.selected {
-		border-color: rgb(255 255 255 / 35%);
+	.explorer-entities-heading .ac-section-label {
+		margin: 0;
 	}
 
-	.entity-select {
-		align-items: flex-start;
-		min-width: 0;
+	.explorer-entities-heading span {
+		color: var(--ac-ink-muted);
+		font-size: 0.76rem;
+	}
+
+	.explorer-entities-list {
+		max-height: 235px;
+		overflow: auto;
+		margin: 0;
 		padding: 0;
-		border: 0;
-		background: transparent;
-		color: inherit;
-		text-align: left;
+		list-style: none;
 	}
 
-	.despawn {
-		align-self: center;
+	.explorer-entities-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 6px;
+		align-items: center;
 	}
 
-	.entity-details {
-		margin: 0;
+	.explorer-entities-row .explorer-selectable-row {
+		gap: 2px;
 	}
 
-	.entity-details div {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-
-	dd {
-		margin: 0;
-		text-align: right;
+	.explorer-entities-row .explorer-selectable-row span {
+		color: var(--ac-ink-muted);
+		font-size: 0.75rem;
 	}
 </style>

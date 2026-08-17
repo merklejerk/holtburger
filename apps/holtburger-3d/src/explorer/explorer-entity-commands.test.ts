@@ -5,10 +5,25 @@ import { Vec3 } from "../lib/game/math/types";
 import {
 	createExplorerLaunchRequest,
 	createExplorerSpawnRequest,
+	EXPLORER_SPAWN_DISTANCE,
+	isExplorerSpawnDistanceOnStep,
 	parseExplorerWcid,
 } from "./explorer-entity-commands";
 
 describe("Explorer entity commands", () => {
+	it("offers a default spawn distance the number control accepts", () => {
+		// A number input rejects values off `minimum + step * k`, and the browser blocks submit
+		// before any handler runs. A default of 5 against a 0.1 minimum and 0.5 step was exactly
+		// that: the untouched form refused to spawn.
+		expect(isExplorerSpawnDistanceOnStep(EXPLORER_SPAWN_DISTANCE.default)).toBe(
+			true,
+		);
+		expect(EXPLORER_SPAWN_DISTANCE.default).toBeGreaterThanOrEqual(
+			EXPLORER_SPAWN_DISTANCE.minimum,
+		);
+		expect(isExplorerSpawnDistanceOnStep(0.1)).toBe(false);
+	});
+
 	it("accepts only decimal or explicitly prefixed hexadecimal WCIDs", () => {
 		expect(parseExplorerWcid(" 42 ")).toBe(42);
 		expect(parseExplorerWcid("0x2A")).toBe(42);

@@ -137,12 +137,12 @@ pub fn resolve_template_appearance(
         });
     }
 
-    // Hair texture rides the hairstyle's own ObjDesc and has no authored counterpart property.
-    if let Some(entry) = hair_style_entry
-        && let Some(change) = entry.obj_desc.texture_changes.first()
-    {
-        push_head_texture(&mut resolved, change.old_texture, change.new_texture);
-    }
+    // The hairstyle's own ObjDesc texture change is deliberately NOT applied. ACE reaches it only
+    // through the Gear Knight / Olthoi "hairstyle as body style" branch, where `HairStyle` is an
+    // explicit property; an ordinary generated NPC takes the `HeadObjectDID` branch and receives
+    // the head model alone, with hair colour coming from the hair palette
+    // (`WorldObject_Networking.cs:984-1005`). Every shipped hairstyle carries one such change, so
+    // applying it would recolour every generated head against ACE.
 
     push_face_texture(
         &mut resolved,
@@ -797,10 +797,18 @@ mod tests {
         );
         assert!(palette_at(&resolved, HAIR_PALETTE_OFFSET).is_some());
         assert!(palette_at(&resolved, EYES_PALETTE_OFFSET).is_some());
-        // Head model plus hair, eyes, nose, and mouth textures, all on the head part.
+        // The head model, plus exactly the eyes, nose, and mouth strips. The hairstyle's own
+        // texture change is ACE's body-style branch only, so a generated NPC must not receive it.
         assert_eq!(resolved.part_changes.len(), 1);
         assert_eq!(resolved.part_changes[0].part_index, HEAD_PART_INDEX);
-        assert_eq!(resolved.texture_changes.len(), 4);
+        assert_eq!(resolved.texture_changes.len(), 3);
+        assert!(
+            !resolved
+                .texture_changes
+                .iter()
+                .any(|change| change.new_texture_did == 0x0500_0002),
+            "the hairstyle texture change belongs to the body-style branch, not a generated NPC"
+        );
         assert!(
             resolved
                 .texture_changes

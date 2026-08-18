@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Appearance Plan
 
-Status: Complete 2026-08-17
+Status: Phases 1-5 complete 2026-08-17; Phase 6 (sub-palette rendering) pending
 Created: 2026-08-17
 Parent: follow-on to `holtburger-3d-explorer-weenie-dynamic-runtime-plan.md` (complete 2026-08-17)
 
@@ -465,6 +465,68 @@ single projection.
     framing a population scenario requires knowing the camera heading. The single-spawn path is
     camera-relative and was used for the visual proof.
 
+### Phase 6: Apply ObjDesc Sub-Palettes
+
+Progress: Pending.
+
+Added 2026-08-17 after Phase 5. Phases 1-5 land a complete, correct `EntityAppearance`, and the
+Phase 4 material fixes make its texture changes render. Its **sub-palettes still render nowhere**:
+`object_resource_closure` never serializes them and the frontend only handles a material's single
+palette. That is why every NPC's clothes are grey-white and why two Collectors with provably
+different skin and hair palettes still look alike. This is a missing capability rather than a
+defect, and it affects a server-fed client identically, since a real server sends the same
+sub-palettes in the same ObjDesc.
+
+#### Ground Truth
+
+| Question | Source |
+| --- | --- |
+| How a base palette and sub-palettes combine, and who receives the result | `acclient.c:313977-314040` (`CPartArray::SetPalette`), called with `objdesc->paletteID` at `:314208` |
+| The original palette a part is matched against | `acclient.c:302979` (`CPhysicsPart::GetOriginalPaletteID`), `CSurface::GetOriginalPaletteID` field 33, which is our `CSurface.orig_palette_id` |
+| Range replacement rule | `Palette::Modify`; ACViewer `Render/TextureCache.cs:332-337` — `paletteColors[j + offset] = newPalette.Colors[j + offset]`, replacement indexed at the same absolute offset |
+
+Settled semantics: the ObjDesc `PaletteID` is a **selector, not an override**. One modified palette
+is built from that base plus the ranges, then applied only to parts whose *original* palette ID
+equals it; parts on a different base palette are untouched. An ObjDesc carrying sub-palettes but no
+valid base palette recolours nothing, because `SetPalette` returns early.
+
+#### Deliverables
+
+- `holtburger-dat`: one pure composite of a `Palette` with ordered ranges, beside
+  `palette_id_for_shade`. Format semantics over its own type; no content, GPU, or entity concern.
+- `holtburger-content::material_graph`: `palette_override_for_material`, the exact structural
+  sibling of the landed `texture_override_for_material` — match the ObjDesc base against the
+  material's `orig_palette_id`, and on a match emit the composited palette's recipe plus its stable
+  identity in `ResolvedTextureMaterial`. Match strictly on `orig_palette_id`: a material with no
+  CSurface palette must not match through its RenderSurface default, or parts retail leaves alone
+  get recoloured.
+- Identity is derived once here and carried in the contract type, keyed by base palette plus the
+  ordered ranges, so several materials sharing a base palette share one prepared texture and
+  consumers re-derive nothing.
+- App: serialize that recipe and identity (`object_resource_closure`), composite and square the
+  pixels (`object_texture.rs`, which keeps only the RGBA layout concern), and carry the recipe on
+  the pixel request through both the Tauri command and the dev content host.
+- Frontend: decode the identity and recipe, request the composited palette, and treat the identity
+  as opaque. `createAssetTextureKey` keeps its shape; no hashing or re-derivation in the frontend.
+- Focused tests: range replacement at absolute offsets including a zero-length and a boundary
+  range; selector semantics (non-matching original palette untouched, absent base palette a
+  no-op); strict `orig_palette_id` matching that ignores the RenderSurface default; and identity
+  stability and distinctness across range sets.
+
+#### Acceptance Criteria
+
+- WCIDs 3921 and 3922 render with visibly different clothing colours, skin tone, and hair colour in
+  the browser harness, with zero browser errors.
+- A material whose original palette differs from the ObjDesc base renders exactly as before, proven
+  by an unchanged non-humanoid and an unchanged static-object scenario.
+- Two entities sharing a base palette and range set share one prepared palette texture; two with
+  different ranges do not. Teardown returns texture counts to baseline.
+- No change to the resolver, catalog, driver, feed schema, or protocol.
+
+#### Decisions and Course Corrections
+
+- Populate during execution.
+
 ## Risks and Mitigations
 
 | Risk | Mitigation |
@@ -476,6 +538,8 @@ single projection.
 | Catalog v2 breaks the byte-portability guarantees | Same fixture discipline as v1: canonical order, absence-vs-zero, round-trip determinism |
 | Layer sort diverges from ACE (wrong garment on top) | Priority is pure over decoded CLO coverage; two-item layering fixture plus WCID 3921/3922 visual comparison |
 | Scope bleed into held-weapon rendering | Out-of-scope names the parenting mechanism as the boundary; Phase 5 forbids dormant scaffolding |
+| Palette composite identity collides or over-splits | Identity is derived once in `material_graph` from base palette plus ordered ranges; tests assert sharing and distinctness, and teardown asserts texture counts return to baseline |
+| Sub-palettes recolour parts retail leaves alone | Match strictly on `CSurface.orig_palette_id`, never the RenderSurface default fallback; an unchanged static-object scenario guards the regression |
 | A second composition later wants catalog-backed appearance | Promotion out of `src-tauri` only when proven, per the app boundary rules; the shared `EntityAppearance` contract already insulates consumers |
 
 ## Definition of Done
@@ -494,10 +558,18 @@ single projection.
 - [x] No feed, protocol, or client-path contract change; no equipment scaffolding. The frontend
       material pipeline was changed under an explicit mid-plan scope extension, recorded in Phase 4.
 - [x] All gates pass.
+- [ ] ObjDesc sub-palettes reach the renderer: clothing colour, skin tone, and hair colour are
+      visibly correct and distinct between NPCs, with palette compositing owned by `holtburger-dat`,
+      material selection and identity owned by `material_graph`, and the frontend re-deriving
+      nothing.
 
 ## Open Questions
 
-None remain. The seed source (spawn GUID) and both ACE divergences were user-approved 2026-08-17,
+None block Phase 6. The palette question raised at the end of Phase 5 — whether the ObjDesc base
+palette overrides the per-surface palette — was settled from the decompile before the phase was
+written: it is a selector, not an override.
+
+The rest remain closed. The seed source (spawn GUID) and both ACE divergences were user-approved 2026-08-17,
 as was the mid-plan extension into the material pipeline once integration proved the existing
 renderer did not consume a complete ObjDesc.
 

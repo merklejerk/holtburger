@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
 use holtburger_common::Placement;
-use holtburger_content::{ResolvedMaterialRecipe, ResolvedMaterialSource};
+use holtburger_content::{ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource};
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, SetupAppearanceRequest,
 };
@@ -125,12 +125,9 @@ impl ObjectResourceClosure {
                 unreachable!("GfxObj request must return a GfxObj")
             };
             let geometry_id = self.add_geometry(&gfx_obj)?;
-            let surface_ids = part
-                .material_slots
-                .iter()
-                .map(|slot| slot.material.surface_id)
-                .collect::<Vec<_>>();
-            let material_ids = self.add_materials(runtime, &surface_ids).await?;
+            let material_ids = self
+                .add_resolved_materials(runtime, &part.material_slots)
+                .await?;
             parts.push(json!({
                 "partIndex": part.part_index,
                 "geometryId": geometry_id,
@@ -183,6 +180,41 @@ impl ObjectResourceClosure {
         Ok(id)
     }
 
+    /// Serialize materials that appearance resolution already produced.
+    ///
+    /// The resolved recipe carries any ObjDesc texture substitution, so re-loading it by surface
+    /// id would silently discard the garment texture and render the base body instead. The cache
+    /// key therefore includes the resolved texture: one surface can appear both substituted and
+    /// unsubstituted within a single closure.
+    async fn add_resolved_materials(
+        &mut self,
+        runtime: &ContentAssetRuntime,
+        slots: &[ResolvedMaterialSlot],
+    ) -> Result<Vec<String>> {
+        let mut ids = Vec::with_capacity(slots.len());
+        for slot in slots {
+            let recipe = &slot.material;
+            let id = match &recipe.source {
+                ResolvedMaterialSource::Texture(texture) => format!(
+                    "surface/{:08x}/texture/{:08x}",
+                    recipe.surface_id, texture.surface_texture_id
+                ),
+                ResolvedMaterialSource::SolidColor(_) => {
+                    format!("surface/{:08x}", recipe.surface_id)
+                }
+            };
+            if !self.materials.contains_key(&id) {
+                self.materials.insert(
+                    id.clone(),
+                    material_recipe_json(runtime, &id, recipe).await?,
+                );
+                self.add_texture_dependencies(recipe);
+            }
+            ids.push(id);
+        }
+        Ok(ids)
+    }
+
     pub(crate) async fn add_materials(
         &mut self,
         runtime: &ContentAssetRuntime,
@@ -198,8 +230,10 @@ impl ObjectResourceClosure {
                 let ContentAsset::MaterialRecipe(recipe) = asset else {
                     unreachable!("MaterialRecipe request must return a material recipe")
                 };
-                self.materials
-                    .insert(id.clone(), material_recipe_json(runtime, &recipe).await?);
+                self.materials.insert(
+                    id.clone(),
+                    material_recipe_json(runtime, &id, &recipe).await?,
+                );
                 self.add_texture_dependencies(&recipe);
             }
             ids.push(id);
@@ -412,6 +446,7 @@ fn material_side_type(sides_type: i32) -> Result<u8> {
 
 async fn material_recipe_json(
     runtime: &ContentAssetRuntime,
+    material_id: &str,
     recipe: &ResolvedMaterialRecipe,
 ) -> Result<Value> {
     let source = match &recipe.source {
@@ -449,7 +484,7 @@ async fn material_recipe_json(
         }
     };
     Ok(json!({
-        "id": format!("surface/{:08x}", recipe.surface_id),
+        "id": material_id,
         "rawSurfaceFlags": recipe.surface_type.bits(),
         "translucency": recipe.translucency,
         "luminosity": recipe.luminosity,

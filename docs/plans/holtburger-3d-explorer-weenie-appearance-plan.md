@@ -326,33 +326,41 @@ the layering test was verified to fail against a reversed merge order before acc
 
 ### Phase 4: Explorer Integration and Visual Proof
 
-Progress: Blocked on a scope decision (2026-08-17). Integration is complete and the resolved
-appearance is verifiably correct end to end, but the frontend does not render a complete outfit,
-and finishing that requires renderer work this plan placed out of scope.
+Progress: Complete (2026-08-17). Integration landed, and after the user extended scope into the
+material pipeline, both Collectors render fully dressed and visibly distinct.
 
-Landed: `ExplorerEntityContentPreparer` gained `char_gen`, `palette_set`, and `clothing_table`; the
-DAT adapter retains the decoded `CharGen` in a `OnceLock` because `ContentRepository::read_asset`
+`ExplorerEntityContentPreparer` gained `char_gen`, `palette_set`, and `clothing_table`; the DAT
+adapter retains the decoded `CharGen` in a `OnceLock` because `ContentRepository::read_asset`
 parses per call. `ExplorerEntityDriver::resolve_appearance` runs face resolution, selects wields,
 joins each item's catalog facts, and merges equipment, falling back to the template's own ObjDesc
-rows only when nothing worn paints the body, as ACE does. Four driver tests cover a seeded humanoid
-spawn with its outfit, GUID reproducibility, the non-humanoid path that never consults CharGen, the
-loud CharGen-absent failure, and a missing wielded item naming both weenies.
+rows only when nothing worn paints the body, as ACE does. Character generation is consulted only
+for templates that resolve a heritage and gender, so a crate spawns without it while a humanoid
+whose mount lacks it fails loudly.
 
-Evidence against real content and the regenerated catalog, via a temporary probe since deleted:
-WCID 3921 and 3922 both resolve `skipped=None`, eight sub-palettes each, 22 texture changes and 16
-part changes across body parts 0-16, and all three wield rows resolving to items. Their skin
-(`0x040002B2` vs `0x040002AF`), hair (`0x04001FC1` vs `0x04001FE0`), and three clothing palettes
-differ; the skin, hair, and eye layers land exactly on ACE's 0x0/0x18, 0x18/0x8, and 0x20/0x8
-ranges. The browser harness confirms the same eight/22/16 cardinality arrives at the frontend view,
-so nothing is lost across the Tauri boundary.
+Evidence against real content: WCID 3921 and 3922 each resolve eight sub-palettes, 22 texture
+changes, and 16 part changes across body parts 0-16, with differing skin (`0x040002B2` vs
+`0x040002AF`), hair (`0x04001FC1` vs `0x04001FE0`), and clothing palettes; the browser harness
+confirms the same cardinality reaches the frontend view. Both now render clothed and distinct —
+the Stone Collector in a long-sleeved tunic, the Tumerok Collector short-sleeved and belted — with
+zero browser errors.
 
-Open shortfall: the rendered NPCs show resolved skin tone and hair colour, and the two are visibly
-distinct (the Tumerok Collector's tunic sleeves appear on its upper arms where the Stone Collector
-has bare arms), but neither is fully dressed. Torso and legs still render base-body materials.
-Tracing found the cause outside this plan's boundary: `material_graph` applies a substitution only
-when a texture change's `old_texture` equals the material's `orig_texture_id`
-(`texture_override_for_material`), and unmatched changes are silently dropped rather than reported.
-The appearance contract is satisfied; the frontend material pipeline does not fully consume it.
+Two real defects in the shared material pipeline were found and fixed, both pre-existing and both
+reachable by a server-fed client, not just by Explorer:
+
+1. `texture_override_for_material` selected the *first* matching texture change. Layered clothing
+   appends one change list per garment in paint order, and a lower layer commonly restores the body
+   texture with an identity change (`0x05000BB0 -> 0x05000BB0` from the breeches) that a higher
+   layer then covers (`0x05000BB0 -> 0x0500025D` from the shirt). First-match let the identity
+   shadow the garment above it, so the abdomen rendered as bare skin. Retail applies changes
+   sequentially, so the final write wins; the selection is now last-match.
+2. `ObjectResourceClosure::add_setup_model_appearance` computed the resolved, substituted material
+   and then discarded it, re-loading `MaterialRecipe(surface_id)` from the raw surface. Every
+   ObjDesc texture substitution was silently dropped at serialization, which is why the bodies wore
+   armor-shaped silhouettes painted with skin. Appearance parts now serialize their already-resolved
+   recipes through `add_resolved_materials`, keyed by surface *and* resolved texture so one surface
+   can appear both substituted and unsubstituted in a single closure. `material_recipe_json` now
+   takes the material id rather than deriving it from `surface_id`, which had made the emitted
+   identity disagree with the map key.
 
 #### Deliverables
 
@@ -375,11 +383,28 @@ The appearance contract is satisfied; the frontend material pipeline does not fu
 
 - The three harness scenarios above pass with zero browser errors; teardown counts return to
   baseline (existing lifecycle checks unchanged).
-- Client-path contracts are untouched: no frontend, feed-schema, or protocol change in the diff.
+- Client-path contracts are untouched: no feed-schema or protocol change in the diff.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Scope extended by the user (2026-08-17) from "no frontend or renderer change" to include the
+  material pipeline, after integration proved the existing pipeline does not consume a complete
+  ObjDesc. The user's own observation — silhouettes armor-shaped but textured with skin — was the
+  decisive clue: it separated part changes, which were landing, from texture substitution, which
+  was not.
+- Both material-pipeline defects are pre-existing and independent of this plan. Neither could be
+  observed before, because no prior consumer supplied an ObjDesc with layered texture changes:
+  authored dynamics and static objects use base appearances. A server-fed client would have hit
+  both.
+- The material cache key changed from `surface/{id}` to `surface/{id}/texture/{tex}` for textured
+  materials. Solid-colour materials keep the short key, since they carry no substitutable texture.
+- `texture_changes_for_part` and `add_texture_change_retail` were both investigated and found
+  correct; the CLO old-texture keys match the replaced part models' surfaces exactly. Recording
+  that so the next reader does not re-suspect them.
+- Debt: unmatched texture substitutions are still dropped silently. That is correct for authored
+  content — a garment legitimately carries changes for body parts it does not cover — so it cannot
+  simply become an error, but it also means a genuine content fault is invisible. A future
+  diagnostic could count unmatched changes per part without failing the spawn.
 
 ### Phase 5: Cleanup, Docs, and Gates
 

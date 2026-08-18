@@ -14,7 +14,8 @@
 //!    guards (`Creature.cs:181`), discarding the weenie's own value.
 
 use holtburger_dat::file_type::char_gen::{CharGen, CharacterGenGender, ObjDesc};
-use holtburger_weenie_catalog::TemplateAppearance;
+use holtburger_dat::file_type::{ClothingTable, ObjDesc as ClothingObjDesc};
+use holtburger_weenie_catalog::{TemplateAppearance, WieldEntry};
 use holtburger_world::{EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange};
 
 /// Palette ranges ACE writes for the generated body layers (`AddBaseModelData`).
@@ -331,6 +332,190 @@ const HERITAGE_NAMES: [(&str, u32); 12] = [
 
 /// `ACE.Entity.Enum.Gender`.
 const GENDER_NAMES: [(&str, i32); 2] = [("Male", 1), ("Female", 2)];
+
+/// ACE's `DestinationType::Treasure`; combined with `Wield` it makes `WieldTreasure`, where the
+/// row's `shade` column carries a selection probability instead of a CLO shade.
+const DESTINATION_TREASURE: i32 = 8;
+
+/// `EquipMask` bits ACE treats as armor or extremity when partitioning worn items
+/// (`Creature_Networking.cs:110`). `Armor` already includes `FootWear`.
+const EQUIP_MASK_ARMOR: i32 = 0x0000_7E00 | 0x0000_0100;
+const EQUIP_MASK_EXTREMITY: i32 = 0x0000_0001 | 0x0000_0020 | 0x0000_0100;
+
+/// ACE's `ItemType::Armor`.
+const ITEM_TYPE_ARMOR: i32 = 2;
+
+/// One wielded item's facts, joined from its own catalog template by the caller.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WieldedItem {
+    /// Item weenie class, for error reporting.
+    pub wcid: u32,
+    /// `PropertyDataId::ClothingBase`; an item without one paints nothing.
+    pub clothing_base_did: Option<u32>,
+    /// Raw ACE `ItemType`.
+    pub item_type: i32,
+    /// `PropertyInt::ValidLocations`, the slot ACE wields NPC items at.
+    pub valid_locations: Option<i32>,
+    /// `PropertyInt::ClothingPriority` coverage mask, used to order clothing.
+    pub clothing_priority: Option<i32>,
+    /// `PaletteTemplate` selector from the wield row; zero is unset.
+    pub palette_template: u32,
+    /// CLO shade from the wield row.
+    pub shade: f64,
+}
+
+/// Selects the wield rows that actually dress the wearer this spawn.
+///
+/// Ordinary `Wield` rows always apply. `WieldTreasure` rows accumulate their `shade` as a
+/// probability in source order and one row per 0-1 chunk is selected, mirroring
+/// `Creature_Equipment.CreateListSelect`; the same seeded stream keeps the outcome stable per
+/// spawn.
+pub fn select_wielded(entries: &[WieldEntry], seed: u64) -> Vec<WieldEntry> {
+    let mut roll = Roll::new(seed);
+    let mut draw = roll.unit();
+    let mut total_probability = 0.0_f64;
+    let mut chunk_selected = false;
+    let mut selected = Vec::new();
+
+    for entry in entries {
+        let uses_probability =
+            entry.destination_type & DESTINATION_TREASURE != 0 && entry.shade != 0.0;
+        if !uses_probability {
+            selected.push(*entry);
+            continue;
+        }
+        if total_probability >= 1.0 {
+            total_probability = 0.0;
+            draw = roll.unit();
+            chunk_selected = false;
+        }
+        total_probability += entry.shade;
+        if chunk_selected || draw >= total_probability {
+            continue;
+        }
+        chunk_selected = true;
+        selected.push(*entry);
+    }
+    selected
+}
+
+/// Merge worn clothing and armor onto an already-resolved body appearance.
+///
+/// Items are ordered as `Creature_Networking.CalculateObjDesc` orders them: clothing by its
+/// authored `ClothingPriority`, then armor by the coverage its clothing table paints. An item
+/// whose clothing table does not dress this setup is skipped, exactly as ACE skips it, because
+/// that is authored content rather than an error.
+pub fn merge_worn_equipment(
+    appearance: &mut EntityAppearance,
+    setup_did: u32,
+    items: &[WieldedItem],
+    clothing_table: impl Fn(u32) -> Option<ClothingTable>,
+    palette_set: impl Fn(u32, f64) -> Option<u32>,
+) -> Result<(), WornEquipmentError> {
+    let mut clothing = Vec::new();
+    let mut armor = Vec::new();
+    for item in items {
+        let Some(clothing_base_did) = item.clothing_base_did else {
+            continue;
+        };
+        let table = clothing_table(clothing_base_did).ok_or(WornEquipmentError::MissingTable {
+            wcid: item.wcid,
+            clothing_base_did,
+        })?;
+        let Some(coverage) = table.visual_coverage(setup_did) else {
+            // Authored gap: this garment has no mapping for this body.
+            continue;
+        };
+        if is_armor(item) {
+            armor.push((coverage.bits(), *item, table));
+        } else {
+            clothing.push((item.clothing_priority.unwrap_or_default(), *item, table));
+        }
+    }
+    clothing.sort_by_key(|(priority, item, _)| (*priority, item.wcid));
+    armor.sort_by_key(|(coverage, item, _)| (*coverage, item.wcid));
+
+    for (_, item, table) in clothing.into_iter().chain(
+        armor
+            .into_iter()
+            .map(|(coverage, item, table)| (coverage as i32, item, table)),
+    ) {
+        let obj_desc = table
+            .build_obj_desc(setup_did, item.palette_template, item.shade, |set, hue| {
+                palette_set(set, hue).ok_or(
+                    holtburger_dat::file_type::ClothingBuildObjDescError::MissingPaletteSet {
+                        palette_set_id: set,
+                    },
+                )
+            })
+            .map_err(|source| WornEquipmentError::Build {
+                wcid: item.wcid,
+                message: format!("{source:?}"),
+            })?;
+        push_clothing_obj_desc(appearance, &obj_desc);
+    }
+    Ok(())
+}
+
+/// A wielded item that cannot be resolved at all, as distinct from one that simply does not dress
+/// this body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WornEquipmentError {
+    /// The item names a clothing table absent from mounted content.
+    MissingTable { wcid: u32, clothing_base_did: u32 },
+    /// The clothing table exists but could not produce an ObjDesc.
+    Build { wcid: u32, message: String },
+}
+
+impl std::fmt::Display for WornEquipmentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingTable {
+                wcid,
+                clothing_base_did,
+            } => write!(
+                formatter,
+                "wielded item {wcid} names missing clothing table 0x{clothing_base_did:08X}"
+            ),
+            Self::Build { wcid, message } => {
+                write!(formatter, "wielded item {wcid} clothing failed: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WornEquipmentError {}
+
+/// ACE partitions on `ItemType == Armor || ValidLocations & (Armor | Extremity)`.
+fn is_armor(item: &WieldedItem) -> bool {
+    item.item_type == ITEM_TYPE_ARMOR
+        || item
+            .valid_locations
+            .is_some_and(|locations| locations & (EQUIP_MASK_ARMOR | EQUIP_MASK_EXTREMITY) != 0)
+}
+
+fn push_clothing_obj_desc(appearance: &mut EntityAppearance, obj_desc: &ClothingObjDesc) {
+    for change in &obj_desc.anim_part_changes {
+        appearance.part_changes.push(EntityPartChange {
+            part_index: change.part_index,
+            gfx_obj_did: change.part_id,
+        });
+    }
+    for change in &obj_desc.texture_changes {
+        appearance.texture_changes.push(EntityTextureChange {
+            part_index: change.part_index,
+            old_texture_did: change.old_texture,
+            new_texture_did: change.new_texture,
+        });
+    }
+    for palette in &obj_desc.sub_palettes {
+        appearance.sub_palettes.push(EntitySubPalette {
+            palette_did: palette.sub_id,
+            offset: palette.offset,
+            color_count: palette.num_colors,
+        });
+    }
+}
 
 /// Deterministic splitmix64 stream. ACE uses `ThreadSafeRandom`; seeding from the spawn identity is
 /// divergence 1, and keeps a given entity's face identical across runs and harness captures.
@@ -709,5 +894,243 @@ mod tests {
         assert_eq!(set.palette_id_for_shade(0.5), Some(20));
         assert_eq!(set.palette_id_for_shade(-0.1), None);
         assert_eq!(set.palette_id_for_shade(1.1), None);
+    }
+}
+
+#[cfg(test)]
+mod equipment_tests {
+    use super::*;
+    use holtburger_dat::file_type::{CloObjectEffect, CloTextureEffect, ClothingBase};
+    use std::collections::BTreeMap;
+
+    const HUMAN_MALE: u32 = 0x0200_0001;
+    const OTHER_BODY: u32 = 0x0200_0099;
+
+    /// Body part indices from ACE's coverage map.
+    const PART_CHEST: u32 = 9;
+    const PART_LEFT_FOOT: u32 = 3;
+
+    fn clothing(setup: u32, part: u32, texture: (u32, u32), model: u32) -> ClothingTable {
+        let mut clothing_bases = BTreeMap::new();
+        clothing_bases.insert(
+            setup,
+            ClothingBase {
+                object_effects: vec![CloObjectEffect {
+                    part_num: part,
+                    object_id: model,
+                    texture_effects: vec![CloTextureEffect {
+                        old_texture: texture.0,
+                        new_texture: texture.1,
+                    }],
+                }],
+            },
+        );
+        ClothingTable {
+            id: 0x1000_0001,
+            clothing_bases,
+            palette_templates: BTreeMap::new(),
+        }
+    }
+
+    fn item(
+        wcid: u32,
+        clothing_base_did: u32,
+        item_type: i32,
+        valid_locations: i32,
+    ) -> WieldedItem {
+        WieldedItem {
+            wcid,
+            clothing_base_did: Some(clothing_base_did),
+            item_type,
+            valid_locations: Some(valid_locations),
+            clothing_priority: None,
+            palette_template: 0,
+            shade: 0.0,
+        }
+    }
+
+    fn empty_appearance() -> EntityAppearance {
+        EntityAppearance {
+            palette_did: None,
+            sub_palettes: Vec::new(),
+            texture_changes: Vec::new(),
+            part_changes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn worn_clothing_paints_the_wearer_model() {
+        let mut appearance = empty_appearance();
+        let shirt = item(130, 0x1000_0001, 4, 0x1E);
+
+        merge_worn_equipment(
+            &mut appearance,
+            HUMAN_MALE,
+            &[shirt],
+            |_| {
+                Some(clothing(
+                    HUMAN_MALE,
+                    PART_CHEST,
+                    (0x0500_0001, 0x0500_0002),
+                    0x0100_0001,
+                ))
+            },
+            |_, _| Some(0x0400_0001),
+        )
+        .unwrap();
+
+        assert_eq!(appearance.part_changes.len(), 1);
+        assert_eq!(appearance.texture_changes.len(), 1);
+        assert_eq!(appearance.texture_changes[0].new_texture_did, 0x0500_0002);
+    }
+
+    /// A garment with no mapping for this body is authored content, not a failure: ACE skips it.
+    #[test]
+    fn clothing_without_a_mapping_for_this_body_is_skipped() {
+        let mut appearance = empty_appearance();
+        let robe = item(2593, 0x1000_0002, 4, 0x1E);
+
+        merge_worn_equipment(
+            &mut appearance,
+            HUMAN_MALE,
+            &[robe],
+            |_| Some(clothing(OTHER_BODY, PART_CHEST, (1, 2), 3)),
+            |_, _| Some(0x0400_0001),
+        )
+        .unwrap();
+
+        assert_eq!(appearance, empty_appearance());
+    }
+
+    /// A missing clothing table is a real content failure and must be loud.
+    #[test]
+    fn missing_clothing_table_fails_loudly_naming_the_item() {
+        let mut appearance = empty_appearance();
+        let boots = item(115, 0x1000_00FF, 2, 0x180);
+
+        let error = merge_worn_equipment(
+            &mut appearance,
+            HUMAN_MALE,
+            &[boots],
+            |_| None,
+            |_, _| Some(0x0400_0001),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WornEquipmentError::MissingTable { wcid: 115, .. }
+        ));
+        assert!(error.to_string().contains("115"));
+    }
+
+    /// Clothing paints before armor, so boots layer over a tunic rather than under it.
+    #[test]
+    fn armor_layers_after_clothing() {
+        let mut appearance = empty_appearance();
+        // Boots partition as armor through FootWear; the tunic is ordinary clothing.
+        let boots = item(115, 0x1000_0007, 2, 0x180);
+        let tunic = item(2593, 0x1000_0001, 4, 0x1E);
+
+        merge_worn_equipment(
+            &mut appearance,
+            HUMAN_MALE,
+            &[boots, tunic],
+            |clothing_base| {
+                Some(if clothing_base == 0x1000_0007 {
+                    clothing(
+                        HUMAN_MALE,
+                        PART_LEFT_FOOT,
+                        (0x0500_0010, 0x0500_0011),
+                        0x0100_0010,
+                    )
+                } else {
+                    clothing(
+                        HUMAN_MALE,
+                        PART_CHEST,
+                        (0x0500_0020, 0x0500_0021),
+                        0x0100_0020,
+                    )
+                })
+            },
+            |_, _| Some(0x0400_0001),
+        )
+        .unwrap();
+
+        let order: Vec<u32> = appearance
+            .texture_changes
+            .iter()
+            .map(|change| change.new_texture_did)
+            .collect();
+        assert_eq!(
+            order,
+            vec![0x0500_0021, 0x0500_0011],
+            "clothing must be applied before armor regardless of wield order"
+        );
+    }
+
+    #[test]
+    fn armor_partition_follows_item_type_or_equip_mask() {
+        // Explicit ItemType::Armor.
+        assert!(is_armor(&item(1, 1, ITEM_TYPE_ARMOR, 0)));
+        // FootWear through the equip mask, as the Collector boots do.
+        assert!(is_armor(&item(2, 1, 4, 0x180)));
+        // A plain shirt is clothing.
+        assert!(!is_armor(&item(3, 1, 4, 0x1E)));
+    }
+
+    /// Ordinary wields always apply; treasure rows compete inside a probability chunk and the
+    /// same seed reproduces the same outfit.
+    #[test]
+    fn treasure_wields_select_one_per_chunk_and_are_stable_per_seed() {
+        let entries = vec![
+            WieldEntry {
+                wcid: 100,
+                destination_type: 2,
+                palette_template: 0,
+                shade: 0.0,
+            },
+            WieldEntry {
+                wcid: 200,
+                destination_type: 10,
+                palette_template: 0,
+                shade: 0.5,
+            },
+            WieldEntry {
+                wcid: 201,
+                destination_type: 10,
+                palette_template: 0,
+                shade: 0.5,
+            },
+        ];
+
+        let first = select_wielded(&entries, 0xf000_0001);
+        let repeat = select_wielded(&entries, 0xf000_0001);
+
+        assert_eq!(first, repeat, "same seed must reproduce the same outfit");
+        assert!(
+            first.iter().any(|entry| entry.wcid == 100),
+            "ordinary wields always apply"
+        );
+        let chosen = first.iter().filter(|entry| entry.wcid >= 200).count();
+        assert_eq!(chosen, 1, "exactly one treasure row per probability chunk");
+    }
+
+    #[test]
+    fn items_without_clothing_paint_nothing() {
+        let mut appearance = empty_appearance();
+        let mut trinket = item(999, 0, 4, 0x1E);
+        trinket.clothing_base_did = None;
+
+        merge_worn_equipment(
+            &mut appearance,
+            HUMAN_MALE,
+            &[trinket],
+            |_| panic!("an item without a clothing base must not be looked up"),
+            |_, _| Some(0x0400_0001),
+        )
+        .unwrap();
+
+        assert_eq!(appearance, empty_appearance());
     }
 }

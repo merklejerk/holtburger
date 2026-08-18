@@ -5,9 +5,9 @@ use tempfile::tempdir;
 
 use crate::codec::{HEADER_LENGTH, INDEX_ENTRY_LENGTH, MAX_STRING_BYTES};
 use crate::{
-    AnimPartChange, CatalogLookupError, CatalogOpenError, CatalogWriteError, PhysicsBoolOverrides,
-    SubPalette, TemplatePhysics, TextureChange, WeenieCatalog, WeenieTemplate,
-    write_catalog_atomic,
+    AnimPartChange, CATALOG_FORMAT_VERSION, CatalogLookupError, CatalogOpenError,
+    CatalogWriteError, PhysicsBoolOverrides, SubPalette, TemplateAppearance, TemplatePhysics,
+    TextureChange, WeenieCatalog, WeenieTemplate, WieldEntry, write_catalog_atomic,
 };
 
 fn template(wcid: u32) -> WeenieTemplate {
@@ -26,6 +26,39 @@ fn template(wcid: u32) -> WeenieTemplate {
         elasticity: Some(0.05),
         maximum_velocity: Some(15.0),
         rotation_speed: Some(2.0),
+        appearance: TemplateAppearance {
+            clothing_base_did: None,
+            head_object_did: Some(0x0200_1234),
+            skin_palette_did: Some(0x0400_0100),
+            hair_palette_did: Some(0x0400_0101),
+            eyes_palette_did: None,
+            eyes_texture_did: Some(0x0500_0001),
+            default_eyes_texture_did: None,
+            nose_texture_did: None,
+            default_nose_texture_did: None,
+            mouth_texture_did: None,
+            default_mouth_texture_did: None,
+            heritage_group: Some(2),
+            gender: None,
+            heritage_group_name: Some("Gharu'ndim".to_owned()),
+            sex: Some("Male".to_owned()),
+            clothing_priority: Some(65_536),
+            valid_locations: Some(384),
+        },
+        wielded: vec![
+            WieldEntry {
+                wcid: 130,
+                destination_type: 2,
+                palette_template: 5,
+                shade: 0.67,
+            },
+            WieldEntry {
+                wcid: 115,
+                destination_type: 10,
+                palette_template: 0,
+                shade: 0.0,
+            },
+        ],
         physics: TemplatePhysics {
             base_mask: Some(0x0040_0c08),
             overrides: PhysicsBoolOverrides {
@@ -138,11 +171,19 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     absent.physics.overrides.frozen = None;
     absent.maximum_velocity = None;
     absent.rotation_speed = None;
+    absent.appearance.skin_palette_did = None;
+    absent.appearance.heritage_group = None;
+    absent.appearance.clothing_priority = None;
+    absent.appearance.sex = None;
     let mut explicit = template(2);
     explicit.physics.base_mask = Some(0);
     explicit.physics.overrides.frozen = Some(false);
     explicit.maximum_velocity = Some(0.0);
     explicit.rotation_speed = Some(0.0);
+    explicit.appearance.skin_palette_did = Some(0);
+    explicit.appearance.heritage_group = Some(0);
+    explicit.appearance.clothing_priority = Some(0);
+    explicit.appearance.sex = Some(String::new());
 
     write_catalog_atomic(&path, "ACE-World-test", &[absent, explicit]).unwrap();
 
@@ -157,6 +198,50 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     assert_eq!(explicit.physics.overrides.frozen, Some(false));
     assert_eq!(explicit.maximum_velocity, Some(0.0));
     assert_eq!(explicit.rotation_speed, Some(0.0));
+    assert_eq!(absent.appearance.skin_palette_did, None);
+    assert_eq!(absent.appearance.heritage_group, None);
+    assert_eq!(absent.appearance.clothing_priority, None);
+    assert_eq!(absent.appearance.sex, None);
+    assert_eq!(explicit.appearance.skin_palette_did, Some(0));
+    assert_eq!(explicit.appearance.heritage_group, Some(0));
+    assert_eq!(explicit.appearance.clothing_priority, Some(0));
+    assert_eq!(explicit.appearance.sex.as_deref(), Some(""));
+}
+
+/// Wielded entries are positional: probability grouping depends on source order, so the codec
+/// must not sort or dedupe them the way canonical appearance collections are sorted.
+#[test]
+fn wielded_entries_survive_round_trip_in_source_order() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("wielded.hwc");
+    let mut template = template(3);
+    template.wielded = vec![
+        WieldEntry {
+            wcid: 2606,
+            destination_type: 10,
+            palette_template: 17,
+            shade: 1.0,
+        },
+        WieldEntry {
+            wcid: 115,
+            destination_type: 2,
+            palette_template: 4,
+            shade: 0.8,
+        },
+        WieldEntry {
+            wcid: 115,
+            destination_type: 2,
+            palette_template: 4,
+            shade: 0.8,
+        },
+    ];
+    let expected = template.wielded.clone();
+
+    write_catalog_atomic(&path, "ACE-World-test", &[template]).unwrap();
+
+    let catalog = WeenieCatalog::open(path).unwrap();
+    let decoded = catalog.lookup(3).unwrap().unwrap();
+    assert_eq!(decoded.wielded, expected);
 }
 
 #[test]
@@ -257,21 +342,25 @@ fn truncated_header_is_corrupt() {
     assert!(error.to_string().contains("shorter than header"));
 }
 
+/// Both neighbours of the supported version must be rejected by the same distinct error, so a
+/// stale v1 artifact and a future format are equally unreadable rather than silently misparsed.
 #[test]
 fn unsupported_version_is_distinct() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("version.hwc");
-    write_catalog_atomic(&path, "ACE-World-test", &[]).unwrap();
-    mutate(&path, |bytes| {
-        bytes[8..12].copy_from_slice(&2_u32.to_le_bytes())
-    });
+    for unsupported in [CATALOG_FORMAT_VERSION - 1, CATALOG_FORMAT_VERSION + 1] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("version.hwc");
+        write_catalog_atomic(&path, "ACE-World-test", &[]).unwrap();
+        mutate(&path, |bytes| {
+            bytes[8..12].copy_from_slice(&unsupported.to_le_bytes())
+        });
 
-    let error = WeenieCatalog::open(path).unwrap_err();
+        let error = WeenieCatalog::open(path).unwrap_err();
 
-    assert!(matches!(
-        error,
-        CatalogOpenError::UnsupportedVersion { version: 2, .. }
-    ));
+        assert!(
+            matches!(error, CatalogOpenError::UnsupportedVersion { version, .. } if version == unsupported),
+            "version {unsupported} must be rejected distinctly, got {error:?}"
+        );
+    }
 }
 
 #[test]

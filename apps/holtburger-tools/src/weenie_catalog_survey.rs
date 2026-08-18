@@ -88,6 +88,33 @@ pub struct CatalogSurvey {
     pub maximum_velocity: FloatDistribution,
     /// Present projectile rotation-speed distribution.
     pub rotation_speed: FloatDistribution,
+    /// Appearance-input census used to size face resolution and the equipment merge.
+    pub appearance: AppearanceSurvey,
+}
+
+/// Distribution of the authored appearance facts and wielded equipment.
+#[derive(Debug, Serialize)]
+pub struct AppearanceSurvey {
+    /// Records carrying each optional appearance data ID, keyed by field name.
+    pub present_appearance_dids: BTreeMap<&'static str, u64>,
+    /// Records carrying at least one explicit face data ID.
+    pub records_with_any_face_did: u64,
+    /// Records with both a resolvable heritage and gender source, i.e. face-generation eligible.
+    pub generation_eligible: u64,
+    /// Eligible records whose skin, hair, and eyes palettes are all authored.
+    pub eligible_fully_authored: u64,
+    /// Eligible records with some but not all of those three authored.
+    pub eligible_partly_authored: u64,
+    /// Eligible records authoring none of them, so every feature is generated.
+    pub eligible_fully_generated: u64,
+    /// Records carrying `ClothingBase`, i.e. wearable items.
+    pub records_with_clothing_base: u64,
+    /// Per-record wielded-entry cardinality.
+    pub wielded_counts: BTreeMap<usize, u64>,
+    /// Total wielded entries by raw destination type.
+    pub wielded_by_destination_type: BTreeMap<i32, u64>,
+    /// Distinct heritage/sex string pairs observed, as `heritage/sex`.
+    pub heritage_sex_pairs: BTreeMap<String, u64>,
 }
 
 /// Client-content measurements and the effective masks derived from them.
@@ -625,6 +652,105 @@ fn survey_templates(templates: &[WeenieTemplate], encoded_lengths: Vec<u64>) -> 
         elasticity,
         maximum_velocity,
         rotation_speed,
+        appearance: survey_appearance(templates),
+    }
+}
+
+fn survey_appearance(templates: &[WeenieTemplate]) -> AppearanceSurvey {
+    let mut present_appearance_dids = BTreeMap::new();
+    let mut records_with_any_face_did = 0;
+    let mut generation_eligible = 0;
+    let mut eligible_fully_authored = 0;
+    let mut eligible_partly_authored = 0;
+    let mut eligible_fully_generated = 0;
+    let mut records_with_clothing_base = 0;
+    let mut wielded_counts = BTreeMap::new();
+    let mut wielded_by_destination_type = BTreeMap::new();
+    let mut heritage_sex_pairs = BTreeMap::new();
+
+    for template in templates {
+        let appearance = &template.appearance;
+        let face_dids: [(&'static str, bool); 11] = [
+            ("clothing_base_did", appearance.clothing_base_did.is_some()),
+            ("head_object_did", appearance.head_object_did.is_some()),
+            ("skin_palette_did", appearance.skin_palette_did.is_some()),
+            ("hair_palette_did", appearance.hair_palette_did.is_some()),
+            ("eyes_palette_did", appearance.eyes_palette_did.is_some()),
+            ("eyes_texture_did", appearance.eyes_texture_did.is_some()),
+            (
+                "default_eyes_texture_did",
+                appearance.default_eyes_texture_did.is_some(),
+            ),
+            ("nose_texture_did", appearance.nose_texture_did.is_some()),
+            (
+                "default_nose_texture_did",
+                appearance.default_nose_texture_did.is_some(),
+            ),
+            ("mouth_texture_did", appearance.mouth_texture_did.is_some()),
+            (
+                "default_mouth_texture_did",
+                appearance.default_mouth_texture_did.is_some(),
+            ),
+        ];
+        for (field, present) in face_dids {
+            let counter = present_appearance_dids.entry(field).or_insert(0);
+            if present {
+                *counter += 1;
+            }
+        }
+        // `ClothingBase` marks a wearable item rather than a face, so it is excluded here.
+        if face_dids
+            .iter()
+            .any(|(field, present)| *present && *field != "clothing_base_did")
+        {
+            records_with_any_face_did += 1;
+        }
+        if appearance.clothing_base_did.is_some() {
+            records_with_clothing_base += 1;
+        }
+
+        let has_heritage =
+            appearance.heritage_group.is_some() || appearance.heritage_group_name.is_some();
+        let has_gender = appearance.gender.is_some() || appearance.sex.is_some();
+        if has_heritage && has_gender {
+            generation_eligible += 1;
+            let authored = u8::from(appearance.skin_palette_did.is_some())
+                + u8::from(appearance.hair_palette_did.is_some())
+                + u8::from(appearance.eyes_palette_did.is_some());
+            match authored {
+                3 => eligible_fully_authored += 1,
+                0 => eligible_fully_generated += 1,
+                _ => eligible_partly_authored += 1,
+            }
+        }
+        if let (Some(heritage), Some(sex)) = (
+            appearance.heritage_group_name.as_deref(),
+            appearance.sex.as_deref(),
+        ) {
+            *heritage_sex_pairs
+                .entry(format!("{heritage}/{sex}"))
+                .or_insert(0) += 1;
+        }
+
+        *wielded_counts.entry(template.wielded.len()).or_insert(0) += 1;
+        for entry in &template.wielded {
+            *wielded_by_destination_type
+                .entry(entry.destination_type)
+                .or_insert(0) += 1;
+        }
+    }
+
+    AppearanceSurvey {
+        present_appearance_dids,
+        records_with_any_face_did,
+        generation_eligible,
+        eligible_fully_authored,
+        eligible_partly_authored,
+        eligible_fully_generated,
+        records_with_clothing_base,
+        wielded_counts,
+        wielded_by_destination_type,
+        heritage_sex_pairs,
     }
 }
 
@@ -1744,6 +1870,8 @@ mod tests {
             elasticity: None,
             maximum_velocity: None,
             rotation_speed: None,
+            appearance: Default::default(),
+            wielded: Vec::new(),
             physics: TemplatePhysics::default(),
             sub_palettes: Vec::new(),
             texture_changes: Vec::new(),

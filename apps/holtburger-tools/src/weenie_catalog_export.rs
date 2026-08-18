@@ -5,8 +5,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use holtburger_weenie_catalog::{
-    AnimPartChange, PhysicsBoolOverrides, SubPalette, TemplatePhysics, TextureChange,
-    WeenieTemplate, write_catalog_atomic,
+    AnimPartChange, PhysicsBoolOverrides, SubPalette, TemplateAppearance, TemplatePhysics,
+    TextureChange, WeenieTemplate, WieldEntry, write_catalog_atomic,
 };
 use mysql::prelude::Queryable;
 use mysql::{Conn, Opts};
@@ -17,6 +17,17 @@ const PROPERTY_DID_MOTION_TABLE: u16 = 2;
 const PROPERTY_DID_SOUND_TABLE: u16 = 3;
 const PROPERTY_DID_PALETTE_BASE: u16 = 6;
 const PROPERTY_DID_PHYSICS_EFFECT_TABLE: u16 = 22;
+const PROPERTY_DID_CLOTHING_BASE: u16 = 7;
+const PROPERTY_DID_EYES_TEXTURE: u16 = 9;
+const PROPERTY_DID_NOSE_TEXTURE: u16 = 10;
+const PROPERTY_DID_MOUTH_TEXTURE: u16 = 11;
+const PROPERTY_DID_DEFAULT_EYES_TEXTURE: u16 = 12;
+const PROPERTY_DID_DEFAULT_NOSE_TEXTURE: u16 = 13;
+const PROPERTY_DID_DEFAULT_MOUTH_TEXTURE: u16 = 14;
+const PROPERTY_DID_HAIR_PALETTE: u16 = 15;
+const PROPERTY_DID_EYES_PALETTE: u16 = 16;
+const PROPERTY_DID_SKIN_PALETTE: u16 = 17;
+const PROPERTY_DID_HEAD_OBJECT: u16 = 18;
 
 const PROPERTY_FLOAT_MAXIMUM_VELOCITY: u16 = 26;
 const PROPERTY_FLOAT_ROTATION_SPEED: u16 = 27;
@@ -25,7 +36,15 @@ const PROPERTY_FLOAT_FRICTION: u16 = 78;
 const PROPERTY_FLOAT_ELASTICITY: u16 = 79;
 
 const PROPERTY_INT_PHYSICS_STATE: u16 = 93;
+const PROPERTY_INT_CLOTHING_PRIORITY: u16 = 4;
+const PROPERTY_INT_VALID_LOCATIONS: u16 = 9;
+const PROPERTY_INT_GENDER: u16 = 113;
+const PROPERTY_INT_HERITAGE_GROUP: u16 = 188;
 const PROPERTY_STRING_NAME: u16 = 1;
+const PROPERTY_STRING_SEX: u16 = 3;
+const PROPERTY_STRING_HERITAGE_GROUP_NAME: u16 = 4;
+/// ACE `DestinationType::Wield`; `WieldTreasure` is this bit plus `Treasure`.
+const DESTINATION_WIELD: i32 = 2;
 
 const PROPERTY_BOOL_IGNORE_COLLISIONS: u16 = 11;
 const PROPERTY_BOOL_REPORT_COLLISIONS: u16 = 12;
@@ -59,12 +78,14 @@ struct AceWorldRows {
     dids: Vec<ScalarRow<u32>>,
     /// Selected floating properties.
     floats: Vec<ScalarRow<f64>>,
-    /// Raw signed integer physics-state properties.
+    /// Selected signed integer properties.
     ints: Vec<ScalarRow<i32>>,
     /// Selected string properties.
     strings: Vec<ScalarRow<String>>,
     /// Selected nullable physics property-bools, decoded as validated numeric bits.
     bools: Vec<ScalarRow<u8>>,
+    /// Wielded create-list rows in source order.
+    wields: Vec<WieldRow>,
     /// Raw packed subpalette rows.
     palettes: Vec<PaletteRow>,
     /// Texture substitution rows.
@@ -132,6 +153,21 @@ struct AnimPartRow {
     animation_part_did: u32,
 }
 
+/// One wielded `weenie_properties_create_list` row, retained in source order.
+#[derive(Clone, Debug)]
+struct WieldRow {
+    /// Wearer weenie class.
+    wcid: u32,
+    /// Raw ACE `DestinationType` bits.
+    destination_type: i32,
+    /// Wielded item weenie class.
+    item_wcid: u32,
+    /// Raw `PaletteTemplate` selector.
+    palette: i32,
+    /// CLO shade, or selection probability on treasure destinations.
+    shade: f64,
+}
+
 fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
     Ok(AceWorldRows {
         weenies: connection
@@ -146,7 +182,7 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie")?,
         dids: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_d_i_d WHERE type IN (1, 2, 3, 6, 22) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_d_i_d WHERE type IN (1, 2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 22) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_d_i_d")?,
@@ -158,13 +194,13 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_float")?,
         ints: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type = 93 ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (4, 9, 93, 113, 188) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_int")?,
         strings: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_string WHERE type = 1 ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_string WHERE type IN (1, 3, 4) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_string")?,
@@ -192,6 +228,18 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
                 |(wcid, part_index, animation_part_did)| AnimPartRow { wcid, part_index, animation_part_did },
             )
             .context("could not query ACE table weenie_properties_anim_part")?,
+        wields: connection
+            .query_map(
+                "SELECT object_Id, id, destination_Type, weenie_Class_Id, palette, shade FROM weenie_properties_create_list WHERE destination_Type & 2 <> 0 ORDER BY object_Id, id",
+                |(wcid, _id, destination_type, item_wcid, palette, shade): (u32, u64, i32, u32, i32, f64)| WieldRow {
+                    wcid,
+                    destination_type,
+                    item_wcid,
+                    palette,
+                    shade,
+                },
+            )
+            .context("could not query ACE table weenie_properties_create_list")?,
     })
 }
 
@@ -215,6 +263,8 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             maximum_velocity: None,
             rotation_speed: None,
             physics: TemplatePhysics::default(),
+            appearance: TemplateAppearance::default(),
+            wielded: Vec::new(),
             sub_palettes: Vec::new(),
             texture_changes: Vec::new(),
             anim_part_changes: Vec::new(),
@@ -235,6 +285,50 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
                 &mut template.physics_effect_table_did,
             ),
             PROPERTY_DID_PALETTE_BASE => ("palette_base_did", &mut template.palette_base_did),
+            PROPERTY_DID_CLOTHING_BASE => (
+                "appearance.clothing_base_did",
+                &mut template.appearance.clothing_base_did,
+            ),
+            PROPERTY_DID_EYES_TEXTURE => (
+                "appearance.eyes_texture_did",
+                &mut template.appearance.eyes_texture_did,
+            ),
+            PROPERTY_DID_NOSE_TEXTURE => (
+                "appearance.nose_texture_did",
+                &mut template.appearance.nose_texture_did,
+            ),
+            PROPERTY_DID_MOUTH_TEXTURE => (
+                "appearance.mouth_texture_did",
+                &mut template.appearance.mouth_texture_did,
+            ),
+            PROPERTY_DID_DEFAULT_EYES_TEXTURE => (
+                "appearance.default_eyes_texture_did",
+                &mut template.appearance.default_eyes_texture_did,
+            ),
+            PROPERTY_DID_DEFAULT_NOSE_TEXTURE => (
+                "appearance.default_nose_texture_did",
+                &mut template.appearance.default_nose_texture_did,
+            ),
+            PROPERTY_DID_DEFAULT_MOUTH_TEXTURE => (
+                "appearance.default_mouth_texture_did",
+                &mut template.appearance.default_mouth_texture_did,
+            ),
+            PROPERTY_DID_HAIR_PALETTE => (
+                "appearance.hair_palette_did",
+                &mut template.appearance.hair_palette_did,
+            ),
+            PROPERTY_DID_EYES_PALETTE => (
+                "appearance.eyes_palette_did",
+                &mut template.appearance.eyes_palette_did,
+            ),
+            PROPERTY_DID_SKIN_PALETTE => (
+                "appearance.skin_palette_did",
+                &mut template.appearance.skin_palette_did,
+            ),
+            PROPERTY_DID_HEAD_OBJECT => (
+                "appearance.head_object_did",
+                &mut template.appearance.head_object_did,
+            ),
             property_type => {
                 return Err(ProjectionError::UnexpectedProperty {
                     wcid: row.wcid,
@@ -271,38 +365,96 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
     }
     for row in rows.ints {
         let template = template_mut(&mut templates, row.wcid, "weenie_properties_int")?;
-        if row.property_type != PROPERTY_INT_PHYSICS_STATE {
-            return Err(ProjectionError::UnexpectedProperty {
-                wcid: row.wcid,
-                table: "weenie_properties_int",
-                property_type: row.property_type,
-            });
+        match row.property_type {
+            PROPERTY_INT_PHYSICS_STATE => {
+                let value = u32::from_le_bytes(row.value.to_le_bytes());
+                set_once(
+                    &mut template.physics.base_mask,
+                    value,
+                    row.wcid,
+                    "weenie_properties_int",
+                    "physics.base_mask",
+                )?;
+            }
+            PROPERTY_INT_CLOTHING_PRIORITY => set_once(
+                &mut template.appearance.clothing_priority,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "appearance.clothing_priority",
+            )?,
+            PROPERTY_INT_VALID_LOCATIONS => set_once(
+                &mut template.appearance.valid_locations,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "appearance.valid_locations",
+            )?,
+            PROPERTY_INT_GENDER => set_once(
+                &mut template.appearance.gender,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "appearance.gender",
+            )?,
+            PROPERTY_INT_HERITAGE_GROUP => set_once(
+                &mut template.appearance.heritage_group,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "appearance.heritage_group",
+            )?,
+            property_type => {
+                return Err(ProjectionError::UnexpectedProperty {
+                    wcid: row.wcid,
+                    table: "weenie_properties_int",
+                    property_type,
+                });
+            }
         }
-        let value = u32::from_le_bytes(row.value.to_le_bytes());
-        set_once(
-            &mut template.physics.base_mask,
-            value,
-            row.wcid,
-            "weenie_properties_int",
-            "physics.base_mask",
-        )?;
     }
     for row in rows.strings {
         let template = template_mut(&mut templates, row.wcid, "weenie_properties_string")?;
-        if row.property_type != PROPERTY_STRING_NAME {
-            return Err(ProjectionError::UnexpectedProperty {
+        let (field, slot) = match row.property_type {
+            PROPERTY_STRING_NAME => ("name", &mut template.name),
+            PROPERTY_STRING_SEX => ("appearance.sex", &mut template.appearance.sex),
+            PROPERTY_STRING_HERITAGE_GROUP_NAME => (
+                "appearance.heritage_group_name",
+                &mut template.appearance.heritage_group_name,
+            ),
+            property_type => {
+                return Err(ProjectionError::UnexpectedProperty {
+                    wcid: row.wcid,
+                    table: "weenie_properties_string",
+                    property_type,
+                });
+            }
+        };
+        set_once(slot, row.value, row.wcid, "weenie_properties_string", field)?;
+    }
+    for row in rows.wields {
+        if !row.shade.is_finite() {
+            return Err(ProjectionError::NonFiniteFloat {
                 wcid: row.wcid,
-                table: "weenie_properties_string",
-                property_type: row.property_type,
+                property_type: 0,
             });
         }
-        set_once(
-            &mut template.name,
-            row.value,
-            row.wcid,
-            "weenie_properties_string",
-            "name",
-        )?;
+        debug_assert!(row.destination_type & DESTINATION_WIELD != 0);
+        let template = template_mut(&mut templates, row.wcid, "weenie_properties_create_list")?;
+        let palette_template =
+            u32::try_from(row.palette).map_err(|_| ProjectionError::ValueOutOfRange {
+                wcid: row.wcid,
+                table: "weenie_properties_create_list",
+                field: "palette",
+                value: row.palette.unsigned_abs().into(),
+                target: "u32",
+            })?;
+        template.wielded.push(WieldEntry {
+            wcid: row.item_wcid,
+            destination_type: row.destination_type,
+            palette_template,
+            shade: row.shade,
+        });
     }
     for row in rows.bools {
         let value = match row.value {

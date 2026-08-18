@@ -207,6 +207,8 @@ mod tests {
             elasticity: None,
             maximum_velocity: None,
             rotation_speed: None,
+            appearance: Default::default(),
+            wielded: Vec::new(),
             physics: TemplatePhysics::default(),
             sub_palettes: Vec::new(),
             texture_changes: Vec::new(),

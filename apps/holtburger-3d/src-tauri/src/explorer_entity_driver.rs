@@ -2,7 +2,8 @@
 
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::sync::{Arc, Mutex};
+use std::io::Cursor;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use holtburger_common::position::WorldPosition;
@@ -15,6 +16,8 @@ use holtburger_core::{
     DynamicEntityLaunchError, DynamicEntityPhysicalPreparationError, DynamicEntitySetupPreparation,
     prepare_dynamic_entity_physics, prepare_dynamic_entity_setup, resolve_dynamic_entity_launch,
 };
+use holtburger_dat::file_type::{CharGen, ClothingTable, PaletteSet};
+use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_weenie_catalog::WeenieTemplate;
 use holtburger_world::{
     CellTransitRequest, DynamicPhysicalBodyDefinition, EntityAppearance, EntityPartChange,
@@ -33,6 +36,10 @@ use crate::explorer_weenie_catalog::{
     ExplorerCatalogCapability, ExplorerCatalogLookupError, ExplorerWeenieCatalogSource,
 };
 use crate::host_simulation_runtime::HostSimulationRuntime;
+use crate::weenie_appearance::{
+    WieldedItem, WornEquipmentError, merge_worn_equipment, requires_character_generation,
+    resolve_authored_appearance, resolve_template_appearance, select_wielded,
+};
 
 /// Explicit host-owned spawn placement; `candidate` uses the camera pose's landblock frame.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -136,6 +143,21 @@ pub enum ExplorerEntityDriverError {
     Placement(String),
     /// Ordered registry/body lifecycle rejected the operation.
     Runtime(ExplorerEntityRuntimeError),
+    /// Appearance resolution needed content the mount does not provide.
+    AppearanceContent(ExplorerAppearanceContentError),
+    /// A wielded item names a WCID absent from the catalog.
+    MissingWieldedItem { wcid: u32, item_wcid: u32 },
+    /// A wielded item's clothing could not be resolved.
+    WornEquipment {
+        wcid: u32,
+        source: WornEquipmentError,
+    },
+}
+
+impl From<ExplorerAppearanceContentError> for ExplorerEntityDriverError {
+    fn from(value: ExplorerAppearanceContentError) -> Self {
+        Self::AppearanceContent(value)
+    }
 }
 
 impl Display for ExplorerEntityDriverError {
@@ -166,6 +188,14 @@ impl Display for ExplorerEntityDriverError {
             Self::Preparation(source) => Display::fmt(source, formatter),
             Self::Placement(reason) => formatter.write_str(reason),
             Self::Runtime(source) => Display::fmt(source, formatter),
+            Self::AppearanceContent(source) => Display::fmt(source, formatter),
+            Self::MissingWieldedItem { wcid, item_wcid } => write!(
+                formatter,
+                "WCID {wcid} wields item {item_wcid}, which the catalog does not contain"
+            ),
+            Self::WornEquipment { wcid, source } => {
+                write!(formatter, "WCID {wcid} equipment failed: {source}")
+            }
         }
     }
 }
@@ -228,17 +258,57 @@ pub trait ExplorerEntityContentPreparer: Send + Sync {
         &self,
         definition: &DynamicEntityDefinition,
     ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError>;
+
+    /// Immutable character-generation table used to fill unauthored appearance features.
+    ///
+    /// Absence is a loud content failure rather than a silent bare-setup fallback, because a
+    /// humanoid template that reaches generation cannot be realized correctly without it.
+    fn char_gen(&self) -> Result<Arc<CharGen>, ExplorerAppearanceContentError>;
+
+    /// Resolves one `PaletteSet` resource to the palette matching a hue.
+    fn palette_set(&self, palette_set_did: u32, hue: f64) -> Option<u32>;
+
+    /// Reads one clothing table for the equipment merge.
+    fn clothing_table(&self, clothing_base_did: u32) -> Option<ClothingTable>;
 }
+
+/// Content required by appearance resolution that mounted content did not supply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExplorerAppearanceContentError {
+    /// The character-generation table is missing or undecodable.
+    CharGenUnavailable { reason: String },
+}
+
+impl Display for ExplorerAppearanceContentError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CharGenUnavailable { reason } => {
+                write!(
+                    formatter,
+                    "character generation table unavailable: {reason}"
+                )
+            }
+        }
+    }
+}
+
+impl Error for ExplorerAppearanceContentError {}
 
 /// Production DAT-backed preparation adapter.
 pub struct DatExplorerEntityContentPreparer {
     content: Arc<ContentRepository>,
+    /// `ContentRepository::read_asset` parses on every call, so the immutable table is retained
+    /// once here rather than re-decoded per spawn. This is retained content, not entity state.
+    char_gen: OnceLock<Arc<CharGen>>,
 }
 
 impl DatExplorerEntityContentPreparer {
     /// Binds preparation to the same immutable repository used by the Explorer host.
     pub fn new(content: Arc<ContentRepository>) -> Self {
-        Self { content }
+        Self {
+            content,
+            char_gen: OnceLock::new(),
+        }
     }
 }
 
@@ -257,6 +327,35 @@ impl ExplorerEntityContentPreparer for DatExplorerEntityContentPreparer {
         definition: &DynamicEntityDefinition,
     ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
         prepare_dynamic_entity_physics(definition, &self.content)
+    }
+
+    fn char_gen(&self) -> Result<Arc<CharGen>, ExplorerAppearanceContentError> {
+        if let Some(char_gen) = self.char_gen.get() {
+            return Ok(Arc::clone(char_gen));
+        }
+        let char_gen = Arc::new(
+            self.content
+                .read_asset::<CharGen>("character generator table")
+                .map_err(|error| ExplorerAppearanceContentError::CharGenUnavailable {
+                    reason: format!("{error:#}"),
+                })?,
+        );
+        Ok(Arc::clone(self.char_gen.get_or_init(|| char_gen)))
+    }
+
+    fn palette_set(&self, palette_set_did: u32, hue: f64) -> Option<u32> {
+        self.content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, palette_set_did))
+            .ok()
+            .and_then(|resource| PaletteSet::unpack(&mut Cursor::new(resource.bytes)).ok())
+            .and_then(|set| set.palette_id_for_shade(hue))
+    }
+
+    fn clothing_table(&self, clothing_base_did: u32) -> Option<ClothingTable> {
+        self.content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, clothing_base_did))
+            .ok()
+            .and_then(|resource| ClothingTable::unpack(&mut Cursor::new(resource.bytes)).ok())
     }
 }
 
@@ -406,7 +505,7 @@ impl ExplorerEntityDriver {
                 sound_table_did: template.sound_table_did,
                 physics_effect_table_did: template.physics_effect_table_did,
             },
-            appearance: appearance(&template),
+            appearance: self.resolve_appearance(guid, &template, setup_did)?,
             initial: DynamicEntityInitialState {
                 pose: candidate_pose(request.camera_pose, request.candidate, request.rotation)?,
                 velocity: Vector3::zero(),
@@ -591,8 +690,78 @@ fn physics_input(template: &WeenieTemplate) -> EntityPhysicsStateInput {
     }
 }
 
-fn appearance(template: &WeenieTemplate) -> EntityAppearance {
-    EntityAppearance {
+impl ExplorerEntityDriver {
+    /// Assemble one entity's complete appearance the way an ACE server would before serializing.
+    ///
+    /// Order follows `Creature_Networking.CalculateObjDesc`: generated and authored body layers
+    /// first, then worn equipment. When nothing worn paints this body, ACE falls back to the
+    /// template's own ObjDesc rows, so we do the same.
+    fn resolve_appearance(
+        &self,
+        guid: Guid,
+        template: &WeenieTemplate,
+        setup_did: u32,
+    ) -> Result<EntityAppearance, ExplorerEntityDriverError> {
+        let seed = u64::from(guid.0);
+        // Only humanoids consult character generation; a crate never needs it, so its absence is
+        // not an error for templates that resolve no heritage and gender.
+        let mut appearance = if requires_character_generation(&template.appearance) {
+            let char_gen = self.content.char_gen()?;
+            resolve_template_appearance(
+                template.palette_base_did,
+                &template.appearance,
+                &char_gen,
+                seed,
+                |set, hue| self.content.palette_set(set, hue),
+            )
+            .0
+        } else {
+            resolve_authored_appearance(template.palette_base_did, &template.appearance)
+        };
+
+        let wielded = select_wielded(&template.wielded, seed);
+        let mut items = Vec::with_capacity(wielded.len());
+        for entry in &wielded {
+            let Some(item) = self.catalog.lookup(entry.wcid)? else {
+                return Err(ExplorerEntityDriverError::MissingWieldedItem {
+                    wcid: template.wcid,
+                    item_wcid: entry.wcid,
+                });
+            };
+            items.push(WieldedItem {
+                wcid: item.wcid,
+                clothing_base_did: item.appearance.clothing_base_did,
+                item_type: item.weenie_type,
+                valid_locations: item.appearance.valid_locations,
+                clothing_priority: item.appearance.clothing_priority,
+                palette_template: entry.palette_template,
+                shade: entry.shade,
+            });
+        }
+
+        let painted = items.iter().any(|item| item.clothing_base_did.is_some());
+        if painted {
+            merge_worn_equipment(
+                &mut appearance,
+                setup_did,
+                &items,
+                |clothing_base| self.content.clothing_table(clothing_base),
+                |set, hue| self.content.palette_set(set, hue),
+            )
+            .map_err(|source| ExplorerEntityDriverError::WornEquipment {
+                wcid: template.wcid,
+                source,
+            })?;
+        } else {
+            // ACE's no-equipment fallback: the template's own ObjDesc rows dress the body.
+            append_template_obj_desc(&mut appearance, template);
+        }
+        Ok(appearance)
+    }
+}
+
+fn append_template_obj_desc(appearance: &mut EntityAppearance, template: &WeenieTemplate) {
+    let raw = EntityAppearance {
         palette_did: template.palette_base_did,
         sub_palettes: template
             .sub_palettes
@@ -620,7 +789,13 @@ fn appearance(template: &WeenieTemplate) -> EntityAppearance {
                 gfx_obj_did: change.animation_part_did,
             })
             .collect(),
+    };
+    if appearance.palette_did.is_none() {
+        appearance.palette_did = raw.palette_did;
     }
+    appearance.sub_palettes.extend(raw.sub_palettes);
+    appearance.texture_changes.extend(raw.texture_changes);
+    appearance.part_changes.extend(raw.part_changes);
 }
 
 fn candidate_pose(
@@ -671,6 +846,7 @@ mod tests {
     use anyhow::anyhow;
     use holtburger_common::Sphere;
     use holtburger_content::{ColliderScale, LandblockCollisionAsset};
+    use holtburger_weenie_catalog::WieldEntry;
     use holtburger_weenie_catalog::{PhysicsBoolOverrides, TemplatePhysics};
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityCollisionParticipation,
@@ -733,6 +909,10 @@ mod tests {
 
     struct FixtureContent {
         physical: FixturePhysical,
+        /// Absent by default so existing tests keep their bare-setup appearance.
+        char_gen: Option<Arc<CharGen>>,
+        /// Clothing tables keyed by `ClothingBase`, for the equipment merge.
+        clothing: BTreeMap<u32, ClothingTable>,
     }
 
     impl ExplorerEntityContentPreparer for FixtureContent {
@@ -783,6 +963,23 @@ mod tests {
             physical.entity_collision.reporting = definition.physics.reporting;
             physical.entity_collision.uses_physics_bsp = definition.physics.uses_physics_bsp;
             Ok(physical)
+        }
+
+        fn char_gen(&self) -> Result<Arc<CharGen>, ExplorerAppearanceContentError> {
+            self.char_gen.clone().ok_or_else(|| {
+                ExplorerAppearanceContentError::CharGenUnavailable {
+                    reason: "fixture supplies no character generation table".to_owned(),
+                }
+            })
+        }
+
+        fn palette_set(&self, palette_set_did: u32, hue: f64) -> Option<u32> {
+            // Deterministic synthetic palette so a test can attribute a layer to its source set.
+            Some(palette_set_did ^ ((hue * 1024.0) as u32))
+        }
+
+        fn clothing_table(&self, clothing_base_did: u32) -> Option<ClothingTable> {
+            self.clothing.get(&clothing_base_did).cloned()
         }
     }
 
@@ -882,6 +1079,36 @@ mod tests {
         )
     }
 
+    /// Driver whose content supplies a synthetic CharGen and one shirt clothing table, so
+    /// appearance resolution runs for real without touching mounted DAT content.
+    fn driver_with_appearance(
+        templates: Vec<WeenieTemplate>,
+    ) -> (Arc<ExplorerEntityRuntime>, ExplorerEntityDriver) {
+        use crate::weenie_appearance::test_support::{synthetic_char_gen, synthetic_clothing};
+
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let entities = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
+        let mut clothing = BTreeMap::new();
+        clothing.insert(0x1000_0001, synthetic_clothing(0x0200_0001));
+        let driver = ExplorerEntityDriver::new(
+            Arc::new(MemoryCatalog {
+                templates: templates
+                    .into_iter()
+                    .map(|template| (template.wcid, template))
+                    .collect(),
+            }),
+            Arc::new(FixtureContent {
+                physical: FixturePhysical::Prepares,
+                char_gen: Some(Arc::new(synthetic_char_gen())),
+                clothing,
+            }),
+            Arc::new(FixedClock(Instant::now())),
+            Arc::clone(&entities),
+            simulation,
+        );
+        (entities, driver)
+    }
+
     fn driver_with_catalog(
         catalog: Arc<dyn ExplorerWeenieCatalogSource>,
         physical: FixturePhysical,
@@ -890,7 +1117,11 @@ mod tests {
         let entities = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
         let driver = ExplorerEntityDriver::new(
             catalog,
-            Arc::new(FixtureContent { physical }),
+            Arc::new(FixtureContent {
+                physical,
+                char_gen: None,
+                clothing: BTreeMap::new(),
+            }),
             Arc::new(FixedClock(Instant::now())),
             Arc::clone(&entities),
             simulation,
@@ -1294,6 +1525,145 @@ mod tests {
             survivor[0].input.participation,
             holtburger_world::PhysicalBodyParticipation::PoseOnly
         );
+    }
+
+    /// A humanoid spawn resolves a full face and its worn outfit; the same GUID reproduces both.
+    #[test]
+    fn humanoid_spawn_resolves_a_seeded_face_and_its_worn_outfit() {
+        let mut collector = template(3921);
+        collector.appearance.heritage_group_name = Some("Gharu'ndim".to_owned());
+        collector.appearance.sex = Some("Male".to_owned());
+        collector.wielded = vec![WieldEntry {
+            wcid: 130,
+            destination_type: 2,
+            palette_template: 5,
+            shade: 0.67,
+        }];
+        let mut shirt = template(130);
+        shirt.appearance.clothing_base_did = Some(0x1000_0001);
+        shirt.appearance.valid_locations = Some(0x1E);
+
+        let (entities, driver) = driver_with_appearance(vec![collector, shirt]);
+        let spawned = driver
+            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+        let appearance = &spawned.instance.definition.appearance;
+
+        // Generated body layers land at ACE's skin, hair, and eye palette ranges.
+        for offset in [0x0_u32, 0x18, 0x20] {
+            assert!(
+                appearance
+                    .sub_palettes
+                    .iter()
+                    .any(|entry| entry.offset == offset),
+                "expected a generated palette layer at offset 0x{offset:X}"
+            );
+        }
+        // The worn shirt painted the body on top of the face.
+        assert!(
+            appearance
+                .texture_changes
+                .iter()
+                .any(|change| change.part_index != 0x10),
+            "worn clothing must paint a non-head part"
+        );
+
+        // Same identity, same appearance.
+        let repeat = driver_with_appearance(vec![
+            {
+                let mut again = template(3921);
+                again.appearance.heritage_group_name = Some("Gharu'ndim".to_owned());
+                again.appearance.sex = Some("Male".to_owned());
+                again.wielded = vec![WieldEntry {
+                    wcid: 130,
+                    destination_type: 2,
+                    palette_template: 5,
+                    shade: 0.67,
+                }];
+                again
+            },
+            {
+                let mut again = template(130);
+                again.appearance.clothing_base_did = Some(0x1000_0001);
+                again.appearance.valid_locations = Some(0x1E);
+                again
+            },
+        ]);
+        let second = repeat
+            .1
+            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+        assert_eq!(
+            &second.instance.definition.appearance, appearance,
+            "the same GUID must reproduce the same appearance"
+        );
+        assert_eq!(entities.snapshot().unwrap().len(), 1);
+    }
+
+    /// A non-humanoid never consults character generation, so a mount without it still spawns.
+    #[test]
+    fn non_humanoid_spawns_without_character_generation() {
+        let (_entities, driver) = driver(vec![template(147)], FixturePhysical::Prepares);
+
+        let spawned = driver
+            .spawn_by_wcid(request(147, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+
+        assert!(
+            spawned
+                .instance
+                .definition
+                .appearance
+                .texture_changes
+                .is_empty()
+        );
+    }
+
+    /// A humanoid whose mount lacks character generation fails loudly rather than spawning bare.
+    #[test]
+    fn humanoid_without_character_generation_fails_loudly() {
+        let mut humanoid = template(3922);
+        humanoid.appearance.heritage_group_name = Some("Gharu'ndim".to_owned());
+        humanoid.appearance.sex = Some("Male".to_owned());
+        let (entities, driver) = driver(vec![humanoid], FixturePhysical::Prepares);
+
+        let error = driver
+            .spawn_by_wcid(request(3922, EntityPhysicalIntent::PoseOnly))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExplorerEntityDriverError::AppearanceContent(
+                ExplorerAppearanceContentError::CharGenUnavailable { .. }
+            )
+        ));
+        assert!(entities.snapshot().unwrap().is_empty());
+    }
+
+    /// A wielded item missing from the catalog is a content fault naming both weenies.
+    #[test]
+    fn missing_wielded_item_names_wearer_and_item() {
+        let mut wearer = template(3921);
+        wearer.wielded = vec![WieldEntry {
+            wcid: 9999,
+            destination_type: 2,
+            palette_template: 0,
+            shade: 0.0,
+        }];
+        let (_entities, driver) = driver_with_appearance(vec![wearer]);
+
+        let error = driver
+            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExplorerEntityDriverError::MissingWieldedItem {
+                wcid: 3921,
+                item_wcid: 9999
+            }
+        ));
+        assert!(error.to_string().contains("9999"));
     }
 
     /// An absent catalog is a capability boundary, not a spawn that silently produces nothing.

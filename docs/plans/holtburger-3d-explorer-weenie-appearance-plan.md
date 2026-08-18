@@ -108,7 +108,13 @@ merge. 2,888 weenies carry 10,946 `Wield`/`WieldTreasure` entries.
 
 ### Phase 1: Catalog v2 With Appearance Facts
 
-Progress: Pending.
+Progress: Complete (2026-08-17). `WeenieTemplate` gained `TemplateAppearance` (eleven optional
+appearance DIDs, heritage/gender ints and strings, `clothing_priority`, `valid_locations`) and a
+source-ordered `Vec<WieldEntry>`. The codec encodes both in canonical order at format version 2,
+the exporter widened its DID/int/string filters and added one `create_list` query gated on
+`destination_Type & 2`, and `survey-weenie-catalog` gained an `AppearanceSurvey` census. The
+regenerated `dats/weenies.hwc` holds 43,913 records at 6,904,835 bytes from ACE World base v0.8.8,
+patch v0.9.294, `last_Modified = 2026-06-20 18:22:29`.
 
 #### Deliverables
 
@@ -148,13 +154,32 @@ Progress: Pending.
 #### Acceptance Criteria
 
 - Byte-identical re-export; v1 file rejected with a distinct unsupported-version error.
-- Survey reproduces the recorded distributions: 299 explicit-face weenies, 2,016 eligible,
-  143/14/1,859 fixed/partial/random split, zero rows for DID types 12-14.
+- Survey reproduces the recorded distributions: 299 explicit-face weenies, the eligibility split,
+  and zero rows for DID types 12-14.
 - MySQL remains confined to the exporter feature; catalog crate dependency graph unchanged.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Correction: the plan's recorded eligibility figures (2,016 eligible; 143/14/1,859) were an
+  undercount, derived from a query that required both `Sex` and `HeritageGroupName` strings. ACE
+  resolves heritage and gender from the int properties first and only falls back to the strings
+  (`Creature.cs:152-161`), so a weenie carrying just the ints is equally eligible. The survey now
+  measures int-or-string and reports 3,107 eligible, verified against the database. Its
+  authored/partial/generated split is 258/36/2,813, counting the three palette DIDs the resolver
+  actually consumes (skin 17, hair 15, eyes-palette 16); the earlier 143 counted eyes-*texture*
+  (9) instead. Every other recorded distribution reproduced exactly: 43,913 records, 299
+  explicit-face weenies, 13,810 `ClothingBase`, 10,103 `Wield` plus 843 `WieldTreasure`, and zero
+  rows for the three `Default*Texture` types.
+- The wield query filters in SQL on `destination_Type & 2 <> 0`, which selects both `Wield` and
+  `WieldTreasure` without enumerating composite values, and preserves source order by primary key
+  so positional probability groups survive.
+- `unsupported_version_is_distinct` previously hard-coded `2` as the unsupported version, which the
+  version bump turned into the supported one. It now derives both neighbours from
+  `CATALOG_FORMAT_VERSION`, so a stale v1 artifact and a future format are each rejected
+  distinctly and the test cannot rot at the next bump.
+- Concession: the exporter's `debug_assert!` on the wield destination bit trusts the SQL filter
+  rather than re-validating in release. The query is the single source of that invariant, and a
+  release-mode check would be dead weight.
 
 ### Phase 2: Deterministic Appearance Resolver
 

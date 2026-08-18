@@ -6,8 +6,8 @@ mod reader;
 mod writer;
 
 pub use model::{
-    AnimPartChange, PhysicsBoolOverrides, SubPalette, TemplatePhysics, TextureChange,
-    WeenieTemplate,
+    AnimPartChange, PhysicsBoolOverrides, SubPalette, TemplateAppearance, TemplatePhysics,
+    TextureChange, WeenieTemplate, WieldEntry,
 };
 pub use reader::{CatalogLookupError, CatalogOpenError, CatalogRecordInfo, WeenieCatalog};
 pub use writer::{CatalogWriteError, write_catalog_atomic};
@@ -15,7 +15,7 @@ pub use writer::{CatalogWriteError, write_catalog_atomic};
 /// Conventional extension for Holtburger weenie catalog assets.
 pub const CATALOG_EXTENSION: &str = "hwc";
 /// Current portable file-format version.
-pub const CATALOG_FORMAT_VERSION: u32 = 1;
+pub const CATALOG_FORMAT_VERSION: u32 = 2;
 
 #[cfg(test)]
 mod tests;

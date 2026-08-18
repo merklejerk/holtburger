@@ -31,12 +31,76 @@ pub struct WeenieTemplate {
     pub rotation_speed: Option<f64>,
     /// Lossless template physics inputs; no effective mask has been derived.
     pub physics: TemplatePhysics,
+    /// Lossless template appearance inputs; no ObjDesc has been derived.
+    pub appearance: TemplateAppearance,
+    /// Source-ordered wielded equipment entries; probability grouping is positional.
+    pub wielded: Vec<WieldEntry>,
     /// Canonically ordered raw packed palette ranges.
     pub sub_palettes: Vec<SubPalette>,
     /// Canonically ordered texture substitutions.
     pub texture_changes: Vec<TextureChange>,
     /// Canonically ordered animation-part substitutions.
     pub anim_part_changes: Vec<AnimPartChange>,
+}
+
+/// ACE template appearance inputs consumed by face resolution and the equipment merge.
+///
+/// These are raw authored facts. Deriving an ObjDesc from them requires DAT content (CharGen,
+/// PaletteSet, ClothingTable) and is deliberately not the catalog's job, exactly as the catalog
+/// retains physics inputs without calculating the effective mask.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TemplateAppearance {
+    /// `PropertyDataId::ClothingBase`; present on wearable items, not on their wearers.
+    pub clothing_base_did: Option<u32>,
+    /// `PropertyDataId::HeadObject`.
+    pub head_object_did: Option<u32>,
+    /// `PropertyDataId::SkinPalette`.
+    pub skin_palette_did: Option<u32>,
+    /// `PropertyDataId::HairPalette`.
+    pub hair_palette_did: Option<u32>,
+    /// `PropertyDataId::EyesPalette`.
+    pub eyes_palette_did: Option<u32>,
+    /// `PropertyDataId::EyesTexture`.
+    pub eyes_texture_did: Option<u32>,
+    /// `PropertyDataId::DefaultEyesTexture`; the replaced texture for the eyes strip.
+    pub default_eyes_texture_did: Option<u32>,
+    /// `PropertyDataId::NoseTexture`.
+    pub nose_texture_did: Option<u32>,
+    /// `PropertyDataId::DefaultNoseTexture`.
+    pub default_nose_texture_did: Option<u32>,
+    /// `PropertyDataId::MouthTexture`.
+    pub mouth_texture_did: Option<u32>,
+    /// `PropertyDataId::DefaultMouthTexture`.
+    pub default_mouth_texture_did: Option<u32>,
+    /// `PropertyInt::HeritageGroup`; authoritative over `heritage_group_name` when present.
+    pub heritage_group: Option<i32>,
+    /// `PropertyInt::Gender`; authoritative over `sex` when present.
+    pub gender: Option<i32>,
+    /// `PropertyString::HeritageGroupName`, e.g. `Gharu'ndim`.
+    pub heritage_group_name: Option<String>,
+    /// `PropertyString::Sex`, e.g. `Male`.
+    pub sex: Option<String>,
+    /// `PropertyInt::ClothingPriority`; a `CoverageMask` used to sort worn clothing.
+    pub clothing_priority: Option<i32>,
+    /// `PropertyInt::ValidLocations`; an `EquipMask` selecting the wield slot.
+    pub valid_locations: Option<i32>,
+}
+
+/// One `weenie_properties_create_list` entry that a creature wields.
+///
+/// `shade` is overloaded at the source: on a `Treasure`-flagged destination it is a selection
+/// probability, otherwise it is the CLO shade. The catalog stores the raw row plus its
+/// destination type and leaves that split to the consumer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WieldEntry {
+    /// Weenie class of the wielded item.
+    pub wcid: u32,
+    /// Raw ACE `DestinationType` bits.
+    pub destination_type: i32,
+    /// `PaletteTemplate` selector; ACE treats zero as unset.
+    pub palette_template: u32,
+    /// CLO shade, or a selection probability on treasure destinations.
+    pub shade: f64,
 }
 
 /// ACE template physics inputs that must preserve property absence.

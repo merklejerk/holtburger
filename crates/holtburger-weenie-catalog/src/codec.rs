@@ -1,8 +1,8 @@
 use std::fmt;
 
 use crate::{
-    AnimPartChange, PhysicsBoolOverrides, SubPalette, TemplatePhysics, TextureChange,
-    WeenieTemplate,
+    AnimPartChange, PhysicsBoolOverrides, SubPalette, TemplateAppearance, TemplatePhysics,
+    TextureChange, WeenieTemplate, WieldEntry,
 };
 
 pub(crate) const MAGIC: [u8; 8] = *b"HBWCAT\0\x1a";
@@ -136,7 +136,15 @@ pub(crate) fn encode_template(template: &WeenieTemplate) -> Result<Vec<u8>, Code
     encoder.optional_f64(template.rotation_speed, "rotation_speed")?;
     encoder.optional_u32(template.physics.base_mask);
     encode_overrides(&mut encoder, &template.physics.overrides);
+    encode_appearance(&mut encoder, &template.appearance)?;
 
+    encoder.count(template.wielded.len(), "wielded")?;
+    for entry in &template.wielded {
+        encoder.u32(entry.wcid);
+        encoder.i32(entry.destination_type);
+        encoder.u32(entry.palette_template);
+        encoder.f64_finite(entry.shade, "wielded.shade")?;
+    }
     encoder.count(template.sub_palettes.len(), "sub_palettes")?;
     for palette in &template.sub_palettes {
         encoder.u32(palette.sub_palette_did);
@@ -175,7 +183,18 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
     let rotation_speed = decoder.optional_f64("rotation_speed")?;
     let base_mask = decoder.optional_u32("physics.base_mask")?;
     let overrides = decode_overrides(&mut decoder)?;
+    let appearance = decode_appearance(&mut decoder)?;
 
+    let wielded_count = decoder.count("wielded")?;
+    let mut wielded = Vec::with_capacity(wielded_count);
+    for _ in 0..wielded_count {
+        wielded.push(WieldEntry {
+            wcid: decoder.u32()?,
+            destination_type: decoder.i32()?,
+            palette_template: decoder.u32()?,
+            shade: decoder.f64()?,
+        });
+    }
     let sub_palette_count = decoder.count("sub_palettes")?;
     let mut sub_palettes = Vec::with_capacity(sub_palette_count);
     for _ in 0..sub_palette_count {
@@ -223,6 +242,8 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
             base_mask,
             overrides,
         },
+        appearance,
+        wielded,
         sub_palettes,
         texture_changes,
         anim_part_changes,
@@ -250,6 +271,21 @@ fn validate_template(template: &WeenieTemplate) -> Result<(), CodecError> {
             )));
         }
     }
+    if let Some(value) = &template.appearance.heritage_group_name {
+        validate_string(value, "appearance.heritage_group_name")?;
+    }
+    if let Some(value) = &template.appearance.sex {
+        validate_string(value, "appearance.sex")?;
+    }
+    for entry in &template.wielded {
+        if !entry.shade.is_finite() {
+            return Err(CodecError::new(format!(
+                "WCID {} field wielded.shade must be finite",
+                template.wcid
+            )));
+        }
+    }
+    validate_count(template.wielded.len(), "wielded")?;
     validate_count(template.sub_palettes.len(), "sub_palettes")?;
     validate_count(template.texture_changes.len(), "texture_changes")?;
     validate_count(template.anim_part_changes.len(), "anim_part_changes")?;
@@ -374,6 +410,56 @@ fn decode_overrides(decoder: &mut Decoder<'_>) -> Result<PhysicsBoolOverrides, C
     })
 }
 
+fn encode_appearance(
+    encoder: &mut Encoder,
+    appearance: &TemplateAppearance,
+) -> Result<(), CodecError> {
+    for value in [
+        appearance.clothing_base_did,
+        appearance.head_object_did,
+        appearance.skin_palette_did,
+        appearance.hair_palette_did,
+        appearance.eyes_palette_did,
+        appearance.eyes_texture_did,
+        appearance.default_eyes_texture_did,
+        appearance.nose_texture_did,
+        appearance.default_nose_texture_did,
+        appearance.mouth_texture_did,
+        appearance.default_mouth_texture_did,
+    ] {
+        encoder.optional_u32(value);
+    }
+    encoder.optional_i32(appearance.heritage_group);
+    encoder.optional_i32(appearance.gender);
+    encoder.optional_string(appearance.heritage_group_name.as_deref())?;
+    encoder.optional_string(appearance.sex.as_deref())?;
+    encoder.optional_i32(appearance.clothing_priority);
+    encoder.optional_i32(appearance.valid_locations);
+    Ok(())
+}
+
+fn decode_appearance(decoder: &mut Decoder<'_>) -> Result<TemplateAppearance, CodecError> {
+    Ok(TemplateAppearance {
+        clothing_base_did: decoder.optional_u32("appearance.clothing_base_did")?,
+        head_object_did: decoder.optional_u32("appearance.head_object_did")?,
+        skin_palette_did: decoder.optional_u32("appearance.skin_palette_did")?,
+        hair_palette_did: decoder.optional_u32("appearance.hair_palette_did")?,
+        eyes_palette_did: decoder.optional_u32("appearance.eyes_palette_did")?,
+        eyes_texture_did: decoder.optional_u32("appearance.eyes_texture_did")?,
+        default_eyes_texture_did: decoder.optional_u32("appearance.default_eyes_texture_did")?,
+        nose_texture_did: decoder.optional_u32("appearance.nose_texture_did")?,
+        default_nose_texture_did: decoder.optional_u32("appearance.default_nose_texture_did")?,
+        mouth_texture_did: decoder.optional_u32("appearance.mouth_texture_did")?,
+        default_mouth_texture_did: decoder.optional_u32("appearance.default_mouth_texture_did")?,
+        heritage_group: decoder.optional_i32("appearance.heritage_group")?,
+        gender: decoder.optional_i32("appearance.gender")?,
+        heritage_group_name: decoder.optional_string("appearance.heritage_group_name")?,
+        sex: decoder.optional_string("appearance.sex")?,
+        clothing_priority: decoder.optional_i32("appearance.clothing_priority")?,
+        valid_locations: decoder.optional_i32("appearance.valid_locations")?,
+    })
+}
+
 #[derive(Default)]
 struct Encoder {
     bytes: Vec<u8>,
@@ -432,6 +518,24 @@ impl Encoder {
                 self.u32(value);
             }
         }
+    }
+
+    fn optional_i32(&mut self, value: Option<i32>) {
+        match value {
+            None => self.u8(0),
+            Some(value) => {
+                self.u8(1);
+                self.i32(value);
+            }
+        }
+    }
+
+    fn f64_finite(&mut self, value: f64, field: &str) -> Result<(), CodecError> {
+        if !value.is_finite() {
+            return Err(CodecError::new(format!("field {field} must be finite")));
+        }
+        self.f64(value);
+        Ok(())
     }
 
     fn optional_f64(&mut self, value: Option<f64>, field: &str) -> Result<(), CodecError> {
@@ -557,6 +661,16 @@ impl<'a> Decoder<'a> {
         match self.u8()? {
             0 => Ok(None),
             1 => self.u32().map(Some),
+            tag => Err(CodecError::new(format!(
+                "field {field} has invalid option tag {tag}"
+            ))),
+        }
+    }
+
+    fn optional_i32(&mut self, field: &str) -> Result<Option<i32>, CodecError> {
+        match self.u8()? {
+            0 => Ok(None),
+            1 => self.i32().map(Some),
             tag => Err(CodecError::new(format!(
                 "field {field} has invalid option tag {tag}"
             ))),

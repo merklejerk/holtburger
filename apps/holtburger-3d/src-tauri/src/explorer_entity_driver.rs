@@ -855,6 +855,8 @@ mod tests {
             elasticity: None,
             maximum_velocity: None,
             rotation_speed: None,
+            appearance: Default::default(),
+            wielded: Vec::new(),
             physics: TemplatePhysics {
                 base_mask: Some(PhysicsState::GRAVITY.bits()),
                 overrides: PhysicsBoolOverrides::default(),

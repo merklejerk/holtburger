@@ -60,7 +60,10 @@ function fakeGl() {
 	const draws: number[] = [];
 	const blendFuncs: Array<[number, number]> = [];
 	const intUniforms: Array<[string, number]> = [];
-	const samplerBinds: Array<{ readonly unit: number; readonly request: unknown }> = [];
+	const samplerBinds: Array<{
+		readonly unit: number;
+		readonly request: unknown;
+	}> = [];
 	const bufferSubData = vi.fn();
 	const gl = {
 		ARRAY_BUFFER: 1,
@@ -137,7 +140,14 @@ function fakeGl() {
 			samplerBinds.push({ request, unit });
 		},
 	} as unknown as WebGL2TextureSamplerCatalog;
-	return { calls: { blendFuncs, bufferSubData }, draws, gl, intUniforms, samplerBinds, samplers };
+	return {
+		calls: { blendFuncs, bufferSubData },
+		draws,
+		gl,
+		intUniforms,
+		samplerBinds,
+		samplers,
+	};
 }
 
 const context = (

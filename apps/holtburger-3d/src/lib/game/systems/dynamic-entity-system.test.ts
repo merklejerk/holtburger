@@ -57,6 +57,77 @@ describe("DynamicEntitySystem authored ownership", () => {
 		}
 	});
 
+	it("attaches a child through the parent rigid part and the requested child pose", async () => {
+		const { scene, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const parentBase = source("parent");
+		const holdingOffset = Mat4.identity();
+		holdingOffset.m41 = 2;
+		const parentSource: PlacedDynamicPresentationSource = {
+			...parentBase,
+			placement: {
+				...parentBase.placement,
+				localTransform: Object.assign(Mat4.identity(), { m41: 10 }),
+			},
+			source: {
+				...parentBase.source,
+				presentation: {
+					...parentBase.source.presentation,
+					holdingLocations: new Map([
+						[
+							"right-hand",
+							{
+								location: "right-hand",
+								offsetTransform: holdingOffset,
+								partIndex: 0,
+							},
+						],
+					]),
+				},
+			},
+		};
+		const childBase = source("child");
+		const fallbackPose = Mat4.identity();
+		fallbackPose.m41 = 1;
+		const requestedPose = Mat4.identity();
+		requestedPose.m41 = 4;
+		const childSource: PlacedDynamicPresentationSource = {
+			...childBase,
+			source: {
+				...childBase.source,
+				presentation: {
+					...childBase.source.presentation,
+					placementPoses: new Map([
+						[0, { placementId: 0, partTransforms: [fallbackPose] }],
+						[1, { placementId: 1, partTransforms: [requestedPose] }],
+					]),
+				},
+			},
+		};
+		const parent = system.replaceOwner("parent", [parentSource]);
+		const child = system.replaceOwner("child", [childSource]);
+		expect(await parent.ready).toBe("ready");
+		expect(await child.ready).toBe("ready");
+		commit(parent);
+		commit(child);
+		const parentRoot = requiredAt(parent.nodeIds, 0);
+		const childRoot = requiredAt(child.nodeIds, 0);
+		const parentPart = system.resolvePartNode(parentRoot, 0)!;
+		const animatedParentPose = Mat4.identity();
+		animatedParentPose.m41 = 3;
+		scene.updateLocalTransform(parentPart, animatedParentPose);
+
+		system.attachEntity(childRoot, parentRoot, "right-hand", 1);
+
+		const childPart = system.resolvePartNode(childRoot, 0)!;
+		expect(scene.getResolvedPlacement(childPart)?.localToLandblock.m41).toBe(
+			19,
+		);
+		system.removeOwner("child");
+		system.removeOwner("parent");
+	});
+
 	it("promotes a script-only resident and stages its behavior closure", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		// 0x330003d8 leads into the self-cycling 0x330003cc, so the closure spans two scripts.

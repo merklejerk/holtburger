@@ -15,7 +15,11 @@ import type {
 	ResolvedObjectPart,
 	ResolvedObjectPresentation,
 } from "../game/resolution/presentation";
-import { resolveObjectPresentationBounds } from "../game/resolution/presentation";
+import {
+	FALLBACK_PLACEMENT_KEY,
+	RESTING_PLACEMENT_KEY,
+	resolveObjectPresentationBounds,
+} from "../game/resolution/presentation";
 import {
 	classifyObjectResidents,
 	resolveObjectBehavior,
@@ -139,8 +143,11 @@ const setupPart = z.object({
 	partIndex: z.number().int().nonnegative(),
 	geometryId: z.string().min(1),
 	defaultScale: vec3,
-	defaultPlacement: frame.nullable(),
 	materialIds: z.array(z.string().min(1)),
+});
+const setupPlacementFrames = z.object({
+	placementId: z.number().int().nonnegative(),
+	frames: z.array(frame),
 });
 const parentLocation = z.enum([
 	"none",
@@ -183,6 +190,7 @@ const setupDefinition = z.object({
 	parts: z.array(setupPart),
 	lights: z.array(setupLight),
 	holdingLocations: z.array(holdingLocation),
+	placementFrames: z.array(setupPlacementFrames),
 	defaultAnimationId: datId.nullable(),
 	defaultMotionTableId: datId.nullable(),
 	defaultScriptId: datId.nullable(),
@@ -655,7 +663,6 @@ export function decodeStaticPresentation(
 						0,
 						definition.geometryId,
 						[1, 1, 1],
-						null,
 						definition.materialIds,
 						geometries,
 						materials,
@@ -666,20 +673,16 @@ export function decodeStaticPresentation(
 						part.partIndex,
 						part.geometryId,
 						part.defaultScale,
-						part.defaultPlacement,
 						part.materialIds,
 						geometries,
 						materials,
 					),
 				);
+	const placementPoses = decodePlacementPoses(definition, parts.length);
 	const partTransforms =
-		definition.kind === "gfx-obj"
-			? [Mat4.identity()]
-			: definition.parts.map((part) =>
-					part.defaultPlacement === null
-						? Mat4.identity()
-						: acFrameTransform(part.defaultPlacement, [1, 1, 1]),
-				);
+		placementPoses.get(RESTING_PLACEMENT_KEY)?.partTransforms ??
+		placementPoses.get(FALLBACK_PLACEMENT_KEY)?.partTransforms ??
+		parts.map(() => Mat4.identity());
 	const presentationBounds = resolveObjectPresentationBounds(
 		parts,
 		partTransforms,
@@ -713,7 +716,7 @@ export function decodeStaticPresentation(
 					? definition.lights.map(decodeSetupLight)
 					: [],
 			holdingLocations: decodeHoldingLocations(definition, parts.length),
-			placementPoses: new Map([[0, { placementId: 0, partTransforms }]]),
+			placementPoses,
 			selectionBounds: null,
 			sortingBounds: null,
 		},
@@ -795,11 +798,43 @@ function decodeHoldingLocations(
 	return attachPoints;
 }
 
+/** Decode every authored setup pose, preserving its enum key and exact per-part frame list. */
+function decodePlacementPoses(
+	definition: StaticDefinitionManifest,
+	partCount: number,
+) {
+	if (definition.kind === "gfx-obj") {
+		return new Map([
+			[0, { placementId: 0, partTransforms: [Mat4.identity()] }],
+		]);
+	}
+	const poses = new Map<
+		number,
+		{ placementId: number; partTransforms: readonly Mat4[] }
+	>();
+	for (const { placementId, frames } of definition.placementFrames) {
+		if (poses.has(placementId)) {
+			throw new Error(
+				`Setup ${definition.id} declares placement ${placementId} twice.`,
+			);
+		}
+		if (frames.length !== partCount) {
+			throw new Error(
+				`Setup ${definition.id} placement ${placementId} carries ${frames.length} frames for ${partCount} parts.`,
+			);
+		}
+		poses.set(placementId, {
+			placementId,
+			partTransforms: frames.map((value) => acFrameTransform(value, [1, 1, 1])),
+		});
+	}
+	return poses;
+}
+
 function decodePart(
 	partIndex: number,
 	geometryId: string,
 	defaultScale: readonly [number, number, number],
-	defaultPlacement: z.infer<typeof frame> | null,
 	materialIds: readonly string[],
 	geometries: ReadonlyMap<string, ResolvedGeometry>,
 	materials: ReadonlyMap<string, ResolvedMaterial>,

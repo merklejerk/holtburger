@@ -101,9 +101,9 @@ mod tests {
         DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EdgeProtection,
         EntityAppearance, EntityCollisionParticipation, EntityCollisionReportPolicy,
         EntityDynamicCollisionPolicy, EntityPhysicalIntent, EntityPhysicsScheduling,
-        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityTargetGeometry,
-        resolve_effective_entity_physics_state,
+        EntityPlacement, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
     };
 
     use crate::host_fixed_tick_runtime::HOST_FIXED_TICK_HZ;
@@ -200,7 +200,7 @@ mod tests {
                 physics_effect_table_did: None,
             },
             appearance: EntityAppearance::default(),
-            initial: DynamicEntityInitialState {
+            placement: EntityPlacement::World(DynamicEntityInitialState {
                 pose: WorldPosition {
                     landblock_id: Guid(0xda55_0001),
                     coords: Vector3::new(96.0, 96.0, 10.0),
@@ -210,7 +210,7 @@ mod tests {
                 acceleration: Vector3::zero(),
                 omega: Vector3::zero(),
                 created_at: Instant::now(),
-            },
+            }),
             object_scale: 1.0,
             friction: None,
             elasticity: None,

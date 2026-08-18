@@ -31,10 +31,12 @@ pub mod stats;
 pub mod vendor;
 
 pub use self::state::WorldState;
-pub use attachment::{AttachmentError, PhysicsAttachment};
+pub use attachment::{AttachmentError, EntityPlacement, PhysicsAttachment};
 pub use bootstrap::WorldBootstrap;
 pub use entity_appearance::{
-    EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange,
+    EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange, HeldItemPlacement,
+    PaintedWieldedItem, WieldedItemClassification, WieldedItemClassificationError,
+    WieldedItemSlotFacts, classify_wielded_item,
 };
 pub use entity_physics::{
     DEFAULT_ENTITY_PHYSICS_STATE, EffectiveEntityPhysicsState, EntityCollisionParticipation,

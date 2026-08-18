@@ -20,6 +20,9 @@ import type { SceneGraph, SceneNodeId } from "../scene";
 import type { ScenePlacement } from "../scene";
 import { scopeKey } from "../scene/scope";
 import {
+	FALLBACK_PLACEMENT_KEY,
+	type ParentLocation,
+	RESTING_PLACEMENT_KEY,
 	resolveObjectPresentationBounds,
 	type ResolvedObjectPresentation,
 } from "../resolution/presentation";
@@ -424,6 +427,90 @@ export class DynamicEntitySystem<
 		return (
 			entity.renderable.parts.find((part) => part.partIndex === partIndex)
 				?.nodeId ?? null
+		);
+	}
+
+	/** Copy one live entity's resolved object placement for synchronous child staging. */
+	resolvedRootPlacement(rootNodeId: SceneNodeId): ScenePlacement | null {
+		if (!this.#entities.has(rootNodeId)) return null;
+		const resolved = this.#scene.getResolvedPlacement(rootNodeId);
+		if (!resolved) return null;
+		return {
+			envCellId: resolved.envCellId,
+			landblockId: resolved.landblockId,
+			localTransform: resolved.localToLandblock,
+		};
+	}
+
+	/**
+	 * Pose one child by its own setup and attach its root to a named point on the parent setup.
+	 *
+	 * Lookup stays caller-side, matching retail's `CPhysicsObj::add_child`: the scene graph receives
+	 * only a resolved part node and rigid holding frame, so parent geometry scale cannot leak into
+	 * the child's independently scaled parts.
+	 */
+	attachEntity(
+		childRootNodeId: SceneNodeId,
+		parentRootNodeId: SceneNodeId,
+		location: ParentLocation,
+		placementKey: number,
+	): void {
+		const child = this.#entities.get(childRootNodeId);
+		if (!child)
+			throw new Error(`Dynamic child ${childRootNodeId} does not exist.`);
+		const parent = this.#entities.get(parentRootNodeId);
+		if (!parent)
+			throw new Error(`Dynamic parent ${parentRootNodeId} does not exist.`);
+		const attachPoint =
+			parent.source.presentation.holdingLocations.get(location);
+		if (!attachPoint) {
+			// RETAIL DIVERGENCE: `CPhysicsObj::add_child` silently refuses a missing holding
+			// location (`acclient.c:305203`). The Explorer throws because silence would hide broken
+			// mounted data; an archive/ACE census found 8 missing pairs among 2,288, all on three
+			// arrow templates carrying degenerate wield lists and none on genuine creatures.
+			throw new Error(
+				`Dynamic parent ${parentRootNodeId} has no holding location ${location}.`,
+			);
+		}
+		const parentPart = parent.renderable.parts.find(
+			(part) => part.partIndex === attachPoint.partIndex,
+		);
+		if (!parentPart) {
+			throw new Error(
+				`Dynamic parent ${parentRootNodeId} holding location ${location} names missing part ${attachPoint.partIndex}.`,
+			);
+		}
+		const pose = poseFor(child.source.presentation, placementKey);
+		for (const part of child.renderable.parts) {
+			const transform = pose.partToObjectTransforms[part.partIndex];
+			if (!transform) {
+				throw new Error(
+					`Dynamic child ${childRootNodeId} placement ${placementKey} has no frame for part ${part.partIndex}.`,
+				);
+			}
+			this.#scene.updateLocalTransform(
+				part.nodeId,
+				composeObjectPartTransform(
+					transform,
+					child.source.scale,
+					part.defaultScale,
+				),
+			);
+		}
+		child.articulatedPose = pose;
+		const placedBounds = presentationBoundsForPose(child.source, pose);
+		child.publishedPresentationBounds = expandBounds(
+			placedBounds,
+			child.appliedEnvelopeRadius,
+		);
+		if (child.cullingBounds) {
+			child.cullingBounds.union(placedBounds);
+			this.#publishCullingBounds(child);
+		}
+		this.#scene.attachToPart(
+			child.rootNodeId,
+			parentPart.nodeId,
+			attachPoint.offsetTransform,
 		);
 	}
 
@@ -998,6 +1085,13 @@ export class DynamicEntitySystem<
 
 function staticPresentationBounds(source: DynamicPresentationSource) {
 	const pose = defaultPose(source.presentation);
+	return presentationBoundsForPose(source, pose);
+}
+
+function presentationBoundsForPose(
+	source: DynamicPresentationSource,
+	pose: ArticulatedPose,
+) {
 	const bounds = resolveObjectPresentationBounds(
 		source.presentation.parts,
 		pose.partToObjectTransforms,
@@ -1136,12 +1230,6 @@ function requiredBoundsCenter(bounds: AABB3 | null, partIndex: number): Vec3 {
 		(bounds.min.z + bounds.max.z) / 2,
 	);
 }
-
-/** Pose retail requests for an object at rest (`CPhysicsObj::InitObjectEnd`, `acclient.c:305765`). */
-const RESTING_PLACEMENT_KEY = 0x65;
-
-/** Fallback key `CPartArray::SetPlacementFrame` uses when a setup lacks the requested pose. */
-const FALLBACK_PLACEMENT_KEY = 0;
 
 /**
  * Select one authored pose by placement key, falling back exactly as retail does.

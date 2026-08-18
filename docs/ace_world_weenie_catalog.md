@@ -8,14 +8,14 @@ The ACE World schema and ACE Server code are authoritative for database meaning.
 remain authoritative for setup-derived geometry, animation, and physics-script facts; the exporter
 does not duplicate those facts into the catalog.
 
-## Phase 0 Bootstrap Record
+## Current Catalog Record
 
-The bootstrap record is deliberately lossless with respect to the selected ACE template inputs. It
-supports the Phase R0 population survey without fixing the eventual runtime entity definition.
+The catalog record is deliberately lossless with respect to the selected ACE template inputs. It
+supports offline surveys and Explorer realization without becoming a runtime entity definition.
 Missing scalar properties remain absent; they are not replaced with ACE runtime defaults during
 export.
 
-| Field | ACE World source | Phase R0 consumer |
+| Field | ACE World source | Current consumer |
 | --- | --- | --- |
 | `wcid: u32` | `weenie.class_Id` | Record identity, coverage, and representative-WCID selection |
 | `class_name: String` | `weenie.class_Name` | Provenance and exact error reporting; never a fallback display name |
@@ -36,6 +36,16 @@ export.
 | `sub_palettes` | All `weenie_properties_palette` rows for the WCID | Palette cardinality, packed-range validation, and overlap census |
 | `texture_changes` | All `weenie_properties_texture_map` rows for the WCID | Appearance cardinality and ordered runtime substitution input |
 | `anim_part_changes` | All `weenie_properties_anim_part` rows for the WCID | Appearance cardinality and ordered runtime substitution input |
+| `appearance` | Selected appearance properties listed below | Humanoid face resolution, worn CLO painting, and wield classification |
+| `wielded` | Source-ordered `weenie_properties_create_list` rows whose destination includes `Wield` | Deterministic Explorer loadout selection |
+
+`appearance` preserves the optional DIDs `ClothingBase`, `HeadObject`, `SkinPalette`,
+`HairPalette`, `EyesPalette`, `EyesTexture`, `DefaultEyesTexture`, `NoseTexture`,
+`DefaultNoseTexture`, `MouthTexture`, and `DefaultMouthTexture`; optional ints `HeritageGroup`,
+`Gender`, `ItemType`, `DefaultCombatStyle`, `ClothingPriority`, and `ValidLocations`; and optional
+strings `HeritageGroupName` and `Sex`. `DefaultCombatStyle` is PropertyInt 46 and selects
+bow/crossbow versus thrown-weapon handedness. A wield row stores destination WCID, destination
+flags, palette template, and raw shade/probability.
 
 The five optional float values remain binary64 in the bootstrap catalog because ACE World stores them
 as MySQL `double`. Runtime narrowing and retail validation belong to later resolution, where failures
@@ -107,11 +117,12 @@ review condition rather than permission to trust incidental MySQL row order.
 The catalog includes every base `weenie` row, including records without setup or display-name
 properties, so Phase R0 can measure missing facts. A missing setup is not an export error.
 
-## `.hwc` File Format Version 1
+## `.hwc` File Format Version 4
 
 Every integer and binary64 float bit pattern is little-endian. Strings are length-prefixed UTF-8.
 There is no alignment padding, compression, checksum, implicit serializer metadata, or unknown-field
-skipping in version 1. Readers reject trailing bytes and every nonzero reserved byte.
+skipping in version 4. Readers reject trailing bytes and every nonzero reserved byte. Versions are
+clean cutovers; the v4 reader does not reinterpret older payloads.
 
 The file layout is:
 
@@ -125,7 +136,7 @@ The file layout is:
 | Offset | Width | Field | Contract |
 | ---: | ---: | --- | --- |
 | 0 | 8 | magic | Bytes `48 42 57 43 41 54 00 1A` (`HBWCAT`) |
-| 8 | 4 | version | `1` |
+| 8 | 4 | version | `4` |
 | 12 | 4 | header length | `64` |
 | 16 | 4 | provenance length | `1..=1,048,576` bytes |
 | 20 | 4 | record count | `0..=1,048,576` |
@@ -133,7 +144,7 @@ The file layout is:
 | 32 | 8 | payload length | Sum of every indexed record length |
 | 40 | 8 | index offset | Exactly `payload offset + payload length` |
 | 48 | 8 | index length | Exactly `record count * 16` |
-| 56 | 8 | reserved | All zero in version 1 |
+| 56 | 8 | reserved | All zero in version 4 |
 
 The file ends exactly after the index. A valid index has no gaps or overlapping payload ranges.
 
@@ -158,10 +169,15 @@ Every other tag is invalid.
 6. five `Option<f64>` values: default scale, friction, elasticity, maximum velocity, rotation speed
 7. `physics.base_mask: Option<u32>`
 8. eleven nullable booleans in the order of the nullable-override table above
-9. `sub_palettes`: `u32` count then `{ sub_palette_did: u32, offset: u16, length: u16 }`
-10. `texture_changes`: `u32` count then
+9. `appearance`: eleven optional DIDs in the order documented above; optional heritage and gender
+   ints; optional heritage and sex strings; then optional `item_type`, `default_combat_style`,
+   `clothing_priority`, and `valid_locations` ints
+10. `wielded`: `u32` count then
+    `{ wcid: u32, destination_type: i32, palette_template: u32, shade: f64 }`
+11. `sub_palettes`: `u32` count then `{ sub_palette_did: u32, offset: u16, length: u16 }`
+12. `texture_changes`: `u32` count then
     `{ part_index: u8, old_texture_did: u32, new_texture_did: u32 }`
-11. `anim_part_changes`: `u32` count then `{ part_index: u8, animation_part_did: u32 }`
+13. `anim_part_changes`: `u32` count then `{ part_index: u8, animation_part_did: u32 }`
 
 Strings and collection counts are each bounded at 1,048,576. Floats must be finite. Records must
 already obey the canonical collection order and semantic uniqueness rules.
@@ -194,7 +210,7 @@ The default output is `dats/weenies.hwc`, beside the installed `assets.hba`. `--
 overrides that location for packaging or diagnostics. The catalog remains a separate host-only file;
 it is not mounted into the HBA repository.
 
-The exporter opens one `mysql::Conn`, bulk-reads the parent and eight selected property/appearance
+The exporter opens one `mysql::Conn`, bulk-reads the parent and selected property/appearance
 tables in canonical order, validates relational and narrowing invariants, and closes the database
 before the application ever consumes the resulting file. It does not issue one query or create one
 pool per WCID.
@@ -219,11 +235,12 @@ The production database constraints make several failures unreachable from a val
 synthetic source/codec fixtures still exercise them so corruption is rejected deliberately rather
 than through an incidental panic or lossy map collection.
 
-## Deferred Until Phase R0
+## Runtime Boundary
 
-The bootstrap catalog intentionally does not calculate an effective physics mask, choose a runtime
-body shape, expand palette ranges, or substitute ACE defaults. Phase R0 must use a generated catalog
-plus DAT setup facts to determine:
+The catalog intentionally does not calculate an effective physics mask, choose a runtime body
+shape, expand palette ranges, resolve CLO, classify wielded items, or substitute ACE defaults.
+Those decisions join the generated catalog with DAT setup facts at runtime. Offline surveys remain
+responsible for determining:
 
 - the observed base/override combinations and exact effective-state precedence;
 - which target-geometry branches occur;

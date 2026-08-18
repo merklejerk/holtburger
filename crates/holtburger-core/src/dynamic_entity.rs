@@ -24,11 +24,12 @@ use holtburger_world::{
     CollisionReportOutcome, DynamicBodyCollisionDefinition, DynamicBodyKinematics,
     DynamicPhysicalBodyDefinition, EdgeProtection, EffectiveEntityPhysicsState, EntityAppearance,
     EntityPhysicalTransitionAction, EntityPhysicsSetupFacts, EntityPhysicsTransitionDecision,
-    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
-    PhysicalBodyResponsePolicy, PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity,
-    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-    PreparedEntityBspPart, PreparedEntityTargetGeometry, RuntimeSpatialBodyView, SpatialBody,
-    SpatialBodyId, SpatialScene, resolve_effective_entity_physics_state,
+    EntityPlacement, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
+    PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy, PhysicalBodyState,
+    PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
+    PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    resolve_effective_entity_physics_state,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -86,8 +87,8 @@ pub struct DynamicEntityDefinitionInput {
     pub content: DynamicEntityContent,
     /// Lossless ordered material and part substitutions.
     pub appearance: EntityAppearance,
-    /// Explicit initial pose and kinematics.
-    pub initial: DynamicEntityInitialState,
+    /// Mutually exclusive initial world motion or parent-owned attachment.
+    pub placement: EntityPlacement<DynamicEntityInitialState>,
     /// Uniform root scale before scalar validation.
     pub object_scale: f32,
     /// Optional authored friction; absence selects the ACE default.
@@ -111,8 +112,8 @@ pub struct DynamicEntityDefinition {
     pub content: DynamicEntityContent,
     /// Lossless ordered material and part substitutions.
     pub appearance: EntityAppearance,
-    /// Validated initial pose and kinematics.
-    pub initial: DynamicEntityInitialState,
+    /// Validated initial world motion or parent-owned attachment.
+    pub placement: EntityPlacement<DynamicEntityInitialState>,
     /// Validated uniform root scale.
     pub object_scale: f32,
     /// Validated effective friction coefficient.
@@ -172,10 +173,11 @@ impl DynamicEntityDefinition {
         if !input.object_scale.is_finite() || input.object_scale <= 0.0 {
             return Err(DynamicEntityDefinitionError::InvalidObjectScale);
         }
-        if !world_position_is_finite(input.initial.pose)
-            || !vector_is_finite(input.initial.velocity)
-            || !vector_is_finite(input.initial.acceleration)
-            || !vector_is_finite(input.initial.omega)
+        if let EntityPlacement::World(initial) = input.placement
+            && (!world_position_is_finite(initial.pose)
+                || !vector_is_finite(initial.velocity)
+                || !vector_is_finite(initial.acceleration)
+                || !vector_is_finite(initial.omega))
         {
             return Err(DynamicEntityDefinitionError::InvalidInitialState);
         }
@@ -204,7 +206,7 @@ impl DynamicEntityDefinition {
             identity: input.identity,
             content: input.content,
             appearance: input.appearance,
-            initial: input.initial,
+            placement: input.placement,
             object_scale: input.object_scale,
             friction,
             elasticity,
@@ -383,9 +385,16 @@ pub struct DynamicEntityProjectionInput {
     pub object_scale: f32,
     /// Current complete semantic physics state.
     pub physics: EffectiveEntityPhysicsState,
-    /// Current solver-owned canonical body view.
+    /// Mutually exclusive current solver state or parent-owned attachment.
+    pub placement: EntityPlacement<DynamicEntityWorldProjection>,
+}
+
+/// Complete solver-owned world arm used by dynamic-entity projection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicEntityWorldProjection {
+    /// Current canonical body view.
     pub body: RuntimeSpatialBodyView,
-    /// Current solver participation derived from the body.
+    /// Current local physical participation derived from the body.
     pub participation: PhysicalBodyParticipation,
 }
 
@@ -396,13 +405,14 @@ pub struct DynamicEntityProjectionInput {
 pub fn install_dynamic_entity_body(
     scene: &mut SpatialScene,
     definition: &DynamicEntityDefinition,
+    initial: DynamicEntityInitialState,
     physical: Option<DynamicPhysicalBodyDefinition>,
 ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
     if scene.body(body_id).is_some() {
         return Err(DynamicEntityBodyOperationError::AlreadyRegistered { body_id });
     }
-    let (body, physical_change) = build_dynamic_entity_body(definition, physical);
+    let (body, physical_change) = build_dynamic_entity_body(definition, initial, physical);
     scene.register_body(body);
     committed_body_outcome(scene, body_id, physical_change)
 }
@@ -483,13 +493,14 @@ pub fn remove_dynamic_entity_body(
 pub fn replace_dynamic_entity_body(
     scene: &mut SpatialScene,
     definition: &DynamicEntityDefinition,
+    initial: DynamicEntityInitialState,
     physical: Option<DynamicPhysicalBodyDefinition>,
 ) -> Result<DynamicEntityBodyReplacementOutcome, DynamicEntityBodyOperationError> {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
     if scene.body(body_id).is_none() {
         return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
     }
-    let (successor, physical_change) = build_dynamic_entity_body(definition, physical);
+    let (successor, physical_change) = build_dynamic_entity_body(definition, initial, physical);
     let collision_reports = scene.force_end_collision_reports_for_body(body_id);
     let removed_body = scene
         .register_body(successor)
@@ -505,23 +516,19 @@ pub fn replace_dynamic_entity_body(
 
 fn build_dynamic_entity_body(
     definition: &DynamicEntityDefinition,
+    initial: DynamicEntityInitialState,
     physical: Option<DynamicPhysicalBodyDefinition>,
 ) -> (SpatialBody, PhysicalBodyReconfigurationOutcome) {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
-    let mut body = SpatialBody::new(
-        body_id,
-        definition.initial.pose,
-        definition.initial.created_at,
-    );
-    body.velocity = definition.initial.velocity;
-    body.acceleration = definition.initial.acceleration;
-    body.omega = definition.initial.omega;
+    let mut body = SpatialBody::new(body_id, initial.pose, initial.created_at);
+    body.velocity = initial.velocity;
+    body.acceleration = initial.acceleration;
+    body.omega = initial.omega;
     let physical_change = if let Some(physical) = physical {
-        let initial_cell = definition
-            .initial
+        let initial_cell = initial
             .pose
             .is_indoors()
-            .then_some(definition.initial.pose.landblock_id);
+            .then_some(initial.pose.landblock_id);
         body.physical = Some(PhysicalBodyState::new_dynamic(
             physical,
             PhysicalCollisionFilter::ALL,
@@ -551,6 +558,12 @@ pub fn dynamic_entity_projection_input(
     definition: &DynamicEntityDefinition,
     scene: &SpatialScene,
 ) -> Result<DynamicEntityProjectionInput, DynamicEntityBodyOperationError> {
+    if let EntityPlacement::Attached(attachment) = definition.placement {
+        return Ok(projection_input(
+            definition,
+            EntityPlacement::Attached(attachment),
+        ));
+    }
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
     let body = scene
         .body(body_id)
@@ -570,15 +583,27 @@ pub fn dynamic_entity_projection_input_from_body(
     if body.id != body_id {
         return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
     }
-    Ok(DynamicEntityProjectionInput {
+    Ok(projection_input(
+        definition,
+        EntityPlacement::World(DynamicEntityWorldProjection {
+            body: body.runtime_view(),
+            participation: participation(body.physical.is_some()),
+        }),
+    ))
+}
+
+fn projection_input(
+    definition: &DynamicEntityDefinition,
+    placement: EntityPlacement<DynamicEntityWorldProjection>,
+) -> DynamicEntityProjectionInput {
+    DynamicEntityProjectionInput {
         identity: definition.identity.clone(),
         content: definition.content,
         appearance: definition.appearance.clone(),
         object_scale: definition.object_scale,
         physics: definition.physics,
-        body: body.runtime_view(),
-        participation: participation(body.physical.is_some()),
-    })
+        placement,
+    }
 }
 
 fn committed_body_outcome(
@@ -1128,13 +1153,13 @@ mod tests {
                 physics_effect_table_did: None,
             },
             appearance: EntityAppearance::default(),
-            initial: DynamicEntityInitialState {
+            placement: EntityPlacement::World(DynamicEntityInitialState {
                 pose: WorldPosition::default(),
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 omega: Vector3::zero(),
                 created_at: Instant::now(),
-            },
+            }),
             object_scale: 1.0,
             friction: None,
             elasticity: None,
@@ -1142,6 +1167,13 @@ mod tests {
             rotation_speed: None,
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         }
+    }
+
+    fn world_initial(definition: &DynamicEntityDefinition) -> DynamicEntityInitialState {
+        *definition
+            .placement
+            .world()
+            .expect("test definition must own world placement")
     }
 
     #[test]
@@ -1311,27 +1343,30 @@ mod tests {
     #[test]
     fn body_operations_return_committed_facts_and_leave_duplicate_install_untouched() {
         let mut input = definition_input();
-        input.initial.acceleration = Vector3::new(0.0, 0.0, -9.8);
+        input.placement.world_mut().unwrap().acceleration = Vector3::new(0.0, 0.0, -9.8);
         let definition = DynamicEntityDefinition::prepare(input).unwrap();
         let body_id = SpatialBodyId::Entity(definition.identity.guid);
         let mut scene = SpatialScene::new();
 
-        let installed = install_dynamic_entity_body(&mut scene, &definition, None).unwrap();
-        assert_eq!(installed.body.acceleration, definition.initial.acceleration);
+        let initial = world_initial(&definition);
+        let installed =
+            install_dynamic_entity_body(&mut scene, &definition, initial, None).unwrap();
+        assert_eq!(installed.body.acceleration, initial.acceleration);
         assert_eq!(installed.participation, PhysicalBodyParticipation::PoseOnly);
         assert_eq!(
-            install_dynamic_entity_body(&mut scene, &definition, None),
+            install_dynamic_entity_body(&mut scene, &definition, initial, None),
             Err(DynamicEntityBodyOperationError::AlreadyRegistered { body_id })
         );
         assert_eq!(
             scene.body(body_id).unwrap().acceleration,
-            definition.initial.acceleration
+            initial.acceleration
         );
         let projection = dynamic_entity_projection_input(&definition, &scene).unwrap();
         assert_eq!(projection.identity, definition.identity);
-        assert_eq!(projection.body, installed.body);
+        let projected_world = projection.placement.world().unwrap();
+        assert_eq!(projected_world.body, installed.body);
         assert_eq!(
-            projection.participation,
+            projected_world.participation,
             PhysicalBodyParticipation::PoseOnly
         );
 
@@ -1368,14 +1403,23 @@ mod tests {
     fn complete_body_replacement_retires_and_installs_the_same_identity_once() {
         let first = DynamicEntityDefinition::prepare(definition_input()).unwrap();
         let mut replacement_input = definition_input();
-        replacement_input.initial.pose.coords = Vector3::new(4.0, 5.0, 6.0);
-        replacement_input.initial.velocity = Vector3::new(1.0, 2.0, 3.0);
+        replacement_input.placement.world_mut().unwrap().pose.coords = Vector3::new(4.0, 5.0, 6.0);
+        replacement_input.placement.world_mut().unwrap().velocity = Vector3::new(1.0, 2.0, 3.0);
         let replacement = DynamicEntityDefinition::prepare(replacement_input).unwrap();
         let body_id = SpatialBodyId::Entity(first.identity.guid);
         let mut scene = SpatialScene::new();
-        install_dynamic_entity_body(&mut scene, &first, Some(prepared_physics())).unwrap();
+        install_dynamic_entity_body(
+            &mut scene,
+            &first,
+            world_initial(&first),
+            Some(prepared_physics()),
+        )
+        .unwrap();
 
-        let outcome = replace_dynamic_entity_body(&mut scene, &replacement, None).unwrap();
+        let replacement_initial = world_initial(&replacement);
+        let outcome =
+            replace_dynamic_entity_body(&mut scene, &replacement, replacement_initial, None)
+                .unwrap();
 
         assert_eq!(
             outcome.removed.participation,
@@ -1387,11 +1431,11 @@ mod tests {
         );
         assert_eq!(
             outcome.installed.body.runtime_pose,
-            replacement.initial.pose
+            replacement_initial.pose
         );
         assert_eq!(
             scene.body(body_id).unwrap().velocity,
-            replacement.initial.velocity
+            replacement_initial.velocity
         );
     }
 
@@ -1399,8 +1443,8 @@ mod tests {
     fn same_identity_replacement_returns_balanced_ends_for_both_report_directions() {
         let created_at = Instant::now();
         let mut first_input = definition_input();
-        first_input.initial.created_at = created_at;
-        first_input.initial.pose = WorldPosition {
+        first_input.placement.world_mut().unwrap().created_at = created_at;
+        first_input.placement.world_mut().unwrap().pose = WorldPosition {
             landblock_id: Guid(0xda55_0020),
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
@@ -1408,13 +1452,25 @@ mod tests {
         let first = DynamicEntityDefinition::prepare(first_input).unwrap();
         let mut peer_input = definition_input();
         peer_input.identity.guid = Guid(0x7000_0002);
-        peer_input.initial = first.initial;
+        peer_input.placement = first.placement;
         let peer = DynamicEntityDefinition::prepare(peer_input).unwrap();
         let first_id = SpatialBodyId::Entity(first.identity.guid);
         let peer_id = SpatialBodyId::Entity(peer.identity.guid);
         let mut scene = SpatialScene::new();
-        install_dynamic_entity_body(&mut scene, &first, Some(prepared_physics())).unwrap();
-        install_dynamic_entity_body(&mut scene, &peer, Some(prepared_physics())).unwrap();
+        install_dynamic_entity_body(
+            &mut scene,
+            &first,
+            world_initial(&first),
+            Some(prepared_physics()),
+        )
+        .unwrap();
+        install_dynamic_entity_body(
+            &mut scene,
+            &peer,
+            world_initial(&peer),
+            Some(prepared_physics()),
+        )
+        .unwrap();
 
         let collision = holtburger_world::CollisionScene::new();
         let prepared = scene
@@ -1449,14 +1505,20 @@ mod tests {
         assert!(despawn_scene.body(first_id).is_none());
 
         let mut replacement_input = definition_input();
-        replacement_input.initial.created_at = touched_at;
-        replacement_input.initial.pose = WorldPosition {
+        replacement_input.placement.world_mut().unwrap().created_at = touched_at;
+        replacement_input.placement.world_mut().unwrap().pose = WorldPosition {
             landblock_id: Guid(0xda55_0020),
             coords: Vector3::new(10.0, 0.0, 0.0),
             rotation: Quaternion::identity(),
         };
         let replacement = DynamicEntityDefinition::prepare(replacement_input).unwrap();
-        let replaced = replace_dynamic_entity_body(&mut scene, &replacement, None).unwrap();
+        let replaced = replace_dynamic_entity_body(
+            &mut scene,
+            &replacement,
+            world_initial(&replacement),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(replaced.removed.collision_reports.len(), 2);
         assert!(replaced.removed.collision_reports.iter().any(|report| {

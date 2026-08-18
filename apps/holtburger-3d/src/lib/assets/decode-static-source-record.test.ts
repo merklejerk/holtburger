@@ -190,6 +190,55 @@ describe("decodeOutdoorStaticRecord", () => {
 		});
 	});
 
+	it("preserves distinct authored placement poses by their enum key", () => {
+		const source = decodeOutdoorStaticRecord(
+			buildResponse({
+				placementFrames: [
+					{
+						placementId: 0,
+						frames: [{ origin: [1, 0, 0], orientation: [1, 0, 0, 0] }],
+					},
+					{
+						placementId: 1,
+						frames: [{ origin: [7, 0, 0], orientation: [1, 0, 0, 0] }],
+					},
+				],
+			}),
+			LANDBLOCK_ID,
+			LandblockLayerKind.Buildings,
+		);
+
+		const poses = source.dynamicSources[0]!.presentation.placementPoses;
+		expect(poses.get(0)?.partTransforms[0]?.m41).toBe(1);
+		expect(poses.get(1)?.partTransforms[0]?.m41).toBe(7);
+	});
+
+	it("rejects a duplicate placement key", () => {
+		const pose = {
+			placementId: 1,
+			frames: [{ origin: [0, 0, 0], orientation: [1, 0, 0, 0] }],
+		};
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({ placementFrames: [pose, pose] }),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("declares placement 1 twice");
+	});
+
+	it("rejects a placement with the wrong number of part frames", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({
+					placementFrames: [{ placementId: 1, frames: [] }],
+				}),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("carries 0 frames for 1 parts");
+	});
+
 	it("rejects an attach point naming a location outside the enum", () => {
 		expect(() =>
 			decodeOutdoorStaticRecord(
@@ -234,6 +283,7 @@ function buildResponse(
 		readonly layer?: "buildings" | "objects" | "generated";
 		readonly holdingLocations?: readonly Record<string, unknown>[];
 		readonly lights?: readonly Record<string, unknown>[];
+		readonly placementFrames?: readonly Record<string, unknown>[];
 	} = {},
 ): Uint8Array {
 	const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -313,12 +363,17 @@ function buildResponse(
 						partIndex: 0,
 						geometryId: "geometry",
 						defaultScale: [1, 1, 1],
-						defaultPlacement: null,
 						materialIds: ["surface/08000001"],
 					},
 				],
 				lights: options.lights ?? [],
 				holdingLocations: options.holdingLocations ?? [],
+				placementFrames: options.placementFrames ?? [
+					{
+						placementId: 0,
+						frames: [{ origin: [0, 0, 0], orientation: [1, 0, 0, 0] }],
+					},
+				],
 				defaultAnimationId: "0x030005cf",
 				defaultMotionTableId: null,
 				defaultScriptId: null,

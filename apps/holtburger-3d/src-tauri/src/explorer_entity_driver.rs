@@ -20,10 +20,12 @@ use holtburger_dat::file_type::{CharGen, ClothingTable, PaletteSet};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_weenie_catalog::WeenieTemplate;
 use holtburger_world::{
-    CellTransitRequest, DynamicPhysicalBodyDefinition, EntityAppearance, EntityPartChange,
-    EntityPhysicalIntent, EntityPhysicalTransitionAction, EntityPhysicsStateInput,
-    EntityPhysicsStateOverrides, EntitySubPalette, EntityTextureChange,
-    calculate_effective_entity_physics_state, resolve_effective_entity_physics_state,
+    CellTransitRequest, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
+    EntityAppearance, EntityPartChange, EntityPhysicalIntent, EntityPhysicalTransitionAction,
+    EntityPhysicsStateInput, EntityPhysicsStateOverrides, EntityPlacement, EntitySubPalette,
+    EntityTextureChange, WieldedItemClassification, WieldedItemClassificationError,
+    WieldedItemSlotFacts, calculate_effective_entity_physics_state, classify_wielded_item,
+    resolve_effective_entity_physics_state,
 };
 use serde::Deserialize;
 
@@ -37,9 +39,20 @@ use crate::explorer_weenie_catalog::{
 };
 use crate::host_simulation_runtime::HostSimulationRuntime;
 use crate::weenie_appearance::{
-    WieldedItem, WornEquipmentError, merge_worn_equipment, requires_character_generation,
-    resolve_authored_appearance, resolve_template_appearance, select_wielded,
+    WieldedItem, WornEquipmentError, merge_item_clothing, merge_worn_equipment,
+    requires_character_generation, resolve_authored_appearance, resolve_template_appearance,
+    select_wielded,
 };
+
+struct SelectedWieldedItem {
+    template: WeenieTemplate,
+    item: WieldedItem,
+}
+
+struct ResolvedSpawnAppearance {
+    wearer: EntityAppearance,
+    wielded: Vec<SelectedWieldedItem>,
+}
 
 /// Explicit host-owned spawn placement; `candidate` uses the camera pose's landblock frame.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -147,6 +160,12 @@ pub enum ExplorerEntityDriverError {
     AppearanceContent(ExplorerAppearanceContentError),
     /// A wielded item names a WCID absent from the catalog.
     MissingWieldedItem { wcid: u32, item_wcid: u32 },
+    /// A wielded item lacks a catalog fact required by its exact held slot.
+    EquipmentClassification {
+        wcid: u32,
+        item_wcid: u32,
+        source: WieldedItemClassificationError,
+    },
     /// A wielded item's clothing could not be resolved.
     WornEquipment {
         wcid: u32,
@@ -192,6 +211,14 @@ impl Display for ExplorerEntityDriverError {
             Self::MissingWieldedItem { wcid, item_wcid } => write!(
                 formatter,
                 "WCID {wcid} wields item {item_wcid}, which the catalog does not contain"
+            ),
+            Self::EquipmentClassification {
+                wcid,
+                item_wcid,
+                source,
+            } => write!(
+                formatter,
+                "WCID {wcid} wielded item {item_wcid} cannot be classified: {source}"
             ),
             Self::WornEquipment { wcid, source } => {
                 write!(formatter, "WCID {wcid} equipment failed: {source}")
@@ -419,9 +446,9 @@ impl ExplorerEntityDriver {
             .lock()
             .expect("Explorer entity driver lock poisoned");
         let guid = self.entities.reserve_guid()?;
-        let (definition, physical) = self.prepare_by_wcid(guid, request)?;
+        let (definition, physical, children) = self.prepare_by_wcid(guid, request)?;
         self.entities
-            .spawn_prepared(definition, request.physical_intent, physical)
+            .spawn_prepared_group(definition, request.physical_intent, physical, children)
             .map_err(ExplorerEntityDriverError::from)
     }
 
@@ -435,32 +462,25 @@ impl ExplorerEntityDriver {
             .lock()
             .expect("Explorer entity driver lock poisoned");
         self.entities.instance(request.guid, request.generation)?;
-        let (definition, physical) = self.prepare_by_wcid(request.guid, request.replacement)?;
+        let (definition, physical, children) =
+            self.prepare_by_wcid(request.guid, request.replacement)?;
         self.entities
-            .replace_prepared(
+            .replace_prepared_group(
                 definition,
                 request.generation,
                 request.replacement.physical_intent,
                 physical,
+                children,
             )
             .map_err(ExplorerEntityDriverError::from)
     }
 
-    fn prepare_by_wcid(
+    /// Resolves the template facts every realized entity derives the same way: required setup,
+    /// authored-or-default scale, prepared setup state, and the effective physics composition.
+    fn prepare_template_content(
         &self,
-        guid: Guid,
-        request: ExplorerEntitySpawnRequest,
-    ) -> Result<
-        (
-            DynamicEntityDefinition,
-            Option<DynamicPhysicalBodyDefinition>,
-        ),
-        ExplorerEntityDriverError,
-    > {
-        let template = self
-            .catalog
-            .lookup(request.wcid)?
-            .ok_or(ExplorerEntityDriverError::MissingWcid { wcid: request.wcid })?;
+        template: &WeenieTemplate,
+    ) -> Result<PreparedTemplateContent, ExplorerEntityDriverError> {
         let object_scale =
             optional_f32(template.wcid, "default scale", template.default_scale)?.unwrap_or(1.0); // ACE PhysicsGlobals.DefaultScale.
         let setup_did = template
@@ -472,70 +492,114 @@ impl ExplorerEntityDriver {
             .content
             .prepare_setup(template.wcid, setup_did, object_scale)?;
         let physics =
-            calculate_effective_entity_physics_state(physics_input(&template), setup.physics);
-        if !physics.supports_local_simulation() {
+            calculate_effective_entity_physics_state(physics_input(template), setup.physics);
+        Ok(PreparedTemplateContent {
+            setup_did,
+            object_scale,
+            setup,
+            physics,
+        })
+    }
+
+    fn prepare_by_wcid(
+        &self,
+        guid: Guid,
+        request: ExplorerEntitySpawnRequest,
+    ) -> Result<
+        (
+            DynamicEntityDefinition,
+            Option<DynamicPhysicalBodyDefinition>,
+            Vec<DynamicEntityDefinition>,
+        ),
+        ExplorerEntityDriverError,
+    > {
+        let template = self
+            .catalog
+            .lookup(request.wcid)?
+            .ok_or(ExplorerEntityDriverError::MissingWcid { wcid: request.wcid })?;
+        let content = self.prepare_template_content(&template)?;
+        if !content.physics.supports_local_simulation() {
             return Err(ExplorerEntityDriverError::Preparation(
                 DynamicEntityPhysicalPreparationError::UnsupportedPhysicsState {
                     wcid: template.wcid,
-                    state: physics.semantic.bits(),
-                    unsupported_bits: physics.unsupported_local_simulation.bits(),
-                    unknown_bits: physics.unknown_bits,
+                    state: content.physics.semantic.bits(),
+                    unsupported_bits: content.physics.unsupported_local_simulation.bits(),
+                    unknown_bits: content.physics.unknown_bits,
                 },
             ));
         }
-        let mut definition = DynamicEntityDefinition::prepare(DynamicEntityDefinitionInput {
-            identity: DynamicEntityIdentity {
-                guid,
-                wcid: template.wcid,
-                name: template
-                    .name
-                    .clone()
-                    .ok_or(ExplorerEntityDriverError::MissingName {
-                        wcid: template.wcid,
-                    })?,
-                weenie_type: WeenieType::from_repr(template.weenie_type).ok_or(
-                    ExplorerEntityDriverError::InvalidWeenieType {
-                        wcid: template.wcid,
-                        value: template.weenie_type,
-                    },
-                )?,
-            },
-            content: DynamicEntityContent {
-                setup_did,
-                sound_table_did: template.sound_table_did,
-                physics_effect_table_did: template.physics_effect_table_did,
-            },
-            appearance: self.resolve_appearance(guid, &template, setup_did)?,
-            initial: DynamicEntityInitialState {
-                pose: candidate_pose(request.camera_pose, request.candidate, request.rotation)?,
-                velocity: Vector3::zero(),
-                acceleration: Vector3::zero(),
-                omega: Vector3::zero(),
-                created_at: self.clock.now(),
-            },
-            object_scale,
-            friction: optional_f32(template.wcid, "friction", template.friction)?,
-            elasticity: optional_f32(template.wcid, "elasticity", template.elasticity)?,
-            maximum_velocity: optional_f32(
-                template.wcid,
-                "maximum velocity",
-                template.maximum_velocity,
-            )?,
-            rotation_speed: optional_f32(template.wcid, "rotation speed", template.rotation_speed)?,
-            physics,
-        })?;
+        let resolved_appearance = self.resolve_appearance(guid, &template, content.setup_did)?;
+        let placement = EntityPlacement::World(DynamicEntityInitialState {
+            pose: candidate_pose(request.camera_pose, request.candidate, request.rotation)?,
+            velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
+            omega: Vector3::zero(),
+            created_at: self.clock.now(),
+        });
+        let mut definition = DynamicEntityDefinition::prepare(template_definition_input(
+            &template,
+            guid,
+            &content,
+            resolved_appearance.wearer,
+            placement,
+        )?)?;
         let physical = match request.physical_intent {
             EntityPhysicalIntent::PoseOnly => None,
             EntityPhysicalIntent::Simulated => Some(self.content.prepare_physical(&definition)?),
         };
-        definition.initial.pose = resolve_spawn_placement(
+        let initial = definition
+            .placement
+            .world_mut()
+            .expect("root spawn definition must own world placement");
+        initial.pose = resolve_spawn_placement(
             &self.simulation.snapshot(),
             request.camera_pose,
-            definition.initial.pose,
-            setup.movement_spheres.primary().center,
-            setup.movement_spheres.primary().radius,
+            initial.pose,
+            content.setup.movement_spheres.primary().center,
+            content.setup.movement_spheres.primary().radius,
         )?;
-        Ok((definition, physical))
+        let children = self.prepare_held_children(guid, resolved_appearance.wielded)?;
+        Ok((definition, physical, children))
+    }
+
+    fn prepare_held_children(
+        &self,
+        parent: Guid,
+        wielded: Vec<SelectedWieldedItem>,
+    ) -> Result<Vec<DynamicEntityDefinition>, ExplorerEntityDriverError> {
+        let mut children = Vec::new();
+        for selected in wielded {
+            let Some(WieldedItemClassification::Held(held)) = selected.item.classification else {
+                continue;
+            };
+            let template = selected.template;
+            let guid = self.entities.reserve_guid()?;
+            let content = self.prepare_template_content(&template)?;
+            let mut appearance =
+                resolve_authored_appearance(template.palette_base_did, &template.appearance);
+            append_template_obj_desc(&mut appearance, &template);
+            merge_item_clothing(
+                &mut appearance,
+                content.setup_did,
+                &selected.item,
+                |clothing_base| self.content.clothing_table(clothing_base),
+                |set, hue| self.content.palette_set(set, hue),
+            )
+            .map_err(|source| ExplorerEntityDriverError::WornEquipment {
+                wcid: template.wcid,
+                source,
+            })?;
+            children.push(DynamicEntityDefinition::prepare(
+                template_definition_input(
+                    &template,
+                    guid,
+                    &content,
+                    appearance,
+                    EntityPlacement::Attached(held.attach_to(parent)),
+                )?,
+            )?);
+        }
+        Ok(children)
     }
 
     /// Despawns one exact current instance generation through the serialized driver.
@@ -701,7 +765,7 @@ impl ExplorerEntityDriver {
         guid: Guid,
         template: &WeenieTemplate,
         setup_did: u32,
-    ) -> Result<EntityAppearance, ExplorerEntityDriverError> {
+    ) -> Result<ResolvedSpawnAppearance, ExplorerEntityDriverError> {
         let seed = u64::from(guid.0);
         // Only humanoids consult character generation; a crate never needs it, so its absence is
         // not an error for templates that resolve no heritage and gender.
@@ -720,7 +784,7 @@ impl ExplorerEntityDriver {
         };
 
         let wielded = select_wielded(&template.wielded, seed);
-        let mut items = Vec::with_capacity(wielded.len());
+        let mut wielded_items = Vec::with_capacity(wielded.len());
         for entry in &wielded {
             let Some(item) = self.catalog.lookup(entry.wcid)? else {
                 return Err(ExplorerEntityDriverError::MissingWieldedItem {
@@ -728,18 +792,42 @@ impl ExplorerEntityDriver {
                     item_wcid: entry.wcid,
                 });
             };
-            items.push(WieldedItem {
+            let item_facts = WieldedItem {
                 wcid: item.wcid,
                 clothing_base_did: item.appearance.clothing_base_did,
-                item_type: item.appearance.item_type,
-                valid_locations: item.appearance.valid_locations,
+                classification: classify_wielded_item(WieldedItemSlotFacts {
+                    valid_locations: item.appearance.valid_locations,
+                    item_type: item.appearance.item_type,
+                    default_combat_style: item.appearance.default_combat_style,
+                })
+                .map_err(|source| {
+                    ExplorerEntityDriverError::EquipmentClassification {
+                        wcid: template.wcid,
+                        item_wcid: item.wcid,
+                        source,
+                    }
+                })?,
                 clothing_priority: item.appearance.clothing_priority,
                 palette_template: entry.palette_template,
                 shade: entry.shade,
+            };
+            wielded_items.push(SelectedWieldedItem {
+                template: item,
+                item: item_facts,
             });
         }
 
-        let painted = items.iter().any(|item| item.clothing_base_did.is_some());
+        let items = wielded_items
+            .iter()
+            .map(|selected| selected.item)
+            .collect::<Vec<_>>();
+        let painted = items.iter().any(|item| {
+            item.clothing_base_did.is_some()
+                && matches!(
+                    item.classification,
+                    Some(WieldedItemClassification::Painted(_))
+                )
+        });
         if painted {
             merge_worn_equipment(
                 &mut appearance,
@@ -756,7 +844,10 @@ impl ExplorerEntityDriver {
             // ACE's no-equipment fallback: the template's own ObjDesc rows dress the body.
             append_template_obj_desc(&mut appearance, template);
         }
-        Ok(appearance)
+        Ok(ResolvedSpawnAppearance {
+            wearer: appearance,
+            wielded: wielded_items,
+        })
     }
 }
 
@@ -819,6 +910,63 @@ fn candidate_pose(
     .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))
 }
 
+/// Once-derived template content facts shared by a wearer and each of its held children.
+struct PreparedTemplateContent {
+    /// Required authored setup identity.
+    setup_did: u32,
+    /// Authored default scale, or ACE's implicit 1.0.
+    object_scale: f32,
+    /// Setup-owned state facts and placement spheres.
+    setup: DynamicEntitySetupPreparation,
+    /// Complete effective physics composition.
+    physics: EffectiveEntityPhysicsState,
+}
+
+/// Assembles the template-derived definition input identically for every placement arm.
+fn template_definition_input(
+    template: &WeenieTemplate,
+    guid: Guid,
+    content: &PreparedTemplateContent,
+    appearance: EntityAppearance,
+    placement: EntityPlacement<DynamicEntityInitialState>,
+) -> Result<DynamicEntityDefinitionInput, ExplorerEntityDriverError> {
+    Ok(DynamicEntityDefinitionInput {
+        identity: DynamicEntityIdentity {
+            guid,
+            wcid: template.wcid,
+            name: template
+                .name
+                .clone()
+                .ok_or(ExplorerEntityDriverError::MissingName {
+                    wcid: template.wcid,
+                })?,
+            weenie_type: WeenieType::from_repr(template.weenie_type).ok_or(
+                ExplorerEntityDriverError::InvalidWeenieType {
+                    wcid: template.wcid,
+                    value: template.weenie_type,
+                },
+            )?,
+        },
+        content: DynamicEntityContent {
+            setup_did: content.setup_did,
+            sound_table_did: template.sound_table_did,
+            physics_effect_table_did: template.physics_effect_table_did,
+        },
+        appearance,
+        placement,
+        object_scale: content.object_scale,
+        friction: optional_f32(template.wcid, "friction", template.friction)?,
+        elasticity: optional_f32(template.wcid, "elasticity", template.elasticity)?,
+        maximum_velocity: optional_f32(
+            template.wcid,
+            "maximum velocity",
+            template.maximum_velocity,
+        )?,
+        rotation_speed: optional_f32(template.wcid, "rotation speed", template.rotation_speed)?,
+        physics: content.physics,
+    })
+}
+
 fn resolve_spawn_placement(
     collision: &holtburger_world::CollisionScene,
     camera_pose: WorldPosition,
@@ -845,9 +993,10 @@ fn resolve_spawn_placement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::weenie_appearance::ITEM_TYPE_CLOTHING;
     use anyhow::anyhow;
     use holtburger_common::Sphere;
+    use holtburger_common::properties::{EquipMask, ItemType};
+    use holtburger_common::{ParentLocation, Placement};
     use holtburger_content::{ColliderScale, LandblockCollisionAsset};
     use holtburger_weenie_catalog::WieldEntry;
     use holtburger_weenie_catalog::{PhysicsBoolOverrides, TemplatePhysics};
@@ -855,7 +1004,7 @@ mod tests {
         DynamicBodyCollisionDefinition, EdgeProtection, EntityCollisionParticipation,
         EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityPhysicsScheduling,
         EntityPhysicsSetupFacts, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
-        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment,
         PreparedEntityTargetGeometry,
     };
     use std::collections::BTreeMap;
@@ -1093,6 +1242,7 @@ mod tests {
         let entities = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
         let mut clothing = BTreeMap::new();
         clothing.insert(0x1000_0001, synthetic_clothing(0x0200_0001));
+        clothing.insert(0x1000_0002, synthetic_clothing(0x0200_0002));
         let driver = ExplorerEntityDriver::new(
             Arc::new(MemoryCatalog {
                 templates: templates
@@ -1525,7 +1675,7 @@ mod tests {
         let survivor = entities.snapshot().unwrap();
         assert_eq!(survivor.len(), 1, "the pose-only entity must survive");
         assert_eq!(
-            survivor[0].input.participation,
+            survivor[0].input.placement.world().unwrap().participation,
             holtburger_world::PhysicalBodyParticipation::PoseOnly
         );
     }
@@ -1545,7 +1695,7 @@ mod tests {
         let mut shirt = template(130);
         shirt.appearance.clothing_base_did = Some(0x1000_0001);
         // WCID 130's own ACE properties: ItemType::Clothing, chest and arm Wear slots.
-        shirt.appearance.item_type = Some(ITEM_TYPE_CLOTHING);
+        shirt.appearance.item_type = Some(ItemType::CLOTHING.bits() as i32);
         shirt.appearance.valid_locations = Some(0x1E);
 
         let (entities, driver) = driver_with_appearance(vec![collector, shirt]);
@@ -1593,7 +1743,7 @@ mod tests {
             {
                 let mut again = template(130);
                 again.appearance.clothing_base_did = Some(0x1000_0001);
-                again.appearance.item_type = Some(ITEM_TYPE_CLOTHING);
+                again.appearance.item_type = Some(ItemType::CLOTHING.bits() as i32);
                 again.appearance.valid_locations = Some(0x1E);
                 again
             },
@@ -1607,6 +1757,62 @@ mod tests {
             "the same GUID must reproduce the same appearance"
         );
         assert_eq!(entities.snapshot().unwrap().len(), 1);
+    }
+
+    /// A held item is a separate bodyless entity. Its CLO is evaluated against the item's own
+    /// setup; applying it to the wearer would silently erase the weapon model substitution.
+    #[test]
+    fn held_item_uses_its_own_setup_appearance_and_attaches_to_the_wearer() {
+        let mut wearer = template(3921);
+        wearer.wielded = vec![WieldEntry {
+            wcid: 359,
+            destination_type: 2,
+            palette_template: 0,
+            shade: 0.0,
+        }];
+        let mut sword = template(359);
+        sword.weenie_type = WeenieType::MeleeWeapon as i32;
+        sword.setup_did = Some(0x0200_0002);
+        sword.appearance.clothing_base_did = Some(0x1000_0002);
+        sword.appearance.item_type = Some(ItemType::MELEE_WEAPON.bits() as i32);
+        sword.appearance.valid_locations = Some(EquipMask::MELEE_WEAPON.bits() as i32);
+
+        let (entities, driver) = driver_with_appearance(vec![wearer, sword]);
+        let spawned = driver
+            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+
+        assert_eq!(spawned.children.len(), 1);
+        let child = &spawned.children[0];
+        assert_eq!(child.definition.identity.wcid, 359);
+        assert_eq!(child.definition.content.setup_did, 0x0200_0002);
+        assert_eq!(
+            child.definition.placement.attachment().copied(),
+            Some(PhysicsAttachment {
+                parent: spawned.instance.definition.identity.guid,
+                location: ParentLocation::RightHand,
+                placement: Placement::RightHandCombat,
+            })
+        );
+        assert!(
+            child
+                .definition
+                .appearance
+                .part_changes
+                .iter()
+                .any(|change| change.part_index != 0x10),
+            "the held item's CLO must paint its own setup"
+        );
+        assert!(
+            spawned
+                .instance
+                .definition
+                .appearance
+                .part_changes
+                .is_empty(),
+            "the held item's CLO must not paint the wearer"
+        );
+        assert_eq!(entities.snapshot().unwrap().len(), 2);
     }
 
     /// A non-humanoid never consults character generation, so a mount without it still spawns.

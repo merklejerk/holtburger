@@ -16,7 +16,10 @@
 use holtburger_dat::file_type::char_gen::{CharGen, CharacterGenGender};
 use holtburger_dat::file_type::{ClothingTable, ObjDesc};
 use holtburger_weenie_catalog::{TemplateAppearance, WieldEntry};
-use holtburger_world::{EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange};
+use holtburger_world::{
+    EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange, PaintedWieldedItem,
+    WieldedItemClassification,
+};
 
 /// Palette ranges ACE writes for the generated body layers, in retail's packed eight-color groups.
 ///
@@ -364,20 +367,6 @@ const GENDER_NAMES: [(&str, i32); 2] = [("Male", 1), ("Female", 2)];
 /// row's `shade` column carries a selection probability instead of a CLO shade.
 const DESTINATION_TREASURE: i32 = 8;
 
-/// `ItemType` values ACE partitions worn items on (`Creature_Networking.cs:110,122`).
-pub(crate) const ITEM_TYPE_ARMOR: i32 = 0x2;
-pub(crate) const ITEM_TYPE_CLOTHING: i32 = 0x4;
-
-/// `EquipMask::Clothing | Armor | Cloak`, the slots whose contents paint the wearer's model
-/// (`Creature_Networking.cs:153`). A held weapon or shield is a separate child object parented to
-/// an attach point, so it never contributes ObjDesc paint however its clothing table is authored.
-const EQUIP_MASK_PAINTABLE: u32 = 0x8800_7FFF;
-
-/// `EquipMask` bits ACE treats as armor or extremity when partitioning worn items
-/// (`Creature_Networking.cs:110`). `Armor` already includes `FootWear`.
-const EQUIP_MASK_ARMOR: u32 = 0x0000_7E00 | 0x0000_0100;
-const EQUIP_MASK_EXTREMITY: u32 = 0x0000_0001 | 0x0000_0020 | 0x0000_0100;
-
 /// One wielded item's facts, joined from its own catalog template by the caller.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WieldedItem {
@@ -385,10 +374,8 @@ pub struct WieldedItem {
     pub wcid: u32,
     /// `PropertyDataId::ClothingBase`; an item without one paints nothing.
     pub clothing_base_did: Option<u32>,
-    /// `PropertyInt::ItemType`. Not `WeenieType`, where armor and clothing are both `Clothing`.
-    pub item_type: Option<i32>,
-    /// `PropertyInt::ValidLocations`, the slot ACE wields NPC items at.
-    pub valid_locations: Option<i32>,
+    /// Once-derived painted/held presentation mechanism, or neither.
+    pub classification: Option<WieldedItemClassification>,
     /// `PropertyInt::ClothingPriority` coverage mask, used to order clothing.
     pub clothing_priority: Option<i32>,
     /// `PaletteTemplate` selector from the wield row; zero is unset.
@@ -448,6 +435,10 @@ pub fn merge_worn_equipment(
     let mut clothing = Vec::new();
     let mut armor = Vec::new();
     for item in items {
+        let bucket = match item.classification {
+            Some(WieldedItemClassification::Painted(bucket)) => bucket,
+            Some(WieldedItemClassification::Held(_)) | None => continue,
+        };
         let Some(clothing_base_did) = item.clothing_base_did else {
             continue;
         };
@@ -459,12 +450,11 @@ pub fn merge_worn_equipment(
             // Authored gap: this garment has no mapping for this body.
             continue;
         };
-        match worn_bucket(item) {
-            Some(WornBucket::Armor) => armor.push((coverage.bits(), *item, table)),
-            Some(WornBucket::Clothing) => {
+        match bucket {
+            PaintedWieldedItem::Armor => armor.push((coverage.bits(), *item, table)),
+            PaintedWieldedItem::Clothing => {
                 clothing.push((item.clothing_priority.unwrap_or_default(), *item, table))
             }
-            None => continue,
         }
     }
     clothing.sort_by_key(|(priority, item, _)| (*priority, item.wcid));
@@ -484,6 +474,34 @@ pub fn merge_worn_equipment(
             })?;
         push_clothing_obj_desc(appearance, &obj_desc);
     }
+    Ok(())
+}
+
+/// Apply one item's `ClothingBase` to its own setup for separate child rendering.
+///
+/// Held items use CLO for their own palette/model variants, never to paint the wearer. The wield
+/// row supplies the same palette template and shade ACE passes while constructing the child.
+pub fn merge_item_clothing(
+    appearance: &mut EntityAppearance,
+    setup_did: u32,
+    item: &WieldedItem,
+    clothing_table: impl Fn(u32) -> Option<ClothingTable>,
+    palette_set: impl Fn(u32, f64) -> Option<u32>,
+) -> Result<(), WornEquipmentError> {
+    let Some(clothing_base_did) = item.clothing_base_did else {
+        return Ok(());
+    };
+    let table = clothing_table(clothing_base_did).ok_or(WornEquipmentError::MissingTable {
+        wcid: item.wcid,
+        clothing_base_did,
+    })?;
+    let obj_desc = build_clothing(&table, setup_did, item, &palette_set).map_err(|source| {
+        WornEquipmentError::Build {
+            wcid: item.wcid,
+            message: source,
+        }
+    })?;
+    push_clothing_obj_desc(appearance, &obj_desc);
     Ok(())
 }
 
@@ -550,40 +568,6 @@ impl std::fmt::Display for WornEquipmentError {
 }
 
 impl std::error::Error for WornEquipmentError {}
-
-/// Which of ACE's two worn-item buckets an item falls in, or neither.
-///
-/// `Creature_Networking.cs:110,122` builds exactly these two sets and concatenates them; an item
-/// in neither is never painted. `ItemType` here is `PropertyInt::ItemType` — ACE's `WeenieType`
-/// cannot substitute, because armor and clothing are both `WeenieType::Clothing`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WornBucket {
-    /// Painted first, ordered by `ClothingPriority`.
-    Clothing,
-    /// Painted last, ordered by the coverage its clothing table paints.
-    Armor,
-}
-
-fn worn_bucket(item: &WieldedItem) -> Option<WornBucket> {
-    let slots = item.valid_locations? as u32;
-    // ACE applies this inside the paint loop rather than while bucketing, but an excluded item
-    // contributes nothing at all — not even coverage — so deciding participation once is the same
-    // answer in one place.
-    if slots & EQUIP_MASK_PAINTABLE == 0 {
-        return None;
-    }
-    if item.item_type == Some(ITEM_TYPE_ARMOR)
-        || slots & (EQUIP_MASK_ARMOR | EQUIP_MASK_EXTREMITY) != 0
-    {
-        return Some(WornBucket::Armor);
-    }
-    if item.item_type == Some(ITEM_TYPE_CLOTHING) {
-        return Some(WornBucket::Clothing);
-    }
-    // Jewellery, ammunition, and anything else a creature wields: ACE leaves these out of the
-    // model entirely, even when they carry a clothing table.
-    None
-}
 
 fn push_clothing_obj_desc(appearance: &mut EntityAppearance, obj_desc: &ObjDesc) {
     for change in &obj_desc.anim_part_changes {
@@ -1068,6 +1052,8 @@ mod tests {
 mod equipment_tests {
     use super::test_support::{PART_CHEST, PART_LEFT_FOOT, clothing_for};
     use super::*;
+    use holtburger_common::properties::ItemType;
+    use holtburger_world::{WieldedItemSlotFacts, classify_wielded_item};
 
     const HUMAN_MALE: u32 = 0x0200_0001;
     const OTHER_BODY: u32 = 0x0200_0099;
@@ -1076,7 +1062,7 @@ mod equipment_tests {
         typed_item(
             wcid,
             clothing_base_did,
-            Some(ITEM_TYPE_CLOTHING),
+            Some(ItemType::CLOTHING.bits() as i32),
             valid_locations,
         )
     }
@@ -1090,8 +1076,12 @@ mod equipment_tests {
         WieldedItem {
             wcid,
             clothing_base_did: Some(clothing_base_did),
-            item_type,
-            valid_locations: Some(valid_locations),
+            classification: classify_wielded_item(WieldedItemSlotFacts {
+                valid_locations: Some(valid_locations),
+                item_type,
+                default_combat_style: None,
+            })
+            .unwrap(),
             clothing_priority: None,
             palette_template: 0,
             shade: 0.0,
@@ -1218,41 +1208,24 @@ mod equipment_tests {
         );
     }
 
-    /// ACE builds two sets and concatenates them; an item in neither is never painted. Both terms
-    /// have to be exercised, because either alone was enough to break real NPCs: the slot term
-    /// alone misreads the 49 wielded armor pieces that sit outside an armor slot, and the
-    /// `ItemType` term alone was what a `WeenieType` once stood in for, making every worn item
-    /// armor and sorting shirts over plate.
+    /// Classification precedes content lookup: a held child cannot accidentally enter CLO just
+    /// because its own setup carries a clothing table.
     #[test]
-    fn worn_items_partition_the_way_ace_concatenates_them() {
-        // WCID 33614's plate: armor by slot bits.
-        assert_eq!(worn_bucket(&item(54, 1, 0x600)), Some(WornBucket::Armor));
-        assert_eq!(worn_bucket(&item(106, 1, 0x1800)), Some(WornBucket::Armor));
-        // Sollerets: FootWear, which ACE counts as both armor and extremity.
-        assert_eq!(worn_bucket(&item(107, 1, 0x100)), Some(WornBucket::Armor));
-        // Its shirt and trousers cover chest, arms and legs through *Wear* bits only.
-        assert_eq!(worn_bucket(&item(130, 1, 0x1E)), Some(WornBucket::Clothing));
-        assert_eq!(worn_bucket(&item(127, 1, 0xC4)), Some(WornBucket::Clothing));
-        // ItemType::Armor worn outside an armor slot is still armor.
-        assert_eq!(
-            worn_bucket(&typed_item(1, 1, Some(ITEM_TYPE_ARMOR), 0x1E)),
-            Some(WornBucket::Armor)
-        );
-        // Neither type paints: ACE drops it even though it carries a clothing table.
-        assert_eq!(worn_bucket(&typed_item(2, 1, Some(0x8), 0x8000)), None);
-        assert_eq!(worn_bucket(&typed_item(3, 1, None, 0x8000)), None);
-        // A held weapon carries a clothing table but is a child object, never body paint.
-        assert_eq!(
-            worn_bucket(&typed_item(24611, 1, Some(0x1), 0x10_0000)),
-            None,
-            "Sword of Lost Light must not paint the Royal Guard's torso"
-        );
-        // Even ItemType::Armor in a held slot: the Royal Guard's shield.
-        assert_eq!(
-            worn_bucket(&typed_item(42717, 1, Some(ITEM_TYPE_ARMOR), 0x20_0000)),
-            None,
-            "a shield is worn on the arm as a child object, not painted on"
-        );
+    fn held_items_never_consult_clothing_content_or_paint_the_wearer() {
+        let mut appearance = empty_appearance();
+        // Royal Guard's Sword of Lost Light: a real held item with a ClothingBase.
+        let sword = typed_item(24611, 0x1000_0001, Some(0x1), 0x10_0000);
+
+        merge_worn_equipment(
+            &mut appearance,
+            HUMAN_MALE,
+            &[sword],
+            |_| panic!("held items must be classified before CLO lookup"),
+            |_, _| panic!("held items must not resolve a CLO palette"),
+        )
+        .unwrap();
+
+        assert_eq!(appearance, empty_appearance());
     }
 
     /// Ordinary wields always apply; treasure rows compete inside a probability chunk and the

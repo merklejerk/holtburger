@@ -83,6 +83,8 @@ pub struct TemplateAppearance {
     /// `PropertyInt::ItemType`; ACE's `ItemType` flags, which partition worn items into clothing
     /// and armor. Distinct from `WeenieType`, where armor and clothing are both `Clothing`.
     pub item_type: Option<i32>,
+    /// `PropertyInt::DefaultCombatStyle`; selects the wield side for missile weapons.
+    pub default_combat_style: Option<i32>,
     /// `PropertyInt::ClothingPriority`; a `CoverageMask` used to sort worn clothing.
     pub clothing_priority: Option<i32>,
     /// `PropertyInt::ValidLocations`; an `EquipMask` selecting the wield slot.

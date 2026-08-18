@@ -6,6 +6,7 @@ import { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system"
 import type {
 	DynamicEntityAdvance,
 	DynamicEntityView,
+	DynamicEntityWorldPlacement,
 } from "../runtime/dynamic-entity-feed";
 
 describe("DynamicEntityPlacementSystem", () => {
@@ -102,7 +103,9 @@ function advance(startX: number, endX: number): DynamicEntityAdvance {
 	};
 }
 
-function dynamicEntity(x: number): DynamicEntityView {
+function dynamicEntity(
+	x: number,
+): DynamicEntityView & { placement: DynamicEntityWorldPlacement } {
 	return {
 		generation: 1,
 		identity: { guid: 1, name: "Entity", wcid: 1 },
@@ -117,6 +120,7 @@ function dynamicEntity(x: number): DynamicEntityView {
 			semanticMask: 0,
 		},
 		placement: {
+			kind: "world",
 			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "airborne",
 			omega: { x: 0, y: 0, z: 0 },

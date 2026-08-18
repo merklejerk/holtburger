@@ -627,12 +627,10 @@ directly with `createNode` before any transition existed.
   key and drops to key `0`, matching `CPartArray::SetPlacementFrame`. `defaultPose` now requests the
   resting key `0x65` through it instead of taking whatever entry the map happened to yield first,
   which was an accidental rule rather than a stated one.
-- **Gap: the host emits only one pose.** `select_setup_default_frames` resolves `0x65 → 0` in Rust
-  and ships the result under key `0`, so the frontend's selection always falls through to the
-  fallback and `placement` cannot yet change an attached item's pose. The rule is implemented and
-  exercised; making it load-bearing needs the host to serialize all placement frames keyed by
-  `Placement` — Phase 2 typed that map in the decoder, so the remaining work is DTO plumbing.
-  Added to Phase 6.
+- **Resolved 2026-08-18 by the held-item follow-on.** The host now serializes every authored setup
+  placement pose under its `Placement` key. The decoder retains the complete map and held-child
+  installation selects the requested pose with retail's key-`0` fallback. A transform test makes
+  the requested non-default pose load-bearing.
 - **Known characteristic, not optimized:** every transform change on an animated parent resyncs its
   entire attached subtree through `#syncSpatialSubtree`, which re-resolves each descendant's
   placement by walking to the root. For a wielder with a few held items this is a handful of matrix
@@ -683,7 +681,12 @@ residency.
 What remains is only the producer: something that constructs commits carrying a non-null
 `attachment` from world state.
 
-#### Blocked
+#### Historical Blocker — Resolved 2026-08-18
+
+The follow-on `holtburger-3d-explorer-held-item-attachments-plan.md` supplied the missing dynamic
+entity feed, bodyless attachment arm, Explorer producer, deferred frontend attach, lifecycle
+ordering, and browser proof. The archaeology below records why this original plan stopped; it is
+not current implementation status.
 
 **Attachment changes at runtime have no producer in `apps/holtburger-3d`.** The plan assumed a path
 from world attachment state into frontend entity installation, and that path does not exist:

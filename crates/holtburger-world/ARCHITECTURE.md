@@ -174,10 +174,15 @@ drift at `0xDA55FFFF`. Owner-local conversion occurs only at collision lookup an
 
 Dynamic entities extend the same scene without a second store or solver:
 
-- Every live dynamic entity keeps exactly one `SpatialBody` that owns its world pose.
+- Every world-placed dynamic entity keeps exactly one `SpatialBody` that owns its world pose.
   `SpatialBody::physical` is optional collision/physics state, and `set_dynamic_physical_body`
   adds, removes, or reconfigures it reversibly. Disabling solver participation never retires the
   pose body, and compatible movement geometry preserves contact/placement response memory.
+- An attached entity instead carries `EntityPlacement::Attached(PhysicsAttachment)` and has no
+  `SpatialBody`: its parent GUID, named holding location, and own placement pose delegate transform
+  authority to the parent's part hierarchy. `EntityPlacement::World(W)` carries the complete
+  layer-specific motion composite, so velocity/contact/sampling facts cannot coexist with an
+  attachment.
 - `SpatialScene` owns every derived membership. Coarse landblock membership and the dynamic
   shadow index are updated inside registration, pose commit, physical-state replacement,
   relocation, and removal, so no caller choreographs a second index and no `entity_poses` mirror

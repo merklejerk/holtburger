@@ -1,6 +1,4 @@
 import {
-	decodeExplorerEntityMutationReceipt,
-	type ExplorerEntityMutationReceipt,
 	type ExplorerEntityRelocationRequest,
 	type ExplorerEntitySpawnRequest,
 	type LaunchExplorerEntityRequest,
@@ -39,17 +37,16 @@ export class HttpExplorerEntityHost {
 		return this.#interest.request(anchorLandblockId);
 	}
 
-	async spawn(request: ExplorerEntitySpawnRequest): Promise<DynamicEntityView> {
-		return decodeDynamicEntityView(
+	async spawn(
+		request: ExplorerEntitySpawnRequest,
+	): Promise<DynamicEntityEvent> {
+		return decodeDynamicEntityEvent(
 			await postJson(this.#baseUrl, "explorer-entity-spawn", request),
 		);
 	}
 
-	async despawn(
-		guid: number,
-		generation: number,
-	): Promise<ExplorerEntityMutationReceipt> {
-		return decodeExplorerEntityMutationReceipt(
+	async despawn(guid: number, generation: number): Promise<DynamicEntityEvent> {
+		return decodeDynamicEntityEvent(
 			await postJson(this.#baseUrl, "explorer-entity-despawn", {
 				guid,
 				generation,

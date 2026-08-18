@@ -36,6 +36,7 @@ const PROPERTY_FLOAT_FRICTION: u16 = 78;
 const PROPERTY_FLOAT_ELASTICITY: u16 = 79;
 
 const PROPERTY_INT_ITEM_TYPE: u16 = 1;
+const PROPERTY_INT_DEFAULT_COMBAT_STYLE: u16 = 46;
 const PROPERTY_INT_PHYSICS_STATE: u16 = 93;
 const PROPERTY_INT_CLOTHING_PRIORITY: u16 = 4;
 const PROPERTY_INT_VALID_LOCATIONS: u16 = 9;
@@ -195,7 +196,7 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_float")?,
         ints: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 4, 9, 93, 113, 188) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 4, 9, 46, 93, 113, 188) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_int")?,
@@ -383,6 +384,13 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
                 row.wcid,
                 "weenie_properties_int",
                 "appearance.item_type",
+            )?,
+            PROPERTY_INT_DEFAULT_COMBAT_STYLE => set_once(
+                &mut template.appearance.default_combat_style,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "appearance.default_combat_style",
             )?,
             PROPERTY_INT_CLOTHING_PRIORITY => set_once(
                 &mut template.appearance.clothing_priority,
@@ -756,6 +764,11 @@ mod tests {
             property_type: PROPERTY_INT_PHYSICS_STATE,
             value: -1,
         });
+        rows.ints.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_INT_DEFAULT_COMBAT_STYLE,
+            value: 2,
+        });
         rows.bools.push(ScalarRow {
             wcid: 42,
             property_type: PROPERTY_BOOL_IS_FROZEN,
@@ -782,6 +795,7 @@ mod tests {
         assert_eq!(template.setup_did, None);
         assert_eq!(template.physics.base_mask, Some(u32::MAX));
         assert_eq!(template.physics.overrides.frozen, Some(false));
+        assert_eq!(template.appearance.default_combat_style, Some(2));
         assert_eq!(template.sub_palettes[0].sub_palette_did, 1);
     }
 

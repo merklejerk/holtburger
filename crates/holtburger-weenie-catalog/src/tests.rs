@@ -43,6 +43,7 @@ fn template(wcid: u32) -> WeenieTemplate {
             heritage_group_name: Some("Gharu'ndim".to_owned()),
             sex: Some("Male".to_owned()),
             item_type: Some(2),
+            default_combat_style: Some(2),
             clothing_priority: Some(65_536),
             valid_locations: Some(384),
         },
@@ -174,6 +175,7 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     absent.rotation_speed = None;
     absent.appearance.skin_palette_did = None;
     absent.appearance.heritage_group = None;
+    absent.appearance.default_combat_style = None;
     absent.appearance.clothing_priority = None;
     absent.appearance.sex = None;
     let mut explicit = template(2);
@@ -183,6 +185,7 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     explicit.rotation_speed = Some(0.0);
     explicit.appearance.skin_palette_did = Some(0);
     explicit.appearance.heritage_group = Some(0);
+    explicit.appearance.default_combat_style = Some(0);
     explicit.appearance.clothing_priority = Some(0);
     explicit.appearance.sex = Some(String::new());
 
@@ -201,10 +204,12 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     assert_eq!(explicit.rotation_speed, Some(0.0));
     assert_eq!(absent.appearance.skin_palette_did, None);
     assert_eq!(absent.appearance.heritage_group, None);
+    assert_eq!(absent.appearance.default_combat_style, None);
     assert_eq!(absent.appearance.clothing_priority, None);
     assert_eq!(absent.appearance.sex, None);
     assert_eq!(explicit.appearance.skin_palette_did, Some(0));
     assert_eq!(explicit.appearance.heritage_group, Some(0));
+    assert_eq!(explicit.appearance.default_combat_style, Some(0));
     assert_eq!(explicit.appearance.clothing_priority, Some(0));
     assert_eq!(explicit.appearance.sex.as_deref(), Some(""));
 }

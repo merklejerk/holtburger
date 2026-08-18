@@ -150,6 +150,8 @@
 		query.get("isolateAuthoredDynamics") === "true";
 	const EXCLUDE_AUTHORED_DYNAMICS =
 		query.get("excludeAuthoredDynamics") === "true";
+	const EXCLUDE_SPAWNED_ATTACHMENTS =
+		query.get("excludeSpawnedAttachments") === "true";
 	if (!Number.isFinite(CAMERA_HEIGHT)) {
 		throw new Error("Browser harness camera height must be finite.");
 	}
@@ -673,14 +675,19 @@
 			distance,
 			physicalIntent,
 		);
-		const entity = await entityHost.spawn(request);
-		spawnedEntities = [
-			...spawnedEntities.filter(
-				(current) => current.identity.guid !== entity.identity.guid,
-			),
-			entity,
-		];
-		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+		const previousGuids = new Set(
+			spawnedEntities.map((entity) => entity.identity.guid),
+		);
+		const event = await entityHost.spawn(request);
+		await applyDynamicEntitySnapshotEvent(event);
+		const entity = spawnedEntities.find(
+			(current) =>
+				!previousGuids.has(current.identity.guid) &&
+				current.identity.wcid === request.wcid &&
+				current.placement.kind === "world",
+		);
+		if (!entity)
+			throw new Error("Explorer spawn snapshot omitted its new world entity.");
 		return entity;
 	}
 
@@ -739,7 +746,10 @@
 			const distance = Math.hypot(...offset);
 			if (!Number.isFinite(distance) || distance <= 0)
 				throw new Error("Each entity fleet offset must be finite and nonzero.");
-			const entity = await entityHost.spawn(
+			const previousGuids = new Set(
+				spawnedEntities.map((entity) => entity.identity.guid),
+			);
+			const event = await entityHost.spawn(
 				createExplorerSpawnRequest(
 					wcid,
 					placement,
@@ -748,18 +758,19 @@
 					physicalIntent,
 				),
 			);
+			await applyDynamicEntitySnapshotEvent(event);
+			const entity = spawnedEntities.find(
+				(current) =>
+					!previousGuids.has(current.identity.guid) &&
+					current.identity.wcid === wcid &&
+					current.placement.kind === "world",
+			);
+			if (!entity)
+				throw new Error(
+					"Explorer fleet snapshot omitted its new world entity.",
+				);
 			spawned.push(entity);
 		}
-		spawnedEntities = [
-			...spawnedEntities.filter(
-				(current) =>
-					!spawned.some(
-						(entity) => entity.identity.guid === current.identity.guid,
-					),
-			),
-			...spawned,
-		];
-		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
 		return spawned;
 	}
 
@@ -852,6 +863,23 @@
 		);
 	}
 
+	async function applyDynamicEntitySnapshotEvent(
+		event: DynamicEntityEvent,
+	): Promise<void> {
+		if (!runtime)
+			throw new Error("Dynamic-entity snapshot requires an active runtime.");
+		if (event.kind !== "snapshot")
+			throw new Error(
+				`Dynamic-entity lifecycle returned unexpected ${event.kind} event.`,
+			);
+		spawnedEntities = EXCLUDE_SPAWNED_ATTACHMENTS
+			? event.snapshot.entities.filter(
+					(entity) => entity.placement.kind === "world",
+				)
+			: event.snapshot.entities;
+		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+	}
+
 	async function despawnExplorerEntity(
 		guid: number,
 		generation: number,
@@ -860,12 +888,9 @@
 			throw new Error(
 				"Browser harness entity despawn requires an active runtime.",
 			);
-		await entityHost.despawn(guid, generation);
-		spawnedEntities = spawnedEntities.filter(
-			(entity) =>
-				entity.identity.guid !== guid || entity.generation !== generation,
+		await applyDynamicEntitySnapshotEvent(
+			await entityHost.despawn(guid, generation),
 		);
-		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
 	}
 
 	/** Retire every live harness-spawned generation, so teardown census has one exact call. */
@@ -874,11 +899,13 @@
 			throw new Error(
 				"Browser harness entity despawn requires an active runtime.",
 			);
-		const retiring = [...spawnedEntities];
+		const retiring = spawnedEntities.filter(
+			(entity) => entity.placement.kind === "world",
+		);
 		for (const entity of retiring)
-			await entityHost.despawn(entity.identity.guid, entity.generation);
-		spawnedEntities = [];
-		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+			await applyDynamicEntitySnapshotEvent(
+				await entityHost.despawn(entity.identity.guid, entity.generation),
+			);
 		return retiring.length;
 	}
 

@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
-use holtburger_common::Placement;
 use holtburger_content::{
     ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedPaletteComposite,
 };
@@ -117,7 +116,6 @@ impl ObjectResourceClosure {
                 appearance.parts.len()
             );
         }
-        let default_frames = select_setup_default_frames(&setup_model);
         let mut parts = Vec::with_capacity(appearance.parts.len());
         for part in &appearance.parts {
             let gfx_asset = runtime
@@ -134,7 +132,6 @@ impl ObjectResourceClosure {
                 "partIndex": part.part_index,
                 "geometryId": geometry_id,
                 "defaultScale": setup_model.default_scale.get(part.part_index).map(ac_vec3_json).unwrap_or_else(unit_vec3_json),
-                "defaultPlacement": default_frames.and_then(|frames| frames.get(part.part_index)).map(frame_json),
                 "materialIds": material_ids,
             }));
         }
@@ -155,6 +152,7 @@ impl ObjectResourceClosure {
             "parts": parts,
             "lights": setup_lights(&setup_model),
             "holdingLocations": setup_holding_locations(&setup_model)?,
+            "placementFrames": setup_placement_frames(&setup_model),
             "defaultAnimationId": setup_model.default_animation.map(dat_id),
             "defaultMotionTableId": setup_model.default_motion_table.map(dat_id),
             "defaultScriptId": setup_model.default_script.map(dat_id),
@@ -569,21 +567,20 @@ fn setup_holding_locations(setup_model: &holtburger_dat::file_type::SetupModel) 
         .map(Value::from)
 }
 
-fn select_setup_default_frames(
-    setup_model: &holtburger_dat::file_type::SetupModel,
-) -> Option<&[holtburger_dat::graphics::Frame]> {
-    setup_model
-        .placement_frames
-        .get(&Placement::Resting)
-        .or_else(|| setup_model.placement_frames.get(&Placement::Default))
-        .or_else(|| {
-            setup_model
-                .placement_frames
-                .iter()
-                .min_by_key(|(key, _)| **key)
-                .map(|(_, placement)| placement)
+/// Serialize every authored setup pose in stable enum order.
+fn setup_placement_frames(setup_model: &holtburger_dat::file_type::SetupModel) -> Value {
+    let mut placements = setup_model.placement_frames.iter().collect::<Vec<_>>();
+    placements.sort_by_key(|(placement, _)| **placement);
+    placements
+        .into_iter()
+        .map(|(placement, frame)| {
+            json!({
+                "placementId": *placement as u32,
+                "frames": frame.anim_frame.frames.iter().map(frame_json).collect::<Vec<_>>(),
+            })
         })
-        .map(|placement| placement.anim_frame.frames.as_slice())
+        .collect::<Vec<_>>()
+        .into()
 }
 
 /// Authored setup lights in setup-local space; consumers compose them with a placement frame.

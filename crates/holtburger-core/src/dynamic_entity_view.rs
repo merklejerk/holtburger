@@ -1,14 +1,14 @@
 //! Source-neutral frontend projection and dynamic-entity delivery values.
 
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Vector3};
+use holtburger_common::{Guid, ParentLocation, Placement, Vector3};
 use holtburger_world::{
-    ContactState, EffectiveEntityPhysicsState, EntityAppearance, PhysicalBodyParticipation,
-    RuntimeSpatialBodyView, SpatialSampleMode,
+    ContactState, EffectiveEntityPhysicsState, EntityAppearance, EntityPlacement,
+    PhysicalBodyParticipation, SpatialSampleMode,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{DynamicEntityContent, DynamicEntityProjectionInput};
+use crate::{DynamicEntityContent, DynamicEntityProjectionInput, DynamicEntityWorldProjection};
 
 /// One monotonic host instant used to align snapshot/event facts with frontend time.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -99,22 +99,38 @@ pub enum DynamicEntitySampleModeView {
     Suspended,
 }
 
-/// Canonical pose, kinematics, support, and sampling state owned by the solver scene.
+/// Serializable mutually exclusive world-motion or attachment placement.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DynamicEntityPlacementView {
-    /// Current accepted root pose; its cell ID is also the current residency.
-    pub pose: WorldPosition,
-    /// Current world-space linear velocity.
-    pub velocity: Vector3,
-    /// Current world-space linear acceleration.
-    pub acceleration: Vector3,
-    /// Current world-space angular velocity.
-    pub omega: Vector3,
-    /// Current solver/server support classification.
-    pub contact: DynamicEntityContactView,
-    /// Current sparse sampling behavior.
-    pub sample_mode: DynamicEntitySampleModeView,
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum DynamicEntityPlacementView {
+    /// Canonical pose, kinematics, support, and sampling state owned by the solver scene.
+    World {
+        /// Current accepted root pose; its cell ID is also the current residency.
+        pose: WorldPosition,
+        /// Current world-space linear velocity.
+        velocity: Vector3,
+        /// Current world-space linear acceleration.
+        acceleration: Vector3,
+        /// Current world-space angular velocity.
+        omega: Vector3,
+        /// Current solver/server support classification.
+        contact: DynamicEntityContactView,
+        /// Current sparse sampling behavior.
+        sample_mode: DynamicEntitySampleModeView,
+    },
+    /// Parent-owned transform plus the held item's own placement pose.
+    Attached {
+        /// Live parent entity identity.
+        parent: Guid,
+        /// Named holding location on the parent's setup.
+        parent_location: ParentLocation,
+        /// Placement-frame key applied to the child's setup.
+        placement: Placement,
+    },
 }
 
 /// Producer-neutral facts accepted by the pure view projector.
@@ -132,10 +148,8 @@ pub struct DynamicEntityViewSource {
     pub object_scale: f32,
     /// Complete semantic physics state and once-derived consequences.
     pub physics: EffectiveEntityPhysicsState,
-    /// Current canonical body facts.
-    pub body: RuntimeSpatialBodyView,
-    /// Current local physical participation.
-    pub participation: PhysicalBodyParticipation,
+    /// Current mutually exclusive solver state or parent-owned attachment.
+    pub placement: EntityPlacement<DynamicEntityWorldProjection>,
 }
 
 impl DynamicEntityViewSource {
@@ -152,8 +166,7 @@ impl DynamicEntityViewSource {
             appearance: input.appearance,
             object_scale: input.object_scale,
             physics: input.physics,
-            body: input.body,
-            participation: input.participation,
+            placement: input.placement,
         }
     }
 }
@@ -292,6 +305,25 @@ pub enum DynamicEntityEvent {
 /// Projects one semantic/body join without consulting either producer registry.
 pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEntityView {
     let presentation = source.physics.presentation;
+    let participation = match source.placement {
+        EntityPlacement::World(world) => world.participation,
+        EntityPlacement::Attached(_) => PhysicalBodyParticipation::PoseOnly,
+    };
+    let placement = match source.placement {
+        EntityPlacement::World(world) => DynamicEntityPlacementView::World {
+            pose: world.body.runtime_pose,
+            velocity: world.body.velocity,
+            acceleration: world.body.acceleration,
+            omega: world.body.omega,
+            contact: world.body.contact.into(),
+            sample_mode: world.body.sample_mode.into(),
+        },
+        EntityPlacement::Attached(attachment) => DynamicEntityPlacementView::Attached {
+            parent: attachment.parent,
+            parent_location: attachment.location,
+            placement: attachment.placement,
+        },
+    };
     DynamicEntityView {
         generation: source.generation,
         identity: source.identity,
@@ -302,7 +334,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
         },
         physics: DynamicEntityPhysicsView {
             semantic_mask: source.physics.semantic.bits(),
-            participation: source.participation.into(),
+            participation: participation.into(),
             no_draw: presentation.no_draw,
             hidden: presentation.hidden,
             cloaked: presentation.cloaked,
@@ -310,14 +342,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             default_animation: presentation.default_animation,
             default_script: presentation.default_script,
         },
-        placement: DynamicEntityPlacementView {
-            pose: source.body.runtime_pose,
-            velocity: source.body.velocity,
-            acceleration: source.body.acceleration,
-            omega: source.body.omega,
-            contact: source.body.contact.into(),
-            sample_mode: source.body.sample_mode.into(),
-        },
+        placement,
     }
 }
 

@@ -6,9 +6,13 @@ import {
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
 	type DynamicEntityView,
+	type DynamicEntityWorldPlacement,
 } from "./dynamic-entity-feed";
 
-function entity(guid: number, generation: number): DynamicEntityView {
+function entity(
+	guid: number,
+	generation: number,
+): DynamicEntityView & { placement: DynamicEntityWorldPlacement } {
 	return {
 		generation,
 		identity: { guid, wcid: 42, name: "Drudge" },
@@ -37,6 +41,7 @@ function entity(guid: number, generation: number): DynamicEntityView {
 			defaultScript: false,
 		},
 		placement: {
+			kind: "world",
 			pose: {
 				landblockId: 0xda550001,
 				coords: { x: 1, y: 2, z: 3 },
@@ -66,7 +71,7 @@ function upserted(value: DynamicEntityView): DynamicEntityEvent {
 }
 
 function advanced(
-	value: DynamicEntityView,
+	value: DynamicEntityView & { placement: DynamicEntityWorldPlacement },
 	hostSeconds: number,
 ): Extract<DynamicEntityEvent, { kind: "advanced" }> {
 	return {
@@ -93,7 +98,62 @@ function advanced(
 	};
 }
 
+function worldPlacement(value: DynamicEntityView): DynamicEntityWorldPlacement {
+	if (value.placement.kind !== "world")
+		throw new Error("test fixture unexpectedly became attached");
+	return value.placement;
+}
+
 describe("dynamic-entity view contract", () => {
+	it("decodes the attached arm and rejects mixed world-motion facts", () => {
+		const attached = {
+			...entity(2, 1),
+			placement: {
+				kind: "attached" as const,
+				parent: 1,
+				parentLocation: "right-hand" as const,
+				placement: "right-hand-combat" as const,
+			},
+		};
+		expect(decodeDynamicEntityView(attached).placement).toEqual(
+			attached.placement,
+		);
+		expect(() =>
+			decodeDynamicEntityView({
+				...attached,
+				placement: {
+					...attached.placement,
+					pose: entity(1, 1).placement.pose,
+				},
+			}),
+		).toThrow();
+	});
+
+	it("rejects path advances for an attached entity", () => {
+		const worldAdvance = advanced(entity(2, 1), 2);
+		const attached = {
+			...entity(2, 1),
+			placement: {
+				kind: "attached" as const,
+				parent: 1,
+				parentLocation: "right-hand" as const,
+				placement: "right-hand-combat" as const,
+			},
+		};
+		expect(() =>
+			decodeDynamicEntityEvent({
+				...worldAdvance,
+				batch: {
+					...worldAdvance.batch,
+					advances: worldAdvance.batch.advances.map((advance) => ({
+						...advance,
+						entity: attached,
+					})),
+				},
+			}),
+		).toThrow("advance targets attached GUID");
+	});
+
 	it("freezes the physics-only view shape crossing the Tauri boundary", () => {
 		// The milestone's scoped command surface cannot select authored root motion, so the
 		// focused feed carries no semantic motion object and no raw motion-table identity.
@@ -198,11 +258,11 @@ describe("DynamicEntityMirror", () => {
 		const current = entity(7, 2);
 		current.placement.pose.coords.x = 10;
 		expect(mirror.apply(advanced(current, 3))).toBe(true);
-		expect(mirror.entities()[0].placement.pose.coords.x).toBe(10);
+		expect(worldPlacement(mirror.entities()[0]!).pose.coords.x).toBe(10);
 
 		const late = entity(7, 2);
 		late.placement.pose.coords.x = 11;
 		expect(mirror.apply(advanced(late, 2.5))).toBe(false);
-		expect(mirror.entities()[0].placement.pose.coords.x).toBe(10);
+		expect(worldPlacement(mirror.entities()[0]!).pose.coords.x).toBe(10);
 	});
 });

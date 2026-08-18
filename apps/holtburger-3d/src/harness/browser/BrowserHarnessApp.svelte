@@ -267,6 +267,32 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => PortalExecutionProbeResult;
+		/** Sweep the camera past an audio emitter over discrete steps and record voice gains/pans. */
+		readonly probeAudioFlyby: (
+			rawLandblockId: string,
+			from: readonly [number, number, number],
+			to: readonly [number, number, number],
+			steps: number,
+			framesPerStep: number,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => Promise<{
+			readonly ambientRegion: unknown;
+			readonly ambientBakes: unknown;
+			readonly ambient: unknown;
+			readonly audio: unknown;
+			readonly steps: number;
+			readonly voices: readonly {
+				readonly samples: readonly {
+					readonly gain: number;
+					readonly pan: number;
+					readonly step: number;
+				}[];
+				readonly soundId: string;
+				readonly startedAtStep: number;
+				readonly stopped: boolean;
+			}[];
+		}>;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => BrowserHarnessState;
 	}

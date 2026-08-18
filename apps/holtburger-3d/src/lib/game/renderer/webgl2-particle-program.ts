@@ -224,19 +224,14 @@ uniform float uOpacityScale;
 out vec4 outColor;
 
 /**
- * Decode one palette index from the base texture.
+ * Decode one palette index from the base texture at an exact texel coordinate.
  *
- * Uses texelFetch rather than texture: indices must not be filtered, since interpolating two
- * palette indices produces a third unrelated colour. Particle textures are standalone rather than
- * atlas pages, so the sample coordinate needs no rect offset.
+ * Uses texelFetch rather than texture: indices must not be filtered directly, since interpolating
+ * two palette indices produces a third unrelated colour.
  */
-float paletteIndex() {
+float paletteIndexAt(ivec2 texel) {
 	ivec2 size = textureSize(uBase, 0);
-	ivec2 texel = clamp(
-		ivec2(vTextureCoordinate * vec2(size)),
-		ivec2(0),
-		size - ivec2(1)
-	);
+	texel = clamp(texel, ivec2(0), size - ivec2(1));
 	vec4 encoded = texelFetch(uBase, texel, 0) * 255.0;
 	return uMaterialKind == 3
 		? floor(encoded.r + 0.5) + floor(encoded.g + 0.5) * 256.0
@@ -256,6 +251,29 @@ vec4 paletteColor(float index) {
 	);
 }
 
+vec4 indexedColorAt(ivec2 texel) {
+	return paletteColor(paletteIndexAt(texel));
+}
+
+vec4 sampleIndexedPaletteLinear(vec2 uv) {
+	ivec2 sourceSize = textureSize(uBase, 0);
+	// Match normalized hardware bilinear sampling, whose texel centers lie at n + 0.5.
+	vec2 texelPosition = uv * vec2(sourceSize) - vec2(0.5);
+	ivec2 baseCoordinate = ivec2(floor(texelPosition));
+	vec2 blend = fract(texelPosition);
+	vec4 top = mix(
+		indexedColorAt(baseCoordinate),
+		indexedColorAt(baseCoordinate + ivec2(1, 0)),
+		blend.x
+	);
+	vec4 bottom = mix(
+		indexedColorAt(baseCoordinate + ivec2(0, 1)),
+		indexedColorAt(baseCoordinate + ivec2(1, 1)),
+		blend.x
+	);
+	return mix(top, bottom, blend.y);
+}
+
 vec4 sampleMaterial() {
 	if (uMaterialKind == 0) {
 		return uMaterialColor;
@@ -263,7 +281,7 @@ vec4 sampleMaterial() {
 	if (uMaterialKind == 1) {
 		return texture(uBase, vTextureCoordinate);
 	}
-	return paletteColor(paletteIndex());
+	return sampleIndexedPaletteLinear(vTextureCoordinate);
 }
 
 void main() {

@@ -2,11 +2,15 @@ import type { DatAssetId } from "../game-types";
 import type { ParticleDrawBatch } from "./particle-render-routing";
 import {
 	createWebGL2ParticleProgram,
+	PARTICLE_TEXTURE_UNITS,
 	type WebGL2ParticleProgram,
 } from "./webgl2-particle-program";
 import type { WebGL2PortalDeferredVisibilityUniforms } from "./portal-deferred-visibility-glsl";
 import { WebGL2ParticleInstanceBuffer } from "./webgl2-particle-instance-buffer";
 import { objectBlendPolicy } from "./object-rendering-policy";
+import { TextureWrapMode } from "../textures/types";
+import type { TextureFilteringPolicy } from "./texture-filtering-policy";
+import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
 
 /** One batch's drawable mesh, already resident on the GPU. */
 /** Neutral colour for a textured mesh, which never reads the solid-colour uniform. */
@@ -16,6 +20,8 @@ export interface ParticleDrawGeometry {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly indexCount: number;
 	readonly indexOffsetBytes: number;
+	/** Accessible mip levels of the base texture for sampler creation. */
+	readonly baseMipLevels: number;
 	/** Base texture and its palette, bound to the program's fixed sampler units. */
 	readonly baseTexture: WebGLTexture;
 	/** Authored colour of an untextured surface, or null when the mesh samples a texture. */
@@ -30,6 +36,7 @@ export interface ParticleDrawGeometry {
 	/** Orientation mode from the mesh's authored degrade band. */
 	readonly orientation: number;
 	readonly lockedAxis: readonly [number, number, number];
+	readonly wrap: TextureWrapMode;
 }
 
 export interface ParticleDrawContext {
@@ -39,6 +46,8 @@ export interface ParticleDrawContext {
 	readonly view: Float32Array;
 	readonly cameraPosition: readonly [number, number, number];
 	readonly clockSeconds: number;
+	readonly samplers: WebGL2TextureSamplerCatalog;
+	readonly textureFiltering: TextureFilteringPolicy;
 	/** Global opacity scale applied to all particles in this context, in [0, 1]. Defaults to 1. */
 	readonly opacityScale?: number;
 }
@@ -196,6 +205,13 @@ export class WebGL2ParticlePass {
 		gl.enable(gl.BLEND);
 		// Blend mode is selected per batch below. Enabling BLEND without a func inherits whatever
 		// the previous pass left bound, which renders particles opaque over their own backing.
+		// Unit 1 is always exact single-level clamp sampling for palette lookups across all batches.
+		context.samplers.bind(PARTICLE_TEXTURE_UNITS.palette, {
+			mipLevels: 1,
+			policy: context.textureFiltering,
+			samplingClass: "exact",
+			wrap: TextureWrapMode.Clamp,
+		});
 
 		let firstInstance = 0;
 		for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
@@ -266,6 +282,12 @@ export class WebGL2ParticlePass {
 			gl.uniform1f(program.uniforms.alphaTest, geometry.alphaTest);
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, geometry.baseTexture);
+			context.samplers.bind(PARTICLE_TEXTURE_UNITS.base, {
+				mipLevels: geometry.baseMipLevels,
+				policy: context.textureFiltering,
+				samplingClass: "filterable",
+				wrap: geometry.wrap,
+			});
 			// Unit 1 is bound unconditionally, falling back to the base texture for an unpaletted
 			// mesh. WebGL validates every *active* sampler against its bound texture at draw time,
 			// even when the shader branches away from it, so leaving unit 1 to whatever a previous

@@ -4,7 +4,7 @@ import type { DatAssetId } from "../game-types";
 import { createTexture2DUpload } from "../textures/texture-manager";
 import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
 import { sourceOpacity } from "./object-rendering-policy";
-import { TexturePixelFormat } from "../textures/types";
+import { TexturePixelFormat, TextureWrapMode } from "../textures/types";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import type {
@@ -128,12 +128,14 @@ export class ParticleMeshResidency {
 		// A mesh whose texture upload failed is not drawable; reporting null keeps it counted as an
 		// unresolved cohort rather than drawn untextured.
 		if (base === undefined) return null;
+		const baseBinding = this.#resources.getTexture2D(base);
 		const palette =
 			mesh.palette === null ? null : (this.#textures.get(mesh.palette) ?? null);
 		const geometry = this.#resources.getGeometry(mesh.geometry);
 		return {
 			alphaTest: mesh.alphaTest,
-			baseTexture: this.#resources.getTexture2D(base).texture,
+			baseMipLevels: baseBinding.mipLevels,
+			baseTexture: baseBinding.texture,
 			indexCount: mesh.indexCount,
 			indexOffsetBytes: mesh.indexOffsetBytes,
 			lockedAxis: mesh.lockedAxis,
@@ -145,6 +147,7 @@ export class ParticleMeshResidency {
 			paletteTexture:
 				palette === null ? null : this.#resources.getTexture2D(palette).texture,
 			vertexArray: geometry.vertexArray,
+			wrap: mesh.wrap,
 		};
 	}
 
@@ -226,6 +229,7 @@ export class ParticleMeshResidency {
 				orientation: particleOrientation(decoded.orientation),
 				palette: null,
 				rawSurfaceFlags: source.rawSurfaceFlags,
+				wrap: TextureWrapMode.Clamp,
 			};
 		}
 		if (base === null) {
@@ -253,6 +257,7 @@ export class ParticleMeshResidency {
 			orientation: particleOrientation(decoded.orientation),
 			palette: range.material.textures.palette,
 			rawSurfaceFlags: range.material.source.rawSurfaceFlags,
+			wrap: range.material.sampler.wrap,
 		};
 	}
 }
@@ -288,4 +293,5 @@ interface ResidentParticleMesh {
 	readonly orientation: number;
 	readonly lockedAxis: readonly [number, number, number];
 	readonly rawSurfaceFlags: number;
+	readonly wrap: TextureWrapMode;
 }

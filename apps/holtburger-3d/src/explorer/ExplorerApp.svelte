@@ -852,7 +852,12 @@
 					texturePixelSource,
 					TauriAnimationAssetSource.build(),
 					TauriPhysicsScriptSource.build(),
-					new WebAudioDevice(new AudioContext(), TauriAudioSource.build()),
+					new WebAudioDevice(
+						new AudioContext(),
+						TauriAudioSource.build(),
+						FRONTEND_TUNING.audio.placementSmoothingSeconds,
+						FRONTEND_TUNING.audio.loudnessCurveExponent,
+					),
 					TauriParticleEmitterSource.build(),
 					TauriSoundTableSource.build(),
 					TauriParticleMeshSource.build(),

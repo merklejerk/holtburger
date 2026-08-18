@@ -11,19 +11,39 @@ export const FRONTEND_TUNING = {
 	},
 	audio: {
 		/**
-		 * Simultaneous authored voices before the oldest is stolen.
+		 * Simultaneous authored voices before one is stolen.
 		 *
-		 * Retail runs 16 with priority stealing, but every hook sound carries priority 0 and loses
-		 * every contest, so this is a plain budget rather than a priority queue.
+		 * RETAIL DIVERGENCE: double retail's DirectSound-era 16 — at 16 a dense ambience pose
+		 * saturated and audibly cut 27 voices in ~14 s. Still bounded, because an unbounded voice
+		 * pool turns any trigger bug into a runaway mixer instead of a diagnosable steal counter.
+		 * The steal policy (quietest, not oldest) lives with its mechanism in
+		 * `AudioSystem.#claimVoiceSlot`.
 		 */
-		maximumSimultaneousVoices: 16,
+		maximumSimultaneousVoices: 32,
+		/**
+		 * `setTargetAtTime` time constant for live gain and pan updates, in seconds.
+		 *
+		 * Too small clicks at frame boundaries; too large smears a fast pan sweep. A listening
+		 * judgement rather than a derived value — revisit by ear, not by math.
+		 */
+		placementSmoothingSeconds: 0.02,
+		/**
+		 * Exponent shaping each voice's linear gain before it reaches the device: `gain ** exponent`.
+		 *
+		 * RETAIL DIVERGENCE: retail plays the attenuation curve's linear gain as-is. Gains live in
+		 * (0, 1], so an exponent below 1 lifts quiet-to-mid sounds while leaving silence and full
+		 * volume untouched (at 0.75: 0.02 → 0.053, 0.1 → 0.18, 0.5 → 0.6, 1 → 1) — a loudness
+		 * contour for distant ambience, not a mix change content can observe structurally. The
+		 * audibility floor still judges unshaped retail gains, so *which* sounds play is unchanged;
+		 * only how loud the quiet ones are. `1` restores retail exactly. Tune by ear.
+		 */
+		loudnessCurveExponent: 0.75,
 		/**
 		 * How late a warmed sound may still be played, in seconds.
 		 *
 		 * The device refuses a sound whose buffer has not decoded, so the first trigger of any sound
-		 * warms it and replays once it lands. Beyond this the moment has passed and playing it would
-		 * place a sound where the listener no longer is, since retail fixes gain and pan at trigger
-		 * time and never updates them.
+		 * warms it and replays once it lands. The bound is purely temporal: a footstep arriving this
+		 * late belongs to a moment that has passed, however correctly it would now be placed.
 		 */
 		maximumWarmupReplaySeconds: 0.25,
 	},

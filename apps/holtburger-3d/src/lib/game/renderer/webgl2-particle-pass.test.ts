@@ -9,6 +9,9 @@ import {
 } from "./webgl2-particle-pass";
 import { createParticleFragmentShader } from "./webgl2-particle-program";
 
+import { TextureWrapMode } from "../textures/types";
+import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
+
 const MESH = "0x01000ff4" as DatAssetId;
 
 function batch(
@@ -37,6 +40,7 @@ function batch(
 
 const GEOMETRY: ParticleDrawGeometry = {
 	alphaTest: 0,
+	baseMipLevels: 2,
 	baseTexture: {} as WebGLTexture,
 	indexCount: 6,
 	indexOffsetBytes: 0,
@@ -49,12 +53,14 @@ const GEOMETRY: ParticleDrawGeometry = {
 	palettedClipMap: false,
 	rawSurfaceFlags: 0,
 	vertexArray: {} as WebGLVertexArrayObject,
+	wrap: TextureWrapMode.Clamp,
 };
 
 function fakeGl() {
 	const draws: number[] = [];
 	const blendFuncs: Array<[number, number]> = [];
 	const intUniforms: Array<[string, number]> = [];
+	const samplerBinds: Array<{ readonly unit: number; readonly request: unknown }> = [];
 	const bufferSubData = vi.fn();
 	const gl = {
 		ARRAY_BUFFER: 1,
@@ -126,14 +132,28 @@ function fakeGl() {
 		vertexAttribDivisor: () => undefined,
 		vertexAttribPointer: () => undefined,
 	} as unknown as WebGL2RenderingContext;
-	return { calls: { blendFuncs, bufferSubData }, draws, gl, intUniforms };
+	const samplers = {
+		bind: (unit: number, request: unknown) => {
+			samplerBinds.push({ request, unit });
+		},
+	} as unknown as WebGL2TextureSamplerCatalog;
+	return { calls: { blendFuncs, bufferSubData }, draws, gl, intUniforms, samplerBinds, samplers };
 }
 
-const context = (gl: WebGL2RenderingContext) => ({
+const context = (
+	gl: WebGL2RenderingContext,
+	samplers?: WebGL2TextureSamplerCatalog,
+) => ({
 	cameraPosition: renderVector3([0, 0, 0]),
 	clockSeconds: 1,
 	gl,
 	projection: new Float32Array(16),
+	samplers:
+		samplers ??
+		({
+			bind: () => undefined,
+		} as unknown as WebGL2TextureSamplerCatalog),
+	textureFiltering: "linear" as const,
 	view: new Float32Array(16),
 });
 
@@ -233,5 +253,33 @@ describe("WebGL2ParticlePass", () => {
 		expect(createProgram).not.toHaveBeenCalled();
 		expect(createBuffer).not.toHaveBeenCalled();
 		expect(pass.getDiagnostics().drawnBatchCount).toBe(0);
+	});
+
+	it("binds samplers with the configured policy for base and palette units", () => {
+		const { gl, samplerBinds, samplers } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+
+		pass.draw(context(gl, samplers), [batch(2, 3)]);
+
+		expect(samplerBinds).toEqual([
+			{
+				request: {
+					mipLevels: 1,
+					policy: "linear",
+					samplingClass: "exact",
+					wrap: TextureWrapMode.Clamp,
+				},
+				unit: 1,
+			},
+			{
+				request: {
+					mipLevels: 2,
+					policy: "linear",
+					samplingClass: "filterable",
+					wrap: TextureWrapMode.Clamp,
+				},
+				unit: 0,
+			},
+		]);
 	});
 });

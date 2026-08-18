@@ -753,8 +753,14 @@ fn texture_override_for_material(
         return None;
     };
 
+    // Last match wins. Layered clothing appends one change list per garment in paint order, and a
+    // lower layer commonly restores the body texture with an identity change that a higher layer
+    // then covers; taking the first match would let that identity shadow the garment above it and
+    // render bare skin under clothing. Retail applies the changes sequentially, so the final write
+    // is what shows.
     texture_changes
         .iter()
+        .rev()
         .find(|change| change.old_texture == orig_texture_id)
         .map(|change| change.new_texture)
 }
@@ -844,4 +850,60 @@ fn build_setup_appearance_key(setup_model_id: u32, obj_desc: Option<&ObjDesc>) -
     format!(
         "setup:0x{setup_model_id:08X}|{palette}|sub=[{sub_palettes}]|tex=[{texture_changes}]|anim=[{anim_changes}]"
     )
+}
+
+#[cfg(test)]
+mod texture_override_tests {
+    use super::*;
+
+    fn change(old_texture: u32, new_texture: u32) -> TextureMapChange {
+        TextureMapChange {
+            part_index: 0,
+            old_texture,
+            new_texture,
+        }
+    }
+
+    fn textured(orig_texture_id: u32) -> ParsedMaterialDependency {
+        ParsedMaterialDependency {
+            surface_id: 0x0800_0001,
+            c_surface: CSurface {
+                surface_type: SurfaceType::BASE1_IMAGE,
+                source: CSurfaceSource::Texture {
+                    orig_texture_id,
+                    orig_palette_id: 0,
+                },
+                translucency: 0.0,
+                luminosity: 0.0,
+                diffuse: 0.0,
+            },
+            surface_texture: None,
+            palette: None,
+        }
+    }
+
+    /// Layered clothing appends one change list per garment in paint order. A lower layer often
+    /// restores the body texture with an identity change that a higher layer then covers, so the
+    /// final write must win; taking the first match rendered bare skin under clothing.
+    #[test]
+    fn the_last_matching_texture_change_wins() {
+        let changes = [
+            change(0x0500_0BB0, 0x0500_0BB0),
+            change(0x0500_0BB0, 0x0500_025D),
+        ];
+
+        let selected = texture_override_for_material(&textured(0x0500_0BB0), &changes);
+
+        assert_eq!(selected, Some(0x0500_025D));
+    }
+
+    #[test]
+    fn an_unmatched_texture_change_leaves_the_material_alone() {
+        let changes = [change(0x0500_0001, 0x0500_0002)];
+
+        assert_eq!(
+            texture_override_for_material(&textured(0x0500_0BB0), &changes),
+            None
+        );
+    }
 }

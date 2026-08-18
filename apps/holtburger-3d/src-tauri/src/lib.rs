@@ -47,6 +47,7 @@ pub mod portal_visibility;
 mod sky_source;
 mod sound_table_source;
 mod source_projection;
+pub mod weenie_appearance;
 
 use animation_source::serialize_animation_record_binary;
 use audio_source::serialize_audio_record_binary;

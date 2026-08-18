@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Appearance Plan
 
-Status: Draft
+Status: Complete 2026-08-17
 Created: 2026-08-17
 Parent: follow-on to `holtburger-3d-explorer-weenie-dynamic-runtime-plan.md` (complete 2026-08-17)
 
@@ -467,20 +467,32 @@ single projection.
 
 ## Definition of Done
 
-- [ ] Catalog v2 exports every listed appearance fact losslessly; survey reproduces the recorded
+- [x] Catalog v2 exports every listed appearance fact losslessly; survey reproduces the recorded
       distributions; v1 is rejected distinctly.
-- [ ] One pure, deterministic, tested app-local resolver fills unauthored features from CharGen
+- [x] One pure, deterministic, tested app-local resolver fills unauthored features from CharGen
       while explicit facts win per property, in ACE's composition order; the only shared-crate
       additions are the two `holtburger-dat` format helpers.
-- [ ] Wielded clothing/armor resolves through the landed CLO core and merges in ACE's layer
+- [x] Wielded clothing/armor resolves through the landed CLO core and merges in ACE's layer
       order; setup-gated items skip silently, broken references fail loudly.
-- [ ] Explorer spawns prove it in the browser: distinct, stable, fully dressed Collectors,
+- [x] Explorer spawns prove it in the browser: distinct, stable, fully dressed Collectors,
       authored WCID 189, unchanged non-humanoids.
-- [ ] Both ACE divergences (GUID-seeded roll; explicit PaletteBase wins) are recorded in code and
+- [x] Both ACE divergences (GUID-seeded roll; explicit PaletteBase wins) are recorded in code and
       docs.
-- [ ] No frontend, feed, protocol, or client-path change; no equipment scaffolding.
-- [ ] All gates pass.
+- [x] No feed, protocol, or client-path contract change; no equipment scaffolding. The frontend
+      material pipeline was changed under an explicit mid-plan scope extension, recorded in Phase 4.
+- [x] All gates pass.
 
 ## Open Questions
 
-None blocking. The seed source (spawn GUID) and both divergences were user-approved 2026-08-17.
+None remain. The seed source (spawn GUID) and both ACE divergences were user-approved 2026-08-17,
+as was the mid-plan extension into the material pipeline once integration proved the existing
+renderer did not consume a complete ObjDesc.
+
+Carried debt, each with a named later owner:
+
+- Held weapons and shields await the parenting/animated-attachment mechanism.
+- The `ObjDescEvent` (0xF625) live-update handler remains client-path debt.
+- Unmatched texture substitutions are dropped silently; correct for authored content, but a
+  genuine content fault is invisible.
+- `TopLayerPriority` is unmodelled, collapsing ACE's three layer buckets to two.
+- The harness population lattice is AC-axis rather than camera-relative.

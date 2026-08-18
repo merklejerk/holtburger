@@ -169,6 +169,7 @@ function parseArgs(args) {
 		disabledLayersBeforeCapture: [],
 		isolateAuthoredDynamics: false,
 		excludeAuthoredDynamics: false,
+		excludeSpawnedAttachments: false,
 		spawnWcid: null,
 		entityShowcaseCount: 0,
 		entityPairWcid: null,
@@ -302,6 +303,9 @@ function parseArgs(args) {
 				break;
 			case "--exclude-authored-dynamics":
 				parsed.excludeAuthoredDynamics = true;
+				break;
+			case "--exclude-spawned-attachments":
+				parsed.excludeSpawnedAttachments = true;
 				break;
 			case "--spawn-wcid":
 				parsed.spawnWcid = requireValue(args, ++index, arg);
@@ -750,6 +754,9 @@ function parseArgs(args) {
 	if (parsed.spawnSimulated && parsed.spawnWcid === null) {
 		throw new Error("--spawn-simulated requires --spawn-wcid.");
 	}
+	if (parsed.excludeSpawnedAttachments && parsed.spawnWcid === null) {
+		throw new Error("--exclude-spawned-attachments requires --spawn-wcid.");
+	}
 	// The pair and population scenarios spawn simulated fleets of their own, so they satisfy the
 	// same requirement without --spawn-simulated.
 	const simulatedScenario =
@@ -817,6 +824,8 @@ Options:
                          Keep terrain and promoted outdoor dynamics but strip outdoor statics.
   --exclude-authored-dynamics
                          Keep outdoor statics but strip promoted dynamics.
+  --exclude-spawned-attachments
+                         Harness-only A/B: realize a spawned wearer without its attached children.
   --spawn-wcid <id>     Spawn one decimal or 0x WCID through the real catalog host, capture it,
                          then exact-despawn it and assert shared-runtime resource cleanup.
   --entity-pair-wcid <id>
@@ -1434,14 +1443,20 @@ function assertSpawnedEntityLifecycle(result) {
 	if (!initialDynamics || !spawnedDynamics || !despawnedDynamics) {
 		throw new Error("Spawned-entity scenario omitted dynamic runtime state.");
 	}
-	if (lifecycle.spawnedState.spawnedEntities.length !== 1) {
+	const worldEntities = lifecycle.spawnedState.spawnedEntities.filter(
+		(entity) => entity.placement.kind === "world",
+	);
+	if (worldEntities.length !== 1) {
 		throw new Error(
-			"Spawned-entity scenario did not retain exactly one current entity.",
+			"Spawned-entity scenario did not retain exactly one world-placed wearer.",
 		);
 	}
-	if (spawnedDynamics.entityCount !== initialDynamics.entityCount + 1) {
+	if (
+		spawnedDynamics.entityCount !==
+		initialDynamics.entityCount + lifecycle.spawnedState.spawnedEntities.length
+	) {
 		throw new Error(
-			"Catalog spawn did not add exactly one shared-runtime dynamic entity.",
+			"Catalog spawn did not realize its complete wearer/child entity group.",
 		);
 	}
 	if (
@@ -1546,7 +1561,10 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		options.captureFrame === undefined
 			? ""
 			: `&captureFrame=${encodeURIComponent(options.captureFrame)}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}`;
+	const attachmentExclusion = options.excludeSpawnedAttachments
+		? "&excludeSpawnedAttachments=true"
+		: "";
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,

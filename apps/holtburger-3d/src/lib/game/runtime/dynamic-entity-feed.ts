@@ -51,6 +51,87 @@ const appearanceSchema = z.object({
 	),
 });
 
+const parentLocationSchema = z.enum([
+	"none",
+	"right-hand",
+	"left-hand",
+	"shield",
+	"belt",
+	"quiver",
+	"heraldry",
+	"mouth",
+	"left-weapon",
+	"left-unarmed",
+]);
+
+const placementSchema = z.enum([
+	"default",
+	"right-hand-combat",
+	"right-hand-non-combat",
+	"left-hand",
+	"belt",
+	"quiver",
+	"shield",
+	"left-weapon",
+	"left-unarmed",
+	"unknown0-a",
+	"unknown0-f",
+	"unknown14",
+	"unknown1-e",
+	"unknown20",
+	"special-crossbow-bolt",
+	"missile-flight",
+	"unknown3-c",
+	"unknown63",
+	"resting",
+	"other",
+	"hook",
+	"unknown68",
+	"unknown69",
+	"unknown6-a",
+	"unknown78",
+	"random1",
+	"random2",
+	"random3",
+	"random4",
+	"random5",
+	"random6",
+	"random7",
+	"random8",
+	"random9",
+	"random10",
+	"unknown84",
+	"unknown-f0",
+	"unknown3-f2",
+]);
+
+const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("world"),
+			pose: worldPositionSchema,
+			velocity: vector3Schema,
+			acceleration: vector3Schema,
+			omega: vector3Schema,
+			contact: z.enum(["unknown", "airborne", "sliding", "grounded"]),
+			sampleMode: z.enum([
+				"authoritative-only",
+				"simulating-motion-state",
+				"simulating-velocity",
+				"suspended",
+			]),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("attached"),
+			parent: guid,
+			parentLocation: parentLocationSchema,
+			placement: placementSchema,
+		})
+		.strict(),
+]);
+
 const dynamicEntityViewSchema = z.object({
 	generation: nonNegativeInteger,
 	identity: z.object({
@@ -77,19 +158,7 @@ const dynamicEntityViewSchema = z.object({
 		defaultAnimation: z.boolean(),
 		defaultScript: z.boolean(),
 	}),
-	placement: z.object({
-		pose: worldPositionSchema,
-		velocity: vector3Schema,
-		acceleration: vector3Schema,
-		omega: vector3Schema,
-		contact: z.enum(["unknown", "airborne", "sliding", "grounded"]),
-		sampleMode: z.enum([
-			"authoritative-only",
-			"simulating-motion-state",
-			"simulating-velocity",
-			"suspended",
-		]),
-	}),
+	placement: dynamicEntityPlacementSchema,
 });
 
 const hostTimeSchema = z.object({ seconds: finiteNumber.nonnegative() });
@@ -145,6 +214,14 @@ const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type DynamicEntityView = z.infer<typeof dynamicEntityViewSchema>;
+export type DynamicEntityWorldPlacement = Extract<
+	DynamicEntityView["placement"],
+	{ kind: "world" }
+>;
+export type DynamicEntityAttachedPlacement = Extract<
+	DynamicEntityView["placement"],
+	{ kind: "attached" }
+>;
 export type DynamicEntityAdvance = z.infer<typeof dynamicEntityAdvanceSchema>;
 export type DynamicEntityAdvanceBatch = z.infer<
 	typeof dynamicEntityAdvanceBatchSchema
@@ -156,6 +233,11 @@ export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 	const event = dynamicEntityEventSchema.parse(value);
 	if (event.kind === "advanced") {
 		for (const advance of event.batch.advances) {
+			if (advance.entity.placement.kind !== "world") {
+				throw new Error(
+					`Dynamic-entity advance targets attached GUID 0x${advance.entity.identity.guid.toString(16).padStart(8, "0")}.`,
+				);
+			}
 			if (advance.kind === "integrated") {
 				validateHostPlacedPath(advance.path, event.batch.durationMs);
 			} else {

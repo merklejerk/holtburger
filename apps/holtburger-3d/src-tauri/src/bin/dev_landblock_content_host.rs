@@ -94,13 +94,6 @@ struct ExplorerEntityTickRequest {
     duration_milliseconds: f64,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExplorerEntityMutationReceipt {
-    guid: holtburger_common::Guid,
-    generation: u64,
-}
-
 struct DevHostState {
     content: ContentAssetRuntime,
     entities: Arc<ExplorerEntityDriver>,
@@ -244,19 +237,16 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
         ("POST", "/explorer-entity-spawn") => {
             let request = serde_json::from_slice::<ExplorerEntitySpawnRequest>(&request.body)?;
             let result = state.delivery.with_ordered_publication(|| {
-                let outcome = state.entities.spawn_by_wcid(request)?;
-                state
-                    .delivery
-                    .entity(outcome.instance.definition.identity.guid)
-                    .map_err(Into::into)
+                state.entities.spawn_by_wcid(request)?;
+                state.delivery.snapshot_event().map_err(Into::into)
             });
             match result {
-                Ok(entity) => {
+                Ok(event) => {
                     write_response(
                         &mut stream,
                         200,
                         "application/json",
-                        &serde_json::to_vec(&entity)?,
+                        &serde_json::to_vec(&event)?,
                     )
                     .await
                 }
@@ -266,19 +256,16 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
         ("POST", "/explorer-entity-despawn") => {
             let request = serde_json::from_slice::<ExplorerEntityDespawnRequest>(&request.body)?;
             let result = state.delivery.with_ordered_publication(|| {
-                let outcome = state.entities.despawn(request.guid, request.generation)?;
-                Ok::<_, anyhow::Error>(ExplorerEntityMutationReceipt {
-                    guid: request.guid,
-                    generation: outcome.instance.generation,
-                })
+                state.entities.despawn(request.guid, request.generation)?;
+                state.delivery.snapshot_event().map_err(Into::into)
             });
             match result {
-                Ok(receipt) => {
+                Ok(event) => {
                     write_response(
                         &mut stream,
                         200,
                         "application/json",
-                        &serde_json::to_vec(&receipt)?,
+                        &serde_json::to_vec(&event)?,
                     )
                     .await
                 }

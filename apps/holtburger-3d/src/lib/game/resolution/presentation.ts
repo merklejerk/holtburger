@@ -153,6 +153,12 @@ export interface ResolvedAttachPoint {
 	readonly offsetTransform: Mat4;
 }
 
+/** Pose retail requests for an object at rest. */
+export const RESTING_PLACEMENT_KEY = 0x65;
+
+/** Fallback key retail placement-frame selection uses when a setup lacks the requested pose. */
+export const FALLBACK_PLACEMENT_KEY = 0;
+
 /** Named setup placement containing a local transform for every part. */
 export interface ResolvedPlacementPose {
 	readonly placementId: number;

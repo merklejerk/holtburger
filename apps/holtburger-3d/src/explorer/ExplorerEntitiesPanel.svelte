@@ -4,6 +4,7 @@
 		EXPLORER_SPAWN_DISTANCE,
 		type ExplorerCatalogCapability,
 	} from "./explorer-entity-commands";
+	import { buildExplorerEntityTree } from "./explorer-entity-tree";
 
 	interface Props {
 		readonly runtimeReady: boolean;
@@ -31,6 +32,7 @@
 		entities.find((entity) => entity.identity.guid === selectedGuid) ?? null,
 	);
 	const catalogReady = $derived(catalog?.status === "available");
+	const tree = $derived(buildExplorerEntityTree(entities));
 
 	function errorMessage(error: unknown): string {
 		return error instanceof Error ? error.message : String(error);
@@ -73,6 +75,20 @@
 		return `0x${guid.toString(16).padStart(8, "0")}`;
 	}
 </script>
+
+{#snippet entityRow(entity: DynamicEntityView, detail: string)}
+	<button
+		type="button"
+		class="explorer-selectable-row"
+		class:active={entity.identity.guid === selectedGuid}
+		onclick={() => (selectedGuid = entity.identity.guid)}
+	>
+		<strong>{entity.identity.name}</strong>
+		<span>{formatGuid(entity.identity.guid)} · WCID {entity.identity.wcid}</span
+		>
+		<span>{detail}</span>
+	</button>
+{/snippet}
 
 <div class="explorer-entities-panel">
 	{#if catalog === null}
@@ -142,35 +158,57 @@
 		<p class="explorer-entities-note">No Explorer-spawned entities.</p>
 	{:else}
 		<ul class="explorer-selectable-list explorer-entities-list">
-			{#each entities as entity (entity.identity.guid)}
-				<li class="explorer-entities-row">
-					<button
-						type="button"
-						class="explorer-selectable-row"
-						class:active={entity.identity.guid === selectedGuid}
-						onclick={() => (selectedGuid = entity.identity.guid)}
-					>
-						<strong>{entity.identity.name}</strong>
-						<span
-							>{formatGuid(entity.identity.guid)} · WCID {entity.identity
-								.wcid}</span
+			{#each tree.roots as root (root.entity.identity.guid)}
+				<li class="explorer-entities-node">
+					<div class="explorer-entities-row">
+						{@render entityRow(
+							root.entity,
+							`Live gen ${root.entity.generation} · ${root.entity.physics.participation}`,
+						)}
+						<!-- Despawn is a wearer-level operation: the host retires a wearer and its
+						complete child set in one generation, and refuses an independent child. -->
+						<button
+							type="button"
+							class="emoji-button explorer-entities-despawn"
+							aria-label={`Despawn ${root.entity.identity.name}`}
+							title="Despawn this entity and its held items"
+							disabled={pending}
+							onclick={() => submitDespawn(root.entity)}
 						>
-						<span
-							>Live gen {entity.generation} · {entity.physics
-								.participation}</span
-						>
-					</button>
-					<button
-						type="button"
-						class="explorer-action"
-						disabled={pending}
-						onclick={() => submitDespawn(entity)}
-					>
-						Despawn
-					</button>
+							🗑️
+						</button>
+					</div>
+					{#if root.children.length > 0}
+						<ul class="explorer-entities-children">
+							{#each root.children as child (child.identity.guid)}
+								<li class="explorer-entities-child">
+									{@render entityRow(
+										child,
+										`${child.placement.parentLocation} · ${child.placement.placement}`,
+									)}
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				</li>
 			{/each}
 		</ul>
+		{#if tree.orphans.length > 0}
+			<p class="explorer-entities-note invalid" role="alert">
+				{tree.orphans.length} held item(s) reference a wearer absent from this feed
+				generation, which the host publishes atomically.
+			</p>
+			<ul class="explorer-selectable-list explorer-entities-list">
+				{#each tree.orphans as orphan (orphan.identity.guid)}
+					<li class="explorer-entities-node explorer-entities-orphan">
+						{@render entityRow(
+							orphan,
+							`Missing wearer ${formatGuid(orphan.placement.parent)}`,
+						)}
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	{/if}
 
 	{#if selected !== null}
@@ -183,14 +221,28 @@
 				<span class="ac-param-key">Physical</span>
 				<code>{selected.physics.participation}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Contact</span>
-				<code>{selected.placement.contact}</code>
-			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Sampling</span>
-				<code>{selected.placement.sampleMode}</code>
-			</div>
+			{#if selected.placement.kind === "world"}
+				<div class="ac-param-row">
+					<span class="ac-param-key">Contact</span>
+					<code>{selected.placement.contact}</code>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Sampling</span>
+					<code>{selected.placement.sampleMode}</code>
+				</div>
+			{:else}
+				<div class="ac-param-row">
+					<span class="ac-param-key">Attached to</span>
+					<code>{formatGuid(selected.placement.parent)}</code>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Holding pose</span>
+					<code
+						>{selected.placement.parentLocation} · {selected.placement
+							.placement}</code
+					>
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -199,6 +251,10 @@
 	.explorer-entities-panel {
 		display: grid;
 		gap: 12px;
+		/* One gap governs sibling spacing and the connector bridge; they must not drift apart. */
+		--entities-tree-gap: 4px;
+		/* Breathing room between the row action and the row edge, reused as its text-side gutter. */
+		--entities-action-inset: 9px;
 	}
 
 	.explorer-entities-note {
@@ -254,19 +310,93 @@
 		list-style: none;
 	}
 
+	/*
+	 * The action sits inside the row's own box rather than beside it, so a wearer reads as one
+	 * object carrying one control. It overlays the selectable button because the two cannot nest.
+	 */
 	.explorer-entities-row {
+		position: relative;
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 6px;
-		align-items: center;
+		grid-template-columns: minmax(0, 1fr);
 	}
 
+	.explorer-entities-despawn {
+		position: absolute;
+		top: var(--entities-action-inset);
+		right: var(--entities-action-inset);
+	}
+
+	/* Clear the action's footprint: its 32px width plus one inset on each side of it. */
 	.explorer-entities-row .explorer-selectable-row {
+		padding-right: calc(32px + var(--entities-action-inset) * 2);
+	}
+
+	/* Every row kind — wearer, held child, and orphan — descends from a node. */
+	.explorer-entities-node .explorer-selectable-row {
 		gap: 2px;
 	}
 
-	.explorer-entities-row .explorer-selectable-row span {
+	.explorer-entities-node .explorer-selectable-row span {
 		color: var(--ac-ink-muted);
 		font-size: 0.75rem;
+	}
+
+	.explorer-entities-node {
+		display: grid;
+		/* minmax(0, …) so a long name shrinks the row instead of overflowing the 420px dock. */
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--entities-tree-gap);
+	}
+
+	.explorer-entities-children {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--entities-tree-gap);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	/*
+	 * File-tree chrome drawn per child rather than on the list, so the trunk can stop at the last
+	 * elbow instead of running past it. Offsets are proportional because rows are two or three
+	 * lines tall depending on the entity, and the trunk is lifted by exactly the sibling gap so it
+	 * reads continuous between rows. The rule colour matches the selectable-row border.
+	 */
+	.explorer-entities-child {
+		position: relative;
+		/* A button shrink-to-fits unless it is a stretched grid item, so the row must be a grid
+		   for a held item to span the same width as its wearer. */
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		padding-left: 15px;
+	}
+
+	.explorer-entities-child::before {
+		content: "";
+		position: absolute;
+		top: calc(-1 * var(--entities-tree-gap));
+		bottom: 0;
+		left: 4px;
+		border-left: 1px solid rgb(162 117 33 / 45%);
+	}
+
+	.explorer-entities-child:last-child::before {
+		bottom: auto;
+		height: calc(50% + var(--entities-tree-gap));
+	}
+
+	.explorer-entities-child::after {
+		content: "";
+		position: absolute;
+		top: 50%;
+		left: 4px;
+		width: 7px;
+		border-top: 1px solid rgb(162 117 33 / 45%);
+	}
+
+	/* An orphan hangs from nothing, so it carries a broken-state border rather than a connector. */
+	.explorer-entities-orphan .explorer-selectable-row {
+		border-color: #ff9c8f;
 	}
 </style>

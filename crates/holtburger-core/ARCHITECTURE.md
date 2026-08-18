@@ -206,9 +206,9 @@ producer and everything downstream. Shared code begins only after a producer reg
 assembled its facts, and it never claims producer authority.
 
 - `DynamicEntityDefinition` is the validated definition: identity, immutable content identities,
-  lossless appearance, explicit initial pose and kinematics, validated scalars, and the complete
-  effective `EffectiveEntityPhysicsState`. It holds no catalog path, SQL row, frontend node, asset
-  payload, or producer handle.
+  lossless appearance, mutually exclusive world-initial or attached placement, validated scalars,
+  and the complete effective `EffectiveEntityPhysicsState`. It holds no catalog path, SQL row,
+  frontend node, asset payload, or producer handle.
 - Content preparation (`prepare_dynamic_entity_setup`, `prepare_dynamic_entity_physics`) resolves
   DAT/setup facts and rejects unsupported combinations with typed reasons — including the measured
   moving-physics-BSP boundary — before any scene mutation.
@@ -216,11 +216,12 @@ assembled its facts, and it never claims producer authority.
   `remove_dynamic_entity_body`, `apply_dynamic_entity_physics_transition`) apply the shared
   transition decision to a caller-supplied `SpatialScene`. The client uses `WorldState`'s scene and
   the Explorer uses the host simulation's; the operations are identical and hold no state.
-- `project_dynamic_entity_view` is a pure join of registry semantics with the current committed
-  body view. It is the only producer of `DynamicEntityView`, so the client adapter
+- `project_dynamic_entity_view` is a pure projection of registry semantics, joining a body view
+  only for the world arm and forwarding bodyless attachment facts directly. It is the only
+  producer of `DynamicEntityView`, so the client adapter
   (`client/dynamic_entity_view.rs`) and the Explorer host emit identical shapes. The view carries
-  no semantic motion object and no motion-table identity; solver-owned placement is the entity
-  root's only authority.
+  no semantic motion object and no motion-table identity; world roots are solver-owned while
+  attached roots inherit transform authority from their parent.
 
 `material_appearance_input` is the single projection from the shared `EntityAppearance` into the
 content resolver's ObjDesc shape. The Explorer's visual source consumes it directly; there is no

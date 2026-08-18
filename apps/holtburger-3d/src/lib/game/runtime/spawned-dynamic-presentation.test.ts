@@ -112,6 +112,7 @@ function fixtureEntity(): DynamicEntityView {
 			semanticMask: 0,
 		},
 		placement: {
+			kind: "world",
 			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
 			omega: { x: 0, y: 0, z: 0 },

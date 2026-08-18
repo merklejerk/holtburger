@@ -1,6 +1,6 @@
 //! Explorer-local dynamic-entity identity, semantic lifetime, and ordered body orchestration.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use holtburger_common::Guid;
 use holtburger_core::{
     DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
-    DynamicEntityLaunchPlan, DynamicEntityProjectionInput,
+    DynamicEntityInitialState, DynamicEntityLaunchPlan, DynamicEntityProjectionInput,
     dynamic_entity_projection_input_from_body,
 };
 use holtburger_world::{
@@ -18,7 +18,7 @@ use holtburger_world::{
 };
 use holtburger_world::{
     EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
-    EntityPhysicsTransitionDecision, decide_entity_physics_state_transition,
+    EntityPhysicsTransitionDecision, EntityPlacement, decide_entity_physics_state_transition,
     resolve_effective_entity_physics_state,
 };
 
@@ -50,6 +50,23 @@ pub enum ExplorerEntityRuntimeError {
     MissingPreparedPhysics,
     /// Pose-only intent incorrectly carried a physical definition.
     UnexpectedPreparedPhysics,
+    /// A world-motion operation targeted an attached child at the untyped GUID boundary.
+    AttachedOperation {
+        guid: Guid,
+        parent: Guid,
+        /// Noun phrase naming the refused operation, e.g. `"independent despawn"`.
+        operation: &'static str,
+    },
+    /// A published child's own attachment named a wearer other than the group it arrived in.
+    ChildWearerMismatch {
+        guid: Guid,
+        /// Wearer whose group the child was published under.
+        expected_parent: Guid,
+        /// Wearer the child's own attachment names.
+        declared_parent: Guid,
+    },
+    /// A published child carried world placement where the group requires an attachment.
+    ChildNotAttached { guid: Guid, parent: Guid },
 }
 
 impl Display for ExplorerEntityRuntimeError {
@@ -91,6 +108,29 @@ impl Display for ExplorerEntityRuntimeError {
             Self::UnexpectedPreparedPhysics => {
                 formatter.write_str("pose-only Explorer entity cannot install prepared physics")
             }
+            Self::AttachedOperation {
+                guid,
+                parent,
+                operation,
+            } => write!(
+                formatter,
+                "{operation} is not available for Explorer entity 0x{:08X}; it is attached to wearer 0x{:08X}",
+                guid.0, parent.0
+            ),
+            Self::ChildWearerMismatch {
+                guid,
+                expected_parent,
+                declared_parent,
+            } => write!(
+                formatter,
+                "Explorer child 0x{:08X} declares wearer 0x{:08X}, but was published under wearer 0x{:08X}",
+                guid.0, declared_parent.0, expected_parent.0
+            ),
+            Self::ChildNotAttached { guid, parent } => write!(
+                formatter,
+                "Explorer child 0x{:08X} published under wearer 0x{:08X} carries world placement instead of an attachment",
+                guid.0, parent.0
+            ),
         }
     }
 }
@@ -128,6 +168,8 @@ pub struct ExplorerEntitySpawnOutcome {
     pub instance: ExplorerEntityInstance,
     /// Body facts read after canonical scene installation committed.
     pub body: DynamicEntityBodyCommitOutcome,
+    /// Attached child generations published in the same registry transaction.
+    pub children: Vec<ExplorerEntityInstance>,
 }
 
 /// Old/new facts returned after a same-GUID complete replacement commits.
@@ -139,6 +181,10 @@ pub struct ExplorerEntityReplacementOutcome {
     pub installed: ExplorerEntityInstance,
     /// Canonical old/new body replacement facts.
     pub body: DynamicEntityBodyReplacementOutcome,
+    /// Attached child generations retired with the old wearer.
+    pub removed_children: Vec<ExplorerEntityInstance>,
+    /// Attached child generations published with the successor wearer.
+    pub installed_children: Vec<ExplorerEntityInstance>,
 }
 
 /// Semantic/body facts returned after one exact generation is despawned.
@@ -148,6 +194,8 @@ pub struct ExplorerEntityDespawnOutcome {
     pub instance: ExplorerEntityInstance,
     /// Canonical body facts retired from the host scene.
     pub body: DynamicEntityBodyRemovalOutcome,
+    /// Attached child generations retired in the same registry transaction.
+    pub children: Vec<ExplorerEntityInstance>,
 }
 
 /// Current semantic/solver join built without copying physical state into the registry.
@@ -391,19 +439,50 @@ impl ExplorerEntityRuntime {
         physical_intent: EntityPhysicalIntent,
         physical: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<ExplorerEntitySpawnOutcome, ExplorerEntityRuntimeError> {
+        self.spawn_prepared_group(definition, physical_intent, physical, Vec::new())
+    }
+
+    /// Installs one world-placed wearer and publishes its bodyless attached children atomically.
+    pub fn spawn_prepared_group(
+        &self,
+        definition: DynamicEntityDefinition,
+        physical_intent: EntityPhysicalIntent,
+        physical: Option<DynamicPhysicalBodyDefinition>,
+        children: Vec<DynamicEntityDefinition>,
+    ) -> Result<ExplorerEntitySpawnOutcome, ExplorerEntityRuntimeError> {
         validate_prepared_intent(physical_intent, physical.is_some())?;
         let guid = definition.identity.guid;
+        validate_attached_children(guid, &children)?;
         let mut registry = self
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
         registry.require_absent(guid)?;
+        for child in &children {
+            registry.require_absent(child.identity.guid)?;
+        }
         let generation = registry.reserve_generation()?;
+        let child_generations = children
+            .iter()
+            .map(|_| registry.reserve_generation())
+            .collect::<Result<Vec<_>, _>>()?;
+        let initial = require_world_initial(&definition, "spawn")?;
         let body = self
             .simulation
-            .install_dynamic_entity(&definition, physical)?;
+            .install_dynamic_entity(&definition, initial, physical)?;
         let instance = registry.publish(definition, physical_intent, generation);
-        Ok(ExplorerEntitySpawnOutcome { instance, body })
+        let children = children
+            .into_iter()
+            .zip(child_generations)
+            .map(|(child, generation)| {
+                registry.publish(child, EntityPhysicalIntent::PoseOnly, generation)
+            })
+            .collect();
+        Ok(ExplorerEntitySpawnOutcome {
+            instance,
+            body,
+            children,
+        })
     }
 
     /// Replaces one exact live generation and rejects late work before touching its body.
@@ -414,22 +493,63 @@ impl ExplorerEntityRuntime {
         physical_intent: EntityPhysicalIntent,
         physical: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<ExplorerEntityReplacementOutcome, ExplorerEntityRuntimeError> {
+        self.replace_prepared_group(
+            definition,
+            expected_generation,
+            physical_intent,
+            physical,
+            Vec::new(),
+        )
+    }
+
+    /// Replaces one wearer and cleanly cuts over its complete attached-child set.
+    pub fn replace_prepared_group(
+        &self,
+        definition: DynamicEntityDefinition,
+        expected_generation: u64,
+        physical_intent: EntityPhysicalIntent,
+        physical: Option<DynamicPhysicalBodyDefinition>,
+        children: Vec<DynamicEntityDefinition>,
+    ) -> Result<ExplorerEntityReplacementOutcome, ExplorerEntityRuntimeError> {
         validate_prepared_intent(physical_intent, physical.is_some())?;
         let guid = definition.identity.guid;
+        validate_attached_children(guid, &children)?;
         let mut registry = self
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
         registry.require_generation(guid, expected_generation)?;
+        for child in &children {
+            registry.require_absent(child.identity.guid)?;
+        }
+        let removed_child_guids = child_guids(&registry, guid);
         let generation = registry.reserve_generation()?;
+        let child_generations = children
+            .iter()
+            .map(|_| registry.reserve_generation())
+            .collect::<Result<Vec<_>, _>>()?;
+        let initial = require_world_initial(&definition, "replacement")?;
         let body = self
             .simulation
-            .replace_dynamic_entity(&definition, physical)?;
+            .replace_dynamic_entity(&definition, initial, physical)?;
         let (removed, installed) = registry.replace(definition, physical_intent, generation);
+        let removed_children = removed_child_guids
+            .into_iter()
+            .map(|child| registry.remove(child))
+            .collect();
+        let installed_children = children
+            .into_iter()
+            .zip(child_generations)
+            .map(|(child, generation)| {
+                registry.publish(child, EntityPhysicalIntent::PoseOnly, generation)
+            })
+            .collect();
         Ok(ExplorerEntityReplacementOutcome {
             removed,
             installed,
             body,
+            removed_children,
+            installed_children,
         })
     }
 
@@ -443,12 +563,22 @@ impl ExplorerEntityRuntime {
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
-        registry.require_generation(guid, expected_generation)?;
+        let current = registry.require_generation(guid, expected_generation)?;
+        require_world_initial(&current.definition, "independent despawn")?;
+        let children = child_guids(&registry, guid);
         let body = self
             .simulation
             .remove_dynamic_entity(SpatialBodyId::Entity(guid))?;
+        let children = children
+            .into_iter()
+            .map(|child| registry.remove(child))
+            .collect();
         let instance = registry.remove(guid);
-        Ok(ExplorerEntityDespawnOutcome { instance, body })
+        Ok(ExplorerEntityDespawnOutcome {
+            instance,
+            body,
+            children,
+        })
     }
 
     /// Applies a complete effective-state replacement without replacing semantic identity.
@@ -471,6 +601,7 @@ impl ExplorerEntityRuntime {
             next,
             next_intent,
             replacement.is_some(),
+            "physics-state replacement",
         )?;
         validate_transition_replacement(decision.action, replacement.is_some())?;
         let outcome = self.simulation.apply_dynamic_entity_physics(
@@ -503,7 +634,8 @@ impl ExplorerEntityRuntime {
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
-        registry.require_generation(guid, expected_generation)?;
+        let instance = registry.require_generation(guid, expected_generation)?;
+        require_world_initial(&instance.definition, "launch")?;
         let body = self.simulation.apply_dynamic_entity_kinematics(
             SpatialBodyId::Entity(guid),
             launch.kinematics,
@@ -533,6 +665,7 @@ impl ExplorerEntityRuntime {
             .lock()
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
+        require_world_initial(&instance.definition, "relocation")?;
         let relocation =
             self.simulation
                 .relocate_dynamic_entity(SpatialBodyId::Entity(guid), pose, now)?;
@@ -556,7 +689,14 @@ impl ExplorerEntityRuntime {
             .lock()
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
-        transition_decision(&self.simulation, instance, next, next_intent, true)
+        transition_decision(
+            &self.simulation,
+            instance,
+            next,
+            next_intent,
+            true,
+            "physics-state planning",
+        )
     }
 
     /// Returns one exact semantic generation without joining or copying solver state.
@@ -580,9 +720,9 @@ impl ExplorerEntityRuntime {
             .expect("Explorer entity registry lock poisoned");
         let body_ids = registry
             .entities
-            .keys()
-            .copied()
-            .map(SpatialBodyId::Entity)
+            .values()
+            .filter(|instance| instance.definition.placement.world().is_some())
+            .map(|instance| SpatialBodyId::Entity(instance.definition.identity.guid))
             .collect::<Vec<_>>();
         self.simulation.remove_dynamic_entities(&body_ids)?;
         Ok(registry.reset())
@@ -699,6 +839,68 @@ fn physical_tick_changed(tick: &HostPhysicalBodyTick) -> bool {
             .any(|leg| leg.end() != tick.result.motion.path.initial())
 }
 
+fn child_guids(registry: &ExplorerEntityRegistry, parent: Guid) -> Vec<Guid> {
+    registry
+        .entities
+        .values()
+        .filter_map(|instance| {
+            instance
+                .definition
+                .placement
+                .attachment()
+                .filter(|attachment| attachment.parent == parent)
+                .map(|_| instance.definition.identity.guid)
+        })
+        .collect()
+}
+
+fn validate_attached_children(
+    parent: Guid,
+    children: &[DynamicEntityDefinition],
+) -> Result<(), ExplorerEntityRuntimeError> {
+    let mut identities = BTreeSet::new();
+    for child in children {
+        if !identities.insert(child.identity.guid) {
+            return Err(ExplorerEntityRuntimeError::AlreadyRegistered {
+                guid: child.identity.guid,
+            });
+        }
+        match child.placement.attachment().copied() {
+            Some(attachment) if attachment.parent == parent => {}
+            Some(attachment) => {
+                return Err(ExplorerEntityRuntimeError::ChildWearerMismatch {
+                    guid: child.identity.guid,
+                    expected_parent: parent,
+                    declared_parent: attachment.parent,
+                });
+            }
+            None => {
+                return Err(ExplorerEntityRuntimeError::ChildNotAttached {
+                    guid: child.identity.guid,
+                    parent,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn require_world_initial(
+    definition: &DynamicEntityDefinition,
+    operation: &'static str,
+) -> Result<DynamicEntityInitialState, ExplorerEntityRuntimeError> {
+    match definition.placement {
+        EntityPlacement::World(initial) => Ok(initial),
+        EntityPlacement::Attached(attachment) => {
+            Err(ExplorerEntityRuntimeError::AttachedOperation {
+                guid: definition.identity.guid,
+                parent: attachment.parent,
+                operation,
+            })
+        }
+    }
+}
+
 fn validate_prepared_intent(
     intent: EntityPhysicalIntent,
     has_physical: bool,
@@ -720,10 +922,21 @@ fn transition_decision(
     next: EffectiveEntityPhysicsState,
     next_intent: EntityPhysicalIntent,
     prepared_physics_available: bool,
+    operation: &'static str,
 ) -> Result<EntityPhysicsTransitionDecision, ExplorerEntityRuntimeError> {
     let projection = simulation.project_dynamic_entity(&instance.definition)?;
+    let world = match projection.placement {
+        EntityPlacement::World(world) => world,
+        EntityPlacement::Attached(attachment) => {
+            return Err(ExplorerEntityRuntimeError::AttachedOperation {
+                guid: instance.definition.identity.guid,
+                parent: attachment.parent,
+                operation,
+            });
+        }
+    };
     let solver_participation_enabled = matches!(
-        projection.participation,
+        world.participation,
         holtburger_world::PhysicalBodyParticipation::Physical
     );
     Ok(decide_entity_physics_state_transition(
@@ -761,7 +974,7 @@ mod tests {
     use anyhow::Result;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PhysicsState, WeenieType};
-    use holtburger_common::{Quaternion, Sphere, Vector3};
+    use holtburger_common::{ParentLocation, Placement, Quaternion, Sphere, Vector3};
     use holtburger_content::{
         ColliderScale, CollisionBall, CollisionShape, LandblockCollisionAsset,
     };
@@ -774,7 +987,7 @@ mod tests {
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
         EntityPhysicsScheduling, PhysicalBodyDefinition, PhysicalBodyParticipation,
         PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
-        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment,
         PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
     };
     use std::time::Instant;
@@ -808,7 +1021,7 @@ mod tests {
                 physics_effect_table_did: None,
             },
             appearance: EntityAppearance::default(),
-            initial: DynamicEntityInitialState {
+            placement: EntityPlacement::World(DynamicEntityInitialState {
                 pose: WorldPosition {
                     landblock_id: Guid(0xda55_0001),
                     coords: Vector3::new(x, 0.0, 0.0),
@@ -818,7 +1031,7 @@ mod tests {
                 acceleration: Vector3::zero(),
                 omega: Vector3::zero(),
                 created_at: Instant::now(),
-            },
+            }),
             object_scale: 1.0,
             friction: None,
             elasticity: None,
@@ -827,6 +1040,18 @@ mod tests {
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         })
         .unwrap()
+    }
+
+    /// Child definition whose transform is wholly owned by `parent`; it intentionally has no
+    /// world-motion state or host body to accidentally keep alive.
+    fn attached_definition(guid: Guid, wcid: u32, parent: Guid) -> DynamicEntityDefinition {
+        let mut child = definition(guid, wcid, 0.0);
+        child.placement = EntityPlacement::Attached(PhysicsAttachment {
+            parent,
+            location: ParentLocation::RightHand,
+            placement: Placement::RightHandCombat,
+        });
+        child
     }
 
     fn physical() -> DynamicPhysicalBodyDefinition {
@@ -1039,7 +1264,7 @@ mod tests {
         let mover_guid = runtime.reserve_guid().unwrap();
         let target_guid = runtime.reserve_guid().unwrap();
         let mut mover_definition = definition(mover_guid, 1499, 0.0);
-        mover_definition.initial.velocity = Vector3::new(10.0, 0.0, 0.0);
+        mover_definition.placement.world_mut().unwrap().velocity = Vector3::new(10.0, 0.0, 0.0);
         mover_definition.physics = resolve_effective_entity_physics_state(
             PhysicsState::GRAVITY
                 | PhysicsState::MISSILE
@@ -1145,7 +1370,11 @@ mod tests {
         let guid = runtime.reserve_guid().unwrap();
         let definition = definition(guid, 7, 0.0);
         simulation
-            .install_dynamic_entity(&definition, None)
+            .install_dynamic_entity(
+                &definition,
+                require_world_initial(&definition, "test install").unwrap(),
+                None,
+            )
             .unwrap();
 
         assert_eq!(
@@ -1194,6 +1423,9 @@ mod tests {
                 .project(guid)
                 .unwrap()
                 .input
+                .placement
+                .world()
+                .unwrap()
                 .body
                 .runtime_pose
                 .coords
@@ -1259,6 +1491,133 @@ mod tests {
             )
             .unwrap();
         assert!(after_reset.instance.generation > second.instance.generation);
+    }
+
+    /// Both malformed-child-set clauses are reachable and name every wearer involved, so a
+    /// miswired producer learns which group it published under, not only what the child claims.
+    #[test]
+    fn a_malformed_child_set_is_refused_before_any_body_is_installed() {
+        let (_simulation, runtime) = runtime(0xf000_0090, 0xf000_0095);
+        let wearer_guid = runtime.reserve_guid().unwrap();
+        let other_wearer_guid = runtime.reserve_guid().unwrap();
+        let child_guid = runtime.reserve_guid().unwrap();
+
+        assert_eq!(
+            runtime
+                .spawn_prepared_group(
+                    definition(wearer_guid, 10, 0.0),
+                    EntityPhysicalIntent::PoseOnly,
+                    None,
+                    vec![attached_definition(child_guid, 20, other_wearer_guid)],
+                )
+                .unwrap_err(),
+            ExplorerEntityRuntimeError::ChildWearerMismatch {
+                guid: child_guid,
+                expected_parent: wearer_guid,
+                declared_parent: other_wearer_guid,
+            }
+        );
+        assert_eq!(
+            runtime
+                .spawn_prepared_group(
+                    definition(wearer_guid, 10, 0.0),
+                    EntityPhysicalIntent::PoseOnly,
+                    None,
+                    vec![definition(child_guid, 20, 0.0)],
+                )
+                .unwrap_err(),
+            ExplorerEntityRuntimeError::ChildNotAttached {
+                guid: child_guid,
+                parent: wearer_guid,
+            }
+        );
+        // A refused group leaves no wearer, no child, and no host body behind.
+        assert!(runtime.snapshot().unwrap().is_empty());
+    }
+
+    #[test]
+    fn attached_children_cut_over_with_their_wearer_and_reject_independent_despawn() {
+        let (_simulation, runtime) = runtime(0xf000_0050, 0xf000_0055);
+        let wearer_guid = runtime.reserve_guid().unwrap();
+        let first_child_guid = runtime.reserve_guid().unwrap();
+        let first = runtime
+            .spawn_prepared_group(
+                definition(wearer_guid, 10, 0.0),
+                EntityPhysicalIntent::PoseOnly,
+                None,
+                vec![attached_definition(first_child_guid, 20, wearer_guid)],
+            )
+            .unwrap();
+
+        assert_eq!(first.children.len(), 1);
+        let independent_error = runtime
+            .despawn(first_child_guid, first.children[0].generation)
+            .unwrap_err();
+        assert_eq!(
+            independent_error,
+            ExplorerEntityRuntimeError::AttachedOperation {
+                guid: first_child_guid,
+                parent: wearer_guid,
+                operation: "independent despawn",
+            }
+        );
+        assert_eq!(
+            runtime
+                .plan_physics_state(
+                    first_child_guid,
+                    first.children[0].generation,
+                    resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
+                    EntityPhysicalIntent::PoseOnly,
+                )
+                .unwrap_err(),
+            ExplorerEntityRuntimeError::AttachedOperation {
+                guid: first_child_guid,
+                parent: wearer_guid,
+                operation: "physics-state planning",
+            }
+        );
+
+        let second_child_guid = runtime.reserve_guid().unwrap();
+        let replacement = runtime
+            .replace_prepared_group(
+                definition(wearer_guid, 11, 1.0),
+                first.instance.generation,
+                EntityPhysicalIntent::PoseOnly,
+                None,
+                vec![attached_definition(second_child_guid, 21, wearer_guid)],
+            )
+            .unwrap();
+        assert_eq!(replacement.removed_children, first.children);
+        assert_eq!(replacement.installed_children.len(), 1);
+        assert_eq!(
+            runtime
+                .snapshot()
+                .unwrap()
+                .into_iter()
+                .map(|projection| projection.input.identity.guid)
+                .collect::<Vec<_>>(),
+            vec![wearer_guid, second_child_guid]
+        );
+
+        let removed = runtime
+            .despawn(wearer_guid, replacement.installed.generation)
+            .unwrap();
+        assert_eq!(removed.children, replacement.installed_children);
+        assert!(runtime.snapshot().unwrap().is_empty());
+
+        let reset_wearer_guid = runtime.reserve_guid().unwrap();
+        let reset_child_guid = runtime.reserve_guid().unwrap();
+        runtime
+            .spawn_prepared_group(
+                definition(reset_wearer_guid, 12, 0.0),
+                EntityPhysicalIntent::PoseOnly,
+                None,
+                vec![attached_definition(reset_child_guid, 22, reset_wearer_guid)],
+            )
+            .unwrap();
+        let reset = runtime.reset().unwrap();
+        assert_eq!(reset.len(), 2);
+        assert!(runtime.snapshot().unwrap().is_empty());
     }
 
     /// Both producer compositions must derive the same operation from one pair of masks. This

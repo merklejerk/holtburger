@@ -719,6 +719,51 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		).toBe(0);
 		await runtime.destroy();
 	});
+
+	it("defers child-first attachment and tears children down before their parent", async () => {
+		const baseVisual = spawnedVisual();
+		const holdingOffset = Mat4.identity();
+		holdingOffset.m41 = 2;
+		const visual: DecodedStaticPresentation = {
+			...baseVisual,
+			presentation: {
+				...baseVisual.presentation,
+				holdingLocations: new Map([
+					[
+						"right-hand",
+						{
+							location: "right-hand",
+							offsetTransform: holdingOffset,
+							partIndex: 0,
+						},
+					],
+				]),
+			},
+		};
+		const runtime = await buildSpawnRuntime({ load: async () => visual });
+		const parent = spawnedEntity(20, 1);
+		const child = attachedEntity(21, 1, 20);
+
+		await runtime.reconcileSpawnedDynamicEntities([child]);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(0);
+		await runtime.reconcileSpawnedDynamicEntities([child, parent]);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(2);
+		await runtime.reconcileSpawnedDynamicEntities([]);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(0);
+
+		await runtime.reconcileSpawnedDynamicEntities([parent]);
+		await runtime.reconcileSpawnedDynamicEntities([parent, child]);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(2);
+		await runtime.destroy();
+	});
 });
 
 async function buildSpawnRuntime(
@@ -765,6 +810,7 @@ function spawnedEntity(
 			...physics,
 		},
 		placement: {
+			kind: "world",
 			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
 			omega: { x: 0, y: 0, z: 0 },
@@ -789,6 +835,22 @@ function spawnedEntity(
 				soundTableDid: null,
 			},
 			objectScale: 1,
+		},
+	};
+}
+
+function attachedEntity(
+	guid: number,
+	generation: number,
+	parent: number,
+): DynamicEntityView {
+	return {
+		...spawnedEntity(guid, generation),
+		placement: {
+			kind: "attached",
+			parent,
+			parentLocation: "right-hand",
+			placement: "right-hand-combat",
 		},
 	};
 }

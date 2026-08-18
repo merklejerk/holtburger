@@ -171,6 +171,7 @@ import { adaptAuthoredDynamicPresentation } from "../resolution/authored-dynamic
 import {
 	adaptSpawnedDynamicPresentation,
 	spawnedDynamicPlacement,
+	spawnedDynamicPlacementKey,
 } from "./spawned-dynamic-presentation";
 import type {
 	DynamicEntityAdvanceBatch,
@@ -1150,24 +1151,41 @@ export class GameRuntime {
 				);
 			requested.set(guid, entity);
 		}
-		for (const guid of [...this.#spawnedDesiredEntities.keys()]) {
-			if (!requested.has(guid)) this.#removeSpawnedDynamicEntity(guid);
-		}
-		const preparations: Promise<void>[] = [];
+		const stale = new Set(
+			[...this.#spawnedDesiredEntities.keys()].filter(
+				(guid) => !requested.has(guid),
+			),
+		);
+		for (const guid of stale) this.#removeSpawnedDynamicTree(guid, stale);
+		const worldRequests: Array<{
+			entity: DynamicEntityView;
+			visualKey: string;
+			visual: Promise<DecodedStaticPresentation>;
+		}> = [];
+		const attachedRequests: typeof worldRequests = [];
 		for (const entity of requested.values()) {
 			const guid = entity.identity.guid;
 			const visualKey = dynamicVisualKey(entity);
 			this.#spawnedDesiredEntities.set(guid, entity);
 			const visual = this.#retainSpawnedVisual(guid, visualKey, entity);
-			const preparation = this.#upsertSpawnedDynamicEntity(
-				entity,
-				visualKey,
-				visual,
-			);
-			this.#trackRealizationContinuation(preparation);
-			preparations.push(preparation);
+			if (entity.placement.kind === "world")
+				worldRequests.push({ entity, visualKey, visual });
+			else attachedRequests.push({ entity, visualKey, visual });
 		}
-		const outcomes = await Promise.allSettled(preparations);
+		const prepare = (request: (typeof worldRequests)[number]) => {
+			const continuation = this.#upsertSpawnedDynamicEntity(
+				request.entity,
+				request.visualKey,
+				request.visual,
+			);
+			this.#trackRealizationContinuation(continuation);
+			return continuation;
+		};
+		const worldOutcomes = await Promise.allSettled(worldRequests.map(prepare));
+		const outcomes = [
+			...worldOutcomes,
+			...(await Promise.allSettled(attachedRequests.map(prepare))),
+		];
 		const failures = outcomes.flatMap((outcome) =>
 			outcome.status === "rejected" ? [outcome.reason] : [],
 		);
@@ -1233,9 +1251,11 @@ export class GameRuntime {
 			this.#spawnedDesiredEntities.get(guid)?.generation !== entity.generation
 		)
 			return;
+		const stagingPlacement = this.#spawnedStagingPlacement(entity);
+		if (stagingPlacement === null) return;
 		const ownerId = spawnedDynamicOwnerId(guid);
 		const activation = await this.#prepareDynamicOwner(ownerId, [
-			adaptSpawnedDynamicPresentation(entity, resolved),
+			adaptSpawnedDynamicPresentation(entity, resolved, stagingPlacement),
 		]);
 		if (
 			this.#spawnedDesiredEntities.get(guid)?.generation !== entity.generation
@@ -1257,6 +1277,26 @@ export class GameRuntime {
 			ownerId,
 			visualKey,
 		});
+		if (entity.placement.kind === "attached") {
+			const parent = this.#spawnedPresentations.get(entity.placement.parent);
+			if (!parent) {
+				throw new Error(
+					`Attached dynamic entity ${formatDynamicGuid(guid)} lost parent ${formatDynamicGuid(entity.placement.parent)} during synchronous activation.`,
+				);
+			}
+			try {
+				this.#dynamics.attachEntity(
+					nodeId,
+					parent.nodeId,
+					entity.placement.parentLocation,
+					spawnedDynamicPlacementKey(entity.placement.placement),
+				);
+			} catch (cause) {
+				this.#retireDynamicOwner(ownerId);
+				this.#spawnedPresentations.delete(guid);
+				throw cause;
+			}
+		}
 		const latestDesired = this.#spawnedDesiredEntities.get(guid);
 		if (latestDesired?.generation !== entity.generation) {
 			throw new Error(
@@ -1270,8 +1310,19 @@ export class GameRuntime {
 		nodeId: SceneNodeId,
 		entity: DynamicEntityView,
 	): void {
-		this.#dynamics.updatePlacement(nodeId, spawnedDynamicPlacement(entity));
+		if (entity.placement.kind === "world") {
+			this.#dynamics.updatePlacement(nodeId, spawnedDynamicPlacement(entity));
+		}
 		this.#applySpawnedPresentationState(nodeId, entity);
+	}
+
+	/** Resolve the temporary world placement needed only while an attached visual is staged. */
+	#spawnedStagingPlacement(entity: DynamicEntityView): ScenePlacement | null {
+		if (entity.placement.kind === "world")
+			return spawnedDynamicPlacement(entity);
+		const parent = this.#spawnedPresentations.get(entity.placement.parent);
+		if (!parent) return null;
+		return this.#dynamics.resolvedRootPlacement(parent.nodeId);
 	}
 
 	#applySpawnedPresentationState(
@@ -1332,6 +1383,21 @@ export class GameRuntime {
 			this.#retireDynamicOwner(installed.ownerId);
 			this.#spawnedPresentations.delete(guid);
 		}
+	}
+
+	/** Remove attached descendants before their parent scene tree. */
+	#removeSpawnedDynamicTree(guid: number, stale: ReadonlySet<number>): void {
+		for (const [childGuid, child] of this.#spawnedDesiredEntities) {
+			if (
+				stale.has(childGuid) &&
+				child.placement.kind === "attached" &&
+				child.placement.parent === guid
+			) {
+				this.#removeSpawnedDynamicTree(childGuid, stale);
+			}
+		}
+		if (this.#spawnedDesiredEntities.has(guid))
+			this.#removeSpawnedDynamicEntity(guid);
 	}
 
 	/** Replace frontend-owned static content interest without moving the camera. */
@@ -1788,8 +1854,8 @@ export class GameRuntime {
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
-		for (const guid of [...this.#spawnedDesiredEntities.keys()])
-			this.#removeSpawnedDynamicEntity(guid);
+		const spawned = new Set(this.#spawnedDesiredEntities.keys());
+		for (const guid of spawned) this.#removeSpawnedDynamicTree(guid, spawned);
 		this.#spawnedVisuals.clear();
 		this.#spawnedVisualKeys.clear();
 		this.#destroyed = true;

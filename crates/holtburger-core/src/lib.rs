@@ -40,11 +40,11 @@ pub use dynamic_entity::{
     DynamicEntityDefinition, DynamicEntityDefinitionError, DynamicEntityDefinitionInput,
     DynamicEntityIdentity, DynamicEntityInitialState, DynamicEntityLaunchError,
     DynamicEntityLaunchPlan, DynamicEntityPhysicalPreparationError, DynamicEntityProjectionInput,
-    DynamicEntitySetupPreparation, apply_dynamic_entity_physics_transition,
-    dynamic_entity_projection_input, dynamic_entity_projection_input_from_body,
-    install_dynamic_entity_body, material_appearance_input, prepare_dynamic_entity_physics,
-    prepare_dynamic_entity_setup, remove_dynamic_entity_body, replace_dynamic_entity_body,
-    resolve_dynamic_entity_launch,
+    DynamicEntitySetupPreparation, DynamicEntityWorldProjection,
+    apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
+    dynamic_entity_projection_input_from_body, install_dynamic_entity_body,
+    material_appearance_input, prepare_dynamic_entity_physics, prepare_dynamic_entity_setup,
+    remove_dynamic_entity_body, replace_dynamic_entity_body, resolve_dynamic_entity_launch,
 };
 pub use dynamic_entity_view::{
     DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityContactView, DynamicEntityEvent,

@@ -73,6 +73,7 @@ function entity(guid: number) {
 			defaultScript: false,
 		},
 		placement: {
+			kind: "world" as const,
 			pose: {
 				landblockId: 0xda550001,
 				coords: { x: 1, y: 2, z: 3 },

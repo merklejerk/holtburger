@@ -27,6 +27,54 @@ pub struct PhysicsAttachment {
     pub placement: Placement,
 }
 
+/// One entity's mutually exclusive world-owned or parent-owned placement.
+///
+/// `W` is the complete motion contract at the layer using this type: creation uses initial motion
+/// facts, the authoritative runtime uses its body view, and a frontend feed uses its serializable
+/// projection. Keeping `W` inside the world arm prevents an attached entity from also carrying a
+/// pose, velocity, contact, or sampling mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EntityPlacement<W> {
+    /// The entity owns its world pose and every layer-specific motion fact in `W`.
+    World(W),
+    /// The parent entity's part hierarchy owns this entity's world transform.
+    Attached(PhysicsAttachment),
+}
+
+impl<W> EntityPlacement<W> {
+    /// Narrow to the world-motion arm without inventing a fallback for an attached entity.
+    pub const fn world(&self) -> Option<&W> {
+        match self {
+            Self::World(world) => Some(world),
+            Self::Attached(_) => None,
+        }
+    }
+
+    /// Mutably narrow to the world-motion arm without weakening the placement invariant.
+    pub const fn world_mut(&mut self) -> Option<&mut W> {
+        match self {
+            Self::World(world) => Some(world),
+            Self::Attached(_) => None,
+        }
+    }
+
+    /// Narrow to the attachment arm without retaining impossible world-motion facts.
+    pub const fn attachment(&self) -> Option<&PhysicsAttachment> {
+        match self {
+            Self::World(_) => None,
+            Self::Attached(attachment) => Some(attachment),
+        }
+    }
+
+    /// Transform only the world arm while preserving an attachment unchanged.
+    pub fn map_world<T>(self, map: impl FnOnce(W) -> T) -> EntityPlacement<T> {
+        match self {
+            Self::World(world) => EntityPlacement::World(map(world)),
+            Self::Attached(attachment) => EntityPlacement::Attached(attachment),
+        }
+    }
+}
+
 /// One reason a wire attachment could not be resolved. Never a reason to substitute a default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AttachmentError {
@@ -54,7 +102,7 @@ impl PhysicsAttachment {
 
 #[cfg(test)]
 mod tests {
-    use super::{AttachmentError, PhysicsAttachment};
+    use super::{AttachmentError, EntityPlacement, PhysicsAttachment};
     use holtburger_common::{Guid, ParentLocation, Placement};
 
     #[test]
@@ -78,6 +126,30 @@ mod tests {
         assert_eq!(
             PhysicsAttachment::from_wire(Guid(0x5000_0001), 8, 9),
             Err(AttachmentError::UnknownPlacement(9))
+        );
+    }
+
+    #[test]
+    fn placement_arms_cannot_carry_each_others_facts() {
+        let world = EntityPlacement::World(42_u32);
+        assert_eq!(world.world(), Some(&42));
+        assert_eq!(world.attachment(), None);
+        assert_eq!(
+            world.map_world(|value| value.to_string()),
+            EntityPlacement::World("42".to_owned())
+        );
+
+        let attachment = PhysicsAttachment {
+            parent: Guid(0x5000_0001),
+            location: ParentLocation::RightHand,
+            placement: Placement::RightHandCombat,
+        };
+        let attached = EntityPlacement::<u32>::Attached(attachment);
+        assert_eq!(attached.world(), None);
+        assert_eq!(attached.attachment(), Some(&attachment));
+        assert_eq!(
+            attached.map_world(|value| value.to_string()),
+            EntityPlacement::Attached(attachment)
         );
     }
 }

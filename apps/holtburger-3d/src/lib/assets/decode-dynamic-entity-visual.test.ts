@@ -44,6 +44,7 @@ describe("decodeDynamicEntityVisual", () => {
 							},
 						],
 						holdingLocations: [],
+						placementFrames: [{ placementId: 0, frames: [] }],
 						defaultAnimationId: "0x03000001",
 						defaultMotionTableId: null,
 						defaultScriptId: null,

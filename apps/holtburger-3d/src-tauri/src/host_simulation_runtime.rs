@@ -10,9 +10,9 @@ use holtburger_content::LandblockCollisionAsset;
 use holtburger_core::{
     ContentAssetService, DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
-    DynamicEntityProjectionInput, apply_dynamic_entity_physics_transition,
-    dynamic_entity_projection_input, install_dynamic_entity_body, remove_dynamic_entity_body,
-    replace_dynamic_entity_body,
+    DynamicEntityInitialState, DynamicEntityProjectionInput,
+    apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
+    install_dynamic_entity_body, remove_dynamic_entity_body, replace_dynamic_entity_body,
 };
 use holtburger_world::{
     CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
@@ -293,20 +293,22 @@ impl HostSimulationRuntime {
     pub fn install_dynamic_entity(
         &self,
         definition: &DynamicEntityDefinition,
+        initial: DynamicEntityInitialState,
         physical: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        install_dynamic_entity_body(&mut state.bodies, definition, physical)
+        install_dynamic_entity_body(&mut state.bodies, definition, initial, physical)
     }
 
     /// Replaces one same-GUID dynamic body while preserving the old body on failure.
     pub fn replace_dynamic_entity(
         &self,
         definition: &DynamicEntityDefinition,
+        initial: DynamicEntityInitialState,
         physical: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<DynamicEntityBodyReplacementOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        replace_dynamic_entity_body(&mut state.bodies, definition, physical)
+        replace_dynamic_entity_body(&mut state.bodies, definition, initial, physical)
     }
 
     /// Removes one caller-identified dynamic entity body from the canonical host scene.

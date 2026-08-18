@@ -82,11 +82,6 @@ impl ExplorerEntityDelivery {
         })
     }
 
-    /// Builds one removal event after the exact body and registry generation are gone.
-    pub fn removed(&self, guid: Guid, generation: u64) -> DynamicEntityEvent {
-        DynamicEntityEvent::Removed { guid, generation }
-    }
-
     /// Builds a complete replacement event for startup, reload, or explicit reset.
     pub fn snapshot_event(&self) -> Result<DynamicEntityEvent, ExplorerEntityRuntimeError> {
         Ok(DynamicEntityEvent::Snapshot {
@@ -144,9 +139,17 @@ impl ExplorerEntityDelivery {
             "correction publication cannot masquerade as integrated motion"
         );
         let entity = self.entity(guid)?;
-        let point = DynamicEntityPathPoint {
-            pose: entity.placement.pose,
+        let pose = match entity.placement {
+            holtburger_core::DynamicEntityPlacementView::World { pose, .. } => pose,
+            holtburger_core::DynamicEntityPlacementView::Attached { parent, .. } => {
+                return Err(ExplorerEntityRuntimeError::AttachedOperation {
+                    guid,
+                    parent,
+                    operation: "correction publication",
+                });
+            }
         };
+        let point = DynamicEntityPathPoint { pose };
         Ok(DynamicEntityEvent::Advanced {
             batch: DynamicEntityAdvanceBatch::new(
                 self.host_time(),

@@ -974,7 +974,7 @@ fn request_explorer_dynamic_entity_snapshot(
     })
 }
 
-/// Prepares and commits one catalog WCID at the explicit host-resolved candidate pose.
+/// Prepares one catalog WCID and publishes the complete wearer/child registry generation.
 #[tauri::command]
 async fn spawn_explorer_entity(
     app: tauri::AppHandle,
@@ -993,8 +993,10 @@ async fn spawn_explorer_entity(
                 guid: outcome.instance.definition.identity.guid,
                 generation: outcome.instance.generation,
             };
+            // A held loadout is one lifecycle unit but several feed entities. One snapshot event
+            // keeps the wearer and every child in the same ordered publication generation.
             let event = delivery
-                .upserted(receipt.guid)
+                .snapshot_event()
                 .map_err(|error| error.to_string())?;
             app.emit(
                 explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
@@ -1008,7 +1010,7 @@ async fn spawn_explorer_entity(
     .map_err(|error| format!("Explorer entity spawn task failed: {error}"))?
 }
 
-/// Removes one exact Explorer entity generation and publishes its focused removal.
+/// Removes one exact wearer generation and publishes the complete post-removal registry.
 #[tauri::command]
 async fn despawn_explorer_entity(
     app: tauri::AppHandle,
@@ -1028,9 +1030,12 @@ async fn despawn_explorer_entity(
                 guid,
                 generation: outcome.instance.generation,
             };
+            let event = delivery
+                .snapshot_event()
+                .map_err(|error| error.to_string())?;
             app.emit(
                 explorer_entity_delivery::EXPLORER_DYNAMIC_ENTITY_EVENT,
-                delivery.removed(guid, receipt.generation),
+                event,
             )
             .map_err(|error| {
                 format!("Explorer entity despawned but publication failed: {error}")

@@ -4,12 +4,13 @@ use holtburger_common::Guid;
 use holtburger_common::properties::{
     PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
-use holtburger_world::{PhysicalBodyParticipation, WorldState};
+use holtburger_world::{EntityPlacement, PhysicalBodyParticipation, WorldState};
 use thiserror::Error;
 
 use crate::{
     DynamicEntityContent, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
-    DynamicEntitySnapshot, DynamicEntityViewSource, project_dynamic_entity_view,
+    DynamicEntitySnapshot, DynamicEntityViewSource, DynamicEntityWorldProjection,
+    project_dynamic_entity_view,
 };
 
 use super::{ClientRuntime, ClientViewEvent};
@@ -56,20 +57,28 @@ pub fn project_client_dynamic_entity(
     if !object_scale.is_finite() || object_scale <= 0.0 {
         return Err(ClientDynamicEntityViewError::InvalidObjectScale { guid: guid.0 });
     }
-    let body_id = world
-        .runtime_body_id_for_guid(guid)
-        .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
-    let body = world
-        .runtime_body_view(body_id)
-        .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
-    let participation = if world
-        .scene
-        .body(body_id)
-        .is_some_and(|body| body.physical.is_some())
-    {
-        PhysicalBodyParticipation::Physical
+    let placement = if let Some(attachment) = entity.attachment {
+        EntityPlacement::Attached(attachment)
     } else {
-        PhysicalBodyParticipation::PoseOnly
+        let body_id = world
+            .runtime_body_id_for_guid(guid)
+            .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
+        let body = world
+            .runtime_body_view(body_id)
+            .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
+        let participation = if world
+            .scene
+            .body(body_id)
+            .is_some_and(|body| body.physical.is_some())
+        {
+            PhysicalBodyParticipation::Physical
+        } else {
+            PhysicalBodyParticipation::PoseOnly
+        };
+        EntityPlacement::World(DynamicEntityWorldProjection {
+            body,
+            participation,
+        })
     };
 
     Ok(project_dynamic_entity_view(DynamicEntityViewSource {
@@ -83,8 +92,7 @@ pub fn project_client_dynamic_entity(
         appearance: entity.appearance.clone(),
         object_scale,
         physics: entity.physics,
-        body,
-        participation,
+        placement,
     }))
 }
 
@@ -231,8 +239,10 @@ mod tests {
                 appearance,
                 object_scale: 1.25,
                 physics,
-                body,
-                participation: PhysicalBodyParticipation::PoseOnly,
+                placement: EntityPlacement::World(DynamicEntityWorldProjection {
+                    body,
+                    participation: PhysicalBodyParticipation::PoseOnly,
+                }),
             },
         ));
 

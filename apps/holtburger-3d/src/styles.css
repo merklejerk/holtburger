@@ -539,6 +539,14 @@ h1 {
 	cursor: pointer;
 }
 
+/* An unavailable action must not read as armed; matches the disabled range-input treatment. */
+.explorer-action:disabled,
+.emoji-button:disabled {
+	cursor: not-allowed;
+	filter: grayscale(0.8);
+	opacity: 0.45;
+}
+
 .explorer-selectable-list {
 	display: grid;
 	gap: 4px;

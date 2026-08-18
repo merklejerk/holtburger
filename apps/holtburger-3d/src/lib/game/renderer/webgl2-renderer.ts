@@ -1967,6 +1967,8 @@ export class WebGL2Renderer implements Renderer {
 				view.projection,
 				this.#particleProjectionScratch,
 			),
+			samplers: this.#textureSamplers,
+			textureFiltering: this.#frameTextureFiltering,
 			view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
 		};
 	}

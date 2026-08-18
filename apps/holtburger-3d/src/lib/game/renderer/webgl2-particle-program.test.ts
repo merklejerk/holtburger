@@ -51,6 +51,16 @@ describe("createWebGL2ParticleProgram", () => {
 			expect(vertexSource).toContain(`uMotionType == ${type}`);
 		}
 	});
+
+	it("compiles 4-tap software bilinear filtering for paletted particle textures", () => {
+		const fixture = fakeGl();
+		createWebGL2ParticleProgram(fixture.gl);
+		const fragmentSource = fixture.sources[1] ?? "";
+
+		expect(fragmentSource).toContain("sampleIndexedPaletteLinear");
+		expect(fragmentSource).toContain("paletteIndexAt");
+		expect(fragmentSource).toContain("indexedColorAt");
+	});
 });
 
 function fakeGl(options: { linkStatus?: boolean } = {}): {

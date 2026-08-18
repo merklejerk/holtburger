@@ -183,7 +183,15 @@ patch v0.9.294, `last_Modified = 2026-06-20 18:22:29`.
 
 ### Phase 2: Deterministic Appearance Resolver
 
-Progress: Pending.
+Progress: Complete (2026-08-17). `apps/holtburger-3d/src-tauri/src/weenie_appearance.rs` owns
+`resolve_template_appearance`, a pure function of (palette base, template appearance, `CharGen`,
+seed, palette-set resolver) producing the shared `EntityAppearance`. It mirrors
+`GenerateNewFace` + `AddBaseModelData`: authored DIDs suppress their generated counterparts per
+property, the hairstyle's own ObjDesc supplies the head model and hair texture, eye/nose/mouth
+strips supply paired old/new textures, and skin/hair/eye palettes land at ACE's 0x0/0x18,
+0x18/0x8, and 0x20/0x8 ranges. Ten focused tests cover both divergences, per-property precedence,
+bald eye-strip selection, apostrophe/int heritage parsing, and palette-set hue bounds; three of
+them were verified to fail against injected breaks before acceptance.
 
 #### Deliverables
 
@@ -227,7 +235,25 @@ Progress: Pending.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- Correction: the planned `PaletteSet`-by-hue helper already existed in `holtburger-dat` as
+  `PaletteSet::palette_id_for_shade`, matching ACE's `GetPaletteID` including its out-of-range
+  rejection. Only the CLO coverage-priority helper remains for Phase 3, so this phase added no
+  shared-crate code at all.
+- The resolver takes a palette-set resolver closure rather than a `ContentRepository`, keeping it
+  pure and letting tests supply synthetic sets. An unavailable set suppresses only the layer that
+  needed it instead of failing the appearance, matching ACE's tolerance of missing palette data.
+- `AppearanceGenerationSkipped` distinguishes "not a generated humanoid" from "heritage absent from
+  CharGen". Neither is an error — both keep the authored layers, as ACE's early returns do — but a
+  caller can tell a drudge from missing content.
+- Facial texture halves are paired at the CharGen strip, which carries a complete authored ObjDesc.
+  That removes the concern recorded during planning that the absent `Default*Texture` properties
+  would make eye/nose/mouth substitutions unemittable: the strip supplies whichever half the
+  template omits, and a substitution is emitted only when both halves resolve, as ACE requires.
+- Concession: `weenie_appearance` is `pub mod` so its API is not dead code between this phase and
+  its Phase 4 caller. That matches the sibling `explorer_*` modules. If Phase 4 wiring makes it
+  reachable only internally, it reverts to a private module in Phase 5.
+- The hairstyle roll adopts retail's compiled 0-8 range as fixed behavior rather than exposing
+  ACE's `npc_hairstyle_fullrange` server option.
 
 ### Phase 3: Worn Equipment Merge
 

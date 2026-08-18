@@ -1,9 +1,7 @@
 //! One exact live-entity SetupModel appearance projected for frontend visual realization.
 
 use anyhow::Result;
-use holtburger_content::MaterialAppearanceInput;
-use holtburger_core::{ContentAssetRuntime, SetupAppearanceRequest};
-use holtburger_dat::file_type::{AnimationPartChange, ObjDesc, SubPalette, TextureMapChange};
+use holtburger_core::{ContentAssetRuntime, SetupAppearanceRequest, material_appearance_input};
 use holtburger_world::EntityAppearance;
 use serde::Serialize;
 use serde_json::Value;
@@ -41,7 +39,7 @@ pub async fn load_dynamic_entity_visual_source_bytes(
             runtime,
             SetupAppearanceRequest {
                 setup_model_id: setup_did,
-                appearance: material_appearance(appearance),
+                appearance: material_appearance_input(&appearance),
             },
         )
         .await?;
@@ -66,53 +64,16 @@ pub async fn load_dynamic_entity_visual_source_bytes(
     )
 }
 
-fn material_appearance(appearance: EntityAppearance) -> MaterialAppearanceInput {
-    if appearance == EntityAppearance::default() {
-        return MaterialAppearanceInput::default();
-    }
-    MaterialAppearanceInput {
-        obj_desc: Some(ObjDesc {
-            palette_id: appearance.palette_did,
-            sub_palettes: appearance
-                .sub_palettes
-                .into_iter()
-                .map(|palette| SubPalette {
-                    sub_id: palette.palette_did,
-                    offset: palette.offset,
-                    num_colors: palette.color_count,
-                })
-                .collect(),
-            texture_changes: appearance
-                .texture_changes
-                .into_iter()
-                .map(|change| TextureMapChange {
-                    part_index: change.part_index,
-                    old_texture: change.old_texture_did,
-                    new_texture: change.new_texture_did,
-                })
-                .collect(),
-            anim_part_changes: appearance
-                .part_changes
-                .into_iter()
-                .map(|change| AnimationPartChange {
-                    part_index: change.part_index,
-                    part_id: change.gfx_obj_did,
-                })
-                .collect(),
-        }),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::material_appearance;
+    use super::*;
     use holtburger_world::{
         EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange,
     };
 
     #[test]
     fn projects_lossless_ordered_entity_appearance() {
-        let projected = material_appearance(EntityAppearance {
+        let projected = material_appearance_input(&EntityAppearance {
             palette_did: Some(0x0400_0001),
             sub_palettes: vec![EntitySubPalette {
                 palette_did: 0x0400_0002,
@@ -141,7 +102,7 @@ mod tests {
     #[test]
     fn preserves_base_appearance_cache_identity() {
         assert!(
-            material_appearance(EntityAppearance::default())
+            material_appearance_input(&EntityAppearance::default())
                 .obj_desc
                 .is_none()
         );

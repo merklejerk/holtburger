@@ -222,6 +222,10 @@ assembled its facts, and it never claims producer authority.
   no semantic motion object and no motion-table identity; solver-owned placement is the entity
   root's only authority.
 
+`material_appearance_input` is the single projection from the shared `EntityAppearance` into the
+content resolver's ObjDesc shape. The Explorer's visual source consumes it directly; there is no
+second copy.
+
 Two producer registries remain intentionally distinct — `WorldState` for the network client and an
 app-local registry for the Explorer — and neither is generalized into a universal store.
 

@@ -106,6 +106,7 @@ try {
 						measureMs: options.measureMs,
 						settleMs: options.settleMs,
 						viewport: result.state.viewport,
+						audioFlyby: result.audioFlyby,
 					},
 			null,
 			2,
@@ -160,6 +161,9 @@ function parseArgs(args) {
 		cameraHeight: 600,
 		cameraPosition: null,
 		cameraSweepPosition: null,
+		audioFlybyTarget: null,
+		audioFlybySteps: 60,
+		audioFlybyFramesPerStep: 2,
 		cameraEndPitchDegrees: null,
 		cameraEndYawDegrees: null,
 		explorerFocus: false,
@@ -427,6 +431,36 @@ function parseArgs(args) {
 					requireValue(args, ++index, arg),
 					arg,
 				);
+				break;
+			case "--audio-flyby":
+				parsed.audioFlybyTarget = parsePoint(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				break;
+			case "--audio-flyby-steps":
+				parsed.audioFlybySteps = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isInteger(parsed.audioFlybySteps) ||
+					parsed.audioFlybySteps < 2
+				) {
+					throw new Error(
+						"--audio-flyby-steps must be an integer of at least 2.",
+					);
+				}
+				break;
+			case "--audio-flyby-frames-per-step":
+				parsed.audioFlybyFramesPerStep = Number(
+					requireValue(args, ++index, arg),
+				);
+				if (
+					!Number.isInteger(parsed.audioFlybyFramesPerStep) ||
+					parsed.audioFlybyFramesPerStep < 1
+				) {
+					throw new Error(
+						"--audio-flyby-frames-per-step must be a positive integer.",
+					);
+				}
 				break;
 			case "--camera-end-yaw":
 				parsed.cameraEndYawDegrees = Number(requireValue(args, ++index, arg));
@@ -731,6 +765,9 @@ function parseArgs(args) {
 	}
 	if (parsed.cameraSweepPosition !== null && parsed.cameraPosition === null) {
 		throw new Error("--camera-sweep-position requires --camera-position.");
+	}
+	if (parsed.audioFlybyTarget !== null && parsed.cameraPosition === null) {
+		throw new Error("--audio-flyby requires --camera-position.");
 	}
 	if (parsed.cameraSweepPosition !== null && cameraEndOptionCount !== 0) {
 		throw new Error(
@@ -1564,7 +1601,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const attachmentExclusion = options.excludeSpawnedAttachments
 		? "&excludeSpawnedAttachments=true"
 		: "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}`;
+	const audioTrace = options.audioFlybyTarget === null ? "" : "&audioTrace=1";
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -2022,6 +2060,22 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			await delay(500);
 		}
+		let audioFlyby = null;
+		if (options.audioFlybyTarget !== null) {
+			audioFlyby = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeAudioFlyby",
+				[
+					options.landblockId,
+					options.cameraPosition,
+					options.audioFlybyTarget,
+					options.audioFlybySteps,
+					options.audioFlybyFramesPerStep,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
+			);
+		}
 		let cameraSweepScreenshots = null;
 		if (options.cameraSweepPosition !== null) {
 			const capture = async () =>
@@ -2270,6 +2324,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		}
 		return {
 			ambientOcclusionCycleStates,
+			audioFlyby,
 			cameraSweepScreenshots,
 			glRenderer,
 			consoleMessages,

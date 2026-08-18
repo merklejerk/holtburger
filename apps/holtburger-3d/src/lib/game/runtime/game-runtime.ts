@@ -77,14 +77,16 @@ import {
 import { AmbientSystem } from "../systems/ambient-system";
 import {
 	ambientSoundTableIds,
-	createAmbientTableResolver,
+	createAmbientRegionResolution,
 	type AmbientRegionFacts,
+	type AmbientRegionResolution,
 } from "../systems/ambient-region";
 import {
+	AmbientBakeRegistry,
 	EMPTY_AMBIENT_SCAN_RESULT,
+	accumulateAmbientWeights,
 	scanAmbientSources,
-	type AmbientTableResolver,
-	type AmbientTerrainBlock,
+	type InstalledAmbientTerrain,
 } from "../systems/ambient-scan";
 import type { UniformRoll } from "../systems/particle-system";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
@@ -385,20 +387,6 @@ export interface EnvCellLayerRuntimeDiagnostics
 	readonly visibilityIslandCount: number;
 }
 
-/**
- * How far the listener may move before the ambient scan re-runs.
- *
- * Cell-sized rather than landblock-sized: a landblock is 192 m across and the ambient radius is 120,
- * so waiting for a landblock crossing would let the listener walk most of the way across the audible
- * field before the surroundings were re-weighted.
- */
-const AMBIENT_SCAN_CELL_SIZE = 24;
-
-/** Which scan cell a scene-frame position sits in, which is the rescan trigger. */
-function ambientScanCellKey(position: SceneVector3): string {
-	return `${Math.floor(position[0] / AMBIENT_SCAN_CELL_SIZE)}:${Math.floor(position[2] / AMBIENT_SCAN_CELL_SIZE)}`;
-}
-
 /** Exact immutable visual lookup identity; motion and mutable physics never enter this key. */
 function dynamicVisualKey(entity: DynamicEntityView): string {
 	return JSON.stringify({
@@ -495,7 +483,11 @@ export class GameRuntime {
 	/** Environment cell the listener occupies, or null for outdoor terrain. */
 	#audioListenerEnvCellId: EnvCellId | null = null;
 	/** Region ambient facts, installed once per active region; `null` before one is installed. */
-	#ambientResolver: AmbientTableResolver | null = null;
+	#ambientRegion: AmbientRegionResolution | null = null;
+	/** Baked sound-authoring ground per installed landblock, reconciled by terrain revision. */
+	readonly #ambientBakes = new AmbientBakeRegistry();
+	/** Hoisted so the every-frame reconcile check allocates nothing. */
+	readonly #listAmbientTerrain = () => this.#ambientTerrainBlocks();
 	/** Staged ambient sound tables, keyed as the descriptors name them. */
 	readonly #ambientSoundTables = new Map<DatAssetId, DecodedSoundTable>();
 	/** Handles retaining staged ambient sound tables; released on new region or runtime destruction. */
@@ -503,8 +495,16 @@ export class GameRuntime {
 		DatAssetId,
 		PreparedAssetHandle<DecodedSoundTable>
 	>();
-	/** Cell the last ambient scan ran from, so walking within one cell does not rescan. */
-	#ambientScanCell: string | null = null;
+	/**
+	 * Scan cell the last ambient schedule refresh ran from, floored on the authored terrain cell
+	 * size. Cell-sized rather than landblock-sized: the ambient radius is 120 m against a 192 m
+	 * block, so a landblock trigger would let the listener cross most of the audible field between
+	 * refreshes. Compared as numbers so the per-frame check allocates nothing.
+	 */
+	#ambientScanCellX: number | null = null;
+	#ambientScanCellZ: number | null = null;
+	/** EnvCell the last ambient refresh ran under, part of the same numeric trigger. */
+	#ambientScanEnvCellId: EnvCellId | null = null;
 	/**
 	 * Make every mesh this generation's emitters can name resident.
 	 *
@@ -920,6 +920,15 @@ export class GameRuntime {
 			FRONTEND_TUNING.audio.maximumWarmupReplaySeconds,
 		);
 		this.#ambient = new AmbientSystem({
+			// Pure wiring: the ambient system owns the buffer, what share means, and the indoor
+			// gate; the runtime only knows where the baked terrain lives.
+			accumulateWeights: (outWeights) =>
+				accumulateAmbientWeights(
+					this.#audioListenerPosition,
+					this.#ambientBakes.blocks(),
+					outWeights,
+				),
+			listenerHearsOutdoors: () => this.#ambientListenerSeenOutside(),
 			listenerPosition: () => this.#audioListenerPosition,
 			play: (trigger) => this.#audio.trigger(trigger),
 			resolveSound: (soundTableId, soundType) =>
@@ -935,18 +944,18 @@ export class GameRuntime {
 			{
 				audio: {
 					playSound: (target, sound) => {
-						// A sound is placed at its emitting node's world position, resolved once at
-						// trigger time exactly as retail samples it.
+						// The emitting node's world position is sampled once at trigger time, as
+						// retail samples it; the voice then tracks the listener from that fixed
+						// point rather than following the emitter.
 						const origin = this.#originOf(target);
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							// Authored hook sounds are effect sounds: `PlaySoundA` gates on
 							// `effect_sounds_enabled` and passes `is_ambient = 0`.
 							category: "effect",
-							position: origin,
 							probability: sound.probability,
 							soundId: sound.soundId,
-							volume: sound.volume,
+							source: { mode: "world", position: origin, volume: sound.volume },
 						});
 						return outcome === "played" ? "played" : "suppressed";
 					},
@@ -962,10 +971,13 @@ export class GameRuntime {
 						if (origin === null) return "unprepared";
 						const outcome = this.#audio.trigger({
 							category: "effect",
-							position: origin,
 							probability: candidate.probability,
 							soundId: candidate.soundId,
-							volume: candidate.volume,
+							source: {
+								mode: "world",
+								position: origin,
+								volume: candidate.volume,
+							},
 						});
 						return outcome === "played" ? "played" : "suppressed";
 					},
@@ -1454,21 +1466,20 @@ export class GameRuntime {
 	}
 
 	/**
-	 * Apply user audio settings.
-	 *
-	 * Retail carries an enable flag and a volume per sound category; a volume of zero here is the
-	 * same observable behaviour as its flag being off. Only the effect category exists so far,
-	 * because authored hook sounds are effect sounds.
-	 */
-	/**
 	 * Install the active region's ambient facts and stage every sound table they can reach.
 	 *
 	 * Ambience is selected by the ground rather than by a hook, so nothing else will pull these
 	 * tables in; without staging them here every scheduled sound resolves to nothing.
 	 */
 	async installAmbientRegion(facts: AmbientRegionFacts): Promise<void> {
-		this.#ambientResolver = createAmbientTableResolver(facts);
-		this.#ambientScanCell = null;
+		this.#ambientRegion = createAmbientRegionResolution(facts);
+		// Baked entries and scheduled slots carry the previous region's slot ids, so both go with
+		// the region; a bed still playing fades out through its supplier reading zero.
+		this.#ambientBakes.clear();
+		this.#ambient.resetForRegion(this.#ambientRegion.descriptorsBySlot.length);
+		this.#ambientScanCellX = null;
+		this.#ambientScanCellZ = null;
+		this.#ambientScanEnvCellId = null;
 		for (const handle of this.#ambientSoundTableHandles.values()) {
 			handle.release();
 		}
@@ -1510,45 +1521,87 @@ export class GameRuntime {
 	 * (EnvCell flag 0x01), outdoor surface terrain ambience is silenced (acclient.c:140501-140526).
 	 */
 	#refreshAmbient(timeSeconds: number): void {
-		const resolver = this.#ambientResolver;
-		if (!resolver) return;
+		const region = this.#ambientRegion;
+		if (!region) return;
 		const position = this.#audioListenerPosition;
-		// Keyed on the terrain, cell residency, and listener scan cell: landblocks stream in after the first scan,
-		// and a listener standing still while its surroundings arrive would otherwise never hear them.
-		const cell = `${ambientScanCellKey(position)}/${this.#audioListenerEnvCellId ?? "outside"}/${this.#terrain.installationRevision}`;
-		if (cell === this.#ambientScanCell) return;
-		this.#ambientScanCell = cell;
+		// Terrain first: landblocks stream in after the first refresh, and a listener standing
+		// still while its surroundings arrive would otherwise never hear them.
+		const rebaked = this.#ambientBakes.reconcile(
+			this.#terrain.installationRevision,
+			this.#listAmbientTerrain,
+			region.resolve,
+		);
+		// The scan-cell size is the authored terrain cell size, read from the terrain in hand
+		// rather than restated as a constant. Before any terrain installs there is nothing to scan
+		// and the revision diff, not the cell trigger, fires the first real refresh.
+		const cellSize = this.#ambientBakes.cellSize;
+		const cellX = cellSize === null ? 0 : Math.floor(position[0] / cellSize);
+		const cellZ = cellSize === null ? 0 : Math.floor(position[2] / cellSize);
+		if (
+			!rebaked &&
+			cellX === this.#ambientScanCellX &&
+			cellZ === this.#ambientScanCellZ &&
+			this.#audioListenerEnvCellId === this.#ambientScanEnvCellId
+		) {
+			return;
+		}
+		this.#ambientScanCellX = cellX;
+		this.#ambientScanCellZ = cellZ;
+		this.#ambientScanEnvCellId = this.#audioListenerEnvCellId;
 
-		const seenOutside =
-			this.#audioListenerEnvCellId !== null
-				? this.#scene.getEnvCellSeenOutside(this.#audioListenerEnvCellId)
-				: true;
-
-		const scanResult =
-			seenOutside === false
-				? EMPTY_AMBIENT_SCAN_RESULT
-				: scanAmbientSources(position, this.#ambientTerrainBlocks(), resolver);
+		// Skipping the walk indoors is an optimization only; the ambient system enforces the same
+		// gate through its `listenerHearsOutdoors` dependency, so the two cadences cannot diverge.
+		const scanResult = !this.#ambientListenerSeenOutside()
+			? EMPTY_AMBIENT_SCAN_RESULT
+			: scanAmbientSources(
+					position,
+					this.#ambientBakes.blocks(),
+					region.descriptorsBySlot,
+				);
 
 		this.#ambient.refresh(scanResult, timeSeconds);
 	}
 
-	/** Installed terrain, expressed in the scene frame the scan measures distances in. */
-	*#ambientTerrainBlocks(): Generator<AmbientTerrainBlock> {
+	/**
+	 * Whether outdoor terrain ambience reaches the listener where it stands.
+	 *
+	 * Inside an EnvCell whose authored flags lack `SeenOutside` (flag 0x01), surface ambience is
+	 * silenced (acclient.c:140501-140526). The ambient system consumes this through one dependency
+	 * for both of its cadences; the runtime additionally reads it to skip building scans indoors.
+	 */
+	#ambientListenerSeenOutside(): boolean {
+		return this.#audioListenerEnvCellId !== null
+			? this.#scene.getEnvCellSeenOutside(this.#audioListenerEnvCellId) !==
+					false
+			: true;
+	}
+
+	/** Installed terrain with identity, expressed in the scene frame the bake retains. */
+	*#ambientTerrainBlocks(): Generator<InstalledAmbientTerrain> {
 		for (const {
 			generation,
 			landblockId,
 		} of this.#terrain.listInstalledTerrain()) {
 			const origin = createLandblockWorldOrigin(landblockId);
 			yield {
-				gridSize: generation.gridSize,
-				heights: generation.heights,
-				origin: sceneVector3([origin.x, origin.y, origin.z]),
-				terrainSamples: generation.terrainSamples,
-				tileSize: generation.tileSize,
+				block: {
+					gridSize: generation.gridSize,
+					heights: generation.heights,
+					origin: sceneVector3([origin.x, origin.y, origin.z]),
+					terrainSamples: generation.terrainSamples,
+					tileSize: generation.tileSize,
+				},
+				landblockId,
 			};
 		}
 	}
 
+	/**
+	 * Apply user audio settings, one volume per retail sound category.
+	 *
+	 * A volume of zero is the same observable behaviour as retail's per-category enable flag being
+	 * off, so no separate flag exists.
+	 */
 	setAudioSettings(settings: AudioSettings): void {
 		this.#audio.setSettings(settings);
 	}
@@ -1629,6 +1682,7 @@ export class GameRuntime {
 			animation: this.#animation.getDiagnostics(),
 			audio: this.#audio.getDiagnostics(),
 			ambient: this.#ambient.getDiagnostics(),
+			ambientBakes: this.#ambientBakes.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
 			behavior: this.#behaviorRouter.getDiagnostics(),
 			particles: this.#particles.getDiagnostics(),
@@ -1781,6 +1835,8 @@ export class GameRuntime {
 		this.#particles.advance(timeSeconds);
 		this.#refreshAmbient(timeSeconds);
 		this.#ambient.advance(timeSeconds);
+		// After ambience so a voice triggered this frame is placed against the same listener pose.
+		this.#audio.advance();
 		tick?.mark("particleAdvance");
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(

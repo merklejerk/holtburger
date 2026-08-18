@@ -24,6 +24,7 @@ function descriptor(
 		isContinuous: false,
 		maxRate: 10,
 		minRate: 10,
+		slot: 0,
 		soundTableId: TABLE,
 		soundType: 70,
 		tableIndex: 0,
@@ -39,10 +40,14 @@ function scan(
 ): AmbientScanResult {
 	const accumulations = new Map(
 		descriptors.map((entry, index) => [
-			`${entry.tableIndex}:${entry.soundType}`,
+			entry.slot,
 			{
 				descriptor: entry,
-				directions: new Map(),
+				// A real scan widens at least one band for every intermittent contributor; a
+				// continuous descriptor never gets one.
+				directions: entry.isContinuous
+					? new Map()
+					: new Map([[AMBIENT_DIRECTION.north, { maximum: 20, minimum: 4 }]]),
 				soundCount: shares[index] ?? 1,
 			},
 		]),
@@ -52,7 +57,19 @@ function scan(
 
 function build(overrides: Partial<AmbientSystemDependencies> = {}) {
 	const played: AudioTrigger[] = [];
+	// One slot at full weight, mirroring a listener surrounded by a single descriptor's ground.
+	const weights = { bySlot: new Float32Array([1]), total: 1 };
 	const system = new AmbientSystem({
+		accumulateWeights: (outWeights) => {
+			outWeights.set(
+				weights.bySlot.subarray(
+					0,
+					Math.min(weights.bySlot.length, outWeights.length),
+				),
+			);
+			return weights.total;
+		},
+		listenerHearsOutdoors: () => true,
 		listenerPosition: () => LISTENER,
 		play: (trigger) => {
 			played.push(trigger);
@@ -65,7 +82,8 @@ function build(overrides: Partial<AmbientSystemDependencies> = {}) {
 		roll: () => 0,
 		...overrides,
 	});
-	return { played, system };
+	system.resetForRegion(4);
+	return { played, system, weights };
 }
 
 describe("AmbientSystem", () => {
@@ -144,7 +162,85 @@ describe("AmbientSystem", () => {
 
 		system.advance(1);
 
-		expect(played[0]!.volume).toBeCloseTo(0.4);
+		// Fired as a live bed: the supplier reads this frame's share (weights fixture: full share),
+		// scaled by the authored volume.
+		const source = played[0]!.source;
+		if (source.mode !== "listener") throw new Error("expected a bed");
+		expect(source.volume()).toBeCloseTo(0.8);
+	});
+
+	it("re-weights a playing bed's supplier live, without waiting for the next firing", () => {
+		const { played, system, weights } = build();
+		system.refresh(
+			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
+			0,
+		);
+		system.advance(1);
+		const supplier = played[0]!.source;
+		if (supplier.mode !== "listener") throw new Error("expected a bed");
+		expect(supplier.volume()).toBeCloseTo(0.8);
+
+		// The ground thins out: half the surroundings author this bed now.
+		weights.bySlot[0] = 0.5;
+		weights.total = 1;
+		system.advance(1.5);
+
+		expect(supplier.volume()).toBeCloseTo(0.4);
+	});
+
+	it("reads zero from a bed supplier once its descriptor retires or the region resets", () => {
+		const { played, system } = build();
+		system.refresh(
+			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
+			0,
+		);
+		system.advance(1);
+		const supplier = played[0]!.source;
+		if (supplier.mode !== "listener") throw new Error("expected a bed");
+
+		// Every contributor gone: the scan retires the descriptor.
+		system.refresh(
+			{ accumulations: new Map(), examinedCellCount: 0, totalWeight: 0 },
+			2,
+		);
+		expect(supplier.volume()).toBe(0);
+	});
+
+	it("silences bed suppliers while the listener is indoors, and restores them outside", () => {
+		let outdoors = true;
+		const { played, system } = build({ listenerHearsOutdoors: () => outdoors });
+		system.refresh(
+			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
+			0,
+		);
+		system.advance(1);
+		const source = played[0]!.source;
+		if (source.mode !== "listener") throw new Error("expected a bed");
+		expect(source.volume()).toBeCloseTo(0.8);
+
+		// Through the dungeon door: the same gate feeds both cadences, so the playing bed fades
+		// without waiting for a schedule refresh.
+		outdoors = false;
+		system.advance(1.5);
+		expect(source.volume()).toBe(0);
+
+		outdoors = true;
+		system.advance(2);
+		expect(source.volume()).toBeCloseTo(0.8);
+	});
+
+	it("reads zero from a bed supplier after a region reinstall clears the schedule", () => {
+		const { played, system } = build();
+		system.refresh(
+			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
+			0,
+		);
+		system.advance(1);
+		const supplier = played[0]!.source;
+		if (supplier.mode !== "listener") throw new Error("expected a bed");
+
+		system.resetForRegion(2);
+		expect(supplier.volume()).toBe(0);
 	});
 
 	it("does not schedule a continuous descriptor below the audible floor", () => {
@@ -199,23 +295,27 @@ describe("AmbientSystem", () => {
 		const scanned = scan([descriptor()]);
 		// The only contributors lie to the north, 40-60 m out.
 		scanned.accumulations
-			.get("0:70")!
+			.get(0)!
 			.directions.set(AMBIENT_DIRECTION.north, { maximum: 60, minimum: 40 });
 		system.refresh(scanned, 0);
 
 		system.advance(20);
 
 		// Scene z runs negative to the north, so a northward placement moves away from the listener.
-		expect(played[0]!.position[2]).toBeLessThan(LISTENER[2]);
+		const source = played[0]!.source;
+		if (source.mode !== "world") throw new Error("expected a placed firing");
+		expect(source.position[2]).toBeLessThan(LISTENER[2]);
 	});
 
-	it("centres a continuous firing, which has no direction to place it in", () => {
+	it("fires a continuous descriptor head-locked, with no world position at all", () => {
 		const { played, system } = build();
 		system.refresh(scan([descriptor({ isContinuous: true, minRate: 1 })]), 0);
 
 		system.advance(1);
 
-		expect(played[0]!.position).toEqual(LISTENER);
+		// Retail hardcodes distance 0 and pan 0 for these (acclient.c:366859); a bed has no
+		// position to drift away from the listener.
+		expect(played[0]!.source.mode).toBe("listener");
 	});
 
 	it("plays in the ambient category, so the ambient slider is what scales it", () => {

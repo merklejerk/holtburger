@@ -1,5 +1,3 @@
-import type { AcVector3 } from "../../assets/ac-frame";
-
 /**
  * Retail's ambient weighting and direction bucketing, transcribed from `Ambient`
  * (acclient.c:367152-367210).
@@ -125,11 +123,14 @@ export function ambientWeight(distanceSquared: number): number {
 /**
  * Which of eight compass buckets a source falls into (`Ambient::CalcDir`).
  *
+ * Takes AC's horizontal plane as two scalars — eastward and northward displacement — rather than a
+ * vector, because the scan calls this once per contributing entry and a tuple per call is exactly
+ * the allocation the baked walk exists to avoid.
+ *
  * Returns `inViewerBlock` for a source close enough that a direction would be meaningless; retail's
  * caller then contributes it to all eight instead of dropping it.
  */
-export function ambientDirection(delta: AcVector3): AmbientDirection {
-	const [x, y] = delta;
+export function ambientDirection(x: number, y: number): AmbientDirection {
 	if (AMBIENT_MIN_DISTANCE_SQUARED * 0.5 > y * y + x * x) {
 		return AMBIENT_DIRECTION.inViewerBlock;
 	}

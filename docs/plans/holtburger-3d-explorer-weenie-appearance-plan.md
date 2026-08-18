@@ -401,6 +401,19 @@ reachable by a server-fed client, not just by Explorer:
 - `texture_changes_for_part` and `add_texture_change_retail` were both investigated and found
   correct; the CLO old-texture keys match the replaced part models' surfaces exactly. Recording
   that so the next reader does not re-suspect them.
+- Correction (2026-08-17, post-completion review): the resolver had been applying the selected
+  hairstyle's own ObjDesc texture change to every generated NPC. ACE reaches that change only
+  through the Gear Knight / Olthoi "hairstyle as body style" branch, where `HairStyle` is an
+  explicit property; an ordinary generated NPC takes the `HeadObjectDID` branch and receives the
+  head model alone, with hair colour coming from the hair palette
+  (`WorldObject_Networking.cs:984-1005`). Every shipped hairstyle carries exactly one such change,
+  so this was recolouring every generated head against ACE. Removed, with the test now asserting
+  the three strip textures and the hairstyle change's absence.
+- Verified against ACE while reviewing the roll: `ThreadSafeRandom.Next(min, max)` is inclusive of
+  `max`, so ACE's `Next(0, Count - 1)` equals our `index(len)` over `0..len-1`, and
+  `Next(0.0, 1.0)` matches our `[0, 1)` hue. Roll order, the retail 0-8 hairstyle clamp, the
+  bald eye-strip selection, direct eye-palette indexing, and PaletteSet-by-hue for skin and hair
+  all match.
 - Debt: unmatched texture substitutions are still dropped silently. That is correct for authored
   content — a garment legitimately carries changes for body parts it does not cover — so it cannot
   simply become an error, but it also means a genuine content fault is invisible. A future

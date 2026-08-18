@@ -38,7 +38,7 @@ the blast radius. See `apps/holtburger-3d/AGENTS.md` for the full convention.
 
 ## App Boundaries
 
-- `apps/holtburger-3d`: explorer/Tauri 3D client app shell, Svelte UI, Three.js renderer integration, explorer-mode controls, frontend view state, debug overlays, panels, tabs, layout, and explorer-specific UX policy.
+- `apps/holtburger-3d`: explorer/Tauri 3D client app shell, Svelte UI, WebGL2 renderer integration, explorer-mode controls, frontend view state, debug overlays, panels, tabs, layout, and explorer-specific UX policy.
 - Keep explorer-mode presentation and interaction decisions inside `apps/holtburger-3d`. Floating panels, tabbed inspectors, viewport HUDs, camera gestures, explorer navigation controls, selection affordances, and debug UI are app-local concerns.
 - `apps/holtburger-3d/src-tauri`: app-local host adapter and Tauri command boundary. Keep it narrow and typed; do not promote adapter shapes into shared crates unless they represent reusable client behavior proven outside the explorer app.
 

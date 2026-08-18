@@ -1369,7 +1369,7 @@ mod tests {
                 surface_texture_id: 0x0500_0021,
                 render_surface_ids: vec![0x0600_0021],
                 palette_id: Some(0x0400_0021),
-                render_surface_default_palette_ids: Vec::new(),
+                palette_composite: None,
             })
         );
     }
@@ -1423,7 +1423,7 @@ mod tests {
                 surface_texture_id: 0x0500_0040,
                 render_surface_ids: vec![0x0600_4040, 0x0600_0040],
                 palette_id: None,
-                render_surface_default_palette_ids: Vec::new(),
+                palette_composite: None,
             })
         );
         assert_eq!(
@@ -1460,7 +1460,7 @@ mod tests {
                 surface_texture_id: 0x0500_2862,
                 render_surface_ids: vec![0x0600_41BF, 0x0600_41C0],
                 palette_id: None,
-                render_surface_default_palette_ids: Vec::new(),
+                palette_composite: None,
             })
         );
         assert_eq!(

@@ -9,6 +9,7 @@ use holtburger_core::{
     SurfaceTexturePixelsRequest,
 };
 use holtburger_dat::file_type::region::{LandSurfType, TerrainDesc};
+use holtburger_dat::file_type::{Palette, PaletteRange};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::Emitter;
@@ -120,10 +121,33 @@ struct LoadLandblockSourceBatchRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LoadTexturePixelsRequest {
+pub struct LoadTexturePixelsRequest {
     kind: String,
     purpose: String,
+    /// Identity of the requested texture, echoed back so a caller can match its response.
+    ///
+    /// For a composited palette this is the composition's identity rather than a DAT id, because
+    /// several compositions share one base palette.
     source_asset_id: String,
+    /// Recipe for a composited palette. Present only for a palette request whose material carries
+    /// an ObjDesc composition; the host never derives it from `source_asset_id`.
+    #[serde(default)]
+    palette_composite: Option<LoadPaletteCompositeRequest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadPaletteCompositeRequest {
+    base_palette_id: String,
+    ranges: Vec<LoadPaletteRangeRequest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadPaletteRangeRequest {
+    replacement_palette_id: String,
+    offset: u32,
+    color_count: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -227,14 +251,9 @@ async fn load_texture_pixels(
     state: tauri::State<'_, HostContentState>,
     request: LoadTexturePixelsRequest,
 ) -> Result<tauri::ipc::Response, String> {
-    let bytes = load_texture_pixels_bytes(
-        &state.runtime,
-        &request.kind,
-        &request.purpose,
-        &request.source_asset_id,
-    )
-    .await
-    .map_err(format_error)?;
+    let bytes = load_texture_pixels_bytes(&state.runtime, request)
+        .await
+        .map_err(format_error)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -361,22 +380,15 @@ pub async fn load_active_region_data_bytes(runtime: &ContentAssetRuntime) -> Res
     serialize_active_region_binary(&active_region)
 }
 
-/// Build the canonical terrain-pixel response used by Tauri and the headless browser harness.
+/// Build the canonical texture-pixel response used by Tauri and the headless browser harness.
+///
+/// Covers every request kind: terrain surfaces, object surfaces, and palettes both authored and
+/// composited.
 pub async fn load_texture_pixels_bytes(
     runtime: &ContentAssetRuntime,
-    kind: &str,
-    purpose: &str,
-    source_asset_id: &str,
+    request: LoadTexturePixelsRequest,
 ) -> Result<Vec<u8>> {
-    build_texture_pixels_response(
-        runtime,
-        LoadTexturePixelsRequest {
-            kind: kind.to_owned(),
-            purpose: purpose.to_owned(),
-            source_asset_id: source_asset_id.to_owned(),
-        },
-    )
-    .await
+    build_texture_pixels_response(runtime, request).await
 }
 
 /// Build the canonical typed animation response used by Tauri and focused host tests.
@@ -648,15 +660,25 @@ async fn build_texture_pixels_response(
             if request.purpose != "object-palette" {
                 anyhow::bail!("prepared-object-palette requires object-palette purpose");
             }
-            let palette_id = parse_palette_asset_id(&request.source_asset_id)?;
-            let asset = runtime
-                .load(ContentAssetRequest::Palette(palette_id))
-                .await?;
-            let ContentAsset::Palette(palette) = asset else {
-                unreachable!("palette request must return a palette")
-            };
-            let prepared = prepare_object_palette(&palette)?;
-            (palette_asset_id(palette_id), dat_id(palette.id), prepared)
+            match &request.palette_composite {
+                None => {
+                    let palette_id = parse_palette_asset_id(&request.source_asset_id)?;
+                    let palette = load_palette(runtime, palette_id).await?;
+                    let prepared = prepare_object_palette(&palette)?;
+                    (palette_asset_id(palette_id), dat_id(palette.id), prepared)
+                }
+                Some(composite) => {
+                    let palette = composite_palette(runtime, composite).await?;
+                    let prepared = prepare_object_palette(&palette)?;
+                    // The composition's identity, not the base palette's id: several compositions
+                    // share one base, and the caller keyed its request on the identity.
+                    (
+                        request.source_asset_id.clone(),
+                        dat_id(palette.id),
+                        prepared,
+                    )
+                }
+            }
         }
         _ => anyhow::bail!("unsupported texture request kind {:?}", request.kind),
     };
@@ -705,6 +727,48 @@ fn parse_surface_texture_asset_id(raw_asset_id: &str) -> Result<u32> {
 
 fn parse_palette_asset_id(raw_asset_id: &str) -> Result<u32> {
     parse_typed_asset_id(raw_asset_id, "palette/", 0x04)
+}
+
+async fn load_palette(runtime: &ContentAssetRuntime, palette_id: u32) -> Result<Arc<Palette>> {
+    let asset = runtime
+        .load(ContentAssetRequest::Palette(palette_id))
+        .await?;
+    let ContentAsset::Palette(palette) = asset else {
+        unreachable!("palette request must return a palette")
+    };
+    Ok(palette)
+}
+
+/// Materialize one requested palette composition.
+///
+/// The decision to apply it was already made while resolving the appearance; this only realizes
+/// the pixels for an identity that decision produced, so a refused range here means the request
+/// and the resolution disagree.
+async fn composite_palette(
+    runtime: &ContentAssetRuntime,
+    composite: &LoadPaletteCompositeRequest,
+) -> Result<Palette> {
+    let base_palette_id = parse_typed_dat_id(&composite.base_palette_id, 0x04)?;
+    let base = load_palette(runtime, base_palette_id).await?;
+    let mut replacements = Vec::with_capacity(composite.ranges.len());
+    for range in &composite.ranges {
+        let palette_id = parse_typed_dat_id(&range.replacement_palette_id, 0x04)?;
+        replacements.push(load_palette(runtime, palette_id).await?);
+    }
+    let ranges = composite
+        .ranges
+        .iter()
+        .zip(&replacements)
+        .map(|(range, replacement)| PaletteRange {
+            replacement,
+            offset: range.offset,
+            color_count: range.color_count,
+        })
+        .collect::<Vec<_>>();
+
+    base.composite(&ranges).with_context(|| {
+        format!("Could not composite palette 0x{base_palette_id:08X} for a requested appearance")
+    })
 }
 
 fn parse_typed_asset_id(raw_asset_id: &str, prefix: &str, expected_type: u32) -> Result<u32> {
@@ -1975,6 +2039,7 @@ mod tests {
                 kind: "prepared-texture-surface".to_string(),
                 purpose: "terrain-color".to_string(),
                 source_asset_id: "surface-texture/0x05000001".to_string(),
+                palette_composite: None,
             },
         )
         .await
@@ -1991,6 +2056,78 @@ mod tests {
             &bytes[section_data_offset..section_data_offset + 4],
             &[3, 2, 1, 4]
         );
+    }
+
+    #[tokio::test]
+    async fn palette_pixel_response_composites_ranges_and_echoes_the_requested_identity() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("palette-composite.hba");
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        for (palette_id, colors) in [
+            (0x0400_0001_u32, [0xFF11_1111_u32, 0xFF22_2222, 0xFF33_3333]),
+            (0x0400_0002, [0xFF44_4444, 0xFF55_5555, 0xFF66_6666]),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    palette_id,
+                    DatFileType::Palette as u32,
+                    test_palette_bytes(palette_id, &colors),
+                )
+                .expect("palette should be added");
+        }
+        writer.write(&path).expect("test HBA should be written");
+
+        let repository = Arc::new(
+            ContentRepository::from_hba_path(&path).expect("test repository should be opened"),
+        );
+        let state = HostContentState::from_repository(repository)
+            .expect("test content repository should initialize");
+        let identity = "palette-composite:04000001:04000002+1+1".to_string();
+        let bytes = build_texture_pixels_response(
+            &state.runtime,
+            LoadTexturePixelsRequest {
+                kind: "prepared-object-palette".to_string(),
+                purpose: "object-palette".to_string(),
+                source_asset_id: identity.clone(),
+                palette_composite: Some(LoadPaletteCompositeRequest {
+                    base_palette_id: "0x04000001".to_string(),
+                    ranges: vec![LoadPaletteRangeRequest {
+                        replacement_palette_id: "0x04000002".to_string(),
+                        offset: 1,
+                        color_count: 1,
+                    }],
+                }),
+            },
+        )
+        .await
+        .expect("composited palette pixels should load");
+
+        let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let section_data_offset = BINARY_ENVELOPE_HEADER_LEN + manifest_length;
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&bytes[BINARY_ENVELOPE_HEADER_LEN..section_data_offset])
+                .expect("response manifest should decode");
+        // The caller keyed its request on the composition, so that is what must come back.
+        assert_eq!(manifest["sourceAssetId"], identity);
+
+        // Only the requested range changes, and it takes the replacement's color from the same
+        // absolute index rather than from the replacement's start.
+        let pixels = &bytes[section_data_offset..];
+        assert_eq!(&pixels[..4], &[0x11, 0x11, 0x11, 0xFF]);
+        assert_eq!(&pixels[4..8], &[0x55, 0x55, 0x55, 0xFF]);
+        assert_eq!(&pixels[8..12], &[0x33, 0x33, 0x33, 0xFF]);
+    }
+
+    fn test_palette_bytes(id: u32, colors_argb: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend(id.to_le_bytes());
+        bytes.extend((colors_argb.len() as u32).to_le_bytes());
+        for color in colors_argb {
+            bytes.extend(color.to_le_bytes());
+        }
+        bytes
     }
 
     fn test_surface_texture_bytes(id: u32, render_surface_ids: &[u32]) -> Vec<u8> {

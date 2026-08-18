@@ -1,5 +1,5 @@
 import type { LandblockVec3 } from "../../assets/ac-frame";
-import type { DatAssetId } from "../game-types";
+import type { DatAssetId, PaletteComposite } from "../game-types";
 import { transformAABB3 } from "../math/matrices";
 import { type AABB3, type Mat4, Vec3 } from "../math/types";
 import { composeObjectPartTransform } from "./object-part-transform";
@@ -68,7 +68,19 @@ export type ResolvedMaterial = ResolvedMaterialFacts &
 				readonly colorTextureId: DatAssetId;
 				/** Concrete source level selected by the closed host material dependency. */
 				readonly renderSurfaceId: DatAssetId;
+				/**
+				 * The palette this material samples, already resolved by the host: a surface that
+				 * authors none adopts its texture's own, exactly as retail does at load. Null
+				 * means the material samples no palette at all.
+				 */
 				readonly paletteTextureId: DatAssetId | null;
+				/**
+				 * ObjDesc palette composition replacing `paletteTextureId` for this material.
+				 *
+				 * The host decided which materials receive it and derived its identity; consumers
+				 * key on that identity and re-derive nothing.
+				 */
+				readonly paletteComposite: PaletteComposite | null;
 				/** Source encoding selected by the closed host dependency manifest. */
 				readonly textureEncoding: ResolvedObjectTextureEncoding;
 		  }

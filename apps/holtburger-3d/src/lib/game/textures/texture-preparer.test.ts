@@ -49,7 +49,72 @@ describe("WorkerTexturePreparer", () => {
 			},
 		]);
 	});
+
+	it("requests an authored palette by resource id and a composition by identity", async () => {
+		const composite = {
+			identity: "palette-composite:04000001:04000abc+18+8",
+			basePaletteId: "0x04000001",
+			ranges: [
+				{ replacementPaletteId: "0x04000abc", offset: 0x18, colorCount: 0x08 },
+			],
+		} as const;
+		const assets = new RecordingTexturePixelSource();
+		const preparer = await WorkerTexturePreparer.build(assets);
+
+		await preparer.prepare({
+			kind: "asset",
+			key: createAssetTextureKey(TexturePurpose.ObjectPalette, "0x04000001"),
+			purpose: TexturePurpose.ObjectPalette,
+			sourceAssetId: "0x04000001",
+		});
+		await preparer.prepare({
+			kind: "asset",
+			key: createAssetTextureKey(
+				TexturePurpose.ObjectPalette,
+				composite.identity,
+			),
+			purpose: TexturePurpose.ObjectPalette,
+			sourceAssetId: composite.identity,
+			paletteComposite: composite,
+		});
+
+		expect(assets.requests).toEqual([
+			{
+				kind: "prepared-object-palette",
+				purpose: TexturePurpose.ObjectPalette,
+				sourceAssetId: "palette/0x04000001",
+			},
+			{
+				kind: "prepared-object-palette",
+				purpose: TexturePurpose.ObjectPalette,
+				sourceAssetId: composite.identity,
+				paletteComposite: composite,
+			},
+		]);
+	});
 });
+
+/** Echoes each request back so the preparer's own identity validation stays in play. */
+class RecordingTexturePixelSource implements TexturePixelSource {
+	readonly requests: TexturePreparationServiceRequest[] = [];
+
+	async loadTexturePixels(
+		request: TexturePreparationServiceRequest,
+	): Promise<TexturePreparationServiceResponse> {
+		this.requests.push(request);
+		return {
+			kind: request.kind,
+			purpose: request.purpose,
+			surface: {
+				format: TexturePixelFormat.RGBA8,
+				height: 1,
+				pixels: new Uint8Array([1, 2, 3, 4]),
+				sourceAssetId: request.sourceAssetId,
+				width: 1,
+			},
+		};
+	}
+}
 
 class DeferredTexturePixelSource implements TexturePixelSource {
 	readonly requests: TexturePreparationServiceRequest[] = [];

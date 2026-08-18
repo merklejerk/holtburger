@@ -1,6 +1,6 @@
 use anyhow::Context;
 use holtburger_3d::{
-    LandblockSourceLayer,
+    LandblockSourceLayer, LoadTexturePixelsRequest,
     dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes,
     explorer_entity_delivery::ExplorerEntityDelivery,
     explorer_entity_driver::{
@@ -42,14 +42,6 @@ struct ReadyMessage {
 struct LandblockSourceBatchRequest {
     landblock_id: String,
     layers: Vec<LandblockSourceLayer>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TexturePixelsRequest {
-    kind: String,
-    purpose: String,
-    source_asset_id: String,
 }
 
 #[derive(Deserialize)]
@@ -181,15 +173,8 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
             }
         }
         ("POST", "/texture-pixels") => {
-            let request = serde_json::from_slice::<TexturePixelsRequest>(&request.body)?;
-            match load_texture_pixels_bytes(
-                runtime,
-                &request.kind,
-                &request.purpose,
-                &request.source_asset_id,
-            )
-            .await
-            {
+            let request = serde_json::from_slice::<LoadTexturePixelsRequest>(&request.body)?;
+            match load_texture_pixels_bytes(runtime, request).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
                 }

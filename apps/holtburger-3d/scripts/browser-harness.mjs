@@ -10,6 +10,8 @@ const DEFAULT_CHROME_PATH = "/opt/google/chrome/chrome";
 const DEFAULT_VITE_PORT = 1420;
 const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
 const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
+/** Lateral metres between showcase subjects; wide enough that two humanoids do not overlap. */
+const ENTITY_SHOWCASE_SEPARATION = 1.2;
 const DEFAULT_SETTLE_MS = 10_000;
 const DEFAULT_VIEWPORT_WIDTH = 1_280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
@@ -128,7 +130,7 @@ try {
 	if (options.fixture === "portal-scope-atlas") {
 		assertPortalScopeAtlasFixture(result.state);
 	}
-	if (options.spawnWcid !== null) {
+	if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 		assertSpawnedEntityLifecycle(result);
 	}
 	if (options.launchDirection !== null) {
@@ -168,6 +170,7 @@ function parseArgs(args) {
 		isolateAuthoredDynamics: false,
 		excludeAuthoredDynamics: false,
 		spawnWcid: null,
+		entityShowcaseCount: 0,
 		entityPairWcid: null,
 		entityPairTargetWcid: null,
 		entityPairSeparation: 3,
@@ -302,6 +305,12 @@ function parseArgs(args) {
 				break;
 			case "--spawn-wcid":
 				parsed.spawnWcid = requireValue(args, ++index, arg);
+				break;
+			case "--entity-showcase-count":
+				parsed.entityShowcaseCount = parsePositiveInteger(
+					requireValue(args, ++index, arg),
+					arg,
+				);
 				break;
 			case "--entity-pair-wcid":
 				parsed.entityPairWcid = requireValue(args, ++index, arg);
@@ -1669,7 +1678,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		const entityAdvanceEvents = [];
 		let spawnedEntityState = null;
 		let completedEntityState = null;
-		if (options.spawnWcid !== null) {
+		if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 			spawnedEntity = await evaluate(
 				client,
 				options.spawnSimulated
@@ -1721,6 +1730,25 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
+		}
+		let entityShowcase = null;
+		if (options.entityShowcaseCount > 0) {
+			// Distinct GUIDs in one session, spread laterally in front of the camera: appearance
+			// variation between NPCs is a looking-at-it check, and a fresh harness process would
+			// otherwise reissue the same first GUID and therefore the same deterministic roll.
+			const offsets = [];
+			for (let index = 0; index < options.entityShowcaseCount; index += 1) {
+				const lateral =
+					(index - (options.entityShowcaseCount - 1) / 2) *
+					ENTITY_SHOWCASE_SEPARATION;
+				offsets.push([lateral, options.spawnDistance, 0]);
+			}
+			entityShowcase = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntityFleet",
+				[options.spawnWcid, offsets, "pose-only"],
+			);
+			await delay(1000);
 		}
 		let entityPair = null;
 		if (options.entityPairWcid !== null) {
@@ -2228,6 +2256,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			glRenderer,
 			consoleMessages,
 			entityPair,
+			entityShowcase,
 			entityPopulation,
 			entityLifecycle:
 				spawnedEntity === null

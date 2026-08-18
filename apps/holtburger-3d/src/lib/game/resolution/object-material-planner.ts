@@ -71,30 +71,35 @@ export function planObjectMaterial(
 		purpose,
 		sourceAssetId: material.colorTextureId,
 	};
-	const paletteTexture = material.paletteTextureId
-		? createAssetTextureKey(
-				TexturePurpose.ObjectPalette,
-				material.paletteTextureId,
-			)
-		: null;
+	// A composition replaces the authored palette outright, so it is the palette source whenever
+	// the host resolved one for this material.
+	const paletteSourceId =
+		material.paletteComposite?.identity ?? material.paletteTextureId;
+	const paletteRequirement: AssetTextureFact | null =
+		paletteSourceId === null
+			? null
+			: {
+					kind: "asset",
+					key: createAssetTextureKey(
+						TexturePurpose.ObjectPalette,
+						paletteSourceId,
+					),
+					purpose: TexturePurpose.ObjectPalette,
+					sourceAssetId: paletteSourceId,
+					...(material.paletteComposite === null
+						? {}
+						: { paletteComposite: material.paletteComposite }),
+				};
+	const paletteTexture = paletteRequirement?.key ?? null;
 	if (material.textureEncoding !== "direct-color" && paletteTexture === null) {
 		throw new Error(
 			`Indexed material ${material.id} has no palette dependency.`,
 		);
 	}
-	const textureRequirements = [
-		baseTextureRequirement,
-		...(material.paletteTextureId === null
-			? []
-			: [
-					{
-						kind: "asset" as const,
-						key: paletteTexture!,
-						purpose: TexturePurpose.ObjectPalette,
-						sourceAssetId: material.paletteTextureId,
-					},
-				]),
-	];
+	const textureRequirements =
+		paletteRequirement === null
+			? [baseTextureRequirement]
+			: [baseTextureRequirement, paletteRequirement];
 	return {
 		id: bindingId(
 			material,

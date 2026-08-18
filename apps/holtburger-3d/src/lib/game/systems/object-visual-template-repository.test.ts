@@ -352,6 +352,7 @@ function indexedMaterial(): ResolvedMaterial {
 		kind: "texture",
 		luminosity: 0,
 		paletteTextureId: "0x04000001",
+		paletteComposite: null,
 		rawSurfaceFlags: 0,
 		renderSurfaceId: "0x06000001",
 		textureEncoding: "index8",

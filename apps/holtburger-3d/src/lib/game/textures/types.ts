@@ -1,4 +1,9 @@
-import type { DatAssetId, LandblockId } from "../game-types";
+import type {
+	DatAssetId,
+	LandblockId,
+	PaletteComposite,
+	TextureSourceId,
+} from "../game-types";
 
 /** Logical edge behavior required by one texture use. */
 export enum TextureWrapMode {
@@ -46,7 +51,7 @@ declare const terrainCompositionTextureKeyBrand: unique symbol;
 
 /** Logical DAT-backed two-dimensional texture; packing is a replaceable physical binding. */
 export type AssetTextureKey =
-	`asset-texture:${TexturePurpose}:${DatAssetId}` & {
+	`asset-texture:${TexturePurpose}:${TextureSourceId}` & {
 		readonly [assetTextureKeyBrand]: true;
 	};
 
@@ -89,7 +94,13 @@ export interface AssetTextureFact {
 	readonly kind: "asset";
 	readonly key: AssetTextureKey;
 	readonly purpose: TexturePurpose;
-	readonly sourceAssetId: DatAssetId;
+	readonly sourceAssetId: TextureSourceId;
+	/**
+	 * Recipe for a composited palette. Present only on an {@link TexturePurpose.ObjectPalette}
+	 * fact whose material carries an ObjDesc composition; its absence means there is none, and the
+	 * host never derives one from `sourceAssetId`.
+	 */
+	readonly paletteComposite?: PaletteComposite;
 }
 
 /** One complete logical texture resource to materialize from DAT texture sources. */
@@ -255,7 +266,7 @@ export function texturePurposeMipLevelCount(
 /** Build the canonical identity for one DAT-backed two-dimensional texture. */
 export function createAssetTextureKey(
 	purpose: TexturePurpose,
-	sourceAssetId: DatAssetId,
+	sourceAssetId: TextureSourceId,
 ): AssetTextureKey {
 	return `asset-texture:${purpose}:${sourceAssetId}` as AssetTextureKey;
 }
@@ -312,7 +323,7 @@ export function isGeneratedTextureKey(
 export function assetTextureKeyMatchesSource(
 	key: AssetTextureKey,
 	purpose: TexturePurpose,
-	sourceAssetId: DatAssetId,
+	sourceAssetId: TextureSourceId,
 ): boolean {
 	return key === createAssetTextureKey(purpose, sourceAssetId);
 }

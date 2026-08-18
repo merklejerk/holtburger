@@ -21,6 +21,7 @@ describe("object material planning", () => {
 				colorTextureId: "0x05000001",
 				renderSurfaceId: "0x06000001",
 				paletteTextureId: "0x04000001",
+				paletteComposite: null,
 				textureEncoding: "index16",
 			},
 			TextureWrapMode.Repeat,
@@ -42,6 +43,72 @@ describe("object material planning", () => {
 				sourceAssetId: "0x04000001",
 			},
 		]);
+	});
+
+	it("prepares a composited palette under its own identity, not the base palette", () => {
+		const composite = {
+			identity: "palette-composite:04000001:04000abc+18+8",
+			basePaletteId: "0x04000001",
+			ranges: [
+				{
+					replacementPaletteId: "0x04000abc",
+					offset: 0x18,
+					colorCount: 0x08,
+				},
+			],
+		} as const;
+		const plan = planObjectMaterial(
+			{
+				...material(0),
+				kind: "texture",
+				colorTextureId: "0x05000001",
+				renderSurfaceId: "0x06000001",
+				paletteTextureId: "0x04000001",
+				paletteComposite: composite,
+				textureEncoding: "index8",
+			},
+			TextureWrapMode.Repeat,
+			null,
+		);
+
+		expect(plan.paletteTexture).toBe(
+			`asset-texture:object-palette:${composite.identity}`,
+		);
+		expect(plan.textureRequirements[1]).toEqual({
+			kind: "asset",
+			key: plan.paletteTexture,
+			purpose: "object-palette",
+			sourceAssetId: composite.identity,
+			paletteComposite: composite,
+		});
+	});
+
+	it("gives two range sets over one base palette distinct palette textures", () => {
+		const plan = (identity: string) =>
+			planObjectMaterial(
+				{
+					...material(0),
+					kind: "texture",
+					colorTextureId: "0x05000001",
+					renderSurfaceId: "0x06000001",
+					paletteTextureId: "0x04000001",
+					paletteComposite: {
+						identity,
+						basePaletteId: "0x04000001",
+						ranges: [],
+					},
+					textureEncoding: "index8",
+				},
+				TextureWrapMode.Repeat,
+				null,
+			);
+
+		expect(plan("composite:a").paletteTexture).not.toBe(
+			plan("composite:b").paletteTexture,
+		);
+		expect(plan("composite:a").paletteTexture).toBe(
+			plan("composite:a").paletteTexture,
+		);
 	});
 
 	it("keeps logical textures distinct and preserves paletted clip-map facts", () => {
@@ -108,6 +175,7 @@ describe("object material planning", () => {
 					colorTextureId: "0x05000001",
 					renderSurfaceId: "0x06000001",
 					paletteTextureId: null,
+					paletteComposite: null,
 					textureEncoding: "index8",
 				},
 				TextureWrapMode.Clamp,
@@ -139,6 +207,7 @@ function texturedMaterial(
 		colorTextureId,
 		renderSurfaceId: "0x06000001",
 		paletteTextureId: "0x04000001",
+		paletteComposite: null,
 		textureEncoding: "index8",
 	};
 }

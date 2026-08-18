@@ -42,6 +42,7 @@ fn template(wcid: u32) -> WeenieTemplate {
             gender: None,
             heritage_group_name: Some("Gharu'ndim".to_owned()),
             sex: Some("Male".to_owned()),
+            item_type: Some(2),
             clothing_priority: Some(65_536),
             valid_locations: Some(384),
         },

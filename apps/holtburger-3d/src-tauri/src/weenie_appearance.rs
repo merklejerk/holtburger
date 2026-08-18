@@ -13,18 +13,22 @@
 //!    `PaletteBaseId = sex.BasePalette` unconditionally, before its per-property `HasValue`
 //!    guards (`Creature.cs:181`), discarding the weenie's own value.
 
-use holtburger_dat::file_type::char_gen::{CharGen, CharacterGenGender, ObjDesc};
-use holtburger_dat::file_type::{ClothingTable, ObjDesc as ClothingObjDesc};
+use holtburger_dat::file_type::char_gen::{CharGen, CharacterGenGender};
+use holtburger_dat::file_type::{ClothingTable, ObjDesc};
 use holtburger_weenie_catalog::{TemplateAppearance, WieldEntry};
 use holtburger_world::{EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange};
 
-/// Palette ranges ACE writes for the generated body layers (`AddBaseModelData`).
-const SKIN_PALETTE_OFFSET: u32 = 0x0;
-const SKIN_PALETTE_LENGTH: u32 = 0x18;
-const HAIR_PALETTE_OFFSET: u32 = 0x18;
-const HAIR_PALETTE_LENGTH: u32 = 0x8;
-const EYES_PALETTE_OFFSET: u32 = 0x20;
-const EYES_PALETTE_LENGTH: u32 = 0x8;
+/// Palette ranges ACE writes for the generated body layers, in retail's packed eight-color groups.
+///
+/// ACE authors these already packed (`WorldObject_Networking.cs:1011,1019,1027`) — unlike its CLO
+/// ranges, which it divides by eight on the way in (`:967-968`) — so they reach `EntitySubPalette`
+/// through `from_groups` like every other retail-sourced range.
+const SKIN_PALETTE_OFFSET_GROUPS: u32 = 0x0;
+const SKIN_PALETTE_GROUPS: u32 = 0x18;
+const HAIR_PALETTE_OFFSET_GROUPS: u32 = 0x18;
+const HAIR_PALETTE_GROUPS: u32 = 0x8;
+const EYES_PALETTE_OFFSET_GROUPS: u32 = 0x20;
+const EYES_PALETTE_GROUPS: u32 = 0x8;
 
 /// Setup part index carrying the head, and therefore every facial texture substitution.
 const HEAD_PART_INDEX: u8 = 0x10;
@@ -179,8 +183,8 @@ pub fn resolve_template_appearance(
     push_palette(
         &mut resolved,
         skin_palette,
-        SKIN_PALETTE_OFFSET,
-        SKIN_PALETTE_LENGTH,
+        SKIN_PALETTE_OFFSET_GROUPS,
+        SKIN_PALETTE_GROUPS,
     );
 
     let hair_palette = appearance.hair_palette_did.or_else(|| {
@@ -191,8 +195,8 @@ pub fn resolve_template_appearance(
     push_palette(
         &mut resolved,
         hair_palette,
-        HAIR_PALETTE_OFFSET,
-        HAIR_PALETTE_LENGTH,
+        HAIR_PALETTE_OFFSET_GROUPS,
+        HAIR_PALETTE_GROUPS,
     );
 
     let eyes_palette = appearance
@@ -201,8 +205,8 @@ pub fn resolve_template_appearance(
     push_palette(
         &mut resolved,
         eyes_palette,
-        EYES_PALETTE_OFFSET,
-        EYES_PALETTE_LENGTH,
+        EYES_PALETTE_OFFSET_GROUPS,
+        EYES_PALETTE_GROUPS,
     );
 
     (resolved, None)
@@ -237,20 +241,20 @@ fn push_authored_layers(resolved: &mut EntityAppearance, appearance: &TemplateAp
     push_palette(
         resolved,
         appearance.skin_palette_did,
-        SKIN_PALETTE_OFFSET,
-        SKIN_PALETTE_LENGTH,
+        SKIN_PALETTE_OFFSET_GROUPS,
+        SKIN_PALETTE_GROUPS,
     );
     push_palette(
         resolved,
         appearance.hair_palette_did,
-        HAIR_PALETTE_OFFSET,
-        HAIR_PALETTE_LENGTH,
+        HAIR_PALETTE_OFFSET_GROUPS,
+        HAIR_PALETTE_GROUPS,
     );
     push_palette(
         resolved,
         appearance.eyes_palette_did,
-        EYES_PALETTE_OFFSET,
-        EYES_PALETTE_LENGTH,
+        EYES_PALETTE_OFFSET_GROUPS,
+        EYES_PALETTE_GROUPS,
     );
 }
 
@@ -282,15 +286,15 @@ fn push_head_texture(resolved: &mut EntityAppearance, old_texture: u32, new_text
 fn push_palette(
     resolved: &mut EntityAppearance,
     palette_did: Option<u32>,
-    offset: u32,
-    color_count: u32,
+    offset_groups: u32,
+    group_count: u32,
 ) {
     if let Some(palette_did) = palette_did {
-        resolved.sub_palettes.push(EntitySubPalette {
+        resolved.sub_palettes.push(EntitySubPalette::from_groups(
             palette_did,
-            offset,
-            color_count,
-        });
+            offset_groups,
+            group_count,
+        ));
     }
 }
 
@@ -360,13 +364,19 @@ const GENDER_NAMES: [(&str, i32); 2] = [("Male", 1), ("Female", 2)];
 /// row's `shade` column carries a selection probability instead of a CLO shade.
 const DESTINATION_TREASURE: i32 = 8;
 
+/// `ItemType` values ACE partitions worn items on (`Creature_Networking.cs:110,122`).
+pub(crate) const ITEM_TYPE_ARMOR: i32 = 0x2;
+pub(crate) const ITEM_TYPE_CLOTHING: i32 = 0x4;
+
+/// `EquipMask::Clothing | Armor | Cloak`, the slots whose contents paint the wearer's model
+/// (`Creature_Networking.cs:153`). A held weapon or shield is a separate child object parented to
+/// an attach point, so it never contributes ObjDesc paint however its clothing table is authored.
+const EQUIP_MASK_PAINTABLE: u32 = 0x8800_7FFF;
+
 /// `EquipMask` bits ACE treats as armor or extremity when partitioning worn items
 /// (`Creature_Networking.cs:110`). `Armor` already includes `FootWear`.
-const EQUIP_MASK_ARMOR: i32 = 0x0000_7E00 | 0x0000_0100;
-const EQUIP_MASK_EXTREMITY: i32 = 0x0000_0001 | 0x0000_0020 | 0x0000_0100;
-
-/// ACE's `ItemType::Armor`.
-const ITEM_TYPE_ARMOR: i32 = 2;
+const EQUIP_MASK_ARMOR: u32 = 0x0000_7E00 | 0x0000_0100;
+const EQUIP_MASK_EXTREMITY: u32 = 0x0000_0001 | 0x0000_0020 | 0x0000_0100;
 
 /// One wielded item's facts, joined from its own catalog template by the caller.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -375,8 +385,8 @@ pub struct WieldedItem {
     pub wcid: u32,
     /// `PropertyDataId::ClothingBase`; an item without one paints nothing.
     pub clothing_base_did: Option<u32>,
-    /// Raw ACE `ItemType`.
-    pub item_type: i32,
+    /// `PropertyInt::ItemType`. Not `WeenieType`, where armor and clothing are both `Clothing`.
+    pub item_type: Option<i32>,
     /// `PropertyInt::ValidLocations`, the slot ACE wields NPC items at.
     pub valid_locations: Option<i32>,
     /// `PropertyInt::ClothingPriority` coverage mask, used to order clothing.
@@ -449,10 +459,12 @@ pub fn merge_worn_equipment(
             // Authored gap: this garment has no mapping for this body.
             continue;
         };
-        if is_armor(item) {
-            armor.push((coverage.bits(), *item, table));
-        } else {
-            clothing.push((item.clothing_priority.unwrap_or_default(), *item, table));
+        match worn_bucket(item) {
+            Some(WornBucket::Armor) => armor.push((coverage.bits(), *item, table)),
+            Some(WornBucket::Clothing) => {
+                clothing.push((item.clothing_priority.unwrap_or_default(), *item, table))
+            }
+            None => continue,
         }
     }
     clothing.sort_by_key(|(priority, item, _)| (*priority, item.wcid));
@@ -486,7 +498,7 @@ fn build_clothing(
     setup_did: u32,
     item: &WieldedItem,
     palette_set: &impl Fn(u32, f64) -> Option<u32>,
-) -> Result<ClothingObjDesc, String> {
+) -> Result<ObjDesc, String> {
     let resolver = |set: u32, hue: f64| {
         palette_set(set, hue).ok_or(
             holtburger_dat::file_type::ClothingBuildObjDescError::MissingPaletteSet {
@@ -539,15 +551,41 @@ impl std::fmt::Display for WornEquipmentError {
 
 impl std::error::Error for WornEquipmentError {}
 
-/// ACE partitions on `ItemType == Armor || ValidLocations & (Armor | Extremity)`.
-fn is_armor(item: &WieldedItem) -> bool {
-    item.item_type == ITEM_TYPE_ARMOR
-        || item
-            .valid_locations
-            .is_some_and(|locations| locations & (EQUIP_MASK_ARMOR | EQUIP_MASK_EXTREMITY) != 0)
+/// Which of ACE's two worn-item buckets an item falls in, or neither.
+///
+/// `Creature_Networking.cs:110,122` builds exactly these two sets and concatenates them; an item
+/// in neither is never painted. `ItemType` here is `PropertyInt::ItemType` — ACE's `WeenieType`
+/// cannot substitute, because armor and clothing are both `WeenieType::Clothing`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WornBucket {
+    /// Painted first, ordered by `ClothingPriority`.
+    Clothing,
+    /// Painted last, ordered by the coverage its clothing table paints.
+    Armor,
 }
 
-fn push_clothing_obj_desc(appearance: &mut EntityAppearance, obj_desc: &ClothingObjDesc) {
+fn worn_bucket(item: &WieldedItem) -> Option<WornBucket> {
+    let slots = item.valid_locations? as u32;
+    // ACE applies this inside the paint loop rather than while bucketing, but an excluded item
+    // contributes nothing at all — not even coverage — so deciding participation once is the same
+    // answer in one place.
+    if slots & EQUIP_MASK_PAINTABLE == 0 {
+        return None;
+    }
+    if item.item_type == Some(ITEM_TYPE_ARMOR)
+        || slots & (EQUIP_MASK_ARMOR | EQUIP_MASK_EXTREMITY) != 0
+    {
+        return Some(WornBucket::Armor);
+    }
+    if item.item_type == Some(ITEM_TYPE_CLOTHING) {
+        return Some(WornBucket::Clothing);
+    }
+    // Jewellery, ammunition, and anything else a creature wields: ACE leaves these out of the
+    // model entirely, even when they carry a clothing table.
+    None
+}
+
+fn push_clothing_obj_desc(appearance: &mut EntityAppearance, obj_desc: &ObjDesc) {
     for change in &obj_desc.anim_part_changes {
         appearance.part_changes.push(EntityPartChange {
             part_index: change.part_index,
@@ -610,11 +648,11 @@ impl Roll {
 #[cfg(test)]
 pub mod test_support {
     use super::*;
-    use holtburger_dat::file_type::char_gen::{
-        AnimationPartChange, EyeStrip, FaceStrip, HairStyle, HeritageGroup, SubPalette,
+    use holtburger_dat::file_type::char_gen::{EyeStrip, FaceStrip, HairStyle, HeritageGroup};
+    use holtburger_dat::file_type::{
+        AnimationPartChange, CloObjectEffect, CloTextureEffect, ClothingBase, SubPalette,
         TextureMapChange,
     };
-    use holtburger_dat::file_type::{CloObjectEffect, CloTextureEffect, ClothingBase};
     use std::collections::{BTreeMap, HashMap};
 
     pub const GHARUNDIM: u32 = 2;
@@ -776,12 +814,32 @@ mod tests {
         Some(set ^ ((hue * 1024.0) as u32))
     }
 
+    fn expanded(groups: u32) -> u32 {
+        groups * EntitySubPalette::GROUP_COLORS
+    }
+
     fn palette_at(appearance: &EntityAppearance, offset: u32) -> Option<EntitySubPalette> {
         appearance
             .sub_palettes
             .iter()
             .find(|entry| entry.offset == offset)
             .copied()
+    }
+
+    /// ACE authors the body bands already packed, unlike its CLO ranges, so the expansion into
+    /// `EntityAppearance`'s color units is easy to drop — and dropping it leaves the hair band
+    /// sitting inside the skin band, which renders every NPC with one skin tone and one hair
+    /// colour. Asserting against the constants would pass either way, so these are the literal
+    /// expanded colors: three adjacent, non-overlapping bands.
+    #[test]
+    fn generated_body_bands_expand_to_retail_color_counts() {
+        let (resolved, _) =
+            resolve_template_appearance(None, &humanoid(), &synthetic_char_gen(), 42, palette_set);
+
+        let band = |offset| palette_at(&resolved, offset).map(|entry| entry.color_count);
+        assert_eq!(band(0), Some(192), "skin covers 0x18 groups from 0");
+        assert_eq!(band(192), Some(64), "hair covers 0x8 groups from 0x18");
+        assert_eq!(band(256), Some(64), "eyes covers 0x8 groups from 0x20");
     }
 
     #[test]
@@ -792,11 +850,12 @@ mod tests {
         assert_eq!(skipped, None);
         assert_eq!(resolved.palette_did, Some(0x0400_0900));
         assert_eq!(
-            palette_at(&resolved, SKIN_PALETTE_OFFSET).map(|entry| entry.color_count),
-            Some(SKIN_PALETTE_LENGTH)
+            palette_at(&resolved, expanded(SKIN_PALETTE_OFFSET_GROUPS))
+                .map(|entry| entry.color_count),
+            Some(expanded(SKIN_PALETTE_GROUPS))
         );
-        assert!(palette_at(&resolved, HAIR_PALETTE_OFFSET).is_some());
-        assert!(palette_at(&resolved, EYES_PALETTE_OFFSET).is_some());
+        assert!(palette_at(&resolved, expanded(HAIR_PALETTE_OFFSET_GROUPS)).is_some());
+        assert!(palette_at(&resolved, expanded(EYES_PALETTE_OFFSET_GROUPS)).is_some());
         // The head model, plus exactly the eyes, nose, and mouth strips. The hairstyle's own
         // texture change is ACE's body-style branch only, so a generated NPC must not receive it.
         assert_eq!(resolved.part_changes.len(), 1);
@@ -830,15 +889,18 @@ mod tests {
 
         assert_eq!(skipped, None);
         assert_eq!(
-            palette_at(&resolved, SKIN_PALETTE_OFFSET).map(|entry| entry.palette_did),
+            palette_at(&resolved, expanded(SKIN_PALETTE_OFFSET_GROUPS))
+                .map(|entry| entry.palette_did),
             Some(0x0400_DEAD)
         );
         assert_eq!(
-            palette_at(&resolved, HAIR_PALETTE_OFFSET).map(|entry| entry.palette_did),
+            palette_at(&resolved, expanded(HAIR_PALETTE_OFFSET_GROUPS))
+                .map(|entry| entry.palette_did),
             Some(0x0400_BEEF)
         );
         assert_eq!(
-            palette_at(&resolved, EYES_PALETTE_OFFSET).map(|entry| entry.palette_did),
+            palette_at(&resolved, expanded(EYES_PALETTE_OFFSET_GROUPS))
+                .map(|entry| entry.palette_did),
             Some(0x0400_CAFE)
         );
         assert_eq!(resolved.part_changes[0].gfx_obj_did, 0x0200_FEED);
@@ -924,7 +986,8 @@ mod tests {
         assert_eq!(resolved.part_changes, Vec::new());
         assert_eq!(resolved.texture_changes, Vec::new());
         assert_eq!(
-            palette_at(&resolved, SKIN_PALETTE_OFFSET).map(|entry| entry.palette_did),
+            palette_at(&resolved, expanded(SKIN_PALETTE_OFFSET_GROUPS))
+                .map(|entry| entry.palette_did),
             Some(0x0400_0077)
         );
     }
@@ -972,7 +1035,8 @@ mod tests {
             resolve_template_appearance(None, &appearance, &synthetic_char_gen(), 11, palette_set);
 
         assert_eq!(
-            palette_at(&resolved, SKIN_PALETTE_OFFSET).map(|entry| entry.palette_did),
+            palette_at(&resolved, expanded(SKIN_PALETTE_OFFSET_GROUPS))
+                .map(|entry| entry.palette_did),
             Some(0x0400_5150)
         );
         assert!(
@@ -1008,10 +1072,19 @@ mod equipment_tests {
     const HUMAN_MALE: u32 = 0x0200_0001;
     const OTHER_BODY: u32 = 0x0200_0099;
 
-    fn item(
+    fn item(wcid: u32, clothing_base_did: u32, valid_locations: i32) -> WieldedItem {
+        typed_item(
+            wcid,
+            clothing_base_did,
+            Some(ITEM_TYPE_CLOTHING),
+            valid_locations,
+        )
+    }
+
+    fn typed_item(
         wcid: u32,
         clothing_base_did: u32,
-        item_type: i32,
+        item_type: Option<i32>,
         valid_locations: i32,
     ) -> WieldedItem {
         WieldedItem {
@@ -1037,7 +1110,7 @@ mod equipment_tests {
     #[test]
     fn worn_clothing_paints_the_wearer_model() {
         let mut appearance = empty_appearance();
-        let shirt = item(130, 0x1000_0001, 4, 0x1E);
+        let shirt = item(130, 0x1000_0001, 0x1E);
 
         merge_worn_equipment(
             &mut appearance,
@@ -1064,7 +1137,7 @@ mod equipment_tests {
     #[test]
     fn clothing_without_a_mapping_for_this_body_is_skipped() {
         let mut appearance = empty_appearance();
-        let robe = item(2593, 0x1000_0002, 4, 0x1E);
+        let robe = item(2593, 0x1000_0002, 0x1E);
 
         merge_worn_equipment(
             &mut appearance,
@@ -1082,7 +1155,7 @@ mod equipment_tests {
     #[test]
     fn missing_clothing_table_fails_loudly_naming_the_item() {
         let mut appearance = empty_appearance();
-        let boots = item(115, 0x1000_00FF, 2, 0x180);
+        let boots = item(115, 0x1000_00FF, 0x180);
 
         let error = merge_worn_equipment(
             &mut appearance,
@@ -1105,8 +1178,8 @@ mod equipment_tests {
     fn armor_layers_after_clothing() {
         let mut appearance = empty_appearance();
         // Boots partition as armor through FootWear; the tunic is ordinary clothing.
-        let boots = item(115, 0x1000_0007, 2, 0x180);
-        let tunic = item(2593, 0x1000_0001, 4, 0x1E);
+        let boots = item(115, 0x1000_0007, 0x180);
+        let tunic = item(2593, 0x1000_0001, 0x1E);
 
         merge_worn_equipment(
             &mut appearance,
@@ -1145,14 +1218,41 @@ mod equipment_tests {
         );
     }
 
+    /// ACE builds two sets and concatenates them; an item in neither is never painted. Both terms
+    /// have to be exercised, because either alone was enough to break real NPCs: the slot term
+    /// alone misreads the 49 wielded armor pieces that sit outside an armor slot, and the
+    /// `ItemType` term alone was what a `WeenieType` once stood in for, making every worn item
+    /// armor and sorting shirts over plate.
     #[test]
-    fn armor_partition_follows_item_type_or_equip_mask() {
-        // Explicit ItemType::Armor.
-        assert!(is_armor(&item(1, 1, ITEM_TYPE_ARMOR, 0)));
-        // FootWear through the equip mask, as the Collector boots do.
-        assert!(is_armor(&item(2, 1, 4, 0x180)));
-        // A plain shirt is clothing.
-        assert!(!is_armor(&item(3, 1, 4, 0x1E)));
+    fn worn_items_partition_the_way_ace_concatenates_them() {
+        // WCID 33614's plate: armor by slot bits.
+        assert_eq!(worn_bucket(&item(54, 1, 0x600)), Some(WornBucket::Armor));
+        assert_eq!(worn_bucket(&item(106, 1, 0x1800)), Some(WornBucket::Armor));
+        // Sollerets: FootWear, which ACE counts as both armor and extremity.
+        assert_eq!(worn_bucket(&item(107, 1, 0x100)), Some(WornBucket::Armor));
+        // Its shirt and trousers cover chest, arms and legs through *Wear* bits only.
+        assert_eq!(worn_bucket(&item(130, 1, 0x1E)), Some(WornBucket::Clothing));
+        assert_eq!(worn_bucket(&item(127, 1, 0xC4)), Some(WornBucket::Clothing));
+        // ItemType::Armor worn outside an armor slot is still armor.
+        assert_eq!(
+            worn_bucket(&typed_item(1, 1, Some(ITEM_TYPE_ARMOR), 0x1E)),
+            Some(WornBucket::Armor)
+        );
+        // Neither type paints: ACE drops it even though it carries a clothing table.
+        assert_eq!(worn_bucket(&typed_item(2, 1, Some(0x8), 0x8000)), None);
+        assert_eq!(worn_bucket(&typed_item(3, 1, None, 0x8000)), None);
+        // A held weapon carries a clothing table but is a child object, never body paint.
+        assert_eq!(
+            worn_bucket(&typed_item(24611, 1, Some(0x1), 0x10_0000)),
+            None,
+            "Sword of Lost Light must not paint the Royal Guard's torso"
+        );
+        // Even ItemType::Armor in a held slot: the Royal Guard's shield.
+        assert_eq!(
+            worn_bucket(&typed_item(42717, 1, Some(ITEM_TYPE_ARMOR), 0x20_0000)),
+            None,
+            "a shield is worn on the arm as a child object, not painted on"
+        );
     }
 
     /// Ordinary wields always apply; treasure rows compete inside a probability chunk and the
@@ -1197,7 +1297,7 @@ mod equipment_tests {
     #[test]
     fn absent_palette_template_falls_back_instead_of_failing() {
         let mut appearance = empty_appearance();
-        let mut shirt = item(130, 0x1000_0001, 4, 0x1E);
+        let mut shirt = item(130, 0x1000_0001, 0x1E);
         shirt.palette_template = 5;
         shirt.shade = 0.67;
 
@@ -1216,7 +1316,7 @@ mod equipment_tests {
     #[test]
     fn items_without_clothing_paint_nothing() {
         let mut appearance = empty_appearance();
-        let mut trinket = item(999, 0, 4, 0x1E);
+        let mut trinket = item(999, 0, 0x1E);
         trinket.clothing_base_did = None;
 
         merge_worn_equipment(

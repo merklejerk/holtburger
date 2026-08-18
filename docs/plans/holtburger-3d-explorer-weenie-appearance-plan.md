@@ -408,7 +408,14 @@ reachable by a server-fed client, not just by Explorer:
 
 ### Phase 5: Cleanup, Docs, and Gates
 
-Progress: Pending.
+Progress: Complete (2026-08-17). The temporary probes were deleted, the Phase 2 visibility
+concession reverted (`weenie_appearance` is private again now that its Phase 4 caller makes it
+reachable), and the pre-existing duplicate appearance projection collapsed: the app-local
+`material_appearance` is gone and `dynamic_entity_visual_source` consumes
+`holtburger_core::material_appearance_input`, which previously had no production consumer at all.
+Its two existing tests survive unchanged against the shared function. Architecture docs for the
+catalog and core crates record the v2 appearance facts, the overloaded `shade` column, and the
+single projection.
 
 #### Deliverables
 
@@ -430,7 +437,20 @@ Progress: Pending.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- The Phase 2 `pub mod` concession reverted cleanly, confirming it was a genuine phase-ordering
+  artifact rather than a permanent API widening.
+- Debt carried forward, each with a named owner rather than a guess:
+  - Held weapons and shields still await the parenting/animated-attachment mechanism; they are
+    child objects, not ObjDesc data.
+  - The `ObjDescEvent` (0xF625) live-update handler remains client-path debt: the protocol decodes
+    it and nothing dispatches it, so a server changing an appearance after creation is ignored.
+  - Unmatched texture substitutions are dropped silently. That is correct for authored content, so
+    it cannot become an error, but a genuine content fault is currently invisible.
+  - `TopLayerPriority` stays unmodelled (zero world-database rows), collapsing ACE's three layer
+    buckets to two.
+  - The harness population lattice places entities on fixed AC axes rather than camera-relative, so
+    framing a population scenario requires knowing the camera heading. The single-spawn path is
+    camera-relative and was used for the visual proof.
 
 ## Risks and Mitigations
 

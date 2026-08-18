@@ -1,5 +1,6 @@
+use super::material::ObjDesc;
 use crate::graphics::Frame;
-use crate::utils::{align_boundary, read_dotnet_string, read_smart_map, read_smart_vec};
+use crate::utils::{read_dotnet_string, read_smart_map, read_smart_vec};
 use crate::{EOR_PORTAL_NAMESPACE, ResourceKey, StaticResourceKey};
 use binrw::{
     BinRead, BinResult,
@@ -225,7 +226,7 @@ impl CharacterGenGender {
             physics_table: u32::read_le(reader)?,
             motion_table: u32::read_le(reader)?,
             combat_table: u32::read_le(reader)?,
-            base_obj_desc: ObjDesc::read(reader)?,
+            base_obj_desc: ObjDesc::unpack(reader)?,
             hair_color_list: read_smart_vec(reader, u32::read_le)?,
             hair_style_list: read_smart_vec(reader, HairStyle::read)?,
             eye_color_list: read_smart_vec(reader, u32::read_le)?,
@@ -255,7 +256,7 @@ impl HairStyle {
             icon_image: u32::read_le(reader)?,
             bald: u8::read(reader)? == 1,
             alternate_setup: u32::read_le(reader)?,
-            obj_desc: ObjDesc::read(reader)?,
+            obj_desc: ObjDesc::unpack(reader)?,
         })
     }
 }
@@ -273,8 +274,8 @@ impl EyeStrip {
         Ok(Self {
             icon_image: u32::read_le(reader)?,
             icon_image_bald: u32::read_le(reader)?,
-            obj_desc: ObjDesc::read(reader)?,
-            obj_desc_bald: ObjDesc::read(reader)?,
+            obj_desc: ObjDesc::unpack(reader)?,
+            obj_desc_bald: ObjDesc::unpack(reader)?,
         })
     }
 }
@@ -289,7 +290,7 @@ impl FaceStrip {
     fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
         Ok(Self {
             icon_image: u32::read_le(reader)?,
-            obj_desc: ObjDesc::read(reader)?,
+            obj_desc: ObjDesc::unpack(reader)?,
         })
     }
 }
@@ -309,171 +310,6 @@ impl Gear {
             weenie_default: u32::read_le(reader)?,
         })
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ObjDesc {
-    pub palette_id: Option<u32>,
-    pub sub_palettes: Vec<SubPalette>,
-    pub texture_changes: Vec<TextureMapChange>,
-    pub anim_part_changes: Vec<AnimationPartChange>,
-}
-
-impl ObjDesc {
-    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
-        align_boundary(reader, 4)?;
-
-        let marker = u8::read(reader)?;
-        if marker != 0x11 {
-            return Err(binrw::Error::AssertFail {
-                pos: reader.stream_position().unwrap_or(0).saturating_sub(1),
-                message: format!("ObjDesc marker must be 0x11, got 0x{marker:02X}"),
-            });
-        }
-        let num_palettes = u8::read(reader)?;
-        let num_texture_map_changes = u8::read(reader)?;
-        let num_anim_part_changes = u8::read(reader)?;
-
-        let palette_id = if num_palettes > 0 {
-            Some(read_known_type_data_id(reader, 0x0400_0000)?)
-        } else {
-            None
-        };
-
-        let sub_palettes =
-            read_exact_count_vec(reader, usize::from(num_palettes), SubPalette::read)?;
-        let mut texture_changes = Vec::with_capacity(usize::from(num_texture_map_changes));
-        for _ in 0..num_texture_map_changes {
-            add_texture_change_retail(&mut texture_changes, TextureMapChange::read(reader)?);
-        }
-
-        let mut anim_part_changes = Vec::with_capacity(usize::from(num_anim_part_changes));
-        for _ in 0..num_anim_part_changes {
-            add_anim_part_change_retail(&mut anim_part_changes, AnimationPartChange::read(reader)?);
-        }
-
-        let obj_desc = Self {
-            palette_id,
-            sub_palettes,
-            texture_changes,
-            anim_part_changes,
-        };
-
-        align_boundary(reader, 4)?;
-
-        Ok(obj_desc)
-    }
-}
-
-fn add_texture_change_retail(changes: &mut Vec<TextureMapChange>, new_change: TextureMapChange) {
-    if let Some(index) = changes.iter().position(|change| {
-        change.part_index == new_change.part_index && change.old_texture == new_change.old_texture
-    }) {
-        changes.remove(index);
-    }
-
-    if changes.len() < 255 {
-        changes.push(new_change);
-    }
-}
-
-fn add_anim_part_change_retail(
-    changes: &mut Vec<AnimationPartChange>,
-    new_change: AnimationPartChange,
-) {
-    if let Some(index) = changes
-        .iter()
-        .position(|change| change.part_index == new_change.part_index)
-    {
-        changes.remove(index);
-    }
-
-    if changes.len() < 255 {
-        changes.push(new_change);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SubPalette {
-    pub sub_id: u32,
-    pub offset: u32,
-    pub num_colors: u32,
-}
-
-impl SubPalette {
-    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
-        let sub_id = read_known_type_data_id(reader, 0x0400_0000)?;
-        let offset = u32::from(u8::read(reader)?) * 8;
-        let num_colors = match u8::read(reader)? {
-            0 => 256,
-            value => u32::from(value),
-        } * 8;
-
-        Ok(Self {
-            sub_id,
-            offset,
-            num_colors,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TextureMapChange {
-    pub part_index: u8,
-    pub old_texture: u32,
-    pub new_texture: u32,
-}
-
-impl TextureMapChange {
-    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
-        Ok(Self {
-            part_index: u8::read(reader)?,
-            old_texture: read_known_type_data_id(reader, 0x0500_0000)?,
-            new_texture: read_known_type_data_id(reader, 0x0500_0000)?,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AnimationPartChange {
-    pub part_index: u8,
-    pub part_id: u32,
-}
-
-impl AnimationPartChange {
-    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
-        Ok(Self {
-            part_index: u8::read(reader)?,
-            part_id: read_known_type_data_id(reader, 0x0100_0000)?,
-        })
-    }
-}
-
-fn read_exact_count_vec<T, R, F>(
-    reader: &mut R,
-    count: usize,
-    mut read_item: F,
-) -> BinResult<Vec<T>>
-where
-    R: Read + Seek,
-    F: FnMut(&mut R) -> BinResult<T>,
-{
-    let mut values = Vec::with_capacity(count);
-    for _ in 0..count {
-        values.push(read_item(reader)?);
-    }
-    Ok(values)
-}
-
-fn read_known_type_data_id<R: Read + Seek>(reader: &mut R, known_type: u32) -> BinResult<u32> {
-    let value = u16::read_le(reader)?;
-    if (value & 0x8000) != 0 {
-        let lower = u16::read_le(reader)?;
-        let higher = u32::from(value & 0x3FFF) << 16;
-        return Ok(known_type + (higher | u32::from(lower)));
-    }
-
-    Ok(known_type + u32::from(value))
 }
 
 #[cfg(test)]

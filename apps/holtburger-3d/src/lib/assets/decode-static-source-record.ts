@@ -92,8 +92,20 @@ export const staticMaterialSchema = z.object({
 			kind: z.literal("texture"),
 			surfaceTextureId: datId,
 			paletteId: datId.nullable(),
+			paletteComposite: z
+				.object({
+					identity: z.string().min(1),
+					basePaletteId: datId,
+					ranges: z.array(
+						z.object({
+							replacementPaletteId: datId,
+							offset: z.number().int().nonnegative(),
+							colorCount: z.number().int().nonnegative(),
+						}),
+					),
+				})
+				.nullable(),
 			renderSurfaceIds: z.array(datId),
-			defaultPaletteIds: z.array(datId),
 			selectedRenderSurface: z.object({
 				id: datId,
 				format: z.enum([
@@ -609,8 +621,8 @@ export function decodeStaticMaterial(
 		kind: "texture",
 		colorTextureId: entry.source.surfaceTextureId,
 		renderSurfaceId: entry.source.selectedRenderSurface.id,
-		paletteTextureId:
-			entry.source.paletteId ?? entry.source.defaultPaletteIds.at(0) ?? null,
+		paletteTextureId: entry.source.paletteId,
+		paletteComposite: entry.source.paletteComposite,
 		textureEncoding: textureEncoding(entry.source.selectedRenderSurface.format),
 	};
 }

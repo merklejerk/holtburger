@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
 use holtburger_common::Placement;
-use holtburger_content::{ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource};
+use holtburger_content::{
+    ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedPaletteComposite,
+};
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, SetupAppearanceRequest,
 };
@@ -182,10 +184,10 @@ impl ObjectResourceClosure {
 
     /// Serialize materials that appearance resolution already produced.
     ///
-    /// The resolved recipe carries any ObjDesc texture substitution, so re-loading it by surface
-    /// id would silently discard the garment texture and render the base body instead. The cache
-    /// key therefore includes the resolved texture: one surface can appear both substituted and
-    /// unsubstituted within a single closure.
+    /// The resolved recipe carries any ObjDesc texture substitution and palette composition, so
+    /// re-loading it by surface id would silently discard the garment texture and render the base
+    /// body instead. The cache key therefore includes both: one surface can appear substituted and
+    /// unsubstituted, or recoloured and not, within a single closure.
     async fn add_resolved_materials(
         &mut self,
         runtime: &ContentAssetRuntime,
@@ -195,10 +197,17 @@ impl ObjectResourceClosure {
         for slot in slots {
             let recipe = &slot.material;
             let id = match &recipe.source {
-                ResolvedMaterialSource::Texture(texture) => format!(
-                    "surface/{:08x}/texture/{:08x}",
-                    recipe.surface_id, texture.surface_texture_id
-                ),
+                ResolvedMaterialSource::Texture(texture) => {
+                    let palette = texture
+                        .palette_composite
+                        .as_ref()
+                        .map(|composite| format!("/{}", composite.identity))
+                        .unwrap_or_default();
+                    format!(
+                        "surface/{:08x}/texture/{:08x}{palette}",
+                        recipe.surface_id, texture.surface_texture_id
+                    )
+                }
                 ResolvedMaterialSource::SolidColor(_) => {
                     format!("surface/{:08x}", recipe.surface_id)
                 }
@@ -252,11 +261,13 @@ impl ObjectResourceClosure {
                 "kind": "surface-texture",
             }),
         );
-        for palette_id in texture
-            .palette_id
-            .into_iter()
-            .chain(texture.render_surface_default_palette_ids.iter().copied())
-        {
+        for palette_id in texture.palette_id.into_iter().chain(
+            texture
+                .palette_composite
+                .iter()
+                .flat_map(|composite| composite.ranges.iter())
+                .map(|range| range.replacement_palette_id),
+        ) {
             self.texture_dependencies.insert(
                 format!("palette/{palette_id:08x}"),
                 json!({ "id": format!("palette/{palette_id:08x}"), "kind": "palette" }),
@@ -477,8 +488,8 @@ async fn material_recipe_json(
                 "kind": "texture",
                 "surfaceTextureId": dat_id(texture.surface_texture_id),
                 "paletteId": texture.palette_id.map(dat_id),
+                "paletteComposite": texture.palette_composite.as_ref().map(palette_composite_json),
                 "renderSurfaceIds": texture.render_surface_ids.iter().copied().map(dat_id).collect::<Vec<_>>(),
-                "defaultPaletteIds": texture.render_surface_default_palette_ids.iter().copied().map(dat_id).collect::<Vec<_>>(),
                 "selectedRenderSurface": selected,
             })
         }
@@ -491,6 +502,21 @@ async fn material_recipe_json(
         "diffuseScale": recipe.diffuse,
         "source": source,
     }))
+}
+
+/// Serialize one palette composition: the identity its consumers key on, plus the recipe the
+/// pixel request needs to materialize it. The identity is derived upstream and rides through here
+/// unchanged, so nothing downstream re-derives it.
+fn palette_composite_json(composite: &ResolvedPaletteComposite) -> Value {
+    json!({
+        "identity": composite.identity,
+        "basePaletteId": dat_id(composite.base_palette_id),
+        "ranges": composite.ranges.iter().map(|range| json!({
+            "replacementPaletteId": dat_id(range.replacement_palette_id),
+            "offset": range.offset,
+            "colorCount": range.color_count,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 fn render_surface_format_name(format: holtburger_dat::file_type::PixelFormatId) -> &'static str {

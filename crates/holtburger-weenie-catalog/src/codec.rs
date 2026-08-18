@@ -433,6 +433,7 @@ fn encode_appearance(
     encoder.optional_i32(appearance.gender);
     encoder.optional_string(appearance.heritage_group_name.as_deref())?;
     encoder.optional_string(appearance.sex.as_deref())?;
+    encoder.optional_i32(appearance.item_type);
     encoder.optional_i32(appearance.clothing_priority);
     encoder.optional_i32(appearance.valid_locations);
     Ok(())
@@ -455,6 +456,7 @@ fn decode_appearance(decoder: &mut Decoder<'_>) -> Result<TemplateAppearance, Co
         gender: decoder.optional_i32("appearance.gender")?,
         heritage_group_name: decoder.optional_string("appearance.heritage_group_name")?,
         sex: decoder.optional_string("appearance.sex")?,
+        item_type: decoder.optional_i32("appearance.item_type")?,
         clothing_priority: decoder.optional_i32("appearance.clothing_priority")?,
         valid_locations: decoder.optional_i32("appearance.valid_locations")?,
     })

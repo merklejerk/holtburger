@@ -23,7 +23,120 @@ impl Palette {
 
         Ok(Self { id, colors_argb })
     }
+
+    /// Reject the ranges retail's `Palette::Modify` would refuse before writing any color.
+    ///
+    /// Separated from [`Palette::composite`] so a caller that only needs the accept/reject decision
+    /// — selecting which parts an ObjDesc recolours — does not allocate a palette it discards.
+    pub fn check_composite(
+        &self,
+        ranges: &[PaletteRange<'_>],
+    ) -> Result<(), PaletteCompositeError> {
+        for range in ranges {
+            let end = u64::from(range.offset) + u64::from(range.color_count);
+            if end > self.colors_argb.len() as u64 {
+                return Err(PaletteCompositeError::RangeExceedsBase {
+                    base_palette_id: self.id,
+                    base_color_count: self.colors_argb.len(),
+                    offset: range.offset,
+                    color_count: range.color_count,
+                });
+            }
+            if end > range.replacement.colors_argb.len() as u64 {
+                return Err(PaletteCompositeError::RangeExceedsReplacement {
+                    replacement_palette_id: range.replacement.id,
+                    replacement_color_count: range.replacement.colors_argb.len(),
+                    offset: range.offset,
+                    color_count: range.color_count,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Apply ordered replacement ranges over a copy of this palette.
+    ///
+    /// Retail `Palette::Modify` (acclient.c:349800). Ranges are applied in order and later ranges
+    /// overwrite earlier ones where they overlap. The result keeps this palette's id: the
+    /// composition's identity belongs to whoever selected the ranges, not to the format.
+    pub fn composite(&self, ranges: &[PaletteRange<'_>]) -> Result<Self, PaletteCompositeError> {
+        self.check_composite(ranges)?;
+        let mut composited = self.clone();
+        for range in ranges {
+            // check_composite proved both slices are in bounds.
+            let start = range.offset as usize;
+            let end = start + range.color_count as usize;
+            composited.colors_argb[start..end]
+                .copy_from_slice(&range.replacement.colors_argb[start..end]);
+        }
+        Ok(composited)
+    }
 }
+
+/// One replacement range applied over a base palette.
+///
+/// Retail copies from the *same absolute offsets* in the replacement palette
+/// (`Palette::Modify`, acclient.c:349818), so a range is one window shared by both palettes rather
+/// than a source span pasted at a destination offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaletteRange<'a> {
+    pub replacement: &'a Palette,
+    pub offset: u32,
+    pub color_count: u32,
+}
+
+/// Why a palette composition was refused. Both variants abort the whole composition, matching
+/// retail: `Palette::Modify` returns failure, and `CPartArray::SetPalette` (acclient.c:314006) then
+/// recolours nothing rather than applying the ranges that did fit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaletteCompositeError {
+    /// The range reaches past the base palette. Retail checks this explicitly
+    /// (acclient.c:349812), so authored content can and does rely on the resulting no-op.
+    RangeExceedsBase {
+        base_palette_id: u32,
+        base_color_count: usize,
+        offset: u32,
+        color_count: u32,
+    },
+    /// The range reaches past the replacement palette. Retail reads past the allocation instead of
+    /// checking, so nothing authored can depend on what it produces; refusing is the only honest
+    /// answer, and reaching this means a decode or a source is wrong.
+    RangeExceedsReplacement {
+        replacement_palette_id: u32,
+        replacement_color_count: usize,
+        offset: u32,
+        color_count: u32,
+    },
+}
+
+impl fmt::Display for PaletteCompositeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RangeExceedsBase {
+                base_palette_id,
+                base_color_count,
+                offset,
+                color_count,
+            } => write!(
+                formatter,
+                "palette range {offset}..{} reaches past base Palette 0x{base_palette_id:08X}, which has {base_color_count} colors",
+                u64::from(*offset) + u64::from(*color_count)
+            ),
+            Self::RangeExceedsReplacement {
+                replacement_palette_id,
+                replacement_color_count,
+                offset,
+                color_count,
+            } => write!(
+                formatter,
+                "palette range {offset}..{} reaches past replacement Palette 0x{replacement_palette_id:08X}, which has {replacement_color_count} colors",
+                u64::from(*offset) + u64::from(*color_count)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PaletteCompositeError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteSet {
@@ -894,6 +1007,151 @@ mod tests {
         assert_eq!(palette_set.palette_id_for_shade(0.5), Some(0x0400_0002));
         assert_eq!(palette_set.palette_id_for_shade(1.0), Some(0x0400_0003));
         assert_eq!(palette_set.palette_id_for_shade(-0.1), None);
+    }
+
+    fn ramp_palette(id: u32, first_color: u32, color_count: usize) -> Palette {
+        Palette {
+            id,
+            colors_argb: (0..color_count)
+                .map(|index| first_color + index as u32)
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn composite_replaces_colors_at_the_same_absolute_offset_in_both_palettes() {
+        let base = ramp_palette(0x0400_0001, 0x1000, 8);
+        let replacement = ramp_palette(0x0400_0002, 0x2000, 8);
+
+        let composited = base
+            .composite(&[PaletteRange {
+                replacement: &replacement,
+                offset: 2,
+                color_count: 3,
+            }])
+            .expect("in-range composition should succeed");
+
+        // Indices 2..5 take the replacement's colors from indices 2..5, not from its start.
+        assert_eq!(
+            composited.colors_argb,
+            vec![
+                0x1000, 0x1001, 0x2002, 0x2003, 0x2004, 0x1005, 0x1006, 0x1007
+            ]
+        );
+        assert_eq!(composited.id, base.id);
+    }
+
+    #[test]
+    fn a_later_range_overwrites_an_earlier_one_where_they_overlap() {
+        let base = ramp_palette(0x0400_0001, 0x1000, 8);
+        let first = ramp_palette(0x0400_0002, 0x2000, 8);
+        let second = ramp_palette(0x0400_0003, 0x3000, 8);
+
+        let composited = base
+            .composite(&[
+                PaletteRange {
+                    replacement: &first,
+                    offset: 0,
+                    color_count: 4,
+                },
+                PaletteRange {
+                    replacement: &second,
+                    offset: 2,
+                    color_count: 2,
+                },
+            ])
+            .expect("in-range composition should succeed");
+
+        assert_eq!(
+            &composited.colors_argb[..4],
+            &[0x2000, 0x2001, 0x3002, 0x3003]
+        );
+    }
+
+    #[test]
+    fn a_zero_length_range_changes_nothing() {
+        let base = ramp_palette(0x0400_0001, 0x1000, 4);
+        let replacement = ramp_palette(0x0400_0002, 0x2000, 4);
+
+        let composited = base
+            .composite(&[PaletteRange {
+                replacement: &replacement,
+                offset: 4,
+                color_count: 0,
+            }])
+            .expect("an empty range at the end boundary is in range");
+
+        assert_eq!(composited.colors_argb, base.colors_argb);
+    }
+
+    #[test]
+    fn a_range_ending_exactly_at_the_last_color_is_accepted() {
+        let base = ramp_palette(0x0400_0001, 0x1000, 4);
+        let replacement = ramp_palette(0x0400_0002, 0x2000, 4);
+
+        let composited = base
+            .composite(&[PaletteRange {
+                replacement: &replacement,
+                offset: 1,
+                color_count: 3,
+            }])
+            .expect("a range ending on the boundary is in range");
+
+        assert_eq!(composited.colors_argb, vec![0x1000, 0x2001, 0x2002, 0x2003]);
+    }
+
+    #[test]
+    fn a_range_past_the_base_palette_refuses_the_whole_composition() {
+        let base = ramp_palette(0x0400_0001, 0x1000, 4);
+        let replacement = ramp_palette(0x0400_0002, 0x2000, 8);
+
+        let ranges = [
+            PaletteRange {
+                replacement: &replacement,
+                offset: 0,
+                color_count: 2,
+            },
+            PaletteRange {
+                replacement: &replacement,
+                offset: 3,
+                color_count: 2,
+            },
+        ];
+
+        // Retail refuses at the second range and applies neither, so the first must not survive.
+        assert_eq!(
+            base.composite(&ranges),
+            Err(PaletteCompositeError::RangeExceedsBase {
+                base_palette_id: 0x0400_0001,
+                base_color_count: 4,
+                offset: 3,
+                color_count: 2,
+            })
+        );
+        assert_eq!(
+            base.check_composite(&ranges),
+            base.composite(&ranges).map(|_| ())
+        );
+    }
+
+    #[test]
+    fn a_range_past_the_replacement_palette_is_refused_rather_than_overread() {
+        let base = ramp_palette(0x0400_0001, 0x1000, 8);
+        let replacement = ramp_palette(0x0400_0002, 0x2000, 4);
+
+        assert_eq!(
+            base.composite(&[PaletteRange {
+                replacement: &replacement,
+                offset: 2,
+                color_count: 4,
+            }]),
+            Err(PaletteCompositeError::RangeExceedsReplacement {
+                replacement_palette_id: 0x0400_0002,
+                replacement_color_count: 4,
+                offset: 2,
+                color_count: 4,
+            })
+        );
     }
 
     #[test]

@@ -3,8 +3,9 @@ use std::io::Cursor;
 use anyhow::{Context, Result, anyhow};
 use holtburger_dat::file_type::{
     AnimationPartChange, CSurface, CSurfaceSource, ClothingBuildObjDescError, ClothingTable,
-    EnvCell, GfxObj, ObjDesc, Palette, PaletteSet, REGION_DESC_FILE_ID, RegionDesc, RenderSurface,
-    SetupModel, SubPalette, SurfaceTexture, SurfaceType, TextureMapChange,
+    EnvCell, GfxObj, ObjDesc, Palette, PaletteCompositeError, PaletteRange, PaletteSet,
+    REGION_DESC_FILE_ID, RegionDesc, RenderSurface, SetupModel, SubPalette, SurfaceTexture,
+    SurfaceType, TextureMapChange,
 };
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
@@ -46,8 +47,56 @@ pub enum ResolvedMaterialSource {
 pub struct ResolvedTextureMaterial {
     pub surface_texture_id: u32,
     pub render_surface_ids: Vec<u32>,
+    /// The palette this material actually samples.
+    ///
+    /// Retail resolves this once at load: a surface that authors no palette adopts its texture's
+    /// own (`CSurface::InitEnd`, acclient.c:343300-343311). Consumers read this rather than
+    /// re-deriving it from the render surfaces.
     pub palette_id: Option<u32>,
-    pub render_surface_default_palette_ids: Vec<u32>,
+    /// ObjDesc palette composition that replaces `palette_id` for this material.
+    ///
+    /// Present only when the owning setup part's base palette is the one the ObjDesc selects.
+    pub palette_composite: Option<ResolvedPaletteComposite>,
+}
+
+/// One ObjDesc-composited palette, as a recipe plus the identity of its result.
+///
+/// The identity is derived here, at the layer that decides which materials receive the
+/// composition, so materials sharing a base palette and range set share one prepared texture and
+/// no consumer re-derives it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedPaletteComposite {
+    pub identity: String,
+    pub base_palette_id: u32,
+    pub ranges: Vec<ResolvedPaletteRange>,
+}
+
+/// One replacement range within a palette composition, in expanded color units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedPaletteRange {
+    pub replacement_palette_id: u32,
+    pub offset: u32,
+    pub color_count: u32,
+}
+
+impl ResolvedPaletteComposite {
+    /// Build the stable identity for one base palette and its ordered ranges.
+    ///
+    /// Order is significant: later ranges overwrite earlier ones where they overlap, so two range
+    /// sets differing only in order are different palettes and must not share a prepared texture.
+    fn derive_identity(base_palette_id: u32, ranges: &[ResolvedPaletteRange]) -> String {
+        let ranges = ranges
+            .iter()
+            .map(|range| {
+                format!(
+                    "{:08x}+{:x}+{:x}",
+                    range.replacement_palette_id, range.offset, range.color_count
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("palette-composite:{base_palette_id:08x}:{ranges}")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -453,18 +502,26 @@ impl ContentRepository {
             }
         }
 
+        let palette_composite = match appearance {
+            Some(obj_desc) => resolve_palette_composite(self, obj_desc)?,
+            None => None,
+        };
+
         let mut parts = Vec::with_capacity(selected_parts.len());
         for (part_index, gfx_obj_id) in selected_parts.into_iter().enumerate() {
             let texture_changes = appearance
                 .map(|obj_desc| texture_changes_for_part(&obj_desc.texture_changes, part_index))
                 .unwrap_or_default();
-            let material_slots = self
+            let mut material_slots = self
                 .resolve_gfx_obj_material_slots_with_texture_changes(gfx_obj_id, &texture_changes)
                 .with_context(|| {
                     format!(
                         "failed to resolve setup 0x{setup_model_id:08X} part {part_index} materials"
                     )
                 })?;
+            if let Some(composite) = &palette_composite {
+                apply_palette_composite(&mut material_slots, composite);
+            }
 
             parts.push(ResolvedSetupAppearancePart {
                 part_index,
@@ -717,17 +774,26 @@ fn material_recipe_from_dependency(
             } else {
                 read_surface_texture_dependency(content, surface_texture_id)?
             };
-            let render_surface_default_palette_ids = surface_texture
-                .render_surfaces
-                .iter()
-                .filter_map(|dependency| dependency.render_surface.default_palette_id)
-                .collect();
+            // Retail backfills a surface that authors no palette from its texture's own palette
+            // while loading it, and stores that as the surface's original palette
+            // (`CSurface::InitEnd`, acclient.c:343300-343311). Every later decision reads the one
+            // result: what the shader samples, and which parts an ObjDesc recolours.
+            let palette_id = if orig_palette_id != 0 {
+                Some(orig_palette_id)
+            } else {
+                surface_texture
+                    .render_surfaces
+                    .iter()
+                    .find_map(|dependency| dependency.render_surface.default_palette_id)
+            };
 
             ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
                 surface_texture_id,
                 render_surface_ids: surface_texture.surface_texture.render_surface_ids,
-                palette_id: (orig_palette_id != 0).then_some(orig_palette_id),
-                render_surface_default_palette_ids,
+                palette_id,
+                // The owning setup part decides this; a material resolved on its own has no
+                // ObjDesc to select it.
+                palette_composite: None,
             })
         }
     };
@@ -765,6 +831,104 @@ fn texture_override_for_material(
         .map(|change| change.new_texture)
 }
 
+/// Resolve and validate an ObjDesc's palette composition once for a whole setup.
+///
+/// Returns `None` when the ObjDesc selects no base palette or carries no ranges, and when retail's
+/// `Palette::Modify` would refuse a range: it returns failure at acclient.c:349812, and
+/// `CPartArray::SetPalette` (acclient.c:314006) then recolours nothing at all rather than applying
+/// the ranges that did fit. A range past its *replacement* palette is a different matter — retail
+/// reads past the allocation there instead of checking, so nothing authored can depend on the
+/// result and reaching it means a source or a decode is wrong.
+fn resolve_palette_composite(
+    content: &ContentRepository,
+    obj_desc: &ObjDesc,
+) -> Result<Option<ResolvedPaletteComposite>> {
+    let Some(base_palette_id) = obj_desc.palette_id else {
+        return Ok(None);
+    };
+    if obj_desc.sub_palettes.is_empty() {
+        return Ok(None);
+    }
+
+    let base = read_palette(content, base_palette_id)?;
+    let replacements = obj_desc
+        .sub_palettes
+        .iter()
+        .map(|sub_palette| read_palette(content, sub_palette.sub_id))
+        .collect::<Result<Vec<_>>>()?;
+    let ranges = obj_desc
+        .sub_palettes
+        .iter()
+        .zip(&replacements)
+        .map(|(sub_palette, replacement)| PaletteRange {
+            replacement,
+            offset: sub_palette.offset,
+            color_count: sub_palette.num_colors,
+        })
+        .collect::<Vec<_>>();
+
+    match base.check_composite(&ranges) {
+        Ok(()) => {}
+        Err(PaletteCompositeError::RangeExceedsBase { .. }) => return Ok(None),
+        Err(error) => {
+            return Err(anyhow!(error).context(format!(
+                "ObjDesc palette 0x{base_palette_id:08X} composition is unusable"
+            )));
+        }
+    }
+
+    let ranges = obj_desc
+        .sub_palettes
+        .iter()
+        .map(|sub_palette| ResolvedPaletteRange {
+            replacement_palette_id: sub_palette.sub_id,
+            offset: sub_palette.offset,
+            color_count: sub_palette.num_colors,
+        })
+        .collect::<Vec<_>>();
+    Ok(Some(ResolvedPaletteComposite {
+        identity: ResolvedPaletteComposite::derive_identity(base_palette_id, &ranges),
+        base_palette_id,
+        ranges,
+    }))
+}
+
+/// Apply retail's part-level palette selection to one setup part's resolved materials.
+///
+/// `CPartArray::SetPalette` (acclient.c:314006) matches the ObjDesc's base palette against the
+/// *part's* base palette — the first surface carrying an authored palette, per
+/// `CPhysicsPart::DetermineBasePal` (acclient.c:303379) — and then hands the composite to every
+/// surface of that part, not only the surface that matched. So the decision is per part while the
+/// effect is per material, and a part sitting on a different base palette is left alone.
+///
+/// The match reads `palette_id`, which already resolves a surface that authors no palette to the
+/// one its texture supplies, exactly as retail's load-time backfill does
+/// (`CSurface::InitEnd`, acclient.c:343300-343311). Almost every character surface reaches its
+/// palette that way, so matching only authored palettes would recolour nothing at all.
+fn apply_palette_composite(
+    slots: &mut [ResolvedMaterialSlot],
+    composite: &ResolvedPaletteComposite,
+) {
+    let part_base_palette_id = slots.iter().find_map(|slot| match &slot.material.source {
+        ResolvedMaterialSource::Texture(texture) => texture.palette_id,
+        ResolvedMaterialSource::SolidColor(_) => None,
+    });
+    if part_base_palette_id != Some(composite.base_palette_id) {
+        return;
+    }
+
+    for slot in slots {
+        let ResolvedMaterialSource::Texture(texture) = &mut slot.material.source else {
+            continue;
+        };
+        // Retail hands the composite to every surface of the part, but a surface with no palette
+        // samples none, so carrying it there would only prepare a texture nothing reads.
+        if texture.palette_id.is_some() {
+            texture.palette_composite = Some(composite.clone());
+        }
+    }
+}
+
 fn texture_changes_for_part(
     texture_changes: &[TextureMapChange],
     part_index: usize,
@@ -790,11 +954,7 @@ fn collect_setup_palette_dependencies(parts: &[ResolvedSetupAppearancePart]) -> 
         .flat_map(|part| part.material_slots.iter())
         .flat_map(|slot| match &slot.material.source {
             ResolvedMaterialSource::SolidColor(_) => Vec::new(),
-            ResolvedMaterialSource::Texture(texture) => texture
-                .palette_id
-                .into_iter()
-                .chain(texture.render_surface_default_palette_ids.iter().copied())
-                .collect(),
+            ResolvedMaterialSource::Texture(texture) => texture.palette_id.into_iter().collect(),
         })
         .collect()
 }
@@ -904,6 +1064,149 @@ mod texture_override_tests {
         assert_eq!(
             texture_override_for_material(&textured(0x0500_0BB0), &changes),
             None
+        );
+    }
+}
+
+#[cfg(test)]
+mod palette_composite_tests {
+    use super::*;
+
+    fn range(replacement_palette_id: u32, offset: u32, color_count: u32) -> ResolvedPaletteRange {
+        ResolvedPaletteRange {
+            replacement_palette_id,
+            offset,
+            color_count,
+        }
+    }
+
+    fn composite(
+        base_palette_id: u32,
+        ranges: Vec<ResolvedPaletteRange>,
+    ) -> ResolvedPaletteComposite {
+        ResolvedPaletteComposite {
+            identity: ResolvedPaletteComposite::derive_identity(base_palette_id, &ranges),
+            base_palette_id,
+            ranges,
+        }
+    }
+
+    /// One textured slot. `palette_id` is the effective palette the material samples, so `None`
+    /// models a surface that samples none at all rather than one that merely authors none.
+    fn slot(slot_index: usize, palette_id: Option<u32>) -> ResolvedMaterialSlot {
+        ResolvedMaterialSlot {
+            slot_index,
+            material: ResolvedMaterialRecipe {
+                surface_id: 0x0800_0001 + slot_index as u32,
+                surface_type: SurfaceType::BASE1_IMAGE,
+                source: ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
+                    surface_texture_id: 0x0500_0001,
+                    render_surface_ids: vec![0x0600_0001],
+                    palette_id,
+                    palette_composite: None,
+                }),
+                translucency: 0.0,
+                luminosity: 0.0,
+                diffuse: 0.0,
+            },
+        }
+    }
+
+    fn composites(slots: &[ResolvedMaterialSlot]) -> Vec<Option<String>> {
+        slots
+            .iter()
+            .map(|slot| match &slot.material.source {
+                ResolvedMaterialSource::Texture(texture) => texture
+                    .palette_composite
+                    .as_ref()
+                    .map(|composite| composite.identity.clone()),
+                ResolvedMaterialSource::SolidColor(_) => None,
+            })
+            .collect()
+    }
+
+    /// Retail matches the part's base palette, then recolours every surface of that part, so a
+    /// sibling surface on a different palette is recoloured too.
+    #[test]
+    fn a_matching_part_hands_the_composite_to_all_of_its_paletted_materials() {
+        let mut slots = vec![slot(0, Some(0x0400_0AAA)), slot(1, Some(0x0400_0BBB))];
+        let composite = composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]);
+
+        apply_palette_composite(&mut slots, &composite);
+
+        let identity = composite.identity.clone();
+        assert_eq!(
+            composites(&slots),
+            vec![Some(identity.clone()), Some(identity)]
+        );
+    }
+
+    /// The part's base palette is the first surface that has one, so a leading unpaletted surface
+    /// must not stop the part from matching.
+    #[test]
+    fn the_part_base_palette_skips_leading_materials_without_a_palette() {
+        let mut slots = vec![slot(0, None), slot(1, Some(0x0400_0AAA))];
+
+        apply_palette_composite(
+            &mut slots,
+            &composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]),
+        );
+
+        // The unpaletted surface samples no palette, so it gains nothing to prepare.
+        assert_eq!(composites(&slots)[0], None);
+        assert!(composites(&slots)[1].is_some());
+    }
+
+    #[test]
+    fn a_part_on_another_base_palette_is_left_alone() {
+        let mut slots = vec![slot(0, Some(0x0400_0BBB))];
+
+        apply_palette_composite(
+            &mut slots,
+            &composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]),
+        );
+
+        assert_eq!(composites(&slots), vec![None]);
+    }
+
+    /// A part whose surfaces sample no palette at all — a direct-color static — has nothing an
+    /// ObjDesc can select, and must render byte-identically.
+    #[test]
+    fn a_part_with_no_palette_at_all_is_left_alone() {
+        let mut slots = vec![slot(0, None), slot(1, None)];
+
+        apply_palette_composite(
+            &mut slots,
+            &composite(0x0400_0AAA, vec![range(0x0400_0CCC, 0x18, 0x08)]),
+        );
+
+        assert_eq!(composites(&slots), vec![None, None]);
+    }
+
+    #[test]
+    fn identity_is_stable_and_distinguishes_base_palette_and_range_order() {
+        let first = range(0x0400_0CCC, 0x18, 0x08);
+        let second = range(0x0400_0DDD, 0x20, 0x08);
+        let identity = |base, ranges: Vec<ResolvedPaletteRange>| {
+            ResolvedPaletteComposite::derive_identity(base, &ranges)
+        };
+
+        assert_eq!(
+            identity(0x0400_0AAA, vec![first, second]),
+            identity(0x0400_0AAA, vec![first, second])
+        );
+        assert_ne!(
+            identity(0x0400_0AAA, vec![first, second]),
+            identity(0x0400_0BBB, vec![first, second])
+        );
+        // Later ranges overwrite earlier ones, so order is part of the result.
+        assert_ne!(
+            identity(0x0400_0AAA, vec![first, second]),
+            identity(0x0400_0AAA, vec![second, first])
+        );
+        assert_ne!(
+            identity(0x0400_0AAA, vec![first]),
+            identity(0x0400_0AAA, vec![first, second])
         );
     }
 }

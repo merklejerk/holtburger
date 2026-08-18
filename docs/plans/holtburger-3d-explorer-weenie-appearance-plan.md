@@ -1,6 +1,6 @@
 # Holtburger 3D Explorer Weenie Appearance Plan
 
-Status: Phases 1-5 complete 2026-08-17; Phase 6 (sub-palette rendering) pending
+Status: Complete 2026-08-17 (Phases 1-6)
 Created: 2026-08-17
 Parent: follow-on to `holtburger-3d-explorer-weenie-dynamic-runtime-plan.md` (complete 2026-08-17)
 
@@ -467,7 +467,7 @@ single projection.
 
 ### Phase 6: Apply ObjDesc Sub-Palettes
 
-Progress: Pending.
+Progress: Complete.
 
 Added 2026-08-17 after Phase 5. Phases 1-5 land a complete, correct `EntityAppearance`, and the
 Phase 4 material fixes make its texture changes render. Its **sub-palettes still render nowhere**:
@@ -482,24 +482,26 @@ sub-palettes in the same ObjDesc.
 | Question | Source |
 | --- | --- |
 | How a base palette and sub-palettes combine, and who receives the result | `acclient.c:313977-314040` (`CPartArray::SetPalette`), called with `objdesc->paletteID` at `:314208` |
-| The original palette a part is matched against | `acclient.c:302979` (`CPhysicsPart::GetOriginalPaletteID`), `CSurface::GetOriginalPaletteID` field 33, which is our `CSurface.orig_palette_id` |
-| Range replacement rule | `Palette::Modify`; ACViewer `Render/TextureCache.cs:332-337` — `paletteColors[j + offset] = newPalette.Colors[j + offset]`, replacement indexed at the same absolute offset |
+| The base palette a **part** is matched against | `acclient.c:303379` (`CPhysicsPart::DetermineBasePal`) — the first surface with a nonzero `orig_palette_id`; `SetPalette` reads it through `CPhysicsPart::GetOriginalPaletteID` (`:302979`) |
+| Where a surface's `orig_palette_id` comes from when it authors none | `acclient.c:343300-343311` (`CSurface::InitEnd`) — a surface with no authored palette **adopts its texture's own palette** and stores it as `orig_palette_id` while loading |
+| Range replacement rule and its bounds | `acclient.c:349800-349820` (`Palette::Modify`) — copies `dest[i] = src[i]` over `offset..offset+count`, refusing outright when the range passes the base palette's color count; ACViewer `Render/TextureCache.cs:332-337` agrees |
 
 Settled semantics: the ObjDesc `PaletteID` is a **selector, not an override**. One modified palette
-is built from that base plus the ranges, then applied only to parts whose *original* palette ID
-equals it; parts on a different base palette are untouched. An ObjDesc carrying sub-palettes but no
-valid base palette recolours nothing, because `SetPalette` returns early.
+is built from that base plus the ranges, then applied to every surface of each part whose base
+palette equals it; parts on a different base palette are untouched. An ObjDesc carrying sub-palettes
+but no valid base palette recolours nothing, because `SetPalette` returns early.
+
+Two of the assumptions this phase was written on were **wrong**, and both were disproven from the
+decompile during execution rather than after. They are recorded under Decisions below.
 
 #### Deliverables
 
 - `holtburger-dat`: one pure composite of a `Palette` with ordered ranges, beside
   `palette_id_for_shade`. Format semantics over its own type; no content, GPU, or entity concern.
-- `holtburger-content::material_graph`: `palette_override_for_material`, the exact structural
-  sibling of the landed `texture_override_for_material` — match the ObjDesc base against the
-  material's `orig_palette_id`, and on a match emit the composited palette's recipe plus its stable
-  identity in `ResolvedTextureMaterial`. Match strictly on `orig_palette_id`: a material with no
-  CSurface palette must not match through its RenderSurface default, or parts retail leaves alone
-  get recoloured.
+- `holtburger-content::material_graph`: `apply_palette_selection`, applied once per setup part
+  after its material slots resolve — derive the part's base palette from its ordered slots, compare
+  it against the ObjDesc base, and on a match emit the composition's recipe plus its stable identity
+  onto every paletted material of that part. The decision is per part; the effect is per material.
 - Identity is derived once here and carried in the contract type, keyed by base palette plus the
   ordered ranges, so several materials sharing a base palette share one prepared texture and
   consumers re-derive nothing.
@@ -508,24 +510,162 @@ valid base palette recolours nothing, because `SetPalette` returns early.
   the pixel request through both the Tauri command and the dev content host.
 - Frontend: decode the identity and recipe, request the composited palette, and treat the identity
   as opaque. `createAssetTextureKey` keeps its shape; no hashing or re-derivation in the frontend.
-- Focused tests: range replacement at absolute offsets including a zero-length and a boundary
-  range; selector semantics (non-matching original palette untouched, absent base palette a
-  no-op); strict `orig_palette_id` matching that ignores the RenderSurface default; and identity
-  stability and distinctness across range sets.
+- `material_graph` also resolves the **effective** palette once, collapsing `palette_id` and
+  `render_surface_default_palette_ids` into one field that means "the palette this material
+  samples", matching retail's load-time adoption. The frontend's `?? defaultPaletteIds.at(0)`
+  re-derivation and the whole `defaultPaletteIds` contract field go away.
+- Focused tests: range replacement at absolute offsets including a zero-length range, a boundary
+  range, overlap order, and both refusal modes; part-level selector semantics (all paletted
+  materials of a matching part, a leading unpaletted material skipped, a part on another base
+  palette and a part with no palette untouched); identity stability and distinctness across base
+  palettes and range order; the host compositing the right colors and echoing the requested
+  identity; and the frontend requesting an authored palette by resource id and a composition by
+  identity.
 
 #### Acceptance Criteria
 
 - WCIDs 3921 and 3922 render with visibly different clothing colours, skin tone, and hair colour in
   the browser harness, with zero browser errors.
 - A material whose original palette differs from the ObjDesc base renders exactly as before, proven
-  by an unchanged non-humanoid and an unchanged static-object scenario.
+  by an unchanged static-object scenario.
 - Two entities sharing a base palette and range set share one prepared palette texture; two with
-  different ranges do not. Teardown returns texture counts to baseline.
+  different ranges do not.
 - No change to the resolver, catalog, driver, feed schema, or protocol.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- **The match is per part, not per material.** The phase was written expecting a
+  `palette_override_for_material` sibling of `texture_override_for_material`. `CPartArray::SetPalette`
+  (`acclient.c:314006`) instead matches the ObjDesc base against the *part's* base palette — the
+  first surface with a palette, per `CPhysicsPart::DetermineBasePal` (`:303379`) — and then hands
+  the composite to **every** surface of that part through `CPhysicsPart::UsePalette` (`:303502`),
+  including surfaces on a different palette. The shape landed as a per-part
+  `apply_palette_selection` over already-resolved slots. Materials that sample no palette are
+  skipped: retail hands them the composite too, but nothing reads it there.
+- **The plan's strict-matching warning was inverted, and following it rendered nothing.** The phase
+  warned that a material with no `CSurface` palette must not match through its RenderSurface
+  default. Implemented that way, the first browser run recoloured *nothing*: a probe against real
+  content showed every one of WCID 3921's nineteen materials has `orig_palette_id == 0`, so no part
+  ever matched. `CSurface::InitEnd` (`acclient.c:343300-343311`) resolves it: at load, a surface
+  with no authored palette **adopts its texture's palette and stores it as `orig_palette_id`**. The
+  RenderSurface default is not a fallback the renderer invents — it is where almost every character
+  surface's original palette legitimately comes from.
+- **That fix was taken as a collapse, not a fallback.** Rather than teach the matcher a second
+  lookup, `material_graph` now resolves the effective palette once at the layer that owns the
+  decision and stores it in `palette_id`. `render_surface_default_palette_ids` and the
+  `defaultPaletteIds` contract field are deleted, and the frontend's
+  `paletteId ?? defaultPaletteIds.at(0)` re-derivation with them. Statics were proven unchanged by
+  before/after capture: the diff (3,758 px, worst channel delta 57) is *smaller* than the
+  run-to-run noise between two captures of the same build (3,901 px, delta 62), because the
+  reference scene contains a live particle flame.
+- **A refused range refuses the whole composition.** `Palette::Modify` returns 0 on the first range
+  past the base palette, and `SetPalette` then applies nothing — it does not keep the ranges that
+  fit. `check_composite` is separated from `composite` so the selection decision does not allocate
+  a palette it discards, and the two refusal reasons are distinct: a range past the *base* is an
+  authored-content rule retail defines and we match silently, while a range past the *replacement*
+  is a retail buffer overread that nothing can depend on, so we fail loudly.
+- **The composite identity is not a DAT id.** `AssetTextureKey` was widened from `DatAssetId` to a
+  `TextureSourceId` union so the type says what it holds. `DatAssetId` is an unbranded string, so
+  this buys naming honesty rather than checking — worth it, since the alternative was a field named
+  for a DAT id carrying something else.
+- `load_texture_pixels_bytes` now takes the typed request instead of three loose strings, which
+  deleted the dev host's duplicate `TexturePixelsRequest` struct.
+- **Concession:** `material_graph` validates the composition and the host materializes it, so the
+  ranges are walked twice per identity. `check_composite` keeps the first walk allocation-free, and
+  the two happen at different times for different consumers keyed on one identity.
+- **Debt found and taken (2026-08-18, at the user's call).** `char_gen.rs` carried a private
+  duplicate of `ObjDesc`, `SubPalette`, `TextureMapChange`, `AnimationPartChange`, both retail
+  dedup helpers, and `read_known_type_data_id`, alongside the exported ones in `material.rs`. Six
+  of the seven were byte-identical; `ObjDesc` differed only cosmetically (a private `read` versus
+  the public `unpack`, one loop inlined instead of routed through a local helper) and in derives,
+  since `material::ObjDesc` needs `Eq`/`Hash` to key the closure's definition cache. Both copies
+  correctly implemented the same retail quirks — the `num_colors == 0 → 256` expansion, the `× 8`
+  offset scaling, and remove-then-append dedup capped at 255 — so the risk was drift, not a live
+  bug, and drift of exactly the kind this phase spent its time chasing.
+
+  `char_gen` now imports the one `ObjDesc`. Every use of both local read helpers lived inside the
+  duplicated block, so they went too, along with a then-unused `align_boundary` import: **164 lines
+  deleted, none added.** The payoff lands in the resolver, where the aliased dual import
+  (`ObjDesc` from `char_gen` plus `ObjDesc as ClothingObjDesc` from `file_type`) collapses to one
+  name covering both the CharGen strip path and the CLO path.
+
+  Verified three ways rather than by inspection: the real-content `CharGen` fixture test parses the
+  whole table, which reads past every embedded `ObjDesc` and would misalign on a one-byte decode
+  difference; WCID 3921's resolved appearance is unchanged across the swap, all eight sub-palettes
+  and the full three-spawn deterministic roll matching the pre-dedup capture exactly; and its
+  rendered frame is **pixel-identical**, zero differing pixels.
+
+- **Follow-up defect: the generated face bands were emitted in packed units (2026-08-18).** Reported
+  from the Explorer: clothing recoloured but every NPC kept one skin tone and ginger hair. ACE
+  divides its CLO ranges by eight on the way in (`WorldObject_Networking.cs:967-968`) but authors
+  the skin, hair, and eyes constants **already packed** (`:1011,1019,1027`). The resolver copied
+  those three literals into `EntityAppearance`, whose contract is expanded colors — a factor of
+  eight short. Skin covered 24 of its 192 colors, and hair and eyes landed *inside* the skin band
+  instead of after it, so hair was never recoloured at all and eight skin entries were stomped.
+  Clothing looked right throughout because its ranges come from the CLO decoder, which expands
+  correctly.
+
+  Fixed at the contract: `EntitySubPalette::from_groups` now owns the one expansion, and all three
+  adapters — wire `ModelData`, the catalog-backed template path, and the resolver — go through it,
+  removing three scattered `* 8` literals. Real content confirms the bands now tile: skin 0-192,
+  hair 192-256, eyes 256-320, and the independently decoded CLO ranges begin at exactly 320.
+  Four NPCs spawned with distinct GUIDs in one session render with visibly different hair colours,
+  hairstyles, and skin tones.
+
+  **Both tests that should have caught this were hollow, and both are replaced.** The resolver test
+  compared `color_count` against the same constant that produced it, so it passed either way; the
+  driver test hard-coded `0x0, 0x18, 0x20` as raw offsets, asserting the defect. They now assert
+  literal expanded colors with the packed-versus-raw trap named in the comment, and the resolver
+  test was confirmed to fail (`left: Some(24), right: Some(192)`) with the expansion reverted.
+
+  The risk table below had flagged exactly this ("Palette offset unit confusion") and named the
+  mitigation as a single conversion at the `appearance()` boundary. The mitigation was real but
+  incomplete: it covered the catalog path and missed the CharGen constants, which enter from ACE
+  rather than from the DAT. A named risk is not a guarantee.
+
+- **Follow-up defect: armor never survived the layer merge (2026-08-18).** Reported from the
+  Explorer with WCID 33614, Pathwarden Koro Ijida: clothing rendered, the Yoroi plate did not.
+  `is_armor` short-circuited on `item.item_type == ItemType::Armor`, but the field was fed the
+  catalog's `weenie_type` column. Armor and clothing are **both** `WeenieType::Clothing == 2`, and
+  `ItemType::Armor` is also `2`, so the term was unconditionally true for every worn item. All six
+  of the Pathwarden's items landed in the armor bucket, sorted by CLO coverage instead of the
+  clothing/armor split, and the shirt and trousers ended up painting over the cuirass, sleeves and
+  leggings.
+
+  The `EquipMask` constants were correct throughout (`0x7F00` armor, `0x121` extremity) and the
+  slot term alone classifies all six items right: shirt `0x1E` and trousers `0xC4` carry only
+  *Wear* bits, while cuirass `0x600`, sleeves `0x1800`, leggings `0x6000` and sollerets `0x100`
+  carry armor or extremity bits. Removing the mis-typed term restores ACE's order — clothing by
+  `ClothingPriority`, then armor — and all eleven armor parts now survive the merge. Census: the
+  bogus term fired on 2,034 of the 13,810 catalog weenies that carry a `ClothingBase`.
+
+  The `item_type` field was deleted rather than repaired: it was documented as `ItemType` and fed a
+  `WeenieType`, and no exported column can answer the question. Its test was equally hollow — it
+  asserted the `ItemType::Armor` branch using a synthetic item with `item_type` set by hand, so it
+  exercised a branch unreachable from real data. The replacement uses WCID 33614's own six items
+  and was confirmed to fail when the partition is forced true.
+
+  **Closed the same day with catalog v3.** The ACE containers were running after all — they are
+  Docker, not Podman, which is why the first check reported them stopped. `PropertyInt::ItemType`
+  (type 1) now joins the exporter's int filter as `TemplateAppearance::item_type`, the format is at
+  version 3, and `dats/weenies.hwc` was re-exported from the live `ace_world` (43,913 templates).
+
+  With the real column available, the merge implements ACE's partition in full: a `WornBucket` of
+  `Clothing` (`ItemType::Clothing`) or `Armor` (`ItemType::Armor`, or an armor/extremity slot), and
+  `None` for anything else, which is never painted. That last case is not academic — ACE also gates
+  paint on the wield slot being `Clothing | Armor | Cloak` (`Creature_Networking.cs:153`), and that
+  gate is what keeps held items off the body. WCID 42945 Royal Guard wields only a sword and a
+  shield, both carrying clothing tables; ACE paints neither, and neither do we. It is the same
+  boundary Out of Scope already drew around held weapons, now enforced rather than assumed.
+
+  Census against live `ace_world`, over the 1,126 wielded items that carry a `ClothingBase`:
+  49 are `ItemType::Armor` outside an armor slot (the term rescues these into the armor layer),
+  560 are in neither bucket (weapons and jewellery ACE drops), and 5 are bucketed but sit in a
+  non-paintable slot (the Royal Guard's shield among them).
+
+  A correction to an earlier draft of this entry: it cited 447 for the first figure. That came from
+  a MySQL query using `0x`-prefixed mask literals, which coerce as binary strings rather than
+  integers; re-run with decimal masks the figure is 49. The 560 was unaffected.
 
 ## Risks and Mitigations
 
@@ -539,13 +679,14 @@ valid base palette recolours nothing, because `SetPalette` returns early.
 | Layer sort diverges from ACE (wrong garment on top) | Priority is pure over decoded CLO coverage; two-item layering fixture plus WCID 3921/3922 visual comparison |
 | Scope bleed into held-weapon rendering | Out-of-scope names the parenting mechanism as the boundary; Phase 5 forbids dormant scaffolding |
 | Palette composite identity collides or over-splits | Identity is derived once in `material_graph` from base palette plus ordered ranges; tests assert sharing and distinctness, and teardown asserts texture counts return to baseline |
-| Sub-palettes recolour parts retail leaves alone | Match strictly on `CSurface.orig_palette_id`, never the RenderSurface default fallback; an unchanged static-object scenario guards the regression |
+| Sub-palettes recolour parts retail leaves alone | Match the effective palette retail itself resolves at load, per part; an unchanged static-object scenario guards the regression, measured against same-build capture noise |
 | A second composition later wants catalog-backed appearance | Promotion out of `src-tauri` only when proven, per the app boundary rules; the shared `EntityAppearance` contract already insulates consumers |
 
 ## Definition of Done
 
-- [x] Catalog v2 exports every listed appearance fact losslessly; survey reproduces the recorded
-      distributions; v1 is rejected distinctly.
+- [x] Catalog v3 exports every listed appearance fact losslessly, including
+      `PropertyInt::ItemType`; survey reproduces the recorded distributions; older versions are
+      rejected distinctly.
 - [x] One pure, deterministic, tested app-local resolver fills unauthored features from CharGen
       while explicit facts win per property, in ACE's composition order; the only shared-crate
       additions are the two `holtburger-dat` format helpers.
@@ -558,16 +699,17 @@ valid base palette recolours nothing, because `SetPalette` returns early.
 - [x] No feed, protocol, or client-path contract change; no equipment scaffolding. The frontend
       material pipeline was changed under an explicit mid-plan scope extension, recorded in Phase 4.
 - [x] All gates pass.
-- [ ] ObjDesc sub-palettes reach the renderer: clothing colour, skin tone, and hair colour are
+- [x] ObjDesc sub-palettes reach the renderer: clothing colour, skin tone, and hair colour are
       visibly correct and distinct between NPCs, with palette compositing owned by `holtburger-dat`,
       material selection and identity owned by `material_graph`, and the frontend re-deriving
       nothing.
 
 ## Open Questions
 
-None block Phase 6. The palette question raised at the end of Phase 5 — whether the ObjDesc base
-palette overrides the per-surface palette — was settled from the decompile before the phase was
-written: it is a selector, not an override.
+None remain. The palette question raised at the end of Phase 5 — whether the ObjDesc base palette
+overrides the per-surface palette — was settled from the decompile before Phase 6 was written: it is
+a selector, not an override. Phase 6 then corrected two further assumptions from the same source,
+recorded in its Decisions.
 
 The rest remain closed. The seed source (spawn GUID) and both ACE divergences were user-approved 2026-08-17,
 as was the mid-plan extension into the material pipeline once integration proved the existing

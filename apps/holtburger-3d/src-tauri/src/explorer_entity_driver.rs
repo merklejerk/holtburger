@@ -731,7 +731,7 @@ impl ExplorerEntityDriver {
             items.push(WieldedItem {
                 wcid: item.wcid,
                 clothing_base_did: item.appearance.clothing_base_did,
-                item_type: item.weenie_type,
+                item_type: item.appearance.item_type,
                 valid_locations: item.appearance.valid_locations,
                 clothing_priority: item.appearance.clothing_priority,
                 palette_template: entry.palette_template,
@@ -766,10 +766,12 @@ fn append_template_obj_desc(appearance: &mut EntityAppearance, template: &Weenie
         sub_palettes: template
             .sub_palettes
             .iter()
-            .map(|range| EntitySubPalette {
-                palette_did: range.sub_palette_did,
-                offset: u32::from(range.offset) * 8,
-                color_count: u32::from(range.length) * 8,
+            .map(|range| {
+                EntitySubPalette::from_groups(
+                    range.sub_palette_did,
+                    u32::from(range.offset),
+                    u32::from(range.length),
+                )
             })
             .collect(),
         texture_changes: template
@@ -843,6 +845,7 @@ fn resolve_spawn_placement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::weenie_appearance::ITEM_TYPE_CLOTHING;
     use anyhow::anyhow;
     use holtburger_common::Sphere;
     use holtburger_content::{ColliderScale, LandblockCollisionAsset};
@@ -1541,6 +1544,8 @@ mod tests {
         }];
         let mut shirt = template(130);
         shirt.appearance.clothing_base_did = Some(0x1000_0001);
+        // WCID 130's own ACE properties: ItemType::Clothing, chest and arm Wear slots.
+        shirt.appearance.item_type = Some(ITEM_TYPE_CLOTHING);
         shirt.appearance.valid_locations = Some(0x1E);
 
         let (entities, driver) = driver_with_appearance(vec![collector, shirt]);
@@ -1549,14 +1554,17 @@ mod tests {
             .unwrap();
         let appearance = &spawned.instance.definition.appearance;
 
-        // Generated body layers land at ACE's skin, hair, and eye palette ranges.
-        for offset in [0x0_u32, 0x18, 0x20] {
+        // Generated body layers land at ACE's skin, hair, and eye ranges, expanded into the color
+        // units this contract carries. ACE authors those three offsets packed (0x0, 0x18, 0x20),
+        // so asserting the packed values here would accept a missing expansion.
+        for offset_groups in [0x0_u32, 0x18, 0x20] {
+            let offset = offset_groups * EntitySubPalette::GROUP_COLORS;
             assert!(
                 appearance
                     .sub_palettes
                     .iter()
                     .any(|entry| entry.offset == offset),
-                "expected a generated palette layer at offset 0x{offset:X}"
+                "expected a generated palette layer at color offset {offset}"
             );
         }
         // The worn shirt painted the body on top of the face.
@@ -1585,6 +1593,7 @@ mod tests {
             {
                 let mut again = template(130);
                 again.appearance.clothing_base_did = Some(0x1000_0001);
+                again.appearance.item_type = Some(ITEM_TYPE_CLOTHING);
                 again.appearance.valid_locations = Some(0x1E);
                 again
             },

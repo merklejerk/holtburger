@@ -125,6 +125,7 @@ function indexedMaterial(
 		kind: "texture" as const,
 		luminosity: 0,
 		paletteTextureId,
+		paletteComposite: null,
 		rawSurfaceFlags: 0,
 		renderSurfaceId: "0x06000001",
 		textureEncoding: "index8" as const,

@@ -32,6 +32,24 @@ pub struct EntitySubPalette {
     pub color_count: u32,
 }
 
+impl EntitySubPalette {
+    /// Colors in one retail palette group.
+    ///
+    /// Retail counts palette ranges in eight-color groups everywhere it stores them — the wire
+    /// `ModelData`, CLO tables, and ACE's authored face constants alike. This contract carries
+    /// expanded colors, so every adapter expands exactly once, here.
+    pub const GROUP_COLORS: u32 = 8;
+
+    /// Build one range from a retail packed group offset and group count.
+    pub fn from_groups(palette_did: u32, offset_groups: u32, group_count: u32) -> Self {
+        Self {
+            palette_did,
+            offset: offset_groups * Self::GROUP_COLORS,
+            color_count: group_count * Self::GROUP_COLORS,
+        }
+    }
+}
+
 /// One texture substitution addressed within a setup part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,15 +79,17 @@ impl From<&ModelData> for EntityAppearance {
             sub_palettes: model
                 .sub_palettes
                 .iter()
-                .map(|palette| EntitySubPalette {
-                    palette_did: palette.id,
-                    offset: u32::from(palette.offset) * 8,
-                    // Retail's packed zero byte represents all 256 eight-color groups.
-                    color_count: u32::from(if palette.length == 0 {
-                        256
-                    } else {
-                        u16::from(palette.length)
-                    }) * 8,
+                .map(|palette| {
+                    EntitySubPalette::from_groups(
+                        palette.id,
+                        u32::from(palette.offset),
+                        // Retail's packed zero byte represents all 256 eight-color groups.
+                        u32::from(if palette.length == 0 {
+                            256
+                        } else {
+                            u16::from(palette.length)
+                        }),
+                    )
                 })
                 .collect(),
             texture_changes: model

@@ -1,5 +1,9 @@
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
-import type { DatAssetId } from "../game-types";
+import type {
+	DatAssetId,
+	PaletteComposite,
+	TextureSourceId,
+} from "../game-types";
 import type { AssetTextureSource, TextureArraySource } from "./texture-manager";
 import {
 	type AssetTextureFact,
@@ -13,7 +17,7 @@ import {
 
 /** One decoded DAT surface returned to a runtime texture-preparation worker. */
 export interface PreparedTextureSurface {
-	readonly sourceAssetId: DatAssetId;
+	readonly sourceAssetId: TextureSourceId;
 	readonly format: TexturePixelFormat;
 	readonly width: number;
 	readonly height: number;
@@ -38,11 +42,14 @@ interface ObjectTexturePreparationServiceRequest {
 	readonly sourceAssetId: DatAssetId;
 }
 
-/** Closed request for one canonical full authored palette lookup texture. */
+/** Closed request for one canonical full palette lookup texture, authored or composited. */
 interface ObjectPalettePreparationServiceRequest {
 	readonly kind: "prepared-object-palette";
 	readonly purpose: TexturePurpose.ObjectPalette;
-	readonly sourceAssetId: DatAssetId;
+	/** `palette/<dat id>` for an authored palette, or a composition identity. */
+	readonly sourceAssetId: TextureSourceId;
+	/** Recipe the host materializes when this identity names a composition, not a DAT palette. */
+	readonly paletteComposite?: PaletteComposite;
 }
 
 /** Narrow, app-local pixel capability request. */
@@ -181,11 +188,20 @@ function assetPreparationRequest(
 	fact: AssetTextureFact,
 ): TexturePreparationServiceRequest {
 	if (fact.purpose === TexturePurpose.ObjectPalette) {
-		return {
-			kind: "prepared-object-palette",
-			purpose: fact.purpose,
-			sourceAssetId: `palette/${fact.sourceAssetId}`,
-		};
+		// A composition already carries its own identity; only an authored DAT palette needs the
+		// resource prefix that names its archive family.
+		return fact.paletteComposite
+			? {
+					kind: "prepared-object-palette",
+					purpose: fact.purpose,
+					sourceAssetId: fact.sourceAssetId,
+					paletteComposite: fact.paletteComposite,
+				}
+			: {
+					kind: "prepared-object-palette",
+					purpose: fact.purpose,
+					sourceAssetId: `palette/${fact.sourceAssetId}`,
+				};
 	}
 	if (isPackedObjectTexturePurpose(fact.purpose)) {
 		return {

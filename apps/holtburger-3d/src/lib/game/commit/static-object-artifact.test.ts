@@ -191,6 +191,7 @@ function material(): ObjectMaterialBinding {
 			kind: "texture",
 			luminosity: 0,
 			paletteTextureId: null,
+			paletteComposite: null,
 			rawSurfaceFlags: 0,
 			renderSurfaceId: "0x06000001",
 			textureEncoding: "direct-color",

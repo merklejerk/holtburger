@@ -41,11 +41,11 @@ pub use material_capabilities::{
 };
 pub use material_graph::{
     MaterialAppearanceInput, ResolvedAnimationPartChange, ResolvedMaterialRecipe,
-    ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedRegionDetailRole,
-    ResolvedRegionDetailRoleKind, ResolvedRegionRenderProfile, ResolvedSetupAppearance,
-    ResolvedSetupAppearancePart, ResolvedSurfaceTexture, ResolvedTerrainAlphaMap,
-    ResolvedTerrainMaterialTable, ResolvedTerrainMaterialType, ResolvedTerrainRoadAlphaMap,
-    ResolvedTextureChange, ResolvedTextureMaterial,
+    ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedPaletteComposite, ResolvedPaletteRange,
+    ResolvedRegionDetailRole, ResolvedRegionDetailRoleKind, ResolvedRegionRenderProfile,
+    ResolvedSetupAppearance, ResolvedSetupAppearancePart, ResolvedSurfaceTexture,
+    ResolvedTerrainAlphaMap, ResolvedTerrainMaterialTable, ResolvedTerrainMaterialType,
+    ResolvedTerrainRoadAlphaMap, ResolvedTextureChange, ResolvedTextureMaterial,
 };
 pub use object_collision::{
     BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,

@@ -35,6 +35,7 @@ const PROPERTY_FLOAT_DEFAULT_SCALE: u16 = 39;
 const PROPERTY_FLOAT_FRICTION: u16 = 78;
 const PROPERTY_FLOAT_ELASTICITY: u16 = 79;
 
+const PROPERTY_INT_ITEM_TYPE: u16 = 1;
 const PROPERTY_INT_PHYSICS_STATE: u16 = 93;
 const PROPERTY_INT_CLOTHING_PRIORITY: u16 = 4;
 const PROPERTY_INT_VALID_LOCATIONS: u16 = 9;
@@ -194,7 +195,7 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_float")?,
         ints: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (4, 9, 93, 113, 188) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 4, 9, 93, 113, 188) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_int")?,
@@ -376,6 +377,13 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
                     "physics.base_mask",
                 )?;
             }
+            PROPERTY_INT_ITEM_TYPE => set_once(
+                &mut template.appearance.item_type,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "appearance.item_type",
+            )?,
             PROPERTY_INT_CLOTHING_PRIORITY => set_once(
                 &mut template.appearance.clothing_priority,
                 row.value,

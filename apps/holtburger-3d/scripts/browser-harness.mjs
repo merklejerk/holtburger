@@ -1251,10 +1251,18 @@ function summarizeEntityLifecycleState(state) {
 	const dynamics = state.authoredDynamics;
 	return {
 		currentEntities: state.spawnedEntities.map(
-			({ generation, identity, placement }) => ({
+			({ generation, identity, placement, presentation }) => ({
 				generation,
 				identity,
 				placement,
+				// Appearance cardinality proves resolution reached the frontend without dumping
+				// every palette range into the report.
+				appearance: {
+					paletteDid: presentation?.appearance?.paletteDid ?? null,
+					subPalettes: presentation?.appearance?.subPalettes?.length ?? 0,
+					textureChanges: presentation?.appearance?.textureChanges?.length ?? 0,
+					partChanges: presentation?.appearance?.partChanges?.length ?? 0,
+				},
 			}),
 		),
 		visibleDynamicEntityCount: state.metrics?.visibleDynamicEntityCount ?? null,

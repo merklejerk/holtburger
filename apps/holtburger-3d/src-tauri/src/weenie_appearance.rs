@@ -43,6 +43,29 @@ pub enum AppearanceGenerationSkipped {
     HeritageUnavailable,
 }
 
+/// Whether a template resolves a heritage and gender, and therefore needs CharGen to be realized.
+///
+/// Non-humanoids answer `false` and never consult character-generation content, so a crate spawns
+/// without it.
+pub fn requires_character_generation(appearance: &TemplateAppearance) -> bool {
+    resolve_heritage(appearance).is_some() && resolve_gender(appearance).is_some()
+}
+
+/// Body layers for a template that never enters generation.
+pub fn resolve_authored_appearance(
+    palette_base_did: Option<u32>,
+    appearance: &TemplateAppearance,
+) -> EntityAppearance {
+    let mut resolved = EntityAppearance {
+        palette_did: palette_base_did,
+        sub_palettes: Vec::new(),
+        texture_changes: Vec::new(),
+        part_changes: Vec::new(),
+    };
+    push_authored_layers(&mut resolved, appearance);
+    resolved
+}
+
 /// Resolve one template's complete appearance, filling unauthored features from CharGen.
 ///
 /// `palette_set` resolves a `PaletteSet` resource to the palette matching a hue, mirroring ACE's
@@ -440,21 +463,51 @@ pub fn merge_worn_equipment(
             .into_iter()
             .map(|(coverage, item, table)| (coverage as i32, item, table)),
     ) {
-        let obj_desc = table
-            .build_obj_desc(setup_did, item.palette_template, item.shade, |set, hue| {
-                palette_set(set, hue).ok_or(
-                    holtburger_dat::file_type::ClothingBuildObjDescError::MissingPaletteSet {
-                        palette_set_id: set,
-                    },
-                )
-            })
-            .map_err(|source| WornEquipmentError::Build {
-                wcid: item.wcid,
-                message: format!("{source:?}"),
+        let obj_desc =
+            build_clothing(&table, setup_did, &item, &palette_set).map_err(|source| {
+                WornEquipmentError::Build {
+                    wcid: item.wcid,
+                    message: source,
+                }
             })?;
         push_clothing_obj_desc(appearance, &obj_desc);
     }
     Ok(())
+}
+
+/// Build one garment's ObjDesc, applying ACE's palette-template fallback.
+///
+/// `ClothingTable::build_obj_desc` rejects an absent palette template, but ACE substitutes the
+/// first defined effect and simply skips palettes when a garment defines none
+/// (`WorldObject_Networking.cs:946-951`). That substitution is server policy rather than format
+/// semantics, so it lives here instead of in the decoder.
+fn build_clothing(
+    table: &ClothingTable,
+    setup_did: u32,
+    item: &WieldedItem,
+    palette_set: &impl Fn(u32, f64) -> Option<u32>,
+) -> Result<ClothingObjDesc, String> {
+    let resolver = |set: u32, hue: f64| {
+        palette_set(set, hue).ok_or(
+            holtburger_dat::file_type::ClothingBuildObjDescError::MissingPaletteSet {
+                palette_set_id: set,
+            },
+        )
+    };
+    let requested = item.palette_template;
+    match table.build_obj_desc(setup_did, requested, item.shade, resolver) {
+        Ok(obj_desc) => Ok(obj_desc),
+        Err(holtburger_dat::file_type::ClothingBuildObjDescError::MissingPaletteTemplate {
+            ..
+        }) => {
+            // ACE's fallback: the first defined template, or no palette layer at all.
+            let fallback = table.palette_templates.keys().next().copied().unwrap_or(0);
+            table
+                .build_obj_desc(setup_did, fallback, item.shade, resolver)
+                .map_err(|source| format!("{source:?}"))
+        }
+        Err(source) => Err(format!("{source:?}")),
+    }
 }
 
 /// A wielded item that cannot be resolved at all, as distinct from one that simply does not dress
@@ -552,22 +605,28 @@ impl Roll {
     }
 }
 
+/// Synthetic CharGen and clothing fixtures shared by this module's tests and the driver's, so a
+/// single definition backs both rather than two drifting copies.
 #[cfg(test)]
-mod tests {
+pub mod test_support {
     use super::*;
     use holtburger_dat::file_type::char_gen::{
         AnimationPartChange, EyeStrip, FaceStrip, HairStyle, HeritageGroup, SubPalette,
         TextureMapChange,
     };
-    use std::collections::HashMap;
+    use holtburger_dat::file_type::{CloObjectEffect, CloTextureEffect, ClothingBase};
+    use std::collections::{BTreeMap, HashMap};
 
-    const GHARUNDIM: u32 = 2;
-    const MALE: i32 = 1;
-    const SKIN_SET: u32 = 0x0F00_0001;
-    const HAIR_SET_A: u32 = 0x0F00_0010;
-    const HAIR_SET_B: u32 = 0x0F00_0011;
+    pub const GHARUNDIM: u32 = 2;
+    pub const MALE: i32 = 1;
+    pub const SKIN_SET: u32 = 0x0F00_0001;
+    pub const HAIR_SET_A: u32 = 0x0F00_0010;
+    pub const HAIR_SET_B: u32 = 0x0F00_0011;
+    /// ACE coverage-map body part indices used by the fixtures.
+    pub const PART_CHEST: u32 = 9;
+    pub const PART_LEFT_FOOT: u32 = 3;
 
-    fn obj_desc(part: Option<u32>, texture: Option<(u32, u32)>) -> ObjDesc {
+    pub fn obj_desc(part: Option<u32>, texture: Option<(u32, u32)>) -> ObjDesc {
         ObjDesc {
             palette_id: None,
             sub_palettes: Vec::<SubPalette>::new(),
@@ -589,7 +648,7 @@ mod tests {
         }
     }
 
-    fn gender_entry(bald_style: bool) -> CharacterGenGender {
+    pub fn gender_entry(bald_style: bool) -> CharacterGenGender {
         CharacterGenGender {
             name: "Male".to_owned(),
             scale: 100,
@@ -640,7 +699,7 @@ mod tests {
         }
     }
 
-    fn char_gen(bald_style: bool) -> CharGen {
+    pub fn char_gen_with(bald_style: bool) -> CharGen {
         let mut genders = HashMap::new();
         genders.insert(MALE, gender_entry(bald_style));
         let mut heritage_groups = HashMap::new();
@@ -667,6 +726,42 @@ mod tests {
         }
     }
 
+    pub fn synthetic_char_gen() -> CharGen {
+        char_gen_with(false)
+    }
+
+    pub fn clothing_for(setup: u32, part: u32, texture: (u32, u32), model: u32) -> ClothingTable {
+        let mut clothing_bases = BTreeMap::new();
+        clothing_bases.insert(
+            setup,
+            ClothingBase {
+                object_effects: vec![CloObjectEffect {
+                    part_num: part,
+                    object_id: model,
+                    texture_effects: vec![CloTextureEffect {
+                        old_texture: texture.0,
+                        new_texture: texture.1,
+                    }],
+                }],
+            },
+        );
+        ClothingTable {
+            id: 0x1000_0001,
+            clothing_bases,
+            palette_templates: BTreeMap::new(),
+        }
+    }
+
+    pub fn synthetic_clothing(setup: u32) -> ClothingTable {
+        clothing_for(setup, PART_CHEST, (0x0500_0020, 0x0500_0021), 0x0100_0020)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{GHARUNDIM, MALE, char_gen_with, synthetic_char_gen};
+    use super::*;
+
     fn humanoid() -> TemplateAppearance {
         TemplateAppearance {
             heritage_group_name: Some("Gharu'ndim".to_owned()),
@@ -692,7 +787,7 @@ mod tests {
     #[test]
     fn generated_humanoid_fills_every_body_layer() {
         let (resolved, skipped) =
-            resolve_template_appearance(None, &humanoid(), &char_gen(false), 42, palette_set);
+            resolve_template_appearance(None, &humanoid(), &synthetic_char_gen(), 42, palette_set);
 
         assert_eq!(skipped, None);
         assert_eq!(resolved.palette_did, Some(0x0400_0900));
@@ -723,7 +818,7 @@ mod tests {
         appearance.head_object_did = Some(0x0200_FEED);
 
         let (resolved, skipped) =
-            resolve_template_appearance(None, &appearance, &char_gen(false), 7, palette_set);
+            resolve_template_appearance(None, &appearance, &synthetic_char_gen(), 7, palette_set);
 
         assert_eq!(skipped, None);
         assert_eq!(
@@ -747,7 +842,7 @@ mod tests {
         let (resolved, _) = resolve_template_appearance(
             Some(0x0400_1234),
             &humanoid(),
-            &char_gen(false),
+            &synthetic_char_gen(),
             1,
             palette_set,
         );
@@ -763,21 +858,21 @@ mod tests {
         let (first, _) = resolve_template_appearance(
             None,
             &template,
-            &char_gen(false),
+            &synthetic_char_gen(),
             0xf000_0001,
             palette_set,
         );
         let (repeat, _) = resolve_template_appearance(
             None,
             &template,
-            &char_gen(false),
+            &synthetic_char_gen(),
             0xf000_0001,
             palette_set,
         );
         let (other, _) = resolve_template_appearance(
             None,
             &template,
-            &char_gen(false),
+            &synthetic_char_gen(),
             0xf000_0002,
             palette_set,
         );
@@ -789,9 +884,9 @@ mod tests {
     #[test]
     fn bald_hairstyle_selects_the_bald_eye_strip() {
         let (haired, _) =
-            resolve_template_appearance(None, &humanoid(), &char_gen(false), 3, palette_set);
+            resolve_template_appearance(None, &humanoid(), &synthetic_char_gen(), 3, palette_set);
         let (bald, _) =
-            resolve_template_appearance(None, &humanoid(), &char_gen(true), 3, palette_set);
+            resolve_template_appearance(None, &humanoid(), &char_gen_with(true), 3, palette_set);
 
         let bald_eyes = bald
             .texture_changes
@@ -815,7 +910,7 @@ mod tests {
         };
 
         let (resolved, skipped) =
-            resolve_template_appearance(None, &appearance, &char_gen(false), 9, palette_set);
+            resolve_template_appearance(None, &appearance, &synthetic_char_gen(), 9, palette_set);
 
         assert_eq!(skipped, Some(AppearanceGenerationSkipped::NotAHumanoid));
         assert_eq!(resolved.part_changes, Vec::new());
@@ -850,7 +945,7 @@ mod tests {
         appearance.heritage_group = Some(9);
 
         let (_, skipped) =
-            resolve_template_appearance(None, &appearance, &char_gen(false), 5, palette_set);
+            resolve_template_appearance(None, &appearance, &synthetic_char_gen(), 5, palette_set);
 
         assert_eq!(
             skipped,
@@ -866,7 +961,7 @@ mod tests {
         appearance.skin_palette_did = Some(0x0400_5150);
 
         let (resolved, _) =
-            resolve_template_appearance(None, &appearance, &char_gen(false), 11, palette_set);
+            resolve_template_appearance(None, &appearance, &synthetic_char_gen(), 11, palette_set);
 
         assert_eq!(
             palette_at(&resolved, SKIN_PALETTE_OFFSET).map(|entry| entry.palette_did),
@@ -899,38 +994,11 @@ mod tests {
 
 #[cfg(test)]
 mod equipment_tests {
+    use super::test_support::{PART_CHEST, PART_LEFT_FOOT, clothing_for};
     use super::*;
-    use holtburger_dat::file_type::{CloObjectEffect, CloTextureEffect, ClothingBase};
-    use std::collections::BTreeMap;
 
     const HUMAN_MALE: u32 = 0x0200_0001;
     const OTHER_BODY: u32 = 0x0200_0099;
-
-    /// Body part indices from ACE's coverage map.
-    const PART_CHEST: u32 = 9;
-    const PART_LEFT_FOOT: u32 = 3;
-
-    fn clothing(setup: u32, part: u32, texture: (u32, u32), model: u32) -> ClothingTable {
-        let mut clothing_bases = BTreeMap::new();
-        clothing_bases.insert(
-            setup,
-            ClothingBase {
-                object_effects: vec![CloObjectEffect {
-                    part_num: part,
-                    object_id: model,
-                    texture_effects: vec![CloTextureEffect {
-                        old_texture: texture.0,
-                        new_texture: texture.1,
-                    }],
-                }],
-            },
-        );
-        ClothingTable {
-            id: 0x1000_0001,
-            clothing_bases,
-            palette_templates: BTreeMap::new(),
-        }
-    }
 
     fn item(
         wcid: u32,
@@ -968,7 +1036,7 @@ mod equipment_tests {
             HUMAN_MALE,
             &[shirt],
             |_| {
-                Some(clothing(
+                Some(clothing_for(
                     HUMAN_MALE,
                     PART_CHEST,
                     (0x0500_0001, 0x0500_0002),
@@ -994,7 +1062,7 @@ mod equipment_tests {
             &mut appearance,
             HUMAN_MALE,
             &[robe],
-            |_| Some(clothing(OTHER_BODY, PART_CHEST, (1, 2), 3)),
+            |_| Some(clothing_for(OTHER_BODY, PART_CHEST, (1, 2), 3)),
             |_, _| Some(0x0400_0001),
         )
         .unwrap();
@@ -1038,14 +1106,14 @@ mod equipment_tests {
             &[boots, tunic],
             |clothing_base| {
                 Some(if clothing_base == 0x1000_0007 {
-                    clothing(
+                    clothing_for(
                         HUMAN_MALE,
                         PART_LEFT_FOOT,
                         (0x0500_0010, 0x0500_0011),
                         0x0100_0010,
                     )
                 } else {
-                    clothing(
+                    clothing_for(
                         HUMAN_MALE,
                         PART_CHEST,
                         (0x0500_0020, 0x0500_0021),
@@ -1114,6 +1182,27 @@ mod equipment_tests {
         );
         let chosen = first.iter().filter(|entry| entry.wcid >= 200).count();
         assert_eq!(chosen, 1, "exactly one treasure row per probability chunk");
+    }
+
+    /// ACE substitutes the first defined palette effect when the requested template is absent, and
+    /// skips palettes entirely when a garment defines none. Neither case is a failure.
+    #[test]
+    fn absent_palette_template_falls_back_instead_of_failing() {
+        let mut appearance = empty_appearance();
+        let mut shirt = item(130, 0x1000_0001, 4, 0x1E);
+        shirt.palette_template = 5;
+        shirt.shade = 0.67;
+
+        merge_worn_equipment(
+            &mut appearance,
+            HUMAN_MALE,
+            &[shirt],
+            |_| Some(clothing_for(HUMAN_MALE, PART_CHEST, (1, 2), 3)),
+            |_, _| Some(0x0400_0001),
+        )
+        .expect("a garment with no palette templates must still paint its model and textures");
+
+        assert_eq!(appearance.texture_changes.len(), 1);
     }
 
     #[test]

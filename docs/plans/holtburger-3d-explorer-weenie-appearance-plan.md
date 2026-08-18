@@ -326,7 +326,33 @@ the layering test was verified to fail against a reversed merge order before acc
 
 ### Phase 4: Explorer Integration and Visual Proof
 
-Progress: Pending.
+Progress: Blocked on a scope decision (2026-08-17). Integration is complete and the resolved
+appearance is verifiably correct end to end, but the frontend does not render a complete outfit,
+and finishing that requires renderer work this plan placed out of scope.
+
+Landed: `ExplorerEntityContentPreparer` gained `char_gen`, `palette_set`, and `clothing_table`; the
+DAT adapter retains the decoded `CharGen` in a `OnceLock` because `ContentRepository::read_asset`
+parses per call. `ExplorerEntityDriver::resolve_appearance` runs face resolution, selects wields,
+joins each item's catalog facts, and merges equipment, falling back to the template's own ObjDesc
+rows only when nothing worn paints the body, as ACE does. Four driver tests cover a seeded humanoid
+spawn with its outfit, GUID reproducibility, the non-humanoid path that never consults CharGen, the
+loud CharGen-absent failure, and a missing wielded item naming both weenies.
+
+Evidence against real content and the regenerated catalog, via a temporary probe since deleted:
+WCID 3921 and 3922 both resolve `skipped=None`, eight sub-palettes each, 22 texture changes and 16
+part changes across body parts 0-16, and all three wield rows resolving to items. Their skin
+(`0x040002B2` vs `0x040002AF`), hair (`0x04001FC1` vs `0x04001FE0`), and three clothing palettes
+differ; the skin, hair, and eye layers land exactly on ACE's 0x0/0x18, 0x18/0x8, and 0x20/0x8
+ranges. The browser harness confirms the same eight/22/16 cardinality arrives at the frontend view,
+so nothing is lost across the Tauri boundary.
+
+Open shortfall: the rendered NPCs show resolved skin tone and hair colour, and the two are visibly
+distinct (the Tumerok Collector's tunic sleeves appear on its upper arms where the Stone Collector
+has bare arms), but neither is fully dressed. Torso and legs still render base-body materials.
+Tracing found the cause outside this plan's boundary: `material_graph` applies a substitution only
+when a texture change's `old_texture` equals the material's `orig_texture_id`
+(`texture_override_for_material`), and unmatched changes are silently dropped rather than reported.
+The appearance contract is satisfied; the frontend material pipeline does not fully consume it.
 
 #### Deliverables
 

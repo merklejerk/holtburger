@@ -366,6 +366,31 @@ impl ClothingTable {
         })
     }
 
+    /// Coverage this clothing paints on one setup, used to order worn layers.
+    ///
+    /// Mirrors ACE's `ClothingTable.GetVisualPriority`: each covered body part contributes its
+    /// coverage bit, and a setup this clothing does not dress yields `None`. Parts outside the
+    /// human body map (mounts, banners) contribute nothing, exactly as ACE's default arm does.
+    pub fn visual_coverage(&self, setup_model_id: u32) -> Option<ClothingCoverage> {
+        let base = self.clothing_bases.get(&setup_model_id)?;
+        let mut coverage = ClothingCoverage::empty();
+        for effect in &base.object_effects {
+            coverage |= match effect.part_num {
+                0 => ClothingCoverage::OUTERWEAR_ABDOMEN,
+                1 | 5 => ClothingCoverage::OUTERWEAR_UPPER_LEGS,
+                2 | 6 => ClothingCoverage::OUTERWEAR_LOWER_LEGS,
+                3 | 4 | 7 | 8 => ClothingCoverage::FEET,
+                9 => ClothingCoverage::OUTERWEAR_CHEST,
+                10 | 13 => ClothingCoverage::OUTERWEAR_UPPER_ARMS,
+                11 | 14 => ClothingCoverage::OUTERWEAR_LOWER_ARMS,
+                12 | 15 => ClothingCoverage::HANDS,
+                16 => ClothingCoverage::HEAD,
+                _ => ClothingCoverage::empty(),
+            };
+        }
+        Some(coverage)
+    }
+
     pub fn build_obj_desc<F>(
         &self,
         setup_model_id: u32,
@@ -412,6 +437,25 @@ impl ClothingTable {
         }
 
         Ok(obj_desc)
+    }
+}
+
+bitflags::bitflags! {
+    /// Body coverage a clothing table paints, mirroring ACE's `CoverageMask` outerwear bits.
+    ///
+    /// Only the bits `GetVisualPriority` can produce are modelled; underwear and unknown bits
+    /// exist in ACE's enum but are never derived from clothing-base coverage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct ClothingCoverage: u32 {
+        const OUTERWEAR_UPPER_LEGS = 0x0000_0100;
+        const OUTERWEAR_LOWER_LEGS = 0x0000_0200;
+        const OUTERWEAR_CHEST = 0x0000_0400;
+        const OUTERWEAR_ABDOMEN = 0x0000_0800;
+        const OUTERWEAR_UPPER_ARMS = 0x0000_1000;
+        const OUTERWEAR_LOWER_ARMS = 0x0000_2000;
+        const HEAD = 0x0000_4000;
+        const HANDS = 0x0000_8000;
+        const FEET = 0x0001_0000;
     }
 }
 

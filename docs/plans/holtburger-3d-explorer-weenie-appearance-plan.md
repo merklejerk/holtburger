@@ -257,7 +257,13 @@ them were verified to fail against injected breaks before acceptance.
 
 ### Phase 3: Worn Equipment Merge
 
-Progress: Pending.
+Progress: Complete (2026-08-17). `holtburger-dat` gained `ClothingTable::visual_coverage` and the
+`ClothingCoverage` bitflags, porting ACE's `GetVisualPriority` coverage map as a pure function
+beside `build_obj_desc`. The resolver module gained `WieldedItem`, `select_wielded`,
+`merge_worn_equipment`, and the typed `WornEquipmentError`. Seven further tests cover painting,
+the setup-gated skip, loud missing-table failure, clothing-before-armor layering, the
+`ItemType`/`EquipMask` partition, seed-stable treasure selection, and items with no clothing base;
+the layering test was verified to fail against a reversed merge order before acceptance.
 
 #### Deliverables
 
@@ -301,7 +307,22 @@ Progress: Pending.
 
 #### Decisions and Course Corrections
 
-- Populate during execution.
+- `ClothingCoverage` models only the nine outerwear/head/hands/feet bits `GetVisualPriority` can
+  actually produce. ACE's `CoverageMask` also defines underwear and unknown bits, but no clothing
+  base derives them, so importing the full enum would add unreachable variants.
+- Armor sorts by its derived coverage bits and clothing by its authored `ClothingPriority`, each
+  tie-broken by item WCID. ACE leaves ties to `OrderBy`'s stability over an equipment dictionary,
+  which is not a reproducible order for us; the WCID tiebreak makes the merge deterministic without
+  changing which garment wins a genuine priority contest.
+- `TopLayerPriority` remains unexported and unmodelled, as Phase 1 established it has zero
+  world-database rows. The clothing/armor split therefore collapses to two buckets rather than
+  ACE's three. Recorded as debt: a future biota- or server-fed source could carry it, and the
+  third bucket would need reinstating with it.
+- `select_wielded` ports `CreateListSelect`'s probability grouping, including its quirk that a
+  chunk resets only once accumulated probability reaches 1.0. It shares the seeded stream with the
+  face roll, so an entity's outfit and face are stable together.
+- An item with no `ClothingBase` is skipped before any content lookup, so trinkets and weapons
+  cost nothing here. Weapons remain out of scope as separate parented objects.
 
 ### Phase 4: Explorer Integration and Visual Proof
 

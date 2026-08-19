@@ -96,7 +96,6 @@
 	import {
 		createExplorerFrameDiagnosticReport,
 		type ExplorerFrameDiagnosticReport,
-		type ExplorerSceneInterestSnapshot,
 	} from "./explorer-frame-diagnostic-report";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
@@ -128,7 +127,6 @@
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
 		$state(null);
-	let sceneInterest: ExplorerSceneInterestSnapshot | null = null;
 	let authoredDynamicRuntimeDiagnostics: ReturnType<
 		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 	> | null = $state(null);
@@ -213,33 +211,18 @@
 	}
 
 	/**
-	 * Follow mode's whole policy: when the camera's landblock differs from the last requested
-	 * interest anchor, re-issue the same radii centered there. Interest only — the camera never
-	 * moves, and the coordinator's focus flow is deliberately bypassed so no automatic placement
-	 * fires. Inert until a manual request establishes radii to follow with.
+	 * Carry follow-mode re-anchoring into simulation interest, which the coordinator does not own.
+	 *
+	 * The coordinator holds the anchor of record and decides whether the camera's residency is a
+	 * crossing worth following, so this only mirrors a move it already made.
 	 */
 	function followCameraSceneInterest(residency: SceneResidency): void {
-		const interest = sceneInterest;
-		if (
-			!gameRuntime ||
-			interest === null ||
-			interest.residency.landblockId === residency.landblockId
-		) {
-			return;
-		}
-		gameRuntime.updateSceneInterest({
-			anchorLandblockId: residency.landblockId,
-			radii: interest.radii,
-		});
+		if (cameraCoordinator?.followCameraResidency(residency) !== true) return;
 		void requestSimulationInterest(residency.landblockId).catch(
 			(error: unknown) => {
 				physicalCameraError = errorMessage(error);
 			},
 		);
-		sceneInterest = {
-			radii: interest.radii,
-			residency: { ...residency },
-		};
 	}
 	let clockStartedAtMs = 0;
 	let clockTimer: ReturnType<typeof setInterval> | undefined;
@@ -335,7 +318,7 @@
 			environment: environmentSelection,
 			frame,
 			frameSettings,
-			sceneInterest,
+			sceneInterest: cameraCoordinator?.sceneInterest() ?? null,
 			viewport: {
 				cssHeight: viewport.height,
 				cssWidth: viewport.width,
@@ -377,10 +360,6 @@
 			},
 		);
 		cameraCoordinator?.requestSceneInterest(residency, radii);
-		sceneInterest = {
-			radii: { ...radii },
-			residency: { ...residency },
-		};
 	}
 
 	async function requestSimulationInterest(
@@ -796,7 +775,6 @@
 			runtimeReady = false;
 			cameraLocation = null;
 			rendererFrameDiagnostics = null;
-			sceneInterest = null;
 			authoredDynamicRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;

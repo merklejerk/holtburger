@@ -1,21 +1,14 @@
-import type { SceneResidency } from "../lib/game/scene";
 import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 import type {
 	FrameSettings,
 	RendererFrameDiagnosticsSnapshot,
 } from "../lib/game/renderer/renderer";
 import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2-device";
-import type { SceneInterestRadii } from "../lib/game/runtime/types";
+import type { ExplorerSceneInterestSnapshot } from "./explorer-camera-coordinator";
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
 import type { FreeFlyCameraState } from "./free-fly-camera-controller";
 
 const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 4;
-
-/** Scene request that owns the content population represented by an exported frame report. */
-export interface ExplorerSceneInterestSnapshot {
-	readonly radii: SceneInterestRadii;
-	readonly residency: SceneResidency;
-}
 
 /** Browser-owned viewport facts recorded at the same instant as the diagnostic snapshot. */
 interface ExplorerViewportDiagnosticSnapshot {

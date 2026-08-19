@@ -10,6 +10,8 @@ import {
 import {
 	type ResolvedGeometry,
 	type ResolvedObjectPart,
+	RESTING_PLACEMENT_KEY,
+	resolvePlacementPose,
 } from "../resolution/presentation";
 import {
 	multiplyMat4,
@@ -312,16 +314,15 @@ function prepareStaticSource(
 	const sourceRangeIds = new Set<string>();
 	const sourceMaterialSlotIds = new Set<string>();
 	for (const resident of source.staticResidents) {
-		const defaultPose = resident.presentation.placementPoses.get(0);
-		if (!defaultPose)
-			throw new Error(
-				`Resident ${residentKey(resident.identity)} has no default placement pose.`,
-			);
+		const restingPose = resolvePlacementPose(
+			resident.presentation,
+			RESTING_PLACEMENT_KEY,
+		);
 		for (const part of resident.presentation.parts) {
-			const partTransform = defaultPose.partTransforms[part.partIndex];
+			const partTransform = restingPose.partTransforms[part.partIndex];
 			if (!partTransform) {
 				throw new Error(
-					`Resident ${residentKey(resident.identity)} has no default transform for part ${part.partIndex}.`,
+					`Resident ${residentKey(resident.identity)} has no resting transform for part ${part.partIndex}.`,
 				);
 			}
 			const sourceToLandblock = multiplyMat4(

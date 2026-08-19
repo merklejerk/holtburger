@@ -1,6 +1,10 @@
 import { textureScrollPhase } from "./texture-scroll-phase";
 import { acFrameTransform } from "../../assets/ac-frame";
 import { composeObjectPartTransform } from "../resolution/object-part-transform";
+import {
+	RESTING_PLACEMENT_KEY,
+	resolvePlacementPose,
+} from "../resolution/presentation";
 import { mat4ToFloat32Array, multiplyMat4 } from "../math/matrices";
 import { createTexture2DUpload } from "../textures/texture-manager";
 import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
@@ -167,12 +171,11 @@ export class WebGL2SkyPass {
 		decoded: DecodedStaticPresentation,
 		facts: Map<AssetTextureKey, AssetTextureFact>,
 	): SkyObjectResources {
-		// Every decoded presentation carries exactly one authored placement pose; sky objects have
-		// no animation, so that pose is the only one they ever use.
-		const pose = decoded.presentation.placementPoses.get(0);
-		if (pose === undefined) {
-			throw new Error(`Sky object ${gfxObjectId} authors no placement pose.`);
-		}
+		// Sky objects have no animation, so the resting pose is the only one they ever use.
+		const pose = resolvePlacementPose(
+			decoded.presentation,
+			RESTING_PLACEMENT_KEY,
+		);
 		const ranges: SkyDrawRange[] = [];
 		for (const part of decoded.presentation.parts) {
 			const label = `Sky object ${gfxObjectId} part ${part.partIndex}`;

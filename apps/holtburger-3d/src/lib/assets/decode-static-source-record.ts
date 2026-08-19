@@ -16,9 +16,9 @@ import type {
 	ResolvedObjectPresentation,
 } from "../game/resolution/presentation";
 import {
-	FALLBACK_PLACEMENT_KEY,
 	RESTING_PLACEMENT_KEY,
 	resolveObjectPresentationBounds,
+	resolvePlacementPose,
 } from "../game/resolution/presentation";
 import {
 	classifyObjectResidents,
@@ -679,13 +679,14 @@ export function decodeStaticPresentation(
 					),
 				);
 	const placementPoses = decodePlacementPoses(definition, parts.length);
-	const partTransforms =
-		placementPoses.get(RESTING_PLACEMENT_KEY)?.partTransforms ??
-		placementPoses.get(FALLBACK_PLACEMENT_KEY)?.partTransforms ??
-		parts.map(() => Mat4.identity());
+	const presentationId = `presentation:${definition.id}` as const;
+	const restingPose = resolvePlacementPose(
+		{ id: presentationId, placementPoses },
+		RESTING_PLACEMENT_KEY,
+	);
 	const presentationBounds = resolveObjectPresentationBounds(
 		parts,
-		partTransforms,
+		restingPose.partTransforms,
 		new Vec3(1, 1, 1),
 	);
 	const behavior =
@@ -708,7 +709,7 @@ export function decodeStaticPresentation(
 		behavior,
 		presentation: {
 			appearanceKey: definition.appearanceKey,
-			id: `presentation:${definition.id}`,
+			id: presentationId,
 			sourceAssetId: definition.sourceAssetId,
 			parts,
 			lights:

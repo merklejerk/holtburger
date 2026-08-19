@@ -1,5 +1,4 @@
 import { createLandblockWorldOrigin } from "../landblocks";
-import { getMat4Translation } from "../math/matrices";
 import {
 	acRotationFromRenderTransform,
 	renderVector3,
@@ -547,10 +546,10 @@ export class GameRuntime {
 	 * decay the moment the camera crosses a boundary. This frame is the only one safe to retain.
 	 */
 	#sceneOriginOf(nodeId: SceneNodeId): SceneVector3 | null {
-		const placement = this.#scene.getResolvedPlacement(nodeId);
-		if (!placement) return null;
-		const origin = getMat4Translation(placement.localToLandblock);
-		const landblockOrigin = createLandblockWorldOrigin(placement.landblockId);
+		const resolved = this.#scene.getResolvedOrigin(nodeId);
+		if (!resolved) return null;
+		const origin = resolved.landblockOrigin;
+		const landblockOrigin = createLandblockWorldOrigin(resolved.landblockId);
 		return sceneVector3([
 			origin.x + landblockOrigin.x,
 			origin.y + landblockOrigin.y,
@@ -584,6 +583,19 @@ export class GameRuntime {
 		if (sky) return sky.originOf();
 		const nodeId = sceneNodeIdOf(target.targetId);
 		return nodeId === null ? null : this.#sceneOriginOf(nodeId);
+	}
+
+	/**
+	 * Whether a behavior target still exists, in either residency, without resolving its frame.
+	 *
+	 * The liveness half of {@link GameRuntime.#originOf}, split out because per-frame consumers ask
+	 * only this: both residencies always publish an origin for a target they hold, so existence and
+	 * "has an origin" are the same fact, and only one of them costs a scene-hierarchy walk.
+	 */
+	#targetLives(target: BehaviorTarget): boolean {
+		if (this.#skyTargets.has(target.targetId)) return true;
+		const nodeId = sceneNodeIdOf(target.targetId);
+		return nodeId !== null && this.#scene.hasNode(nodeId);
 	}
 
 	#rotationOf(target: BehaviorTarget): AcRotation | null {
@@ -903,6 +915,7 @@ export class GameRuntime {
 			resolveEmitter: (emitterInfoId) =>
 				this.#particleEmitters.getReady(emitterInfoId),
 			sceneOriginOf: (target) => this.#originOf(target),
+			targetLives: (target) => this.#targetLives(target),
 			sceneRotationOf: (target) => this.#rotationOf(target),
 			// A part-attached emitter is positioned by its part's node, which the dynamics system owns.
 			// The generation is carried through unchanged: the part belongs to the same activation, so

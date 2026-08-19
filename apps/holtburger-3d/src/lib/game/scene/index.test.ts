@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createLandblockWorldOrigin } from "../landblocks";
 import {
 	createPerspectiveMat4,
+	createRotationMat4,
+	createScaleMat4,
 	createTranslationMat4,
 	createViewMat4,
 	getMat4Translation,
+	multiplyMat4,
 } from "../math/matrices";
 import { createFrustum, type Frustum } from "../math/frustum";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
@@ -95,6 +98,87 @@ describe("SceneGraph", () => {
 				visiblePlacement(scene, grandchildId).localToLandblock,
 			),
 		).toEqual(new Vec3(10, 40, 30));
+	});
+
+	// `getResolvedOrigin` answers the same question as `getResolvedPlacement` by a different route
+	// (a point walked up the parent chain rather than composed matrices), so the two must agree
+	// wherever a frame-rate consumer swaps one for the other.
+	describe("getResolvedOrigin", () => {
+		/** TRS in the order the scene graph's own placements are authored. */
+		const createTrsMat4 = (
+			translation: Vec3,
+			rotation: Quat,
+			scale: Vec3,
+		): Mat4 =>
+			multiplyMat4(
+				createTranslationMat4(translation),
+				multiplyMat4(createRotationMat4(rotation), createScaleMat4(scale)),
+			);
+
+		const expectMatchesPlacement = (scene: SceneGraph, nodeId: SceneNodeId) => {
+			const placement = scene.getResolvedPlacement(nodeId);
+			if (!placement) throw new Error(`Scene node ${nodeId} has no placement.`);
+			const expected = getMat4Translation(placement.localToLandblock);
+			const resolved = scene.getResolvedOrigin(nodeId);
+			if (!resolved) throw new Error(`Scene node ${nodeId} has no origin.`);
+			expect(resolved.landblockOrigin.x).toBeCloseTo(expected.x, 10);
+			expect(resolved.landblockOrigin.y).toBeCloseTo(expected.y, 10);
+			expect(resolved.landblockOrigin.z).toBeCloseTo(expected.z, 10);
+			expect(resolved.landblockId).toBe(placement.landblockId);
+			expect(resolved.envCellId).toBe(placement.envCellId);
+			expect(resolved.scope).toEqual(placement.scope);
+		};
+
+		it("matches the resolved placement translation for a root node", () => {
+			const scene = new SceneGraph();
+			const rootId = scene.createNode({
+				...rootInput,
+				localTransform: createTranslationMat4(new Vec3(10, -20, 30)),
+			});
+
+			expectMatchesPlacement(scene, rootId);
+		});
+
+		it("matches the resolved placement translation through rotated, scaled ancestors", () => {
+			// Rotation and scale are what separate a point walk from summing translations: an
+			// ancestor's rotation turns its descendants' offsets, and its scale stretches them.
+			const scene = new SceneGraph();
+			const quarterTurnAboutY = new Quat(Math.SQRT1_2, 0, Math.SQRT1_2, 0);
+			const rootId = scene.createNode({
+				...rootInput,
+				localTransform: createTrsMat4(
+					new Vec3(10, 0, 0),
+					quarterTurnAboutY,
+					new Vec3(2, 2, 2),
+				),
+			});
+			const childId = scene.createNode({
+				...boundedChildFields,
+				localTransform: createTrsMat4(
+					new Vec3(0, 20, 0),
+					quarterTurnAboutY,
+					new Vec3(3, 1, 1),
+				),
+				parentId: rootId,
+			});
+			const grandchildId = scene.createNode({
+				...boundedChildFields,
+				localTransform: createTranslationMat4(new Vec3(0, 0, 30)),
+				parentId: childId,
+			});
+
+			expectMatchesPlacement(scene, rootId);
+			expectMatchesPlacement(scene, childId);
+			expectMatchesPlacement(scene, grandchildId);
+		});
+
+		it("reports no origin for a node the scene does not hold", () => {
+			const scene = new SceneGraph();
+			const rootId = scene.createNode(rootInput);
+			scene.destroyNode(rootId);
+
+			expect(scene.getResolvedOrigin(rootId)).toBeUndefined();
+		});
 	});
 
 	it("owns spatial values at its API boundary", () => {

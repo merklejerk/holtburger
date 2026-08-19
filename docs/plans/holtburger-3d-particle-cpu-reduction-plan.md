@@ -419,6 +419,38 @@ numbers demand it.
 
 ## Decisions and Course Corrections
 
+- **Off-screen visibility gate: wired, measured, reverted (2026-08-19).** `advance` has always
+  taken an `isVisible` predicate with a full retail-faithful suspend/reconcile path behind it, and
+  the runtime has always called `advance(timeSeconds)` without one — so all 626 resident emitters
+  took the full path every frame while only 72 were visible. Wiring it was the very first fix this
+  investigation identified, and it was never done; the conversation moved to throttling, the
+  throttle was dropped, and the gate went with it unnoticed.
+
+  Wired to the same predicate the draw path culls with, so "visible" means one thing in both
+  places. Result, medians of 3:
+
+  | metric | ungated | gated |
+  | ------ | ------- | ----- |
+  | `particleAdvance` | 0.050 | **0.063** (+27 %) |
+  | tick total | 1.183 | 1.313 |
+  | `frameWork` | 1.207 | 1.228 |
+  | live particles | 3,701 | 1,686 (−54 %) |
+
+  **Half the particles simulated, and the frame got slower.** The predicate costs more than the
+  work it skips: `#particleRenderOwner` performs a sky-map lookup, a string prefix test and a Set
+  lookup — about 1,900 lookups per frame across 626 emitters — to avoid a watermark comparison and
+  two early-returning field checks.
+
+  **Why the original recommendation went stale rather than being wrong.** It was written when
+  `advance` resolved a full scene placement per emitter, where gating would have saved ~150 µs.
+  Phase 2 deleted exactly that work, so by the time the gate was wired there was nothing left to
+  skip and the test became the cost. Reverted: no gain, and it halves live populations, which is a
+  behaviour change with visual consequences when the camera turns.
+
+  **Kept as knowledge, not code:** the suspend/reconcile machinery stays (it is tested and
+  retail-faithful) but remains unreached in production. Re-evaluate only if per-emitter frame work
+  grows again — the gate's value scales with what it can skip, which is currently almost nothing.
+
 - **Phase 7 (2026-08-19) — cleanup and guarantee census.**
 
   **Vocabulary swept.** "Cohort" described a per-frame grouping of record *copies*; there is no

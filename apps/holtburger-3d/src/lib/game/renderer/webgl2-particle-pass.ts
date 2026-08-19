@@ -65,6 +65,14 @@ export interface ParticleRecordFrame {
 
 export interface ParticleDrawDiagnostics {
 	readonly drawnBatchCount: number;
+	/**
+	 * Texture rows uploaded this frame.
+	 *
+	 * Worth surfacing rather than assuming: the dirty span is a single min/max range, so scattered
+	 * spawns across many emitters can widen it to cover most of the store. A row count near the
+	 * store's height means the span has degenerated and the upload is no longer incremental.
+	 */
+	readonly uploadedRecordRowCount: number;
 	readonly drawnParticleCount: number;
 	/** Batches skipped because their mesh is not resident; never a silent zero. */
 	readonly unresolvedBatchCount: number;
@@ -102,6 +110,7 @@ export class WebGL2ParticlePass {
 	readonly #scopedRenderScopeKeys: string[] = [];
 	#diagnostics: ParticleDrawDiagnostics = {
 		drawnBatchCount: 0,
+		uploadedRecordRowCount: 0,
 		drawnParticleCount: 0,
 		unresolvedBatchCount: 0,
 	};
@@ -160,6 +169,7 @@ export class WebGL2ParticlePass {
 				drawnBatchCount: 0,
 				drawnParticleCount: 0,
 				unresolvedBatchCount: 0,
+				uploadedRecordRowCount: 0,
 			};
 			return;
 		}
@@ -337,6 +347,7 @@ export class WebGL2ParticlePass {
 		gl.disable(gl.BLEND);
 		this.#diagnostics = {
 			drawnBatchCount,
+			uploadedRecordRowCount: records.uploadedRowCount,
 			drawnParticleCount,
 			unresolvedBatchCount,
 		};

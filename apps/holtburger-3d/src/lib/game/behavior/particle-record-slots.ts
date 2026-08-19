@@ -128,10 +128,13 @@ export class ParticleRecordSlots {
 	moveRecord(fromSlot: number, toSlot: number): void {
 		if (fromSlot === toSlot) return;
 		const stride = PARTICLE_RECORD_STRIDE_FLOATS;
+		// The whole stride, not just the written fields: the two are equal only while the record
+		// happens to fill its texels exactly, and a move that copied the smaller of them would
+		// silently truncate the day any padding came back.
 		this.#data.copyWithin(
 			toSlot * stride,
 			fromSlot * stride,
-			fromSlot * stride + PARTICLE_INSTANCE_FLOAT_COUNT,
+			fromSlot * stride + stride,
 		);
 		this.#markDirty(toSlot);
 	}

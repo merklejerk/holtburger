@@ -2,18 +2,22 @@ import type {
 	ClosedWorkerRequest,
 	ClosedWorkerResponse,
 } from "../../workers/closed-worker";
-import { runAtlasPageBuildWorkerJob } from "./page-build-worker";
-import type { AtlasPageBuildJob, AtlasPageBuildResult } from "./page-build";
+import {
+	atlasPageWorkerResultTransfer,
+	runAtlasPageBuildWorkerJob,
+	type AtlasPageWorkerJob,
+	type AtlasPageWorkerResult,
+} from "./page-build-worker";
 
 const worker = self as unknown as {
 	onmessage:
-		| ((event: MessageEvent<ClosedWorkerRequest<AtlasPageBuildJob>>) => void)
+		| ((event: MessageEvent<ClosedWorkerRequest<AtlasPageWorkerJob>>) => void)
 		| null;
 	postMessage(message: unknown, transfer?: readonly Transferable[]): void;
 };
 
 worker.onmessage = (
-	event: MessageEvent<ClosedWorkerRequest<AtlasPageBuildJob>>,
+	event: MessageEvent<ClosedWorkerRequest<AtlasPageWorkerJob>>,
 ) => {
 	const { id, input } = event.data;
 	try {
@@ -23,8 +27,8 @@ worker.onmessage = (
 				id,
 				ok: true,
 				result,
-			} satisfies ClosedWorkerResponse<AtlasPageBuildResult>,
-			[result.pageBits.buffer],
+			} satisfies ClosedWorkerResponse<AtlasPageWorkerResult>,
+			atlasPageWorkerResultTransfer(result),
 		);
 	} catch (cause) {
 		worker.postMessage({

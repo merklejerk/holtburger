@@ -8,6 +8,7 @@ import {
 	type TextureArrayResourceKey,
 	type Texture2DFormat,
 	type Texture2DResourceKey,
+	type Texture2DRegionUpload,
 	type Texture2DUpload,
 } from "./resource-manager";
 import { TexturePixelFormat } from "../textures/types";
@@ -99,6 +100,40 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const replacement = this.#uploadTexture(upload);
 		this.#textures.set(key, replacement);
 		this.#gl.deleteTexture(previous.texture);
+	}
+
+	updateTexture2DRegions(
+		key: Texture2DResourceKey,
+		regions: readonly Texture2DRegionUpload[],
+	): void {
+		const resource = this.getTexture2D(key);
+		const gl = this.#gl;
+		const format = resolveTextureFormat(gl, resource.format);
+		for (const region of regions) {
+			validateTexture2DRegionUpload(region, resource, format);
+		}
+		try {
+			gl.bindTexture(gl.TEXTURE_2D, resource.texture);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			for (const region of regions) {
+				gl.texSubImage2D(
+					gl.TEXTURE_2D,
+					0,
+					region.x,
+					region.y,
+					region.width,
+					region.height,
+					format.external,
+					format.dataType,
+					region.data,
+				);
+			}
+			// Level zero now matches a full rebuild of this texture, so one regeneration produces
+			// the same chain a replacement upload would have.
+			if (resource.mipLevels > 1) gl.generateMipmap(gl.TEXTURE_2D);
+		} finally {
+			gl.bindTexture(gl.TEXTURE_2D, null);
+		}
 	}
 
 	getTexture2D(key: Texture2DResourceKey): WebGL2Texture2DBinding {
@@ -353,6 +388,63 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 }
 
+function validateTexture2DRegionUpload(
+	region: Texture2DRegionUpload,
+	resource: WebGL2Texture2DBinding,
+	format: WebGL2TextureFormat,
+): void {
+	if (
+		!Number.isInteger(region.x) ||
+		!Number.isInteger(region.y) ||
+		!Number.isInteger(region.width) ||
+		!Number.isInteger(region.height) ||
+		region.width <= 0 ||
+		region.height <= 0
+	) {
+		throw new Error("Texture region dimensions must be positive integers.");
+	}
+	if (
+		region.x < 0 ||
+		region.y < 0 ||
+		region.x + region.width > resource.width ||
+		region.y + region.height > resource.height
+	) {
+		throw new Error("Texture region exceeds its texture bounds.");
+	}
+	validateTexelPayload(
+		region.data,
+		format,
+		region.width * region.height,
+		"Texture region",
+	);
+}
+
+/** Prove one payload's scalar type and length match the texel count its format implies. */
+function validateTexelPayload(
+	data: Uint8Array | Uint32Array,
+	format: WebGL2TextureFormat,
+	texelCount: number,
+	subject: string,
+): void {
+	if (
+		format.integer
+			? !(data instanceof Uint32Array)
+			: !(data instanceof Uint8Array)
+	) {
+		throw new Error(
+			format.integer
+				? `${subject} requires Uint32Array data for an integer texture.`
+				: `${subject} requires Uint8Array data for a normalized texture.`,
+		);
+	}
+	const expectedBytes = texelCount * format.bytesPerPixel;
+	if (data.byteLength !== expectedBytes) {
+		throw new Error(
+			`${subject} contains ${data.byteLength} bytes; expected ${expectedBytes}.`,
+		);
+	}
+}
+
 function validateTexture2DUpload(
 	gl: WebGL2RenderingContext,
 	upload: Texture2DUpload,
@@ -377,23 +469,12 @@ function validateTexture2DUpload(
 		);
 	}
 	const format = resolveTextureFormat(gl, upload.format);
-	if (
-		format.integer
-			? !(upload.data instanceof Uint32Array)
-			: !(upload.data instanceof Uint8Array)
-	) {
-		throw new Error(
-			format.integer
-				? "Integer textures require Uint32Array pixel data."
-				: "Normalized textures require Uint8Array pixel data.",
-		);
-	}
-	const expectedBytes = upload.width * upload.height * format.bytesPerPixel;
-	if (upload.data.byteLength !== expectedBytes) {
-		throw new Error(
-			`Texture contains ${upload.data.byteLength} bytes; expected ${expectedBytes}.`,
-		);
-	}
+	validateTexelPayload(
+		upload.data,
+		format,
+		upload.width * upload.height,
+		"Texture",
+	);
 }
 
 function isGeometryResourceKey(
@@ -447,16 +528,19 @@ function validateGeometry(geometry: RenderGeometryData): void {
 	}
 }
 
-function resolveTextureFormat(
-	gl: WebGL2RenderingContext,
-	format: Texture2DFormat,
-): {
+/** Physical GL enums and scalar shape for one logical texture format. */
+interface WebGL2TextureFormat {
 	readonly internal: GLenum;
 	readonly external: GLenum;
 	readonly bytesPerPixel: number;
 	readonly dataType: GLenum;
 	readonly integer: boolean;
-} {
+}
+
+function resolveTextureFormat(
+	gl: WebGL2RenderingContext,
+	format: Texture2DFormat,
+): WebGL2TextureFormat {
 	switch (format) {
 		case TexturePixelFormat.RGBA8:
 			return {

@@ -19,12 +19,19 @@ import {
 	type AssetTextureKey,
 	type PackedObjectTexturePurpose,
 } from "../types";
-import type {
-	AtlasPageLayout,
-	StableAtlasLayoutPlan,
-	StableAtlasLayoutRequest,
+import {
+	allocationBoundsForPlacement,
+	type AtlasPageLayout,
+	type AtlasPlacement,
+	type StableAtlasLayoutPlan,
+	type StableAtlasLayoutRequest,
 } from "./layout";
-import type { AtlasPageBuildJob, AtlasPageBuildResult } from "./page-build";
+import type {
+	AtlasPageBuildJob,
+	AtlasPageBuildResult,
+	AtlasPagePatchJob,
+	AtlasPagePatchResult,
+} from "./page-build";
 import {
 	AtlasPagePublication,
 	type AtlasPagePublicationDiagnostics,
@@ -55,11 +62,20 @@ export interface ResidentTextureAtlasDiagnostics {
 	readonly acceptedCompactionCount: number;
 	readonly avoidedPreparationCount: number;
 	readonly claimedTextureCount: number;
+	/** Compaction plans actually computed; layouts that cannot shrink are never planned. */
 	readonly compactionAttemptCount: number;
 	readonly copiedSourceBytes: number;
 	readonly eliminatedPageCount: number;
 	readonly failedCompactionCount: number;
 	readonly insertedReuseCount: number;
+	/** Release-only page updates that swapped placement metadata without a rebuild. */
+	readonly metadataOnlyPageUpdateCount: number;
+	/** Pages patched in place instead of rebuilt. */
+	readonly patchedPageCount: number;
+	/** Level-zero region bytes written into retained page resources. */
+	readonly patchedRegionBytes: number;
+	/** Publications that retried as whole-page rebuilds after a patch attempt failed. */
+	readonly patchFallbackCount: number;
 	readonly uploadedPageBytes: number;
 	readonly uploadedPageCount: number;
 	readonly releasedPageBytes: number;
@@ -89,6 +105,10 @@ export interface ResidentAtlasPageBuilder {
 		job: AtlasPageBuildJob,
 		transfer: readonly Transferable[],
 	): Promise<AtlasPageBuildResult>;
+	patch(
+		job: AtlasPagePatchJob,
+		transfer: readonly Transferable[],
+	): Promise<AtlasPagePatchResult>;
 	getDiagnostics?(): ClosedWorkerPoolDiagnostics;
 	destroy(): void;
 }
@@ -116,7 +136,7 @@ type PackedAssetTextureFact = AssetTextureFact & {
 
 /** Stable and compact layout candidates for one unchanged purpose epoch. */
 interface PurposeRebuildPlans {
-	readonly compact: StableAtlasLayoutPlan;
+	readonly compact: StableAtlasLayoutPlan | null;
 	readonly epoch: number;
 	readonly nextPageGeneration: number;
 	readonly stable: StableAtlasLayoutPlan;
@@ -163,7 +183,13 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	#failedCompactionCount = 0;
 	#eliminatedPageCount = 0;
 	#insertedReuseCount = 0;
+	/** Pages whose placement change was release-only and needed no pixel or GPU work. */
+	#metadataOnlyPageUpdateCount = 0;
+	/** Publications that retried as whole-page rebuilds after a patch attempt failed. */
+	#patchFallbackCount = 0;
 	#destroyed = false;
+	/** The fixture override resolved against fixed policy once, so no caller re-resolves it. */
+	readonly #pageSize: number;
 
 	constructor(
 		preparer: TexturePreparer,
@@ -171,14 +197,13 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	) {
 		this.#preparer = preparer;
 		this.#physical = physical;
+		this.#pageSize =
+			physical?.pageSize ??
+			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize;
 		this.#publication =
 			physical === null
 				? null
-				: new AtlasPagePublication(
-						physical.renderResources,
-						physical.pageSize ??
-							FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
-					);
+				: new AtlasPagePublication(physical.renderResources, this.#pageSize);
 	}
 
 	/**
@@ -329,6 +354,10 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			eliminatedPageCount: this.#eliminatedPageCount,
 			failedCompactionCount: this.#failedCompactionCount,
 			insertedReuseCount: this.#insertedReuseCount,
+			metadataOnlyPageUpdateCount: this.#metadataOnlyPageUpdateCount,
+			patchedPageCount: publication.patchedPageCount,
+			patchedRegionBytes: publication.patchedRegionBytes,
+			patchFallbackCount: this.#patchFallbackCount,
 			uploadedPageBytes: publication.uploadedPageBytes,
 			uploadedPageCount: publication.uploadedPageCount,
 			releasedPageBytes: publication.releasedPageBytes,
@@ -385,6 +414,10 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			residentSourceBytes: diagnostics.residentSourceBytes,
 			residentSourceCount: diagnostics.residentSourceCount,
 			reusedAtlasInsertions: diagnostics.insertedReuseCount,
+			metadataOnlyAtlasPageUpdates: diagnostics.metadataOnlyPageUpdateCount,
+			patchedAtlasPages: diagnostics.patchedPageCount,
+			patchedAtlasRegionBytes: diagnostics.patchedRegionBytes,
+			atlasPatchFallbacks: diagnostics.patchFallbackCount,
 		};
 	}
 
@@ -553,22 +586,23 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	async #rebuildPurpose(purpose: PackedObjectTexturePurpose): Promise<void> {
 		const plans = await this.#planPurposeRebuild(purpose);
 		if (plans === null) return;
-		if (plans.stable.pages.length > 0) this.#compactionAttemptCount += 1;
-		if (
-			shouldAcceptCompaction(
-				plans.stable,
-				plans.compact,
-				FRONTEND_TUNING.workloads.staticObjectTextureAtlas
-					.maximumCompactionRebuildPages,
-			) &&
-			(await this.#tryPublishCompaction(purpose, plans))
-		) {
-			return;
+		if (plans.compact !== null) {
+			this.#compactionAttemptCount += 1;
+			if (
+				shouldAcceptCompaction(
+					plans.stable,
+					plans.compact,
+					FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+						.maximumCompactionRebuildPages,
+				) &&
+				(await this.#tryPublishCompaction(purpose, plans.compact, plans))
+			) {
+				return;
+			}
 		}
-		const physical = this.#physical;
-		if (physical === null) return;
+		if (this.#physical === null) return;
 		try {
-			await this.#publishPlan(plans.stable, physical.pageSize);
+			await this.#publishPlan(plans.stable);
 		} catch (error) {
 			this.#failedTransactionCount += 1;
 			throw error;
@@ -606,23 +640,34 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		const stableNewPageCount = stable.pages.filter(
 			(page) => !this.#publication?.hasPage(page.pageId),
 		).length;
-		const compact = await physical.layoutPlanner.plan({
-			correlationId: `resident:${purpose}:${epoch}:compact`,
-			entries,
-			nextPageGeneration: nextPageGeneration + stableNewPageCount,
-			pages: [],
-			purpose,
-		});
+		// Planning a compaction costs a worker round trip, so only pay it when the layout could
+		// arithmetically end up on fewer pages and still fit the rebuild budget. Both conditions
+		// are necessary for `shouldAcceptCompaction`, so skipping cannot hide an accepted pass.
+		const compact = couldCompactionReducePages(
+			stable,
+			this.#pageSize,
+			FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+				.maximumCompactionRebuildPages,
+		)
+			? await physical.layoutPlanner.plan({
+					correlationId: `resident:${purpose}:${epoch}:compact`,
+					entries,
+					nextPageGeneration: nextPageGeneration + stableNewPageCount,
+					pages: [],
+					purpose,
+				})
+			: null;
 		if (!this.#isPurposeCurrent(purpose, epoch)) return null;
 		return { compact, epoch, nextPageGeneration, stable, stableNewPageCount };
 	}
 
 	async #tryPublishCompaction(
 		purpose: PackedObjectTexturePurpose,
+		compact: StableAtlasLayoutPlan,
 		plans: PurposeRebuildPlans,
 	): Promise<boolean> {
 		try {
-			await this.#publishPlan(plans.compact, this.#physical?.pageSize);
+			await this.#publishPlan(compact);
 		} catch {
 			this.#failedCompactionCount += 1;
 			this.#failedTransactionCount += 1;
@@ -632,12 +677,12 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			purpose,
 			plans.nextPageGeneration +
 				plans.stableNewPageCount +
-				plans.compact.pages.length,
+				compact.pages.length,
 		);
 		if (!this.#markPurposePublished(purpose, plans.epoch)) return true;
 		this.#acceptedCompactionCount += 1;
 		this.#eliminatedPageCount +=
-			plans.stable.pages.length - plans.compact.pages.length;
+			plans.stable.pages.length - compact.pages.length;
 		return true;
 	}
 
@@ -677,33 +722,41 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		this.#nextPageGeneration.set(purpose, nextPageGeneration);
 	}
 
-	async #publishPlan(
-		plan: StableAtlasLayoutPlan,
-		pageSize: number | undefined,
-	): Promise<void> {
+	async #publishPlan(plan: StableAtlasLayoutPlan): Promise<void> {
+		const physical = this.#physical;
 		const publication = this.#publication;
-		if (publication === null) return;
-		const pagesToBuild = plan.pages.filter((page) => {
-			const existing = publication
-				.getPurposeLayouts(page.purpose)
-				.find((candidate) => candidate.pageId === page.pageId);
-			return existing === undefined || !pageLayoutsEqual(existing, page);
-		});
-		const builtPages = await Promise.all(
-			pagesToBuild.map((page) =>
-				this.#buildPage(
-					page,
-					pageSize ??
-						FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
-				),
-			),
+		if (physical === null || publication === null) {
+			throw new Error(
+				"Resident atlas cannot publish without physical publication state.",
+			);
+		}
+		const published = new Map(
+			publication
+				.getPurposeLayouts(plan.purpose)
+				.map((layout) => [layout.pageId, layout] as const),
 		);
+		const insertedKeys = new Set(plan.insertedKeys);
+		const dispositions = plan.pages.map((page) => ({
+			disposition: classifyAtlasPageDisposition(
+				published.get(page.pageId),
+				page,
+				insertedKeys,
+			),
+			page,
+		}));
 		const existingPageIds = new Set(
 			plan.pages
 				.filter((page) => publication.hasPage(page.pageId))
 				.map((page) => page.pageId),
 		);
-		publication.publish(plan, builtPages);
+		const { built, patched, publishedDispositions } =
+			await this.#preparePayloads(dispositions, physical);
+		publication.publish(plan, { built, patched });
+		// Counters commit only once the publication they describe has, so a failed attempt that
+		// later falls back to whole pages is never counted as work that landed.
+		this.#metadataOnlyPageUpdateCount += publishedDispositions.filter(
+			({ disposition }) => disposition.kind === "metadata-only",
+		).length;
 		for (const key of plan.insertedKeys) {
 			if (
 				plan.pages.some(
@@ -717,15 +770,103 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		}
 	}
 
+	/**
+	 * Build every payload one publication needs, degrading patches to whole-page rebuilds if they
+	 * cannot be composited.
+	 *
+	 * Only the patch jobs are retryable: a patch is an optimization over rebuilding, so its failure
+	 * has a correct fallback. Every other failure — a lost retained source, a failed page build —
+	 * is a real fault and propagates rather than being relabelled as patch trouble.
+	 */
+	async #preparePayloads(
+		dispositions: readonly AtlasPageDispositionEntry[],
+		physical: ResidentTextureAtlasPhysicalDependencies,
+	): Promise<{
+		readonly built: readonly AtlasPageBuildResult[];
+		readonly patched: readonly AtlasPagePatchResult[];
+		readonly publishedDispositions: readonly AtlasPageDispositionEntry[];
+	}> {
+		// Flattened rather than filtered so the inserted keys stay narrowed to the patch case.
+		const patchEntries = dispositions.flatMap(({ disposition, page }) =>
+			disposition.kind === "patch"
+				? [{ insertedKeys: disposition.insertedKeys, page }]
+				: [],
+		);
+		let patched: readonly AtlasPagePatchResult[] = [];
+		let publishedDispositions = dispositions;
+		if (patchEntries.length > 0) {
+			try {
+				patched = await Promise.all(
+					patchEntries.map(({ insertedKeys: keys, page }) =>
+						this.#patchPage(page, keys, physical),
+					),
+				);
+			} catch {
+				this.#patchFallbackCount += 1;
+				patched = [];
+				publishedDispositions = dispositions.map(({ disposition, page }) => ({
+					disposition:
+						disposition.kind === "patch"
+							? ({ kind: "build" } as const)
+							: disposition,
+					page,
+				}));
+			}
+		}
+		const built = await Promise.all(
+			publishedDispositions.flatMap(({ disposition, page }) =>
+				disposition.kind === "build" ? [this.#buildPage(page, physical)] : [],
+			),
+		);
+		return { built, patched, publishedDispositions };
+	}
+
+	async #patchPage(
+		page: AtlasPageLayout,
+		patchedKeys: readonly AssetTextureKey[],
+		physical: ResidentTextureAtlasPhysicalDependencies,
+	): Promise<AtlasPagePatchResult> {
+		const sources = this.#copyPageSources(patchedKeys, page);
+		const transfer = sources.map(
+			(source) => source.pixels.buffer as ArrayBuffer,
+		);
+		const result = await physical.pageBuilder.patch(
+			{ page, pageSize: this.#pageSize, patchedKeys, sources },
+			transfer,
+		);
+		this.#copiedSourceBytes += result.copiedSourceBytes;
+		return result;
+	}
+
 	async #buildPage(
 		page: AtlasPageLayout,
-		pageSize: number,
+		physical: ResidentTextureAtlasPhysicalDependencies,
 	): Promise<AtlasPageBuildResult> {
-		const sources = page.placements.map((placement) => {
-			const source = this.#sources.get(placement.key);
+		const sources = this.#copyPageSources(
+			page.placements.map((placement) => placement.key),
+			page,
+		);
+		const transfer = sources.map(
+			(source) => source.pixels.buffer as ArrayBuffer,
+		);
+		const result = await physical.pageBuilder.build(
+			{ page, pageSize: this.#pageSize, sources },
+			transfer,
+		);
+		this.#copiedSourceBytes += result.copiedSourceBytes;
+		return result;
+	}
+
+	/** Copy retained source pixels for one page job; retained sources are never transferred. */
+	#copyPageSources(
+		keys: readonly AssetTextureKey[],
+		page: AtlasPageLayout,
+	): AtlasPageBuildJob["sources"] {
+		return keys.map((key) => {
+			const source = this.#sources.get(key);
 			if (!source) {
 				throw new Error(
-					`Resident atlas page ${page.pageId} lost retained source ${placement.key}.`,
+					`Resident atlas page ${page.pageId} lost retained source ${key}.`,
 				);
 			}
 			return {
@@ -735,15 +876,6 @@ export class ResidentTextureAtlas<TOwner extends string> {
 				width: source.width,
 			};
 		});
-		const transfer = sources.map(
-			(source) => source.pixels.buffer as ArrayBuffer,
-		);
-		const result = await this.#physical!.pageBuilder.build(
-			{ page, pageSize, sources },
-			transfer,
-		);
-		this.#copiedSourceBytes += result.copiedSourceBytes;
-		return result;
 	}
 
 	#markPurposeDirty(purpose: PackedObjectTexturePurpose): void {
@@ -772,6 +904,8 @@ export class ResidentTextureAtlas<TOwner extends string> {
 				publicationDurationMs: 0,
 				releasedPageBytes: 0,
 				releasedPageCount: 0,
+				patchedPageCount: 0,
+				patchedRegionBytes: 0,
 				uploadedPageBytes: 0,
 				uploadedPageCount: 0,
 			}
@@ -876,6 +1010,19 @@ function validatePreparedSource(
 	}
 }
 
+function atlasPlacementsEqual(
+	left: AtlasPlacement,
+	right: AtlasPlacement,
+): boolean {
+	return (
+		left.key === right.key &&
+		left.contentBounds.x === right.contentBounds.x &&
+		left.contentBounds.y === right.contentBounds.y &&
+		left.contentBounds.width === right.contentBounds.width &&
+		left.contentBounds.height === right.contentBounds.height
+	);
+}
+
 function pageLayoutsEqual(
 	left: AtlasPageLayout,
 	right: AtlasPageLayout,
@@ -888,13 +1035,91 @@ function pageLayoutsEqual(
 			const rightPlacement = right.placements[index];
 			return (
 				rightPlacement !== undefined &&
-				placement.key === rightPlacement.key &&
-				placement.contentBounds.x === rightPlacement.contentBounds.x &&
-				placement.contentBounds.y === rightPlacement.contentBounds.y &&
-				placement.contentBounds.width === rightPlacement.contentBounds.width &&
-				placement.contentBounds.height === rightPlacement.contentBounds.height
+				atlasPlacementsEqual(placement, rightPlacement)
 			);
 		})
+	);
+}
+
+/** One planned page paired with the work its publication needs. */
+interface AtlasPageDispositionEntry {
+	readonly disposition: AtlasPageDisposition;
+	readonly page: AtlasPageLayout;
+}
+
+/** How one planned page reaches its published state, cheapest sufficient work first. */
+export type AtlasPageDisposition =
+	/** Published pixels and metadata already match the plan. */
+	| { readonly kind: "unchanged" }
+	/** Only releases: published pixels stay, and the freed regions become unreferenced. */
+	| { readonly kind: "metadata-only" }
+	/** Insertions only touch free regions, so the published resource is patched in place. */
+	| {
+			readonly kind: "patch";
+			readonly insertedKeys: readonly AssetTextureKey[];
+	  }
+	/** Anything else — a new page, moved placements, or unexplained content. */
+	| { readonly kind: "build" };
+
+/**
+ * Decide the cheapest sufficient publication work for one planned page.
+ *
+ * Keys are content-immutable (`asset-texture:{purpose}:{assetId}` over immutable DAT data) and the
+ * stable planner never moves a retained placement, so a placement matching its published bounds
+ * still has correct pixels. Any placement that neither matches its published bounds nor appears in
+ * the plan's inserted set is unexplained, and the page rebuilds rather than guessing.
+ */
+export function classifyAtlasPageDisposition(
+	published: AtlasPageLayout | undefined,
+	planned: AtlasPageLayout,
+	insertedKeys: ReadonlySet<AssetTextureKey>,
+): AtlasPageDisposition {
+	if (published === undefined) return { kind: "build" };
+	if (pageLayoutsEqual(published, planned)) return { kind: "unchanged" };
+	const publishedByKey = new Map(
+		published.placements.map((placement) => [placement.key, placement]),
+	);
+	const patched: AssetTextureKey[] = [];
+	for (const placement of planned.placements) {
+		const prior = publishedByKey.get(placement.key);
+		if (prior !== undefined) {
+			if (!atlasPlacementsEqual(prior, placement)) return { kind: "build" };
+			continue;
+		}
+		if (!insertedKeys.has(placement.key)) return { kind: "build" };
+		patched.push(placement.key);
+	}
+	return patched.length === 0
+		? { kind: "metadata-only" }
+		: { kind: "patch", insertedKeys: patched };
+}
+
+/**
+ * True when compaction could still satisfy `shouldAcceptCompaction`, judged without planning it.
+ *
+ * Allocation area gives an exact lower bound on the pages any packing can use, so a layout already
+ * sitting at that bound can never compact to fewer pages, and a bound above the rebuild budget can
+ * never produce an acceptable plan. Both are necessary conditions, so this never skips a
+ * compaction that would have been accepted.
+ */
+function couldCompactionReducePages(
+	stable: StableAtlasLayoutPlan,
+	pageSize: number,
+	rebuildPageBudget: number,
+): boolean {
+	if (stable.pages.length < 2) return false;
+	const allocatedArea = stable.pages.reduce(
+		(total, page) =>
+			total +
+			page.placements.reduce((pageTotal, placement) => {
+				const bounds = allocationBoundsForPlacement(page.purpose, placement);
+				return pageTotal + bounds.width * bounds.height;
+			}, 0),
+		0,
+	);
+	const minimumPages = Math.ceil(allocatedArea / pageSize ** 2);
+	return (
+		minimumPages < stable.pages.length && minimumPages <= rebuildPageBudget
 	);
 }
 

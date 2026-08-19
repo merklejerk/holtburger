@@ -100,6 +100,10 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		throw new Error("Geometry manager tests do not create textures.");
 	}
 
+	updateTexture2DRegions(): void {
+		throw new Error("Texture region updates are outside this fixture.");
+	}
+
 	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void {
 		void key;
 		void upload;

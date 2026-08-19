@@ -87,6 +87,7 @@ export interface TextureManagerDiagnostics {
 	readonly avoidedAtlasPreparations: number;
 	readonly compactedAtlasPagesEliminated: number;
 	readonly acceptedAtlasCompactions: number;
+	/** Compaction plans actually computed; layouts that cannot shrink are never planned. */
 	readonly attemptedAtlasCompactions: number;
 	readonly failedAtlasCompactions: number;
 	/** Completed page-build source copies transferred into the closed worker boundary. */
@@ -94,6 +95,14 @@ export interface TextureManagerDiagnostics {
 	/** Complete level-zero fixed-page payload bytes submitted to the device resource manager. */
 	readonly uploadedAtlasPageBytes: number;
 	readonly uploadedAtlasPages: number;
+	/** Release-only page updates that swapped placement metadata without a rebuild. */
+	readonly metadataOnlyAtlasPageUpdates: number;
+	/** Pages brought up to date in place instead of being replaced. */
+	readonly patchedAtlasPages: number;
+	/** Level-zero region bytes written into retained page resources. */
+	readonly patchedAtlasRegionBytes: number;
+	/** Publications that retried as whole-page rebuilds after a patch attempt failed. */
+	readonly atlasPatchFallbacks: number;
 	/** Device allocation bytes, including mip levels, released after replacement or shutdown. */
 	readonly releasedAtlasPageBytes: number;
 	readonly releasedAtlasPages: number;

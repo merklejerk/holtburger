@@ -68,12 +68,56 @@ npm run harness:browser -- --brief --gpu --profile-renderer --measure-ms 6000 ..
 SwiftShader is only the default because it is deterministic and available
 everywhere. Pass `--gpu` for anything meant to be performance evidence.
 
+### CPU Profiling with Chrome's Native Profiler
+
+The harness already drives Chrome over a CDP session, so V8's sampling
+profiler needs no extra tooling: `--cpu-profile <path>` samples the page at
+100 µs across the same measurement window `--profile-renderer` uses and writes
+standard `.cpuprofile` JSON, loadable in the Chrome DevTools Performance panel
+or speedscope.
+
+The two profilers answer different questions; use them together. The
+renderer's phase buckets measure spans the renderer itself defined, and work
+that crosses a bucket boundary is silently billed to the wrong phase — cached
+generated-instance selection has been billed to run preparation, and the
+non-nesting GPU elapsed windows once pinned opaque-pass cost on the terrain
+pass. The V8 profile attributes CPU time to actual functions regardless of
+bucket boundaries, so it corroborates the buckets and also surfaces costs no
+bucket names: key-string construction, per-draw attribute rebinding, GC
+pressure. Capture an on/off pair of the workload under investigation and diff
+function self-times; a single profile cannot separate the workload from the
+baseline. Frame counts differ between unthrottled runs, so normalize per frame
+before comparing.
+
 Capture your own numbers; do not quote numbers recorded here or in any other
 doc. A timing is only meaningful alongside the scene interest radius, content,
 and hardware that produced it, and those are exactly the facts a pasted figure
 loses. A stale capture taken at an unrepresentative radius reads as a budget and
 will be believed. Record what a measurement _means_ in a plan or commit message
 next to its configuration, not as a standing figure in this file.
+
+### Measuring Streaming, Not Just Steady State
+
+Frame cost while content streams in is a different measurement from steady-state frame cost, and
+the harness has separate tools for it. `--relocate-landblock` re-issues scene interest once;
+`--relocate-sequence <hex,hex,...>` walks a series of landblocks with `--relocate-hop-ms` between
+hops, resetting timing per hop so each crossing reports its own worst frame instead of a running
+maximum inherited from initial load.
+
+Two rules make streaming numbers mean anything:
+
+**Never conclude from a single sample.** Identical, exactly repeatable crossings have been measured
+spanning 18.7 ms to 38.0 ms of worst-frame work. A single capture once produced a recorded "hitch
+halved" result that repeated sampling showed never happened. Report the median of at least five
+runs, and report the spread with it.
+
+**Report the workload beside the timing.** Streaming frame cost tracks how much work lands in the
+window, so a timing without its workload is not comparable to another timing.
+`staticLayerPublicationCount` counts outdoor static layer installs, each of which is one
+synchronous main-thread publication; the atlas counters (`uploadedAtlasPageBytes`,
+`patchedAtlasRegionBytes`, `attemptedAtlasCompactions`) do the same job for texture work. A change
+that moves cost per unit of work is a real result; a change that moved the amount of work is not
+the same claim.
 
 ### Looking at Particles
 

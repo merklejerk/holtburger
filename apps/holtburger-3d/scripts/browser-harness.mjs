@@ -13,6 +13,7 @@ const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 /** Lateral metres between showcase subjects; wide enough that two humanoids do not overlap. */
 const ENTITY_SHOWCASE_SEPARATION = 1.2;
 const DEFAULT_SETTLE_MS = 10_000;
+const DEFAULT_RELOCATE_HOP_MS = 1_500;
 const DEFAULT_VIEWPORT_WIDTH = 1_280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
 const DEFAULT_DEVICE_SCALE_FACTOR = 1;
@@ -52,6 +53,9 @@ try {
 			options.screenshotPath,
 			Buffer.from(result.screenshot, "base64"),
 		);
+	}
+	if (options.cpuProfilePath && result.cpuProfile) {
+		await writeFile(options.cpuProfilePath, JSON.stringify(result.cpuProfile));
 	}
 	if (options.screenshotPath && result.cameraSweepScreenshots) {
 		for (const [label, screenshot] of Object.entries(
@@ -97,6 +101,7 @@ try {
 						landblockId: options.landblockId,
 						lifecycleState: result.lifecycleState,
 						entityLifecycle: result.entityLifecycle,
+						relocationSequence: result.relocationSequence,
 						relocationState: result.relocationState,
 						metrics: result.state.metrics,
 						ready: result.state.ready,
@@ -190,6 +195,8 @@ function parseArgs(args) {
 		relocateDistance: 10,
 		cameraLandblockId: null,
 		relocateLandblockId: null,
+		relocateSequence: [],
+		relocateHopMs: DEFAULT_RELOCATE_HOP_MS,
 		envCellCameraId: null,
 		envCellCameraPosition: null,
 		minimumPortalFootprintPixelArea: null,
@@ -214,6 +221,7 @@ function parseArgs(args) {
 		lifecycle: false,
 		fixture: null,
 		screenshotPath: null,
+		cpuProfilePath: null,
 		measureMs: 0,
 		settleMs: DEFAULT_SETTLE_MS,
 		viewportWidth: DEFAULT_VIEWPORT_WIDTH,
@@ -659,6 +667,27 @@ function parseArgs(args) {
 			case "--screenshot":
 				parsed.screenshotPath = requireValue(args, ++index, arg);
 				break;
+			case "--relocate-sequence":
+				parsed.relocateSequence = requireValue(args, ++index, arg)
+					.split(",")
+					.map((entry) => entry.trim())
+					.filter((entry) => entry.length > 0);
+				if (parsed.relocateSequence.length === 0) {
+					throw new Error("--relocate-sequence needs at least one landblock.");
+				}
+				break;
+			case "--relocate-hop-ms":
+				parsed.relocateHopMs = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isFinite(parsed.relocateHopMs) ||
+					parsed.relocateHopMs < 0
+				) {
+					throw new Error("--relocate-hop-ms must be a non-negative number.");
+				}
+				break;
+			case "--cpu-profile":
+				parsed.cpuProfilePath = requireValue(args, ++index, arg);
+				break;
 			case "--settle-ms":
 				parsed.settleMs = Number(requireValue(args, ++index, arg));
 				if (!Number.isFinite(parsed.settleMs) || parsed.settleMs < 0) {
@@ -688,6 +717,17 @@ function parseArgs(args) {
 	}
 	if (parsed.relocateKind !== null && parsed.spawnWcid === null) {
 		throw new Error("--relocate-kind requires --spawn-wcid.");
+	}
+	if (
+		parsed.relocateHopMs !== DEFAULT_RELOCATE_HOP_MS &&
+		parsed.relocateSequence.length === 0
+	) {
+		throw new Error("--relocate-hop-ms requires --relocate-sequence.");
+	}
+	if (parsed.relocateSequence.length > 0 && parsed.relocateLandblockId) {
+		throw new Error(
+			"--relocate-sequence and --relocate-landblock cannot be combined.",
+		);
 	}
 	if (
 		parsed.envCellRadius !== null &&
@@ -723,15 +763,19 @@ function parseArgs(args) {
 			"--isolate-authored-dynamics and --exclude-authored-dynamics cannot be combined.",
 		);
 	}
-	if (parsed.cameraLandblockId && parsed.relocateLandblockId) {
+	if (
+		parsed.cameraLandblockId &&
+		(parsed.relocateLandblockId || parsed.relocateSequence.length > 0)
+	) {
 		throw new Error(
-			"--camera-landblock and --relocate-landblock cannot be combined.",
+			"--camera-landblock cannot be combined with a relocation option.",
 		);
 	}
 	if (
 		parsed.explorerFocus &&
 		(parsed.cameraLandblockId ||
 			parsed.relocateLandblockId ||
+			parsed.relocateSequence.length > 0 ||
 			parsed.envCellCameraId ||
 			parsed.cameraPosition)
 	) {
@@ -743,6 +787,7 @@ function parseArgs(args) {
 		parsed.cameraPosition &&
 		(parsed.cameraLandblockId ||
 			parsed.relocateLandblockId ||
+			parsed.relocateSequence.length > 0 ||
 			parsed.envCellCameraId)
 	) {
 		throw new Error(
@@ -955,6 +1000,13 @@ Options:
   --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
   --screenshot <path>   Persist the captured PNG after the harness exits.
+  --relocate-sequence <hex,hex,...>
+                         Re-issue scene interest at each landblock in turn, so sustained streaming
+                         churn can be measured without the interactive client. Reports per-hop
+                         state under relocationSequence.
+  --relocate-hop-ms <ms> Settle time between sequence hops. Default: ${DEFAULT_RELOCATE_HOP_MS}
+  --cpu-profile <path>  Sample the page's V8 CPU profile across the measurement window and
+                         persist it as .cpuprofile JSON for DevTools or speedscope.
   --chrome-path <path>  Chrome executable. Default: ${DEFAULT_CHROME_PATH}
 `);
 }
@@ -1564,6 +1616,42 @@ async function startViteServer(port) {
 	return viteUrl;
 }
 
+/** The page's positional scene-interest contract, built once so call sites cannot drift. */
+function sceneInterestArgs(options, landblockId, generatedObjectRadius) {
+	return [
+		landblockId,
+		options.terrainRadius ?? options.buildingRadius,
+		options.buildingRadius,
+		options.envCellRadius,
+		options.explicitObjectRadius,
+		generatedObjectRadius,
+		options.cameraYawDegrees,
+		options.cameraPitchDegrees,
+	];
+}
+
+/** Re-issue interest at one landblock and settle, the unit every relocation path repeats. */
+async function hopToLandblock(client, options, landblockId, settleMs) {
+	// Timing resets per hop so each crossing reports its own worst frame instead of a running
+	// maximum inherited from initial load.
+	await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming",
+		[],
+	);
+	await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
+		sceneInterestArgs(options, landblockId, options.generatedObjectRadius),
+	);
+	await delay(settleMs);
+	return evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+		[],
+	);
+}
+
 async function runHarness({ contentHostUrl, viteUrl }) {
 	const userDataDirectory = await mkdtemp(
 		join(tmpdir(), "holtburger-3d-browser-harness-"),
@@ -1660,16 +1748,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
-			[
+			sceneInterestArgs(
+				options,
 				options.landblockId,
-				options.terrainRadius ?? options.buildingRadius,
-				options.buildingRadius,
-				options.envCellRadius,
-				options.explicitObjectRadius,
 				options.generatedObjectRadius,
-				options.cameraYawDegrees,
-				options.cameraPitchDegrees,
-			],
+			),
 		);
 		if (options.minimumPortalFootprintPixelArea !== null) {
 			await evaluate(
@@ -2164,16 +2247,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
-				[
+				sceneInterestArgs(
+					options,
 					options.landblockId,
-					options.terrainRadius ?? options.buildingRadius,
-					options.buildingRadius,
-					options.envCellRadius,
-					options.explicitObjectRadius,
 					options.generatedObjectRadius,
-					options.cameraYawDegrees,
-					options.cameraPitchDegrees,
-				],
+				),
 			);
 			await delay(options.settleMs);
 			const reloaded = await evaluate(
@@ -2185,40 +2263,42 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		}
 		let relocationState = null;
 		if (options.relocateLandblockId) {
-			await evaluate(
+			relocationState = await hopToLandblock(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
-				[
-					options.relocateLandblockId,
-					options.buildingRadius,
-					options.envCellRadius,
-					options.explicitObjectRadius,
-					options.generatedObjectRadius,
-					options.cameraYawDegrees,
-					options.cameraPitchDegrees,
-				],
+				options,
+				options.relocateLandblockId,
+				options.settleMs,
 			);
-			await delay(options.settleMs);
-			relocationState = await evaluate(
+		}
+		const relocationSequence = [];
+		for (const landblockId of options.relocateSequence) {
+			const state = await hopToLandblock(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
-				[],
+				options,
+				landblockId,
+				options.relocateHopMs,
 			);
+			relocationSequence.push({
+				landblockId,
+				// Publication count travels with the timing: frame cost during a crossing scales
+				// with how many layer installs land in the window, so timings from runs that
+				// published different amounts are not comparable.
+				staticLayerPublicationCount:
+					state.staticObjects.staticLayerPublicationCount,
+				texture: state.staticObjects.texture,
+				timing: state.timing,
+			});
 		}
 		let generatedDisabledState = null;
 		if (options.disableGeneratedBeforeCapture) {
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
-				[
+				sceneInterestArgs(
+					options,
 					options.relocateLandblockId ?? options.landblockId,
-					options.buildingRadius,
-					options.envCellRadius,
-					options.explicitObjectRadius,
 					null,
-					options.cameraYawDegrees,
-					options.cameraPitchDegrees,
-				],
+				),
 			);
 			await delay(options.settleMs);
 			generatedDisabledState = await evaluate(
@@ -2270,6 +2350,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[true],
 			);
 		}
+		let cpuProfile = null;
+		if (options.cpuProfilePath) {
+			await client.send("Profiler.enable");
+			// 100 µs sampling: the 1 ms default would land only ~2 samples in a ~2 ms frame.
+			await client.send("Profiler.setSamplingInterval", { interval: 100 });
+			await client.send("Profiler.start");
+		}
 		if (options.measureMs > 0) {
 			await evaluate(
 				client,
@@ -2277,8 +2364,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[],
 			);
 			await delay(options.measureMs);
-		} else if (options.profileRenderer) {
+		} else if (options.profileRenderer || options.cpuProfilePath) {
 			await delay(250);
+		}
+		if (options.cpuProfilePath) {
+			cpuProfile = (await client.send("Profiler.stop")).profile;
 		}
 		if (options.captureFrame !== undefined) {
 			await waitForCaptureFrame(client, options.captureFrame);
@@ -2323,6 +2413,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 		}
 		return {
+			cpuProfile,
 			ambientOcclusionCycleStates,
 			audioFlyby,
 			cameraSweepScreenshots,
@@ -2349,6 +2440,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			modeCycleStates,
 			lifecycleState,
 			portalExecution,
+			relocationSequence,
 			relocationState,
 			screenshot: screenshot.data,
 			state,

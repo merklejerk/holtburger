@@ -351,6 +351,10 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		return key;
 	}
 
+	updateTexture2DRegions(): void {
+		throw new Error("Texture region updates are outside this fixture.");
+	}
+
 	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void {
 		void key;
 		void upload;

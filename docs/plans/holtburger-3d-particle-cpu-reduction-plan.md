@@ -431,8 +431,21 @@ numbers demand it.
      static-owner follower as cheap as a trailing one. That beats the uniform for the common case
      and is a fraction of the work.
 
-  **Recorded as debt rather than done:** if a scene with visible following emitters is ever
-  profiled, do the origin-unchanged check first and measure before considering the uniform.
+  **Follow-up probe (2026-08-19), answering "aren't static followers most of C061?":** no —
+  **zero of the 626 resident emitters follow their parent, and zero of 3,709 live particles belong
+  to one.** Not a culling artifact; the scene contains none at any camera angle. Every C061 emitter
+  freezes its origins at spawn, which is the natural authoring choice for scenery: smoke, mist and
+  fire should drift where they were born rather than stay glued to the object.
+
+  That also weakens the "static follower" case I proposed as the cheaper fix. Authors appear to
+  select `followsParent` precisely *because* the parent moves — the flag is visually meaningless
+  otherwise — so a follower on a stationary owner may be close to hypothetical rather than the
+  common case I implied. The corpus's 737 followers presumably ride creatures, items and spells.
+
+  **Recorded as debt rather than done, with the trigger stated:** neither the origin-unchanged
+  check nor the uniform is justified by any measurement we currently have. If a creature- or
+  effect-heavy scene is ever profiled and shows visible followers, measure there first — and check
+  whether their owners actually hold still before assuming the cheap check helps.
 
 - **6c landed (2026-08-19) — the mechanism works; the draw count now caps the payoff.**
 

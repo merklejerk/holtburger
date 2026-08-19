@@ -203,8 +203,9 @@ function parseArgs(args) {
 		followFlightMs: DEFAULT_FOLLOW_FLIGHT_MS,
 		envCellCameraId: null,
 		envCellCameraPosition: null,
-		minimumPortalFootprintPixelArea: null,
-		minimumObjectFootprintPixelArea: null,
+		renderScale: null,
+		minimumPortalFootprintCssPixelArea: null,
+		minimumObjectFootprintCssPixelArea: null,
 		offscreenAnimationSampleIntervalMs: null,
 		executePortal: false,
 		frameMode: null,
@@ -522,29 +523,35 @@ function parseArgs(args) {
 					arg,
 				);
 				break;
-			case "--minimum-portal-footprint-pixel-area":
-				parsed.minimumPortalFootprintPixelArea = Number(
+			case "--render-scale":
+				parsed.renderScale = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.renderScale) || parsed.renderScale <= 0) {
+					throw new Error("--render-scale must be a positive number.");
+				}
+				break;
+			case "--minimum-portal-footprint-css-pixel-area":
+				parsed.minimumPortalFootprintCssPixelArea = Number(
 					requireValue(args, ++index, arg),
 				);
 				if (
-					!Number.isFinite(parsed.minimumPortalFootprintPixelArea) ||
-					parsed.minimumPortalFootprintPixelArea < 0
+					!Number.isFinite(parsed.minimumPortalFootprintCssPixelArea) ||
+					parsed.minimumPortalFootprintCssPixelArea < 0
 				) {
 					throw new Error(
-						"--minimum-portal-footprint-pixel-area must be a non-negative number.",
+						"--minimum-portal-footprint-css-pixel-area must be a non-negative number.",
 					);
 				}
 				break;
-			case "--minimum-object-footprint-pixel-area":
-				parsed.minimumObjectFootprintPixelArea = Number(
+			case "--minimum-object-footprint-css-pixel-area":
+				parsed.minimumObjectFootprintCssPixelArea = Number(
 					requireValue(args, ++index, arg),
 				);
 				if (
-					!Number.isFinite(parsed.minimumObjectFootprintPixelArea) ||
-					parsed.minimumObjectFootprintPixelArea < 0
+					!Number.isFinite(parsed.minimumObjectFootprintCssPixelArea) ||
+					parsed.minimumObjectFootprintCssPixelArea < 0
 				) {
 					throw new Error(
-						"--minimum-object-footprint-pixel-area must be a non-negative number.",
+						"--minimum-object-footprint-css-pixel-area must be a non-negative number.",
 					);
 				}
 				break;
@@ -976,7 +983,10 @@ Options:
   --explorer-focus      Apply the Explorer's automatic outdoor camera pose after loading.
   --viewport-width <px> CSS render width. Default: ${DEFAULT_VIEWPORT_WIDTH}
   --viewport-height <px> CSS render height. Default: ${DEFAULT_VIEWPORT_HEIGHT}
-  --device-scale-factor <n> Browser device scale factor. Default: ${DEFAULT_DEVICE_SCALE_FACTOR}
+  --device-scale-factor <n> Browser device scale factor, which sizes screenshots but no
+                        longer sizes the drawing buffer. Default: ${DEFAULT_DEVICE_SCALE_FACTOR}
+  --render-scale <n>    Device pixels rendered per CSS pixel, and the only anti-aliasing
+                        control. Above one supersamples. Default: renderer default (1)
   --camera-landblock <hex>  Move only the camera after the initial request.
   --relocate-landblock <hex> Replace scene interest and camera at a new landblock.
   --lifecycle           Clear and reload the requested neighborhood before capture.
@@ -984,9 +994,9 @@ Options:
                          Authoritative EnvCell residency for the continuous camera.
   --env-cell-position <x,y,z>
                          Canonical position for the EnvCell camera.
-  --minimum-portal-footprint-pixel-area <px2>
+  --minimum-portal-footprint-css-pixel-area <px2>
                          Override the production recursive portal-footprint cutoff.
-  --minimum-object-footprint-pixel-area <px2>
+  --minimum-object-footprint-css-pixel-area <px2>
                          Override independently optional object footprint culling.
   --offscreen-animation-sample-interval-ms <ms>
                          Override offscreen visual animation sampling; zero is full cadence.
@@ -1797,18 +1807,25 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				options.generatedObjectRadius,
 			),
 		);
-		if (options.minimumPortalFootprintPixelArea !== null) {
+		if (options.renderScale !== null) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumPortalFootprintPixelArea",
-				[options.minimumPortalFootprintPixelArea],
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setRenderScale",
+				[options.renderScale],
 			);
 		}
-		if (options.minimumObjectFootprintPixelArea !== null) {
+		if (options.minimumPortalFootprintCssPixelArea !== null) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumObjectFootprintPixelArea",
-				[options.minimumObjectFootprintPixelArea],
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumPortalFootprintCssPixelArea",
+				[options.minimumPortalFootprintCssPixelArea],
+			);
+		}
+		if (options.minimumObjectFootprintCssPixelArea !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setMinimumObjectFootprintCssPixelArea",
+				[options.minimumObjectFootprintCssPixelArea],
 			);
 		}
 		if (options.offscreenAnimationSampleIntervalMs !== null) {

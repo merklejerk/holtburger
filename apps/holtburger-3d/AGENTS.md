@@ -96,6 +96,24 @@ loses. A stale capture taken at an unrepresentative radius reads as a budget and
 will be believed. Record what a measurement _means_ in a plan or commit message
 next to its configuration, not as a standing figure in this file.
 
+### Render Scale and Anti-Aliasing
+
+Sampling density is frame-settings policy — `quality.renderScale`, device pixels per CSS pixel,
+default `1`. The renderer does not read `window.devicePixelRatio`, because how densely we sample is
+a cost decision rather than a fact about the viewer's monitor. Two things follow:
+
+- **Render scale is the only anti-aliasing we have.** Above one, every pass draws into the
+  offscreen scene target at that density and the browser resolves it when compositing the canvas,
+  which antialiases blended geometry and particles along with everything else. There is no MSAA and
+  no post-process AA pass. Cost scales with its square. Drive it with `--render-scale` and judge
+  edges from a screenshot.
+- **Footprint cutoffs do not move with it.** `minimumObjectFootprintCssPixelArea` and
+  `minimumPortalFootprintCssPixelArea` are authored in CSS pixels and resolved to drawing-buffer
+  pixels once per frame, so density decides how content is sampled and never which content survives
+  the cutoff. Keep any new screen-space cutoff on that side of the line.
+
+Report the render scale beside any timing, for the same reason the workload goes beside it.
+
 ### Measuring Streaming, Not Just Steady State
 
 Frame cost while content streams in is a different measurement from steady-state frame cost, and

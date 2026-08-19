@@ -93,6 +93,7 @@
 		type TextureFilteringCapabilities,
 		type TextureFilteringPolicy,
 	} from "../lib/game/renderer/texture-filtering-policy";
+	import { isRenderScale } from "../lib/game/renderer/render-scale";
 	import {
 		createExplorerFrameDiagnosticReport,
 		type ExplorerFrameDiagnosticReport,
@@ -276,6 +277,24 @@
 		frameSettings = {
 			...frameSettings,
 			layerVisibility: { ...frameSettings.layerVisibility, [layer]: visible },
+		};
+		applyFrameSettings();
+	}
+
+	/**
+	 * Sampling density presets.
+	 *
+	 * Explorer-local UX: the renderer accepts any density within its bounds, and which handful to
+	 * put in front of a viewer is a frontend choice. One is native CSS resolution; above it buys
+	 * supersampled edges for the square of the cost. Filtered against the renderer's own bounds so
+	 * tightening them can never leave a preset here that the next frame throws on.
+	 */
+	const RENDER_SCALE_OPTIONS = [0.5, 0.75, 1, 1.5, 2].filter(isRenderScale);
+
+	function updateRenderScale(renderScale: number): void {
+		frameSettings = {
+			...frameSettings,
+			quality: { ...frameSettings.quality, renderScale },
 		};
 		applyFrameSettings();
 	}
@@ -1104,6 +1123,9 @@
 			maximumTextureAnisotropy={textureFilteringCapabilities?.maximumAnisotropy ??
 				null}
 			{updateTextureFiltering}
+			renderScale={frameSettings.quality.renderScale}
+			renderScaleOptions={RENDER_SCALE_OPTIONS}
+			{updateRenderScale}
 			{rendererFrameDiagnostics}
 			{updateRendererFrameProfiling}
 			{captureFrameDiagnosticReport}

@@ -146,6 +146,7 @@ import {
 	WebGL2TextureSamplerCatalog,
 	type TextureSamplingClass,
 } from "./webgl2-texture-sampler-catalog";
+import { devicePixelArea, validateRenderScale } from "./render-scale";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { Camera } from "../runtime/types";
 import type {
@@ -653,10 +654,12 @@ export class WebGL2Renderer implements Renderer {
 	/** Requested quality captured at frame entry and consumed by every nested draw path. */
 	#frameTextureFiltering: TextureFilteringPolicy =
 		FRONTEND_TUNING.rendering.frameDefaults.textureFiltering;
-	/** Requested portal footprint cutoff captured once at frame entry. */
-	#minimumPortalFootprintPixelArea = 0;
-	/** Requested object-presentation footprint cutoff captured once at frame entry. */
-	#minimumObjectFootprintPixelArea = 0;
+	/** Portal footprint cutoff resolved to drawing-buffer pixels once at frame entry. */
+	#minimumPortalFootprintDevicePixelArea = 0;
+	/** Object-presentation footprint cutoff resolved to drawing-buffer pixels at frame entry. */
+	#minimumObjectFootprintDevicePixelArea = 0;
+	/** Sampling density the drawing buffer is currently sized for, retained for resize alone. */
+	#renderScale: number = FRONTEND_TUNING.rendering.frameDefaults.renderScale;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused metrics record for the frame's effective AO distance interval. */
@@ -896,11 +899,20 @@ export class WebGL2Renderer implements Renderer {
 			this.#compiledEnvCellRenderMode = input.frameSettings.envCellRenderMode;
 		}
 		this.#skyClockSeconds = input.timeSeconds;
-		this.#minimumPortalFootprintPixelArea =
-			input.frameSettings.quality.minimumPortalFootprintPixelArea;
-		this.#minimumObjectFootprintPixelArea =
-			input.frameSettings.quality.minimumObjectFootprintPixelArea;
-		this.#resizeCanvasForDpr();
+		const quality = input.frameSettings.quality;
+		validateRenderScale(quality.renderScale, "Frame settings");
+		this.#renderScale = quality.renderScale;
+		// Cutoffs are authored in CSS pixels so a density change stays a sampling decision. The
+		// conversion happens once here; the projection math downstream is drawing-buffer only.
+		this.#minimumPortalFootprintDevicePixelArea = devicePixelArea(
+			quality.minimumPortalFootprintCssPixelArea,
+			this.#renderScale,
+		);
+		this.#minimumObjectFootprintDevicePixelArea = devicePixelArea(
+			quality.minimumObjectFootprintCssPixelArea,
+			this.#renderScale,
+		);
+		this.#resizeCanvasForRenderScale();
 		this.#resetFrameSelectionMetrics(
 			input.views.length,
 			input.frameSettings.envCellRenderMode,
@@ -1135,7 +1147,7 @@ export class WebGL2Renderer implements Renderer {
 		rootScope: SceneScope,
 	): PortalExecutionProbeResult {
 		this.#assertDeviceReady();
-		this.#resizeCanvasForDpr();
+		this.#resizeCanvasForRenderScale();
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
 		const pipeline = (this.#portalScopeAtlasPipeline ??=
 			new WebGL2PortalScopeAtlasPipeline(this.#gl));
@@ -1421,7 +1433,7 @@ export class WebGL2Renderer implements Renderer {
 					height: this.#frameHeight,
 					width: this.#frameWidth,
 				},
-				minimumPixelArea: this.#minimumPortalFootprintPixelArea,
+				minimumPixelArea: this.#minimumPortalFootprintDevicePixelArea,
 			},
 			rootScope,
 		};
@@ -1625,7 +1637,7 @@ export class WebGL2Renderer implements Renderer {
 		if (footprint.kind === "ineligible")
 			return retainsProjectedObjectFootprint(
 				null,
-				this.#minimumObjectFootprintPixelArea,
+				this.#minimumObjectFootprintDevicePixelArea,
 			);
 		const landblockOffset = createLandblockOffset(
 			getLandblockCoordinates(footprint.placement.landblockId),
@@ -1642,9 +1654,9 @@ export class WebGL2Renderer implements Renderer {
 				viewportHeight: this.#frameHeight,
 				viewportWidth: this.#frameWidth,
 			},
-			this.#minimumObjectFootprintPixelArea,
+			this.#minimumObjectFootprintDevicePixelArea,
 		);
-		if (this.#minimumObjectFootprintPixelArea > 0) {
+		if (this.#minimumObjectFootprintDevicePixelArea > 0) {
 			this.#frameSelectionMetrics.testedObjectPresentationCount += 1;
 			if (retained)
 				this.#frameSelectionMetrics.retainedObjectPresentationCount += 1;
@@ -3410,10 +3422,10 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	#resizeCanvasForDpr(): void {
-		const dpr = window.devicePixelRatio ?? 1;
-		const width = Math.max(1, Math.floor(this.#canvas.clientWidth * dpr));
-		const height = Math.max(1, Math.floor(this.#canvas.clientHeight * dpr));
+	#resizeCanvasForRenderScale(): void {
+		const scale = this.#renderScale;
+		const width = Math.max(1, Math.floor(this.#canvas.clientWidth * scale));
+		const height = Math.max(1, Math.floor(this.#canvas.clientHeight * scale));
 		if (width === this.#frameWidth && height === this.#frameHeight) return;
 
 		this.#frameWidth = width;

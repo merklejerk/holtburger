@@ -26,6 +26,7 @@ describe("orderTransparentObjectRanges", () => {
 				entry("depth-nearer", 8, 2),
 			],
 			() => null,
+			depthOf,
 		);
 
 		expect(ordered.near.map(({ range }) => range)).toEqual([
@@ -35,6 +36,7 @@ describe("orderTransparentObjectRanges", () => {
 		]);
 		expect(ordered.far).toEqual([]);
 		expect(ordered.trace).toEqual({
+			cameraDepthEvaluationCount: 3,
 			distanceClassificationCount: 3,
 			farBatchKeyEvaluationCount: 0,
 		});
@@ -44,12 +46,14 @@ describe("orderTransparentObjectRanges", () => {
 		const ordered = orderTransparentObjectRanges(
 			[entry("z", 4, 3), entry("a", 4, 3)],
 			() => null,
+			depthOf,
 		);
 
 		expect(ordered.near.map(({ range }) => range)).toEqual(["a", "z"]);
 	});
 
 	it("groups far ranges by first-seen batching cohort", () => {
+		depthEvaluations.length = 0;
 		const ordered = orderTransparentObjectRanges(
 			[
 				{ ...entry("a-2", 40), range: { cohort: "a", id: "a-2" } },
@@ -57,6 +61,7 @@ describe("orderTransparentObjectRanges", () => {
 				{ ...entry("a-1", 30), range: { cohort: "a", id: "a-1" } },
 			],
 			({ cohort }) => cohort,
+			({ id }) => depthOf(id),
 		);
 
 		expect(ordered.far.map(({ range }) => range.id)).toEqual([
@@ -66,6 +71,24 @@ describe("orderTransparentObjectRanges", () => {
 		]);
 		expect(ordered.near).toEqual([]);
 		expect(ordered.trace.farBatchKeyEvaluationCount).toBe(3);
+		// The far majority is the whole population here; none of it may pay for a camera depth.
+		expect(depthEvaluations).toEqual([]);
+		expect(ordered.trace.cameraDepthEvaluationCount).toBe(0);
+	});
+
+	it("derives camera depth only for near candidates", () => {
+		depthEvaluations.length = 0;
+		const ordered = orderTransparentObjectRanges(
+			[
+				entry("far", TRANSPARENT_TUNING.nearDistance + 1),
+				entry("near", TRANSPARENT_TUNING.nearDistance - 1),
+			],
+			() => null,
+			depthOf,
+		);
+
+		expect(depthEvaluations).toEqual(["near"]);
+		expect(ordered.trace.cameraDepthEvaluationCount).toBe(1);
 	});
 
 	it("separates far candidates from the near camera-sorted phase", () => {
@@ -75,6 +98,7 @@ describe("orderTransparentObjectRanges", () => {
 				entry("far-second", TRANSPARENT_TUNING.nearDistance + 1),
 			],
 			() => null,
+			depthOf,
 		);
 
 		expect(ordered.far.map(({ range }) => range)).toEqual(["far-second"]);
@@ -82,13 +106,22 @@ describe("orderTransparentObjectRanges", () => {
 	});
 
 	it.each([
-		["camera depth", { ...entry("range", 1), cameraDepth: Number.NaN }],
 		["camera distance", { ...entry("range", 1), distanceSquared: -1 }],
 		["stable identity", { ...entry("range", 1), stableId: "" }],
 	])("rejects invalid transparent %s", (_label, range) => {
-		expect(() => orderTransparentObjectRanges([range], () => null)).toThrow(
-			`Transparent object ${_label}`,
-		);
+		expect(() =>
+			orderTransparentObjectRanges([range], () => null, depthOf),
+		).toThrow(`Transparent object ${_label}`);
+	});
+
+	it("rejects a near candidate whose derived camera depth is not finite", () => {
+		expect(() =>
+			orderTransparentObjectRanges(
+				[entry("near", TRANSPARENT_TUNING.nearDistance - 1)],
+				() => null,
+				() => Number.NaN,
+			),
+		).toThrow("Transparent object camera depth");
 	});
 });
 
@@ -120,19 +153,24 @@ describe("createObjectSubmissionPhases", () => {
 			},
 		] as const;
 
+		const depthCalls: string[] = [];
 		const phases = createObjectSubmissionPhases(
 			objects,
 			(object) => {
 				sortFactCalls.push(object.id);
 				return {
-					cameraDepth: object.distance,
 					distanceSquared: object.distance ** 2,
+					range: object,
 					stableId: object.id,
 				};
 			},
 			(object) => {
 				batchCalls.push(object.id);
 				return object.cohort;
+			},
+			(object) => {
+				depthCalls.push(object.id);
+				return object.distance;
 			},
 		);
 
@@ -145,6 +183,7 @@ describe("createObjectSubmissionPhases", () => {
 		expect(phases.additive.map(({ id }) => id)).toEqual(["glow"]);
 		expect(sortFactCalls).toEqual(["far-glass-a", "near-glass", "far-glass-b"]);
 		expect(batchCalls).toEqual(["far-glass-a", "far-glass-b"]);
+		expect(depthCalls).toEqual(["near-glass"]);
 	});
 });
 
@@ -286,7 +325,6 @@ describe("areStaticObjectDrawsCompatible", () => {
 			{ ...baseline, indexStart: 4 },
 			{ ...baseline, indexCount: 9 },
 			{ ...baseline, cullFace: "front" },
-			{ ...baseline, landblockOffset: [1, 0, 0] },
 			{ ...baseline, wrapRepeat: true },
 			{ ...baseline, palettedClipMap: true },
 			{ ...baseline, alphaTest: 0 },
@@ -569,18 +607,36 @@ describe("objectBlendPolicy", () => {
 	});
 });
 
+/**
+ * One classified candidate plus the depth the lazy near-phase callback would derive for it.
+ *
+ * Depth is carried beside the range rather than inside it, mirroring production: classification
+ * never sees a camera depth, and only near candidates ever have one derived.
+ */
 function entry(
 	stableId: string,
 	radialDistance: number,
 	cameraDepth = radialDistance,
 ) {
+	cameraDepths.set(stableId, cameraDepth);
 	return {
-		cameraDepth,
 		distanceSquared: radialDistance * radialDistance,
 		range: stableId,
 		stableId,
 	};
 }
+
+const cameraDepths = new Map<string, number>();
+
+/** Lazy depth source recording which candidates the ordering policy actually asked about. */
+function depthOf(range: string): number {
+	depthEvaluations.push(range);
+	const depth = cameraDepths.get(range);
+	if (depth === undefined) throw new Error(`No camera depth for ${range}.`);
+	return depth;
+}
+
+const depthEvaluations: string[] = [];
 
 interface TestIdentity {
 	readonly name: string;
@@ -621,7 +677,6 @@ function staticCompatibility(): StaticCompatibility {
 		geometry: identity("geometry:a"),
 		indexCount: 6,
 		indexStart: 0,
-		landblockOffset: [0, 0, 0],
 		luminosity: 0,
 		material: {
 			base: {

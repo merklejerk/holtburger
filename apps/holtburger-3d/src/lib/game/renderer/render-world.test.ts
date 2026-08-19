@@ -24,6 +24,7 @@ import type { StaticGeometryKey } from "../systems/static-resources";
 import type { StaticObjectRenderable } from "../commit/artifacts";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
 import { TextureWrapMode } from "../textures/types";
+import { landblockVec3 } from "../../assets/ac-frame";
 import type {
 	PartVisualTemplateKey,
 	VisibleRigidPartContribution,
@@ -275,9 +276,10 @@ function dynamicContribution(
 			color: { a: alpha, b: 1, g: 1, r: 1 },
 			sourceToLandblock: Mat4.identity(),
 		},
+		ordering,
 		transparentSort:
 			ordering === "transparent"
-				? { center: Vec3.zero(), stableId: "part/range" }
+				? { center: landblockVec3(Vec3.zero()), stableId: "part/range" }
 				: null,
 	};
 }

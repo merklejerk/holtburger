@@ -145,7 +145,6 @@ describe("WebGL2FrameProfiler", () => {
 				frameNumber,
 				instanceRunPreparationMs: 0,
 				instanceUploadMs: 0,
-				objectPreparationMs: frameNumber * 2,
 				opaqueSubmissionMs: 0,
 				otherMs: 0,
 				particleSubmissionMs: 0,
@@ -168,7 +167,6 @@ describe("WebGL2FrameProfiler", () => {
 			sampleCount: 60,
 		});
 		expect(profile?.cpu.mean.totalMs).toBe(31.5);
-		expect(profile?.cpu.mean.objectPreparationMs).toBe(63);
 		expect(profile?.cpu.contribution.latest.staticObjectPreparationCount).toBe(
 			61,
 		);

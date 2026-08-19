@@ -4,18 +4,18 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 const TRANSPARENT_NEAR_DISTANCE_SQUARED =
 	FRONTEND_TUNING.rendering.transparentObjects.nearDistance ** 2;
 
-/** Current-frame facts needed to classify and deterministically order transparent geometry. */
-export interface TransparentObjectSortFacts {
-	/** Signed distance along the camera's forward axis, used for exact back-to-front ordering. */
-	readonly cameraDepth: number;
+/**
+ * Current-frame facts needed to classify one transparent range, paired with the range itself.
+ *
+ * Deliberately excludes camera depth: only the bounded near phase orders by it, so deriving it
+ * for every candidate spends a view transform on the far majority that never reads the result.
+ * Producers build this value directly, so classification allocates once per candidate.
+ */
+export interface TransparentObjectRange<T> {
 	/** Squared radial camera distance, used only to select the bounded near policy. */
 	readonly distanceSquared: number;
 	/** Stable physical identity used to break equal-depth ties deterministically. */
 	readonly stableId: string;
-}
-
-/** One transparent range paired with its current-frame ordering facts. */
-export interface TransparentObjectRange<T> extends TransparentObjectSortFacts {
 	readonly range: T;
 }
 
@@ -35,6 +35,8 @@ export interface TransparentObjectOrderingTrace {
 	readonly farBatchKeyEvaluationCount: number;
 	/** Far/near classifications; exactly one per physical candidate. */
 	readonly distanceClassificationCount: number;
+	/** Camera-depth derivations; exactly one per near candidate, none for far candidates. */
+	readonly cameraDepthEvaluationCount: number;
 }
 
 /** Renderer-resolved ordering class consumed by the frame submission partition. */
@@ -121,6 +123,11 @@ interface PreparedObjectDetail<
 /**
  * Exact facts that must agree before generated static instances can share one draw.
  *
+ * Every field is constant for its draw unit's lifetime, which is what lets one compiled value be
+ * shared by every frame that submits the draw. The anchor-relative landblock offset must also
+ * agree before two draws share a run, but it is a per-frame fact and so is compared by the caller
+ * alongside this value rather than stored in it.
+ *
  * Ordering class and render-domain scope remain caller-owned partitions. Instance records and
  * diagnostic provenance remain payload, not compatibility axes.
  */
@@ -135,7 +142,6 @@ export interface PreparedStaticObjectDrawCompatibility<
 	readonly geometry: TGeometry;
 	readonly indexCount: number;
 	readonly indexStart: number;
-	readonly landblockOffset: readonly [number, number, number];
 	readonly luminosity: number;
 	readonly material: PreparedObjectMaterial<TTexture, TSampler>;
 	readonly palettedClipMap: boolean;
@@ -147,12 +153,12 @@ export function areStaticObjectDrawsCompatible<TGeometry, TTexture, TSampler>(
 	left: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
 	right: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
 ): boolean {
+	if (left === right) return true;
 	return (
 		left.geometry === right.geometry &&
 		left.indexStart === right.indexStart &&
 		left.indexCount === right.indexCount &&
 		left.cullFace === right.cullFace &&
-		vector3Equals(left.landblockOffset, right.landblockOffset) &&
 		left.wrapRepeat === right.wrapRepeat &&
 		left.palettedClipMap === right.palettedClipMap &&
 		left.alphaTest === right.alphaTest &&
@@ -216,30 +222,43 @@ export function sourceOpacity(translucency: number): number {
 export function orderTransparentObjectRanges<T>(
 	ranges: readonly TransparentObjectRange<T>[],
 	batchKey: (range: T) => string | null,
+	cameraDepth: (range: T) => number,
 ): OrderedTransparentObjectRanges<T> {
 	const far: TransparentObjectRange<T>[] = [];
-	const near: TransparentObjectRange<T>[] = [];
+	const near: NearTransparentObjectRange<T>[] = [];
 	for (const range of ranges) {
 		validateTransparentObjectRange(range);
 		if (range.distanceSquared > TRANSPARENT_NEAR_DISTANCE_SQUARED) {
 			far.push(range);
 			continue;
 		}
-		near.push(range);
+		// Camera depth is derived only here, for the bounded near population that orders by it.
+		const depth = cameraDepth(range.range);
+		if (!Number.isFinite(depth)) {
+			throw new Error("Transparent object camera depth must be finite.");
+		}
+		near.push({ cameraDepth: depth, candidate: range });
 	}
 	near.sort(
 		(left, right) =>
 			right.cameraDepth - left.cameraDepth ||
-			compareStableIds(left.stableId, right.stableId),
+			compareStableIds(left.candidate.stableId, right.candidate.stableId),
 	);
 	return {
 		far: groupTransparentRanges(far, batchKey),
-		near,
+		near: near.map(({ candidate }) => candidate),
 		trace: {
+			cameraDepthEvaluationCount: near.length,
 			distanceClassificationCount: ranges.length,
 			farBatchKeyEvaluationCount: far.length,
 		},
 	};
+}
+
+/** One near candidate paired with the camera depth derived only for the near phase. */
+interface NearTransparentObjectRange<T> {
+	readonly cameraDepth: number;
+	readonly candidate: TransparentObjectRange<T>;
 }
 
 function compareStableIds(left: string, right: string): number {
@@ -251,9 +270,6 @@ function compareStableIds(left: string, right: string): number {
 function validateTransparentObjectRange<T>(
 	range: TransparentObjectRange<T>,
 ): void {
-	if (!Number.isFinite(range.cameraDepth)) {
-		throw new Error("Transparent object camera depth must be finite.");
-	}
 	if (!Number.isFinite(range.distanceSquared) || range.distanceSquared < 0) {
 		throw new Error(
 			"Transparent object camera distance must be finite and non-negative.",
@@ -275,8 +291,9 @@ export function createObjectSubmissionPhases<
 	T extends ObjectSubmissionOrderingInput,
 >(
 	objects: readonly T[],
-	transparentSortFacts: (object: T) => TransparentObjectSortFacts,
+	transparentRange: (object: T) => TransparentObjectRange<T>,
 	transparentBatchKey: (object: T) => string | null,
+	transparentCameraDepth: (object: T) => number,
 ): ObjectSubmissionPhases<T> {
 	const opaque: T[] = [];
 	const transparent: TransparentObjectRange<T>[] = [];
@@ -288,7 +305,7 @@ export function createObjectSubmissionPhases<
 				opaque.push(object);
 				break;
 			case "transparent": {
-				transparent.push({ ...transparentSortFacts(object), range: object });
+				transparent.push(transparentRange(object));
 				break;
 			}
 			case "additive":
@@ -299,6 +316,7 @@ export function createObjectSubmissionPhases<
 	const ordered = orderTransparentObjectRanges(
 		transparent,
 		transparentBatchKey,
+		transparentCameraDepth,
 	);
 	return {
 		additive,
@@ -452,13 +470,6 @@ function preparedObjectTextureBindingEquals<TTexture, TSampler>(
 	right: PreparedObjectTextureBinding<TTexture, TSampler>,
 ): boolean {
 	return left.texture === right.texture && left.sampler === right.sampler;
-}
-
-function vector3Equals(
-	left: readonly [number, number, number],
-	right: readonly [number, number, number],
-): boolean {
-	return left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
 }
 
 function vector4Equals(

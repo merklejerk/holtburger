@@ -1,6 +1,7 @@
 import type { EnvCellId, LandblockId } from "../game-types";
 import type { ObjectGeometryKey } from "../geometry/types";
 import type { AABB3, Mat4, Vec3 } from "../math/types";
+import type { LandblockVec3 } from "../../assets/ac-frame";
 import type { SceneNodeId, SceneScope } from "../scene";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
@@ -40,12 +41,24 @@ export interface ObjectRenderDomain {
 /** Renderer-neutral visible rigid-part instance emitted from one selected dynamic root. */
 export interface VisibleRigidPartContribution {
 	readonly domain: ObjectRenderDomain;
+	/** Stable authored draw unit; its identity is a cache key, so it is never cloned per frame. */
 	readonly drawUnit: RigidPartDrawUnit;
+	/**
+	 * Effective ordering for this frame, which is the draw unit's own class unless a translucency
+	 * effect promotes an opaque part into the transparent phase.
+	 */
+	readonly ordering: RigidPartDrawUnit["ordering"];
 	/** Final part transform and per-entity modifiers consumed by shared object instancing. */
 	readonly instance: ObjectInstanceData;
-	/** Stable geometry-local ordering facts required only for transparent ranges. */
+	/**
+	 * Stable ordering facts required only for transparent ranges.
+	 *
+	 * `center` is in landblock space, matching every other transparent contribution the renderer
+	 * orders. Unlike static contributions it is resolved per frame, because the pose that places
+	 * it is animation-variant.
+	 */
 	readonly transparentSort: {
-		readonly center: Vec3;
+		readonly center: LandblockVec3;
 		readonly stableId: string;
 	} | null;
 }
@@ -81,6 +94,7 @@ export interface ActiveDynamicPart {
 /** One active draw range with the sort center needed by authored or effect-driven transparency. */
 export interface ActiveDynamicDrawUnit {
 	readonly drawUnit: RigidPartDrawUnit;
+	/** Geometry-local center; the pose that places it into landblock space is per frame. */
 	readonly transparentSortCenter: Vec3;
 }
 

@@ -448,7 +448,9 @@
 		readonly near: number;
 		readonly pitchDegrees: number;
 		readonly policy:
-			"explicit-env-cell" | "explicit-outdoor" | "explorer-outdoor-focus";
+			| "explicit-env-cell"
+			| "explicit-outdoor"
+			| "explorer-outdoor-focus";
 		readonly position: readonly [number, number, number];
 		readonly yawDegrees: number;
 	}
@@ -1585,6 +1587,8 @@
 							camera: cameraEvidence,
 							error,
 							frameSettings,
+							compiledObjectDraws:
+								frameDiagnostics?.compiledObjectDraws ?? null,
 							frameProfile: frameDiagnostics?.profile ?? null,
 							frames,
 							metrics: frameDiagnostics?.selectionMetrics ?? null,

@@ -1260,6 +1260,9 @@ function briefHarnessReport(result) {
 		relocationSequence: result.relocationSequence,
 		relocationState: result.relocationState,
 		sourceBatches: summarizeSourceBatches(result.state.sourceBatches),
+		// Compiled-draw occupancy is leak evidence across relocations, and its flush counts
+		// explain any recompilation, so brief mode keeps both.
+		compiledObjectDraws: result.state.compiledObjectDraws,
 		staticResourceCounts:
 			staticObjects === null
 				? null
@@ -2330,8 +2333,22 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				timing: state.timing,
 			});
 		}
+		let cpuProfileStarted = false;
+		const startCpuProfile = async () => {
+			if (!options.cpuProfilePath || cpuProfileStarted) return;
+			cpuProfileStarted = true;
+			await client.send("Profiler.enable");
+			// 100 µs sampling: the 1 ms default would land only ~2 samples in a ~2 ms frame.
+			await client.send("Profiler.setSamplingInterval", { interval: 100 });
+			await client.send("Profiler.start");
+		};
 		let followFlight = null;
 		if (options.followFlightLandblockId) {
+			// Start profiling before the flight so churn spikes land inside the sampled window.
+			// The settle keeps profiler warm-up (an unattributed "(program)" blob) from
+			// overlapping the flight's first frames.
+			await startCpuProfile();
+			if (cpuProfileStarted) await delay(1000);
 			followFlight = await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.runFollowFlight",
@@ -2400,12 +2417,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 		}
 		let cpuProfile = null;
-		if (options.cpuProfilePath) {
-			await client.send("Profiler.enable");
-			// 100 µs sampling: the 1 ms default would land only ~2 samples in a ~2 ms frame.
-			await client.send("Profiler.setSamplingInterval", { interval: 100 });
-			await client.send("Profiler.start");
-		}
+		await startCpuProfile();
 		if (options.measureMs > 0) {
 			await evaluate(
 				client,

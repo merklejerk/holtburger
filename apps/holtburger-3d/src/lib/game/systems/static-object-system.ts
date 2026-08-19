@@ -4,7 +4,6 @@ import type {
 	StaticObjectRenderable,
 } from "../commit/artifacts";
 import type { SceneGraph, SceneNodeId } from "../scene";
-import type { StaticInstanceStreamManager } from "./static-instance-stream-manager";
 import type { OutdoorStaticLayerKind } from "../runtime/scene-interest";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
 
@@ -37,7 +36,6 @@ export class StaticObjectSystem<
 	>();
 	readonly #scene: SceneGraph;
 	readonly #geometry: GeometryManager<TResourceOwner>;
-	readonly #instances: StaticInstanceStreamManager<TResourceOwner>;
 	readonly #resourceOwner: (
 		owner: TOwnerId,
 		revision: SceneInterestRevision,
@@ -46,7 +44,6 @@ export class StaticObjectSystem<
 	constructor(
 		scene: SceneGraph,
 		geometry: GeometryManager<TResourceOwner>,
-		instances: StaticInstanceStreamManager<TResourceOwner>,
 		resourceOwner: (
 			owner: TOwnerId,
 			revision: SceneInterestRevision,
@@ -54,14 +51,13 @@ export class StaticObjectSystem<
 	) {
 		this.#scene = scene;
 		this.#geometry = geometry;
-		this.#instances = instances;
 		this.#resourceOwner = resourceOwner;
 	}
 
 	/**
 	 * Stage a complete static replacement before retiring the visible revision.
 	 *
-	 * Geometry/instance identities are revision-scoped, so staged resources never alias the
+	 * Geometry identities are revision-scoped, so staged resources never alias the
 	 * previous record. A failed publication drops only the staged owner and leaves the old scene
 	 * record untouched.
 	 */
@@ -86,12 +82,6 @@ export class StaticObjectSystem<
 			);
 			for (const source of installSet.geometry)
 				this.#geometry.upsertGeometry(source);
-			this.#instances.reserveKeys(
-				resourceOwner,
-				installSet.instanceStreams.map(({ key }) => key),
-			);
-			for (const source of installSet.instanceStreams)
-				this.#instances.publish(source);
 			for (const object of installSet.objects) {
 				const nodeId = this.#scene.createNode({
 					...object.placement,
@@ -148,7 +138,6 @@ export class StaticObjectSystem<
 		}
 		this.#owners.delete(ownerId);
 		this.#geometry.dropOwner(record.resourceOwner);
-		this.#instances.dropOwner(record.resourceOwner);
 	}
 
 	#dropStaged(
@@ -160,6 +149,5 @@ export class StaticObjectSystem<
 			this.#scene.destroyNode(nodeId);
 		}
 		this.#geometry.dropOwner(resourceOwner);
-		this.#instances.dropOwner(resourceOwner);
 	}
 }

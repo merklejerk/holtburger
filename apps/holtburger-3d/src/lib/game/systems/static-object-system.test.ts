@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { StaticObjectLayerArtifact } from "../commit/artifacts";
 import type { GeometryManager } from "../geometry/geometry-manager";
 import type { SceneGraph, SceneNodeId } from "../scene";
-import type { StaticInstanceStreamManager } from "./static-instance-stream-manager";
 import { StaticObjectSystem } from "./static-object-system";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
@@ -11,11 +10,9 @@ describe("StaticObjectSystem", () => {
 	it("retains the visible revision when staging a replacement fails", () => {
 		const scene = new FixtureScene();
 		const geometry = new FixtureGeometry();
-		const instances = new FixtureInstances();
 		const system = new StaticObjectSystem<"buildings", string>(
 			scene as unknown as SceneGraph,
 			geometry as unknown as GeometryManager<string>,
-			instances as unknown as StaticInstanceStreamManager<string>,
 			(_, revision) => `resource:${revision}`,
 		);
 
@@ -38,17 +35,14 @@ describe("StaticObjectSystem", () => {
 
 		expect(scene.live).toEqual(["node:1"]);
 		expect(geometry.dropped).toEqual(["resource:2"]);
-		expect(instances.dropped).toEqual(["resource:2"]);
 	});
 
 	it("does not evict a later visible revision", () => {
 		const scene = new FixtureScene();
 		const geometry = new FixtureGeometry();
-		const instances = new FixtureInstances();
 		const system = new StaticObjectSystem<"buildings", string>(
 			scene as unknown as SceneGraph,
 			geometry as unknown as GeometryManager<string>,
-			instances as unknown as StaticInstanceStreamManager<string>,
 			(_, revision) => `resource:${revision}`,
 		);
 		system.replaceObjects(
@@ -67,14 +61,12 @@ describe("StaticObjectSystem", () => {
 	it("keeps all outdoor-static owners and culling groups independent", () => {
 		const scene = new FixtureScene();
 		const geometry = new FixtureGeometry();
-		const instances = new FixtureInstances();
 		const system = new StaticObjectSystem<
 			"buildings" | "objects" | "generated",
 			string
 		>(
 			scene as unknown as SceneGraph,
 			geometry as unknown as GeometryManager<string>,
-			instances as unknown as StaticInstanceStreamManager<string>,
 			(owner, revision) => `resource:${owner}:${revision}`,
 		);
 
@@ -118,11 +110,9 @@ describe("StaticObjectSystem", () => {
 	it("publishes and evicts every independently cullable object in one layer", () => {
 		const scene = new FixtureScene();
 		const geometry = new FixtureGeometry();
-		const instances = new FixtureInstances();
 		const system = new StaticObjectSystem<"generated", string>(
 			scene as unknown as SceneGraph,
 			geometry as unknown as GeometryManager<string>,
-			instances as unknown as StaticInstanceStreamManager<string>,
 			(_, revision) => `resource:${revision}`,
 		);
 		const clustered = artifact("clustered");
@@ -150,26 +140,19 @@ function artifact(id: string): StaticObjectLayerArtifact {
 	return {
 		staticLights: [],
 		geometryDiagnostics: {
-			bakedFallbackRangeCount: 0,
+			bakedRangeCount: 0,
 			bakedGeometryBytes: 0,
 			geometryWorkerDurationMs: 0,
 			instancedGeometryBytes: 0,
-			staticFragmentBytes: 0,
-			staticFragmentCohortCount: 0,
-			staticFragmentCount: 0,
-			staticFragmentDrawUnitCount: 0,
-			staticFragmentInstanceCount: 0,
 			sourceMaterialSlotCount: 0,
 			sourcePartCount: 0,
 			sourceRangeCount: 0,
 			sourceResidentCount: 0,
-			strategy: "empty",
 			transparentTemplateBytes: 0,
 			transparentTemplateCohortCount: 0,
 			transparentTemplateInstanceCount: 0,
 		},
 		geometry: [],
-		instanceStreams: [],
 		objects: [
 			{
 				localBounds:
@@ -220,13 +203,4 @@ class FixtureGeometry {
 	}
 	reserveKeys(): void {}
 	upsertGeometry(): void {}
-}
-
-class FixtureInstances {
-	readonly dropped: string[] = [];
-	dropOwner(owner: string): void {
-		this.dropped.push(owner);
-	}
-	publish(): void {}
-	reserveKeys(): void {}
 }

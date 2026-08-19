@@ -1,14 +1,14 @@
 import type { AABB3, Mat4 } from "../math/types";
 
 /** Conservative screen-space classification for one transformed object envelope. */
-export type ObjectFootprintVisibility =
+type ObjectFootprintVisibility =
 	| "visible"
 	| "near-plane-or-ambiguous"
 	| "below-threshold"
 	| "outside-view";
 
 /** Complete physical-pixel projection input for one object-local envelope. */
-export interface ObjectFootprintProjectionInput {
+interface ObjectFootprintProjectionInput {
 	readonly bounds: AABB3;
 	readonly clipFromAnchor: Mat4;
 	readonly localToLandblock: Mat4;
@@ -32,7 +32,7 @@ const CLIP_EPSILON = 1e-7;
  * Project every envelope corner and reject only objects proven outside or below the cutoff.
  * Near-plane intersections and non-finite intermediates remain visible conservatively.
  */
-export function classifyObjectFootprint(
+function classifyObjectFootprint(
 	input: ObjectFootprintProjectionInput,
 ): ObjectFootprintVisibility {
 	if (

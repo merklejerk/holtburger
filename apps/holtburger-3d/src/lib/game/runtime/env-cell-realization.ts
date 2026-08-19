@@ -242,15 +242,6 @@ function mergeResidentArtifacts(
 	const geometry = deduplicateResidentGeometry(
 		present.flatMap((artifact) => artifact.geometry),
 	);
-	const instanceStreams = present.flatMap(
-		(artifact) => artifact.instanceStreams,
-	);
-	const instanceKeys = new Set(instanceStreams.map(({ key }) => key));
-	if (instanceKeys.size !== instanceStreams.length) {
-		throw new Error(
-			"EnvCell resident partitions emitted duplicate instance-stream keys.",
-		);
-	}
 	return {
 		// Interior residents are lit by their bake, not by the runtime set.
 		staticLights: [],
@@ -261,7 +252,6 @@ function mergeResidentArtifacts(
 		),
 		objects: present.flatMap((artifact) => artifact.objects),
 		geometry,
-		instanceStreams,
 		textureRequirements: mergeAssetTextureFacts(
 			present.flatMap((artifact) => artifact.textureRequirements),
 			"EnvCell",
@@ -324,31 +314,15 @@ function mergeGeometryDiagnostics(
 	);
 	const sum = (select: (entry: StaticObjectGeometryDiagnostics) => number) =>
 		diagnostics.reduce((total, entry) => total + select(entry), 0);
-	const strategies = new Set(diagnostics.map(({ strategy }) => strategy));
 	return {
-		bakedFallbackRangeCount: sum((entry) => entry.bakedFallbackRangeCount),
+		bakedRangeCount: sum((entry) => entry.bakedRangeCount),
 		bakedGeometryBytes: sum((entry) => entry.bakedGeometryBytes),
 		geometryWorkerDurationMs: sum((entry) => entry.geometryWorkerDurationMs),
 		instancedGeometryBytes: sum((entry) => entry.instancedGeometryBytes),
-		staticFragmentBytes: sum((entry) => entry.staticFragmentBytes),
-		staticFragmentCohortCount: sum((entry) => entry.staticFragmentCohortCount),
-		staticFragmentCount: sum((entry) => entry.staticFragmentCount),
-		staticFragmentDrawUnitCount: sum(
-			(entry) => entry.staticFragmentDrawUnitCount,
-		),
-		staticFragmentInstanceCount: sum(
-			(entry) => entry.staticFragmentInstanceCount,
-		),
 		sourceMaterialSlotCount: sum((entry) => entry.sourceMaterialSlotCount),
 		sourcePartCount: sum((entry) => entry.sourcePartCount),
 		sourceRangeCount: sum((entry) => entry.sourceRangeCount),
 		sourceResidentCount: sum((entry) => entry.sourceResidentCount),
-		strategy:
-			diagnostics.length === 0
-				? "empty"
-				: strategies.size === 1
-					? diagnostics[0]!.strategy
-					: "mixed",
 		transparentTemplateBytes: sum((entry) => entry.transparentTemplateBytes),
 		transparentTemplateCohortCount: sum(
 			(entry) => entry.transparentTemplateCohortCount,

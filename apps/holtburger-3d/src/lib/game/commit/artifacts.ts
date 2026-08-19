@@ -19,8 +19,6 @@ import type {
 	StaticGeometryKey,
 	StaticInstallResourceNamespace,
 	ObjectInstanceData,
-	StaticInstanceStreamKey,
-	StaticInstanceStreamSource,
 } from "../systems/static-resources";
 import type {
 	AssetTextureKey,
@@ -37,13 +35,7 @@ export const FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_BYTES =
 	Float32Array.BYTES_PER_ELEMENT;
 
 /** Geometry strategies observed for one static-object preparation attempt. */
-export type StaticObjectGeometryStrategy =
-	| "empty"
-	| "baked"
-	| "instanced"
-	| "mixed";
-
-/** Strategy-neutral geometry-worker facts retained beside a materialized static layer artifact. */
+/** Geometry-worker facts retained beside a materialized static layer artifact. */
 export interface StaticObjectGeometryDiagnostics {
 	/** Static residents admitted to geometry preparation. */
 	readonly sourceResidentCount: number;
@@ -53,18 +45,11 @@ export interface StaticObjectGeometryDiagnostics {
 	readonly sourceMaterialSlotCount: number;
 	/** Source resident/part/complete-binding submissions after polygon facts are distinguished. */
 	readonly sourceRangeCount: number;
-	/** Actual output strategy, including an explicit mixed fallback result. */
-	readonly strategy: StaticObjectGeometryStrategy;
-	/** Baked draw ranges retained as the selected policy or an explicit fallback. */
-	readonly bakedFallbackRangeCount: number;
+	/** Baked draw ranges in the layer's merged static buffer. */
+	readonly bakedRangeCount: number;
 	readonly bakedGeometryBytes: number;
-	readonly staticFragmentCohortCount: number;
-	readonly staticFragmentCount: number;
-	readonly staticFragmentDrawUnitCount: number;
-	readonly staticFragmentInstanceCount: number;
+	/** Bytes of shared template source geometry, instanced per frame by transparent residue. */
 	readonly instancedGeometryBytes: number;
-	/** Encoded generated-scenery instance payload retained on the CPU. */
-	readonly staticFragmentBytes: number;
 	readonly transparentTemplateCohortCount: number;
 	readonly transparentTemplateInstanceCount: number;
 	/** Fixed transform, color, and center payload bytes retained on the CPU. */
@@ -108,8 +93,7 @@ export interface ObjectMaterialBinding {
 }
 
 /** Baked immutable geometry selected directly by one static draw. */
-export interface BakedStaticDrawUnit {
-	readonly kind: "baked";
+export interface StaticObjectDrawUnit {
 	readonly geometry: StaticGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
@@ -122,25 +106,6 @@ export interface BakedStaticDrawUnit {
 		readonly center: Vec3;
 	} | null;
 }
-
-/** Instanced immutable geometry selected by one generated-scenery fragment cohort. */
-export interface InstancedStaticDrawUnit {
-	readonly kind: "instanced";
-	/** Semantic material/geometry partition used to group compatible visible fragments. */
-	readonly cohortKey: string;
-	readonly geometry: StaticGeometryKey;
-	readonly instances: StaticInstanceStreamKey;
-	readonly indexStart: number;
-	readonly indexCount: number;
-	readonly material: ObjectMaterialBinding;
-	readonly ordering: ObjectMaterialOrdering;
-	readonly transparentSort: null;
-}
-
-/** Logical immutable-object draw contribution retained beside its spatial node. */
-export type StaticObjectDrawUnit =
-	| BakedStaticDrawUnit
-	| InstancedStaticDrawUnit;
 
 /**
  * Immutable transparent instance retained on the CPU so the renderer can order it for each view.
@@ -181,7 +146,6 @@ export interface StaticObjectLayerArtifact {
 	readonly resourceNamespace: StaticInstallResourceNamespace;
 	readonly objects: readonly StaticObjectArtifact[];
 	readonly geometry: readonly GeometrySource[];
-	readonly instanceStreams: readonly StaticInstanceStreamSource[];
 	/** Complete logical requirements whose bindings must be ready before publication. */
 	readonly textureRequirements: readonly AssetTextureFact[];
 	/** Exact closed-worker facts for this materialized geometry. */

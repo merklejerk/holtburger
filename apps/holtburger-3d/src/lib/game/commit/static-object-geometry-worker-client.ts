@@ -116,7 +116,7 @@ function hydrateGeometryResult(
 				new Vec3(object.bounds.max.x, object.bounds.max.y, object.bounds.max.z),
 			),
 			drawUnits: object.drawUnits.map((drawUnit) =>
-				drawUnit.kind === "instanced" || drawUnit.transparentSort === null
+				drawUnit.transparentSort === null
 					? drawUnit
 					: {
 							...drawUnit,
@@ -146,24 +146,7 @@ function hydrateGeometryResult(
 				},
 			})),
 		})),
-		instanceStreams: result.instanceStreams.map((stream) => ({
-			...stream,
-			data: {
-				sourceEnvelope: hydrateAABB3(stream.data.sourceEnvelope),
-				instances: stream.data.instances.map((instance) => ({
-					...instance,
-					sourceToLandblock: hydrateMat4(instance.sourceToLandblock),
-				})),
-			},
-		})),
 	};
-}
-
-function hydrateAABB3(bounds: AABB3): AABB3 {
-	return new AABB3(
-		new Vec3(bounds.min.x, bounds.min.y, bounds.min.z),
-		new Vec3(bounds.max.x, bounds.max.y, bounds.max.z),
-	);
 }
 
 function hydrateMat4(matrix: Mat4): Mat4 {

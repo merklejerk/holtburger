@@ -44,7 +44,6 @@ const FRUSTUM = {
 } as const satisfies Frustum;
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
-const INSTANCE_DATA = { instances: [], sourceEnvelope: AABB3.zero() } as const;
 const PLACEMENT = {
 	envCellId: null,
 	landblockId: "0x0001ffff",
@@ -68,12 +67,6 @@ describe("RenderWorld", () => {
 				getResource: () => {
 					calls.push("geometry");
 					return GEOMETRY;
-				},
-			},
-			instances: {
-				getData: () => {
-					calls.push("instances");
-					return INSTANCE_DATA;
 				},
 			},
 			staticDetails: { getBinding: () => null },
@@ -202,12 +195,9 @@ describe("RenderWorld", () => {
 		const staticRenderable = {
 			drawUnits: [
 				{
-					cohortKey: "fixture-partition",
 					geometry: "static-source-geometry:fixture" as StaticGeometryKey,
 					indexCount: 3,
 					indexStart: 0,
-					kind: "instanced",
-					instances: "static-instance-stream:static-install:1/cohort",
 					material: staticMaterial(),
 					ordering: "opaque",
 					transparentSort: null,
@@ -242,7 +232,6 @@ describe("RenderWorld", () => {
 			{
 				drawUnit: staticRenderable.drawUnits[0],
 				geometry: GEOMETRY,
-				instances: INSTANCE_DATA,
 			},
 		]);
 		expect(calls).toEqual([
@@ -258,7 +247,6 @@ describe("RenderWorld", () => {
 			"texture-2d",
 			"texture-array",
 			"geometry",
-			"instances",
 		]);
 	});
 });

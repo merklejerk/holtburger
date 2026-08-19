@@ -328,8 +328,8 @@ numbers demand it.
 
 **Task checklist:**
 
-- [ ] 6a data texture with dirty-range upload; attribute stream retired
-- [ ] 6b landblock-space origins with per-range offset uniform
+- [x] 6a data texture; attribute stream retired
+- [x] 6b landblock-space origins, re-anchored by a per-frame uniform
 - [ ] 6c persistent slots; `collectCohorts` and pooled records deleted
 - [ ] 6d following-emitter origin uniform
 - [ ] 6e budget, diagnostics, and a measured decision on range merging
@@ -407,6 +407,42 @@ numbers demand it.
   Resolve in 6b.
 
 ## Decisions and Course Corrections
+
+- **6a and 6b landed (2026-08-19).**
+
+  **6a — data texture.** Spawn constants moved from six instance attributes to an RGBA32F texture
+  read by `texelFetch`, indexed by `gl_InstanceID + uInstanceBase`. Lifetimes deliberately
+  unchanged, so this isolates the texture path from the persistence change to come. Measured
+  neutral at C061 (`particleAdvance` 0.042 → 0.043, `particleCohort` 0.090 → 0.086, tick 1.283 →
+  1.304, identical 5 batches / ~670 instances), which is the expected result for plumbing: it
+  removed ~100 attribute-binding GL calls per frame and added one texture upload.
+  `WebGL2ParticleInstanceBuffer` retired; the replacement store keeps its invariants and adds one
+  the attribute path never needed — each record starts on its own texel stride.
+
+  **6b — landblock-space origins, with a better mechanism than the plan specified.** The plan
+  called for a per-*range* landblock offset uniform, which would have forced ranges to be
+  landblock-homogeneous and split batches. Storing the origin **split** instead — a landblock
+  scene origin plus a landblock-local offset — allows a single per-*frame* anchor uniform and no
+  batch splitting at all. It is also strictly more precise: one scene-space origin near 40,000
+  units differenced against a similar-magnitude anchor in float32 loses ~5 mm to cancellation on
+  every particle, whereas landblock origins and the anchor are both exact multiples of the
+  landblock size, so their difference is exact and the small local part keeps full precision.
+
+  **The three floats were free.** 6a padded records to whole texels with three spare lanes; the
+  split needs exactly three. The record grew 21 → 24 floats inside the same six texels.
+
+  **Addition through subtraction:** `ParticleSystem` no longer takes a `renderAnchorOrigin`
+  dependency — anchoring belongs to the renderer's frame — and `GameRuntime.#renderAnchorOrigin`
+  went with it. A `LandblockVector3` tuple brand now makes the stored frame compiler-checked
+  rather than commented.
+
+  **Test replaced, not adapted.** "Keeps left-behind particles in place when the render anchor
+  moves" asserted anchor-relative behaviour that no longer exists; it now pins the real invariant
+  (coarse part on the landblock grid, the two parts reconstructing the scene origin exactly, local
+  part inside one landblock).
+
+  **Verified:** DA55 candle pose pixel-identical across 6a and 6b; a three-hop relocation flight
+  renders correctly with particles intact and no origin drift.
 
 - **Phase 6 redesigned and approved (2026-08-19, user): persistent records, not closed-form
   emission.** The original phase bundled "stop rebuilding the particle list every frame" with

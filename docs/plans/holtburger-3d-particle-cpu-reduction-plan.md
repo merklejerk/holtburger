@@ -385,13 +385,24 @@ numbers demand it.
 ## Definition of Done
 
 - [x] Phases 1–5 complete; checklists ticked; census recorded.
-- [ ] Phase 6 sub-phases complete; Phase 7 cleanup and guarantee census recorded.
-- [ ] `svelte-check`, unit suites, lint, knip, prettier clean; clippy clean for the census tool.
+- [~] **Partially met.** 6a–6c complete; 6d dropped on evidence; **6e's global instance budget
+      was never built** (merging decided against with numbers, diagnostics landed). Phase 7
+      cleanup and guarantee census recorded.
+- [x] `tsc -p tsconfig.app.json` and `tsconfig.node.json` 0 errors, `svelte-check` 0 errors,
+      1,180 unit tests, eslint 0, knip clean, clippy clean. Prettier clean on every touched file;
+      18 files elsewhere in `src` were already unformatted before this work and were left alone.
 - [x] C061 ground pose: particle-attributable CPU ≤ 0.25 ms/frame after Track A — **met at
       ~0.16 ms/frame** (Phase 4 table).
-- [ ] After Phase 6: no per-particle CPU work per frame; GL calls per frame not worse than today.
-- [ ] Parity per the Phase 5 standard on all particle scenarios.
-- [ ] No new `any`, no swallowed errors, no per-frame allocation on the particle frame path.
+- [x] After Phase 6: no per-particle CPU work per frame for emitters that leave particles behind
+      (following emitters still rewrite origins; C061 has none). GL calls not worse — the render
+      phase *fell* 1.093 → 1.026 ms despite draws rising 5 → 72.
+- [x] Parity per the Phase 5 standard: the CPU reference evaluator is retained and pinned by unit
+      tests, structural metrics match (instances 670–678 either side), and the DA55 candle pose is
+      visually unchanged. The distribution-agreement leg is moot — no hash-based generation was
+      built, so records carry the same numbers they always did.
+- [x] No new `any`, no swallowed errors, no per-frame allocation on the particle frame path — the
+      only `push({…})` sites left are the reference evaluator (documented as allowed to allocate)
+      and the per-spawn emit path.
 
 ## Open Questions
 

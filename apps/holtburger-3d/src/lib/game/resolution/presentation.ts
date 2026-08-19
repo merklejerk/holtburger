@@ -15,7 +15,9 @@ export type ResolvedMaterialId = `material:${string}`;
 
 /** Selected source encoding that determines object texture preparation. */
 export type ResolvedObjectTextureEncoding =
-	"direct-color" | "index8" | "index16";
+	| "direct-color"
+	| "index8"
+	| "index16";
 
 /** Geometry buffers shared by object parts and embedded structures. */
 export interface ResolvedGeometry {
@@ -155,13 +157,35 @@ export interface ResolvedAttachPoint {
 export const RESTING_PLACEMENT_KEY = 0x65;
 
 /** Fallback key `CPartArray::SetPlacementFrame` uses when a setup lacks the requested pose. */
-export const FALLBACK_PLACEMENT_KEY = 0;
+const FALLBACK_PLACEMENT_KEY = 0;
 
 /** Named setup placement containing a local transform for every part. */
 export interface ResolvedPlacementPose {
 	readonly placementId: number;
 	/** Rigid part-to-object transforms; setup and object source scale are composed at use time. */
 	readonly partTransforms: readonly Mat4[];
+}
+
+/**
+ * Select one authored pose by placement key, falling back exactly as retail does.
+ *
+ * `CPartArray::SetPlacementFrame` (`acclient.c:314297`) looks the requested key up in the setup's
+ * placement frames and drops to key 0 when it is absent. Every retail setup authors key 0, so a
+ * presentation carrying neither key is a decoding defect, not content, and fails loudly.
+ */
+export function resolvePlacementPose(
+	presentation: Pick<ResolvedObjectPresentation, "id" | "placementPoses">,
+	placementKey: number,
+): ResolvedPlacementPose {
+	const pose =
+		presentation.placementPoses.get(placementKey) ??
+		presentation.placementPoses.get(FALLBACK_PLACEMENT_KEY);
+	if (pose === undefined) {
+		throw new Error(
+			`Presentation ${presentation.id} authors neither placement ${placementKey} nor fallback ${FALLBACK_PLACEMENT_KEY}.`,
+		);
+	}
+	return pose;
 }
 
 /**

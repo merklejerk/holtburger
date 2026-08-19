@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Mat4, Vec3 } from "../math/types";
+import { RESTING_PLACEMENT_KEY } from "../resolution/presentation";
 import { transformPoint3 } from "../math/matrices";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
@@ -187,6 +188,35 @@ describe("prepareStaticObjectGeometry", () => {
 			Float32Array.from([
 				20, 20, 30, 22, 20, 30, 20, 22, 30, 12, 20, 30, 14, 20, 30, 12, 22, 30,
 			]),
+		);
+	});
+
+	it("bakes the resting pose, not the default pose, when a setup authors both", () => {
+		const base = resident("setup", Mat4.identity(), new Vec3(1, 1, 1));
+		const posedResident = {
+			...base,
+			presentation: {
+				...base.presentation,
+				placementPoses: new Map([
+					[0, { partTransforms: [translation(5, 0, 0)], placementId: 0 }],
+					[
+						RESTING_PLACEMENT_KEY,
+						{
+							partTransforms: [translation(1, 0, 0)],
+							placementId: RESTING_PLACEMENT_KEY,
+						},
+					],
+				]),
+			},
+		};
+
+		const result = bake({
+			resourceNamespace: "static-install:resting" as const,
+			source: source([posedResident]),
+		});
+
+		expect(result?.geometry[0]?.geometry.positions).toEqual(
+			Float32Array.from([1, 0, 0, 2, 0, 0, 1, 1, 0]),
 		);
 	});
 

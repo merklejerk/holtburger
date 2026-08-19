@@ -25,11 +25,11 @@ import type { SceneGraph, SceneNodeId } from "../scene";
 import type { ScenePlacement } from "../scene";
 import { scopeKey } from "../scene/scope";
 import {
-	FALLBACK_PLACEMENT_KEY,
 	type ParentLocation,
 	RESTING_PLACEMENT_KEY,
 	resolveObjectPresentationBounds,
 	type ResolvedObjectPresentation,
+	resolvePlacementPose,
 } from "../resolution/presentation";
 import { composeObjectPartTransform } from "../resolution/object-part-transform";
 import type {
@@ -1246,25 +1246,14 @@ function requiredBoundsCenter(bounds: AABB3 | null, partIndex: number): Vec3 {
 	);
 }
 
-/**
- * Select one authored pose by placement key, falling back exactly as retail does.
- *
- * `CPartArray::SetPlacementFrame` (`acclient.c:314297`) looks the requested key up in the setup's
- * placement frames and drops to key 0 when it is absent.
- */
 function poseFor(
 	presentation: ResolvedObjectPresentation,
 	placementKey: number,
 ): ArticulatedPose {
-	const pose =
-		presentation.placementPoses.get(placementKey) ??
-		presentation.placementPoses.get(FALLBACK_PLACEMENT_KEY);
-	const transforms: Mat4[] = [];
-	for (const part of presentation.parts) {
-		transforms[part.partIndex] =
-			pose?.partTransforms[part.partIndex] ?? Mat4.identity();
-	}
-	return { partToObjectTransforms: transforms };
+	return {
+		partToObjectTransforms: resolvePlacementPose(presentation, placementKey)
+			.partTransforms,
+	};
 }
 
 function defaultPose(

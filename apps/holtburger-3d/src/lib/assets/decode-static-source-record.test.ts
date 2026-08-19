@@ -227,6 +227,23 @@ describe("decodeOutdoorStaticRecord", () => {
 		).toThrow("declares placement 1 twice");
 	});
 
+	it("rejects a setup that authors neither the resting nor the fallback pose", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({
+					placementFrames: [
+						{
+							placementId: 1,
+							frames: [{ origin: [0, 0, 0], orientation: [1, 0, 0, 0] }],
+						},
+					],
+				}),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("authors neither placement");
+	});
+
 	it("rejects a placement with the wrong number of part frames", () => {
 		expect(() =>
 			decodeOutdoorStaticRecord(

@@ -622,6 +622,112 @@ describe("ExplorerCameraCoordinator", () => {
 		);
 		coordinator.dispose();
 	});
+	it("re-anchors the established radii on a landblock the camera reached", () => {
+		const updateSceneInterest = vi.fn(() => ({ revision: 1 }));
+		const { runtime } = createRuntime({
+			queryOutdoorTerrainSurface: () => ({
+				height: 0,
+				landblockId: "0x0102ffff",
+			}),
+			updateSceneInterest:
+				updateSceneInterest as unknown as GameRuntime["updateSceneInterest"],
+		});
+		const coordinator = new ExplorerCameraCoordinator(
+			runtime,
+			{ setAutomaticPose: vi.fn() } as unknown as FreeFlyCameraController,
+			() => {},
+		);
+
+		// Inert until a manual request establishes the radii to follow with.
+		expect(
+			coordinator.followCameraResidency({
+				envCellId: null,
+				landblockId: "0x0103ffff",
+			}),
+		).toBe(false);
+		expect(updateSceneInterest).not.toHaveBeenCalled();
+		expect(coordinator.sceneInterest()).toBeNull();
+
+		coordinator.requestSceneInterest(
+			{ envCellId: null, landblockId: "0x0102ffff" },
+			TEST_RADII,
+		);
+
+		expect(
+			coordinator.followCameraResidency({
+				envCellId: null,
+				landblockId: "0x0102ffff",
+			}),
+		).toBe(false);
+		expect(
+			coordinator.followCameraResidency({
+				envCellId: null,
+				landblockId: "0x0103ffff",
+			}),
+		).toBe(true);
+		expect(updateSceneInterest).toHaveBeenLastCalledWith({
+			anchorLandblockId: "0x0103ffff",
+			radii: TEST_RADII,
+		});
+		expect(coordinator.sceneInterest()).toEqual({
+			radii: TEST_RADII,
+			residency: { envCellId: null, landblockId: "0x0103ffff" },
+		});
+		coordinator.dispose();
+	});
+
+	it("declines to follow the camera it has not finished placing yet", () => {
+		const setAutomaticPose = vi.fn();
+		const updateSceneInterest = vi.fn(() => ({ revision: 1 }));
+		let terrainQueryable = false;
+		const { emit, runtime } = createRuntime({
+			queryOutdoorTerrainSurface: () =>
+				terrainQueryable ? { height: 0, landblockId: "0x0103ffff" } : null,
+			updateSceneInterest:
+				updateSceneInterest as unknown as GameRuntime["updateSceneInterest"],
+		});
+		const coordinator = new ExplorerCameraCoordinator(
+			runtime,
+			{ setAutomaticPose } as unknown as FreeFlyCameraController,
+			() => {},
+		);
+		// Request a landblock whose terrain has not arrived, so its placement stays pending.
+		coordinator.requestSceneInterest(
+			{ envCellId: null, landblockId: "0x0103ffff" },
+			TEST_RADII,
+		);
+		expect(setAutomaticPose).not.toHaveBeenCalled();
+		updateSceneInterest.mockClear();
+
+		// The camera still reports the landblock it is leaving; following it would undo the request.
+		expect(
+			coordinator.followCameraResidency({
+				envCellId: null,
+				landblockId: "0x0102ffff",
+			}),
+		).toBe(false);
+		expect(updateSceneInterest).not.toHaveBeenCalled();
+		expect(coordinator.sceneInterest()).toEqual({
+			radii: TEST_RADII,
+			residency: { envCellId: null, landblockId: "0x0103ffff" },
+		});
+
+		terrainQueryable = true;
+		emit({
+			kind: "outdoor-terrain-source-available",
+			landblockId: "0x0103ffff",
+			revision: 1 as never,
+		});
+
+		expect(setAutomaticPose).toHaveBeenCalledOnce();
+		expect(
+			coordinator.followCameraResidency({
+				envCellId: null,
+				landblockId: "0x0102ffff",
+			}),
+		).toBe(true);
+		coordinator.dispose();
+	});
 });
 
 function createRuntime(
@@ -630,9 +736,11 @@ function createRuntime(
 		hasEnvCellTopology: GameRuntime["hasEnvCellTopology"];
 		queryEnvCellBounds: GameRuntime["queryEnvCellBounds"];
 		queryEnvCellPointContainment: GameRuntime["queryEnvCellPointContainment"];
+		queryOutdoorTerrainSurface: GameRuntime["queryOutdoorTerrainSurface"];
 		queryWorldPointResidencyCandidates: GameRuntime["queryWorldPointResidencyCandidates"];
 		setAudioListener: GameRuntime["setAudioListener"];
 		setPrimaryCamera: GameRuntime["setPrimaryCamera"];
+		updateSceneInterest: GameRuntime["updateSceneInterest"];
 	}> = {},
 ): {
 	readonly emit: (event: SceneAvailabilityEvent) => void;
@@ -645,6 +753,8 @@ function createRuntime(
 		queryEnvCellBounds: overrides.queryEnvCellBounds ?? (() => null),
 		queryEnvCellPointContainment:
 			overrides.queryEnvCellPointContainment ?? (() => null),
+		queryOutdoorTerrainSurface:
+			overrides.queryOutdoorTerrainSurface ?? (() => null),
 		queryWorldPointResidencyCandidates:
 			overrides.queryWorldPointResidencyCandidates ??
 			(() => ({
@@ -661,7 +771,8 @@ function createRuntime(
 				listener = null;
 			};
 		},
-		updateSceneInterest: () => ({ revision: 1 }),
+		updateSceneInterest:
+			overrides.updateSceneInterest ?? (() => ({ revision: 1 })),
 	} as unknown as GameRuntime;
 	return {
 		emit: (event) => listener?.(event),

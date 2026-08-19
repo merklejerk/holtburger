@@ -67,6 +67,8 @@
 		readonly viewerLightEnabled: boolean;
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
+		/** Follow mode: scene interest re-anchors to the camera's landblock on crossings. */
+		readonly interestFollowsCamera: boolean;
 		readonly audioFollowsCamera: boolean;
 		readonly effectVolume: number;
 		readonly ambientVolume: number;
@@ -78,6 +80,7 @@
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateWeather: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
+		readonly updateInterestFollowsCamera: (enabled: boolean) => void;
 		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
 		readonly updateEffectVolume: (volume: number) => void;
 		readonly updateAmbientVolume: (volume: number) => void;
@@ -137,6 +140,7 @@
 		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
+		interestFollowsCamera,
 		audioFollowsCamera,
 		effectVolume,
 		ambientVolume,
@@ -145,6 +149,7 @@
 		updateViewerLight,
 		updateWeather,
 		updateClockFollowing,
+		updateInterestFollowsCamera,
 		updateAudioFollowsCamera,
 		updateEffectVolume,
 		updateAmbientVolume,
@@ -279,6 +284,8 @@
 								{viewerLightEnabled}
 								{weatherEnabled}
 								{clockFollowing}
+								{interestFollowsCamera}
+								{updateInterestFollowsCamera}
 								{audioFollowsCamera}
 								{effectVolume}
 								{ambientVolume}

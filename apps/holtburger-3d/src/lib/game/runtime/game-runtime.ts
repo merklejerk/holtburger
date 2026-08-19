@@ -366,6 +366,8 @@ export interface StaticObjectRuntimeDiagnostics {
 	 */
 	readonly staticLayerPublicationCount: number;
 	readonly staticObjectNodeCount: number;
+	/** Landblock layers owning outdoor lights; growth across relocations means evicted lamps leaked. */
+	readonly outdoorLightScopeCount: number;
 	/** Synchronous texture-fact collection before building realization dispatch. */
 	readonly textureFactCollectionDurationMs: number;
 	readonly textureFactCollectionCount: number;
@@ -801,10 +803,20 @@ export class GameRuntime {
 			},
 			geometry: dependencies.staticGeometryPreparer,
 			publisher: {
-				evict: async (owner, revision) =>
-					this.#staticObjects.evict(owner, revision),
-				removeExact: async (owner, revision) =>
-					this.#staticObjects.removeExact(owner, revision),
+				evict: async (owner, revision) => {
+					this.#staticObjects.evict(owner, revision);
+					const parsed = parseOutdoorLayerOwner(owner);
+					this.#outdoorLights.evict(parsed.landblockId, parsed.layer, revision);
+				},
+				removeExact: async (owner, revision) => {
+					this.#staticObjects.removeExact(owner, revision);
+					const parsed = parseOutdoorLayerOwner(owner);
+					this.#outdoorLights.removeExact(
+						parsed.landblockId,
+						parsed.layer,
+						revision,
+					);
+				},
 				replace: async ({ geometry, layer, owner, revision }) => {
 					if (!isOutdoorStaticLayer(layer)) {
 						throw new Error(`Outdoor static publisher received ${layer}.`);
@@ -814,8 +826,9 @@ export class GameRuntime {
 					// Only the Objects layer emits, but every outdoor layer publishes here: an
 					// empty set is how a withdrawn layer clears its own entry.
 					this.#outdoorLights.install(
-						parseLandblockLayerOwnerId(owner).landblockId,
+						parseOutdoorLayerOwner(owner).landblockId,
 						layer,
+						revision,
 						geometry?.staticLights ?? [],
 					);
 				},
@@ -1720,6 +1733,7 @@ export class GameRuntime {
 			staticObjectNodeCount: staticObjects.nodeCount,
 			staticObjectOwnerCount: staticObjects.ownerCount,
 			staticLayerPublicationCount: this.#staticLayerPublicationCount,
+			outdoorLightScopeCount: this.#outdoorLights.ownedScopeCount,
 			textureFactCollectionDurationMs: this.#textureFactCollectionDurationMs,
 			textureFactCollectionCount: this.#textureFactCollectionCount,
 			texture: this.#textures.getDiagnostics(),
@@ -2489,6 +2503,18 @@ class InlineStaticObjectGeometryPreparer extends RuntimeStaticObjectGeometryPrep
 			destroy: () => undefined,
 		} as StaticObjectGeometryWorker);
 	}
+}
+
+/** Parse an outdoor static publisher owner, failing loudly if a non-outdoor layer reached it. */
+function parseOutdoorLayerOwner(owner: OwnerId): {
+	readonly landblockId: LandblockId;
+	readonly layer: OutdoorStaticLayerKind;
+} {
+	const parsed = parseLandblockLayerOwnerId(owner);
+	if (!isOutdoorStaticLayer(parsed.layer)) {
+		throw new Error(`Outdoor static publisher received ${parsed.layer}.`);
+	}
+	return { landblockId: parsed.landblockId, layer: parsed.layer };
 }
 
 function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {

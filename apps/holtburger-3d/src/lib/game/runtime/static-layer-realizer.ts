@@ -238,6 +238,15 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 			preparedCompanion?.commit();
 			return { geometry: preparedGeometry, kind: "published" };
 		} catch (cause) {
+			if (preparedCompanion === null && companion !== undefined) {
+				// A geometry rejection can outrun the still-pending companion leg, in which case
+				// nobody ever receives the publication. Release it on settlement; its own
+				// rejection is swallowed because this realization already failed loudly.
+				void companion.then(
+					(publication) => publication.release(),
+					() => undefined,
+				);
+			}
 			preparedCompanion?.release();
 			await Promise.all([
 				this.#atlas.withdrawOwnerRevision(atlasHandle),

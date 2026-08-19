@@ -1,4 +1,5 @@
 import type { LandblockId } from "../game-types";
+import type { SceneInterestRevision } from "../runtime/scene-availability";
 import type { OutdoorStaticLayerKind } from "../runtime/scene-interest";
 import {
 	getLandblockCoordinates,
@@ -52,20 +53,66 @@ export class OutdoorLightIndex {
 	install(
 		landblockId: LandblockId,
 		layer: OutdoorStaticLayerKind,
+		revision: SceneInterestRevision,
 		lights: readonly RuntimeLight[],
 	): void {
 		const scope: OwnedLightScope = `${landblockId}/${layer}`;
 		if (lights.length === 0) {
 			if (!this.#owned.delete(scope)) return;
 		} else {
-			this.#owned.set(scope, { landblockId, lights });
+			this.#owned.set(scope, { landblockId, lights, revision });
 		}
+		this.#effective.clear();
+	}
+
+	/**
+	 * Remove a layer's lights when its landblock leaves interest.
+	 *
+	 * Guarded like StaticObjectSystem.evict: only an entry at or below the evicted revision is
+	 * removed, so a late eviction of an old revision cannot delete lamps a re-entered revision
+	 * just installed.
+	 */
+	evict(
+		landblockId: LandblockId,
+		layer: OutdoorStaticLayerKind,
+		revision: SceneInterestRevision,
+	): void {
+		this.#remove(landblockId, layer, (owned) => owned <= revision);
+	}
+
+	/** Remove exactly one revision's lights, repairing a publish that lost the eviction race. */
+	removeExact(
+		landblockId: LandblockId,
+		layer: OutdoorStaticLayerKind,
+		revision: SceneInterestRevision,
+	): void {
+		this.#remove(landblockId, layer, (owned) => owned === revision);
+	}
+
+	#remove(
+		landblockId: LandblockId,
+		layer: OutdoorStaticLayerKind,
+		matches: (owned: SceneInterestRevision) => boolean,
+	): void {
+		const scope: OwnedLightScope = `${landblockId}/${layer}`;
+		const owned = this.#owned.get(scope);
+		if (owned === undefined || !matches(owned.revision)) return;
+		this.#owned.delete(scope);
 		this.#effective.clear();
 	}
 
 	/** True when no landblock emits any light, so callers can skip binding entirely. */
 	get isEmpty(): boolean {
 		return this.#owned.size === 0;
+	}
+
+	/**
+	 * Number of landblock layers currently owning lights. A diagnostic leak detector: after
+	 * residency settles this must match the light-emitting layers inside interest, so growth
+	 * across relocations means evicted layers left lamps behind.
+	 */
+	get ownedScopeCount(): number {
+		return this.#owned.size;
 	}
 
 	/**
@@ -146,6 +193,8 @@ type OwnedLightScope = `${LandblockId}/${OutdoorStaticLayerKind}`;
 interface OwnedLights {
 	readonly landblockId: LandblockId;
 	readonly lights: readonly RuntimeLight[];
+	/** Interest revision that published these lights; evictions match against it. */
+	readonly revision: SceneInterestRevision;
 }
 
 /** Shared unlit result: no lights, and a mask table that admits none. */

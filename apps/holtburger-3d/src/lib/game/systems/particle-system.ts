@@ -15,7 +15,7 @@ import type {
 	DrawableParticleEmitter,
 	PreparedParticleEmitter,
 } from "../behavior/particle-emitter-repository";
-import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
+import type { ParticleInstanceRecord } from "../renderer/particle-record-layout";
 import type { DatAssetId } from "../game-types";
 import type {
 	BehaviorTarget,
@@ -26,7 +26,7 @@ import {
 	ParticleRecordSlots,
 	type ParticleSlotRegion,
 } from "../behavior/particle-record-slots";
-import { PARTICLE_RECORD_BIRTH_TIME_FLOAT } from "../renderer/particle-instance-stream";
+import { PARTICLE_RECORD_BIRTH_TIME_FLOAT } from "../renderer/particle-record-layout";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import {
 	PARTICLE_TYPE,
@@ -53,7 +53,7 @@ export interface ParticleSystemDependencies {
 	 *
 	 * Scene frame rather than anchor-relative because particle origins are retained across frames.
 	 *
-	 * **Spawn-tier, not frame-tier.** Only emission and cohort collection read an origin; the
+	 * **Spawn-tier, not frame-tier.** Only emission and range collection read an origin; the
 	 * per-frame emitter loop must not, because resolving one costs a walk up the scene hierarchy
 	 * and this runs for every resident emitter whether or not it is drawn. Liveness questions go
 	 * to {@link ParticleSystemDependencies.targetLives} instead.
@@ -223,7 +223,7 @@ function sampleTranslucency(
  *
  * RETAIL DIVERGENCE: retail uses only `max(max_offset, max_a * lifespan)` for its sorting sphere
  * (acclient.c:312431-312445). That omits acceleration, hook displacement, scale, and mesh geometry;
- * restoring it would cull whole cohorts while particles remain visible. The 2026-08-15 census
+ * restoring it would cull whole emitters while their particles remain visible. The 2026-08-15 census
  * covered all 2,051 emitters and found 834 drawable definitions underbounded by the former
  * unit-mesh size term alone.
  */
@@ -344,7 +344,7 @@ export type ParticleRenderOwner =
 	| typeof EXTERIOR_PARTICLE_RENDER_OWNER
 	| typeof SKY_PARTICLE_RENDER_OWNER;
 
-/** One owner-local source cohort awaiting renderer-owned portal-domain batching. */
+/** One emitter's slot range awaiting renderer-owned portal-domain routing. */
 export interface ParticleSourceRange {
 	/** Particle mesh shared by every instance in this range. */
 	readonly hwGfxObjId: DatAssetId;
@@ -412,7 +412,7 @@ export class ParticleSystem {
 		BehaviorTargetId,
 		ParticleOwnerAggregate
 	>();
-	/** Reused across frames so cohort grouping does not allocate in the renderer's hot path. */
+	/** Reused across frames so range collection does not allocate in the renderer's hot path. */
 	/** Persistent record storage; written at spawn and read by the GPU every frame after. */
 	readonly #slots = new ParticleRecordSlots();
 	/**

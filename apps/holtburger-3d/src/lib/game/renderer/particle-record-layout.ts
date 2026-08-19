@@ -4,12 +4,12 @@ import type {
 	SceneVector3,
 } from "../../assets/ac-frame";
 /**
- * Packs live particles into the per-instance layout the particle vertex stage declares.
+ * The record layout the particle vertex stage reads, and the writer that fills it.
  *
  * One record per particle, carrying **spawn constants only** — no evaluated position. The vertex
- * stage derives position, scale, and translucency from these constants plus the shared clock, which
- * is what keeps per-particle CPU work at emission and expiry bookkeeping regardless of how many
- * particles are live.
+ * stage derives position, scale, and translucency from these constants plus the shared clock, so a
+ * record is written once when its particle is born and read every frame after, and no per-frame
+ * work scales with the live particle count.
  *
  * Attribute locations 3-8 of `webgl2-particle-program.ts`, in order:
  *
@@ -90,12 +90,13 @@ export interface ParticleInstanceRecord {
 }
 
 /**
- * Write one particle's instance record at `floatOffset`, returning the next free offset.
+ * Write one particle's record at `floatOffset`, returning the next free offset.
  *
- * Writes in place into a caller-owned buffer rather than allocating, because this runs per particle
- * per frame and allocation here would be pure GC churn in the renderer's hot path.
+ * Writes in place into a caller-owned buffer rather than allocating: the buffer is the persistent
+ * slot store the GPU reads directly, so a record is written into its final home rather than copied
+ * through an intermediate.
  */
-export function writeParticleInstance(
+export function writeParticleRecord(
 	target: Float32Array,
 	floatOffset: number,
 	record: ParticleInstanceRecord,

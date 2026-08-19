@@ -4,7 +4,7 @@ import {
 	sceneVector3,
 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
-import type { ParticleInstanceRecord } from "../renderer/particle-instance-stream";
+import type { ParticleInstanceRecord } from "../renderer/particle-record-layout";
 import {
 	ParticleRecordSlots,
 	PARTICLE_RECORD_STRIDE_FLOATS,

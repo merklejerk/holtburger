@@ -509,7 +509,7 @@ export class GameRuntime {
 	 * Make every mesh this generation's emitters can name resident.
 	 *
 	 * Deliberately fire-and-forget: a resident activates immediately and its first particles may
-	 * miss a frame or two while meshes land, which the draw pass counts as unresolved cohorts.
+	 * miss a frame or two while meshes land, which the draw pass counts as unresolved ranges.
 	 * Blocking activation on mesh residency would hold back correct script, audio, and animation
 	 * behavior for a purely visual dependency.
 	 */
@@ -1893,7 +1893,7 @@ export class GameRuntime {
 				dirtySlots: this.#particles.takeDirtyRecordSlots(),
 			},
 		);
-		tick?.mark("particleCohort");
+		tick?.mark("particleRanges");
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,

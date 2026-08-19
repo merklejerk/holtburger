@@ -2,7 +2,7 @@ import { PARTICLE_TYPE } from "../behavior/particle-motion";
 import {
 	PARTICLE_RECORD_TEXELS,
 	PARTICLE_RECORD_TEXTURE_WIDTH,
-} from "./particle-instance-stream";
+} from "./particle-record-layout";
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
@@ -110,7 +110,7 @@ uniform mat4 uProjection;
 uniform mat4 uView;
 /** Shared runtime clock; every particle derives its own elapsed time from its birth stamp. */
 uniform float uClockSeconds;
-/** One of PARTICLE_ORIENTATION, constant per cohort because it is a per-mesh fact. */
+/** One of PARTICLE_ORIENTATION, constant per drawn range because it is a per-mesh fact. */
 uniform int uOrientation;
 /** Axis held fixed when uOrientation is axis-locked. */
 uniform vec3 uLockedAxis;
@@ -124,7 +124,7 @@ uniform vec3 uCameraPosition;
  * cancellation, and that error would land on every particle.
  */
 uniform vec3 uAnchorOrigin;
-/** Authored ParticleType, constant per cohort. */
+/** Authored ParticleType, constant per drawn range. */
 uniform int uMotionType;
 
 out vec2 vTextureCoordinate;

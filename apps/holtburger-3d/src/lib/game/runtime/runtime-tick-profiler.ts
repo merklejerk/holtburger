@@ -17,7 +17,7 @@ export const RUNTIME_TICK_PHASES = [
 	"particleAdvance",
 	"animationAdvance",
 	"presentationPublish",
-	"particleCohort",
+	"particleRanges",
 	"render",
 	"frameCompletion",
 ] as const;

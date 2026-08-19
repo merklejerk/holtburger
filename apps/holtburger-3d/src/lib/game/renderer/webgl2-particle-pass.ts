@@ -7,7 +7,7 @@ import {
 } from "./webgl2-particle-program";
 import type { WebGL2PortalDeferredVisibilityUniforms } from "./portal-deferred-visibility-glsl";
 import { WebGL2ParticleRecordStore } from "./webgl2-particle-record-store";
-import { PARTICLE_RECORDS_PER_ROW } from "./particle-instance-stream";
+import { PARTICLE_RECORDS_PER_ROW } from "./particle-record-layout";
 import { objectBlendPolicy } from "./object-rendering-policy";
 import { TextureWrapMode } from "../textures/types";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";

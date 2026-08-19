@@ -2,9 +2,9 @@ import {
 	PARTICLE_INSTANCE_FLOAT_COUNT,
 	PARTICLE_RECORD_TEXELS,
 	PARTICLE_RECORDS_PER_ROW,
-	writeParticleInstance,
+	writeParticleRecord,
 	type ParticleInstanceRecord,
-} from "../renderer/particle-instance-stream";
+} from "../renderer/particle-record-layout";
 
 /** RGBA32F carries four floats per texel. */
 const FLOATS_PER_TEXEL = 4;
@@ -116,7 +116,7 @@ export class ParticleRecordSlots {
 		if (!Number.isSafeInteger(slot) || slot < 0 || slot >= this.#capacity) {
 			throw new Error(`Particle record slot ${slot} is out of range.`);
 		}
-		writeParticleInstance(
+		writeParticleRecord(
 			this.#data,
 			slot * PARTICLE_RECORD_STRIDE_FLOATS,
 			record,

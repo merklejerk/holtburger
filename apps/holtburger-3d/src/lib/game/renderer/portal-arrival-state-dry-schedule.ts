@@ -45,7 +45,7 @@ interface PortalDryScopeWorkload {
 	readonly deferred: readonly PortalDryDeferredSubmission[];
 	/** Opaque/alpha-test batches after ordinary compatibility coalescing. */
 	readonly opaque: readonly PortalDryOpaqueBatch[];
-	/** Live source cohorts before domain routing and final packing. */
+	/** Live emitter slot ranges before domain routing. */
 	readonly particles: readonly PortalDryParticleSource[];
 	/** Canonical scene scope key matching `scopeKey`. */
 	readonly scopeKey: string;

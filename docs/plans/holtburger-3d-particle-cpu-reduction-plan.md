@@ -354,8 +354,8 @@ numbers demand it.
 
 **Task checklist:**
 
-- [ ] Vocabulary and dead code swept
-- [ ] Guarantee/replacement census verified and recorded in Decisions
+- [x] Vocabulary and dead code swept
+- [x] Guarantee/replacement census verified and recorded in Decisions
 
 ## Risks & Mitigations
 
@@ -407,6 +407,45 @@ numbers demand it.
   Resolve in 6b.
 
 ## Decisions and Course Corrections
+
+- **Phase 7 (2026-08-19) — cleanup and guarantee census.**
+
+  **Vocabulary swept.** "Cohort" described a per-frame grouping of record *copies*; there is no
+  such thing now, so it is gone from every particle-path symbol, comment, and metric: the tick
+  phase `particleCohort` → `particleRanges`, the module `particle-instance-stream.ts` →
+  `particle-record-layout.ts` (there is no stream — records are written once into their final
+  home), and `writeParticleInstance` → `writeParticleRecord`. Deliberately **not** swept: the
+  static-object transparent path's `cohortKey` and `transparentTemplateCohortCount`, which name a
+  different and still-live mechanism.
+
+  **Guarantee census** — every mechanism this plan deleted, against what now provides it:
+
+  | deleted guarantee | replacement | verified by |
+  | ----------------- | ----------- | ----------- |
+  | per-frame origin freshness in `advance` | spawn-time resolution + `targetLives` | call-count tests: 0 reads across idle frames, 1 on a spawning frame |
+  | per-frame reap exactness | `deathTime` at spawn + `nextDeathTime` watermark | boundary tests at `t <`, `=`, `>` lifespan, including zero lifespan |
+  | age freeze across an off-screen suspension | birth, death and watermark shifted together; stored birth patched | test hides an emitter across its whole lifespan and asserts it survives *and* dies a full lifespan later |
+  | per-frame record rebuild | write at spawn, compact on death | candle pose pixel-identical; 1,180 unit tests |
+  | anchor freshness inside records | landblock-space storage + per-frame `uAnchorOrigin` | three-hop relocation flight, no origin drift |
+  | packed-stream consumption check | per-range instance accounting | pass throws if drawn + unresolved ≠ prepared |
+  | per-frame attribute rebinding | `uInstanceBase` into the record texture | render phase *fell* 1.093 → 1.026 ms despite 5 → 72 draws |
+  | mesh-not-resident visibility | unresolved-range counter, unchanged | existing pass test |
+
+  **Debt recorded, with triggers rather than intentions:**
+  - **6e's global instance budget was never built.** It was North Star 4 and an acceptance
+    criterion, and it is the one substantive item this plan did not deliver. The load it guarded
+    against is now partly bounded by construction — the store cannot exceed the sum of resident
+    emitters' `maxParticles` (39,205 slots for the entire authored corpus) and draws are bounded by
+    visible emitters (72 at C061) — but nothing caps a pathological scene. Unbuilt because no
+    measurement showed pressure; build it if visible emitters or instances are ever found climbing
+    far beyond the reference pose.
+  - **6e range merging: decided against with numbers**, not deferred — the draw-count increase it
+    would recover costs nothing measurable.
+  - **6d and the origin-unchanged check for following emitters:** both unjustified by current
+    measurement, since C061 has zero followers. Trigger is a profiled creature- or effect-heavy
+    scene.
+  - **Two `RETAIL DIVERGENCE` write-ups were ratified and then went unused** when Phase 6 was
+    redesigned away from closed-form emission. They stay recorded should it ever be revisited.
 
 - **Correction (2026-08-19): Phase 6a–6c is a clear win, not the wash I reported.** The earlier
   6c entry compared against Track A numbers captured hours earlier in the session. The machine

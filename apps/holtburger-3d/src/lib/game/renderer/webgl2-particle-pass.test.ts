@@ -1,12 +1,7 @@
-import {
-	acVector3,
-	landblockVector3,
-	renderVector3,
-	sceneVector3,
-} from "../../assets/ac-frame";
+import { renderVector3, sceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { DatAssetId } from "../game-types";
-import type { ParticleDrawBatch } from "./particle-render-routing";
+import type { ParticleDrawRange } from "./particle-render-routing";
 import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
 import {
 	WebGL2ParticlePass,
@@ -19,29 +14,17 @@ import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catal
 
 const MESH = "0x01000ff4" as DatAssetId;
 
+let nextBaseSlot = 0;
+
+/** One drawable slot range; slots are handed out ascending so ranges never overlap. */
 function batch(
 	motionType: number,
 	particleCount: number,
 	hwGfxObjId: DatAssetId = MESH,
-): ParticleDrawBatch {
-	return {
-		hwGfxObjId,
-		motionType,
-		particles: Array.from({ length: particleCount }, () => ({
-			a: acVector3([1, 0, 0]),
-			b: acVector3([0, 0, 0]),
-			birthTime: 0,
-			c: acVector3([0, 0, 0]),
-			finalScale: 1,
-			finalTranslucency: 1,
-			lifespan: 4,
-			offset: acVector3([0, 0, 0]),
-			landblockOrigin: sceneVector3([0, 0, 0]),
-			localOrigin: landblockVector3([0, 0, 0]),
-			startScale: 1,
-			startTranslucency: 0,
-		})),
-	};
+): ParticleDrawRange {
+	const baseSlot = nextBaseSlot;
+	nextBaseSlot += particleCount;
+	return { baseSlot, count: particleCount, hwGfxObjId, motionType };
 }
 
 const GEOMETRY: ParticleDrawGeometry = {
@@ -70,6 +53,7 @@ function fakeGl() {
 		readonly unit: number;
 		readonly request: unknown;
 	}> = [];
+	const texImage2D = vi.fn();
 	const texSubImage2D = vi.fn();
 	const gl = {
 		ARRAY_BUFFER: 1,
@@ -139,7 +123,7 @@ function fakeGl() {
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 		linkProgram: () => undefined,
 		shaderSource: () => undefined,
-		texImage2D: () => undefined,
+		texImage2D,
 		texParameteri: () => undefined,
 		texSubImage2D,
 		uniform1f: () => undefined,
@@ -160,7 +144,7 @@ function fakeGl() {
 		},
 	} as unknown as WebGL2TextureSamplerCatalog;
 	return {
-		calls: { blendFuncs, texSubImage2D },
+		calls: { blendFuncs, texImage2D, texSubImage2D },
 		draws,
 		gl,
 		intUniforms,
@@ -175,6 +159,7 @@ const context = (
 ) => ({
 	anchorOrigin: sceneVector3([0, 0, 0]),
 	cameraPosition: renderVector3([0, 0, 0]),
+	records: { data: new Float32Array(4096), dirtySlots: null },
 	clockSeconds: 1,
 	gl,
 	projection: new Float32Array(16),
@@ -196,7 +181,10 @@ describe("WebGL2ParticlePass", () => {
 
 		// One call per batch regardless of particle count; retail's per-part ceiling is not inherited.
 		expect(draws).toEqual([3, 7]);
-		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
+		expect(
+			calls.texImage2D.mock.calls.length +
+				calls.texSubImage2D.mock.calls.length,
+		).toBe(1);
 		expect(pass.getDiagnostics()).toMatchObject({
 			drawnBatchCount: 2,
 			drawnParticleCount: 10,
@@ -232,7 +220,10 @@ describe("WebGL2ParticlePass", () => {
 
 		expect(draws).toEqual([3, 7]);
 		expect(routedScopes).toEqual(["outdoor", "env-cell:0101/01010001"]);
-		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
+		expect(
+			calls.texImage2D.mock.calls.length +
+				calls.texSubImage2D.mock.calls.length,
+		).toBe(1);
 	});
 
 	it("rejects portal-hidden fragments before particle material sampling", () => {

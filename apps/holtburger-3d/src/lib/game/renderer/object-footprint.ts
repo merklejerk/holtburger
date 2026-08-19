@@ -2,7 +2,10 @@ import type { AABB3, Mat4 } from "../math/types";
 
 /** Conservative screen-space classification for one transformed object envelope. */
 type ObjectFootprintVisibility =
-	"visible" | "near-plane-or-ambiguous" | "below-threshold" | "outside-view";
+	| "visible"
+	| "near-plane-or-ambiguous"
+	| "below-threshold"
+	| "outside-view";
 
 /** Complete physical-pixel projection input for one object-local envelope. */
 interface ObjectFootprintProjectionInput {

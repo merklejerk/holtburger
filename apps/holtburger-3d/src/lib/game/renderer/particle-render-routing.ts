@@ -1,121 +1,92 @@
-import type { ParticleInstanceRecord } from "./particle-instance-stream";
 import type {
 	ParticleRenderOwner,
-	ParticleSourceCohort,
+	ParticleSourceRange,
 } from "../systems/particle-system";
 import type { DatAssetId } from "../game-types";
 
-/** Final instanced particle batch after portal-domain ownership has been erased. */
-export interface ParticleDrawBatch {
+/** Final instanced particle draw after portal-domain ownership has been erased. */
+export interface ParticleDrawRange {
 	/** Particle mesh shared by every instance in this draw. */
 	readonly hwGfxObjId: DatAssetId;
 	/** Vertex-stage motion law shared by every instance in this draw. */
 	readonly motionType: number;
-	/** Spawn records uploaded by one instanced draw. */
-	readonly particles: readonly ParticleInstanceRecord[];
-}
-
-/** Mutable scratch form of one final draw batch. */
-interface MutableParticleDrawBatch extends ParticleDrawBatch {
-	readonly particles: ParticleInstanceRecord[];
+	/** First record slot this draw reads. */
+	readonly baseSlot: number;
+	/** Instances drawn from `baseSlot`. */
+	readonly count: number;
 }
 
 /**
- * Routes owner-local particle sources into render domains, then recoalesces their GPU batches.
+ * Routes owner-local particle sources into render domains.
  *
- * Scratch persists across frames. Ownership is intentionally absent from {@link ParticleDrawBatch}:
- * it exists only to select a domain, and retaining it afterward would manufacture one draw per
- * owner instead of one draw per compatible mesh and motion law in the final contribution.
+ * Ownership is intentionally absent from {@link ParticleDrawRange}: it exists only to select a
+ * domain, and retaining it afterward would leak scope policy into the draw contract.
+ *
+ * Deliberately does *not* recoalesce by mesh and motion law, unlike the record-array form this
+ * replaced. A range names a contiguous run of record slots owned by one emitter, and two emitters'
+ * runs are not adjacent, so there is nothing to merge — a merged draw would have to cover the
+ * slots between them. Reducing the draw count is a packing question for the slot allocator rather
+ * than a routing one.
  */
 export class ParticleRenderBatcher {
 	/** Reused output arrays grouped by the final render domain. */
-	readonly #domainBatches = new Map<string, ParticleDrawBatch[]>();
-	/** Reused route batches keyed by domain, mesh, and motion law. */
-	readonly #domainScratch = new Map<string, MutableParticleDrawBatch>();
+	readonly #domainRanges = new Map<string, ParticleDrawRange[]>();
 	/** Reused output for several render nodes sharing one executor contribution. */
-	readonly #mergedOutput: ParticleDrawBatch[] = [];
-	/** Reused contribution batches keyed only by the final GPU compatibility facts. */
-	readonly #mergeScratch = new Map<string, MutableParticleDrawBatch>();
+	readonly #mergedOutput: ParticleDrawRange[] = [];
 	/** Revision owning the domain-keyed scratch, or null before the first route. */
 	#routingRevision: number | string | null = null;
 
 	/** Release all frame references and revision-owned scratch on particle residency teardown. */
 	clear(): void {
-		this.#domainBatches.clear();
-		this.#domainScratch.clear();
+		this.#domainRanges.clear();
 		this.#mergedOutput.length = 0;
-		this.#mergeScratch.clear();
 		this.#routingRevision = null;
 	}
 
 	/** Assign every source once, omitting owners unavailable to this view's render graph. */
 	route(
 		routingRevision: number | string,
-		sources: readonly ParticleSourceCohort[],
+		sources: readonly ParticleSourceRange[],
 		resolveDomain: (owner: ParticleRenderOwner) => string | null,
-	): ReadonlyMap<string, readonly ParticleDrawBatch[]> {
+	): ReadonlyMap<string, readonly ParticleDrawRange[]> {
 		if (this.#routingRevision !== routingRevision) {
 			this.#routingRevision = routingRevision;
-			this.#domainBatches.clear();
-			this.#domainScratch.clear();
-			this.#mergedOutput.length = 0;
-			this.#mergeScratch.clear();
+			this.#domainRanges.clear();
 		}
-		for (const batch of this.#domainScratch.values())
-			batch.particles.length = 0;
-		for (const batches of this.#domainBatches.values()) batches.length = 0;
+		for (const ranges of this.#domainRanges.values()) ranges.length = 0;
 
 		for (const source of sources) {
 			const domainId = resolveDomain(source.renderOwner);
 			if (domainId === null) continue;
-			const batchKey = `${domainId}\0${source.hwGfxObjId}\0${source.motionType}`;
-			let batch = this.#domainScratch.get(batchKey);
-			if (!batch) {
-				batch = {
-					hwGfxObjId: source.hwGfxObjId,
-					motionType: source.motionType,
-					particles: [],
-				};
-				this.#domainScratch.set(batchKey, batch);
+			let ranges = this.#domainRanges.get(domainId);
+			if (!ranges) {
+				ranges = [];
+				this.#domainRanges.set(domainId, ranges);
 			}
-			if (batch.particles.length === 0) {
-				const batches = this.#domainBatches.get(domainId) ?? [];
-				batches.push(batch);
-				this.#domainBatches.set(domainId, batches);
-			}
-			for (const particle of source.particles) batch.particles.push(particle);
+			ranges.push({
+				baseSlot: source.baseSlot,
+				count: source.count,
+				hwGfxObjId: source.hwGfxObjId,
+				motionType: source.motionType,
+			});
 		}
 
-		return this.#domainBatches;
+		return this.#domainRanges;
 	}
 
 	/**
-	 * Merge nodes submitted under one executor contribution without restoring owner boundaries.
+	 * Concatenate the ranges of several render nodes sharing one executor contribution.
 	 *
 	 * The result is consumed immediately by the draw callback and remains valid only until the next
-	 * call, matching the frame-local source records it references.
+	 * call, matching the frame-local ranges it references.
 	 */
 	mergeContribution(
-		batchGroups: readonly (readonly ParticleDrawBatch[])[],
-	): readonly ParticleDrawBatch[] {
-		if (batchGroups.length === 1) return batchGroups[0] ?? [];
-		for (const batch of this.#mergeScratch.values()) batch.particles.length = 0;
+		rangeGroups: readonly (readonly ParticleDrawRange[])[],
+	): readonly ParticleDrawRange[] {
+		if (rangeGroups.length === 1) return rangeGroups[0] ?? [];
 		this.#mergedOutput.length = 0;
-		for (const group of batchGroups) {
-			for (const source of group) {
-				const batchKey = `${source.hwGfxObjId}\0${source.motionType}`;
-				let batch = this.#mergeScratch.get(batchKey);
-				if (!batch) {
-					batch = {
-						hwGfxObjId: source.hwGfxObjId,
-						motionType: source.motionType,
-						particles: [],
-					};
-					this.#mergeScratch.set(batchKey, batch);
-				}
-				if (batch.particles.length === 0) this.#mergedOutput.push(batch);
-				for (const particle of source.particles) batch.particles.push(particle);
-			}
+		for (const group of rangeGroups) {
+			for (const range of group) this.#mergedOutput.push(range);
 		}
 		return this.#mergedOutput;
 	}

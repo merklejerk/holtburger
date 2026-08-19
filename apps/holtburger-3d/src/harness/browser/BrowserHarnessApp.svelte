@@ -14,6 +14,7 @@
 	import type { EnvCellId, LandblockId } from "../../lib/game/game-types";
 	import {
 		createLandblockWorldOrigin,
+		landblockAtWorldPoint,
 		OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	} from "../../lib/game/landblocks";
 	import {
@@ -22,6 +23,7 @@
 	} from "../../lib/game/math/camera-orientation";
 	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
 	import type { Camera } from "../../lib/game/runtime/types";
+	import type { SceneInterestRadii } from "../../lib/game/runtime/types";
 	import { Vec3 } from "../../lib/game/math/types";
 	import {
 		WebGL2Device,
@@ -221,6 +223,16 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => void;
+		/**
+		 * Fly the camera in a straight line to the target landblock's centre over the given
+		 * duration, re-anchoring scene interest on every landblock crossing — the harness
+		 * mirror of the Explorer's interest-follows-camera mode. Resolves with the crossing
+		 * log and the flight window's frame timing.
+		 */
+		readonly runFollowFlight: (
+			targetLandblockId: string,
+			durationMs: number,
+		) => Promise<BrowserHarnessFollowFlightReport>;
 		/** Move only the render-world anchor; current scene interest remains installed. */
 		readonly setCameraLandblock: (
 			landblockId: string,
@@ -398,6 +410,35 @@
 		readonly viewport: BrowserHarnessViewportEvidence;
 	}
 
+	/** One scripted follow-mode flight's evidence: crossings, publications, and timing. */
+	interface BrowserHarnessFollowFlightReport {
+		/** Interest re-anchors in flight order, stamped with elapsed flight time. */
+		readonly crossings: readonly {
+			readonly elapsedMs: number;
+			readonly landblockId: LandblockId;
+		}[];
+		readonly durationMs: number;
+		/** Outdoor static layer publications that landed during the flight window. */
+		readonly staticLayerPublicationCount: number;
+		/** Frame timing accumulated across the flight; reset when the flight starts. */
+		readonly timing: BrowserHarnessTiming;
+	}
+
+	/** In-progress scripted flight, advanced by the frame loop until its duration elapses. */
+	interface FollowFlightState {
+		readonly crossings: { elapsedMs: number; landblockId: LandblockId }[];
+		readonly durationMs: number;
+		readonly from: Vec3;
+		readonly pitchDegrees: number;
+		readonly radii: SceneInterestRadii;
+		readonly reject: (cause: Error) => void;
+		readonly resolve: (report: BrowserHarnessFollowFlightReport) => void;
+		readonly startPublicationCount: number;
+		readonly startedAt: number;
+		readonly to: Vec3;
+		readonly yawDegrees: number;
+	}
+
 	interface BrowserHarnessCameraEvidence {
 		/** Authoritative indoor residency, or null for an outdoor camera. */
 		readonly envCellId: EnvCellId | null;
@@ -476,6 +517,10 @@
 	let renderer: WebGL2Renderer | undefined;
 	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
 	let cameraEvidence: BrowserHarnessCameraEvidence | null = null;
+	/** Anchor and radii of the most recent interest request, reused by follow flights. */
+	let lastInterestAnchor: LandblockId | null = null;
+	let lastInterestRadii: SceneInterestRadii | null = null;
+	let followFlight: FollowFlightState | null = null;
 	let frameSettings: FrameSettings = {
 		...DEFAULT_FRAME_SETTINGS,
 		envCellRenderMode: "flat",
@@ -558,18 +603,21 @@
 		}
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const usesGeneratedFixture = fixture === "instanced";
+		const requestedRadii: SceneInterestRadii = {
+			buildingRadius: usesGeneratedFixture ? null : buildingRadius,
+			envCellRadius,
+			explicitObjectRadius,
+			generatedObjectRadius: usesGeneratedFixture
+				? buildingRadius
+				: generatedObjectRadius,
+			terrainRadius,
+		};
 		runtime.updateSceneInterest({
 			anchorLandblockId: landblockId,
-			radii: {
-				buildingRadius: usesGeneratedFixture ? null : buildingRadius,
-				envCellRadius,
-				explicitObjectRadius,
-				generatedObjectRadius: usesGeneratedFixture
-					? buildingRadius
-					: generatedObjectRadius,
-				terrainRadius,
-			},
+			radii: requestedRadii,
 		});
+		lastInterestAnchor = landblockId;
+		lastInterestRadii = requestedRadii;
 		setCameraLandblock(landblockId, cameraYawDegrees, cameraPitchDegrees);
 	}
 
@@ -634,6 +682,115 @@
 			position,
 			yawDegrees: cameraYawDegrees,
 		};
+	}
+
+	/** Begin a scripted follow-mode flight; see the BrowserHarnessApi entry for semantics. */
+	async function runFollowFlight(
+		rawTargetLandblockId: string,
+		durationMs: number,
+	): Promise<BrowserHarnessFollowFlightReport> {
+		const activeRuntime = runtime;
+		if (!activeRuntime)
+			throw new Error("Browser harness runtime is not ready.");
+		if (!Number.isFinite(durationMs) || durationMs <= 0) {
+			throw new Error(
+				"Browser harness follow flight duration must be a positive number of milliseconds.",
+			);
+		}
+		if (followFlight !== null) {
+			throw new Error("Browser harness follow flight is already running.");
+		}
+		const radii = lastInterestRadii;
+		if (radii === null) {
+			throw new Error(
+				"Browser harness follow flight requires a prior scene-interest request.",
+			);
+		}
+		const evidence = cameraEvidence;
+		if (evidence === null || evidence.envCellId !== null) {
+			throw new Error(
+				"Browser harness follow flight requires a current outdoor camera.",
+			);
+		}
+		const targetLandblockId = parseOutdoorLandblockId(rawTargetLandblockId);
+		const origin = createLandblockWorldOrigin(targetLandblockId);
+		// Fly level at the current camera height to the target landblock's centre.
+		const to = new Vec3(
+			origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+			evidence.position[1],
+			origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+		);
+		const from = new Vec3(...evidence.position);
+		const startPublicationCount =
+			activeRuntime.getStaticObjectRuntimeDiagnostics()
+				.staticLayerPublicationCount;
+		resetTiming();
+		return new Promise<BrowserHarnessFollowFlightReport>((resolve, reject) => {
+			followFlight = {
+				crossings: [],
+				durationMs,
+				from,
+				pitchDegrees: evidence.pitchDegrees,
+				radii,
+				reject,
+				resolve,
+				startPublicationCount,
+				startedAt: performance.now(),
+				to,
+				yawDegrees: evidence.yawDegrees,
+			};
+		});
+	}
+
+	/**
+	 * Advance the scripted flight one frame: move the camera along the line and, on a landblock
+	 * crossing, re-issue the retained interest radii centred there — the same policy the
+	 * Explorer's interest-follows-camera toggle applies to free flight.
+	 */
+	function advanceFollowFlight(now: number): void {
+		const flight = followFlight;
+		if (flight === null || !runtime) return;
+		const fraction = Math.min(1, (now - flight.startedAt) / flight.durationMs);
+		const position = new Vec3(
+			flight.from.x + (flight.to.x - flight.from.x) * fraction,
+			flight.from.y + (flight.to.y - flight.from.y) * fraction,
+			flight.from.z + (flight.to.z - flight.from.z) * fraction,
+		);
+		const landblockId = landblockAtWorldPoint(position);
+		if (landblockId === null) {
+			followFlight = null;
+			flight.reject(
+				new Error("Browser harness follow flight left canonical world bounds."),
+			);
+			return;
+		}
+		if (landblockId !== lastInterestAnchor) {
+			lastInterestAnchor = landblockId;
+			runtime.updateSceneInterest({
+				anchorLandblockId: landblockId,
+				radii: flight.radii,
+			});
+			flight.crossings.push({
+				elapsedMs: now - flight.startedAt,
+				landblockId,
+			});
+		}
+		setOutdoorCamera(
+			landblockId,
+			[position.x, position.y, position.z],
+			flight.yawDegrees,
+			flight.pitchDegrees,
+		);
+		if (fraction < 1) return;
+		followFlight = null;
+		flight.resolve({
+			crossings: flight.crossings,
+			durationMs: flight.durationMs,
+			staticLayerPublicationCount:
+				runtime.getStaticObjectRuntimeDiagnostics()
+					.staticLayerPublicationCount - flight.startPublicationCount,
+			timing: timingSnapshot(),
+		});
 	}
 
 	function focusExplorerOutdoor(
@@ -1091,6 +1248,8 @@
 	function clearSceneInterest(): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.clearSceneInterest();
+		lastInterestAnchor = null;
+		lastInterestRadii = null;
 	}
 
 	function resetTiming(): void {
@@ -1393,6 +1552,7 @@
 					probePortalExecution,
 					relocateExplorerEntity,
 					requestSceneInterest,
+					runFollowFlight,
 					setCameraLandblock,
 					setEnvCellCamera,
 					setEnvCellRenderMode,
@@ -1477,6 +1637,7 @@
 						};
 					}
 					lastFrameAt = now;
+					advanceFollowFlight(now);
 					const tickStartedAt = performance.now();
 					runtime.tick();
 					const renderStartedAt = performance.now();

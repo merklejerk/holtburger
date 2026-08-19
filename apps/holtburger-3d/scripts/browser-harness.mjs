@@ -14,6 +14,7 @@ const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 const ENTITY_SHOWCASE_SEPARATION = 1.2;
 const DEFAULT_SETTLE_MS = 10_000;
 const DEFAULT_RELOCATE_HOP_MS = 1_500;
+const DEFAULT_FOLLOW_FLIGHT_MS = 20_000;
 const DEFAULT_VIEWPORT_WIDTH = 1_280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
 const DEFAULT_DEVICE_SCALE_FACTOR = 1;
@@ -101,6 +102,7 @@ try {
 						landblockId: options.landblockId,
 						lifecycleState: result.lifecycleState,
 						entityLifecycle: result.entityLifecycle,
+						followFlight: result.followFlight,
 						relocationSequence: result.relocationSequence,
 						relocationState: result.relocationState,
 						metrics: result.state.metrics,
@@ -197,6 +199,8 @@ function parseArgs(args) {
 		relocateLandblockId: null,
 		relocateSequence: [],
 		relocateHopMs: DEFAULT_RELOCATE_HOP_MS,
+		followFlightLandblockId: null,
+		followFlightMs: DEFAULT_FOLLOW_FLIGHT_MS,
 		envCellCameraId: null,
 		envCellCameraPosition: null,
 		minimumPortalFootprintPixelArea: null,
@@ -676,6 +680,18 @@ function parseArgs(args) {
 					throw new Error("--relocate-sequence needs at least one landblock.");
 				}
 				break;
+			case "--follow-flight":
+				parsed.followFlightLandblockId = requireValue(args, ++index, arg);
+				break;
+			case "--follow-flight-ms":
+				parsed.followFlightMs = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isFinite(parsed.followFlightMs) ||
+					parsed.followFlightMs <= 0
+				) {
+					throw new Error("--follow-flight-ms must be a positive number.");
+				}
+				break;
 			case "--relocate-hop-ms":
 				parsed.relocateHopMs = Number(requireValue(args, ++index, arg));
 				if (
@@ -723,6 +739,20 @@ function parseArgs(args) {
 		parsed.relocateSequence.length === 0
 	) {
 		throw new Error("--relocate-hop-ms requires --relocate-sequence.");
+	}
+	if (
+		parsed.followFlightMs !== DEFAULT_FOLLOW_FLIGHT_MS &&
+		parsed.followFlightLandblockId === null
+	) {
+		throw new Error("--follow-flight-ms requires --follow-flight.");
+	}
+	if (
+		parsed.followFlightLandblockId !== null &&
+		(parsed.relocateLandblockId || parsed.relocateSequence.length > 0)
+	) {
+		throw new Error(
+			"--follow-flight and relocation options cannot be combined; the flight re-anchors by itself.",
+		);
 	}
 	if (parsed.relocateSequence.length > 0 && parsed.relocateLandblockId) {
 		throw new Error(
@@ -1005,6 +1035,10 @@ Options:
                          churn can be measured without the interactive client. Reports per-hop
                          state under relocationSequence.
   --relocate-hop-ms <ms> Settle time between sequence hops. Default: ${DEFAULT_RELOCATE_HOP_MS}
+  --follow-flight <hex>  Fly the camera in a straight line to this landblock's centre,
+                         re-anchoring scene interest on every crossing — the harness mirror of
+                         Explorer follow mode. Reports crossings and flight-window timing.
+  --follow-flight-ms <ms> Flight duration. Default: ${DEFAULT_FOLLOW_FLIGHT_MS}
   --cpu-profile <path>  Sample the page's V8 CPU profile across the measurement window and
                          persist it as .cpuprofile JSON for DevTools or speedscope.
   --chrome-path <path>  Chrome executable. Default: ${DEFAULT_CHROME_PATH}
@@ -1220,6 +1254,11 @@ function briefHarnessReport(result) {
 		camera: result.state.camera,
 		viewport: result.state.viewport,
 		ready: result.state.ready,
+		// Per-hop streaming evidence must survive brief mode: relocation runs exist to
+		// produce it, and the full report is too large to diff by hand.
+		followFlight: result.followFlight,
+		relocationSequence: result.relocationSequence,
+		relocationState: result.relocationState,
 		sourceBatches: summarizeSourceBatches(result.state.sourceBatches),
 		staticResourceCounts:
 			staticObjects === null
@@ -1228,6 +1267,7 @@ function briefHarnessReport(result) {
 						geometryResourceCount: staticObjects.geometryResourceCount,
 						staticObjectNodeCount: staticObjects.staticObjectNodeCount,
 						staticObjectOwnerCount: staticObjects.staticObjectOwnerCount,
+						outdoorLightScopeCount: staticObjects.outdoorLightScopeCount,
 						textureAtlasPageCount: staticObjects.textureAtlasPages.length,
 						textureResidentSourceCount:
 							staticObjects.texture.residentSourceCount,
@@ -2285,9 +2325,18 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				// published different amounts are not comparable.
 				staticLayerPublicationCount:
 					state.staticObjects.staticLayerPublicationCount,
+				outdoorLightScopeCount: state.staticObjects.outdoorLightScopeCount,
 				texture: state.staticObjects.texture,
 				timing: state.timing,
 			});
+		}
+		let followFlight = null;
+		if (options.followFlightLandblockId) {
+			followFlight = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.runFollowFlight",
+				[options.followFlightLandblockId, options.followFlightMs],
+			);
 		}
 		let generatedDisabledState = null;
 		if (options.disableGeneratedBeforeCapture) {
@@ -2440,6 +2489,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			modeCycleStates,
 			lifecycleState,
 			portalExecution,
+			followFlight,
 			relocationSequence,
 			relocationState,
 			screenshot: screenshot.data,

@@ -26,6 +26,7 @@
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
+	import type { LandblockId } from "../lib/game/game-types";
 	import type { SceneResidency } from "../lib/game/scene";
 	import {
 		DEFAULT_FRAME_SETTINGS,
@@ -183,6 +184,8 @@
 	 * two ways to reach the same resolution.
 	 */
 	let clockFollowing = $state(false);
+	/** Follow mode: re-anchor scene interest to the camera's landblock on boundary crossings. */
+	let interestFollowsCamera = $state(false);
 	/** Mirrors the camera coordinator's default so the switch reflects reality on first paint. */
 	let audioFollowsCamera = $state(true);
 
@@ -203,6 +206,40 @@
 	function updateAudioFollowsCamera(enabled: boolean): void {
 		audioFollowsCamera = enabled;
 		cameraCoordinator?.setAudioFollowsCamera(enabled);
+	}
+
+	function updateInterestFollowsCamera(enabled: boolean): void {
+		interestFollowsCamera = enabled;
+	}
+
+	/**
+	 * Follow mode's whole policy: when the camera's landblock differs from the last requested
+	 * interest anchor, re-issue the same radii centered there. Interest only — the camera never
+	 * moves, and the coordinator's focus flow is deliberately bypassed so no automatic placement
+	 * fires. Inert until a manual request establishes radii to follow with.
+	 */
+	function followCameraSceneInterest(residency: SceneResidency): void {
+		const interest = sceneInterest;
+		if (
+			!gameRuntime ||
+			interest === null ||
+			interest.residency.landblockId === residency.landblockId
+		) {
+			return;
+		}
+		gameRuntime.updateSceneInterest({
+			anchorLandblockId: residency.landblockId,
+			radii: interest.radii,
+		});
+		void requestSimulationInterest(residency.landblockId).catch(
+			(error: unknown) => {
+				physicalCameraError = errorMessage(error);
+			},
+		);
+		sceneInterest = {
+			radii: interest.radii,
+			residency: { ...residency },
+		};
 	}
 	let clockStartedAtMs = 0;
 	let clockTimer: ReturnType<typeof setInterval> | undefined;
@@ -971,6 +1008,10 @@
 						);
 					}
 					cameraLocation = residencySync.location;
+					const followResidency = residencySync.location?.residency;
+					if (interestFollowsCamera && followResidency?.kind === "resolved") {
+						followCameraSceneInterest(followResidency.residency);
+					}
 					const updateAndDrawStartedAt = performance.now();
 					if (residencySync.renderable) {
 						gameRuntime.render(performance.now() / 1_000);
@@ -1061,6 +1102,8 @@
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			ambientOcclusion={frameSettings.ambientOcclusion}
 			{clockFollowing}
+			{interestFollowsCamera}
+			{updateInterestFollowsCamera}
 			{audioFollowsCamera}
 			{effectVolume}
 			{ambientVolume}

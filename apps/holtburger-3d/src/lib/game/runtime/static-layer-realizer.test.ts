@@ -182,6 +182,39 @@ describe("StaticLayerRealizer", () => {
 		expect(released).toBe(true);
 	});
 
+	it("releases a companion that settles after geometry already rejected", async () => {
+		const atlas = new FakeAtlas();
+		const geometry = deferred<string>();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			new FakePublisher(),
+			new FakeCurrentness(),
+		);
+		let released = false;
+		let resolveCompanion = () => undefined as void;
+		const pending = realizer.realize({
+			...input(),
+			prepareCompanion: () =>
+				new Promise((accept) => {
+					resolveCompanion = () =>
+						accept({
+							commit: () => undefined,
+							release: () => {
+								released = true;
+							},
+						});
+				}),
+		});
+		atlas.resolve();
+		geometry.reject(new Error("bake failed"));
+		await expect(pending).rejects.toThrow("failed to realize: bake failed");
+		expect(released).toBe(false);
+		resolveCompanion();
+		await Promise.resolve();
+		expect(released).toBe(true);
+	});
+
 	it("removes an exact published revision when atlas activation fails", async () => {
 		const atlas = new FakeAtlas();
 		atlas.failActivation = true;
@@ -315,8 +348,10 @@ function revision(value: number): SceneInterestRevision {
 
 function deferred<T>() {
 	let accept!: (value: T) => void;
-	const promise = new Promise<T>((resolve) => {
+	let fail!: (cause: Error) => void;
+	const promise = new Promise<T>((resolve, reject) => {
 		accept = resolve;
+		fail = reject;
 	});
 	const state = {
 		started: false,
@@ -326,6 +361,7 @@ function deferred<T>() {
 		},
 		promise,
 		resolve: accept,
+		reject: fail,
 	};
 	return state;
 }

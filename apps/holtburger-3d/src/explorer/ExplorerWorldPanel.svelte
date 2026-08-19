@@ -56,6 +56,9 @@
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
+		/** Follow mode: scene interest re-anchors to the camera's landblock on crossings. */
+		readonly interestFollowsCamera: boolean;
+		readonly updateInterestFollowsCamera: (enabled: boolean) => void;
 		/** Whether the audio listener rides the free camera; see the camera coordinator. */
 		readonly audioFollowsCamera: boolean;
 		/** Effect-category volume in [0, 1]; retail's other categories are not produced yet. */
@@ -106,6 +109,8 @@
 		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
+		interestFollowsCamera,
+		updateInterestFollowsCamera,
 		audioFollowsCamera,
 		updateAudioFollowsCamera,
 		effectVolume,
@@ -206,6 +211,12 @@
 		updateAudioFollowsCamera((event.currentTarget as HTMLInputElement).checked);
 	}
 
+	function handleInterestFollowsCameraChange(event: Event): void {
+		updateInterestFollowsCamera(
+			(event.currentTarget as HTMLInputElement).checked,
+		);
+	}
+
 	function handleCameraModeChange(event: Event): void {
 		updateCameraMode(
 			(event.currentTarget as HTMLSelectElement).value as ExplorerCameraMode,
@@ -237,6 +248,15 @@
 				{parsedInterest?.label ??
 					"Enter four or eight hexadecimal digits, or N/S E/W coordinates."}
 			</p>
+			<label class="explorer-toggle">
+				<input
+					checked={interestFollowsCamera}
+					type="checkbox"
+					onchange={handleInterestFollowsCameraChange}
+				/>
+				<span>Interest follows camera</span>
+				<strong>{interestFollowsCamera ? "On" : "Off"}</strong>
+			</label>
 			<div
 				class="explorer-residency-controls"
 				aria-label="Scene interest level of detail"

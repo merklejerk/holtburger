@@ -112,7 +112,6 @@ import type { SkyBehaviorTarget } from "../environment/sky-behavior-targets";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
-import { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 import {
 	TextureManager,
 	type TextureAtlasPageDiagnostics,
@@ -245,20 +244,14 @@ const TERRAIN_ROOT_BOUNDS: AABB3 = new AABB3(
 
 const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics =
 	{
-		bakedFallbackRangeCount: 0,
+		bakedRangeCount: 0,
 		bakedGeometryBytes: 0,
 		geometryWorkerDurationMs: 0,
 		instancedGeometryBytes: 0,
-		staticFragmentBytes: 0,
-		staticFragmentCohortCount: 0,
-		staticFragmentCount: 0,
-		staticFragmentDrawUnitCount: 0,
-		staticFragmentInstanceCount: 0,
 		sourceMaterialSlotCount: 0,
 		sourcePartCount: 0,
 		sourceRangeCount: 0,
 		sourceResidentCount: 0,
-		strategy: "empty",
 		transparentTemplateBytes: 0,
 		transparentTemplateCohortCount: 0,
 		transparentTemplateInstanceCount: 0,
@@ -436,7 +429,6 @@ export class GameRuntime {
 		EnvCellRealizationArtifact,
 		OwnerId
 	>;
-	readonly #instances: StaticInstanceStreamManager<ResourceOwnerId>;
 	/** Dynamic roots, articulated part nodes, and presentation preparation. */
 	readonly #dynamics: DynamicEntitySystem<
 		DynamicOwnerId,
@@ -759,11 +751,9 @@ export class GameRuntime {
 			dependencies.texturePreparer,
 			this.#residentAtlas,
 		);
-		this.#instances = new StaticInstanceStreamManager();
 		this.#staticObjects = new StaticObjectSystem<OwnerId, ResourceOwnerId>(
 			this.#scene,
 			this.#geometry,
-			this.#instances,
 			staticRevisionToResourceOwnerId,
 		);
 		const staticLayerCurrentness = {
@@ -1078,7 +1068,6 @@ export class GameRuntime {
 			dynamics: this.#dynamics,
 			envCells: this.#envCells,
 			geometry: this.#geometry,
-			instances: this.#instances,
 			staticDetails: {
 				getBinding: (role) => this.#activeRegionStaticDetails.get(role) ?? null,
 			},
@@ -1973,7 +1962,6 @@ export class GameRuntime {
 		this.#activeRegionStaticDetails.clear();
 		this.#activeRegionStaticDetailOwner = null;
 		this.#geometry.destroy();
-		this.#instances.destroy();
 	}
 
 	#applySceneInterest(interest: SceneInterestMap): SceneInterestReceipt {

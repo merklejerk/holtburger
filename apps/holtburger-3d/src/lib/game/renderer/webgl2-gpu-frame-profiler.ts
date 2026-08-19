@@ -27,7 +27,6 @@ export type WebGL2CpuFramePhase =
 	| "sceneContributionResolution"
 	| "objectPreparation"
 	| "blendedOrdering"
-	| "generatedInstanceCulling"
 	| "instanceRunPreparation"
 	| "instanceUpload"
 	| "portalPlanning"
@@ -67,7 +66,6 @@ const CPU_TIMING_KEYS = [
 	"blendedOrderingMs",
 	"blendedSubmissionMs",
 	"finalizationMs",
-	"generatedInstanceCullingMs",
 	"instanceRunPreparationMs",
 	"instanceUploadMs",
 	"objectPreparationMs",
@@ -388,7 +386,6 @@ export class WebGL2FrameProfileCapture {
 		blendedSubmissionMs: 0,
 		particleSubmissionMs: 0,
 		finalizationMs: 0,
-		generatedInstanceCullingMs: 0,
 		instanceRunPreparationMs: 0,
 		instanceUploadMs: 0,
 		objectPreparationMs: 0,
@@ -469,8 +466,7 @@ export class WebGL2FrameProfileCapture {
 			this.#cpu.opaqueSubmissionMs +
 			this.#cpu.blendedSubmissionMs +
 			this.#cpu.particleSubmissionMs +
-			this.#cpu.finalizationMs +
-			this.#cpu.generatedInstanceCullingMs;
+			this.#cpu.finalizationMs;
 		this.#owner.finishFrame({
 			...this.#cpu,
 			contribution: { ...this.#contribution },
@@ -540,7 +536,6 @@ function summarizeCpuFrames(
 		blendedSubmissionMs: 0,
 		particleSubmissionMs: 0,
 		finalizationMs: 0,
-		generatedInstanceCullingMs: 0,
 		instanceRunPreparationMs: 0,
 		instanceUploadMs: 0,
 		objectPreparationMs: 0,
@@ -567,7 +562,6 @@ function summarizeCpuFrames(
 		blendedOrderingMs: totals.blendedOrderingMs / sampleCount,
 		blendedSubmissionMs: totals.blendedSubmissionMs / sampleCount,
 		finalizationMs: totals.finalizationMs / sampleCount,
-		generatedInstanceCullingMs: totals.generatedInstanceCullingMs / sampleCount,
 		instanceRunPreparationMs: totals.instanceRunPreparationMs / sampleCount,
 		instanceUploadMs: totals.instanceUploadMs / sampleCount,
 		objectPreparationMs: totals.objectPreparationMs / sampleCount,

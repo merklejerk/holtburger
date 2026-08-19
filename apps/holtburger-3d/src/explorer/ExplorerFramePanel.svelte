@@ -199,11 +199,11 @@
 							</div>
 						{/if}
 						<div class="ac-param-row">
-							<span class="ac-param-key">Generated cull / runs / upload</span>
+							<span class="ac-param-key">Instance runs / upload</span>
 							<code
-								>{profile.cpu.mean.generatedInstanceCullingMs.toFixed(2)} / {profile.cpu.mean.instanceRunPreparationMs.toFixed(
+								>{profile.cpu.mean.instanceRunPreparationMs.toFixed(2)} / {profile.cpu.mean.instanceUploadMs.toFixed(
 									2,
-								)} / {profile.cpu.mean.instanceUploadMs.toFixed(2)} ms</code
+								)} ms</code
 							>
 						</div>
 						<div class="ac-param-row">
@@ -286,12 +286,6 @@
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Generated instances / draws</span>
-					<code
-						>{metrics.submittedCompactedGeneratedInstanceCount} / {metrics.submittedCompactedGeneratedDrawCount}</code
-					>
-				</div>
-				<div class="ac-param-row">
 					<span class="ac-param-key">Visible dynamics / parts</span>
 					<code
 						>{metrics.visibleDynamicEntityCount} / {metrics.visibleDynamicPartCount}</code
@@ -312,21 +306,6 @@
 		<details class="explorer-frame-details">
 			<summary>Object pipeline</summary>
 			<div class="ac-param-panel">
-				<div class="ac-param-row">
-					<span class="ac-param-key">Generated fragments / selected</span>
-					<code
-						>{metrics.selectedGeneratedInstanceFragmentCount} / {metrics.selectedGeneratedInstanceCount}</code
-					>
-				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key"
-						>Generated tested / retained / rejected</span
-					>
-					<code
-						>{metrics.testedGeneratedInstanceCount} / {metrics.retainedGeneratedInstanceCount}
-						/ {metrics.rejectedGeneratedInstanceCount}</code
-					>
-				</div>
 				<div class="ac-param-row">
 					<span class="ac-param-key">Transparent total candidates / runs</span>
 					<code

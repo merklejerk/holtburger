@@ -44,7 +44,6 @@ import type {
 import {
 	OBJECT_INSTANCE_RECORD_BYTES,
 	type ObjectInstanceData,
-	type StaticInstanceStreamData,
 } from "../systems/static-resources";
 import {
 	assertSharedTerrainRegion,
@@ -62,7 +61,6 @@ import {
 	type WebGL2TerrainProgram,
 } from "./webgl2-terrain-program";
 import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
-import { GeneratedInstanceSelector } from "./generated-instance-selection";
 import {
 	createWebGL2ObjectProgram,
 	OBJECT_TEXTURE_UNITS,
@@ -293,11 +291,6 @@ interface ObjectFrameInput {
 		| null
 		| {
 				readonly cohortKey: string;
-				readonly data: StaticInstanceStreamData;
-				readonly kind: "static-fragment";
-		  }
-		| {
-				readonly cohortKey: string;
 				readonly instance: import("../systems/static-resources").ObjectInstanceData;
 				readonly kind: "frame-template";
 		  }
@@ -429,13 +422,6 @@ interface MutableFrameSelectionMetrics {
 	submittedStaticObjectTriangleCount: number;
 	submittedBakedStaticObjectDrawCount: number;
 	submittedBakedStaticObjectTriangleCount: number;
-	selectedGeneratedInstanceFragmentCount: number;
-	selectedGeneratedInstanceCount: number;
-	testedGeneratedInstanceCount: number;
-	retainedGeneratedInstanceCount: number;
-	rejectedGeneratedInstanceCount: number;
-	submittedCompactedGeneratedDrawCount: number;
-	submittedCompactedGeneratedInstanceCount: number;
 	submittedInstancedSourceTriangleCount: number;
 	transparentObjectCandidateCount: number;
 	farTransparentObjectCandidateCount: number;
@@ -506,7 +492,6 @@ export class WebGL2Renderer implements Renderer {
 	readonly #dynamicLightScratch: ReturnType<typeof createDynamicLightScratch>;
 	readonly #terrainLightMask: WebGL2TerrainLightMaskTexture;
 	/** Reuses one generated-stream selection across all material partitions in a view. */
-	readonly #generatedInstanceSelector = new GeneratedInstanceSelector();
 	/** Exact state mirror scoped to independently invalidated object phases. */
 	readonly #objectState: WebGL2ObjectStateApplicator;
 	/** Portal owner created lazily when the first portal frame needs GPU resources. */
@@ -599,13 +584,6 @@ export class WebGL2Renderer implements Renderer {
 		submittedStaticObjectTriangleCount: 0,
 		submittedBakedStaticObjectDrawCount: 0,
 		submittedBakedStaticObjectTriangleCount: 0,
-		selectedGeneratedInstanceFragmentCount: 0,
-		selectedGeneratedInstanceCount: 0,
-		testedGeneratedInstanceCount: 0,
-		retainedGeneratedInstanceCount: 0,
-		rejectedGeneratedInstanceCount: 0,
-		submittedCompactedGeneratedDrawCount: 0,
-		submittedCompactedGeneratedInstanceCount: 0,
 		submittedInstancedSourceTriangleCount: 0,
 		transparentObjectCandidateCount: 0,
 		farTransparentObjectCandidateCount: 0,
@@ -1374,30 +1352,13 @@ export class WebGL2Renderer implements Renderer {
 				}
 				for (const resolved of node.drawUnits) {
 					const { drawUnit } = resolved;
-					if (resolved.instances !== null && source !== "generated") {
-						throw new Error(
-							`${contribution.cullingGroup} static objects unexpectedly resolved instance fragments.`,
-						);
-					}
-					if (
-						drawUnit.kind === "instanced" &&
-						drawUnit.ordering === "transparent"
-					) {
-						throw new Error(
-							"Transparent static instance draw requires a frame-streamed template.",
-						);
-					}
-					const instances = resolveStaticFragmentInstanceInput(
-						drawUnit,
-						resolved.instances,
-					);
 					objects.push({
 						cullFaceOverride: null,
-						drawKind: drawUnit.kind,
+						drawKind: "baked",
 						geometry: resolved.geometry,
 						indexCount: drawUnit.indexCount,
 						indexStart: drawUnit.indexStart,
-						instances,
+						instances: null,
 						landblockId: node.placement.landblockId,
 						localToLandblock: node.placement.localToLandblock,
 						material: drawUnit.material,
@@ -1764,13 +1725,6 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedStaticObjectTriangleCount = 0;
 		metrics.submittedBakedStaticObjectDrawCount = 0;
 		metrics.submittedBakedStaticObjectTriangleCount = 0;
-		metrics.selectedGeneratedInstanceFragmentCount = 0;
-		metrics.selectedGeneratedInstanceCount = 0;
-		metrics.testedGeneratedInstanceCount = 0;
-		metrics.retainedGeneratedInstanceCount = 0;
-		metrics.rejectedGeneratedInstanceCount = 0;
-		metrics.submittedCompactedGeneratedDrawCount = 0;
-		metrics.submittedCompactedGeneratedInstanceCount = 0;
 		metrics.submittedInstancedSourceTriangleCount = 0;
 		metrics.transparentObjectCandidateCount = 0;
 		metrics.farTransparentObjectCandidateCount = 0;
@@ -2628,12 +2582,9 @@ export class WebGL2Renderer implements Renderer {
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		if (candidates.length === 0) return;
-		const objects = this.#prepareFrameInstanceRuns(
-			[candidates],
-			profile,
-			["grouped"],
-			view,
-		).objects;
+		const objects = this.#prepareFrameInstanceRuns([candidates], profile, [
+			"grouped",
+		]).objects;
 		const submissionStartedAt = profile?.beginCpuPhase();
 		const gl = this.#gl;
 		try {
@@ -2764,7 +2715,6 @@ export class WebGL2Renderer implements Renderer {
 			[ordered.far, ordered.near, ordered.additive],
 			profile,
 			["adjacent", "adjacent", "grouped"],
-			null,
 		);
 		const [farRunCount = 0, nearRunCount = 0] = prepared.runCounts;
 		this.#frameSelectionMetrics.transparentFrameRunCount +=
@@ -2779,7 +2729,6 @@ export class WebGL2Renderer implements Renderer {
 		phases: readonly (readonly PreparedObjectFrameInput[])[],
 		profile: WebGL2FrameProfileCapture | null,
 		groupings: readonly ("adjacent" | "grouped")[],
-		generatedCullView: PreparedView | null,
 	): {
 		readonly objects: readonly PreparedObjectFrameInput[];
 		readonly runCounts: readonly number[];
@@ -2787,49 +2736,6 @@ export class WebGL2Renderer implements Renderer {
 		const orderedInstances: ObjectInstanceData[] = [];
 		const objects: PreparedObjectFrameInput[] = [];
 		const runCounts: number[] = [];
-		if (generatedCullView) {
-			this.#generatedInstanceSelector.beginView(
-				generatedCullView.clipFromAnchor,
-				this.#frameWidth,
-				this.#frameHeight,
-				this.#minimumObjectFootprintPixelArea,
-			);
-		}
-		const cullingStartedAt = generatedCullView
-			? profile?.beginCpuPhase()
-			: undefined;
-		for (const phase of phases) {
-			for (const object of phase) {
-				if (object.instances?.kind !== "static-fragment") continue;
-				if (!generatedCullView || object.source !== "generated") {
-					throw new Error(
-						`${object.source} object unexpectedly entered generated-scenery compaction.`,
-					);
-				}
-				this.#frameSelectionMetrics.selectedGeneratedInstanceFragmentCount += 1;
-				const [offsetX, offsetY, offsetZ] =
-					object.compatibility.landblockOffset;
-				const selectedIndices = this.#generatedInstanceSelector.select(
-					object.instances.data,
-					offsetX,
-					offsetY,
-					offsetZ,
-				);
-				this.#frameSelectionMetrics.selectedGeneratedInstanceCount +=
-					selectedIndices.length;
-			}
-		}
-		if (generatedCullView) {
-			this.#frameSelectionMetrics.testedGeneratedInstanceCount +=
-				this.#generatedInstanceSelector.testedCount;
-			this.#frameSelectionMetrics.retainedGeneratedInstanceCount +=
-				this.#generatedInstanceSelector.retainedCount;
-			this.#frameSelectionMetrics.rejectedGeneratedInstanceCount +=
-				this.#generatedInstanceSelector.rejectedCount;
-		}
-		if (profile && cullingStartedAt !== undefined) {
-			profile.finishCpuPhase("generatedInstanceCulling", cullingStartedAt);
-		}
 		const preparationStartedAt = profile?.beginCpuPhase();
 		for (const [phaseIndex, phase] of phases.entries()) {
 			const grouping = groupings[phaseIndex];
@@ -2839,32 +2745,18 @@ export class WebGL2Renderer implements Renderer {
 				);
 			}
 			const isFrameInstance = (object: PreparedObjectFrameInput): boolean =>
-				object.instances?.kind === "frame-template" ||
-				object.instances?.kind === "static-fragment";
+				object.instances?.kind === "frame-template";
 			const isCompatible = (
 				left: PreparedObjectFrameInput,
 				right: PreparedObjectFrameInput,
-			): boolean => {
-				if (
-					!areStaticObjectDrawsCompatible(
-						left.compatibility,
-						right.compatibility,
-					)
-				) {
-					return false;
-				}
-				if (
-					left.instances?.kind === "static-fragment" &&
-					right.instances?.kind === "static-fragment"
-				) {
-					return true;
-				}
-				return (
-					left.instances?.kind === "frame-template" &&
-					right.instances?.kind === "frame-template" &&
-					frameTemplateBatchIdentityEquals(left, right)
-				);
-			};
+			): boolean =>
+				areStaticObjectDrawsCompatible(
+					left.compatibility,
+					right.compatibility,
+				) &&
+				left.instances?.kind === "frame-template" &&
+				right.instances?.kind === "frame-template" &&
+				frameTemplateBatchIdentityEquals(left, right);
 			const scheduled =
 				grouping === "grouped"
 					? formGroupedObjectInstanceRuns(
@@ -2891,31 +2783,12 @@ export class WebGL2Renderer implements Renderer {
 				const object = submission.values[0];
 				const firstInstance = orderedInstances.length;
 				for (const adjacent of submission.values) {
-					if (adjacent.instances?.kind === "frame-template") {
-						orderedInstances.push(adjacent.instances.instance);
-					} else if (adjacent.instances?.kind === "static-fragment") {
-						const [offsetX, offsetY, offsetZ] =
-							adjacent.compatibility.landblockOffset;
-						const selectedIndices = this.#generatedInstanceSelector.select(
-							adjacent.instances.data,
-							offsetX,
-							offsetY,
-							offsetZ,
-						);
-						for (const index of selectedIndices) {
-							const instance = adjacent.instances.data.instances[index];
-							if (!instance) {
-								throw new Error(
-									"Generated-instance selection referenced a missing instance.",
-								);
-							}
-							orderedInstances.push(instance);
-						}
-					} else {
+					if (adjacent.instances?.kind !== "frame-template") {
 						throw new Error(
 							"Object instance run contains prepared range state.",
 						);
 					}
+					orderedInstances.push(adjacent.instances.instance);
 				}
 				const instanceCount = orderedInstances.length - firstInstance;
 				if (instanceCount === 0) continue;
@@ -3026,10 +2899,7 @@ export class WebGL2Renderer implements Renderer {
 			if (!object.instances) {
 				throw new Error("Instanced draw has no resolved instance stream.");
 			}
-			if (
-				object.instances.kind === "frame-template" ||
-				object.instances.kind === "static-fragment"
-			) {
+			if (object.instances.kind === "frame-template") {
 				throw new Error("Unprepared object instance data reached submission.");
 			}
 			const range = this.#frameInstances.getRange(
@@ -3093,14 +2963,6 @@ export class WebGL2Renderer implements Renderer {
 		} else {
 			this.#frameSelectionMetrics.submittedInstancedSourceTriangleCount +=
 				sourceTriangleCount;
-			if (
-				object.source === "generated" &&
-				(object.ordering === "opaque" || object.ordering === "alpha-test")
-			) {
-				this.#frameSelectionMetrics.submittedCompactedGeneratedDrawCount += 1;
-				this.#frameSelectionMetrics.submittedCompactedGeneratedInstanceCount +=
-					submittedInstanceCount;
-			}
 		}
 		if (object.ordering === "transparent") {
 			this.#frameSelectionMetrics.submittedTransparentObjectDrawCount += 1;
@@ -3265,18 +3127,6 @@ function validateDrawRange(
 	}
 }
 
-/** Pair generated instance data with the semantic partition that owns exact run grouping. */
-function resolveStaticFragmentInstanceInput(
-	drawUnit: StaticObjectDrawUnit,
-	data: StaticInstanceStreamData | null,
-): ObjectFrameInput["instances"] {
-	if (data === null) return null;
-	if (drawUnit.kind !== "instanced") {
-		throw new Error("Baked static object unexpectedly resolved instance data.");
-	}
-	return { cohortKey: drawUnit.cohortKey, data, kind: "static-fragment" };
-}
-
 /** Check the semantic frame-template identity required in addition to prepared compatibility. */
 function frameTemplateBatchIdentityEquals(
 	left: PreparedObjectFrameInput,
@@ -3308,10 +3158,7 @@ function opaqueObjectInstanceBatchKey(
 	object: PreparedObjectFrameInput,
 ): string {
 	const instances = object.instances;
-	if (
-		instances?.kind !== "frame-template" &&
-		instances?.kind !== "static-fragment"
-	) {
+	if (instances?.kind !== "frame-template") {
 		throw new Error(
 			"Opaque instance grouping received a non-frame instance input.",
 		);

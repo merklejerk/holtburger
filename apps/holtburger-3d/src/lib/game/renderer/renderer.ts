@@ -219,20 +219,6 @@ export interface FrameSelectionMetrics {
 	readonly submittedBakedStaticObjectDrawCount: number;
 	/** Triangles submitted by baked static-object draws. */
 	readonly submittedBakedStaticObjectTriangleCount: number;
-	/** Visible generated-scenery fragments selected before post-culling compaction. */
-	readonly selectedGeneratedInstanceFragmentCount: number;
-	/** Generated-scenery instances selected before post-culling compaction. */
-	readonly selectedGeneratedInstanceCount: number;
-	/** Generated candidates projected once per immutable stream in each rendered view. */
-	readonly testedGeneratedInstanceCount: number;
-	/** Stream-unique, per-view projected candidates retained across material partitions. */
-	readonly retainedGeneratedInstanceCount: number;
-	/** Stream-unique, per-view candidates omitted as proven-small or outside the view. */
-	readonly rejectedGeneratedInstanceCount: number;
-	/** Compacted generated-scenery draw calls submitted this frame. */
-	readonly submittedCompactedGeneratedDrawCount: number;
-	/** Generated-scenery instances submitted through compacted frame ranges. */
-	readonly submittedCompactedGeneratedInstanceCount: number;
 	/** Source triangles referenced by instanced draws before instance multiplication. */
 	readonly submittedInstancedSourceTriangleCount: number;
 	/** Transparent baked ranges and instance templates classified for view submission. */
@@ -313,7 +299,6 @@ export interface RendererCpuFrameTimings {
 	/** CPU wall time spent finalizing renderer diagnostics. */
 	readonly finalizationMs: number;
 	/** CPU wall time spent projecting and selecting generated-instance envelopes. */
-	readonly generatedInstanceCullingMs: number;
 	/** CPU wall time spent encoding and uploading frame-local object instances. */
 	readonly instanceUploadMs: number;
 	/** CPU wall time spent forming compatible frame-instance submission runs. */

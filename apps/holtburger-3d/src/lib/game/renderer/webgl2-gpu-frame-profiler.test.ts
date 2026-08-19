@@ -143,7 +143,6 @@ describe("WebGL2FrameProfiler", () => {
 				contribution: contributionMetrics(frameNumber),
 				finalizationMs: 0,
 				frameNumber,
-				generatedInstanceCullingMs: 0,
 				instanceRunPreparationMs: 0,
 				instanceUploadMs: 0,
 				objectPreparationMs: frameNumber * 2,

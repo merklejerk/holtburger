@@ -21,15 +21,13 @@ import type { StaticObjectGeometryPreparationResult } from "./static-object-geom
 const INSTALL_NAMESPACE = "static-install:artifact-test" as const;
 const GEOMETRY_KEY =
 	"static-install-geometry:static-install:artifact-test/geometry" as const;
-const STREAM_KEY =
-	"static-instance-stream:static-install:artifact-test/instances" as const;
 const BASE_TEXTURE = createAssetTextureKey(
 	TexturePurpose.ObjectDirectColor,
 	"0x05000001",
 );
 
 describe("assembleStaticObjectArtifact", () => {
-	it.each(["baked", "instanced", "frame-streamed"] as const)(
+	it.each(["baked", "frame-streamed"] as const)(
 		"rejects a missing %s texture requirement",
 		(strategy) => {
 			expect(() =>
@@ -43,8 +41,8 @@ describe("assembleStaticObjectArtifact", () => {
 		},
 	);
 
-	it("accepts one logical requirement shared by static fragments and frame-streamed draws", () => {
-		const geometry = geometryResult("instanced");
+	it("accepts one logical requirement shared by baked and frame-streamed draws", () => {
+		const geometry = geometryResult("baked");
 		const frameStreamedInstances =
 			geometryResult("frame-streamed").objects[0]!.frameStreamedInstances;
 
@@ -65,12 +63,11 @@ describe("assembleStaticObjectArtifact", () => {
 			],
 		});
 
-		expect(artifact?.geometryDiagnostics.strategy).toBe("instanced");
 		expect(artifact?.textureRequirements).toHaveLength(1);
 	});
 
-	it("publishes every worker cluster as an independently bounded scene object", () => {
-		const geometry = geometryResult("instanced");
+	it("publishes every worker render object as an independently bounded scene object", () => {
+		const geometry = geometryResult("baked");
 		const first = geometry.objects[0]!;
 		const secondBounds = new AABB3(
 			new Vec3(96, 0, -48),
@@ -100,10 +97,10 @@ describe("assembleStaticObjectArtifact", () => {
 });
 
 function geometryResult(
-	strategy: "baked" | "instanced" | "frame-streamed",
+	strategy: "baked" | "frame-streamed",
 ): StaticObjectGeometryPreparationResult {
 	const drawUnits: StaticObjectDrawUnit[] =
-		strategy === "frame-streamed" ? [] : [drawUnit(strategy)];
+		strategy === "frame-streamed" ? [] : [drawUnit()];
 	const frameStreamedInstances: FrameStreamedObjectInstanceTemplate[] =
 		strategy === "frame-streamed"
 			? [
@@ -123,25 +120,11 @@ function geometryResult(
 			: [];
 	return {
 		geometry: [],
-		instanceStreams:
-			strategy === "instanced"
-				? [
-						{
-							data: { instances: [instance()], sourceEnvelope: AABB3.zero() },
-							key: STREAM_KEY,
-						},
-					]
-				: [],
 		objects: [{ bounds: AABB3.zero(), drawUnits, frameStreamedInstances }],
 		metrics: {
 			bakedDrawUnitCount: strategy === "baked" ? 1 : 0,
 			bakedGeometryBytes: 0,
 			instancedGeometryBytes: 0,
-			staticFragmentBytes: 0,
-			staticFragmentCohortCount: strategy === "instanced" ? 1 : 0,
-			staticFragmentCount: strategy === "instanced" ? 1 : 0,
-			staticFragmentDrawUnitCount: strategy === "instanced" ? 1 : 0,
-			staticFragmentInstanceCount: strategy === "instanced" ? 1 : 0,
 			sourceMaterialSlotCount: 1,
 			sourcePartCount: 1,
 			sourceRangeCount: 1,
@@ -154,8 +137,8 @@ function geometryResult(
 	};
 }
 
-function drawUnit(strategy: "baked" | "instanced"): StaticObjectDrawUnit {
-	const common = {
+function drawUnit(): StaticObjectDrawUnit {
+	return {
 		geometry: GEOMETRY_KEY,
 		indexCount: 3,
 		indexStart: 0,
@@ -163,14 +146,6 @@ function drawUnit(strategy: "baked" | "instanced"): StaticObjectDrawUnit {
 		ordering: "opaque" as const,
 		transparentSort: null,
 	};
-	return strategy === "baked"
-		? { ...common, kind: "baked" }
-		: {
-				...common,
-				cohortKey: "fixture-partition",
-				instances: STREAM_KEY,
-				kind: "instanced",
-			};
 }
 
 function material(): ObjectMaterialBinding {

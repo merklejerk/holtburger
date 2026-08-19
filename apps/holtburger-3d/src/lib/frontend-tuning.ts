@@ -285,8 +285,6 @@ export const FRONTEND_TUNING = {
 		},
 	},
 	workloads: {
-		/** Outdoor grid width used to cluster generated scenery into culling groups. */
-		generatedSceneryClusterGridSize: 2,
 		staticObjectTextureAtlas: {
 			/** Atlas pages rebuilt during one incremental compaction pass. */
 			maximumCompactionRebuildPages: 2,

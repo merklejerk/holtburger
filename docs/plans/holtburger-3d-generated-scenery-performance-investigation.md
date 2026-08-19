@@ -165,3 +165,26 @@ Retain instancing but address structural fragmentation. Per §2.7 this remains a
    - If a cluster bounding box is outside or sub-pixel, reject all instances immediately.
    - Only evaluate the narrow-phase loop on boundary clusters.
 3. **State Sorting:** Bucket draw calls by `(program, textureAtlasPage, lightingGroup)` before submission to minimize WebGL pipeline switches.
+
+---
+
+## 4. Outcome (2026-08-18)
+
+Option A shipped as a hybrid split on `ObjectMaterialOrdering`, executed by the
+[generated scenery hybrid baking plan](holtburger-3d-generated-scenery-hybrid-baking-plan.md) —
+read that plan's Decisions for the full A/B evidence and the mechanism. Headlines, same
+configuration as §1:
+
+- Generated opaque/alpha-test/additive contributions bake into one per-landblock buffer;
+  only transparent contributions of instance-eligible parts remain instanced, as
+  frame-streamed templates. The clustered path, the per-instance selector, and the static
+  instance stream mechanism were deleted outright.
+- `0xda55ffff`: renderer CPU 6.22 → 2.72 ms, GPU total 2.79 → 2.38 ms, generated instanced
+  draws 315 → 0, per-frame instance upload eliminated.
+- `0xf71effff`: renderer CPU 3.40 → 1.98 ms; GPU total rose 1.30 → 3.54 ms — the accepted
+  loss of the per-instance pixel-area cull realized (submitted baked triangles 3.3k → 384k),
+  radius-bounded and revisited only if the radius policy changes.
+- Streaming (20 s follow-mode flights, 108 publications each): worst frame median
+  32.2 → 24.8 ms, in-flight average frame work 5.4 → 2.6 ms.
+- Option B and its satellites (state sorting, broad-phase, batch-key surgery) were re-measured
+  post-cutover and declared dead; the numbers are in the plan's Phase 4 decisions.

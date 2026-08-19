@@ -82,32 +82,17 @@ export function assembleStaticObjectArtifact(options: {
 			}
 		}
 	}
-	const hasBakedOutput = geometry.metrics.bakedDrawUnitCount > 0;
-	const hasInstancedOutput =
-		geometry.metrics.staticFragmentDrawUnitCount > 0 ||
-		geometry.metrics.transparentTemplateInstanceCount > 0;
 	return {
 		staticLights,
 		geometryDiagnostics: {
-			bakedFallbackRangeCount: geometry.metrics.bakedDrawUnitCount,
+			bakedRangeCount: geometry.metrics.bakedDrawUnitCount,
 			bakedGeometryBytes: geometry.metrics.bakedGeometryBytes,
 			geometryWorkerDurationMs: geometry.metrics.workerDurationMs,
 			instancedGeometryBytes: geometry.metrics.instancedGeometryBytes,
-			staticFragmentBytes: geometry.metrics.staticFragmentBytes,
-			staticFragmentCohortCount: geometry.metrics.staticFragmentCohortCount,
-			staticFragmentCount: geometry.metrics.staticFragmentCount,
-			staticFragmentDrawUnitCount: geometry.metrics.staticFragmentDrawUnitCount,
-			staticFragmentInstanceCount: geometry.metrics.staticFragmentInstanceCount,
 			sourceMaterialSlotCount: geometry.metrics.sourceMaterialSlotCount,
 			sourcePartCount: geometry.metrics.sourcePartCount,
 			sourceRangeCount: geometry.metrics.sourceRangeCount,
 			sourceResidentCount: geometry.metrics.sourceResidentCount,
-			strategy:
-				hasBakedOutput && hasInstancedOutput
-					? "mixed"
-					: hasInstancedOutput
-						? "instanced"
-						: "baked",
 			transparentTemplateBytes: geometry.metrics.transparentTemplateBytes,
 			transparentTemplateCohortCount:
 				geometry.metrics.transparentTemplateCohortCount,
@@ -115,7 +100,6 @@ export function assembleStaticObjectArtifact(options: {
 				geometry.metrics.transparentTemplateInstanceCount,
 		},
 		geometry: geometry.geometry,
-		instanceStreams: geometry.instanceStreams,
 		objects: geometry.objects.map((object) => ({
 			localBounds: object.bounds,
 			placement: {

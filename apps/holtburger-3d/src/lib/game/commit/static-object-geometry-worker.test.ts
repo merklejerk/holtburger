@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AABB3, Mat4, Vec3 } from "../math/types";
+import { Mat4, Vec3 } from "../math/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
 	ResolvedEnvCellStaticObjectSource,
@@ -274,25 +274,27 @@ describe("prepareStaticObjectGeometry", () => {
 		worker.destroy();
 	});
 
-	it("hydrates generated stream envelopes across the worker boundary", async () => {
+	it("hydrates generated template transforms across the worker boundary", async () => {
 		const worker = new StaticObjectGeometryWorker({
 			createGeometryWorker: () => new TransferWorkerPort(),
 		});
 
 		const result = await worker.prepare({
 			layer: LandblockLayerKind.Generated,
-			resourceNamespace: "static-install:generated-envelope-transfer" as const,
+			resourceNamespace: "static-install:generated-template-transfer" as const,
 			source: generatedSource([
-				resident("generated-transfer", Mat4.identity(), new Vec3(1, 1, 1)),
+				resident(
+					"transparent-transfer",
+					translation(3, 0, 0),
+					new Vec3(1, 1, 1),
+				),
 			]),
 		});
 
-		expect(result?.instanceStreams[0]?.data.sourceEnvelope).toBeInstanceOf(
-			AABB3,
-		);
-		expect(result?.instanceStreams[0]?.data.sourceEnvelope).toEqual(
-			new AABB3(Vec3.zero(), new Vec3(1, 1, 0)),
-		);
+		const template = result?.objects[0]?.frameStreamedInstances[0];
+		expect(template?.instance.sourceToLandblock).toBeInstanceOf(Mat4);
+		expect(template?.instance.sourceToLandblock.m41).toBe(3);
+		expect(template?.transparentSort.center).toBeInstanceOf(Vec3);
 		worker.destroy();
 	});
 
@@ -326,7 +328,7 @@ describe("prepareStaticObjectGeometry", () => {
 		worker.destroy();
 	});
 
-	it("emits one source-local geometry and stream for repeated generated residents", () => {
+	it("bakes repeated generated residents into one merged landblock buffer", () => {
 		const first = resident(
 			"generated-opaque",
 			Mat4.identity(),
@@ -351,87 +353,24 @@ describe("prepareStaticObjectGeometry", () => {
 		});
 
 		expect(result?.geometry).toHaveLength(1);
-		expect(result?.geometry[0]?.geometry.positions).toEqual(
-			Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		expect(result?.geometry[0]?.key).toBe(
+			"static-install-geometry:static-install:generated-repeated/generated-layer",
 		);
-		expect(result?.instanceStreams).toHaveLength(1);
-		expect(result?.instanceStreams[0]?.data.instances).toHaveLength(2);
-		expect(result?.instanceStreams[0]?.data.sourceEnvelope).toEqual(
-			new AABB3(Vec3.zero(), new Vec3(1, 1, 0)),
-		);
+		// Baking replicates vertices per instance: two residents merge to six vertices.
+		expect(result?.geometry[0]?.geometry.positions).toHaveLength(18);
+		expect(result?.objects).toHaveLength(1);
 		expect(result?.objects[0]?.drawUnits).toHaveLength(1);
-		expect(result?.objects[0]?.drawUnits[0]?.kind).toBe("instanced");
+		expect(result?.objects[0]?.frameStreamedInstances).toEqual([]);
 		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 11, y: 1, z: 0 });
 		expect(result?.metrics).toMatchObject({
-			bakedDrawUnitCount: 0,
-			staticFragmentCohortCount: 1,
-			staticFragmentDrawUnitCount: 1,
-			staticFragmentInstanceCount: 2,
-			staticFragmentCount: 1,
+			bakedDrawUnitCount: 1,
 			sourcePartCount: 2,
 			sourceResidentCount: 2,
+			transparentTemplateInstanceCount: 0,
 		});
 	});
 
-	it("partitions generated residents into tight cullable clusters while sharing geometry", () => {
-		const first = resident(
-			"generated-clustered",
-			translation(10, 0, -10),
-			new Vec3(1, 1, 1),
-		);
-		const second = {
-			...first,
-			identity: {
-				kind: "authored" as const,
-				sourceId: "generated-clustered-b",
-			},
-			placement: {
-				...first.placement,
-				localTransform: translation(100, 0, -10),
-			},
-		};
-		const third = {
-			...first,
-			identity: {
-				kind: "authored" as const,
-				sourceId: "generated-clustered-c",
-			},
-			placement: {
-				...first.placement,
-				localTransform: translation(10, 0, -100),
-			},
-		};
-
-		const result = prepareStaticObjectGeometry({
-			layer: LandblockLayerKind.Generated,
-			resourceNamespace: "static-install:generated-clustered" as const,
-			source: generatedSource([first, second, third]),
-		});
-
-		expect(result?.geometry).toHaveLength(1);
-		expect(result?.objects).toHaveLength(3);
-		expect(result?.objects.map(({ bounds }) => bounds.min.x)).toEqual([
-			10, 10, 100,
-		]);
-		expect(result?.objects.map(({ bounds }) => bounds.max.x)).toEqual([
-			11, 11, 101,
-		]);
-		expect(result?.objects.map(({ bounds }) => bounds.min.z)).toEqual([
-			-10, -100, -10,
-		]);
-		expect(result?.instanceStreams).toHaveLength(3);
-		expect(
-			result?.instanceStreams.map(({ data }) => data.instances.length),
-		).toEqual([1, 1, 1]);
-		expect(result?.metrics).toMatchObject({
-			staticFragmentCohortCount: 3,
-			staticFragmentDrawUnitCount: 3,
-			staticFragmentInstanceCount: 3,
-			sourceResidentCount: 3,
-		});
-	});
-
-	it("emits static fragments and transparent generated strategies in one result", () => {
+	it("splits transparent contributions into templates and bakes the rest", () => {
 		const residents = ["opaque", "alpha-test", "additive", "transparent"].map(
 			(kind, index) =>
 				resident(kind, translation(index * 2, 0, 0), new Vec3(1, 1, 1)),
@@ -443,10 +382,10 @@ describe("prepareStaticObjectGeometry", () => {
 			source: generatedSource(residents),
 		});
 
+		// Additive commutes, so it bakes alongside opaque and alpha-test.
 		expect(
 			result?.objects[0]?.drawUnits.map(({ ordering }) => ordering).sort(),
 		).toEqual(["additive", "alpha-test", "opaque"]);
-		expect(result?.instanceStreams).toHaveLength(3);
 		expect(result?.objects[0]?.frameStreamedInstances).toHaveLength(1);
 		expect(result?.objects[0]?.frameStreamedInstances[0]).toMatchObject({
 			transparentSort: {
@@ -454,16 +393,50 @@ describe("prepareStaticObjectGeometry", () => {
 				stableId: expect.stringContaining("transparent"),
 			},
 		});
+		// One merged baked buffer plus one shared template partition geometry.
+		expect(result?.geometry).toHaveLength(2);
 		expect(result?.metrics).toMatchObject({
-			staticFragmentInstanceCount: 3,
+			bakedDrawUnitCount: 3,
 			transparentTemplateCohortCount: 1,
 			transparentTemplateInstanceCount: 1,
 		});
 	});
 
-	it("includes exact triangle membership in generated partition identity", () => {
+	it("shares one template partition geometry across repeated transparent residents", () => {
 		const first = resident(
-			"partition-membership-a",
+			"transparent-shared",
+			Mat4.identity(),
+			new Vec3(1, 1, 1),
+		);
+		const second = {
+			...first,
+			identity: { kind: "authored" as const, sourceId: "transparent-shared-b" },
+			placement: {
+				...first.placement,
+				localTransform: translation(10, 0, 0),
+			},
+		};
+		const result = prepareStaticObjectGeometry({
+			layer: LandblockLayerKind.Generated,
+			resourceNamespace: "static-install:generated-shared-template" as const,
+			source: generatedSource([first, second]),
+		});
+
+		expect(result?.geometry).toHaveLength(1);
+		expect(result?.objects[0]?.drawUnits).toEqual([]);
+		expect(result?.objects[0]?.frameStreamedInstances).toHaveLength(2);
+		const [left, right] = result?.objects[0]?.frameStreamedInstances ?? [];
+		expect(left?.geometry).toBe(right?.geometry);
+		expect(left?.cohortKey).toBe(right?.cohortKey);
+		expect(left?.transparentSort.stableId).not.toBe(
+			right?.transparentSort.stableId,
+		);
+		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 11, y: 1, z: 0 });
+	});
+
+	it("includes exact triangle membership in template partition identity", () => {
+		const first = resident(
+			"transparent-membership-a",
 			Mat4.identity(),
 			new Vec3(1, 1, 1),
 		);
@@ -498,10 +471,10 @@ describe("prepareStaticObjectGeometry", () => {
 		};
 		const second = {
 			...first,
-			id: "partition-membership-b",
+			id: "transparent-membership-b",
 			presentation: {
 				...firstPresentation,
-				id: "presentation:partition-membership-b" as const,
+				id: "presentation:transparent-membership-b" as const,
 				parts: [
 					{
 						...firstPresentation.parts[0]!,
@@ -520,17 +493,25 @@ describe("prepareStaticObjectGeometry", () => {
 			]),
 		});
 
+		// Two subset partitions for the split-material resident, one full-membership
+		// partition for the merged-material resident, each its own template cohort.
 		expect(result?.geometry).toHaveLength(3);
-		expect(result?.instanceStreams).toHaveLength(2);
-		expect(result?.objects[0]?.drawUnits).toHaveLength(3);
+		expect(result?.objects[0]?.frameStreamedInstances).toHaveLength(3);
+		expect(
+			new Set(
+				result?.objects[0]?.frameStreamedInstances.map(
+					({ cohortKey }) => cohortKey,
+				),
+			).size,
+		).toBe(3);
 		expect(
 			result?.geometry.map(({ geometry }) => geometry.indices.length).sort(),
 		).toEqual([3, 3, 6]);
 	});
 
-	it("applies flat setup part transforms in generated instance streams", () => {
+	it("applies flat setup part transforms in generated templates", () => {
 		const base = resident(
-			"generated-setup",
+			"transparent-setup",
 			translation(10, 20, 30),
 			new Vec3(2, 2, 2),
 		);
@@ -545,7 +526,7 @@ describe("prepareStaticObjectGeometry", () => {
 						...root,
 						geometry: {
 							...root.geometry,
-							id: "geometry:generated-child" as const,
+							id: "geometry:transparent-child" as const,
 						},
 						partIndex: 1,
 					},
@@ -569,8 +550,8 @@ describe("prepareStaticObjectGeometry", () => {
 			source: generatedSource([setupResident]),
 		});
 
-		const transforms = result?.instanceStreams
-			.map(({ data }) => data.instances[0]!.sourceToLandblock)
+		const transforms = result?.objects[0]?.frameStreamedInstances
+			.map(({ instance }) => instance.sourceToLandblock)
 			.sort((left, right) => left.m41 - right.m41);
 		expect(transforms).toEqual([
 			new Mat4(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 12, 20, 30, 1),
@@ -578,42 +559,39 @@ describe("prepareStaticObjectGeometry", () => {
 		]);
 	});
 
-	it("falls back explicitly for unsupported generated transforms", () => {
+	it("bakes unsupported generated transforms wholly, transparent ranges sorted", () => {
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			resourceNamespace: "static-install:generated-fallback" as const,
+			resourceNamespace: "static-install:generated-ineligible" as const,
 			source: generatedSource([
-				resident("non-uniform", Mat4.identity(), new Vec3(2, 3, 2)),
+				resident("transparent-non-uniform", Mat4.identity(), new Vec3(2, 3, 2)),
 			]),
 		});
 
-		expect(result?.instanceStreams).toEqual([]);
-		expect(result?.objects[0]?.drawUnits[0]?.kind).toBe("baked");
+		expect(result?.objects[0]?.frameStreamedInstances).toEqual([]);
+		expect(result?.objects[0]?.drawUnits).toHaveLength(1);
+		expect(result?.objects[0]?.drawUnits[0]?.ordering).toBe("transparent");
+		expect(result?.objects[0]?.drawUnits[0]?.transparentSort).not.toBeNull();
 		expect(result?.metrics).toMatchObject({
 			bakedDrawUnitCount: 1,
-			staticFragmentInstanceCount: 0,
+			transparentTemplateInstanceCount: 0,
 		});
 	});
 
-	it("merges an explicit baked fallback with eligible generated cohorts", () => {
+	it("merges eligible and ineligible generated parts into one baked buffer", () => {
 		const result = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Generated,
-			resourceNamespace: "static-install:generated-mixed-fallback" as const,
+			resourceNamespace: "static-install:generated-merged" as const,
 			source: generatedSource([
 				resident("eligible", Mat4.identity(), new Vec3(1, 1, 1)),
 				resident("fallback", translation(5, 0, 0), new Vec3(2, 3, 2)),
 			]),
 		});
 
-		expect(
-			result?.objects[0]?.drawUnits.map(({ kind }) => kind).sort(),
-		).toEqual(["baked", "instanced"]);
-		expect(result?.geometry).toHaveLength(2);
-		expect(result?.metrics).toMatchObject({
-			bakedDrawUnitCount: 1,
-			staticFragmentDrawUnitCount: 1,
-			staticFragmentInstanceCount: 1,
-		});
+		expect(result?.geometry).toHaveLength(1);
+		expect(result?.objects[0]?.drawUnits).toHaveLength(1);
+		expect(result?.objects[0]?.frameStreamedInstances).toEqual([]);
+		expect(result?.metrics).toMatchObject({ bakedDrawUnitCount: 1 });
 		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 7, y: 3, z: 0 });
 	});
 

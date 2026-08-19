@@ -170,9 +170,10 @@ companion])`), and `replaceObjects` (`static-object-system.ts`) then runs fully 
 - [x] Harness scripted multi-boundary interest re-issue flag — `--relocate-sequence <hex,...>`
       with `--relocate-hop-ms`, resetting timing per hop so each crossing reports its own worst
       frame rather than a running maximum.
-- [ ] Audit + verdict per listed system; fix findings with reproductions.
-- [ ] Sweep for retained `RenderVector3` state outside per-frame derivation.
-- [ ] Record verdicts and fixes in Decisions.
+- [x] Audit + verdict per listed system; fix findings with reproductions (see Decisions:
+      static-light eviction leak fixed, orphaned-companion release fixed).
+- [x] Sweep for retained `RenderVector3` state outside per-frame derivation — clean.
+- [x] Record verdicts and fixes in Decisions.
 
 ### Phase 2b: Explorer Follow Mode Toggle
 
@@ -188,8 +189,12 @@ free-flight controls do the moving; follow mode only re-anchors. App-local view-
 
 **Tasks:**
 
-- [ ] Follow-mode toggle in Explorer view state, re-anchoring on camera landblock crossing.
-- [ ] Baseline follow-mode capture on current code (pre-cutover), recorded in Decisions.
+- [x] Follow-mode toggle in Explorer view state, re-anchoring on camera landblock crossing —
+      "Interest follows camera" in the World panel's Scene interest section.
+- [x] Harness mirror: `--follow-flight <hex>` / `--follow-flight-ms <ms>` fly the camera in a
+      straight line to the target landblock, re-anchoring interest on each crossing via the same
+      policy, and report crossings plus flight-window frame timing.
+- [x] Baseline follow-mode capture on current code (pre-cutover), recorded in Decisions.
 
 ### Phase 3: Hybrid Cutover
 
@@ -238,13 +243,21 @@ can render the same range.
 
 **Tasks:**
 
-- [ ] Partition generated parts by ordering in the worker; route baked portion.
-- [ ] Delete `prepareClusteredGeneratedScenery`, cluster grid tuning knob, and cluster-key
+- [x] Partition generated parts by ordering in the worker; route baked portion
+      (`prepareGeneratedSceneryGeometry`; additive bakes too — see Decisions).
+- [x] Delete `prepareClusteredGeneratedScenery`, cluster grid tuning knob, and cluster-key
       namespaces.
-- [ ] Shrink instanced stream preparation to transparent/additive ranges.
-- [ ] Sweep cluster/cohort vocabulary from renderer types, batch key, and metrics.
-- [ ] Update/rewrite affected worker and selector tests.
-- [ ] Run the A/B captures and screenshot comparison; record results in Decisions.
+- [x] Shrink instanced preparation to the transparent template flow — and further: the entire
+      static instance stream mechanism died (`static-instance-stream-manager.ts`,
+      `generated-instance-selection.ts`, the `static-fragment` instance kind, and the
+      `InstancedStaticDrawUnit` variant deleted; `StaticObjectDrawUnit` collapsed to the baked
+      shape with no discriminant).
+- [x] Sweep cluster/cohort vocabulary from renderer types, batch key, and metrics
+      (`cohortKey` survives only as the frame-template far-grouping key, which is load-bearing
+      for dynamics and the transparent residue).
+- [x] Update/rewrite affected worker and selector tests (selector tests deleted with the
+      selector; worker suite rewritten around the hybrid split; 1156 tests pass).
+- [x] Run the A/B captures and screenshot comparison; record results in Decisions.
 
 ### Phase 4: Re-measure & Resteer
 
@@ -263,9 +276,10 @@ can render the same range.
 
 **Tasks:**
 
-- [ ] Post-cutover captures and follow-mode run; record deltas.
-- [ ] Decide each parked item; update Out of scope / open a follow-up plan if warranted.
-- [ ] Close the loop in the investigation doc.
+- [x] Post-cutover captures and follow-mode run; record deltas (Phase 3 A/B plus V8 profile
+      captures at both scenes).
+- [x] Decide each parked item; see Decisions.
+- [x] Close the loop in the investigation doc (§4 Outcome added).
 
 ### Phase 5: Cleanup
 
@@ -281,6 +295,11 @@ can render the same range.
 
 - [x] ~~Phase 1 per-ordering census metrics~~ — moot: no new metrics were added; existing
       metrics already carried the split.
+- [x] Phase 4 dry-run verdict: **nothing further.** The Phase 3 diff swept its own vocabulary
+      (knip, lint, and the metric/type deletions landed together); no temporary probes were
+      ever added; the only remaining textual references to the clustered path live in
+      historical plan docs, which this repository retains unmodified by policy. Phase 5 closes
+      empty.
 
 ## Risks & Mitigations
 
@@ -320,16 +339,17 @@ can render the same range.
 
 ## Definition of Done
 
-- [ ] `opaque`/`alpha-test` generated scenery renders via per-landblock baked buffers; no
-      per-frame selection, grouping, compaction, or upload for those orderings.
-- [ ] `transparent`/`additive` generated scenery renders via the instanced path with unchanged
-      near/far ordering behavior.
-- [ ] The clustered scenery path and its vocabulary are fully removed.
-- [ ] A/B captures at both reference scenes and a follow-mode streaming run are recorded in this
+- [x] `opaque`/`alpha-test` generated scenery renders via per-landblock baked buffers; no
+      per-frame selection, grouping, compaction, or upload for those orderings (additive
+      bakes too; see Decisions).
+- [x] `transparent` generated scenery renders via the frame-template instanced path with
+      unchanged near/far ordering behavior (A/B: identical run/draw counts).
+- [x] The clustered scenery path and its vocabulary are fully removed.
+- [x] A/B captures at both reference scenes and a follow-mode streaming run are recorded in this
       plan with their configurations.
-- [ ] Explorer follow mode ships and is harness-scriptable.
-- [ ] Typecheck, lint (clippy-clean where Rust is touched), knip, unit tests, and prettier pass.
-- [ ] Parked items each have a recorded keep/kill decision with supporting numbers.
+- [x] Explorer follow mode ships and is harness-scriptable.
+- [x] Typecheck, lint (clippy-clean where Rust is touched), knip, unit tests, and prettier pass.
+- [x] Parked items each have a recorded keep/kill decision with supporting numbers.
 
 ## Open Questions
 
@@ -397,6 +417,168 @@ can render the same range.
   Still unproven, and still Phase 2's job: worker in-flight bake cancellation under churn,
   interest-snapshot consumers (static lights, audio, EnvCell hydration, dynamics hydration), and
   the retained-`RenderVector3` sweep.
+
+- (2026-08-18) **Phase 4 parked-item decisions.** Evidence: post-cutover V8 profiles
+  (`--cpu-profile`, 8 s windows) at both scenes, plus the Phase 3 A/B.
+  - **Draw state sorting (§2.5): dead.** Draw counts collapsed with the cutover and renderer
+    CPU totals are 2.7/2.0 ms; per-draw uniform and atlas-binding work appears in the profile
+    but nothing suggests program/texture churn dominates. Revisit only if a
+    materially-diverse scene profiles hot on state switches.
+  - **Broad-phase culling for residue selection: dead.** The per-instance narrow phase was
+    deleted with the selector; `classifyObjectFootprint` fell to 99 ms/8 s at da55, all of it
+    the retained owner-envelope path (dynamics, portals, presentations). The remaining
+    per-template per-frame cost at f71e (~1.5 ms across `transparentSortFacts`, compatibility
+    checks, and instance encoding for 2,290 templates) is the known ceiling of the residue
+    pipeline — small in absolute terms; revisit only if template populations grow an order of
+    magnitude.
+  - **Residue draw fragmentation: dead.** Far-grouping batches the residue at ~55
+    instances/draw at f71e (2,290 candidates in 42 draws), better than the pre-cutover ~47,
+    because grouping now sees only templates. No batch-key surgery warranted.
+  - **F71E GPU rise (1.30 → 3.54 ms): accepted for the explorer.** Radius-bounded by policy
+    (2; retail used 1) and cheap on target hardware. Flagged as a candidate for the future
+    client's performance pass — per-range distance cutoffs or baked LOD are the obvious
+    mitigations if weaker GPUs need them. No code change now.
+  - **Worker prep +15% and 3.2 MB/landblock baked geometry: accepted.** The bake emits three
+    vertices per triangle with no cross-triangle dedup; indexed vertex dedup would shrink both
+    numbers and is noted as a possible follow-up optimization, deliberately not done here —
+    measure first if it ever matters.
+
+- (2026-08-18) **Phase 3 cutover landed, A/B captured.** Configuration: `--gpu
+--profile-renderer`, radii terrain/building 8, explicit/generated 2 (EnvCell 2 at
+  `0xda55ffff`, omitted at `0xf71effff`), RX 7900 XT, single capture per scene plus n=5
+  follow-flights.
+
+  The mechanism: `prepareGeneratedSceneryGeometry` bakes every order-independent contribution
+  (opaque, alpha-test, **and additive** — see below) into one merged per-landblock buffer via
+  the buildings path; only transparent contributions of instance-eligible parts remain
+  frame-streamed templates. Transform-ineligible parts bake wholly, their transparent triangles
+  as sorted baked ranges — the semantics buildings always had. One render object per landblock
+  layer replaces the 2x2 cluster objects. Deleted outright: the clustered path, the selector
+  and its per-instance `classifyObjectFootprint` narrow phase (the function survives,
+  unexported, inside `retainsProjectedObjectFootprint`), the static instance stream manager and
+  its resource type family, the `static-fragment` instance kind, the `InstancedStaticDrawUnit`
+  variant (the draw-unit union collapsed to one shape), the `strategy` diagnostics field, the
+  `generatedInstanceCulling` profile phase, and seven per-frame selection/compaction metrics.
+  `bakedFallbackRangeCount` renamed to `bakedRangeCount` — there is no fallback anymore, only
+  the path.
+
+  **Steady-state A/B (per frame):**
+
+  | metric                            | da55 pre | da55 post     | f71e pre   | f71e post     |
+  | --------------------------------- | -------- | ------------- | ---------- | ------------- |
+  | generated instanced draws         | 315      | 0             | 191        | 0             |
+  | generated instances uploaded      | 1,265    | 0             | 4,907      | 0             |
+  | CPU generatedInstanceCullingMs    | 0.90     | phase deleted | 0.60       | phase deleted |
+  | CPU instanceRunPreparationMs      | 1.05     | 0.12          | 0.58       | 0.24          |
+  | CPU renderer total                | 6.22 ms  | **2.72 ms**   | 3.40 ms    | **1.98 ms**   |
+  | GPU total                         | 2.79 ms  | **2.38 ms**   | 1.30 ms    | **3.54 ms**   |
+  | far transparent candidates / runs | 708 / 18 | 717 / 18      | 2,255 / 42 | 2,290 / 42    |
+
+  Transparency is bit-compatible: identical run and draw counts, near-sort still zero in both
+  scenes. Screenshots differ by 0.3-0.4% of pixels — scattered single-pixel speckles from
+  previously pixel-area-culled small instances now rendering, no structural change.
+
+  **The honest wrinkle: F71E GPU total rose 1.30 → 3.54 ms.** Losing the per-instance
+  pixel-area cull means every baked instance vertex-shades and rasterizes when its landblock is
+  in frustum — submitted baked triangles at f71e went 3.3k → 384k (da55: 55k → 456k). The plan
+  accepted this risk as radius-bounded; the number now exists and Phase 4 owns the
+  keep/mitigate decision. Note the per-phase GPU buckets (terrainMs +1.2 in both scenes,
+  f71e blendedMs 0.1 → 2.0) shifted in ways that look like timer-span attribution artifacts;
+  treat totals as the comparable figure, per the investigation doc's attribution lesson.
+
+  **Streaming (like-for-like 20 s flights, `0xda55ffff → 0xda59ffff`, n=5, 108 publications
+  and 4 crossings every run):** worst frame work median 32.2 → **24.8 ms** (range 20.8-27.3 vs
+  27.1-47.7), average in-flight frame work 5.4 → **2.6 ms**, zero console errors. Cost per
+  publication in the worst frame ~1.19 → ~0.92 ms.
+
+  **Costs, recorded plainly:** generated worker prep rose ~15% (cold mean 50.9 → 58.4 ms,
+  max 133 → 181 ms per landblock) — vertex replication outweighs the deleted per-cluster
+  dedup; it runs off-thread and streaming worst-frames still improved. Baked generated
+  geometry is **79.9 MB for the 25-landblock neighborhood (~3.2 MB/landblock)** at da55,
+  the VRAM-growth risk realized within its radius bound. Template residue is tiny: 1,332
+  transparent templates sharing <0.1 MB of partition geometry.
+
+- (2026-08-18) **Additive bakes; the template flow stays transparent-only.** The in-scope
+  statement said additive would remain instanced, but additive blending commutes, so baked
+  additive ranges draw identically regardless of merge order — and they are the exact mechanism
+  buildings already use. Keeping additive instanced would instead have required adding an
+  ordering field to `FrameStreamedObjectInstanceTemplate` and touching the transparency
+  pipeline this plan promised not to touch. Census found zero additive generated content in
+  both reference scenes, so the choice is unobservable today; the worker test suite pins the
+  additive-bakes contract.
+
+- (2026-08-18) **Phase 2b complete: follow mode shipped, pre-cutover streaming baseline
+  captured.** The Explorer toggle ("Interest follows camera", World panel) applies the whole
+  policy in one place: when the synced camera residency resolves to a landblock different from
+  the last interest anchor, re-issue the same radii centred there (`ExplorerApp.svelte`
+  `followCameraSceneInterest`). It updates scene and simulation interest only — the camera never
+  moves and the coordinator focus flow is bypassed, so no automatic placement fires. Inert until
+  a manual request establishes radii. Works in free-fly and physical camera modes alike.
+
+  The harness mirror (`runFollowFlight`, driven by `--follow-flight`/`--follow-flight-ms`) flies
+  the camera linearly to a target landblock inside the real frame loop, re-anchoring with the
+  retained radii on each crossing, and reports the crossing log, publications in the flight
+  window, and flight-window timing.
+
+  **Baseline (pre-cutover), the Phase 3/4 comparison target.** Configuration: `--gpu`, radii
+  terrain/building 8, EnvCell/explicit/generated 2, flight `0xda55ffff → 0xda59ffff` over 20 s
+  (four single-block crossings at 5 s intervals), n=5. Every run: 4 crossings, **108
+  publications** (27 per single-block crossing), zero console errors. Worst frame work median
+  **32.2 ms** (range 27.1–47.7); worst frame gap median 35.5 ms (range 33.0–63.0); average frame
+  work median 5.4 ms. Note the in-flight worst-frame cost per publication (~1.2 ms at 27
+  publications per crossing) runs above the stationary-crossing rate (~0.5 ms at 54); flight
+  frames pay commit and full rendering in the same frame, so cutover comparisons must use
+  like-for-like flights, not the stationary rate.
+
+- (2026-08-18) **Phase 2 audit complete.** Verdict per system, with the churn rig: nine interest
+  re-issues at 250 ms intervals (faster than bake throughput, with quick leave-and-re-enter
+  hops), plus a five-hop tour at 4 s intervals, both ending at the starting landblock and
+  compared against a clean single load there. Configuration: `--gpu`, radii terrain/building 8,
+  EnvCell/explicit/generated 2.
+  - **Residency diffing/eviction under continuous re-issue: safe.** After churn stops, every
+    resource count converges exactly to the clean-load value (geometry 1638, nodes 256, owners
+    351, atlas pages 5, resident textures 291) — no leaks, no over-eviction, zero console
+    errors in every run.
+  - **Worker pipeline under churn: correct but unthrottled.** No cancellation exists anywhere:
+    a landblock leaving interest never cancels its in-flight or queued bake; stale results are
+    dropped at publication by three revision gates (`static-layer-realizer.ts` `#realize`:
+    atlas completion `withdrawn`, `#isCurrent` pre-publish, post-publish re-check with
+    `removeExact` repair). Duplicate revisions for the same layer may run concurrently by
+    design (`#pending` is per-revision; resource ids are revision-namespaced; evictions are
+    revision-guarded `<=`/`===`). The single geometry worker's queue is unbounded and obsolete
+    jobs still bake fully before being dropped, so sustained 250 ms crossings put hydration
+    seconds behind — measured as publication counts flatlining mid-churn, then converging
+    within 15 s of the last hop. **Named debt, deferred:** queue pruning/cancellation belongs
+    with the commit-budget plan after Phase 4, when post-bake job sizes are known; the
+    consequence accepted meanwhile is lag, not corruption.
+  - **Interest-snapshot consumers: one real defect, fixed.** The `OutdoorLightIndex` was
+    publish-only — `install` ran on every layer `replace`, but neither interest eviction nor
+    stale-publish repair ever removed entries, so evicted landblocks kept lighting resident
+    neighbours via the nine-cell fan-out and the index grew without bound. Reproduced with the
+    new `outdoorLightScopeCount` diagnostic: clean load at `0xda55ffff` owns 5 scopes; a
+    five-hop tour returning there left 8. **Fix:** revision-stamped entries with `evict`
+    (`revision <=`) and `removeExact` (`===`) mirroring `StaticObjectSystem` semantics, wired
+    into the same outdoor publisher callbacks that install — so the late-eviction-vs-re-entry
+    race cannot delete a newer revision's lamps. Post-fix, all three runs converge to exactly
+    5 scopes. Audio (frame-rate re-derivation off terrain installation revision), EnvCells
+    (revision-guarded evict/replace with rollback), dynamics (owner-replace with
+    currentness-gated commit; spawned dynamics are interest-independent), and the host/page
+    boundary (revision-monotonic delta reconcile, no first-interest latch) are all safe by
+    construction.
+  - **Resource lifetime: one leak edge, fixed.** `StaticLayerRealizer.#realize` starts the
+    companion preparation before failure is knowable; a geometry rejection racing a
+    still-pending companion left the companion's staged resources unowned and unreleased
+    forever. Fixed by releasing the companion on settlement from the catch path; regression
+    test added.
+  - **Retained `RenderVector3` sweep: clean.** Every retained position is landblock-local or
+    scene-canonical with anchor math done per frame; the two persistent anchor-relative sites
+    (generated-instance selection cache, particle cohort origins) are respectively cleared
+    per view with a hard throw on frame mismatch, and rewritten in place every tick before the
+    draw that consumes them. Enforcement is convention + branding; no unbranded retained
+    position exists today.
+  - **Harness additions:** brief reports now include `relocationSequence`/`relocationState`
+    (previously silently dropped, making per-hop evidence invisible), and per-hop capture plus
+    `staticResourceCounts` carry `outdoorLightScopeCount`.
 
 - (2026-08-18) Plan created from the investigation's Option A, reshaped to a hybrid split on
   `ObjectMaterialOrdering` after the F71E probe showed 1,140 transparent generated instances with

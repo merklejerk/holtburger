@@ -97,7 +97,9 @@ describe("planEnvCellMaterialization", () => {
 		expect(outputs[0]?.geometry[0]?.key).not.toBe(outputs[1]?.geometry[0]?.key);
 		expect(
 			outputs.every((output) =>
-				output?.objects[0]?.drawUnits.every(({ kind }) => kind === "baked"),
+				output?.objects[0]?.drawUnits.every(
+					({ transparentSort }) => transparentSort === null,
+				),
 			),
 		).toBe(true);
 	});
@@ -167,13 +169,7 @@ describe("planEnvCellMaterialization", () => {
 		});
 
 		expect(realized.residents?.geometry).toHaveLength(2);
-		expect(realized.residents?.instanceStreams).toEqual([]);
 		expect(realized.residents?.objects).toHaveLength(2);
-		expect(
-			realized.residents?.objects.every((object) =>
-				object.renderable.drawUnits.every(({ kind }) => kind === "baked"),
-			),
-		).toBe(true);
 		expect(
 			realized.residents?.objects.map(({ placement }) => placement.envCellId),
 		).toEqual(["0x00010100", "0x00010101"]);

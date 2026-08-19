@@ -744,6 +744,13 @@ export class GameRuntime {
 							workerCount: 2,
 						}),
 						renderResources,
+						// Compaction can move a retained placement, so anything holding a resolved
+						// atlas rect re-resolves it. The renderer may not exist yet during early
+						// content load; it holds nothing to invalidate until it does.
+						onLayoutPublished: () =>
+							this.#renderer?.invalidateResolvedResources?.(
+								"atlas-publication",
+							),
 					},
 		);
 		this.#textures = new TextureManager<ResourceOwnerId>(
@@ -1761,6 +1768,8 @@ export class GameRuntime {
 		const previousOwner = this.#activeRegionStaticDetailOwner;
 		this.#activeRegionStaticDetailOwner = owner;
 		this.#activeRegionStaticDetails.clear();
+		// Compiled object draws embed the detail binding these roles select.
+		this.#renderer?.invalidateResolvedResources?.("region-static-detail");
 		for (const role of STATIC_DETAIL_ROLES) {
 			const detail = binding.roles[role];
 			this.#activeRegionStaticDetails.set(role, {

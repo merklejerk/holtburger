@@ -460,12 +460,12 @@ function orderPhysicalTransparent(
 } {
 	const ordered = orderTransparentObjectRanges(
 		values.map((range) => ({
-			cameraDepth: range.cameraDepth,
 			distanceSquared: range.distanceSquared,
 			range,
 			stableId: range.submissionKey,
 		})),
 		({ batchKey }) => batchKey,
+		({ cameraDepth }) => cameraDepth,
 	);
 	return {
 		trace: ordered.trace,

@@ -33,9 +33,15 @@ import {
 	type RendererFrameFeedback,
 	type FrameViewInput,
 	type Renderer,
+	type ResolvedResourceInvalidation,
 } from "./renderer";
 import { renderCullingGroupFilter } from "./render-layer-visibility";
-import { RenderWorld, type ObjectPresentationFootprint } from "./render-world";
+import type { LandblockVec3 } from "../../assets/ac-frame";
+import {
+	RenderWorld,
+	type ObjectPresentationFootprint,
+	type RenderContribution,
+} from "./render-world";
 import { retainsProjectedObjectFootprint } from "./object-footprint";
 import type {
 	GeometryResourceKey,
@@ -117,6 +123,7 @@ import {
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
 	areStaticObjectDrawsCompatible,
+	type ObjectBlendPolicy,
 	createObjectSubmissionPhases,
 	objectBlendPolicy,
 	type ObjectSubmissionPhases,
@@ -124,10 +131,13 @@ import {
 	type PreparedObjectMaterial,
 	type PreparedObjectTextureBinding,
 	type PreparedStaticObjectDrawCompatibility,
-	type ObjectBlendPolicy,
-	type TransparentObjectSortFacts,
+	type TransparentObjectRange,
 } from "./object-rendering-policy";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
+import {
+	CompiledObjectDrawStore,
+	type CompiledObjectDraw,
+} from "./compiled-object-draws";
 import type { PreparedPortalProjection } from "./portal-view-window";
 import type { PortalScopeWindowCullInput } from "./portal-scope-window-culler";
 import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
@@ -281,7 +291,8 @@ interface ObjectFrameInput {
 	/** Canonical authored scope; an instance run must never cross this atlas-routing boundary. */
 	readonly renderScopeKey: string;
 	readonly cullFaceOverride:
-		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
+		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
+		| null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -302,9 +313,10 @@ interface ObjectFrameInput {
 	readonly localToLandblock: Mat4;
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
+	/** Landblock-space ordering facts; the brand holds every producer to that frame. */
 	readonly transparentSort: {
 		readonly stableId: string;
-		readonly center: Vec3;
+		readonly center: LandblockVec3;
 	} | null;
 }
 
@@ -314,10 +326,84 @@ type PreparedObjectDrawCompatibility = PreparedStaticObjectDrawCompatibility<
 	WebGLSampler
 >;
 
-/** One object contribution paired with every renderer-resolved fact consumed at submission. */
+/**
+ * One object contribution paired with every renderer-resolved fact consumed at submission.
+ *
+ * `compiled` is shared by reference with every frame that submits this draw unit, so a frame
+ * never copies compiled facts to use them. Nothing anchor-relative is stored: the offset is
+ * looked up per frame by `landblockId`, which is what lets a static submission itself be cached
+ * across re-anchoring.
+ */
 interface PreparedObjectFrameInput extends ObjectFrameInput {
+	/**
+	 * Compiled facts held directly rather than behind their cache entry.
+	 *
+	 * Run formation compares these for every adjacent submission pair, so the hot loop reads them
+	 * without a second dereference. Both values are owned by the cache entry and shared by
+	 * reference; nothing is copied to place them here.
+	 */
 	readonly blendPolicy: ObjectBlendPolicy;
 	readonly compatibility: PreparedObjectDrawCompatibility;
+}
+
+/**
+ * Build one submission with a fixed field order, from every producer.
+ *
+ * Run formation reads these fields for every adjacent pair in the frame, so all submissions are
+ * constructed here rather than by per-site spreads: one construction site means one object shape,
+ * and the hot comparison stays monomorphic instead of degrading as producers are added.
+ */
+function createObjectSubmission(
+	object: ObjectFrameInput,
+	compiled: CompiledObjectDraw<PreparedObjectDrawCompatibility>,
+): PreparedObjectFrameInput {
+	return {
+		blendPolicy: compiled.blendPolicy,
+		compatibility: compiled.compatibility,
+		cullFaceOverride: object.cullFaceOverride,
+		drawKind: object.drawKind,
+		geometry: object.geometry,
+		indexCount: object.indexCount,
+		indexStart: object.indexStart,
+		instances: object.instances,
+		landblockId: object.landblockId,
+		localToLandblock: object.localToLandblock,
+		material: object.material,
+		ordering: object.ordering,
+		renderScopeKey: object.renderScopeKey,
+		source: object.source,
+		transparentSort: object.transparentSort,
+	};
+}
+
+/** The facts one draw's compiled constants are derived from; deliberately no per-frame state. */
+type CompiledObjectDrawInput = Pick<
+	ObjectFrameInput,
+	| "cullFaceOverride"
+	| "geometry"
+	| "indexCount"
+	| "indexStart"
+	| "material"
+	| "ordering"
+>;
+
+/** Anchor-relative landblock offset, resolved once per visible landblock per frame. */
+type LandblockRenderOffset = readonly [number, number, number];
+
+/**
+ * One static publication's complete submission set plus the node-level facts a frame reports.
+ *
+ * Cached whole against the publication, so a visible node performs one lookup per frame instead
+ * of rebuilding a submission, a scope key, and a layer key for every draw unit it owns.
+ */
+interface CompiledStaticNodeSubmissions {
+	readonly objects: readonly PreparedObjectFrameInput[];
+	readonly landblockId: string;
+	readonly source: ObjectFrameInput["source"];
+	/** Key this publication contributes to the visible-layer census. */
+	readonly visibleLayerKey: string;
+	/** Cell scope this publication occupies, or null for outdoor publications. */
+	readonly envCellScopeKey: string | null;
 }
 
 type AnyObjectProgram =
@@ -348,6 +434,13 @@ interface PreparedSceneContributions {
 	readonly terrain: readonly TerrainFrameInput[];
 	/** Opaque and alpha-test static-object ranges visible to this view. */
 	readonly objects: readonly PreparedObjectFrameInput[];
+	/**
+	 * Anchor-relative offset per visible landblock for this frame.
+	 *
+	 * The only anchor-relative fact in a submission, held here rather than on each object so
+	 * submissions survive re-anchoring and can be cached with their publication.
+	 */
+	readonly landblockOffsets: ReadonlyMap<string, LandblockRenderOffset>;
 	/** Final contribution-local batches, recoalesced after particle owner routing. */
 	readonly particles: readonly ParticleDrawBatch[];
 	/** Sky-attached particle batches drawn before the landscape. */
@@ -478,6 +571,28 @@ export class WebGL2Renderer implements Renderer {
 	/** Shared clock seconds for the current frame, driving derived texture-velocity phase. */
 	#skyClockSeconds = 0;
 	readonly #offsetScratch = new Vec3(0, 0, 0);
+	/**
+	 * Draw facts compiled once per draw unit instead of once per frame.
+	 *
+	 * Keyed by the artifact draw units and templates themselves, so entries become collectable
+	 * with the publication that owns them; the named flushes cover the events that invalidate
+	 * every entry at once.
+	 */
+	readonly #compiledDraws = new CompiledObjectDrawStore<
+		CompiledStaticNodeSubmissions,
+		PreparedObjectDrawCompatibility
+	>();
+	/** Last landblock offset uploaded, memoizing the per-draw lookup across a run. */
+	#lastDrawnLandblockId: string | null = null;
+	#lastDrawnLandblockOffset: LandblockRenderOffset = [0, 0, 0];
+	/** Terrain programs resolved once per realized landblock; see #resolveTerrainFrameInput. */
+	readonly #terrainFrameInputs = new WeakMap<
+		TerrainDrawUnit,
+		TerrainFrameInput
+	>();
+	/** Frame settings that select compiled facts, retained to detect a change between frames. */
+	#compiledTextureFiltering: TextureFilteringPolicy | null = null;
+	#compiledEnvCellRenderMode: FrameSettings["envCellRenderMode"] | null = null;
 	/** Reused while deriving transparent range distances before sorting a view. */
 	readonly #transparentCenterScratch = new Vec3(0, 0, 0);
 	readonly #canvas: HTMLCanvasElement;
@@ -678,6 +793,7 @@ export class WebGL2Renderer implements Renderer {
 		};
 		this.frameDiagnostics = {
 			snapshot: () => ({
+				compiledObjectDraws: this.#compiledDraws.getDiagnostics(),
 				profile: this.#frameProfiler?.getProfile() ?? null,
 				profilingEnabled: this.#frameProfiler !== null,
 				selectionMetrics: {
@@ -720,6 +836,16 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
+	/**
+	 * Drop compiled draw facts because a runtime event invalidated them.
+	 *
+	 * Implements the shared renderer contract: the events that move atlas placements or replace
+	 * active-region detail are owned by the runtime and cannot be observed from inside a frame.
+	 */
+	invalidateResolvedResources(reason: ResolvedResourceInvalidation): void {
+		this.#compiledDraws.flush(reason);
+	}
+
 	/** Toggle the harness-only AO category view without widening production frame settings. */
 	setAmbientOcclusionCoverageVisualizationEnabled(enabled: boolean): void {
 		this.#saoCoverageVisualizationEnabled = enabled;
@@ -736,7 +862,27 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const setupStartedAt = profile?.beginCpuPhase();
+		// Offsets are anchor-relative and rebuilt every frame, so last frame's memo would be a
+		// stale value for the same landblock after the anchor moves.
+		this.#lastDrawnLandblockId = null;
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
+		// Compiled facts embed the samplers filtering selects and the cull-face override the
+		// env-cell mode selects, so a change to either invalidates every compiled entry. Both
+		// arrive as frame settings, which is the only place the renderer can observe them change.
+		if (this.#compiledTextureFiltering !== this.#frameTextureFiltering) {
+			if (this.#compiledTextureFiltering !== null) {
+				this.#compiledDraws.flush("texture-filtering");
+			}
+			this.#compiledTextureFiltering = this.#frameTextureFiltering;
+		}
+		if (
+			this.#compiledEnvCellRenderMode !== input.frameSettings.envCellRenderMode
+		) {
+			if (this.#compiledEnvCellRenderMode !== null) {
+				this.#compiledDraws.flush("env-cell-render-mode");
+			}
+			this.#compiledEnvCellRenderMode = input.frameSettings.envCellRenderMode;
+		}
 		this.#skyClockSeconds = input.timeSeconds;
 		this.#minimumPortalFootprintPixelArea =
 			input.frameSettings.quality.minimumPortalFootprintPixelArea;
@@ -1317,7 +1463,20 @@ export class WebGL2Renderer implements Renderer {
 	): PreparedSceneContributions {
 		const resolutionStartedAt = profile?.beginCpuPhase();
 		const terrain: TerrainFrameInput[] = [];
-		const objects: ObjectFrameInput[] = [];
+		const objects: PreparedObjectFrameInput[] = [];
+		let staticObjectCount = 0;
+		// One offset per visible landblock, not one per object: it is the same value for every
+		// object in a landblock. Submissions carry only their landblock id, so a cached static
+		// submission stays valid across re-anchoring and the frame never rewrites it.
+		const landblockOffsets = new Map<string, LandblockRenderOffset>();
+		const retainOffset = (landblockId: string): void => {
+			if (landblockOffsets.has(landblockId)) return;
+			const offset = createLandblockOffset(
+				getLandblockCoordinates(landblockId),
+				prepared.anchorCoordinates,
+			);
+			landblockOffsets.set(landblockId, [offset.x, offset.y, offset.z]);
+		};
 		this.#frameSelectionMetrics.visibleSceneEntries += visibleEntries.length;
 		for (const nodeId of visibleEntries) {
 			const contribution = this.#world.getRenderContributionDescriptor(nodeId);
@@ -1326,69 +1485,24 @@ export class WebGL2Renderer implements Renderer {
 				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
 					continue;
 				}
+				// A static publication has exactly one submission set; its culling group is fixed
+				// for the renderable's lifetime and serves as the variant name.
+				const compiled = this.#compiledDraws.resolveNodeSubmissions(
+					contribution.renderable,
+					contribution.cullingGroup,
+					() => this.#compileStaticNodeSubmissions(nodeId, contribution),
+				);
 				this.#frameSelectionMetrics.visibleStaticNodeCount += 1;
-				const source =
-					contribution.cullingGroup === "env-cell-static-residents"
-						? "env-cell-resident"
-						: contribution.cullingGroup === LandblockLayerKind.Generated
-							? "generated"
-							: "outdoor";
-				if (source === "env-cell-resident") {
+				if (compiled.source === "env-cell-resident") {
 					this.#frameSelectionMetrics.visibleEnvCellResidentNodes += 1;
 				}
-				const node = this.#world.resolveStaticObjectNode(
-					nodeId,
-					contribution.renderable,
-					contribution.footprint,
-				);
-				this.#visibleStaticLayers.add(
-					`${node.placement.scope.kind === "outdoor" ? "outdoor" : `${node.placement.scope.landblockId}/${node.placement.scope.envCellId}`}/${contribution.cullingGroup}`,
-				);
-				if (node.placement.scope.kind === "env-cell") {
-					this.#visibleEnvCellScopes.add(
-						`${node.placement.scope.landblockId}/${node.placement.scope.envCellId}`,
-					);
+				this.#visibleStaticLayers.add(compiled.visibleLayerKey);
+				if (compiled.envCellScopeKey !== null) {
+					this.#visibleEnvCellScopes.add(compiled.envCellScopeKey);
 				}
-				for (const resolved of node.drawUnits) {
-					const { drawUnit } = resolved;
-					objects.push({
-						cullFaceOverride: null,
-						drawKind: "baked",
-						geometry: resolved.geometry,
-						indexCount: drawUnit.indexCount,
-						indexStart: drawUnit.indexStart,
-						instances: null,
-						landblockId: node.placement.landblockId,
-						localToLandblock: node.placement.localToLandblock,
-						material: drawUnit.material,
-						ordering: drawUnit.ordering,
-						renderScopeKey: scopeKey(node.placement.scope),
-						source,
-						transparentSort: drawUnit.transparentSort,
-					});
-				}
-				for (const resolved of node.frameStreamedInstances) {
-					const { template } = resolved;
-					objects.push({
-						cullFaceOverride: null,
-						drawKind: "instanced",
-						geometry: resolved.geometry,
-						indexCount: template.indexCount,
-						indexStart: template.indexStart,
-						instances: {
-							cohortKey: template.cohortKey,
-							instance: template.instance,
-							kind: "frame-template",
-						},
-						landblockId: node.placement.landblockId,
-						localToLandblock: node.placement.localToLandblock,
-						material: template.material,
-						ordering: "transparent",
-						renderScopeKey: scopeKey(node.placement.scope),
-						source,
-						transparentSort: template.transparentSort,
-					});
-				}
+				retainOffset(compiled.landblockId);
+				staticObjectCount += compiled.objects.length;
+				for (const object of compiled.objects) objects.push(object);
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
@@ -1404,84 +1518,71 @@ export class WebGL2Renderer implements Renderer {
 				for (const resolved of this.#world.resolveDynamicContributions(
 					dynamicContributions,
 				)) {
-					const { domain, drawUnit, instance, transparentSort } =
+					const { domain, drawUnit, instance, ordering, transparentSort } =
 						resolved.drawUnit;
-					objects.push({
-						cullFaceOverride: null,
-						drawKind: "instanced",
-						geometry: resolved.geometry,
-						indexCount: drawUnit.indexCount,
-						indexStart: drawUnit.indexStart,
-						instances: {
-							cohortKey: `${domain.key}/${drawUnit.batchKey}`,
-							instance,
-							kind: "frame-template",
-						},
-						landblockId: domain.landblockId,
-						localToLandblock: instance.sourceToLandblock,
-						material: drawUnit.material,
-						ordering: drawUnit.ordering,
-						renderScopeKey: scopeKey(domain.scope),
-						source: "dynamic",
-						transparentSort,
-					});
+					retainOffset(domain.landblockId);
+					const compiled = this.#compiledDraws.resolveDraw(
+						drawUnit,
+						ordering,
+						() =>
+							this.#compileObjectDraw({
+								cullFaceOverride: null,
+								geometry: resolved.geometry,
+								indexCount: drawUnit.indexCount,
+								indexStart: drawUnit.indexStart,
+								material: drawUnit.material,
+								ordering,
+							}),
+					);
+					objects.push(
+						createObjectSubmission(
+							{
+								cullFaceOverride: null,
+								drawKind: "instanced",
+								geometry: resolved.geometry,
+								indexCount: drawUnit.indexCount,
+								indexStart: drawUnit.indexStart,
+								instances: {
+									cohortKey: `${domain.key}/${drawUnit.batchKey}`,
+									instance,
+									kind: "frame-template",
+								},
+								landblockId: domain.landblockId,
+								localToLandblock: instance.sourceToLandblock,
+								material: drawUnit.material,
+								ordering,
+								renderScopeKey: scopeKey(domain.scope),
+								source: "dynamic",
+								transparentSort,
+							},
+							compiled,
+						),
+					);
 				}
 				continue;
 			}
 			if (contribution.kind === "env-cell") {
 				this.#frameSelectionMetrics.visibleEnvCellShells += 1;
-				const node = this.#world.resolveEnvCellNode(
-					nodeId,
+				const compiled = this.#compiledDraws.resolveNodeSubmissions(
 					contribution.renderable,
+					frameSettings.envCellRenderMode,
+					() =>
+						this.#compileShellNodeSubmissions(
+							nodeId,
+							contribution,
+							frameSettings.envCellRenderMode,
+						),
 				);
-				if (node.placement.scope.kind !== "env-cell") {
-					throw new Error(`EnvCell shell ${nodeId} has outdoor residency.`);
+				if (compiled.envCellScopeKey !== null) {
+					this.#visibleEnvCellScopes.add(compiled.envCellScopeKey);
 				}
-				this.#visibleEnvCellScopes.add(
-					`${node.placement.scope.landblockId}/${node.placement.scope.envCellId}`,
-				);
-				this.#visibleStaticLayers.add(
-					`${node.placement.scope.landblockId}/${node.placement.scope.envCellId}/env-cell-shell`,
-				);
-				for (const resolved of node.drawUnits) {
-					objects.push({
-						cullFaceOverride:
-							frameSettings.envCellRenderMode === "flat" ? "back" : null,
-						drawKind: "baked",
-						geometry: resolved.geometry,
-						indexCount: resolved.drawUnit.indexCount,
-						indexStart: resolved.drawUnit.indexStart,
-						instances: null,
-						landblockId: node.placement.landblockId,
-						localToLandblock: node.placement.localToLandblock,
-						material: resolved.drawUnit.material,
-						ordering: resolved.drawUnit.ordering,
-						renderScopeKey: scopeKey(node.placement.scope),
-						source: "env-cell-shell",
-						transparentSort: resolved.drawUnit.transparentSort,
-					});
-				}
+				this.#visibleStaticLayers.add(compiled.visibleLayerKey);
+				retainOffset(compiled.landblockId);
+				staticObjectCount += compiled.objects.length;
+				for (const object of compiled.objects) objects.push(object);
 				continue;
 			}
-			const { drawUnit } = contribution;
-			terrain.push({
-				drawUnit,
-				program: {
-					geometry: this.#world.resolveGeometry(drawUnit.geometry),
-					composition: this.#world.resolveTexture2D(drawUnit.composition),
-					surfaceField: this.#world.resolveTexture2D(drawUnit.surfaceField),
-					textures: {
-						blendMasks: this.#world.resolveTextureArray(
-							drawUnit.textures.blendMasks,
-						),
-						colors: this.#world.resolveTextureArray(drawUnit.textures.colors),
-						detail: this.#world.resolveTexture2D(drawUnit.textures.detail),
-						roadMasks: this.#world.resolveTextureArray(
-							drawUnit.textures.roadMasks,
-						),
-					},
-				},
-			});
+			terrain.push(this.#resolveTerrainFrameInput(contribution.drawUnit));
 			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
 		if (profile && resolutionStartedAt !== undefined) {
@@ -1490,22 +1591,15 @@ export class WebGL2Renderer implements Renderer {
 				resolutionStartedAt,
 			);
 		}
-		const preparationStartedAt = profile?.beginCpuPhase();
-		const preparedObjects = objects.map((object) =>
-			this.#prepareObjectFrameInput(object, prepared.anchorLandblockId),
-		);
-		if (profile && preparationStartedAt !== undefined) {
-			profile.finishCpuPhase("objectPreparation", preparationStartedAt);
-			const dynamicObjectCount = objects.filter(
-				(object) => object.source === "dynamic",
-			).length;
+		if (profile) {
 			profile.recordObjectPreparation(
-				objects.length - dynamicObjectCount,
-				dynamicObjectCount,
+				staticObjectCount,
+				objects.length - staticObjectCount,
 			);
 		}
 		return {
-			objects: preparedObjects,
+			landblockOffsets,
+			objects,
 			particles: [],
 			skyParticles: [],
 			terrain,
@@ -1547,17 +1641,197 @@ export class WebGL2Renderer implements Renderer {
 		return retained;
 	}
 
-	/** Compile every draw-consumed constant once before ordering, grouping, or submission. */
-	#prepareObjectFrameInput(
+	/**
+	 * Resolve one landblock's terrain program once, against the draw unit that owns it.
+	 *
+	 * Terrain draw units are built when their landblock realizes and live until it is removed, and
+	 * every resource they name is immutable for its key: texture arrays are created once per key
+	 * and generated surfaces once per source. There is therefore no invalidation event to ride —
+	 * an entry simply becomes collectable with the installation that produced its draw unit.
+	 */
+	#resolveTerrainFrameInput(drawUnit: TerrainDrawUnit): TerrainFrameInput {
+		const existing = this.#terrainFrameInputs.get(drawUnit);
+		if (existing !== undefined) return existing;
+		const resolved: TerrainFrameInput = {
+			drawUnit,
+			program: {
+				geometry: this.#world.resolveGeometry(drawUnit.geometry),
+				composition: this.#world.resolveTexture2D(drawUnit.composition),
+				surfaceField: this.#world.resolveTexture2D(drawUnit.surfaceField),
+				textures: {
+					blendMasks: this.#world.resolveTextureArray(
+						drawUnit.textures.blendMasks,
+					),
+					colors: this.#world.resolveTextureArray(drawUnit.textures.colors),
+					detail: this.#world.resolveTexture2D(drawUnit.textures.detail),
+					roadMasks: this.#world.resolveTextureArray(
+						drawUnit.textures.roadMasks,
+					),
+				},
+			},
+		};
+		this.#terrainFrameInputs.set(drawUnit, resolved);
+		return resolved;
+	}
+
+	/**
+	 * Build one shell publication's submission set for one env-cell render mode, once per mode.
+	 *
+	 * Like static publications, shell submissions hold nothing frame-variant; the render mode is
+	 * part of the cache variant because it selects the cull-face override.
+	 */
+	#compileShellNodeSubmissions(
+		nodeId: SceneNodeId,
+		contribution: Extract<RenderContribution, { kind: "env-cell" }>,
+		envCellRenderMode: FrameSettings["envCellRenderMode"],
+	): CompiledStaticNodeSubmissions {
+		const objects: PreparedObjectFrameInput[] = [];
+
+		const node = this.#world.resolveEnvCellNode(
+			nodeId,
+			contribution.renderable,
+		);
+		if (node.placement.scope.kind !== "env-cell") {
+			throw new Error(`EnvCell shell ${nodeId} has outdoor residency.`);
+		}
+		const scope = node.placement.scope;
+		for (const resolved of node.drawUnits) {
+			objects.push(
+				this.#compileStaticSubmission(resolved.drawUnit, {
+					cullFaceOverride: envCellRenderMode === "flat" ? "back" : null,
+					drawKind: "baked",
+					geometry: resolved.geometry,
+					indexCount: resolved.drawUnit.indexCount,
+					indexStart: resolved.drawUnit.indexStart,
+					instances: null,
+					landblockId: node.placement.landblockId,
+					localToLandblock: node.placement.localToLandblock,
+					material: resolved.drawUnit.material,
+					ordering: resolved.drawUnit.ordering,
+					renderScopeKey: scopeKey(scope),
+					source: "env-cell-shell",
+					transparentSort: resolved.drawUnit.transparentSort,
+				}),
+			);
+		}
+		const envCellScopeKey = `${scope.landblockId}/${scope.envCellId}`;
+		return {
+			envCellScopeKey,
+			landblockId: node.placement.landblockId,
+			objects,
+			source: "env-cell-shell",
+			visibleLayerKey: `${envCellScopeKey}/env-cell-shell`,
+		};
+	}
+
+	/**
+	 * Build one static publication's complete submission set, once for its lifetime.
+	 *
+	 * Static submissions hold nothing that varies between frames: placement, geometry, material,
+	 * ordering and sort facts are all fixed when the publication commits, and the one
+	 * anchor-relative fact is looked up per frame from the landblock offsets instead of stored
+	 * here. A visible node therefore costs one cache lookup and an array append per frame.
+	 */
+	#compileStaticNodeSubmissions(
+		nodeId: SceneNodeId,
+		contribution: Extract<RenderContribution, { kind: "static-object" }>,
+	): CompiledStaticNodeSubmissions {
+		const objects: PreparedObjectFrameInput[] = [];
+		const source =
+			contribution.cullingGroup === "env-cell-static-residents"
+				? "env-cell-resident"
+				: contribution.cullingGroup === LandblockLayerKind.Generated
+					? "generated"
+					: "outdoor";
+		const node = this.#world.resolveStaticObjectNode(
+			nodeId,
+			contribution.renderable,
+			contribution.footprint,
+		);
+		const scope = node.placement.scope;
+		const renderScopeKey = scopeKey(scope);
+		for (const resolved of node.drawUnits) {
+			const { drawUnit } = resolved;
+			objects.push(
+				this.#compileStaticSubmission(drawUnit, {
+					cullFaceOverride: null,
+					drawKind: "baked",
+					geometry: resolved.geometry,
+					indexCount: drawUnit.indexCount,
+					indexStart: drawUnit.indexStart,
+					instances: null,
+					landblockId: node.placement.landblockId,
+					localToLandblock: node.placement.localToLandblock,
+					material: drawUnit.material,
+					ordering: drawUnit.ordering,
+					renderScopeKey,
+					source,
+					transparentSort: drawUnit.transparentSort,
+				}),
+			);
+		}
+		for (const resolved of node.frameStreamedInstances) {
+			const { template } = resolved;
+			objects.push(
+				this.#compileStaticSubmission(template, {
+					cullFaceOverride: null,
+					drawKind: "instanced",
+					geometry: resolved.geometry,
+					indexCount: template.indexCount,
+					indexStart: template.indexStart,
+					instances: {
+						cohortKey: template.cohortKey,
+						instance: template.instance,
+						kind: "frame-template",
+					},
+					landblockId: node.placement.landblockId,
+					localToLandblock: node.placement.localToLandblock,
+					material: template.material,
+					ordering: "transparent",
+					renderScopeKey,
+					source,
+					transparentSort: template.transparentSort,
+				}),
+			);
+		}
+		return {
+			envCellScopeKey:
+				scope.kind === "env-cell"
+					? `${scope.landblockId}/${scope.envCellId}`
+					: null,
+			landblockId: node.placement.landblockId,
+			objects,
+			source,
+			visibleLayerKey:
+				scope.kind === "outdoor"
+					? `outdoor/${contribution.cullingGroup}`
+					: `${scope.landblockId}/${scope.envCellId}/${contribution.cullingGroup}`,
+		};
+	}
+
+	/** Pair one static contribution with its compiled draw facts, both retained for its lifetime. */
+	#compileStaticSubmission(
+		key: object,
 		object: ObjectFrameInput,
-		anchorLandblockId: FrameInput["anchorLandblockId"],
 	): PreparedObjectFrameInput {
+		const compiled = this.#compiledDraws.resolveDraw(key, object.ordering, () =>
+			this.#compileObjectDraw(object),
+		);
+		return createObjectSubmission(object, compiled);
+	}
+
+	/**
+	 * Compile every draw-consumed constant for one draw unit, once for its whole lifetime.
+	 *
+	 * Nothing resolved here varies with the camera or the anchor, so the result is cached against
+	 * the draw unit that owns it and shared by every later frame. The anchor-relative offset is
+	 * assembled per frame by the caller instead.
+	 */
+	#compileObjectDraw(
+		object: CompiledObjectDrawInput,
+	): CompiledObjectDraw<PreparedObjectDrawCompatibility> {
 		const geometry = this.#resources.getGeometry(object.geometry);
 		validateDrawRange(geometry, object.indexStart, object.indexCount);
-		const landblockOffset = createLandblockOffset(
-			getLandblockCoordinates(object.landblockId),
-			getLandblockCoordinates(anchorLandblockId),
-		);
 		const { material } = object;
 		const opacity = sourceOpacity(material.source.translucency);
 		// RETAIL DIVERGENCE: Authored CSurface.diffuse (e.g. 0.2734 on 0x080006E4, the celtic knot
@@ -1607,7 +1881,6 @@ export class WebGL2Renderer implements Renderer {
 			this.#world.resolveActiveRegionStaticDetail(role),
 		);
 		return {
-			...object,
 			blendPolicy: objectBlendPolicy(material.source.rawSurfaceFlags),
 			compatibility: {
 				alphaTest:
@@ -1629,11 +1902,6 @@ export class WebGL2Renderer implements Renderer {
 				geometry,
 				indexCount: object.indexCount,
 				indexStart: object.indexStart,
-				landblockOffset: [
-					landblockOffset.x,
-					landblockOffset.y,
-					landblockOffset.z,
-				],
 				luminosity: material.source.luminosity,
 				material: preparedMaterial,
 				palettedClipMap: material.palettedClipMap,
@@ -2504,11 +2772,12 @@ export class WebGL2Renderer implements Renderer {
 		try {
 			const phases = createObjectSubmissionPhases(
 				view.objects,
-				(object) => this.#transparentSortFacts(object, view),
+				(object) => this.#transparentRange(object, view),
 				(object) =>
 					object.instances?.kind === "frame-template"
 						? object.instances.cohortKey
 						: null,
+				(object) => this.#transparentCameraDepth(object, view),
 			);
 			this.#frameSelectionMetrics.transparentObjectCandidateCount +=
 				phases.transparent.far.length + phases.transparent.near.length;
@@ -2524,28 +2793,20 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	/** Compute object-center camera ordering facts exactly once per transparent range. */
-	#transparentSortFacts(
+	/**
+	 * Classify one transparent range against the camera, without deriving its camera depth.
+	 *
+	 * Every producer publishes its sort center in landblock space, so placing it in the view's
+	 * anchored frame is one offset add: no per-candidate matrix work survives here.
+	 */
+	#transparentRange(
 		object: PreparedObjectFrameInput,
 		view: PreparedViewGeometry,
-	): TransparentObjectSortFacts {
+	): TransparentObjectRange<PreparedObjectFrameInput> {
 		const facts = object.transparentSort;
 		if (!facts) {
 			throw new Error(
 				"Transparent static-object contribution lacks sort facts.",
-			);
-		}
-		if (object.instances?.kind === "frame-template") {
-			transformPoint3(
-				object.instances.instance.sourceToLandblock,
-				facts.center,
-				this.#transparentCenterScratch,
-			);
-		} else {
-			transformPoint3(
-				object.localToLandblock,
-				facts.center,
-				this.#transparentCenterScratch,
 			);
 		}
 		const offset = createLandblockOffset(
@@ -2553,24 +2814,42 @@ export class WebGL2Renderer implements Renderer {
 			view.anchorCoordinates,
 			this.#offsetScratch,
 		);
-		this.#transparentCenterScratch.x += offset.x;
-		this.#transparentCenterScratch.y += offset.y;
-		this.#transparentCenterScratch.z += offset.z;
-		const x = this.#transparentCenterScratch.x - view.cameraPosition.x;
-		const y = this.#transparentCenterScratch.y - view.cameraPosition.y;
-		const z = this.#transparentCenterScratch.z - view.cameraPosition.z;
-		const distanceSquared = x * x + y * y + z * z;
+		const x = facts.center.x + offset.x - view.cameraPosition.x;
+		const y = facts.center.y + offset.y - view.cameraPosition.y;
+		const z = facts.center.z + offset.z - view.cameraPosition.z;
+		return {
+			distanceSquared: x * x + y * y + z * z,
+			range: object,
+			stableId: facts.stableId,
+		};
+	}
+
+	/** Project one near candidate's center onto the camera's forward axis for exact ordering. */
+	#transparentCameraDepth(
+		object: PreparedObjectFrameInput,
+		view: PreparedViewGeometry,
+	): number {
+		const facts = object.transparentSort;
+		if (!facts) {
+			throw new Error(
+				"Transparent static-object contribution lacks sort facts.",
+			);
+		}
+		const offset = createLandblockOffset(
+			getLandblockCoordinates(object.landblockId),
+			view.anchorCoordinates,
+			this.#offsetScratch,
+		);
+		this.#transparentCenterScratch.x = facts.center.x + offset.x;
+		this.#transparentCenterScratch.y = facts.center.y + offset.y;
+		this.#transparentCenterScratch.z = facts.center.z + offset.z;
 		transformPoint3(
 			view.view,
 			this.#transparentCenterScratch,
 			this.#transparentCenterScratch,
 		);
-		return {
-			// The renderer's right-handed view matrix maps forward to negative view-space Z.
-			cameraDepth: -this.#transparentCenterScratch.z,
-			distanceSquared,
-			stableId: facts.stableId,
-		};
+		// The renderer's right-handed view matrix maps forward to negative view-space Z.
+		return -this.#transparentCenterScratch.z;
 	}
 
 	#drawOpaqueObjects(
@@ -2605,7 +2884,7 @@ export class WebGL2Renderer implements Renderer {
 					program.uniforms.clipTransform,
 					programChanged,
 				);
-				this.#drawObjectRange(program, object);
+				this.#drawObjectRange(program, object, view.landblockOffsets);
 			}
 		} finally {
 			if (profile && submissionStartedAt !== undefined) {
@@ -2667,7 +2946,7 @@ export class WebGL2Renderer implements Renderer {
 				}
 				this.#applyObjectLighting(program, object, shading);
 				this.#objectState.applyBlend(object.blendPolicy);
-				this.#drawObjectRange(program, object);
+				this.#drawObjectRange(program, object, view.landblockOffsets);
 			}
 		} finally {
 			if (profile && submissionStartedAt !== undefined) {
@@ -2749,6 +3028,9 @@ export class WebGL2Renderer implements Renderer {
 				left: PreparedObjectFrameInput,
 				right: PreparedObjectFrameInput,
 			): boolean =>
+				// One offset per landblock this frame, so equal landblocks mean equal offsets:
+				// this replaces the component comparison the compatibility value used to carry.
+				left.landblockId === right.landblockId &&
 				areStaticObjectDrawsCompatible(
 					left.compatibility,
 					right.compatibility,
@@ -2820,6 +3102,7 @@ export class WebGL2Renderer implements Renderer {
 	#drawObjectRange(
 		program: AnyObjectProgram,
 		object: PreparedObjectFrameInput,
+		landblockOffsets: PreparedSceneContributions["landblockOffsets"],
 	): void {
 		if (
 			(object.drawKind === "baked") !==
@@ -2839,11 +3122,22 @@ export class WebGL2Renderer implements Renderer {
 				mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
 			);
 		}
+		// Submissions are drawn in run order, so consecutive draws usually share a landblock.
+		if (object.landblockId !== this.#lastDrawnLandblockId) {
+			const offset = landblockOffsets.get(object.landblockId);
+			if (offset === undefined) {
+				throw new Error(
+					`Submitted object in landblock ${object.landblockId} has no frame offset.`,
+				);
+			}
+			this.#lastDrawnLandblockId = object.landblockId;
+			this.#lastDrawnLandblockOffset = offset;
+		}
 		gl.uniform3f(
 			program.uniforms.landblockOffset,
-			compatibility.landblockOffset[0],
-			compatibility.landblockOffset[1],
-			compatibility.landblockOffset[2],
+			this.#lastDrawnLandblockOffset[0],
+			this.#lastDrawnLandblockOffset[1],
+			this.#lastDrawnLandblockOffset[2],
 		);
 		gl.uniform1i(program.uniforms.wrapRepeat, compatibility.wrapRepeat ? 1 : 0);
 		gl.uniform1i(

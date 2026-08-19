@@ -25,6 +25,16 @@
 	let exportStatus = $state<string | null>(null);
 
 	const metrics = $derived(diagnostics?.selectionMetrics ?? null);
+	const compiledDraws = $derived(diagnostics?.compiledObjectDraws ?? null);
+	/** Flushes are rare by design, so showing the total keeps an unexpected source visible. */
+	const compiledFlushTotal = $derived(
+		compiledDraws === null
+			? 0
+			: Object.values(compiledDraws.flushCounts).reduce(
+					(total, count) => total + count,
+					0,
+				),
+	);
 	const profile = $derived(diagnostics?.profile ?? null);
 	const profilingEnabled = $derived(diagnostics?.profilingEnabled ?? false);
 
@@ -159,13 +169,11 @@
 							>
 						</div>
 						<div class="ac-param-row">
-							<span class="ac-param-key"
-								>Portal plan / compose / object prepare</span
-							>
+							<span class="ac-param-key">Portal plan / compose</span>
 							<code
 								>{profile.cpu.mean.portalPlanningMs.toFixed(2)} / {profile.cpu.mean.portalCompositionMs.toFixed(
 									2,
-								)} / {profile.cpu.mean.objectPreparationMs.toFixed(2)} ms</code
+								)} ms</code
 							>
 						</div>
 						<div class="ac-param-row">
@@ -195,6 +203,17 @@
 									>{profile.gpu.skyMs.toFixed(2)} / {profile.gpu.terrainMs.toFixed(
 										2,
 									)} / {profile.gpu.blendedMs.toFixed(2)} ms</code
+								>
+							</div>
+						{/if}
+						{#if compiledDraws}
+							<div class="ac-param-row">
+								<span class="ac-param-key"
+									>Compiled draws / total / flushes</span
+								>
+								<code
+									>{compiledDraws.compiledEntryCount} / {compiledDraws.totalCompilationCount}
+									/ {compiledFlushTotal}</code
 								>
 							</div>
 						{/if}

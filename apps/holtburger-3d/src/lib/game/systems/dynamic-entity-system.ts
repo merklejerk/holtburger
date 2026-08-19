@@ -15,7 +15,12 @@ import type {
 	PlacedDynamicPresentationSource,
 } from "./dynamic-presentation-source";
 import { AABB3, Mat4, Vec3 } from "../math/types";
-import { multiplyMat4, transformAABB3 } from "../math/matrices";
+import {
+	multiplyMat4,
+	transformAABB3,
+	transformPoint3,
+} from "../math/matrices";
+import { landblockVec3 } from "../../assets/ac-frame";
 import type { SceneGraph, SceneNodeId } from "../scene";
 import type { ScenePlacement } from "../scene";
 import { scopeKey } from "../scene/scope";
@@ -551,10 +556,11 @@ export class DynamicEntitySystem<
 						landblockId: placement.landblockId,
 						scope: placement.scope,
 					},
-					drawUnit:
-						ordering === drawUnit.ordering
-							? drawUnit
-							: { ...drawUnit, ordering },
+					// The draw unit is passed by reference, never cloned to carry an overridden
+					// ordering: consumers cache compiled facts against its identity, and an
+					// effect can hold a part translucent indefinitely.
+					drawUnit,
+					ordering,
 					instance: {
 						color: { a: 1 - translucency, b: 1, g: 1, r: 1 },
 						sourceToLandblock: placement.localToLandblock,
@@ -562,7 +568,16 @@ export class DynamicEntitySystem<
 					transparentSort:
 						ordering === "transparent"
 							? {
-									center: activeDrawUnit.transparentSortCenter,
+									// Dynamic parts animate, so unlike static contributions their
+									// landblock-space center is genuinely per-frame. It is resolved
+									// here, where the pose is owned, so every transparent center
+									// reaching the renderer is in one frame.
+									center: landblockVec3(
+										transformPoint3(
+											placement.localToLandblock,
+											activeDrawUnit.transparentSortCenter,
+										),
+									),
 									stableId: `${entity.source.identity}/part:${part.partIndex}/${drawUnit.batchKey}`,
 								}
 							: null,

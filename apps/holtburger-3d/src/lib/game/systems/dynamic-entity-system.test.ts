@@ -410,15 +410,21 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const secondNodeId = requiredAt(installation.nodeIds, 1);
 		const first = system.getVisibleContributions(firstNodeId)?.[0];
 		const second = system.getVisibleContributions(secondNodeId)?.[0];
+		// A translucency ramp promotes the part into the transparent phase for this frame without
+		// rewriting its authored draw unit, whose identity consumers cache compiled facts against.
 		expect(first).toMatchObject({
-			drawUnit: { ordering: "transparent" },
+			drawUnit: { ordering: "opaque" },
 			instance: { color: { a: 0.75 } },
+			ordering: "transparent",
 		});
 		expect(first?.transparentSort).not.toBeNull();
 		expect(second).toMatchObject({
-			drawUnit: { ordering: "transparent" },
+			drawUnit: { ordering: "opaque" },
 			instance: { color: { a: 0.5 } },
+			ordering: "transparent",
 		});
+		// Both parts share one authored draw unit, so the promotion cannot have cloned it.
+		expect(first?.drawUnit).toBe(second?.drawUnit);
 		expect(first?.drawUnit.batchKey).toBe(second?.drawUnit.batchKey);
 		const firstOpaque = presentationSample(firstPrepared, 0);
 		expect(() =>

@@ -17,6 +17,7 @@ import type {
 	ObjectMaterialBinding,
 } from "./artifacts";
 import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
+import { landblockVec3 } from "../../assets/ac-frame";
 
 const INSTALL_NAMESPACE = "static-install:artifact-test" as const;
 const GEOMETRY_KEY =
@@ -112,7 +113,7 @@ function geometryResult(
 						instance: instance(),
 						material: material(),
 						transparentSort: {
-							center: Vec3.zero(),
+							center: landblockVec3(Vec3.zero()),
 							stableId: "transparent:0",
 						},
 					},

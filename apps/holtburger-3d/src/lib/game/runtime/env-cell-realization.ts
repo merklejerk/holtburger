@@ -7,6 +7,8 @@ import type {
 import type { EnvCellMaterializationPlan } from "../commit/env-cell-materialization";
 import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import { Vec3 } from "../math/types";
+import { transformPoint3 } from "../math/matrices";
+import { landblockVec3 } from "../../assets/ac-frame";
 import type { ScenePortalCrossingInput } from "../scene";
 import {
 	qualifyJunctionGroupId,
@@ -128,16 +130,23 @@ export function createEnvCellEnvironmentArtifact(
 					transparentSort:
 						range.ordering === "transparent"
 							? {
-									center: new Vec3(
-										(shell.structureLocalBounds.min.x +
-											shell.structureLocalBounds.max.x) *
-											0.5,
-										(shell.structureLocalBounds.min.y +
-											shell.structureLocalBounds.max.y) *
-											0.5,
-										(shell.structureLocalBounds.min.z +
-											shell.structureLocalBounds.max.z) *
-											0.5,
+									// A realized cell's structure never moves, so its landblock-space
+									// center is resolved here rather than by every ordering frame.
+									center: landblockVec3(
+										transformPoint3(
+											shell.placement.localTransform,
+											new Vec3(
+												(shell.structureLocalBounds.min.x +
+													shell.structureLocalBounds.max.x) *
+													0.5,
+												(shell.structureLocalBounds.min.y +
+													shell.structureLocalBounds.max.y) *
+													0.5,
+												(shell.structureLocalBounds.min.z +
+													shell.structureLocalBounds.max.z) *
+													0.5,
+											),
+										),
 									),
 									stableId: `${shell.envCellId}/shell-range:${rangeIndex}`,
 								}

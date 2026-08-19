@@ -1,4 +1,5 @@
 import { AABB3, Mat4, Vec3 } from "../math/types";
+import { landblockVec3, type LandblockVec3 } from "../../assets/ac-frame";
 import {
 	type StaticObjectGeometryPreparationJob,
 	type StaticObjectGeometryPreparationResult,
@@ -122,11 +123,7 @@ function hydrateGeometryResult(
 							...drawUnit,
 							transparentSort: {
 								...drawUnit.transparentSort,
-								center: new Vec3(
-									drawUnit.transparentSort.center.x,
-									drawUnit.transparentSort.center.y,
-									drawUnit.transparentSort.center.z,
-								),
+								center: hydrateLandblockVec3(drawUnit.transparentSort.center),
 							},
 						},
 			),
@@ -138,15 +135,16 @@ function hydrateGeometryResult(
 				},
 				transparentSort: {
 					...template.transparentSort,
-					center: new Vec3(
-						template.transparentSort.center.x,
-						template.transparentSort.center.y,
-						template.transparentSort.center.z,
-					),
+					center: hydrateLandblockVec3(template.transparentSort.center),
 				},
 			})),
 		})),
 	};
+}
+
+/** Restore a structured-cloned sort center to a real Vec3 in the frame the worker emitted it in. */
+function hydrateLandblockVec3(center: LandblockVec3): LandblockVec3 {
+	return landblockVec3(new Vec3(center.x, center.y, center.z));
 }
 
 function hydrateMat4(matrix: Mat4): Mat4 {

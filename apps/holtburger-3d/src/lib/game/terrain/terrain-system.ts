@@ -70,6 +70,16 @@ interface RealizedTerrainInstallation<TOwnerId extends string> {
 	readonly kind: "realized";
 	readonly source: ResolvedTerrainSource<TOwnerId>;
 	readonly resources: RealizedTerrainResources;
+	/**
+	 * The landblock's draw unit, assembled once when it realizes.
+	 *
+	 * Every field derives from the realized installation, so it is built here rather than rebuilt
+	 * per frame, and its stable identity lets consumers cache their own derivations against it.
+	 * Residency is deliberately *not* folded in: the shared region texture arrays it names can
+	 * still be preparing at realization and become resident later, so whether it may be drawn
+	 * stays a per-frame question.
+	 */
+	readonly drawUnit: TerrainDrawUnit;
 }
 
 type TerrainInstallation<TOwnerId extends string> =
@@ -102,6 +112,13 @@ export class TerrainSystem<
 		LandblockId,
 		TerrainInstallation<TOwnerId>
 	>();
+	/**
+	 * Landblocks whose draw-unit resources have all been observed resident.
+	 *
+	 * Residency only ever goes from pending to satisfied within one installation, so this latches
+	 * the check rather than repeating six resource lookups for every visible landblock every frame.
+	 */
+	readonly #residentDrawUnits = new Set<LandblockId>();
 	/**
 	 * Bumped whenever the installed set changes, so consumers that derive from *which* landblocks are
 	 * resident can tell that their derivation is stale without diffing the set themselves.
@@ -185,6 +202,7 @@ export class TerrainSystem<
 		const installation = this.#installations.get(landblockId);
 		if (!installation) return;
 		this.#installations.delete(landblockId);
+		this.#residentDrawUnits.delete(landblockId);
 		this.#installationRevision += 1;
 		this.#releaseSourceResources(installation.source);
 	}
@@ -195,19 +213,28 @@ export class TerrainSystem<
 		if (!landblockId) return null;
 		const installation = this.#installations.get(landblockId);
 		if (!installation || installation.kind !== "realized") return null;
+		// Residency is rechecked per frame because the shared region arrays this draw unit names
+		// can finish preparing after the landblock realizes.
+		return this.#hasDrawUnit(installation.drawUnit)
+			? installation.drawUnit
+			: null;
+	}
 
-		const drawUnit: TerrainDrawUnit = {
-			composition: installation.source.generatedTextures.composition,
+	/** Assemble one realized landblock's draw unit from facts that cannot change afterwards. */
+	#buildDrawUnit(
+		landblockId: LandblockId,
+		source: ResolvedTerrainSource<TOwnerId>,
+		resources: RealizedTerrainResources,
+	): TerrainDrawUnit {
+		return {
+			composition: source.generatedTextures.composition,
 			coordinates: getLandblockCoordinates(landblockId),
-			dominantTerrainCode: installation.resources.dominantTerrainCode,
-			geometry: installation.source.geometry,
+			dominantTerrainCode: resources.dominantTerrainCode,
+			geometry: source.geometry,
 			landblockId,
-			surfaceField: installation.source.generatedTextures.surfaceField,
-			textures: terrainTextureKeysFromFacts(
-				installation.source.input.presentation.textures,
-			),
+			surfaceField: source.generatedTextures.surfaceField,
+			textures: terrainTextureKeysFromFacts(source.input.presentation.textures),
 		};
-		return this.#hasDrawUnit(drawUnit) ? drawUnit : null;
 	}
 
 	/** Sample source-proven terrain height without waiting for generated GPU resources. */
@@ -249,6 +276,7 @@ export class TerrainSystem<
 		for (const installation of this.#installations.values())
 			this.#releaseSourceResources(installation.source);
 		this.#installations.clear();
+		this.#residentDrawUnits.clear();
 		this.#nodes.clear();
 		this.#nodeLandblocks.clear();
 	}
@@ -268,6 +296,11 @@ export class TerrainSystem<
 				kind: "realized",
 				source: installation.source,
 				resources,
+				drawUnit: this.#buildDrawUnit(
+					landblockId,
+					installation.source,
+					resources,
+				),
 			});
 			this.#syncSceneBoundsForLandblock(landblockId);
 		} catch (error) {

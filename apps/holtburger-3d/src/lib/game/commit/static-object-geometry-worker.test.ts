@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Mat4, Vec3 } from "../math/types";
+import { transformPoint3 } from "../math/matrices";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
 	ResolvedEnvCellStaticObjectSource,
@@ -295,6 +296,35 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(template?.instance.sourceToLandblock).toBeInstanceOf(Mat4);
 		expect(template?.instance.sourceToLandblock.m41).toBe(3);
 		expect(template?.transparentSort.center).toBeInstanceOf(Vec3);
+		// Equivalence pin for the retired per-frame transform: a template's published center must
+		// equal what the renderer used to derive each frame from the shared source-local center.
+		const partitionGeometry = result?.geometry.find(({ key }) =>
+			key.startsWith("static-source-geometry:"),
+		)?.geometry;
+		expect(partitionGeometry).toBeDefined();
+		const sourceLocalCenter = Vec3.zero();
+		const { positions } = partitionGeometry!;
+		for (let offset = 0; offset < positions.length; offset += 3) {
+			sourceLocalCenter.x += positions[offset]! / (positions.length / 3);
+			sourceLocalCenter.y += positions[offset + 1]! / (positions.length / 3);
+			sourceLocalCenter.z += positions[offset + 2]! / (positions.length / 3);
+		}
+		const retiredPerFrameCenter = transformPoint3(
+			template!.instance.sourceToLandblock,
+			sourceLocalCenter,
+		);
+		expect(template?.transparentSort.center.x).toBeCloseTo(
+			retiredPerFrameCenter.x,
+			12,
+		);
+		expect(template?.transparentSort.center.y).toBeCloseTo(
+			retiredPerFrameCenter.y,
+			12,
+		);
+		expect(template?.transparentSort.center.z).toBeCloseTo(
+			retiredPerFrameCenter.z,
+			12,
+		);
 		worker.destroy();
 	});
 
@@ -388,8 +418,10 @@ describe("prepareStaticObjectGeometry", () => {
 		).toEqual(["additive", "alpha-test", "opaque"]);
 		expect(result?.objects[0]?.frameStreamedInstances).toHaveLength(1);
 		expect(result?.objects[0]?.frameStreamedInstances[0]).toMatchObject({
+			// Landblock space: the source-local centroid (1/3, 1/3, 0) translated by this
+			// resident's own placement, which sits at x = 6. The renderer no longer applies it.
 			transparentSort: {
-				center: { x: 1 / 3, y: 1 / 3, z: 0 },
+				center: { x: 6 + 1 / 3, y: 1 / 3, z: 0 },
 				stableId: expect.stringContaining("transparent"),
 			},
 		});

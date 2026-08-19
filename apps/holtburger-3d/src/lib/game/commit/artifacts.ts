@@ -6,7 +6,7 @@ import type {
 } from "../geometry/types";
 import type { LandblockId } from "../game-types";
 import type { AABB3 } from "../math/types";
-import type { Vec3 } from "../math/types";
+import type { LandblockVec3 } from "../../assets/ac-frame";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import type { StaticDetailRole } from "../resolution/static-detail-role";
 import type {
@@ -26,7 +26,7 @@ import type {
 	TextureSamplerPolicy,
 } from "../textures/types";
 
-/** Transform, color, and source-local center floats retained by one transparent template. */
+/** Transform, color, and landblock-space center floats retained by one transparent template. */
 const FRAME_STREAMED_OBJECT_INSTANCE_TEMPLATE_FLOAT_COUNT = 23;
 
 /** Fixed numeric payload bytes retained by one transparent instance template. */
@@ -100,10 +100,16 @@ export interface StaticObjectDrawUnit {
 	readonly material: ObjectMaterialBinding;
 	/** Renderer-neutral ordering class selected from lossless source material facts. */
 	readonly ordering: ObjectMaterialOrdering;
-	/** Stable distance-sort input present only for transparent ranges. */
+	/**
+	 * Stable distance-sort input present only for transparent ranges.
+	 *
+	 * `center` is in landblock space, the space every transparent sort center reaches the renderer
+	 * in. Baked ranges merge their contributions in landblock space already, so the bake stores the
+	 * merged centroid verbatim.
+	 */
 	readonly transparentSort: {
 		readonly stableId: string;
-		readonly center: Vec3;
+		readonly center: LandblockVec3;
 	} | null;
 }
 
@@ -118,9 +124,14 @@ export interface FrameStreamedObjectInstanceTemplate {
 	readonly indexCount: number;
 	readonly material: ObjectMaterialBinding;
 	readonly instance: ObjectInstanceData;
-	/** Stable distance-sort facts expressed in the reusable source-local geometry frame. */
+	/**
+	 * Stable distance-sort facts for this instance.
+	 *
+	 * `center` is in landblock space: the geometry is shared source-local, but each template's
+	 * placement is fixed at bake, so the bake applies it once instead of every ordering frame.
+	 */
 	readonly transparentSort: {
-		readonly center: Vec3;
+		readonly center: LandblockVec3;
 		readonly stableId: string;
 	};
 }
@@ -178,10 +189,15 @@ export interface EnvCellDrawUnit {
 	/** Renderer-neutral material source selected for this draw. */
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
-	/** Stable shell-local ordering facts required only for transparent ranges. */
+	/**
+	 * Stable ordering facts required only for transparent ranges.
+	 *
+	 * `center` is in landblock space; realization applies the shell's structure placement once,
+	 * because a cell's structure never moves after it is realized.
+	 */
 	readonly transparentSort: {
 		readonly stableId: string;
-		readonly center: Vec3;
+		readonly center: LandblockVec3;
 	} | null;
 }
 

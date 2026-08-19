@@ -17,6 +17,7 @@ import {
 	transformPoint3,
 } from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
+import { landblockVec3, type LandblockVec3 } from "../../assets/ac-frame";
 import type { ObjectGeometryData } from "../renderer/geometry";
 import { bakeStaticLight } from "./interior-static-lighting";
 import type { StaticGeometryKey } from "../geometry/types";
@@ -48,10 +49,10 @@ interface BakedStaticObjectRange {
 	readonly indexCount: number;
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
-	/** Stable sorter input exists only for transparent ranges. */
+	/** Stable sorter input exists only for transparent ranges; centers are landblock space. */
 	readonly transparentSort: {
 		readonly stableId: string;
-		readonly center: Vec3;
+		readonly center: LandblockVec3;
 	} | null;
 }
 
@@ -222,10 +223,14 @@ function prepareBakedStaticObjectGeometry(
 			group.transparentStableId === null
 				? null
 				: {
-						center: new Vec3(
-							center.x / centerPointCount,
-							center.y / centerPointCount,
-							center.z / centerPointCount,
+						// Merged baked contributions are already in landblock space, so their
+						// centroid is too and needs no placement transform here or per frame.
+						center: landblockVec3(
+							new Vec3(
+								center.x / centerPointCount,
+								center.y / centerPointCount,
+								center.z / centerPointCount,
+							),
 						),
 						stableId: group.transparentStableId,
 					};
@@ -525,7 +530,15 @@ function prepareGeneratedSceneryGeometry(
 				instance: member.instance,
 				material: partition.binding,
 				transparentSort: {
-					center: partition.center,
+					// The partition's center is shared source-local geometry, but a template's sort
+					// center must be landblock space. This instance's placement never changes, so
+					// the transform belongs here rather than in every frame that orders it.
+					center: landblockVec3(
+						transformPoint3(
+							member.instance.sourceToLandblock,
+							partition.center,
+						),
+					),
 					stableId: `${member.residentId}/part:${member.partIndex}/${member.partitionIdentity}`,
 				},
 			};

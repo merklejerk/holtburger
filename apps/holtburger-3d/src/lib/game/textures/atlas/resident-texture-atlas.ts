@@ -120,6 +120,13 @@ export interface ResidentTextureAtlasPhysicalDependencies {
 	readonly renderResources: RendererResourceManager;
 	/** Test-only fixture override; production pages retain the fixed 2048px policy. */
 	readonly pageSize?: number;
+	/**
+	 * Called after a published layout swap commits.
+	 *
+	 * Compaction can move a retained placement, so anything holding a resolved atlas rect must
+	 * re-resolve it. Published here, at the swap itself, rather than inferred by readers.
+	 */
+	readonly onLayoutPublished?: () => void;
 }
 
 interface Requirement<TOwner extends string> {
@@ -752,6 +759,9 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		const { built, patched, publishedDispositions } =
 			await this.#preparePayloads(dispositions, physical);
 		publication.publish(plan, { built, patched });
+		// Placements may have moved, so any consumer caching a resolved rect must drop it. Fired
+		// after the swap commits: a failed publication leaves the previous layout current.
+		physical.onLayoutPublished?.();
 		// Counters commit only once the publication they describe has, so a failed attempt that
 		// later falls back to whole pages is never counted as work that landed.
 		this.#metadataOnlyPageUpdateCount += publishedDispositions.filter(

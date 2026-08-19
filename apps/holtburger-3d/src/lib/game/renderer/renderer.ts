@@ -303,8 +303,6 @@ export interface RendererCpuFrameTimings {
 	readonly instanceUploadMs: number;
 	/** CPU wall time spent forming compatible frame-instance submission runs. */
 	readonly instanceRunPreparationMs: number;
-	/** CPU wall time spent compiling draw-consumed object state. */
-	readonly objectPreparationMs: number;
 	/** CPU wall time spent submitting opaque object work. */
 	readonly opaqueSubmissionMs: number;
 	/** CPU cost of routing sources and uploading particle batches, separate from blended work. */
@@ -436,6 +434,21 @@ export interface RendererFrameDiagnosticsSnapshot {
 	readonly profile: RendererFrameProfile | null;
 	readonly profilingEnabled: boolean;
 	readonly selectionMetrics: FrameSelectionMetrics;
+	/**
+	 * Renderer-cached draw compilation, or null on backends that cache none.
+	 *
+	 * Occupancy tracks resident draw units, so growth across relocations means entries outlived
+	 * their publication; lifetime compilations and per-reason flush counts make recompilation
+	 * attributable instead of appearing as unexplained frame cost.
+	 */
+	readonly compiledObjectDraws: CompiledObjectDrawDiagnostics | null;
+}
+
+/** Draw-compilation occupancy and churn reported by a renderer that caches compiled draws. */
+export interface CompiledObjectDrawDiagnostics {
+	readonly compiledEntryCount: number;
+	readonly totalCompilationCount: number;
+	readonly flushCounts: Readonly<Record<string, number>>;
 }
 
 /** Optional diagnostic capability kept separate from the renderer's production draw contract. */
@@ -491,6 +504,17 @@ export interface RendererParticleCapability {
 	clear(): void;
 }
 
+/**
+ * World-resource changes a renderer cannot observe from inside a frame, announced by the runtime.
+ *
+ * A renderer that derives cached state from world resources must drop it when one of these
+ * arrives: `atlas-publication` because a published layout can move a placement a cached binding
+ * resolved, and `region-static-detail` because the active region's detail bindings were replaced.
+ */
+export type ResolvedResourceInvalidation =
+	| "atlas-publication"
+	| "region-static-detail";
+
 export interface Renderer {
 	/** Backend-specific diagnostics; absent renderers remain valid production implementations. */
 	readonly frameDiagnostics?: RendererFrameDiagnostics;
@@ -499,5 +523,7 @@ export interface Renderer {
 	/** Authored particle residency and submission, absent on backends that cannot draw them. */
 	readonly particles?: RendererParticleCapability;
 	drawFrame(input: FrameInput): RendererFrameFeedback;
+	/** Drop cached derivations of world resources; absent on backends that cache none. */
+	invalidateResolvedResources?(reason: ResolvedResourceInvalidation): void;
 	destroy(): Promise<void>;
 }

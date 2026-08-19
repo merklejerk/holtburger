@@ -179,6 +179,7 @@ describe("GameRuntime view and interest control", () => {
 			frameDiagnostics: {
 				setProfilingEnabled: setFrameProfilingEnabled,
 				snapshot: () => ({
+					compiledObjectDraws: null,
 					profile: null,
 					profilingEnabled: false,
 					selectionMetrics: frameSelectionMetrics,
@@ -304,6 +305,7 @@ describe("GameRuntime view and interest control", () => {
 			},
 		});
 		expect(runtime.getRendererFrameDiagnostics()).toEqual({
+			compiledObjectDraws: null,
 			profile: null,
 			profilingEnabled: false,
 			selectionMetrics: frameSelectionMetrics,

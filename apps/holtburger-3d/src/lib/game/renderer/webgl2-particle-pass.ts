@@ -6,7 +6,7 @@ import {
 	type WebGL2ParticleProgram,
 } from "./webgl2-particle-program";
 import type { WebGL2PortalDeferredVisibilityUniforms } from "./portal-deferred-visibility-glsl";
-import { WebGL2ParticleInstanceBuffer } from "./webgl2-particle-instance-buffer";
+import { WebGL2ParticleRecordStore } from "./webgl2-particle-record-store";
 import { objectBlendPolicy } from "./object-rendering-policy";
 import { TextureWrapMode } from "../textures/types";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
@@ -85,7 +85,7 @@ export class WebGL2ParticlePass {
 	#gl: WebGL2RenderingContext | null = null;
 	#program: WebGL2ParticleProgram | null = null;
 	#portalProgram: WebGL2ParticleProgram | null = null;
-	#instances: WebGL2ParticleInstanceBuffer | null = null;
+	#records: WebGL2ParticleRecordStore | null = null;
 	/** Reused flattening scratch keeps all scoped batches in one contiguous frame upload. */
 	readonly #scopedBatches: ParticleDrawBatch[] = [];
 	readonly #scopedRenderScopeKeys: string[] = [];
@@ -168,10 +168,8 @@ export class WebGL2ParticlePass {
 			throw new Error("Particle pass cannot move between WebGL devices.");
 		}
 		this.#gl = gl;
-		const instances = (this.#instances ??= new WebGL2ParticleInstanceBuffer(
-			gl,
-		));
-		const uploadedInstanceCount = instances.prepareFrame(batches);
+		const records = (this.#records ??= new WebGL2ParticleRecordStore(gl));
+		const uploadedInstanceCount = records.prepareFrame(batches);
 		if (uploadedInstanceCount !== preparedInstanceCount) {
 			throw new Error(
 				`Particle preparation uploaded ${uploadedInstanceCount} of ${preparedInstanceCount} instances.`,
@@ -188,6 +186,8 @@ export class WebGL2ParticlePass {
 		}
 
 		gl.useProgram(program.program);
+		gl.activeTexture(gl.TEXTURE0 + PARTICLE_TEXTURE_UNITS.records);
+		gl.bindTexture(gl.TEXTURE_2D, records.texture);
 		gl.uniformMatrix4fv(program.uniforms.projection, false, context.projection);
 		gl.uniformMatrix4fv(program.uniforms.view, false, context.view);
 		gl.uniform1f(program.uniforms.clockSeconds, context.clockSeconds);
@@ -244,7 +244,9 @@ export class WebGL2ParticlePass {
 						: gl.ONE_MINUS_SRC_ALPHA,
 			);
 			gl.bindVertexArray(geometry.vertexArray);
-			instances.bindAttributes(firstInstance);
+			// One uniform selects this range's records, where binding six attribute pointers to the
+			// same range would cost about twenty GL calls.
+			gl.uniform1i(program.uniforms.instanceBase, firstInstance);
 			if (routing) {
 				if (portalVisibilityUniforms === null) {
 					throw new Error(
@@ -329,8 +331,8 @@ export class WebGL2ParticlePass {
 	}
 
 	destroy(): void {
-		this.#instances?.destroy();
-		this.#instances = null;
+		this.#records?.destroy();
+		this.#records = null;
 		if (this.#program) this.#gl?.deleteProgram(this.#program.program);
 		this.#program = null;
 		if (this.#portalProgram) {

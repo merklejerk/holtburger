@@ -64,7 +64,7 @@ function fakeGl() {
 		readonly unit: number;
 		readonly request: unknown;
 	}> = [];
-	const bufferSubData = vi.fn();
+	const texSubImage2D = vi.fn();
 	const gl = {
 		ARRAY_BUFFER: 1,
 		BLEND: 2,
@@ -78,6 +78,14 @@ function fakeGl() {
 		TEXTURE0: 9,
 		TEXTURE1: 10,
 		TEXTURE_2D: 11,
+		TEXTURE_MIN_FILTER: 19,
+		TEXTURE_MAG_FILTER: 20,
+		TEXTURE_WRAP_S: 21,
+		TEXTURE_WRAP_T: 22,
+		NEAREST: 23,
+		CLAMP_TO_EDGE: 24,
+		RGBA: 25,
+		RGBA32F: 26,
 		TRIANGLES: 12,
 		UNSIGNED_INT: 13,
 		UNIFORM_BLOCK_DATA_SIZE: 18,
@@ -93,12 +101,14 @@ function fakeGl() {
 		blendFunc: (source: number, destination: number) =>
 			blendFuncs.push([source, destination]),
 		bufferData: () => undefined,
-		bufferSubData,
+		bufferSubData: () => undefined,
 		compileShader: () => undefined,
 		createBuffer: () => ({}) as WebGLBuffer,
+		createTexture: () => ({}) as WebGLTexture,
 		createProgram: () => ({}) as WebGLProgram,
 		createShader: () => ({}) as WebGLShader,
 		deleteBuffer: () => undefined,
+		deleteTexture: () => undefined,
 		deleteProgram: () => undefined,
 		deleteShader: () => undefined,
 		depthMask: () => undefined,
@@ -123,6 +133,9 @@ function fakeGl() {
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 		linkProgram: () => undefined,
 		shaderSource: () => undefined,
+		texImage2D: () => undefined,
+		texParameteri: () => undefined,
+		texSubImage2D,
 		uniform1f: () => undefined,
 		uniform1i: (location: { name: string }, value: number) =>
 			intUniforms.push([location.name, value]),
@@ -141,7 +154,7 @@ function fakeGl() {
 		},
 	} as unknown as WebGL2TextureSamplerCatalog;
 	return {
-		calls: { blendFuncs, bufferSubData },
+		calls: { blendFuncs, texSubImage2D },
 		draws,
 		gl,
 		intUniforms,
@@ -176,7 +189,7 @@ describe("WebGL2ParticlePass", () => {
 
 		// One call per batch regardless of particle count; retail's per-part ceiling is not inherited.
 		expect(draws).toEqual([3, 7]);
-		expect(calls.bufferSubData).toHaveBeenCalledTimes(1);
+		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
 		expect(pass.getDiagnostics()).toMatchObject({
 			drawnBatchCount: 2,
 			drawnParticleCount: 10,
@@ -212,7 +225,7 @@ describe("WebGL2ParticlePass", () => {
 
 		expect(draws).toEqual([3, 7]);
 		expect(routedScopes).toEqual(["outdoor", "env-cell:0101/01010001"]);
-		expect(calls.bufferSubData).toHaveBeenCalledTimes(1);
+		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
 	});
 
 	it("rejects portal-hidden fragments before particle material sampling", () => {
@@ -253,7 +266,7 @@ describe("WebGL2ParticlePass", () => {
 	it("does not create a program for an empty frame", () => {
 		const { gl } = fakeGl();
 		const createProgram = vi.spyOn(gl, "createProgram");
-		const createBuffer = vi.spyOn(gl, "createBuffer");
+		const createTexture = vi.spyOn(gl, "createTexture");
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
 		pass.draw(context(gl), []);
@@ -261,7 +274,7 @@ describe("WebGL2ParticlePass", () => {
 
 		// A scene with no live particles must cost nothing, including no lazy GPU allocation.
 		expect(createProgram).not.toHaveBeenCalled();
-		expect(createBuffer).not.toHaveBeenCalled();
+		expect(createTexture).not.toHaveBeenCalled();
 		expect(pass.getDiagnostics().drawnBatchCount).toBe(0);
 	});
 

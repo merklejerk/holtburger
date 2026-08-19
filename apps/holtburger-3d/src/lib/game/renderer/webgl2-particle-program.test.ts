@@ -14,6 +14,7 @@ describe("createWebGL2ParticleProgram", () => {
 		expect(fixture.samplerAssignments).toEqual([
 			{ name: "uBase", unit: PARTICLE_TEXTURE_UNITS.base },
 			{ name: "uPalette", unit: PARTICLE_TEXTURE_UNITS.palette },
+			{ name: "uParticleRecords", unit: PARTICLE_TEXTURE_UNITS.records },
 		]);
 		expect(program.uniforms.clockSeconds).toBeDefined();
 	});

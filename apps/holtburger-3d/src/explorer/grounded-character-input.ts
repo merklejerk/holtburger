@@ -8,14 +8,7 @@ export interface GroundedCharacterDrive {
 
 /** Keys that participate in retail-style character drive or jump input. */
 export type GroundedCharacterKey =
-	| "a"
-	| "c"
-	| "d"
-	| "s"
-	| "shift"
-	| "space"
-	| "w"
-	| "z";
+	"a" | "c" | "d" | "s" | "shift" | "space" | "w" | "z";
 
 /** Non-coalescible lifecycle edge sent in frontend order. */
 export type GroundedCharacterEdge =

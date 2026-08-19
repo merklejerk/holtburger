@@ -12,10 +12,7 @@ const MAGIC = "HBTR";
 
 interface BinarySection {
 	readonly name:
-		| "heightIndices"
-		| "resolvedHeights"
-		| "terrainSamples"
-		| "cellDiagonals";
+		"heightIndices" | "resolvedHeights" | "terrainSamples" | "cellDiagonals";
 	readonly scalarType: "u8" | "u16" | "f32";
 	readonly elementCount: number;
 	readonly byteOffset: number;

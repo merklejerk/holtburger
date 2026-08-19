@@ -116,9 +116,7 @@ export interface PortalModelCrossing {
 	readonly junctionGroupId: number | null;
 	readonly reciprocalCrossingId: PortalModelCrossingId | null;
 	readonly relationship:
-		| "depth-continuous"
-		| "exterior-boundary"
-		| "indoor-boundary";
+		"depth-continuous" | "exterior-boundary" | "indoor-boundary";
 	readonly sourceScopeId: PortalModelScopeId;
 	readonly targetScopeId: PortalModelScopeId;
 }

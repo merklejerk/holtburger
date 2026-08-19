@@ -18,8 +18,7 @@ export type OutdoorStaticLayerKind =
 
 /** Every non-terrain layer whose visual resources are revision-realized. */
 export type StaticLayerKind =
-	| OutdoorStaticLayerKind
-	| LandblockLayerKind.EnvCells;
+	OutdoorStaticLayerKind | LandblockLayerKind.EnvCells;
 
 /** Narrow a landblock layer to the shared outdoor-static realization domain. */
 export function isOutdoorStaticLayer(

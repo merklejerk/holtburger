@@ -21,8 +21,7 @@ export interface StaticObjectSystemDiagnostics {
 
 /** Renderer culling identity for one independently switchable immutable-object cohort. */
 export type StaticObjectCullingGroup =
-	| OutdoorStaticLayerKind
-	| "env-cell-static-residents";
+	OutdoorStaticLayerKind | "env-cell-static-residents";
 
 /** Owns immutable object nodes, node-keyed render components, and resource leases. */
 export class StaticObjectSystem<

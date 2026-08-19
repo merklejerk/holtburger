@@ -67,20 +67,13 @@ export interface WebGL2PortalScopeAtlasTargetDiagnostics {
  */
 export class WebGL2PortalScopeAtlasTargets {
 	readonly #gl: WebGL2RenderingContext;
-	readonly #maximumByteLength: number;
 	#allocatedGenerationCount = 0;
 	#destroyed = false;
 	#disposedGenerationCount = 0;
 	#targets: WebGL2PortalScopeAtlasTargetSet | null = null;
 
-	constructor(gl: WebGL2RenderingContext, maximumByteLength: number) {
-		if (!Number.isSafeInteger(maximumByteLength) || maximumByteLength <= 0) {
-			throw new Error(
-				"Portal scope-atlas target budget must be a positive safe integer.",
-			);
-		}
+	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
-		this.#maximumByteLength = maximumByteLength;
 	}
 
 	/** Allocate or reuse the one complete attachment generation. */
@@ -89,12 +82,6 @@ export class WebGL2PortalScopeAtlasTargets {
 	): WebGL2PortalScopeAtlasTargetSet {
 		this.#assertAlive();
 		validateTargetExtents(extents);
-		const requiredByteLength = portalScopeAtlasTargetByteLength(extents);
-		if (requiredByteLength > this.#maximumByteLength) {
-			throw new Error(
-				`Portal scope-atlas targets require ${requiredByteLength} bytes, exceeding the configured ${this.#maximumByteLength}-byte budget.`,
-			);
-		}
 		const current = this.#targets;
 		if (current && sameTargetExtents(current.extents, extents)) {
 			return current;

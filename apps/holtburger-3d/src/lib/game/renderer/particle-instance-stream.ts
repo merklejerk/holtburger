@@ -20,6 +20,26 @@ import type { AcVector3, RenderVector3 } from "../../assets/ac-frame";
  */
 export const PARTICLE_INSTANCE_FLOAT_COUNT = 21;
 
+/**
+ * Texels one record occupies in the record data texture.
+ *
+ * The record is padded up to whole RGBA texels so the vertex stage reads a fixed count per
+ * particle; the spare lane in the final texel is reserved, not packed against.
+ */
+export const PARTICLE_RECORD_TEXELS = 6;
+
+/**
+ * Records per row of the record data texture.
+ *
+ * A whole number of records per row, so a record never straddles rows: that keeps the vertex
+ * stage's index maths to two integer ops and keeps any partial upload to whole rows.
+ */
+export const PARTICLE_RECORDS_PER_ROW = 256;
+
+/** Record-texture width in texels. Shared by the writer and the vertex stage that reads it. */
+export const PARTICLE_RECORD_TEXTURE_WIDTH =
+	PARTICLE_RECORDS_PER_ROW * PARTICLE_RECORD_TEXELS;
+
 /** Everything one particle contributes to the instance stream. */
 export interface ParticleInstanceRecord {
 	/**

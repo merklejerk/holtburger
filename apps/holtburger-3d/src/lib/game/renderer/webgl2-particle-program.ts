@@ -1,5 +1,9 @@
 import { PARTICLE_TYPE } from "../behavior/particle-motion";
 import {
+	PARTICLE_RECORD_TEXELS,
+	PARTICLE_RECORD_TEXTURE_WIDTH,
+} from "./particle-instance-stream";
+import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "./webgl2-shader-utils";
@@ -13,6 +17,7 @@ import {
 export const PARTICLE_TEXTURE_UNITS = {
 	base: 0,
 	palette: 1,
+	records: 2,
 } as const;
 
 /**
@@ -54,13 +59,48 @@ layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTextureCoordinate;
 
-// Per-instance spawn constants. Everything a particle needs for its whole life.
-layout(location = 3) in vec4 aOriginBirth;   // xyz = parent origin + hook offset, w = birth time
-layout(location = 4) in vec4 aOffsetLife;    // xyz = spawn offset, w = lifespan
-layout(location = 5) in vec3 aMotionA;
-layout(location = 6) in vec3 aMotionB;
-layout(location = 7) in vec3 aMotionC;
-layout(location = 8) in vec4 aAppearance;    // startScale, finalScale, startTrans, finalTrans
+/**
+ * Spawn constants live in a data texture, not in instance attributes.
+ *
+ * The draw path addresses *ranges* of records, and pointing six attribute pointers at a range costs
+ * about twenty GL calls where a texture range costs one uniform. Reading here keeps that cost off
+ * the frame regardless of how many ranges are drawn.
+ */
+uniform highp sampler2D uParticleRecords;
+/** First record this draw range covers; the record index is this plus gl_InstanceID. */
+uniform int uInstanceBase;
+
+/** Spawn constants for one particle, unpacked from its texels. */
+struct ParticleRecord {
+	vec3 origin;
+	float birthTime;
+	vec3 offset;
+	float lifespan;
+	vec3 motionA;
+	vec3 motionB;
+	vec3 motionC;
+	vec4 appearance;   // startScale, finalScale, startTrans, finalTrans
+};
+
+ParticleRecord readParticleRecord(int recordIndex) {
+	int firstTexel = recordIndex * ${PARTICLE_RECORD_TEXELS};
+	int row = firstTexel / ${PARTICLE_RECORD_TEXTURE_WIDTH};
+	int column = firstTexel - row * ${PARTICLE_RECORD_TEXTURE_WIDTH};
+	vec4 t0 = texelFetch(uParticleRecords, ivec2(column, row), 0);
+	vec4 t1 = texelFetch(uParticleRecords, ivec2(column + 1, row), 0);
+	vec4 t2 = texelFetch(uParticleRecords, ivec2(column + 2, row), 0);
+	vec4 t3 = texelFetch(uParticleRecords, ivec2(column + 3, row), 0);
+	vec4 t4 = texelFetch(uParticleRecords, ivec2(column + 4, row), 0);
+	vec4 t5 = texelFetch(uParticleRecords, ivec2(column + 5, row), 0);
+	return ParticleRecord(
+		t0.xyz, t0.w,
+		t1.xyz, t1.w,
+		t2.xyz,
+		vec3(t2.w, t3.xy),
+		vec3(t3.zw, t4.x),
+		vec4(t4.yzw, t5.x)
+	);
+}
 
 uniform mat4 uProjection;
 uniform mat4 uView;
@@ -81,47 +121,47 @@ out float vTranslucency;
 /**
  * Displacement from the parent origin at elapsed time t, in AC's authored axes.
  *
- * Component meaning here is AC's: x, then north, then **up**. The instance attributes are delivered
+ * Component meaning here is AC's: x, then north, then **up**. The record's constants are stored
  * unconverted for exactly this reason — Swarm and Explode read axis meaning from the component, so
  * evaluating them against converted vectors applies each rule to the wrong axis.
  */
-vec3 acDisplacement(vec3 offset, float t) {
+vec3 acDisplacement(ParticleRecord record, float t) {
 	// Formula families, in the same order and with the same quirks as the CPU evaluator.
 	if (uMotionType == ${PARTICLE_TYPE.still}) {
-		return offset;
+		return record.offset;
 	}
 	if (uMotionType == ${PARTICLE_TYPE.localVelocity} || uMotionType == ${PARTICLE_TYPE.globalVelocity}) {
-		return offset + aMotionA * t;
+		return record.offset + record.motionA * t;
 	}
 	if (uMotionType == ${PARTICLE_TYPE.parabolicLvga} || uMotionType == ${PARTICLE_TYPE.parabolicLvla}
 		|| uMotionType == ${PARTICLE_TYPE.parabolicGvga} || uMotionType == ${PARTICLE_TYPE.parabolicLvgaGr}
 		|| uMotionType == ${PARTICLE_TYPE.parabolicLvlaLr} || uMotionType == ${PARTICLE_TYPE.parabolicGvgaGr}) {
-		return offset + aMotionA * t + 0.5 * aMotionB * t * t;
+		return record.offset + record.motionA * t + 0.5 * record.motionB * t * t;
 	}
 	if (uMotionType == ${PARTICLE_TYPE.swarm}) {
 		// RETAIL QUIRK: sin on AC's y, cos on AC's x and z. Do not make this uniform, and do
 		// not evaluate it against converted vectors, which swaps which axis gets the sine.
-		return offset + vec3(
-			cos(aMotionB.x * t) * aMotionC.x + aMotionA.x * t,
-			sin(aMotionB.y * t) * aMotionC.y + aMotionA.y * t,
-			cos(aMotionB.z * t) * aMotionC.z + aMotionA.z * t
+		return record.offset + vec3(
+			cos(record.motionB.x * t) * record.motionC.x + record.motionA.x * t,
+			sin(record.motionB.y * t) * record.motionC.y + record.motionA.y * t,
+			cos(record.motionB.z * t) * record.motionC.z + record.motionA.z * t
 		);
 	}
 	if (uMotionType == ${PARTICLE_TYPE.explode}) {
-		// RETAIL QUIRK: both Explode quirks. Every axis multiplies by aMotionA.x rather than its own
-		// component, and AC's z -- up -- carries an extra + aMotionA.z inside the parenthesis.
-		return offset + vec3(
-			(aMotionB.x * t + aMotionC.x * aMotionA.x) * t,
-			(aMotionB.y * t + aMotionC.y * aMotionA.x) * t,
-			(aMotionB.z * t + aMotionC.z * aMotionA.x + aMotionA.z) * t
+		// RETAIL QUIRK: both Explode quirks. Every axis multiplies by motionA.x rather than its own
+		// component, and AC's z -- up -- carries an extra + motionA.z inside the parenthesis.
+		return record.offset + vec3(
+			(record.motionB.x * t + record.motionC.x * record.motionA.x) * t,
+			(record.motionB.y * t + record.motionC.y * record.motionA.x) * t,
+			(record.motionB.z * t + record.motionC.z * record.motionA.x + record.motionA.z) * t
 		);
 	}
 	if (uMotionType == ${PARTICLE_TYPE.implode}) {
-		// RETAIL QUIRK: one scalar cosine driven by aMotionA.x, applied to all three axes.
-		float wave = cos(aMotionA.x * t);
-		return offset + wave * aMotionC + aMotionB * t * t;
+		// RETAIL QUIRK: one scalar cosine driven by motionA.x, applied to all three axes.
+		float wave = cos(record.motionA.x * t);
+		return record.offset + wave * record.motionC + record.motionB * t * t;
 	}
-	return offset;
+	return record.offset;
 }
 
 /** AC authors Z-up with +Y north; the renderer is Y-up with -Z north. */
@@ -155,22 +195,23 @@ mat3 orientationBasis(vec3 worldPosition) {
 }
 
 void main() {
-	float elapsed = max(uClockSeconds - aOriginBirth.w, 0.0);
-	float lifespan = aOffsetLife.w;
+	ParticleRecord record = readParticleRecord(uInstanceBase + gl_InstanceID);
+	float elapsed = max(uClockSeconds - record.birthTime, 0.0);
+	float lifespan = record.lifespan;
 	// Clamped, matching retail: a particle past its lifespan holds its final appearance.
 	float progress = lifespan > 0.0 ? min(elapsed / lifespan, 1.0) : 1.0;
 
 	// The origin is already anchor-relative; only the authored displacement needs converting, and
 	// it is converted exactly once here.
 	vec3 worldPosition =
-		aOriginBirth.xyz + acToRender(acDisplacement(aOffsetLife.xyz, elapsed));
-	float scale = mix(aAppearance.x, aAppearance.y, progress);
+		record.origin + acToRender(acDisplacement(record, elapsed));
+	float scale = mix(record.appearance.x, record.appearance.y, progress);
 
 	// The mesh's authored plane faces its own +Z after conversion, so the basis maps local x/y to
 	// screen right/up and local z to the facing axis.
 	vec3 local = orientationBasis(worldPosition) * (aPosition * scale);
 	vTextureCoordinate = aTextureCoordinate;
-	vTranslucency = mix(aAppearance.z, aAppearance.w, progress);
+	vTranslucency = mix(record.appearance.z, record.appearance.w, progress);
 	// The normal attribute is bound by the shared object geometry layout but unused: particles draw
 	// unlit, exactly as retail draws them.
 	gl_Position = uProjection * uView * vec4(worldPosition + local, 1.0);
@@ -308,7 +349,9 @@ export interface WebGL2ParticleProgram {
 		readonly materialKind: WebGLUniformLocation;
 		readonly materialColor: WebGLUniformLocation;
 		readonly palettedClipMap: WebGLUniformLocation;
+		readonly instanceBase: WebGLUniformLocation;
 		readonly motionType: WebGLUniformLocation;
+		readonly particleRecords: WebGLUniformLocation;
 		readonly opacityScale: WebGLUniformLocation;
 		readonly orientation: WebGLUniformLocation;
 		readonly palette: WebGLUniformLocation;
@@ -352,7 +395,9 @@ export function createWebGL2ParticleProgram(
 		materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
 		materialColor: requireWebGL2Uniform(gl, program, "uMaterialColor"),
 		palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
+		instanceBase: requireWebGL2Uniform(gl, program, "uInstanceBase"),
 		motionType: requireWebGL2Uniform(gl, program, "uMotionType"),
+		particleRecords: requireWebGL2Uniform(gl, program, "uParticleRecords"),
 		opacityScale: requireWebGL2Uniform(gl, program, "uOpacityScale"),
 		orientation: requireWebGL2Uniform(gl, program, "uOrientation"),
 		palette: requireWebGL2Uniform(gl, program, "uPalette"),
@@ -363,6 +408,7 @@ export function createWebGL2ParticleProgram(
 	gl.useProgram(program);
 	gl.uniform1i(uniforms.base, PARTICLE_TEXTURE_UNITS.base);
 	gl.uniform1i(uniforms.palette, PARTICLE_TEXTURE_UNITS.palette);
+	gl.uniform1i(uniforms.particleRecords, PARTICLE_TEXTURE_UNITS.records);
 	const portalVisibilityUniforms = portalVisibility
 		? bindWebGL2PortalDeferredVisibilityProgram(gl, program)
 		: null;

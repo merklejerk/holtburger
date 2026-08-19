@@ -13,6 +13,7 @@ import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { DrawableParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { ParticleSystem } from "./particle-system";
 
 const TARGET: BehaviorTarget = {
@@ -104,7 +105,6 @@ const runtime = (
 			generation: target.generation,
 			targetId: behaviorTargetId(`${target.targetId}/part/${partIndex}`),
 		}),
-		renderAnchorOrigin: () => sceneVector3([0, 0, 0]),
 		resolveEmitter: () => null,
 		roll: () => 0.5,
 		...overrides,
@@ -436,8 +436,8 @@ describe("ParticleSystem", () => {
 
 		parentX = 100;
 
-		expect(left.sample(0)[0]!.position[0]).toBeCloseTo(0);
-		expect(following.sample(0)[0]!.position[0]).toBeCloseTo(100);
+		expect(left.sample(0, ORIGIN)[0]!.position[0]).toBeCloseTo(0);
+		expect(following.sample(0, ORIGIN)[0]!.position[0]).toBeCloseTo(100);
 	});
 
 	it("drops emitters whose target stops existing", () => {
@@ -656,7 +656,7 @@ describe("ParticleSystem", () => {
 		expect(particles.getDiagnostics().particleCount).toBe(2);
 		// The hook offset lands on top of the parent origin, not instead of it, and arrives in
 		// render axes where up is y.
-		expect(particles.sample(12)[0]!.position[1]).toBeCloseTo(5);
+		expect(particles.sample(12, ORIGIN)[0]!.position[1]).toBeCloseTo(5);
 	});
 
 	/**
@@ -681,9 +681,9 @@ describe("ParticleSystem", () => {
 			partIndex: 4,
 		});
 
-		expect(particles.collectCohorts()[0]!.particles[0]!.origin[0]).toBeCloseTo(
-			9,
-		);
+		expect(
+			particles.collectCohorts()[0]!.particles[0]!.localOrigin[0],
+		).toBeCloseTo(9);
 	});
 
 	it("keeps a part-attached emitter owned by its object for visibility and envelope", () => {
@@ -888,9 +888,9 @@ describe("ParticleSystem", () => {
 		const cohorts = particles.collectCohorts();
 
 		expect(cohorts).toHaveLength(1);
-		expect(cohorts[0]!.particles.map(({ origin }) => origin[0])).toEqual([
-			1, 2, 3,
-		]);
+		expect(
+			cohorts[0]!.particles.map(({ localOrigin }) => localOrigin[0]),
+		).toEqual([1, 2, 3]);
 		expect(particles.getDiagnostics()).toMatchObject({
 			emitterOwnerCount: 2,
 			maximumEmitterCountPerOwner: 2,
@@ -923,12 +923,12 @@ describe("ParticleSystem", () => {
 		expect(new Set(cohorts.map((cohort) => cohort.renderOwner)).size).toBe(2);
 	});
 
-	it("keeps left-behind particles in place when the render anchor moves", () => {
-		// Origins arrive anchor-relative, so crossing a landblock boundary shifts every origin by
-		// the anchor delta without anything in the world actually moving.
-		let anchorX = 0;
+	// Records outlive the anchor they are drawn against, so a spawn origin is stored split on the
+	// landblock grid rather than measured from the camera's landblock. The coarse part cancels
+	// exactly against the anchor in the vertex stage; the local part stays small and precise.
+	it("splits a spawn origin onto the landblock grid", () => {
 		const particles = runtime({
-			renderAnchorOrigin: () => sceneVector3([anchorX, 0, 0]),
+			sceneOriginOf: () => sceneVector3([500, 12, -300]),
 		});
 		particles.create(
 			TARGET,
@@ -936,18 +936,30 @@ describe("ParticleSystem", () => {
 			NO_OFFSET,
 			0,
 			0,
-			ORIGIN,
+			sceneVector3([500, 12, -300]),
 		);
 
-		// Copied because origins are pooled storage that the next collect overwrites in place.
-		const before = [...particles.collectCohorts()[0]!.particles[0]!.origin];
-		expect(before).toEqual([0, 0, 0]);
+		const record = particles.collectCohorts()[0]!.particles[0]!;
 
-		// The camera crosses one landblock; the emitter has not moved.
-		anchorX = 192;
-
-		const after = particles.collectCohorts()[0]!.particles[0]!.origin;
-		expect(after).toEqual([-192, 0, 0]);
+		// The coarse part lands on the landblock grid, so subtracting the anchor -- also on that
+		// grid -- is exact rather than merely close.
+		expect(
+			Math.abs(record.landblockOrigin[0] % OUTDOOR_LANDBLOCK_WORLD_SIZE),
+		).toBe(0);
+		expect(
+			Math.abs(record.landblockOrigin[2] % OUTDOOR_LANDBLOCK_WORLD_SIZE),
+		).toBe(0);
+		// Elevation needs no coarse part: landblock origins are flat.
+		expect(record.landblockOrigin[1]).toBe(0);
+		// Together they reconstruct the scene origin exactly.
+		expect(record.landblockOrigin[0] + record.localOrigin[0]).toBe(500);
+		expect(record.landblockOrigin[1] + record.localOrigin[1]).toBe(12);
+		expect(record.landblockOrigin[2] + record.localOrigin[2]).toBe(-300);
+		// The local part stays inside one landblock, which is what keeps its precision.
+		expect(record.localOrigin[0]).toBeGreaterThanOrEqual(0);
+		expect(record.localOrigin[0]).toBeLessThan(OUTDOOR_LANDBLOCK_WORLD_SIZE);
+		expect(record.localOrigin[2]).toBeGreaterThanOrEqual(0);
+		expect(record.localOrigin[2]).toBeLessThan(OUTDOOR_LANDBLOCK_WORLD_SIZE);
 	});
 
 	/**
@@ -968,7 +980,7 @@ describe("ParticleSystem", () => {
 		);
 
 		const record = particles.collectCohorts()[0]!.particles[0]!;
-		expect(record.origin).toEqual([0, 0, 0]);
+		expect(record.localOrigin).toEqual([0, 0, 0]);
 		expect(record.offset).toEqual(acVector3([5, 0, 0]));
 	});
 
@@ -1003,10 +1015,10 @@ describe("ParticleSystem", () => {
 
 		const first = particles
 			.collectCohorts()[0]!
-			.particles.map(({ origin }) => origin);
+			.particles.map(({ localOrigin }) => localOrigin);
 		const second = particles
 			.collectCohorts()[0]!
-			.particles.map(({ origin }) => origin);
+			.particles.map(({ localOrigin }) => localOrigin);
 
 		// Identity, not equality: a fresh vector per particle per frame is the GC churn the pool
 		// exists to avoid, and it would still compare equal.
@@ -1102,7 +1114,7 @@ describe("ParticleSystem", () => {
 		);
 
 		// One second of travel, so the sampled position is the velocity itself.
-		expect(particles.sample(1)[0]!.position[0]).toBeCloseTo(expectedX);
+		expect(particles.sample(1, ORIGIN)[0]!.position[0]).toBeCloseTo(expectedX);
 	});
 
 	it("rotates the spawn offset for a Still emitter, which has no velocity to rotate", () => {
@@ -1129,7 +1141,7 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const [rotatedX, , rotatedZ] = particles.sample(0)[0]!.position;
+		const [rotatedX, , rotatedZ] = particles.sample(0, ORIGIN)[0]!.position;
 		const unrotated = runtime({
 			roll: offsetRoll,
 			sceneRotationOf: () => UNROTATED,
@@ -1148,7 +1160,7 @@ describe("ParticleSystem", () => {
 			0,
 			ORIGIN,
 		);
-		const [authoredX, , authoredZ] = unrotated.sample(0)[0]!.position;
+		const [authoredX, , authoredZ] = unrotated.sample(0, ORIGIN)[0]!.position;
 
 		// Retail rotates `offset` for every type, so the same roll lands somewhere else.
 		expect(Math.hypot(rotatedX, rotatedZ)).toBeCloseTo(

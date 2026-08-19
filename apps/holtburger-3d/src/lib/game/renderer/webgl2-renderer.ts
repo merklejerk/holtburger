@@ -2174,7 +2174,11 @@ export class WebGL2Renderer implements Renderer {
 		clockSeconds: number,
 		opacityScale: number,
 	): ParticleDrawContext {
+		// The view names its own anchor landblock, so the origin records re-anchor against comes
+		// from the same place the view transform did.
+		const anchor = createLandblockWorldOrigin(view.anchorLandblockId);
 		return {
+			anchorOrigin: [anchor.x, anchor.y, anchor.z],
 			cameraPosition: [
 				view.cameraPosition.x,
 				view.cameraPosition.y,

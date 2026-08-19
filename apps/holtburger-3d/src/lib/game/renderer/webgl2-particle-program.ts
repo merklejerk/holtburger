@@ -72,7 +72,8 @@ uniform int uInstanceBase;
 
 /** Spawn constants for one particle, unpacked from its texels. */
 struct ParticleRecord {
-	vec3 origin;
+	/** Spawn origin within its landblock, kept small so float32 holds it precisely. */
+	vec3 localOrigin;
 	float birthTime;
 	vec3 offset;
 	float lifespan;
@@ -80,6 +81,8 @@ struct ParticleRecord {
 	vec3 motionB;
 	vec3 motionC;
 	vec4 appearance;   // startScale, finalScale, startTrans, finalTrans
+	/** Scene origin of the record's landblock; an exact multiple of the landblock size. */
+	vec3 landblockOrigin;
 };
 
 ParticleRecord readParticleRecord(int recordIndex) {
@@ -98,7 +101,8 @@ ParticleRecord readParticleRecord(int recordIndex) {
 		t2.xyz,
 		vec3(t2.w, t3.xy),
 		vec3(t3.zw, t4.x),
-		vec4(t4.yzw, t5.x)
+		vec4(t4.yzw, t5.x),
+		t5.yzw
 	);
 }
 
@@ -112,6 +116,14 @@ uniform int uOrientation;
 uniform vec3 uLockedAxis;
 /** World-space camera position; retail bills board to the eye, not to the screen plane. */
 uniform vec3 uCameraPosition;
+/**
+ * Scene origin of this frame's render anchor, an exact multiple of the landblock size.
+ *
+ * Records store a landblock origin of the same form, so the difference below is exact rather than
+ * merely close: subtracting two nearby scene-magnitude values would otherwise lose millimetres to
+ * cancellation, and that error would land on every particle.
+ */
+uniform vec3 uAnchorOrigin;
 /** Authored ParticleType, constant per cohort. */
 uniform int uMotionType;
 
@@ -201,10 +213,13 @@ void main() {
 	// Clamped, matching retail: a particle past its lifespan holds its final appearance.
 	float progress = lifespan > 0.0 ? min(elapsed / lifespan, 1.0) : 1.0;
 
-	// The origin is already anchor-relative; only the authored displacement needs converting, and
-	// it is converted exactly once here.
+	// Re-anchor exactly: the coarse difference cancels on the landblock grid, then the precise
+	// landblock-local part is added. Only the authored displacement needs converting, and it is
+	// converted exactly once here.
+	vec3 anchoredOrigin =
+		(record.landblockOrigin - uAnchorOrigin) + record.localOrigin;
 	vec3 worldPosition =
-		record.origin + acToRender(acDisplacement(record, elapsed));
+		anchoredOrigin + acToRender(acDisplacement(record, elapsed));
 	float scale = mix(record.appearance.x, record.appearance.y, progress);
 
 	// The mesh's authored plane faces its own +Z after conversion, so the basis maps local x/y to
@@ -342,6 +357,7 @@ export interface WebGL2ParticleProgram {
 	readonly portalVisibilityUniforms: WebGL2PortalDeferredVisibilityUniforms | null;
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
+		readonly anchorOrigin: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
 		readonly cameraPosition: WebGLUniformLocation;
 		readonly clockSeconds: WebGLUniformLocation;
@@ -388,6 +404,7 @@ export function createWebGL2ParticleProgram(
 	}
 	const uniforms: WebGL2ParticleProgram["uniforms"] = {
 		alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
+		anchorOrigin: requireWebGL2Uniform(gl, program, "uAnchorOrigin"),
 		base: requireWebGL2Uniform(gl, program, "uBase"),
 		cameraPosition: requireWebGL2Uniform(gl, program, "uCameraPosition"),
 		clockSeconds: requireWebGL2Uniform(gl, program, "uClockSeconds"),

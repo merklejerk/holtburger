@@ -45,6 +45,8 @@ export interface ParticleDrawContext {
 	readonly projection: Float32Array;
 	readonly view: Float32Array;
 	readonly cameraPosition: readonly [number, number, number];
+	/** Scene origin of this frame's render anchor, which records are re-anchored against. */
+	readonly anchorOrigin: readonly [number, number, number];
 	readonly clockSeconds: number;
 	readonly samplers: WebGL2TextureSamplerCatalog;
 	readonly textureFiltering: TextureFilteringPolicy;
@@ -197,6 +199,13 @@ export class WebGL2ParticlePass {
 			context.cameraPosition[0],
 			context.cameraPosition[1],
 			context.cameraPosition[2],
+		);
+		// One value for the whole frame, so it binds once here rather than per drawn range.
+		gl.uniform3f(
+			program.uniforms.anchorOrigin,
+			context.anchorOrigin[0],
+			context.anchorOrigin[1],
+			context.anchorOrigin[2],
 		);
 		// Particles are additive-friendly unlit sprites: depth-tested against the scene but never
 		// occluding it, which is what retail's transparent staging produces for them.

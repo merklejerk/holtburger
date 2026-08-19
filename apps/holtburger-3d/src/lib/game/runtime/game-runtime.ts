@@ -651,14 +651,6 @@ export class GameRuntime {
 			: null;
 	}
 
-	/** Scene-frame origin of this frame's render anchor, which is the camera's landblock. */
-	#renderAnchorOrigin(): SceneVector3 {
-		const anchor = createLandblockWorldOrigin(
-			this.#camera.placement.landblockId,
-		);
-		return sceneVector3([anchor.x, anchor.y, anchor.z]);
-	}
-
 	/** Latest advanced frame time, so a mid-frame installation anchors to the current clock. */
 	#lastFrameTimeSeconds = 0;
 	/** Previous frame's renderer selection, which particle culling reads. */
@@ -921,7 +913,6 @@ export class GameRuntime {
 			// The generation is carried through unchanged: the part belongs to the same activation, so
 			// a command that has outlived its owner must still be rejected.
 			partFrameOf: (target, partIndex) => this.#partFrameOf(target, partIndex),
-			renderAnchorOrigin: () => this.#renderAnchorOrigin(),
 			roll: dependencies.roll ?? Math.random,
 		});
 		this.#dynamics = new DynamicEntitySystem(

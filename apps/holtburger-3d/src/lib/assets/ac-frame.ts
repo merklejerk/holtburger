@@ -231,6 +231,23 @@ export function sceneVec3(vector: Vec3): SceneVec3 {
  */
 export type LandblockVec3 = Vec3 & { readonly [landblockSpace]: true };
 
+/**
+ * A landblock-local position in tuple form, for the asset and particle paths that work in tuples.
+ *
+ * The tuple counterpart to {@link LandblockVec3}. Safe to retain, unlike {@link RenderVector3}:
+ * its origin is the landblock's own corner, which no camera movement can move.
+ */
+export type LandblockVector3 = readonly [number, number, number] & {
+	readonly [landblockSpace]: true;
+};
+
+/** Assert that a tuple is measured from its landblock's corner. */
+export function landblockVector3(
+	vector: readonly [number, number, number],
+): LandblockVector3 {
+	return vector as LandblockVector3;
+}
+
 /** Assert that a `Vec3` is in one landblock's local frame. */
 export function landblockVec3(vector: Vec3): LandblockVec3 {
 	return vector as LandblockVec3;

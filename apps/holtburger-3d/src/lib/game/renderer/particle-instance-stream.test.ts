@@ -1,4 +1,8 @@
-import { acVector3, renderVector3 } from "../../assets/ac-frame";
+import {
+	acVector3,
+	landblockVector3,
+	sceneVector3,
+} from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import {
 	PARTICLE_INSTANCE_FLOAT_COUNT,
@@ -15,7 +19,8 @@ const RECORD: ParticleInstanceRecord = {
 	finalTranslucency: 19,
 	lifespan: 8,
 	offset: acVector3([5, 6, 7]),
-	origin: renderVector3([1, 2, 3]),
+	landblockOrigin: sceneVector3([20, 21, 22]),
+	localOrigin: landblockVector3([1, 2, 3]),
 	startScale: 16,
 	startTranslucency: 18,
 };
@@ -28,7 +33,10 @@ describe("writeParticleInstance", () => {
 
 		expect(next).toBe(PARTICLE_INSTANCE_FLOAT_COUNT);
 		expect([...stream]).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+			// local origin, birth | offset, lifespan | a, b | c, appearance | landblock origin
+			1,
+			2, 3, 4, 5, 6, 7, 8, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+			21, 22,
 		]);
 	});
 
@@ -50,7 +58,7 @@ describe("writeParticleInstance", () => {
 
 		// Silently truncating here would corrupt whichever particle followed.
 		expect(() => writeParticleInstance(stream, 0, RECORD)).toThrow(
-			"exceeds a 20-float stream",
+			"exceeds a 23-float stream",
 		);
 	});
 });

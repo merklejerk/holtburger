@@ -1,4 +1,8 @@
-import type { AcVector3, RenderVector3 } from "../../assets/ac-frame";
+import type {
+	AcVector3,
+	LandblockVector3,
+	SceneVector3,
+} from "../../assets/ac-frame";
 /**
  * Packs live particles into the per-instance layout the particle vertex stage declares.
  *
@@ -9,16 +13,16 @@ import type { AcVector3, RenderVector3 } from "../../assets/ac-frame";
  *
  * Attribute locations 3-8 of `webgl2-particle-program.ts`, in order:
  *
- * | Offset | Attribute       | Contents                                        |
- * | -----: | --------------- | ----------------------------------------------- |
- * |      0 | `aOriginBirth`  | spawn origin xyz, birth time                    |
- * |      4 | `aOffsetLife`   | spawn offset xyz, lifespan                      |
- * |      8 | `aMotionA`      | sampled `a`                                     |
- * |     11 | `aMotionB`      | sampled `b`                                     |
- * |     14 | `aMotionC`      | sampled `c`                                     |
- * |     17 | `aAppearance`   | start/final scale, start/final translucency     |
+ * | Offset | Texel | Contents                                                      |
+ * | -----: | ----: | ------------------------------------------------------------- |
+ * |      0 |     0 | landblock-local spawn origin xyz, birth time                   |
+ * |      4 |     1 | spawn offset xyz, lifespan                                     |
+ * |      8 |     2 | sampled `a`, then `b.x`                                        |
+ * |     12 |     3 | `b.yz`, `c.xy`                                                 |
+ * |     16 |     4 | `c.z`, start/final scale, start translucency                   |
+ * |     20 |     5 | final translucency, landblock scene origin xyz                 |
  */
-export const PARTICLE_INSTANCE_FLOAT_COUNT = 21;
+export const PARTICLE_INSTANCE_FLOAT_COUNT = 24;
 
 /**
  * Texels one record occupies in the record data texture.
@@ -43,12 +47,22 @@ export const PARTICLE_RECORD_TEXTURE_WIDTH =
 /** Everything one particle contributes to the instance stream. */
 export interface ParticleInstanceRecord {
 	/**
-	 * Parent origin plus hook offset, resolved at spawn or read live for a following emitter.
+	 * Spawn origin within its landblock, plus the hook offset.
 	 *
-	 * Anchor-relative, unlike the motion constants below: this is a scene position, and the vertex
-	 * stage adds the evaluated displacement to it after converting that displacement out of AC axes.
+	 * Split from {@link landblockOrigin} rather than carried as one scene or anchor-relative
+	 * position, and the split is what makes a record survivable. Anchor-relative would decay the
+	 * moment the camera crossed a landblock; a single scene-space position would be a number near
+	 * 40,000 whose float32 difference against the anchor loses roughly 5 mm to cancellation. This
+	 * part stays small and therefore precise, while the coarse part cancels exactly.
 	 */
-	readonly origin: RenderVector3;
+	readonly localOrigin: LandblockVector3;
+	/**
+	 * Scene-space origin of the landblock {@link localOrigin} is measured within.
+	 *
+	 * Always an exact multiple of the landblock size, as is the render anchor, so the vertex stage's
+	 * `landblockOrigin - anchor` is exact in float32 rather than merely close.
+	 */
+	readonly landblockOrigin: SceneVector3;
 	readonly birthTime: number;
 	/**
 	 * Spawn constants in **AC's authored axes**, matching {@link ParticleSpawnConstants}.
@@ -83,9 +97,9 @@ export function writeParticleInstance(
 			`Particle instance at ${floatOffset} exceeds a ${target.length}-float stream.`,
 		);
 	}
-	target[floatOffset] = record.origin[0];
-	target[floatOffset + 1] = record.origin[1];
-	target[floatOffset + 2] = record.origin[2];
+	target[floatOffset] = record.localOrigin[0];
+	target[floatOffset + 1] = record.localOrigin[1];
+	target[floatOffset + 2] = record.localOrigin[2];
 	target[floatOffset + 3] = record.birthTime;
 
 	target[floatOffset + 4] = record.offset[0];
@@ -109,6 +123,9 @@ export function writeParticleInstance(
 	target[floatOffset + 18] = record.finalScale;
 	target[floatOffset + 19] = record.startTranslucency;
 	target[floatOffset + 20] = record.finalTranslucency;
+	target[floatOffset + 21] = record.landblockOrigin[0];
+	target[floatOffset + 22] = record.landblockOrigin[1];
+	target[floatOffset + 23] = record.landblockOrigin[2];
 
 	return floatOffset + PARTICLE_INSTANCE_FLOAT_COUNT;
 }

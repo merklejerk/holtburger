@@ -1,12 +1,14 @@
 import type {
 	AcVector3,
-	RenderVector3,
+	LandblockVector3,
 	SceneVector3,
 } from "../../assets/ac-frame";
 import {
 	acVector3,
+	landblockVector3,
 	renderVector3,
 	rotateAcVector,
+	sceneVector3,
 } from "../../assets/ac-frame";
 import type { AcRotation } from "../../assets/ac-frame";
 import type {
@@ -20,6 +22,7 @@ import type {
 	BehaviorTargetId,
 } from "../behavior/behavior-event-router";
 import type { SceneNodeId } from "../scene";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import {
 	PARTICLE_TYPE,
 	particlePosition,
@@ -79,13 +82,6 @@ export interface ParticleSystemDependencies {
 		target: BehaviorTarget,
 		partIndex: number,
 	) => BehaviorTarget | null;
-	/**
-	 * Scene-frame origin of the current render anchor, subtracted to reach anchor-relative space.
-	 *
-	 * Exposed as the anchor rather than as a conversion function so the subtraction can be hoisted
-	 * out of the per-particle loop and written into pooled storage.
-	 */
-	readonly renderAnchorOrigin: () => SceneVector3;
 	/** Current runtime clock, needed because commands arrive mid-dispatch. */
 	readonly clock: () => number;
 }
@@ -102,7 +98,10 @@ const WHOLE_OBJECT_PART_INDEX = -1;
 /** A pooled record the system fills in place; consumers still see the readonly contract. */
 type MutableParticleInstanceRecord = {
 	-readonly [K in keyof ParticleInstanceRecord]: ParticleInstanceRecord[K];
-} & { origin: [number, number, number] & RenderVector3 };
+} & {
+	landblockOrigin: [number, number, number] & SceneVector3;
+	localOrigin: [number, number, number] & LandblockVector3;
+};
 
 function blankRecord(): MutableParticleInstanceRecord {
 	return {
@@ -114,11 +113,26 @@ function blankRecord(): MutableParticleInstanceRecord {
 		finalTranslucency: 0,
 		lifespan: 0,
 		offset: acVector3([0, 0, 0]),
-		origin: renderVector3([0, 0, 0]) as [number, number, number] &
-			RenderVector3,
+		landblockOrigin: sceneVector3([0, 0, 0]) as [number, number, number] &
+			SceneVector3,
+		localOrigin: landblockVector3([0, 0, 0]) as [number, number, number] &
+			LandblockVector3,
 		startScale: 0,
 		startTranslucency: 0,
 	};
+}
+
+/**
+ * Snap a scene coordinate down to its landblock's corner.
+ *
+ * Landblock origins are exact multiples of the landblock size and so is the render anchor, which is
+ * what lets the vertex stage subtract one from the other without losing precision.
+ */
+function quantizeToLandblock(sceneCoordinate: number): number {
+	return (
+		Math.floor(sceneCoordinate / OUTDOOR_LANDBLOCK_WORLD_SIZE) *
+		OUTDOOR_LANDBLOCK_WORLD_SIZE
+	);
 }
 
 /** Sum two AC-axis displacements, which retail does before rotating the result. */
@@ -588,8 +602,6 @@ export class ParticleSystem {
 		const cohorts = this.#cohortScratch;
 		for (const cohort of cohorts.values()) cohort.particles.length = 0;
 		this.#activeCohortKeys.clear();
-		// The anchor is one value for the whole frame, so it is read once rather than per particle.
-		const anchor = this.#dependencies.renderAnchorOrigin();
 		this.#recordsUsed = 0;
 		for (const instance of this.#instances) {
 			const info = instance.emitter.info;
@@ -626,9 +638,17 @@ export class ParticleSystem {
 				record.finalTranslucency = particle.spawn.finalTranslucency;
 				record.lifespan = particle.spawn.lifespan;
 				record.offset = particle.spawn.offset;
-				record.origin[0] = sceneOrigin[0] - anchor[0];
-				record.origin[1] = sceneOrigin[1] - anchor[1];
-				record.origin[2] = sceneOrigin[2] - anchor[2];
+				// Split on the landblock grid so the record survives re-anchoring: the coarse part
+				// cancels exactly against the anchor and the local part stays small enough to keep
+				// its precision.
+				const landblockX = quantizeToLandblock(sceneOrigin[0]);
+				const landblockZ = quantizeToLandblock(sceneOrigin[2]);
+				record.landblockOrigin[0] = landblockX;
+				record.landblockOrigin[1] = 0;
+				record.landblockOrigin[2] = landblockZ;
+				record.localOrigin[0] = sceneOrigin[0] - landblockX;
+				record.localOrigin[1] = sceneOrigin[1];
+				record.localOrigin[2] = sceneOrigin[2] - landblockZ;
 				record.startScale = particle.spawn.startScale;
 				record.startTranslucency = particle.spawn.startTranslucency;
 				cohort.particles.push(record);
@@ -651,9 +671,8 @@ export class ParticleSystem {
 	 * path: the shader implements the same formulas, and this is what its output is checked
 	 * against. Production drawing goes through {@link collectCohorts}.
 	 */
-	sample(timeSeconds: number): ParticleSample[] {
+	sample(timeSeconds: number, anchor: SceneVector3): ParticleSample[] {
 		const samples: ParticleSample[] = [];
-		const anchor = this.#dependencies.renderAnchorOrigin();
 		for (const instance of this.#instances) {
 			const liveOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
 			if (liveOrigin === null) continue;

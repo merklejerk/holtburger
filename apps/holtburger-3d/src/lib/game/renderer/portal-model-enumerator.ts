@@ -38,11 +38,7 @@ export interface PortalModelSeededCorpusInput {
 }
 
 type FragmentVariant =
-	| "additive"
-	| "alpha-blended"
-	| "alpha-test"
-	| "opaque"
-	| "particle";
+	"additive" | "alpha-blended" | "alpha-test" | "opaque" | "particle";
 
 interface DirectedEdge {
 	readonly sourceIndex: number;

@@ -281,8 +281,7 @@ interface ObjectFrameInput {
 	/** Canonical authored scope; an instance run must never cross this atlas-routing boundary. */
 	readonly renderScopeKey: string;
 	readonly cullFaceOverride:
-		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
-		| null;
+		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;

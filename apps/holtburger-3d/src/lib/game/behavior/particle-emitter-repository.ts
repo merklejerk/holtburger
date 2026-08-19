@@ -45,8 +45,7 @@ interface RetailInertParticleEmitter {
 
 /** Prepared activation decision, computed once from the authored hardware-mesh ID. */
 export type PreparedParticleEmitter =
-	| DrawableParticleEmitter
-	| RetailInertParticleEmitter;
+	DrawableParticleEmitter | RetailInertParticleEmitter;
 
 /** Shares immutable emitter-definition transfer/preparation over the common asset lifecycle. */
 export class ParticleEmitterRepository extends PreparedAssetRepository<

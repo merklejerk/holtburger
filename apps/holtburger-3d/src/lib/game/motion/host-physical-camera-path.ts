@@ -14,9 +14,7 @@ import {
 
 /** Solver completion or finite-budget result for one fixed host tick. */
 export type PhysicalCameraTickStatus =
-	| "solved"
-	| "substep-budget-exceeded"
-	| "contact-budget-exceeded";
+	"solved" | "substep-budget-exceeded" | "contact-budget-exceeded";
 
 /** Non-gating residency of the final primary-sphere collision owner. */
 export type PhysicalCameraSceneResidency =
@@ -32,10 +30,7 @@ export type PhysicalCameraMode = "physical-fly" | "grounded-walk";
  * plane (sliding), airborne, or not yet classified.
  */
 export type PhysicalCameraGroundState =
-	| "unknown"
-	| "airborne"
-	| "sliding"
-	| "supported";
+	"unknown" | "airborne" | "sliding" | "supported";
 
 /** Every Explorer camera authority mode. */
 export type ExplorerCameraMode = "free-fly" | PhysicalCameraMode;

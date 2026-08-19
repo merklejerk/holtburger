@@ -19,7 +19,6 @@ describe("portal render capacity policy", () => {
 				columnCount: 2,
 				maximumCrossingTriangleVertexCount: 37,
 				maximumArrivalStateCount: 31,
-				maximumTargetByteLength: 1_000,
 				rowCount: 4,
 			},
 		};
@@ -87,7 +86,6 @@ describe("portal render capacity policy", () => {
 					columnCount: 1,
 					maximumCrossingTriangleVertexCount: 3,
 					maximumArrivalStateCount: 1,
-					maximumTargetByteLength: 1,
 					rowCount: 1,
 				},
 			}),
@@ -105,7 +103,6 @@ describe("portal render capacity policy", () => {
 					columnCount: 2,
 					maximumCrossingTriangleVertexCount: 3,
 					maximumArrivalStateCount: 1,
-					maximumTargetByteLength: 1,
 					rowCount: 0,
 				},
 			}),
@@ -123,7 +120,6 @@ describe("portal render capacity policy", () => {
 					columnCount: 1,
 					maximumCrossingTriangleVertexCount: 3,
 					maximumArrivalStateCount: 0,
-					maximumTargetByteLength: 1,
 					rowCount: 1,
 				},
 			}),
@@ -141,28 +137,9 @@ describe("portal render capacity policy", () => {
 					columnCount: 1,
 					maximumCrossingTriangleVertexCount: 2,
 					maximumArrivalStateCount: 1,
-					maximumTargetByteLength: 1,
 					rowCount: 1,
 				},
 			}),
 		).toThrow("scopeAtlas.maximumCrossingTriangleVertexCount");
-	});
-
-	it("rejects a non-positive target byte budget", () => {
-		expect(() =>
-			createPortalRenderCapacityPolicy({
-				maximumAuthoredApertureVertexCount: 3,
-				maximumPathDepth: 1,
-				maximumProjectionPrimitiveCount: 1,
-				maximumScopeWindowWorkItemCount: 1,
-				scopeAtlas: {
-					columnCount: 1,
-					maximumArrivalStateCount: 1,
-					maximumCrossingTriangleVertexCount: 3,
-					maximumTargetByteLength: 0,
-					rowCount: 1,
-				},
-			}),
-		).toThrow("scopeAtlas.maximumTargetByteLength");
 	});
 });

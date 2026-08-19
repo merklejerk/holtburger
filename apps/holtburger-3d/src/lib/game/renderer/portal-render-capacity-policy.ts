@@ -25,8 +25,6 @@ interface PortalScopeAtlasCapacitySelection {
 	readonly maximumCrossingTriangleVertexCount: number;
 	/** Root plus directed-crossing arrival ids representable by the frontier format. */
 	readonly maximumArrivalStateCount: number;
-	/** Complete fixed attachment bytes admitted for one drawing-buffer generation. */
-	readonly maximumTargetByteLength: number;
 	/** Vertical drawing-buffer tiles allocated once per target generation. */
 	readonly rowCount: number;
 }
@@ -127,11 +125,6 @@ function validateSelection(selection: PortalRenderCapacitySelection): void {
 			selection.scopeAtlas.maximumArrivalStateCount,
 			1,
 		],
-		[
-			"scopeAtlas.maximumTargetByteLength",
-			selection.scopeAtlas.maximumTargetByteLength,
-			1,
-		],
 		["scopeAtlas.rowCount", selection.scopeAtlas.rowCount, 1],
 	] as const) {
 		if (!Number.isSafeInteger(value) || value < minimum) {
@@ -152,9 +145,6 @@ export const PORTAL_RENDER_CAPACITY_POLICY = createPortalRenderCapacityPolicy({
 		columnCount: 2,
 		maximumCrossingTriangleVertexCount: 2_048,
 		maximumArrivalStateCount: PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT,
-		// The traced 2560x1080 production extent consumes 215,654,400 bytes. This binary
-		// 256 MiB ceiling admits that corpus while rejecting untraced 4K/high-DPI allocations.
-		maximumTargetByteLength: 256 * 1024 * 1024,
 		rowCount: 3,
 	},
 });

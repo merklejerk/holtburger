@@ -122,10 +122,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
 		this.#tileState = new WebGL2PortalTileStateApplicator(gl);
-		this.#targetOwner = new WebGL2PortalScopeAtlasTargets(
-			gl,
-			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumTargetByteLength,
-		);
+		this.#targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
 		this.#executor = new WebGL2PortalScopeAtlasExecutor(
 			gl,
 			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas

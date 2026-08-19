@@ -28,9 +28,7 @@ export const SEALED_INTERIOR_AMBIENT = {
  * (`useSunlightSet(0)`, acclient.c:441094-441234).
  */
 export type SceneLightingRole =
-	| "terrain"
-	| "outdoor-object"
-	| "interior-object";
+	"terrain" | "outdoor-object" | "interior-object";
 
 /** One frame's lighting for every draw role, derived once to keep draw loops allocation-free. */
 export type SceneLightingByRole = Readonly<

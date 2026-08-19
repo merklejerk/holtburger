@@ -16,7 +16,7 @@ const RESIZED_EXTENTS = {
 describe("WebGL2 portal scope-atlas targets", () => {
 	it("allocates the fixed format set once and reports exact active bytes", () => {
 		const state = createDefaultFakeWebGL2();
-		const targets = new WebGL2PortalScopeAtlasTargets(state.gl, 1_000);
+		const targets = new WebGL2PortalScopeAtlasTargets(state.gl);
 
 		expect(targets.getDiagnostics()).toEqual({
 			activeBytes: 0,
@@ -60,7 +60,7 @@ describe("WebGL2 portal scope-atlas targets", () => {
 
 	it("replaces a complete generation transactionally and disposes once", () => {
 		const state = createDefaultFakeWebGL2();
-		const targets = new WebGL2PortalScopeAtlasTargets(state.gl, 1_000);
+		const targets = new WebGL2PortalScopeAtlasTargets(state.gl);
 		const first = targets.resize(INITIAL_EXTENTS);
 
 		const second = targets.resize(RESIZED_EXTENTS);
@@ -100,7 +100,7 @@ describe("WebGL2 portal scope-atlas targets", () => {
 
 	it("retains the previous generation and restores bindings after replacement failure", () => {
 		const state = createDefaultFakeWebGL2();
-		const targets = new WebGL2PortalScopeAtlasTargets(state.gl, 1_000);
+		const targets = new WebGL2PortalScopeAtlasTargets(state.gl);
 		const first = targets.resize(INITIAL_EXTENTS);
 		const expectedBindings = installUnrelatedBindings(state.gl);
 		state.failFramebufferCheckAt = state.framebufferStatusCheckCount + 3;
@@ -124,7 +124,7 @@ describe("WebGL2 portal scope-atlas targets", () => {
 
 	it("rejects impossible extents before allocating resources", () => {
 		const state = createFakeWebGL2({ maximumTextureSize: 8 });
-		const targets = new WebGL2PortalScopeAtlasTargets(state.gl, 1_000);
+		const targets = new WebGL2PortalScopeAtlasTargets(state.gl);
 
 		expect(() =>
 			targets.resize({
@@ -154,19 +154,6 @@ describe("WebGL2 portal scope-atlas targets", () => {
 			framebuffers: 0,
 			textures: 0,
 		});
-	});
-
-	it("rejects an attachment generation above its explicit byte budget", () => {
-		const state = createDefaultFakeWebGL2();
-		const targets = new WebGL2PortalScopeAtlasTargets(state.gl, 215);
-
-		expect(() => targets.resize(INITIAL_EXTENTS)).toThrow(
-			"require 216 bytes, exceeding the configured 215-byte budget",
-		);
-		expect(state.created).toEqual({ framebuffers: 0, textures: 0 });
-		expect(() => new WebGL2PortalScopeAtlasTargets(state.gl, 0)).toThrow(
-			"positive safe integer",
-		);
 	});
 });
 

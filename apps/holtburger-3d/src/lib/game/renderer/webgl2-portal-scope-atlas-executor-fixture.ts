@@ -23,10 +23,7 @@ import type {
 } from "../scene";
 import type { PlanarAperture } from "../scene/planar-aperture";
 import { composePortalReferenceFrameThroughPathDepth } from "./portal-reference-compositor";
-import {
-	createPortalRenderCapacityPolicy,
-	PORTAL_RENDER_CAPACITY_POLICY,
-} from "./portal-render-capacity-policy";
+import { createPortalRenderCapacityPolicy } from "./portal-render-capacity-policy";
 import { PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS } from "./portal-envelope-sampling-glsl";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
@@ -114,7 +111,6 @@ const PRODUCTION_PACKED_FIXTURE_POLICY = createPortalRenderCapacityPolicy({
 		columnCount: 4,
 		maximumArrivalStateCount: 2,
 		maximumCrossingTriangleVertexCount: 6,
-		maximumTargetByteLength: 1_024,
 		rowCount: 1,
 	},
 });
@@ -162,10 +158,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		);
 	}
 	const state = captureState(gl, METADATA_BINDING_POINT);
-	const targetOwner = new WebGL2PortalScopeAtlasTargets(
-		gl,
-		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumTargetByteLength,
-	);
+	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
 	const executor = new WebGL2PortalScopeAtlasExecutor(
 		gl,
 		18,

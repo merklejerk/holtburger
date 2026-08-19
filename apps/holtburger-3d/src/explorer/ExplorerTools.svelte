@@ -26,12 +26,7 @@
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 
 	type ExplorerTabId =
-		| "world"
-		| "frame"
-		| "textures"
-		| "assets"
-		| "entities"
-		| "logs";
+		"world" | "frame" | "textures" | "assets" | "entities" | "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */

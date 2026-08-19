@@ -364,6 +364,57 @@ interval-driven — the census's 614 shape-eligible definitions are a floor, not
 
 ## Decisions and Course Corrections
 
+- **Phase 6 blocked on a design gap found at implementation start (2026-08-19) — needs a
+  decision before any code is written.**
+
+  **The gap.** Phase 6's per-frame contract reads "cull to visible emitters, sort farthest-last,
+  prefix-sum bounds, cut at the global budget, draw" — i.e. draw a *subset* of a static
+  per-emitter instance buffer with no per-particle CPU work. That requires addressing an arbitrary
+  instance range, which in WebGL2 means `baseInstance`. Core WebGL2's `drawElementsInstanced` has
+  none (it is the `WEBGL_draw_instanced_base_vertex_base_instance` extension, unused anywhere in
+  this renderer), so the subset must be expressed some other way. Every option costs something the
+  plan did not budget:
+
+  | option | draws at C061 | per-frame CPU per particle | note |
+  | ------ | ------------- | -------------------------- | ---- |
+  | one draw per visible emitter (`gl_InstanceID` = k, emitter constants per draw) | **72** (from 5) | none | 14x the draw calls, plus per-draw uniform/UBO-index setup |
+  | per-frame `(emitterIndex, k)` instance stream, draws stay coalesced | 5 | 2 floats | keeps coalescing; reintroduces per-visible-particle CPU work |
+  | static buffer covering all *resident* emitters, cull in-shader | 5 | none | draws ~7.5k instances instead of 669 — 11x vertex work |
+
+  **Measured at the reference pose** (temporary probe in `collectCohorts`, since removed): 626
+  resident emitters, **72 visible**, 69 cohorts, recoalesced to 5 draw batches, 669 submitted
+  instances. So per-emitter draws are 72, not the handful the plan implicitly assumed.
+
+  **The prize has also shrunk, because Track A already took most of it.** Remaining
+  particle-attributable CPU is ~0.16 ms/frame total: `collectCohorts` 71.4 µs, `advance` 37.6 µs,
+  `writeParticleInstance` 23.4 µs, `route` 11.3 µs. Phase 6's realistic ceiling is ~0.08–0.10
+  ms/frame saved (option 2 keeps some per-particle work; option 1 risks spending the saving on
+  driver overhead). Against that: in-shader reproduction of the entire spawn path (sampling and
+  clamps, offset disc projection with its degenerate fallback, spawn-frame rotation, Explode's
+  direction roll and minimum-length check, Implode's derived `c`) with every `RETAIL QUIRK`
+  preserved, a per-emitter constants table with creation/eviction lifetime, the eligibility split,
+  the budget, and the whole new parity apparatus — in the subsystem the repo says is verified by
+  looking rather than diffing.
+
+  **Cheaper alternative that captures much of the same win.** The plan parked "per-particle spawn
+  record pooling" as out of scope *because GPU emission would supersede it*. If Phase 6 does not
+  happen, that reasoning inverts and it becomes the obvious next move: a particle's instance record
+  is immutable after spawn except for `origin`, so the record can be built once at spawn and
+  `collectCohorts` reduced to writing 3 floats instead of refilling 14 fields. For frozen-origin
+  particles — the majority of static scenery — even the origin is fixed in scene space, changing
+  only when the render anchor moves (a landblock crossing), so those records can be fully static
+  between crossings. Estimated saving 50–60 µs/frame for a contained, low-risk change with no
+  shader work, no divergences, and no parity-standard exposure.
+
+  **Also worth weighing:** particles are no longer the largest renderer-owned CPU cost. The same
+  profile puts run formation and culling well above them — `formAdjacentObjectInstanceRuns`
+  613 ms/10 s, `createObjectSubmissionPhases` 593, `formGroupedObjectInstanceRuns` 534,
+  `#frustumIntersectsLandblockBounds` 512 — which is exactly what the frame-input plan predicted
+  would surface next.
+
+  **Status: Phase 6 not started.** No code written; the temporary probe was reverted and the tree
+  is clean at the two Track A commits.
+
 - **Phase 5 ratified (2026-08-19, user sign-off) — parity standard set and RNG approach chosen.**
 
   **Order-independent particle RNG is approved**, and on its own merits rather than as a

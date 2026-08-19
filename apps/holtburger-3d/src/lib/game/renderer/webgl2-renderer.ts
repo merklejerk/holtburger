@@ -538,6 +538,8 @@ interface MutableFrameSelectionMetrics {
 	submittedParticleBatchCount: number;
 	submittedParticleInstanceCount: number;
 	unresolvedParticleBatchCount: number;
+	/** Record-texture rows uploaded this frame; near the store height means a degenerate span. */
+	uploadedParticleRecordRowCount: number;
 	frameInstanceCapacity: number;
 	frameInstanceGrowthCount: number;
 	frameInstanceViewHighWaterMark: number;
@@ -724,6 +726,7 @@ export class WebGL2Renderer implements Renderer {
 		submittedParticleBatchCount: 0,
 		submittedParticleInstanceCount: 0,
 		unresolvedParticleBatchCount: 0,
+		uploadedParticleRecordRowCount: 0,
 		frameInstanceCapacity: 0,
 		frameInstanceGrowthCount: 0,
 		frameInstanceViewHighWaterMark: 0,
@@ -2018,6 +2021,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedParticleBatchCount = 0;
 		metrics.submittedParticleInstanceCount = 0;
 		metrics.unresolvedParticleBatchCount = 0;
+		metrics.uploadedParticleRecordRowCount = 0;
 		metrics.frameInstanceCapacity = 0;
 		metrics.frameInstanceGrowthCount = 0;
 		metrics.frameInstanceViewHighWaterMark = 0;
@@ -2226,6 +2230,8 @@ export class WebGL2Renderer implements Renderer {
 				diagnostics.drawnParticleCount;
 			this.#frameSelectionMetrics.unresolvedParticleBatchCount +=
 				diagnostics.unresolvedBatchCount;
+			this.#frameSelectionMetrics.uploadedParticleRecordRowCount +=
+				diagnostics.uploadedRecordRowCount;
 		} finally {
 			if (startedAt !== undefined) {
 				profile?.finishCpuPhase("particleSubmission", startedAt);

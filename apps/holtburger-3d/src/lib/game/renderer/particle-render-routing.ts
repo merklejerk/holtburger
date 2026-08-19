@@ -16,6 +16,11 @@ export interface ParticleDrawRange {
 	readonly count: number;
 }
 
+/** Mutable scratch form of one final draw range. */
+type MutableParticleDrawRange = {
+	-readonly [K in keyof ParticleDrawRange]: ParticleDrawRange[K];
+};
+
 /**
  * Routes owner-local particle sources into render domains.
  *
@@ -31,6 +36,14 @@ export interface ParticleDrawRange {
 export class ParticleRenderBatcher {
 	/** Reused output arrays grouped by the final render domain. */
 	readonly #domainRanges = new Map<string, ParticleDrawRange[]>();
+	/**
+	 * Flat pool of range objects the domain arrays hold references into.
+	 *
+	 * One object per visible emitter per frame would otherwise be allocated here and immediately
+	 * discarded, which is the churn the particle path is built to avoid.
+	 */
+	readonly #rangePool: MutableParticleDrawRange[] = [];
+	#rangesUsed = 0;
 	/** Reused output for several render nodes sharing one executor contribution. */
 	readonly #mergedOutput: ParticleDrawRange[] = [];
 	/** Revision owning the domain-keyed scratch, or null before the first route. */
@@ -39,6 +52,8 @@ export class ParticleRenderBatcher {
 	/** Release all frame references and revision-owned scratch on particle residency teardown. */
 	clear(): void {
 		this.#domainRanges.clear();
+		this.#rangePool.length = 0;
+		this.#rangesUsed = 0;
 		this.#mergedOutput.length = 0;
 		this.#routingRevision = null;
 	}
@@ -54,6 +69,7 @@ export class ParticleRenderBatcher {
 			this.#domainRanges.clear();
 		}
 		for (const ranges of this.#domainRanges.values()) ranges.length = 0;
+		this.#rangesUsed = 0;
 
 		for (const source of sources) {
 			const domainId = resolveDomain(source.renderOwner);
@@ -63,12 +79,18 @@ export class ParticleRenderBatcher {
 				ranges = [];
 				this.#domainRanges.set(domainId, ranges);
 			}
-			ranges.push({
-				baseSlot: source.baseSlot,
-				count: source.count,
+			const range = (this.#rangePool[this.#rangesUsed] ??= {
+				baseSlot: 0,
+				count: 0,
 				hwGfxObjId: source.hwGfxObjId,
-				motionType: source.motionType,
+				motionType: 0,
 			});
+			this.#rangesUsed += 1;
+			range.baseSlot = source.baseSlot;
+			range.count = source.count;
+			range.hwGfxObjId = source.hwGfxObjId;
+			range.motionType = source.motionType;
+			ranges.push(range);
 		}
 
 		return this.#domainRanges;

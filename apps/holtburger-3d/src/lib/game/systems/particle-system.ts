@@ -100,6 +100,21 @@ const MINIMUM_NORMALIZABLE_LENGTH = 0.00019999999;
 /** `CreateParticle`'s sentinel for an emitter riding the object's own frame rather than a part. */
 const WHOLE_OBJECT_PART_INDEX = -1;
 
+/** A pooled range the system fills in place; consumers still see the readonly contract. */
+type MutableParticleSourceRange = {
+	-readonly [K in keyof ParticleSourceRange]: ParticleSourceRange[K];
+};
+
+function blankRange(): MutableParticleSourceRange {
+	return {
+		baseSlot: 0,
+		count: 0,
+		hwGfxObjId: "" as DatAssetId,
+		motionType: 0,
+		renderOwner: EXTERIOR_PARTICLE_RENDER_OWNER,
+	};
+}
+
 /** A pooled record the system fills in place; consumers still see the readonly contract. */
 type MutableParticleInstanceRecord = {
 	-readonly [K in keyof ParticleInstanceRecord]: ParticleInstanceRecord[K];
@@ -371,6 +386,10 @@ export interface ParticleSystemDiagnostics {
 	/** Removals of a widest emitter that required rebuilding its surviving owner's maximum. */
 	readonly ownerAggregateRepairTotal: number;
 	readonly reapedEmitterCount: number;
+	/** Record slots reserved by live emitter regions. */
+	readonly reservedRecordSlotCount: number;
+	/** Record slots the store holds, reserved or not. */
+	readonly recordSlotCapacity: number;
 	/** Emitters removed when a nonzero authored identity was recreated. */
 	readonly replacedEmitterTotal: number;
 }
@@ -396,7 +415,14 @@ export class ParticleSystem {
 	/** Reused across frames so cohort grouping does not allocate in the renderer's hot path. */
 	/** Persistent record storage; written at spawn and read by the GPU every frame after. */
 	readonly #slots = new ParticleRecordSlots();
-	/** Reused output for the visible draw ranges, rebuilt each frame from emitters alone. */
+	/**
+	 * Reused output for the visible draw ranges, rebuilt each frame from emitters alone.
+	 *
+	 * Pooled rather than rebuilt: one object per visible emitter per frame is exactly the churn the
+	 * record pooling this replaced existed to avoid, and it would be invisible until it showed up
+	 * as collection pauses.
+	 */
+	readonly #rangePool: MutableParticleSourceRange[] = [];
 	readonly #rangeOutput: ParticleSourceRange[] = [];
 	/** Reused record builder; a record is copied into slot storage, never retained by shape. */
 	readonly #recordScratch: MutableParticleInstanceRecord = blankRecord();
@@ -605,6 +631,7 @@ export class ParticleSystem {
 		) => ParticleRenderOwner | null = () => EXTERIOR_PARTICLE_RENDER_OWNER,
 	): ParticleSourceRange[] {
 		this.#rangeOutput.length = 0;
+		let rangesUsed = 0;
 		for (const instance of this.#instances) {
 			if (instance.particles.length === 0) continue;
 			const info = instance.emitter.info;
@@ -624,13 +651,14 @@ export class ParticleSystem {
 					);
 				}
 			}
-			this.#rangeOutput.push({
-				baseSlot: instance.region.base,
-				count: instance.particles.length,
-				hwGfxObjId: instance.emitter.mesh.id,
-				motionType: info.motionType,
-				renderOwner,
-			});
+			const range = (this.#rangePool[rangesUsed] ??= blankRange());
+			rangesUsed += 1;
+			range.baseSlot = instance.region.base;
+			range.count = instance.particles.length;
+			range.hwGfxObjId = instance.emitter.mesh.id;
+			range.motionType = info.motionType;
+			range.renderOwner = renderOwner;
+			this.#rangeOutput.push(range);
 		}
 		return this.#rangeOutput;
 	}
@@ -728,6 +756,8 @@ export class ParticleSystem {
 				0,
 			),
 			reapedEmitterCount: this.#reapedEmitterCount,
+			recordSlotCapacity: this.#slots.capacity,
+			reservedRecordSlotCount: this.#slots.reservedSlotCount,
 			replacedEmitterTotal: this.#replacedEmitterTotal,
 		};
 	}

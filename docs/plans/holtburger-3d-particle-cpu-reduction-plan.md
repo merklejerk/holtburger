@@ -257,67 +257,99 @@ with their measured blast radius.
 - [x] Divergence write-ups drafted (approval pending with the parity standard)
 - [x] Parity methodology decided
 
-### Phase 6: Closed-form GPU emission with a global on-screen budget
+### Phase 6: Persistent particle records (data texture, landblock space, spawn-time writes)
 
-For persistent, static-owner, interval-driven emitters: births occur at `phase + k · interval`;
-particle `k`'s lifespan, scale/translucency endpoints, offset, and a/b/c samples derive from
-`hash(emitterSeed, k)`; the spawn-frame rotation is constant and bakes into per-emitter
-constants at creation. At time `t` the alive set is a contiguous window of `k`, bounded by
-`min(ceil(maxLifespan / interval), maxParticles)` — a fixed per-emitter instance count. Upload
-per-emitter static data once at creation; per frame, CPU work is: cull to visible emitters,
-sort farthest-last, prefix-sum bounds, cut at the global budget, draw.
+**Replaces the original closed-form GPU emission design** (see Decisions, 2026-08-19). That design
+bundled two ideas: *stop rebuilding the particle list every frame* (the structural win) and *have
+the GPU derive each particle from its index* (the risk). This phase takes the first without the
+second. Emission stays on the CPU exactly as retail specifies it, so **no retail divergences are
+needed at all** — the cap-clamp and cadence divergences ratified in Phase 5 go unused, and the
+eligibility split disappears with them.
 
-Finite/burst emitters and emitters whose owner actually moves or rotates stay on the (now
-cheap) CPU path. `followsParent` is not itself disqualifying: for a static owner, following and
-frozen origins are indistinguishable, so eligibility is owner staticness + persistence +
-interval-driven — the census's 614 shape-eligible definitions are a floor, not the gate.
+**The shape.** A particle's record is immutable after spawn except for its origin, and even the
+origin is fixed for a trailing emitter. So the record is written once, at spawn, into a persistent
+slot the GPU reads directly; the per-frame CPU walks *emitters*, never particles.
 
-**Deliverables:**
+Three mechanisms make that work, each answering a measured obstacle:
 
-- Shader-side generation logic in `webgl2-particle-program.ts` (or a sibling program): in-shader
-  PRNG hash, per-generation constant derivation, alive-window discard, reproducing
-  `particle-motion.ts` semantics; the CPU evaluator remains the checked reference.
-- Per-emitter static instance regions with creation-time upload; a residency/eviction story tied
-  to emitter lifetime (creation, destroy, target loss).
-- Runtime split: closed-form-eligible emitters leave `advance`'s per-frame loop and
-  `collectCohorts` entirely; eligibility decided once at creation from the emitter info.
-- Global instance budget: a named frontend tuning constant; farthest-first emitter-granularity
-  truncation; budget pressure surfaced in particle diagnostics (eligible vs drawn instance
-  counts, truncated emitter count).
-- Harness scenario exercising budget truncation and the CPU/GPU population split; diagnostics
-  extended so both populations are visible.
+1. **Records live in an RGBA32F data texture**, indexed by `gl_InstanceID + uInstanceBase`, not in
+   vertex attributes. Rebinding six attribute pointers costs ~20 GL calls per drawn range; a
+   uniform plus a draw costs 2. This is what keeps device-state churn *below* today's ~100
+   calls/frame even as the number of ranges rises. Precedent: `webgl2-terrain-program.ts` and
+   portal envelope sampling already drive lookups through `texelFetch`.
+2. **Origins are stored in landblock space**, with the landblock offset supplied per drawn range as
+   a uniform. A camera crossing then changes a uniform, never stored data, so persistent records are
+   immune to re-anchoring. This reuses the frame-input plan's North Star 3 rather than inventing a
+   convention.
+3. **The origin is a sum, not a branch**: `origin = storedOrigin + uEmitterOrigin`. A trailing
+   emitter stores its real spawn origin and passes `uEmitterOrigin = 0`; a following emitter stores
+   zero and passes its live landblock-space origin. One uniform serves both, with no per-particle
+   work for either and no eligibility test anywhere.
 
-**Acceptance criteria:**
+**Sub-phases**, each independently verifiable and each leaving the tree working:
 
-- CPU reference vs GPU output pinned for the closed-form population (per the Phase 5 parity
-  standard).
-- C061 pose: particle-attributable CPU scales with visible emitters only; per-frame
-  `bufferSubData` volume for the closed-form population is zero in steady state.
-- Budget scenario: truncation drops farthest emitters first, diagnostics account for every
-  eligible instance, no over-budget draw.
-- All existing particle scenarios (seeded captures, portal path, sky) still pass.
+**6a — data texture, same lifetimes.** Move the per-particle record from the instance attribute
+stream to a data texture read by `texelFetch`, keeping the existing per-frame rebuild. No lifetime
+or ownership change; this isolates the texture path so a regression here cannot be confused with
+one from persistence. Deliverables: record store with a CPU `Float32Array` mirror and dirty-range
+upload, shader reads via `gl_InstanceID + uInstanceBase`, `webgl2-particle-instance-buffer.ts`
+retired. Acceptance: DA55 candle pose and C061 render unchanged; GL call count per frame reported
+and not worse.
+
+**6b — landblock-space origins.** Stop baking the anchor into records: store landblock-space
+origins and add `uLandblockOffset` per drawn range, which forces ranges to be landblock-homogeneous
+(free — landblock becomes a sort key). Acceptance: a landblock-crossing flight renders correctly;
+`--relocate-sequence` shows no origin drift.
+
+**6c — persistent slots (the win).** Each emitter owns a contiguous slot region sized
+`min(maxParticles, aliveWindowBound)`. Spawn writes one record; death compacts by swapping the last
+live record into the freed slot. `collectCohorts` and the pooled `ParticleInstanceRecord` path are
+deleted outright — the per-frame path becomes: cull emitters, then per visible emitter set uniforms
+and draw. Acceptance: no per-particle CPU work in a frame profile; particle populations and draw
+structure unchanged at C061.
+
+**6d — following-emitter origin uniform.** Following emitters store zero and carry their live origin
+in `uEmitterOrigin`, removing the last per-particle per-frame write. Acceptance: a following-emitter
+scene (moving creature) shows zero per-particle frame work; trails still render behind movers.
+
+**6e — budget, diagnostics, and range merging if measured necessary.** Global instance budget with
+farthest-first emitter truncation; slot occupancy, dirty-upload bytes, range count, and GL calls in
+diagnostics. Range merging across adjacent same-key emitters is deliberately **not** built up front:
+start with one range per visible emitter (~72 at C061, ~144 GL calls) and add merging only if the
+numbers demand it.
+
+**Acceptance criteria (phase-wide):**
+
+- Parity per the Phase 5 standard: formula agreement (CPU reference vs shader), distribution
+  agreement, structural metrics, and visual review at the DA55 candle pose.
+- C061 ground pose: zero per-particle CPU work per frame; particle-attributable CPU below the
+  ~0.16 ms/frame Track A left; GL calls per frame not worse than today.
+- Portal, sky, filtering, and relocation harness scenarios still pass.
 
 **Task checklist:**
 
-- [ ] In-shader generation with pinned CPU-reference parity
-- [ ] Creation-time upload and lifetime-tied eviction
-- [ ] Eligibility split at creation; eligible emitters out of the frame loop
-- [ ] Budget with diagnostics and harness scenario
-- [ ] Divergence markers landed with census citations
+- [ ] 6a data texture with dirty-range upload; attribute stream retired
+- [ ] 6b landblock-space origins with per-range offset uniform
+- [ ] 6c persistent slots; `collectCohorts` and pooled records deleted
+- [ ] 6d following-emitter origin uniform
+- [ ] 6e budget, diagnostics, and a measured decision on range merging
 - [ ] Harness A/B recorded in Decisions
+
 
 ### Phase 7: Cleanup & guarantee census
 
-- Sweep vocabulary: the `collectCohorts` "measured debt" comment, any "reap" naming that no
-  longer scans, dependency doc comments describing the old call rates.
-- Delete dead paths: per-frame refill/upload code that only the closed-form population used,
-  interim diagnostics that report a permanent zero.
+- Sweep vocabulary: the `collectCohorts` "measured debt" comment (the mechanism it describes is
+  gone), any "cohort" naming that no longer groups anything, dependency doc comments describing
+  the old call rates.
+- Delete dead paths: the pooled `ParticleInstanceRecord` machinery, `writeParticleInstance`, the
+  instance attribute stream, and any diagnostic that now reports a permanent zero.
 - Verify every guarantee of the deleted per-frame mechanisms against its named replacement:
   - per-frame origin freshness (advance) → spawn-time resolution + `targetLives`
   - per-frame reap exactness → `deathTime` watermark + compaction
-  - per-frame upload freshness (closed-form population) → creation-time upload + eviction on
-    emitter lifetime events
-  - per-frame population cap (`maxParticles`) → alive-window clamp (divergence-marked)
+  - per-frame record freshness → spawn-time write + death compaction into persistent slots
+  - anchor freshness in records → landblock-space storage + per-range offset uniform
+  - following-emitter origin freshness → per-range `uEmitterOrigin`
+  - per-frame attribute rebinding → `uInstanceBase` addressing into the data texture
   - unbounded draw volume → global budget with diagnostics
 
 **Task checklist:**
@@ -327,12 +359,18 @@ interval-driven — the census's 614 shape-eligible definitions are a floor, not
 
 ## Risks & Mitigations
 
-- **Hash-driven randomness looks wrong** (banding, visible repetition vs retail's LCG streams):
-  pick a proven integer hash (e.g. PCG-style) and eyeball A/B captures of dense emitter scenes
-  during Phase 6; the CPU reference makes distribution tests cheap.
-- **Divergence blast radius underestimated** (an authored effect that depends on cap-delay or
-  frame-coupled cadence): the Phase 5 census flags exactly those emitters; any flagged emitter
-  can be routed to the CPU path instead of diverging.
+- **Slot leakage or aliasing** (a freed slot still drawn, or two particles sharing one): slot
+  allocation and death compaction are the only writers; unit tests cover spawn/death/compaction
+  ordering, and a slot-occupancy diagnostic makes a leak visible in the existing leak-check flow.
+- **Dirty-range upload degenerating to a full-texture upload** (scattered spawns across a large
+  store): track dirty rows rather than a single min/max span, and report uploaded bytes per frame
+  so a pathological pattern is visible rather than merely slow.
+- **Device-state churn eating the saving** (the trap that killed the original Phase 6): the data
+  texture keeps a range at 2 GL calls; GL calls per frame is an acceptance metric, not an
+  afterthought.
+- **Following emitters spending draws** (one range each, no merging): bounded by emitter count
+  rather than particle count, but C061 is scenery-heavy and does not exercise it — measure on a
+  moving-creature scene before concluding.
 - **`deathTime`/reconcile inconsistency** (suspension shifts `birthTime` but not `deathTime`,
   silently extending lifetimes): consistency test in Phase 3 targets that exact seam.
 - **Budget popping** (emitters at the budget boundary flickering as the camera moves): emitter-
@@ -346,23 +384,64 @@ interval-driven — the census's 614 shape-eligible definitions are a floor, not
 
 ## Definition of Done
 
-- [ ] All phases complete; checklists ticked; census results and divergence markers recorded.
+- [x] Phases 1–5 complete; checklists ticked; census recorded.
+- [ ] Phase 6 sub-phases complete; Phase 7 cleanup and guarantee census recorded.
 - [ ] `svelte-check`, unit suites, lint, knip, prettier clean; clippy clean for the census tool.
-- [ ] C061 ground pose: particle-attributable CPU ≤ 0.25 ms/frame after Track A (Phases 1–3),
-      and scaling with visible particles only after Phase 6; A/B tables in Decisions.
-- [ ] Screenshot/metric parity per the Phase 5 standard on all particle scenarios.
+- [x] C061 ground pose: particle-attributable CPU ≤ 0.25 ms/frame after Track A — **met at
+      ~0.16 ms/frame** (Phase 4 table).
+- [ ] After Phase 6: no per-particle CPU work per frame; GL calls per frame not worse than today.
+- [ ] Parity per the Phase 5 standard on all particle scenarios.
 - [ ] No new `any`, no swallowed errors, no per-frame allocation on the particle frame path.
 
 ## Open Questions
 
-- Default global instance budget: the census gives p50 12 / p90 36 / p99 102 clamped instances
-  per eligible emitter; a C061-density scene (~626 resident emitters, far fewer visible) suggests
-  a low-five-figure default leaves headroom while still bounding pathology. Pick the number when
-  Phase 6's diagnostics can validate it against real visible-emitter sums.
-- Sky-target emitters (weather) under Track B: their origins are viewer-relative; likely CPU
-  path forever, but confirm with the census how many exist.
+- Default global instance budget: the census gives p50 12 / p90 36 / p99 102 alive-window
+  instances per emitter; at C061, 72 visible emitters carry 669 instances. Pick the number in 6e
+  when diagnostics can validate it against real visible sums.
+- Slot region sizing: `min(maxParticles, aliveWindowBound)` is the intended bound, but the census
+  showed `maxParticles` below the alive window for 208 of 614 emitters, so the min is load-bearing
+  rather than belt-and-braces. Confirm total store size at C061 before fixing the texture
+  dimensions.
+- Sky-target emitters (weather) have viewer-relative origins, so "landblock space" needs a defined
+  meaning for them — most likely they keep a per-range origin uniform like following emitters.
+  Resolve in 6b.
 
 ## Decisions and Course Corrections
+
+- **Phase 6 redesigned and approved (2026-08-19, user): persistent records, not closed-form
+  emission.** The original phase bundled "stop rebuilding the particle list every frame" with
+  "have the GPU derive each particle from its index." Nearly all the CPU saving came from the
+  first; nearly all the risk and every divergence came from the second. They separate cleanly, so
+  the phase now takes only the first.
+
+  **Consequences, all simplifying:**
+  - **No retail divergences.** Emission stays on the CPU on retail's schedule with retail's cap
+    behavior, so the cap-clamp and cadence divergences ratified in Phase 5 are not needed. They
+    remain recorded as approved-but-unused in case closed-form emission is ever revisited.
+  - **No eligibility split.** The original design could not serve moving owners at all, because
+    spawn-frame rotation and frozen origins are history-dependent snapshots that an index cannot
+    reproduce. Persistent records *store* those snapshots, so history stops being a problem: 1,112
+    trailing emitters get fully static records (moving owner or not — a trail streaming off a
+    running creature is the same case as a campfire), and 737 following emitters carry one live
+    origin per emitter rather than per particle. The population axis that matters turned out to be
+    `followsParent`, not owner staticness.
+  - **No in-shader spawn logic**, so the RETAIL QUIRK semantics in `#emit` and `particle-motion.ts`
+    stay where they are and the parity exposure shrinks to "does the shader read the same numbers
+    it used to read."
+
+  **Three mechanisms, each answering a measured obstacle rather than a guess:** an RGBA32F data
+  texture indexed by `gl_InstanceID + uInstanceBase` (2 GL calls per drawn range instead of ~20,
+  keeping churn below today's ~100 calls/frame); landblock-space origins with a per-range offset
+  uniform (crossing immunity, reusing the frame-input plan's North Star 3); and
+  `origin = storedOrigin + uEmitterOrigin`, which serves trailing and following emitters with one
+  uniform, no branch, and no eligibility test.
+
+  **Sequenced as 6a–6e** so each step is independently verifiable: data texture first with
+  lifetimes unchanged (isolating the texture path from the persistence change), then landblock-space
+  origins, then persistent slots, then the following-emitter uniform, then budget and diagnostics.
+  Range merging is deliberately deferred to 6e and gated on measurement — one range per visible
+  emitter is ~144 GL calls at C061, already below today's ~100-call baseline plus the attribute
+  binding it replaces.
 
 - **Correction (2026-08-19): `baseInstance` is NOT the blocker — I overstated it.** The renderer
   already draws arbitrary instance sub-ranges: `WebGL2ParticleInstanceBuffer.bindAttributes(

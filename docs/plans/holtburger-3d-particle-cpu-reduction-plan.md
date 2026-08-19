@@ -408,6 +408,37 @@ numbers demand it.
 
 ## Decisions and Course Corrections
 
+- **Correction (2026-08-19): Phase 6a–6c is a clear win, not the wash I reported.** The earlier
+  6c entry compared against Track A numbers captured hours earlier in the session. The machine
+  drifted about 5 % between them — the identical pre-6 code measures `frameWork` 1.326 ms in a
+  matched run against 1.268 ms when Track A was recorded — so the cross-session delta manufactured
+  a phantom render regression and then a phantom net-zero. AGENTS.md warns about exactly this and
+  I ignored it.
+
+  **Matched A/B, n=4 each, back to back on one machine state** (pre-6 measured by checking out
+  `70397969`, then returning to the branch):
+
+  | phase | pre-6 | post-6c | delta |
+  | ----- | ----- | ------- | ----- |
+  | range collection (was cohort) | 0.090 (0.070–0.103) | 0.025 (0.015–0.037) | −0.065 |
+  | render | 1.093 (1.043–1.288) | 1.026 (1.013–1.105) | −0.068 |
+  | tick `totalMs` | 1.323 (1.233–1.548) | 1.180 (1.152–1.252) | −0.142 |
+  | **`frameWork`** | **1.326 (1.290–1.362)** | **1.210 (1.199–1.222)** | **−0.116** |
+
+  `frameWork` ranges do not overlap. Workload identical: 670–675 instances before, 674–678 after;
+  draws 5 → 72.
+
+  **Render got *faster* despite 14x the draws**, which is what the earlier reading inverted. The
+  old path packed every record — ~670 x 21 floats — into a staging buffer *inside the render
+  phase* each frame, then bound six attribute pointers per batch (~100 GL calls). That repack is
+  gone, replaced by a dirty-row upload of only what changed, and each of the 72 draws costs one
+  `uniform1i` plus the draw. So ~144 cheap calls replaced ~100 expensive ones plus a full
+  per-frame repack.
+
+  **Consequence for 6e:** the draw-count increase is *not* costing us anything measurable, so
+  range merging loses most of its justification. It remains theoretically useful for scenes with
+  far more visible emitters than C061's 72, but there is no measured cost to recover today.
+
 - **6d dropped on evidence (2026-08-19), not deferred.** A temporary probe (since reverted)
   counted the visible emitter population at the C061 reference pose: **72 visible, of which 0
   follow their parent**, and `followRewrites` of 0 — the per-frame rewrite path 6d exists to

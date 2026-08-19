@@ -364,6 +364,44 @@ interval-driven — the census's 614 shape-eligible definitions are a floor, not
 
 ## Decisions and Course Corrections
 
+- **Correction (2026-08-19): `baseInstance` is NOT the blocker — I overstated it.** The renderer
+  already draws arbitrary instance sub-ranges: `WebGL2ParticleInstanceBuffer.bindAttributes(
+  firstInstance)` rebinds all six instance attribute pointers at a byte offset, and the pass calls
+  it once per batch today. So subset drawing is expressible in core WebGL2 with no extension. The
+  real constraint is **cost per range**, not possibility.
+
+  **Quantified device-state churn.** Each range costs 1 `bindBuffer` + 6 x (`enableVertexAttribArray`
+  + `vertexAttribPointer` + `vertexAttribDivisor`) + 1 `bindBuffer` = ~20 GL calls. Today's 5
+  batches spend ~100 calls/frame. Scaling that to ranges:
+
+  | ranges per frame | GL calls | verdict at ~0.3-1 us per call |
+  | ---------------- | -------- | ----------------------------- |
+  | 5 (today)        | ~100     | baseline |
+  | ~20 (merged runs)| ~400     | +90-300 us/frame — eats much of the saving |
+  | 72 (per emitter) | ~1,440   | far exceeds the saving |
+
+  **The fix that makes every variant viable: move per-particle records out of vertex attributes and
+  into a data texture**, indexed by `gl_InstanceID + uInstanceBase`. A range then costs 1 uniform +
+  1 draw = **2 GL calls**, so ~20 runs spend ~40 calls — *fewer than the ~100 we spend today*.
+  Precedent is established in this renderer: `webgl2-terrain-program.ts` drives composition, light
+  mask, and surface-field lookups through `texelFetch`, and portal envelope sampling does the same.
+  Cost is ~6 extra texel fetches per vertex, negligible at these particle counts.
+
+- **Landblock-crossing immunity: solved, and by the pattern this codebase already ratified.** Store
+  particle origins in **landblock space** and pass the landblock offset as a per-run uniform. A
+  crossing then changes a uniform value, never stored data, so persistent records survive it
+  untouched. This is exactly North Star 3 of the frame-input compilation plan — "anchor-relativity
+  is a per-landblock frame fact, never a cached fact; cached spatial facts live in landblock
+  space" — reused rather than reinvented. It requires runs to be landblock-homogeneous, which
+  costs nothing because the buffer is being sorted for locality anyway; landblock simply becomes a
+  sort key ahead of spatial order. Following emitters' live per-emitter origin uniform becomes
+  landblock-relative on the same basis.
+
+  Rejected alternative: storing world-space origins and subtracting the anchor in-shader. float32
+  at this world's coordinate magnitudes (~40,000 units) resolves to ~4 mm, and the codebase
+  deliberately refuses to retain world/render-space positions for exactly this class of reason.
+  Rewriting live particles on each crossing was the earlier fallback and is now unnecessary.
+
 - **Phase 6 blocked on a design gap found at implementation start (2026-08-19) — needs a
   decision before any code is written.**
 

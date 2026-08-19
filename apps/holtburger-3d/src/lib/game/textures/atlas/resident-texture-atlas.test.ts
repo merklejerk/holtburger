@@ -5,6 +5,7 @@ import type {
 	GeometryResourceKey,
 	RendererResourceManager,
 	RenderResourceKey,
+	Texture2DRegionUpload,
 	Texture2DResourceKey,
 	Texture2DUpload,
 	TextureArrayDescription,
@@ -23,17 +24,30 @@ import {
 	TexturePurpose,
 } from "../types";
 import {
+	classifyAtlasPageDisposition,
 	type ResidentAtlasLayoutPlanner,
 	type ResidentAtlasPageBuilder,
 	ResidentTextureAtlas,
 } from "./resident-texture-atlas";
-import { createAtlasPageId, planStableAtlasLayout } from "./layout";
-import { buildAtlasPage, type AtlasPageBuildJob } from "./page-build";
+import {
+	createAtlasPageId,
+	planStableAtlasLayout,
+	type AtlasPageLayout,
+} from "./layout";
+import {
+	buildAtlasPage,
+	buildAtlasPagePatch,
+	type AtlasPageBuildJob,
+	type AtlasPageBuildResult,
+	type AtlasPagePatchJob,
+	type AtlasPagePatchResult,
+} from "./page-build";
 
 const DIRECT_COLOR = fact(TexturePurpose.ObjectDirectColor, "0x06000001");
 const SECOND_DIRECT = fact(TexturePurpose.ObjectDirectColor, "0x06000003");
 const INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000002");
 const SECOND_INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000004");
+const THIRD_INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000005");
 const FIXTURE_SOURCE_SIZE = 1;
 const FIXTURE_DIRECT_COLOR_GUTTER = packedObjectTexturePreparation(
 	TexturePurpose.ObjectDirectColor,
@@ -102,7 +116,7 @@ describe("ResidentTextureAtlas", () => {
 	});
 
 	it("keeps a committed replacement when old-page retirement fails", async () => {
-		const planner = new ArmableFailingLayoutPlanner();
+		const planner = new ArmableFailingLayoutPlanner(FIXTURE_PAGE_SIZE);
 		const resources = new FixtureRendererResources();
 		const atlas = new ResidentTextureAtlas<"building">(
 			new ImmediatePreparer(),
@@ -248,7 +262,7 @@ describe("ResidentTextureAtlas", () => {
 		const atlas = new ResidentTextureAtlas<"building">(
 			new ImmediatePreparer(),
 			{
-				layoutPlanner: new FixtureLayoutPlanner(),
+				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder: new FixturePageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: resources,
@@ -318,7 +332,7 @@ describe("ResidentTextureAtlas", () => {
 	});
 
 	it("does not plan or rebuild when a second owner only claims an existing resident binding", async () => {
-		const planner = new CountingLayoutPlanner();
+		const planner = new CountingLayoutPlanner(FIXTURE_PAGE_SIZE);
 		const atlas = new ResidentTextureAtlas<"first" | "second">(
 			new ImmediatePreparer(),
 			{
@@ -347,7 +361,7 @@ describe("ResidentTextureAtlas", () => {
 		const atlas = new ResidentTextureAtlas<"first" | "second">(
 			new ImmediatePreparer(),
 			{
-				layoutPlanner: new FixtureLayoutPlanner(),
+				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder: new FixturePageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: new FixtureRendererResources(),
@@ -367,6 +381,177 @@ describe("ResidentTextureAtlas", () => {
 		]);
 		await second.completion;
 		expect(atlas.getAtlasPageDiagnostics()[0]!.pageId).not.toBe(firstPageId);
+	});
+
+	it("skips the page rebuild for a release-only change and rebuilds on a later insert", async () => {
+		const resources = new FixtureRendererResources();
+		const atlas = new ResidentTextureAtlas<"first" | "second" | "third">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: FIXTURE_PAGE_SIZE,
+				renderResources: resources,
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			INDEX8,
+		]);
+		await first.completion;
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			SECOND_INDEX8,
+		]);
+		await second.completion;
+		expect(atlas.getAtlasPageDiagnostics()).toHaveLength(1);
+		const retainedResource = atlas.getAtlasBinding(INDEX8.key)!.resource;
+		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)!.resource).toBe(
+			retainedResource,
+		);
+		const uploadsBeforeRelease = resources.uploads.length;
+		const releasedBeforeRelease = [...resources.released];
+		const releasedPagesBeforeRelease = atlas.getDiagnostics().releasedPageCount;
+		const patchedPagesBeforeRelease = atlas.getDiagnostics().patchedPageCount;
+
+		await atlas.withdrawOwnerRevision(second);
+		expect(resources.uploads).toHaveLength(uploadsBeforeRelease);
+		expect(resources.released).toEqual(releasedBeforeRelease);
+		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)).toBeNull();
+		expect(atlas.getAtlasBinding(INDEX8.key)!.resource).toBe(retainedResource);
+		expect(atlas.getDiagnostics()).toMatchObject({
+			metadataOnlyPageUpdateCount: 1,
+			releasedPageCount: releasedPagesBeforeRelease,
+		});
+
+		const third = atlas.prepareOwnerRequirements("third", revision(1), [
+			THIRD_INDEX8,
+		]);
+		await expect(third.completion).resolves.toBe("ready");
+		// The freed region is reused by a patch, so the page is never republished whole.
+		expect(resources.uploads).toHaveLength(uploadsBeforeRelease);
+		expect(resources.released).toEqual(releasedBeforeRelease);
+		expect(atlas.getAtlasBinding(THIRD_INDEX8.key)!.resource).toBe(
+			retainedResource,
+		);
+		expect(atlas.getAtlasBinding(INDEX8.key)!.resource).toBe(retainedResource);
+		expect(atlas.getDiagnostics()).toMatchObject({
+			metadataOnlyPageUpdateCount: 1,
+			patchedPageCount: patchedPagesBeforeRelease + 1,
+		});
+	});
+
+	it("patches a page to exactly the pixels a whole-page rebuild produces", async () => {
+		// Wide enough for two gutter-bearing direct-color allocations, so the second insertion
+		// lands on the first page and exercises patching rather than page creation.
+		const pageSize = 64;
+		const patchedResources = new FixtureRendererResources();
+		const patched = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new SizedLayoutPlanner(pageSize),
+				pageBuilder: new FixturePageBuilder(),
+				pageSize,
+				renderResources: patchedResources,
+			},
+		);
+		const first = patched.prepareOwnerRequirements("first", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await first.completion;
+		const pageResource = patched.getAtlasBinding(DIRECT_COLOR.key)!.resource;
+		const second = patched.prepareOwnerRequirements("second", revision(1), [
+			SECOND_DIRECT,
+		]);
+		await expect(second.completion).resolves.toBe("ready");
+		expect(patched.getAtlasBinding(SECOND_DIRECT.key)!.resource).toBe(
+			pageResource,
+		);
+		expect(patched.getDiagnostics()).toMatchObject({ patchedPageCount: 1 });
+
+		const rebuiltResources = new FixtureRendererResources();
+		const rebuilt = new ResidentTextureAtlas<"both">(new ImmediatePreparer(), {
+			layoutPlanner: new SizedLayoutPlanner(pageSize),
+			pageBuilder: new FixturePageBuilder(),
+			pageSize,
+			renderResources: rebuiltResources,
+		});
+		const both = rebuilt.prepareOwnerRequirements("both", revision(1), [
+			DIRECT_COLOR,
+			SECOND_DIRECT,
+		]);
+		await expect(both.completion).resolves.toBe("ready");
+		const rebuiltResource = rebuilt.getAtlasBinding(DIRECT_COLOR.key)!.resource;
+
+		expect(patched.getAtlasPageDiagnostics()).toEqual(
+			rebuilt.getAtlasPageDiagnostics(),
+		);
+		expect(patchedResources.pixelsOf(pageResource)).toEqual(
+			rebuiltResources.pixelsOf(rebuiltResource),
+		);
+	});
+
+	it("republishes whole pages when a patch cannot be built", async () => {
+		const pageBuilder = new FailingPatchPageBuilder();
+		const resources = new FixtureRendererResources();
+		const atlas = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
+				pageBuilder,
+				pageSize: FIXTURE_PAGE_SIZE,
+				renderResources: resources,
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			INDEX8,
+		]);
+		await first.completion;
+		const originalResource = atlas.getAtlasBinding(INDEX8.key)!.resource;
+
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			SECOND_INDEX8,
+		]);
+		await expect(second.completion).resolves.toBe("ready");
+
+		expect(pageBuilder.patchAttempts).toBe(1);
+		expect(atlas.getDiagnostics()).toMatchObject({
+			patchFallbackCount: 1,
+			patchedPageCount: 0,
+		});
+		// The fallback rebuild republishes the page, so both keys bind to a fresh resource.
+		const rebuiltResource = atlas.getAtlasBinding(INDEX8.key)!.resource;
+		expect(rebuiltResource).not.toBe(originalResource);
+		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)!.resource).toBe(
+			rebuiltResource,
+		);
+		expect(resources.released).toContain(originalResource);
+	});
+
+	it("does not plan a compaction for a layout that cannot occupy fewer pages", async () => {
+		const planner = new CountingLayoutPlanner(FIXTURE_PAGE_SIZE);
+		const atlas = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: planner,
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: FIXTURE_PAGE_SIZE,
+				renderResources: new FixtureRendererResources(),
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			INDEX8,
+		]);
+		await first.completion;
+		const plansAfterFirst = planner.planCount;
+
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			SECOND_INDEX8,
+		]);
+		await expect(second.completion).resolves.toBe("ready");
+
+		// Both keys share one page, so no packing can use fewer: the stable plan is the only one.
+		expect(atlas.getAtlasPageDiagnostics()).toHaveLength(1);
+		expect(planner.planCount).toBe(plansAfterFirst + 1);
+		expect(atlas.getDiagnostics().compactionAttemptCount).toBe(0);
 	});
 
 	it("accepts a bounded compaction only when it eliminates a page", async () => {
@@ -430,7 +615,7 @@ describe("ResidentTextureAtlas", () => {
 		const atlas = new ResidentTextureAtlas<"building">(
 			new ImmediatePreparer(),
 			{
-				layoutPlanner: new FixtureLayoutPlanner(),
+				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder: new FixturePageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: resources,
@@ -486,7 +671,7 @@ describe("ResidentTextureAtlas", () => {
 		const atlas = new ResidentTextureAtlas<"first" | "second">(
 			new ImmediatePreparer(),
 			{
-				layoutPlanner: new FixtureLayoutPlanner(),
+				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder,
 				pageSize: FIXTURE_PAGE_SIZE,
 				renderResources: new FixtureRendererResources(),
@@ -523,6 +708,81 @@ describe("ResidentTextureAtlas", () => {
 	});
 });
 
+describe("classifyAtlasPageDisposition", () => {
+	const purpose = TexturePurpose.ObjectIndex8;
+	const placed = (
+		key: AssetTextureFact["key"],
+		x: number,
+	): AtlasPageLayout["placements"][number] => ({
+		contentBounds: { height: 1, width: 1, x, y: 0 },
+		key,
+	});
+	const layout = (
+		...placements: AtlasPageLayout["placements"]
+	): AtlasPageLayout => ({
+		pageId: createAtlasPageId(purpose, 0),
+		placements,
+		purpose,
+	});
+
+	it("builds a page that has never been published", () => {
+		expect(
+			classifyAtlasPageDisposition(
+				undefined,
+				layout(placed(INDEX8.key, 0)),
+				new Set([INDEX8.key]),
+			),
+		).toEqual({ kind: "build" });
+	});
+
+	it("does nothing when published pixels and metadata already match", () => {
+		const published = layout(placed(INDEX8.key, 0));
+		expect(
+			classifyAtlasPageDisposition(published, published, new Set()),
+		).toEqual({ kind: "unchanged" });
+	});
+
+	it("swaps metadata only when placements were released", () => {
+		expect(
+			classifyAtlasPageDisposition(
+				layout(placed(INDEX8.key, 0), placed(SECOND_INDEX8.key, 1)),
+				layout(placed(INDEX8.key, 0)),
+				new Set(),
+			),
+		).toEqual({ kind: "metadata-only" });
+	});
+
+	it("patches the inserted keys of a page whose retained placements held still", () => {
+		expect(
+			classifyAtlasPageDisposition(
+				layout(placed(INDEX8.key, 0)),
+				layout(placed(INDEX8.key, 0), placed(SECOND_INDEX8.key, 1)),
+				new Set([SECOND_INDEX8.key]),
+			),
+		).toEqual({ insertedKeys: [SECOND_INDEX8.key], kind: "patch" });
+	});
+
+	it("rebuilds when a retained placement moved", () => {
+		expect(
+			classifyAtlasPageDisposition(
+				layout(placed(INDEX8.key, 0)),
+				layout(placed(INDEX8.key, 2)),
+				new Set(),
+			),
+		).toEqual({ kind: "build" });
+	});
+
+	it("rebuilds when an unfamiliar key appears without being planned as an insertion", () => {
+		expect(
+			classifyAtlasPageDisposition(
+				layout(placed(INDEX8.key, 0)),
+				layout(placed(INDEX8.key, 0), placed(SECOND_INDEX8.key, 1)),
+				new Set(),
+			),
+		).toEqual({ kind: "build" });
+	});
+});
+
 function fact(
 	purpose: TexturePurpose.ObjectDirectColor | TexturePurpose.ObjectIndex8,
 	sourceAssetId: `0x${string}`,
@@ -539,12 +799,16 @@ function revision(value: number): SceneInterestRevision {
 	return value as SceneInterestRevision;
 }
 
+/** Distinct per-asset pixels, so a misplaced patch cannot compare equal to a correct one. */
 function source(fact: AssetTextureFact): AssetTextureSource {
+	const seed = Number.parseInt(fact.sourceAssetId.slice(-1), 16);
 	return {
 		height: 1,
 		key: fact.key,
 		pixels: new Uint8Array(
-			fact.purpose === TexturePurpose.ObjectDirectColor ? [1, 2, 3, 4] : [1],
+			fact.purpose === TexturePurpose.ObjectDirectColor
+				? [seed, seed + 1, seed + 2, seed + 3]
+				: [seed],
 		),
 		purpose: fact.purpose,
 		sourceAssetId: fact.sourceAssetId,
@@ -601,15 +865,21 @@ class ImmediatePreparer implements TexturePreparer {
 	async destroy(): Promise<void> {}
 }
 
-class FixtureLayoutPlanner implements ResidentAtlasLayoutPlanner {
+class SizedLayoutPlanner implements ResidentAtlasLayoutPlanner {
+	readonly #pageSize: number;
+
+	constructor(pageSize: number) {
+		this.#pageSize = pageSize;
+	}
+
 	destroy(): void {}
 
 	async plan(request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0]) {
-		return planStableAtlasLayout(request, { pageSize: FIXTURE_PAGE_SIZE });
+		return planStableAtlasLayout(request, { pageSize: this.#pageSize });
 	}
 }
 
-class CountingLayoutPlanner extends FixtureLayoutPlanner {
+class CountingLayoutPlanner extends SizedLayoutPlanner {
 	planCount = 0;
 
 	override async plan(
@@ -620,7 +890,7 @@ class CountingLayoutPlanner extends FixtureLayoutPlanner {
 	}
 }
 
-class ArmableFailingLayoutPlanner extends FixtureLayoutPlanner {
+class ArmableFailingLayoutPlanner extends SizedLayoutPlanner {
 	#fail = false;
 
 	override plan(request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0]) {
@@ -710,12 +980,35 @@ class FixturePageBuilder implements ResidentAtlasPageBuilder {
 	build(
 		job: AtlasPageBuildJob,
 		transfer: readonly Transferable[],
-	): Promise<ReturnType<typeof buildAtlasPage>> {
+	): Promise<AtlasPageBuildResult> {
 		void transfer;
 		return Promise.resolve(buildAtlasPage(job));
 	}
 
+	patch(
+		job: AtlasPagePatchJob,
+		transfer: readonly Transferable[],
+	): Promise<AtlasPagePatchResult> {
+		void transfer;
+		return Promise.resolve(buildAtlasPagePatch(job));
+	}
+
 	destroy(): void {}
+}
+
+/** Page builder whose patches always fail, exercising the whole-page rebuild fallback. */
+class FailingPatchPageBuilder extends FixturePageBuilder {
+	patchAttempts = 0;
+
+	override patch(
+		job: AtlasPagePatchJob,
+		transfer: readonly Transferable[],
+	): Promise<AtlasPagePatchResult> {
+		void job;
+		void transfer;
+		this.patchAttempts += 1;
+		return Promise.reject(new Error("Synthetic patch failure."));
+	}
 }
 
 class DeferredFirstPageBuilder implements ResidentAtlasPageBuilder {
@@ -733,7 +1026,7 @@ class DeferredFirstPageBuilder implements ResidentAtlasPageBuilder {
 	build(
 		job: AtlasPageBuildJob,
 		transfer: readonly Transferable[],
-	): Promise<ReturnType<typeof buildAtlasPage>> {
+	): Promise<AtlasPageBuildResult> {
 		void transfer;
 		this.#buildCount += 1;
 		if (this.#buildCount > 1) return Promise.resolve(buildAtlasPage(job));
@@ -741,6 +1034,14 @@ class DeferredFirstPageBuilder implements ResidentAtlasPageBuilder {
 		return new Promise((resolve) => {
 			this.#resolveFirstBuild = () => resolve(buildAtlasPage(job));
 		});
+	}
+
+	patch(
+		job: AtlasPagePatchJob,
+		transfer: readonly Transferable[],
+	): Promise<AtlasPagePatchResult> {
+		void transfer;
+		return Promise.resolve(buildAtlasPagePatch(job));
 	}
 
 	destroy(): void {}
@@ -757,7 +1058,7 @@ class FailingCompactPageBuilder extends FixturePageBuilder {
 	override build(
 		job: AtlasPageBuildJob,
 		transfer: readonly Transferable[],
-	): Promise<ReturnType<typeof buildAtlasPage>> {
+	): Promise<AtlasPageBuildResult> {
 		if (job.page.pageId.endsWith(":2")) {
 			return Promise.reject(new Error("Synthetic compact-page failure."));
 		}
@@ -768,6 +1069,15 @@ class FailingCompactPageBuilder extends FixturePageBuilder {
 class FixtureRendererResources implements RendererResourceManager {
 	readonly uploads: Texture2DUpload[] = [];
 	readonly released: RenderResourceKey[] = [];
+	/** Live device state per texture, so region writes are observable like a real device. */
+	readonly #textures = new Map<
+		Texture2DResourceKey,
+		{
+			readonly bytesPerTexel: number;
+			readonly pixels: Uint8Array;
+			readonly width: number;
+		}
+	>();
 	readonly #failOnCreate: number | null;
 	#next = 0;
 
@@ -783,7 +1093,47 @@ class FixtureRendererResources implements RendererResourceManager {
 		const resource =
 			`texture-2d-resource:${this.#next}` as Texture2DResourceKey;
 		this.#next += 1;
+		if (!(upload.data instanceof Uint8Array)) {
+			throw new Error("Fixture textures are normalized byte textures.");
+		}
+		this.#textures.set(resource, {
+			bytesPerTexel: upload.data.byteLength / (upload.width * upload.height),
+			pixels: Uint8Array.from(upload.data),
+			width: upload.width,
+		});
 		return resource;
+	}
+
+	/** Current device bytes for one texture, for exact patch-versus-rebuild comparison. */
+	pixelsOf(key: Texture2DResourceKey): Uint8Array {
+		return this.#requireTexture(key).pixels;
+	}
+
+	updateTexture2DRegions(
+		key: Texture2DResourceKey,
+		regions: readonly Texture2DRegionUpload[],
+	): void {
+		const { bytesPerTexel, pixels, width } = this.#requireTexture(key);
+		for (const region of regions) {
+			if (!(region.data instanceof Uint8Array)) {
+				throw new Error("Fixture regions are normalized byte regions.");
+			}
+			for (let row = 0; row < region.height; row += 1) {
+				const source = row * region.width * bytesPerTexel;
+				const destination =
+					((region.y + row) * width + region.x) * bytesPerTexel;
+				pixels.set(
+					region.data.subarray(source, source + region.width * bytesPerTexel),
+					destination,
+				);
+			}
+		}
+	}
+
+	#requireTexture(key: Texture2DResourceKey) {
+		const texture = this.#textures.get(key);
+		if (!texture) throw new Error(`Fixture texture ${key} does not exist.`);
+		return texture;
 	}
 
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {

@@ -23,7 +23,18 @@ import {
 	type AtlasPageLayout,
 	type StableAtlasLayoutPlan,
 } from "./layout";
-import type { AtlasPageBuildResult } from "./page-build";
+import type { AtlasPageBuildResult, AtlasPagePatchResult } from "./page-build";
+
+/**
+ * Complete device payloads for one publication.
+ *
+ * `built` pages replace their resource wholesale; `patched` pages keep their resource and
+ * receive only the regions their newly inserted placements occupy.
+ */
+export interface AtlasPagePayloads {
+	readonly built: readonly AtlasPageBuildResult[];
+	readonly patched: readonly AtlasPagePatchResult[];
+}
 
 /** Resource-backed page snapshot owned privately by one resident-atlas publication state. */
 interface PublishedAtlasPage {
@@ -47,6 +58,10 @@ export interface AtlasPagePublicationDiagnostics {
 	/** Level-zero worker payload bytes submitted for texture creation. */
 	readonly uploadedPageBytes: number;
 	readonly uploadedPageCount: number;
+	/** Pages brought up to date in place instead of being replaced. */
+	readonly patchedPageCount: number;
+	/** Level-zero region bytes written into retained page resources. */
+	readonly patchedRegionBytes: number;
 }
 
 /**
@@ -67,6 +82,8 @@ export class AtlasPagePublication {
 	#releasedPageCount = 0;
 	#publicationDurationMs = 0;
 	#longestPublicationDurationMs = 0;
+	#patchedPageCount = 0;
+	#patchedRegionBytes = 0;
 
 	constructor(
 		renderResources: RendererResourceManager,
@@ -93,6 +110,8 @@ export class AtlasPagePublication {
 			releasedPageCount: this.#releasedPageCount,
 			uploadedPageBytes: this.#uploadedPageBytes,
 			uploadedPageCount: this.#uploadedPageCount,
+			patchedPageCount: this.#patchedPageCount,
+			patchedRegionBytes: this.#patchedRegionBytes,
 		};
 	}
 
@@ -118,14 +137,21 @@ export class AtlasPagePublication {
 		return this.#pages.has(pageId);
 	}
 
-	/** Atomically replace one purpose's pages and bindings after every page payload exists. */
-	publish(
-		plan: StableAtlasLayoutPlan,
-		builtPages: readonly AtlasPageBuildResult[],
-	): void {
+	/**
+	 * Bring one purpose's pages and bindings to the planned state.
+	 *
+	 * The page set, binding table, and resource releases still swap atomically. Level-zero
+	 * texels for patched pages land before that swap, in regions the currently published
+	 * layout does not reference, so no reader can observe them until the swap commits.
+	 */
+	publish(plan: StableAtlasLayoutPlan, payloads: AtlasPagePayloads): void {
 		const startedAt = performance.now();
 		try {
-			const created = this.#createResources(plan, builtPages);
+			// Patches run before any resource is created so a failed region write leaves both the
+			// committed metadata and the created-resource set untouched; the partially written
+			// texels sit in regions the still-current layout does not reference.
+			const patchedRegionBytes = this.#applyPatches(payloads.patched);
+			const created = this.#createResources(plan, payloads.built);
 			const oldPages = this.#currentPurposePages(plan.purpose);
 			const nextPages = this.#nextPages(plan, created, oldPages);
 			const nextBindings = this.#nextBindings(plan, nextPages, oldPages);
@@ -139,6 +165,10 @@ export class AtlasPagePublication {
 				this.#activePageBytes(),
 			);
 			this.#releaseSupersededPages(oldPages, nextPages);
+			// Patch counters commit with the publication: writes made before a later failure are
+			// not work that landed, and the caller's rebuild fallback will overwrite them.
+			this.#patchedPageCount += payloads.patched.length;
+			this.#patchedRegionBytes += patchedRegionBytes;
 		} finally {
 			const durationMs = performance.now() - startedAt;
 			this.#publicationDurationMs += durationMs;
@@ -147,6 +177,28 @@ export class AtlasPagePublication {
 				durationMs,
 			);
 		}
+	}
+
+	/** Write every patch's regions, returning the level-zero bytes those writes covered. */
+	#applyPatches(patched: readonly AtlasPagePatchResult[]): number {
+		let regionBytes = 0;
+		for (const patch of patched) {
+			const page = this.#pages.get(patch.pageId);
+			if (!page) {
+				throw new Error(
+					`Resident atlas cannot patch unpublished page ${patch.pageId}.`,
+				);
+			}
+			this.#renderResources.updateTexture2DRegions(
+				page.resource,
+				patch.regions,
+			);
+			regionBytes += patch.regions.reduce(
+				(total, region) => total + region.data.byteLength,
+				0,
+			);
+		}
+		return regionBytes;
 	}
 
 	#createResources(

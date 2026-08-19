@@ -6,7 +6,7 @@ import {
 	TexturePurpose,
 } from "../types";
 import { createAtlasPageId, type AtlasPageLayout } from "./layout";
-import { buildAtlasPage } from "./page-build";
+import { buildAtlasPage, buildAtlasPagePatch } from "./page-build";
 
 describe("buildAtlasPage", () => {
 	it("materializes a complete production-size fixed page", () => {
@@ -122,6 +122,105 @@ describe("buildAtlasPage", () => {
 				],
 			}),
 		).toThrow("placements do not match");
+	});
+});
+
+describe("buildAtlasPagePatch", () => {
+	const purpose = TexturePurpose.ObjectDirectColor;
+	const gutterPixels = packedObjectTexturePreparation(purpose).gutterPixels;
+	const pageSize = 64;
+	const first = createAssetTextureKey(purpose, "0x05000010");
+	const second = createAssetTextureKey(purpose, "0x05000011");
+	const sources = [
+		{ height: 1, key: first, pixels: Uint8Array.of(11, 12, 13, 14), width: 1 },
+		{ height: 1, key: second, pixels: Uint8Array.of(21, 22, 23, 24), width: 1 },
+	];
+	const fullPage: AtlasPageLayout = {
+		pageId: createAtlasPageId(purpose, 1),
+		placements: [
+			{
+				contentBounds: {
+					height: 1,
+					width: 1,
+					x: gutterPixels,
+					y: gutterPixels,
+				},
+				key: first,
+			},
+			{
+				contentBounds: {
+					height: 1,
+					width: 1,
+					x: gutterPixels * 3 + 1,
+					y: gutterPixels,
+				},
+				key: second,
+			},
+		],
+		purpose,
+	};
+
+	it("patches a published page into the exact bits of a whole-page build", () => {
+		const published = buildAtlasPage({
+			page: {
+				...fullPage,
+				placements: fullPage.placements.filter(({ key }) => key === first),
+			},
+			pageSize,
+			sources: sources.filter(({ key }) => key === first),
+		});
+		const rebuilt = buildAtlasPage({ page: fullPage, pageSize, sources });
+		const patch = buildAtlasPagePatch({
+			page: fullPage,
+			pageSize,
+			patchedKeys: [second],
+			sources: sources.filter(({ key }) => key === second),
+		});
+
+		const patchedBits = Uint8Array.from(published.pageBits);
+		for (const region of patch.regions) {
+			for (let row = 0; row < region.height; row += 1) {
+				patchedBits.set(
+					region.data.subarray(
+						row * region.width * 4,
+						(row + 1) * region.width * 4,
+					),
+					((region.y + row) * pageSize + region.x) * 4,
+				);
+			}
+		}
+		expect(patchedBits).toEqual(rebuilt.pageBits);
+	});
+
+	it("covers the placement's whole gutter ring so no stale texel survives", () => {
+		const patch = buildAtlasPagePatch({
+			page: fullPage,
+			pageSize,
+			patchedKeys: [second],
+			sources: sources.filter(({ key }) => key === second),
+		});
+
+		expect(patch.regions).toHaveLength(1);
+		expect(patch.regions[0]).toMatchObject({
+			height: 1 + gutterPixels * 2,
+			width: 1 + gutterPixels * 2,
+			x: gutterPixels * 3 + 1 - gutterPixels,
+			y: 0,
+		});
+	});
+
+	it("rejects a patch key the planned page does not place", () => {
+		expect(() =>
+			buildAtlasPagePatch({
+				page: {
+					...fullPage,
+					placements: fullPage.placements.filter(({ key }) => key === first),
+				},
+				pageSize,
+				patchedKeys: [second],
+				sources: sources.filter(({ key }) => key === second),
+			}),
+		).toThrow("is not a planned placement");
 	});
 });
 

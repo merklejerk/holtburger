@@ -186,6 +186,22 @@
 				<code>{diagnostics.texture.failedAtlasCompactions}</code>
 			</div>
 			<div class="ac-param-row">
+				<span class="ac-param-key">In-place patches</span>
+				<code
+					>{diagnostics.texture.patchedAtlasPages} pages · {formatBytes(
+						diagnostics.texture.patchedAtlasRegionBytes,
+					)}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Metadata-only updates</span>
+				<code>{diagnostics.texture.metadataOnlyAtlasPageUpdates}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Patch fallbacks</span>
+				<code>{diagnostics.texture.atlasPatchFallbacks}</code>
+			</div>
+			<div class="ac-param-row">
 				<span class="ac-param-key">Page traffic</span>
 				<code
 					>{diagnostics.texture.uploadedAtlasPages} uploaded · {diagnostics

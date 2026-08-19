@@ -36,6 +36,16 @@ export interface Texture2DUpload {
 	readonly mipLevels: number;
 }
 
+/** One level-zero sub-rectangle written into an existing two-dimensional texture. */
+export interface Texture2DRegionUpload {
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+	/** Exactly `width * height` texels in the scalar type required by the texture's format. */
+	readonly data: Uint8Array | Uint32Array;
+}
+
 /** Immutable storage allocated for a homogeneous two-dimensional texture array. */
 export interface TextureArrayDescription {
 	readonly format: TexturePixelFormat;
@@ -57,6 +67,14 @@ export interface RendererResourceManager {
 	replaceGeometry(key: GeometryResourceKey, geometry: RenderGeometryData): void;
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey;
 	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void;
+	/**
+	 * Write level-zero sub-rectangles into an existing texture and regenerate its promised mip
+	 * range once, leaving every texel outside the written regions untouched.
+	 */
+	updateTexture2DRegions(
+		key: Texture2DResourceKey,
+		regions: readonly Texture2DRegionUpload[],
+	): void;
 	createTextureArray(
 		description: TextureArrayDescription,
 	): TextureArrayResourceKey;

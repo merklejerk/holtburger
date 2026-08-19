@@ -358,6 +358,13 @@ export interface StaticObjectRuntimeDiagnostics {
 	readonly envCellLayers: readonly EnvCellLayerRuntimeDiagnostics[];
 	readonly geometryResourceCount: number;
 	readonly staticObjectOwnerCount: number;
+	/**
+	 * Outdoor static layer publications since startup.
+	 *
+	 * Each publication is one synchronous main-thread install, so streaming frame timing is only
+	 * comparable between runs that published a similar number of layers in the window.
+	 */
+	readonly staticLayerPublicationCount: number;
 	readonly staticObjectNodeCount: number;
 	/** Synchronous texture-fact collection before building realization dispatch. */
 	readonly textureFactCollectionDurationMs: number;
@@ -667,6 +674,8 @@ export class GameRuntime {
 	>();
 	#textureFactCollectionDurationMs = 0;
 	#textureFactCollectionCount = 0;
+	/** Outdoor static layer publications; each one is a synchronous main-thread install. */
+	#staticLayerPublicationCount = 0;
 	/** Active-region owner of the complete device-backed static-detail role set. */
 	#activeRegionStaticDetailOwner: ActiveRegionResourceOwnerId | null = null;
 	/** Read-only regional detail selections consumed by renderer-owned object programs. */
@@ -800,6 +809,7 @@ export class GameRuntime {
 					if (!isOutdoorStaticLayer(layer)) {
 						throw new Error(`Outdoor static publisher received ${layer}.`);
 					}
+					this.#staticLayerPublicationCount += 1;
 					this.#staticObjects.replaceObjects(owner, revision, geometry, layer);
 					// Only the Objects layer emits, but every outdoor layer publishes here: an
 					// empty set is how a withdrawn layer clears its own entry.
@@ -1709,6 +1719,7 @@ export class GameRuntime {
 			),
 			staticObjectNodeCount: staticObjects.nodeCount,
 			staticObjectOwnerCount: staticObjects.ownerCount,
+			staticLayerPublicationCount: this.#staticLayerPublicationCount,
 			textureFactCollectionDurationMs: this.#textureFactCollectionDurationMs,
 			textureFactCollectionCount: this.#textureFactCollectionCount,
 			texture: this.#textures.getDiagnostics(),

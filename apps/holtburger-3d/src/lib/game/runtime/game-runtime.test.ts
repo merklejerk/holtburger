@@ -86,6 +86,7 @@ const TEST_RESOURCES = {
 	releaseResource: () => true,
 	replaceGeometry() {},
 	replaceTexture2D() {},
+	updateTexture2DRegions() {},
 	uploadTextureArrayLayer() {},
 } as RendererResourceManager;
 

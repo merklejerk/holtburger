@@ -251,12 +251,13 @@ describe("GameRuntime view and interest control", () => {
 				FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
 			envCellRenderMode: "portal",
 			quality: {
-				minimumObjectFootprintPixelArea:
+				minimumObjectFootprintCssPixelArea:
 					FRONTEND_TUNING.rendering.frameDefaults
-						.minimumObjectFootprintPixelArea,
-				minimumPortalFootprintPixelArea:
+						.minimumObjectFootprintCssPixelArea,
+				minimumPortalFootprintCssPixelArea:
 					FRONTEND_TUNING.rendering.frameDefaults
-						.minimumPortalFootprintPixelArea,
+						.minimumPortalFootprintCssPixelArea,
+				renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
 				textureFiltering:
 					FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
 			},
@@ -277,8 +278,9 @@ describe("GameRuntime view and interest control", () => {
 			staticLightsEnabled: true,
 			envCellRenderMode: "flat",
 			quality: {
-				minimumObjectFootprintPixelArea: 8,
-				minimumPortalFootprintPixelArea: 4,
+				minimumObjectFootprintCssPixelArea: 8,
+				minimumPortalFootprintCssPixelArea: 4,
+				renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
 				textureFiltering: "nearest",
 			},
 		});
@@ -299,8 +301,9 @@ describe("GameRuntime view and interest control", () => {
 			staticLightsEnabled: true,
 			envCellRenderMode: "flat",
 			quality: {
-				minimumObjectFootprintPixelArea: 8,
-				minimumPortalFootprintPixelArea: 4,
+				minimumObjectFootprintCssPixelArea: 8,
+				minimumPortalFootprintCssPixelArea: 4,
+				renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
 				textureFiltering: "nearest",
 			},
 		});

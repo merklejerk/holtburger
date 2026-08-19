@@ -207,7 +207,8 @@ breadth-first in complete crossing frontiers. For each admitted scope-window del
 2. suppresses only the reciprocal/shared aperture that admitted the delta;
 3. rejects wrong-facing apertures unless the finite near-clip volume intersects them;
 4. projects the effective visibility aperture and clips it by the inherited window;
-5. applies the physical-pixel footprint cutoff to ordinary crossings; and
+5. applies the footprint cutoff to ordinary crossings, authored in CSS pixels and resolved to
+   drawing-buffer pixels for the frame's render scale; and
 6. admits only window coverage not already present for the target scope.
 
 Coverage is accumulated by authored scope, not render domain or topology path. This is legal because

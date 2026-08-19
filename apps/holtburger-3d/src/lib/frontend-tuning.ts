@@ -206,10 +206,18 @@ export const FRONTEND_TUNING = {
 			staticLightsEnabled: true,
 			/** Environment-cell visibility policy selected initially. */
 			envCellRenderMode: "portal",
-			/** Physical-pixel cutoff for independently optional object presentations. */
-			minimumObjectFootprintPixelArea: 64,
-			/** Physical-pixel cutoff for non-near-plane recursive portal windows. */
-			minimumPortalFootprintPixelArea: 4,
+			/** CSS-pixel cutoff for independently optional object presentations. */
+			minimumObjectFootprintCssPixelArea: 64,
+			/** CSS-pixel cutoff for non-near-plane recursive portal windows. */
+			minimumPortalFootprintCssPixelArea: 4,
+			/**
+			 * Device pixels per CSS pixel.
+			 *
+			 * One renders at native CSS resolution, so a HiDPI display costs the same as any
+			 * other. Raising it supersamples, which is where anti-aliasing comes from; the
+			 * browser resolves the oversized drawing buffer when it composites the canvas.
+			 */
+			renderScale: 1,
 			/** Requested normalized-texture filtering before device capability resolution. */
 			textureFiltering: "anisotropic-2x",
 		},

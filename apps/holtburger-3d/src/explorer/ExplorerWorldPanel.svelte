@@ -87,6 +87,11 @@
 		readonly textureFiltering: TextureFilteringPolicy;
 		/** Device-supported texture filtering choices in display order. */
 		readonly textureFilteringOptions: readonly TextureFilteringPolicy[];
+		/** Device pixels rendered per CSS pixel, and the only anti-aliasing control we have. */
+		readonly renderScale: number;
+		/** Frontend-chosen densities offered to the viewer, not the renderer's full range. */
+		readonly renderScaleOptions: readonly number[];
+		readonly updateRenderScale: (renderScale: number) => void;
 		/** Raw device maximum reported independently from the client 8x ceiling. */
 		readonly maximumTextureAnisotropy: number | null;
 		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
@@ -128,6 +133,9 @@
 		updateLayerVisibility,
 		textureFiltering,
 		textureFilteringOptions,
+		renderScale,
+		renderScaleOptions,
+		updateRenderScale,
 		maximumTextureAnisotropy,
 		updateTextureFiltering,
 	}: Props = $props();
@@ -608,6 +616,25 @@
 					updateAmbientOcclusionParameter("bilateralDepthThreshold", event)}
 			/>
 		</label>
+		<label class="explorer-environment-field">
+			<span>Render scale</span>
+			<select
+				class="explorer-control explorer-control--select"
+				value={renderScale}
+				onchange={(event) =>
+					updateRenderScale(
+						Number((event.currentTarget as HTMLSelectElement).value),
+					)}
+			>
+				{#each renderScaleOptions as scale}
+					<option value={scale}>{scale}x</option>
+				{/each}
+			</select>
+		</label>
+		<p>
+			Above 1x supersamples, which is the only anti-aliasing there is. Cost
+			scales with its square.
+		</p>
 		<label class="explorer-environment-field">
 			<span>Texture filtering</span>
 			<select

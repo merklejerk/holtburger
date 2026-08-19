@@ -7,7 +7,7 @@ type ObjectFootprintVisibility =
 	| "below-threshold"
 	| "outside-view";
 
-/** Complete physical-pixel projection input for one object-local envelope. */
+/** Complete drawing-buffer-pixel projection input for one object-local envelope. */
 interface ObjectFootprintProjectionInput {
 	readonly bounds: AABB3;
 	readonly clipFromAnchor: Mat4;
@@ -138,7 +138,12 @@ function classifyObjectFootprint(
 	return pixelArea < input.minimumPixelArea ? "below-threshold" : "visible";
 }
 
-/** Apply the zero-disabled product policy while retaining explicitly exempt presentations. */
+/**
+ * Apply the zero-disabled product policy while retaining explicitly exempt presentations.
+ *
+ * The cutoff is in drawing-buffer pixels, matching the viewport dimensions in the envelope.
+ * Frame settings author it in CSS pixels; `devicePixelArea` converts once at frame entry.
+ */
 export function retainsProjectedObjectFootprint(
 	envelope: ObjectFootprintEnvelope | null,
 	minimumPixelArea: number,

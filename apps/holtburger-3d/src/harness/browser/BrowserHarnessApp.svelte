@@ -45,6 +45,7 @@
 		type FrameSettings,
 		type RendererFrameProfile,
 	} from "../../lib/game/renderer/renderer";
+	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
 	import type {
 		PortalExecutionProbeResult,
 		WebGL2Renderer,
@@ -269,9 +270,11 @@
 		/** Change filterable texture quality without changing content or resources. */
 		readonly setTextureFiltering: (policy: string) => void;
 		/** Change the generic portal-footprint cutoff without rebuilding content. */
-		readonly setMinimumPortalFootprintPixelArea: (pixelArea: number) => void;
+		readonly setMinimumPortalFootprintCssPixelArea: (pixelArea: number) => void;
 		/** Change shared object-footprint policy without rebuilding content. */
-		readonly setMinimumObjectFootprintPixelArea: (pixelArea: number) => void;
+		readonly setMinimumObjectFootprintCssPixelArea: (pixelArea: number) => void;
+		/** Change device pixels per CSS pixel, which is also the only anti-aliasing control. */
+		readonly setRenderScale: (renderScale: number) => void;
 		/** Change offscreen visual animation cadence without changing semantic advancement. */
 		readonly setOffscreenAnimationSampleIntervalSeconds: (
 			intervalSeconds: number,
@@ -1173,36 +1176,47 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
-	function setMinimumPortalFootprintPixelArea(pixelArea: number): void {
+	function setMinimumPortalFootprintCssPixelArea(pixelArea: number): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (!Number.isFinite(pixelArea) || pixelArea < 0) {
 			throw new Error(
-				"Minimum portal footprint pixel area must be non-negative and finite.",
+				"Minimum portal footprint CSS pixel area must be non-negative and finite.",
 			);
 		}
 		frameSettings = {
 			...frameSettings,
 			quality: {
 				...frameSettings.quality,
-				minimumPortalFootprintPixelArea: pixelArea,
+				minimumPortalFootprintCssPixelArea: pixelArea,
 			},
 		};
 		runtime.setFrameSettings(frameSettings);
 	}
 
-	function setMinimumObjectFootprintPixelArea(pixelArea: number): void {
+	function setMinimumObjectFootprintCssPixelArea(pixelArea: number): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (!Number.isFinite(pixelArea) || pixelArea < 0) {
 			throw new Error(
-				"Minimum object-footprint pixel area must be non-negative and finite.",
+				"Minimum object-footprint CSS pixel area must be non-negative and finite.",
 			);
 		}
 		frameSettings = {
 			...frameSettings,
 			quality: {
 				...frameSettings.quality,
-				minimumObjectFootprintPixelArea: pixelArea,
+				minimumObjectFootprintCssPixelArea: pixelArea,
 			},
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	/** Drive sampling density explicitly; the renderer no longer reads `devicePixelRatio`. */
+	function setRenderScale(renderScale: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		validateRenderScale(renderScale, "Browser harness");
+		frameSettings = {
+			...frameSettings,
+			quality: { ...frameSettings.quality, renderScale },
 		};
 		runtime.setFrameSettings(frameSettings);
 	}
@@ -1563,8 +1577,9 @@
 					setFrameProfiling,
 					setStaticLights,
 					setWeather,
-					setMinimumObjectFootprintPixelArea,
-					setMinimumPortalFootprintPixelArea,
+					setMinimumObjectFootprintCssPixelArea,
+					setMinimumPortalFootprintCssPixelArea,
+					setRenderScale,
 					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,
 					resetTiming,

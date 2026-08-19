@@ -33,10 +33,12 @@ export type RenderLayerVisibility = Readonly<
 
 /** Dynamic renderer quality choices independent from content and resource identity. */
 interface RenderQualitySettings {
-	/** Independently optional object presentations below this physical pixel area are omitted. */
-	readonly minimumObjectFootprintPixelArea: number;
-	/** Non-near-plane portal windows smaller than this physical pixel area are omitted. */
-	readonly minimumPortalFootprintPixelArea: number;
+	/** Independently optional object presentations below this CSS pixel area are omitted. */
+	readonly minimumObjectFootprintCssPixelArea: number;
+	/** Non-near-plane portal windows smaller than this CSS pixel area are omitted. */
+	readonly minimumPortalFootprintCssPixelArea: number;
+	/** Device pixels rendered per CSS pixel, and the renderer's only anti-aliasing control. */
+	readonly renderScale: number;
 	/** Global draw-time policy for filterable normalized textures. */
 	readonly textureFiltering: TextureFilteringPolicy;
 }
@@ -96,10 +98,13 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 		FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
 	envCellRenderMode: FRONTEND_TUNING.rendering.frameDefaults.envCellRenderMode,
 	quality: {
-		minimumObjectFootprintPixelArea:
-			FRONTEND_TUNING.rendering.frameDefaults.minimumObjectFootprintPixelArea,
-		minimumPortalFootprintPixelArea:
-			FRONTEND_TUNING.rendering.frameDefaults.minimumPortalFootprintPixelArea,
+		minimumObjectFootprintCssPixelArea:
+			FRONTEND_TUNING.rendering.frameDefaults
+				.minimumObjectFootprintCssPixelArea,
+		minimumPortalFootprintCssPixelArea:
+			FRONTEND_TUNING.rendering.frameDefaults
+				.minimumPortalFootprintCssPixelArea,
+		renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
 		textureFiltering: FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
 	},
 };

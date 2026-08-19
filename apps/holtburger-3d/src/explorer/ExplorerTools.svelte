@@ -26,7 +26,12 @@
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 
 	type ExplorerTabId =
-		"world" | "frame" | "textures" | "assets" | "entities" | "logs";
+		| "world"
+		| "frame"
+		| "textures"
+		| "assets"
+		| "entities"
+		| "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -93,6 +98,9 @@
 		/** Raw device maximum shown beside the client-capped choices. */
 		readonly maximumTextureAnisotropy: number | null;
 		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
+		readonly renderScale: number;
+		readonly renderScaleOptions: readonly number[];
+		readonly updateRenderScale: (renderScale: number) => void;
 		/** Latest atomic read of renderer selection and explicit profiling state. */
 		readonly rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null;
 		/** Explicitly create or tear down the renderer profiling session. */
@@ -156,6 +164,9 @@
 		textureFilteringOptions,
 		maximumTextureAnisotropy,
 		updateTextureFiltering,
+		renderScale,
+		renderScaleOptions,
+		updateRenderScale,
 		rendererFrameDiagnostics,
 		updateRendererFrameProfiling,
 		captureFrameDiagnosticReport,
@@ -300,6 +311,9 @@
 								{textureFilteringOptions}
 								{maximumTextureAnisotropy}
 								{updateTextureFiltering}
+								{renderScale}
+								{renderScaleOptions}
+								{updateRenderScale}
 							/>
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel

@@ -331,7 +331,7 @@ numbers demand it.
 - [x] 6a data texture; attribute stream retired
 - [x] 6b landblock-space origins, re-anchored by a per-frame uniform
 - [x] 6c persistent slots; `collectCohorts` and pooled records deleted
-- [ ] 6d following-emitter origin uniform
+- [~] 6d following-emitter origin uniform — **dropped, see Decisions**
 - [ ] 6e budget, diagnostics, and a measured decision on range merging
 - [ ] Harness A/B recorded in Decisions
 
@@ -407,6 +407,32 @@ numbers demand it.
   Resolve in 6b.
 
 ## Decisions and Course Corrections
+
+- **6d dropped on evidence (2026-08-19), not deferred.** A temporary probe (since reverted)
+  counted the visible emitter population at the C061 reference pose: **72 visible, of which 0
+  follow their parent**, and `followRewrites` of 0 — the per-frame rewrite path 6d exists to
+  remove never executes there.
+
+  So 6d as specified would be a **pure regression** at the only pose we can measure: no work
+  removed, and two `uniform3f` added per drawn range — about 144 extra GL calls per frame across
+  72 ranges. Building it would be optimizing a population that is not present while taxing one
+  that is.
+
+  **Two reasoning errors this exposed, worth recording because both were mine:**
+  1. I justified 6d with "a combat scene would exercise it", which was a guess about content
+     dressed as a requirement. The census does say 737 of 1,849 interval-driven emitters are
+     `followsParent` — 40 % of the *corpus* — but corpus share is not scene share, and the scene
+     we actually render has none.
+  2. More useful: **motion is not what makes a follower expensive — following-ness is.**
+     `collectDrawRanges` rewrites a following emitter's records every frame with no movement
+     check, so a follower on a perfectly stationary owner pays full price. That means the cheaper
+     fix, if followers ever do appear, is skipping the rewrite when the origin is unchanged since
+     last frame: one vector compare per emitter, nothing added to non-followers, and it makes a
+     static-owner follower as cheap as a trailing one. That beats the uniform for the common case
+     and is a fraction of the work.
+
+  **Recorded as debt rather than done:** if a scene with visible following emitters is ever
+  profiled, do the origin-unchanged check first and measure before considering the uniform.
 
 - **6c landed (2026-08-19) — the mechanism works; the draw count now caps the payoff.**
 

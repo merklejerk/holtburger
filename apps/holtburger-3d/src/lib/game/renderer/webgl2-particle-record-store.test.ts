@@ -1,4 +1,8 @@
-import { acVector3, renderVector3 } from "../../assets/ac-frame";
+import {
+	acVector3,
+	landblockVector3,
+	sceneVector3,
+} from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import {
 	PARTICLE_RECORD_TEXELS,
@@ -17,7 +21,8 @@ function record(birthTime: number): ParticleInstanceRecord {
 		finalTranslucency: 13,
 		lifespan: 4,
 		offset: acVector3([21, 22, 23]),
-		origin: renderVector3([31, 32, 33]),
+		landblockOrigin: sceneVector3([192, 0, 384]),
+		localOrigin: landblockVector3([31, 32, 33]),
 		startScale: 10,
 		startTranslucency: 12,
 	};

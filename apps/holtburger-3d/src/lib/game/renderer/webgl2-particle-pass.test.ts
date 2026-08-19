@@ -1,4 +1,9 @@
-import { acVector3, renderVector3 } from "../../assets/ac-frame";
+import {
+	acVector3,
+	landblockVector3,
+	renderVector3,
+	sceneVector3,
+} from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { DatAssetId } from "../game-types";
 import type { ParticleDrawBatch } from "./particle-render-routing";
@@ -31,7 +36,8 @@ function batch(
 			finalTranslucency: 1,
 			lifespan: 4,
 			offset: acVector3([0, 0, 0]),
-			origin: renderVector3([0, 0, 0]),
+			landblockOrigin: sceneVector3([0, 0, 0]),
+			localOrigin: landblockVector3([0, 0, 0]),
 			startScale: 1,
 			startTranslucency: 0,
 		})),
@@ -167,6 +173,7 @@ const context = (
 	gl: WebGL2RenderingContext,
 	samplers?: WebGL2TextureSamplerCatalog,
 ) => ({
+	anchorOrigin: sceneVector3([0, 0, 0]),
 	cameraPosition: renderVector3([0, 0, 0]),
 	clockSeconds: 1,
 	gl,

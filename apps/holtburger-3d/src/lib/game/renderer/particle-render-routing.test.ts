@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { acVector3, renderVector3 } from "../../assets/ac-frame";
+import {
+	acVector3,
+	landblockVector3,
+	sceneVector3,
+} from "../../assets/ac-frame";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import {
@@ -123,7 +127,8 @@ function record(birthTime: number): ParticleInstanceRecord {
 		finalTranslucency: 1,
 		lifespan: 4,
 		offset: acVector3([0, 0, 0]),
-		origin: renderVector3([0, 0, 0]),
+		landblockOrigin: sceneVector3([0, 0, 0]),
+		localOrigin: landblockVector3([0, 0, 0]),
 		startScale: 1,
 		startTranslucency: 0,
 	};

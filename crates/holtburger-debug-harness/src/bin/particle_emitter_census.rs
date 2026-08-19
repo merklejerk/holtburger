@@ -44,6 +44,7 @@ struct EmitterFacts {
     /// rate-limits emission.
     sub_frame_cadence: bool,
     birthrate: f64,
+    max_particles: i32,
 }
 
 fn main() -> Result<()> {
@@ -92,6 +93,7 @@ fn main() -> Result<()> {
             sub_frame_cadence: info.birthrate > 0.0 && info.birthrate < RETAIL_FRAME_SECONDS,
             alive_window_bound,
             birthrate: info.birthrate,
+            max_particles: info.max_particles,
         });
     }
 
@@ -148,6 +150,22 @@ fn main() -> Result<()> {
         );
         let total_instances: u64 = bounds.iter().map(|&b| u64::from(b)).sum();
         println!("  sum over all eligible emitters: {total_instances}");
+    }
+
+    let mut caps: Vec<i32> = interval.iter().map(|f| f.max_particles).collect();
+    caps.sort_unstable();
+    if !caps.is_empty() {
+        let pct = |p: f64| caps[((caps.len() - 1) as f64 * p) as usize];
+        println!(
+            "\nmax_particles: min {} / p50 {} / p90 {} / p99 {} / max {}",
+            caps[0],
+            pct(0.5),
+            pct(0.9),
+            pct(0.99),
+            caps[caps.len() - 1]
+        );
+        let total: i64 = caps.iter().map(|&c| i64::from(c)).sum();
+        println!("  sum over interval-driven emitters: {total}");
     }
 
     let mut birthrates: Vec<f64> = interval

@@ -330,7 +330,7 @@ numbers demand it.
 
 - [x] 6a data texture; attribute stream retired
 - [x] 6b landblock-space origins, re-anchored by a per-frame uniform
-- [ ] 6c persistent slots; `collectCohorts` and pooled records deleted
+- [x] 6c persistent slots; `collectCohorts` and pooled records deleted
 - [ ] 6d following-emitter origin uniform
 - [ ] 6e budget, diagnostics, and a measured decision on range merging
 - [ ] Harness A/B recorded in Decisions
@@ -407,6 +407,47 @@ numbers demand it.
   Resolve in 6b.
 
 ## Decisions and Course Corrections
+
+- **6c landed (2026-08-19) — the mechanism works; the draw count now caps the payoff.**
+
+  Records are written once at spawn into per-emitter slot regions and read by the GPU every frame
+  after. `collectCohorts` and the pooled `ParticleInstanceRecord` machinery are deleted; the frame
+  path walks visible emitters only.
+
+  **Region sizing turned out simpler than the plan assumed.** The plan specified
+  `min(maxParticles, aliveWindowBound)`, treating the alive-window estimate as load-bearing. It is
+  not needed: a census of `max_particles` (added to the census tool) came back at p50 15, p99 100,
+  **max 240**, summing to 39,205 slots for the entire authored corpus — about 15 MB if every
+  emitter in the game were resident at once. So regions are simply `maxParticles`, which the
+  emission path already enforces, making overflow impossible by construction with no estimate to
+  get wrong and no clamp divergence.
+
+  **Evidence, C061 medians of 3 against Track A:**
+
+  | metric | Track A | 6c | note |
+  | ------ | ------- | -- | ---- |
+  | range collection (was cohort) | 0.090 | **0.027** | −70 % |
+  | `particleAdvance` | 0.042 | 0.040 | unchanged |
+  | average frame work | 1.268 | **1.229** | −39 µs/frame |
+  | submitted instances | 670 | 672 | identical workload |
+  | draws | 5 | **72** | one range per visible emitter |
+
+  **The honest read: the per-particle walk cost 63 µs and its removal returned 39 µs**, because
+  going from 5 draws to 72 gave about 24 µs back. That is the tradeoff the design accepted, and it
+  is now the limiting factor rather than a footnote.
+
+  **Consequence for the remaining sub-phases, which the numbers reorder:**
+  - **6e's range merging is now the highest-value item, not the cleanup item** — it targets the
+    24 µs directly. But merging as the plan described it (adjacent same-key ranges) will rarely
+    fire: a merged draw must cover the slots between two regions, and a region is only full when
+    its emitter is at its cap. Making merging actually work needs regions *allocated* grouped by
+    mesh and motion law, plus a dead-slot sentinel the vertex stage skips, so a merged draw can
+    span partially-filled regions. That is a real piece of work, not a tidy-up.
+  - **6d's value is now scene-dependent and its cost is per-draw.** Moving a following emitter's
+    origin into a uniform removes its per-frame record writes, but costs two `uniform3f` per drawn
+    range for *every* emitter, follower or not. C061 is scenery-heavy with few followers, so it
+    would measure as a small loss there and a win in combat-like scenes. It needs a
+    moving-creature scene to evaluate honestly, which no current harness pose provides.
 
 - **6a and 6b landed (2026-08-19).**
 

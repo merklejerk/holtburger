@@ -1,4 +1,4 @@
-import { PARTICLE_RECORD_TEXELS } from "./particle-instance-stream";
+import { PARTICLE_RECORD_TEXELS } from "./particle-record-layout";
 
 /** RGBA32F carries four floats per texel. */
 const FLOATS_PER_TEXEL = 4;

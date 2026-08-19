@@ -62,7 +62,7 @@ const manifestSchema = z.object({
  * Decoded presentations for one batch of particle meshes.
  *
  * Keyed by `hw_gfxobj_id` because that is what a `CreateParticle` names and what the renderer keys
- * its cohorts on. The presentations are the same shape every other object path produces, so
+ * its draw ranges on. The presentations are the same shape every other object path produces, so
  * particles draw through ordinary geometry and materials.
  */
 /** One particle mesh: its drawable presentation and how it orients at draw time. */

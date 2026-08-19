@@ -23,8 +23,8 @@ import { PARTICLE_ORIENTATION } from "./webgl2-particle-program";
  * testable without a resource manager and knows only how to draw.
  *
  * A particle mesh resolves to **one** draw geometry rather than a range list: a `CreateParticle`
- * names a single mesh, and every particle in a cohort shares it, so a multi-range mesh would mean
- * splitting a cohort mid-draw. The first material range wins and the rest are reported.
+ * names a single mesh, and every particle in a draw range shares it, so a multi-range mesh would
+ * mean splitting a range mid-draw. The first material range wins and the rest are reported.
  */
 /**
  * Reference axis for an axis-locked particle billboard, in **render** axes.
@@ -126,7 +126,7 @@ export class ParticleMeshResidency {
 				? this.#requirePlaceholderTexture()
 				: this.#textures.get(mesh.base);
 		// A mesh whose texture upload failed is not drawable; reporting null keeps it counted as an
-		// unresolved cohort rather than drawn untextured.
+		// unresolved range rather than drawn untextured.
 		if (base === undefined) return null;
 		const baseBinding = this.#resources.getTexture2D(base);
 		const palette =
@@ -201,8 +201,8 @@ export class ParticleMeshResidency {
 		const ranges = resolveObjectMaterialRanges(part, label, facts);
 		const range = ranges[0];
 		if (range === undefined) return null;
-		// Every particle in a cohort shares one mesh, so a mesh spanning several material ranges
-		// would have to split the cohort mid-draw. Counted rather than silently truncated.
+		// Every particle in a draw range shares one mesh, so a mesh spanning several material
+		// ranges would have to split the range mid-draw. Counted rather than silently truncated.
 		if (ranges.length > 1) this.#multiRangeMeshCount += 1;
 		const base = range.material.textures.base;
 		const source = range.material.source;

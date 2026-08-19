@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	PARTICLE_RECORD_TEXELS,
 	PARTICLE_RECORDS_PER_ROW,
-} from "./particle-instance-stream";
+} from "./particle-record-layout";
 import { WebGL2ParticleRecordStore } from "./webgl2-particle-record-store";
 
 const FLOATS_PER_ROW = PARTICLE_RECORDS_PER_ROW * PARTICLE_RECORD_TEXELS * 4;

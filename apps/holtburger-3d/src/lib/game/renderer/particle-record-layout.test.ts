@@ -6,9 +6,9 @@ import {
 import { describe, expect, it } from "vitest";
 import {
 	PARTICLE_INSTANCE_FLOAT_COUNT,
-	writeParticleInstance,
+	writeParticleRecord,
 	type ParticleInstanceRecord,
-} from "./particle-instance-stream";
+} from "./particle-record-layout";
 
 const RECORD: ParticleInstanceRecord = {
 	a: acVector3([7, 8, 9]),
@@ -25,11 +25,11 @@ const RECORD: ParticleInstanceRecord = {
 	startTranslucency: 18,
 };
 
-describe("writeParticleInstance", () => {
+describe("writeParticleRecord", () => {
 	it("packs spawn constants in the layout the vertex stage declares", () => {
 		const stream = new Float32Array(PARTICLE_INSTANCE_FLOAT_COUNT);
 
-		const next = writeParticleInstance(stream, 0, RECORD);
+		const next = writeParticleRecord(stream, 0, RECORD);
 
 		expect(next).toBe(PARTICLE_INSTANCE_FLOAT_COUNT);
 		expect([...stream]).toEqual([
@@ -43,8 +43,8 @@ describe("writeParticleInstance", () => {
 	it("writes consecutive particles without gaps", () => {
 		const stream = new Float32Array(PARTICLE_INSTANCE_FLOAT_COUNT * 2);
 
-		const first = writeParticleInstance(stream, 0, RECORD);
-		const second = writeParticleInstance(stream, first, {
+		const first = writeParticleRecord(stream, 0, RECORD);
+		const second = writeParticleRecord(stream, first, {
 			...RECORD,
 			birthTime: 99,
 		});
@@ -57,7 +57,7 @@ describe("writeParticleInstance", () => {
 		const stream = new Float32Array(PARTICLE_INSTANCE_FLOAT_COUNT - 1);
 
 		// Silently truncating here would corrupt whichever particle followed.
-		expect(() => writeParticleInstance(stream, 0, RECORD)).toThrow(
+		expect(() => writeParticleRecord(stream, 0, RECORD)).toThrow(
 			"exceeds a 23-float stream",
 		);
 	});

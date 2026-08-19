@@ -13,7 +13,7 @@ import type { BehaviorTarget } from "../behavior/behavior-event-router";
 import type { DrawableParticleEmitter } from "../behavior/particle-emitter-repository";
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
-import { ParticleSystem, type UniformRoll } from "./particle-system";
+import { ParticleSystem } from "./particle-system";
 
 const TARGET: BehaviorTarget = {
 	generation: 1,
@@ -84,21 +84,6 @@ function prepared(
 	};
 }
 
-/** Deterministic finite source that fails loudly if spawn consumes an unexpected extra roll. */
-function rollSequence(values: readonly number[]): UniformRoll {
-	let index = 0;
-	return () => {
-		const value = values[index];
-		if (value === undefined) {
-			throw new Error(
-				`Particle spawn requested roll ${index + 1} unexpectedly.`,
-			);
-		}
-		index += 1;
-		return value;
-	};
-}
-
 /** A quarter turn about AC's up axis, the case the waterfall report turned on. */
 const YAWED_QUARTER_TURN = acRotationFromRenderTransform(
 	createRotationMat4(new Quat(Math.SQRT1_2, 0, Math.SQRT1_2, 0)),
@@ -163,51 +148,82 @@ describe("ParticleSystem", () => {
 		},
 	);
 
-	it("samples and clamps every appearance endpoint with its own retail-ordered roll", () => {
-		const particles = runtime({
-			// lifespan, final/start trans, final/start scale, C, B, A, then zero offset direction.
-			roll: rollSequence([0, 1, 0, 1, 0, 0.25, 0.5, 0.75, 0.5, 0.5, 0.5]),
-		});
-		particles.create(
-			TARGET,
-			prepared({
-				a: acVector3([4, 0, 0]),
-				b: acVector3([0, 3, 0]),
-				c: acVector3([0, 0, 2]),
-				finalScale: 9.5,
-				finalTrans: 0.8,
-				initialParticles: 1,
-				lifespan: 10,
-				lifespanRand: 2,
-				maxA: 0.6,
-				maxB: 0.6,
-				maxC: 0.6,
-				minA: 0.2,
-				minB: 0.2,
-				minC: 0.2,
-				scaleRand: 2,
-				startScale: 0.2,
-				startTrans: 0.2,
-				transRand: 0.5,
-			}),
-			NO_OFFSET,
-			0,
-			0,
-			ORIGIN,
-		);
+	// Each endpoint is sampled and clamped by its own formula, which is the behavior content
+	// depends on. Asserted with a constant roll rather than a positional sequence on purpose:
+	// *which* draw feeds *which* field is an implementation detail of the CPU emitter, and one the
+	// closed-form GPU path deliberately does not preserve.
+	it.each([
+		{
+			// Every field at the top of its range: exercises the upper scale and translucency clamps.
+			expectedA: 2.4,
+			expectedB: 1.8,
+			expectedC: 1.2,
+			expectedEndpoints: {
+				finalScale: 10,
+				finalTranslucency: 1,
+				lifespan: 12,
+				startScale: 2.2,
+				startTranslucency: 0.7,
+			},
+			roll: 1,
+		},
+		{
+			// Every field at the bottom: exercises the lower clamps, which floor scale at 0.1.
+			expectedA: 0.8,
+			expectedB: 0.6,
+			expectedC: 0.4,
+			expectedEndpoints: {
+				finalScale: 7.5,
+				finalTranslucency: 0.3,
+				lifespan: 8,
+				startScale: 0.1,
+				startTranslucency: 0,
+			},
+			roll: 0,
+		},
+	])(
+		"samples and clamps every appearance endpoint at roll $roll",
+		({ expectedA, expectedB, expectedC, expectedEndpoints, roll }) => {
+			const particles = runtime({ roll: () => roll });
+			particles.create(
+				TARGET,
+				prepared({
+					a: acVector3([4, 0, 0]),
+					b: acVector3([0, 3, 0]),
+					c: acVector3([0, 0, 2]),
+					finalScale: 9.5,
+					finalTrans: 0.8,
+					initialParticles: 1,
+					lifespan: 10,
+					lifespanRand: 2,
+					maxA: 0.6,
+					maxB: 0.6,
+					maxC: 0.6,
+					minA: 0.2,
+					minB: 0.2,
+					minC: 0.2,
+					scaleRand: 2,
+					startScale: 0.2,
+					startTrans: 0.2,
+					transRand: 0.5,
+				}),
+				NO_OFFSET,
+				0,
+				0,
+				ORIGIN,
+			);
 
-		const spawn = particles.collectCohorts()[0]!.particles[0]!;
-		expect(spawn).toMatchObject({
-			finalScale: 10,
-			finalTranslucency: 1,
-			lifespan: 8,
-			startScale: 0.1,
-			startTranslucency: 0,
-		});
-		expect(spawn.a[0]).toBeCloseTo(2);
-		expect(spawn.b[1]).toBeCloseTo(1.2);
-		expect(spawn.c[2]).toBeCloseTo(0.6);
-	});
+			const spawn = particles.collectCohorts()[0]!.particles[0]!;
+			for (const [endpoint, expected] of Object.entries(expectedEndpoints)) {
+				expect(spawn[endpoint as keyof typeof expectedEndpoints]).toBeCloseTo(
+					expected,
+				);
+			}
+			expect(spawn.a[0]).toBeCloseTo(expectedA);
+			expect(spawn.b[1]).toBeCloseTo(expectedB);
+			expect(spawn.c[2]).toBeCloseTo(expectedC);
+		},
+	);
 
 	it("releases initial particles immediately, before any interval applies", () => {
 		const particles = runtime();

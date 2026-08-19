@@ -248,15 +248,14 @@ with their measured blast radius.
 
 **Acceptance criteria:**
 
-- Census results and both divergence write-ups recorded in Decisions (census and the
-  cap-clamp direction already resolved — see Decisions); user sign-off on the parity standard
-  **before Phase 6 begins**.
+- Census, both divergence write-ups, and the parity standard all recorded in Decisions and
+  signed off (2026-08-19). Phase 5 is complete; Phase 6 is unblocked.
 
 **Task checklist:**
 
 - [x] Census tool and results in Decisions (gathered early, 2026-08-19)
 - [x] Divergence write-ups drafted (approval pending with the parity standard)
-- [ ] Parity methodology decided
+- [x] Parity methodology decided
 
 ### Phase 6: Closed-form GPU emission with a global on-screen budget
 
@@ -364,6 +363,42 @@ interval-driven — the census's 614 shape-eligible definitions are a floor, not
   path forever, but confirm with the census how many exist.
 
 ## Decisions and Course Corrections
+
+- **Phase 5 ratified (2026-08-19, user sign-off) — parity standard set and RNG approach chosen.**
+
+  **Order-independent particle RNG is approved**, and on its own merits rather than as a
+  concession: "I'm okay with not matching retail's randomness faithfully. I don't think anyone
+  will notice. If order-independent RNG is a cleaner fit for our arch then we should do it." This
+  is also forced by the closed-form model — the CPU path is a *stream* whose particle `k` depends
+  on how many draws every prior particle consumed (and that count is data-dependent: Explode burns
+  two extra rolls, the offset path can short-circuit). A stream cannot be indexed; generation-
+  indexed emission requires random *access*, i.e. `hash(seed, k, field)`.
+
+  **Scope of the relaxation, stated explicitly by the user: particle RNG only, because particles
+  are purely presentation.** It does not generalize to RNG that world state depends on.
+
+  **The parity standard for the Phase 6 cutover**, replacing cross-cutover screenshot parity
+  (which is impossible by construction — a hash matches distributions, not values):
+  1. **Formula agreement** — identical spawn constants into `particle-motion.ts` and the shader
+     produce identical positions, scale, and translucency. Unaffected by how constants are made.
+  2. **Distribution agreement** — the in-shader hash reproduces each authored field's range, mean,
+     and retail clamping over many generations. This is the property content can actually observe.
+  3. **Structural metrics** — emitter, instance, and draw counts plus budget accounting must be
+     explainable across the cutover even though pixels move.
+  4. **Visual review** — per AGENTS.md, particles are verified by looking; the DA55 candle pose is
+     the close-up standard.
+
+  **Dropped from the standard: self-determinism assertions.** The user's steer — "tests asserting
+  determinism on the particle RNG are going too far" — removes the leg I had proposed. A seeded
+  particle run reproducing an exact image is not a property worth defending for presentation-only
+  randomness.
+
+  **Test posture changed to match, ahead of Phase 6.** The one test that asserted a positional roll
+  sequence ("samples and clamps every appearance endpoint with its own retail-ordered roll") now
+  runs at constant rolls of 0 and 1, asserting each field's formula and both clamp directions
+  without any coupling to draw order — better coverage of what matters (both clamps, previously
+  only one) and it survives the hash migration untouched. The `rollSequence` helper that existed
+  solely to pin draw order is deleted.
 
 - **Explorer-in-Tauri spot check confirmed (2026-08-19, user):** "looks good in explorer to me"
   at the same pose. Phase 4's last outstanding item is closed; the harness numbers hold in the

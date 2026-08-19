@@ -1,6 +1,11 @@
 import { Vec3, type AABB3, type Mat4 } from "../math/types";
 import type { EnvCellId } from "../game-types";
-import { multiplyMat4, transformAABB3 } from "../math/matrices";
+import {
+	getMat4Translation,
+	multiplyMat4,
+	transformAABB3,
+	transformPoint3,
+} from "../math/matrices";
 import { containsPoint, translateBounds } from "../math/geometry-utils";
 import { frustumIntersectsAABB, type Frustum } from "../math/frustum";
 import {
@@ -22,6 +27,7 @@ import type {
 	SceneTopologyView,
 	PortalCrossingId,
 	ResolvedScenePlacement,
+	ResolvedSceneOrigin,
 	ResolvedSceneBounds,
 	ScenePointResidencyCandidates,
 	SceneResidency,
@@ -150,6 +156,17 @@ export class SceneGraph {
 		};
 	}
 
+	/**
+	 * Report whether one node is still live, without resolving anything about it.
+	 *
+	 * For frame-rate consumers whose question is liveness alone — a system holding node ids across
+	 * frames must notice a torn-down node, and paying a placement or origin resolution to learn it
+	 * is the resolution this graph's hot callers are trying to avoid.
+	 */
+	hasNode(nodeId: SceneNodeId): boolean {
+		return this.#nodes.has(nodeId);
+	}
+
 	/** Return the producer-owned broad-phase group for one live scene node. */
 	getCullingGroup(nodeId: SceneNodeId): string | null {
 		return this.#nodes.get(nodeId)?.cullingGroup ?? null;
@@ -161,6 +178,32 @@ export class SceneGraph {
 	): ResolvedScenePlacement | undefined {
 		if (!this.#nodes.has(nodeId)) return undefined;
 		return copyResolvedPlacement(this.#resolvePlacement(nodeId));
+	}
+
+	/**
+	 * Return one live node's landblock-local origin and residency, without composing transforms.
+	 *
+	 * The frame-rate counterpart to {@link SceneGraph.getResolvedPlacement}: that method answers
+	 * "what is this node's transform" and must copy the matrix it hands out, which costs a compose
+	 * per ancestor hop plus two clones. A consumer that only needs a position instead walks the
+	 * origin point up the same chain — 9 multiplies per hop, and the returned vector is the only
+	 * allocation. Reach for the placement query only when the full transform is genuinely consumed.
+	 */
+	getResolvedOrigin(nodeId: SceneNodeId): ResolvedSceneOrigin | undefined {
+		let node = this.#nodes.get(nodeId);
+		if (!node) return undefined;
+		// A node's own origin is its transform's translation; each hop then carries that point up.
+		const landblockOrigin = getMat4Translation(node.localTransform);
+		while (node.parentId !== null) {
+			node = this.#requireNode(node.parentId);
+			transformPoint3(node.localTransform, landblockOrigin, landblockOrigin);
+		}
+		return {
+			envCellId: node.envCellId,
+			landblockId: node.landblockId,
+			landblockOrigin,
+			scope: scopeFor(node.landblockId, node.envCellId),
+		};
 	}
 
 	/** Return one bounded node's colocated local envelope and resolved placement. */

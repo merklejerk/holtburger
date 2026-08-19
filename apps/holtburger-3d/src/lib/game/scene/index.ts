@@ -136,6 +136,20 @@ export interface ResolvedScenePlacement extends SceneResidency {
 	readonly localToLandblock: Mat4;
 }
 
+/**
+ * Residency and flattened *origin* for any node in a transform tree.
+ *
+ * The translation-only companion to {@link ResolvedScenePlacement}, for frame-rate consumers that
+ * ask "where is this node" rather than "what is its transform". Resolving it walks a point through
+ * the parent chain instead of composing matrices, so it neither multiplies nor copies transforms.
+ */
+export interface ResolvedSceneOrigin extends SceneResidency {
+	/** Query scope derived from the root residency. */
+	readonly scope: SceneScope;
+	/** Node origin composed through its parents into landblock-local coordinates. */
+	readonly landblockOrigin: Vec3;
+}
+
 /** One bounded scene node's colocated local envelope and resolved render placement. */
 export interface ResolvedSceneBounds {
 	/** Bounds retained in the selected node's own local coordinate frame. */

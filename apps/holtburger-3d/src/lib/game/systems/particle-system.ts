@@ -22,7 +22,6 @@ import type {
 import type { SceneNodeId } from "../scene";
 import {
 	PARTICLE_TYPE,
-	particleLifeProgress,
 	particlePosition,
 	rotatedSpawnConstants,
 	particleScale,
@@ -45,8 +44,21 @@ export interface ParticleSystemDependencies {
 	 * Current origin of a target in the fixed scene frame, or `null` once it stops publishing one.
 	 *
 	 * Scene frame rather than anchor-relative because particle origins are retained across frames.
+	 *
+	 * **Spawn-tier, not frame-tier.** Only emission and cohort collection read an origin; the
+	 * per-frame emitter loop must not, because resolving one costs a walk up the scene hierarchy
+	 * and this runs for every resident emitter whether or not it is drawn. Liveness questions go
+	 * to {@link ParticleSystemDependencies.targetLives} instead.
 	 */
 	readonly sceneOriginOf: (target: BehaviorTarget) => SceneVector3 | null;
+	/**
+	 * Whether a target still exists, asked without resolving its transform.
+	 *
+	 * Exactly the condition under which {@link ParticleSystemDependencies.sceneOriginOf} yields a
+	 * value: every registered target publishes an origin, so a live target always has one. The
+	 * emitter loop asks this per frame and pays for an origin only when a particle actually spawns.
+	 */
+	readonly targetLives: (target: BehaviorTarget) => boolean;
 	/**
 	 * Current rotation of a target's frame, in AC's authored axes, or `null` once it stops
 	 * publishing one.
@@ -192,9 +204,23 @@ function drawableEnvelopeRadius(
 	);
 }
 
-/** One live particle: spawn constants plus a birth time, and nothing else. */
+/** One live particle: spawn constants plus the two stamps that bound its life, and nothing else. */
 interface LiveParticle {
-	readonly birthTime: number;
+	/**
+	 * Mutable because an off-screen suspension shifts it: freezing a hidden particle's age is
+	 * exactly moving its birth forward by the hidden duration (see `#reconcileVisible`).
+	 */
+	birthTime: number;
+	/**
+	 * When this particle expires, fixed at spawn as `birthTime + lifespan` and shifted with
+	 * `birthTime` by a suspension.
+	 *
+	 * Reaping is a comparison against this rather than a life-progress evaluation per particle per
+	 * frame: `particleLifeProgress(spawn, t) < 1` is exactly `t < lifespan` for every lifespan the
+	 * spawn path can produce, including the degenerate zero, so the closed form is equivalent and
+	 * carries no division.
+	 */
+	deathTime: number;
 	readonly spawn: ParticleSpawnConstants;
 	/**
 	 * Spawn origin frozen in the fixed scene frame, for an emitter that leaves particles behind.
@@ -245,6 +271,14 @@ interface EmitterInstance {
 	 */
 	hiddenSince: number | null;
 	particles: LiveParticle[];
+	/**
+	 * Earliest `deathTime` among this emitter's live particles, or `Infinity` when it has none.
+	 *
+	 * The reap scan is skipped entirely until the clock reaches this, which is the common frame:
+	 * particles outlive many frames, so most frames have nothing to expire and should cost one
+	 * comparison rather than a pass over the population.
+	 */
+	nextDeathTime: number;
 }
 
 /** Derived owner facts read by presentation culling without scanning the global emitter sequence. */
@@ -441,6 +475,7 @@ export class ParticleSystem {
 			hookOffset,
 			hiddenSince: null,
 			lastEmissionTime: null,
+			nextDeathTime: Number.POSITIVE_INFINITY,
 			particles: [],
 			startTime: timeSeconds,
 			stopped: false,
@@ -493,8 +528,10 @@ export class ParticleSystem {
 	/**
 	 * Advance every emitter to `timeSeconds`.
 	 *
-	 * Origins come from the injected `sceneOriginOf`, so this runtime follows published entity
-	 * transforms without holding a reference to the entity itself.
+	 * Deliberately resolves no origins: emitters follow published transforms, but only a spawn
+	 * needs to know where its owner *is*, and spawns are interval-gated while this loop runs for
+	 * every resident emitter every frame. The loop asks only whether each target still exists;
+	 * {@link ParticleSystem.#emitDue} resolves the origin once it knows a particle is due.
 	 */
 	advance(
 		timeSeconds: number,
@@ -502,11 +539,8 @@ export class ParticleSystem {
 	): void {
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
 			const instance = this.#instances[index]!;
-			const parentOrigin = this.#dependencies.sceneOriginOf(
-				instance.frameTarget,
-			);
-			// A target that no longer publishes a transform has gone away underneath us.
-			if (parentOrigin === null) {
+			// A target that no longer exists has gone away underneath us.
+			if (!this.#dependencies.targetLives(instance.frameTarget)) {
 				this.#removeEmitter(index, "target-lost");
 				continue;
 			}
@@ -521,7 +555,7 @@ export class ParticleSystem {
 			}
 			this.#reapExpired(instance, timeSeconds);
 			this.#applyAutoStop(instance, timeSeconds);
-			if (!instance.stopped) this.#emitDue(instance, timeSeconds, parentOrigin);
+			if (!instance.stopped) this.#emitDue(instance, timeSeconds);
 			// A stopped emitter with nothing left alive has finished its whole job.
 			if (instance.stopped && instance.particles.length === 0) {
 				this.#removeEmitter(index, "reaped");
@@ -709,10 +743,12 @@ export class ParticleSystem {
 		if (instance.emitter.info.isPersistent) {
 			// Shifting every birth time forward by the suspension is exactly an age freeze, and it
 			// keeps the emission clock in step so the next particle is not immediately overdue.
-			instance.particles = instance.particles.map((particle) => ({
-				...particle,
-				birthTime: particle.birthTime + hiddenSeconds,
-			}));
+			for (const particle of instance.particles) {
+				particle.birthTime += hiddenSeconds;
+				// Death rides birth exactly, or the freeze would silently extend every lifespan.
+				particle.deathTime += hiddenSeconds;
+			}
+			instance.nextDeathTime += hiddenSeconds;
 			if (instance.lastEmissionTime !== null)
 				instance.lastEmissionTime += hiddenSeconds;
 			return;
@@ -731,13 +767,28 @@ export class ParticleSystem {
 		}
 	}
 
-	/** Particles die only by lifespan; retail never kills them any other way. */
+	/**
+	 * Particles die only by lifespan; retail never kills them any other way.
+	 *
+	 * Compacts survivors in place rather than rebuilding the array, and rebuilds the watermark from
+	 * the same pass, so a frame that expires nothing costs one comparison and a frame that expires
+	 * something costs one pass with no allocation.
+	 */
 	#reapExpired(instance: EmitterInstance, timeSeconds: number): void {
-		instance.particles = instance.particles.filter(
-			(particle) =>
-				particleLifeProgress(particle.spawn, timeSeconds - particle.birthTime) <
-				1,
-		);
+		if (timeSeconds < instance.nextDeathTime) return;
+		const particles = instance.particles;
+		let surviving = 0;
+		let nextDeathTime = Number.POSITIVE_INFINITY;
+		for (let index = 0; index < particles.length; index += 1) {
+			const particle = particles[index]!;
+			if (timeSeconds >= particle.deathTime) continue;
+			particles[surviving] = particle;
+			surviving += 1;
+			if (particle.deathTime < nextDeathTime)
+				nextDeathTime = particle.deathTime;
+		}
+		particles.length = surviving;
+		instance.nextDeathTime = nextDeathTime;
 	}
 
 	/** A finite emitter stops once it exhausts its particle budget or its authored duration. */
@@ -820,11 +871,7 @@ export class ParticleSystem {
 	 * update with no catch-up (acclient.c:312447-312476, 318289). Reproduced deliberately: emitting
 	 * a burst to "catch up" a slow frame would change authored density.
 	 */
-	#emitDue(
-		instance: EmitterInstance,
-		timeSeconds: number,
-		parentOrigin: SceneVector3,
-	): void {
+	#emitDue(instance: EmitterInstance, timeSeconds: number): void {
 		const info = instance.emitter.info;
 		// The per-meter predicate is unrecovered from the decompile, so a purely per-meter emitter
 		// must report rather than guess an emission cadence.
@@ -835,6 +882,15 @@ export class ParticleSystem {
 			timeSeconds - instance.lastEmissionTime < info.birthrateSeconds
 		) {
 			return;
+		}
+		// Every gate has passed, so this emitter is spawning and now needs to know where it is.
+		const parentOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
+		// `advance` proved this target live earlier in the same iteration, and a live target always
+		// publishes an origin, so a missing one is a broken contract rather than a departed target.
+		if (parentOrigin === null) {
+			throw new Error(
+				`Emitter frame ${instance.frameTarget.targetId} is live but published no origin.`,
+			);
 		}
 		this.#emit(instance, timeSeconds, parentOrigin);
 	}
@@ -916,8 +972,11 @@ export class ParticleSystem {
 			),
 			inFrame(authoredC, rotated.c),
 		);
+		const deathTime = timeSeconds + lifespan;
+		if (deathTime < instance.nextDeathTime) instance.nextDeathTime = deathTime;
 		instance.particles.push({
 			birthTime: timeSeconds,
+			deathTime,
 			// A following emitter resolves its origin live every frame, so freezing one here would
 			// be a value nothing reads. The hook offset is applied by the shared resolution instead
 			// of here, so both kinds of emitter get it.

@@ -113,6 +113,7 @@ const runtime = (
 	new ParticleSystem({
 		clock: () => 0,
 		sceneOriginOf: () => ORIGIN,
+		targetLives: () => true,
 		sceneRotationOf: () => UNROTATED,
 		partFrameOf: (target, partIndex) => ({
 			generation: target.generation,
@@ -423,10 +424,11 @@ describe("ParticleSystem", () => {
 		expect(following.sample(0)[0]!.position[0]).toBeCloseTo(100);
 	});
 
-	it("drops emitters whose target stops publishing a transform", () => {
+	it("drops emitters whose target stops existing", () => {
 		let published = true;
 		const particles = runtime({
 			sceneOriginOf: () => (published ? ORIGIN : null),
+			targetLives: () => published,
 		});
 		particles.create(
 			TARGET,
@@ -443,6 +445,115 @@ describe("ParticleSystem", () => {
 		expect(particles.getDiagnostics()).toMatchObject({
 			emitterCount: 0,
 			lostTargetEmitterTotal: 1,
+		});
+	});
+
+	// Resolving an origin walks the scene hierarchy, and the emitter loop runs for every resident
+	// emitter every frame while spawns are interval-gated. Pinning the call count is what keeps a
+	// future edit from quietly reintroducing a per-frame resolve.
+	it("resolves no origin on a frame where no emitter is due to spawn", () => {
+		let originReads = 0;
+		const particles = runtime({
+			sceneOriginOf: () => {
+				originReads += 1;
+				return ORIGIN;
+			},
+		});
+		particles.create(
+			TARGET,
+			prepared({ birthrateSeconds: 100, initialParticles: 1 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+		originReads = 0;
+
+		// Well inside the emitter's 100-second interval, so no spawn is due on any of these frames.
+		particles.advance(1);
+		particles.advance(2);
+		particles.advance(3);
+
+		expect(originReads).toBe(0);
+	});
+
+	it("resolves one origin on the frame an emitter spawns", () => {
+		let originReads = 0;
+		const particles = runtime({
+			sceneOriginOf: () => {
+				originReads += 1;
+				return ORIGIN;
+			},
+		});
+		particles.create(
+			TARGET,
+			prepared({ birthrateSeconds: 1, initialParticles: 0, maxParticles: 8 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+		originReads = 0;
+
+		particles.advance(5);
+
+		expect(originReads).toBe(1);
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+	});
+
+	// Reaping moved from evaluating life progress per particle per frame to comparing a `deathTime`
+	// stamped at spawn. The two must agree exactly, including at the boundary and for the
+	// degenerate lifespans the spawn path can produce.
+	describe("expiry", () => {
+		it.each([
+			{ alive: true, at: 1.9, lifespan: 2 },
+			// Retail's predicate is `t < lifespan`, so a particle is gone the instant it reaches its
+			// lifespan rather than one frame later.
+			{ alive: false, at: 2, lifespan: 2 },
+			{ alive: false, at: 2.1, lifespan: 2 },
+			// A zero-lifespan particle is born already expired.
+			{ alive: false, at: 0, lifespan: 0 },
+		])(
+			"keeps a lifespan-$lifespan particle alive=$alive at t=$at",
+			({ alive, at, lifespan }) => {
+				const particles = runtime();
+				particles.create(
+					TARGET,
+					prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan }),
+					NO_OFFSET,
+					0,
+					0,
+					ORIGIN,
+				);
+
+				particles.advance(at);
+
+				expect(particles.getDiagnostics().particleCount).toBe(alive ? 1 : 0);
+			},
+		);
+
+		it("shifts expiry with birth when a hidden persistent emitter is reconciled", () => {
+			const particles = runtime();
+			particles.create(
+				TARGET,
+				prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
+				NO_OFFSET,
+				0,
+				0,
+				ORIGIN,
+			);
+
+			// Hidden across its entire lifespan: a suspension that shifted birth but not death would
+			// expire this particle the moment it became visible again.
+			particles.advance(1, () => false);
+			particles.advance(10, () => false);
+			particles.advance(10.5);
+
+			expect(particles.getDiagnostics().particleCount).toBe(1);
+			// Its age is frozen at the 1-second mark it reached before hiding, so it dies a full
+			// lifespan after reconciliation rather than on the original clock.
+			particles.advance(11.5);
+			expect(particles.getDiagnostics().particleCount).toBe(0);
 		});
 	});
 

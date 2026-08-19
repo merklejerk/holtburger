@@ -1885,9 +1885,13 @@ export class GameRuntime {
 		// include the particle envelope, so an emitter entering view is selected on the frame its
 		// envelope crosses the frustum rather than when its mesh does.
 		renderer.particles?.submit(
-			this.#particles.collectCohorts((target) =>
+			this.#particles.collectDrawRanges((target) =>
 				this.#particleRenderOwner(target),
 			),
+			{
+				data: this.#particles.recordData,
+				dirtySlots: this.#particles.takeDirtyRecordSlots(),
+			},
 		);
 		tick?.mark("particleCohort");
 		const anchorLandblockId = this.#camera.placement.landblockId;

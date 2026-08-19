@@ -15,6 +15,7 @@ import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { ParticleSystem } from "./particle-system";
+import { PARTICLE_RECORD_STRIDE_FLOATS } from "../behavior/particle-record-slots";
 
 const TARGET: BehaviorTarget = {
 	generation: 1,
@@ -110,6 +111,32 @@ const runtime = (
 		...overrides,
 	});
 
+/**
+ * Decode one particle's stored record, which is exactly what the vertex stage reads.
+ *
+ * Records are written into slot storage at spawn rather than rebuilt per frame, so a spawn is
+ * inspected by reading its slot rather than by collecting a frame's worth of them.
+ */
+function storedRecord(system: ParticleSystem, slot = 0) {
+	const data = system.recordData;
+	const at = slot * PARTICLE_RECORD_STRIDE_FLOATS;
+	const read = (offset: number) => data[at + offset]!;
+	return {
+		a: [read(8), read(9), read(10)],
+		b: [read(11), read(12), read(13)],
+		birthTime: read(3),
+		c: [read(14), read(15), read(16)],
+		finalScale: read(18),
+		finalTranslucency: read(20),
+		landblockOrigin: [read(21), read(22), read(23)],
+		lifespan: read(7),
+		localOrigin: [read(0), read(1), read(2)],
+		offset: [read(4), read(5), read(6)],
+		startScale: read(17),
+		startTranslucency: read(19),
+	};
+}
+
 describe("ParticleSystem", () => {
 	it.each([
 		{ expectedFactor: 0.3, roll: 0 },
@@ -140,7 +167,7 @@ describe("ParticleSystem", () => {
 				ORIGIN,
 			);
 
-			const spawn = particles.collectCohorts()[0]!.particles[0]!;
+			const spawn = storedRecord(particles);
 			expect(spawn.a[0]).toBeCloseTo(expectedFactor);
 			expect(spawn.b[2]).toBeCloseTo(-40 * expectedFactor);
 			expect(spawn.c[1]).toBeCloseTo(expectedFactor);
@@ -213,7 +240,7 @@ describe("ParticleSystem", () => {
 				ORIGIN,
 			);
 
-			const spawn = particles.collectCohorts()[0]!.particles[0]!;
+			const spawn = storedRecord(particles);
 			for (const [endpoint, expected] of Object.entries(expectedEndpoints)) {
 				expect(spawn[endpoint as keyof typeof expectedEndpoints]).toBeCloseTo(
 					expected,
@@ -681,9 +708,7 @@ describe("ParticleSystem", () => {
 			partIndex: 4,
 		});
 
-		expect(
-			particles.collectCohorts()[0]!.particles[0]!.localOrigin[0],
-		).toBeCloseTo(9);
+		expect(storedRecord(particles).localOrigin[0]).toBeCloseTo(9);
 	});
 
 	it("keeps a part-attached emitter owned by its object for visibility and envelope", () => {
@@ -699,7 +724,7 @@ describe("ParticleSystem", () => {
 
 		// The envelope belongs to the owning object; culling the part alone would lose the swarm.
 		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBeGreaterThan(0);
-		expect(particles.collectCohorts(() => null)).toHaveLength(0);
+		expect(particles.collectDrawRanges(() => null)).toHaveLength(0);
 	});
 
 	it("refuses a part the owner does not have rather than falling back to the object", () => {
@@ -818,7 +843,7 @@ describe("ParticleSystem", () => {
 		});
 	});
 
-	it("groups particles into cohorts by mesh and motion type", () => {
+	it("emits one range per emitter, carrying its mesh and motion law", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
@@ -837,16 +862,17 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const cohorts = particles.collectCohorts();
+		const ranges = particles.collectDrawRanges();
 
-		// Same mesh, different motion law: the vertex stage binds it as a constant, so they split.
-		expect(cohorts).toHaveLength(2);
-		expect(cohorts.map((cohort) => cohort.particles.length).sort()).toEqual([
-			1, 2,
-		]);
+		expect(ranges).toHaveLength(2);
+		expect(ranges.map((range) => range.count).sort()).toEqual([1, 2]);
+		expect(ranges.map((range) => range.motionType).sort()).toEqual([2, 5]);
 	});
 
-	it("merges emitters that share a mesh and motion type into one cohort", () => {
+	// Ranges deliberately do not merge, even for emitters that would draw identically. A range
+	// names a contiguous run of record slots owned by one emitter, and two emitters' runs are not
+	// adjacent, so a merged draw would have to cover the slots between them.
+	it("keeps same-mesh emitters in separate, non-overlapping ranges", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
@@ -865,7 +891,10 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		expect(particles.collectCohorts()).toHaveLength(1);
+		const ranges = particles.collectDrawRanges();
+
+		expect(ranges).toHaveLength(2);
+		expect(ranges[0]!.baseSlot).not.toBe(ranges[1]!.baseSlot);
 	});
 
 	it("preserves global creation order when owner aggregates interleave", () => {
@@ -885,11 +914,14 @@ describe("ParticleSystem", () => {
 		);
 		particles.create(TARGET, emitter, NO_OFFSET, 0, 0, sceneVector3([3, 0, 0]));
 
-		const cohorts = particles.collectCohorts();
+		const ranges = particles.collectDrawRanges();
 
-		expect(cohorts).toHaveLength(1);
+		// One range per emitter, still in the global creation order the authoritative sequence holds.
+		expect(ranges).toHaveLength(3);
 		expect(
-			cohorts[0]!.particles.map(({ localOrigin }) => localOrigin[0]),
+			ranges.map(
+				(range) => storedRecord(particles, range.baseSlot).localOrigin[0],
+			),
 		).toEqual([1, 2, 3]);
 		expect(particles.getDiagnostics()).toMatchObject({
 			emitterOwnerCount: 2,
@@ -916,11 +948,11 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const cohorts = particles.collectCohorts(
+		const ranges = particles.collectDrawRanges(
 			(target) => `scene-node:${target.targetId}` as SceneNodeId,
 		);
-		expect(cohorts).toHaveLength(2);
-		expect(new Set(cohorts.map((cohort) => cohort.renderOwner)).size).toBe(2);
+		expect(ranges).toHaveLength(2);
+		expect(new Set(ranges.map((range) => range.renderOwner)).size).toBe(2);
 	});
 
 	// Records outlive the anchor they are drawn against, so a spawn origin is stored split on the
@@ -939,7 +971,7 @@ describe("ParticleSystem", () => {
 			sceneVector3([500, 12, -300]),
 		);
 
-		const record = particles.collectCohorts()[0]!.particles[0]!;
+		const record = storedRecord(particles);
 
 		// The coarse part lands on the landblock grid, so subtracting the anchor -- also on that
 		// grid -- is exact rather than merely close.
@@ -979,7 +1011,7 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const record = particles.collectCohorts()[0]!.particles[0]!;
+		const record = storedRecord(particles);
 		expect(record.localOrigin).toEqual([0, 0, 0]);
 		expect(record.offset).toEqual(acVector3([5, 0, 0]));
 	});
@@ -997,183 +1029,60 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const record = particles.collectCohorts()[0]!.particles[0]!;
+		const record = storedRecord(particles);
 		expect(record.offset[0]).toBeCloseTo(-5);
 		expect(record.offset[1]).toBeCloseTo(0);
 	});
 
-	it("reuses anchored origin storage instead of allocating per particle per frame", () => {
-		const particles = runtime();
-		particles.create(
-			TARGET,
-			prepared({ initialParticles: 2 }),
-			NO_OFFSET,
-			0,
-			0,
-			ORIGIN,
-		);
-
-		const first = particles
-			.collectCohorts()[0]!
-			.particles.map(({ localOrigin }) => localOrigin);
-		const second = particles
-			.collectCohorts()[0]!
-			.particles.map(({ localOrigin }) => localOrigin);
-
-		// Identity, not equality: a fresh vector per particle per frame is the GC churn the pool
-		// exists to avoid, and it would still compare equal.
-		expect(second[0]).toBe(first[0]);
-		expect(second[1]).toBe(first[1]);
-		expect(first[0]).not.toBe(first[1]);
-	});
-
-	it("reuses instance records too, not only the vectors inside them", () => {
-		const particles = runtime();
-		particles.create(
-			TARGET,
-			prepared({ initialParticles: 2 }),
-			NO_OFFSET,
-			0,
-			0,
-			ORIGIN,
-		);
-
-		const first = [...particles.collectCohorts()[0]!.particles];
-		const second = [...particles.collectCohorts()[0]!.particles];
-
-		// The record is the other half of the per-particle-per-frame allocation. Churn is worse
-		// than its cost suggests: it accumulates into pauses that are hard to attribute back.
-		expect(second[0]).toBe(first[0]);
-		expect(second[1]).toBe(first[1]);
-		expect(first[0]).not.toBe(first[1]);
-	});
-
-	it("emits no instance records for a culled emitter", () => {
-		const particles = runtime();
-		particles.create(
-			TARGET,
-			prepared({ initialParticles: 5 }),
-			NO_OFFSET,
-			0,
-			0,
-			ORIGIN,
-		);
-
-		// Culling is per emitter, so the whole cohort disappears rather than being filtered.
-		expect(particles.collectCohorts(() => null)).toHaveLength(0);
-	});
-
-	it("skips an unshipped motion type rather than drawing it motionless", () => {
-		const particles = runtime();
-		particles.create(
-			TARGET,
-			prepared({ initialParticles: 1, motionType: null }),
-			NO_OFFSET,
-			0,
-			0,
-			ORIGIN,
-		);
-
-		expect(particles.collectCohorts()).toHaveLength(0);
-	});
-
-	/**
-	 * The `Local`/`Global` split lives entirely at spawn (`Particle::Init`, acclient.c:317743): the
-	 * evaluator sees identical arithmetic either way, so only the stored constants can tell them
-	 * apart. AC's +y is north and a quarter turn about up sends it to -x; in render axes that is -x
-	 * as well, since the conversion leaves x alone.
-	 */
-	it.each([
-		{
-			expectedX: -5,
-			motionType: 2,
-			name: "LocalVelocity rotates its velocity",
-		},
-		{
-			expectedX: 0,
-			motionType: 12,
-			name: "GlobalVelocity keeps its authored velocity",
-		},
-	])("$name", ({ expectedX, motionType }) => {
+	// The point of persistent records is that a frame touches emitters, never particles. Origin
+	// resolution is the observable proxy: a frozen-origin emitter resolves nothing per frame,
+	// because its records were complete at spawn.
+	it("resolves no origins per frame for emitters that leave particles behind", () => {
+		let originReads = 0;
 		const particles = runtime({
-			sceneRotationOf: () => YAWED_QUARTER_TURN,
+			sceneOriginOf: () => {
+				originReads += 1;
+				return ORIGIN;
+			},
 		});
 		particles.create(
 			TARGET,
-			prepared({
-				a: acVector3([0, 5, 0]),
-				initialParticles: 1,
-				maxA: 1,
-				minA: 1,
-				motionType,
-			}),
+			prepared({ birthrateSeconds: 100, initialParticles: 4 }),
 			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
+		originReads = 0;
 
-		// One second of travel, so the sampled position is the velocity itself.
-		expect(particles.sample(1, ORIGIN)[0]!.position[0]).toBeCloseTo(expectedX);
+		particles.collectDrawRanges();
+		particles.collectDrawRanges();
+
+		expect(originReads).toBe(0);
 	});
 
-	it("rotates the spawn offset for a Still emitter, which has no velocity to rotate", () => {
-		// The default roll of 0.5 yields a zero random direction, which no rotation can move.
-		const offsetRoll = () => 0.75;
+	// A following emitter is the one case that still writes per frame, because every one of its
+	// particles sits at its parent's current position rather than where it was born.
+	it("rewrites a following emitter's origins as its parent moves", () => {
+		let parentX = 0;
 		const particles = runtime({
-			roll: offsetRoll,
-			sceneRotationOf: () => YAWED_QUARTER_TURN,
+			sceneOriginOf: () => sceneVector3([parentX, 0, 0]),
 		});
 		particles.create(
 			TARGET,
-			prepared({
-				initialParticles: 1,
-				maxOffset: 5,
-				minOffset: 5,
-				motionType: 1,
-				// Offsets are spread perpendicular to this axis, so an authored up axis spreads the
-				// particle across AC's horizontal plane, where a yaw is observable.
-				offsetDir: acVector3([0, 0, 1]),
-			}),
+			prepared({ followsParent: true, initialParticles: 1 }),
 			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		const [rotatedX, , rotatedZ] = particles.sample(0, ORIGIN)[0]!.position;
-		const unrotated = runtime({
-			roll: offsetRoll,
-			sceneRotationOf: () => UNROTATED,
-		});
-		unrotated.create(
-			TARGET,
-			prepared({
-				initialParticles: 1,
-				maxOffset: 5,
-				minOffset: 5,
-				motionType: 1,
-				offsetDir: acVector3([0, 0, 1]),
-			}),
-			NO_OFFSET,
-			0,
-			0,
-			ORIGIN,
-		);
-		const [authoredX, , authoredZ] = unrotated.sample(0, ORIGIN)[0]!.position;
+		parentX = 40;
+		particles.collectDrawRanges();
 
-		// Retail rotates `offset` for every type, so the same roll lands somewhere else.
-		expect(Math.hypot(rotatedX, rotatedZ)).toBeCloseTo(
-			Math.hypot(authoredX, authoredZ),
-		);
-		expect(rotatedX).not.toBeCloseTo(authoredX);
+		expect(storedRecord(particles).localOrigin[0]).toBeCloseTo(40);
 	});
 
-	/**
-	 * `Particle::Init` replaces Explode's authored `c` with a random unit direction, discarding the
-	 * authored magnitude. Passing authored `c` through instead fires an entire burst along one
-	 * direction rather than spraying.
-	 */
 	it("gives each exploding particle its own unit direction", () => {
 		let index = 0;
 		const particles = runtime({
@@ -1197,11 +1106,15 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const spawned = particles.collectCohorts()[0]!.particles;
+		const range = particles.collectDrawRanges()[0]!;
+		const spawned = Array.from({ length: range.count }, (_unused, slot) =>
+			storedRecord(particles, range.baseSlot + slot),
+		);
 		for (const record of spawned) {
 			const magnitude = Math.hypot(...record.c);
-			// Unit or zero; the authored 1000 is gone either way.
-			expect(magnitude === 0 || Math.abs(magnitude - 1) < 1e-9).toBe(true);
+			// Unit or zero; the authored 1000 is gone either way. The tolerance is float32-sized
+			// because records live in the storage the GPU reads, not in doubles.
+			expect(magnitude === 0 || Math.abs(magnitude - 1) < 1e-6).toBe(true);
 		}
 		const distinct = new Set(spawned.map((record) => record.c.join(",")));
 		expect(distinct.size).toBeGreaterThan(1);
@@ -1234,7 +1147,7 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const record = particles.collectCohorts()[0]!.particles[0]!;
+		const record = storedRecord(particles);
 		expect(record.c).toEqual(record.offset);
 		// Authored c of 2 doubles the offset it was derived from, so neither is the raw offset.
 		expect(Math.hypot(...record.c)).toBeCloseTo(2 * 5);
@@ -1251,7 +1164,7 @@ describe("ParticleSystem", () => {
 			ORIGIN,
 		);
 
-		const record = particles.collectCohorts()[0]!.particles[0]!;
+		const record = storedRecord(particles);
 
 		// The shader derives position from these; the CPU must not have done it already.
 		expect(record.birthTime).toBe(0);

@@ -15,7 +15,8 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
-import type { ParticleSourceCohort } from "../systems/particle-system";
+import type { ParticleSourceRange } from "../systems/particle-system";
+import type { ParticleRecordFrame } from "./webgl2-particle-pass";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import {
 	DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
@@ -500,7 +501,16 @@ export interface RendererParticleCapability {
 	 * Called before `drawFrame`, because sources come from a system the renderer does not own and
 	 * are rebuilt every frame rather than retained.
 	 */
-	submit(sources: readonly ParticleSourceCohort[]): void;
+	/**
+	 * Publish this frame's visible ranges together with the record storage they index into.
+	 *
+	 * Records and ranges travel together because a range is only meaningful against the mirror that
+	 * holds its slots; splitting them would let a stale mirror be drawn with fresh ranges.
+	 */
+	submit(
+		sources: readonly ParticleSourceRange[],
+		records: ParticleRecordFrame,
+	): void;
 	clear(): void;
 }
 

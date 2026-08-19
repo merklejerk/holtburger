@@ -22,6 +22,11 @@ import type {
 	BehaviorTargetId,
 } from "../behavior/behavior-event-router";
 import type { SceneNodeId } from "../scene";
+import {
+	ParticleRecordSlots,
+	type ParticleSlotRegion,
+} from "../behavior/particle-record-slots";
+import { PARTICLE_RECORD_BIRTH_TIME_FLOAT } from "../renderer/particle-instance-stream";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import {
 	PARTICLE_TYPE,
@@ -284,6 +289,14 @@ interface EmitterInstance {
 	 * reconciliation at the visibility transition, so a hidden emitter costs nothing per frame.
 	 */
 	hiddenSince: number | null;
+	/**
+	 * Record slots reserved for this emitter's whole life.
+	 *
+	 * Sized at the authored `maxParticles`, which the emission path already enforces, so the region
+	 * cannot overflow by construction. The corpus makes that cheap: the census puts `max_particles`
+	 * at p50 15 and max 240 across all 2,051 authored emitters.
+	 */
+	readonly region: ParticleSlotRegion;
 	particles: LiveParticle[];
 	/**
 	 * Earliest `deathTime` among this emitter's live particles, or `Infinity` when it has none.
@@ -317,12 +330,16 @@ export type ParticleRenderOwner =
 	| typeof SKY_PARTICLE_RENDER_OWNER;
 
 /** One owner-local source cohort awaiting renderer-owned portal-domain batching. */
-export interface ParticleSourceCohort {
+export interface ParticleSourceRange {
+	/** Particle mesh shared by every instance in this range. */
 	readonly hwGfxObjId: DatAssetId;
-	/** Bound as a vertex-stage constant, so cohorts never mix motion laws. */
+	/** Vertex-stage motion law shared by every instance in this range. */
 	readonly motionType: number;
-	readonly particles: ParticleInstanceRecord[];
-	/** Owner used only for render-domain routing; it is not part of the final GPU batch key. */
+	/** First record slot this range draws. */
+	readonly baseSlot: number;
+	/** Live particles in the range, drawn as instances from `baseSlot`. */
+	readonly count: number;
+	/** Owner whose visibility selected this range, for portal scope routing. */
 	readonly renderOwner: ParticleRenderOwner;
 }
 
@@ -377,21 +394,12 @@ export class ParticleSystem {
 		ParticleOwnerAggregate
 	>();
 	/** Reused across frames so cohort grouping does not allocate in the renderer's hot path. */
-	readonly #cohortScratch = new Map<string, ParticleSourceCohort>();
-	/** Current-frame keys used to release scratch belonging to streamed-out owners. */
-	readonly #activeCohortKeys = new Set<string>();
-	readonly #cohortScratchOutput: ParticleSourceCohort[] = [];
-	/**
-	 * Reused instance records, one entry per particle drawn, each owning its origin vector.
-	 *
-	 * `collectCohorts` runs every frame over every live particle, so allocating a record and a
-	 * vector per particle would be pure GC churn in the renderer's hot path — and churn is worse
-	 * than its cost suggests, because it accumulates into collection pauses that are hard to
-	 * attribute back to the code that caused them. Records are handed out by index and are valid
-	 * only until the next call, which is exactly the lifetime of the cohorts that reference them.
-	 */
-	readonly #recordPool: MutableParticleInstanceRecord[] = [];
-	#recordsUsed = 0;
+	/** Persistent record storage; written at spawn and read by the GPU every frame after. */
+	readonly #slots = new ParticleRecordSlots();
+	/** Reused output for the visible draw ranges, rebuilt each frame from emitters alone. */
+	readonly #rangeOutput: ParticleSourceRange[] = [];
+	/** Reused record builder; a record is copied into slot storage, never retained by shape. */
+	readonly #recordScratch: MutableParticleInstanceRecord = blankRecord();
 	/** Lifetime creates, including an authored identity that replaces a predecessor. */
 	#createdEmitterTotal = 0;
 	/** Immediate authored destroy removals. */
@@ -481,6 +489,7 @@ export class ParticleSystem {
 		}
 		const envelopeRadius = drawableEnvelopeRadius(emitter, hookOffset);
 		const instance: EmitterInstance = {
+			region: this.#slots.allocate(Math.max(1, emitter.info.maxParticles)),
 			emittedCount: 0,
 			emitter,
 			emitterId,
@@ -578,90 +587,65 @@ export class ParticleSystem {
 	}
 
 	/**
-	 * Group live particles into owner-local source cohorts.
+	 * Select the draw ranges visible this frame, walking emitters and never particles.
 	 *
-	 * Cohorts carry the facts the vertex stage binds as constants — mesh, motion type — and the
-	 * per-particle spawn records it reads as instance attributes. No position is evaluated here:
-	 * that is the shader's job, and doing it twice is the CPU ceiling this design exists to avoid.
+	 * This is what the persistent-record design buys: a record is written when its particle is born
+	 * and read by the GPU every frame after, so the per-frame cost is one entry per *visible
+	 * emitter* rather than per live particle. Ranges carry a slot base and count instead of record
+	 * arrays; the records themselves already sit in {@link ParticleSystem.recordData}.
 	 *
 	 * `resolveRenderOwner` both culls and preserves the fact needed to route the emitter into the
-	 * current portal scope selection. Owners intentionally remain separate here; the renderer erases
-	 * them and recoalesces by mesh and motion type after assigning each source to its scope envelope.
+	 * current portal scope selection.
 	 *
-	 * The returned cohorts, their record arrays, and the `origin` vectors inside them are all reused
-	 * storage owned by this system. They are valid until the next call and must be consumed, not
-	 * retained — which matches the one consumer, the particle pass, uploading them the same frame.
+	 * The returned array is reused storage owned by this system, valid until the next call.
 	 */
-	collectCohorts(
+	collectDrawRanges(
 		resolveRenderOwner: (
 			target: BehaviorTarget,
 		) => ParticleRenderOwner | null = () => EXTERIOR_PARTICLE_RENDER_OWNER,
-	): ParticleSourceCohort[] {
-		// Cohort objects and their arrays persist across frames; only the per-particle records are
-		// rebuilt. Reusing those too is recorded as measured debt rather than guessed at.
-		const cohorts = this.#cohortScratch;
-		for (const cohort of cohorts.values()) cohort.particles.length = 0;
-		this.#activeCohortKeys.clear();
-		this.#recordsUsed = 0;
+	): ParticleSourceRange[] {
+		this.#rangeOutput.length = 0;
 		for (const instance of this.#instances) {
+			if (instance.particles.length === 0) continue;
 			const info = instance.emitter.info;
-			const meshId = instance.emitter.mesh.id;
 			// An unshipped motion type has no formula in either evaluator; drawing it motionless
 			// would misrepresent it as working.
 			if (info.motionType === null) continue;
 			const renderOwner = resolveRenderOwner(instance.target);
 			if (renderOwner === null) continue;
-			const liveOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
-			if (liveOrigin === null) continue;
-			const key = `${renderOwner}\0${meshId}:${info.motionType}`;
-			this.#activeCohortKeys.add(key);
-			let cohort = cohorts.get(key);
-			if (!cohort) {
-				cohort = {
-					hwGfxObjId: meshId,
-					motionType: info.motionType,
-					particles: [],
-					renderOwner,
-				};
-				cohorts.set(key, cohort);
+			// A following emitter's particles all sit at its parent's current position, so their
+			// origins are the one part of a record that is not fixed at spawn.
+			if (info.followsParent) {
+				for (let index = 0; index < instance.particles.length; index += 1) {
+					this.#writeParticleRecord(
+						instance,
+						index,
+						instance.region.base + index,
+					);
+				}
 			}
-			for (const particle of instance.particles) {
-				const record = this.#pooledRecord();
-				const sceneOrigin = resolveSceneOrigin(particle, liveOrigin);
-				// Motion constants are shared with the spawn record rather than copied; only the
-				// anchored origin is per-frame, and it is written into the record's own vector.
-				record.a = particle.spawn.a;
-				record.b = particle.spawn.b;
-				record.birthTime = particle.birthTime;
-				record.c = particle.spawn.c;
-				record.finalScale = particle.spawn.finalScale;
-				record.finalTranslucency = particle.spawn.finalTranslucency;
-				record.lifespan = particle.spawn.lifespan;
-				record.offset = particle.spawn.offset;
-				// Split on the landblock grid so the record survives re-anchoring: the coarse part
-				// cancels exactly against the anchor and the local part stays small enough to keep
-				// its precision.
-				const landblockX = quantizeToLandblock(sceneOrigin[0]);
-				const landblockZ = quantizeToLandblock(sceneOrigin[2]);
-				record.landblockOrigin[0] = landblockX;
-				record.landblockOrigin[1] = 0;
-				record.landblockOrigin[2] = landblockZ;
-				record.localOrigin[0] = sceneOrigin[0] - landblockX;
-				record.localOrigin[1] = sceneOrigin[1];
-				record.localOrigin[2] = sceneOrigin[2] - landblockZ;
-				record.startScale = particle.spawn.startScale;
-				record.startTranslucency = particle.spawn.startTranslucency;
-				cohort.particles.push(record);
-			}
+			this.#rangeOutput.push({
+				baseSlot: instance.region.base,
+				count: instance.particles.length,
+				hwGfxObjId: instance.emitter.mesh.id,
+				motionType: info.motionType,
+				renderOwner,
+			});
 		}
-		for (const key of cohorts.keys()) {
-			if (!this.#activeCohortKeys.has(key)) cohorts.delete(key);
-		}
-		this.#cohortScratchOutput.length = 0;
-		for (const cohort of cohorts.values()) {
-			if (cohort.particles.length > 0) this.#cohortScratchOutput.push(cohort);
-		}
-		return this.#cohortScratchOutput;
+		return this.#rangeOutput;
+	}
+
+	/** Record storage the renderer uploads; one entry per live particle, written at spawn. */
+	get recordData(): Float32Array {
+		return this.#slots.data;
+	}
+
+	/** Slots written since the last call, or `null` when no record changed. */
+	takeDirtyRecordSlots(): {
+		readonly first: number;
+		readonly last: number;
+	} | null {
+		return this.#slots.takeDirtySlotRange();
 	}
 
 	/**
@@ -762,10 +746,18 @@ export class ParticleSystem {
 		if (instance.emitter.info.isPersistent) {
 			// Shifting every birth time forward by the suspension is exactly an age freeze, and it
 			// keeps the emission clock in step so the next particle is not immediately overdue.
-			for (const particle of instance.particles) {
+			for (let index = 0; index < instance.particles.length; index += 1) {
+				const particle = instance.particles[index]!;
 				particle.birthTime += hiddenSeconds;
 				// Death rides birth exactly, or the freeze would silently extend every lifespan.
 				particle.deathTime += hiddenSeconds;
+				// The vertex stage derives elapsed time from the stored birth, so the shift has to
+				// reach the record too.
+				this.#slots.patchRecordFloat(
+					instance.region.base + index,
+					PARTICLE_RECORD_BIRTH_TIME_FLOAT,
+					particle.birthTime,
+				);
 			}
 			instance.nextDeathTime += hiddenSeconds;
 			if (instance.lastEmissionTime !== null)
@@ -801,7 +793,13 @@ export class ParticleSystem {
 		for (let index = 0; index < particles.length; index += 1) {
 			const particle = particles[index]!;
 			if (timeSeconds >= particle.deathTime) continue;
-			particles[surviving] = particle;
+			if (surviving !== index) {
+				particles[surviving] = particle;
+				this.#slots.moveRecord(
+					instance.region.base + index,
+					instance.region.base + surviving,
+				);
+			}
 			surviving += 1;
 			if (particle.deathTime < nextDeathTime)
 				nextDeathTime = particle.deathTime;
@@ -830,6 +828,7 @@ export class ParticleSystem {
 		const instance = this.#instances[index];
 		if (!instance) throw new Error(`Particle emitter ${index} does not exist.`);
 		this.#instances.splice(index, 1);
+		this.#slots.release(instance.region);
 		switch (reason) {
 			case "destroyed":
 				this.#destroyedEmitterTotal += 1;
@@ -914,13 +913,6 @@ export class ParticleSystem {
 		this.#emit(instance, timeSeconds, parentOrigin);
 	}
 
-	/** Hand out the next pooled record, growing the pool only as the peak particle count grows. */
-	#pooledRecord(): MutableParticleInstanceRecord {
-		const record = (this.#recordPool[this.#recordsUsed] ??= blankRecord());
-		this.#recordsUsed += 1;
-		return record;
-	}
-
 	#emit(
 		instance: EmitterInstance,
 		timeSeconds: number,
@@ -993,6 +985,7 @@ export class ParticleSystem {
 		);
 		const deathTime = timeSeconds + lifespan;
 		if (deathTime < instance.nextDeathTime) instance.nextDeathTime = deathTime;
+		const slot = instance.region.base + instance.particles.length;
 		instance.particles.push({
 			birthTime: timeSeconds,
 			deathTime,
@@ -1012,9 +1005,66 @@ export class ParticleSystem {
 				startTranslucency,
 			},
 		});
+		this.#writeParticleRecord(instance, instance.particles.length - 1, slot);
 		instance.emittedCount += 1;
 		this.#emittedTotal += 1;
 		instance.lastEmissionTime = timeSeconds;
+	}
+
+	/**
+	 * Write one live particle's record into its slot.
+	 *
+	 * Everything a record carries is fixed at spawn except a following emitter's origin, so this
+	 * runs on birth, on the compaction that follows a death, and — until the origin becomes a draw
+	 * uniform — per frame for following emitters only.
+	 */
+	#writeParticleRecord(
+		instance: EmitterInstance,
+		particleIndex: number,
+		slot: number,
+	): void {
+		const particle = instance.particles[particleIndex];
+		if (!particle) {
+			throw new Error(
+				`Emitter ${instance.emitterId} has no particle at ${particleIndex}.`,
+			);
+		}
+		const origin = particle.frozenOrigin ?? this.#liveOriginOf(instance);
+		const landblockX = quantizeToLandblock(origin[0]);
+		const landblockZ = quantizeToLandblock(origin[2]);
+		this.#recordScratch.a = particle.spawn.a;
+		this.#recordScratch.b = particle.spawn.b;
+		this.#recordScratch.birthTime = particle.birthTime;
+		this.#recordScratch.c = particle.spawn.c;
+		this.#recordScratch.finalScale = particle.spawn.finalScale;
+		this.#recordScratch.finalTranslucency = particle.spawn.finalTranslucency;
+		this.#recordScratch.lifespan = particle.spawn.lifespan;
+		this.#recordScratch.offset = particle.spawn.offset;
+		this.#recordScratch.landblockOrigin[0] = landblockX;
+		this.#recordScratch.landblockOrigin[1] = 0;
+		this.#recordScratch.landblockOrigin[2] = landblockZ;
+		this.#recordScratch.localOrigin[0] = origin[0] - landblockX;
+		this.#recordScratch.localOrigin[1] = origin[1];
+		this.#recordScratch.localOrigin[2] = origin[2] - landblockZ;
+		this.#recordScratch.startScale = particle.spawn.startScale;
+		this.#recordScratch.startTranslucency = particle.spawn.startTranslucency;
+		this.#slots.writeRecord(slot, this.#recordScratch);
+	}
+
+	/**
+	 * Live origin of a following emitter's frame.
+	 *
+	 * A following emitter reads its parent every frame by definition, so a target that has stopped
+	 * publishing one while still registered is a broken contract rather than a departed target.
+	 */
+	#liveOriginOf(instance: EmitterInstance): SceneVector3 {
+		const origin = this.#dependencies.sceneOriginOf(instance.frameTarget);
+		if (origin === null) {
+			throw new Error(
+				`Emitter frame ${instance.frameTarget.targetId} published no origin.`,
+			);
+		}
+		return origin;
 	}
 
 	/**

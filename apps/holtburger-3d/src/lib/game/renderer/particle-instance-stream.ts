@@ -33,6 +33,14 @@ export const PARTICLE_INSTANCE_FLOAT_COUNT = 24;
 export const PARTICLE_RECORD_TEXELS = 6;
 
 /**
+ * Float offset of `birthTime` within a record.
+ *
+ * Named because a suspension shifts it in place on an already-written record, which is the one
+ * field anything patches after spawn.
+ */
+export const PARTICLE_RECORD_BIRTH_TIME_FLOAT = 3;
+
+/**
  * Records per row of the record data texture.
  *
  * A whole number of records per row, so a record never straddles rows: that keeps the vertex

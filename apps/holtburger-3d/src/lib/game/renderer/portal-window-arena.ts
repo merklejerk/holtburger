@@ -1184,7 +1184,7 @@ class PolygonBuilder {
 		scratchY: Float64Array,
 	): void {
 		for (let left = 0; left < this.fragmentCount; left += 1) {
-			for (let right = left + 1; right < this.fragmentCount;) {
+			for (let right = left + 1; right < this.fragmentCount; ) {
 				const mergedCount = this.#merge(left, right, scratchX, scratchY, meter);
 				if (mergedCount === 0) {
 					right += 1;

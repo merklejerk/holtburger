@@ -106,21 +106,22 @@ export function createPortalPotentialViewPlan(
 				left.crossingIds.length - right.crossingIds.length ||
 				left.id.localeCompare(right.id),
 		)
-		.map((view): PortalPotentialView =>
-			Object.freeze({
-				coverage: createPortalModelFootprint(
-					scene.pixelCount,
-					view.coverageByPixel.flatMap((covered, pixel) =>
-						covered ? [pixel] : [],
+		.map(
+			(view): PortalPotentialView =>
+				Object.freeze({
+					coverage: createPortalModelFootprint(
+						scene.pixelCount,
+						view.coverageByPixel.flatMap((covered, pixel) =>
+							covered ? [pixel] : [],
+						),
 					),
-				),
-				crossingIds: Object.freeze([...view.crossingIds]),
-				domainId: view.domainId,
-				entryDepthByPixel: Object.freeze([...view.entryDepthByPixel]),
-				id: view.id,
-				parentViewId: view.parentViewId,
-				scopeId: view.scopeId,
-			}),
+					crossingIds: Object.freeze([...view.crossingIds]),
+					domainId: view.domainId,
+					entryDepthByPixel: Object.freeze([...view.entryDepthByPixel]),
+					id: view.id,
+					parentViewId: view.parentViewId,
+					scopeId: view.scopeId,
+				}),
 		);
 	return Object.freeze({
 		maximumPathLength,

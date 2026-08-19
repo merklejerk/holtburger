@@ -19,7 +19,9 @@ type PortalScopeAtlasCapability =
 	| "scissor-test"
 	| "stencil-test";
 type PortalScopeAtlasFramebuffer =
-	"envelope" | "output" | `frontier-${FrontierOrdinal}`;
+	| "envelope"
+	| "output"
+	| `frontier-${FrontierOrdinal}`;
 type PortalScopeAtlasProgram =
 	| "propagation-root"
 	| "propagation-from-0"

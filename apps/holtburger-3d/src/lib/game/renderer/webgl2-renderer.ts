@@ -157,16 +157,23 @@ import type { SkyDrawPass } from "../environment/sky-state";
 import { ParticleMeshResidency } from "./particle-mesh-residency";
 import {
 	type ParticleDrawContext,
+	type ParticleRecordFrame,
 	WebGL2ParticlePass,
 } from "./webgl2-particle-pass";
+
+/** Stand-in before any emitter has published records, so the context is never partially built. */
+const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
+	data: new Float32Array(0),
+	dirtySlots: null,
+};
 import {
 	EXTERIOR_PARTICLE_RENDER_OWNER,
 	SKY_PARTICLE_RENDER_OWNER,
-	type ParticleSourceCohort,
+	type ParticleSourceRange,
 } from "../systems/particle-system";
 import {
 	ParticleRenderBatcher,
-	type ParticleDrawBatch,
+	type ParticleDrawRange,
 } from "./particle-render-routing";
 import {
 	createWebGL2SkyProgram,
@@ -442,9 +449,9 @@ interface PreparedSceneContributions {
 	 */
 	readonly landblockOffsets: ReadonlyMap<string, LandblockRenderOffset>;
 	/** Final contribution-local batches, recoalesced after particle owner routing. */
-	readonly particles: readonly ParticleDrawBatch[];
+	readonly particles: readonly ParticleDrawRange[];
 	/** Sky-attached particle batches drawn before the landscape. */
-	readonly skyParticles: readonly ParticleDrawBatch[];
+	readonly skyParticles: readonly ParticleDrawRange[];
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
@@ -559,7 +566,9 @@ export class WebGL2Renderer implements Renderer {
 	#particleResidency: ParticleMeshResidency | null = null;
 	#particlePass: WebGL2ParticlePass | null = null;
 	/** This frame's owner-local sources, replaced every submission rather than retained. */
-	#particleSources: readonly ParticleSourceCohort[] = [];
+	#particleSources: readonly ParticleSourceRange[] = [];
+	/** Record storage published with the ranges that index into it. */
+	#particleRecords: ParticleRecordFrame = EMPTY_PARTICLE_RECORDS;
 	/** Persistent scratch for owner routing and final contribution-local batch coalescing. */
 	readonly #particleBatcher = new ParticleRenderBatcher();
 	/** Reusable particle matrices; the pass runs every frame and must not allocate in it. */
@@ -2054,6 +2063,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#particlePass?.destroy();
 			this.#particlePass = null;
 			this.#particleSources = [];
+			this.#particleRecords = EMPTY_PARTICLE_RECORDS;
 			this.#particleBatcher.clear();
 		},
 		install: async (source, preparer) => {
@@ -2067,8 +2077,9 @@ export class WebGL2Renderer implements Renderer {
 				(hwGfxObjId) => this.#particleResidency?.resolve(hwGfxObjId) ?? null,
 			);
 		},
-		submit: (sources) => {
+		submit: (sources, records) => {
 			this.#particleSources = sources;
+			this.#particleRecords = records;
 		},
 	};
 
@@ -2179,6 +2190,7 @@ export class WebGL2Renderer implements Renderer {
 		const anchor = createLandblockWorldOrigin(view.anchorLandblockId);
 		return {
 			anchorOrigin: [anchor.x, anchor.y, anchor.z],
+			records: this.#particleRecords,
 			cameraPosition: [
 				view.cameraPosition.x,
 				view.cameraPosition.y,
@@ -2224,7 +2236,7 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawParticleBatches(
 		view: PreparedView,
-		batches: readonly ParticleDrawBatch[],
+		batches: readonly ParticleDrawRange[],
 		profile: WebGL2FrameProfileCapture | null,
 		clockSeconds: number,
 		opacityScale: number,
@@ -2242,7 +2254,7 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawScopedParticles(
 		view: PreparedView,
-		particlesByScope: ReadonlyMap<string, readonly ParticleDrawBatch[]>,
+		particlesByScope: ReadonlyMap<string, readonly ParticleDrawRange[]>,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {

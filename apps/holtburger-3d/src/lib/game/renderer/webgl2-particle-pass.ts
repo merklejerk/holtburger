@@ -1,5 +1,5 @@
 import type { DatAssetId } from "../game-types";
-import type { ParticleDrawBatch } from "./particle-render-routing";
+import type { ParticleDrawRange } from "./particle-render-routing";
 import {
 	createWebGL2ParticleProgram,
 	PARTICLE_TEXTURE_UNITS,
@@ -7,6 +7,7 @@ import {
 } from "./webgl2-particle-program";
 import type { WebGL2PortalDeferredVisibilityUniforms } from "./portal-deferred-visibility-glsl";
 import { WebGL2ParticleRecordStore } from "./webgl2-particle-record-store";
+import { PARTICLE_RECORDS_PER_ROW } from "./particle-instance-stream";
 import { objectBlendPolicy } from "./object-rendering-policy";
 import { TextureWrapMode } from "../textures/types";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
@@ -52,6 +53,14 @@ export interface ParticleDrawContext {
 	readonly textureFiltering: TextureFilteringPolicy;
 	/** Global opacity scale applied to all particles in this context, in [0, 1]. Defaults to 1. */
 	readonly opacityScale?: number;
+	/** Record mirror owned by the emitter runtime; the pass uploads it, never writes it. */
+	readonly records: ParticleRecordFrame;
+}
+
+/** The emitter runtime's record storage and what changed in it since the last frame. */
+export interface ParticleRecordFrame {
+	readonly data: Float32Array;
+	readonly dirtySlots: { readonly first: number; readonly last: number } | null;
 }
 
 export interface ParticleDrawDiagnostics {
@@ -89,7 +98,7 @@ export class WebGL2ParticlePass {
 	#portalProgram: WebGL2ParticleProgram | null = null;
 	#records: WebGL2ParticleRecordStore | null = null;
 	/** Reused flattening scratch keeps all scoped batches in one contiguous frame upload. */
-	readonly #scopedBatches: ParticleDrawBatch[] = [];
+	readonly #scopedBatches: ParticleDrawRange[] = [];
 	readonly #scopedRenderScopeKeys: string[] = [];
 	#diagnostics: ParticleDrawDiagnostics = {
 		drawnBatchCount: 0,
@@ -105,7 +114,7 @@ export class WebGL2ParticlePass {
 
 	draw(
 		context: ParticleDrawContext,
-		batches: readonly ParticleDrawBatch[],
+		batches: readonly ParticleDrawRange[],
 	): void {
 		this.#draw(context, batches, null, null);
 	}
@@ -113,7 +122,7 @@ export class WebGL2ParticlePass {
 	/** Draw scope-grouped particles with one upload and one scalar scope route per physical draw. */
 	drawScoped(
 		context: ParticleDrawContext,
-		batchesByScope: ReadonlyMap<string, readonly ParticleDrawBatch[]>,
+		batchesByScope: ReadonlyMap<string, readonly ParticleDrawRange[]>,
 		routing: ParticlePortalScopeRouting,
 	): void {
 		this.#scopedBatches.length = 0;
@@ -135,7 +144,7 @@ export class WebGL2ParticlePass {
 
 	#draw(
 		context: ParticleDrawContext,
-		batches: readonly ParticleDrawBatch[],
+		batches: readonly ParticleDrawRange[],
 		renderScopeKeys: readonly string[] | null,
 		routing: ParticlePortalScopeRouting | null,
 	): void {
@@ -144,9 +153,7 @@ export class WebGL2ParticlePass {
 		let drawnParticleCount = 0;
 		let unresolvedBatchCount = 0;
 		let preparedInstanceCount = 0;
-		for (const batch of batches) {
-			preparedInstanceCount += batch.particles.length;
-		}
+		for (const batch of batches) preparedInstanceCount += batch.count;
 		const opacityScale = context.opacityScale ?? 1.0;
 		if (opacityScale <= 0 || preparedInstanceCount === 0) {
 			this.#diagnostics = {
@@ -170,13 +177,11 @@ export class WebGL2ParticlePass {
 			throw new Error("Particle pass cannot move between WebGL devices.");
 		}
 		this.#gl = gl;
-		const records = (this.#records ??= new WebGL2ParticleRecordStore(gl));
-		const uploadedInstanceCount = records.prepareFrame(batches);
-		if (uploadedInstanceCount !== preparedInstanceCount) {
-			throw new Error(
-				`Particle preparation uploaded ${uploadedInstanceCount} of ${preparedInstanceCount} instances.`,
-			);
-		}
+		const records = (this.#records ??= new WebGL2ParticleRecordStore(
+			gl,
+			PARTICLE_RECORDS_PER_ROW,
+		));
+		records.sync(context.records.data, context.records.dirtySlots);
 		const program = routing
 			? (this.#portalProgram ??= createWebGL2ParticleProgram(gl, true))
 			: (this.#program ??= createWebGL2ParticleProgram(gl));
@@ -222,19 +227,21 @@ export class WebGL2ParticlePass {
 			wrap: TextureWrapMode.Clamp,
 		});
 
-		let firstInstance = 0;
+		// Ranges each address their own slots, so this is an accounting total rather than a cursor:
+		// every prepared instance must be either drawn or counted unresolved.
+		let accountedInstanceCount = 0;
 		for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
 			const batch = batches[batchIndex];
 			if (!batch)
 				throw new Error(`Particle batch ${batchIndex} is unavailable.`);
-			const instanceCount = batch.particles.length;
+			const instanceCount = batch.count;
 			if (instanceCount === 0) continue;
 			const geometry = this.#resolveGeometry(batch.hwGfxObjId);
 			// A batch whose mesh has not landed is counted, not silently dropped: the emitter is
 			// live and the viewer is missing it.
 			if (geometry === null) {
 				unresolvedBatchCount += 1;
-				firstInstance += instanceCount;
+				accountedInstanceCount += instanceCount;
 				continue;
 			}
 			// Retail's own flag-to-blend mapping, shared with the object and sky paths: additive
@@ -255,7 +262,7 @@ export class WebGL2ParticlePass {
 			gl.bindVertexArray(geometry.vertexArray);
 			// One uniform selects this range's records, where binding six attribute pointers to the
 			// same range would cost about twenty GL calls.
-			gl.uniform1i(program.uniforms.instanceBase, firstInstance);
+			gl.uniform1i(program.uniforms.instanceBase, batch.baseSlot);
 			if (routing) {
 				if (portalVisibilityUniforms === null) {
 					throw new Error(
@@ -317,11 +324,11 @@ export class WebGL2ParticlePass {
 			);
 			drawnBatchCount += 1;
 			drawnParticleCount += instanceCount;
-			firstInstance += instanceCount;
+			accountedInstanceCount += instanceCount;
 		}
-		if (firstInstance !== preparedInstanceCount) {
+		if (accountedInstanceCount !== preparedInstanceCount) {
 			throw new Error(
-				`Particle submission consumed ${firstInstance} of ${preparedInstanceCount} prepared instances.`,
+				`Particle submission accounted for ${accountedInstanceCount} of ${preparedInstanceCount} prepared instances.`,
 			);
 		}
 

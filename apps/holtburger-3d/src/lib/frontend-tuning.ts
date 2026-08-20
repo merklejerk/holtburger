@@ -10,6 +10,8 @@ export const FRONTEND_TUNING = {
 		offscreenSampleIntervalSeconds: 0.1,
 	},
 	audio: {
+		/** Cadence for listener-relative ambient weighting and live voice placement updates. */
+		controlUpdateIntervalSeconds: 1 / 30,
 		/**
 		 * Simultaneous authored voices before one is stolen.
 		 *

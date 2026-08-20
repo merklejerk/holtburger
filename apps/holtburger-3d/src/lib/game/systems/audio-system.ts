@@ -33,9 +33,9 @@ export interface AudioVoice {
  *
  * A discriminated union so the illegal states cannot be spelled: a world sound has a fixed emitting
  * point and a fixed authored volume; a listener-locked bed has neither — no position at all, and a
- * gain supplier read live each frame. This mirrors the ambient invariant that the surroundings
- * scale exactly one of gain and probability: a `"world"` sound's static volume is correct, not an
- * omission.
+ * gain supplier read on each audio-control tick. This mirrors the ambient invariant that the
+ * surroundings scale exactly one of gain and probability: a `"world"` sound's static volume is
+ * correct, not an omission.
  */
 export type AudioPlacementSource =
 	| {
@@ -47,7 +47,7 @@ export type AudioPlacementSource =
 	| {
 			readonly mode: "listener";
 			/**
-			 * Live gain for a head-locked sound, read once per frame and at trigger time.
+			 * Live gain for a head-locked sound, read on each control tick and at trigger time.
 			 *
 			 * A supplier rather than a number because the value belongs to its producer — ambient
 			 * share re-weighted as the listener moves — and reads `0` once that producer retires it,
@@ -57,7 +57,7 @@ export type AudioPlacementSource =
 	  };
 
 /**
- * A playing voice plus the facts needed to re-place it each frame.
+ * A playing voice plus the facts needed to re-place it on each audio-control tick.
  *
  * Facts, not derived results: gain and pan are recomputed from these against the current listener,
  * never stored. A world position is the emitting point sampled at trigger time — voices deliberately
@@ -142,7 +142,10 @@ export interface AudioTrigger {
 }
 
 export type AudioTriggerOutcome =
-	"played" | "lost-probability-roll" | "inaudible" | "device-refused";
+	| "played"
+	| "lost-probability-roll"
+	| "inaudible"
+	| "device-refused";
 
 /**
  * Why triggers did not become sound, counted separately.
@@ -183,8 +186,9 @@ export interface AudioDiagnostics {
  * RETAIL DIVERGENCE: retail never updates a playing voice's spatial parameters. `GetAttenuation`
  * has exactly four call sites in the whole binary (acclient.c:366516, 366859, 366879, 366904),
  * every one inside a sound-*starting* function; gain and pan were fixed at trigger time for the
- * voice's whole life. We re-place every live voice against the current listener each frame
- * (`advance`). Safe to depart: no shipped content can depend on a sound *failing* to track a
+ * voice's whole life. We re-place every live voice against the current listener on a bounded
+ * audio-control cadence (`updatePlacements`). Safe to depart: no shipped content can depend on a
+ * sound *failing* to track a
  * listener — the difference is pure presentation — and a free-flying camera makes frozen placement
  * audibly wrong within a single multi-second voice. The 1999 constraint (DirectSound buffers, CPU
  * budget) no longer applies.
@@ -295,7 +299,7 @@ export class AudioSystem {
 		return "played";
 	}
 
-	/** Record a started voice with the facts `advance` re-places it from. */
+	/** Record a started voice with the facts `updatePlacements` re-places it from. */
 	#retain(voice: AudioVoice, trigger: AudioTrigger): void {
 		this.#voices.push({
 			category: trigger.category,
@@ -326,14 +330,14 @@ export class AudioSystem {
 	}
 
 	/**
-	 * Re-place every live voice against the current listener, once per frame.
+	 * Re-place every live voice against the current listener on one audio-control tick.
 	 *
 	 * Takes no clock: placement is a pure function of the listener pose and settings as they are
 	 * right now. A voice that has receded below the audible floor is silenced rather than stopped —
 	 * a free-flying camera routinely leaves and re-enters earshot, and stopping would make the
 	 * return trip silently lossy.
 	 */
-	advance(): void {
+	updatePlacements(): void {
 		this.#sweepFinishedVoices();
 		for (const live of this.#voices) {
 			const placement = this.#place(live.source, live.category);
@@ -341,7 +345,7 @@ export class AudioSystem {
 		}
 	}
 
-	/** Retire voices that ended on their own; shared by the frame path and the budget path. */
+	/** Retire voices that ended on their own; shared by the control path and the budget path. */
 	#sweepFinishedVoices(): void {
 		for (let index = this.#voices.length - 1; index >= 0; index -= 1) {
 			if (this.#voices[index]!.voice.finished) this.#voices.splice(index, 1);

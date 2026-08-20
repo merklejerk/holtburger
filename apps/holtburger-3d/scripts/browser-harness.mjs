@@ -1264,6 +1264,8 @@ function briefHarnessReport(result) {
 		camera: result.state.camera,
 		viewport: result.state.viewport,
 		ready: result.state.ready,
+		// Audio traces are the proof surface for bounded placement cadence and forced refreshes.
+		audioFlyby: result.audioFlyby,
 		// Per-hop streaming evidence must survive brief mode: relocation runs exist to
 		// produce it, and the full report is too large to diff by hand.
 		followFlight: result.followFlight,
@@ -1742,7 +1744,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const attachmentExclusion = options.excludeSpawnedAttachments
 		? "&excludeSpawnedAttachments=true"
 		: "";
-	const audioTrace = options.audioFlybyTarget === null ? "" : "&audioTrace=1";
+	const audioTrace =
+		options.audioFlybyTarget === null &&
+		options.followFlightLandblockId === null
+			? ""
+			: "&audioTrace=1";
 	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",

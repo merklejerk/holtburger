@@ -32,8 +32,8 @@ import { clamp } from "../math/vector-utils";
  * installed region, so it is baked once per landblock at terrain install (`bakeAmbientBlock`) into
  * flat arrays. How much it contributes *from here* depends on the listener, so it is streamed: the
  * schedule scan (`scanAmbientSources`) runs on cell crossings and the per-slot weight pass
- * (`accumulateAmbientWeights`) is cheap enough to run every frame. Both stay free of clocks and
- * playback so they can be tested as functions of position.
+ * (`accumulateAmbientWeights`) runs on the bounded audio-control cadence. Both stay free of clocks
+ * and playback so they can be tested as functions of position.
  */
 
 /** One installed landblock's authored terrain, in the canonical row-major order. */
@@ -86,7 +86,7 @@ export type AmbientTableResolver = (
  * per-descriptor entries once divided every share by the table size and silenced most production
  * ambience.
  *
- * Parallel `Float32Array` lanes rather than objects, because the per-frame weight pass iterates
+ * Parallel `Float32Array` lanes rather than objects, because the audio-control weight pass iterates
  * every cell in earshot and must not chase pointers or allocate. Positions are block-local so the
  * arrays stay small-valued; the origin is added during the walk, which also keeps the retained data
  * in the frames the app allows retention in.
@@ -331,9 +331,9 @@ function walkAudibleAmbientCells(
 /**
  * Accumulate every ambient descriptor audible from `listenerPosition`, for the schedule.
  *
- * Runs on cell crossings, not per frame, so its per-call result allocation is O(descriptors within
- * earshot) — a few dozen small objects at walking pace — and deliberately not pooled. The per-frame
- * path is `accumulateAmbientWeights`, which allocates nothing.
+ * Runs on cell crossings, not on the audio-control cadence, so its per-call result allocation is
+ * O(descriptors within earshot) — a few dozen small objects at walking pace — and deliberately not
+ * pooled. The live path is `accumulateAmbientWeights`, which allocates nothing.
  */
 export function scanAmbientSources(
 	listenerPosition: SceneVector3,
@@ -364,8 +364,8 @@ export function scanAmbientSources(
 /**
  * Sum each slot's presence weight from `listenerPosition` into `outWeights`; returns the total.
  *
- * The per-frame half of the split walk: no directions, no bands, no descriptor objects, and no
- * allocation — the caller owns the buffer, sized to the region's slot count.
+ * The audio-control half of the split walk: no directions, no bands, no descriptor objects, and
+ * no allocation — the caller owns the buffer, sized to the region's slot count.
  */
 export function accumulateAmbientWeights(
 	listenerPosition: SceneVector3,

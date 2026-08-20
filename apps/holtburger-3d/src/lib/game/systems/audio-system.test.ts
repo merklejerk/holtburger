@@ -217,7 +217,7 @@ describe("AudioSystem", () => {
 			position: sceneVector3([-10, 0, 0]),
 			right: renderVector3([1, 0, 0]),
 		});
-		system.advance();
+		system.updatePlacements();
 
 		const voice = stops[0]!;
 		expect(voice.placements).toHaveLength(1);
@@ -238,7 +238,7 @@ describe("AudioSystem", () => {
 			position: sceneVector3([20, 0, 0]),
 			right: renderVector3([1, 0, 0]),
 		});
-		system.advance();
+		system.updatePlacements();
 
 		expect(stops[0]!.placements[0]!.pan).toBeCloseTo(-1);
 	});
@@ -257,7 +257,7 @@ describe("AudioSystem", () => {
 			position: sceneVector3([500, 0, 0]),
 			right: renderVector3([1, 0, 0]),
 		});
-		system.advance();
+		system.updatePlacements();
 		const voice = stops[0]!;
 		expect(voice.stopCalls).toBe(0);
 		expect(voice.placements.at(-1)).toEqual({ gain: 0, pan: 0 });
@@ -266,7 +266,7 @@ describe("AudioSystem", () => {
 			position: sceneVector3([0, 0, 0]),
 			right: renderVector3([1, 0, 0]),
 		});
-		system.advance();
+		system.updatePlacements();
 		expect(voice.placements.at(-1)!.gain).toBeCloseTo(0.25);
 	});
 
@@ -275,7 +275,7 @@ describe("AudioSystem", () => {
 		system.trigger(trigger());
 		stops[0]!.finished = true;
 
-		system.advance();
+		system.updatePlacements();
 
 		expect(stops[0]!.placements).toHaveLength(0);
 		expect(system.getDiagnostics().activeVoiceCount).toBe(0);
@@ -294,14 +294,14 @@ describe("AudioSystem", () => {
 			position: sceneVector3([300, 0, 0]),
 			right: renderVector3([1, 0, 0]),
 		});
-		system.advance();
+		system.updatePlacements();
 
 		// Head-locked: distance to the listener is always zero, so gain follows the supplier and
 		// pan stays centred no matter where the camera goes.
 		expect(stops[0]!.placements.at(-1)).toEqual({ gain: 0.8, pan: 0 });
 
 		bed = 0.2;
-		system.advance();
+		system.updatePlacements();
 		expect(stops[0]!.placements.at(-1)).toEqual({ gain: 0.2, pan: 0 });
 	});
 
@@ -311,7 +311,7 @@ describe("AudioSystem", () => {
 		system.trigger(bedTrigger(() => bed));
 
 		bed = 0;
-		system.advance();
+		system.updatePlacements();
 
 		// A supplier reading zero is a retired or region-cleared bed; the voice glides out.
 		expect(stops[0]!.stopCalls).toBe(0);
@@ -330,7 +330,7 @@ describe("AudioSystem", () => {
 		system.trigger(trigger());
 
 		system.setSettings({ ambientVolume: 1, effectVolume: 0.5 });
-		system.advance();
+		system.updatePlacements();
 
 		expect(stops[0]!.placements[0]!.gain).toBeCloseTo(0.5);
 	});

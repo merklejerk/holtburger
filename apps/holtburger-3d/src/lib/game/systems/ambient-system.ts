@@ -45,7 +45,7 @@ export interface AmbientSystemDependencies {
 		soundType: number,
 	) => AmbientSoundSelection | null;
 	readonly play: (trigger: AudioTrigger) => AudioTriggerOutcome;
-	/** Where an intermittent firing is placed relative to; the listener as of this frame. */
+	/** Where an intermittent firing is placed relative to; the listener at firing time. */
 	readonly listenerPosition: () => SceneVector3;
 	/**
 	 * Fill `outWeights` with each slot's presence weight from the current listener; returns the
@@ -55,7 +55,7 @@ export interface AmbientSystemDependencies {
 	readonly accumulateWeights: (outWeights: Float32Array) => number;
 	/**
 	 * Whether outdoor terrain ambience reaches the listener where it stands (retail's
-	 * `SeenOutside` gate). One fact consumed by both cadences — the schedule and the per-frame bed
+	 * `SeenOutside` gate). One fact consumed by both cadences — the schedule and the live bed
 	 * weights — so the two can never disagree about being indoors; a bed fades at the dungeon door
 	 * instead of following the listener in.
 	 */
@@ -73,7 +73,8 @@ interface ScheduledAmbient {
 	readonly maxRate: number;
 	/**
 	 * The descriptor's authored volume: an intermittent firing's gain as-is, and the value live
-	 * share re-scales each frame for a playing bed. Crossing-time share never persists here — it
+	 * share re-scales on each audio-control tick for a playing bed. Crossing-time share never
+	 * persists here — it
 	 * drives only the discrete audibility and retirement decisions inside `refresh`.
 	 */
 	readonly authoredVolume: number;
@@ -122,7 +123,8 @@ export class AmbientSystem {
 	readonly #dependencies: AmbientSystemDependencies;
 	readonly #scheduled = new Map<number, ScheduledAmbient>();
 	/**
-	 * Per-slot presence weights recomputed each `advance`, sized to the region's slot registry.
+	 * Per-slot presence weights recomputed each audio-control tick, sized to the region's slot
+	 * registry.
 	 *
 	 * `null` until a region installs; a bed supplier reading it then is a schedule that outlived
 	 * its region, which `resetForRegion` prevents by clearing the schedule with the buffer.
@@ -130,7 +132,7 @@ export class AmbientSystem {
 	#liveWeights: Float32Array | null = null;
 	/** Total of `#liveWeights` from the same pass; zero when nothing (or nothing outdoors) is heard. */
 	#liveTotalWeight = 0;
-	/** Continuous descriptors currently scheduled, maintained by `refresh`, read every frame. */
+	/** Continuous descriptors currently scheduled, maintained by `refresh`, read each control tick. */
 	#continuousScheduledCount = 0;
 	#firedCount = 0;
 	#playedCount = 0;
@@ -196,13 +198,20 @@ export class AmbientSystem {
 			}
 			this.#scheduled.set(slot, {
 				authoredVolume: descriptor.volume,
-				dueAt:
-					timeSeconds +
-					this.#interval(
-						descriptor.isContinuous,
-						descriptor.minRate,
-						descriptor.maxRate,
-					),
+				// Retail admits newly audible descriptors with an immediate play attempt
+				// (`Ambient::UpdatePlayQueue`, acclient.c:367842-367861), then `Play` rearms the
+				// recurrence clock (acclient.c:367715). A continuous bed must therefore not wait
+				// for its wave-length interval before it can be heard.
+				//
+				// RETAIL DIVERGENCE: intermittent descriptors retain randomized admission delay.
+				// Making all 343 intermittent descriptors immediate would align their first attempt
+				// (acclient.c:367842-367858), but risks a synchronized burst whenever streaming
+				// exposes several descriptors together. Continuous beds are the latency-sensitive
+				// 40-descriptor population; intermittent recurrence remains correctly randomized.
+				dueAt: descriptor.isContinuous
+					? timeSeconds
+					: timeSeconds +
+						this.#interval(false, descriptor.minRate, descriptor.maxRate),
 				directions: accumulation.directions,
 				isContinuous: descriptor.isContinuous,
 				slot,
@@ -219,7 +228,7 @@ export class AmbientSystem {
 			this.#scheduled.delete(slot);
 			this.#retiredCount += 1;
 		}
-		// Recomputed once per crossing so the per-frame weight gate is a single integer test.
+		// Recomputed once per crossing so the control-tick weight gate is one integer test.
 		let continuousCount = 0;
 		for (const scheduled of this.#scheduled.values()) {
 			if (scheduled.isContinuous) continuousCount += 1;
@@ -227,9 +236,8 @@ export class AmbientSystem {
 		this.#continuousScheduledCount = continuousCount;
 	}
 
-	/** Refresh live bed weights, then fire every descriptor that has come due and re-arm it. */
+	/** Fire every descriptor that has come due and re-arm it. */
 	advance(timeSeconds: number): void {
-		this.#refreshLiveWeights();
 		for (const scheduled of this.#scheduled.values()) {
 			if (scheduled.dueAt > timeSeconds) continue;
 			this.#fire(scheduled);
@@ -238,12 +246,12 @@ export class AmbientSystem {
 	}
 
 	/**
-	 * Recompute per-slot weights for playing beds, once per frame.
+	 * Recompute per-slot weights for playing beds on the runtime's audio-control cadence.
 	 *
 	 * Skipped entirely while no continuous descriptor is scheduled: intermittent sounds read their
-	 * share at crossing time, so the per-frame pass would feed nothing.
+	 * share at crossing time, so the control pass would feed nothing.
 	 */
-	#refreshLiveWeights(): void {
+	updateLiveWeights(): void {
 		const weights = this.#liveWeights;
 		if (weights === null) return;
 		if (
@@ -259,7 +267,7 @@ export class AmbientSystem {
 	}
 
 	/**
-	 * A playing bed's gain right now: authored volume scaled by this frame's share.
+	 * A playing bed's gain right now: authored volume scaled by the latest control-tick share.
 	 *
 	 * Reads through the schedule so a retired or region-cleared slot yields `0` and the voice fades
 	 * out, rather than holding its last gain with no source behind it.

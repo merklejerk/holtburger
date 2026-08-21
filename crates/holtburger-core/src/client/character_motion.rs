@@ -211,6 +211,16 @@ impl CharacterMotionController {
         matches!(self.phase, CharacterMotionPhase::Charging { .. })
     }
 
+    /// Whether the active charge began with no translation or turn input.
+    pub fn is_standing_long_jump(self) -> bool {
+        matches!(
+            self.phase,
+            CharacterMotionPhase::Charging {
+                standing_long_jump: true
+            }
+        )
+    }
+
     /// Applies one event if it is newer than every accepted event in this epoch.
     pub fn apply_event(
         &mut self,

@@ -6,7 +6,7 @@ import type {
 import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2-device";
 import type { ExplorerSceneInterestSnapshot } from "./explorer-camera-coordinator";
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
-import type { FreeFlyCameraState } from "./free-fly-camera-controller";
+import type { FreeFlyCameraState } from "../lib/game/controls/frontend-camera-controller";
 
 const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 4;
 

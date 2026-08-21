@@ -20,6 +20,8 @@ const ADVANCING_FRAMERATE_EPSILON = 0.0002;
  */
 export interface PlayingClip {
 	readonly animation: PreparedAnimation;
+	/** Terminal behavior derived from the authoritative sequence's cyclic-tail boundary. */
+	readonly completion: "hold" | "loop";
 	/** Inclusive traversal bounds within the animation's frames. */
 	readonly lowFrame: number;
 	readonly highFrame: number;
@@ -39,6 +41,7 @@ export function playingClip(
 	lowFrame: number,
 	highFrame: number,
 	framesPerSecond: number,
+	completion: PlayingClip["completion"],
 ): PlayingClip {
 	if (!Number.isInteger(lowFrame) || !Number.isInteger(highFrame))
 		throw new Error(`Clip window for ${animation.id} must be whole frames.`);
@@ -48,7 +51,7 @@ export function playingClip(
 		);
 	if (!Number.isFinite(framesPerSecond))
 		throw new Error(`Clip rate for ${animation.id} must be finite.`);
-	return { animation, framesPerSecond, highFrame, lowFrame };
+	return { animation, completion, framesPerSecond, highFrame, lowFrame };
 }
 
 /** The whole animation forward at its authored rate, which is the setup-default resident's clip. */
@@ -58,6 +61,7 @@ export function wholeAnimationClip(animation: PreparedAnimation): PlayingClip {
 		0,
 		animation.frameCount - 1,
 		animation.framesPerSecond,
+		"loop",
 	);
 }
 
@@ -78,12 +82,11 @@ export function clipEntryFrame(clip: PlayingClip): number {
 /**
  * Traverse one clip's window iteratively while preserving retail's seam-hook exclusions.
  *
- * Reaching the far bound laps back to the entry frame rather than stopping. A motion table's
- * looping clip is projected once and never re-sent, so holding at the bound would freeze every
- * idle; the host's own sequence laps a lone cyclic node exactly this way. A one-shot transition
- * laps too, for at most the one host tick before the successor clip arrives.
+ * Reaching the far bound either laps or holds according to the host's cyclic-tail classification.
+ * The frontend cannot derive that distinction from an animation window: the same asset may be a
+ * transition in one sequence and part of the looping tail in another.
  */
-export function advanceCyclicFrame(
+export function advancePlayingFrame(
 	clip: PlayingClip,
 	framePosition: number,
 	elapsedSeconds: number,
@@ -110,6 +113,8 @@ export function advanceCyclicFrame(
 			}
 			if (remaining < seamDistance)
 				return { departedFrames, framePosition: end };
+			if (clip.completion === "hold")
+				return { departedFrames, framePosition: clip.highFrame };
 			remaining -= seamDistance;
 		} else {
 			const seamDistance = position - clip.lowFrame;
@@ -132,6 +137,8 @@ export function advanceCyclicFrame(
 				departedFrames.push(frame);
 			}
 			remaining -= seamDistance;
+			if (clip.completion === "hold")
+				return { departedFrames, framePosition: clip.lowFrame };
 		}
 		position = clipEntryFrame(clip);
 	}

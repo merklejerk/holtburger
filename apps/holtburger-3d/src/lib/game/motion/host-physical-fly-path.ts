@@ -13,57 +13,32 @@ import {
 } from "./host-placed-path";
 
 /** Solver completion or finite-budget result for one fixed host tick. */
-export type PhysicalCameraTickStatus =
+export type PhysicalFlyTickStatus =
 	| "solved"
 	| "substep-budget-exceeded"
 	| "contact-budget-exceeded";
 
 /** Non-gating residency of the final primary-sphere collision owner. */
-export type PhysicalCameraSceneResidency =
+export type PhysicalFlySceneResidency =
 	| { readonly state: "resident" }
 	| { readonly state: "missing-owner"; readonly landblockId: LandblockId }
 	| { readonly state: "outside-landscape" };
-
-/** Host-owned physical response selected for one camera session. */
-export type PhysicalCameraMode = "physical-fly" | "grounded-walk";
 
 /**
  * Ground classification of the camera body: walkable support, a retained sub-walkable contact
  * plane (sliding), airborne, or not yet classified.
  */
-export type PhysicalCameraGroundState =
+export type PhysicalFlyGroundState =
 	| "unknown"
 	| "airborne"
 	| "sliding"
 	| "supported";
 
 /** Every Explorer camera authority mode. */
-export type ExplorerCameraMode = "free-fly" | PhysicalCameraMode;
-
-/** Host result for one grounded jump lifecycle edge drained before a fixed solve. */
-export type GroundedCharacterEventOutcome =
-	| {
-			readonly kind:
-				| "charge-accepted"
-				| "charge-continues"
-				| "ignored-stale"
-				| "jump-released"
-				| "reset";
-			readonly sequence: number;
-	  }
-	| {
-			readonly kind: "rejected";
-			readonly reason:
-				| "airborne"
-				| "charge-not-active"
-				| "constrained"
-				| "invalid-heading"
-				| "unsupported";
-			readonly sequence: number;
-	  };
+export type ExplorerCameraMode = "free-fly" | "physical-fly";
 
 /** One authoritative viewer point in landblock-local AC axes. */
-interface HostPhysicalCameraPathPoint {
+interface HostPhysicalFlyPathPoint {
 	/** Portal-seeded placement that becomes authoritative with this point. */
 	readonly residency: SceneResidency;
 	/** Presented viewer origin in `residency.landblockId` local `[east, north, up]`. */
@@ -72,21 +47,19 @@ interface HostPhysicalCameraPathPoint {
 
 /** One placement-stable motion leg ending at an authoritative point. */
 /** One fixed-tick, host-solved placed-motion path in AC axes. */
-export interface HostPhysicalCameraPath extends HostPlacedPath<HostPhysicalCameraPathPoint> {
+export interface HostPhysicalFlyPath extends HostPlacedPath<HostPhysicalFlyPathPoint> {
 	/** Runtime generation; paths from an earlier handoff are stale. */
 	readonly session: number;
 	/** Monotonic path counter within the session. */
 	readonly sequence: number;
-	/** Physical response that produced this path. */
-	readonly mode: PhysicalCameraMode;
 	/** Positive fixed-tick playback duration. */
 	readonly durationMs: number;
-	readonly status: PhysicalCameraTickStatus;
+	readonly status: PhysicalFlyTickStatus;
 	/** Installed collision residency, independent from solver completion. */
-	readonly sceneResidency: PhysicalCameraSceneResidency;
+	readonly sceneResidency: PhysicalFlySceneResidency;
 	/** Ground classification committed by the latest solve. */
-	readonly groundState: PhysicalCameraGroundState;
-	/** Distinct non-walkable planes encountered during the latest grounded solve. */
+	readonly groundState: PhysicalFlyGroundState;
+	/** Distinct collision constraints encountered during the latest solve. */
 	readonly constraintCount: number;
 	/** Collision substeps consumed by this tick. */
 	readonly substeps: number;
@@ -94,12 +67,10 @@ export interface HostPhysicalCameraPath extends HostPlacedPath<HostPhysicalCamer
 	readonly contactPasses: number;
 	/** Host wall time spent solving the body and portal-transiting its viewer. */
 	readonly solveDurationMs: number;
-	/** Ordered grounded lifecycle outcomes processed immediately before this solve. */
-	readonly characterEventOutcomes: readonly GroundedCharacterEventOutcome[];
 }
 
 /** Canonical presented position and authoritative residency evaluated from one host path. */
-export interface PhysicalCameraPlacement {
+export interface PhysicalFlyPlacement {
 	/** Camera position retained in canonical scene space. */
 	readonly position: SceneVec3;
 	/** Host-supplied portal placement paired atomically with the path position. */
@@ -111,10 +82,10 @@ export interface PhysicalCameraPlacement {
  *
  * AC axes are `[east, north, up]`; canonical render-scene axes are `[east, up, south]`.
  */
-export function evaluateHostPhysicalCameraPath(
-	path: HostPhysicalCameraPath,
+export function evaluateHostPhysicalFlyPath(
+	path: HostPhysicalFlyPath,
 	elapsedMs: number,
-): PhysicalCameraPlacement {
+): PhysicalFlyPlacement {
 	return evaluateHostPlacedPath(path, path.durationMs, elapsedMs, {
 		interpolate: interpolatePathPoints,
 		present: pathPointPlacement,
@@ -122,17 +93,15 @@ export function evaluateHostPhysicalCameraPath(
 }
 
 /** Reject malformed host paths at the transport boundary instead of sampling incoherent state. */
-export function validateHostPhysicalCameraPath(
-	path: HostPhysicalCameraPath,
-): void {
+export function validateHostPhysicalFlyPath(path: HostPhysicalFlyPath): void {
 	validateHostPlacedPath(path, path.durationMs);
 }
 
 function interpolatePathPoints(
-	start: HostPhysicalCameraPathPoint,
-	end: HostPhysicalCameraPathPoint,
+	start: HostPhysicalFlyPathPoint,
+	end: HostPhysicalFlyPathPoint,
 	fraction: number,
-): PhysicalCameraPlacement {
+): PhysicalFlyPlacement {
 	const startPosition = pathPointPosition(start);
 	const endPosition = pathPointPosition(end);
 	return {
@@ -149,12 +118,12 @@ function interpolatePathPoints(
 }
 
 function pathPointPlacement(
-	point: HostPhysicalCameraPathPoint,
-): PhysicalCameraPlacement {
+	point: HostPhysicalFlyPathPoint,
+): PhysicalFlyPlacement {
 	return { position: pathPointPosition(point), residency: point.residency };
 }
 
-function pathPointPosition(point: HostPhysicalCameraPathPoint): SceneVec3 {
+function pathPointPosition(point: HostPhysicalFlyPathPoint): SceneVec3 {
 	const owner = getLandblockCoordinates(point.residency.landblockId);
 	const acX = owner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + point.origin[0];
 	const acY = owner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + point.origin[1];
@@ -162,22 +131,22 @@ function pathPointPosition(point: HostPhysicalCameraPathPoint): SceneVec3 {
 }
 
 /** Explorer camera axes in canonical scene coordinates. */
-export interface PhysicalCameraBasis {
+export interface PhysicalFlyBasis {
 	readonly forward: readonly [number, number, number];
 	readonly right: readonly [number, number, number];
 	readonly up: readonly [number, number, number];
 }
 
 /** Dimensionless local movement requested by the Explorer input controller. */
-export interface PhysicalCameraLocalMovement {
+export interface PhysicalFlyLocalMovement {
 	readonly forward: number;
 	readonly right: number;
 	readonly up: number;
 }
 
 /** Convert the frontend-owned pitched view direction to AC world axes for host viewer placement. */
-export function resolvePhysicalCameraViewDirection(
-	basis: PhysicalCameraBasis,
+export function resolvePhysicalFlyViewDirection(
+	basis: PhysicalFlyBasis,
 ): [number, number, number] {
 	const [east, up, south] = basis.forward;
 	return [east, south === 0 ? 0 : -south, up];
@@ -190,8 +159,8 @@ export function resolvePhysicalCameraViewDirection(
  * semantics, only a concrete world-space velocity.
  */
 export function resolvePhysicalFlyVelocity(
-	movement: PhysicalCameraLocalMovement,
-	basis: PhysicalCameraBasis,
+	movement: PhysicalFlyLocalMovement,
+	basis: PhysicalFlyBasis,
 	speed: number,
 ): [number, number, number] {
 	const sceneX =
@@ -216,7 +185,7 @@ export function resolvePhysicalFlyVelocity(
 
 /** Converts one local-up wheel distance into an AC-world displacement. */
 export function resolvePhysicalFlyWheelDisplacement(
-	basis: PhysicalCameraBasis,
+	basis: PhysicalFlyBasis,
 	distance: number,
 ): [number, number, number] {
 	const east = basis.up[0] * distance;

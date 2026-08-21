@@ -28,10 +28,11 @@ pub mod explorer_entity_delivery;
 pub mod explorer_entity_driver;
 pub mod explorer_entity_runtime;
 mod explorer_entity_simulation;
+pub mod explorer_possession_control;
 pub mod explorer_weenie_catalog;
 pub mod gfx_obj_geometry;
-mod host_camera_runtime;
 mod host_fixed_tick_runtime;
+mod host_physical_fly_runtime;
 pub mod host_simulation_runtime;
 pub mod interior_seam;
 mod landblock_source_batch;
@@ -872,13 +873,12 @@ fn format_error(error: anyhow::Error) -> String {
 
 /// Registers one host-owned physical camera body at the currently presented Explorer pose.
 #[tauri::command]
-async fn start_physical_camera(
+async fn start_physical_fly(
     app: tauri::AppHandle,
-    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
-    registration: host_camera_runtime::PhysicalCameraRegistration,
-) -> Result<host_camera_runtime::PhysicalCameraStartReceipt, String> {
+    runtime: tauri::State<'_, Arc<host_physical_fly_runtime::HostPhysicalFlyRuntime>>,
+    registration: host_physical_fly_runtime::PhysicalFlyRegistration,
+) -> Result<host_physical_fly_runtime::PhysicalFlyStartReceipt, String> {
     let runtime = Arc::clone(&runtime);
-    let mode = registration.control.mode();
     let registration_runtime = Arc::clone(&runtime);
     let session = tokio::task::spawn_blocking(move || registration_runtime.start(registration))
         .await
@@ -887,42 +887,24 @@ async fn start_physical_camera(
     if !runtime.schedule(app, session) {
         return Err("physical camera registration was superseded before scheduling".to_string());
     }
-    host_camera_runtime::PhysicalCameraStartReceipt::new(session, mode).map_err(format_error)
+    Ok(host_physical_fly_runtime::PhysicalFlyStartReceipt::new(
+        session,
+    ))
 }
 
 /// Replaces the world-space velocity consumed by the next fixed host tick.
 #[tauri::command]
-fn set_physical_fly_camera_intent(
-    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
-    intent: host_camera_runtime::PhysicalFlyCameraIntent,
+fn set_physical_fly_intent(
+    runtime: tauri::State<'_, Arc<host_physical_fly_runtime::HostPhysicalFlyRuntime>>,
+    intent: host_physical_fly_runtime::PhysicalFlyIntent,
 ) -> Result<(), String> {
-    runtime
-        .set_physical_fly_intent(intent)
-        .map_err(format_error)
-}
-
-/// Replaces the semantic drive/view snapshot consumed by grounded character control.
-#[tauri::command]
-fn set_grounded_camera_drive(
-    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
-    intent: host_camera_runtime::GroundedCameraDriveIntent,
-) -> Result<(), String> {
-    runtime.set_grounded_drive(intent).map_err(format_error)
-}
-
-/// Queues one ordered grounded jump/reset edge for the next fixed host tick.
-#[tauri::command]
-fn queue_grounded_camera_event(
-    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
-    request: host_camera_runtime::GroundedCameraEventRequest,
-) -> Result<host_camera_runtime::GroundedCameraQueueResult, String> {
-    runtime.queue_grounded_event(request).map_err(format_error)
+    runtime.set_intent(intent).map_err(format_error)
 }
 
 /// Returns position authority to frontend free fly and invalidates the old tick generation.
 #[tauri::command]
-fn stop_physical_camera(
-    runtime: tauri::State<'_, Arc<host_camera_runtime::HostCameraRuntime>>,
+fn stop_physical_fly(
+    runtime: tauri::State<'_, Arc<host_physical_fly_runtime::HostPhysicalFlyRuntime>>,
     session: u64,
 ) {
     runtime.stop(session);
@@ -1272,59 +1254,116 @@ async fn load_motion_table_closure(
 /// Frontend request naming which entity to possess, or releasing whatever is possessed.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PossessExplorerEntityRequest {
+pub struct PossessExplorerEntityRequest {
     /// Entity to possess. `None` releases.
-    guid: Option<holtburger_common::Guid>,
+    pub guid: Option<holtburger_common::Guid>,
 }
 
 /// What the frontend needs to render possession: identity and what the entity can actually do.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ExplorerPossessionReceipt {
-    guid: Option<holtburger_common::Guid>,
-    motion_table_id: Option<String>,
-    /// Locomotion commands this entity's motion table models. Read from the contract, so the UX
-    /// refuses what the table cannot do rather than issuing a command that resolves to nothing.
-    modelled_commands: Vec<String>,
+pub struct ExplorerPossessionReceipt {
+    pub guid: Option<holtburger_common::Guid>,
+    pub entity_generation: Option<u64>,
+    pub possession_generation: u64,
+    pub motion_table_id: Option<String>,
+    pub accepted_stance: Option<u32>,
+    pub stances: Vec<explorer_possession_control::PossessionStanceCapability>,
 }
 
-/// Semantic locomotion order for the possessed entity, in the same four axes retail interprets.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExplorerMotionOrderRequest {
-    /// Stance, as a full motion-table style command.
-    style: Option<u32>,
-    forward: Option<ExplorerOrderedMotion>,
-    sidestep: Option<ExplorerOrderedMotion>,
-    turn: Option<ExplorerOrderedMotion>,
-}
+impl ExplorerPossessionReceipt {
+    pub fn active(possession: explorer_entity_runtime::ExplorerPossession) -> Self {
+        Self {
+            guid: Some(possession.guid),
+            entity_generation: Some(possession.entity_generation),
+            possession_generation: possession.possession_generation,
+            motion_table_id: Some(format!("0x{:08x}", possession.motion_table_id)),
+            accepted_stance: Some(possession.accepted_stance),
+            stances: possession.stances,
+        }
+    }
 
-/// One commanded motion and the speed multiplier it plays at.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExplorerOrderedMotion {
-    command: u32,
-    /// Retail's `speedMod`: a multiplier on the selected motion, not metres per second.
-    speed: f32,
-}
-
-impl ExplorerOrderedMotion {
-    fn resolve(self) -> Option<(holtburger_world::motion::MotionCommand, f32)> {
-        self.speed.is_finite().then_some((
-            holtburger_world::motion::MotionCommand(self.command),
-            self.speed,
-        ))
+    pub fn released(possession_generation: u64) -> Self {
+        Self {
+            guid: None,
+            entity_generation: None,
+            possession_generation,
+            motion_table_id: None,
+            accepted_stance: None,
+            stances: Vec::new(),
+        }
     }
 }
 
-impl ExplorerMotionOrderRequest {
-    fn resolve(self) -> holtburger_world::motion::MotionOrder {
-        holtburger_world::motion::MotionOrder {
-            style: self.style.map(holtburger_world::motion::MotionCommand),
-            forward: self.forward.and_then(ExplorerOrderedMotion::resolve),
-            sidestep: self.sidestep.and_then(ExplorerOrderedMotion::resolve),
-            turn: self.turn.and_then(ExplorerOrderedMotion::resolve),
+/// Replaceable semantic character intent targeted at one exact possession epoch.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerPossessionIntentWireRequest {
+    possession_generation: u64,
+    revision: u64,
+    stance: u32,
+    drive: explorer_possession_control::CharacterDriveRequest,
+}
+
+impl ExplorerPossessionIntentWireRequest {
+    pub fn resolve(self) -> explorer_entity_runtime::ExplorerPossessionIntentRequest {
+        explorer_entity_runtime::ExplorerPossessionIntentRequest {
+            possession_generation: self.possession_generation,
+            revision: self.revision,
+            stance: self.stance,
+            drive: self.drive.resolve(),
         }
+    }
+}
+
+/// Lifecycle payload whose drive and stance come from the enclosing semantic snapshot.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ExplorerPossessionEventKind {
+    BeginJump,
+    ReleaseJump { extent: f32 },
+    Reset,
+}
+
+/// Ordered edge carrying its complete contemporaneous semantic intent.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerPossessionEventWireRequest {
+    possession_generation: u64,
+    sequence: u64,
+    revision: u64,
+    stance: u32,
+    drive: explorer_possession_control::CharacterDriveRequest,
+    #[serde(flatten)]
+    event: ExplorerPossessionEventKind,
+}
+
+impl ExplorerPossessionEventWireRequest {
+    pub fn resolve(
+        self,
+    ) -> Result<explorer_entity_runtime::ExplorerPossessionEventRequest, String> {
+        let event = match self.event {
+            ExplorerPossessionEventKind::BeginJump => {
+                explorer_possession_control::PossessionLifecycleEvent::BeginJump
+            }
+            ExplorerPossessionEventKind::ReleaseJump { extent } => {
+                explorer_possession_control::PossessionLifecycleEvent::ReleaseJump {
+                    extent: holtburger_core::JumpExtent::new(extent)
+                        .map_err(|error| format!("invalid possession jump extent: {error:?}"))?,
+                }
+            }
+            ExplorerPossessionEventKind::Reset => {
+                explorer_possession_control::PossessionLifecycleEvent::Reset
+            }
+        };
+        Ok(explorer_entity_runtime::ExplorerPossessionEventRequest {
+            possession_generation: self.possession_generation,
+            sequence: self.sequence,
+            revision: self.revision,
+            stance: self.stance,
+            drive: self.drive.resolve(),
+            event,
+        })
     }
 }
 
@@ -1336,32 +1375,37 @@ async fn possess_explorer_entity(
 ) -> Result<ExplorerPossessionReceipt, String> {
     let entities = Arc::clone(&entities);
     let Some(guid) = request.guid else {
-        entities.release_possession(std::time::Instant::now());
-        return Ok(ExplorerPossessionReceipt {
-            guid: None,
-            motion_table_id: None,
-            modelled_commands: Vec::new(),
-        });
+        let release = entities
+            .release_possession(std::time::Instant::now())
+            .map_err(|error| error.to_string())?;
+        return Ok(ExplorerPossessionReceipt::released(
+            release.possession_generation,
+        ));
     };
     let possession = entities.possess(guid).map_err(|error| error.to_string())?;
-    Ok(ExplorerPossessionReceipt {
-        guid: Some(possession.guid),
-        motion_table_id: possession.motion_table_id.map(source_projection::dat_id),
-        modelled_commands: possession
-            .modelled_commands
-            .into_iter()
-            .map(source_projection::dat_id)
-            .collect(),
-    })
+    Ok(ExplorerPossessionReceipt::active(possession))
 }
 
-/// Replaces the order the possessed entity performs from the next tick onward.
+/// Replaces semantic intent for one exact possession generation.
 #[tauri::command]
-async fn set_explorer_entity_motion(
+async fn set_explorer_possession_intent(
     entities: tauri::State<'_, Arc<explorer_entity_runtime::ExplorerEntityRuntime>>,
-    request: ExplorerMotionOrderRequest,
-) -> Result<bool, String> {
-    Ok(entities.set_motion_order(request.resolve()).is_some())
+    request: ExplorerPossessionIntentWireRequest,
+) -> Result<explorer_possession_control::PossessionIntentReplaceResult, String> {
+    entities
+        .replace_possession_intent(request.resolve())
+        .map_err(|error| error.to_string())
+}
+
+/// Queues one non-coalescible possession lifecycle edge.
+#[tauri::command]
+async fn queue_explorer_possession_event(
+    entities: tauri::State<'_, Arc<explorer_entity_runtime::ExplorerEntityRuntime>>,
+    request: ExplorerPossessionEventWireRequest,
+) -> Result<explorer_entity_runtime::PossessionEventQueueReceipt, String> {
+    entities
+        .queue_possession_event(request.resolve()?)
+        .map_err(|error| error.to_string())
 }
 
 /// Clears the Explorer registry/body population and publishes an empty reconstruction snapshot.
@@ -1861,6 +1905,8 @@ pub fn run() {
     let explorer_entities = Arc::new(explorer_entity_runtime::ExplorerEntityRuntime::new(
         Arc::clone(&simulation),
         Arc::clone(&motion_catalog),
+        explorer_possession_control::ExplorerPossessionControlProfile::standard()
+            .expect("failed to construct standard Explorer possession control profile"),
     ));
     let catalog = Arc::new(
         explorer_weenie_catalog::ExplorerWeenieCatalog::discover_from_environment(
@@ -1886,7 +1932,7 @@ pub fn run() {
     ));
     let fixed_tick_runtime = Arc::new(host_fixed_tick_runtime::HostFixedTickRuntime::new());
     let explorer_entity_tick_slot = fixed_tick_runtime.reserve_slot();
-    let camera_runtime = Arc::new(host_camera_runtime::HostCameraRuntime::new(
+    let physical_fly_runtime = Arc::new(host_physical_fly_runtime::HostPhysicalFlyRuntime::new(
         Arc::clone(&simulation),
         Arc::clone(&fixed_tick_runtime),
     ));
@@ -1917,7 +1963,7 @@ pub fn run() {
         .manage(explorer_entity_driver)
         .manage(explorer_entity_delivery)
         .manage(fixed_tick_runtime)
-        .manage(camera_runtime)
+        .manage(physical_fly_runtime)
         .invoke_handler(tauri::generate_handler![
             host_status,
             explorer_catalog_capability,
@@ -1931,14 +1977,13 @@ pub fn run() {
             load_motion_table_closure,
             sweep_sphere_distance,
             possess_explorer_entity,
-            set_explorer_entity_motion,
+            set_explorer_possession_intent,
+            queue_explorer_possession_event,
             start_simulation_interest_session,
             replace_simulation_interest,
-            start_physical_camera,
-            set_physical_fly_camera_intent,
-            set_grounded_camera_drive,
-            queue_grounded_camera_event,
-            stop_physical_camera,
+            start_physical_fly,
+            set_physical_fly_intent,
+            stop_physical_fly,
             load_active_region_data,
             load_animation,
             load_dynamic_entity_visual,

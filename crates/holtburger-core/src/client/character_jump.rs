@@ -1,20 +1,12 @@
 //! Actor-neutral conversion from interpreted jump intent to resolved launch kinematics.
 
-use super::character_kinematics::{CharacterJumpKinematics, CharacterMovementKinematics};
+use super::character_axes::{CharacterAxisAdjustmentError, adjust_character_axes};
+use super::character_kinematics::CharacterJumpKinematics;
 use super::character_motion::{JumpAttempt, JumpChargeProfile, JumpExtent};
-use super::movement_types::{CharacterDrive, Gait, LateralMotion, LongitudinalMotion};
 use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
 use thiserror::Error;
 
-/// Retail backward scaling from retail movement adjust motion.
-const RETAIL_BACKWARD_FACTOR: f32 = 0.65;
-/// Retail sidestep scaling from retail movement adjust motion.
-const RETAIL_SIDESTEP_FACTOR: f32 = 0.5;
-/// Retail sidestep animation speed from retail movement state velocity query.
-const RETAIL_SIDESTEP_ANIMATION_SPEED: f32 = 1.25;
-/// Retail cap applied to the interpreted sidestep animation rate.
-const RETAIL_MAXIMUM_SIDESTEP_RATE: f32 = 3.0;
 /// Retail's minimum resolved jump height.
 const RETAIL_MINIMUM_JUMP_HEIGHT: f32 = 0.35;
 /// Twice retail gravity magnitude, used to convert jump height to launch speed.
@@ -38,8 +30,6 @@ pub enum CharacterJumpReadiness {
     Airborne,
     /// The body has contact but no walkable launch support.
     Unsupported,
-    /// Current collision constraints prohibit leaving the pose.
-    Constrained,
 }
 
 /// Why an interpreted attempt could not become resolved launch kinematics.
@@ -49,17 +39,10 @@ pub enum CharacterJumpRejection {
     Airborne,
     #[error("jump requires current walkable support")]
     Unsupported,
-    #[error("a fully constrained body cannot jump")]
-    Constrained,
     #[error("character heading must be finite")]
     InvalidHeading,
-}
-
-/// Invalid release-time orientation for continuous or launch motion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum CharacterDriveResolutionError {
-    #[error("character heading must be finite")]
-    InvalidHeading,
+    #[error("character drive has an invalid turn-rate scalar")]
+    InvalidTurnRate,
 }
 
 /// One computed launch shared by local physics and the later player packet bridge.
@@ -101,7 +84,11 @@ pub fn resolve_character_jump(
     readiness: CharacterJumpReadiness,
 ) -> Result<ResolvedJump, CharacterJumpRejection> {
     require_supported(readiness)?;
-    let planar = resolve_local_planar_velocity(attempt.drive, kinematics.movement());
+    let planar = adjust_character_axes(attempt.drive, kinematics.movement())
+        .map_err(|CharacterAxisAdjustmentError::InvalidTurnRate| {
+            CharacterJumpRejection::InvalidTurnRate
+        })?
+        .local_planar_velocity(kinematics.movement());
     let height = (kinematics.full_extent_jump_height() * attempt.extent.get())
         .max(RETAIL_MINIMUM_JUMP_HEIGHT);
     let local_velocity = Vector3::new(planar.x, planar.y, (height * RETAIL_DOUBLE_GRAVITY).sqrt());
@@ -117,67 +104,12 @@ pub fn resolve_character_jump(
     })
 }
 
-/// Resolves ordinary supported drive from the same axis composition sampled by a later jump.
-pub fn resolve_character_drive(
-    kinematics: CharacterMovementKinematics,
-    drive: CharacterDrive,
-    heading: f32,
-) -> Result<Vector3, CharacterDriveResolutionError> {
-    world_planar_velocity(resolve_local_planar_velocity(drive, kinematics), heading)
-}
-
-fn resolve_local_planar_velocity(
-    drive: CharacterDrive,
-    kinematics: CharacterMovementKinematics,
-) -> Vector3 {
-    let running = drive.gait == Gait::Run;
-    let forward_speed = match drive.longitudinal {
-        Some(LongitudinalMotion::Forward) if running => {
-            kinematics.base_run_forward_speed() * kinematics.run_rate_scalar()
-        }
-        Some(LongitudinalMotion::Forward) => kinematics.base_walk_forward_speed(),
-        Some(LongitudinalMotion::Backward) => {
-            let run_scale = if running {
-                kinematics.run_rate_scalar()
-            } else {
-                1.0
-            };
-            -(kinematics.base_walk_forward_speed() * RETAIL_BACKWARD_FACTOR * run_scale)
-        }
-        None => 0.0,
-    };
-    let sidestep_sign = match drive.lateral {
-        Some(LateralMotion::Left) => -1.0,
-        Some(LateralMotion::Right) => 1.0,
-        None => 0.0,
-    };
-    let base_sidestep_rate = sidestep_sign
-        * RETAIL_SIDESTEP_FACTOR
-        * (kinematics.base_walk_forward_speed() / RETAIL_SIDESTEP_ANIMATION_SPEED);
-    let sidestep_rate = if running {
-        (base_sidestep_rate * kinematics.run_rate_scalar())
-            .clamp(-RETAIL_MAXIMUM_SIDESTEP_RATE, RETAIL_MAXIMUM_SIDESTEP_RATE)
-    } else {
-        base_sidestep_rate
-    };
-    let mut velocity = Vector3::new(
-        RETAIL_SIDESTEP_ANIMATION_SPEED * sidestep_rate,
-        forward_speed,
-        0.0,
-    );
-    let maximum_speed = kinematics.base_run_forward_speed() * kinematics.run_rate_scalar();
-    if velocity.length() > maximum_speed {
-        velocity = velocity.normalize() * maximum_speed;
-    }
-    velocity
-}
-
 fn world_planar_velocity(
     local_velocity: Vector3,
     heading: f32,
-) -> Result<Vector3, CharacterDriveResolutionError> {
+) -> Result<Vector3, CharacterJumpRejection> {
     if !heading.is_finite() {
-        return Err(CharacterDriveResolutionError::InvalidHeading);
+        return Err(CharacterJumpRejection::InvalidHeading);
     }
     let forward = Vector3::new(-heading.cos(), heading.sin(), 0.0);
     let right = Vector3::new(heading.sin(), heading.cos(), 0.0);
@@ -189,7 +121,6 @@ fn require_supported(readiness: CharacterJumpReadiness) -> Result<(), CharacterJ
         CharacterJumpReadiness::Supported => Ok(()),
         CharacterJumpReadiness::Airborne => Err(CharacterJumpRejection::Airborne),
         CharacterJumpReadiness::Unsupported => Err(CharacterJumpRejection::Unsupported),
-        CharacterJumpReadiness::Constrained => Err(CharacterJumpRejection::Constrained),
     }
 }
 
@@ -197,7 +128,8 @@ fn require_supported(readiness: CharacterJumpReadiness) -> Result<(), CharacterJ
 mod tests {
     use super::*;
     use crate::client::character_kinematics::{
-        CharacterKinematicsError, jump_kinematics_from_movement_capabilities,
+        CharacterKinematicsError, CharacterMovementKinematics,
+        jump_kinematics_from_movement_capabilities,
     };
     use crate::client::character_motion::{
         CharacterMotionContact, CharacterMotionController, CharacterMotionEvent,
@@ -206,6 +138,7 @@ mod tests {
     use crate::client::movement::character_motion_retail_differential::{
         oracle_planar_launch, oracle_vertical_launch,
     };
+    use crate::client::movement_types::CharacterDrive;
     use holtburger_world::{
         PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
     };
@@ -297,10 +230,6 @@ mod tests {
                 CharacterJumpReadiness::Unsupported,
                 CharacterJumpRejection::Unsupported,
             ),
-            (
-                CharacterJumpReadiness::Constrained,
-                CharacterJumpRejection::Constrained,
-            ),
         ] {
             assert_eq!(
                 resolve_character_jump(kinematics(), attempt, 0.0, readiness),
@@ -315,24 +244,6 @@ mod tests {
                 CharacterJumpReadiness::Supported,
             ),
             Err(CharacterJumpRejection::InvalidHeading)
-        );
-    }
-
-    #[test]
-    fn supported_drive_uses_the_same_planar_kinematics_without_jump_height() {
-        let movement = kinematics().movement();
-        let drive = resolve_character_drive(
-            movement,
-            CharacterDrive::builder().run().forward().build(),
-            0.0,
-        )
-        .unwrap();
-        assert_close(drive.x, -4.0);
-        assert_close(drive.y, 0.0);
-        assert_eq!(drive.z, 0.0);
-        assert_eq!(
-            resolve_character_drive(movement, CharacterDrive::default(), f32::NAN),
-            Err(CharacterDriveResolutionError::InvalidHeading)
         );
     }
 

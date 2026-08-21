@@ -6,7 +6,7 @@ import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import { AABB3, Vec3 } from "../lib/game/math/types";
 import type { ScenePointResidencyCandidates } from "../lib/game/scene";
-import type { FreeFlyCameraController } from "./free-fly-camera-controller";
+import type { FrontendCameraController as FreeFlyCameraController } from "../lib/game/controls/frontend-camera-controller";
 import { ExplorerCameraCoordinator } from "./explorer-camera-coordinator";
 
 const TEST_RADII: SceneInterestRadii = {

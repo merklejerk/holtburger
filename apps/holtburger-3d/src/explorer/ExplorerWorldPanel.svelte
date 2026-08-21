@@ -25,8 +25,8 @@
 		type AmbientOcclusionParameters,
 		type AmbientOcclusionSettings,
 	} from "../lib/game/renderer/ambient-occlusion-policy";
-	import type { PhysicalCameraStatus } from "./physical-camera-session";
-	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-camera-path";
+	import type { PhysicalFlyStatus } from "./physical-fly-session";
+	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -40,7 +40,7 @@
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
 		readonly cameraMode: ExplorerCameraMode;
 		readonly cameraModePending: boolean;
-		readonly physicalCameraStatus: PhysicalCameraStatus | null;
+		readonly physicalCameraStatus: PhysicalFlyStatus | null;
 		readonly physicalCameraError: string | null;
 		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
 		readonly environmentSelection: ExplorerEnvironmentSelection;
@@ -392,14 +392,13 @@
 			>
 				<option value="free-fly">Frontend free fly</option>
 				<option value="physical-fly">Host physical fly</option>
-				<option value="grounded-walk">Host grounded walk</option>
 			</select>
 		</label>
 		<p>
 			{cameraModePending
 				? "Loading collision content and placing the physical camera."
 				: cameraMode !== "free-fly"
-					? `Host ${physicalCameraStatus?.mode ?? cameraMode}: ${physicalCameraStatus?.tick ?? "awaiting-first-path"}; collision ${physicalCameraStatus?.sceneResidency?.state ?? "unknown"}; cell ${physicalCameraStatus?.cellId ?? "outdoor"}; ${physicalCameraStatus?.groundState ?? "unknown"}; ${physicalCameraStatus?.constraintCount ?? 0} solve constraints; ${physicalCameraStatus?.solveDurationMs.toFixed(2) ?? "0.00"} ms; ${physicalCameraStatus?.substeps ?? 0} substeps; ${physicalCameraStatus?.contactPasses ?? 0} contact passes; ${physicalCameraStatus?.droppedPaths ?? 0} dropped paths.`
+					? `Host physical fly: ${physicalCameraStatus?.tick ?? "awaiting-first-path"}; collision ${physicalCameraStatus?.sceneResidency?.state ?? "unknown"}; cell ${physicalCameraStatus?.cellId ?? "outdoor"}; ${physicalCameraStatus?.groundState ?? "unknown"}; ${physicalCameraStatus?.constraintCount ?? 0} solve constraints; ${physicalCameraStatus?.solveDurationMs.toFixed(2) ?? "0.00"} ms; ${physicalCameraStatus?.substeps ?? 0} substeps; ${physicalCameraStatus?.contactPasses ?? 0} contact passes; ${physicalCameraStatus?.droppedPaths ?? 0} dropped paths.`
 					: "Free fly bypasses collision and remains the recovery mode."}
 		</p>
 		{#if physicalCameraStatus?.sceneResidency?.state === "missing-owner"}

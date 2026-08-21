@@ -1243,6 +1243,8 @@ mod tests {
         let entities = Arc::new(ExplorerEntityRuntime::new(
             Arc::clone(&simulation),
             Default::default(),
+            crate::explorer_possession_control::ExplorerPossessionControlProfile::standard()
+                .expect("standard Explorer possession profile is valid"),
         ));
         let mut clothing = BTreeMap::new();
         clothing.insert(0x1000_0001, synthetic_clothing(0x0200_0001));
@@ -1274,6 +1276,8 @@ mod tests {
         let entities = Arc::new(ExplorerEntityRuntime::new(
             Arc::clone(&simulation),
             Default::default(),
+            crate::explorer_possession_control::ExplorerPossessionControlProfile::standard()
+                .expect("standard Explorer possession profile is valid"),
         ));
         let driver = ExplorerEntityDriver::new(
             catalog,

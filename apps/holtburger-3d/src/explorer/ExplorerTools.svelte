@@ -19,8 +19,8 @@
 	import type { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
 	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
-	import type { PhysicalCameraStatus } from "./physical-camera-session";
-	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-camera-path";
+	import type { PhysicalFlyStatus } from "./physical-fly-session";
+	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
 	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
 	import type { ExplorerCatalogCapability } from "./explorer-entity-commands";
 	import type { ExplorerPossession } from "./explorer-entity-possession";
@@ -54,7 +54,7 @@
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
 		readonly cameraMode: ExplorerCameraMode;
 		readonly cameraModePending: boolean;
-		readonly physicalCameraStatus: PhysicalCameraStatus | null;
+		readonly physicalCameraStatus: PhysicalFlyStatus | null;
 		readonly physicalCameraError: string | null;
 		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
 		readonly environmentSelection: ExplorerEnvironmentSelection;

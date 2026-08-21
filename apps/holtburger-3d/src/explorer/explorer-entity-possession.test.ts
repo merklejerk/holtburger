@@ -1,126 +1,99 @@
 import { describe, expect, it } from "vitest";
 
-import type { GroundedCharacterDrive } from "./grounded-character-input";
 import {
 	decodeExplorerPossession,
-	IDLE_MOTION_ORDER,
-	MOTION_COMMAND,
-	motionOrderFromDrive,
-	motionOrderIsIdle,
-	possessionModels,
-	restrictToModelled,
+	decodePossessionEventQueueReceipt,
+	decodePossessionIntentResult,
+	possessionStance,
 } from "./explorer-entity-possession";
 
-function drive(
-	overrides: Partial<GroundedCharacterDrive> = {},
-): GroundedCharacterDrive {
-	return {
-		gait: "run",
-		lateral: null,
-		longitudinal: null,
-		turn: null,
-		...overrides,
-	};
-}
-
-const walkingEntity = decodeExplorerPossession({
-	guid: 0xf0000001,
-	modelledCommands: ["0x45000005", "0x44000007", "0x6500000d"],
-	motionTableId: "0x09000001",
-});
-
-describe("motionOrderFromDrive", () => {
-	it("selects the run or walk substate from gait rather than scaling one of them", () => {
-		expect(
-			motionOrderFromDrive(drive({ longitudinal: "forward" }), null).forward,
-		).toEqual({ command: MOTION_COMMAND.runForward, speed: 1 });
-		expect(
-			motionOrderFromDrive(
-				drive({ gait: "walk", longitudinal: "forward" }),
-				null,
-			).forward,
-		).toEqual({ command: MOTION_COMMAND.walkForward, speed: 1 });
-	});
-
-	it("carries forward, sidestep, and turn independently so a body can walk and turn at once", () => {
-		const order = motionOrderFromDrive(
-			drive({ lateral: "right", longitudinal: "forward", turn: "left" }),
-			null,
-		);
-
-		expect(order.forward?.command).toBe(MOTION_COMMAND.runForward);
-		expect(order.sidestep?.command).toBe(MOTION_COMMAND.sidestepRight);
-		expect(order.turn?.command).toBe(MOTION_COMMAND.turnLeft);
-	});
-
-	it("issues speeds as multipliers left at the authored rate", () => {
-		const order = motionOrderFromDrive(
-			drive({ longitudinal: "forward" }),
-			null,
-		);
-
-		expect(order.forward?.speed).toBe(1);
-	});
-
-	it("treats a drive with no held axis as idle", () => {
-		expect(motionOrderIsIdle(motionOrderFromDrive(drive(), null))).toBe(true);
-		expect(motionOrderIsIdle(IDLE_MOTION_ORDER)).toBe(true);
-	});
-});
-
-describe("restrictToModelled", () => {
-	it("drops axes the possessed entity's table does not model", () => {
-		const order = motionOrderFromDrive(
-			drive({ lateral: "left", longitudinal: "forward", turn: "right" }),
-			null,
-		);
-
-		const restricted = restrictToModelled(order, walkingEntity);
-
-		expect(restricted.forward?.command).toBe(MOTION_COMMAND.runForward);
-		expect(restricted.turn?.command).toBe(MOTION_COMMAND.turnRight);
-		expect(restricted.sidestep).toBeNull();
-	});
-
-	it("keeps the stance, which is not a locomotion axis", () => {
-		const restricted = restrictToModelled(
-			{ ...IDLE_MOTION_ORDER, style: 0x8000003d },
-			walkingEntity,
-		);
-
-		expect(restricted.style).toBe(0x8000003d);
-	});
-});
-
-describe("possessionModels", () => {
-	it("compares the host's reported commands case-insensitively", () => {
-		expect(possessionModels(walkingEntity, MOTION_COMMAND.walkForward)).toBe(
-			true,
-		);
-		expect(possessionModels(walkingEntity, MOTION_COMMAND.sidestepLeft)).toBe(
-			false,
-		);
-	});
-});
+const nonCombatCapability = {
+	chargeDurationMs: 1_000,
+	jumpPresentation: "ready-only",
+	run: "standard-fallback-with-target-presentation",
+	sidestep: "standard-fallback-without-target-presentation",
+	style: 0x8000_003d,
+	turn: "target-authored",
+	walk: "target-authored",
+} as const;
 
 describe("decodeExplorerPossession", () => {
-	it("accepts a release, which names no entity and models nothing", () => {
-		expect(
-			decodeExplorerPossession({
-				guid: null,
-				modelledCommands: [],
-				motionTableId: null,
-			}).guid,
-		).toBeNull();
+	it("keeps entity and possession generations beside per-stance source facts", () => {
+		const possession = decodeExplorerPossession({
+			acceptedStance: 0x8000_003d,
+			entityGeneration: 7,
+			guid: 0xf0000001,
+			motionTableId: "0x09000001",
+			possessionGeneration: 9,
+			stances: [nonCombatCapability],
+		});
+
+		expect(possession.guid).toBe(0xf0000001);
+		if (possession.guid === null) throw new Error("expected active possession");
+		expect(possession.entityGeneration).toBe(7);
+		expect(possessionStance(possession, 0x8000_003d)).toEqual(
+			nonCombatCapability,
+		);
 	});
 
-	it("rejects a malformed command list rather than silently modelling nothing", () => {
+	it("requires a release receipt to carry the new possession ownership barrier", () => {
+		expect(
+			decodeExplorerPossession({
+				acceptedStance: null,
+				entityGeneration: null,
+				guid: null,
+				motionTableId: null,
+				possessionGeneration: 10,
+				stances: [],
+			}).possessionGeneration,
+		).toBe(10);
+	});
+
+	it("rejects contradictory partial release state", () => {
 		expect(() =>
 			decodeExplorerPossession({
-				guid: 1,
-				modelledCommands: ["walk"],
-				motionTableId: "0x09000001",
+				acceptedStance: null,
+				entityGeneration: 7,
+				guid: null,
+				motionTableId: null,
+				possessionGeneration: 10,
+				stances: [],
 			}),
 		).toThrow();
+	});
+});
+
+describe("possession command outcomes", () => {
+	it("keeps stale ownership, stale revision, and duplicate edge outcomes distinct", () => {
+		expect(decodePossessionIntentResult("ignored-stale-possession")).toBe(
+			"ignored-stale-possession",
+		);
+		expect(decodePossessionIntentResult("ignored-stale-revision")).toBe(
+			"ignored-stale-revision",
+		);
+		expect(
+			decodePossessionEventQueueReceipt({
+				result: "ignored-duplicate",
+				outcomes: [],
+			}).result,
+		).toBe("ignored-duplicate");
+	});
+
+	it("keeps an immediate nonphysical rejection typed and generation-bound", () => {
+		expect(
+			decodePossessionEventQueueReceipt({
+				result: "queued",
+				outcomes: [
+					{
+						possessionGeneration: 9,
+						sequence: 0,
+						result: {
+							kind: "rejected",
+							reason: "nonphysical-response",
+						},
+					},
+				],
+			}).outcomes[0]?.result,
+		).toEqual({ kind: "rejected", reason: "nonphysical-response" });
 	});
 });

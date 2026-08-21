@@ -1,7 +1,9 @@
-import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
-import { Vec3 } from "../lib/game/math/types";
-import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { createCameraAxesRadians } from "../math/camera-orientation";
+import { Vec3 } from "../math/types";
+import { clamp, normalizeVec3, scaleVec3 } from "../math/vector-utils";
+import { CameraLookController } from "./camera-look-controller";
+import { THIRD_PERSON_CHARACTER_CONTROL_PROFILE } from "./third-person-character-profile";
 
 type DragMode = "pan" | "rotate";
 type MovementKey =
@@ -41,13 +43,19 @@ export interface FreeFlyCameraState extends FreeFlyCameraPose {
 	readonly hasManualControl: boolean;
 }
 
-export interface FreeFlyCameraControllerOptions {
+/** Complete, mutually exclusive canvas-input owner selected by the entry point. */
+export type FrontendControlScheme =
+	| { readonly kind: "free-fly" }
+	| { readonly kind: "physical-fly" }
+	| { readonly kind: "possessed-character" };
+
+export interface FrontendCameraControllerOptions {
 	readonly canvas: HTMLCanvasElement;
 	readonly onChange: (state: FreeFlyCameraState) => void;
 	/** Sends wheel translation to the current host-owned camera policy. */
 	readonly onPhysicalWheel: (localUpDistance: number) => void;
 	/** Publishes normalized raw character keys without assigning grounded semantics here. */
-	readonly onCharacterInput: (input: CameraCharacterInput) => void;
+	readonly onCharacterInput: (input: CharacterKeyInput) => void;
 	/** Resolves the app regime's complete keyboard-yaw rate without teaching this controller its modes. */
 	readonly keyboardYawRadiansPerSecond?: (shiftActive: boolean) => number;
 	readonly requestAnimationFrame?: (callback: FrameRequestCallback) => number;
@@ -55,7 +63,7 @@ export interface FreeFlyCameraControllerOptions {
 }
 
 /** Raw keyboard lifecycle consumed only when the app selects a character-control regime. */
-export type CameraCharacterInput =
+export type CharacterKeyInput =
 	| {
 			readonly key: "a" | "c" | "d" | "s" | "shift" | "space" | "w" | "z";
 			readonly kind: "key";
@@ -76,11 +84,11 @@ const CAMERA_CONTROL_TUNING = FRONTEND_TUNING.explorer.camera.controls;
  * Explorer-local port of the legacy fly controls: left drag rotates, middle/right drag pans,
  * wheel moves along local up, WASD-style keys fly, and Shift slows every movement.
  */
-export class FreeFlyCameraController {
+export class FrontendCameraController {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onChange: (state: FreeFlyCameraState) => void;
 	readonly #onPhysicalWheel: (localUpDistance: number) => void;
-	readonly #onCharacterInput: (input: CameraCharacterInput) => void;
+	readonly #onCharacterInput: (input: CharacterKeyInput) => void;
 	readonly #keyboardYawRadiansPerSecond: (shiftActive: boolean) => number;
 	readonly #requestAnimationFrame: (callback: FrameRequestCallback) => number;
 	readonly #cancelAnimationFrame: (handle: number) => void;
@@ -90,11 +98,11 @@ export class FreeFlyCameraController {
 	#linearMovementStartedAt: number | null = null;
 	#movementFrame: number | null = null;
 	#shiftActive = false;
-	/** False while the host owns camera position; orientation remains frontend-owned. */
-	#localTranslationEnabled = true;
+	#scheme: FrontendControlScheme = { kind: "free-fly" };
+	readonly #look = new CameraLookController(DEFAULT_STATE);
 	#state: FreeFlyCameraState = DEFAULT_STATE;
 
-	constructor(options: FreeFlyCameraControllerOptions) {
+	constructor(options: FrontendCameraControllerOptions) {
 		this.#canvas = options.canvas;
 		this.#onChange = options.onChange;
 		this.#onPhysicalWheel = options.onPhysicalWheel;
@@ -124,6 +132,7 @@ export class FreeFlyCameraController {
 	/** Replace the pose for automatic focus without marking it as user-controlled. */
 	setAutomaticPose(pose: FreeFlyCameraPose): void {
 		this.#stopMovement();
+		this.#look.replace(pose);
 		this.#setState({ ...pose, hasManualControl: false });
 	}
 
@@ -135,14 +144,17 @@ export class FreeFlyCameraController {
 	/** Seeds frontend free fly from the exact physical pose presented on the prior frame. */
 	adoptPresentedPose(pose: FreeFlyCameraPose): void {
 		this.#stopMovement();
+		this.#look.replace(pose);
 		this.#state = { ...pose, hasManualControl: true };
 	}
 
-	/** Transfers position authority while retaining the existing rotation controls. */
-	setLocalTranslationEnabled(enabled: boolean): void {
-		if (this.#localTranslationEnabled === enabled) return;
+	/** Atomically clears the outgoing owner before installing a complete input-routing scheme. */
+	setControlScheme(scheme: FrontendControlScheme): void {
+		if (this.#scheme.kind === scheme.kind) return;
+		if (this.#isCharacterScheme()) this.#onCharacterInput({ kind: "reset" });
 		this.#stopMovement();
-		this.#localTranslationEnabled = enabled;
+		this.#shiftActive = false;
+		this.#scheme = scheme;
 	}
 
 	/** Current local input, camera basis, and precision modifier for physical-camera policy. */
@@ -157,8 +169,11 @@ export class FreeFlyCameraController {
 	} {
 		return {
 			basis: cameraAxes(this.#state),
-			movement: this.#movementVector(),
-			precision: this.#shiftActive,
+			movement:
+				this.#scheme.kind === "physical-fly"
+					? this.#movementVector()
+					: { forward: 0, right: 0, up: 0 },
+			precision: this.#scheme.kind === "physical-fly" && this.#shiftActive,
 		};
 	}
 
@@ -187,6 +202,11 @@ export class FreeFlyCameraController {
 
 	readonly #handlePointerDown = (event: PointerEvent): void => {
 		if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
+		if (
+			this.#isCharacterScheme() &&
+			event.button !== THIRD_PERSON_CHARACTER_CONTROL_PROFILE.orbitPointerButton
+		)
+			return;
 		this.#canvas.focus();
 		this.#canvas.setPointerCapture(event.pointerId);
 		this.#activeDrag = {
@@ -205,21 +225,22 @@ export class FreeFlyCameraController {
 		const deltaY = event.clientY - drag.lastY;
 		this.#activeDrag = { ...drag, lastX: event.clientX, lastY: event.clientY };
 		if (deltaX === 0 && deltaY === 0) return;
-		const speed = this.#speedMultiplier(event.shiftKey);
+		const speed = this.#isCharacterScheme()
+			? 1
+			: this.#speedMultiplier(event.shiftKey);
 		if (drag.mode === "rotate") {
+			const look = this.#look.rotate(
+				deltaX,
+				deltaY,
+				CAMERA_CONTROL_TUNING.pointerYawRadiansPerPixel * speed,
+				CAMERA_CONTROL_TUNING.pointerPitchRadiansPerPixel * speed,
+				CAMERA_CONTROL_TUNING.maximumPitchRadians,
+			);
 			this.#setManualState({
 				...this.#state,
-				pitchRadians: clamp(
-					this.#state.pitchRadians +
-						deltaY * CAMERA_CONTROL_TUNING.pointerPitchRadiansPerPixel * speed,
-					-CAMERA_CONTROL_TUNING.maximumPitchRadians,
-					CAMERA_CONTROL_TUNING.maximumPitchRadians,
-				),
-				yawRadians:
-					this.#state.yawRadians -
-					deltaX * CAMERA_CONTROL_TUNING.pointerYawRadiansPerPixel * speed,
+				...look,
 			});
-		} else if (this.#localTranslationEnabled) {
+		} else if (this.#scheme.kind === "free-fly") {
 			const { right, up } = cameraAxes(this.#state);
 			this.#setManualState({
 				...this.#state,
@@ -257,8 +278,8 @@ export class FreeFlyCameraController {
 				CAMERA_CONTROL_TUNING.wheelDeltaClamp,
 			) *
 			CAMERA_CONTROL_TUNING.wheelLocalUpUnitsPerDelta *
-			this.#speedMultiplier(event.shiftKey);
-		if (!this.#localTranslationEnabled) {
+			(this.#isCharacterScheme() ? 1 : this.#speedMultiplier(event.shiftKey));
+		if (this.#scheme.kind !== "free-fly") {
 			if (distance !== 0) this.#onPhysicalWheel(distance);
 			event.preventDefault();
 			return;
@@ -273,7 +294,9 @@ export class FreeFlyCameraController {
 
 	readonly #handleKeyDown = (event: KeyboardEvent): void => {
 		this.#shiftActive = event.shiftKey;
-		const semanticKey = characterKey(event.key);
+		const semanticKey = this.#isCharacterScheme()
+			? THIRD_PERSON_CHARACTER_CONTROL_PROFILE.characterKey(event.key)
+			: null;
 		if (semanticKey !== null) {
 			this.#onCharacterInput({
 				key: semanticKey,
@@ -282,21 +305,24 @@ export class FreeFlyCameraController {
 				repeat: event.repeat,
 			});
 		}
-		const key = movementKey(event.key);
+		const key = this.#acceptsCameraKeys() ? movementKey(event.key) : null;
 		if (!key) {
-			if (event.key === "Shift" && !this.#localTranslationEnabled)
+			if (event.key === "Shift" && this.#scheme.kind === "physical-fly")
 				this.#onChange(this.#state);
+			if (semanticKey !== null) event.preventDefault();
 			return;
 		}
 		this.#pressedKeys.add(key);
 		this.#startMovement();
-		if (!this.#localTranslationEnabled) this.#onChange(this.#state);
+		if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
 		event.preventDefault();
 	};
 
 	readonly #handleKeyUp = (event: KeyboardEvent): void => {
 		this.#shiftActive = event.key === "Shift" ? false : event.shiftKey;
-		const semanticKey = characterKey(event.key);
+		const semanticKey = this.#isCharacterScheme()
+			? THIRD_PERSON_CHARACTER_CONTROL_PROFILE.characterKey(event.key)
+			: null;
 		if (semanticKey !== null) {
 			this.#onCharacterInput({
 				key: semanticKey,
@@ -305,27 +331,28 @@ export class FreeFlyCameraController {
 				repeat: false,
 			});
 		}
-		const key = movementKey(event.key);
+		const key = this.#acceptsCameraKeys() ? movementKey(event.key) : null;
 		if (!key) {
-			if (event.key === "Shift" && !this.#localTranslationEnabled)
+			if (event.key === "Shift" && this.#scheme.kind === "physical-fly")
 				this.#onChange(this.#state);
+			if (semanticKey !== null) event.preventDefault();
 			return;
 		}
 		this.#pressedKeys.delete(key);
 		if (this.#pressedKeys.size === 0) {
 			// Preserve the empty held set long enough for the physical adapter to send a stop intent.
-			if (!this.#localTranslationEnabled) this.#onChange(this.#state);
+			if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
 			this.#stopMovement();
-		} else if (!this.#localTranslationEnabled) {
+		} else if (this.#scheme.kind === "physical-fly") {
 			this.#onChange(this.#state);
 		}
 		event.preventDefault();
 	};
 
 	readonly #handleBlur = (): void => {
-		this.#onCharacterInput({ kind: "reset" });
+		if (this.#isCharacterScheme()) this.#onCharacterInput({ kind: "reset" });
 		this.#stopMovement();
-		if (!this.#localTranslationEnabled) this.#onChange(this.#state);
+		if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
 	};
 
 	#finishDrag(pointerId: number): boolean {
@@ -369,9 +396,10 @@ export class FreeFlyCameraController {
 		this.#lastMovementAt = frameAt;
 		if (deltaSeconds === 0) return;
 
-		const movement = this.#localTranslationEnabled
-			? this.#movementVector()
-			: { forward: 0, right: 0, up: 0 };
+		const movement =
+			this.#scheme.kind === "free-fly"
+				? this.#movementVector()
+				: { forward: 0, right: 0, up: 0 };
 		let next = this.#state;
 		if (movement.right !== 0 || movement.up !== 0 || movement.forward !== 0) {
 			this.#linearMovementStartedAt ??= frameAt;
@@ -387,17 +415,22 @@ export class FreeFlyCameraController {
 		} else {
 			this.#linearMovementStartedAt = null;
 		}
-		const yawDirection =
-			(this.#pressedKeys.has("d") ? 1 : 0) -
-			(this.#pressedKeys.has("a") ? 1 : 0);
+		const yawDirection = this.#acceptsKeyboardYaw()
+			? (this.#pressedKeys.has("d") ? 1 : 0) -
+				(this.#pressedKeys.has("a") ? 1 : 0)
+			: 0;
 		if (yawDirection !== 0) {
-			next = {
-				...next,
+			const look = this.#look.replace({
+				pitchRadians: next.pitchRadians,
 				yawRadians:
 					next.yawRadians +
 					yawDirection *
 						this.#keyboardYawRadiansPerSecond(this.#shiftActive) *
 						deltaSeconds,
+			});
+			next = {
+				...next,
+				...look,
 			};
 		}
 		this.#setManualState(next);
@@ -422,6 +455,20 @@ export class FreeFlyCameraController {
 		return isShiftActive ? CAMERA_CONTROL_TUNING.shiftSlowMultiplier : 1;
 	}
 
+	#acceptsCameraKeys(): boolean {
+		return (
+			this.#scheme.kind === "free-fly" || this.#scheme.kind === "physical-fly"
+		);
+	}
+
+	#acceptsKeyboardYaw(): boolean {
+		return this.#acceptsCameraKeys();
+	}
+
+	#isCharacterScheme(): boolean {
+		return this.#scheme.kind === "possessed-character";
+	}
+
 	#setManualState(state: FreeFlyCameraPose): void {
 		this.#setState({ ...state, hasManualControl: true });
 	}
@@ -436,16 +483,6 @@ function movementKey(key: string): MovementKey | null {
 	const normalized = key.toLowerCase();
 	if (["w", "a", "s", "d", "z", "c", "pageup", "pagedown"].includes(normalized))
 		return normalized as MovementKey;
-	return key === " " ? "space" : null;
-}
-
-function characterKey(
-	key: string,
-): "a" | "c" | "d" | "s" | "shift" | "space" | "w" | "z" | null {
-	const normalized = key.toLowerCase();
-	if (["w", "a", "s", "d", "z", "c", "shift"].includes(normalized)) {
-		return normalized as "a" | "c" | "d" | "s" | "shift" | "w" | "z";
-	}
 	return key === " " ? "space" : null;
 }
 

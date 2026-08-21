@@ -16,6 +16,7 @@ const STAND: u32 = 0x4500_0003;
 const WALK: u32 = MotionTable::WALK_FORWARD_COMMAND;
 const RUN: u32 = MotionTable::RUN_FORWARD_COMMAND;
 const MODIFIER: u32 = 0x2000_0021;
+const SECOND_MODIFIER: u32 = 0x2000_0022;
 const HOOKED: u32 = 0x4500_0009;
 
 const STAND_ANIM: u32 = 0x0300_0001;
@@ -23,9 +24,14 @@ const WALK_ANIM: u32 = 0x0300_0002;
 const RUN_ANIM: u32 = 0x0300_0003;
 const LINK_ANIM: u32 = 0x0300_0004;
 const HOOK_ANIM: u32 = 0x0300_0005;
+const SIDESTEP_ANIM: u32 = 0x0300_0006;
 
 /// Builds an animation whose every frame translates `step` along local Y.
 fn animation(id: u32, frames: usize, step: f32) -> Animation {
+    animation_with_step(id, frames, Vector3::new(0.0, step, 0.0))
+}
+
+fn animation_with_step(id: u32, frames: usize, step: Vector3) -> Animation {
     Animation {
         id,
         flags: AnimationFlags::POS_FRAMES,
@@ -33,7 +39,7 @@ fn animation(id: u32, frames: usize, step: f32) -> Animation {
         num_frames: frames as u32,
         pos_frames: (0..frames)
             .map(|_| Frame {
-                origin: Vector3::new(0.0, step, 0.0),
+                origin: step,
                 orientation: Quaternion::identity(),
             })
             .collect(),
@@ -58,6 +64,11 @@ fn hook_animation() -> Animation {
         hook_type: 6,
         direction: -1,
         payload: AnimationHookPayload::Ethereal(EtherealHookPayload { ethereal: false }),
+    });
+    animation.part_frames[3].hooks.push(AnimationHook {
+        hook_type: 6,
+        direction: 1,
+        payload: AnimationHookPayload::Ethereal(EtherealHookPayload { ethereal: true }),
     });
     animation
 }
@@ -116,6 +127,10 @@ fn catalog() -> MotionSequenceCatalog {
     modifiers.insert(
         MotionTable::cycle_key(STYLE, MODIFIER),
         motion(Vec::new(), None, Some(Vector3::new(0.0, 0.0, 0.5))),
+    );
+    modifiers.insert(
+        MotionTable::cycle_key(STYLE, SECOND_MODIFIER),
+        motion(Vec::new(), None, Some(Vector3::new(0.25, 0.0, 0.0))),
     );
 
     // Links: stand->walk, walk->stand, stand->run, run->stand, and stand->combat style.
@@ -472,6 +487,36 @@ fn selecting_a_substate_reinstalls_the_active_modifiers() {
 }
 
 #[test]
+fn rebuilding_a_sequence_reinstalls_each_active_modifier_once() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut body = standing(table);
+    for command in [MODIFIER, SECOND_MODIFIER] {
+        assert_eq!(
+            select_motion(
+                table,
+                &mut body.state,
+                &mut body.sequence,
+                MotionCommand(command),
+                1.0,
+            ),
+            MotionSelectionOutcome::Selected
+        );
+    }
+
+    select_motion(
+        table,
+        &mut body.state,
+        &mut body.sequence,
+        MotionCommand(WALK),
+        1.0,
+    );
+
+    assert_eq!(body.state.modifiers().len(), 2);
+    assert_eq!(body.sequence.omega(), Vector3::new(0.25, 0.0, 0.5));
+}
+
+#[test]
 fn stopping_completely_clears_modifiers_and_the_substate() {
     let catalog = catalog();
     let table = catalog.table(0x0900_0001).expect("table");
@@ -539,7 +584,7 @@ fn crossing_a_clip_boundary_carries_leftover_time_into_the_next_clip() {
         1.0,
         "leftover time advanced the wrapped cursor rather than being discarded"
     );
-    assert!(tick.offset.translation.y > 4.0);
+    assert_eq!(tick.offset.translation, Vector3::new(0.0, 5.0, 0.0));
 }
 
 /// A cycle with explicit velocity and no clips still moves; that is how 1,064 archive cycles work.
@@ -592,6 +637,25 @@ fn hooks_fire_on_departure_and_respect_their_authored_direction() {
     // Departing frame 2 forwards must not fire its backward-only hook.
     let tick = sequence.advance(0.25);
     assert!(tick.hooks.is_empty());
+}
+
+#[test]
+fn completing_a_clip_fires_its_terminal_frame_hook() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut sequence = MotionSequenceRuntime::new();
+    let hooked = table.cycle(STYLE, HOOKED).expect("hooked cycle");
+    sequence.append(SequenceNode::install(&hooked.clips[0], 1.0));
+
+    let tick = sequence.advance(1.0);
+
+    assert_eq!(
+        tick.hooks
+            .iter()
+            .map(|fired| fired.hook.frame)
+            .collect::<Vec<_>>(),
+        vec![1, 3]
+    );
 }
 
 /// Installing a sequence after the cursor has been running starts at the new clip's own entry
@@ -840,7 +904,7 @@ mod actuation {
 
 mod playing_clip {
     use super::*;
-    use crate::motion::{MotionRuntimeRegistry, set_default_state};
+    use crate::motion::{MotionClipCompletion, MotionRuntimeRegistry, set_default_state};
 
     fn possessed(
         catalog: &MotionSequenceCatalog,
@@ -867,6 +931,7 @@ mod playing_clip {
         assert_eq!(clip.low_frame, 0);
         assert_eq!(clip.high_frame, 3);
         assert_eq!(clip.framerate, 10.0);
+        assert_eq!(clip.completion, MotionClipCompletion::Loop);
     }
 
     /// A clip change reaches the frontend only as a new projection, never as something it chose.
@@ -894,6 +959,22 @@ mod playing_clip {
             .expect("a walking body plays a clip");
         assert_ne!(clip.animation_id, idle);
         assert_eq!(clip.animation_id, LINK_ANIM, "the transition plays first");
+        assert_eq!(clip.completion, MotionClipCompletion::Hold);
+
+        registry.drive(
+            table,
+            guid,
+            MotionOrder {
+                style: Some(MotionCommand(STYLE)),
+                forward: Some((MotionCommand(WALK), 1.0)),
+                sidestep: None,
+                turn: None,
+            },
+            1.1,
+        );
+        let cycle = registry.playing_clip(guid).expect("walk cycle");
+        assert_eq!(cycle.animation_id, WALK_ANIM);
+        assert_eq!(cycle.completion, MotionClipCompletion::Loop);
     }
 
     /// The projection deliberately carries no frame number: host and frontend advance at the same
@@ -929,6 +1010,71 @@ mod playing_clip {
         let _ = (&catalog, &mut registry, guid, set_default_state);
 
         assert!(registry.playing_clip(guid).is_none());
+    }
+
+    /// Standard non-combat sidestep is a dual-class command whose authored row resolves as a
+    /// cycle. Re-applying an order must not mistake that cycle for stale forward locomotion and
+    /// restart it every host tick.
+    #[test]
+    fn a_sustained_sidestep_cycle_advances_at_its_authored_rate() {
+        const SIDE: u32 = 0x6500_000F;
+        const FRAMES: usize = 10;
+        const STEP: f32 = 0.1;
+        const FRAMERATE: f32 = 12.0;
+        const EXPECTED_METRES_PER_SECOND: f32 = 1.2;
+
+        let table = MotionTable {
+            id: 0x0900_0002,
+            default_style: STYLE,
+            style_defaults: HashMap::from([(STYLE, STAND)]),
+            cycles: HashMap::from([
+                (
+                    MotionTable::cycle_key(STYLE, STAND),
+                    motion(vec![clip(STAND_ANIM, 10.0)], None, None),
+                ),
+                (
+                    MotionTable::cycle_key(STYLE, SIDE),
+                    motion(vec![clip(SIDESTEP_ANIM, FRAMERATE)], None, None),
+                ),
+            ]),
+            modifiers: HashMap::new(),
+            links: HashMap::new(),
+        };
+        let catalog = MotionSequenceCatalog::assemble(
+            [table],
+            [
+                animation(STAND_ANIM, 4, 0.0),
+                animation_with_step(SIDESTEP_ANIM, FRAMES, Vector3::new(STEP, 0.0, 0.0)),
+            ],
+            [],
+        )
+        .expect("sidestep fixture should assemble");
+        let table = catalog.table(0x0900_0002).expect("table");
+        let guid = holtburger_common::Guid(0xf000_0003);
+        let order = MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: None,
+            sidestep: Some((MotionCommand(SIDE), 1.0)),
+            turn: None,
+        };
+        let mut registry = MotionRuntimeRegistry::new();
+        let mut travelled = 0.0;
+
+        // Measure long enough that the clip's one-frame entry anchor is insignificant. That anchor
+        // is sequence semantics, whereas a selector restart would lose nearly all displacement.
+        for _ in 0..300 {
+            travelled += registry
+                .drive(table, guid, order, 1.0 / 30.0)
+                .offset
+                .translation
+                .length();
+        }
+
+        let measured_rate = travelled / 10.0;
+        assert!(
+            (measured_rate - EXPECTED_METRES_PER_SECOND).abs() / EXPECTED_METRES_PER_SECOND < 0.01,
+            "sustained sidestep measured {measured_rate}m/s instead of {EXPECTED_METRES_PER_SECOND}m/s"
+        );
     }
 }
 

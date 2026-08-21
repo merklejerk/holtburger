@@ -1,30 +1,15 @@
 import { z } from "zod";
 
-import type { GroundedCharacterDrive } from "./grounded-character-input";
+import type { CharacterDrive } from "../lib/game/controls/character-input-controller";
 
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const unsigned32 = z.number().int().min(0).max(0xffff_ffff);
-
-/**
- * Motion-table commands the Explorer can issue, as full 32-bit values.
- *
- * The wire carries only the low 16 bits; the table keys on the full value whose high half
- * classifies the command. Forward locomotion is a substate while turning and sidestepping are
- * modifiers, which is what lets a body walk and turn at once.
- */
-export const MOTION_COMMAND = {
-	runForward: 0x4400_0007,
-	sidestepLeft: 0x6500_0010,
-	sidestepRight: 0x6500_000f,
-	turnLeft: 0x6500_000e,
-	turnRight: 0x6500_000d,
-	walkBackwards: 0x4500_0006,
-	walkForward: 0x4500_0005,
-} as const;
+const generation = z.number().int().nonnegative().safe();
 
 /** Stances the Explorer offers. Values are full motion-table style commands. */
 export const MOTION_STYLE = {
 	bowCombat: 0x8000_003f,
+	dualWieldCombat: 0x8000_0046,
 	handCombat: 0x8000_003c,
 	magic: 0x8000_0049,
 	nonCombat: 0x8000_003d,
@@ -35,119 +20,197 @@ export const MOTION_STYLE = {
 
 export type MotionStyleName = keyof typeof MOTION_STYLE;
 
-const explorerPossessionSchema = z.object({
-	guid: unsigned32.nullable(),
-	modelledCommands: z.array(datId),
-	motionTableId: datId.nullable(),
+const locomotionSource = z.enum([
+	"target-authored",
+	"standard-fallback-with-target-presentation",
+	"standard-fallback-without-target-presentation",
+]);
+
+const jumpPresentation = z.enum([
+	"ready-and-falling",
+	"ready-only",
+	"falling-only",
+	"stance-default",
+]);
+
+const possessionStanceCapability = z.object({
+	chargeDurationMs: z.number().int().positive().safe(),
+	jumpPresentation,
+	run: locomotionSource,
+	sidestep: locomotionSource,
+	style: unsigned32,
+	turn: locomotionSource,
+	walk: locomotionSource,
 });
 
-/** What the host reported about the entity that was just possessed. */
+/** Capability and target-presentation quality for one host-modelled stance. */
+export type PossessionStanceCapability = z.infer<
+	typeof possessionStanceCapability
+>;
+
+const activePossession = z.object({
+	acceptedStance: unsigned32,
+	entityGeneration: generation,
+	guid: unsigned32,
+	motionTableId: datId,
+	possessionGeneration: generation,
+	stances: z.array(possessionStanceCapability),
+});
+
+const releasedPossession = z.object({
+	acceptedStance: z.null(),
+	entityGeneration: z.null(),
+	guid: z.null(),
+	motionTableId: z.null(),
+	possessionGeneration: generation,
+	stances: z.array(possessionStanceCapability).length(0),
+});
+
+const explorerPossessionSchema = z.union([
+	activePossession,
+	releasedPossession,
+]);
+
+/** What the host reported about the current possession ownership epoch. */
 export type ExplorerPossession = z.infer<typeof explorerPossessionSchema>;
 
 export function decodeExplorerPossession(value: unknown): ExplorerPossession {
 	return explorerPossessionSchema.parse(value);
 }
 
-/** One commanded motion and the multiplier it plays at. */
-interface OrderedMotion {
-	readonly command: number;
-	/** Retail's `speedMod`: a multiplier on the selected motion, not metres per second. */
-	readonly speed: number;
+/** Complete coalescible semantic intent sent to the host-owned possession controller. */
+export interface ExplorerPossessionIntent {
+	readonly drive: CharacterDrive;
+	readonly possessionGeneration: number;
+	readonly revision: number;
+	readonly stance: number;
 }
 
-/** Semantic order for the possessed entity, in the four axes retail interprets. */
-export interface ExplorerMotionOrder {
-	readonly style: number | null;
-	readonly forward: OrderedMotion | null;
-	readonly sidestep: OrderedMotion | null;
-	readonly turn: OrderedMotion | null;
+/** Ordered lifecycle request carrying the complete intent snapshot at the browser edge. */
+export type ExplorerPossessionEventRequest = ExplorerPossessionIntent &
+	(
+		| { readonly kind: "begin-jump"; readonly sequence: number }
+		| {
+				readonly extent: number;
+				readonly kind: "release-jump";
+				readonly sequence: number;
+		  }
+		| { readonly kind: "reset"; readonly sequence: number }
+	);
+
+const possessionIntentResult = z.enum([
+	"accepted",
+	"ignored-stale-possession",
+	"ignored-stale-revision",
+]);
+
+export type PossessionIntentResult = z.infer<typeof possessionIntentResult>;
+
+export function decodePossessionIntentResult(
+	value: unknown,
+): PossessionIntentResult {
+	return possessionIntentResult.parse(value);
 }
 
-export const IDLE_MOTION_ORDER: ExplorerMotionOrder = {
-	forward: null,
-	sidestep: null,
-	style: null,
-	turn: null,
-};
+const possessionEventQueueResult = z.enum([
+	"queued",
+	"ignored-stale-possession",
+	"ignored-duplicate",
+]);
 
-/**
- * Translates held-key drive into a motion order for the possessed entity.
- *
- * The same four axes the camera controller already arbitrates, retargeted. Gait selects between the
- * walk and run substates rather than scaling one of them, because the table authors them as
- * different cycles with different root motion — which is the whole reason this path exists.
- *
- * Speeds stay at `1.0`: they are multipliers on the authored motion, and the Explorer has no reason
- * to play a cycle at anything other than its authored rate.
- */
-export function motionOrderFromDrive(
-	drive: GroundedCharacterDrive,
-	style: number | null,
-): ExplorerMotionOrder {
-	const ordered = (command: number): OrderedMotion => ({ command, speed: 1 });
-	const forward =
-		drive.longitudinal === "forward"
-			? ordered(
-					drive.gait === "run"
-						? MOTION_COMMAND.runForward
-						: MOTION_COMMAND.walkForward,
-				)
-			: drive.longitudinal === "backward"
-				? ordered(MOTION_COMMAND.walkBackwards)
-				: null;
-	const sidestep =
-		drive.lateral === "left"
-			? ordered(MOTION_COMMAND.sidestepLeft)
-			: drive.lateral === "right"
-				? ordered(MOTION_COMMAND.sidestepRight)
-				: null;
-	const turn =
-		drive.turn === "left"
-			? ordered(MOTION_COMMAND.turnLeft)
-			: drive.turn === "right"
-				? ordered(MOTION_COMMAND.turnRight)
-				: null;
+const possessionEventRejection = z.enum([
+	"charge-not-active",
+	"nonphysical-response",
+	"unsupported-contact",
+	"airborne",
+	"constrained",
+]);
 
-	return { forward, sidestep, style, turn };
+const possessionEventOutcomeKind = z.union([
+	z
+		.object({
+			kind: z.enum(["charge-accepted", "charge-continues", "jump-released"]),
+			presentation: jumpPresentation,
+		})
+		.strict(),
+	z.object({ kind: z.literal("reset") }).strict(),
+	z
+		.object({ kind: z.literal("rejected"), reason: possessionEventRejection })
+		.strict(),
+]);
+
+const possessionEventOutcome = z
+	.object({
+		possessionGeneration: z.number().int().nonnegative(),
+		sequence: z.number().int().nonnegative(),
+		result: possessionEventOutcomeKind,
+	})
+	.strict();
+
+export type PossessionEventOutcome = z.infer<typeof possessionEventOutcome>;
+
+export function decodePossessionEventOutcome(
+	value: unknown,
+): PossessionEventOutcome {
+	return possessionEventOutcome.parse(value);
 }
 
-/** Whether an order asks the entity to do anything at all. */
-export function motionOrderIsIdle(order: ExplorerMotionOrder): boolean {
+const possessionEventQueueReceipt = z
+	.object({
+		result: possessionEventQueueResult,
+		outcomes: z.array(possessionEventOutcome),
+	})
+	.strict();
+
+export type PossessionEventQueueReceipt = z.infer<
+	typeof possessionEventQueueReceipt
+>;
+
+export function decodePossessionEventQueueReceipt(
+	value: unknown,
+): PossessionEventQueueReceipt {
+	return possessionEventQueueReceipt.parse(value);
+}
+
+const possessionActiveMotionProbe = z
+	.object({ command: unsigned32, speed: z.number().finite() })
+	.strict();
+
+const possessionMotionProbe = z
+	.object({
+		clip: z
+			.object({
+				animationId: unsigned32,
+				completion: z.enum(["hold", "loop"]),
+				framerate: z.number().finite(),
+				highFrame: z.number().int(),
+				lowFrame: z.number().int(),
+			})
+			.strict()
+			.nullable(),
+		entityGeneration: generation,
+		guid: unsigned32,
+		modifiers: z.array(possessionActiveMotionProbe),
+		possessionGeneration: generation,
+		style: unsigned32,
+		substate: possessionActiveMotionProbe,
+	})
+	.strict();
+
+export type PossessionMotionProbe = z.infer<typeof possessionMotionProbe>;
+
+export function decodePossessionMotionProbe(
+	value: unknown,
+): PossessionMotionProbe | null {
+	return value === null ? null : possessionMotionProbe.parse(value);
+}
+
+/** Finds a modelled stance without letting the frontend reconstruct host capability policy. */
+export function possessionStance(
+	possession: Extract<ExplorerPossession, { guid: number }>,
+	style: number,
+): PossessionStanceCapability | null {
 	return (
-		order.forward === null && order.sidestep === null && order.turn === null
+		possession.stances.find((capability) => capability.style === style) ?? null
 	);
-}
-
-/** Whether the possessed entity's table models one command, read from the host's report. */
-export function possessionModels(
-	possession: ExplorerPossession,
-	command: number,
-): boolean {
-	const wanted = `0x${command.toString(16).padStart(8, "0")}`;
-	return possession.modelledCommands.some(
-		(modelled) => modelled.toLowerCase() === wanted,
-	);
-}
-
-/**
- * Drops the axes the possessed entity's table cannot perform.
- *
- * Issuing an unmodelled command is harmless — selection reports it and nothing happens — but the
- * UX should not pretend it worked, and the host should not be asked for motion that cannot exist.
- */
-export function restrictToModelled(
-	order: ExplorerMotionOrder,
-	possession: ExplorerPossession,
-): ExplorerMotionOrder {
-	const keep = (motion: OrderedMotion | null): OrderedMotion | null =>
-		motion !== null && possessionModels(possession, motion.command)
-			? motion
-			: null;
-
-	return {
-		forward: keep(order.forward),
-		sidestep: keep(order.sidestep),
-		style: order.style,
-		turn: keep(order.turn),
-	};
 }

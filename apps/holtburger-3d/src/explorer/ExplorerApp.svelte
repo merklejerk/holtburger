@@ -41,40 +41,40 @@
 		type ExplorerCameraResidencySync,
 	} from "./explorer-camera-coordinator";
 	import {
-		FreeFlyCameraController,
-		type CameraCharacterInput,
-	} from "./free-fly-camera-controller";
+		FrontendCameraController,
+		type CharacterKeyInput,
+		type FrontendControlScheme,
+	} from "../lib/game/controls/frontend-camera-controller";
 	import {
-		resolvePhysicalCameraViewDirection,
+		resolvePhysicalFlyViewDirection,
 		resolvePhysicalFlyVelocity,
 		resolvePhysicalFlyWheelDisplacement,
 		type ExplorerCameraMode,
-		type PhysicalCameraMode,
-		type PhysicalCameraLocalMovement,
-		type PhysicalCameraPlacement,
-	} from "../lib/game/motion/host-physical-camera-path";
+		type PhysicalFlyLocalMovement,
+		type PhysicalFlyPlacement,
+	} from "../lib/game/motion/host-physical-fly-path";
 	import {
-		GroundedCharacterInput,
-		type GroundedCharacterDrive,
-		type GroundedCharacterEdge,
-	} from "./grounded-character-input";
+		CharacterInputController,
+		type CharacterDrive,
+		type CharacterInputEdge,
+	} from "../lib/game/controls/character-input-controller";
 	import {
 		MOTION_STYLE,
-		motionOrderFromDrive,
-		restrictToModelled,
+		possessionStance,
 		type ExplorerPossession,
 		type MotionStyleName,
+		type PossessionEventOutcome,
 	} from "./explorer-entity-possession";
 	import {
 		BoomCameraSession,
 		type BoomFollowTarget,
-	} from "./boom-camera-session";
-	import { tauriBoomSweepSource } from "./boom-sweep-source";
+	} from "../lib/game/controls/boom-camera-session";
+	import { tauriBoomSweepSource } from "./tauri-boom-sweep-source";
 	import {
-		PhysicalCameraSession,
-		type PhysicalCameraStatus,
-	} from "./physical-camera-session";
-	import { tauriPhysicalCameraTransport } from "./physical-camera-transport";
+		PhysicalFlySession,
+		type PhysicalFlyStatus,
+	} from "./physical-fly-session";
+	import { tauriPhysicalFlyTransport } from "./physical-fly-transport";
 	import { SimulationInterestController } from "./simulation-interest";
 	import { tauriSimulationInterestTransport } from "./simulation-interest-transport";
 	import {
@@ -122,15 +122,15 @@
 	let activeRegionSource: TauriActiveRegionSource | undefined;
 	let skySource: TauriSkySource | undefined;
 	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
-	let cameraController: FreeFlyCameraController | undefined;
+	let cameraController: FrontendCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
-	let physicalCameraSession: PhysicalCameraSession | undefined;
-	let groundedCharacterInput: GroundedCharacterInput | undefined;
+	let physicalCameraSession: PhysicalFlySession | undefined;
 	let explorerPossession = $state<ExplorerPossession | null>(null);
 	let possessedStance = $state<MotionStyleName>("nonCombat");
 	let simulationInterestController: SimulationInterestController | undefined;
 	let dynamicEntitySession: ExplorerDynamicEntitySession | undefined;
 	let unsubscribeDynamicEntities: (() => void) | undefined;
+	let unsubscribePossessionOutcomes: (() => void) | undefined;
 	let dynamicEntityReconciliation: Promise<void> = Promise.resolve();
 	let dynamicEntityReconciliationRevision = 0;
 	let entityCatalog = $state<ExplorerCatalogCapability | null>(null);
@@ -139,9 +139,8 @@
 	let physicalSimulationAnchor: string | null = null;
 	let cameraMode = $state<ExplorerCameraMode>("free-fly");
 	let cameraModePending = $state(false);
-	let physicalCameraStatus = $state<PhysicalCameraStatus | null>(null);
+	let physicalCameraStatus = $state<PhysicalFlyStatus | null>(null);
 	let physicalCameraError = $state<string | null>(null);
-	let jumpChargeExtent = $state<number | null>(null);
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
 		$state(null);
@@ -432,7 +431,7 @@
 		);
 	}
 
-	function physicalCameraInput(controller: FreeFlyCameraController): {
+	function physicalCameraInput(controller: FrontendCameraController): {
 		readonly basis: {
 			readonly forward: [number, number, number];
 			readonly right: [number, number, number];
@@ -453,7 +452,7 @@
 			up: tuple(basis.up),
 		};
 		const worldVelocity = resolvePhysicalFlyVelocity(
-			movement as PhysicalCameraLocalMovement,
+			movement as PhysicalFlyLocalMovement,
 			cameraBasis,
 			FRONTEND_TUNING.explorer.camera.controls.moveSpeed *
 				(precision
@@ -462,7 +461,7 @@
 		);
 		return {
 			basis: cameraBasis,
-			viewDirection: resolvePhysicalCameraViewDirection(cameraBasis),
+			viewDirection: resolvePhysicalFlyViewDirection(cameraBasis),
 			worldVelocity,
 		};
 	}
@@ -471,26 +470,8 @@
 		const session = physicalCameraSession;
 		const controller = cameraController;
 		if (!session?.running || !controller) return;
-		const mode =
-			session.status().mode ?? (cameraMode === "free-fly" ? null : cameraMode);
-		if (mode === null) return;
 		const input = physicalCameraInput(controller);
-		const characterInput = groundedCharacterInput;
-		let request: Promise<void>;
-		if (mode === "grounded-walk") {
-			if (characterInput === undefined) {
-				physicalCameraError =
-					"Grounded camera session has no character input owner.";
-				return;
-			}
-			request = session.setGroundedDrive(
-				characterInput.drive(),
-				input.viewDirection,
-			);
-		} else {
-			request = session.setIntent(input.worldVelocity, input.viewDirection);
-		}
-		void request.catch((error: unknown) => {
+		void session.setIntent(input.worldVelocity).catch((error: unknown) => {
 			if (physicalCameraSession !== session) return;
 			physicalCameraError = errorMessage(error);
 		});
@@ -507,15 +488,11 @@
 		const session = physicalCameraSession;
 		const controller = cameraController;
 		if (!session?.running || !controller) return;
-		const mode =
-			session.status().mode ?? (cameraMode === "free-fly" ? null : cameraMode);
-		if (mode !== "physical-fly") return;
 		const input = physicalCameraInput(controller);
 		void session
 			.addDisplacement(
 				resolvePhysicalFlyWheelDisplacement(input.basis, localUpDistance),
 				input.worldVelocity,
-				input.viewDirection,
 			)
 			.catch((error: unknown) => {
 				if (physicalCameraSession !== session) return;
@@ -523,36 +500,8 @@
 			});
 	}
 
-	function createGroundedCharacterInput(
-		session: PhysicalCameraSession,
-	): GroundedCharacterInput {
-		return new GroundedCharacterInput({
-			fullChargeDurationMs: session.groundedJumpChargeDurationMs(),
-			now: () => performance.now(),
-			onDrive: () => sendPhysicalCameraIntent(),
-			onEdge: (edge: GroundedCharacterEdge) => {
-				const controller = cameraController;
-				if (controller === undefined) return;
-				const viewDirection = physicalCameraInput(controller).viewDirection;
-				void session
-					.queueGroundedEvent(edge, viewDirection)
-					.catch((error: unknown) => {
-						if (physicalCameraSession !== session) return;
-						physicalCameraError = errorMessage(error);
-						// A missing discrete edge would strand the host's contiguous sequence. End
-						// this ownership epoch instead of allowing later input to queue behind a gap.
-						void leavePhysicalCamera(true);
-					});
-			},
-		});
-	}
-
-	function handleCameraCharacterInput(input: CameraCharacterInput): void {
-		// A possessed entity takes the drive keys; otherwise the grounded camera does. They are
-		// never both driven, so possession simply wins while it is held.
-		const owner =
-			possessionInput ??
-			(cameraMode === "grounded-walk" ? groundedCharacterInput : undefined);
+	function handleCameraCharacterInput(input: CharacterKeyInput): void {
+		const owner = possessionInput;
 		if (owner === undefined) return;
 		if (input.kind === "reset") {
 			owner.reset();
@@ -561,7 +510,34 @@
 		owner.applyKey(input.key, input.pressed, input.repeat);
 	}
 
-	async function enterPhysicalCamera(mode: PhysicalCameraMode): Promise<void> {
+	function controlSchemeForCameraMode(
+		mode: ExplorerCameraMode,
+	): FrontendControlScheme {
+		if (mode === "free-fly") return { kind: "free-fly" };
+		return { kind: "physical-fly" };
+	}
+
+	function restoreCameraControlScheme(): void {
+		const controller = cameraController;
+		if (controller === undefined) return;
+		if (possessionInput !== undefined) {
+			controller.setControlScheme({ kind: "possessed-character" });
+			return;
+		}
+		if (physicalCameraSession !== undefined) {
+			controller.setControlScheme(controlSchemeForCameraMode(cameraMode));
+			return;
+		}
+		controller.setControlScheme({ kind: "free-fly" });
+	}
+
+	function nonPossessionCameraControlScheme(): FrontendControlScheme {
+		return physicalCameraSession === undefined
+			? { kind: "free-fly" }
+			: controlSchemeForCameraMode(cameraMode);
+	}
+
+	async function enterPhysicalCamera(): Promise<void> {
 		const controller = cameraController;
 		if (!controller || physicalCameraSession || cameraModePending) return;
 		const placement = cameraCoordinator?.presentedPlacement() ?? null;
@@ -572,29 +548,26 @@
 		}
 		cameraModePending = true;
 		physicalCameraError = null;
-		controller.setLocalTranslationEnabled(false);
-		const session = new PhysicalCameraSession(tauriPhysicalCameraTransport());
+		controller.setControlScheme(
+			possessionInput === undefined
+				? controlSchemeForCameraMode("physical-fly")
+				: { kind: "possessed-character" },
+		);
+		const session = new PhysicalFlySession(tauriPhysicalFlyTransport());
 		try {
-			await session.start(
-				placement,
-				physicalCameraInput(controller).viewDirection,
-				mode,
-			);
+			await session.start(placement);
 			if (cameraController !== controller || !runtimeReady) {
 				await session.stop();
-				controller.setLocalTranslationEnabled(true);
 				cameraMode = "free-fly";
+				restoreCameraControlScheme();
 				return;
 			}
 			physicalCameraSession = session;
-			cameraMode = mode;
-			groundedCharacterInput =
-				mode === "grounded-walk"
-					? createGroundedCharacterInput(session)
-					: undefined;
+			cameraMode = "physical-fly";
+			restoreCameraControlScheme();
 			sendPhysicalCameraIntent();
 		} catch (error) {
-			controller.setLocalTranslationEnabled(true);
+			restoreCameraControlScheme();
 			physicalCameraError = errorMessage(error);
 		} finally {
 			cameraModePending = false;
@@ -612,16 +585,19 @@
 			session.placement()?.residency ??
 			null;
 		// Detach presentation first: no late segment can move the frontend pose after handoff.
+		controller.setControlScheme(
+			possessionInput === undefined
+				? { kind: "free-fly" }
+				: { kind: "possessed-character" },
+		);
 		physicalCameraSession = undefined;
-		groundedCharacterInput = undefined;
-		jumpChargeExtent = null;
 		const presented = controller.snapshotState();
 		controller.adoptPresentedPose(presented);
 		if (preserveResidency && lastHostResidency !== null) {
 			cameraCoordinator?.seedFreeFlyResidency(lastHostResidency);
 		}
-		controller.setLocalTranslationEnabled(true);
 		cameraMode = "free-fly";
+		restoreCameraControlScheme();
 		physicalCameraStatus = null;
 		try {
 			await session.stop();
@@ -630,76 +606,12 @@
 		}
 	}
 
-	async function replacePhysicalCamera(
-		mode: PhysicalCameraMode,
-	): Promise<void> {
-		const oldSession = physicalCameraSession;
-		const controller = cameraController;
-		if (!oldSession || !controller || cameraModePending) return;
-		cameraModePending = true;
-		physicalCameraError = null;
-		const lastHostPlacement =
-			cameraCoordinator?.presentedPlacement() ?? oldSession.placement() ?? null;
-		const lastHostResidency = lastHostPlacement?.residency ?? null;
-		physicalCameraSession = undefined;
-		groundedCharacterInput = undefined;
-		jumpChargeExtent = null;
-		controller.adoptPresentedPose(controller.snapshotState());
-		controller.setLocalTranslationEnabled(false);
-		physicalCameraStatus = null;
-		try {
-			await oldSession.stop();
-			if (cameraController !== controller || !runtimeReady) {
-				controller.setLocalTranslationEnabled(true);
-				cameraMode = "free-fly";
-				return;
-			}
-			const nextSession = new PhysicalCameraSession(
-				tauriPhysicalCameraTransport(),
-			);
-			if (lastHostPlacement === null) {
-				throw new Error(
-					"Physical camera replacement lost its presented placement.",
-				);
-			}
-			await nextSession.start(
-				lastHostPlacement,
-				physicalCameraInput(controller).viewDirection,
-				mode,
-			);
-			if (cameraController !== controller || !runtimeReady) {
-				await nextSession.stop();
-				controller.setLocalTranslationEnabled(true);
-				cameraMode = "free-fly";
-				return;
-			}
-			physicalCameraSession = nextSession;
-			cameraMode = mode;
-			groundedCharacterInput =
-				mode === "grounded-walk"
-					? createGroundedCharacterInput(nextSession)
-					: undefined;
-			sendPhysicalCameraIntent();
-		} catch (error) {
-			if (lastHostResidency !== null) {
-				cameraCoordinator?.seedFreeFlyResidency(lastHostResidency);
-			}
-			controller.setLocalTranslationEnabled(true);
-			cameraMode = "free-fly";
-			physicalCameraError = errorMessage(error);
-		} finally {
-			cameraModePending = false;
-		}
-	}
-
 	function updateCameraMode(mode: ExplorerCameraMode): void {
 		if (mode === cameraMode || cameraModePending) return;
 		if (mode === "free-fly") {
 			void leavePhysicalCamera(true);
-		} else if (physicalCameraSession) {
-			void replacePhysicalCamera(mode);
-		} else {
-			void enterPhysicalCamera(mode);
+		} else if (!physicalCameraSession) {
+			void enterPhysicalCamera();
 		}
 	}
 
@@ -743,6 +655,18 @@
 		const session = dynamicEntitySession;
 		if (session === undefined) return;
 		spawnedEntities = session.mirror.entities();
+		const held = explorerPossession;
+		if (
+			held !== null &&
+			held.guid !== null &&
+			!spawnedEntities.some(
+				(entity) =>
+					entity.identity.guid === held.guid &&
+					entity.generation === held.entityGeneration,
+			)
+		) {
+			retireFrontendPossession();
+		}
 		if (event.kind !== "advanced") {
 			void reconcileSpawnedEntities();
 			return;
@@ -780,11 +704,8 @@
 		await dynamicEntityReconciliation;
 	}
 
-	/// Charge window the possession drive owner is constructed with. Nothing consumes a possessed
-	/// jump yet, so this only has to be a valid positive duration.
-	const POSSESSION_JUMP_CHARGE_MS = 1000;
 	/// Drive with no axis held, used when a stance changes while no key is down.
-	const IDLE_DRIVE: GroundedCharacterDrive = {
+	const IDLE_DRIVE: CharacterDrive = {
 		gait: "run",
 		lateral: null,
 		longitudinal: null,
@@ -793,10 +714,11 @@
 
 	/// Drive owner for the possessed entity, alive only while something is possessed.
 	///
-	/// Deliberately separate from the camera's owner: possession routes the same four axes to an
-	/// entity, and coupling it to grounded-walk camera mode would make driving an entity depend on
-	/// which camera happens to be running.
-	let possessionInput: GroundedCharacterInput | undefined;
+	/// Deliberately separate from camera navigation: possession routes the semantic character axes
+	/// to the entity while the camera controller retains only view/boom gestures.
+	let possessionInput: CharacterInputController | undefined;
+	/// Monotonic semantic revision within the active host-issued possession generation.
+	let possessionIntentRevision = 0;
 
 	/// Third-person boom, alive exactly while an entity is possessed.
 	///
@@ -812,7 +734,7 @@
 	function beginBoomCamera(): void {
 		// The same authority transfer a physical camera performs: the drive keys belong to the
 		// possessed entity, so free fly must stop translating or both would consume them.
-		cameraController?.setLocalTranslationEnabled(false);
+		cameraController?.setControlScheme({ kind: "possessed-character" });
 		boomCameraSession?.dispose();
 		pendingBoomZoom = 0;
 		lastBoomFrameAt = null;
@@ -830,13 +752,11 @@
 	function endBoomCamera(): void {
 		// Free fly resumes from wherever the boom left the camera, because `applyPresentedPosition`
 		// has been writing that position every frame; only translation authority returns here.
-		if (boomCameraSession && physicalCameraSession === undefined) {
-			cameraController?.setLocalTranslationEnabled(true);
-		}
 		boomCameraSession?.dispose();
 		boomCameraSession = undefined;
 		pendingBoomZoom = 0;
 		lastBoomFrameAt = null;
+		restoreCameraControlScheme();
 	}
 
 	/// Route one frame to whichever camera currently owns position.
@@ -847,7 +767,7 @@
 	/// fly, which holds still rather than drifting, since the boom has been writing its position
 	/// into the controller every frame and possession has taken the drive keys away.
 	function syncActiveCamera(
-		physicalPlacement: PhysicalCameraPlacement | null,
+		physicalPlacement: PhysicalFlyPlacement | null,
 		nowMs: number,
 	): ExplorerCameraResidencySync | undefined {
 		const boomTarget = boomCameraSession ? boomFollowTarget() : null;
@@ -912,7 +832,7 @@
 				};
 	}
 
-	function sendPossessedOrder(): void {
+	function sendPossessedIntent(): void {
 		const session = dynamicEntitySession;
 		const input = possessionInput;
 		const held = explorerPossession;
@@ -924,13 +844,80 @@
 		) {
 			return;
 		}
-		const order = restrictToModelled(
-			motionOrderFromDrive(input.drive(), MOTION_STYLE[possessedStance]),
-			held,
-		);
-		void session.setMotionOrder(order).catch((error: unknown) => {
-			spawnedEntityPresentationError = errorMessage(error);
-		});
+		possessionIntentRevision += 1;
+		void session
+			.setPossessionIntent({
+				drive: input.drive(),
+				possessionGeneration: held.possessionGeneration,
+				revision: possessionIntentRevision,
+				stance: MOTION_STYLE[possessedStance],
+			})
+			.catch((error: unknown) => {
+				spawnedEntityPresentationError = errorMessage(error);
+			});
+	}
+
+	function acceptPossessionEventOutcome(outcome: PossessionEventOutcome): void {
+		const held = explorerPossession;
+		if (
+			held === null ||
+			outcome.possessionGeneration !== held.possessionGeneration
+		)
+			return;
+		if (outcome.result.kind !== "rejected") return;
+		possessionInput?.rejectBegin(outcome.sequence);
+		spawnedEntityPresentationError = `Possession ${outcome.sequence} rejected: ${outcome.result.reason}.`;
+	}
+
+	function queuePossessedEdge(edge: CharacterInputEdge): void {
+		const session = dynamicEntitySession;
+		const input = possessionInput;
+		const held = explorerPossession;
+		if (!session || input === undefined || held === null || held.guid === null)
+			return;
+		possessionIntentRevision += 1;
+		const drive = edge.kind === "reset" ? input.drive() : edge.drive;
+		void session
+			.queuePossessionEvent({
+				...edge,
+				drive,
+				possessionGeneration: held.possessionGeneration,
+				revision: possessionIntentRevision,
+				stance: MOTION_STYLE[possessedStance],
+			})
+			.then((receipt) => {
+				for (const outcome of receipt.outcomes)
+					acceptPossessionEventOutcome(outcome);
+			})
+			.catch((error: unknown) => {
+				spawnedEntityPresentationError = errorMessage(error);
+				if (
+					explorerPossession?.possessionGeneration !== held.possessionGeneration
+				)
+					return;
+				// A missing sequence can strand every later edge. End both sides of this ownership
+				// epoch; if the transport is unavailable, the generation check still protects the host.
+				void session
+					.possess(null)
+					.catch((releaseError: unknown) => {
+						spawnedEntityPresentationError = `${errorMessage(error)} Release also failed: ${errorMessage(releaseError)}`;
+					})
+					.finally(() => {
+						if (
+							explorerPossession?.possessionGeneration ===
+							held.possessionGeneration
+						)
+							retireFrontendPossession();
+					});
+			});
+	}
+
+	function retireFrontendPossession(): void {
+		possessionInput?.releaseOwnership();
+		possessionInput = undefined;
+		explorerPossession = null;
+		possessionIntentRevision = 0;
+		endBoomCamera();
 	}
 
 	async function possessExplorerEntity(
@@ -940,41 +927,68 @@
 		if (!session)
 			throw new Error("Explorer possession requires an active runtime.");
 		const possession = await session.possess(guid);
-		explorerPossession = possession.guid === null ? null : possession;
 		if (possession.guid === null) {
+			// Installing the next scheme first asks the outgoing character owner for its one reset.
+			cameraController?.setControlScheme(nonPossessionCameraControlScheme());
+			explorerPossession = null;
 			possessionInput = undefined;
+			possessionIntentRevision = 0;
 			endBoomCamera();
 			return possession;
 		}
-		beginBoomCamera();
-		possessionInput = new GroundedCharacterInput({
-			fullChargeDurationMs: POSSESSION_JUMP_CHARGE_MS,
+		explorerPossession = possession;
+		const acceptedName = (Object.keys(MOTION_STYLE) as MotionStyleName[]).find(
+			(candidate) => MOTION_STYLE[candidate] === possession.acceptedStance,
+		);
+		if (acceptedName === undefined)
+			throw new Error(
+				`Host accepted unknown possession stance 0x${possession.acceptedStance.toString(16)}.`,
+			);
+		possessedStance = acceptedName;
+		possessionIntentRevision = 0;
+		const capability = possessionStance(possession, possession.acceptedStance);
+		if (capability === null)
+			throw new Error(
+				"Host omitted the accepted possession stance capability.",
+			);
+		// Transition before installing the new sink so held camera keys cannot leak into the new
+		// character ownership epoch; keys held across the cutover require a fresh browser press.
+		cameraController?.setControlScheme({ kind: "possessed-character" });
+		possessionInput = new CharacterInputController({
+			fullChargeDurationMs: capability.chargeDurationMs,
 			now: () => performance.now(),
-			onDrive: () => sendPossessedOrder(),
-			// Jump and reset edges have no possessed-entity consumer yet: the entity command surface
-			// carries locomotion only, and a launch is a separate host operation.
-			onEdge: () => {},
+			onDrive: () => sendPossessedIntent(),
+			onEdge: queuePossessedEdge,
 		});
-		// The newly possessed entity holds whatever stance the panel last selected.
-		await setExplorerEntityStance(MOTION_STYLE[possessedStance]);
+		beginBoomCamera();
 		return possession;
 	}
 
 	async function setExplorerEntityStance(style: number): Promise<void> {
 		const session = dynamicEntitySession;
 		const held = explorerPossession;
-		if (!session || held === null) return;
+		if (!session || held === null || held.guid === null) return;
 		const name = (Object.keys(MOTION_STYLE) as MotionStyleName[]).find(
 			(candidate) => MOTION_STYLE[candidate] === style,
 		);
-		if (name !== undefined) possessedStance = name;
-		const input = possessionInput;
-		await session.setMotionOrder(
-			restrictToModelled(
-				motionOrderFromDrive(input?.drive() ?? IDLE_DRIVE, style),
-				held,
-			),
-		);
+		if (name === undefined)
+			throw new Error(`Unknown possession stance 0x${style.toString(16)}.`);
+		possessionIntentRevision += 1;
+		const result = await session.setPossessionIntent({
+			drive: possessionInput?.drive() ?? IDLE_DRIVE,
+			possessionGeneration: held.possessionGeneration,
+			revision: possessionIntentRevision,
+			stance: style,
+		});
+		if (result === "accepted") {
+			const capability = possessionStance(held, style);
+			if (capability === null)
+				throw new Error(
+					"Host accepted a stance absent from its capability receipt.",
+				);
+			possessedStance = name;
+			possessionInput?.setFullChargeDurationMs(capability.chargeDurationMs);
+		}
 	}
 
 	async function despawnExplorerEntity(
@@ -1015,6 +1029,7 @@
 			const physicalSession = physicalCameraSession;
 			const entitySession = dynamicEntitySession;
 			const entityUnsubscribe = unsubscribeDynamicEntities;
+			const possessionOutcomeUnsubscribe = unsubscribePossessionOutcomes;
 			gameRuntime = undefined;
 			runtimeReady = false;
 			cameraLocation = null;
@@ -1033,13 +1048,12 @@
 			physicalCameraSession = undefined;
 			dynamicEntitySession = undefined;
 			unsubscribeDynamicEntities = undefined;
+			unsubscribePossessionOutcomes = undefined;
 			dynamicEntityReconciliationRevision += 1;
 			dynamicEntityReconciliation = Promise.resolve();
 			entityCatalog = null;
 			spawnedEntities = [];
 			spawnedEntityPresentationError = null;
-			groundedCharacterInput = undefined;
-			jumpChargeExtent = null;
 			simulationInterestController = undefined;
 			physicalSimulationAnchor = null;
 			cameraMode = "free-fly";
@@ -1048,6 +1062,7 @@
 			teardown = (async () => {
 				stopFrameLoop();
 				entityUnsubscribe?.();
+				possessionOutcomeUnsubscribe?.();
 				entitySession?.stop();
 				coordinator?.dispose();
 				controller?.dispose();
@@ -1082,6 +1097,10 @@
 				unsubscribeDynamicEntities = entitySession.subscribe(
 					acceptDynamicEntityEvent,
 				);
+				unsubscribePossessionOutcomes =
+					entitySession.subscribePossessionOutcomes(
+						acceptPossessionEventOutcome,
+					);
 				await entitySession.start();
 				entityCatalog = await entitySession.catalogCapability();
 				if (destroyed) return;
@@ -1151,15 +1170,10 @@
 				applyEnvironment();
 				applyFrameSettings();
 				if (destroyed) return;
-				cameraController = new FreeFlyCameraController({
+				cameraController = new FrontendCameraController({
 					canvas,
 					keyboardYawRadiansPerSecond(shiftActive) {
 						const controls = FRONTEND_TUNING.explorer.camera.controls;
-						if (cameraMode === "grounded-walk") {
-							return shiftActive
-								? controls.groundedWalkYawRadiansPerSecond
-								: controls.groundedRunYawRadiansPerSecond;
-						}
 						return (
 							controls.keyboardYawRadiansPerSecond *
 							(shiftActive ? controls.shiftSlowMultiplier : 1)
@@ -1205,13 +1219,6 @@
 						void leavePhysicalCamera(true);
 					}
 					const physicalPlacement = physicalCameraSession?.placement() ?? null;
-					for (const outcome of physicalCameraSession?.takeCharacterEventOutcomes() ??
-						[]) {
-						if (outcome.kind === "rejected") {
-							groundedCharacterInput?.rejectBegin(outcome.sequence);
-						}
-					}
-					jumpChargeExtent = groundedCharacterInput?.chargeExtent() ?? null;
 					if (physicalPlacement && cameraController) {
 						cameraController.applyPresentedPosition(physicalPlacement.position);
 						physicalCameraStatus = physicalCameraSession?.status() ?? null;
@@ -1289,14 +1296,6 @@
 	></canvas>
 
 	<div class="explorer-overlay">
-		{#if jumpChargeExtent !== null}
-			<div class="explorer-jump-charge" aria-label="Jump power">
-				<div
-					class="explorer-jump-charge-fill"
-					style:width={`${jumpChargeExtent * 100}%`}
-				></div>
-			</div>
-		{/if}
 		{#if startupError !== null}
 			<section class="explorer-startup-error" role="alert">
 				{startupError}

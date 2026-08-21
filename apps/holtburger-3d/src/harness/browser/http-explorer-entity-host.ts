@@ -16,6 +16,25 @@ import {
 	type SimulationInterestReceipt,
 } from "../../explorer/simulation-interest";
 import type { LandblockId } from "../../lib/game/game-types";
+import {
+	decodeExplorerPossession,
+	decodePossessionEventOutcome,
+	decodePossessionEventQueueReceipt,
+	decodePossessionIntentResult,
+	decodePossessionMotionProbe,
+	type ExplorerPossession,
+	type ExplorerPossessionEventRequest,
+	type ExplorerPossessionIntent,
+	type PossessionEventOutcome,
+	type PossessionEventQueueReceipt,
+	type PossessionIntentResult,
+	type PossessionMotionProbe,
+} from "../../explorer/explorer-entity-possession";
+
+export interface PossessionTickResponse {
+	readonly event: DynamicEntityEvent | null;
+	readonly outcomes: readonly PossessionEventOutcome[];
+}
 
 /** Harness-only HTTP adapter over the same app-local Explorer driver used by Tauri commands. */
 export class HttpExplorerEntityHost {
@@ -67,6 +86,55 @@ export class HttpExplorerEntityHost {
 	): Promise<DynamicEntityEvent> {
 		return decodeDynamicEntityEvent(
 			await postJson(this.#baseUrl, "explorer-entity-relocate", request),
+		);
+	}
+
+	async possess(guid: number | null): Promise<ExplorerPossession> {
+		return decodeExplorerPossession(
+			await postJson(this.#baseUrl, "explorer-entity-possess", { guid }),
+		);
+	}
+
+	async setPossessionIntent(
+		request: ExplorerPossessionIntent,
+	): Promise<PossessionIntentResult> {
+		return decodePossessionIntentResult(
+			await postJson(this.#baseUrl, "explorer-possession-intent", request),
+		);
+	}
+
+	async queuePossessionEvent(
+		request: ExplorerPossessionEventRequest,
+	): Promise<PossessionEventQueueReceipt> {
+		return decodePossessionEventQueueReceipt(
+			await postJson(this.#baseUrl, "explorer-possession-event", request),
+		);
+	}
+
+	/** Advances one possession tick while retaining lifecycle outcomes beside body delivery. */
+	async tickPossession(
+		durationMilliseconds: number,
+	): Promise<PossessionTickResponse> {
+		const value = await postJson(this.#baseUrl, "explorer-possession-tick", {
+			durationMilliseconds,
+		});
+		if (typeof value !== "object" || value === null)
+			throw new Error("Possession tick response must be an object.");
+		const response = value as Record<string, unknown>;
+		if (!Array.isArray(response.outcomes))
+			throw new Error("Possession tick outcomes must be an array.");
+		return {
+			event:
+				response.event === null
+					? null
+					: decodeDynamicEntityEvent(response.event),
+			outcomes: response.outcomes.map(decodePossessionEventOutcome),
+		};
+	}
+
+	async possessionMotionProbe(): Promise<PossessionMotionProbe | null> {
+		return decodePossessionMotionProbe(
+			await postJson(this.#baseUrl, "explorer-possession-probe", {}),
 		);
 	}
 

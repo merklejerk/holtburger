@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { Vec3 } from "../lib/game/math/types";
-import type { LandblockId } from "../lib/game/game-types";
-import type { ResolvedSceneOrigin } from "../lib/game/scene";
+import type { LandblockId } from "../game-types";
+import { Vec3 } from "../math/types";
+import type { ResolvedSceneOrigin } from "../scene";
 import {
 	IDLE_BOOM_INPUT,
 	type BoomCameraOrientation,

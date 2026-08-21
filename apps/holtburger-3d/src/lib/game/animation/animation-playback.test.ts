@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createRotationMat4, transformPoint3 } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 import {
-	advanceCyclicFrame,
+	advancePlayingFrame,
 	clipEntryFrame,
 	interpolateRigidTransform,
 	playingClip,
@@ -33,51 +33,53 @@ function testAnimation(frameCount: number): PreparedAnimation {
 
 describe("playingClip", () => {
 	it("rejects a window that does not fit the animation it indexes", () => {
-		expect(() => playingClip(testAnimation(5), 0, 5, 30)).toThrow(
+		expect(() => playingClip(testAnimation(5), 0, 5, 30, "loop")).toThrow(
 			/does not fit/,
 		);
-		expect(() => playingClip(testAnimation(5), 3, 1, 30)).toThrow(
+		expect(() => playingClip(testAnimation(5), 3, 1, 30, "loop")).toThrow(
 			/does not fit/,
 		);
-		expect(() => playingClip(testAnimation(5), -1, 4, 30)).toThrow(
+		expect(() => playingClip(testAnimation(5), -1, 4, 30, "loop")).toThrow(
 			/does not fit/,
 		);
 	});
 
 	it("enters a forward clip at its low frame and a reversed clip inside its high frame", () => {
-		expect(clipEntryFrame(playingClip(testAnimation(5), 1, 3, 30))).toBe(1);
+		expect(
+			clipEntryFrame(playingClip(testAnimation(5), 1, 3, 30, "loop")),
+		).toBe(1);
 		// Just inside the high frame, so the first departure leaves it rather than skipping it.
-		const reversed = playingClip(testAnimation(5), 1, 3, -30);
+		const reversed = playingClip(testAnimation(5), 1, 3, -30, "loop");
 		expect(clipEntryFrame(reversed)).toBeGreaterThan(3);
 		expect(clipEntryFrame(reversed)).toBeLessThan(4);
 	});
 });
 
-describe("advanceCyclicFrame", () => {
+describe("advancePlayingFrame", () => {
 	it("visits forward departed frames once and excludes the terminal seam frame", () => {
 		const clip = wholeAnimationClip(testAnimation(5));
-		expect(advanceCyclicFrame(clip, 1.5, 4 / clip.framesPerSecond)).toEqual({
+		expect(advancePlayingFrame(clip, 1.5, 4 / clip.framesPerSecond)).toEqual({
 			departedFrames: [1, 2, 3],
 			framePosition: 0.5,
 		});
 	});
 
 	it("visits reverse departed frames once and excludes the low seam frame", () => {
-		const clip = playingClip(testAnimation(5), 0, 4, -30);
+		const clip = playingClip(testAnimation(5), 0, 4, -30, "loop");
 		// Lapping re-enters just inside the high frame, so frame 4 is not departed until the
 		// cursor crosses back below it.
-		expect(advanceCyclicFrame(clip, 3.5, 4 / 30)).toEqual({
+		expect(advancePlayingFrame(clip, 3.5, 4 / 30)).toEqual({
 			departedFrames: [3, 2, 1],
 			framePosition: expect.closeTo(4.4998, 4),
 		});
 	});
 
 	it("never leaves the authored window", () => {
-		const clip = playingClip(testAnimation(10), 4, 6, 30);
+		const clip = playingClip(testAnimation(10), 4, 6, 30, "loop");
 		let position = clipEntryFrame(clip);
 		const visited: number[] = [];
 		for (let step = 0; step < 40; step += 1) {
-			const advance = advanceCyclicFrame(clip, position, 0.25 / 30);
+			const advance = advancePlayingFrame(clip, position, 0.25 / 30);
 			position = advance.framePosition;
 			visited.push(...advance.departedFrames);
 			expect(position).toBeGreaterThanOrEqual(clip.lowFrame);
@@ -87,16 +89,34 @@ describe("advanceCyclicFrame", () => {
 	});
 
 	it("laps back to the entry frame instead of holding at the far bound", () => {
-		const clip = playingClip(testAnimation(10), 4, 6, 30);
+		const clip = playingClip(testAnimation(10), 4, 6, 30, "loop");
 		// Three window frames at 30fps is 0.1s; two laps' worth must land back inside the window.
-		const advance = advanceCyclicFrame(clip, clipEntryFrame(clip), 0.2);
+		const advance = advancePlayingFrame(clip, clipEntryFrame(clip), 0.2);
 		expect(advance.framePosition).toBe(clip.lowFrame);
 		expect(advance.departedFrames).toEqual([4, 5, 4, 5]);
 	});
 
+	it("holds a forward transition at its high-frame pose", () => {
+		const clip = playingClip(testAnimation(10), 4, 6, 30, "hold");
+
+		expect(advancePlayingFrame(clip, clipEntryFrame(clip), 1)).toEqual({
+			departedFrames: [4, 5],
+			framePosition: 6,
+		});
+	});
+
+	it("holds a reversed transition at its low-frame pose", () => {
+		const clip = playingClip(testAnimation(10), 4, 6, -30, "hold");
+
+		expect(advancePlayingFrame(clip, clipEntryFrame(clip), 1)).toEqual({
+			departedFrames: [6, 5],
+			framePosition: 4,
+		});
+	});
+
 	it("holds the entry frame at a zero rate", () => {
-		const clip = playingClip(testAnimation(5), 1, 3, 0);
-		expect(advanceCyclicFrame(clip, clipEntryFrame(clip), 10)).toEqual({
+		const clip = playingClip(testAnimation(5), 1, 3, 0, "hold");
+		expect(advancePlayingFrame(clip, clipEntryFrame(clip), 10)).toEqual({
 			departedFrames: [],
 			framePosition: 1,
 		});
@@ -198,7 +218,7 @@ describe("sampleAnimationPose", () => {
 	});
 
 	it("holds the window's own high frame rather than the animation's last frame", () => {
-		const clip = playingClip(testAnimation(10), 2, 4, 30);
+		const clip = playingClip(testAnimation(10), 2, 4, 30, "loop");
 
 		expect(sampleAnimationPose(clip, 3.5)[0]?.m41).toBe(35);
 		// Frame 5 exists in the animation and is outside the window, so the seam holds frame 4.

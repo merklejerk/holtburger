@@ -1316,7 +1316,13 @@ export class GameRuntime {
 				generation: installed.behaviorGeneration,
 				targetId: behaviorTargetId(installed.nodeId),
 			},
-			playingClip(animation, clip.lowFrame, clip.highFrame, clip.framerate),
+			playingClip(
+				animation,
+				clip.lowFrame,
+				clip.highFrame,
+				clip.framerate,
+				clip.completion,
+			),
 		);
 	}
 

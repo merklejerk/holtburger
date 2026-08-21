@@ -34,8 +34,7 @@ import {
 } from "./static-object-source-closure";
 
 type OutdoorStaticPreparedPayload =
-	| LandblockOutdoorLayerSourcePayloadDto
-	| RegionRenderProfilePayloadDto;
+	LandblockOutdoorLayerSourcePayloadDto | RegionRenderProfilePayloadDto;
 
 interface LoadedPayload<
 	TKind extends OutdoorStaticPreparedPayload["kind"] =

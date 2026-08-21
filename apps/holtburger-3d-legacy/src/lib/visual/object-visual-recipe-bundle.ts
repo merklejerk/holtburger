@@ -50,22 +50,13 @@ export type ObjectVisualPartRecipeKey = Brand<
 type ObjectVisualSourceKind = "gfx-obj" | "embedded-geometry";
 
 export type ObjectVisualTextureUsage =
-	| "object-base-color"
-	| "object-detail"
-	| "object-index"
-	| "object-palette";
+	"object-base-color" | "object-detail" | "object-index" | "object-palette";
 
 type ObjectVisualMaterialFamily =
-	| "direct-color"
-	| "indexed-color"
-	| "texture-rgba"
-	| "unsupported";
+	"direct-color" | "indexed-color" | "texture-rgba" | "unsupported";
 
 type ObjectVisualMaterialPass =
-	| "additive"
-	| "alpha-test"
-	| "opaque"
-	| "transparent";
+	"additive" | "alpha-test" | "opaque" | "transparent";
 
 type ObjectVisualIndexedTextureFormat = "index16" | "p8";
 
@@ -82,8 +73,7 @@ export interface ObjectVisualTextureRecipe {
 }
 
 type ObjectVisualTextureSource =
-	| ObjectVisualPaletteTextureSource
-	| ObjectVisualRenderSurfaceTextureSource;
+	ObjectVisualPaletteTextureSource | ObjectVisualRenderSurfaceTextureSource;
 
 interface ObjectVisualRenderSurfaceTextureSource {
 	readonly kind: "render-surface";
@@ -150,8 +140,7 @@ export interface ObjectVisualUnsupportedMaterialRecipe extends ObjectVisualMater
 
 /** Source-local geometry recipe. The baker applies `PartInstance.transform`. */
 export type ObjectVisualGeometryRecipe =
-	| ObjectVisualEmbeddedGeometryRecipe
-	| ObjectVisualGfxObjGeometryRecipe;
+	ObjectVisualEmbeddedGeometryRecipe | ObjectVisualGfxObjGeometryRecipe;
 
 interface ObjectVisualGfxObjGeometryRecipe {
 	/** Sidecar buffer containing resolver-flattened source-local gfx-obj geometry. */

@@ -375,12 +375,10 @@ export function createOutdoorSourceDiagnosticsRoot(
 						slot.object.landblockId === object.identity.landblockId &&
 						slot.object.instanceId === object.identity.instanceId,
 				)
-				.map(
-					(slot): OutdoorStaticObjectMaterialSlotDiagnostics => ({
-						material: materialSourcesById.get(slot.material.materialId) ?? null,
-						slot,
-					}),
-				),
+				.map((slot): OutdoorStaticObjectMaterialSlotDiagnostics => ({
+					material: materialSourcesById.get(slot.material.materialId) ?? null,
+					slot,
+				})),
 		].sort(compareMaterialSlotDiagnostics);
 		const materialIds = new Set([
 			...materialSlots.map((entry) => entry.slot.material.materialId),

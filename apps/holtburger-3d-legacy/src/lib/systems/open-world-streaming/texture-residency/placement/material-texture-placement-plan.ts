@@ -251,7 +251,9 @@ async function reserveBucketTexturePlacements<
 				intentByBindingId,
 				jobPrefix: options.jobPrefix,
 				output: filterAtlasPlacementOutput({
-					entryIds: new Set(insertion.remainingEntries.map((entry) => entry.id)),
+					entryIds: new Set(
+						insertion.remainingEntries.map((entry) => entry.id),
+					),
 					output: planned,
 				}),
 				timing,
@@ -341,7 +343,8 @@ function splitReusableEntryPlacements(options: {
 	readonly unplacedEntries: readonly OpenWorldTextureBucketSnapshot["entries"][number][];
 } {
 	const reusablePlacements: OpenWorldTextureEntryPlacementRecord[] = [];
-	const unplacedEntries: OpenWorldTextureBucketSnapshot["entries"][number][] = [];
+	const unplacedEntries: OpenWorldTextureBucketSnapshot["entries"][number][] =
+		[];
 	for (const entry of options.touchedEntries) {
 		const reusable = options.textureClaims.findReusableEntryPlacement(entry.id);
 		if (reusable) {
@@ -445,9 +448,10 @@ function planExistingPageInsertion<
 	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
 	readonly remainingEntries: readonly OpenWorldTextureBucketSnapshot["entries"][number][];
 } {
-	const candidates = options.textureClaims.createResidentPageInsertionCandidates(
-		options.bucketKey,
-	);
+	const candidates =
+		options.textureClaims.createResidentPageInsertionCandidates(
+			options.bucketKey,
+		);
 	if (candidates.length === 0 || options.touchedEntries.length === 0) {
 		return {
 			bindingPlacements: [],
@@ -507,12 +511,7 @@ function planExistingPageInsertion<
 		const rect: OpenWorldObjectVisualAtlasPlacementRect = {
 			entryKey: placement.atlasEntryKey as OpenWorldTextureEntryId,
 			pageId: candidate.pageId,
-			rect: [
-				placement.x,
-				placement.y,
-				placement.width,
-				placement.height,
-			],
+			rect: [placement.x, placement.y, placement.width, placement.height],
 		};
 		const bucket = insertedRectsByPageId.get(candidate.pageId);
 		if (bucket) {
@@ -530,7 +529,9 @@ function planExistingPageInsertion<
 	for (const [pageId, rects] of insertedRectsByPageId) {
 		const candidate = candidates.find((page) => page.pageId === pageId);
 		if (!candidate) {
-			throw new Error(`Inserted texture page ${pageId} has no candidate facts.`);
+			throw new Error(
+				`Inserted texture page ${pageId} has no candidate facts.`,
+			);
 		}
 		options.textureClaims.addEntryPlacementsToPage({
 			pageId: candidate.pageId,
@@ -575,9 +576,9 @@ function planExistingPageInsertion<
 			}),
 		);
 	}
-	const insertedEntryIds = new Set(
-		[...insertion.insertedPlacementsByEntryKey.keys()] as OpenWorldTextureEntryId[],
-	);
+	const insertedEntryIds = new Set([
+		...insertion.insertedPlacementsByEntryKey.keys(),
+	] as OpenWorldTextureEntryId[]);
 	return {
 		bindingPlacements,
 		pageBuildRequests,
@@ -791,7 +792,10 @@ function createReusableBakeFacingBindingPlacements<
 	>;
 }): OpenWorldMaterialTexturePlacementReservation<TItemId>["bindingPlacements"] {
 	return options.placements.flatMap((placement) => {
-		const entry = requireSourceEntry(options.sourceByEntryId, placement.entryId);
+		const entry = requireSourceEntry(
+			options.sourceByEntryId,
+			placement.entryId,
+		);
 		return entry.bindingIds.flatMap((bindingId) => {
 			const intent = options.intentByBindingId.get(bindingId);
 			if (!intent) {
@@ -823,7 +827,10 @@ function createReusableResidentTextureCommit<
 		if (placement.pageState === "building") {
 			return [];
 		}
-		const entry = requireSourceEntry(options.sourceByEntryId, placement.entryId);
+		const entry = requireSourceEntry(
+			options.sourceByEntryId,
+			placement.entryId,
+		);
 		return entry.bindingIds.flatMap((bindingId) => {
 			if (!options.intentByBindingId.has(bindingId)) {
 				return [];

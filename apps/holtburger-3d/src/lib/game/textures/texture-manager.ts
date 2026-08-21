@@ -59,14 +59,12 @@ export interface TerrainColorTextureArraySource extends TextureArraySourceBase {
 /** Array source whose purpose owns no CPU terrain palette. */
 export interface ConventionalTextureArraySource extends TextureArraySourceBase {
 	readonly purpose:
-		| TexturePurposeValue.TerrainBlendMask
-		| TexturePurposeValue.TerrainRoadMask;
+		TexturePurposeValue.TerrainBlendMask | TexturePurposeValue.TerrainRoadMask;
 }
 
 /** Complete immutable source used to create one texture array atomically. */
 export type TextureArraySource =
-	| TerrainColorTextureArraySource
-	| ConventionalTextureArraySource;
+	TerrainColorTextureArraySource | ConventionalTextureArraySource;
 
 /** Complete immutable source used to create one unpacked texture atomically. */
 export interface AssetTextureSource {
@@ -97,13 +95,11 @@ export interface TerrainColorTextureArrayBinding extends TextureArrayBindingBase
 /** Array binding with no terrain-palette consumer. */
 export interface ConventionalTextureArrayBinding extends TextureArrayBindingBase {
 	readonly purpose:
-		| TexturePurposeValue.TerrainBlendMask
-		| TexturePurposeValue.TerrainRoadMask;
+		TexturePurposeValue.TerrainBlendMask | TexturePurposeValue.TerrainRoadMask;
 }
 
 export type TextureArrayBinding =
-	| TerrainColorTextureArrayBinding
-	| ConventionalTextureArrayBinding;
+	TerrainColorTextureArrayBinding | ConventionalTextureArrayBinding;
 
 /** Backend atlas resource and page-relative placement for one logical texture. */
 export interface TextureAtlasBinding {

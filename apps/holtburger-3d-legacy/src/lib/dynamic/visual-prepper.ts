@@ -17,7 +17,9 @@ export class LocalDynamicVisualPrepper implements DynamicVisualPrepper {
 		this.#assetReader = assetReader;
 	}
 
-	async prepare(input: DynamicVisualPrepInput): Promise<DynamicVisualBakeResult> {
+	async prepare(
+		input: DynamicVisualPrepInput,
+	): Promise<DynamicVisualBakeResult> {
 		const sourceGeometry = await createDynamicVisualBakeSourceGeometry(
 			this.#assetReader,
 			[input.recipe],

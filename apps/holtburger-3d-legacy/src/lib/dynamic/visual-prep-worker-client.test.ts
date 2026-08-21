@@ -95,7 +95,9 @@ describe("dynamic visual prep worker protocol", () => {
 			serviceRequestId: "service:1",
 		});
 		if (serviceResponse?.kind !== "service-response") {
-			throw new Error("Expected worker to receive a prepared asset service response.");
+			throw new Error(
+				"Expected worker to receive a prepared asset service response.",
+			);
 		}
 		expect(serviceResponse.response).toMatchObject({
 			asset: {

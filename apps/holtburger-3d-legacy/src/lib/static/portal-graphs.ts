@@ -22,7 +22,9 @@ import {
 type PortalAperture =
 	StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
 type MutableProjectionDiagnostics = {
-	-readonly [Key in keyof StaticPortalProjectionDiagnostics]: StaticPortalProjectionDiagnostics[Key];
+	-readonly [
+		Key in keyof StaticPortalProjectionDiagnostics
+	]: StaticPortalProjectionDiagnostics[Key];
 };
 
 const OUTDOOR_ROOT_NODE_ID_PREFIX = "outdoor";

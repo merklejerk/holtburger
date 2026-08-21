@@ -67,12 +67,16 @@ describe("OpenWorldTextureClaimRegistry", () => {
 				textureKey: textureKey("texture:shared-terrain"),
 			}),
 		]);
-		const snapshot = registry.retainTextureBindings(ownerId("owner:b"), bucketKey, [
-			createBinding("terrain-b", bucketKey, {
-				bindingId: bindingId("binding:terrain-owner-b"),
-				textureKey: textureKey("texture:shared-terrain"),
-			}),
-		]);
+		const snapshot = registry.retainTextureBindings(
+			ownerId("owner:b"),
+			bucketKey,
+			[
+				createBinding("terrain-b", bucketKey, {
+					bindingId: bindingId("binding:terrain-owner-b"),
+					textureKey: textureKey("texture:shared-terrain"),
+				}),
+			],
+		);
 
 		expect(snapshot.entries).toEqual([
 			expect.objectContaining({
@@ -104,9 +108,7 @@ describe("OpenWorldTextureClaimRegistry", () => {
 					textureKey: textureKey("texture:shared-terrain"),
 				}),
 			]),
-		).toThrow(
-			"changed source key from source:first to source:second",
-		);
+		).toThrow("changed source key from source:first to source:second");
 	});
 
 	it("fails loudly when one canonical texture key maps to a conflicting page class", () => {
@@ -127,9 +129,7 @@ describe("OpenWorldTextureClaimRegistry", () => {
 					textureKey: textureKey("texture:shared-terrain"),
 				}),
 			]),
-		).toThrow(
-			"changed page class from page-class:first to page-class:second",
-		);
+		).toThrow("changed page class from page-class:first to page-class:second");
 	});
 
 	it("replaces an owner's full binding set for one bucket", () => {
@@ -585,14 +585,16 @@ function createBinding(
 	return {
 		bindingId: overrides.bindingId ?? bindingId(`binding:${name}`),
 		bucketKey,
-		pageClass: overrides.pageClass ?? pageClass(
-			`page-class:${name.includes("terrain") ? "terrain" : "object"}`,
-		),
+		pageClass:
+			overrides.pageClass ??
+			pageClass(
+				`page-class:${name.includes("terrain") ? "terrain" : "object"}`,
+			),
 		purpose: overrides.purpose ?? purposeFromBucketKey(bucketKey),
 		sourceKey: overrides.sourceKey ?? "source:shared",
-		textureKey: overrides.textureKey ?? textureKey(
-			`texture:${name.replace("-a", "").replace("-b", "")}`,
-		),
+		textureKey:
+			overrides.textureKey ??
+			textureKey(`texture:${name.replace("-a", "").replace("-b", "")}`),
 	};
 }
 

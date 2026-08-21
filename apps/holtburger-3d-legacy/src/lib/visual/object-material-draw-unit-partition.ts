@@ -32,10 +32,7 @@ export interface ObjectMaterialPartitionAxis {
 }
 
 type ObjectMaterialFamily =
-	| "flat-color"
-	| "indexed-paletted"
-	| "texture-rgba"
-	| "unsupported";
+	"flat-color" | "indexed-paletted" | "texture-rgba" | "unsupported";
 
 type ObjectMaterialPass = "additive" | "alpha-test" | "opaque" | "transparent";
 
@@ -85,8 +82,7 @@ export function createObjectMaterialDrawUnitPartitionKey(options: {
 	readonly includeConcreteEntryInKey: boolean;
 	readonly material: ObjectMaterialPartitionInput;
 	readonly texturePlacementSnapshot:
-		| ObjectVisualTexturePlacementSnapshot
-		| undefined;
+		ObjectVisualTexturePlacementSnapshot | undefined;
 	readonly texturePlacementReadinessByItemId?: ReadonlyMap<
 		TexturePlacementItemId,
 		ObjectMaterialTexturePlacementReadiness

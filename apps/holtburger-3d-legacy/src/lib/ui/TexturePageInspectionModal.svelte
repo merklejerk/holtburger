@@ -112,7 +112,8 @@
 			selectedPlacementBindingId === null ||
 			!entry.bindingIds.includes(selectedPlacementBindingId)
 		) {
-			selectedPlacementBindingId = findFirstPlacementForEntry(entry)?.bindingId ?? null;
+			selectedPlacementBindingId =
+				findFirstPlacementForEntry(entry)?.bindingId ?? null;
 		}
 		activeDetailTab = "entry";
 	}
@@ -133,7 +134,8 @@
 		bindingId: string,
 	): RuntimeTexturePageInspectionEntry | null {
 		return (
-			snapshot.entries.find((entry) => entry.bindingIds.includes(bindingId)) ?? null
+			snapshot.entries.find((entry) => entry.bindingIds.includes(bindingId)) ??
+			null
 		);
 	}
 
@@ -164,7 +166,10 @@
 			8,
 			Math.max(
 				0.05,
-				Math.min(viewport.width / preview.width, viewport.height / preview.height),
+				Math.min(
+					viewport.width / preview.width,
+					viewport.height / preview.height,
+				),
 			),
 		);
 		panX = (viewport.width - preview.width * zoom) * 0.5;
@@ -266,7 +271,12 @@
 				? "rgba(255, 214, 102, 0.16)"
 				: "rgba(117, 255, 209, 0.06)";
 			const [x, y, width, height] = placement.rect;
-			context.fillRect(panX + x * zoom, panY + y * zoom, width * zoom, height * zoom);
+			context.fillRect(
+				panX + x * zoom,
+				panY + y * zoom,
+				width * zoom,
+				height * zoom,
+			);
 			context.strokeRect(
 				panX + x * zoom,
 				panY + y * zoom,
@@ -343,8 +353,9 @@
 		return (
 			[...preview.placements]
 				.reverse()
-				.find((placement) => placementContainsPoint(placement.rect, pageX, pageY)) ??
-			null
+				.find((placement) =>
+					placementContainsPoint(placement.rect, pageX, pageY),
+				) ?? null
 		);
 	}
 
@@ -431,7 +442,9 @@
 			: `${preview.width}x${preview.height} ${preview.format} / ${preview.sampleClass}`;
 	}
 
-	function formatAssignedPixels(snapshot: RuntimeTexturePageInspectionSnapshot): string {
+	function formatAssignedPixels(
+		snapshot: RuntimeTexturePageInspectionSnapshot,
+	): string {
 		const ratio =
 			snapshot.assignedPixelRatio === null
 				? "unknown"
@@ -463,7 +476,10 @@
 		</div>
 
 		<div class="texture-page-inspector__body">
-			<section class="texture-page-inspector__preview" aria-label="Texture page preview">
+			<section
+				class="texture-page-inspector__preview"
+				aria-label="Texture page preview"
+			>
 				<div class="texture-page-inspector__preview-toolbar">
 					<div>
 						<h3>Preview</h3>
@@ -474,13 +490,19 @@
 							<input bind:checked={boundsVisible} type="checkbox" />
 							<span>Bounds</span>
 						</label>
-						<button disabled={snapshot.preview === null} type="button" onclick={resetView}>
+						<button
+							disabled={snapshot.preview === null}
+							type="button"
+							onclick={resetView}
+						>
 							Fit
 						</button>
 					</div>
 				</div>
 				{#if snapshot.preview === null}
-					<div class="texture-page-inspector__missing-preview">no accepted page upload</div>
+					<div class="texture-page-inspector__missing-preview">
+						no accepted page upload
+					</div>
 				{:else}
 					<div
 						bind:this={viewportElement}
@@ -498,8 +520,15 @@
 				{/if}
 			</section>
 
-			<aside class="texture-page-inspector__side" aria-label="Texture page details">
-				<div class="texture-page-inspector__tabs" role="tablist" aria-label="Inspection panels">
+			<aside
+				class="texture-page-inspector__side"
+				aria-label="Texture page details"
+			>
+				<div
+					class="texture-page-inspector__tabs"
+					role="tablist"
+					aria-label="Inspection panels"
+				>
 					<button
 						class:active={activeDetailTab === "page"}
 						type="button"
@@ -536,7 +565,10 @@
 				</div>
 
 				{#if activeDetailTab === "page"}
-					<section class="texture-page-inspector__panel" aria-label="Page summary">
+					<section
+						class="texture-page-inspector__panel"
+						aria-label="Page summary"
+					>
 						<dl>
 							<div>
 								<dt>State</dt>
@@ -581,7 +613,10 @@
 						</dl>
 					</section>
 				{:else if activeDetailTab === "entries"}
-					<section class="texture-page-inspector__panel" aria-label="Page entries">
+					<section
+						class="texture-page-inspector__panel"
+						aria-label="Page entries"
+					>
 						<h3>Entries</h3>
 						{#if snapshot.entries.length === 0}
 							<p class="texture-page-inspector__empty">none</p>
@@ -601,7 +636,10 @@
 						{/if}
 					</section>
 				{:else}
-					<section class="texture-page-inspector__panel" aria-label="Entry details">
+					<section
+						class="texture-page-inspector__panel"
+						aria-label="Entry details"
+					>
 						<h3>Selected Entry</h3>
 						{#if selectedEntry === null}
 							<p class="texture-page-inspector__empty">none</p>

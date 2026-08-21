@@ -74,8 +74,7 @@ interface CrossedHookDispatchResult {
 export class DynamicAnimationPlayer {
 	readonly #hookDispatcher = new DynamicHookDispatcher();
 	readonly #onCatchUpTruncated:
-		| ((truncation: DynamicAnimationCatchUpTruncation) => void)
-		| null;
+		((truncation: DynamicAnimationCatchUpTruncation) => void) | null;
 
 	constructor(options: DynamicAnimationPlayerOptions = {}) {
 		this.#onCatchUpTruncated = options.onCatchUpTruncated ?? null;
@@ -494,8 +493,7 @@ function createCrossedHookFrames(options: {
 	readonly entityId: string;
 	readonly frameCount: number;
 	readonly onCatchUpTruncated:
-		| ((truncation: DynamicAnimationCatchUpTruncation) => void)
-		| null;
+		((truncation: DynamicAnimationCatchUpTruncation) => void) | null;
 	readonly previousHookFrame: DynamicAnimationHookFrameKey | null;
 	readonly sampled: SampledAnimationFrame;
 	readonly startedAtSeconds: number;

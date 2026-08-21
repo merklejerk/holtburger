@@ -315,8 +315,7 @@ class FixtureWorkerPort implements StaticResolverWorkerPort {
 
 	postMessage(
 		message:
-			| StaticResolverWorkerMainMessage
-			| StaticResolverWorkerThreadMessage,
+			StaticResolverWorkerMainMessage | StaticResolverWorkerThreadMessage,
 	): void {
 		if (
 			message.kind === "job" ||

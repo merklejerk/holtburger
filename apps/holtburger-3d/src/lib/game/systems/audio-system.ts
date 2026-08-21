@@ -142,10 +142,7 @@ export interface AudioTrigger {
 }
 
 export type AudioTriggerOutcome =
-	| "played"
-	| "lost-probability-roll"
-	| "inaudible"
-	| "device-refused";
+	"played" | "lost-probability-roll" | "inaudible" | "device-refused";
 
 /**
  * Why triggers did not become sound, counted separately.

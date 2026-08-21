@@ -15,15 +15,7 @@ import type { FrameState } from "../renderer/types";
 
 type CameraDragMode = "rotate" | "pan";
 type CameraControlKey =
-	| "w"
-	| "a"
-	| "s"
-	| "d"
-	| "z"
-	| "c"
-	| "pageup"
-	| "pagedown"
-	| "space";
+	"w" | "a" | "s" | "d" | "z" | "c" | "pageup" | "pagedown" | "space";
 
 interface ActiveCameraDrag {
 	readonly pointerId: number;

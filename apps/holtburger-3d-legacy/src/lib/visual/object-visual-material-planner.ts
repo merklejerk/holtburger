@@ -47,21 +47,13 @@ const INDEXED_CLIP_MAP_INDEX_THRESHOLD = 8;
 const INDEXED_CLIP_MAP_INDEX_THRESHOLD_DISABLED = -1;
 
 type StaticObjectMaterialFamily =
-	| "flat-color"
-	| "texture-rgba"
-	| "indexed-paletted"
-	| "unsupported";
+	"flat-color" | "texture-rgba" | "indexed-paletted" | "unsupported";
 
 type StaticObjectMaterialRenderCoverage =
-	| "classified-render-candidate"
-	| "classified-render-deferred"
-	| "unsupported";
+	"classified-render-candidate" | "classified-render-deferred" | "unsupported";
 
 type StaticObjectMaterialPass =
-	| "opaque"
-	| "alpha-test"
-	| "transparent"
-	| "additive";
+	"opaque" | "alpha-test" | "transparent" | "additive";
 
 type PaletteDataUseIdentity = Extract<
 	MaterialTextureDataUseIdentity,
@@ -162,12 +154,7 @@ export interface ObjectVisualMaterialFallbackReason {
 
 interface StaticObjectMaterialAlphaPolicy {
 	readonly mode:
-		| "opaque"
-		| "clip"
-		| "translucent"
-		| "alpha"
-		| "inverse-alpha"
-		| "additive";
+		"opaque" | "clip" | "translucent" | "alpha" | "inverse-alpha" | "additive";
 	readonly alphaTest: number;
 	readonly indexedClipThreshold: number;
 	readonly opacity: number;

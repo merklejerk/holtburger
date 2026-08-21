@@ -148,9 +148,7 @@ export function isObjectVisualTexturePlacementSnapshot(
 
 export function requireObjectVisualTexturePlacementSnapshot(
 	snapshot:
-		| TexturePlacementSnapshot
-		| ObjectVisualTexturePlacementSnapshot
-		| undefined,
+		TexturePlacementSnapshot | ObjectVisualTexturePlacementSnapshot | undefined,
 	subject: string,
 ): ObjectVisualTexturePlacementSnapshot {
 	if (!snapshot || !isObjectVisualTexturePlacementSnapshot(snapshot)) {

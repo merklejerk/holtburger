@@ -67,7 +67,7 @@ function createOpenWorldStreamingTextureCommitFromPageUpdate(
 				textureRefId: placement.textureRefId,
 				textureWidth: placement.textureWidth,
 			}),
-	);
+		);
 	return {
 		bindingRemovals: [],
 		bindingUpdates,

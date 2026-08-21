@@ -35,8 +35,7 @@ import {
 import { createSurfaceTextureIdentity } from "../terrain/terrain-identities";
 
 type EnvCellSystemPreparedPayload =
-	| ResolverLandblockEnvCellLayerPayloadDto
-	| RegionRenderProfilePayloadDto;
+	ResolverLandblockEnvCellLayerPayloadDto | RegionRenderProfilePayloadDto;
 
 interface LoadedPayload<
 	TKind extends EnvCellSystemPreparedPayload["kind"] =

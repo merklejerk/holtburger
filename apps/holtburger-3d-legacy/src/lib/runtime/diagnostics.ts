@@ -16,8 +16,7 @@ interface RuntimeDiagnosticsRuntimeSummary {
 }
 
 type RuntimeDiagnosticsDomainReport =
-	| OpenWorldStreamingDiagnosticsReport
-	| RendererDiagnosticsReport;
+	OpenWorldStreamingDiagnosticsReport | RendererDiagnosticsReport;
 
 interface OpenWorldStreamingDiagnosticsReport {
 	readonly kind: "open-world-streaming";

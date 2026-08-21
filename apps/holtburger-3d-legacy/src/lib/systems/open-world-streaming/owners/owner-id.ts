@@ -5,9 +5,7 @@ export type MaterializationOwnerId = string & {
 };
 
 export type MaterializationOwnerKind =
-	| "static-layer"
-	| "runtime-entity"
-	| "static-authored-dynamic";
+	"static-layer" | "runtime-entity" | "static-authored-dynamic";
 
 export interface StaticLayerMaterializationOwner {
 	readonly id: MaterializationOwnerId;

@@ -295,8 +295,7 @@ export interface ResolvedEnvCellStaticObjectSource {
 
 /** Static-object source shape shared by outdoor layers and one exact EnvCell scope. */
 export type ResolvedStaticObjectLayerSource =
-	| ResolvedOutdoorStaticLayerSource
-	| ResolvedEnvCellStaticObjectSource;
+	ResolvedOutdoorStaticLayerSource | ResolvedEnvCellStaticObjectSource;
 
 /** Environment-cell layer containing structured interiors and embedded residents. */
 export interface ResolvedEnvCellLayerSource {

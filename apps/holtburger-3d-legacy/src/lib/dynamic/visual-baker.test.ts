@@ -122,9 +122,7 @@ describe("dynamic visual baker", () => {
 			"texture|source=src=render-surface|id=06000010|usage=rgba-color|format=rgba8|sample=rgba-color",
 		);
 		expect(firstRequirement?.textureKey).not.toContain("src=runtime");
-		expect(firstRequirement?.ownerIds).not.toEqual(
-			secondRequirement?.ownerIds,
-		);
+		expect(firstRequirement?.ownerIds).not.toEqual(secondRequirement?.ownerIds);
 		expect(firstPlanning.placementIntents[0]?.placementPolicy).toEqual({
 			bucketScope: { kind: "static-domain" },
 			sourceStability: { kind: "content-stable" },

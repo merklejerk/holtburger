@@ -37,6 +37,4 @@ export interface PortalGeometryData {
 
 /** Complete semantic geometry accepted by renderer backends. */
 export type RenderGeometryData =
-	| TerrainGeometryData
-	| ObjectGeometryData
-	| PortalGeometryData;
+	TerrainGeometryData | ObjectGeometryData | PortalGeometryData;

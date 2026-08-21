@@ -595,28 +595,28 @@ function createStructuredInteriorMaterialTableEntries(options: {
 			.entries(),
 	]
 		.sort(([left], [right]) => left.localeCompare(right))
-		.map(
-			([, entry], slot): StaticMaterialTableEntry =>
-				createStaticMaterialTableEntry({
-					createTextureBindingRef: (dataUse, wrapMode) => {
-						const requirement =
-							createStructuredInteriorTextureBindingRequirement({
-								dataUse,
-								task: options.task,
-								wrapMode,
-							});
-						return {
-							bindingId: requirement.bindingId,
-							textureKey: requirement.sourceKey,
-						};
-					},
-					materialIds: uniqueSortedNumbers([...entry.materialIds]),
-					plan: entry.plan,
-					slot,
-					textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(
-						entry.plan,
-					),
-				}),
+		.map(([, entry], slot): StaticMaterialTableEntry =>
+			createStaticMaterialTableEntry({
+				createTextureBindingRef: (dataUse, wrapMode) => {
+					const requirement = createStructuredInteriorTextureBindingRequirement(
+						{
+							dataUse,
+							task: options.task,
+							wrapMode,
+						},
+					);
+					return {
+						bindingId: requirement.bindingId,
+						textureKey: requirement.sourceKey,
+					};
+				},
+				materialIds: uniqueSortedNumbers([...entry.materialIds]),
+				plan: entry.plan,
+				slot,
+				textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(
+					entry.plan,
+				),
+			}),
 		);
 }
 

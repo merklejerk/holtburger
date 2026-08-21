@@ -83,8 +83,7 @@ interface OpenWorldTexturePageBuildEntry {
 }
 
 export type OpenWorldTexturePageBuildOutput =
-	| OpenWorldTexturePageUpdateOutput
-	| OpenWorldTexturePageNoopOutput;
+	OpenWorldTexturePageUpdateOutput | OpenWorldTexturePageNoopOutput;
 
 interface OpenWorldTexturePageUpdateOutput extends OpenWorldTexturePageBuildBaseOutput {
 	/** Accepted page pixels and placement rects. */
@@ -129,11 +128,10 @@ interface OpenWorldTexturePageBuildPlacement {
 	readonly rect: readonly [number, number, number, number];
 }
 
-export type OpenWorldTexturePageBuildWorkerRequest =
-	WorkerHandlerInputMessage<
-		OpenWorldTexturePageBuildInput,
-		PreparedAssetServiceResponse
-	>;
+export type OpenWorldTexturePageBuildWorkerRequest = WorkerHandlerInputMessage<
+	OpenWorldTexturePageBuildInput,
+	PreparedAssetServiceResponse
+>;
 
 export type OpenWorldTexturePageBuildWorkerResponse =
 	WorkerHandlerOutputMessage<

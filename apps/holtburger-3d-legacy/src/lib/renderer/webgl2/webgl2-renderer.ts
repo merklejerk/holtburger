@@ -296,9 +296,7 @@ void main() {
 `;
 
 type ObjectMaterialShaderFamily =
-	| "flat-color"
-	| "indexed-paletted"
-	| "texture-rgba";
+	"flat-color" | "indexed-paletted" | "texture-rgba";
 
 export const OBJECT_MATERIAL_FRAGMENT_SHADERS: Readonly<
 	Record<ObjectMaterialShaderFamily, string>

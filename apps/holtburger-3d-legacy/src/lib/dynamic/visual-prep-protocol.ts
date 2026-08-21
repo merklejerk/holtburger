@@ -33,7 +33,10 @@ export type DynamicVisualPrepWorkerResponse =
 	DynamicVisualPrepWorkerThreadMessage;
 
 export type DynamicVisualPrepWorkerPort = WorkerMessagePort<
-	WorkerPoolRequestMessage<DynamicVisualPrepInput, PreparedAssetServiceResponse>,
+	WorkerPoolRequestMessage<
+		DynamicVisualPrepInput,
+		PreparedAssetServiceResponse
+	>,
 	WorkerPoolResponseMessage<
 		DynamicVisualBakeResult,
 		never,

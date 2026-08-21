@@ -549,8 +549,7 @@ export interface RendererParticleCapability {
  * resolved, and `region-static-detail` because the active region's detail bindings were replaced.
  */
 export type ResolvedResourceInvalidation =
-	| "atlas-publication"
-	| "region-static-detail";
+	"atlas-publication" | "region-static-detail";
 
 export interface Renderer {
 	/** Backend-specific diagnostics; absent renderers remain valid production implementations. */

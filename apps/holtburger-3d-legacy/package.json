@@ -32,7 +32,7 @@
 		"eslint": "^10.2.1",
 		"globals": "^17.5.0",
 		"knip": "^6.13.1",
-		"prettier": "^3.8.3",
+		"prettier": "3.9.6",
 		"prettier-plugin-svelte": "^3.5.2",
 		"svelte": "^5.55.4",
 		"svelte-check": "^4.4.6",

@@ -71,8 +71,7 @@ interface BrowserSpawnRequestRejected {
 }
 
 export type BrowserSpawnRequestValidationResult =
-	| BrowserSpawnRequestAccepted
-	| BrowserSpawnRequestRejected;
+	BrowserSpawnRequestAccepted | BrowserSpawnRequestRejected;
 
 const DEFAULT_RUNTIME_SPAWN_LANDBLOCK_ID = 0xda55ffff;
 const DEFAULT_RUNTIME_SPAWN_ENV_CELL_ID = 0xda550100;

@@ -89,11 +89,7 @@ interface DynamicPrepRecord {
 }
 
 type DynamicPrepResult =
-	| "failed"
-	| "missingRecipe"
-	| "ready"
-	| "skipped"
-	| "stale";
+	"failed" | "missingRecipe" | "ready" | "skipped" | "stale";
 
 type DynamicPrepStage =
 	| "dynamic-visual-prep-worker"

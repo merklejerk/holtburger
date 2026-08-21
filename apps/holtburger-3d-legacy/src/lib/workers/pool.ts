@@ -523,11 +523,14 @@ export class StandardWorkerPool<
 
 		const serviceStartedAtMs = performance.now();
 		this.#serviceRequests += 1;
-		this.#activeServiceRequestsByServiceRequestId.set(message.serviceRequestId, {
-			requestId: message.requestId,
-			serviceRequestId: message.serviceRequestId,
-			startedAtMs: serviceStartedAtMs,
-		});
+		this.#activeServiceRequestsByServiceRequestId.set(
+			message.serviceRequestId,
+			{
+				requestId: message.requestId,
+				serviceRequestId: message.serviceRequestId,
+				startedAtMs: serviceStartedAtMs,
+			},
+		);
 		void this.#serviceHandler(message.request).then(
 			(result) => {
 				this.#recordServiceTiming({
@@ -669,7 +672,9 @@ export class StandardWorkerPool<
 	): void {
 		const now = performance.now();
 		const runningMs =
-			job.workerIndex === undefined ? 0 : Math.max(0, now - job.stageStartedAtMs);
+			job.workerIndex === undefined
+				? 0
+				: Math.max(0, now - job.stageStartedAtMs);
 		const queuedMs =
 			job.workerIndex === undefined
 				? Math.max(0, now - job.queuedAtMs)
@@ -695,7 +700,9 @@ export class StandardWorkerPool<
 		readonly startedAtMs: number;
 		readonly status: WorkerPoolServiceTimingDiagnostics["status"];
 	}): void {
-		this.#activeServiceRequestsByServiceRequestId.delete(input.serviceRequestId);
+		this.#activeServiceRequestsByServiceRequestId.delete(
+			input.serviceRequestId,
+		);
 		this.#recentServiceTimings.push({
 			durationMs: performance.now() - input.startedAtMs,
 			requestId: input.requestId,

@@ -69,11 +69,7 @@ export type SkillSnapshot = {
 };
 
 export type MageSpellcastKind =
-	| "attack"
-	| "vulnerability"
-	| "heal"
-	| "revitalize"
-	| "transfer";
+	"attack" | "vulnerability" | "heal" | "revitalize" | "transfer";
 
 export type MageSpellcastRequest = {
 	spellName: string | null;
@@ -92,9 +88,7 @@ export type AttackRaySnapshot = {
 };
 
 export type MageSpellcastInterruptionReason =
-	| "follow_override"
-	| "teleport"
-	| "weenie_error";
+	"follow_override" | "teleport" | "weenie_error";
 
 export type MageSpellcastOutcome =
 	| { kind: "succeeded" }

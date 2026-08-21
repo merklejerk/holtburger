@@ -12,8 +12,7 @@ import type {
 import type { ObjectVisualStaticPublicationMetadata } from "./object-visual-static-publication";
 
 export type ObjectVisualStaticScope =
-	| ObjectVisualEnvCellSystemStaticScope
-	| ObjectVisualOutdoorStaticObjectScope;
+	ObjectVisualEnvCellSystemStaticScope | ObjectVisualOutdoorStaticObjectScope;
 
 interface ObjectVisualStaticVisualProduct {
 	/** Heavy source-local geometry buffers referenced by ready object visual recipes. */

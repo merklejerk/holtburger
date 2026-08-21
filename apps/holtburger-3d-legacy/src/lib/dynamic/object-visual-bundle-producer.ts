@@ -132,28 +132,26 @@ function createDynamicMaterialSlots(options: {
 	readonly recipe: DynamicEntityRecipe;
 }): readonly ObjectVisualMaterialSlotFacts[] {
 	return options.recipe.visual.setupModel.parts.flatMap((part) =>
-		part.materialSlots.map(
-			(slot): ObjectVisualMaterialSlotFacts => ({
-				gfxObj: part.gfxObj,
-				identity: {
-					geometrySurfaceId: slot.geometrySurfaceId,
-					kind: "static-material-slot",
-					materialSurfaceId: slot.materialSurfaceId,
-					part: {
-						kind: "static-object-part",
-						object: options.object,
-						partIndex: part.partIndex,
-					},
-					slotIndex: slot.slotIndex,
+		part.materialSlots.map((slot): ObjectVisualMaterialSlotFacts => ({
+			gfxObj: part.gfxObj,
+			identity: {
+				geometrySurfaceId: slot.geometrySurfaceId,
+				kind: "static-material-slot",
+				materialSurfaceId: slot.materialSurfaceId,
+				part: {
+					kind: "static-object-part",
+					object: options.object,
+					partIndex: part.partIndex,
 				},
-				material: slot.material,
-				materialVariantSignature: slot.materialVariantSignature,
-				object: options.object,
-				paletteOverride: slot.paletteOverride,
-				paletteViews: slot.paletteViews,
-				source: part.source,
-			}),
-		),
+				slotIndex: slot.slotIndex,
+			},
+			material: slot.material,
+			materialVariantSignature: slot.materialVariantSignature,
+			object: options.object,
+			paletteOverride: slot.paletteOverride,
+			paletteViews: slot.paletteViews,
+			source: part.source,
+		})),
 	);
 }
 

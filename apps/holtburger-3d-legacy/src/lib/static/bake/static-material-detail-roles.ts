@@ -32,8 +32,7 @@ export interface StaticMaterialDetailRolePlan {
 	readonly fadeNear: number;
 	readonly fadeFar: number;
 	readonly renderCoverage:
-		| "classified-render-candidate"
-		| "classified-render-deferred";
+		"classified-render-candidate" | "classified-render-deferred";
 	readonly fallbackReasons: readonly ObjectVisualMaterialFallbackReason[];
 }
 

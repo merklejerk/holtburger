@@ -285,10 +285,18 @@ vec3 applyRoads(vec3 color, uint pcode, TerrainUv uv) {
 /**
  * Flat stand-in colour for a landblock too fogged to be worth compositing.
  *
- * Samples the dominant terrain type's colour texture at its smallest mip. Terrain colours carry a
- * complete mip chain, so that level is the box-filtered average of the whole texture -- the colour
- * the composited surface would average to, without a surface field, a blend, or a road lookup.
- * The explicit large LOD clamps to that level whatever the array's dimensions are.
+ * RETAIL DIVERGENCE: retail selected a composed surface for every terrain cell from its four
+ * authored corner codes and drew every visible land cell against that surface array. This path
+ * instead represents the whole far landblock with one dominant terrain texture average.
+ * Restoring retail composition would remove the visible flat-colour boundary, but would also
+ * restore composition sampling and texture state for 111 of 139 visible landblocks in the
+ * deterministic 0xda55ffff radius-8, noon-fog census captured on 2026-08-20.
+ *
+ * Samples the dominant terrain type's colour texture at its smallest mip. Terrain colours
+ * carry a complete mip chain, so that level is the box-filtered average of the whole texture
+ * -- the colour the composited surface would average to, without a surface field, a blend, or
+ * a road lookup. The explicit large LOD clamps to that level whatever the array's dimensions
+ * are.
  */
 vec3 solidTerrainColor() {
 	uvec4 record = compositionRecord(int(uSolidTerrainCode), 0);

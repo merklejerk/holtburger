@@ -483,6 +483,8 @@
 		readonly durationMs: number;
 		readonly from: Vec3;
 		readonly pitchDegrees: number;
+		/** Active projection retained while scripted movement changes only the outdoor pose. */
+		readonly projection: Pick<Camera, "far" | "fov" | "near">;
 		readonly radii: SceneInterestRadii;
 		readonly reject: (cause: Error) => void;
 		readonly resolve: (report: BrowserHarnessFollowFlightReport) => void;
@@ -702,6 +704,23 @@
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): void {
+		setOutdoorCameraProjection(
+			rawLandblockId,
+			position,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			{ far: CAMERA_FAR, fov: CAMERA_FOV_DEGREES, near: CAMERA_NEAR },
+		);
+	}
+
+	/** Place an outdoor camera without changing the projection owned by its calling policy. */
+	function setOutdoorCameraProjection(
+		rawLandblockId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		projection: Pick<Camera, "far" | "fov" | "near">,
+	): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (
 			position.length !== 3 ||
@@ -715,9 +734,7 @@
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const cameraPosition = new Vec3(...position);
 		applyHarnessCamera(runtime, {
-			far: CAMERA_FAR,
-			fov: CAMERA_FOV_DEGREES,
-			near: CAMERA_NEAR,
+			...projection,
 			placement: {
 				envCellId: null,
 				landblockId,
@@ -726,11 +743,9 @@
 			},
 		});
 		cameraEvidence = {
+			...projection,
 			envCellId: null,
-			far: CAMERA_FAR,
-			fov: CAMERA_FOV_DEGREES,
 			landblockId,
-			near: CAMERA_NEAR,
 			pitchDegrees: cameraPitchDegrees,
 			policy: "explicit-outdoor",
 			position,
@@ -786,6 +801,11 @@
 				durationMs,
 				from,
 				pitchDegrees: evidence.pitchDegrees,
+				projection: {
+					far: evidence.far,
+					fov: evidence.fov,
+					near: evidence.near,
+				},
 				radii,
 				reject,
 				resolve,
@@ -833,11 +853,12 @@
 				landblockId,
 			});
 		}
-		setOutdoorCamera(
+		setOutdoorCameraProjection(
 			landblockId,
 			[position.x, position.y, position.z],
 			flight.yawDegrees,
 			flight.pitchDegrees,
+			flight.projection,
 		);
 		if (fraction < 1) return;
 		flight.completionPending = true;

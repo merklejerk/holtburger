@@ -41,7 +41,7 @@ mod outdoor_static_source;
 mod particle_emitter_source;
 mod particle_mesh_source;
 mod physics_script_source;
-mod placed_motion_presentation;
+pub mod placed_motion_presentation;
 pub mod polygon_geometry;
 pub mod portal_geometry;
 pub mod portal_visibility;
@@ -389,6 +389,26 @@ pub async fn load_texture_pixels_bytes(
     request: LoadTexturePixelsRequest,
 ) -> Result<Vec<u8>> {
     build_texture_pixels_response(runtime, request).await
+}
+
+/// Every animation one motion table can reach, as canonical dat ids in stable order.
+///
+/// Shared by the Tauri command and the dev content host so the browser harness stages the same
+/// closure the app does; a harness that could not stage one could not exercise motion at all.
+pub fn load_motion_table_closure_ids(
+    motion: &holtburger_content::MotionSequenceCatalog,
+    raw_motion_table_id: &str,
+) -> Result<Vec<String>> {
+    let motion_table_id = parse_typed_dat_id(raw_motion_table_id, 0x09)?;
+    let table = motion
+        .table(motion_table_id)
+        .with_context(|| format!("Motion table 0x{motion_table_id:08X} is not in the contract."))?;
+    let mut animations: Vec<u32> = table.reachable_animation_ids().collect();
+    animations.sort_unstable();
+    Ok(animations
+        .into_iter()
+        .map(source_projection::dat_id)
+        .collect())
 }
 
 /// Build the canonical typed animation response used by Tauri and focused host tests.
@@ -899,6 +919,66 @@ fn stop_physical_camera(
     runtime.stop(session);
 }
 
+/// One frontend sweep request in canonical scene axes.
+///
+/// Names geometry and a budget only. What the answer is used for — a boom arm, a placement probe,
+/// a line-of-sight test — is the caller's policy, and the host does not model it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SphereSweepRequest {
+    /// Canonical scene-space start point.
+    pub origin: [f32; 3],
+    /// Interior cell containing `origin`, or absent while outdoors.
+    pub env_cell_id: Option<String>,
+    /// Canonical scene-space direction; normalized host-side.
+    pub direction: [f32; 3],
+    /// Maximum distance to travel in meters.
+    pub distance: f32,
+    /// Positive swept-sphere radius in meters.
+    pub radius: f32,
+}
+
+/// Resolve one frontend sweep request against the live collision scene.
+///
+/// Shared by the Tauri command and the dev content host so the browser harness asks the identical
+/// question with identical validation. An earlier copy in the dev host parsed the EnvCell without
+/// checking its type, which would have let the harness accept input the app rejects — exactly the
+/// divergence that makes harness evidence untrustworthy.
+pub fn resolve_sphere_sweep(
+    simulation: &host_simulation_runtime::HostSimulationRuntime,
+    request: SphereSweepRequest,
+) -> Result<f32> {
+    let cell = request
+        .env_cell_id
+        .as_deref()
+        .map(|cell| parse_typed_dat_id(cell, 0x01).map(holtburger_common::Guid))
+        .transpose()?;
+    simulation.sweep_sphere_distance(host_simulation_runtime::SphereSweepQuery {
+        origin: placed_motion_presentation::scene_point_to_pose(request.origin)?,
+        cell,
+        direction: placed_motion_presentation::scene_direction_to_ac(request.direction)?,
+        distance: request.distance,
+        radius: request.radius,
+        config: holtburger_core::FREE_SPHERE_FLY_CONFIG,
+    })
+}
+
+/// How far a sphere travels from a point before static geometry stops it.
+///
+/// Static collision only, like every free-flight solve. Registers nothing and retains nothing, so
+/// a caller may ask every tick.
+#[tauri::command]
+async fn sweep_sphere_distance(
+    simulation: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
+    request: SphereSweepRequest,
+) -> Result<f32, String> {
+    let simulation = Arc::clone(&simulation);
+    tokio::task::spawn_blocking(move || resolve_sphere_sweep(&simulation, request))
+        .await
+        .map_err(|error| format!("sphere sweep task failed: {error}"))?
+        .map_err(format_error)
+}
+
 /// Replaces the complete frontend-owned collision simulation interest.
 #[tauri::command]
 async fn replace_simulation_interest(
@@ -1157,6 +1237,122 @@ async fn relocate_explorer_entity(
     })
     .await
     .map_err(|error| format!("Explorer entity relocation task failed: {error}"))?
+}
+
+/// Every animation one motion table can reach, so a spawning entity can stage them as a closure.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MotionTableClosureRequest {
+    motion_table_id: String,
+}
+
+/// Loads the animation closure of one motion table.
+///
+/// The set is read from the projected contract, which already resolved every reference, so this
+/// cannot report an animation the archive lacks. An unknown table is an error rather than an empty
+/// set: staging nothing for a table that should exist would activate an entity that silently never
+/// animates.
+#[tauri::command]
+async fn load_motion_table_closure(
+    motion: tauri::State<'_, Arc<holtburger_content::MotionSequenceCatalog>>,
+    request: MotionTableClosureRequest,
+) -> Result<Vec<String>, String> {
+    load_motion_table_closure_ids(motion.inner(), &request.motion_table_id).map_err(format_error)
+}
+
+/// Frontend request naming which entity to possess, or releasing whatever is possessed.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PossessExplorerEntityRequest {
+    /// Entity to possess. `None` releases.
+    guid: Option<holtburger_common::Guid>,
+}
+
+/// What the frontend needs to render possession: identity and what the entity can actually do.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerPossessionReceipt {
+    guid: Option<holtburger_common::Guid>,
+    motion_table_id: Option<String>,
+    /// Locomotion commands this entity's motion table models. Read from the contract, so the UX
+    /// refuses what the table cannot do rather than issuing a command that resolves to nothing.
+    modelled_commands: Vec<String>,
+}
+
+/// Semantic locomotion order for the possessed entity, in the same four axes retail interprets.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerMotionOrderRequest {
+    /// Stance, as a full motion-table style command.
+    style: Option<u32>,
+    forward: Option<ExplorerOrderedMotion>,
+    sidestep: Option<ExplorerOrderedMotion>,
+    turn: Option<ExplorerOrderedMotion>,
+}
+
+/// One commanded motion and the speed multiplier it plays at.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerOrderedMotion {
+    command: u32,
+    /// Retail's `speedMod`: a multiplier on the selected motion, not metres per second.
+    speed: f32,
+}
+
+impl ExplorerOrderedMotion {
+    fn resolve(self) -> Option<(holtburger_world::motion::MotionCommand, f32)> {
+        self.speed.is_finite().then_some((
+            holtburger_world::motion::MotionCommand(self.command),
+            self.speed,
+        ))
+    }
+}
+
+impl ExplorerMotionOrderRequest {
+    fn resolve(self) -> holtburger_world::motion::MotionOrder {
+        holtburger_world::motion::MotionOrder {
+            style: self.style.map(holtburger_world::motion::MotionCommand),
+            forward: self.forward.and_then(ExplorerOrderedMotion::resolve),
+            sidestep: self.sidestep.and_then(ExplorerOrderedMotion::resolve),
+            turn: self.turn.and_then(ExplorerOrderedMotion::resolve),
+        }
+    }
+}
+
+/// Possesses one spawned entity, or releases whatever is possessed.
+#[tauri::command]
+async fn possess_explorer_entity(
+    entities: tauri::State<'_, Arc<explorer_entity_runtime::ExplorerEntityRuntime>>,
+    request: PossessExplorerEntityRequest,
+) -> Result<ExplorerPossessionReceipt, String> {
+    let entities = Arc::clone(&entities);
+    let Some(guid) = request.guid else {
+        entities.release_possession(std::time::Instant::now());
+        return Ok(ExplorerPossessionReceipt {
+            guid: None,
+            motion_table_id: None,
+            modelled_commands: Vec::new(),
+        });
+    };
+    let possession = entities.possess(guid).map_err(|error| error.to_string())?;
+    Ok(ExplorerPossessionReceipt {
+        guid: Some(possession.guid),
+        motion_table_id: possession.motion_table_id.map(source_projection::dat_id),
+        modelled_commands: possession
+            .modelled_commands
+            .into_iter()
+            .map(source_projection::dat_id)
+            .collect(),
+    })
+}
+
+/// Replaces the order the possessed entity performs from the next tick onward.
+#[tauri::command]
+async fn set_explorer_entity_motion(
+    entities: tauri::State<'_, Arc<explorer_entity_runtime::ExplorerEntityRuntime>>,
+    request: ExplorerMotionOrderRequest,
+) -> Result<bool, String> {
+    Ok(entities.set_motion_order(request.resolve()).is_some())
 }
 
 /// Clears the Explorer registry/body population and publishes an empty reconstruction snapshot.
@@ -1595,8 +1791,17 @@ pub fn run() {
     let simulation = Arc::new(host_simulation_runtime::HostSimulationRuntime::new(
         collision_source,
     ));
+    // Projected once at startup. Measured at 222 ms against the full profile, which is the same
+    // cost the client pays; lazy per-table resolution is the mitigation if that ever hurts.
+    let motion_catalog = Arc::new(
+        content_state
+            .repository
+            .read_motion_sequence_catalog()
+            .expect("failed to project the motion contract from configured content"),
+    );
     let explorer_entities = Arc::new(explorer_entity_runtime::ExplorerEntityRuntime::new(
         Arc::clone(&simulation),
+        Arc::clone(&motion_catalog),
     ));
     let catalog = Arc::new(
         explorer_weenie_catalog::ExplorerWeenieCatalog::discover_from_environment(
@@ -1648,6 +1853,7 @@ pub fn run() {
         })
         .manage(content_state)
         .manage(simulation)
+        .manage(motion_catalog)
         .manage(explorer_entities)
         .manage(explorer_entity_driver)
         .manage(explorer_entity_delivery)
@@ -1663,6 +1869,10 @@ pub fn run() {
             launch_explorer_entity,
             relocate_explorer_entity,
             reset_explorer_entities,
+            load_motion_table_closure,
+            sweep_sphere_distance,
+            possess_explorer_entity,
+            set_explorer_entity_motion,
             start_simulation_interest_session,
             replace_simulation_interest,
             start_physical_camera,

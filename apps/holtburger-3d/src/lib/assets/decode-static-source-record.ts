@@ -693,12 +693,16 @@ export function decodeStaticPresentation(
 		definition.kind === "setup-model"
 			? resolveObjectBehavior({
 					animationId: definition.defaultAnimationId,
+					// Static scenery animates from its default clip, not from a motion table; a live
+					// entity overrides this from its own content identity when it spawns.
+					motionTableId: null,
 					physicsScriptId: definition.defaultScriptId,
 					physicsScriptTableId: definition.defaultScriptTableId,
 					soundTableId: definition.defaultSoundTableId,
 				})
 			: resolveObjectBehavior({
 					animationId: null,
+					motionTableId: null,
 					physicsScriptId: null,
 					physicsScriptTableId: null,
 					soundTableId: null,

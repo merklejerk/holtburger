@@ -2346,6 +2346,7 @@ dependencies = [
  "holtburger-dat",
  "log",
  "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2408,6 +2409,8 @@ dependencies = [
  "holtburger-content",
  "holtburger-core",
  "holtburger-dat",
+ "holtburger-protocol",
+ "holtburger-weenie-catalog",
  "holtburger-world",
  "log",
  "tokio",

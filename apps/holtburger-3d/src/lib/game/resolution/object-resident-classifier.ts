@@ -14,6 +14,7 @@ export interface ClassifiedObjectResidents {
 /** Setup-default IDs before their behavior capability is classified. */
 export interface ObjectBehaviorIds {
 	readonly animationId: DatAssetId | null;
+	readonly motionTableId: DatAssetId | null;
 	readonly physicsScriptId: DatAssetId | null;
 	readonly physicsScriptTableId: DatAssetId | null;
 	readonly soundTableId: DatAssetId | null;
@@ -31,6 +32,7 @@ export function resolveObjectBehavior(
 			animationId: null,
 			physicsScriptId: null,
 			physicsScriptTableId: null,
+			motionTableId: ids.motionTableId,
 			soundTableId: ids.soundTableId,
 		};
 	}
@@ -39,6 +41,7 @@ export function resolveObjectBehavior(
 			...resolveScriptIds(ids),
 			animationId: null,
 			kind: "script-only",
+			motionTableId: ids.motionTableId,
 			soundTableId: ids.soundTableId,
 		};
 	}
@@ -48,6 +51,7 @@ export function resolveObjectBehavior(
 			animationId: ids.animationId,
 			physicsScriptId: null,
 			physicsScriptTableId: null,
+			motionTableId: ids.motionTableId,
 			soundTableId: ids.soundTableId,
 		};
 	}
@@ -55,6 +59,7 @@ export function resolveObjectBehavior(
 		...resolveScriptIds(ids),
 		animationId: ids.animationId,
 		kind: "animation-and-script",
+		motionTableId: ids.motionTableId,
 		soundTableId: ids.soundTableId,
 	};
 }

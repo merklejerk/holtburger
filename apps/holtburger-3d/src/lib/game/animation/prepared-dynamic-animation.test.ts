@@ -39,7 +39,8 @@ describe("prepareDynamicAnimation", () => {
 			direction: "forward",
 			frameIndex: 0,
 			kind: "replace-object",
-			rawPayload: new Uint8Array([1]),
+			gfxObjId: "0x01000001",
+			partIndex: 1,
 		};
 
 		expect(

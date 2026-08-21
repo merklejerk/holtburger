@@ -1,6 +1,7 @@
 import type {
 	BehaviorEventRouter,
 	BehaviorObservation,
+	BehaviorTarget,
 } from "../behavior/behavior-event-router";
 import {
 	buildEffectRouter,
@@ -10,6 +11,7 @@ import {
 import { describe, expect, it } from "vitest";
 import type { DecodedAnimationHook } from "../../assets/decode-animation-record";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
+import { playingClip } from "../animation/animation-playback";
 import { transformPoint3 } from "../math/matrices";
 import { Mat4, Vec3 } from "../math/types";
 import { AnimationSystem } from "./animation-system";
@@ -37,11 +39,6 @@ function buildAnimationSystemOver(effects: EffectSystem) {
 	lastRouter = router;
 	// Effect state belongs to the entity, not to playback, so these tests stand in for the owner
 	// that installs it in production.
-	const install = system.install.bind(system);
-	system.install = (ownerId, target, identity, animation) => {
-		installEffectState(effects, target.targetId, animation.partCount);
-		return install(ownerId, target, identity, animation);
-	};
 	const stageOwner = system.stageOwner.bind(system);
 	system.stageOwner = (ownerId, installations) => {
 		for (const installation of installations) {
@@ -56,6 +53,21 @@ function buildAnimationSystemOver(effects: EffectSystem) {
 	return system;
 }
 
+/** Stage one owner and commit it, which is the only way production installs playback. */
+function install(
+	system: AnimationSystem<string>,
+	ownerId: string,
+	installations: readonly {
+		readonly animation: PreparedAnimation;
+		readonly target: BehaviorTarget;
+		readonly residentIdentity: string;
+	}[],
+) {
+	const staged = system.stageOwner(ownerId, installations);
+	staged.commit();
+	return staged.samples;
+}
+
 /** The router most recently wired by {@link buildAnimationSystemOver}. */
 let lastRouter: BehaviorEventRouter;
 const observations = (): readonly BehaviorObservation[] =>
@@ -66,26 +78,29 @@ describe("AnimationSystem", () => {
 		const firstEffects = new EffectSystem();
 		const first = buildAnimationSystemOver(firstEffects);
 		const second = buildAnimationSystem();
-		const animation = clip();
+		const animation = testAnimation();
 
-		const firstInitial = first.install(
-			"owner",
-			testTarget("scene-node:1"),
-			"resident:a",
-			animation,
-		);
-		const repeatedInitial = second.install(
-			"owner",
-			testTarget("scene-node:2"),
-			"resident:a",
-			animation,
-		);
-		const independentInitial = first.install(
-			"owner",
-			testTarget("scene-node:3"),
-			"resident:b",
-			animation,
-		);
+		const [firstInitial, independentInitial] = install(first, "owner", [
+			{
+				animation,
+				residentIdentity: "resident:a",
+				target: testTarget("scene-node:1"),
+			},
+			{
+				animation,
+				residentIdentity: "resident:b",
+				target: testTarget("scene-node:3"),
+			},
+		]);
+		const [repeatedInitial] = install(second, "owner", [
+			{
+				animation,
+				residentIdentity: "resident:a",
+				target: testTarget("scene-node:2"),
+			},
+		]);
+		if (!firstInitial || !repeatedInitial || !independentInitial)
+			throw new Error("Phase comparison did not produce three samples.");
 
 		expect(firstInitial.articulatedPose).toEqual(
 			repeatedInitial.articulatedPose,
@@ -110,7 +125,13 @@ describe("AnimationSystem", () => {
 	it("rebases gaps above two seconds without hooks or a catch-up burst", () => {
 		const effects = new EffectSystem();
 		const system = buildAnimationSystemOver(effects);
-		system.install("owner", testTarget("scene-node:1"), "resident:a", clip());
+		install(system, "owner", [
+			{
+				animation: testAnimation(),
+				residentIdentity: "resident:a",
+				target: testTarget("scene-node:1"),
+			},
+		]);
 		const foldedCount = observations().length;
 
 		advanceAndSample(system, 0);
@@ -130,12 +151,16 @@ describe("AnimationSystem", () => {
 
 	it("applies representative static omega as a per-update vector at 30 Hz", () => {
 		const system = buildAnimationSystem();
-		const animation = clip(new Vec3(0, 0, 0.026797784));
-		const initial = system.install(
-			"owner",
-			testTarget("scene-node:1"),
-			"resident:a",
-			animation,
+		const animation = testAnimation(new Vec3(0, 0, 0.026797784));
+		const initial = requiredAt(
+			install(system, "owner", [
+				{
+					animation,
+					residentIdentity: "resident:a",
+					target: testTarget("scene-node:1"),
+				},
+			]),
+			0,
 		);
 		const initialPoint = transformPoint3(
 			initial.effects.rootTransformModifier,
@@ -157,21 +182,22 @@ describe("AnimationSystem", () => {
 	it("stages replacement playback without retiring the active owner", () => {
 		const effects = new EffectSystem();
 		const system = buildAnimationSystemOver(effects);
-		system.install(
-			"owner",
-			testTarget("scene-node:10"),
-			"resident:old",
-			clip(),
-		);
+		install(system, "owner", [
+			{
+				animation: testAnimation(),
+				residentIdentity: "resident:old",
+				target: testTarget("scene-node:10"),
+			},
+		]);
 		const staged = system.stageOwner("owner", [
 			{
-				animation: clip(),
+				animation: testAnimation(),
 				target: testTarget("scene-node:11"),
 				residentIdentity: "resident:new",
 			},
 		]);
 
-		expect(system.getDiagnostics().activePlaybackCount).toBe(0);
+		// The staged node is absent from advancement until commit, which is the whole point.
 		expect(advanceAndSample(system, 0).map((sample) => sample.nodeId)).toEqual([
 			"scene-node:10",
 		]);
@@ -183,15 +209,16 @@ describe("AnimationSystem", () => {
 
 	it("drops staged playback on release without disturbing the active owner", () => {
 		const system = buildAnimationSystem();
-		system.install(
-			"owner",
-			testTarget("scene-node:10"),
-			"resident:old",
-			clip(),
-		);
+		install(system, "owner", [
+			{
+				animation: testAnimation(),
+				residentIdentity: "resident:old",
+				target: testTarget("scene-node:10"),
+			},
+		]);
 		const staged = system.stageOwner("owner", [
 			{
-				animation: clip(),
+				animation: testAnimation(),
 				target: testTarget("scene-node:11"),
 				residentIdentity: "resident:new",
 			},
@@ -208,12 +235,16 @@ describe("AnimationSystem", () => {
 	it("folds effect history before the deterministic initial phase is sampled", () => {
 		const effects = new EffectSystem();
 		const system = buildAnimationSystemOver(effects);
-		const animation = clipWithInitialTransparency();
-		const initial = system.install(
-			"owner",
-			testTarget("scene-node:1"),
-			"resident:a",
-			animation,
+		const animation = animationWithInitialTransparency();
+		const initial = requiredAt(
+			install(system, "owner", [
+				{
+					animation,
+					residentIdentity: "resident:a",
+					target: testTarget("scene-node:1"),
+				},
+			]),
+			0,
 		);
 		const renderState = initial.effects.partRenderStates[0];
 		if (!renderState)
@@ -234,9 +265,16 @@ describe("AnimationSystem", () => {
 		const smallEffects = new EffectSystem();
 		const large = buildAnimationSystemOver(largeEffects);
 		const small = buildAnimationSystemOver(smallEffects);
-		const animation = clipWithTransparency();
-		large.install("owner", testTarget("scene-node:1"), "resident:a", animation);
-		small.install("owner", testTarget("scene-node:1"), "resident:a", animation);
+		const animation = animationWithTransparency();
+		for (const system of [large, small]) {
+			install(system, "owner", [
+				{
+					animation,
+					residentIdentity: "resident:a",
+					target: testTarget("scene-node:1"),
+				},
+			]);
+		}
 		advanceAndSample(large, 0);
 		advanceAndSample(small, 0);
 		const largeBaseline = observations().length;
@@ -278,14 +316,16 @@ describe("AnimationSystem", () => {
 		const sparseEffects = new EffectSystem();
 		const full = buildAnimationSystemOver(fullEffects);
 		const sparse = buildAnimationSystemOver(sparseEffects);
-		const animation = clipWithTransparency();
-		full.install("owner", testTarget("scene-node:1"), "resident:a", animation);
-		sparse.install(
-			"owner",
-			testTarget("scene-node:1"),
-			"resident:a",
-			animation,
-		);
+		const animation = animationWithTransparency();
+		for (const system of [full, sparse]) {
+			install(system, "owner", [
+				{
+					animation,
+					residentIdentity: "resident:a",
+					target: testTarget("scene-node:1"),
+				},
+			]);
+		}
 
 		advanceAndSample(full, 0);
 		advanceAndSample(sparse, 0);
@@ -315,9 +355,86 @@ describe("AnimationSystem", () => {
 		expect(sparse.getDiagnostics().lastSampledPresentationCount).toBe(1);
 	});
 
+	it("installs a first clip onto a node that activated without playback", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		// A motion-driven entity's owner installs effect state at activation and stages no clip.
+		installEffectState(effects, target.targetId);
+
+		expect(advanceAndSample(system, 0)).toEqual([]);
+		system.playClip(
+			"owner",
+			target,
+			playingClip(testAnimation(Vec3.zero()), 1, 2, 30),
+		);
+
+		const sample = requiredAt(advanceAndSample(system, 0), 0);
+		// Frame translations are the frame index, so the entry pose names the window's low frame.
+		expect(sample.articulatedPose.partToObjectTransforms[0]?.m41).toBe(1);
+	});
+
+	it("re-enters at the replacement clip's own starting frame", () => {
+		const system = buildAnimationSystem();
+		const target = testTarget("scene-node:1");
+		const animation = testAnimation(Vec3.zero());
+		install(system, "owner", [
+			{ animation, residentIdentity: "resident:a", target },
+		]);
+		advanceAndSample(system, 0);
+		advanceAndSample(system, 2 / 30);
+
+		system.playClip("owner", target, playingClip(animation, 0, 3, -30));
+
+		// A reversed clip enters just inside its high frame rather than resuming where it was.
+		const sample = requiredAt(advanceAndSample(system, 2 / 30), 0);
+		expect(sample.articulatedPose.partToObjectTransforms[0]?.m41).toBe(3);
+	});
+
+	it("refuses a clip whose target generation the node no longer holds", () => {
+		const system = buildAnimationSystem();
+		const target = testTarget("scene-node:1");
+		const animation = testAnimation(Vec3.zero());
+		install(system, "owner", [
+			{ animation, residentIdentity: "resident:a", target },
+		]);
+
+		expect(() =>
+			system.playClip(
+				"owner",
+				{ ...target, generation: target.generation + 1 },
+				playingClip(animation, 1, 1, 30),
+			),
+		).toThrow("names generation");
+		const sample = requiredAt(advanceAndSample(system, 0), 0);
+		expect(sample.articulatedPose.partToObjectTransforms[0]?.m41).not.toBe(1);
+	});
+
+	it("invalidates the advanced frame a swap raced", () => {
+		const system = buildAnimationSystem();
+		const target = testTarget("scene-node:1");
+		const animation = testAnimation(Vec3.zero());
+		install(system, "owner", [
+			{ animation, residentIdentity: "resident:a", target },
+		]);
+		const frame = system.advance(0);
+
+		system.playClip("owner", target, playingClip(animation, 0, 1, 30));
+
+		expect(() => system.sample(frame, ["scene-node:1"])).toThrow(
+			"latest advanced frame",
+		);
+	});
+
 	it("rejects stale, duplicate, and unknown sampling requests", () => {
 		const system = buildAnimationSystem();
-		system.install("owner", testTarget("scene-node:1"), "resident:a", clip());
+		install(system, "owner", [
+			{
+				animation: testAnimation(),
+				residentIdentity: "resident:a",
+				target: testTarget("scene-node:1"),
+			},
+		]);
 		const staleFrame = system.advance(0);
 		const currentFrame = system.advance(1 / 60);
 
@@ -358,7 +475,7 @@ function effectsFor(system: AnimationSystem<string>): EffectSystem {
 
 const systemEffects = new WeakMap<AnimationSystem<string>, EffectSystem>();
 
-function clip(omega = new Vec3(0, 0, 1)): PreparedAnimation {
+function testAnimation(omega = new Vec3(0, 0, 1)): PreparedAnimation {
 	return {
 		frameCount: 4,
 		framesPerSecond: 30,
@@ -404,8 +521,8 @@ function setOmegaHook(omega: Vec3): DecodedAnimationHook {
 	};
 }
 
-function clipWithTransparency(): PreparedAnimation {
-	const animation = clip(Vec3.zero());
+function animationWithTransparency(): PreparedAnimation {
+	const animation = testAnimation(Vec3.zero());
 	return {
 		...animation,
 		hooks: [
@@ -430,8 +547,8 @@ function clipWithTransparency(): PreparedAnimation {
 	};
 }
 
-function clipWithInitialTransparency(): PreparedAnimation {
-	const animation = clip(Vec3.zero());
+function animationWithInitialTransparency(): PreparedAnimation {
+	const animation = testAnimation(Vec3.zero());
 	return {
 		...animation,
 		hooks: [

@@ -1,5 +1,9 @@
 import type { LandblockId } from "../lib/game/game-types";
-import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
+import {
+	sceneVec3,
+	sceneVector3,
+	type SceneVec3,
+} from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
@@ -256,6 +260,41 @@ export class ExplorerCameraCoordinator {
 			return { location, renderable: true };
 		}
 		return { location, renderable: false };
+	}
+
+	/**
+	 * Apply one boom-derived pose, resolving residency the way free fly does.
+	 *
+	 * The frontend computed this position, so the host has no residency opinion about it — unlike
+	 * `syncPhysicalCamera`, where the solver committed a cell. The boom's own orientation is used
+	 * rather than the free-fly controller's, because while possessed the operator is orbiting the
+	 * entity rather than steering a free camera.
+	 */
+	syncBoomCamera(
+		position: SceneVec3,
+		yawRadians: number,
+		pitchRadians: number,
+	): ExplorerCameraResidencySync {
+		this.#lastReportedHostResidency = null;
+		const state = {
+			...this.#controller.snapshotState(),
+			pitchRadians,
+			position,
+			yawRadians,
+		};
+		const resolution = resolveExplorerPointResidency(
+			this.#runtime.queryWorldPointResidencyCandidates(position),
+		);
+		const location = { position, residency: resolution };
+		if (resolution.kind !== "resolved") {
+			// A boom can legitimately swing outside resident topology for a frame while the entity
+			// crosses a boundary; holding the previous frame beats reporting a camera error.
+			return { location, renderable: false };
+		}
+		this.#lastResolutionIssue = null;
+		this.#lastResidency = resolution.residency;
+		this.#applyCamera(createCamera(resolution.residency, state));
+		return { location, renderable: true };
 	}
 
 	/** Apply one host-owned physical placement without re-deriving its portal residency. */

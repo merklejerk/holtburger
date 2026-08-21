@@ -170,13 +170,16 @@ import {
 import { adaptAuthoredDynamicPresentation } from "../resolution/authored-dynamic-presentation";
 import {
 	adaptSpawnedDynamicPresentation,
+	datAssetId,
 	spawnedDynamicPlacement,
 	spawnedDynamicPlacementKey,
 } from "./spawned-dynamic-presentation";
 import type {
 	DynamicEntityAdvanceBatch,
+	DynamicEntityPlayingClip,
 	DynamicEntityView,
 } from "./dynamic-entity-feed";
+import { playingClip } from "../animation/animation-playback";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import {
 	computeSceneInterest,
@@ -304,6 +307,13 @@ interface PendingCommitArtifact {
 
 interface SpawnedDynamicPresentationRecord {
 	readonly generation: number;
+	/**
+	 * Dynamics owner generation this node's behavior targets carry.
+	 *
+	 * Distinct from `generation`, which is the host's semantic entity generation: a later clip
+	 * projection has to name the target the animation record was staged under, not the entity's.
+	 */
+	readonly behaviorGeneration: number;
 	readonly nodeId: SceneNodeId;
 	readonly ownerId: SpawnedDynamicOwnerId;
 	readonly visualKey: string;
@@ -1256,6 +1266,8 @@ export class GameRuntime {
 			const installed = this.#spawnedPresentations.get(guid);
 			if (installed?.generation !== entity.generation) continue;
 			this.#applySpawnedPresentationState(installed.nodeId, entity);
+			if (advance.clip !== null)
+				this.#playSpawnedDynamicClip(installed, advance.clip);
 			this.#dynamics.updatePlacementPath(
 				installed.nodeId,
 				advance,
@@ -1263,6 +1275,32 @@ export class GameRuntime {
 				receivedAtMs,
 			);
 		}
+	}
+
+	/**
+	 * Swap one entity's rendered clip to the one the host just started playing.
+	 *
+	 * The host projects a clip only on change, and the entity's whole motion closure was staged
+	 * before it activated, so this resolves from memory and loads nothing. An unplayable clip was
+	 * already complained about at preparation and simply leaves the current pose in place.
+	 */
+	#playSpawnedDynamicClip(
+		installed: SpawnedDynamicPresentationRecord,
+		clip: DynamicEntityPlayingClip,
+	): void {
+		const animation = this.#dynamics.getMotionClip(
+			installed.nodeId,
+			datAssetId(clip.animationId),
+		);
+		if (animation === null) return;
+		this.#animation.playClip(
+			installed.ownerId,
+			{
+				generation: installed.behaviorGeneration,
+				targetId: behaviorTargetId(installed.nodeId),
+			},
+			playingClip(animation, clip.lowFrame, clip.highFrame, clip.framerate),
+		);
 	}
 
 	async #upsertSpawnedDynamicEntity(
@@ -1307,6 +1345,7 @@ export class GameRuntime {
 		}
 		activation.commit();
 		this.#spawnedPresentations.set(guid, {
+			behaviorGeneration: activation.generation,
 			generation: entity.generation,
 			nodeId,
 			ownerId,
@@ -1784,6 +1823,21 @@ export class GameRuntime {
 		if (previousOwner !== null && previousOwner !== owner) {
 			this.#textures.dropOwner(previousOwner);
 		}
+	}
+
+	/**
+	 * Resolve one spawned entity's live root origin, for a follower that must not lag it.
+	 *
+	 * Returns the scene graph's own resolution rather than the last host pose, so a follower sees
+	 * the same interpolated position the entity is drawn at. `null` for an entity that is not
+	 * currently presented, which is an ordinary state during reconciliation rather than an error.
+	 */
+	spawnedDynamicEntityOrigin(
+		guid: number,
+	): import("../scene").ResolvedSceneOrigin | null {
+		const installed = this.#spawnedPresentations.get(guid);
+		if (!installed) return null;
+		return this.#scene.getResolvedOrigin(installed.nodeId) ?? null;
 	}
 
 	/** Return every resident scene-scope candidate for one canonical scene-space point. */

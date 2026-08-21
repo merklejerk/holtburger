@@ -7,8 +7,9 @@
 
 use anyhow::{Result, ensure};
 use holtburger_dat::file_type::setup_model::{
-    AnimationHook, AnimationHookPayload, CallPesHookPayload, CreateParticleHookPayload,
-    ScaleHookPayload, SoundTableHookPayload, SoundTweakedHookPayload, TextureVelocityHookPayload,
+    AnimationHook, AnimationHookPayload, AttackConeHookPayload, CallPesHookPayload,
+    CreateParticleHookPayload, EtherealHookPayload, ReplaceObjectHookPayload, ScaleHookPayload,
+    SoundTableHookPayload, SoundTweakedHookPayload, TextureVelocityHookPayload,
     TextureVelocityPartHookPayload, TransparentPartHookPayload,
 };
 use serde::Serialize;
@@ -39,9 +40,23 @@ pub(crate) enum BehaviorHookPayloadManifest {
         byte_offset: usize,
         byte_length: usize,
     },
+    /// Simulation hook the host owns; projected so the transport stays lossless, not to be run.
+    Attack {
+        /// `-1` addresses the whole object; any other value addresses a part.
+        part_index: i32,
+        /// Cone edges as 2D directions in the attacking part's frame.
+        left: [f32; 2],
+        right: [f32; 2],
+        radius: f32,
+        height: f32,
+    },
+    /// Simulation hook the host owns; the frontend has no collision state to toggle.
+    Ethereal {
+        ethereal: bool,
+    },
     ReplaceObject {
-        byte_offset: usize,
-        byte_length: usize,
+        part_index: u32,
+        gfx_obj_id: String,
     },
     SetOmega {
         omega: [f32; 3],
@@ -105,11 +120,39 @@ pub(crate) fn behavior_hook_payload(
                 byte_length,
             }
         }
-        AnimationHookPayload::ReplaceObject(bytes) => {
-            let (byte_offset, byte_length) = append_payload(raw_payloads, bytes);
+        AnimationHookPayload::Attack(AttackConeHookPayload {
+            part_index,
+            left_x,
+            left_y,
+            right_x,
+            right_y,
+            radius,
+            height,
+        }) => {
+            if *part_index >= 0 {
+                ensure_part_index("Attack", u32::try_from(*part_index)?, part_scope)?;
+            }
+            BehaviorHookPayloadManifest::Attack {
+                part_index: *part_index,
+                left: [*left_x, *left_y],
+                right: [*right_x, *right_y],
+                radius: *radius,
+                height: *height,
+            }
+        }
+        AnimationHookPayload::Ethereal(EtherealHookPayload { ethereal }) => {
+            BehaviorHookPayloadManifest::Ethereal {
+                ethereal: *ethereal,
+            }
+        }
+        AnimationHookPayload::ReplaceObject(ReplaceObjectHookPayload {
+            part_index,
+            gfx_obj_id,
+        }) => {
+            ensure_part_index("ReplaceObject", u32::from(*part_index), part_scope)?;
             BehaviorHookPayloadManifest::ReplaceObject {
-                byte_offset,
-                byte_length,
+                part_index: u32::from(*part_index),
+                gfx_obj_id: dat_id(*gfx_obj_id),
             }
         }
         AnimationHookPayload::SetOmega(payload) => {

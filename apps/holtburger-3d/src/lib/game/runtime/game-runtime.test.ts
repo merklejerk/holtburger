@@ -64,6 +64,10 @@ const PHYSICS_SCRIPT_SOURCE: PhysicsScriptSource = {
 };
 
 const ANIMATION_SOURCE: AnimationAssetSource = {
+	/** No runtime test spawns a motion-driven entity, so a closure request is a defect. */
+	async loadMotionTableClosure(motionTableId) {
+		throw new Error(`Unexpected motion closure load for ${motionTableId}.`);
+	},
 	async loadAnimation(animationId) {
 		return {
 			frameCount: 1,
@@ -830,6 +834,7 @@ function spawnedEntity(
 			},
 			content: {
 				physicsEffectTableDid: null,
+				motionTableDid: null,
 				setupDid: 0x02000001,
 				soundTableDid: null,
 			},
@@ -861,6 +866,7 @@ function spawnedVisual(): DecodedStaticPresentation {
 			kind: "animation-only",
 			physicsScriptId: null,
 			physicsScriptTableId: null,
+			motionTableId: null,
 			soundTableId: null,
 		},
 		localBounds: null,
@@ -1006,6 +1012,7 @@ function promotedStaticArtifact(
 			kind: "animation-only",
 			physicsScriptId: null,
 			physicsScriptTableId: null,
+			motionTableId: null,
 			soundTableId: null,
 		},
 		identity: { kind: "authored", sourceId: "resident:promoted" },

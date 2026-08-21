@@ -1,6 +1,17 @@
 use crate::EOR_PORTAL_NAMESPACE;
 use crate::file_type::{CharGen, ChatPoseTable, DatFileType, SkillTable, SpellTable, XpTable};
 
+/// Portal file types that carry the motion representation every profile ships completely.
+///
+/// Motion tables and animations hold the authored program; setup models declare the motion table an
+/// object installs by default. They are namespaced because file types are inferred from the id
+/// prefix: `0x09......` is a motion table under `eor/portal` and a cell record under `eor/cell`.
+const MOTION_CONTENT_TYPES: [DatFileType; 3] = [
+    DatFileType::MotionTable,
+    DatFileType::Animation,
+    DatFileType::SetupModel,
+];
+
 /// A manifest that defines which file IDs and file types should be kept when stripping archives.
 pub struct StripperManifest {
     pub keep_rules: Vec<ManifestRule>,
@@ -23,6 +34,7 @@ impl StripperManifest {
     /// Returns the default manifest for a "Logic/Physics Only" (Lite) archive.
     pub fn logic_only() -> Self {
         let mut manifest = Self::new();
+        manifest.keep_motion_content();
         for file_type in [
             DatFileType::Model,
             DatFileType::SetupModel,
@@ -44,6 +56,7 @@ impl StripperManifest {
     /// Returns the manifest for the current TUI-oriented micro archive.
     pub fn micro() -> Self {
         let mut manifest = Self::new();
+        manifest.keep_motion_content();
         for file_id in [
             CharGen::FILE_ID,
             ChatPoseTable::FILE_ID,
@@ -60,6 +73,18 @@ impl StripperManifest {
     pub fn new() -> Self {
         Self {
             keep_rules: Vec::new(),
+        }
+    }
+
+    /// Keeps the complete motion representation.
+    ///
+    /// Every profile carries it, so a resolver never has to distinguish "this profile legitimately
+    /// omits this motion fact" from "this archive is corrupt" — absence always means corrupt.
+    /// Records are still pruned to simulation facts in small profiles; that reduction is declared
+    /// per record in archive metadata rather than implied by the profile.
+    fn keep_motion_content(&mut self) {
+        for file_type in MOTION_CONTENT_TYPES {
+            self.keep_namespaced_type(EOR_PORTAL_NAMESPACE, file_type);
         }
     }
 
@@ -136,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn micro_manifest_keeps_required_table_ids_and_excludes_raw_motion_assets() {
+    fn micro_manifest_keeps_the_required_table_ids() {
         let manifest = StripperManifest::micro();
 
         assert!(manifest.should_keep_entry(
@@ -164,19 +189,31 @@ mod tests {
             XpTable::FILE_ID,
             DatFileType::Table
         ));
-        assert!(!manifest.should_keep_entry(
-            EOR_PORTAL_NAMESPACE,
-            0x09000001,
-            DatFileType::MotionTable
-        ));
-        assert!(!manifest.should_keep_entry(
-            EOR_PORTAL_NAMESPACE,
-            0x03000003,
-            DatFileType::Animation
-        ));
-        assert!(!manifest.should_keep_entry("eor/cell", 0x09000001, DatFileType::MotionTable));
         assert!(!manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x0E000099, DatFileType::Table));
         assert!(!manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x01000001, DatFileType::Model));
+    }
+
+    #[test]
+    fn every_profile_keeps_the_complete_motion_representation() {
+        for manifest in [StripperManifest::micro(), StripperManifest::logic_only()] {
+            assert!(manifest.should_keep_entry(
+                EOR_PORTAL_NAMESPACE,
+                0x09000001,
+                DatFileType::MotionTable
+            ));
+            assert!(manifest.should_keep_entry(
+                EOR_PORTAL_NAMESPACE,
+                0x03000003,
+                DatFileType::Animation
+            ));
+            assert!(manifest.should_keep_entry(
+                EOR_PORTAL_NAMESPACE,
+                0x02000F30,
+                DatFileType::SetupModel
+            ));
+            // Cell records share the motion-table id prefix and are not motion content.
+            assert!(!manifest.should_keep_entry("eor/cell", 0x09050100, DatFileType::MotionTable));
+        }
     }
 
     #[test]

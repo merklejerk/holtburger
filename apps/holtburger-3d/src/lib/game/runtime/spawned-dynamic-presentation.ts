@@ -17,7 +17,7 @@ export function adaptSpawnedDynamicPresentation(
 	visual: DecodedStaticPresentation,
 	placement = spawnedDynamicPlacement(entity),
 ): PlacedDynamicPresentationSource {
-	const expectedSetupId = datId(entity.presentation.content.setupDid);
+	const expectedSetupId = datAssetId(entity.presentation.content.setupDid);
 	if (visual.setupId?.toLowerCase() !== expectedSetupId) {
 		throw new Error(
 			`Dynamic entity ${formatGuid(entity.identity.guid)} visual resolved ${visual.setupId ?? "no setup"}, expected ${expectedSetupId}.`,
@@ -28,10 +28,16 @@ export function adaptSpawnedDynamicPresentation(
 		source: {
 			behavior: {
 				...visual.behavior,
+				// The entity names the table it animates from; the setup's own default already
+				// resolved host-side, so an absent id here means the entity has no motion at all.
+				motionTableId:
+					entity.presentation.content.motionTableDid === null
+						? null
+						: datAssetId(entity.presentation.content.motionTableDid),
 				soundTableId:
 					entity.presentation.content.soundTableDid === null
 						? visual.behavior.soundTableId
-						: (datId(entity.presentation.content.soundTableDid) as DatAssetId),
+						: datAssetId(entity.presentation.content.soundTableDid),
 			},
 			identity: `dynamic-entity:${formatGuid(entity.identity.guid)}/${entity.generation}`,
 			localBounds: visual.localBounds,
@@ -65,8 +71,8 @@ export function spawnedDynamicPlacementFromPose(
 	const cellId = pose.landblockId >>> 0;
 	const selector = cellId & 0xffff;
 	return {
-		envCellId: selector >= 0x0100 ? (datId(cellId) as EnvCellId) : null,
-		landblockId: datId((cellId & 0xffff_0000) | 0xffff) as LandblockId,
+		envCellId: selector >= 0x0100 ? (datAssetId(cellId) as EnvCellId) : null,
+		landblockId: datAssetId((cellId & 0xffff_0000) | 0xffff) as LandblockId,
 		localTransform: acFrameTransform(
 			{
 				origin: [pose.coords.x, pose.coords.y, pose.coords.z],
@@ -192,10 +198,11 @@ function interpolateQuaternion(
 	return { w: w / length, x: x / length, y: y / length, z: z / length };
 }
 
-function datId(value: number): string {
+/** The feed carries dat ids as numbers; every asset repository keys on the canonical hex form. */
+export function datAssetId(value: number): DatAssetId {
 	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function formatGuid(value: number): string {
-	return datId(value);
+	return datAssetId(value);
 }

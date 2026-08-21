@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
+	import {
+		httpBoomSweepSource,
+		type BoomSweepSource,
+	} from "../../explorer/boom-sweep-source";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import type { HttpLandblockSourceBatchDiagnostic } from "../../lib/assets/http-landblock-content-source";
@@ -313,6 +317,18 @@
 		) => Promise<readonly DynamicEntityView[]>;
 		/** Retire every live harness-spawned generation through the same host lifecycle. */
 		readonly despawnExplorerEntityFleet: () => Promise<number>;
+		/**
+		 * Ask the host how far a sphere travels from a scene point before static geometry stops it.
+		 *
+		 * The same query the third-person boom clamps against, exposed directly so a probe can
+		 * assert it against real loaded collision rather than only through camera behaviour.
+		 */
+		readonly sweepSphereDistance: (
+			origin: readonly [number, number, number],
+			direction: readonly [number, number, number],
+			distance: number,
+			radius: number,
+		) => Promise<number>;
 		/** Apply catalog-authored launch speed/spin to one exact generation. */
 		readonly launchExplorerEntity: (
 			guid: number,
@@ -515,6 +531,10 @@
 	});
 	let contentSource: HttpLandblockContentSource | undefined;
 	let entityHost: HttpExplorerEntityHost | undefined;
+	let boomSweeps: BoomSweepSource = {
+		sweep: () =>
+			Promise.reject(new Error("Harness sweep source is not built yet.")),
+	};
 	let spawnedEntities: readonly DynamicEntityView[] = [];
 	let runtime: GameRuntime | undefined;
 	let renderer: WebGL2Renderer | undefined;
@@ -1034,6 +1054,21 @@
 		return entity;
 	}
 
+	async function sweepSphereDistance(
+		origin: readonly [number, number, number],
+		direction: readonly [number, number, number],
+		distance: number,
+		radius: number,
+	): Promise<number> {
+		return boomSweeps.sweep({
+			direction: new Vec3(direction[0], direction[1], direction[2]),
+			distance,
+			envCellId: null,
+			origin: sceneVec3(new Vec3(origin[0], origin[1], origin[2])),
+			radius,
+		});
+	}
+
 	async function tickExplorerEntities(
 		durationMilliseconds: number,
 	): Promise<DynamicEntityEvent | null> {
@@ -1391,6 +1426,7 @@
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
 				entityHost = new HttpExplorerEntityHost(hostUrl);
+				boomSweeps = httpBoomSweepSource(hostUrl);
 				const landblockSource = ISOLATE_AUTHORED_DYNAMICS
 					? new DynamicOnlyLandblockSource(contentSource)
 					: EXCLUDE_AUTHORED_DYNAMICS
@@ -1587,6 +1623,7 @@
 					spawnExplorerEntityFleet,
 					despawnExplorerEntityFleet,
 					spawnSimulatedExplorerEntity,
+					sweepSphereDistance,
 					tickExplorerEntities,
 					state: () => {
 						const staticObjects =

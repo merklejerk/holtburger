@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { LandblockId } from "../game/game-types";
 import type { DatAssetId } from "../game/game-types";
 import type { AnimationAssetSource } from "./animation-asset-source";
@@ -139,6 +141,28 @@ export class HttpLandblockContentSource
 		);
 	}
 
+	/** Resolved by the dev host from the same contract the Tauri command reads. */
+	async loadMotionTableClosure(
+		motionTableId: DatAssetId,
+	): Promise<DatAssetId[]> {
+		const response = await fetch(
+			new URL("motion-table-closure", this.#baseUrl),
+			{
+				body: JSON.stringify({ motionTableId }),
+				headers: { "content-type": "application/json" },
+				method: "POST",
+			},
+		);
+		if (!response.ok) {
+			throw new Error(
+				`Landblock content host motion-table-closure failed (${response.status}): ${await response.text()}`,
+			);
+		}
+		return motionTableClosureSchema.parse(
+			await response.json(),
+		) as DatAssetId[];
+	}
+
 	async loadParticleEmitter(emitterInfoId: DatAssetId) {
 		return decodeParticleEmitterRecord(
 			await this.#postBinary("particle-emitter", { emitterInfoId }),
@@ -188,6 +212,8 @@ export class HttpLandblockContentSource
 		return postBinaryResponse(this.#baseUrl, path, body);
 	}
 }
+
+const motionTableClosureSchema = z.array(z.string().regex(/^0x[0-9a-f]{8}$/i));
 
 async function postBinary(
 	baseUrl: URL,

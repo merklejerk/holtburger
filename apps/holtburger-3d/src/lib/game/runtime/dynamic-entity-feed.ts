@@ -141,6 +141,8 @@ const dynamicEntityViewSchema = z.object({
 	}),
 	presentation: z.object({
 		content: z.object({
+			/** Table this entity animates from, or `null` when neither it nor its setup declares one. */
+			motionTableDid: guid.nullable(),
 			setupDid: guid,
 			soundTableDid: guid.nullable(),
 			physicsEffectTableDid: guid.nullable(),
@@ -181,7 +183,33 @@ const dynamicEntityPathSchema = z.object({
 		.nonempty(),
 });
 
+/**
+ * The clip the host has an entity playing, projected for presentation.
+ *
+ * Narrow on purpose: the frontend advances within this clip's window at render rate, lapping back
+ * to its entry frame at the far bound, and never chooses the next clip. Which clip follows is link
+ * resolution against host state the frontend does not have, so a clip change arrives only as a
+ * later projection.
+ *
+ * There is no frame number. Host and frontend both advance by `framerate * dt`, so a phase offset
+ * never accumulates, and entering a clip re-anchors both at the same frame regardless.
+ */
+const dynamicEntityPlayingClipSchema = z.object({
+	animationId: guid,
+	/** Negative plays the window backwards; zero holds. */
+	framerate: finiteNumber,
+	highFrame: z.number().int(),
+	lowFrame: z.number().int(),
+});
+
 const dynamicEntityAdvanceSchema = z.object({
+	/**
+	 * Present only when the clip changed on this tick.
+	 *
+	 * `null` means "keep playing whatever you have", which covers an unchanged clip, an entity that
+	 * never animated, and a correction that moves without replaying.
+	 */
+	clip: dynamicEntityPlayingClipSchema.nullable(),
 	entity: dynamicEntityViewSchema,
 	kind: z.enum(["integrated", "teleport", "reset"]),
 	path: dynamicEntityPathSchema,
@@ -223,6 +251,9 @@ export type DynamicEntityAttachedPlacement = Extract<
 	{ kind: "attached" }
 >;
 export type DynamicEntityAdvance = z.infer<typeof dynamicEntityAdvanceSchema>;
+export type DynamicEntityPlayingClip = z.infer<
+	typeof dynamicEntityPlayingClipSchema
+>;
 export type DynamicEntityAdvanceBatch = z.infer<
 	typeof dynamicEntityAdvanceBatchSchema
 >;

@@ -8,7 +8,7 @@ use holtburger_common::properties::{
 };
 use holtburger_common::{ConfirmationType, Quaternion, Vector3};
 use holtburger_core::ActiveCharacterConfirmation;
-use holtburger_core::client::movement_types::{LongitudinalMotion, MotionState, Turn};
+use holtburger_core::client::movement_types::{CharacterDrive, LongitudinalMotion, Turn};
 use holtburger_protocol::messages::combat::AttackHeight;
 use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
 use holtburger_world::book::{BookData, BookPage};

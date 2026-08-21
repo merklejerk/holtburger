@@ -19,10 +19,31 @@ use holtburger_world::{
     DynamicContactBudgetExceeded, DynamicPhysicalBodyDefinition, EdgeProtection,
     EntityPhysicsTransitionDecision, GroundedBodyActuation, PhysicalBodyActuation,
     PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyTickResult,
-    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, PhysicalFlyBody, PhysicalFlyConfig,
+    PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath, PlacementRecovery,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene, solve_physical_fly,
 };
 use serde::{Deserialize, Serialize};
+
+/// One sphere sweep against static collision, from an anchored point along a direction.
+///
+/// Deliberately free of camera vocabulary: the caller supplies geometry and a budget, and the
+/// runtime answers a distance. What that distance means is the caller's policy.
+#[derive(Debug, Clone, Copy)]
+pub struct SphereSweepQuery {
+    /// Start pose, carrying the landblock the sweep is anchored to.
+    pub origin: WorldPosition,
+    /// Interior cell containing `origin`, or `None` while outdoors.
+    pub cell: Option<Guid>,
+    /// Sweep direction; normalized internally, so callers need not pre-normalize.
+    pub direction: holtburger_common::Vector3,
+    /// Maximum distance to travel, which must fit the config's substep budget.
+    pub distance: f32,
+    /// Positive swept-sphere radius in meters.
+    pub radius: f32,
+    /// Anti-tunneling and separation budgets for this sweep.
+    pub config: PhysicalFlyConfig,
+}
 
 /// Injectable source of complete, atomic landblock collision products.
 pub trait CollisionSource: Send + Sync {
@@ -457,19 +478,22 @@ impl HostSimulationRuntime {
     /// commits independently, while every body observes the same immutable static-collision scene.
     /// The later peer-collision phase can consume this same tick-start snapshot without changing
     /// registry ownership or introducing a whole-world rollback transaction.
+    /// `actuation_for` chooses each scheduled body's drive for this tick. Callers that have nothing
+    /// to say pass `dynamic_entity_coasting_actuation`; a possessed body's authored offset arrives
+    /// this way rather than through registry state the simulation would have to know about.
     pub fn tick_dynamic_entity_collection(
         &self,
         delta_seconds: f32,
         now: std::time::Instant,
+        actuation_for: impl Fn(&SpatialBody) -> Result<PhysicalBodyActuation>,
     ) -> Result<HostDynamicEntityCollectionTick> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = Arc::clone(&state.scene);
-        let tick_start =
-            state
-                .bodies
-                .prepare_dynamic_entity_collection(&scene, delta_seconds, |previous| {
-                    dynamic_entity_coasting_actuation(previous, delta_seconds)
-                })?;
+        let tick_start = state.bodies.prepare_dynamic_entity_collection(
+            &scene,
+            delta_seconds,
+            &actuation_for,
+        )?;
         let mut ticks = Vec::with_capacity(tick_start.len());
         for (body_id, actuation) in tick_start {
             let previous = state
@@ -510,6 +534,99 @@ impl HostSimulationRuntime {
             bodies: ticks,
             collision_reports,
         })
+    }
+
+    /// Answers how far one sphere travels from an anchored point before static geometry stops it.
+    ///
+    /// A generic spatial query, not a camera one: it names a sphere, a start, a direction, and a
+    /// budget, and returns the distance achieved. A boom arm, a placement probe, and a
+    /// line-of-sight test all ask exactly this. Nothing registers, nothing is retained, and the
+    /// scene snapshot is immutable, so a caller may ask as often as it likes.
+    ///
+    /// Sees static collision only, like every free-flight solve.
+    pub fn sweep_sphere_distance(&self, query: SphereSweepQuery) -> Result<f32> {
+        let direction = query.direction;
+        let length = direction.length();
+        ensure!(
+            length.is_finite() && length > f32::EPSILON,
+            "sphere sweep direction must be a non-zero finite vector"
+        );
+        ensure!(
+            query.distance.is_finite() && query.distance >= 0.0,
+            "sphere sweep distance must be finite and non-negative"
+        );
+        ensure!(
+            query.radius.is_finite() && query.radius > 0.0,
+            "sphere sweep radius must be finite and positive"
+        );
+        // Refusing beyond the budget rather than truncating: a silently shortened sweep reads as
+        // "geometry is here" and would pull a boom in for no reason.
+        let budget = query.config.maximum_substep_distance * query.config.maximum_substeps as f32;
+        ensure!(
+            query.distance <= budget,
+            "sphere sweep distance {} exceeds the configured budget {budget}",
+            query.distance
+        );
+        let displacement = direction * (query.distance / length);
+        let outcome = solve_physical_fly(
+            &self.snapshot(),
+            query.config,
+            PhysicalFlyRequest {
+                body: PhysicalFlyBody {
+                    pose: query.origin,
+                    cell: query.cell,
+                    radius: query.radius,
+                },
+                displacement,
+                filter: PhysicalCollisionFilter::ALL,
+            },
+        )?;
+        Ok(match outcome {
+            PhysicalFlyOutcome::Solved {
+                achieved_displacement,
+                ..
+            } => achieved_displacement.length(),
+            // A budget stop holds the solver's last safe state, which here is the start, so the
+            // honest answer is zero reach. Deliberately not an error: `Substeps` is unreachable
+            // because the distance was validated against the same budget, and `Contacts` means
+            // separation did not converge in geometry this dense. Reporting zero pulls a caller in
+            // rather than out, which is the safe direction, and the next sweep recovers on its own.
+            PhysicalFlyOutcome::BudgetExceeded { .. } => 0.0,
+        })
+    }
+
+    /// Reads one registered body's live view without taking ownership of it.
+    pub fn physical_body_view(&self, body_id: SpatialBodyId) -> Option<RuntimeSpatialBodyView> {
+        self.state
+            .lock()
+            .expect("host simulation lock poisoned")
+            .bodies
+            .runtime_body_view(body_id)
+    }
+
+    /// Whether one registered body faces along its accepted path.
+    pub fn physical_body_align_path(&self, body_id: SpatialBodyId) -> Option<bool> {
+        self.state
+            .lock()
+            .expect("host simulation lock poisoned")
+            .bodies
+            .body(body_id)?
+            .physical
+            .as_ref()
+            .map(|physical| physical.response_policy.align_path)
+    }
+
+    /// Reactivates one settled dynamic body so the next collection scan integrates it.
+    ///
+    /// A body that has proven stable support drops out of the scan until something disturbs it.
+    /// Authored drive is such a disturbance, but it arrives through the actuation closure the scan
+    /// itself invokes — so a possessed body has to be woken before the scan, not by it.
+    pub fn wake_dynamic_body(&self, body_id: SpatialBodyId) -> bool {
+        self.state
+            .lock()
+            .expect("host simulation lock poisoned")
+            .bodies
+            .wake_dynamic_body(body_id)
     }
 
     #[cfg(test)]
@@ -702,7 +819,8 @@ fn tick_body_transaction<T>(
     ))
 }
 
-fn dynamic_entity_coasting_actuation(
+/// Advances a dynamic body on retained velocity alone, which is what an uncommanded entity does.
+pub(crate) fn dynamic_entity_coasting_actuation(
     previous: &SpatialBody,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyActuation> {
@@ -863,6 +981,133 @@ mod tests {
         assert_eq!(
             state.resident,
             HashSet::from([Guid(0xdb55_ffff), Guid(0xdc55_ffff)])
+        );
+    }
+
+    /// Sweep budgets and geometry live here; collision behaviour itself is `physical_fly`'s
+    /// contract and is proven there. These cover what this wrapper alone is responsible for.
+    fn sweep_scene() -> (Arc<HostSimulationRuntime>, SphereSweepQuery) {
+        let service = Arc::new(HostSimulationRuntime::new(Arc::new(
+            CountingSource::default(),
+        )));
+        let session = service.reserve_interest_session();
+        service
+            .replace_interest(request(session, 1, &["0xda55ffff"]))
+            .unwrap();
+        let query = SphereSweepQuery {
+            origin: WorldPosition {
+                landblock_id: Guid(0xda55_ffff),
+                coords: Vector3::new(10.0, 10.0, 50.0),
+                rotation: Quaternion::identity(),
+            },
+            cell: None,
+            direction: Vector3::new(1.0, 0.0, 0.0),
+            distance: 4.0,
+            radius: 0.25,
+            config: PhysicalFlyConfig {
+                maximum_substep_distance: 0.25,
+                maximum_substeps: 32,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.000_5,
+            },
+        };
+        (service, query)
+    }
+
+    #[test]
+    fn an_unobstructed_sweep_reports_its_whole_requested_distance() {
+        let (service, query) = sweep_scene();
+
+        let travelled = service.sweep_sphere_distance(query).unwrap();
+
+        assert!(
+            (travelled - query.distance).abs() < 1e-3,
+            "empty scene should not shorten a sweep, got {travelled}"
+        );
+    }
+
+    #[test]
+    fn a_sweep_normalizes_its_direction_rather_than_scaling_by_it() {
+        let (service, query) = sweep_scene();
+        let long_direction = SphereSweepQuery {
+            direction: Vector3::new(1000.0, 0.0, 0.0),
+            ..query
+        };
+
+        assert!(
+            (service.sweep_sphere_distance(long_direction).unwrap()
+                - service.sweep_sphere_distance(query).unwrap())
+            .abs()
+                < 1e-3,
+            "direction magnitude must not change how far the sweep travels"
+        );
+    }
+
+    #[test]
+    fn a_sweep_refuses_degenerate_geometry_and_an_over_budget_distance() {
+        let (service, query) = sweep_scene();
+        let budget = query.config.maximum_substep_distance * query.config.maximum_substeps as f32;
+
+        for (label, invalid) in [
+            (
+                "zero direction",
+                SphereSweepQuery {
+                    direction: Vector3::zero(),
+                    ..query
+                },
+            ),
+            (
+                "negative distance",
+                SphereSweepQuery {
+                    distance: -1.0,
+                    ..query
+                },
+            ),
+            (
+                "zero radius",
+                SphereSweepQuery {
+                    radius: 0.0,
+                    ..query
+                },
+            ),
+            (
+                // Truncating instead would read as "geometry is here" and pull a boom in for
+                // nothing, so an unanswerable sweep must fail rather than answer short.
+                "over budget",
+                SphereSweepQuery {
+                    distance: budget + 1.0,
+                    ..query
+                },
+            ),
+        ] {
+            assert!(
+                service.sweep_sphere_distance(invalid).is_err(),
+                "{label} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sweep_registers_nothing_and_leaves_the_scene_untouched() {
+        let (service, query) = sweep_scene();
+        let before = service.snapshot();
+
+        service.sweep_sphere_distance(query).unwrap();
+
+        assert!(
+            Arc::ptr_eq(&before, &service.snapshot()),
+            "a query must not replace the collision snapshot"
+        );
+        assert_eq!(
+            service
+                .state
+                .lock()
+                .unwrap()
+                .bodies
+                .iter_runtime_body_views()
+                .count(),
+            0,
+            "a query must not register a body"
         );
     }
 

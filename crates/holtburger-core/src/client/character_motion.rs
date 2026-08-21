@@ -1,6 +1,6 @@
 //! Reusable interpretation of semantic character drive and jump commands.
 
-use super::movement_types::MotionState;
+use super::movement_types::CharacterDrive;
 use std::time::Duration;
 
 const MINIMUM_RETAIL_JUMP_EXTENT: f32 = 0.001;
@@ -110,11 +110,11 @@ pub struct SequencedCharacterMotionEvent {
 pub enum CharacterMotionEvent {
     BeginJump {
         /// Semantic drive sampled at the press edge.
-        drive: MotionState,
+        drive: CharacterDrive,
     },
     ReleaseJump {
         /// Semantic drive sampled at the release edge.
-        drive: MotionState,
+        drive: CharacterDrive,
         /// Frontend-measured and validated requested power.
         extent: JumpExtent,
     },
@@ -125,7 +125,7 @@ pub enum CharacterMotionEvent {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct JumpAttempt {
     /// Release-time semantic drive used by the actor resolver.
-    pub drive: MotionState,
+    pub drive: CharacterDrive,
     /// Requested normalized jump power.
     pub extent: JumpExtent,
     /// Whether charge began without translation or turn input.
@@ -167,7 +167,7 @@ enum CharacterMotionPhase {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CharacterMotionController {
     /// Latest replaceable semantic drive snapshot.
-    drive: MotionState,
+    drive: CharacterDrive,
     /// Accepted charge lifecycle state.
     phase: CharacterMotionPhase,
     /// Most recent processed lifecycle edge in the current ownership epoch.
@@ -177,7 +177,7 @@ pub struct CharacterMotionController {
 impl Default for CharacterMotionController {
     fn default() -> Self {
         Self {
-            drive: MotionState::default(),
+            drive: CharacterDrive::default(),
             phase: CharacterMotionPhase::Idle,
             last_sequence: None,
         }
@@ -190,12 +190,12 @@ impl CharacterMotionController {
     }
 
     /// Replaces coalescible drive state without creating an ordered lifecycle edge.
-    pub fn replace_drive(&mut self, drive: MotionState) {
+    pub fn replace_drive(&mut self, drive: CharacterDrive) {
         self.drive = drive;
     }
 
     /// Returns interpreted drive, suppressing translation during a standing charge.
-    pub fn effective_drive(self) -> MotionState {
+    pub fn effective_drive(self) -> CharacterDrive {
         match self.phase {
             CharacterMotionPhase::Charging {
                 standing_long_jump: true,
@@ -256,7 +256,7 @@ impl CharacterMotionController {
                 })
             }
             CharacterMotionEvent::Reset => {
-                self.drive = MotionState::default();
+                self.drive = CharacterDrive::default();
                 self.phase = CharacterMotionPhase::Idle;
                 CharacterMotionEventResult::Reset
             }
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn motion_state_represents_simultaneous_forward_strafe_and_turn() {
-        let drive = MotionState::builder()
+        let drive = CharacterDrive::builder()
             .run()
             .forward()
             .strafe_left()
@@ -351,7 +351,7 @@ mod tests {
                 event(
                     1,
                     CharacterMotionEvent::BeginJump {
-                        drive: MotionState::default(),
+                        drive: CharacterDrive::default(),
                     },
                 ),
                 CharacterMotionContact::Walkable,
@@ -359,7 +359,7 @@ mod tests {
             CharacterMotionEventResult::ChargeAccepted
         );
 
-        let release_drive = MotionState::builder()
+        let release_drive = CharacterDrive::builder()
             .run()
             .forward()
             .strafe_right()
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn moving_charge_keeps_emitting_translation() {
-        let drive = MotionState::builder().run().forward().build();
+        let drive = CharacterDrive::builder().run().forward().build();
         let mut controller = CharacterMotionController::new();
 
         controller.apply_event(
@@ -405,7 +405,7 @@ mod tests {
     fn begin_requires_walkable_contact_and_repeated_begin_does_not_restart_charge() {
         let mut controller = CharacterMotionController::new();
         let begin = CharacterMotionEvent::BeginJump {
-            drive: MotionState::default(),
+            drive: CharacterDrive::default(),
         };
 
         assert_eq!(
@@ -431,13 +431,13 @@ mod tests {
             event(
                 10,
                 CharacterMotionEvent::BeginJump {
-                    drive: MotionState::default(),
+                    drive: CharacterDrive::default(),
                 },
             ),
             CharacterMotionContact::Walkable,
         );
         let release = CharacterMotionEvent::ReleaseJump {
-            drive: MotionState::default(),
+            drive: CharacterDrive::default(),
             extent: JumpExtent::MAXIMUM,
         };
         assert!(matches!(
@@ -465,7 +465,7 @@ mod tests {
             event(
                 1,
                 CharacterMotionEvent::BeginJump {
-                    drive: MotionState::default(),
+                    drive: CharacterDrive::default(),
                 },
             ),
             CharacterMotionContact::Walkable,
@@ -485,7 +485,7 @@ mod tests {
                 event(
                     1,
                     CharacterMotionEvent::BeginJump {
-                        drive: MotionState::default(),
+                        drive: CharacterDrive::default(),
                     },
                 ),
                 CharacterMotionContact::Walkable,
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn release_without_charge_is_typed_rejection_and_updates_drive() {
         let mut controller = CharacterMotionController::new();
-        let drive = MotionState::builder().walk().backstep().build();
+        let drive = CharacterDrive::builder().walk().backstep().build();
 
         assert_eq!(
             controller.apply_event(
@@ -518,10 +518,10 @@ mod tests {
     #[test]
     fn gait_and_direction_at_release_are_preserved_in_attempt() {
         let cases = [
-            MotionState::builder().walk().forward().build(),
-            MotionState::builder().run().backstep().build(),
-            MotionState::builder().run().strafe_left().build(),
-            MotionState::builder()
+            CharacterDrive::builder().walk().forward().build(),
+            CharacterDrive::builder().run().backstep().build(),
+            CharacterDrive::builder().run().strafe_left().build(),
+            CharacterDrive::builder()
                 .walk()
                 .forward()
                 .strafe_right()
@@ -534,7 +534,7 @@ mod tests {
                 event(
                     1,
                     CharacterMotionEvent::BeginJump {
-                        drive: MotionState::default(),
+                        drive: CharacterDrive::default(),
                     },
                 ),
                 CharacterMotionContact::Walkable,

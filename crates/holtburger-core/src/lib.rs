@@ -50,14 +50,14 @@ pub use dynamic_entity_view::{
     DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityContactView, DynamicEntityEvent,
     DynamicEntityHostTime, DynamicEntityIdentityView, DynamicEntityPathLeg, DynamicEntityPathPoint,
     DynamicEntityPhysicsView, DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind,
-    DynamicEntityPlacementView, DynamicEntityPresentationView, DynamicEntitySampleModeView,
-    DynamicEntitySnapshot, DynamicEntityView, DynamicEntityViewSource,
+    DynamicEntityPlacementView, DynamicEntityPlayingClip, DynamicEntityPresentationView,
+    DynamicEntitySampleModeView, DynamicEntitySnapshot, DynamicEntityView, DynamicEntityViewSource,
     PhysicalBodyParticipationView, project_dynamic_entity_view,
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use physical_body_definition::{
-    RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile, SetupPhysicalShapeError,
-    physical_fly_viewer_profile, resolve_setup_physical_spheres, retail_grounded_body,
-    retail_grounded_body_with_policy, retail_player_grounded_profile,
+    FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,
+    SetupPhysicalShapeError, physical_fly_viewer_profile, resolve_setup_physical_spheres,
+    retail_grounded_body, retail_grounded_body_with_policy, retail_player_grounded_profile,
 };
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

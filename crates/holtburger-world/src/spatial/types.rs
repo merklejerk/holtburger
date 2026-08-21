@@ -1,7 +1,7 @@
 use super::PhysicalBodyState;
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Vector3};
+use holtburger_common::{Guid, RigidTransform, Vector3};
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
@@ -319,14 +319,14 @@ impl SpatialBody {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SolveProjectionBasis {
-    Velocity {
-        velocity: Vector3,
-        omega: Vector3,
-    },
-    GroundedMotion {
-        desired_local_velocity: Vector3,
-        desired_local_omega: Vector3,
-    },
+    /// Retained physical momentum in world space.
+    Velocity { velocity: Vector3, omega: Vector3 },
+    /// The tick's authored contribution as one rigid offset in the body's own frame.
+    ///
+    /// This is the whole authored program for the tick, composed exactly from the frames the cursor
+    /// departed plus the motion-data slice — not a rate sampled from it. It is consumed and
+    /// discarded: blocked displacement is never retried, and nothing accumulates it as momentum.
+    AuthoredDrive { offset: RigidTransform },
 }
 
 impl SolveProjectionBasis {

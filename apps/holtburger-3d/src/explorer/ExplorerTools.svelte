@@ -23,6 +23,7 @@
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-camera-path";
 	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
 	import type { ExplorerCatalogCapability } from "./explorer-entity-commands";
+	import type { ExplorerPossession } from "./explorer-entity-possession";
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 
 	type ExplorerTabId =
@@ -124,6 +125,12 @@
 		readonly despawnExplorerEntity: (
 			entity: DynamicEntityView,
 		) => Promise<void>;
+		/** Possess one spawned entity so commands reach it, or release with `null`. */
+		readonly possessExplorerEntity: (
+			guid: number | null,
+		) => Promise<ExplorerPossession>;
+		readonly setExplorerEntityStance: (style: number) => Promise<void>;
+		readonly explorerPossession: ExplorerPossession | null;
 	}
 
 	let {
@@ -178,6 +185,9 @@
 		spawnedEntityPresentationError,
 		spawnExplorerEntity,
 		despawnExplorerEntity,
+		possessExplorerEntity,
+		setExplorerEntityStance,
+		explorerPossession,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -335,6 +345,9 @@
 								presentationError={spawnedEntityPresentationError}
 								spawn={spawnExplorerEntity}
 								despawn={despawnExplorerEntity}
+								possess={possessExplorerEntity}
+								setStance={setExplorerEntityStance}
+								possession={explorerPossession}
 							/>
 						{:else}
 							<p>{activeTab.stub}</p>

@@ -94,6 +94,7 @@ describe("DynamicEntityPlacementSystem", () => {
 function advance(startX: number, endX: number): DynamicEntityAdvance {
 	const entity = dynamicEntity(endX);
 	return {
+		clip: null,
 		entity,
 		kind: "integrated",
 		path: {
@@ -141,6 +142,7 @@ function dynamicEntity(
 			},
 			content: {
 				physicsEffectTableDid: null,
+				motionTableDid: null,
 				setupDid: 0x0200_0001,
 				soundTableDid: null,
 			},

@@ -15,7 +15,24 @@ const rawPayload = z.object({
 export const behaviorHookPayloadSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("no-payload") }),
 	rawPayload.extend({ kind: z.literal("raw") }),
-	rawPayload.extend({ kind: z.literal("replace-object") }),
+	z.object({
+		height: finiteNumber,
+		kind: z.literal("attack"),
+		left: z.tuple([finiteNumber, finiteNumber]),
+		/** `-1` is the whole-object sentinel, so this is not merely non-negative. */
+		partIndex: z.number().int().min(-1),
+		radius: finiteNumber,
+		right: z.tuple([finiteNumber, finiteNumber]),
+	}),
+	z.object({
+		ethereal: z.boolean(),
+		kind: z.literal("ethereal"),
+	}),
+	z.object({
+		gfxObjId: datId,
+		kind: z.literal("replace-object"),
+		partIndex: z.number().int().nonnegative(),
+	}),
 	z
 		.object({
 			kind: z.literal("set-omega"),
@@ -87,7 +104,9 @@ const TYPED_PAYLOAD_KIND_BY_HOOK_TYPE = new Map<
 	BehaviorHookPayload["kind"]
 >([
 	[2, "sound-table"],
+	[3, "attack"],
 	[5, "replace-object"],
+	[6, "ethereal"],
 	[7, "transparent-part"],
 	[12, "scale"],
 	[13, "create-particle"],
@@ -207,9 +226,27 @@ export function decodeBehaviorCommand(
 			};
 		case "replace-object":
 			return {
+				gfxObjId: payload.gfxObjId as DatAssetId,
 				kind: "replace-object",
-				rawPayload: payloadSlice(payloadBytes, payload, sourceLabel),
+				partIndex: payload.partIndex,
 			};
+		// Attack cones and ethereal toggles are simulation facts the host owns. They decode so the
+		// transport stays lossless and so a future consumer needs no re-plumbing, but the frontend
+		// has neither combat nor collision state to apply them to.
+		case "attack":
+			return unimplemented(hook, expectedName, {
+				height: payload.height,
+				kind: "attack",
+				left: payload.left,
+				partIndex: payload.partIndex,
+				radius: payload.radius,
+				right: payload.right,
+			});
+		case "ethereal":
+			return unimplemented(hook, expectedName, {
+				ethereal: payload.ethereal,
+				kind: "ethereal",
+			});
 		case "no-payload":
 			if (hook.hookType === 0 || hook.hookType === 4) {
 				return {

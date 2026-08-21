@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use holtburger_content::ContentRepository;
-use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
 use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldBootstrap, WorldState};
 use std::path::PathBuf;
@@ -62,9 +62,9 @@ impl ClientRuntimeBuilder {
         let xp_table = content
             .read_asset::<XpTable>("XP table")
             .context("failed to load XP table for client runtime")?;
-        let motion_kinematics = content
-            .read_asset::<MotionKinematics>("motion kinematics table")
-            .context("failed to load motion kinematics table for client runtime")?;
+        let motion_sequences = content
+            .read_motion_sequence_catalog()
+            .context("failed to build the motion contract for client runtime")?;
         let soul_emote_catalog = content
             .read_soul_emote_catalog()
             .context("failed to load soul emote catalog for client runtime")?;
@@ -73,7 +73,7 @@ impl ClientRuntimeBuilder {
             skill_table,
             spell_table,
             xp_table,
-            motion_kinematics,
+            motion_sequences,
             soul_emote_catalog,
         )));
 
@@ -190,13 +190,8 @@ mod tests {
     use super::*;
     use holtburger_common::{Guid, Vector3};
     use holtburger_content::ContentRepository;
-    use holtburger_dat::file_type::{
-        ChatPoseTable, MotionKinematics, SkillTable, SpellTable, XpTable,
-    };
-    use holtburger_dat::{
-        DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
-        ResourceSource,
-    };
+    use holtburger_dat::file_type::{ChatPoseTable, MotionTable, SkillTable, SpellTable, XpTable};
+    use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter, ResourceSource};
     use holtburger_world::{
         ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialScene, SpatialSolveBatch,
         SpatialSolveRequest,
@@ -224,7 +219,7 @@ mod tests {
                                 velocity,
                                 omega,
                             }) => (velocity, omega),
-                            Some(holtburger_world::SolveProjectionBasis::GroundedMotion {
+                            Some(holtburger_world::SolveProjectionBasis::AuthoredDrive {
                                 ..
                             })
                             | None => (Vector3::zero(), Vector3::zero()),
@@ -249,12 +244,49 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
     }
 
-    fn test_motion_kinematics_bytes() -> Vec<u8> {
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        MotionKinematics::new()
-            .write(&mut bytes)
-            .expect("test motion kinematics asset should write");
-        bytes.into_inner()
+    const TEST_MOTION_TABLE_ID: u32 = 0x0900_0001;
+    const TEST_ANIMATION_ID: u32 = 0x0300_0003;
+    const TEST_STYLE: u32 = 0x8000_003D;
+
+    /// One motion table holding a single walk cycle that plays the whole test animation.
+    fn test_motion_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&TEST_MOTION_TABLE_ID.to_le_bytes());
+        bytes.extend_from_slice(&TEST_STYLE.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // style defaults
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // cycles
+        bytes.extend_from_slice(
+            &MotionTable::cycle_key(TEST_STYLE, MotionTable::WALK_FORWARD_COMMAND).to_le_bytes(),
+        );
+        bytes.push(1); // one clip
+        bytes.push(0); // bitfield
+        bytes.push(0); // flags: no explicit velocity or omega
+        bytes.push(0); // pad to the four-byte boundary the decoder aligns to
+        bytes.extend_from_slice(&TEST_ANIMATION_ID.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes()); // low frame
+        bytes.extend_from_slice(&(-1i32).to_le_bytes()); // open-ended high frame
+        bytes.extend_from_slice(&30.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // modifiers
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // links
+        bytes
+    }
+
+    /// Two frames of authored root translation and no part frames, matching a pruned record.
+    fn test_animation_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&TEST_ANIMATION_ID.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // POS_FRAMES
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // no parts
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for _ in 0..2 {
+            for value in [0.0f32, 0.5, 0.0, 1.0, 0.0, 0.0, 0.0] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        for _ in 0..2 {
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // no hooks
+        }
+        bytes
     }
 
     fn test_chat_pose_table_bytes() -> Vec<u8> {
@@ -317,14 +349,19 @@ mod tests {
                 .expect("test HBA entry should be added");
         }
 
-        writer
-            .add(
-                HOLTBURGER_CORE_NAMESPACE,
-                MotionKinematics::FILE_ID,
-                DatFileType::MotionKinematics as u32,
-                test_motion_kinematics_bytes(),
-            )
-            .expect("motion kinematics test HBA entry should be added");
+        for (file_id, data) in [
+            (TEST_MOTION_TABLE_ID, test_motion_table_bytes()),
+            (TEST_ANIMATION_ID, test_animation_bytes()),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    file_id,
+                    DatFileType::from_id(file_id) as u32,
+                    data,
+                )
+                .expect("motion content test HBA entry should be added");
+        }
 
         writer
             .add(
@@ -377,8 +414,10 @@ mod tests {
             return;
         }
 
-        let archive = Arc::new(HbaReader::open(&bundle_path).expect("test HBA should open"));
-        let repository = ContentRepository::from_mounts(vec![mounted_archive(archive)]);
+        // The motion contract is built from the repository's resource index, which only an
+        // archive-backed repository populates.
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("test repository should mount");
         let mut builder = ClientRuntimeBuilder::new("test").server("127.0.0.1", 9000);
 
         builder
@@ -392,7 +431,19 @@ mod tests {
         assert!(!client.world.skill_table.skill_base_hash.is_empty());
         assert!(!client.world.spell_catalog.spells.is_empty());
         assert!(client.world.soul_emote_catalog.is_known_token("wave"));
-        assert_eq!(client.world.motion_kinematics.id, MotionKinematics::FILE_ID);
+        let walk = client
+            .world
+            .motion_sequences
+            .table(TEST_MOTION_TABLE_ID)
+            .expect("motion contract should carry the bundled table")
+            .cycle(TEST_STYLE, MotionTable::WALK_FORWARD_COMMAND)
+            .expect("motion contract should carry the bundled walk cycle");
+        assert_eq!(walk.clips.len(), 1);
+        assert_eq!(walk.clips[0].animation.id, TEST_ANIMATION_ID);
+        assert_eq!(
+            walk.clips[0].high_frame, 1,
+            "the open-ended window resolves"
+        );
     }
 
     #[test]

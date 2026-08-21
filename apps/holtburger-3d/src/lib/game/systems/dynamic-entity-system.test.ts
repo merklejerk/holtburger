@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { expandBounds } from "../math/geometry-utils";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
+import type { DatAssetId } from "../game-types";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
 import { AUTHORED_SCRIPT_FIXTURES } from "../behavior/authored-script-fixtures";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
@@ -128,6 +129,110 @@ describe("DynamicEntitySystem authored ownership", () => {
 		system.removeOwner("parent");
 	});
 
+	/// A body transitions into clips it has not played, so the whole table stages before activation
+	/// — the same rule physics-script closures hold to.
+	it("stages the whole motion closure of a resident that animates from a table", async () => {
+		const animations = new FixtureAnimationSource();
+		const { system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			animations,
+		);
+		const base = source("motion-table");
+		const animated: PlacedDynamicPresentationSource = {
+			...base,
+			source: {
+				...base.source,
+				behavior: {
+					animationId: "0x03000001",
+					kind: "animation-only",
+					motionTableId: "0x09000001" as DatAssetId,
+					physicsScriptId: null,
+					physicsScriptTableId: null,
+					soundTableId: null,
+				},
+			},
+		};
+
+		const installation = system.replaceOwner("layer", [animated]);
+
+		expect(await installation.ready).toBe("ready");
+		const prepared = installation.getPreparedEntities();
+		commit(installation);
+		expect([...prepared[0]!.motionClosure!.animations.keys()]).toEqual([
+			"0x03000001",
+			"0x03000002",
+		]);
+		expect(animations.loads).toContain("0x03000002");
+	});
+
+	/// The runtime clip swap resolves from the staged closure, so it can never trigger a load.
+	it("resolves a staged clip by id and refuses one the closure never reached", async () => {
+		const animations = new FixtureAnimationSource();
+		const { system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			animations,
+		);
+		const base = source("motion-table");
+		const animated: PlacedDynamicPresentationSource = {
+			...base,
+			source: {
+				...base.source,
+				behavior: {
+					animationId: "0x03000001",
+					kind: "animation-only",
+					motionTableId: "0x09000001" as DatAssetId,
+					physicsScriptId: null,
+					physicsScriptTableId: null,
+					soundTableId: null,
+				},
+			},
+		};
+		const installation = system.replaceOwner("layer", [animated]);
+		expect(await installation.ready).toBe("ready");
+		const nodeId = installation.nodeIds[0]!;
+		commit(installation);
+		const loadsAfterActivation = animations.loads.length;
+
+		expect(system.getMotionClip(nodeId, "0x03000002" as DatAssetId)?.id).toBe(
+			"0x03000002",
+		);
+		// Absent from the closure rather than present-and-broken; both leave the current pose.
+		expect(system.getMotionClip(nodeId, "0x0300dead" as DatAssetId)).toBeNull();
+		expect(animations.loads).toHaveLength(loadsAfterActivation);
+	});
+
+	/// The host names a clip only for a body whose table this entity staged, so a mismatch is a
+	/// contract defect rather than content the frontend should quietly skip.
+	it("rejects a clip named for an entity that staged no motion table", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const installation = system.replaceOwner("layer", [source("plain")]);
+		expect(await installation.ready).toBe("ready");
+		const nodeId = installation.nodeIds[0]!;
+		commit(installation);
+
+		expect(() =>
+			system.getMotionClip(nodeId, "0x03000002" as DatAssetId),
+		).toThrow("staged no motion table");
+	});
+
+	/// A resident with no table stages no closure, so static scenery pays nothing for a mechanism
+	/// it does not use.
+	it("stages no motion closure for a resident that declares no table", async () => {
+		const animations = new FixtureAnimationSource();
+		const { system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			animations,
+		);
+
+		const installation = system.replaceOwner("layer", [source("plain")]);
+
+		expect(await installation.ready).toBe("ready");
+		const prepared = installation.getPreparedEntities();
+		commit(installation);
+		expect(prepared[0]!.motionClosure).toBeNull();
+		expect(animations.loads).not.toContain("0x03000002");
+	});
+
 	it("promotes a script-only resident and stages its behavior closure", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		// 0x330003d8 leads into the self-cycling 0x330003cc, so the closure spans two scripts.
@@ -141,6 +246,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 					kind: "script-only",
 					physicsScriptId: "0x330003d8",
 					physicsScriptTableId: null,
+					motionTableId: null,
 					soundTableId: null,
 				},
 			},
@@ -787,6 +893,7 @@ function source(
 				kind: "animation-only",
 				physicsScriptId: null,
 				physicsScriptTableId: null,
+				motionTableId: null,
 				soundTableId: null,
 			},
 			identity: id,
@@ -931,11 +1038,18 @@ class ReadyTemplateAtlas implements ObjectVisualTemplateAtlas<ReadyTemplateAtlas
 }
 
 class FixtureAnimationSource implements AnimationAssetSource {
+	/// Animations this fixture's motion table reaches, and every id it was asked to load.
+	closure: string[] = ["0x03000001", "0x03000002"];
+	readonly loads: string[] = [];
+
 	constructor(readonly partCount = 1) {}
 
-	async loadAnimation(
-		animationId: "0x03000001",
-	): Promise<DecodedAnimationAsset> {
+	async loadMotionTableClosure() {
+		return this.closure as DatAssetId[];
+	}
+
+	async loadAnimation(animationId: DatAssetId): Promise<DecodedAnimationAsset> {
+		this.loads.push(animationId);
 		return {
 			frameCount: 1,
 			hooks: [],
@@ -950,6 +1064,10 @@ class FixtureAnimationSource implements AnimationAssetSource {
 }
 
 class BlockedAnimationSource implements AnimationAssetSource {
+	async loadMotionTableClosure(): Promise<DatAssetId[]> {
+		return [];
+	}
+
 	async loadAnimation(
 		animationId: "0x03000001",
 	): Promise<DecodedAnimationAsset> {

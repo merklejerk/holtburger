@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, ensure};
 use holtburger_common::Vector3;
-use holtburger_core::client::movement_types::MotionState;
+use holtburger_core::client::movement_types::CharacterDrive;
 use holtburger_core::{
     CharacterJumpKinematics, CharacterJumpReadiness, CharacterJumpRejection,
     CharacterMotionContact, CharacterMotionController, CharacterMotionEvent,
@@ -81,7 +81,7 @@ pub(super) fn bounded_pending_displacement(pending: Vector3, available_distance:
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RevisionedGroundedInput {
     pub(super) revision: u64,
-    pub(super) drive: MotionState,
+    pub(super) drive: CharacterDrive,
     pub(super) view_direction: Vector3,
 }
 

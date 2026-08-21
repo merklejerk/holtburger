@@ -5,11 +5,11 @@ use std::io::Cursor;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use holtburger_content::ContentRepository;
+use holtburger_content::{ContentRepository, MotionSequenceCatalog};
 use holtburger_dat::file_type::motion_table::{AnimData, MotionData};
 use holtburger_dat::file_type::setup_model::{AnimationHook, AnimationHookPayload};
 use holtburger_dat::file_type::{
-    Animation, DatFileType, GfxObj, MotionKinematics, MotionTable, PhysicsScript, SetupModel,
+    Animation, DatFileType, GfxObj, MotionTable, PhysicsScript, SetupModel,
 };
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_weenie_catalog::{PhysicsBoolOverrides, WeenieCatalog, WeenieTemplate};
@@ -177,7 +177,7 @@ pub struct ContentSurvey {
     /// Bounded deterministic WCID examples for measured branches and rejection cases.
     pub representative_samples: BTreeMap<&'static str, Vec<RepresentativeTemplate>>,
     /// Authored locomotion vectors from the derived HBA motion-kinematics asset.
-    pub motion_kinematics: MotionKinematicsSurvey,
+    pub motion_contract: MotionContractSurvey,
     /// Ordered animation root-transform facts from raw motion tables and animations.
     pub authored_root_motion: AuthoredRootMotionSurvey,
 }
@@ -281,19 +281,24 @@ pub struct CollisionRelevantHookSurvey {
     pub effect: &'static str,
 }
 
-/// Population and magnitude ranges of authored cyclic motion vectors.
+/// Population and magnitude ranges of authored cyclic motion vectors, read from the runtime motion
+/// contract rather than from a derived asset.
 #[derive(Debug, Default, Serialize)]
-pub struct MotionKinematicsSurvey {
+pub struct MotionContractSurvey {
     /// Setup-to-default-motion-table mappings.
     pub setup_defaults: usize,
-    /// Distinct decoded motion tables.
+    /// Distinct projected motion tables.
     pub motion_tables: usize,
     /// Stance/command cycle entries across all motion tables.
     pub cycle_entries: usize,
-    /// Magnitudes of present authored velocity vectors in metres per second.
+    /// Magnitudes of authored velocity vectors in metres per second. Only explicit motion-data
+    /// velocity is counted: cycles whose motion is authored as root transforms contribute nothing
+    /// here, because reducing them to a speed would be a second, competing motion fact.
     pub velocity_magnitudes: FloatDistribution,
-    /// Magnitudes of present authored angular-velocity vectors in radians per second.
+    /// Magnitudes of authored angular-velocity vectors in radians per second.
     pub omega_magnitudes: FloatDistribution,
+    /// Cycles whose only motion source is authored root transforms.
+    pub cycles_authored_only: usize,
 }
 
 /// Population evidence used to choose the Phase 6 solver root-motion contract.
@@ -947,9 +952,9 @@ fn survey_content(
         }
     }
 
-    let motion_kinematics = content
-        .read_asset::<MotionKinematics>("motion kinematics table")
-        .context("could not survey authored motion kinematics")?;
+    let motion_contract = content
+        .read_motion_sequence_catalog()
+        .context("could not project the motion contract for the survey")?;
     let physics_bsp_default_behavior_setups = survey_physics_bsp_default_behavior_setups(
         templates,
         &setup_facts,
@@ -1002,7 +1007,7 @@ fn survey_content(
         templates_with_unknown_physics_bits,
         effective_mask_rule: "ACE base mask or PhysicsGlobals.DefaultState; apply the eleven nullable PropertyBool overrides; replace HasPhysicsBSP from setup parts; for Static templates replace HasDefaultAnim/HasDefaultScript from setup defaults",
         representative_samples,
-        motion_kinematics: survey_motion_kinematics(&motion_kinematics),
+        motion_contract: survey_motion_contract(&motion_contract),
         authored_root_motion,
     })
 }
@@ -1326,23 +1331,27 @@ fn resource_key(id: u32) -> String {
     format!("0x{id:08X}")
 }
 
-fn survey_motion_kinematics(motion: &MotionKinematics) -> MotionKinematicsSurvey {
-    let mut survey = MotionKinematicsSurvey {
-        setup_defaults: motion.setup_model_defaults.len(),
-        motion_tables: motion.motion_tables.len(),
-        ..MotionKinematicsSurvey::default()
+fn survey_motion_contract(catalog: &MotionSequenceCatalog) -> MotionContractSurvey {
+    let mut survey = MotionContractSurvey {
+        setup_defaults: catalog.setup_default_tables().count(),
+        motion_tables: catalog.tables().count(),
+        ..MotionContractSurvey::default()
     };
-    for table in motion.motion_tables.values() {
-        for (_, kinematics) in table.iter_cycle_kinematics() {
+    for table in catalog.tables() {
+        for (_, sequence) in table.cycles() {
             survey.cycle_entries += 1;
             survey.velocity_magnitudes.observe(
-                kinematics
+                sequence
                     .velocity
                     .map(|velocity| f64::from(velocity.length())),
             );
             survey
                 .omega_magnitudes
-                .observe(kinematics.omega.map(|omega| f64::from(omega.length())));
+                .observe(sequence.omega.map(|omega| f64::from(omega.length())));
+            if sequence.velocity.is_none() && sequence.omega.is_none() && !sequence.is_motionless()
+            {
+                survey.cycles_authored_only += 1;
+            }
         }
     }
     survey
@@ -1849,8 +1858,8 @@ mod tests {
     use super::*;
     use holtburger_common::Vector3;
     use holtburger_dat::file_type::animation::AnimationFlags;
+    use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
     use holtburger_dat::file_type::setup_model::AnimationFrame;
-    use holtburger_dat::file_type::{MotionCommandKinematics, MotionKinematicsTable};
     use holtburger_dat::graphics::Frame;
     use holtburger_weenie_catalog::{SubPalette, TemplatePhysics};
 
@@ -1973,28 +1982,89 @@ mod tests {
 
     #[test]
     fn motion_census_measures_authored_vector_magnitudes() {
-        let mut motion = MotionKinematics::new();
-        motion.setup_model_defaults.insert(1, 2);
-        let mut table = MotionKinematicsTable::new(2, 3);
-        table.insert_cycle_kinematics(
-            3,
-            4,
-            MotionCommandKinematics {
+        let stance = 3u32;
+        let animation_id = 0x0300_0001;
+        let explicit_key = MotionTable::cycle_key(stance, 4);
+        let authored_key = MotionTable::cycle_key(stance, 5);
+        let clip = AnimData {
+            anim_id: animation_id,
+            low_frame: 0,
+            high_frame: -1,
+            framerate: 30.0,
+        };
+
+        let mut cycles = std::collections::HashMap::new();
+        cycles.insert(
+            explicit_key,
+            MotionData {
+                bitfield: 0,
+                flags: MotionDataFlags::HAS_VELOCITY | MotionDataFlags::HAS_OMEGA,
+                anims: Vec::new(),
                 velocity: Some(Vector3::new(3.0, 4.0, 0.0)),
                 omega: Some(Vector3::new(0.0, 0.0, 2.0)),
             },
         );
-        motion.motion_tables.insert(2, table);
+        cycles.insert(
+            authored_key,
+            MotionData {
+                bitfield: 0,
+                flags: MotionDataFlags::empty(),
+                anims: vec![clip],
+                velocity: None,
+                omega: None,
+            },
+        );
 
-        let survey = survey_motion_kinematics(&motion);
+        let table = MotionTable {
+            id: 2,
+            default_style: stance,
+            style_defaults: std::collections::HashMap::new(),
+            cycles,
+            modifiers: std::collections::HashMap::new(),
+            links: std::collections::HashMap::new(),
+        };
+        let animation = Animation {
+            id: animation_id,
+            flags: AnimationFlags::POS_FRAMES,
+            num_parts: 0,
+            num_frames: 2,
+            pos_frames: vec![
+                Frame {
+                    origin: Vector3::new(0.0, 0.5, 0.0),
+                    orientation: holtburger_common::Quaternion::identity(),
+                },
+                Frame {
+                    origin: Vector3::new(0.0, 0.5, 0.0),
+                    orientation: holtburger_common::Quaternion::identity(),
+                },
+            ],
+            part_frames: vec![
+                AnimationFrame {
+                    frames: Vec::new(),
+                    hooks: Vec::new(),
+                },
+                AnimationFrame {
+                    frames: Vec::new(),
+                    hooks: Vec::new(),
+                },
+            ],
+        };
+
+        let catalog = MotionSequenceCatalog::assemble([table], [animation], [(1, 2)])
+            .expect("catalog should assemble");
+        let survey = survey_motion_contract(&catalog);
 
         assert_eq!(survey.setup_defaults, 1);
         assert_eq!(survey.motion_tables, 1);
-        assert_eq!(survey.cycle_entries, 1);
+        assert_eq!(survey.cycle_entries, 2);
         assert_eq!(survey.velocity_magnitudes.min, Some(5.0));
         assert_eq!(survey.velocity_magnitudes.max, Some(5.0));
         assert_eq!(survey.omega_magnitudes.min, Some(2.0));
         assert_eq!(survey.omega_magnitudes.max, Some(2.0));
+        assert_eq!(
+            survey.cycles_authored_only, 1,
+            "a cycle whose motion is authored as root transforms is counted, not reduced"
+        );
     }
 
     #[test]

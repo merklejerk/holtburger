@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn empty_collection_keeps_its_one_participant_without_publishing() {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
-        let entities = Arc::new(ExplorerEntityRuntime::new(simulation));
+        let entities = Arc::new(ExplorerEntityRuntime::new(simulation, Default::default()));
         let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
         let sink = Arc::new(RecordingSink::default());
         let participant = ExplorerEntitySimulation::new(entities, delivery, sink.clone());
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn one_collection_tick_publishes_one_changed_entity_batch() {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
-        let entities = Arc::new(ExplorerEntityRuntime::new(simulation));
+        let entities = Arc::new(ExplorerEntityRuntime::new(simulation, Default::default()));
         let guid = entities.reserve_guid().unwrap();
         let spawned = entities
             .spawn_prepared(
@@ -195,6 +195,7 @@ mod tests {
                 weenie_type: WeenieType::Creature,
             },
             content: DynamicEntityContent {
+                motion_table_did: None,
                 setup_did: 0x0200_0001,
                 sound_table_did: None,
                 physics_effect_table_did: None,

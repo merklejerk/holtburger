@@ -5,6 +5,26 @@ import {
 	ExplorerDynamicEntitySession,
 	type ExplorerDynamicEntityTransport,
 } from "./explorer-dynamic-entity-session";
+import { IDLE_MOTION_ORDER } from "./explorer-entity-possession";
+
+/// Records every invocation and answers from a per-command script, for commands that publish no
+/// snapshot and therefore cannot be observed through the entity feed.
+class RecordingTransport implements ExplorerDynamicEntityTransport {
+	readonly invocations: [string, Record<string, unknown> | undefined][] = [];
+	readonly responses = new Map<string, unknown>();
+
+	async listen(): Promise<() => void> {
+		return () => {};
+	}
+
+	async invoke(
+		command: string,
+		args?: Record<string, unknown>,
+	): Promise<unknown> {
+		this.invocations.push([command, args]);
+		return this.responses.get(command);
+	}
+}
 
 class FakeTransport implements ExplorerDynamicEntityTransport {
 	readonly calls: string[] = [];
@@ -50,6 +70,7 @@ function entity(guid: number) {
 		identity: { guid, wcid: 42, name: "Drudge" },
 		presentation: {
 			content: {
+				motionTableDid: null,
 				setupDid: 0x02000001,
 				soundTableDid: null,
 				physicsEffectTableDid: null,
@@ -158,5 +179,50 @@ describe("ExplorerDynamicEntitySession", () => {
 			snapshot: { hostTime: { seconds: 2 }, entities: [entity(4)] },
 		});
 		expect(changes).toBe(2);
+	});
+});
+
+describe("possession", () => {
+	it("possesses one entity and reports what its table models", async () => {
+		const transport = new RecordingTransport();
+		transport.responses.set("possess_explorer_entity", {
+			guid: 0xf0000001,
+			modelledCommands: ["0x45000005", "0x44000007"],
+			motionTableId: "0x09000001",
+		});
+		const session = new ExplorerDynamicEntitySession(transport);
+
+		const possession = await session.possess(0xf0000001);
+
+		expect(possession.motionTableId).toBe("0x09000001");
+		expect(possession.modelledCommands).toEqual(["0x45000005", "0x44000007"]);
+		expect(transport.invocations).toContainEqual([
+			"possess_explorer_entity",
+			{ request: { guid: 0xf0000001 } },
+		]);
+	});
+
+	it("releases by naming no entity", async () => {
+		const transport = new RecordingTransport();
+		transport.responses.set("possess_explorer_entity", {
+			guid: null,
+			modelledCommands: [],
+			motionTableId: null,
+		});
+		const session = new ExplorerDynamicEntitySession(transport);
+
+		expect((await session.possess(null)).guid).toBeNull();
+		expect(transport.invocations).toContainEqual([
+			"possess_explorer_entity",
+			{ request: { guid: null } },
+		]);
+	});
+
+	it("reports whether an order reached anything, so an unpossessed order is not silent", async () => {
+		const transport = new RecordingTransport();
+		transport.responses.set("set_explorer_entity_motion", false);
+		const session = new ExplorerDynamicEntitySession(transport);
+
+		expect(await session.setMotionOrder(IDLE_MOTION_ORDER)).toBe(false);
 	});
 });

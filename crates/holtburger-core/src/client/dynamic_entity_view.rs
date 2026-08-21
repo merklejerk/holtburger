@@ -86,6 +86,7 @@ pub fn project_client_dynamic_entity(
         identity: DynamicEntityIdentityView { guid, wcid, name },
         content: DynamicEntityContent {
             setup_did,
+            motion_table_did: entity.mtable_id().map(|did| did.0),
             sound_table_did: entity.stable_id().map(|did| did.0),
             physics_effect_table_did: entity.petable_id().map(|did| did.0),
         },
@@ -232,6 +233,7 @@ mod tests {
                     weenie_type: WeenieType::Creature,
                 },
                 content: DynamicEntityContent {
+                    motion_table_did: Some(0x0900_0001),
                     setup_did: 0x0200_0001,
                     sound_table_did: None,
                     physics_effect_table_did: None,

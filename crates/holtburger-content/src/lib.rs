@@ -6,6 +6,7 @@ pub mod interior;
 pub mod landblock;
 pub mod material_capabilities;
 pub mod material_graph;
+pub mod motion_sequence;
 pub mod object_collision;
 pub mod repository;
 pub mod soul_emote;
@@ -46,6 +47,11 @@ pub use material_graph::{
     ResolvedSetupAppearance, ResolvedSetupAppearancePart, ResolvedSurfaceTexture,
     ResolvedTerrainAlphaMap, ResolvedTerrainMaterialTable, ResolvedTerrainMaterialType,
     ResolvedTerrainRoadAlphaMap, ResolvedTextureChange, ResolvedTextureMaterial,
+};
+pub use motion_sequence::{
+    MotionAnimation, MotionClip, MotionContractError, MotionHook, MotionHookDirection,
+    MotionHookEffect, MotionHookTrack, MotionSequence, MotionSequenceCatalog, MotionSequenceTable,
+    RootMotionTrack,
 };
 pub use object_collision::{
     BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,

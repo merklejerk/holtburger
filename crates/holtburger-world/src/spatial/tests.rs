@@ -1,7 +1,7 @@
 use super::*;
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::time::{Duration, Instant};
 
@@ -441,11 +441,15 @@ fn basic_spatial_physics_uses_target_hint_for_indoor_destination_landblock() {
     assert_eq!(body.pose.coords, Vector3::new(200.0, 6.0, 0.0));
 }
 
+/// An authored offset is a local rigid transform: its translation is rotated into world space by
+/// the body's own pose and its rotation composes onto that pose.
 #[test]
-fn basic_spatial_physics_integrates_grounded_remote_basis_using_local_motion_semantics() {
+fn basic_spatial_physics_integrates_an_authored_offset_in_the_bodys_own_frame() {
     let mut scene = SpatialScene::new();
     let guid = Guid(0x5000_0004);
+    // Heading 90 degrees is AC's North, where the pose rotation is identity.
     let pose = make_position(10.0, 20.0, 90.0_f32.to_radians());
+    let quarter_turn = std::f32::consts::FRAC_PI_2;
 
     let request = SpatialSolveRequest {
         dt: Duration::from_secs(1),
@@ -453,9 +457,15 @@ fn basic_spatial_physics_integrates_grounded_remote_basis_using_local_motion_sem
             body_id: SpatialBodyId::Entity(guid),
             pose,
             contact: ContactState::Grounded,
-            basis: Some(SolveProjectionBasis::GroundedMotion {
-                desired_local_velocity: Vector3::new(2.0, 0.0, 0.0),
-                desired_local_omega: Vector3::new(0.0, 0.0, 1.0),
+            basis: Some(SolveProjectionBasis::AuthoredDrive {
+                offset: RigidTransform {
+                    translation: Vector3::new(0.0, 2.0, 0.0),
+                    rotation: Quaternion::from_axis_angle(
+                        Vector3::new(0.0, 0.0, 1.0),
+                        quarter_turn,
+                    )
+                    .expect("a unit axis and finite angle build a rotation"),
+                },
             }),
         }],
         local_drive: None,
@@ -464,12 +474,51 @@ fn basic_spatial_physics_integrates_grounded_remote_basis_using_local_motion_sem
     let solved = BasicSpatialPhysics.solve(&request, &mut scene);
     let body = solved.solved[0];
 
-    assert!(body.velocity.x.abs() < 1e-4);
-    assert!((body.velocity.y - 2.0).abs() < 1e-4);
     assert!((body.pose.coords.x - 10.0).abs() < 1e-4);
     assert!((body.pose.coords.y - 22.0).abs() < 1e-4);
-    assert!((body.pose.rotation.to_heading() - (90.0_f32.to_radians() + 1.0)).abs() < 1e-4);
+    assert!((body.velocity.y - 2.0).abs() < 1e-4);
+    assert!(
+        (body.omega.z.abs() - quarter_turn).abs() < 1e-4,
+        "the authored rotation reduces to the heading rate it achieved"
+    );
     assert_eq!(body.contact, ContactState::Grounded);
+}
+
+/// Retail's support gate zeroes authored translation off walkable support and never touches the
+/// rotation, so a body walking off a ledge stops driving forward but keeps turning.
+#[test]
+fn an_unsupported_body_keeps_authored_rotation_and_loses_authored_translation() {
+    let mut scene = SpatialScene::new();
+    let guid = Guid(0x5000_0005);
+    let pose = make_position(10.0, 20.0, 90.0_f32.to_radians());
+    let quarter_turn = std::f32::consts::FRAC_PI_2;
+
+    let request = SpatialSolveRequest {
+        dt: Duration::from_secs(1),
+        bodies: vec![SolveBodyInput {
+            body_id: SpatialBodyId::Entity(guid),
+            pose,
+            contact: ContactState::Airborne,
+            basis: Some(SolveProjectionBasis::AuthoredDrive {
+                offset: RigidTransform {
+                    translation: Vector3::new(0.0, 2.0, 0.0),
+                    rotation: Quaternion::from_axis_angle(
+                        Vector3::new(0.0, 0.0, 1.0),
+                        quarter_turn,
+                    )
+                    .expect("a unit axis and finite angle build a rotation"),
+                },
+            }),
+        }],
+        local_drive: None,
+    };
+
+    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
+    let body = solved.solved[0];
+
+    assert!((body.pose.coords.y - 20.0).abs() < 1e-4);
+    assert_eq!(body.velocity, Vector3::zero());
+    assert!((body.omega.z.abs() - quarter_turn).abs() < 1e-4);
 }
 
 #[test]

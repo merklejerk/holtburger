@@ -24,6 +24,7 @@ describe("resolveObjectBehavior", () => {
 					animationId,
 					physicsScriptId,
 					physicsScriptTableId,
+					motionTableId: null,
 					soundTableId: null,
 				}).kind,
 			).toBe(kind);
@@ -78,6 +79,7 @@ function behavior(
 				? "0x33000001"
 				: null,
 		physicsScriptTableId: null,
+		motionTableId: null,
 		soundTableId: null,
 	});
 }

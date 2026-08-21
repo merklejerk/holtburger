@@ -1,6 +1,6 @@
 use anyhow::Context;
 use holtburger_3d::{
-    LandblockSourceLayer, LoadTexturePixelsRequest,
+    LandblockSourceLayer, LoadTexturePixelsRequest, SphereSweepRequest,
     dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes,
     explorer_entity_delivery::ExplorerEntityDelivery,
     explorer_entity_driver::{
@@ -11,8 +11,9 @@ use holtburger_3d::{
     explorer_weenie_catalog::ExplorerWeenieCatalog,
     host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
     load_active_region_data_bytes, load_animation_bytes, load_landblock_source_batch_bytes,
-    load_particle_emitter_bytes, load_particle_meshes_bytes, load_physics_script_bytes,
-    load_sky_source_bytes, load_sound_table_bytes, load_texture_pixels_bytes,
+    load_motion_table_closure_ids, load_particle_emitter_bytes, load_particle_meshes_bytes,
+    load_physics_script_bytes, load_sky_source_bytes, load_sound_table_bytes,
+    load_texture_pixels_bytes, resolve_sphere_sweep,
 };
 use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{ContentAssetRuntime, ContentAssetService};
@@ -58,6 +59,12 @@ struct PhysicsScriptRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct MotionTableClosureRequest {
+    motion_table_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ParticleEmitterRequest {
     emitter_info_id: String,
 }
@@ -96,6 +103,8 @@ struct ExplorerEntityTickRequest {
 
 struct DevHostState {
     content: ContentAssetRuntime,
+    /// Held so the harness can stage a motion closure, which entity activation requires.
+    motion: Arc<holtburger_content::MotionSequenceCatalog>,
     entities: Arc<ExplorerEntityDriver>,
     delivery: Arc<ExplorerEntityDelivery>,
     runtime: Arc<ExplorerEntityRuntime>,
@@ -179,6 +188,36 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
             match load_animation_bytes(runtime, &request.animation_id).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/sphere-sweep") => {
+            let request = serde_json::from_slice::<SphereSweepRequest>(&request.body)?;
+            match resolve_sphere_sweep(&state.simulation, request) {
+                Ok(distance) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&distance)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/motion-table-closure") => {
+            let request = serde_json::from_slice::<MotionTableClosureRequest>(&request.body)?;
+            match load_motion_table_closure_ids(&state.motion, &request.motion_table_id) {
+                Ok(ids) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&ids)?,
+                    )
+                    .await
                 }
                 Err(error) => write_error(&mut stream, error).await,
             }
@@ -381,7 +420,11 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
     let content = ContentAssetRuntime::new(service.clone());
     let collision_source: Arc<dyn CollisionSource> = Arc::new(service);
     let simulation = Arc::new(HostSimulationRuntime::new(collision_source));
-    let runtime = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
+    let motion_catalog = Arc::new(repository.read_motion_sequence_catalog()?);
+    let runtime = Arc::new(ExplorerEntityRuntime::new(
+        Arc::clone(&simulation),
+        Arc::clone(&motion_catalog),
+    ));
     let catalog = Arc::new(ExplorerWeenieCatalog::discover_from_environment(
         repository.source_description().map(Path::new),
     ));
@@ -394,6 +437,7 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
     ));
     Ok(DevHostState {
         content,
+        motion: motion_catalog,
         delivery: Arc::new(ExplorerEntityDelivery::new(Arc::clone(&runtime))),
         entities,
         runtime,

@@ -32,12 +32,12 @@ pub(super) fn has_active_approach(state: &GameState) -> bool {
 pub(super) fn is_run_movement_command(command: &ClientCommand) -> bool {
     matches!(
         command,
-        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
+        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(CharacterDrive {
             longitudinal: Some(LongitudinalMotion::Forward),
             lateral: None,
             ..
         })) | ClientCommand::DriveSelf(PlayerDriveIntent::ManualPulse {
-            state: MotionState {
+            state: CharacterDrive {
                 longitudinal: Some(LongitudinalMotion::Forward),
                 lateral: None,
                 ..
@@ -50,7 +50,7 @@ pub(super) fn is_run_movement_command(command: &ClientCommand) -> bool {
 pub(super) fn is_turn_movement_command(command: &ClientCommand) -> bool {
     matches!(
         command,
-        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
+        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(CharacterDrive {
             longitudinal: None,
             lateral: None,
             turning: Some(Turn::Left | Turn::Right),

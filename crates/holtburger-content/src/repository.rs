@@ -2,8 +2,9 @@ use anyhow::{Context, Result, anyhow};
 use binrw::{BinRead, Endian};
 use directories::ProjectDirs;
 use holtburger_dat::{
-    HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
-    file_type::ChatPoseTable,
+    EOR_PORTAL_NAMESPACE, HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource,
+    StaticResourceKey,
+    file_type::{Animation, ChatPoseTable, DatFileType, MotionTable, SetupModel},
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 
 use crate::SoulEmoteCatalog;
 use crate::material_capabilities::{MaterialArchiveCapabilityReport, RepositoryResourceIndexEntry};
+use crate::motion_sequence::MotionSequenceCatalog;
 
 const HOLTBURGER_DATS_ENV: &str = "HOLTBURGER_DATS";
 
@@ -146,6 +148,11 @@ impl ContentRepository {
         })
     }
 
+    /// Mounts already-constructed sources without a resource index.
+    ///
+    /// `ResourceSource` cannot enumerate its contents, so index-driven readers — the material
+    /// capability report and the motion contract — see nothing from a repository built this way.
+    /// Use `from_hba_dir` or `from_hba_path` when a caller needs those.
     pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self {
         Self {
             mounts,
@@ -223,6 +230,56 @@ impl ContentRepository {
 
     pub fn material_capability_report(&self) -> MaterialArchiveCapabilityReport {
         MaterialArchiveCapabilityReport::build(self, &self.resource_index)
+    }
+
+    /// Builds the runtime motion contract from every motion table, animation, and setup model the
+    /// repository carries.
+    ///
+    /// Every archive profile carries the complete motion representation, so a referenced animation
+    /// that is absent is an integrity failure rather than a profile that legitimately omits it.
+    pub fn read_motion_sequence_catalog(&self) -> Result<MotionSequenceCatalog> {
+        let tables = self.decode_portal_records(DatFileType::MotionTable, MotionTable::read)?;
+        // The projection keeps root frames and simulation hooks and drops articulated part frames,
+        // so it reads with the seeking decode rather than materialising 52 MB it would discard.
+        let animations =
+            self.decode_portal_records(DatFileType::Animation, Animation::read_simulation_facts)?;
+        let setup_default_tables = self
+            .decode_portal_records(DatFileType::SetupModel, SetupModel::read)?
+            .into_iter()
+            .filter_map(|setup| Some((setup.id, setup.default_motion_table?)))
+            .collect::<Vec<_>>();
+
+        MotionSequenceCatalog::assemble(tables, animations, setup_default_tables)
+            .context("failed to project raw motion content into the runtime motion contract")
+    }
+
+    /// Decodes every mounted portal record of one file type, in deterministic index order.
+    ///
+    /// File types are inferred from the id prefix, which is namespace-blind, so the namespace is
+    /// part of the filter: `0x09......` is a motion table under `eor/portal` and a cell record
+    /// under `eor/cell`.
+    fn decode_portal_records<T>(
+        &self,
+        file_type: DatFileType,
+        decode: fn(&mut Cursor<Vec<u8>>) -> binrw::BinResult<T>,
+    ) -> Result<Vec<T>> {
+        self.resource_index
+            .iter()
+            .filter(|entry| {
+                entry.namespace == EOR_PORTAL_NAMESPACE
+                    && DatFileType::from_id(entry.file_id) == file_type
+            })
+            .map(|entry| {
+                let resource =
+                    self.read_resource(ResourceKey::new(&entry.namespace, entry.file_id))?;
+                decode(&mut Cursor::new(resource.bytes)).with_context(|| {
+                    format!(
+                        "failed to decode {} {}:0x{:08X}",
+                        file_type, entry.namespace, entry.file_id
+                    )
+                })
+            })
+            .collect()
     }
 
     pub fn read_soul_emote_catalog(&self) -> Result<SoulEmoteCatalog> {
@@ -382,15 +439,14 @@ mod tests {
     use holtburger_common::properties::GfxObjFlags;
     use holtburger_common::{Sphere, Vector3};
     use holtburger_dat::file_type::{
-        AnimationPartChange, CharGen, ChatPoseTable, EnvCell, GfxObj, MotionKinematics, ObjDesc,
-        SkillTable, SpellTable, SubPalette, TextureMapChange, XpTable,
+        AnimationPartChange, CharGen, ChatPoseTable, EnvCell, GfxObj, ObjDesc, SkillTable,
+        SpellTable, SubPalette, TextureMapChange, XpTable,
     };
     use holtburger_dat::file_type::{PixelFormatId, SetupModel, SurfaceType};
     use holtburger_dat::graphics::CVertexArray;
     use holtburger_dat::graphics::Frame;
     use holtburger_dat::{
-        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
-        HbaWriter, LayeredResourceResolver,
+        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaWriter, LayeredResourceResolver,
     };
     use tempfile::tempdir;
 
@@ -463,14 +519,6 @@ mod tests {
         assert_eq!(pixels.width, 2);
         assert_eq!(pixels.height, 2);
         assert_eq!(pixels.pixels[0..4], [3, 2, 1, 4]);
-    }
-
-    fn test_motion_kinematics_bytes() -> Vec<u8> {
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        MotionKinematics::new()
-            .write(&mut bytes)
-            .expect("test motion kinematics asset should write");
-        bytes.into_inner()
     }
 
     fn test_chat_pose_table_bytes() -> Vec<u8> {
@@ -546,15 +594,6 @@ mod tests {
                 )
                 .expect("test HBA entry should be added");
         }
-
-        writer
-            .add(
-                HOLTBURGER_CORE_NAMESPACE,
-                MotionKinematics::FILE_ID,
-                DatFileType::MotionKinematics as u32,
-                test_motion_kinematics_bytes(),
-            )
-            .expect("motion kinematics test HBA entry should be added");
 
         if include_cell_namespace {
             writer
@@ -1132,26 +1171,6 @@ mod tests {
 
         assert!(!char_gen.starter_areas.is_empty());
         assert!(!char_gen.heritage_groups.is_empty());
-    }
-
-    #[test]
-    fn read_asset_loads_motion_kinematics_from_repository() {
-        let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
-            &dir.path().join("bundle.hba"),
-            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
-            false,
-        ) {
-            return;
-        }
-
-        let repository =
-            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
-        let motion_kinematics = repository
-            .read_asset::<MotionKinematics>("motion kinematics table")
-            .expect("motion kinematics should resolve from content repository");
-
-        assert_eq!(motion_kinematics.id, MotionKinematics::FILE_ID);
     }
 
     #[test]

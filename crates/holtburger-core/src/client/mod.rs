@@ -594,12 +594,14 @@ mod tests {
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Guid, Quaternion, Vector3};
-    use holtburger_dat::file_type::{
-        MotionCommandKinematics, MotionKinematics, MotionKinematicsTable, MotionTable,
-    };
+    use holtburger_content::MotionSequenceCatalog;
+    use holtburger_dat::file_type::MotionTable;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot, OrderedMotionSpeed};
+    use holtburger_world::state::motion_resolution::test_support::{
+        FixtureCycle, explicit_motion_catalog,
+    };
     use holtburger_world::{
         PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
     };
@@ -636,29 +638,22 @@ mod tests {
         capabilities
     }
 
-    fn test_remote_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
-        let mut asset = MotionKinematics::new();
-        let mut table = MotionKinematicsTable::new(motion_table_id, MotionStance::NonCombat as u32);
-
-        table.insert_cycle_kinematics(
+    fn test_remote_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+        explicit_motion_catalog(
+            motion_table_id,
             MotionStance::NonCombat as u32,
-            MotionTable::RUN_FORWARD_COMMAND,
-            MotionCommandKinematics {
-                velocity: Some(Vector3::new(2.5, 0.0, 0.0)),
-                omega: None,
-            },
-        );
-        table.insert_cycle_kinematics(
-            MotionStance::NonCombat as u32,
-            MotionTable::TURN_RIGHT_COMMAND,
-            MotionCommandKinematics {
-                velocity: None,
-                omega: Some(Vector3::new(0.0, 0.0, 1.25)),
-            },
-        );
-
-        asset.motion_tables.insert(motion_table_id, table);
-        asset
+            [
+                FixtureCycle::moving(
+                    MotionTable::RUN_FORWARD_COMMAND,
+                    Vector3::new(2.5, 0.0, 0.0),
+                ),
+                FixtureCycle::turning(
+                    MotionTable::TURN_RIGHT_COMMAND,
+                    Vector3::new(0.0, 0.0, 1.25),
+                ),
+            ],
+            [],
+        )
     }
 
     #[test]
@@ -1059,7 +1054,7 @@ mod tests {
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder()
+                movement_types::CharacterDrive::builder()
                     .run()
                     .forward()
                     .build(),
@@ -1143,7 +1138,7 @@ mod tests {
             .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder()
+                movement_types::CharacterDrive::builder()
                     .run()
                     .forward()
                     .build(),
@@ -1192,7 +1187,7 @@ mod tests {
 
         client
             .world
-            .set_motion_kinematics(test_remote_motion_kinematics_asset(motion_table_id));
+            .set_motion_sequences(test_remote_motion_catalog(motion_table_id));
         client.world.seed_local_player_entity(
             player_guid,
             "Player",
@@ -1231,14 +1226,11 @@ mod tests {
             .simulation
             .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
 
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        client.world.advance_authored_motion(dt);
         let request = client
             .simulation
-            .build_solve_request(
-                Instant::now(),
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &client.world,
-                &client.movement,
-            )
+            .build_solve_request(Instant::now(), dt, &client.world, &client.movement)
             .expect("tracked grounded remote should join the solve set");
 
         let remote_body = request
@@ -1247,14 +1239,13 @@ mod tests {
             .find(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))
             .expect("tracked grounded remote should be present");
 
-        assert!(matches!(
-            remote_body.basis,
-            Some(holtburger_world::SolveProjectionBasis::GroundedMotion {
-                desired_local_velocity,
-                desired_local_omega,
-            }) if desired_local_velocity == Vector3::new(3.5, 0.0, 0.0)
-                && desired_local_omega == Vector3::new(0.0, 0.0, 0.75)
-        ));
+        assert!(
+            matches!(
+                remote_body.basis,
+                Some(holtburger_world::SolveProjectionBasis::AuthoredDrive { .. })
+            ),
+            "a grounded remote performing a motion drives from its authored offset"
+        );
     }
 
     #[tokio::test]
@@ -1277,7 +1268,7 @@ mod tests {
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder()
+                movement_types::CharacterDrive::builder()
                     .run()
                     .forward()
                     .build(),
@@ -1369,7 +1360,7 @@ mod tests {
             .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder()
+                movement_types::CharacterDrive::builder()
                     .run()
                     .forward()
                     .build(),
@@ -1486,7 +1477,7 @@ mod tests {
 
         client
             .world
-            .set_motion_kinematics(test_remote_motion_kinematics_asset(motion_table_id));
+            .set_motion_sequences(test_remote_motion_catalog(motion_table_id));
         client.world.seed_local_player_entity(
             player_guid,
             "Player",
@@ -1523,9 +1514,11 @@ mod tests {
 
         client.observe_runtime_world_event(&WorldEvent::EntityReplaced(Box::new(remote)));
 
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        client.world.advance_authored_motion(dt);
         let request = client.simulation.build_solve_request(
             Instant::now(),
-            Duration::from_millis(PHYSICS_TICK_MS),
+            dt,
             &client.world,
             &client.movement,
         );

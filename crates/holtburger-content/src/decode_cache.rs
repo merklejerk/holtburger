@@ -5,13 +5,18 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use holtburger_dat::file_type::{
-    EnvCell, Environment, GfxObj, Palette, REGION_DESC_FILE_ID, RegionDesc, Scene, SetupModel,
+    Animation, EnvCell, Environment, GfxObj, Palette, REGION_DESC_FILE_ID, RegionDesc, Scene,
+    SetupModel,
 };
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
 use crate::{ActiveRegionData, ContentRepository};
 
+/// Sized to hold every table-reachable animation at once — 1,938 of them — because warming an
+/// entity's motion table acquires a whole closure and evicting inside one would re-decode records
+/// the same closure is still staging.
+const ANIMATION_CAPACITY: usize = 2_048;
 const CELL_LANDBLOCK_CAPACITY: usize = 512;
 const LANDBLOCK_INFO_CAPACITY: usize = 512;
 const ENV_CELL_CAPACITY: usize = 8_192;
@@ -34,6 +39,7 @@ struct PinnedContentCache {
 
 #[derive(Debug)]
 struct LruDecodedRecordCache {
+    animations: Mutex<SimpleLru<u32, Arc<Animation>>>,
     cell_landblocks: Mutex<SimpleLru<u32, Arc<CellLandblock>>>,
     landblock_infos: Mutex<SimpleLru<u32, Arc<LandblockInfo>>>,
     env_cells: Mutex<SimpleLru<u32, Arc<EnvCell>>>,
@@ -54,6 +60,7 @@ struct SimpleLru<K, V> {
 impl Default for LruDecodedRecordCache {
     fn default() -> Self {
         Self {
+            animations: Mutex::new(SimpleLru::new(ANIMATION_CAPACITY)),
             cell_landblocks: Mutex::new(SimpleLru::new(CELL_LANDBLOCK_CAPACITY)),
             landblock_infos: Mutex::new(SimpleLru::new(LANDBLOCK_INFO_CAPACITY)),
             env_cells: Mutex::new(SimpleLru::new(ENV_CELL_CAPACITY)),
@@ -198,6 +205,32 @@ impl ContentDecodeCache {
             Scene::unpack(&resource.bytes)
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))
+        })
+    }
+
+    /// Decodes one animation once and shares it.
+    ///
+    /// Warming a character's motion table acquires 321 animations, and tables overlap 9.2x, so two
+    /// entities on related tables would otherwise re-read and re-decode the same records from the
+    /// archive. Capacity is counted in records rather than bytes; the failure mode is a re-decode,
+    /// not a leak.
+    pub fn animation(
+        &self,
+        content: &ContentRepository,
+        animation_id: u32,
+    ) -> Result<Arc<Animation>> {
+        load_lru_record(&self.lru.animations, animation_id, || {
+            let resource = content
+                .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, animation_id))
+                .with_context(|| {
+                    format!(
+                        "Could not read {}:0x{animation_id:08X} from content repository",
+                        EOR_PORTAL_NAMESPACE
+                    )
+                })?;
+            Animation::read(&mut Cursor::new(resource.bytes))
+                .map(Arc::new)
+                .with_context(|| format!("Could not decode Animation 0x{animation_id:08X}"))
         })
     }
 

@@ -30,6 +30,14 @@ export function residentKey(identity: ResolvedResidentIdentity): string {
 interface ResolvedBehaviorIds {
 	/** Setup default sound table retained for the authored-effects plan. */
 	readonly soundTableId: DatAssetId | null;
+	/**
+	 * Motion table this resident animates from, or `null` when it has none.
+	 *
+	 * Only live entities carry one. Retail installs a setup's motion table for any non-static
+	 * object and reserves `DefaultAnimation` for static ones, so static scenery keeps animating from
+	 * its default clip and stages no motion closure.
+	 */
+	readonly motionTableId: DatAssetId | null;
 }
 
 type ResolvedScriptIds =
@@ -287,7 +295,8 @@ export interface ResolvedEnvCellStaticObjectSource {
 
 /** Static-object source shape shared by outdoor layers and one exact EnvCell scope. */
 export type ResolvedStaticObjectLayerSource =
-	ResolvedOutdoorStaticLayerSource | ResolvedEnvCellStaticObjectSource;
+	| ResolvedOutdoorStaticLayerSource
+	| ResolvedEnvCellStaticObjectSource;
 
 /** Environment-cell layer containing structured interiors and embedded residents. */
 export interface ResolvedEnvCellLayerSource {

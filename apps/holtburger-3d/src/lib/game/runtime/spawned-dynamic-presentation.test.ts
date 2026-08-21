@@ -16,6 +16,7 @@ describe("dynamic presentation producer adapters", () => {
 		const behavior = {
 			animationId: "0x03000001",
 			kind: "animation-only",
+			motionTableId: null,
 			physicsScriptId: null,
 			physicsScriptTableId: null,
 			soundTableId: "0x20000001",
@@ -77,6 +78,7 @@ function fixtureVisual(): DecodedStaticPresentation {
 		behavior: {
 			animationId: "0x03000001",
 			kind: "animation-only",
+			motionTableId: null,
 			physicsScriptId: null,
 			physicsScriptTableId: null,
 			soundTableId: "0x20000001",
@@ -133,6 +135,7 @@ function fixtureEntity(): DynamicEntityView {
 			},
 			content: {
 				physicsEffectTableDid: null,
+				motionTableDid: null,
 				setupDid: 0x02000001,
 				soundTableDid: 0x20000002,
 			},

@@ -5,6 +5,12 @@
 		type ExplorerCatalogCapability,
 	} from "./explorer-entity-commands";
 	import { buildExplorerEntityTree } from "./explorer-entity-tree";
+	import {
+		MOTION_STYLE,
+		possessionModels,
+		type ExplorerPossession,
+		type MotionStyleName,
+	} from "./explorer-entity-possession";
 
 	interface Props {
 		readonly runtimeReady: boolean;
@@ -13,6 +19,11 @@
 		readonly presentationError: string | null;
 		readonly spawn: (wcid: string, distance: number) => Promise<void>;
 		readonly despawn: (entity: DynamicEntityView) => Promise<void>;
+		/** Possess one entity, or release with `null`. */
+		readonly possess: (guid: number | null) => Promise<ExplorerPossession>;
+		/** Change the stance the possessed entity holds. */
+		readonly setStance: (style: number) => Promise<void>;
+		readonly possession: ExplorerPossession | null;
 	}
 
 	let {
@@ -22,7 +33,39 @@
 		presentationError,
 		spawn,
 		despawn,
+		possess,
+		setStance,
+		possession,
 	}: Props = $props();
+	const LOCOMOTION_LABELS: readonly [number, string][] = [
+		[0x4500_0005, "walk"],
+		[0x4400_0007, "run"],
+		[0x4500_0006, "back"],
+		[0x6500_000d, "turn"],
+		[0x6500_000f, "sidestep"],
+	];
+
+	async function togglePossession(): Promise<void> {
+		if (pending || selected === null) return;
+		pending = true;
+		operationError = null;
+		try {
+			await possess(selectedIsPossessed ? null : selected.identity.guid);
+		} catch (error) {
+			operationError = `Possession failed: ${errorMessage(error)}`;
+		} finally {
+			pending = false;
+		}
+	}
+
+	async function applyStance(name: MotionStyleName): Promise<void> {
+		stance = name;
+		try {
+			await setStance(MOTION_STYLE[name]);
+		} catch (error) {
+			operationError = `Stance change failed: ${errorMessage(error)}`;
+		}
+	}
 	let wcid = $state("");
 	let distance = $state(EXPLORER_SPAWN_DISTANCE.default);
 	let pending = $state(false);
@@ -31,6 +74,13 @@
 	const selected = $derived(
 		entities.find((entity) => entity.identity.guid === selectedGuid) ?? null,
 	);
+	let stance = $state<MotionStyleName>("nonCombat");
+	const selectedIsPossessed = $derived(
+		selectedGuid !== null && selectedGuid === (possession?.guid ?? null),
+	);
+	// A possessed entity whose table models nothing has no commands to give it; saying so is more
+	// useful than offering controls that resolve to nothing.
+	const possessedCommands = $derived(possession?.modelledCommands ?? []);
 	const catalogReady = $derived(catalog?.status === "available");
 	const tree = $derived(buildExplorerEntityTree(entities));
 
@@ -241,6 +291,53 @@
 						>{selected.placement.parentLocation} · {selected.placement
 							.placement}</code
 					>
+				</div>
+			{/if}
+
+			<div class="ac-param-row">
+				<span class="ac-param-key">Possession</span>
+				<button
+					type="button"
+					disabled={!runtimeReady || pending}
+					onclick={togglePossession}
+				>
+					{selectedIsPossessed ? "Release" : "Possess"}
+				</button>
+			</div>
+
+			{#if selectedIsPossessed && possession !== null}
+				<div class="ac-param-row">
+					<span class="ac-param-key">Motion table</span>
+					<code
+						>{possession.motionTableId ??
+							"none — entity cannot be driven"}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Models</span>
+					<code>
+						{#if possessedCommands.length === 0}
+							no locomotion
+						{:else}
+							{LOCOMOTION_LABELS.filter(([command]) =>
+								possessionModels(possession, command),
+							)
+								.map(([, label]) => label)
+								.join(" · ")}
+						{/if}
+					</code>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Stance</span>
+					<select
+						value={stance}
+						onchange={(event) =>
+							applyStance(event.currentTarget.value as MotionStyleName)}
+					>
+						{#each Object.keys(MOTION_STYLE) as name (name)}
+							<option value={name}>{name}</option>
+						{/each}
+					</select>
 				</div>
 			{/if}
 		</div>

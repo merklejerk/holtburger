@@ -1,7 +1,10 @@
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import {
 	advanceCyclicFrame,
+	clipEntryFrame,
 	sampleAnimationPose,
+	wholeAnimationClip,
+	type PlayingClip,
 } from "../animation/animation-playback";
 import type {
 	BehaviorEventRouter,
@@ -24,7 +27,8 @@ const advancedAnimationFrameBrand: unique symbol = Symbol(
 );
 
 interface AnimationRecord {
-	readonly animation: PreparedAnimation;
+	/** Replaced wholesale when a host projection names a different clip. */
+	clip: PlayingClip;
 	/** Dispatch identity, carried so a recycled node id cannot receive this record's commands. */
 	readonly target: BehaviorTarget;
 	framePosition: number;
@@ -100,19 +104,30 @@ export class AnimationSystem<TOwnerId extends string> {
 		return record?.target.generation === target.generation;
 	}
 
-	install(
-		ownerId: TOwnerId,
-		target: BehaviorTarget,
-		residentIdentity: string,
-		animation: PreparedAnimation,
-	): DynamicPresentationSample {
+	/**
+	 * Install or replace the clip one node plays, entering at the clip's own starting frame.
+	 *
+	 * Motion-driven entities activate with no playback at all and receive their first clip from a
+	 * host projection, so installing and swapping are the same operation. Playback is entered
+	 * rather than resumed: host and receiver both advance by rate x dt from the same entry frame,
+	 * so neither accumulates a phase offset against the other, and no frame number is exchanged.
+	 *
+	 * A clip naming a generation the node no longer holds is a defect rather than a race: the
+	 * caller resolves the target from the same presentation record the staging used, and both
+	 * change only inside one synchronous commit. Rejecting loudly surfaces a drift between the
+	 * entity generation and the dynamics owner generation, which are separate counters.
+	 */
+	playClip(ownerId: TOwnerId, target: BehaviorTarget, clip: PlayingClip): void {
 		if (this.#destroyed)
-			throw new Error("Cannot install destroyed animation playback.");
+			throw new Error("Cannot play a clip on destroyed animation playback.");
 		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
-		if (this.#records.has(nodeId))
-			throw new Error(`Animation state for ${nodeId} already exists.`);
-		const record = this.#createRecord(target, residentIdentity, animation);
-		this.#records.set(nodeId, record);
+		const existing = this.#records.get(nodeId);
+		if (existing && existing.target.generation !== target.generation) {
+			throw new Error(
+				`Clip for ${nodeId} names generation ${target.generation}, but its playback holds ${existing.target.generation}.`,
+			);
+		}
+		this.#records.set(nodeId, this.#createRecord(target, clip, 0));
 		let nodes = this.#owners.get(ownerId);
 		if (!nodes) {
 			nodes = new Set();
@@ -120,7 +135,6 @@ export class AnimationSystem<TOwnerId extends string> {
 		}
 		nodes.add(nodeId);
 		this.#latestAdvancedFrame = null;
-		return this.#sample(nodeId, record);
 	}
 
 	/** Advance every active playback's semantic state at the fixed 30 Hz behavior cadence. */
@@ -204,8 +218,11 @@ export class AnimationSystem<TOwnerId extends string> {
 				}
 				const record = this.#createRecord(
 					installation.target,
-					installation.residentIdentity,
-					installation.animation,
+					wholeAnimationClip(installation.animation),
+					independentPhaseSeconds(
+						installation.residentIdentity,
+						installation.animation,
+					),
 				);
 				records.set(nodeId, record);
 				this.#stagedNodeIds.add(nodeId);
@@ -300,15 +317,14 @@ export class AnimationSystem<TOwnerId extends string> {
 		record: AnimationRecord,
 	): DynamicPresentationSample {
 		const visualAdvance = advanceCyclicFrame(
+			record.clip,
 			record.framePosition,
-			record.fractionalSeconds * record.animation.framesPerSecond,
-			record.animation.frameCount,
-			"forward",
+			record.fractionalSeconds,
 		);
 		return {
 			articulatedPose: {
 				partToObjectTransforms: sampleAnimationPose(
-					record.animation,
+					record.clip,
 					visualAdvance.framePosition,
 				),
 			},
@@ -317,22 +333,27 @@ export class AnimationSystem<TOwnerId extends string> {
 		};
 	}
 
+	/**
+	 * Build a record at its clip's entry frame, then replay `phaseSeconds` of it.
+	 *
+	 * Phase is the caller's policy rather than the record's: a setup-default resident desyncs from
+	 * its neighbours by an identity-derived offset, while a host-projected clip must start exactly
+	 * where the host started it and so replays nothing.
+	 */
 	#createRecord(
 		target: BehaviorTarget,
-		residentIdentity: string,
-		animation: PreparedAnimation,
+		clip: PlayingClip,
+		phaseSeconds: number,
 	): AnimationRecord {
 		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
 		const record: AnimationRecord = {
-			animation,
+			clip,
 			fractionalSeconds: 0,
-			framePosition: 0,
+			framePosition: clipEntryFrame(clip),
 			lastTimeSeconds: null,
 			target,
 		};
-		let remainingSeconds =
-			independentPhase(residentIdentity, animation.frameCount) /
-			animation.framesPerSecond;
+		let remainingSeconds = phaseSeconds;
 		while (remainingSeconds + CLOCK_EPSILON_SECONDS >= BEHAVIOR_STEP_SECONDS) {
 			this.#advanceSemanticStep(nodeId, record, "initial-state");
 			remainingSeconds = Math.max(0, remainingSeconds - BEHAVIOR_STEP_SECONDS);
@@ -350,10 +371,9 @@ export class AnimationSystem<TOwnerId extends string> {
 		// one new node up to its authored phase, which a global cadence cannot express.
 		if (mode === "initial-state") this.#effects.foldSemanticStep(nodeId);
 		const advance = advanceCyclicFrame(
+			record.clip,
 			record.framePosition,
-			record.animation.framesPerSecond * BEHAVIOR_STEP_SECONDS,
-			record.animation.frameCount,
-			"forward",
+			BEHAVIOR_STEP_SECONDS,
 		);
 		record.framePosition = advance.framePosition;
 		this.#dispatchDepartedFrames(record, advance.departedFrames, mode);
@@ -372,14 +392,14 @@ export class AnimationSystem<TOwnerId extends string> {
 		mode: "initial-state" | "live",
 	): void {
 		for (const frameIndex of departedFrames) {
-			for (const hook of record.animation.hooks) {
+			for (const hook of record.clip.animation.hooks) {
 				if (hook.frameIndex !== frameIndex) continue;
 				if (hook.direction !== "both" && hook.direction !== "forward") continue;
 				this.#router.dispatch(
 					hook,
 					record.target,
 					{
-						assetId: record.animation.id,
+						assetId: record.clip.animation.id,
 						authoredOrder: hook.authoredOrder,
 						authoredPosition: hook.frameIndex,
 						producer: "animation",
@@ -392,11 +412,15 @@ export class AnimationSystem<TOwnerId extends string> {
 }
 
 /** Stable FNV-1a phase keeps entities reproducible without sharing playback clocks. */
-function independentPhase(identity: string, frameCount: number): number {
+function independentPhaseSeconds(
+	identity: string,
+	animation: PreparedAnimation,
+): number {
 	let hash = 0x811c9dc5;
 	for (let index = 0; index < identity.length; index += 1) {
 		hash ^= identity.charCodeAt(index);
 		hash = Math.imul(hash, 0x01000193);
 	}
-	return ((hash >>> 0) / 0x1_0000_0000) * frameCount;
+	const frame = ((hash >>> 0) / 0x1_0000_0000) * animation.frameCount;
+	return frame / animation.framesPerSecond;
 }

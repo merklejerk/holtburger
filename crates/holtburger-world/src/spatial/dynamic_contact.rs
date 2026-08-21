@@ -104,7 +104,7 @@ pub(crate) fn resolve_dynamic_contacts(
     let anchor = commit.motion.path.anchor();
     let extent = moving_sphere_extent(mover);
     let (minimum, maximum) = swept_root_bounds(&commit.motion.path, extent);
-    let placement = swept_mover_placement(collision, mover, commit, delta_seconds)?;
+    let placement = swept_mover_placement(collision, mover, commit)?;
     let candidates = index.candidates(mover.id, anchor, minimum, maximum, &placement);
 
     let mut selected = None::<SelectedBlockingContact>;
@@ -282,7 +282,6 @@ struct PairTrajectories<'a> {
     mover: &'a SpatialBody,
     mover_commit: &'a PhysicalBodyTickCommit,
     peer: &'a DynamicTickStartBody,
-    delta_seconds: f32,
     anchor: Guid,
 }
 
@@ -302,7 +301,6 @@ impl<'a> PairTrajectories<'a> {
             mover,
             mover_commit,
             peer,
-            delta_seconds,
             anchor,
         })
     }
@@ -408,7 +406,7 @@ impl<'a> PairTrajectories<'a> {
         sampled_planned_pose(
             &self.mover_commit.motion.path,
             self.mover.pose,
-            planned_rotation(self.mover, self.mover_commit, self.delta_seconds),
+            self.mover_commit.pose.rotation,
             fraction,
             self.anchor,
         )
@@ -426,7 +424,7 @@ impl<'a> PairTrajectories<'a> {
         sampled_planned_pose(
             &planned.motion.path,
             self.peer.body.pose,
-            planned_rotation(&self.peer.body, planned, self.delta_seconds),
+            planned.pose.rotation,
             fraction,
             self.anchor,
         )
@@ -444,7 +442,6 @@ fn swept_mover_placement(
     collision: &CollisionScene,
     mover: &SpatialBody,
     commit: &PhysicalBodyTickCommit,
-    delta_seconds: f32,
 ) -> Result<CollisionPlacement> {
     let mut placement = commit.motion.path.initial().placement().clone();
     for leg in commit.motion.path.legs() {
@@ -471,7 +468,7 @@ fn swept_mover_placement(
         let pose = sampled_planned_pose(
             &commit.motion.path,
             mover.pose,
-            planned_rotation(mover, commit, delta_seconds),
+            commit.pose.rotation,
             fraction,
             anchor,
         )?;
@@ -734,14 +731,6 @@ fn bounds_overlap(left: (Vector3, Vector3), right: (Vector3, Vector3)) -> bool {
         && left.1.y >= right.0.y
         && left.0.z <= right.1.z
         && left.1.z >= right.0.z
-}
-
-fn planned_rotation(
-    body: &SpatialBody,
-    commit: &PhysicalBodyTickCommit,
-    delta_seconds: f32,
-) -> Quaternion {
-    super::scene::integrate_angular_velocity(commit.pose.rotation, body.omega, delta_seconds)
 }
 
 fn sampled_planned_pose(

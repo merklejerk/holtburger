@@ -116,9 +116,29 @@ export function resolveAuthoredLightResponse(
 	return minimumResponse + (1 - minimumResponse) * faded;
 }
 
+/**
+ * Rec. 601 luma weights, matching how the eye weights the channels these values are judged by.
+ *
+ * Exported so presentation-side color grading weights channels identically; two independent luma
+ * definitions would drift apart the first time either is tuned.
+ */
+export const REC_601_LUMA_WEIGHTS = {
+	red: 0.299,
+	green: 0.587,
+	blue: 0.114,
+} as const;
+
 /** Rec. 601 luma, matching how the eye weights the channels this lighting is judged by. */
-function relativeLuminance(red: number, green: number, blue: number): number {
-	return 0.299 * red + 0.587 * green + 0.114 * blue;
+export function relativeLuminance(
+	red: number,
+	green: number,
+	blue: number,
+): number {
+	return (
+		REC_601_LUMA_WEIGHTS.red * red +
+		REC_601_LUMA_WEIGHTS.green * green +
+		REC_601_LUMA_WEIGHTS.blue * blue
+	);
 }
 
 /** Map one object contribution's source onto its retail lighting policy. */

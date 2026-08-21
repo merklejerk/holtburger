@@ -22,6 +22,10 @@ import {
 	DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
 	type AmbientOcclusionSettings,
 } from "./ambient-occlusion-policy";
+import {
+	DEFAULT_COLOR_GRADE_PARAMETERS,
+	type ColorGradeSettings,
+} from "./color-grade-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -49,6 +53,14 @@ export interface FrameSettings {
 	readonly layerVisibility: RenderLayerVisibility;
 	/** Optional nearby opaque-geometry occlusion and its runtime-adjustable presentation values. */
 	readonly ambientOcclusion: AmbientOcclusionSettings;
+	/**
+	 * Optional presentation color grade applied once to the finished scene.
+	 *
+	 * Purely a look: it runs after every pass has contributed and changes no world data. Retail
+	 * presents ungraded, so disabling this reproduces retail's presentation bit-exactly; the
+	 * shipped look itself is frontend tuning rather than a renderer decision.
+	 */
+	readonly colorGrade: ColorGradeSettings;
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
@@ -88,6 +100,10 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 	ambientOcclusion: {
 		enabled: FRONTEND_TUNING.rendering.ambientOcclusion.enabledByDefault,
 		parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
+	},
+	colorGrade: {
+		enabled: FRONTEND_TUNING.rendering.colorGrade.enabledByDefault,
+		parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
 	},
 	distanceFogEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,

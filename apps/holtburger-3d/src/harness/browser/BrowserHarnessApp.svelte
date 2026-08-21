@@ -6,6 +6,10 @@
 		type BoomSweepSource,
 	} from "../../explorer/boom-sweep-source";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
+	import {
+		createColorGradeParameters,
+		type ColorGradeParameters,
+	} from "../../lib/game/renderer/color-grade-policy";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import type { HttpLandblockSourceBatchDiagnostic } from "../../lib/assets/http-landblock-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
@@ -349,6 +353,8 @@
 		readonly setAmbientOcclusionCoverageVisualization: (
 			enabled: boolean,
 		) => void;
+		/** Apply one authored presentation grade, or `null` to present ungraded. */
+		readonly setColorGrade: (parameters: ColorGradeParameters | null) => void;
 		/** Toggle authored outdoor lamps, to measure their cost against an identical scene. */
 		readonly setStaticLights: (enabled: boolean) => void;
 		/** Toggle authored weather, mirroring retail's `DisableMostWeatherEffects` player option. */
@@ -1383,6 +1389,18 @@
 		renderer.setAmbientOcclusionCoverageVisualizationEnabled(enabled);
 	}
 
+	/** Apply one authored grade, or `null` to present ungraded. */
+	function setColorGrade(parameters: ColorGradeParameters | null): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			colorGrade: parameters
+				? { enabled: true, parameters: createColorGradeParameters(parameters) }
+				: { ...frameSettings.colorGrade, enabled: false },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function setStaticLights(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		frameSettings = { ...frameSettings, staticLightsEnabled: enabled };
@@ -1710,6 +1728,7 @@
 					setOutdoorCamera,
 					setAmbientOcclusion,
 					setAmbientOcclusionCoverageVisualization,
+					setColorGrade,
 					setFrameProfiling,
 					setStaticLights,
 					setWeather,

@@ -24,6 +24,7 @@ import type {
 } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import { TextureWrapMode } from "../textures/types";
+import type { ColorGradeSettings } from "./color-grade-policy";
 import {
 	DEFAULT_FRAME_SETTINGS,
 	type FrameInput,
@@ -669,6 +670,8 @@ export class WebGL2Renderer implements Renderer {
 	#minimumObjectFootprintDevicePixelArea = 0;
 	/** Sampling density the drawing buffer is currently sized for, retained for resize alone. */
 	#renderScale: number = FRONTEND_TUNING.rendering.frameDefaults.renderScale;
+	/** This frame's presentation grade, snapshotted once and consumed at present time. */
+	#frameColorGrade: ColorGradeSettings = DEFAULT_FRAME_SETTINGS.colorGrade;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused metrics record for the frame's effective AO distance interval. */
@@ -910,6 +913,9 @@ export class WebGL2Renderer implements Renderer {
 			this.#compiledEnvCellRenderMode = input.frameSettings.envCellRenderMode;
 		}
 		this.#skyClockSeconds = input.timeSeconds;
+		// Snapshotted here because the flat schedule never receives frame settings, and both
+		// schedules reach presentation through the same shared helper.
+		this.#frameColorGrade = input.frameSettings.colorGrade;
 		const quality = input.frameSettings.quality;
 		validateRenderScale(quality.renderScale, "Frame settings");
 		this.#renderScale = quality.renderScale;
@@ -1250,16 +1256,14 @@ export class WebGL2Renderer implements Renderer {
 			},
 		);
 		const gl = this.#gl;
+		const target = this.#acquireFlatSceneTarget();
 		const setupGpu = profile?.beginGpuPhase("portalComposition") ?? null;
 		const setupStartedAt = profile?.beginCpuPhase();
 		try {
-			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-			gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
-			gl.clearDepth(1);
+			// Explicit rather than inherited from `#beginFrame`, because the harness probe seam
+			// reaches this schedule without one.
 			gl.clearColor(...clearColor);
-			gl.colorMask(true, true, true, true);
-			gl.depthMask(true);
-			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+			this.#beginFlatOpaqueScene(target);
 			pipeline.beginOpaqueScene(clearColor);
 		} finally {
 			if (profile && setupStartedAt !== undefined) {
@@ -1321,8 +1325,8 @@ export class WebGL2Renderer implements Renderer {
 		const compositionGpu = profile?.beginGpuPhase("portalComposition") ?? null;
 		const compositionStartedAt = profile?.beginCpuPhase();
 		try {
-			pipeline.execute(null);
-			pipeline.beginDeferredScene(null);
+			pipeline.execute(target.framebuffer);
+			pipeline.beginDeferredScene(target.framebuffer);
 		} finally {
 			if (profile && compositionStartedAt !== undefined) {
 				profile.finishCpuPhase("portalComposition", compositionStartedAt);
@@ -1331,7 +1335,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
 		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
-		this.#beginObjectPhase();
+		this.#presentFlatScene(target, profile);
 	}
 
 	async destroy(): Promise<void> {
@@ -2308,13 +2312,7 @@ export class WebGL2Renderer implements Renderer {
 		domain: SceneRenderDomain,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
-		const targetOwner = (this.#flatSceneTarget ??= new WebGL2FlatSceneTarget(
-			this.#gl,
-		));
-		const target = targetOwner.resizeDimensions(
-			this.#frameWidth,
-			this.#frameHeight,
-		);
+		const target = this.#acquireFlatSceneTarget();
 		this.#beginFlatOpaqueScene(target);
 		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
 		if (domain === "exterior") {
@@ -2355,16 +2353,6 @@ export class WebGL2Renderer implements Renderer {
 		if (domain === "exterior") {
 			this.#submitSkyPhase(view, shading, "after-landscape", profile, null);
 		}
-		const presentationGpu = profile?.beginGpuPhase("presentation") ?? null;
-		try {
-			(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
-				this.#gl,
-			)).present(target);
-		} finally {
-			presentationGpu?.finish();
-		}
-		// Presentation changes program and texture bindings outside the object-state mirror.
-		this.#beginObjectPhase();
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
@@ -2376,6 +2364,45 @@ export class WebGL2Renderer implements Renderer {
 			1.0,
 		);
 		this.#gl.bindVertexArray(null);
+		this.#presentFlatScene(target, profile);
+	}
+
+	/**
+	 * Reuse this frame's scene target, allocating it on the first frame that needs one.
+	 *
+	 * Both schedules render into the same target: the flat one because it always has, and the
+	 * portal one because its composite must land somewhere samplable before presentation grades
+	 * it. The default framebuffer cannot be sampled, so an offscreen target is what makes a
+	 * whole-frame transform possible at all.
+	 */
+	#acquireFlatSceneTarget(): WebGL2FlatSceneTargetSet {
+		const owner = (this.#flatSceneTarget ??= new WebGL2FlatSceneTarget(
+			this.#gl,
+		));
+		return owner.resizeDimensions(this.#frameWidth, this.#frameHeight);
+	}
+
+	/**
+	 * Write one finished scene target to the default framebuffer.
+	 *
+	 * Both physical schedules end here, and this is the frame's only default-framebuffer write.
+	 * That is a deliberate invariant rather than an incidental one: it is what lets a whole-frame
+	 * presentation transform see every fragment — opaque, portal-composited, blended, and
+	 * particle — exactly once. Anything drawn after this call would escape that transform.
+	 */
+	#presentFlatScene(
+		target: WebGL2FlatSceneTargetSet,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
+		const presentationGpu = profile?.beginGpuPhase("presentation") ?? null;
+		try {
+			(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
+				this.#gl,
+			)).present(target, this.#frameColorGrade);
+		} finally {
+			presentationGpu?.finish();
+		}
+		// Presentation changes program and texture bindings outside the object-state mirror.
 		this.#beginObjectPhase();
 	}
 

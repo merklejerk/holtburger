@@ -134,20 +134,42 @@
 	 */
 	const PARTICLE_SEED = query.get("particleSeed");
 	/**
-	 * Record every voice the runtime starts and every per-frame placement it receives.
+	 * Record every voice the runtime starts and every audio-control placement it receives.
 	 *
 	 * Replaces the refusing stub device so live-placement evidence exists headlessly: the harness
 	 * cannot listen, but a gain/pan series over a camera flyby proves what a listener would hear.
 	 */
 	const AUDIO_TRACE = query.get("audioTrace") === "1";
+	type AuthoredDynamicDiagnostics = ReturnType<
+		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+	>;
+
+	interface AudioTraceSample {
+		readonly frame: number;
+		readonly gain: number;
+		readonly pan: number;
+		readonly step: number;
+	}
 
 	interface AudioTraceVoice {
 		readonly soundId: string;
 		/** Flyby step active when the voice started; -1 outside a flyby. */
 		readonly startedAtStep: number;
 		/** Trigger-time placement first, then one sample per `setPlacement`. */
-		readonly samples: Array<{ gain: number; pan: number; step: number }>;
+		readonly samples: AudioTraceSample[];
 		stopped: boolean;
+	}
+
+	interface AudioTraceSnapshot {
+		readonly ambient: AuthoredDynamicDiagnostics["ambient"];
+		readonly ambientBakes: AuthoredDynamicDiagnostics["ambientBakes"];
+		readonly audio: AuthoredDynamicDiagnostics["audio"];
+		readonly voices: readonly {
+			readonly samples: readonly AudioTraceSample[];
+			readonly soundId: string;
+			readonly startedAtStep: number;
+			readonly stopped: boolean;
+		}[];
 	}
 	const audioTraceVoices: AudioTraceVoice[] = [];
 	let audioFlybyStep = -1;
@@ -163,7 +185,7 @@
 		return {
 			playOneShot: (soundId: string, gain: number, pan: number) => {
 				const voice: AudioTraceVoice = {
-					samples: [{ gain, pan, step: audioFlybyStep }],
+					samples: [{ frame: frames, gain, pan, step: audioFlybyStep }],
 					soundId,
 					startedAtStep: audioFlybyStep,
 					stopped: false,
@@ -173,6 +195,7 @@
 					finished: false,
 					setPlacement: (nextGain: number, nextPan: number) => {
 						voice.samples.push({
+							frame: frames,
 							gain: nextGain,
 							pan: nextPan,
 							step: audioFlybyStep,
@@ -184,6 +207,31 @@
 				};
 			},
 			prepare: async () => {},
+		};
+	}
+
+	/** Capture only placement samples added since the supplied per-voice offsets. */
+	function audioTraceSnapshot(
+		sampleOffsets: readonly number[],
+	): AudioTraceSnapshot {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const dynamics = runtime.getAuthoredDynamicRuntimeDiagnostics();
+		return {
+			ambient: dynamics.ambient,
+			ambientBakes: dynamics.ambientBakes,
+			audio: dynamics.audio,
+			voices: audioTraceVoices.flatMap((voice, index) => {
+				const samples = voice.samples.slice(sampleOffsets[index] ?? 0);
+				if (samples.length === 0) return [];
+				return [
+					{
+						samples,
+						soundId: voice.soundId,
+						startedAtStep: voice.startedAtStep,
+						stopped: voice.stopped,
+					},
+				];
+			}),
 		};
 	}
 	/**
@@ -232,7 +280,7 @@
 		 * Fly the camera in a straight line to the target landblock's centre over the given
 		 * duration, re-anchoring scene interest on every landblock crossing — the harness
 		 * mirror of the Explorer's interest-follows-camera mode. Resolves with the crossing
-		 * log and the flight window's frame timing.
+		 * log, audio trace (when enabled), and the flight window's frame timing.
 		 */
 		readonly runFollowFlight: (
 			targetLandblockId: string,
@@ -400,9 +448,7 @@
 		/** Latest explicit renderer profile, or null while profiling is disabled. */
 		readonly frameProfile: RendererFrameProfile | null;
 		readonly tickProfile: ReturnType<GameRuntime["getTickProfile"]> | null;
-		readonly authoredDynamics: ReturnType<
-			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
-		> | null;
+		readonly authoredDynamics: AuthoredDynamicDiagnostics | null;
 		readonly frameSettings: FrameSettings;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		/** Browser main-thread timing facts accumulated during this harness session. */
@@ -431,6 +477,8 @@
 
 	/** One scripted follow-mode flight's evidence: crossings, publications, and timing. */
 	interface BrowserHarnessFollowFlightReport {
+		/** Audio admissions and bounded placement updates observed during the flight. */
+		readonly audioTrace: AudioTraceSnapshot | null;
 		/** Interest re-anchors in flight order, stamped with elapsed flight time. */
 		readonly crossings: readonly {
 			readonly elapsedMs: number;
@@ -445,13 +493,18 @@
 
 	/** In-progress scripted flight, advanced by the frame loop until its duration elapses. */
 	interface FollowFlightState {
+		/** The destination pose is installed and the promise should resolve after this render. */
+		completionPending: boolean;
 		readonly crossings: { elapsedMs: number; landblockId: LandblockId }[];
 		readonly durationMs: number;
 		readonly from: Vec3;
 		readonly pitchDegrees: number;
+		/** Active projection retained while scripted movement changes only the outdoor pose. */
+		readonly projection: Pick<Camera, "far" | "fov" | "near">;
 		readonly radii: SceneInterestRadii;
 		readonly reject: (cause: Error) => void;
 		readonly resolve: (report: BrowserHarnessFollowFlightReport) => void;
+		readonly startAudioSampleCounts: readonly number[];
 		readonly startPublicationCount: number;
 		readonly startedAt: number;
 		readonly to: Vec3;
@@ -671,6 +724,23 @@
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): void {
+		setOutdoorCameraProjection(
+			rawLandblockId,
+			position,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			{ far: CAMERA_FAR, fov: CAMERA_FOV_DEGREES, near: CAMERA_NEAR },
+		);
+	}
+
+	/** Place an outdoor camera without changing the projection owned by its calling policy. */
+	function setOutdoorCameraProjection(
+		rawLandblockId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		projection: Pick<Camera, "far" | "fov" | "near">,
+	): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (
 			position.length !== 3 ||
@@ -684,9 +754,7 @@
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const cameraPosition = new Vec3(...position);
 		applyHarnessCamera(runtime, {
-			far: CAMERA_FAR,
-			fov: CAMERA_FOV_DEGREES,
-			near: CAMERA_NEAR,
+			...projection,
 			placement: {
 				envCellId: null,
 				landblockId,
@@ -695,11 +763,9 @@
 			},
 		});
 		cameraEvidence = {
+			...projection,
 			envCellId: null,
-			far: CAMERA_FAR,
-			fov: CAMERA_FOV_DEGREES,
 			landblockId,
-			near: CAMERA_NEAR,
 			pitchDegrees: cameraPitchDegrees,
 			policy: "explicit-outdoor",
 			position,
@@ -750,13 +816,22 @@
 		resetTiming();
 		return new Promise<BrowserHarnessFollowFlightReport>((resolve, reject) => {
 			followFlight = {
+				completionPending: false,
 				crossings: [],
 				durationMs,
 				from,
 				pitchDegrees: evidence.pitchDegrees,
+				projection: {
+					far: evidence.far,
+					fov: evidence.fov,
+					near: evidence.near,
+				},
 				radii,
 				reject,
 				resolve,
+				startAudioSampleCounts: audioTraceVoices.map(
+					(voice) => voice.samples.length,
+				),
 				startPublicationCount,
 				startedAt: performance.now(),
 				to,
@@ -798,15 +873,26 @@
 				landblockId,
 			});
 		}
-		setOutdoorCamera(
+		setOutdoorCameraProjection(
 			landblockId,
 			[position.x, position.y, position.z],
 			flight.yawDegrees,
 			flight.pitchDegrees,
+			flight.projection,
 		);
 		if (fraction < 1) return;
+		flight.completionPending = true;
+	}
+
+	/** Resolve a completed flight only after its destination pose has rendered and updated audio. */
+	function completeFollowFlight(): void {
+		const flight = followFlight;
+		if (flight === null || !flight.completionPending || !runtime) return;
 		followFlight = null;
 		flight.resolve({
+			audioTrace: AUDIO_TRACE
+				? audioTraceSnapshot(flight.startAudioSampleCounts)
+				: null,
 			crossings: flight.crossings,
 			durationMs: flight.durationMs,
 			staticLayerPublicationCount:
@@ -1556,6 +1642,9 @@
 					if (!Number.isInteger(steps) || steps < 2) {
 						throw new Error("Audio flyby needs at least two steps.");
 					}
+					const startAudioSampleCounts = audioTraceVoices.map(
+						(voice) => voice.samples.length,
+					);
 					const nextFrame = () =>
 						new Promise<void>((resolve) => {
 							window.requestAnimationFrame(() => resolve());
@@ -1578,19 +1667,14 @@
 						}
 					}
 					audioFlybyStep = -1;
-					const dynamics = runtime?.getAuthoredDynamicRuntimeDiagnostics();
+					const trace = audioTraceSnapshot(startAudioSampleCounts);
 					return {
 						ambientRegion: ambientRegionEvidence,
-						ambientBakes: dynamics?.ambientBakes ?? null,
-						ambient: dynamics?.ambient ?? null,
-						audio: dynamics?.audio ?? null,
+						ambientBakes: trace.ambientBakes,
+						ambient: trace.ambient,
+						audio: trace.audio,
 						steps,
-						voices: audioTraceVoices.map((voice) => ({
-							samples: voice.samples,
-							soundId: voice.soundId,
-							startedAtStep: voice.startedAtStep,
-							stopped: voice.stopped,
-						})),
+						voices: trace.voices,
 					};
 				}
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
@@ -1723,6 +1807,7 @@
 						totalTickMs: timing.totalTickMs + tickMs,
 					};
 					frames += 1;
+					completeFollowFlight();
 					frameHandle = window.requestAnimationFrame(frame);
 				};
 				frameHandle = window.requestAnimationFrame(frame);

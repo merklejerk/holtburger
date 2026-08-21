@@ -87,7 +87,7 @@ function build(overrides: Partial<AmbientSystemDependencies> = {}) {
 }
 
 describe("AmbientSystem", () => {
-	it("fires a continuous descriptor on its flat interval and never rolls a chance", () => {
+	it("admits a continuous descriptor immediately, then fires on its flat interval", () => {
 		let rolls = 0;
 		const { played, system } = build({
 			roll: () => {
@@ -96,13 +96,16 @@ describe("AmbientSystem", () => {
 			},
 		});
 		system.refresh(scan([descriptor({ isContinuous: true, minRate: 4 })]), 0);
+		system.updateLiveWeights();
 
+		system.advance(0);
+		expect(played).toHaveLength(1);
 		system.advance(3);
-		expect(played).toHaveLength(0);
+		expect(played).toHaveLength(1);
 		system.advance(4);
 		system.advance(8);
 
-		expect(played).toHaveLength(2);
+		expect(played).toHaveLength(3);
 		// A roll of 1 would lose every chance test, so a continuous sound must not take one, and its
 		// flat interval must not be rolled either.
 		expect(rolls).toBe(0);
@@ -115,13 +118,15 @@ describe("AmbientSystem", () => {
 	it("keeps a continuous cadence exact instead of drifting from the service time", () => {
 		const { played, system } = build();
 		system.refresh(scan([descriptor({ isContinuous: true, minRate: 4 })]), 0);
+		system.updateLiveWeights();
+		system.advance(0);
 
 		// Served late every time, as a frame-driven clock is.
 		system.advance(4.3);
 		system.advance(8.4);
 		system.advance(12.2);
 
-		expect(played).toHaveLength(3);
+		expect(played).toHaveLength(4);
 	});
 
 	it("re-arms an intermittent descriptor across its authored range", () => {
@@ -159,8 +164,9 @@ describe("AmbientSystem", () => {
 			),
 			0,
 		);
+		system.updateLiveWeights();
 
-		system.advance(1);
+		system.advance(0);
 
 		// Fired as a live bed: the supplier reads this frame's share (weights fixture: full share),
 		// scaled by the authored volume.
@@ -175,7 +181,8 @@ describe("AmbientSystem", () => {
 			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
 			0,
 		);
-		system.advance(1);
+		system.updateLiveWeights();
+		system.advance(0);
 		const supplier = played[0]!.source;
 		if (supplier.mode !== "listener") throw new Error("expected a bed");
 		expect(supplier.volume()).toBeCloseTo(0.8);
@@ -183,7 +190,7 @@ describe("AmbientSystem", () => {
 		// The ground thins out: half the surroundings author this bed now.
 		weights.bySlot[0] = 0.5;
 		weights.total = 1;
-		system.advance(1.5);
+		system.updateLiveWeights();
 
 		expect(supplier.volume()).toBeCloseTo(0.4);
 	});
@@ -194,7 +201,8 @@ describe("AmbientSystem", () => {
 			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
 			0,
 		);
-		system.advance(1);
+		system.updateLiveWeights();
+		system.advance(0);
 		const supplier = played[0]!.source;
 		if (supplier.mode !== "listener") throw new Error("expected a bed");
 
@@ -213,7 +221,8 @@ describe("AmbientSystem", () => {
 			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
 			0,
 		);
-		system.advance(1);
+		system.updateLiveWeights();
+		system.advance(0);
 		const source = played[0]!.source;
 		if (source.mode !== "listener") throw new Error("expected a bed");
 		expect(source.volume()).toBeCloseTo(0.8);
@@ -221,11 +230,11 @@ describe("AmbientSystem", () => {
 		// Through the dungeon door: the same gate feeds both cadences, so the playing bed fades
 		// without waiting for a schedule refresh.
 		outdoors = false;
-		system.advance(1.5);
+		system.updateLiveWeights();
 		expect(source.volume()).toBe(0);
 
 		outdoors = true;
-		system.advance(2);
+		system.updateLiveWeights();
 		expect(source.volume()).toBeCloseTo(0.8);
 	});
 
@@ -235,7 +244,8 @@ describe("AmbientSystem", () => {
 			scan([descriptor({ isContinuous: true, minRate: 1, volume: 0.8 })]),
 			0,
 		);
-		system.advance(1);
+		system.updateLiveWeights();
+		system.advance(0);
 		const supplier = played[0]!.source;
 		if (supplier.mode !== "listener") throw new Error("expected a bed");
 
@@ -310,8 +320,9 @@ describe("AmbientSystem", () => {
 	it("fires a continuous descriptor head-locked, with no world position at all", () => {
 		const { played, system } = build();
 		system.refresh(scan([descriptor({ isContinuous: true, minRate: 1 })]), 0);
+		system.updateLiveWeights();
 
-		system.advance(1);
+		system.advance(0);
 
 		// Retail hardcodes distance 0 and pan 0 for these (acclient.c:366859); a bed has no
 		// position to drift away from the listener.

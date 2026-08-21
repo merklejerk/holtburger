@@ -106,6 +106,7 @@ import type {
 import { sceneNodeIdOf } from "../scene/utils";
 import { SkyScriptSystem } from "../systems/sky-script-system";
 import { SKY_OWNER_ID, type SkyOwnerId } from "./owner-ids";
+import { AudioControlCadence } from "./audio-control-cadence";
 import { SKY_OBJECT_ONLY_PART_INDEX } from "../environment/sky-behavior-targets";
 import type { SkyBehaviorTarget } from "../environment/sky-behavior-targets";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
@@ -488,6 +489,10 @@ export class GameRuntime {
 	>;
 	readonly #audio: AudioSystem;
 	readonly #ambient: AmbientSystem;
+	/** Bounded owner for live ambient-weight and voice-placement control work. */
+	readonly #audioControlCadence = new AudioControlCadence(
+		FRONTEND_TUNING.audio.controlUpdateIntervalSeconds,
+	);
 	/** Where ambience is centred; the listener's own position, kept for the scan and for playback. */
 	#audioListenerPosition: SceneVector3 = sceneVector3([0, 0, 0]);
 	/** Environment cell the listener occupies, or null for outdoor terrain. */
@@ -1582,9 +1587,9 @@ export class GameRuntime {
 	 * When the listener is inside an EnvCell whose authored flags do not include `SeenOutside`
 	 * (EnvCell flag 0x01), outdoor surface terrain ambience is silenced (acclient.c:140501-140526).
 	 */
-	#refreshAmbient(timeSeconds: number): void {
+	#refreshAmbient(timeSeconds: number): boolean {
 		const region = this.#ambientRegion;
-		if (!region) return;
+		if (!region) return false;
 		const position = this.#audioListenerPosition;
 		// Terrain first: landblocks stream in after the first refresh, and a listener standing
 		// still while its surroundings arrive would otherwise never hear them.
@@ -1605,7 +1610,7 @@ export class GameRuntime {
 			cellZ === this.#ambientScanCellZ &&
 			this.#audioListenerEnvCellId === this.#ambientScanEnvCellId
 		) {
-			return;
+			return false;
 		}
 		this.#ambientScanCellX = cellX;
 		this.#ambientScanCellZ = cellZ;
@@ -1622,6 +1627,7 @@ export class GameRuntime {
 				);
 
 		this.#ambient.refresh(scanResult, timeSeconds);
+		return true;
 	}
 
 	/**
@@ -1914,10 +1920,15 @@ export class GameRuntime {
 		this.#physicsScriptSystem.advance(timeSeconds);
 		tick?.mark("scriptAdvance");
 		this.#particles.advance(timeSeconds);
-		this.#refreshAmbient(timeSeconds);
+		const ambientRefreshed = this.#refreshAmbient(timeSeconds);
+		const updateAudioControl = this.#audioControlCadence.shouldUpdate(
+			timeSeconds,
+			ambientRefreshed,
+		);
+		if (updateAudioControl) this.#ambient.updateLiveWeights();
 		this.#ambient.advance(timeSeconds);
-		// After ambience so a voice triggered this frame is placed against the same listener pose.
-		this.#audio.advance();
+		// After ambience so a voice admitted on this control tick is placed against the same pose.
+		if (updateAudioControl) this.#audio.updatePlacements();
 		tick?.mark("particleAdvance");
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(

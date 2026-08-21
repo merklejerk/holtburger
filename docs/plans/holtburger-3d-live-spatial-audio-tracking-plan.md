@@ -25,7 +25,7 @@ the whole of its playback instead of being frozen at the instant it fired.
 
 **Out of scope**
 
-- Emitters dragging their own sounds as the *emitting object* moves. Voices deliberately outlive
+- Emitters dragging their own sounds as the _emitting object_ moves. Voices deliberately outlive
   their owners (`audio-system.ts:136-140`, acclient.c:366405-366407), so a back-pointer to the owner
   needs a policy for the owner vanishing mid-playback. The retained-position shape this plan lands
   makes that a later, small addition; it is not attempted here. See Open Questions.
@@ -50,7 +50,7 @@ the whole of its playback instead of being frozen at the instant it fired.
   turns from an accident into a stated fact.
 - **The census that justifies the departure:** `GetAttenuation` has exactly four call sites in the
   entire binary — 366516, 366859, 366879, 366904 — and every one of them sits inside a
-  sound-*starting* function. There is no update loop and no per-frame re-attenuation pass anywhere in
+  sound-_starting_ function. There is no update loop and no per-frame re-attenuation pass anywhere in
   the client. Retail's frozen placement is a fact about the whole binary, not about one path.
 
 **Existing patterns**
@@ -70,8 +70,8 @@ the whole of its playback instead of being frozen at the instant it fired.
 
 The native panner would give per-frame tracking for free, and it is still the wrong trade. Its
 `exponential` distance model with `refDistance = 5, rolloffFactor = 2` does reproduce retail's
-`25 / d²` exactly, but three things do not survive: retail clamps gain to 1.0 *after* attenuation and
-*before* the category multiply, which no `PannerNode` parameter expresses; retail refuses to play
+`25 / d²` exactly, but three things do not survive: retail clamps gain to 1.0 _after_ attenuation and
+_before_ the category multiply, which no `PannerNode` parameter expresses; retail refuses to play
 below a `-50 dB` floor rather than playing inaudibly; and retail's pan is a sine of a horizontal
 heading, not a spatialized HRTF or equal-power position. Re-running `placeSpatialAudio` for at most
 16 voices per frame is a few hypots — genuinely free — and keeps one authority for the retail curve.
@@ -81,16 +81,16 @@ Taking the native panner would mean reimplementing the clamp and the floor aroun
 
 Net new files: zero. Every deliverable reshapes a module that already owns the neighboring job:
 
-| where | what changes |
-| --- | --- |
-| `holtburger-dat`, `src-tauri` manifest, `active-region-source.ts` | nothing — authored tables, `squareLength`, and validation already flow through |
-| `ambient-region.ts` | assigns integer descriptor slots at install; the string `classificationKey` dies here |
-| `ambient-scan.ts` | the bake (`bakeAmbientBlock`), the per-frame weight pass (`accumulateAmbientWeights`), and the schedule scan rewritten over baked entries; stays pure and clock-free |
-| `ambient-system.ts` | owns the baked-block registry (terrain install/release), the reusable per-slot weight buffer, the schedule, and the live share suppliers |
-| `audio-system.ts` | `AudioPlacementSource`, `LiveVoice`, `advance()` re-placement |
-| `audio-spatialization.ts` | **frozen** — the single authority on the retail curve stays byte-identical so it is never the suspect |
-| `web-audio-device.ts` | `setPlacement` via `setTargetAtTime`; still the only file touching Web Audio |
-| `game-runtime.ts` | wiring only: forwards terrain lifecycle to `AmbientSystem`, numeric rescan trigger, `advance` order |
+| where                                                             | what changes                                                                                                                                                         |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `holtburger-dat`, `src-tauri` manifest, `active-region-source.ts` | nothing — authored tables, `squareLength`, and validation already flow through                                                                                       |
+| `ambient-region.ts`                                               | assigns integer descriptor slots at install; the string `classificationKey` dies here                                                                                |
+| `ambient-scan.ts`                                                 | the bake (`bakeAmbientBlock`), the per-frame weight pass (`accumulateAmbientWeights`), and the schedule scan rewritten over baked entries; stays pure and clock-free |
+| `ambient-system.ts`                                               | owns the baked-block registry (terrain install/release), the reusable per-slot weight buffer, the schedule, and the live share suppliers                             |
+| `audio-system.ts`                                                 | `AudioPlacementSource`, `LiveVoice`, `advance()` re-placement                                                                                                        |
+| `audio-spatialization.ts`                                         | **frozen** — the single authority on the retail curve stays byte-identical so it is never the suspect                                                                |
+| `web-audio-device.ts`                                             | `setPlacement` via `setTargetAtTime`; still the only file touching Web Audio                                                                                         |
+| `game-runtime.ts`                                                 | wiring only: forwards terrain lifecycle to `AmbientSystem`, numeric rescan trigger, `advance` order                                                                  |
 
 Nothing moves to the Rust crates: the shared part (authored data) is already in `holtburger-dat`;
 everything above it is a frontend audio runtime that terminates in Web Audio and serves a listener
@@ -100,7 +100,7 @@ that is a camera. A future non-browser client swaps the device layer and reuses 
 
 1. One authority for the retail curve. `placeSpatialAudio` stays pure and stays the only place gain
    and pan are decided; live tracking is a change in call frequency, not a second implementation.
-2. Voices retain *facts*, not *derived results*. A voice remembers where it is in the world; gain and
+2. Voices retain _facts_, not _derived results_. A voice remembers where it is in the world; gain and
    pan are recomputed from that, never stored and re-served.
 3. The departure from retail is deliberate, marked, and cited — not an accident of writing modern
    code.
@@ -114,7 +114,7 @@ that is a camera. A future non-browser client swaps the device layer and reuses 
    roughly where from, roughly how loud — not the bit-exact numerology. A sound being a few percent
    more or less likely, or a placement landing meters off retail's roll, is not a defect and must not
    deter a cleaner design. Reserve exactness for what the ear or the content actually observes, and
-   spend divergence markers on *categorical* departures (live tracking, pan model), not decimal ones.
+   spend divergence markers on _categorical_ departures (live tracking, pan model), not decimal ones.
 
 ## Phase 0 — Freebie: orphaned doc comment
 
@@ -135,7 +135,7 @@ Zero-risk, independent of everything below, done first so the file is honest bef
 
 - [x] Remove the orphaned block; confirm no other stranded doc pairs exist in the audio region of
       `game-runtime.ts`. **Done 2026-08-16.** Swept the whole file for consecutive JSDoc blocks:
-      none remain. Course correction: the stray block was the *displaced* doc of `setAudioSettings`
+      none remain. Course correction: the stray block was the _displaced_ doc of `setAudioSettings`
       (still live, ~90 lines later, undocumented) and its content had also gone stale — "only the
       effect category exists so far" predates the ambient category. Rather than pure deletion, the
       method received a fresh two-line doc stating what is still true (volume-of-zero equals retail's
@@ -164,20 +164,20 @@ needs to re-place it, and the frame loop does so.
   survivors against the current listener and settings. Named `advance` to match every other
   frame-driven system in the runtime.
 - Below the audible floor, a live voice is **silenced (gain 0), not stopped.** The trigger-time
-  audibility gate is unchanged and still refuses to *start* an inaudible sound; but a free-flying
+  audibility gate is unchanged and still refuses to _start_ an inaudible sound; but a free-flying
   explorer camera routinely leaves and re-enters earshot, and stopping would make return trips
   silently lossy. Comment this, because "why not stop it" is the obvious question.
 - Call `this.#audio.advance(timeSeconds)` in `game-runtime.ts`, immediately after
   `this.#ambient.advance(timeSeconds)` — ambience triggers first, then every voice including the
   new ones places against the same listener pose.
 - A second `RETAIL DIVERGENCE:` marker on `placeSpatialAudio`'s pan projection: retail pans by the
-  sine of a *horizontal* heading difference (acclient.c:366509-366514), we project the full 3D delta.
+  sine of a _horizontal_ heading difference (acclient.c:366509-366514), we project the full 3D delta.
   Decided as a product choice — pan is presentation, no shipped content observes stereo placement, and
   the 3D behavior is the one a modern client wants. The marker cites the retail lines and records the
   decision rather than a census.
 - A `RETAIL DIVERGENCE:` marker on `AudioSystem`, carrying the four-call-site census above, the
   `acclient.c:366516` citation, and the argument: authored content cannot observe the difference
-  because no shipped content can depend on a sound *failing* to track a listener that 1999 hardware
+  because no shipped content can depend on a sound _failing_ to track a listener that 1999 hardware
   could not afford to track. The 1999 constraint — DirectSound buffers and a CPU budget — no longer
   applies to us.
 
@@ -214,7 +214,7 @@ needs to re-place it, and the frame loop does so.
   would be dishonest. Documented on the method.
 - `#warmAndReplay` now threads the whole trigger (facts needed for `LiveVoice`), so a warm-replayed
   voice already rides `advance` and a stale start corrects on the next frame. Phase 2 shrinks to
-  computing the *initial* placement at replay time.
+  computing the _initial_ placement at replay time.
 - The `maximumWarmupReplaySeconds` doc rewrite planned for Phase 2 was pulled into this phase — its
   frozen-placement rationale became false here, and the vocabulary rule says rewrite in the change
   that falsifies. Same for the module doc of `audio-spatialization.ts`; its curve stayed untouched.
@@ -240,7 +240,7 @@ needs to re-place it, and the frame loop does so.
 **Acceptance criteria**
 
 - Unit test: a device that refuses, then accepts after the listener has moved, plays at the
-  *replay-time* placement, not the trigger-time one.
+  _replay-time_ placement, not the trigger-time one.
 - Grep confirms no retained `SpatialAudioPlacement`.
 - The warmup tuning comment no longer cites frozen placement.
 
@@ -264,11 +264,11 @@ A prerequisite for live bed gain, and a defect worth fixing on its own terms.
 **Split what the scan computes into its static and dynamic halves.** Per cell, the scan currently
 does two jobs every time it runs:
 
-1. *What does this cell contribute?* Terrain sample → terrain code and scene index → descriptor
+1. _What does this cell contribute?_ Terrain sample → terrain code and scene index → descriptor
    list, via a string-keyed classification map (`ambient-region.ts:73-76`). This depends only on the
    authored terrain and the installed region. It is the same answer every scan, for the lifetime of
    the block — recomputed, with string keys, on every cell crossing.
-2. *How much, from here?* Distance from the listener → weight → accumulate. This is the only part
+2. _How much, from here?_ Distance from the listener → weight → accumulate. This is the only part
    that actually depends on where the camera is, and it is trivial arithmetic.
 
 Job 1 is baked **once per landblock, at terrain install** — the event when nearby cells actually
@@ -279,7 +279,7 @@ an empty map and cost nothing thereafter. Job 2 becomes a loop over those arrays
 weight, add into a per-slot accumulator. No resolution, no maps, no strings, no allocation — cheap
 enough to run every frame without asking.
 
-**Why the *final* map cannot be pre-baked per cell.** The full result is a function of exact listener
+**Why the _final_ map cannot be pre-baked per cell.** The full result is a function of exact listener
 position, not of the cell the listener stands in. Precomputing finished share per 24 m cell — "the
 ambient map for cell (x,z)" — would quantize share to cell granularity, which is exactly the step
 artifact Phase 3 exists to remove; smoothing it back would need the interpolation machinery we just
@@ -321,7 +321,7 @@ step. One short constant serves both bed gain and pan.
 - A per-block baked ambience map: flat typed arrays of (cell position, slot) entries. Comment the
   representation — it is a hot-path layout choice, not incidental.
 - **Bake lifecycle by revision diff, not new event plumbing** (dry-run finding): `TerrainSystem`
-  already bumps `installationRevision` on every install *and* release (`terrain-system.ts:179,188`)
+  already bumps `installationRevision` on every install _and_ release (`terrain-system.ts:179,188`)
   and enumerates blocks with ids. `AmbientSystem` reconciles lazily — when the revision differs from
   the last seen, diff installed landblock ids against baked ones, bake the new, drop the gone. No
   observer/event machinery.
@@ -402,11 +402,11 @@ latent since the day it was written, and it is invisible only because nothing mo
 
 Phase 1 is what makes it observable: once voices track, that synthesized position stays pinned to the
 patch of ground the listener stood on and the ambience audibly recedes behind them. A river that gets
-quieter as you walk *along* it is strictly worse than the frozen behavior we started with.
+quieter as you walk _along_ it is strictly worse than the frozen behavior we started with.
 
 ### What a continuous bed tracks instead: live share
 
-A continuous bed is head-locked in *position*, but that does not mean it is static. The quantity it
+A continuous bed is head-locked in _position_, but that does not mean it is static. The quantity it
 should track is the one that already governs it — `share` — applied to the **playing voice** rather
 than only to the next firing.
 
@@ -421,7 +421,11 @@ states cannot be spelled:
 
 ```ts
 type AudioPlacementSource =
-  | { readonly mode: "world"; readonly position: SceneVector3; readonly volume: number }
+  | {
+      readonly mode: "world";
+      readonly position: SceneVector3;
+      readonly volume: number;
+    }
   | { readonly mode: "listener"; readonly volume: () => number };
 ```
 
@@ -461,14 +465,14 @@ interval.
 **The census (`crates/holtburger-debug-harness/src/bin/ambient_sound_census.rs`, run against
 `dats/assets.hba`):**
 
-| | n | min | median | max |
-| --- | --- | --- | --- | --- |
-| continuous re-fire interval | 40 | 1.40 s | 7.00 s | 18.70 s |
-| continuous wave duration | 40 | 1.82 s | 6.41 s | 20.00 s |
+|                               | n   | min    | median | max     |
+| ----------------------------- | --- | ------ | ------ | ------- |
+| continuous re-fire interval   | 40  | 1.40 s | 7.00 s | 18.70 s |
+| continuous wave duration      | 40  | 1.82 s | 6.41 s | 20.00 s |
 | intermittent re-fire interval | 343 | 0.00 s | 2.80 s | 30.00 s |
 
 Duration tracks interval almost exactly, which confirms these are authored as a gapless bed: a ~6.4 s
-wave re-fired every ~7 s. So a voice is *nearly always playing*, and drift accumulates for the whole
+wave re-fired every ~7 s. So a voice is _nearly always playing_, and drift accumulates for the whole
 of it.
 
 At a modest 5 m/s walk, a synthesized position drifts **32 m during a single median playback**, and
@@ -477,7 +481,7 @@ attenuation begin, and the Explorer's free-fly camera moves far faster than walk
 result is a bed of sound that swings across the stereo field and fades out over ~6 s, then snaps back
 to centre when it re-fires — a pumping cycle every 7 seconds.
 
-**And the common case inverts.** Walking *along* a river, share stays constant, which is correct: you
+**And the common case inverts.** Walking _along_ a river, share stays constant, which is correct: you
 are still surrounded by river and it should stay steady. A synthesized position, however, recedes
 behind you and fades — exactly backwards. There is no single point to place these at; a river
 wrapping around you on three sides has no meaningful centroid, which is precisely why retail
@@ -493,7 +497,7 @@ exactly why it collapses cleanly into an explicit mode instead of needing a new 
 **Deliverables**
 
 - `AudioPlacementSource` as the discriminated union above, replacing `AudioTrigger`'s bare `position`
-  and `volume` fields. `"world"` covers every hook sound and every *directional* ambient firing;
+  and `volume` fields. `"world"` covers every hook sound and every _directional_ ambient firing;
   `"listener"` covers continuous ambience only.
 - `AmbientSystem` chooses the variant where it already chooses the position, and the
   `?? listenerPosition` fallback disappears rather than being kept alongside it. A `"listener"`
@@ -565,7 +569,7 @@ exactly why it collapses cleanly into an explicit mode instead of needing a new 
 
 ## Phase 5 — Resteering and runtime verification
 
-Static tests cannot prove the thing the user actually asked for: that it *sounds* like it follows.
+Static tests cannot prove the thing the user actually asked for: that it _sounds_ like it follows.
 This crosses the browser and Web Audio boundary, so per `apps/holtburger-3d/AGENTS.md` it needs
 runtime evidence.
 
@@ -600,7 +604,7 @@ runtime evidence.
   re-placed for hundreds of consecutive frames: gain rose continuously on approach (0.042 → 0.60)
   and fell on recede (0.42 → 0.008); pan swept **through zero** on voices the camera passed —
   exactly the plan's proof criterion. Below-floor silencing engaged (`gain 0, pan 0`) without
-  stopping voices. Largest single-frame gain step 0.038 *before* device smoothing, so no audible
+  stopping voices. Largest single-frame gain step 0.038 _before_ device smoothing, so no audible
   stepping is expected after `setTargetAtTime`.
 - **First probe found a real usage subtlety, not a bug:** with `--landblock` only one terrain block
   installs, and the AGENTS candle pose sits ~132 m from that block — outside the 120 m earshot — so
@@ -658,16 +662,16 @@ eslint all clean.
 
 ## Risks & Mitigations
 
-| Risk | Mitigation |
-| --- | --- |
-| Zipper noise from per-frame `AudioParam` writes. | `setTargetAtTime` with a tuned constant, landed in Phase 1 rather than bolted on; Phase 5's trace checks continuity. |
-| Continuous ambience audibly drifts behind the listener. | Phase 3 exists entirely for this and lands immediately after the change that exposes it. The root cause is a pre-existing synthesized position, not the tracking itself, so the fix is a shape change rather than a guard. |
-| Voice budget pressure from silent-but-alive out-of-earshot voices. | 16 voices with oldest-steal already bounds it. Preferentially stealing silenced voices is *not* added speculatively — see Open Questions. |
-| Oldest-steal cuts a playing bed, audibly dropping the ambience floor until its next re-fire. | New failure mode created by beds becoming near-permanent voices. Open Question 6; decide from Phase 5 contention evidence rather than pre-engineering a priority scheme. |
-| The narrow weight pass silently drifts from the schedule scan, so beds fade differently than they schedule. | Phase 3's equivalence tests assert bake-vs-old-scan and weight-pass-vs-schedule-scan identity; they are the phase's primary acceptance criteria, not an afterthought. |
-| Removing allocation makes the scan harder to read for no measured win. | `examinedCellCount` already reports the walk; capture the cost in Phase 5 alongside the trace. If two explicit loops read better than one shared iterator, take the loops. |
-| Test churn across `audio-system.test.ts` (289 lines). | Expected and acceptable. Tests asserting frozen placement are preserving dead architecture and get rewritten, not migrated. |
-| Scope creep into emitter-following. | Explicitly Out of Scope; the retained-position shape makes it a cheap later addition, which is the whole reason to keep it out now. |
+| Risk                                                                                                        | Mitigation                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zipper noise from per-frame `AudioParam` writes.                                                            | `setTargetAtTime` with a tuned constant, landed in Phase 1 rather than bolted on; Phase 5's trace checks continuity.                                                                                                       |
+| Continuous ambience audibly drifts behind the listener.                                                     | Phase 3 exists entirely for this and lands immediately after the change that exposes it. The root cause is a pre-existing synthesized position, not the tracking itself, so the fix is a shape change rather than a guard. |
+| Voice budget pressure from silent-but-alive out-of-earshot voices.                                          | 16 voices with oldest-steal already bounds it. Preferentially stealing silenced voices is _not_ added speculatively — see Open Questions.                                                                                  |
+| Oldest-steal cuts a playing bed, audibly dropping the ambience floor until its next re-fire.                | New failure mode created by beds becoming near-permanent voices. Open Question 6; decide from Phase 5 contention evidence rather than pre-engineering a priority scheme.                                                   |
+| The narrow weight pass silently drifts from the schedule scan, so beds fade differently than they schedule. | Phase 3's equivalence tests assert bake-vs-old-scan and weight-pass-vs-schedule-scan identity; they are the phase's primary acceptance criteria, not an afterthought.                                                      |
+| Removing allocation makes the scan harder to read for no measured win.                                      | `examinedCellCount` already reports the walk; capture the cost in Phase 5 alongside the trace. If two explicit loops read better than one shared iterator, take the loops.                                                 |
+| Test churn across `audio-system.test.ts` (289 lines).                                                       | Expected and acceptable. Tests asserting frozen placement are preserving dead architecture and get rewritten, not migrated.                                                                                                |
+| Scope creep into emitter-following.                                                                         | Explicitly Out of Scope; the retained-position shape makes it a cheap later addition, which is the whole reason to keep it out now.                                                                                        |
 
 ## Definition of Done
 
@@ -691,7 +695,7 @@ eslint all clean.
 
 ## Open Questions
 
-1. **Emitter-following.** Should a sound emitted by a moving object track *that object* as well as
+1. **Emitter-following.** Should a sound emitted by a moving object track _that object_ as well as
    the listener? It needs a policy for the owner being destroyed mid-playback — freezing at the last
    known position is the obvious answer — and retail has no back-pointer to copy from. Recommendation:
    defer. Phase 1's retained-position shape makes it a small follow-up, and there is no confirmed
@@ -709,7 +713,7 @@ eslint all clean.
    depends on absent assets) and it documents the bed timing facts the design rests on. Say the word if
    you would rather it went away with the investigation.
 6. **Voice stealing can now cut a playing bed.** Beds are near-gapless ~6.4 s voices, so under budget
-   pressure the oldest voice is often *the ambience floor*, and stealing it is an audible dropout
+   pressure the oldest voice is often _the ambience floor_, and stealing it is an audible dropout
    until the next re-fire — a failure mode frozen playback never surfaced, since a cut bed used to be
    indistinguishable from one that had drifted inaudible. Options: exempt `"listener"` voices from
    stealing, steal the quietest instead of the oldest, or raise the budget. Recommendation: leave
@@ -729,6 +733,33 @@ eslint all clean.
 
 ## Decisions and Course Corrections
 
+- **2026-08-20 — Continuous admission made immediate; live audio control capped at 30 Hz.** A
+  reported 5–10 second region-entry lag was not authored ambience or re-anchoring: new descriptors
+  were initialized at `now + interval`, conflating recurrence with admission. Retail instead calls
+  `Ambient::Play` immediately when `Ambient::UpdatePlayQueue` admits an unqueued descriptor
+  (acclient.c:367842-367861), and only that play rearms at `now + GetPlayInterval`
+  (acclient.c:367715). Continuous beds now enter due immediately and keep their flat wave-length
+  interval only for recurrence. Intermittent sounds intentionally retain randomized admission to
+  avoid synchronized streaming-entry bursts; the divergence is marked at the scheduler with the
+  census (343 intermittent versus 40 continuous descriptors).
+
+  The live narrow weight walk and voice re-placement no longer scale with uncapped render rate.
+  `GameRuntime` owns one 30 Hz audio-control cadence and updates both together. A schedule refresh
+  (terrain revision, scan-cell crossing, or indoor/outdoor transition) forces and rebases that tick,
+  so retirement fades and new-bed admission do not wait up to 33 ms. Recurrence remains serviced
+  every render: throttling it would introduce avoidable seams in continuous waves. Clock regression
+  and long stalls rebase once with no catch-up burst. The existing 20 ms `AudioParam` smoothing is
+  retained as interpolation between control targets, not as a competing scheduler.
+
+  Browser verification used a 2 ms simulated render step. A same-cell flyby recorded one bed's
+  placement at frames 96, 113, 130, 147, 164, and 181: exactly 17 render frames between writes,
+  matching the 33.3 ms control interval without per-frame work. A ground-level follow flight from
+  `0xda55ffff` through `0xda58ffff` crossed three landblocks, scheduled 33 descriptors, admitted five
+  continuous voices, and retired 29 descriptors. New beds produced trigger and placement samples on
+  their admission frame, while retired beds reached zero gain. Faster samples during that flight
+  corresponded to forced 24 m scan-cell refreshes, which is the intended override rather than
+  cadence drift. Both harness runs reported no browser console errors.
+
 - **2026-08-17 — Loudness contour added** (`FRONTEND_TUNING.audio.loudnessCurveExponent`, default
   0.75, marked `RETAIL DIVERGENCE`): each voice's linear gain passes through `gain ** exponent` at
   the device boundary, lifting quiet-to-mid distant ambience with fixed points at 0 and 1. Applied
@@ -743,7 +774,7 @@ eslint all clean.
   `GetAttenuation(distance, …)` as hooks (`PlaySoundInternal(SoundBufRef*, const Position*, …)`,
   acclient.c:366489-366518). The divergence was the panner: `SoundBuf::Play` clamps pan to ±15 and
   hands DirectSound `SetPan(100 × pan)` (acclient.c:369202-369232) — single-channel attenuation, at
-  most 15 dB on the *far* channel, never touching the near one — while `StereoPannerNode` is
+  most 15 dB on the _far_ channel, never touching the near one — while `StereoPannerNode` is
   equal-power: −3 dB in both ears for every centred sound (every bed, everything in the flat
   radius) and total far-ear silence at full pan. `WebAudioDevice` now reproduces retail's law with
   a master gain fanned into per-channel gains and a merger, marked `RETAIL QUIRK` with the
@@ -765,13 +796,13 @@ eslint all clean.
   per table; doc triplication of the steal divergence trimmed to its mechanism. Skipped with
   reasons: `placeSpatialAudio`'s result object stays (purity of the retail-curve authority over the
   last ~2k tiny allocations/s; its header comment now says "allocation-light" instead of
-  overclaiming); the bed supplier closure stays (one per firing, and it *is* the fade-out
+  overclaiming); the bed supplier closure stays (one per firing, and it _is_ the fade-out
   mechanism); the scan-cell size stays terrain-sourced per the earlier plan decision; harness lerp
   stays local. Full gate re-verified: 1101 tests, flyby behavior unchanged within roll variance.
 - **2026-08-17 — Voice budget raised to 32 and stealing re-targeted to the quietest voice.** Open
   Question 6 closed by decision. Retail's 16 was a DirectSound-era budget; ours doubles it (still
   bounded — an unbounded pool turns a trigger bug into a runaway mixer instead of a diagnosable
-  steal counter) and the steal victim is now chosen by *current* gain, computed from the same
+  steal counter) and the steal victim is now chosen by _current_ gain, computed from the same
   retained facts `advance` re-places from, with age as the tie-break — so equal-gain contests
   behave exactly as retail's oldest-steal did, and the existing steal tests passed unchanged. A
   below-floor silenced voice is the ideal victim, which also answers the bed-steal worry: a bed
@@ -799,6 +830,7 @@ eslint all clean.
   steals in ~14 s of one-shots). Open Question 6's "no contention" finding is obsolete; oldest-steal
   stands for now — the victims are the oldest, quietest one-shots — but a bed, once one schedules,
   is the likeliest steal target and the question is genuinely open again.
+
 - **2026-08-16 — Plan complete.** Phases 0-6 landed in sequence on branch `claude`, uncommitted.
   Residual items, all recorded in their phases: an in-the-wild continuous-bed flyby trace (unit
   coverage stands in; bake diagnostics make a dominant-ambience block findable), the smoothing
@@ -818,7 +850,7 @@ eslint all clean.
   failures skip `#applyCamera` for that frame, holding the last listener pose — acceptable.
 - **2026-08-16 — Dry run completed; five findings folded in.** (1) Bake lifecycle rides an
   `installationRevision` diff — no event plumbing. (2) Phase 3 equivalence is characterization
-  goldens captured *before* the rewrite, since the old scan does not survive to be compared live.
+  goldens captured _before_ the rewrite, since the old scan does not survive to be compared live.
   (3) The scan-grid constant comes from `tileSize` already flowing per block — no manifest plumbing.
   (4) Phase 1 budgets fake-device churn in `audio-system.test.ts`. (5) Schedule-share vs. live-share
   duality documented as intended. No phase reordering or scope changes resulted.

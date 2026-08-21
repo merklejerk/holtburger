@@ -21,23 +21,21 @@ export interface PreparedAnimation {
 	readonly framesPerSecond: number;
 	/** Frame-major rigid-part transforms indexed by `frame * partCount + part`. */
 	readonly partFrames: readonly Mat4[];
-	// RETAIL DIVERGENCE: retail composes these authored root position frames into the object's
-	// world frame every update (`CPhysicsObj::UpdatePositionInternal`, acclient.c:308262-308298).
-	// Holtburger keeps the spawned-dynamic root solver-owned and never applies position frames;
-	// `sampleAnimationPose` reads only `partFrames`. Correcting it *here* would route frontend
-	// animation back into collision authority, which is why the fix does not belong in this file.
-	//
-	// Consequence: WCID 36449 Bats animates without its authored root rotation. Diagnosed
-	// 2026-08-20 — the motion contract projects `setup_default_tables` (which motion *table* a
-	// setup installs) but not `SetupModel::default_animation` (a bare animation for a setup with
-	// no table). Confirmed against the catalog: 36449 declares no motion table, so nothing routes
-	// its root frames host-side where the authored-drive path could apply them.
-	//
-	// Census: one canonical-catalog template, whose frames are rotation-only with zero
-	// translation. Deferred because the projection would touch every setup-default resident to
-	// serve one; see the authored-root-motion plan's debt table.
-	/** Optional frame-major root offsets retained but never applied to the entity root. */
+	/** Optional frame-major authored root offsets. */
 	readonly positionFrames: readonly Mat4[];
+	/**
+	 * Whether any authored root frame *moves* the object rather than only turning it.
+	 *
+	 * A turning root is safe to apply to the visual root: it cannot separate the model from
+	 * whatever owns its position. A translating one can, so it is refused. Computed once here
+	 * because it is a property of the asset, not of any entity playing it.
+	 *
+	 * Census 2026-08-20 over all 5,935 archive setups: 129 declare a bare default animation and
+	 * exactly one authors root motion at all — setup 0x02001752 (WCID 36449 Bats), whose frames
+	 * carry zero translation and 0.44 degrees of yaw each. No translating carrier exists, so this
+	 * flag is a tripwire rather than a live branch.
+	 */
+	readonly authoredRootTranslates: boolean;
 	readonly hooks: readonly DecodedAnimationHook[];
 }
 
@@ -151,6 +149,9 @@ function prepareAnimation(
 		);
 	}
 	return {
+		authoredRootTranslates: decoded.positionFrames.some(
+			(frame) => frame.m41 !== 0 || frame.m42 !== 0 || frame.m43 !== 0,
+		),
 		frameCount: decoded.frameCount,
 		framesPerSecond: STATIC_DEFAULT_ANIMATION_FRAMES_PER_SECOND,
 		hooks: decoded.hooks,

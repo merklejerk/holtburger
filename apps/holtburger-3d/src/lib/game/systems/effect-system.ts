@@ -225,6 +225,29 @@ export class EffectSystem implements EffectCommandPort {
 		};
 	}
 
+	/**
+	 * Install a continuous spin on the resident's visual root.
+	 *
+	 * RETAIL DIVERGENCE: retail's `SetOmegaHook::Execute` calls `CPhysicsObj::set_omega`
+	 * (`acclient.c:328860`), which writes the *body's* angular velocity; the body then grotates its
+	 * own world frame every update (`:309396`), carrying collision along with the visual. We keep
+	 * the spin on the visual root instead, composed in retail's `delta * current` order.
+	 *
+	 * Consequence of "correcting" it: nothing, for any content that exists — and it would cost a
+	 * second mechanism. The body *can* already carry this. `SpatialBody.omega` exists and
+	 * `integrate_angular_velocity` applies it in retail's own `delta * rotation` order. The reason
+	 * to keep it here is the carriers, not the capability.
+	 *
+	 * Census 2026-08-20, archive-wide: 8 `SetOmega` hooks in 8 animations, reached by 8 setups.
+	 * Five are scenery-only — no catalog template reaches them, so they own no spatial body to
+	 * spin at all. The other three are spawnable (WCIDs 3654 "Sentinel Channel", 10698 and 10699
+	 * "Butterflies!"), and every one is `ethereal + ignore_collisions`, resolving to
+	 * `EntityCollisionParticipation::Suppressed`. So routing this to body omega would be impossible
+	 * for five carriers and observationally identical for the other three, leaving two mechanisms
+	 * for one hook in exchange for no behavioural change.
+	 *
+	 * `prepareDynamicAnimation` pays for the visual half with `rotationInvariantBounds`.
+	 */
 	applySetOmega(target: BehaviorTarget, omega: Vec3): void {
 		const state = this.#requiredState(
 			requireSceneNodeId(target.targetId, "EffectSystem"),

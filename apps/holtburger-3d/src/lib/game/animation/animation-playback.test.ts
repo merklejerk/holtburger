@@ -8,6 +8,7 @@ import {
 	playingClip,
 	rotationVectorQuaternion,
 	sampleAnimationPose,
+	sampleAuthoredRootTransform,
 	wholeAnimationClip,
 } from "./animation-playback";
 import type { PreparedAnimation } from "./animation-asset-repository";
@@ -15,6 +16,7 @@ import type { PreparedAnimation } from "./animation-asset-repository";
 /** Frames are distinguishable by their x translation, so a sampled pose names its frame. */
 function testAnimation(frameCount: number): PreparedAnimation {
 	return {
+		authoredRootTranslates: false,
 		frameCount,
 		framesPerSecond: 30,
 		hooks: [],
@@ -101,6 +103,63 @@ describe("advanceCyclicFrame", () => {
 	});
 });
 
+describe("sampleAuthoredRootTransform", () => {
+	/** Yaw-only root frames, the shape the one archive-wide carrier actually authors. */
+	function turningRoot(frameCount: number): PreparedAnimation {
+		const animation = testAnimation(frameCount);
+		return {
+			...animation,
+			positionFrames: Array.from({ length: frameCount }, (_, frame) => {
+				const pose = Mat4.identity();
+				// A distinguishable per-frame yaw; magnitude is irrelevant to the contract.
+				pose.m11 = Math.cos(frame * 0.01);
+				pose.m13 = -Math.sin(frame * 0.01);
+				pose.m31 = Math.sin(frame * 0.01);
+				pose.m33 = Math.cos(frame * 0.01);
+				return pose;
+			}),
+		};
+	}
+
+	it("returns nothing for a clip that authors no root frames", () => {
+		expect(
+			sampleAuthoredRootTransform(wholeAnimationClip(testAnimation(3)), 0),
+		).toBeNull();
+	});
+
+	it("samples the authored root of a turning clip", () => {
+		const clip = wholeAnimationClip(turningRoot(4));
+
+		const sampled = sampleAuthoredRootTransform(clip, 0);
+
+		expect(sampled).not.toBeNull();
+		expect(sampled?.m11).toBeCloseTo(1);
+	});
+
+	it("interpolates between authored root frames", () => {
+		const clip = wholeAnimationClip(turningRoot(4));
+
+		const midpoint = sampleAuthoredRootTransform(clip, 1.5);
+		const lower = sampleAuthoredRootTransform(clip, 1);
+		const upper = sampleAuthoredRootTransform(clip, 2);
+
+		expect(midpoint?.m31).toBeGreaterThan(lower!.m31);
+		expect(midpoint?.m31).toBeLessThan(upper!.m31);
+	});
+
+	it("refuses a translating root, which could separate a model from its collider", () => {
+		const animation = turningRoot(4);
+		const translating: PreparedAnimation = {
+			...animation,
+			authoredRootTranslates: true,
+		};
+
+		expect(
+			sampleAuthoredRootTransform(wholeAnimationClip(translating), 0),
+		).toBeNull();
+	});
+});
+
 describe("interpolateRigidTransform", () => {
 	it("smoothly interpolates rigid translation and orientation", () => {
 		const from = Mat4.identity();
@@ -153,6 +212,7 @@ describe("sampleAnimationPose", () => {
 		const third = Mat4.identity();
 		third.m41 = 20;
 		const withoutRootFrames: PreparedAnimation = {
+			authoredRootTranslates: false,
 			frameCount: 3,
 			framesPerSecond: 30,
 			hooks: [],

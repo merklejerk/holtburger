@@ -200,6 +200,7 @@ function advancedFrame(
 
 function testAnimation(): PreparedAnimation {
 	return {
+		authoredRootTranslates: false,
 		frameCount: 1,
 		framesPerSecond: 30,
 		hooks: [],

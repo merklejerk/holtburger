@@ -144,11 +144,10 @@ export function sampleAnimationPose(
 	framePosition: number,
 ): readonly Mat4[] {
 	const { animation } = clip;
-	const normalized = normalizeClipFrame(clip, framePosition);
-	const lowerFrame = Math.floor(normalized);
-	// Part indices need not identify spatially continuous geometry across a cyclic seam.
-	const upperFrame = Math.min(lowerFrame + 1, clip.highFrame);
-	const fraction = normalized - lowerFrame;
+	const { lowerFrame, upperFrame, fraction } = resolveFrameBlend(
+		clip,
+		framePosition,
+	);
 	const parts: Mat4[] = [];
 	for (let part = 0; part < animation.partCount; part += 1) {
 		const lower = animation.partFrames[lowerFrame * animation.partCount + part];
@@ -160,6 +159,78 @@ export function sampleAnimationPose(
 		parts.push(interpolateRigidTransform(lower, upper, fraction));
 	}
 	return parts;
+}
+
+/**
+ * Whether this animation's authored root frames are applied to the visual root.
+ *
+ * The single predicate behind both the sampled transform and the culling bound that has to cover
+ * it. Spelling it twice would let a bound stop covering a pose it still renders.
+ */
+export function turnsVisualRoot(animation: PreparedAnimation): boolean {
+	return (
+		animation.positionFrames.length > 0 && !animation.authoredRootTranslates
+	);
+}
+
+/**
+ * Sample the authored root frame this clip is on, or `null` when it authors none.
+ *
+ * RETAIL DIVERGENCE: retail composes authored root frames into the object's *world* frame every
+ * update (`CPhysicsObj::UpdatePositionInternal`, acclient.c:308262-308298), which carries collision
+ * along with the visual. Holtburger applies them to the **visual root only**, because an object's
+ * position here is owned by a solver or by a static collider that a presentation sample must not
+ * fight.
+ *
+ * Consequence of "correcting" it: routing these frames back into world placement would hand
+ * frontend animation authority over collision, which is the one thing the dynamic-entity contract
+ * exists to prevent.
+ *
+ * Why content cannot observe the difference: a translating root is refused outright by
+ * `authoredRootTranslates`, so only turning is ever applied, and a turn cannot separate a model
+ * from the thing that owns where it stands. Census 2026-08-20 over all 5,935 archive setups — 129
+ * declare a bare default animation, exactly one authors root motion (setup 0x02001752, WCID 36449
+ * Bats: zero translation, 0.44 degrees of yaw per frame), and zero carriers are collidable, since
+ * that one resolves to `EntityCollisionParticipation::Suppressed`.
+ */
+export function sampleAuthoredRootTransform(
+	clip: PlayingClip,
+	framePosition: number,
+): Mat4 | null {
+	const { animation } = clip;
+	if (!turnsVisualRoot(animation)) return null;
+	const { lowerFrame, upperFrame, fraction } = resolveFrameBlend(
+		clip,
+		framePosition,
+	);
+	const lower = animation.positionFrames[lowerFrame];
+	const upper = animation.positionFrames[upperFrame];
+	if (!lower || !upper)
+		throw new Error(
+			`Animation ${animation.id} has an incomplete authored root frame.`,
+		);
+	return interpolateRigidTransform(lower, upper, fraction);
+}
+
+/**
+ * The two authored frames one clip position sits between, and how far between them it is.
+ *
+ * Shared by every sampler so they cannot disagree about where a position lands. The upper frame
+ * clamps to the window's own high bound rather than wrapping: part indices need not identify
+ * spatially continuous geometry across a cyclic seam, so the seam holds its last frame instead of
+ * blending into the first.
+ */
+function resolveFrameBlend(
+	clip: PlayingClip,
+	framePosition: number,
+): { lowerFrame: number; upperFrame: number; fraction: number } {
+	const normalized = normalizeClipFrame(clip, framePosition);
+	const lowerFrame = Math.floor(normalized);
+	return {
+		fraction: normalized - lowerFrame,
+		lowerFrame,
+		upperFrame: Math.min(lowerFrame + 1, clip.highFrame),
+	};
 }
 
 /** Fold any position back into `[lowFrame, highFrame + 1)`, so traversal is total. */

@@ -67,6 +67,13 @@ export interface VisibleRigidPartContribution {
 export interface ArticulatedPose {
 	/** Transforms indexed by authored setup part index. */
 	readonly partToObjectTransforms: readonly Mat4[];
+	/**
+	 * Authored root frame for this pose, or `null` when the clip authors none.
+	 *
+	 * Applied to the *visual* root only. See `sampleAuthoredRootTransform` for why that differs
+	 * from retail and why no shipped content can observe the difference.
+	 */
+	readonly authoredRootTransform: Mat4 | null;
 }
 
 /** Effect-owned render state for one authored rigid part. */

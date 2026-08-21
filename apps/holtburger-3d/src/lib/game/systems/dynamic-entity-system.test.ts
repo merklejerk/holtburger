@@ -650,6 +650,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const rotatedSample: DynamicPresentationSample = {
 			...sample,
 			articulatedPose: {
+				authoredRootTransform: null,
 				partToObjectTransforms: [firstPartTransform, secondPartTransform],
 			},
 			effects: { ...sample.effects, rootTransformModifier: rootRotation },
@@ -787,6 +788,7 @@ function presentationSample(
 		throw new Error("Static fallback has no dynamic presentation sample.");
 	return {
 		articulatedPose: {
+			authoredRootTransform: null,
 			partToObjectTransforms: Array.from(
 				{ length: animation.animation.partCount },
 				() => Mat4.identity(),

@@ -1119,17 +1119,27 @@ export class DynamicEntitySystem<
 				: sampledRenderState;
 			return { part, renderState, transform };
 		});
+		// Two independent sources can turn the visual root: continuous effect omega and an
+		// authored root frame. They compose rather than compete, with the authored frame innermost
+		// because it is part of the pose the clip describes.
+		const visualRootTransform =
+			sample.articulatedPose.authoredRootTransform === null
+				? sample.effects.rootTransformModifier
+				: multiplyMat4(
+						sample.articulatedPose.authoredRootTransform,
+						sample.effects.rootTransformModifier,
+					);
 		const publishedPresentationBounds = expandBounds(
 			presentationBoundsForSample(
 				updatedParts,
 				entity.source.scale,
-				sample.effects.rootTransformModifier,
+				visualRootTransform,
 			),
 			entity.appliedEnvelopeRadius,
 		);
 		this.#scene.updateLocalTransform(
 			entity.visualRootNodeId,
-			sample.effects.rootTransformModifier,
+			visualRootTransform,
 		);
 		for (const { part, transform } of updatedParts) {
 			this.#scene.updateLocalTransform(
@@ -1345,6 +1355,8 @@ function poseFor(
 	placementKey: number,
 ): ArticulatedPose {
 	return {
+		// A static placement pose has no clip and therefore no authored root frame.
+		authoredRootTransform: null,
 		partToObjectTransforms: resolvePlacementPose(presentation, placementKey)
 			.partTransforms,
 	};

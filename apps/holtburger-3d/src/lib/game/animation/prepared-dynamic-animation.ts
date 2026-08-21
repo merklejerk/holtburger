@@ -8,6 +8,7 @@ import type {
 	PartVisualTemplate,
 } from "../systems/object-visual-template-repository";
 import type { PreparedAnimation } from "./animation-asset-repository";
+import { turnsVisualRoot } from "./animation-playback";
 
 /** Complete animation preparation outcome consumed by the later atomic activation gate. */
 export type PreparedDynamicAnimation =
@@ -61,13 +62,18 @@ export function prepareDynamicAnimation(
 	const hasUnboundedVisualRootRotation = animation.hooks.some(
 		(hook) => hook.kind === "set-omega",
 	);
+	// An applied authored root frame turns the whole part cloud, so the swept bound no longer
+	// covers it. The envelope is used rather than a second sweep because the population is one
+	// clip whose bound is already small, and a rotation-invariant box is provably correct where a
+	// hand-rolled sweep of two composed rotations would have to be argued.
 	return {
 		animation,
 		hasUnboundedVisualRootRotation,
 		kind: "activatable",
-		localBounds: hasUnboundedVisualRootRotation
-			? rotationInvariantBounds(bounds)
-			: bounds,
+		localBounds:
+			hasUnboundedVisualRootRotation || turnsVisualRoot(animation)
+				? rotationInvariantBounds(bounds)
+				: bounds,
 	};
 }
 

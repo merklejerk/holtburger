@@ -3,6 +3,7 @@ import {
 	advanceCyclicFrame,
 	clipEntryFrame,
 	sampleAnimationPose,
+	sampleAuthoredRootTransform,
 	wholeAnimationClip,
 	type PlayingClip,
 } from "../animation/animation-playback";
@@ -323,6 +324,10 @@ export class AnimationSystem<TOwnerId extends string> {
 		);
 		return {
 			articulatedPose: {
+				authoredRootTransform: sampleAuthoredRootTransform(
+					record.clip,
+					visualAdvance.framePosition,
+				),
 				partToObjectTransforms: sampleAnimationPose(
 					record.clip,
 					visualAdvance.framePosition,

@@ -477,6 +477,7 @@ const systemEffects = new WeakMap<AnimationSystem<string>, EffectSystem>();
 
 function testAnimation(omega = new Vec3(0, 0, 1)): PreparedAnimation {
 	return {
+		authoredRootTranslates: false,
 		frameCount: 4,
 		framesPerSecond: 30,
 		hooks: [setOmegaHook(omega), deferredEffectHook()],

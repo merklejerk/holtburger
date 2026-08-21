@@ -131,6 +131,7 @@ function animation(
 	hooks: readonly DecodedAnimationHook[],
 ): PreparedAnimation {
 	return {
+		authoredRootTranslates: false,
 		frameCount: partFrames.length,
 		framesPerSecond: 30,
 		hooks,
@@ -170,3 +171,52 @@ function setOmegaHook(): DecodedAnimationHook {
 		omega: new Vec3(0, 0, 1),
 	};
 }
+
+describe("authored root bounds", () => {
+	it("uses a rotation-invariant envelope when the clip turns the visual root", () => {
+		const base = animation([Mat4.identity()], []);
+		const turningRoot = {
+			...base,
+			authoredRootTranslates: false,
+			positionFrames: [Mat4.identity()],
+		};
+
+		const prepared = prepareDynamicAnimation(
+			turningRoot,
+			template(),
+			new Vec3(1, 1, 1),
+			AABB3.zero(),
+		);
+		const still = prepareDynamicAnimation(
+			base,
+			template(),
+			new Vec3(1, 1, 1),
+			AABB3.zero(),
+		);
+
+		// A turned part cloud leaves the swept box, so the bound must not stay tight to it.
+		expect(prepared.localBounds).not.toEqual(still.localBounds);
+		expect(prepared.localBounds.min.x).toBe(-prepared.localBounds.max.x);
+	});
+
+	it("keeps the tight bound when the root translates, since nothing is applied", () => {
+		const base = animation([Mat4.identity()], []);
+		const translatingRoot = {
+			...base,
+			authoredRootTranslates: true,
+			positionFrames: [Mat4.identity()],
+		};
+
+		expect(
+			prepareDynamicAnimation(
+				translatingRoot,
+				template(),
+				new Vec3(1, 1, 1),
+				AABB3.zero(),
+			).localBounds,
+		).toEqual(
+			prepareDynamicAnimation(base, template(), new Vec3(1, 1, 1), AABB3.zero())
+				.localBounds,
+		);
+	});
+});

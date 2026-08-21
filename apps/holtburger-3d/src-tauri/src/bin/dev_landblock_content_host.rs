@@ -1,13 +1,15 @@
 use anyhow::Context;
 use holtburger_3d::{
-    LandblockSourceLayer, LoadTexturePixelsRequest, SphereSweepRequest,
+    ExplorerPossessionEventWireRequest, ExplorerPossessionIntentWireRequest,
+    ExplorerPossessionReceipt, LandblockSourceLayer, LoadTexturePixelsRequest,
+    PossessExplorerEntityRequest, SphereSweepRequest,
     dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes,
     explorer_entity_delivery::ExplorerEntityDelivery,
     explorer_entity_driver::{
         DatExplorerEntityContentPreparer, ExplorerEntityDriver, ExplorerEntityLaunchRequest,
         ExplorerEntityRelocationRequest, ExplorerEntitySpawnRequest, SystemExplorerEntityClock,
     },
-    explorer_entity_runtime::ExplorerEntityRuntime,
+    explorer_entity_runtime::{ExplorerEntityRuntime, PossessionEventOutcome},
     explorer_weenie_catalog::ExplorerWeenieCatalog,
     host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
     load_active_region_data_bytes, load_animation_bytes, load_landblock_source_batch_bytes,
@@ -16,7 +18,7 @@ use holtburger_3d::{
     load_texture_pixels_bytes, resolve_sphere_sweep,
 };
 use holtburger_content::{ContentDecodeCache, ContentRepository};
-use holtburger_core::{ContentAssetRuntime, ContentAssetService};
+use holtburger_core::{ContentAssetRuntime, ContentAssetService, DynamicEntityEvent};
 use holtburger_world::EntityAppearance;
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Arc, time::Duration, time::Instant};
@@ -99,6 +101,13 @@ struct ExplorerEntityDespawnRequest {
 #[serde(rename_all = "camelCase")]
 struct ExplorerEntityTickRequest {
     duration_milliseconds: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplorerPossessionTickResponse {
+    event: Option<DynamicEntityEvent>,
+    outcomes: Vec<PossessionEventOutcome>,
 }
 
 struct DevHostState {
@@ -333,6 +342,114 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 Err(error) => write_error(&mut stream, error).await,
             }
         }
+        ("POST", "/explorer-entity-possess") => {
+            let request = serde_json::from_slice::<PossessExplorerEntityRequest>(&request.body)?;
+            let result = match request.guid {
+                Some(guid) => state
+                    .runtime
+                    .possess(guid)
+                    .map(ExplorerPossessionReceipt::active),
+                None => state
+                    .runtime
+                    .release_possession(Instant::now())
+                    .map(|release| {
+                        ExplorerPossessionReceipt::released(release.possession_generation)
+                    }),
+            };
+            match result {
+                Ok(receipt) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error.into()).await,
+            }
+        }
+        ("POST", "/explorer-possession-intent") => {
+            let request =
+                serde_json::from_slice::<ExplorerPossessionIntentWireRequest>(&request.body)?;
+            match state.runtime.replace_possession_intent(request.resolve()) {
+                Ok(result) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&result)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error.into()).await,
+            }
+        }
+        ("POST", "/explorer-possession-event") => {
+            let request =
+                serde_json::from_slice::<ExplorerPossessionEventWireRequest>(&request.body)?;
+            match request
+                .resolve()
+                .map_err(anyhow::Error::msg)
+                .and_then(|request| {
+                    state
+                        .runtime
+                        .queue_possession_event(request)
+                        .map_err(Into::into)
+                }) {
+                Ok(receipt) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/explorer-possession-tick") => {
+            let request = serde_json::from_slice::<ExplorerEntityTickRequest>(&request.body)?;
+            let result = state.delivery.with_ordered_publication(|| {
+                anyhow::ensure!(
+                    request.duration_milliseconds.is_finite()
+                        && request.duration_milliseconds > 0.0,
+                    "Explorer possession tick duration must be positive and finite"
+                );
+                let duration = Duration::from_secs_f64(request.duration_milliseconds / 1_000.0);
+                let ticks = state
+                    .runtime
+                    .tick_physical_collection(duration.as_secs_f32(), Instant::now())?;
+                let outcomes = ticks
+                    .iter()
+                    .flat_map(|tick| tick.possession_event_outcomes.iter().copied())
+                    .collect();
+                let event = state.delivery.advanced(ticks, duration)?;
+                Ok(ExplorerPossessionTickResponse { event, outcomes })
+            });
+            match result {
+                Ok(response) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&response)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/explorer-possession-probe") => {
+            write_response(
+                &mut stream,
+                200,
+                "application/json",
+                &serde_json::to_vec(&state.runtime.possession_motion_probe())?,
+            )
+            .await
+        }
         ("POST", "/explorer-entity-tick") => {
             let request = serde_json::from_slice::<ExplorerEntityTickRequest>(&request.body)?;
             let result = state.delivery.with_ordered_publication(|| {
@@ -424,6 +541,8 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
     let runtime = Arc::new(ExplorerEntityRuntime::new(
         Arc::clone(&simulation),
         Arc::clone(&motion_catalog),
+        holtburger_3d::explorer_possession_control::ExplorerPossessionControlProfile::standard()
+            .expect("failed to construct standard Explorer possession control profile"),
     ));
     let catalog = Arc::new(ExplorerWeenieCatalog::discover_from_environment(
         repository.source_description().map(Path::new),

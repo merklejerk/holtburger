@@ -260,15 +260,13 @@ pub struct DynamicEntityAdvance {
     pub path: DynamicEntityPlacedPath,
     /// Clip the host started playing on this tick, if it changed.
     ///
-    /// Published on **change**, not every tick: clip identity changes only at a transition, so a
-    /// receiver swaps on arrival rather than diffing against what it already holds. `None` means
-    /// "keep playing whatever you have" — including for an entity that never animated at all.
+    /// Published on **change**, not every tick: the playing projection changes only at a sequence
+    /// boundary, so a receiver swaps on arrival rather than diffing against what it already holds.
+    /// `None` means "keep playing whatever you have" — including for an entity that never animated.
     ///
-    /// Deliberately narrow: the receiver advances within this clip's window at render rate,
-    /// lapping back to its entry frame at the far bound, and never selects the next one. Which clip
-    /// follows is link resolution against host state, so a clip change arrives only as a later
-    /// projection. Lapping rather than holding is required, not a choice: a looping clip is
-    /// projected once and never re-sent, so a receiver that held would freeze every idle.
+    /// Deliberately narrow: the receiver advances within this clip's window at render rate and
+    /// obeys its projected completion behavior, but never selects the next clip. Which clip follows
+    /// is link resolution against host state, so a clip change arrives only as a later projection.
     pub clip: Option<DynamicEntityPlayingClip>,
 }
 
@@ -285,6 +283,18 @@ pub struct DynamicEntityPlayingClip {
     /// Inclusive traversal bounds, already resolved against the animation's frame count.
     pub low_frame: i32,
     pub high_frame: i32,
+    /// Host-owned terminal behavior derived from the sequence's cyclic-tail boundary.
+    pub completion: DynamicEntityClipCompletion,
+}
+
+/// Presentation behavior when a projected motion clip reaches its far boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DynamicEntityClipCompletion {
+    /// Retain the terminal pose until the host projects the successor clip.
+    Hold,
+    /// Re-enter the clip because it is part of the authoritative looping tail.
+    Loop,
 }
 
 /// At most one ordered changed-entity publication for one host fixed tick.

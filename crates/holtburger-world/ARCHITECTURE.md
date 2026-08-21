@@ -225,8 +225,9 @@ than as a service. Nothing here caches, records history, or reaches back into co
   and the cursor into them. `advance` returns what one tick produced — a single exactly-composed
   rigid offset plus the simulation hooks the departed frames fired — rather than a sample of it,
   matching retail's compose-then-apply-once structure.
-- `selection.rs` ports retail's motion selection, including link resolution and `re_modify`. Its
-  loop reproduces a retail quirk rather than correcting it; the marker there carries the citation.
+- `selection.rs` ports retail's motion selection, including link resolution and `re_modify`, while
+  deliberately replaying every active modifier once instead of reproducing retail's head-only
+  replay defect. The divergence marker there carries the citation and content census.
 - `MotionRuntimeRegistry` holds per-body playback for one authority, and `actuation.rs` converts a
   tick's authored offset into the solver's drive basis.
 

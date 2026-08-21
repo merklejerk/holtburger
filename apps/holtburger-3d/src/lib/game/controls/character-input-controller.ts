@@ -1,5 +1,5 @@
 /** Semantic character input accepted by the host-owned grounded controller. */
-export interface GroundedCharacterDrive {
+export interface CharacterDrive {
 	readonly gait: "run" | "walk";
 	readonly lateral: "left" | "right" | null;
 	readonly longitudinal: "backward" | "forward" | null;
@@ -7,7 +7,7 @@ export interface GroundedCharacterDrive {
 }
 
 /** Keys that participate in retail-style character drive or jump input. */
-export type GroundedCharacterKey =
+export type CharacterInputKey =
 	| "a"
 	| "c"
 	| "d"
@@ -18,14 +18,14 @@ export type GroundedCharacterKey =
 	| "z";
 
 /** Non-coalescible lifecycle edge sent in frontend order. */
-export type GroundedCharacterEdge =
+export type CharacterInputEdge =
 	| {
-			readonly drive: GroundedCharacterDrive;
+			readonly drive: CharacterDrive;
 			readonly kind: "begin-jump";
 			readonly sequence: number;
 	  }
 	| {
-			readonly drive: GroundedCharacterDrive;
+			readonly drive: CharacterDrive;
 			readonly extent: number;
 			readonly kind: "release-jump";
 			readonly sequence: number;
@@ -35,13 +35,13 @@ export type GroundedCharacterEdge =
 			readonly sequence: number;
 	  };
 
-interface GroundedCharacterInputOptions {
+interface CharacterInputControllerOptions {
 	/** Retail/app profile duration used by both the displayed and released extent. */
 	readonly fullChargeDurationMs: number;
 	/** Injectable monotonic clock. */
 	readonly now: () => number;
-	readonly onDrive: (drive: GroundedCharacterDrive) => void;
-	readonly onEdge: (edge: GroundedCharacterEdge) => void;
+	readonly onDrive: (drive: CharacterDrive) => void;
+	readonly onEdge: (edge: CharacterInputEdge) => void;
 }
 
 interface ActiveCharge {
@@ -58,25 +58,25 @@ const MINIMUM_RETAIL_JUMP_EXTENT = 0.001;
  * Each opposed axis is a newest-first held list, matching retail `CommandList::AddCommand` and
  * removal behavior (`acclient.c:681378-683004`). The host sees semantics, never browser keys.
  */
-export class GroundedCharacterInput {
-	readonly #fullChargeDurationMs: number;
+export class CharacterInputController {
+	#fullChargeDurationMs: number;
 	readonly #now: () => number;
-	readonly #onDrive: (drive: GroundedCharacterDrive) => void;
-	readonly #onEdge: (edge: GroundedCharacterEdge) => void;
-	readonly #held = new Set<GroundedCharacterKey>();
-	readonly #longitudinal: GroundedCharacterKey[] = [];
-	readonly #lateral: GroundedCharacterKey[] = [];
-	readonly #turn: GroundedCharacterKey[] = [];
+	readonly #onDrive: (drive: CharacterDrive) => void;
+	readonly #onEdge: (edge: CharacterInputEdge) => void;
+	readonly #held = new Set<CharacterInputKey>();
+	readonly #longitudinal: CharacterInputKey[] = [];
+	readonly #lateral: CharacterInputKey[] = [];
+	readonly #turn: CharacterInputKey[] = [];
 	#activeCharge: ActiveCharge | null = null;
 	#sequence = 0;
 
-	constructor(options: GroundedCharacterInputOptions) {
+	constructor(options: CharacterInputControllerOptions) {
 		if (
 			!Number.isFinite(options.fullChargeDurationMs) ||
 			options.fullChargeDurationMs <= 0
 		) {
 			throw new Error(
-				"Grounded jump charge duration must be finite and positive.",
+				"Character jump charge duration must be finite and positive.",
 			);
 		}
 		this.#fullChargeDurationMs = options.fullChargeDurationMs;
@@ -86,7 +86,7 @@ export class GroundedCharacterInput {
 	}
 
 	/** Applies one browser edge; key-repeat cannot rewrite newest-first precedence. */
-	applyKey(key: GroundedCharacterKey, pressed: boolean, repeat = false): void {
+	applyKey(key: CharacterInputKey, pressed: boolean, repeat = false): void {
 		if (pressed) {
 			if (repeat || this.#held.has(key)) return;
 			this.#held.add(key);
@@ -110,7 +110,7 @@ export class GroundedCharacterInput {
 	}
 
 	/** Latest semantic snapshot, composed independently across all three axes. */
-	drive(): GroundedCharacterDrive {
+	drive(): CharacterDrive {
 		return {
 			gait: this.#held.has("shift") ? "walk" : "run",
 			lateral:
@@ -136,6 +136,15 @@ export class GroundedCharacterInput {
 		return charge === null ? null : this.#extentAt(this.#now(), charge);
 	}
 
+	/** Updates live stance timing without restarting the active charge clock. */
+	setFullChargeDurationMs(fullChargeDurationMs: number): void {
+		if (!Number.isFinite(fullChargeDurationMs) || fullChargeDurationMs <= 0)
+			throw new Error(
+				"Character jump charge duration must be finite and positive.",
+			);
+		this.#fullChargeDurationMs = fullChargeDurationMs;
+	}
+
 	/** Cancels only the optimistic charge owned by a rejected begin edge. */
 	rejectBegin(beginSequence: number): void {
 		if (this.#activeCharge?.beginSequence === beginSequence)
@@ -144,13 +153,14 @@ export class GroundedCharacterInput {
 
 	/** Clears held state and emits one ordered ownership-reset edge. */
 	reset(): void {
-		this.#held.clear();
-		this.#longitudinal.length = 0;
-		this.#lateral.length = 0;
-		this.#turn.length = 0;
-		this.#activeCharge = null;
+		this.#clear();
 		this.#onDrive(this.drive());
 		this.#onEdge({ kind: "reset", sequence: this.#nextSequence() });
+	}
+
+	/** Drops frontend ownership without sending an edge to an already-retired host generation. */
+	releaseOwnership(): void {
+		this.#clear();
 	}
 
 	#beginJump(): void {
@@ -179,7 +189,7 @@ export class GroundedCharacterInput {
 		);
 	}
 
-	#axisFor(key: GroundedCharacterKey): GroundedCharacterKey[] | null {
+	#axisFor(key: CharacterInputKey): CharacterInputKey[] | null {
 		if (key === "w" || key === "s") return this.#longitudinal;
 		if (key === "z" || key === "c") return this.#lateral;
 		if (key === "a" || key === "d") return this.#turn;
@@ -188,5 +198,13 @@ export class GroundedCharacterInput {
 
 	#nextSequence(): number {
 		return this.#sequence++;
+	}
+
+	#clear(): void {
+		this.#held.clear();
+		this.#longitudinal.length = 0;
+		this.#lateral.length = 0;
+		this.#turn.length = 0;
+		this.#activeCharge = null;
 	}
 }

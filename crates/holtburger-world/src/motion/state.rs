@@ -69,6 +69,14 @@ impl MotionCommand {
         }))
     }
 
+    /// Canonical forward substate selected for walking and reversed for backward movement.
+    pub const WALK_FORWARD: Self = Self(0x4500_0005);
+    /// Canonical forward substate selected for running.
+    pub const RUN_FORWARD: Self = Self(0x4400_0007);
+    /// Standing/default jump-charge presentation selected by retail.
+    pub const READY: Self = Self(0x4000_003C);
+    /// Airborne presentation selected when contact disallows grounded locomotion.
+    pub const FALLING: Self = Self(0x4000_0015);
     /// Turning is a modifier, so stopping it names the command retail stops: `TurnRight`.
     pub const TURN: Self = Self(0x6500_000D);
     /// Sidestepping is likewise one modifier, stopped by naming `SideStepRight`.

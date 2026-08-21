@@ -1,20 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { Vec3 } from "../math/types";
 import {
-	evaluateHostPhysicalCameraPath,
-	resolvePhysicalCameraViewDirection,
+	evaluateHostPhysicalFlyPath,
+	resolvePhysicalFlyViewDirection,
 	resolvePhysicalFlyVelocity,
 	resolvePhysicalFlyWheelDisplacement,
-	type HostPhysicalCameraPath,
-} from "./host-physical-camera-path";
+	type HostPhysicalFlyPath,
+} from "./host-physical-fly-path";
 
 function path(
-	overrides: Partial<HostPhysicalCameraPath> = {},
-): HostPhysicalCameraPath {
+	overrides: Partial<HostPhysicalFlyPath> = {},
+): HostPhysicalFlyPath {
 	return {
 		session: 1,
 		sequence: 0,
-		mode: "physical-fly",
 		durationMs: 100,
 		initial: {
 			residency: {
@@ -42,14 +41,13 @@ function path(
 		substeps: 1,
 		contactPasses: 1,
 		solveDurationMs: 0.1,
-		characterEventOutcomes: [],
 		...overrides,
 	};
 }
 
-describe("evaluateHostPhysicalCameraPath", () => {
+describe("evaluateHostPhysicalFlyPath", () => {
 	it("interpolates da55 landblock-local AC motion in canonical scene space", () => {
-		const placement = evaluateHostPhysicalCameraPath(
+		const placement = evaluateHostPhysicalFlyPath(
 			path({
 				initial: {
 					residency: {
@@ -117,15 +115,15 @@ describe("evaluateHostPhysicalCameraPath", () => {
 				},
 			],
 		});
-		expect(evaluateHostPhysicalCameraPath(crossing, 24.999).residency).toEqual({
+		expect(evaluateHostPhysicalFlyPath(crossing, 24.999).residency).toEqual({
 			envCellId: null,
 			landblockId: "0xda55ffff",
 		});
-		expect(evaluateHostPhysicalCameraPath(crossing, 25).residency).toEqual({
+		expect(evaluateHostPhysicalFlyPath(crossing, 25).residency).toEqual({
 			envCellId: "0xda55010b",
 			landblockId: "0xda55ffff",
 		});
-		expect(evaluateHostPhysicalCameraPath(crossing, 75).residency).toEqual({
+		expect(evaluateHostPhysicalFlyPath(crossing, 75).residency).toEqual({
 			envCellId: null,
 			landblockId: "0xda55ffff",
 		});
@@ -146,20 +144,20 @@ describe("evaluateHostPhysicalCameraPath", () => {
 				},
 			],
 		});
-		expect(evaluateHostPhysicalCameraPath(moving, -1_000).position.x).toBe(
+		expect(evaluateHostPhysicalFlyPath(moving, -1_000).position.x).toBe(
 			0xda * 192 + 10,
 		);
-		expect(evaluateHostPhysicalCameraPath(moving, 10_000)).toEqual(
-			evaluateHostPhysicalCameraPath(moving, 100),
+		expect(evaluateHostPhysicalFlyPath(moving, 10_000)).toEqual(
+			evaluateHostPhysicalFlyPath(moving, 100),
 		);
 	});
 
 	it("rejects malformed paths before presentation", () => {
 		expect(() =>
-			evaluateHostPhysicalCameraPath(path({ durationMs: 0 }), 0),
+			evaluateHostPhysicalFlyPath(path({ durationMs: 0 }), 0),
 		).toThrow("duration");
 		expect(() =>
-			evaluateHostPhysicalCameraPath(
+			evaluateHostPhysicalFlyPath(
 				path({
 					legs: [
 						{
@@ -216,10 +214,10 @@ describe("resolvePhysicalFlyWheelDisplacement", () => {
 	});
 });
 
-describe("resolvePhysicalCameraViewDirection", () => {
+describe("resolvePhysicalFlyViewDirection", () => {
 	it("preserves pitch while mapping canonical south back to AC north", () => {
 		expect(
-			resolvePhysicalCameraViewDirection({
+			resolvePhysicalFlyViewDirection({
 				forward: [0.3, 0.4, -0.5],
 				right: [1, 0, 0],
 				up: [0, 1, 0],

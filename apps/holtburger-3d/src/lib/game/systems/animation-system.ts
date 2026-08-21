@@ -1,6 +1,6 @@
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import {
-	advanceCyclicFrame,
+	advancePlayingFrame,
 	clipEntryFrame,
 	sampleAnimationPose,
 	sampleAuthoredRootTransform,
@@ -317,7 +317,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		nodeId: SceneNodeId,
 		record: AnimationRecord,
 	): DynamicPresentationSample {
-		const visualAdvance = advanceCyclicFrame(
+		const visualAdvance = advancePlayingFrame(
 			record.clip,
 			record.framePosition,
 			record.fractionalSeconds,
@@ -375,7 +375,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		// Live steps ride the shared effect clock. An initial-state replay does not: it is catching
 		// one new node up to its authored phase, which a global cadence cannot express.
 		if (mode === "initial-state") this.#effects.foldSemanticStep(nodeId);
-		const advance = advanceCyclicFrame(
+		const advance = advancePlayingFrame(
 			record.clip,
 			record.framePosition,
 			BEHAVIOR_STEP_SECONDS,

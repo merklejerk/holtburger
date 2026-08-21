@@ -502,33 +502,22 @@ fn change_cycle_speed(sequence: &mut MotionSequenceRuntime, substate_mod: f32, s
 /// Selecting a substate clears the sequence, which drops every modifier's contribution with it.
 /// Retail replays them from the state so the rebuilt sequence carries them again.
 ///
-/// RETAIL QUIRK: retail iterates a *snapshot* of the modifier list while repeatedly popping the
-/// live list's head, and re-selecting a modifier pushes it back onto that head
-/// (`CMotionTable::re_modify`, `acclient.c:323847-323874`; ACE `MotionTable.re_modify` matches). So
-/// with one modifier the replay is correct, and with N modifiers the head is re-installed N times
-/// while the rest are never replayed — their state entries survive but their physics do not.
-/// Reproducing it keeps the iteration count and the resulting doubled contribution identical to
-/// retail. Correcting it would change the omega a stacked modifier contributes, which content is
-/// tuned against. Census: reachable only with two or more simultaneous modifiers, which requires a
-/// substate that does not clear modifiers plus two distinct modifier commands active at once.
+/// RETAIL DIVERGENCE: retail iterates a snapshot while repeatedly popping and re-selecting the live
+/// list's head (`CMotionTable::re_modify`, `acclient.c:323847-323874`; ACE
+/// `MotionTable.re_modify` matches). With N modifiers that installs the head N times and none of the
+/// rest. We preserve the semantic list and combine every active modifier's physics exactly once.
+/// This makes simultaneous sidestep and turn independent of list order; correcting retail changes
+/// stacked modifier velocity or omega after a stance or substate rebuild. The archive contains
+/// 1,222 turn/sidestep modifier records, and interpreted movement can activate sidestep and turn
+/// together, so the defect is reachable through the normal control surface rather than dead code.
 fn re_modify(
     table: &MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
 ) {
-    let replays = state.modifiers().len();
-    for _ in 0..replays {
-        let Some(modifier) = state.modifiers().first().copied() else {
-            return;
-        };
-        state.remove_modifier(modifier.command);
-        select(
-            table,
-            state,
-            sequence,
-            modifier.command,
-            modifier.speed_mod,
-            false,
-        );
+    for modifier in state.modifiers() {
+        if let Some(motion) = lookup_modifier(table, state, modifier.command) {
+            combine_motion(sequence, motion, modifier.speed_mod);
+        }
     }
 }

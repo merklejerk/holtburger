@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sceneVec3 } from "../lib/assets/ac-frame";
-import { Vec3 } from "../lib/game/math/types";
+import { sceneVec3 } from "../../assets/ac-frame";
+import { Vec3 } from "../math/types";
 import {
 	advanceBoomState,
 	boomCameraPosition,

@@ -102,6 +102,7 @@ try {
 						landblockId: options.landblockId,
 						lifecycleState: result.lifecycleState,
 						entityLifecycle: result.entityLifecycle,
+						possessionScenario: result.possessionScenario,
 						followFlight: result.followFlight,
 						relocationSequence: result.relocationSequence,
 						relocationState: result.relocationState,
@@ -151,6 +152,9 @@ try {
 	if (options.relocateKind !== null) {
 		assertRelocatedEntityLifecycle(result, options.relocateKind);
 	}
+	if (options.possessionScenario) {
+		assertPossessionScenario(result.possessionScenario);
+	}
 } finally {
 	await Promise.allSettled(children.toReversed().map(stopChild));
 	await Promise.allSettled(
@@ -194,6 +198,7 @@ function parseArgs(args) {
 		entityPopulationCount: 300,
 		spawnDistance: 5,
 		spawnSimulated: false,
+		possessionScenario: false,
 		launchDirection: null,
 		entityTicks: 0,
 		entityTickMs: 1000 / 30,
@@ -375,6 +380,9 @@ function parseArgs(args) {
 				break;
 			case "--spawn-simulated":
 				parsed.spawnSimulated = true;
+				break;
+			case "--possession-scenario":
+				parsed.possessionScenario = true;
 				break;
 			case "--launch-direction":
 				parsed.launchDirection = parsePoint(
@@ -881,6 +889,9 @@ function parseArgs(args) {
 	if (parsed.spawnSimulated && parsed.spawnWcid === null) {
 		throw new Error("--spawn-simulated requires --spawn-wcid.");
 	}
+	if (parsed.possessionScenario && parsed.spawnWcid === null) {
+		throw new Error("--possession-scenario requires --spawn-wcid.");
+	}
 	if (parsed.excludeSpawnedAttachments && parsed.spawnWcid === null) {
 		throw new Error("--exclude-spawned-attachments requires --spawn-wcid.");
 	}
@@ -888,6 +899,7 @@ function parseArgs(args) {
 	// same requirement without --spawn-simulated.
 	const simulatedScenario =
 		parsed.spawnSimulated ||
+		parsed.possessionScenario ||
 		parsed.entityPairWcid !== null ||
 		parsed.entityPopulationWcid !== null;
 	if (
@@ -970,6 +982,9 @@ Options:
                         Entities in the population run. Default: 300
   --spawn-distance <n>  Camera-relative spawn distance. Default: 5
   --spawn-simulated    Attach the spawned entity to the shared host solver instead of pose-only.
+  --possession-scenario
+                        Possess the simulated --spawn-wcid and prove backward/turn/combined/jump
+                        body and playing-motion state through deterministic host ticks.
   --launch-direction <x,y,z>
                         Launch the exact spawned generation using catalog speed/spin.
   --entity-ticks <n>   Advance the entity collection by n explicit harness-controlled ticks.
@@ -1251,6 +1266,7 @@ function briefHarnessReport(result) {
 			({ level }) => level === "error" || level === "exception",
 		),
 		entityLifecycle: summarizeEntityLifecycle(result.entityLifecycle),
+		possessionScenario: summarizePossessionScenario(result.possessionScenario),
 		entityPair: result.entityPair,
 		entityPopulation: result.entityPopulation,
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
@@ -1303,6 +1319,45 @@ function briefHarnessReport(result) {
 		texture: staticObjects?.texture ?? null,
 		terrainWorker: result.state.terrainWorker,
 		timing: result.state.timing,
+	};
+}
+
+function summarizePossessionScenario(scenario) {
+	if (scenario === null) return null;
+	return {
+		backward: {
+			from: entityCoordinates(scenario.initial),
+			to: entityCoordinates(scenario.backward.entity),
+			motion: scenario.backward.probe,
+		},
+		combined: {
+			from: entityCoordinates(scenario.combinedStart),
+			to: entityCoordinates(scenario.combined.entity),
+			fromYaw: entityYawRadians(scenario.combinedStart),
+			toYaw: entityYawRadians(scenario.combined.entity),
+		},
+		control: scenario.controlProbe,
+		jump: {
+			begin: scenario.begin,
+			chargedMotion: scenario.charged.probe,
+			landed: scenario.landed,
+			maximumZ: scenario.maximumZ,
+			outcomes: scenario.outcomes,
+			release: scenario.release,
+			sawAirborne: scenario.sawAirborne,
+			sawFalling: scenario.sawFalling,
+		},
+		possession: scenario.possession,
+		sidestep: {
+			from: entityCoordinates(scenario.sidestepStart),
+			motion: scenario.sidestep.probe,
+			to: entityCoordinates(scenario.sidestep.entity),
+		},
+		turn: {
+			leftYaw: entityYawRadians(scenario.left.entity),
+			rightYaw: entityYawRadians(scenario.right.entity),
+			startYaw: entityYawRadians(scenario.turnStart),
+		},
 	};
 }
 
@@ -1400,6 +1455,344 @@ function summarizeEntityAdvances(events) {
 		first: summarize(changed[0]),
 		last: summarize(changed.at(-1)),
 	};
+}
+
+async function runPossessionScenario(client, spawned, requestedTickMs) {
+	const tickMs = Math.min(50, requestedTickMs);
+	const invoke = (method, args = []) =>
+		evaluate(
+			client,
+			`globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.${method}`,
+			args,
+		);
+	let settledState = null;
+	for (let tick = 0; tick < 240; tick += 1) {
+		await invoke("tickExplorerEntities", [tickMs]);
+		settledState = await invoke("state");
+		if (
+			exactHarnessEntity(settledState, spawned).placement.contact === "grounded"
+		)
+			break;
+	}
+	if (settledState === null)
+		throw new Error("Possession scenario did not execute a settling tick.");
+	let current = exactHarnessEntity(settledState, spawned);
+	if (current.placement.contact !== "grounded")
+		throw new Error("Possession scenario body did not settle onto terrain.");
+	const possession = await invoke("possessExplorerEntity", [
+		spawned.identity.guid,
+	]);
+	const controlProbe = await invoke("probeThirdPersonControls");
+	const stance = possession.acceptedStance;
+	let revision = 0;
+	let sequence = 0;
+	const outcomes = [];
+	const drive = (longitudinal = null, turn = null, lateral = null) => ({
+		gait: "run",
+		lateral,
+		longitudinal,
+		turn,
+	});
+	const setDrive = async (nextDrive) => {
+		revision += 1;
+		const result = await invoke("setPossessionIntent", [
+			{
+				drive: nextDrive,
+				possessionGeneration: possession.possessionGeneration,
+				revision,
+				stance,
+			},
+		]);
+		if (result !== "accepted")
+			throw new Error(
+				`Possession scenario intent ${revision} returned ${result}.`,
+			);
+	};
+	const advance = async (count) => {
+		for (let index = 0; index < count; index += 1) {
+			const response = await invoke("tickPossession", [tickMs]);
+			outcomes.push(...response.outcomes);
+			current = latestPossessionEntity(response, current);
+		}
+		const probe = await invoke("possessionMotionProbe");
+		return { entity: current, probe };
+	};
+
+	const initial = current;
+	await setDrive(drive("backward"));
+	const backward = await advance(4);
+
+	await setDrive(drive());
+	await advance(1);
+	const turnStart = current;
+	await setDrive(drive(null, "left"));
+	const left = await advance(4);
+	await setDrive(drive(null, "right"));
+	const right = await advance(4);
+
+	await setDrive(drive("backward", "left"));
+	const combinedStart = current;
+	const combined = await advance(4);
+	await setDrive(drive(null, "left"));
+	const turnOnly = await advance(3);
+	await setDrive(drive("backward"));
+	const backwardOnly = await advance(3);
+	await setDrive(drive(null, null, "right"));
+	const sidestepStart = current;
+	const sidestep = await advance(4);
+
+	const jumpingDrive = drive("forward");
+	revision += 1;
+	const begin = await invoke("queuePossessionEvent", [
+		{
+			drive: jumpingDrive,
+			kind: "begin-jump",
+			possessionGeneration: possession.possessionGeneration,
+			revision,
+			sequence: sequence++,
+			stance,
+		},
+	]);
+	const charged = await advance(1);
+	revision += 1;
+	const release = await invoke("queuePossessionEvent", [
+		{
+			drive: jumpingDrive,
+			extent: 0.5,
+			kind: "release-jump",
+			possessionGeneration: possession.possessionGeneration,
+			revision,
+			sequence,
+			stance,
+		},
+	]);
+	const launchStart = current;
+	let sawAirborne = false;
+	let sawFalling = false;
+	let maximumZ = entityCoordinates(current).z;
+	let landed = null;
+	for (let index = 0; index < 100; index += 1) {
+		const step = await advance(1);
+		maximumZ = Math.max(maximumZ, entityCoordinates(step.entity).z);
+		if (step.entity.placement.contact === "airborne") sawAirborne = true;
+		if (step.probe?.substate.command === 0x40000015) sawFalling = true;
+		if (sawAirborne && step.entity.placement.contact === "grounded") {
+			landed = step;
+			break;
+		}
+	}
+	const restoredStart = current;
+	const restored = await advance(3);
+	await invoke("possessExplorerEntity", [null]);
+
+	return {
+		backward,
+		backwardOnly,
+		begin,
+		charged,
+		combined,
+		combinedStart,
+		controlProbe,
+		initial,
+		landed,
+		launchStart,
+		left,
+		maximumZ,
+		possession,
+		outcomes,
+		release,
+		restored,
+		restoredStart,
+		right,
+		sawAirborne,
+		sawFalling,
+		sidestep,
+		sidestepStart,
+		tickMs,
+		turnOnly,
+		turnStart,
+	};
+}
+
+function assertPossessionScenario(scenario) {
+	if (scenario === null)
+		throw new Error("Possession scenario produced no evidence.");
+	const initial = entityCoordinates(scenario.initial);
+	const backward = entityCoordinates(scenario.backward.entity);
+	const heading = entityYawRadians(scenario.initial);
+	const backwardProjection =
+		(backward.x - initial.x) * -Math.sin(heading) +
+		(backward.y - initial.y) * Math.cos(heading);
+	if (!(backwardProjection < 0))
+		throw new Error(
+			`Possessed S did not displace opposite the starting forward vector: ${JSON.stringify({ initial, backward, heading, backwardProjection, probe: scenario.backward.probe })}`,
+		);
+	if (!(scenario.backward.probe?.substate.speed < 0))
+		throw new Error(
+			"Possessed S did not retain a reversed authored clip rate.",
+		);
+	if (
+		scenario.controlProbe.cameraYawAfterKeyboardTurn !==
+			scenario.controlProbe.cameraYawBefore ||
+		scenario.controlProbe.cameraYawAfterPointerOrbit ===
+			scenario.controlProbe.cameraYawBefore ||
+		scenario.controlProbe.characterInputCountAfterKeyboard !== 1 ||
+		scenario.controlProbe.characterInputCountAfterPointerAndWheel !== 1 ||
+		!(
+			(scenario.controlProbe.boomDesiredAfter ?? 0) >
+			(scenario.controlProbe.boomDesiredBefore ?? 0)
+		)
+	)
+		throw new Error(
+			`Third-person input ownership probe failed: ${JSON.stringify(scenario.controlProbe)}.`,
+		);
+
+	const leftDelta = wrappedAngleDelta(
+		entityYawRadians(scenario.turnStart),
+		entityYawRadians(scenario.left.entity),
+	);
+	const rightDelta = wrappedAngleDelta(
+		entityYawRadians(scenario.left.entity),
+		entityYawRadians(scenario.right.entity),
+	);
+	if (!(leftDelta * rightDelta < 0))
+		throw new Error(
+			"Possessed A and D did not produce opposite heading signs.",
+		);
+	assertPlanarStill(scenario.turnStart, scenario.left.entity, "A turn");
+	assertPlanarStill(scenario.left.entity, scenario.right.entity, "D turn");
+
+	if (
+		planarDistance(scenario.combinedStart, scenario.combined.entity) <= 0.01 ||
+		Math.abs(
+			wrappedAngleDelta(
+				entityYawRadians(scenario.combinedStart),
+				entityYawRadians(scenario.combined.entity),
+			),
+		) <= 0.001
+	) {
+		throw new Error(
+			"Backward-plus-turn did not change both position and heading.",
+		);
+	}
+	assertPlanarStill(
+		scenario.combined.entity,
+		scenario.turnOnly.entity,
+		"backward release",
+	);
+	if (
+		planarDistance(scenario.turnOnly.entity, scenario.backwardOnly.entity) <=
+		0.01
+	)
+		throw new Error(
+			"Turn release did not leave backward displacement effective.",
+		);
+
+	if (
+		scenario.outcomes.filter(
+			(outcome) => outcome.result.kind === "jump-released",
+		).length !== 1
+	)
+		throw new Error("Possession jump did not commit exactly one release.");
+	const capability = scenario.possession.stances.find(
+		(candidate) => candidate.style === scenario.possession.acceptedStance,
+	);
+	if (capability === undefined)
+		throw new Error("Possession scenario lost its accepted stance capability.");
+	const expectsFalling = ["ready-and-falling", "falling-only"].includes(
+		capability.jumpPresentation,
+	);
+	if (
+		!scenario.sawAirborne ||
+		(expectsFalling && !scenario.sawFalling) ||
+		(!expectsFalling && scenario.sawFalling) ||
+		scenario.landed === null ||
+		!(scenario.maximumZ > entityCoordinates(scenario.launchStart).z)
+	)
+		throw new Error(
+			"Possession jump omitted ascent, Falling, or landing evidence.",
+		);
+	if (
+		planarDistance(scenario.restoredStart, scenario.restored.entity) <= 0.01 &&
+		scenario.restored.probe?.substate.command !== 0x44000007
+	)
+		throw new Error("Retained forward order did not restore after landing.");
+
+	const sidestepDistance = planarDistance(
+		scenario.sidestepStart,
+		scenario.sidestep.entity,
+	);
+	if (capability.sidestep !== "target-authored") {
+		const expected =
+			(1.4976 *
+				scenario.sidestepStart.presentation.objectScale *
+				4 *
+				scenario.tickMs) /
+			1000;
+		if (Math.abs(sidestepDistance - expected) > 0.04)
+			throw new Error(
+				`Fallback sidestep measured ${sidestepDistance} m; expected ${expected} m.`,
+			);
+		const presentsSidestep =
+			scenario.sidestep.probe?.substate.command === 0x6500000f;
+		if (
+			(capability.sidestep === "standard-fallback-with-target-presentation") !==
+			presentsSidestep
+		)
+			throw new Error(
+				"Fallback sidestep target-presentation state disagreed with its capability.",
+			);
+	}
+}
+
+function exactHarnessEntity(state, expected) {
+	const entity = state.spawnedEntities.find(
+		(candidate) =>
+			candidate.identity.guid === expected.identity.guid &&
+			candidate.generation === expected.generation,
+	);
+	if (!entity)
+		throw new Error("Possession scenario lost its exact entity generation.");
+	return entity;
+}
+
+function latestPossessionEntity(response, previous) {
+	if (response.event === null) return previous;
+	const advance = response.event.batch.advances.find(
+		(candidate) =>
+			candidate.entity.identity.guid === previous.identity.guid &&
+			candidate.entity.generation === previous.generation,
+	);
+	return advance?.entity ?? previous;
+}
+
+function entityCoordinates(entity) {
+	if (entity.placement.kind !== "world")
+		throw new Error("Possession scenario entity unexpectedly became attached.");
+	return entity.placement.pose.coords;
+}
+
+function entityYawRadians(entity) {
+	const rotation = entity.placement.pose.rotation;
+	return Math.atan2(
+		2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+		1 - 2 * (rotation.y * rotation.y + rotation.z * rotation.z),
+	);
+}
+
+function wrappedAngleDelta(from, to) {
+	return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function planarDistance(first, second) {
+	const a = entityCoordinates(first);
+	const b = entityCoordinates(second);
+	return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function assertPlanarStill(first, second, label) {
+	if (planarDistance(first, second) > 0.01)
+		throw new Error(`${label} unexpectedly translated the possessed body.`);
 }
 
 function assertLaunchedEntityLifecycle(result) {
@@ -1978,10 +2371,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		let spawnedEntityState = null;
 		let completedEntityState = null;
 		let boomSweepProbe = null;
+		let possessionScenario = null;
 		if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 			spawnedEntity = await evaluate(
 				client,
-				options.spawnSimulated
+				options.spawnSimulated || options.possessionScenario
 					? "globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnSimulatedExplorerEntity"
 					: "globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntity",
 				[options.spawnWcid, options.spawnDistance],
@@ -1992,6 +2386,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
+			if (options.possessionScenario) {
+				possessionScenario = await runPossessionScenario(
+					client,
+					spawnedEntity,
+					options.entityTickMs,
+				);
+			}
 			if (options.launchDirection !== null) {
 				launchedEntity = await evaluate(
 					client,
@@ -2640,6 +3041,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			modeCycleStates,
 			lifecycleState,
 			portalExecution,
+			possessionScenario,
 			followFlight,
 			relocationSequence,
 			relocationState,

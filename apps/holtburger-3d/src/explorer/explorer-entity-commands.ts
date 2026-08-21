@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { PhysicalCameraPlacement } from "../lib/game/motion/host-physical-camera-path";
+import type { PhysicalFlyPlacement } from "../lib/game/motion/host-physical-fly-path";
 import {
 	getLandblockCoordinates,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -151,7 +151,7 @@ export function parseExplorerWcid(raw: string): number {
 /** Snapshot the presented camera and compute one camera-relative candidate in AC world axes. */
 export function createExplorerSpawnRequest(
 	wcid: number,
-	placement: PhysicalCameraPlacement,
+	placement: PhysicalFlyPlacement,
 	viewDirection: readonly [number, number, number],
 	distance: number,
 	physicalIntent: ExplorerEntitySpawnRequest["physicalIntent"],
@@ -169,7 +169,7 @@ export function createExplorerSpawnRequest(
 export function createExplorerRelocationRequest(
 	guid: number,
 	generationValue: number,
-	placement: PhysicalCameraPlacement,
+	placement: PhysicalFlyPlacement,
 	viewDirection: readonly [number, number, number],
 	distance: number,
 	kind: ExplorerEntityRelocationRequest["kind"],
@@ -184,7 +184,7 @@ export function createExplorerRelocationRequest(
 }
 
 function createCameraRelativeEntityCandidate(
-	placement: PhysicalCameraPlacement,
+	placement: PhysicalFlyPlacement,
 	viewDirection: readonly [number, number, number],
 	distance: number,
 ): CameraRelativeEntityCandidate {

@@ -366,7 +366,7 @@ describe("AnimationSystem", () => {
 		system.playClip(
 			"owner",
 			target,
-			playingClip(testAnimation(Vec3.zero()), 1, 2, 30),
+			playingClip(testAnimation(Vec3.zero()), 1, 2, 30, "loop"),
 		);
 
 		const sample = requiredAt(advanceAndSample(system, 0), 0);
@@ -384,7 +384,7 @@ describe("AnimationSystem", () => {
 		advanceAndSample(system, 0);
 		advanceAndSample(system, 2 / 30);
 
-		system.playClip("owner", target, playingClip(animation, 0, 3, -30));
+		system.playClip("owner", target, playingClip(animation, 0, 3, -30, "loop"));
 
 		// A reversed clip enters just inside its high frame rather than resuming where it was.
 		const sample = requiredAt(advanceAndSample(system, 2 / 30), 0);
@@ -403,7 +403,7 @@ describe("AnimationSystem", () => {
 			system.playClip(
 				"owner",
 				{ ...target, generation: target.generation + 1 },
-				playingClip(animation, 1, 1, 30),
+				playingClip(animation, 1, 1, 30, "loop"),
 			),
 		).toThrow("names generation");
 		const sample = requiredAt(advanceAndSample(system, 0), 0);
@@ -419,7 +419,7 @@ describe("AnimationSystem", () => {
 		]);
 		const frame = system.advance(0);
 
-		system.playClip("owner", target, playingClip(animation, 0, 1, 30));
+		system.playClip("owner", target, playingClip(animation, 0, 1, 30, "loop"));
 
 		expect(() => system.sample(frame, ["scene-node:1"])).toThrow(
 			"latest advanced frame",

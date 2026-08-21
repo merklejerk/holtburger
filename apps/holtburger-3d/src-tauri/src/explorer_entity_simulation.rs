@@ -8,14 +8,22 @@ use holtburger_core::DynamicEntityEvent;
 use tauri::{AppHandle, Emitter};
 
 use crate::explorer_entity_delivery::{EXPLORER_DYNAMIC_ENTITY_EVENT, ExplorerEntityDelivery};
-use crate::explorer_entity_runtime::ExplorerEntityRuntime;
+use crate::explorer_entity_runtime::{ExplorerEntityRuntime, PossessionEventOutcome};
 use crate::host_fixed_tick_runtime::{HostFixedTickDisposition, HostFixedTickParticipant};
 
 /// Injectable publication boundary; tests need no Tauri application or retained event history.
 pub trait DynamicEntityEventSink: Send + Sync {
     /// Publishes one current focused event to interested frontend listeners.
     fn publish(&self, event: DynamicEntityEvent) -> anyhow::Result<()>;
+
+    /// Publishes lifecycle outcomes committed with the same fixed-tick body transaction.
+    fn publish_possession_outcomes(
+        &self,
+        outcomes: Vec<PossessionEventOutcome>,
+    ) -> anyhow::Result<()>;
 }
+
+pub const EXPLORER_POSSESSION_EVENT_OUTCOME_EVENT: &str = "explorer-possession-event-outcome";
 
 /// Production sink over the application-wide focused dynamic-entity event name.
 pub struct TauriDynamicEntityEventSink {
@@ -32,6 +40,15 @@ impl TauriDynamicEntityEventSink {
 impl DynamicEntityEventSink for TauriDynamicEntityEventSink {
     fn publish(&self, event: DynamicEntityEvent) -> anyhow::Result<()> {
         self.app.emit(EXPLORER_DYNAMIC_ENTITY_EVENT, event)?;
+        Ok(())
+    }
+
+    fn publish_possession_outcomes(
+        &self,
+        outcomes: Vec<PossessionEventOutcome>,
+    ) -> anyhow::Result<()> {
+        self.app
+            .emit(EXPLORER_POSSESSION_EVENT_OUTCOME_EVENT, outcomes)?;
         Ok(())
     }
 }
@@ -60,11 +77,15 @@ impl ExplorerEntitySimulation {
 
 impl HostFixedTickParticipant for ExplorerEntitySimulation {
     fn fixed_tick(&self, delta: Duration) -> anyhow::Result<HostFixedTickDisposition> {
-        let event = self.delivery.with_ordered_publication(|| {
+        let (event, outcomes) = self.delivery.with_ordered_publication(|| {
             let ticks = self
                 .entities
                 .tick_physical_collection(delta.as_secs_f32(), Instant::now())?;
-            self.delivery.advanced(ticks, delta)
+            let outcomes: Vec<PossessionEventOutcome> = ticks
+                .iter()
+                .flat_map(|tick| tick.possession_event_outcomes.iter().copied())
+                .collect();
+            Ok::<_, anyhow::Error>((self.delivery.advanced(ticks, delta)?, outcomes))
         })?;
         if let Some(event) = event
             && let Err(error) = self.sink.publish(event)
@@ -73,6 +94,11 @@ impl HostFixedTickParticipant for ExplorerEntitySimulation {
             // later focused snapshot reconstructs it, so publication failure must not unregister
             // the collection participant or manufacture rollback state.
             eprintln!("failed to publish Explorer dynamic-entity advance: {error:#}");
+        }
+        if !outcomes.is_empty()
+            && let Err(error) = self.sink.publish_possession_outcomes(outcomes)
+        {
+            eprintln!("failed to publish Explorer possession outcomes: {error:#}");
         }
         Ok(HostFixedTickDisposition::Continue)
     }
@@ -124,6 +150,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingSink {
         events: Mutex<Vec<DynamicEntityEvent>>,
+        possession_outcomes: Mutex<Vec<PossessionEventOutcome>>,
     }
 
     impl DynamicEntityEventSink for RecordingSink {
@@ -131,12 +158,25 @@ mod tests {
             self.events.lock().unwrap().push(event);
             Ok(())
         }
+
+        fn publish_possession_outcomes(
+            &self,
+            outcomes: Vec<PossessionEventOutcome>,
+        ) -> anyhow::Result<()> {
+            self.possession_outcomes.lock().unwrap().extend(outcomes);
+            Ok(())
+        }
     }
 
     #[test]
     fn empty_collection_keeps_its_one_participant_without_publishing() {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
-        let entities = Arc::new(ExplorerEntityRuntime::new(simulation, Default::default()));
+        let entities = Arc::new(ExplorerEntityRuntime::new(
+            simulation,
+            Default::default(),
+            crate::explorer_possession_control::ExplorerPossessionControlProfile::standard()
+                .expect("standard Explorer possession profile is valid"),
+        ));
         let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
         let sink = Arc::new(RecordingSink::default());
         let participant = ExplorerEntitySimulation::new(entities, delivery, sink.clone());
@@ -153,7 +193,12 @@ mod tests {
     #[test]
     fn one_collection_tick_publishes_one_changed_entity_batch() {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
-        let entities = Arc::new(ExplorerEntityRuntime::new(simulation, Default::default()));
+        let entities = Arc::new(ExplorerEntityRuntime::new(
+            simulation,
+            Default::default(),
+            crate::explorer_possession_control::ExplorerPossessionControlProfile::standard()
+                .expect("standard Explorer possession profile is valid"),
+        ));
         let guid = entities.reserve_guid().unwrap();
         let spawned = entities
             .spawn_prepared(

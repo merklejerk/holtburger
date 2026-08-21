@@ -20,6 +20,7 @@ holtburger-content.workspace = true
 holtburger-common.workspace = true
 holtburger-core.workspace = true
 holtburger-dat.workspace = true
+holtburger-protocol.workspace = true
 holtburger-world.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -29,6 +30,7 @@ geo = "0.33.1"
 hex.workspace = true
 log.workspace = true
 holtburger-weenie-catalog.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

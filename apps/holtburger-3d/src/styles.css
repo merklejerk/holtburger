@@ -140,24 +140,6 @@ button:focus-visible {
 	pointer-events: auto;
 }
 
-.explorer-jump-charge {
-	position: absolute;
-	left: 50%;
-	bottom: 3rem;
-	width: min(18rem, 40vw);
-	height: 0.8rem;
-	transform: translateX(-50%);
-	border: 1px solid rgb(212 169 61 / 90%);
-	background: rgb(12 11 8 / 80%);
-	box-shadow: 0 0 0.5rem rgb(0 0 0 / 70%);
-	overflow: hidden;
-}
-
-.explorer-jump-charge-fill {
-	height: 100%;
-	background: linear-gradient(90deg, #b7531f, #f0c85a);
-}
-
 .explorer-startup-error {
 	position: absolute;
 	top: 12px;

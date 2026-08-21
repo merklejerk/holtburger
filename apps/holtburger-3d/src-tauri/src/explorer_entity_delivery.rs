@@ -8,10 +8,10 @@ use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_core::{
-    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityEvent, DynamicEntityHostTime,
-    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPlacedPath,
-    DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot, DynamicEntityView,
-    DynamicEntityViewSource, project_dynamic_entity_view,
+    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityClipCompletion,
+    DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityPathLeg, DynamicEntityPathPoint,
+    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot,
+    DynamicEntityView, DynamicEntityViewSource, project_dynamic_entity_view,
 };
 use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
 
@@ -29,6 +29,17 @@ fn project_playing_clip(
         framerate: clip.framerate,
         low_frame: clip.low_frame,
         high_frame: clip.high_frame,
+        completion: project_clip_completion(clip.completion),
+    }
+}
+
+/// Maps the authoritative sequence fact into the transport-owned enum without reinterpretation.
+pub(crate) fn project_clip_completion(
+    completion: holtburger_world::motion::MotionClipCompletion,
+) -> DynamicEntityClipCompletion {
+    match completion {
+        holtburger_world::motion::MotionClipCompletion::Hold => DynamicEntityClipCompletion::Hold,
+        holtburger_world::motion::MotionClipCompletion::Loop => DynamicEntityClipCompletion::Loop,
     }
 }
 
@@ -304,7 +315,12 @@ mod tests {
     fn delivery() -> Arc<ExplorerEntityDelivery> {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
         Arc::new(ExplorerEntityDelivery::new(Arc::new(
-            ExplorerEntityRuntime::new(simulation, Default::default()),
+            ExplorerEntityRuntime::new(
+                simulation,
+                Default::default(),
+                crate::explorer_possession_control::ExplorerPossessionControlProfile::standard()
+                    .expect("standard Explorer possession profile is valid"),
+            ),
         )))
     }
 

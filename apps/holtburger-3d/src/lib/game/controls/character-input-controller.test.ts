@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	GroundedCharacterInput,
-	type GroundedCharacterDrive,
-	type GroundedCharacterEdge,
-} from "./grounded-character-input";
+	CharacterInputController,
+	type CharacterDrive,
+	type CharacterInputEdge,
+} from "./character-input-controller";
 
 function fixture() {
 	let now = 1_000;
-	const drives: GroundedCharacterDrive[] = [];
-	const edges: GroundedCharacterEdge[] = [];
-	const input = new GroundedCharacterInput({
+	const drives: CharacterDrive[] = [];
+	const edges: CharacterInputEdge[] = [];
+	const input = new CharacterInputController({
 		fullChargeDurationMs: 1_000,
 		now: () => now,
 		onDrive: (drive) => drives.push(drive),
@@ -18,7 +18,7 @@ function fixture() {
 	return { drives, edges, input, setNow: (value: number) => (now = value) };
 }
 
-describe("GroundedCharacterInput", () => {
+describe("CharacterInputController", () => {
 	it("composes independent axes and maps Shift to walk gait", () => {
 		const { input } = fixture();
 		input.applyKey("w", true);
@@ -101,6 +101,15 @@ describe("GroundedCharacterInput", () => {
 		expect(edges.at(-1)).toMatchObject({ extent: 1, kind: "release-jump" });
 	});
 
+	it("recomputes an active charge from the same start when stance timing changes", () => {
+		const { input, setNow } = fixture();
+		input.applyKey("space", true);
+		setNow(1_400);
+		expect(input.chargeExtent()).toBe(0.4);
+		input.setFullChargeDurationMs(800);
+		expect(input.chargeExtent()).toBe(0.5);
+	});
+
 	it("cancels only the optimistic charge belonging to a rejected begin", () => {
 		const { input } = fixture();
 		input.applyKey("space", true);
@@ -133,7 +142,7 @@ describe("GroundedCharacterInput", () => {
 	it("rejects an invalid charge profile", () => {
 		expect(
 			() =>
-				new GroundedCharacterInput({
+				new CharacterInputController({
 					fullChargeDurationMs: Number.NaN,
 					now: vi.fn(),
 					onDrive: vi.fn(),

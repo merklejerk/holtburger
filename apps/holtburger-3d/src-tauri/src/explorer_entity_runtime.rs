@@ -6,27 +6,38 @@ use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
-use holtburger_common::Guid;
+use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_content::MotionSequenceCatalog;
+use holtburger_core::client::movement_types::CharacterDrive;
 use holtburger_core::{
+    AdjustedForwardAxis, CharacterJumpReadiness, CharacterJumpRejection, CharacterMotionContact,
+    CharacterMotionEventResult, CharacterMotionRejection, CharacterMotionSequence,
     DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
     DynamicEntityInitialState, DynamicEntityLaunchPlan, DynamicEntityProjectionInput,
-    dynamic_entity_projection_input_from_body,
+    SequencedCharacterMotionEvent, dynamic_entity_projection_input_from_body,
+    resolve_character_jump,
 };
 use holtburger_world::motion::{
-    MotionOrder, MotionRuntimeRegistry, PlayingMotionClip, authored_grounded_actuation,
+    BodyMotionRuntime, MotionCommand, MotionOrder, MotionRuntimeRegistry, PlayingMotionClip,
 };
 use holtburger_world::{
-    CollisionReportOutcome, DynamicPhysicalBodyDefinition, RuntimeSpatialBodyView, SpatialBody,
-    SpatialBodyId,
+    CollisionReportOutcome, ContactState, DynamicPhysicalBodyDefinition, GroundedBodyActuation,
+    GroundedLaunch, PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyTickStatus,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, gate_authored_offset,
 };
 use holtburger_world::{
     EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
     EntityPhysicsTransitionDecision, EntityPlacement, decide_entity_physics_state_transition,
     resolve_effective_entity_physics_state,
 };
+use serde::Serialize;
 
+use crate::explorer_possession_control::{
+    ActivePossession, ExplorerPossessionControlProfile, PossessionEventQueueResult,
+    PossessionIntentError, PossessionIntentReplaceResult, PossessionLifecycleEvent,
+    PossessionLocomotionSource, PossessionStanceCapability,
+};
 use crate::host_simulation_runtime::{HostPhysicalBodyTick, HostSimulationRuntime};
 
 const EXPLORER_GUID_START: u32 = 0xf000_0001;
@@ -49,6 +60,12 @@ pub enum ExplorerEntityRuntimeError {
         expected: u64,
         actual: u64,
     },
+    /// A possession target has no motion table from either entity or setup content.
+    MissingPossessionMotionTable { guid: Guid },
+    /// A target names a table absent from the projected runtime motion contract.
+    UnprojectedPossessionMotionTable { guid: Guid, motion_table_id: u32 },
+    /// Host validation rejected a stance, drive scalar, or target capability.
+    PossessionIntent(PossessionIntentError),
     /// The canonical host scene rejected the corresponding body operation.
     Body(DynamicEntityBodyOperationError),
     /// Simulated intent reached publication without a prepared physical definition.
@@ -106,6 +123,20 @@ impl Display for ExplorerEntityRuntimeError {
                 "Explorer entity 0x{:08X} generation {expected} is retired; current generation is {actual}",
                 guid.0
             ),
+            Self::MissingPossessionMotionTable { guid } => write!(
+                formatter,
+                "Explorer entity 0x{:08X} has no motion table to possess",
+                guid.0
+            ),
+            Self::UnprojectedPossessionMotionTable {
+                guid,
+                motion_table_id,
+            } => write!(
+                formatter,
+                "Explorer entity 0x{:08X} names motion table 0x{motion_table_id:08X}, which is absent from the runtime contract",
+                guid.0
+            ),
+            Self::PossessionIntent(source) => Display::fmt(source, formatter),
             Self::Body(source) => Display::fmt(source, formatter),
             Self::MissingPreparedPhysics => {
                 formatter.write_str("simulated Explorer entity requires prepared physics")
@@ -144,6 +175,7 @@ impl Error for ExplorerEntityRuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Body(source) => Some(source),
+            Self::PossessionIntent(source) => Some(source),
             _ => None,
         }
     }
@@ -152,6 +184,12 @@ impl Error for ExplorerEntityRuntimeError {
 impl From<DynamicEntityBodyOperationError> for ExplorerEntityRuntimeError {
     fn from(value: DynamicEntityBodyOperationError) -> Self {
         Self::Body(value)
+    }
+}
+
+impl From<PossessionIntentError> for ExplorerEntityRuntimeError {
+    fn from(value: PossessionIntentError) -> Self {
+        Self::PossessionIntent(value)
     }
 }
 
@@ -216,6 +254,8 @@ pub struct ExplorerEntityProjection {
 pub struct ExplorerEntityPhysicalTick {
     /// Clip this entity started playing on this tick, present only when it changed.
     pub clip: Option<holtburger_world::motion::PlayingMotionClip>,
+    /// Possession lifecycle edges committed with this exact body solve.
+    pub possession_event_outcomes: Vec<PossessionEventOutcome>,
     /// Current instance generation held stable across the collection transaction.
     pub generation: u64,
     /// Source-neutral semantic/body projection read from the committed body without relocking.
@@ -309,12 +349,8 @@ pub struct ExplorerEntityRegistry {
 #[derive(Debug, Default)]
 struct ExplorerMotionState {
     playback: MotionRuntimeRegistry,
-    /// Entity currently receiving commands, if any. One at a time: the Explorer possesses, it does
-    /// not command a fleet.
-    possessed: Option<Guid>,
-    /// Newest order the frontend issued. Reapplied every tick, which is what makes it idempotent —
-    /// re-issuing the motion already running is a no-op selection.
-    order: MotionOrder,
+    /// Exact entity/possession generation and all controller-owned input state.
+    active: Option<ActivePossession>,
     /// Clip each body was last published as playing, so only changes are republished.
     playing: BTreeMap<Guid, PlayingMotionClip>,
 }
@@ -339,11 +375,21 @@ impl ExplorerMotionState {
         changed
     }
 
-    fn release(&mut self) {
-        if let Some(guid) = self.possessed.take() {
-            self.playback.forget(guid);
+    fn release(&mut self) -> Option<Guid> {
+        let active = self.active.take()?;
+        self.playback.forget(active.guid);
+        Some(active.guid)
+    }
+
+    fn retire_target(&mut self, guid: Guid, entity_generation: u64) -> bool {
+        if self.active.as_ref().is_some_and(|active| {
+            active.guid == guid && active.entity_generation == entity_generation
+        }) {
+            self.release();
+            true
+        } else {
+            false
         }
-        self.order = MotionOrder::default();
     }
 }
 
@@ -351,72 +397,441 @@ impl ExplorerMotionState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplorerPossession {
     pub guid: Guid,
-    /// Table the entity animates from, absent when neither it nor its setup declares one.
-    pub motion_table_id: Option<u32>,
-    /// Locomotion commands this entity's table actually models, in a stable order.
-    ///
-    /// Read from the contract rather than assumed, because a door and a creature model different
-    /// sets and the UX should refuse what the table cannot do before the command is issued.
-    pub modelled_commands: Vec<u32>,
+    /// Exact semantic entity generation retired by same-GUID replacement.
+    pub entity_generation: u64,
+    /// Host-issued input ownership epoch changed by every possession and release.
+    pub possession_generation: u64,
+    pub motion_table_id: u32,
+    /// Host-selected valid initial stance.
+    pub accepted_stance: u32,
+    /// Every offered stance this target table can model, including physical/presentation sources.
+    pub stances: Vec<PossessionStanceCapability>,
 }
 
-/// One tick's authored drive for the possessed entity.
-struct PossessedDrive {
-    guid: Guid,
-    offset: holtburger_common::RigidTransform,
-    object_scale: f32,
+/// Release receipt carrying the new ownership barrier even when nothing was active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExplorerPossessionRelease {
+    pub released_guid: Option<Guid>,
+    pub possession_generation: u64,
 }
 
-impl PossessedDrive {
-    /// Builds the actuation, falling back to coasting for a body the authored path cannot drive.
-    ///
-    /// Only grounded bodies take authored drive: a free-sphere body is ballistic and has no support
-    /// to gate translation against, which is retail's own rule rather than a simplification.
-    fn actuation(
-        &self,
-        body: &SpatialBody,
-        delta_seconds: f32,
-    ) -> anyhow::Result<holtburger_world::PhysicalBodyActuation> {
-        let grounded = body.physical.as_ref().is_some_and(|physical| {
-            matches!(
-                physical.definition,
-                holtburger_world::PhysicalBodyDefinition::Grounded { .. }
-            )
-        });
-        if !grounded {
-            return crate::host_simulation_runtime::dynamic_entity_coasting_actuation(
-                body,
-                delta_seconds,
-            );
+/// Queue disposition plus any nonphysical outcomes consumed synchronously without a body tick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PossessionEventQueueReceipt {
+    pub result: PossessionEventQueueResult,
+    pub outcomes: Vec<PossessionEventOutcome>,
+}
+
+/// Complete replaceable intent targeted at one possession ownership epoch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExplorerPossessionIntentRequest {
+    pub possession_generation: u64,
+    pub revision: u64,
+    pub stance: u32,
+    pub drive: CharacterDrive,
+}
+
+/// Ordered lifecycle edge carrying its complete contemporaneous intent snapshot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExplorerPossessionEventRequest {
+    pub possession_generation: u64,
+    pub sequence: u64,
+    pub revision: u64,
+    pub stance: u32,
+    pub drive: CharacterDrive,
+    pub event: PossessionLifecycleEvent,
+}
+
+/// Accepted result for one non-coalescible possession lifecycle edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PossessionEventOutcome {
+    pub possession_generation: u64,
+    pub sequence: u64,
+    pub result: PossessionEventOutcomeKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PossessionEventOutcomeKind {
+    ChargeAccepted {
+        presentation: crate::explorer_possession_control::PossessionJumpPresentation,
+    },
+    ChargeContinues {
+        presentation: crate::explorer_possession_control::PossessionJumpPresentation,
+    },
+    JumpReleased {
+        presentation: crate::explorer_possession_control::PossessionJumpPresentation,
+    },
+    Reset,
+    Rejected {
+        reason: PossessionEventRejection,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PossessionEventRejection {
+    ChargeNotActive,
+    NonphysicalResponse,
+    UnsupportedContact,
+    Airborne,
+}
+
+/// Machine-readable host playback state used by deterministic possession harnesses.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerPossessionMotionProbe {
+    pub guid: Guid,
+    pub entity_generation: u64,
+    pub possession_generation: u64,
+    pub style: u32,
+    pub substate: ExplorerPossessionActiveMotionProbe,
+    pub modifiers: Vec<ExplorerPossessionActiveMotionProbe>,
+    pub clip: Option<ExplorerPossessionPlayingClipProbe>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerPossessionActiveMotionProbe {
+    pub command: u32,
+    pub speed: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerPossessionPlayingClipProbe {
+    pub animation_id: u32,
+    pub framerate: f32,
+    pub low_frame: i32,
+    pub high_frame: i32,
+    /// Terminal behavior projected from the host sequence's cyclic-tail boundary.
+    pub completion: holtburger_core::DynamicEntityClipCompletion,
+}
+
+/// Tentative possession/controller/playback state paired with one proposed body actuation.
+struct PossessionTickProposal {
+    active: ActivePossession,
+    playback: BodyMotionRuntime,
+    pre_solve_contact: ContactState,
+    outcomes: Vec<PossessionEventOutcome>,
+}
+
+fn consume_nonphysical_possession_events(
+    active: &mut ActivePossession,
+    profile: ExplorerPossessionControlProfile,
+) -> Result<Vec<PossessionEventOutcome>, PossessionIntentError> {
+    let mut outcomes = Vec::new();
+    while let Some(pending) = active.pending_events.remove(&active.next_event_sequence) {
+        let sequence = active.next_event_sequence;
+        active.next_event_sequence += 1;
+        if pending.intent.revision >= active.applied_intent.revision {
+            active.applied_intent = pending.intent;
         }
-        Ok(authored_grounded_actuation(
-            self.offset,
-            body.pose,
-            body.contact,
-            self.object_scale,
-            delta_seconds,
-        )?)
+        let result = if matches!(pending.event, holtburger_core::CharacterMotionEvent::Reset) {
+            active.controller.clear();
+            active.applied_intent =
+                active.resolve_effective_intent(CharacterDrive::default(), profile)?;
+            PossessionEventOutcomeKind::Reset
+        } else {
+            PossessionEventOutcomeKind::Rejected {
+                reason: PossessionEventRejection::NonphysicalResponse,
+            }
+        };
+        outcomes.push(PossessionEventOutcome {
+            possession_generation: active.generation,
+            sequence,
+            result,
+        });
+    }
+    Ok(outcomes)
+}
+
+impl PossessionTickProposal {
+    fn reconcile_playback(
+        &mut self,
+        table: &holtburger_content::MotionSequenceTable,
+        contact: ContactState,
+        profile: ExplorerPossessionControlProfile,
+    ) -> anyhow::Result<()> {
+        if contact == self.pre_solve_contact {
+            return Ok(());
+        }
+        let order = effective_possession_order(&self.active, contact, false, profile)?;
+        self.playback.drive(table, order, 0.0);
+        self.pre_solve_contact = contact;
+        Ok(())
     }
 }
 
-/// Locomotion commands a table models, in a stable order for a UX to render.
-fn modelled_commands(table: &holtburger_content::MotionSequenceTable) -> Vec<u32> {
-    const LOCOMOTION: [u32; 7] = [
-        0x4500_0005, // walk forward
-        0x4500_0006, // walk backwards
-        0x4400_0007, // run forward
-        0x6500_000D, // turn right
-        0x6500_000E, // turn left
-        0x6500_000F, // sidestep right
-        0x6500_0010, // sidestep left
-    ];
-    let style = table.default_style;
-    LOCOMOTION
-        .into_iter()
-        .filter(|command| {
-            table.cycle(style, *command).is_some() || table.modifier(style, *command).is_some()
-        })
-        .collect()
+fn propose_possession_tick(
+    mut active: ActivePossession,
+    previous_playback: Option<&BodyMotionRuntime>,
+    table: &holtburger_content::MotionSequenceTable,
+    body: &SpatialBody,
+    object_scale: f32,
+    profile: ExplorerPossessionControlProfile,
+    delta_seconds: f32,
+) -> anyhow::Result<(PossessionTickProposal, PhysicalBodyActuation)> {
+    let grounded_response = body.physical.as_ref().is_some_and(|physical| {
+        matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
+    });
+    let mut outcomes = Vec::new();
+    let mut launch = None;
+
+    while let Some(pending) = active.pending_events.remove(&active.next_event_sequence) {
+        let sequence = active.next_event_sequence;
+        active.next_event_sequence += 1;
+        if pending.intent.revision >= active.applied_intent.revision {
+            active.applied_intent = pending.intent;
+        }
+        let result = if !grounded_response {
+            if matches!(pending.event, holtburger_core::CharacterMotionEvent::Reset) {
+                active.controller.clear();
+            }
+            PossessionEventOutcomeKind::Rejected {
+                reason: PossessionEventRejection::NonphysicalResponse,
+            }
+        } else {
+            let contact = if launch.is_some() {
+                CharacterMotionContact::Unsupported
+            } else if body.contact == ContactState::Grounded {
+                CharacterMotionContact::Walkable
+            } else {
+                CharacterMotionContact::Unsupported
+            };
+            let event_result = active.controller.apply_event(
+                SequencedCharacterMotionEvent {
+                    sequence: CharacterMotionSequence(sequence),
+                    event: pending.event,
+                },
+                contact,
+            );
+            let presentation = active
+                .capabilities
+                .get(pending.intent.stance)
+                .expect("queued possession stance lost its capability")
+                .jump_presentation;
+            possession_event_result(event_result, body, profile, presentation, &mut launch)?
+        };
+        if result == PossessionEventOutcomeKind::Reset {
+            active.applied_intent =
+                active.resolve_effective_intent(CharacterDrive::default(), profile)?;
+        }
+        outcomes.push(PossessionEventOutcome {
+            possession_generation: active.generation,
+            sequence,
+            result,
+        });
+    }
+
+    if active.latest_intent.revision > active.applied_intent.revision {
+        active.applied_intent = active.latest_intent;
+    }
+    active.controller.replace_drive(active.applied_intent.drive);
+    let order = effective_possession_order(&active, body.contact, launch.is_some(), profile)?;
+    let mut playback = previous_playback
+        .cloned()
+        .unwrap_or_else(|| BodyMotionRuntime::new(table));
+    let offset = playback.drive(table, order, delta_seconds).offset;
+    let actuation = if grounded_response {
+        possession_grounded_actuation(
+            &active,
+            offset,
+            body,
+            object_scale,
+            profile,
+            delta_seconds,
+            launch,
+        )?
+    } else {
+        crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body, delta_seconds)?
+    };
+    Ok((
+        PossessionTickProposal {
+            active,
+            playback,
+            pre_solve_contact: body.contact,
+            outcomes,
+        },
+        actuation,
+    ))
+}
+
+fn possession_event_result(
+    result: CharacterMotionEventResult,
+    body: &SpatialBody,
+    profile: ExplorerPossessionControlProfile,
+    presentation: crate::explorer_possession_control::PossessionJumpPresentation,
+    launch: &mut Option<GroundedLaunch>,
+) -> anyhow::Result<PossessionEventOutcomeKind> {
+    Ok(match result {
+        CharacterMotionEventResult::ChargeAccepted => {
+            PossessionEventOutcomeKind::ChargeAccepted { presentation }
+        }
+        CharacterMotionEventResult::ChargeContinues => {
+            PossessionEventOutcomeKind::ChargeContinues { presentation }
+        }
+        CharacterMotionEventResult::Reset => PossessionEventOutcomeKind::Reset,
+        CharacterMotionEventResult::IgnoredStale { .. } => {
+            unreachable!("contiguous possession queue passed a stale edge to a fresh controller")
+        }
+        CharacterMotionEventResult::Rejected(reason) => PossessionEventOutcomeKind::Rejected {
+            reason: match reason {
+                CharacterMotionRejection::ChargeNotActive => {
+                    PossessionEventRejection::ChargeNotActive
+                }
+                CharacterMotionRejection::Unsupported => {
+                    PossessionEventRejection::UnsupportedContact
+                }
+            },
+        },
+        CharacterMotionEventResult::JumpReleased(attempt) => {
+            let readiness = if launch.is_some() {
+                CharacterJumpReadiness::Airborne
+            } else {
+                match body.contact {
+                    ContactState::Grounded => CharacterJumpReadiness::Supported,
+                    ContactState::Airborne => CharacterJumpReadiness::Airborne,
+                    ContactState::Sliding | ContactState::Unknown => {
+                        CharacterJumpReadiness::Unsupported
+                    }
+                }
+            };
+            match resolve_character_jump(
+                profile.jump,
+                attempt,
+                body.pose.rotation.to_heading(),
+                readiness,
+            ) {
+                Ok(resolved) => {
+                    *launch = Some(GroundedLaunch::new(resolved.world_velocity())?);
+                    PossessionEventOutcomeKind::JumpReleased { presentation }
+                }
+                Err(CharacterJumpRejection::Airborne) => PossessionEventOutcomeKind::Rejected {
+                    reason: PossessionEventRejection::Airborne,
+                },
+                Err(CharacterJumpRejection::Unsupported) => PossessionEventOutcomeKind::Rejected {
+                    reason: PossessionEventRejection::UnsupportedContact,
+                },
+                Err(
+                    error @ (CharacterJumpRejection::InvalidHeading
+                    | CharacterJumpRejection::InvalidTurnRate),
+                ) => anyhow::bail!("host-owned possession jump invariant failed: {error}"),
+            }
+        }
+    })
+}
+
+fn effective_possession_order(
+    active: &ActivePossession,
+    contact: ContactState,
+    launching: bool,
+    profile: ExplorerPossessionControlProfile,
+) -> Result<MotionOrder, PossessionIntentError> {
+    let effective =
+        active.resolve_effective_intent(active.controller.effective_drive(), profile)?;
+    let capability = active
+        .capabilities
+        .get(effective.stance)
+        .expect("effective possession stance lost its capability");
+    let mut order = effective.visible_order;
+    // RETAIL DIVERGENCE: retail synchronously selects target `Ready`/`Falling` while charging and
+    // crossing support (`acclient.c:330342-330453`). Possession still performs the physical jump
+    // when either target row is absent, retaining only the target stance/default presentation;
+    // requiring those clips would disable jump for content that cannot observe a borrowed player
+    // animation. Census 2026-08-21: 4,999 of 7,788 projected creature templates lack at least one
+    // effective standard non-combat jump-presentation state; the full stance matrix is in the plan.
+    if launching || matches!(contact, ContactState::Airborne | ContactState::Sliding) {
+        order.forward = capability
+            .has_falling_presentation()
+            .then_some((MotionCommand::FALLING, 1.0));
+        order.sidestep = None;
+    } else if active.controller.is_standing_long_jump() {
+        order.forward = capability
+            .has_ready_presentation()
+            .then_some((MotionCommand::READY, 1.0));
+        order.sidestep = None;
+    }
+    Ok(order)
+}
+
+fn possession_grounded_actuation(
+    active: &ActivePossession,
+    authored_offset: RigidTransform,
+    body: &SpatialBody,
+    object_scale: f32,
+    profile: ExplorerPossessionControlProfile,
+    delta_seconds: f32,
+    launch: Option<GroundedLaunch>,
+) -> anyhow::Result<PhysicalBodyActuation> {
+    let effective =
+        active.resolve_effective_intent(active.controller.effective_drive(), profile)?;
+    let capability = active
+        .capabilities
+        .get(effective.stance)
+        .expect("effective possession stance lost its capability");
+    let gated = gate_authored_offset(authored_offset, body.contact, object_scale);
+    let authored_velocity = if delta_seconds > 0.0 {
+        gated.translation / delta_seconds
+    } else {
+        Vector3::zero()
+    };
+    let supported = body.contact == ContactState::Grounded;
+
+    let local_forward = if !supported {
+        0.0
+    } else {
+        match effective.axes.forward() {
+            Some(axis)
+                if capability.source_for_forward(axis)
+                    == PossessionLocomotionSource::TargetAuthored =>
+            {
+                authored_velocity.y
+            }
+            Some(axis) => fallback_forward_velocity(axis, profile) * object_scale,
+            None => 0.0,
+        }
+    };
+    let local_sidestep = if !supported {
+        0.0
+    } else {
+        match effective.axes.sidestep() {
+            Some((_, _)) if capability.sidestep == PossessionLocomotionSource::TargetAuthored => {
+                authored_velocity.x
+            }
+            Some((_, rate)) => profile.fallback.sidestep_speed() * rate * object_scale,
+            None => 0.0,
+        }
+    };
+    let local_planar = Vector3::new(local_sidestep, local_forward, 0.0);
+    let world_planar = body.pose.rotation.rotate_vector(local_planar);
+    let heading = match effective.axes.turn() {
+        Some((_, _)) if capability.turn == PossessionLocomotionSource::TargetAuthored => {
+            body.pose.rotation.multiply(&gated.rotation).to_heading()
+        }
+        Some((_, rate)) => {
+            body.pose.rotation.to_heading() + profile.fallback.turn_rate() * rate * delta_seconds
+        }
+        None => body.pose.rotation.to_heading(),
+    };
+    let mut actuation =
+        GroundedBodyActuation::drive(world_planar)?.with_control_heading(heading)?;
+    if let Some(launch) = launch {
+        actuation = actuation.with_launch(launch);
+    }
+    Ok(PhysicalBodyActuation::Grounded(actuation))
+}
+
+fn fallback_forward_velocity(
+    axis: AdjustedForwardAxis,
+    profile: ExplorerPossessionControlProfile,
+) -> f32 {
+    match axis {
+        AdjustedForwardAxis::Walk { speed_mod } => profile.fallback.walk_speed() * speed_mod,
+        AdjustedForwardAxis::Run { speed_mod } => profile.fallback.run_speed() * speed_mod,
+    }
 }
 
 impl Default for ExplorerEntityRegistry {
@@ -522,6 +937,7 @@ impl ExplorerEntityRegistry {
     fn reset(&mut self) -> Vec<ExplorerEntityInstance> {
         let removed = std::mem::take(&mut self.entities).into_values().collect();
         self.allocator.reset();
+        self.motion = ExplorerMotionState::default();
         removed
     }
 }
@@ -535,6 +951,8 @@ pub struct ExplorerEntityRuntime {
     simulation: Arc<HostSimulationRuntime>,
     /// Shared motion contract, projected once at startup and read by every possession.
     motion_catalog: Arc<MotionSequenceCatalog>,
+    /// App-owned resolved numeric policy injected once and copied into fixed-tick decisions.
+    possession_profile: ExplorerPossessionControlProfile,
 }
 
 impl ExplorerEntityRuntime {
@@ -542,11 +960,13 @@ impl ExplorerEntityRuntime {
     pub fn new(
         simulation: Arc<HostSimulationRuntime>,
         motion_catalog: Arc<MotionSequenceCatalog>,
+        possession_profile: ExplorerPossessionControlProfile,
     ) -> Self {
         Self {
             registry: Mutex::new(ExplorerEntityRegistry::default()),
             simulation,
             motion_catalog,
+            possession_profile,
         }
     }
 
@@ -566,6 +986,8 @@ impl ExplorerEntityRuntime {
             registry: Mutex::new(ExplorerEntityRegistry::with_guid_range(start, end)),
             simulation,
             motion_catalog,
+            possession_profile: ExplorerPossessionControlProfile::standard()
+                .expect("standard Explorer possession profile is valid"),
         }
     }
 
@@ -679,6 +1101,7 @@ impl ExplorerEntityRuntime {
         let body = self
             .simulation
             .replace_dynamic_entity(&definition, initial, physical)?;
+        registry.motion.retire_target(guid, expected_generation);
         let (removed, installed) = registry.replace(definition, physical_intent, generation);
         let removed_children = removed_child_guids
             .into_iter()
@@ -716,6 +1139,7 @@ impl ExplorerEntityRuntime {
         let body = self
             .simulation
             .remove_dynamic_entity(SpatialBodyId::Entity(guid))?;
+        registry.motion.retire_target(guid, expected_generation);
         let children = children
             .into_iter()
             .map(|child| registry.remove(child))
@@ -933,19 +1357,41 @@ impl ExplorerEntityRuntime {
         let instance = registry
             .entities
             .get(&guid)
+            .cloned()
             .ok_or(ExplorerEntityRuntimeError::NotRegistered { guid })?;
-        let motion_table_id = self.motion_table_for(&instance.definition);
+        let motion_table_id = self
+            .motion_table_for(&instance.definition)
+            .ok_or(ExplorerEntityRuntimeError::MissingPossessionMotionTable { guid })?;
+        let table = self.motion_catalog.table(motion_table_id).ok_or(
+            ExplorerEntityRuntimeError::UnprojectedPossessionMotionTable {
+                guid,
+                motion_table_id,
+            },
+        )?;
+        let possession_generation = registry.reserve_generation()?;
+        let active = ActivePossession::new(
+            guid,
+            instance.generation,
+            possession_generation,
+            motion_table_id,
+            table,
+            self.possession_profile,
+        )?;
+        let accepted_stance = active.latest_intent.stance;
+        let stances = active.capabilities.values().collect();
 
         registry.motion.release();
-        registry.motion.possessed = Some(guid);
+        registry.motion.active = Some(active);
+        self.simulation
+            .wake_dynamic_body(SpatialBodyId::Entity(guid));
 
         Ok(ExplorerPossession {
             guid,
+            entity_generation: instance.generation,
+            possession_generation,
             motion_table_id,
-            modelled_commands: motion_table_id
-                .and_then(|id| self.motion_catalog.table(id))
-                .map(modelled_commands)
-                .unwrap_or_default(),
+            accepted_stance,
+            stances,
         })
     }
 
@@ -955,18 +1401,24 @@ impl ExplorerEntityRuntime {
     /// momentum, so once authorship ends there is nothing for the horizontal motion to have come
     /// from; leaving it would let a walk cycle coast on after the command that produced it. Vertical
     /// velocity survives, because falling is real physical momentum the authored path never wrote.
-    pub fn release_possession(&self, now: std::time::Instant) -> Option<Guid> {
+    pub fn release_possession(
+        &self,
+        now: std::time::Instant,
+    ) -> Result<ExplorerPossessionRelease, ExplorerEntityRuntimeError> {
         let mut registry = self
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
-        let released = registry.motion.possessed;
-        registry.motion.release();
+        let possession_generation = registry.reserve_generation()?;
+        let released_guid = registry.motion.release();
 
-        if let Some(guid) = released {
+        if let Some(guid) = released_guid {
             self.clear_authored_momentum(SpatialBodyId::Entity(guid), now);
         }
-        released
+        Ok(ExplorerPossessionRelease {
+            released_guid,
+            possession_generation,
+        })
     }
 
     fn clear_authored_momentum(&self, body_id: SpatialBodyId, now: std::time::Instant) {
@@ -992,14 +1444,121 @@ impl ExplorerEntityRuntime {
             .apply_dynamic_entity_kinematics(body_id, kinematics, now);
     }
 
-    /// Replaces the order the possessed entity performs from the next tick onward.
-    pub fn set_motion_order(&self, order: MotionOrder) -> Option<Guid> {
+    /// Replaces coalescible semantic intent after validating the exact possession generation.
+    pub fn replace_possession_intent(
+        &self,
+        request: ExplorerPossessionIntentRequest,
+    ) -> Result<PossessionIntentReplaceResult, ExplorerEntityRuntimeError> {
         let mut registry = self
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
-        registry.motion.order = order;
-        registry.motion.possessed
+        let Some(active) = registry.motion.active.as_mut() else {
+            return Ok(PossessionIntentReplaceResult::IgnoredStalePossession);
+        };
+        if active.generation != request.possession_generation {
+            return Ok(PossessionIntentReplaceResult::IgnoredStalePossession);
+        }
+        let result = active.replace_intent(
+            request.revision,
+            request.stance,
+            request.drive,
+            self.possession_profile,
+        )?;
+        if result == PossessionIntentReplaceResult::Accepted {
+            self.simulation
+                .wake_dynamic_body(SpatialBodyId::Entity(active.guid));
+        }
+        Ok(result)
+    }
+
+    /// Queues one non-coalescible lifecycle edge without allowing async reordering.
+    pub fn queue_possession_event(
+        &self,
+        request: ExplorerPossessionEventRequest,
+    ) -> Result<PossessionEventQueueReceipt, ExplorerEntityRuntimeError> {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        let Some(active) = registry.motion.active.as_mut() else {
+            return Ok(PossessionEventQueueReceipt {
+                result: PossessionEventQueueResult::IgnoredStalePossession,
+                outcomes: Vec::new(),
+            });
+        };
+        if active.generation != request.possession_generation {
+            return Ok(PossessionEventQueueReceipt {
+                result: PossessionEventQueueResult::IgnoredStalePossession,
+                outcomes: Vec::new(),
+            });
+        }
+        let result = active.queue_event(
+            request.sequence,
+            request.revision,
+            request.stance,
+            request.drive,
+            request.event,
+            self.possession_profile,
+        )?;
+        let grounded_response = self
+            .simulation
+            .physical_body_definition(SpatialBodyId::Entity(active.guid))
+            .is_some_and(|definition| {
+                matches!(definition, PhysicalBodyDefinition::Grounded { .. })
+            });
+        let outcomes = if result == PossessionEventQueueResult::Queued && !grounded_response {
+            consume_nonphysical_possession_events(active, self.possession_profile)?
+        } else {
+            Vec::new()
+        };
+        if result == PossessionEventQueueResult::Queued && grounded_response {
+            self.simulation
+                .wake_dynamic_body(SpatialBodyId::Entity(active.guid));
+        }
+        Ok(PossessionEventQueueReceipt { result, outcomes })
+    }
+
+    /// Snapshots the exact active possession playback without exposing mutable registry ownership.
+    pub fn possession_motion_probe(&self) -> Option<ExplorerPossessionMotionProbe> {
+        let registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        let active = registry.motion.active.as_ref()?;
+        let state = registry.motion.playback.state(active.guid)?;
+        let clip = registry
+            .motion
+            .playback
+            .playing_clip(active.guid)
+            .map(|clip| ExplorerPossessionPlayingClipProbe {
+                animation_id: clip.animation_id,
+                framerate: clip.framerate,
+                low_frame: clip.low_frame,
+                high_frame: clip.high_frame,
+                completion: crate::explorer_entity_delivery::project_clip_completion(
+                    clip.completion,
+                ),
+            });
+        Some(ExplorerPossessionMotionProbe {
+            guid: active.guid,
+            entity_generation: active.entity_generation,
+            possession_generation: active.generation,
+            style: state.style.0,
+            substate: ExplorerPossessionActiveMotionProbe {
+                command: state.substate.0,
+                speed: state.substate_mod,
+            },
+            modifiers: state
+                .modifiers()
+                .iter()
+                .map(|motion| ExplorerPossessionActiveMotionProbe {
+                    command: motion.command.0,
+                    speed: motion.speed_mod,
+                })
+                .collect(),
+            clip,
+        })
     }
 
     /// The motion table an entity animates from: its own property, or the default its setup installs.
@@ -1010,61 +1569,62 @@ impl ExplorerEntityRuntime {
         })
     }
 
-    /// Advances every entity's authored playback by one tick and returns the possessed drive.
+    /// Advances unpossessed authored playback independently from controller/body acceptance.
     ///
     /// Every entity plays, not only the possessed one: an unpossessed entity idles from its motion
     /// table's default style and substate, which is what retail installs for any non-static object
-    /// (`CPhysicsObj::InitDefaults`, `acclient.c:309099-309103`). Only the possessed entity receives
-    /// a command; the rest hold their idle.
+    /// (`CPhysicsObj::InitDefaults`, `acclient.c:309099-309103`). Possessed playback is deliberately
+    /// excluded because its proposal commits only with the exact body's accepted solve.
     ///
     /// An entity whose table is absent from the contract, or which declares none, simply has no
     /// playback. That is not a failure — it is an object that does not animate.
-    fn advance_entity_motion(
+    fn advance_unpossessed_motion(
         &self,
         registry: &mut ExplorerEntityRegistry,
         delta_seconds: f32,
-    ) -> Option<PossessedDrive> {
-        let possessed = registry.motion.possessed;
-        if possessed.is_some_and(|guid| !registry.entities.contains_key(&guid)) {
+    ) {
+        let target_is_retired = registry.motion.active.as_ref().is_some_and(|active| {
+            registry
+                .entities
+                .get(&active.guid)
+                .is_none_or(|instance| instance.generation != active.entity_generation)
+        });
+        if target_is_retired {
             // The possessed entity retired underneath us; drop the possession with it.
             registry.motion.release();
         }
-        let possessed = registry.motion.possessed;
-        let order = registry.motion.order;
-
-        let driving: Vec<(Guid, u32, f32, MotionOrder)> = registry
+        let possessed = registry.motion.active.as_ref().map(|active| active.guid);
+        let driving: Vec<(Guid, u32)> = registry
             .entities
             .iter()
             .filter_map(|(guid, instance)| {
-                Some((
-                    *guid,
-                    self.motion_table_for(&instance.definition)?,
-                    instance.definition.object_scale,
-                    if possessed == Some(*guid) {
-                        order
-                    } else {
-                        MotionOrder::default()
-                    },
-                ))
+                if possessed == Some(*guid) {
+                    return None;
+                }
+                Some((*guid, self.motion_table_for(&instance.definition)?))
             })
             .collect();
 
-        let live: BTreeSet<Guid> = driving.iter().map(|(guid, _, _, _)| *guid).collect();
+        let live: BTreeSet<Guid> = registry
+            .entities
+            .iter()
+            .filter_map(|(guid, instance)| {
+                self.motion_table_for(&instance.definition).map(|_| *guid)
+            })
+            .collect();
         registry
             .motion
             .playback
             .retain_bodies(|guid| live.contains(&guid));
 
-        let mut drive = None;
-        for (guid, motion_table_id, object_scale, order) in driving {
+        for (guid, motion_table_id) in driving {
             let Some(table) = self.motion_catalog.table(motion_table_id) else {
                 continue;
             };
-            let offset = registry
+            registry
                 .motion
                 .playback
-                .drive(table, guid, order, delta_seconds)
-                .offset;
+                .drive(table, guid, MotionOrder::default(), delta_seconds);
 
             // A body that proved stable support has dropped out of the collection scan. Whether it
             // should be back in is a property of what its playback installed, not of how large this
@@ -1078,16 +1638,7 @@ impl ExplorerEntityRuntime {
                 self.simulation
                     .wake_dynamic_body(SpatialBodyId::Entity(guid));
             }
-
-            if possessed == Some(guid) {
-                drive = Some(PossessedDrive {
-                    guid,
-                    offset,
-                    object_scale,
-                });
-            }
         }
-        drive
     }
 
     pub fn tick_physical_collection(
@@ -1099,34 +1650,90 @@ impl ExplorerEntityRuntime {
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
-        // Authored playback advances once, before the solve reads anything from it.
-        let authored = self.advance_entity_motion(&mut registry, delta_seconds);
-        // Sampled after the advance, because the advance is what changes the clip. Only entities
-        // whose clip actually changed are published: a receiver swaps on arrival rather than
-        // diffing, so an unchanged clip must not be resent.
+        self.advance_unpossessed_motion(&mut registry, delta_seconds);
+        let possession = registry.motion.active.clone().and_then(|active| {
+            let instance = registry.entities.get(&active.guid)?;
+            (instance.generation == active.entity_generation).then_some((
+                active,
+                instance.definition.object_scale,
+                registry
+                    .motion
+                    .playback
+                    .get(instance.definition.identity.guid)
+                    .cloned(),
+            ))
+        });
+        let mut proposal = None;
+        let collection =
+            self.simulation
+                .tick_dynamic_entity_collection(delta_seconds, now, |body| {
+                    match possession.as_ref() {
+                        Some((active, object_scale, previous_playback))
+                            if body.id == SpatialBodyId::Entity(active.guid) =>
+                        {
+                            let table = self
+                                .motion_catalog
+                                .table(active.motion_table_id)
+                                .context("active possession motion table vanished")?;
+                            let (next, actuation) = propose_possession_tick(
+                                active.clone(),
+                                previous_playback.as_ref(),
+                                table,
+                                body,
+                                *object_scale,
+                                self.possession_profile,
+                                delta_seconds,
+                            )?;
+                            assert!(
+                                proposal.replace(next).is_none(),
+                                "possessed body scheduled twice"
+                            );
+                            Ok(actuation)
+                        }
+                        _ => crate::host_simulation_runtime::dynamic_entity_coasting_actuation(
+                            body,
+                            delta_seconds,
+                        ),
+                    }
+                })?;
+
+        let mut possession_outcomes = BTreeMap::new();
+        if let (Some((expected, _, _)), Some(mut accepted)) = (possession.as_ref(), proposal)
+            && let Some(solved) = collection.bodies.iter().find(|tick| {
+                tick.current.id == SpatialBodyId::Entity(expected.guid)
+                    && tick.result.motion.status == PhysicalBodyTickStatus::Solved
+            })
+            && registry.motion.active.as_ref().is_some_and(|active| {
+                active.generation == expected.generation
+                    && active.entity_generation == expected.entity_generation
+            })
+        {
+            let table = self
+                .motion_catalog
+                .table(expected.motion_table_id)
+                .expect("active possession motion table vanished while registry lock was held");
+            accepted.reconcile_playback(table, solved.current.contact, self.possession_profile)?;
+            possession_outcomes.insert(expected.guid, accepted.outcomes);
+            registry
+                .motion
+                .playback
+                .replace_body(expected.guid, accepted.playback);
+            registry.motion.active = Some(accepted.active);
+        }
+
+        // A clip change is worth publishing even when the body did not move. Possessed playback is
+        // sampled only after its accepted proposal commits, so a held solve cannot leak a clip.
         let live: BTreeSet<Guid> = registry.entities.keys().copied().collect();
-        // A clip change is a change worth publishing even when the body did not move: an entity can
-        // transition between idles standing still, and the receiver would otherwise never hear.
         let changed_clips = registry.motion.take_changed_clips(&live);
-        self.simulation
-            .tick_dynamic_entity_collection(delta_seconds, now, |body| match &authored {
-                Some(drive) if body.id == SpatialBodyId::Entity(drive.guid) => {
-                    drive.actuation(body, delta_seconds)
-                }
-                _ => crate::host_simulation_runtime::dynamic_entity_coasting_actuation(
-                    body,
-                    delta_seconds,
-                ),
-            })?
+        let outcome_guids: BTreeSet<Guid> = possession_outcomes.keys().copied().collect();
+        collection
             .bodies
             .into_iter()
             .filter(|solved| {
                 physical_tick_changed(solved)
-                    || solved
-                        .current
-                        .id
-                        .authoritative_guid()
-                        .is_some_and(|guid| changed_clips.contains_key(&guid))
+                    || solved.current.id.authoritative_guid().is_some_and(|guid| {
+                        changed_clips.contains_key(&guid) || outcome_guids.contains(&guid)
+                    })
             })
             .map(|solved| {
                 let changed_clips = &changed_clips;
@@ -1150,6 +1757,9 @@ impl ExplorerEntityRuntime {
                 )?;
                 Ok(ExplorerEntityPhysicalTick {
                     clip: changed_clips.get(&guid).copied(),
+                    possession_event_outcomes: possession_outcomes
+                        .remove(&guid)
+                        .unwrap_or_default(),
                     generation: instance.generation,
                     input,
                     solved,
@@ -2057,9 +2667,17 @@ mod tests {
     const WALK_STAND: u32 = 0x4500_0003;
     const WALK_FORWARD: u32 = 0x4500_0005;
     const WALK_ANIM: u32 = 0x0300_0002;
+    const READY_ANIM: u32 = 0x0300_0003;
+    const FALLING_ANIM: u32 = 0x0300_0004;
 
     /// A table whose walk cycle authors root motion along local Y, which is what a real walk does.
     fn walking_catalog() -> Arc<MotionSequenceCatalog> {
+        walking_catalog_with_jump_presentation(false)
+    }
+
+    fn walking_catalog_with_jump_presentation(
+        include_jump_presentation: bool,
+    ) -> Arc<MotionSequenceCatalog> {
         use holtburger_dat::file_type::animation::AnimationFlags;
         use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
         use holtburger_dat::file_type::setup_model::AnimationFrame;
@@ -2106,6 +2724,18 @@ mod tests {
             MotionTable::cycle_key(WALK_STYLE, WALK_FORWARD),
             clip(WALK_ANIM),
         );
+        let mut animations = vec![animation(0x0300_0001, 0.0), animation(WALK_ANIM, 1.0)];
+        if include_jump_presentation {
+            cycles.insert(
+                MotionTable::cycle_key(WALK_STYLE, MotionCommand::READY.raw()),
+                clip(READY_ANIM),
+            );
+            cycles.insert(
+                MotionTable::cycle_key(WALK_STYLE, MotionCommand::FALLING.raw()),
+                clip(FALLING_ANIM),
+            );
+            animations.extend([animation(READY_ANIM, 0.0), animation(FALLING_ANIM, 0.0)]);
+        }
 
         Arc::new(
             MotionSequenceCatalog::assemble(
@@ -2117,7 +2747,7 @@ mod tests {
                     modifiers: std::collections::HashMap::new(),
                     links: std::collections::HashMap::new(),
                 }],
-                [animation(0x0300_0001, 0.0), animation(WALK_ANIM, 1.0)],
+                animations,
                 [],
             )
             .expect("walking fixture should assemble"),
@@ -2125,12 +2755,18 @@ mod tests {
     }
 
     fn walking_runtime() -> (Arc<HostSimulationRuntime>, ExplorerEntityRuntime, Guid) {
+        walking_runtime_with_catalog(walking_catalog())
+    }
+
+    fn walking_runtime_with_catalog(
+        catalog: Arc<MotionSequenceCatalog>,
+    ) -> (Arc<HostSimulationRuntime>, ExplorerEntityRuntime, Guid) {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(FlatGround)));
         let runtime = ExplorerEntityRuntime::with_guid_range_and_motion(
             Arc::clone(&simulation),
             0xf000_0090,
             0xf000_00a0,
-            walking_catalog(),
+            catalog,
         );
         let session = simulation.reserve_interest_session();
         simulation
@@ -2171,13 +2807,22 @@ mod tests {
         panic!("the grounded fixture body must settle before possession");
     }
 
-    fn walk_order() -> MotionOrder {
-        MotionOrder {
-            style: Some(holtburger_world::motion::MotionCommand(WALK_STYLE)),
-            forward: Some((holtburger_world::motion::MotionCommand(WALK_FORWARD), 1.0)),
-            sidestep: None,
-            turn: None,
-        }
+    fn set_walk_intent(
+        runtime: &ExplorerEntityRuntime,
+        possession: &ExplorerPossession,
+        revision: u64,
+    ) {
+        assert_eq!(
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: possession.possession_generation,
+                    revision,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::builder().walk().forward().build(),
+                })
+                .expect("walk intent is valid"),
+            PossessionIntentReplaceResult::Accepted
+        );
     }
 
     /// The payoff of the whole plan, at the Explorer boundary: a possessed entity commanded to walk
@@ -2193,9 +2838,9 @@ mod tests {
             .coords;
 
         let possession = runtime.possess(guid).unwrap();
-        assert_eq!(possession.motion_table_id, Some(WALK_TABLE));
-        assert!(possession.modelled_commands.contains(&WALK_FORWARD));
-        runtime.set_motion_order(walk_order());
+        assert_eq!(possession.motion_table_id, WALK_TABLE);
+        assert_eq!(possession.accepted_stance, WALK_STYLE);
+        set_walk_intent(&runtime, &possession, 1);
 
         for step in 1..=15 {
             runtime
@@ -2223,7 +2868,7 @@ mod tests {
     fn a_playing_clip_publishes_on_change_and_not_again() {
         let (simulation, runtime, guid) = walking_runtime();
         let settled_at = settle(&simulation, Instant::now());
-        runtime.possess(guid).unwrap();
+        let possession = runtime.possess(guid).unwrap();
 
         // The first tick after spawn announces the idle the entity is already playing.
         let first = runtime
@@ -2234,7 +2879,7 @@ mod tests {
             "the first tick announces the clip"
         );
 
-        runtime.set_motion_order(walk_order());
+        set_walk_intent(&runtime, &possession, 1);
         let mut announcements = 0usize;
         let mut animations = Vec::new();
         for step in 2..=20 {
@@ -2268,8 +2913,8 @@ mod tests {
     fn releasing_possession_stops_authored_travel() {
         let (simulation, runtime, guid) = walking_runtime();
         let settled_at = settle(&simulation, Instant::now());
-        runtime.possess(guid).unwrap();
-        runtime.set_motion_order(walk_order());
+        let possession = runtime.possess(guid).unwrap();
+        set_walk_intent(&runtime, &possession, 1);
         for step in 1..=15 {
             runtime
                 .tick_physical_collection(
@@ -2280,7 +2925,9 @@ mod tests {
         }
 
         let released_at = settled_at + std::time::Duration::from_millis(600);
-        assert_eq!(runtime.release_possession(released_at), Some(guid));
+        let release = runtime.release_possession(released_at).unwrap();
+        assert_eq!(release.released_guid, Some(guid));
+        assert!(release.possession_generation > possession.possession_generation);
         let before = simulation
             .physical_body_snapshot(SpatialBodyId::Entity(guid))
             .unwrap()
@@ -2306,15 +2953,589 @@ mod tests {
         );
     }
 
-    /// The UX must be able to refuse what a table cannot do, so the modelled set is read from the
-    /// contract rather than assumed from the command vocabulary.
+    /// Capability distinguishes authored physics from fallback with or without target presentation.
     #[test]
-    fn possession_reports_only_the_commands_the_table_models() {
+    fn possession_reports_composite_sources_for_every_canonical_family() {
         let (_simulation, runtime, guid) = walking_runtime();
 
         let possession = runtime.possess(guid).unwrap();
+        let capability = possession
+            .stances
+            .iter()
+            .find(|capability| capability.style == WALK_STYLE)
+            .expect("non-combat capability");
+        assert_eq!(
+            capability.walk,
+            crate::explorer_possession_control::PossessionLocomotionSource::TargetAuthored
+        );
+        for source in [capability.run, capability.sidestep, capability.turn] {
+            assert_eq!(
+                source,
+                crate::explorer_possession_control::PossessionLocomotionSource::StandardFallbackWithoutTargetPresentation
+            );
+        }
+    }
 
-        assert_eq!(possession.modelled_commands, vec![WALK_FORWARD]);
+    #[test]
+    fn mixed_authored_forward_and_fallback_sidestep_drive_once_per_axis() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        let before = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .coords;
+        let possession = runtime.possess(guid).unwrap();
+        runtime
+            .replace_possession_intent(ExplorerPossessionIntentRequest {
+                possession_generation: possession.possession_generation,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder()
+                    .walk()
+                    .forward()
+                    .strafe_right()
+                    .build(),
+            })
+            .unwrap();
+
+        for step in 1..=30 {
+            runtime
+                .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
+                .unwrap();
+        }
+        let after = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .coords;
+        let travelled = after - before;
+
+        assert!(
+            travelled.y > 2.5,
+            "target-authored forward was lost: {travelled:?}"
+        );
+        assert!(
+            travelled.x > 1.0 && travelled.x < 2.0,
+            "fallback sidestep should contribute once at about 1.5m/s: {travelled:?}"
+        );
+    }
+
+    #[test]
+    fn absent_turn_presentation_still_turns_the_possessed_body_with_fallback() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        let before = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .rotation
+            .to_heading();
+        let possession = runtime.possess(guid).unwrap();
+        runtime
+            .replace_possession_intent(ExplorerPossessionIntentRequest {
+                possession_generation: possession.possession_generation,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder().turn_right().build(),
+            })
+            .unwrap();
+
+        for step in 1..=15 {
+            runtime
+                .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
+                .unwrap();
+        }
+        let after = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .rotation
+            .to_heading();
+        assert!(
+            after - before > 0.6,
+            "fallback turn should rotate about 0.75rad in half a second: {before} -> {after}"
+        );
+    }
+
+    #[test]
+    fn jump_launches_without_ready_or_falling_target_presentation() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).unwrap();
+        assert_eq!(
+            possession.stances[0].jump_presentation,
+            crate::explorer_possession_control::PossessionJumpPresentation::StanceDefault
+        );
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 0,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                event: PossessionLifecycleEvent::BeginJump,
+            })
+            .unwrap();
+        let charged = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .unwrap();
+        assert!(charged.iter().any(|tick| {
+            tick.possession_event_outcomes.iter().any(|outcome| {
+                matches!(
+                    outcome.result,
+                    PossessionEventOutcomeKind::ChargeAccepted { .. }
+                )
+            })
+        }));
+
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 1,
+                revision: 2,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder().forward().turn_right().build(),
+                event: PossessionLifecycleEvent::ReleaseJump {
+                    extent: holtburger_core::JumpExtent::MAXIMUM,
+                },
+            })
+            .unwrap();
+        let launched = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
+            .unwrap();
+        assert!(launched.iter().any(|tick| {
+            tick.possession_event_outcomes.iter().any(|outcome| {
+                matches!(
+                    outcome.result,
+                    PossessionEventOutcomeKind::JumpReleased { .. }
+                )
+            })
+        }));
+        let body = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap();
+        assert!(body.velocity.z > 0.0, "accepted release must launch upward");
+
+        let launch_heading = body.pose.rotation.to_heading();
+        let mut saw_airborne_turn = false;
+        let mut restored_walk_clip = false;
+        let mut landed = false;
+        for step in 3..=140 {
+            let ticks = runtime
+                .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
+                .unwrap();
+            assert!(
+                ticks
+                    .iter()
+                    .flat_map(|tick| &tick.possession_event_outcomes)
+                    .all(|outcome| !matches!(
+                        outcome.result,
+                        PossessionEventOutcomeKind::JumpReleased { .. }
+                    )),
+                "one release edge must launch at most once"
+            );
+            let body = simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .unwrap();
+            if body.contact == ContactState::Airborne
+                && body.pose.rotation.to_heading() - launch_heading > 0.08
+            {
+                saw_airborne_turn = true;
+            }
+            restored_walk_clip |= ticks
+                .iter()
+                .any(|tick| tick.clip.is_some_and(|clip| clip.animation_id == WALK_ANIM));
+            if body.contact == ContactState::Grounded && step > 3 {
+                landed = true;
+                break;
+            }
+        }
+        assert!(
+            saw_airborne_turn,
+            "turn intent must remain effective while airborne"
+        );
+        assert!(
+            landed,
+            "jump fixture must land within its bounded test horizon"
+        );
+        assert!(
+            restored_walk_clip,
+            "landing must restore retained authored locomotion without new input"
+        );
+    }
+
+    #[test]
+    fn target_jump_presentation_selects_ready_then_falling_on_accepted_edges() {
+        let (simulation, runtime, guid) =
+            walking_runtime_with_catalog(walking_catalog_with_jump_presentation(true));
+        let settled_at = settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).unwrap();
+        assert_eq!(
+            possession.stances[0].jump_presentation,
+            crate::explorer_possession_control::PossessionJumpPresentation::ReadyAndFalling
+        );
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 0,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                event: PossessionLifecycleEvent::BeginJump,
+            })
+            .unwrap();
+        let charged = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .unwrap();
+        assert!(charged.iter().any(|tick| {
+            tick.clip
+                .is_some_and(|clip| clip.animation_id == READY_ANIM)
+        }));
+
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 1,
+                revision: 2,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                event: PossessionLifecycleEvent::ReleaseJump {
+                    extent: holtburger_core::JumpExtent::MINIMUM,
+                },
+            })
+            .unwrap();
+        let launched = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
+            .unwrap();
+        assert!(launched.iter().any(|tick| {
+            tick.clip
+                .is_some_and(|clip| clip.animation_id == FALLING_ANIM)
+        }));
+    }
+
+    #[test]
+    fn dynamic_contact_budget_hold_retries_the_uncommitted_release_edge() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).unwrap();
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 0,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                event: PossessionLifecycleEvent::BeginJump,
+            })
+            .unwrap();
+        runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .unwrap();
+
+        let peer_guid = runtime.reserve_guid().unwrap();
+        let mut peer = definition(peer_guid, 2, 0.0);
+        let EntityPlacement::World(mut initial) = peer.placement else {
+            unreachable!()
+        };
+        initial.pose.coords.z = 4.0;
+        peer.placement = EntityPlacement::World(initial);
+        let peer = runtime
+            .spawn_prepared(
+                peer,
+                EntityPhysicalIntent::Simulated,
+                Some(physical_with_ball_target()),
+            )
+            .unwrap();
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 1,
+                revision: 2,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                event: PossessionLifecycleEvent::ReleaseJump {
+                    extent: holtburger_core::JumpExtent::MAXIMUM,
+                },
+            })
+            .unwrap();
+
+        let held = runtime
+            .tick_physical_collection(1.0, settled_at + Duration::from_secs(1))
+            .unwrap();
+        assert!(held.iter().all(|tick| {
+            tick.solved.current.id != SpatialBodyId::Entity(guid)
+                || tick.solved.result.motion.status != PhysicalBodyTickStatus::Solved
+        }));
+        assert!(held.iter().all(|tick| {
+            tick.possession_event_outcomes.iter().all(|outcome| {
+                !matches!(
+                    outcome.result,
+                    PossessionEventOutcomeKind::JumpReleased { .. }
+                )
+            })
+        }));
+        assert!(
+            simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .unwrap()
+                .velocity
+                .z
+                <= 0.0,
+            "a budget-held proposal must not launch the canonical body"
+        );
+
+        runtime
+            .despawn(peer_guid, peer.instance.generation)
+            .unwrap();
+        let retried = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(1_033))
+            .unwrap();
+        assert!(retried.iter().any(|tick| {
+            tick.possession_event_outcomes.iter().any(|outcome| {
+                matches!(
+                    outcome.result,
+                    PossessionEventOutcomeKind::JumpReleased { .. }
+                )
+            })
+        }));
+    }
+
+    #[test]
+    fn nonphysical_possession_rejects_contiguous_jump_edges_without_wedging() {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(FlatGround)));
+        let runtime = ExplorerEntityRuntime::with_guid_range_and_motion(
+            simulation,
+            0xf000_00d0,
+            0xf000_00e0,
+            walking_catalog(),
+        );
+        let guid = runtime.reserve_guid().unwrap();
+        let mut target = definition(guid, 1, 0.0);
+        target.content.motion_table_did = Some(WALK_TABLE);
+        runtime
+            .spawn_prepared(target, EntityPhysicalIntent::PoseOnly, None)
+            .unwrap();
+        let possession = runtime.possess(guid).unwrap();
+
+        let queue = |sequence, event| {
+            runtime
+                .queue_possession_event(ExplorerPossessionEventRequest {
+                    possession_generation: possession.possession_generation,
+                    sequence,
+                    revision: sequence + 1,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::default(),
+                    event,
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            queue(0, PossessionLifecycleEvent::BeginJump).outcomes[0].result,
+            PossessionEventOutcomeKind::Rejected {
+                reason: PossessionEventRejection::NonphysicalResponse
+            }
+        );
+        assert_eq!(
+            queue(1, PossessionLifecycleEvent::Reset).outcomes[0].result,
+            PossessionEventOutcomeKind::Reset
+        );
+        assert_eq!(
+            queue(2, PossessionLifecycleEvent::BeginJump).outcomes[0].sequence,
+            2,
+            "the reset and rejection both advance the contiguous queue"
+        );
+    }
+
+    #[test]
+    fn standing_charge_suppresses_new_translation_but_moving_charge_keeps_it() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).unwrap();
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 0,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                event: PossessionLifecycleEvent::BeginJump,
+            })
+            .unwrap();
+        runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .unwrap();
+        runtime
+            .replace_possession_intent(ExplorerPossessionIntentRequest {
+                possession_generation: possession.possession_generation,
+                revision: 2,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder().forward().build(),
+            })
+            .unwrap();
+        let before = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .coords;
+        for step in 2..=10 {
+            runtime
+                .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
+                .unwrap();
+        }
+        let held = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .coords;
+        assert!(
+            (held - before).length() < 0.01,
+            "standing charge must retain but suppress later translation"
+        );
+
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 1,
+                revision: 3,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                event: PossessionLifecycleEvent::Reset,
+            })
+            .unwrap();
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 2,
+                revision: 4,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder().forward().build(),
+                event: PossessionLifecycleEvent::BeginJump,
+            })
+            .unwrap();
+        for step in 11..=20 {
+            runtime
+                .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
+                .unwrap();
+        }
+        let moved = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .coords;
+        assert!(
+            (moved - held).length() > 0.5,
+            "a charge begun while moving must retain locomotion"
+        );
+    }
+
+    #[test]
+    fn same_guid_repossession_and_release_form_hard_input_generation_barriers() {
+        let (_simulation, runtime, guid) = walking_runtime();
+        let first = runtime.possess(guid).expect("first possession");
+        let second = runtime.possess(guid).expect("same-guid repossession");
+        assert!(second.possession_generation > first.possession_generation);
+
+        let stale_intent = ExplorerPossessionIntentRequest {
+            possession_generation: first.possession_generation,
+            revision: 1,
+            stance: WALK_STYLE,
+            drive: CharacterDrive::builder().walk().forward().build(),
+        };
+        assert_eq!(
+            runtime.replace_possession_intent(stale_intent).unwrap(),
+            PossessionIntentReplaceResult::IgnoredStalePossession
+        );
+        assert_eq!(
+            runtime
+                .queue_possession_event(ExplorerPossessionEventRequest {
+                    possession_generation: first.possession_generation,
+                    sequence: 0,
+                    revision: 1,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::default(),
+                    event: PossessionLifecycleEvent::Reset,
+                })
+                .unwrap()
+                .result,
+            PossessionEventQueueResult::IgnoredStalePossession
+        );
+
+        let release = runtime.release_possession(Instant::now()).unwrap();
+        assert!(release.possession_generation > second.possession_generation);
+        assert_eq!(
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: second.possession_generation,
+                    ..stale_intent
+                })
+                .unwrap(),
+            PossessionIntentReplaceResult::IgnoredStalePossession
+        );
+        let third = runtime.possess(guid).expect("possession after release");
+        assert!(third.possession_generation > release.possession_generation);
+    }
+
+    #[test]
+    fn target_despawn_replacement_and_reset_retire_possession_in_the_registry_transaction() {
+        let assert_stale = |runtime: &ExplorerEntityRuntime, generation: u64| {
+            assert_eq!(
+                runtime
+                    .replace_possession_intent(ExplorerPossessionIntentRequest {
+                        possession_generation: generation,
+                        revision: 1,
+                        stance: WALK_STYLE,
+                        drive: CharacterDrive::builder().forward().build(),
+                    })
+                    .unwrap(),
+                PossessionIntentReplaceResult::IgnoredStalePossession
+            );
+        };
+
+        let (_simulation, runtime, guid) = walking_runtime();
+        let generation = runtime.project(guid).unwrap().generation;
+        let possession = runtime.possess(guid).unwrap();
+        runtime.despawn(guid, generation).unwrap();
+        assert_stale(&runtime, possession.possession_generation);
+
+        let (_simulation, runtime, guid) = walking_runtime();
+        let possession = runtime.possess(guid).unwrap();
+        let generation = runtime.project(guid).unwrap().generation;
+        let mut replacement = definition(guid, 2, 1.0);
+        replacement.content.motion_table_did = Some(WALK_TABLE);
+        runtime
+            .replace_prepared(
+                replacement,
+                generation,
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+        assert_stale(&runtime, possession.possession_generation);
+
+        let (_simulation, runtime, guid) = walking_runtime();
+        let possession = runtime.possess(guid).unwrap();
+        runtime.reset().unwrap();
+        assert_stale(&runtime, possession.possession_generation);
+    }
+
+    #[test]
+    fn possession_rejects_a_target_without_a_resolved_motion_table() {
+        let (_simulation, runtime) = runtime(0xf000_00b0, 0xf000_00c0);
+        let guid = runtime.reserve_guid().unwrap();
+        runtime
+            .spawn_prepared(
+                definition(guid, 1, 0.0),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            runtime.possess(guid),
+            Err(ExplorerEntityRuntimeError::MissingPossessionMotionTable { guid: missing })
+                if missing == guid
+        ));
     }
 
     /// A settled body stops integrating, so a change to the loaded static world would otherwise

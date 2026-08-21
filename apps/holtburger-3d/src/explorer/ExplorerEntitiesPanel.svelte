@@ -7,7 +7,6 @@
 	import { buildExplorerEntityTree } from "./explorer-entity-tree";
 	import {
 		MOTION_STYLE,
-		possessionModels,
 		type ExplorerPossession,
 		type MotionStyleName,
 	} from "./explorer-entity-possession";
@@ -37,14 +36,6 @@
 		setStance,
 		possession,
 	}: Props = $props();
-	const LOCOMOTION_LABELS: readonly [number, string][] = [
-		[0x4500_0005, "walk"],
-		[0x4400_0007, "run"],
-		[0x4500_0006, "back"],
-		[0x6500_000d, "turn"],
-		[0x6500_000f, "sidestep"],
-	];
-
 	async function togglePossession(): Promise<void> {
 		if (pending || selected === null) return;
 		pending = true;
@@ -59,9 +50,9 @@
 	}
 
 	async function applyStance(name: MotionStyleName): Promise<void> {
-		stance = name;
 		try {
 			await setStance(MOTION_STYLE[name]);
+			stance = name;
 		} catch (error) {
 			operationError = `Stance change failed: ${errorMessage(error)}`;
 		}
@@ -75,12 +66,23 @@
 		entities.find((entity) => entity.identity.guid === selectedGuid) ?? null,
 	);
 	let stance = $state<MotionStyleName>("nonCombat");
+	$effect(() => {
+		if (possession === null || possession.guid === null) return;
+		const accepted = (Object.keys(MOTION_STYLE) as MotionStyleName[]).find(
+			(name) => MOTION_STYLE[name] === possession.acceptedStance,
+		);
+		if (accepted !== undefined) stance = accepted;
+	});
 	const selectedIsPossessed = $derived(
 		selectedGuid !== null && selectedGuid === (possession?.guid ?? null),
 	);
-	// A possessed entity whose table models nothing has no commands to give it; saying so is more
-	// useful than offering controls that resolve to nothing.
-	const possessedCommands = $derived(possession?.modelledCommands ?? []);
+	const possessedCapability = $derived(
+		possession !== null && possession.guid !== null
+			? (possession.stances.find(
+					(capability) => capability.style === MOTION_STYLE[stance],
+				) ?? null)
+			: null,
+	);
 	const catalogReady = $derived(catalog?.status === "available");
 	const tree = $derived(buildExplorerEntityTree(entities));
 
@@ -305,25 +307,19 @@
 				</button>
 			</div>
 
-			{#if selectedIsPossessed && possession !== null}
+			{#if selectedIsPossessed && possession !== null && possession.guid !== null}
 				<div class="ac-param-row">
 					<span class="ac-param-key">Motion table</span>
-					<code
-						>{possession.motionTableId ??
-							"none — entity cannot be driven"}</code
-					>
+					<code>{possession.motionTableId}</code>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Models</span>
+					<span class="ac-param-key">Control sources</span>
 					<code>
-						{#if possessedCommands.length === 0}
-							no locomotion
+						{#if possessedCapability === null}
+							unmodelled stance
 						{:else}
-							{LOCOMOTION_LABELS.filter(([command]) =>
-								possessionModels(possession, command),
-							)
-								.map(([, label]) => label)
-								.join(" · ")}
+							walk {possessedCapability.walk} · run {possessedCapability.run} · side
+							{possessedCapability.sidestep} · turn {possessedCapability.turn}
 						{/if}
 					</code>
 				</div>
@@ -335,7 +331,9 @@
 							applyStance(event.currentTarget.value as MotionStyleName)}
 					>
 						{#each Object.keys(MOTION_STYLE) as name (name)}
-							<option value={name}>{name}</option>
+							{#if possession.stances.some((capability) => capability.style === MOTION_STYLE[name as MotionStyleName])}
+								<option value={name}>{name}</option>
+							{/if}
 						{/each}
 					</select>
 				</div>

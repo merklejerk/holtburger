@@ -1,6 +1,6 @@
-import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
-import { sceneVec3, type SceneVec3 } from "../lib/assets/ac-frame";
-import { Vec3 } from "../lib/game/math/types";
+import { sceneVec3, type SceneVec3 } from "../../assets/ac-frame";
+import { createCameraAxesRadians } from "../math/camera-orientation";
+import { Vec3 } from "../math/types";
 
 /**
  * Camera orientation the boom orbits with, owned by the existing look controller.

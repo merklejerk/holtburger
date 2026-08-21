@@ -2283,6 +2283,7 @@ dependencies = [
  "holtburger-content",
  "holtburger-core",
  "holtburger-dat",
+ "holtburger-protocol",
  "holtburger-weenie-catalog",
  "holtburger-world",
  "log",
@@ -2291,6 +2292,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
 ]
 

@@ -33,5 +33,7 @@ pub use registry::{BodyMotionRuntime, MotionRuntimeRegistry, PlayingMotionClip};
 pub use selection::{
     MotionSelectionOutcome, select_motion, set_default_state, stop_completely, stop_motion,
 };
-pub use sequence::{FiredMotionHook, MotionSequenceRuntime, SequenceNode, SequenceTick};
+pub use sequence::{
+    FiredMotionHook, MotionClipCompletion, MotionSequenceRuntime, SequenceNode, SequenceTick,
+};
 pub use state::{ActiveMotion, MotionCommand, MotionOrder, MotionState};

@@ -129,9 +129,10 @@ pub(crate) fn behavior_hook_payload(
             radius,
             height,
         }) => {
-            if *part_index >= 0 {
-                ensure_part_index("Attack", u32::try_from(*part_index)?, part_scope)?;
-            }
+            // This names attack-result metadata, not a render-part array slot. Retail passes it
+            // directly to AttackManager::NewAttack without indexing PartArray
+            // (acclient.c:308215); 46 retail hooks intentionally exceed their animation's part
+            // count, including Virindi Servant animation 0x03000850 (22 versus 12).
             BehaviorHookPayloadManifest::Attack {
                 part_index: *part_index,
                 left: [*left_x, *left_y],
@@ -336,5 +337,35 @@ pub(crate) fn hook_name(hook_type: u32) -> &'static str {
         25 => "set-light",
         26 => "create-blocking-particle",
         _ => "unsupported",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attack_metadata_is_not_bounded_by_render_part_count() {
+        let hook = AnimationHook {
+            hook_type: 3,
+            direction: 0,
+            payload: AnimationHookPayload::Attack(AttackConeHookPayload {
+                part_index: 22,
+                left_x: -0.5,
+                left_y: 0.866_025_4,
+                right_x: 0.5,
+                right_y: 0.866_025_4,
+                radius: 3.0,
+                height: 0.01,
+            }),
+        };
+
+        let payload = behavior_hook_payload(&hook, PartIndexScope::Known(12), &mut Vec::new())
+            .expect("attack metadata outside the render-part range must remain representable");
+
+        let BehaviorHookPayloadManifest::Attack { part_index, .. } = payload else {
+            panic!("attack hook projected as a different payload kind");
+        };
+        assert_eq!(part_index, 22);
     }
 }

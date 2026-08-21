@@ -7,7 +7,7 @@ import {
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
-import type { PhysicalCameraPlacement } from "../lib/game/motion/host-physical-camera-path";
+import type { PhysicalFlyPlacement } from "../lib/game/motion/host-physical-fly-path";
 import type { SceneInterestRevision } from "../lib/game/runtime/scene-availability";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
@@ -16,10 +16,10 @@ import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
-	FreeFlyCameraController,
+	FrontendCameraController,
 	type FreeFlyCameraPose,
 	type FreeFlyCameraState,
-} from "./free-fly-camera-controller";
+} from "../lib/game/controls/frontend-camera-controller";
 import {
 	resolveExplorerPointResidency,
 	resolveExplicitExplorerEnvCell,
@@ -84,7 +84,7 @@ export class ExplorerCameraCoordinator {
 	readonly #runtime: GameRuntime;
 	/** Explorer default: the free camera carries the ears, which is what a viewer expects. */
 	#audioFollowsCamera = true;
-	readonly #controller: FreeFlyCameraController;
+	readonly #controller: FrontendCameraController;
 	readonly #onStatus: (status: ExplorerCameraFocusStatus) => void;
 	readonly #unsubscribeAvailability: () => void;
 	#pending: PendingFocus | null = null;
@@ -98,7 +98,7 @@ export class ExplorerCameraCoordinator {
 	#anchor: ExplorerSceneInterestSnapshot | null = null;
 	#lastResidency: SceneResidency | null = null;
 	/** Exact position/residency most recently applied to the runtime camera. */
-	#presentedPlacement: PhysicalCameraPlacement | null = null;
+	#presentedPlacement: PhysicalFlyPlacement | null = null;
 	/** Last host placement announced to the Explorer status panel. */
 	#lastReportedHostResidency: SceneResidency | null = null;
 	/** One host-owned residency carried across the physical-to-free-fly authority handoff. */
@@ -108,7 +108,7 @@ export class ExplorerCameraCoordinator {
 
 	constructor(
 		runtime: GameRuntime,
-		controller: FreeFlyCameraController,
+		controller: FrontendCameraController,
 		onStatus: (status: ExplorerCameraFocusStatus) => void,
 	) {
 		this.#runtime = runtime;
@@ -299,7 +299,7 @@ export class ExplorerCameraCoordinator {
 
 	/** Apply one host-owned physical placement without re-deriving its portal residency. */
 	syncPhysicalCamera(
-		placement: PhysicalCameraPlacement | null,
+		placement: PhysicalFlyPlacement | null,
 	): ExplorerCameraResidencySync {
 		if (placement === null) {
 			this.#reportResolutionIssue("Waiting for first host camera placement.");
@@ -321,7 +321,7 @@ export class ExplorerCameraCoordinator {
 	}
 
 	/** Copy the exact placement currently applied to the renderer for an authority handoff. */
-	presentedPlacement(): PhysicalCameraPlacement | null {
+	presentedPlacement(): PhysicalFlyPlacement | null {
 		const placement = this.#presentedPlacement;
 		return placement === null
 			? null

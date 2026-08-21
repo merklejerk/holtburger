@@ -16,11 +16,10 @@ use holtburger_core::{
 };
 use holtburger_world::{
     CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
-    DynamicContactBudgetExceeded, DynamicPhysicalBodyDefinition, EdgeProtection,
-    EntityPhysicsTransitionDecision, GroundedBodyActuation, PhysicalBodyActuation,
-    PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyTickResult,
-    PhysicalCollisionExclusions, PhysicalCollisionFilter, PhysicalFlyBody, PhysicalFlyConfig,
-    PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath, PlacementRecovery,
+    DynamicContactBudgetExceeded, DynamicPhysicalBodyDefinition, EntityPhysicsTransitionDecision,
+    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionFilter, PhysicalFlyBody,
+    PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath, PlacementRecovery,
     RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene, solve_physical_fly,
 };
 use serde::{Deserialize, Serialize};
@@ -81,24 +80,6 @@ pub struct SimulationInterestReceipt {
     pub unavailable_landblock_ids: Vec<String>,
 }
 
-/// Serialized edge-protection policy choice.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum EdgeProtectionRequest {
-    /// Accept the unsupported candidate and begin falling.
-    None,
-    /// Preserve the last supported pose when no supported edge slide is available.
-    Creature,
-}
-
-/// Optional collision domain excluded by a frontend-created body.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum PhysicalCollisionExclusionRequest {
-    /// Retail's whole-landblock ocean restriction does not obstruct this body.
-    EntirelyWaterBarrier,
-}
-
 /// Fully validated app-local body registration passed atomically into simulation state.
 ///
 /// This native layer is the diagnostics door: harness fixtures and fault injection construct it
@@ -112,79 +93,6 @@ pub struct ResolvedPhysicalBodyRegistration {
     pub collision_filter: PhysicalCollisionFilter,
     /// Initial mutable contact response.
     pub response_policy: PhysicalBodyResponsePolicy,
-}
-
-/// Named body profile resolved host-side from `holtburger-core`.
-///
-/// The frontend names what it wants plus its app-policy knobs; every retail solver constant is
-/// sourced from the core profile builders rather than mirrored across languages (contact-slide
-/// plan, host-resolved body profiles addendum).
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(
-    tag = "profile",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
-pub enum PhysicalBodyProfileRequest {
-    /// The retail player as a grounded body; edge protection stays frontend/UX policy.
-    RetailPlayerGrounded {
-        /// Policy for retaining support near finite authored edges.
-        edge_protection: EdgeProtectionRequest,
-    },
-    /// The retail render-viewer as a free-flying clip sphere.
-    PhysicalFlyViewer,
-}
-
-/// Frontend-facing body registration: a named profile plus body-owned collision exclusions.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PhysicalBodyProfileBodyRequest {
-    /// Named profile resolved by `holtburger-core`.
-    #[serde(flatten)]
-    pub profile: PhysicalBodyProfileRequest,
-    /// Explicit optional collision domains ignored by this body.
-    pub collision_exclusions: Vec<PhysicalCollisionExclusionRequest>,
-}
-
-impl PhysicalBodyProfileBodyRequest {
-    /// Resolves the named profile and exclusions into one validated registration.
-    pub fn resolve(&self) -> Result<ResolvedPhysicalBodyRegistration> {
-        let profile = match self.profile {
-            PhysicalBodyProfileRequest::RetailPlayerGrounded { edge_protection } => {
-                holtburger_core::retail_player_grounded_profile(match edge_protection {
-                    EdgeProtectionRequest::None => EdgeProtection::None,
-                    EdgeProtectionRequest::Creature => EdgeProtection::Creature,
-                })?
-            }
-            PhysicalBodyProfileRequest::PhysicalFlyViewer => {
-                holtburger_core::physical_fly_viewer_profile()?
-            }
-        };
-        Ok(ResolvedPhysicalBodyRegistration {
-            definition: profile.definition,
-            collision_filter: resolve_collision_filter(&self.collision_exclusions)?,
-            response_policy: profile.response_policy,
-        })
-    }
-}
-
-fn resolve_collision_filter(
-    requested: &[PhysicalCollisionExclusionRequest],
-) -> Result<PhysicalCollisionFilter> {
-    let mut exclusions = PhysicalCollisionExclusions::empty();
-    for exclusion in requested {
-        let bit = match exclusion {
-            PhysicalCollisionExclusionRequest::EntirelyWaterBarrier => {
-                PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER
-            }
-        };
-        ensure!(
-            !exclusions.contains(bit),
-            "physical body collision exclusions contain a duplicate"
-        );
-        exclusions.insert(bit);
-    }
-    Ok(PhysicalCollisionFilter::excluding(exclusions))
 }
 
 /// State that must change atomically with respect to every generic body tick.
@@ -485,14 +393,14 @@ impl HostSimulationRuntime {
         &self,
         delta_seconds: f32,
         now: std::time::Instant,
-        actuation_for: impl Fn(&SpatialBody) -> Result<PhysicalBodyActuation>,
+        mut actuation_for: impl FnMut(&SpatialBody) -> Result<PhysicalBodyActuation>,
     ) -> Result<HostDynamicEntityCollectionTick> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = Arc::clone(&state.scene);
         let tick_start = state.bodies.prepare_dynamic_entity_collection(
             &scene,
             delta_seconds,
-            &actuation_for,
+            &mut actuation_for,
         )?;
         let mut ticks = Vec::with_capacity(tick_start.len());
         for (body_id, actuation) in tick_start {
@@ -614,6 +522,21 @@ impl HostSimulationRuntime {
             .physical
             .as_ref()
             .map(|physical| physical.response_policy.align_path)
+    }
+
+    /// Reads the installed physical response shape, or `None` for a pose-only/absent body.
+    pub fn physical_body_definition(
+        &self,
+        body_id: SpatialBodyId,
+    ) -> Option<holtburger_world::PhysicalBodyDefinition> {
+        self.state
+            .lock()
+            .expect("host simulation lock poisoned")
+            .bodies
+            .body(body_id)?
+            .physical
+            .as_ref()
+            .map(|physical| physical.definition)
     }
 
     /// Reactivates one settled dynamic body so the next collection scan integrates it.
@@ -928,7 +851,7 @@ mod tests {
     use holtburger_content::{LandblockColliders, TerrainCollisionSurface};
     use holtburger_world::{
         PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion, RETAIL_WALKABLE_NORMAL_Z,
+        PhysicalSphereSet, PhysicalSurfaceMotion,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
@@ -1170,48 +1093,6 @@ mod tests {
                 .contains("normalized")
         );
         assert_eq!(source.loads.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn profile_requests_resolve_both_camera_profiles() {
-        let fly = PhysicalBodyProfileBodyRequest {
-            profile: PhysicalBodyProfileRequest::PhysicalFlyViewer,
-            collision_exclusions: vec![PhysicalCollisionExclusionRequest::EntirelyWaterBarrier],
-        }
-        .resolve()
-        .unwrap();
-        assert!(matches!(
-            fly.definition,
-            PhysicalBodyDefinition::FreeSphere { .. }
-        ));
-
-        let grounded = PhysicalBodyProfileBodyRequest {
-            profile: PhysicalBodyProfileRequest::RetailPlayerGrounded {
-                edge_protection: EdgeProtectionRequest::Creature,
-            },
-            collision_exclusions: Vec::new(),
-        }
-        .resolve()
-        .unwrap();
-        let PhysicalBodyDefinition::Grounded { config, .. } = grounded.definition else {
-            panic!("retail player profile must resolve grounded");
-        };
-        assert_eq!(config.walkable_normal_z, RETAIL_WALKABLE_NORMAL_Z);
-        assert_eq!(
-            config.edge_protection,
-            holtburger_world::EdgeProtection::Creature
-        );
-    }
-
-    #[test]
-    fn collision_filter_rejects_duplicate_exclusions() {
-        let error = resolve_collision_filter(&[
-            PhysicalCollisionExclusionRequest::EntirelyWaterBarrier,
-            PhysicalCollisionExclusionRequest::EntirelyWaterBarrier,
-        ])
-        .unwrap_err();
-
-        assert!(error.to_string().contains("duplicate"));
     }
 
     #[test]

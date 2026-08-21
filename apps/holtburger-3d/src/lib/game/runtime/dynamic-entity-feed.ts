@@ -186,8 +186,8 @@ const dynamicEntityPathSchema = z.object({
 /**
  * The clip the host has an entity playing, projected for presentation.
  *
- * Narrow on purpose: the frontend advances within this clip's window at render rate, lapping back
- * to its entry frame at the far bound, and never chooses the next clip. Which clip follows is link
+ * Narrow on purpose: the frontend advances within this clip's window at render rate, obeys the
+ * host-derived terminal behavior, and never chooses the next clip. Which clip follows is link
  * resolution against host state the frontend does not have, so a clip change arrives only as a
  * later projection.
  *
@@ -196,6 +196,7 @@ const dynamicEntityPathSchema = z.object({
  */
 const dynamicEntityPlayingClipSchema = z.object({
 	animationId: guid,
+	completion: z.enum(["hold", "loop"]),
 	/** Negative plays the window backwards; zero holds. */
 	framerate: finiteNumber,
 	highFrame: z.number().int(),

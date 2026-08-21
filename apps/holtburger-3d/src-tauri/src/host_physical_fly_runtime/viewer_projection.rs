@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Quaternion};
 use holtburger_world::{
     CellTransitRequest, CollisionScene, MotionWaypoint, MotionWaypointPlacement,
     PhysicalBodySceneResidency, PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus,
@@ -13,9 +13,8 @@ use crate::placed_motion_presentation::{
 };
 
 use super::{
-    ActiveCamera, FIRST_PERSON_FORWARD_OFFSET, HUMAN_EYE_HEIGHT, PhysicalCameraMode,
-    PhysicalCameraPathLeg, PhysicalCameraPathPoint, PhysicalCameraResidency,
-    PhysicalCameraSceneResidency, PhysicalCameraTickStatus, VIEWER_SPHERE_RADIUS,
+    ActivePhysicalFly, PhysicalFlyPathLeg, PhysicalFlyPathPoint, PhysicalFlyResidency,
+    PhysicalFlySceneResidency, PhysicalFlyTickStatus, VIEWER_SPHERE_RADIUS,
 };
 
 /// Host-retained render viewer state, independent from collision-body placement.
@@ -25,28 +24,25 @@ pub(super) struct PresentedViewer {
     pub(super) pose: WorldPosition,
     /// Last portal-committed cell containing the viewer sphere, or outdoors.
     pub(super) cell: Option<Guid>,
-    /// Last view direction committed with `cell` and the presented origin.
-    pub(super) direction: Vector3,
 }
 
 /// Fully validated presentation derived from a still-provisional body tick.
-pub(super) struct PreparedCameraPresentation {
-    pub(super) initial: PhysicalCameraPathPoint,
-    pub(super) legs: Vec<PhysicalCameraPathLeg>,
+pub(super) struct PreparedPhysicalFlyPresentation {
+    pub(super) initial: PhysicalFlyPathPoint,
+    pub(super) legs: Vec<PhysicalFlyPathLeg>,
     pub(super) viewer: PresentedViewer,
-    pub(super) status: PhysicalCameraTickStatus,
-    pub(super) scene_residency: PhysicalCameraSceneResidency,
-    pub(super) ground_state: super::contract::CameraGroundState,
+    pub(super) status: PhysicalFlyTickStatus,
+    pub(super) scene_residency: PhysicalFlySceneResidency,
+    pub(super) ground_state: super::contract::PhysicalFlyGroundState,
     pub(super) constraint_count: usize,
     pub(super) substeps: usize,
     pub(super) contact_passes: usize,
 }
 
-pub(super) fn prepare_camera_presentation(
-    previous: &ActiveCamera,
+pub(super) fn prepare_physical_fly_presentation(
+    previous: &ActivePhysicalFly,
     solved: &HostPhysicalBodyTick,
-    view_direction: Vector3,
-) -> Result<PreparedCameraPresentation> {
+) -> Result<PreparedPhysicalFlyPresentation> {
     let motion = &solved.result.motion;
     let body_motion = motion
         .path
@@ -64,18 +60,17 @@ pub(super) fn prepare_camera_presentation(
         solved.previous.pose,
         solved.current.pose,
         &body_motion,
-        view_direction,
     )?;
     let initial = serialize_path_point(viewer_path.anchor(), viewer_path.initial())?;
     let legs = serialize_path_legs(&viewer_path)?;
-    let viewer = presented_viewer_from_path(&viewer_path, view_direction)?;
-    report_placed_motion_recoveries("physical camera viewer", &viewer_path);
-    Ok(PreparedCameraPresentation {
+    let viewer = presented_viewer_from_path(&viewer_path)?;
+    report_placed_motion_recoveries("physical fly viewer", &viewer_path);
+    Ok(PreparedPhysicalFlyPresentation {
         initial,
         legs,
         viewer,
-        status: camera_tick_status(motion.status),
-        scene_residency: camera_scene_residency(solved.result.scene_residency),
+        status: physical_fly_tick_status(motion.status),
+        scene_residency: physical_fly_scene_residency(solved.result.scene_residency),
         ground_state: solved.current.contact.into(),
         constraint_count: motion.constraint_count,
         substeps: motion.substeps,
@@ -83,30 +78,13 @@ pub(super) fn prepare_camera_presentation(
     })
 }
 
-pub(super) fn normalized_view_direction(direction: [f32; 3]) -> Result<Vector3> {
-    ensure!(
-        direction.iter().all(|component| component.is_finite()),
-        "physical camera view direction must be finite"
-    );
-    let direction = Vector3::new(direction[0], direction[1], direction[2]);
-    ensure!(
-        direction.length() > f32::EPSILON,
-        "physical camera view direction must be non-zero"
-    );
-    Ok(direction.normalize())
-}
-
-pub(super) fn grounded_viewer_offset(view_direction: Vector3) -> Vector3 {
-    Vector3::new(0.0, 0.0, HUMAN_EYE_HEIGHT) + view_direction * FIRST_PERSON_FORWARD_OFFSET
-}
-
 pub(super) fn parse_registration_residency(
-    residency: &PhysicalCameraResidency,
+    residency: &PhysicalFlyResidency,
 ) -> Result<(Guid, Option<Guid>)> {
     let owner = parse_hex_guid(&residency.landblock_id, "camera landblock")?;
     ensure!(
         landblock_key(owner) == owner,
-        "physical camera landblock must be a normalized 0xFFFF owner"
+        "physical fly landblock must be a normalized 0xFFFF owner"
     );
     let cell = residency
         .env_cell_id
@@ -116,7 +94,7 @@ pub(super) fn parse_registration_residency(
     if let Some(cell) = cell {
         ensure!(
             landblock_key(cell) == owner && (cell.0 & 0xffff) >= 0x0100,
-            "physical camera EnvCell does not belong to its normalized landblock owner"
+            "physical fly EnvCell does not belong to its normalized landblock owner"
         );
     }
     Ok((owner, cell))
@@ -142,7 +120,7 @@ pub(super) fn scene_point_to_residency_pose(
     if cell.is_none() {
         ensure!(
             derived_owner == owner,
-            "outdoor physical camera position does not belong to its supplied landblock"
+            "outdoor physical fly position does not belong to its supplied landblock"
         );
     }
     let coords = reanchor_point(derived.coords, derived_owner, owner);
@@ -189,20 +167,20 @@ pub(super) fn pose_with_cell(mut pose: WorldPosition, cell: Option<Guid>) -> Res
     Ok(pose.normalize_outdoor_landblock_frame()?)
 }
 
+/// Portal-transits the retail 0.3 m viewer independently at every accepted body-path fraction.
+///
+/// Retail transitions `viewer_sphere` on every normal draw (`acclient.c:138800-138918`); retaining
+/// the solver fractions prevents the visual viewer from cutting across a collision-bent body path.
 pub(super) fn transit_presented_viewer_path(
     scene: &CollisionScene,
-    previous: &ActiveCamera,
+    previous: &ActivePhysicalFly,
     previous_body_pose: WorldPosition,
     candidate_body_pose: WorldPosition,
     body_motion: &[MotionWaypoint],
-    direction: Vector3,
 ) -> Result<PlacedMotionPath> {
     let anchor = landblock_key(previous_body_pose.landblock_id);
     let viewer_owner = landblock_key(previous.viewer.pose.landblock_id);
     let start = reanchor_point(previous.viewer.pose.coords, viewer_owner, anchor);
-    let mode = previous.input.mode();
-    let initial_viewer_offset = viewer_offset(mode, previous.viewer.direction);
-    let final_viewer_offset = viewer_offset(mode, direction);
     let initial_body = reanchor_point(
         previous_body_pose.coords,
         landblock_key(previous_body_pose.landblock_id),
@@ -216,20 +194,14 @@ pub(super) fn transit_presented_viewer_path(
     let waypoints = body_motion
         .iter()
         .map(|waypoint| MotionWaypoint {
-            // Body response may bend several times during one tick, while a view-direction change
-            // moves the first-person offset over that entire tick. Interpolating the offset at the
-            // solver's own fractions preserves both facts instead of concentrating a turn into the
-            // first substep.
-            center: waypoint.center
-                + initial_viewer_offset
-                + (final_viewer_offset - initial_viewer_offset) * waypoint.end_fraction,
+            center: waypoint.center,
             end_fraction: waypoint.end_fraction,
             placement: MotionWaypointPlacement::Traverse,
         })
         .collect::<Vec<_>>();
     let waypoints = if waypoints.is_empty() {
         vec![MotionWaypoint {
-            center: candidate_body + final_viewer_offset,
+            center: candidate_body,
             end_fraction: 1.0,
             placement: MotionWaypointPlacement::Traverse,
         }]
@@ -237,8 +209,7 @@ pub(super) fn transit_presented_viewer_path(
         waypoints
     };
     debug_assert!(
-        (start - (initial_body + initial_viewer_offset)).length() < 0.01
-            || previous.viewer.pose != previous_body_pose,
+        (start - initial_body).length() < 0.01 || previous.viewer.pose != previous_body_pose,
         "camera viewer and body unexpectedly diverged without a prior presentation hold"
     );
     Ok(scene.transit_motion_path(PlacedMotionPathRequest {
@@ -250,20 +221,10 @@ pub(super) fn transit_presented_viewer_path(
     })?)
 }
 
-fn viewer_offset(mode: PhysicalCameraMode, direction: Vector3) -> Vector3 {
-    match mode {
-        PhysicalCameraMode::PhysicalFly => Vector3::zero(),
-        PhysicalCameraMode::GroundedWalk => grounded_viewer_offset(direction),
-    }
-}
-
-fn serialize_path_point(
-    anchor: Guid,
-    point: &PlacedMotionPoint,
-) -> Result<PhysicalCameraPathPoint> {
+fn serialize_path_point(anchor: Guid, point: &PlacedMotionPoint) -> Result<PhysicalFlyPathPoint> {
     let presented = present_placed_motion_point(anchor, point)?;
-    Ok(PhysicalCameraPathPoint {
-        residency: PhysicalCameraResidency {
+    Ok(PhysicalFlyPathPoint {
+        residency: PhysicalFlyResidency {
             landblock_id: format!("0x{:08x}", presented.owner.0),
             env_cell_id: presented.cell.map(|cell| format!("0x{:08x}", cell.0)),
         },
@@ -271,11 +232,11 @@ fn serialize_path_point(
     })
 }
 
-fn serialize_path_legs(path: &PlacedMotionPath) -> Result<Vec<PhysicalCameraPathLeg>> {
+fn serialize_path_legs(path: &PlacedMotionPath) -> Result<Vec<PhysicalFlyPathLeg>> {
     path.legs()
         .iter()
         .map(|leg| {
-            Ok(PhysicalCameraPathLeg {
+            Ok(PhysicalFlyPathLeg {
                 end_fraction: leg.end_fraction(),
                 end: serialize_path_point(path.anchor(), leg.end())?,
             })
@@ -283,10 +244,7 @@ fn serialize_path_legs(path: &PlacedMotionPath) -> Result<Vec<PhysicalCameraPath
         .collect()
 }
 
-fn presented_viewer_from_path(
-    path: &PlacedMotionPath,
-    direction: Vector3,
-) -> Result<PresentedViewer> {
+fn presented_viewer_from_path(path: &PlacedMotionPath) -> Result<PresentedViewer> {
     let point = path.final_point();
     let presented = present_placed_motion_point(path.anchor(), point)?;
     let mut pose = WorldPosition {
@@ -301,32 +259,31 @@ fn presented_viewer_from_path(
     Ok(PresentedViewer {
         pose,
         cell: presented.cell,
-        direction,
     })
 }
 
-fn camera_tick_status(status: GenericPhysicalBodyTickStatus) -> PhysicalCameraTickStatus {
+fn physical_fly_tick_status(status: GenericPhysicalBodyTickStatus) -> PhysicalFlyTickStatus {
     match status {
-        GenericPhysicalBodyTickStatus::Solved => PhysicalCameraTickStatus::Solved,
+        GenericPhysicalBodyTickStatus::Solved => PhysicalFlyTickStatus::Solved,
         GenericPhysicalBodyTickStatus::SubstepBudgetExceeded => {
-            PhysicalCameraTickStatus::SubstepBudgetExceeded
+            PhysicalFlyTickStatus::SubstepBudgetExceeded
         }
         GenericPhysicalBodyTickStatus::ContactBudgetExceeded => {
-            PhysicalCameraTickStatus::ContactBudgetExceeded
+            PhysicalFlyTickStatus::ContactBudgetExceeded
         }
     }
 }
 
-fn camera_scene_residency(residency: PhysicalBodySceneResidency) -> PhysicalCameraSceneResidency {
+fn physical_fly_scene_residency(
+    residency: PhysicalBodySceneResidency,
+) -> PhysicalFlySceneResidency {
     match residency {
-        PhysicalBodySceneResidency::Resident => PhysicalCameraSceneResidency::Resident,
+        PhysicalBodySceneResidency::Resident => PhysicalFlySceneResidency::Resident,
         PhysicalBodySceneResidency::MissingOwner { owner } => {
-            PhysicalCameraSceneResidency::MissingOwner {
+            PhysicalFlySceneResidency::MissingOwner {
                 landblock_id: format!("0x{:08x}", owner.0),
             }
         }
-        PhysicalBodySceneResidency::OutsideLandscape => {
-            PhysicalCameraSceneResidency::OutsideLandscape
-        }
+        PhysicalBodySceneResidency::OutsideLandscape => PhysicalFlySceneResidency::OutsideLandscape,
     }
 }

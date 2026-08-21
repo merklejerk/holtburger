@@ -14,11 +14,19 @@ import {
 } from "./explorer-entity-commands";
 import {
 	decodeExplorerPossession,
-	type ExplorerMotionOrder,
+	decodePossessionEventOutcome,
+	decodePossessionEventQueueReceipt,
+	decodePossessionIntentResult,
 	type ExplorerPossession,
+	type ExplorerPossessionEventRequest,
+	type ExplorerPossessionIntent,
+	type PossessionEventQueueReceipt,
+	type PossessionEventOutcome,
+	type PossessionIntentResult,
 } from "./explorer-entity-possession";
 
 const DYNAMIC_ENTITY_EVENT = "explorer-dynamic-entity";
+const POSSESSION_EVENT_OUTCOME = "explorer-possession-event-outcome";
 
 /** Injectable Tauri boundary for listener-before-request hydration and focused commands. */
 export interface ExplorerDynamicEntityTransport {
@@ -34,12 +42,15 @@ export class ExplorerDynamicEntitySession {
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ExplorerDynamicEntityTransport;
 	readonly #listeners = new Set<(event: DynamicEntityEvent) => void>();
+	readonly #possessionOutcomeListeners = new Set<
+		(outcome: PossessionEventOutcome) => void
+	>();
 	readonly #waiters = new Set<{
 		readonly reached: () => boolean;
 		readonly resolve: () => void;
 		readonly reject: (reason: Error) => void;
 	}>();
-	#unlisten: (() => void) | null = null;
+	#unlisten: readonly [() => void, () => void] | null = null;
 	#acceptedRevision = 0;
 
 	constructor(
@@ -54,23 +65,29 @@ export class ExplorerDynamicEntitySession {
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
 		this.mirror.awaitSnapshot();
-		const unlisten = await this.#transport.listen(
+		const unlistenDynamic = await this.#transport.listen(
 			DYNAMIC_ENTITY_EVENT,
 			(payload) => this.#receive(payload),
 		);
-		this.#unlisten = unlisten;
+		let unlistenPossession: (() => void) | null = null;
 		try {
+			unlistenPossession = await this.#transport.listen(
+				POSSESSION_EVENT_OUTCOME,
+				(payload) => this.#receivePossessionOutcome(payload),
+			);
+			this.#unlisten = [unlistenDynamic, unlistenPossession];
 			await this.#transport.invoke("request_explorer_dynamic_entity_snapshot");
 		} catch (error) {
 			this.#unlisten = null;
-			unlisten();
+			unlistenPossession?.();
+			unlistenDynamic();
 			throw error;
 		}
 	}
 
 	/** Stop receiving live mutations; a later start requires a replacement snapshot. */
 	stop(): void {
-		this.#unlisten?.();
+		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
 		this.mirror.awaitSnapshot();
 		for (const waiter of this.#waiters) {
@@ -154,26 +171,40 @@ export class ExplorerDynamicEntitySession {
 		);
 	}
 
-	/**
-	 * Replace the order the possessed entity performs from the next host tick.
-	 *
-	 * Resolves to whether anything is possessed, so a caller can tell "the order was accepted" from
-	 * "nothing is listening" without a second round trip.
-	 */
-	async setMotionOrder(order: ExplorerMotionOrder): Promise<boolean> {
-		const accepted = await this.#transport.invoke(
-			"set_explorer_entity_motion",
-			{
-				request: order,
-			},
+	/** Replace one coalescible semantic snapshot for an exact possession epoch. */
+	async setPossessionIntent(
+		request: ExplorerPossessionIntent,
+	): Promise<PossessionIntentResult> {
+		return decodePossessionIntentResult(
+			await this.#transport.invoke("set_explorer_possession_intent", {
+				request,
+			}),
 		);
-		return accepted === true;
+	}
+
+	/** Queue one non-coalescible lifecycle edge for fixed-tick application. */
+	async queuePossessionEvent(
+		request: ExplorerPossessionEventRequest,
+	): Promise<PossessionEventQueueReceipt> {
+		return decodePossessionEventQueueReceipt(
+			await this.#transport.invoke("queue_explorer_possession_event", {
+				request,
+			}),
+		);
 	}
 
 	/** Observe accepted current-state changes without creating another entity authority. */
 	subscribe(listener: (event: DynamicEntityEvent) => void): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
+	}
+
+	/** Observe fixed-tick lifecycle outcomes for the active possession generation. */
+	subscribePossessionOutcomes(
+		listener: (outcome: PossessionEventOutcome) => void,
+	): () => void {
+		this.#possessionOutcomeListeners.add(listener);
+		return () => this.#possessionOutcomeListeners.delete(listener);
 	}
 
 	#receive(payload: unknown): void {
@@ -186,6 +217,11 @@ export class ExplorerDynamicEntitySession {
 			this.#waiters.delete(waiter);
 			waiter.resolve();
 		}
+	}
+
+	#receivePossessionOutcome(payload: unknown): void {
+		const outcome = decodePossessionEventOutcome(payload);
+		for (const listener of this.#possessionOutcomeListeners) listener(outcome);
 	}
 
 	/** Pair command completion with the focused event the host publishes before returning. */

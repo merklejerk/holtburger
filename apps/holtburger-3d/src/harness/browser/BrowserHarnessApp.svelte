@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
+	import { FrontendCameraController } from "../../lib/game/controls/frontend-camera-controller";
 	import {
-		httpBoomSweepSource,
-		type BoomSweepSource,
-	} from "../../explorer/boom-sweep-source";
+		advanceBoomState,
+		initialBoomState,
+	} from "../../lib/game/controls/boom-camera-controller";
+	import type { BoomSweepSource } from "../../lib/game/controls/boom-sweep-source";
+	import { httpBoomSweepSource } from "./http-boom-sweep-source";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import type { HttpLandblockSourceBatchDiagnostic } from "../../lib/assets/http-landblock-content-source";
@@ -62,9 +65,9 @@
 	} from "../../lib/game/renderer/texture-filtering-policy";
 	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
 	import {
-		resolvePhysicalCameraViewDirection,
-		type PhysicalCameraPlacement,
-	} from "../../lib/game/motion/host-physical-camera-path";
+		resolvePhysicalFlyViewDirection,
+		type PhysicalFlyPlacement,
+	} from "../../lib/game/motion/host-physical-fly-path";
 	import {
 		createExplorerLaunchRequest,
 		createExplorerRelocationRequest,
@@ -76,6 +79,14 @@
 		DynamicEntityView,
 	} from "../../lib/game/runtime/dynamic-entity-feed";
 	import { HttpExplorerEntityHost } from "./http-explorer-entity-host";
+	import type {
+		ExplorerPossession,
+		ExplorerPossessionEventRequest,
+		ExplorerPossessionIntent,
+		PossessionEventQueueReceipt,
+		PossessionMotionProbe,
+	} from "../../explorer/explorer-entity-possession";
+	import type { PossessionTickResponse } from "./http-explorer-entity-host";
 	import {
 		installTerrainGlTrace,
 		type TerrainGlTrace,
@@ -395,6 +406,34 @@
 		readonly tickExplorerEntities: (
 			durationMilliseconds: number,
 		) => Promise<DynamicEntityEvent | null>;
+		/** Acquire or release exact host possession without browser input synthesis. */
+		readonly possessExplorerEntity: (
+			guid: number | null,
+		) => Promise<ExplorerPossession>;
+		/** Replace one generation-bound semantic possession snapshot. */
+		readonly setPossessionIntent: (
+			request: ExplorerPossessionIntent,
+		) => Promise<string>;
+		/** Queue one ordered jump/reset edge with its complete contemporaneous snapshot. */
+		readonly queuePossessionEvent: (
+			request: ExplorerPossessionEventRequest,
+		) => Promise<PossessionEventQueueReceipt>;
+		/** Advance and project one deterministic possession tick plus lifecycle outcomes. */
+		readonly tickPossession: (
+			durationMilliseconds: number,
+		) => Promise<PossessionTickResponse>;
+		/** Read the host's exact active stance/substate/modifier/clip projection. */
+		readonly possessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
+		/** Exercise the compiled shared third-person router/look/boom ownership in-browser. */
+		readonly probeThirdPersonControls: () => {
+			readonly boomDesiredAfter: number;
+			readonly boomDesiredBefore: number;
+			readonly cameraYawAfterKeyboardTurn: number;
+			readonly cameraYawAfterPointerOrbit: number;
+			readonly cameraYawBefore: number;
+			readonly characterInputCountAfterKeyboard: number;
+			readonly characterInputCountAfterPointerAndWheel: number;
+		};
 		/** Apply a host-resolved discontinuity and synchronously snap frontend placement. */
 		readonly relocateExplorerEntity: (
 			guid: number,
@@ -1052,7 +1091,7 @@
 	}
 
 	function entityScenarioAnchor(): {
-		readonly placement: PhysicalCameraPlacement;
+		readonly placement: PhysicalFlyPlacement;
 		readonly direction: readonly [number, number, number];
 	} {
 		if (cameraEvidence === null)
@@ -1068,7 +1107,7 @@
 					landblockId: cameraEvidence.landblockId,
 				},
 			},
-			direction: resolvePhysicalCameraViewDirection({
+			direction: resolvePhysicalFlyViewDirection({
 				forward: [axes.forward.x, axes.forward.y, axes.forward.z],
 				right: [axes.right.x, axes.right.y, axes.right.z],
 				up: [axes.up.x, axes.up.y, axes.up.z],
@@ -1183,6 +1222,122 @@
 		if (event === null) return null;
 		applyDynamicEntityAdvanceEvent(event);
 		return event;
+	}
+
+	async function possessExplorerEntity(
+		guid: number | null,
+	): Promise<ExplorerPossession> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.possess(guid);
+	}
+
+	async function setPossessionIntent(
+		request: ExplorerPossessionIntent,
+	): Promise<string> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.setPossessionIntent(request);
+	}
+
+	async function queuePossessionEvent(
+		request: ExplorerPossessionEventRequest,
+	): Promise<PossessionEventQueueReceipt> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.queuePossessionEvent(request);
+	}
+
+	async function tickPossession(
+		durationMilliseconds: number,
+	): Promise<PossessionTickResponse> {
+		if (!runtime || !entityHost)
+			throw new Error("Browser harness possession requires an active runtime.");
+		if (!Number.isFinite(durationMilliseconds) || durationMilliseconds <= 0)
+			throw new Error("Possession tick duration must be positive and finite.");
+		const response = await entityHost.tickPossession(durationMilliseconds);
+		if (response.event !== null) applyDynamicEntityAdvanceEvent(response.event);
+		return response;
+	}
+
+	async function possessionMotionProbe(): Promise<PossessionMotionProbe | null> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.possessionMotionProbe();
+	}
+
+	function probeThirdPersonControls() {
+		const listeners = new Map<string, EventListener>();
+		const routedCharacterInput: unknown[] = [];
+		let wheelDistance = 0;
+		const canvas = {
+			addEventListener(
+				type: string,
+				listener: EventListenerOrEventListenerObject,
+			) {
+				if (typeof listener === "function") listeners.set(type, listener);
+			},
+			focus() {},
+			hasPointerCapture: () => false,
+			releasePointerCapture() {},
+			removeEventListener() {},
+			setPointerCapture() {},
+		} as unknown as HTMLCanvasElement;
+		const dispatch = (type: string, event: object) =>
+			listeners.get(type)?.({
+				preventDefault() {},
+				...event,
+			} as Event);
+		const controller = new FrontendCameraController({
+			canvas,
+			onChange() {},
+			onCharacterInput: (input) => routedCharacterInput.push(input),
+			onPhysicalWheel: (distance) => (wheelDistance = distance),
+			requestAnimationFrame: () => 1,
+			cancelAnimationFrame() {},
+		});
+		controller.setControlScheme({ kind: "possessed-character" });
+		const cameraYawBefore = controller.snapshotState().yawRadians;
+		dispatch("keydown", { key: "a", repeat: false, shiftKey: false });
+		const cameraYawAfterKeyboardTurn = controller.snapshotState().yawRadians;
+		const characterInputCountAfterKeyboard = routedCharacterInput.length;
+		dispatch("pointerdown", {
+			button: 0,
+			clientX: 0,
+			clientY: 0,
+			pointerId: 1,
+		});
+		dispatch("pointermove", {
+			clientX: 20,
+			clientY: 5,
+			pointerId: 1,
+			shiftKey: false,
+		});
+		const cameraYawAfterPointerOrbit = controller.snapshotState().yawRadians;
+		dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
+		const characterInputCountAfterPointerAndWheel = routedCharacterInput.length;
+		const tuning = {
+			easeOutSeconds: 0.2,
+			maximumDistance: 10,
+			minimumDistance: 1,
+		};
+		const boomBefore = initialBoomState(3, tuning);
+		const boomAfter = advanceBoomState(
+			boomBefore,
+			{ zoomMetersPerSecond: wheelDistance / 0.1 },
+			0.1,
+			tuning,
+		);
+		controller.dispose();
+		return {
+			boomDesiredAfter: boomAfter.desiredDistance,
+			boomDesiredBefore: boomBefore.desiredDistance,
+			cameraYawAfterKeyboardTurn,
+			cameraYawAfterPointerOrbit,
+			cameraYawBefore,
+			characterInputCountAfterKeyboard,
+			characterInputCountAfterPointerAndWheel,
+		};
 	}
 
 	async function relocateExplorerEntity(
@@ -1724,8 +1879,14 @@
 					spawnExplorerEntityFleet,
 					despawnExplorerEntityFleet,
 					spawnSimulatedExplorerEntity,
+					possessExplorerEntity,
+					possessionMotionProbe,
+					probeThirdPersonControls,
+					queuePossessionEvent,
+					setPossessionIntent,
 					sweepSphereDistance,
 					tickExplorerEntities,
+					tickPossession,
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;

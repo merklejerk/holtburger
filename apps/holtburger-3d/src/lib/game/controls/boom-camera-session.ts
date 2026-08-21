@@ -1,7 +1,7 @@
-import { createLandblockWorldOrigin } from "../lib/game/landblocks";
-import { sceneVec3, type SceneVec3 } from "../lib/assets/ac-frame";
-import { Vec3 } from "../lib/game/math/types";
-import type { ResolvedSceneOrigin } from "../lib/game/scene";
+import { sceneVec3, type SceneVec3 } from "../../assets/ac-frame";
+import { createLandblockWorldOrigin } from "../landblocks";
+import { Vec3 } from "../math/types";
+import type { ResolvedSceneOrigin } from "../scene";
 import {
 	advanceBoomState,
 	boomCameraPosition,

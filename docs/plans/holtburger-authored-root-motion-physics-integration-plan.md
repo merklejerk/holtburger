@@ -884,14 +884,16 @@ transitions are frequent.
 holding at `high_frame` for up to one host tick — 33 ms at 30 Hz. Carrying a per-tick frame number to
 eliminate a *sub*-33 ms error while accepting a 33 ms one is incoherent.
 
-So the projection carries clip identity, the traversal window, and the rate — and not the frame
-number. The window and rate are not optional: 17,242 authored windows have a negative rate and must
-be entered at the **high** frame and played backwards, 11,182 have a zero rate and must hold, and 833
-are narrower than their animation. "Just the animation id" would play all of those wrong, visibly.
+So the projection carries clip identity, the traversal window, the rate, and host-derived completion
+behavior — and not the frame number. Those facts are not optional: 17,242 authored windows have a
+negative rate and must be entered at the **high** frame and played backwards, 11,182 have a zero rate
+and must hold, and 833 are narrower than their animation. The completion behavior distinguishes a
+one-shot link from the looping tail. "Just the animation id" would play all of those wrong, visibly.
 
 **What this collapses.** The projection can be published on *change* rather than every tick, since
-clip identity changes only at a transition — which is simpler on the frontend too, because a swap
-happens on receipt rather than by diffing. And `SequenceTick::completed_clips` loses its last
+the playing clip and its completion behavior change only at a sequence boundary — which is simpler
+on the frontend too, because a swap happens on receipt rather than by diffing. And
+`SequenceTick::completed_clips` loses its last
 hypothetical consumer: it was justified as something the Phase 6 command surface would need, Phase 6
 shipped without it, and "the transition finished" is now observable as the clip changing. It is
 deleted under the plan's own rule that every field needs a named consumer.
@@ -1022,11 +1024,11 @@ All three are unreachable in shipped content — the census found no table-reach
 blocking hook or `SetOmega`, the eight `SetOmega` hooks in the archive living only in animations no
 table references — so a complaint is a tripwire rather than an expected event.
 
-### D12. A projected clip laps its window; it does not hold at the far bound
+### D12. A projected clip carries host-owned completion behavior
 
-**Ratified 2026-08-20.** Phase 5's deliverable said the frontend "advances within the current clip
-and clamps at its far bound". Building it showed that clamping cannot be right, and the plan already
-contained the criterion that proves it.
+**Corrected 2026-08-21 after runtime observation.** The 2026-08-20 decision made every projected
+clip lap because a looping idle is published once and must not freeze. That generalized a true fact
+about the cyclic tail into a false fact about one-shot transitions.
 
 `MotionSequenceRuntime::advance_to_next_clip` moves the cursor to `current + 1`, or to `first_cyclic`
 when it is already last. For a lone cyclic idle those are the same node, so the host resets
@@ -1036,15 +1038,17 @@ never again**. A frontend that held at the far bound would play each idle throug
 render a statue, which fails "a possessed entity's rendered idle comes from its motion table" in this
 phase's own acceptance criteria.
 
-So the frontend laps back to the clip's entry frame, which is what the host does for the same node.
-Both ends then run the same traversal over the same window at the same rate, which is exactly the
-agreement D8 gave up the frame number to get.
+The sequence already owns the missing distinction through `first_cyclic`. It now projects that fact
+as `completion: loop | hold`: nodes in the looping tail re-enter their window, while transition
+nodes retain their terminal pose until the successor projection arrives. The frontend neither
+derives cyclicity nor chooses the successor.
 
-**What lapping costs.** A one-shot transition clip also laps, because the projection carries no
-`is_cyclic` and should not: at the rendering layer, "advance this window at this rate" is the whole
-job. The host crosses that clip's boundary on the same tick the frontend reaches it, so the wrap
-lasts until the successor projection arrives — the same sub-33 ms boundary artifact this phase
-already accepted, in a different costume. Prediction remains the eventual fix.
+**Evidence that overturned the old decision.** Clay in Magic and Hand Combat lands through reversed
+animation `0x030004A6`, window `[0, 15]` at `-30` fps. Lapping it jumps from the idle-side low frame
+back to the falling-side high frame for the projection gap, producing a visible one-frame stance
+flash that retail does not show. Non-Combat uses the shorter forward `0x030004AA` window `[0, 5]` at
+`+30` fps, whose equivalent wrap is less conspicuous. Holding the appropriate terminal pose removes
+the observable error without adding a shared cursor or predicting the next clip.
 
 **Entry frames are retail's, not ours.** `clipEntryFrame` returns `lowFrame` forward and
 `highFrame + 1 - 0.0002` reversed, mirroring `AnimSequenceNode::get_starting_frame`
@@ -1406,18 +1410,26 @@ solver — so it is deliberately unwired rather than accidentally dead.
 clock". `advance(quantum)` takes elapsed time as an argument, so the caller already owns the clock
 and a clock type would be a wrapper with one method. Deleted rather than built.
 
-**Retail composes a clip's entry frame twice.** Crossing a boundary composes the next clip's entry
-frame immediately (`acclient.c:327012-327021`) and then composes it again when the cursor departs it
-(`:327150-327160`), while the previous clip's high frame is never composed at all. For a single
-looping clip whose frames are identical the two effects cancel exactly; in general they do not.
-Recorded as a `RETAIL QUIRK` on `advance_to_next_clip` rather than corrected, because every linked
-transition's authored displacement depends on it.
+**Corrected 2026-08-21: every root frame contributes exactly once.** Retail composes a successor's
+entry frame at the boundary (`acclient.c:327012-327021`) and again when that frame departs
+(`:327150-327160`), while ordinary forward playback never composes the leaving clip's terminal
+frame. The original port preserved that as a `RETAIL QUIRK`. We later chose the cleaner authored
+invariant: completing a clip departs its terminal frame, including its hooks and physics slice,
+exactly once; entering the successor only positions the cursor. The retained
+`root_boundary_divergence_census` measured 26,421 directly-authored internal and cyclic boundaries:
+half had no translation difference, p95 was 1.54 cm, p99 was 5.10 cm, and the maximum was 2.01 m;
+77 changed rotation, with a 3.90-degree maximum. The large changes are authored terminal strides
+that retail substitutes with the next entry frame, not numerical instability. This is an explicit
+aesthetic and structural divergence, not a claim of retail parity.
 
-**`re_modify` is wrong in retail and reproduced anyway.** It iterates a snapshot of the modifier list
-while repeatedly popping the live list's head, and re-selecting a modifier pushes it back onto that
-head (`acclient.c:323847-323874`). With one modifier the replay is correct; with N, the head is
-re-installed N times and the rest are never replayed. ACE matches. Marked `RETAIL QUIRK`; the naive
-"replay each modifier once" version does not terminate, which is what surfaced the difference.
+**Corrected 2026-08-21: `re_modify` installs every active modifier once.** Retail iterates a snapshot
+of the modifier list while repeatedly popping the live list's head, and re-selecting a modifier
+pushes it back onto that head (`acclient.c:323847-323874`). With N modifiers the head is installed N
+times and the rest are omitted; ACE matches. The original port reproduced that loop. The corrected
+implementation no longer mutates or re-selects semantic state: it looks up each active modifier and
+combines its physics once. This makes simultaneous sidestep and turn independent of list ordering.
+The archive contains 1,222 turn/sidestep modifier records, and the normal interpreted movement
+surface can activate both together, so the divergence is observable and intentional.
 
 **`Frame::subtract1` and ACE's `AFrame.Subtract` are not the same operation.** Retail computes the
 new rotation first and subtracts the translation through *that* rotation
@@ -1700,10 +1712,10 @@ assets are warmed and shared. Both change what remains, not what is built.
 **The clip swap subtracted more than it added.** `AnimationRecord` held a bare `PreparedAnimation`
 and traversed it whole, forward, at a fixed rate; a motion clip needs a window and a signed rate.
 Rather than branch on which kind of playback a record holds, the three inter-dependent facts became
-one type — `PlayingClip { animation, lowFrame, highFrame, framesPerSecond }` — and a setup-default
-resident is now the `wholeAnimationClip` case of it. `advanceCyclicFrame` and `sampleAnimationPose`
-take the clip instead of loose parameters, so a window can no longer be paired with the wrong
-animation, and the direction can no longer contradict the rate that implies it.
+one type — `PlayingClip { animation, lowFrame, highFrame, framesPerSecond, completion }` — and a
+setup-default resident is now the `wholeAnimationClip` case of it. `advancePlayingFrame` and
+`sampleAnimationPose` take the clip instead of loose parameters, so a window can no longer be paired
+with the wrong animation, and terminal behavior cannot contradict the host sequence that owns it.
 
 `AnimationSystem.install` was deleted in the same change: `stageOwner` is the only path production
 ever used, and the tests that called it now stage and commit like production does.
@@ -1718,8 +1730,7 @@ generation, while behavior targets carry the *dynamics owner* generation; the tw
 counters. It now carries `behaviorGeneration`, so a projection in flight when an entity was replaced
 cannot install onto its successor.
 
-**D12** records why the frontend laps the window instead of holding at its far bound, which reverses
-one line of the deliverable below.
+**D12** records why cyclic tails lap while one-shot transitions hold at their far bound.
 
 #### Phase 5 findings: the browser harness could not stage motion at all
 
@@ -1751,9 +1762,9 @@ when the host names a clip.
 host publishes on change and a looping idle never changes. Playback was still live and still
 stepping at advance 40.
 
-That is D12 measured rather than argued. The clip laps roughly 1.3 times across those 40 ticks, so a
-receiver that held at the far bound would have reached frame 29 around tick 30 and rendered a statue
-from there — with no further projection ever arriving to release it.
+That is the looping half of D12 measured rather than argued. The clip laps roughly 1.3 times across
+those 40 ticks; its projected `loop` completion prevents a receiver from rendering a statue when no
+further projection arrives.
 
 #### Phase 5 findings: the host decodes what it throws away
 
@@ -1812,12 +1823,11 @@ choice is visible if a byte budget is ever needed.
   per D9. Report the resident set size.
 - Let the frontend swap the playing clip when a new projection names a different one, entering at
   the low or high frame according to the rate's sign.
-- Let the frontend advance within the current clip's window at render rate, lapping back to its entry
-  frame at the far bound per **D12**. It never selects the next clip: which clip follows is link
-  resolution against host state it does not have.
-- Accept the boundary artifact for a first implementation: at a clip change the frontend holds until
-  the next projection arrives, under 33 ms at a 30 Hz host. Prediction is the eventual fix, never a
-  shared mutable cursor.
+- Let the frontend advance within the current clip's window at render rate, lapping cyclic tails and
+  holding one-shot transitions at their terminal pose per **D12**. It never selects the next clip:
+  which clip follows is link resolution against host state it does not have.
+- Accept only terminal-pose hold during the sub-33 ms projection gap at a 30 Hz host. Prediction is
+  an eventual option for reducing that hold, never a shared mutable cursor.
 - Keep the placement subsystem as the sole scene-root writer.
 - Let animation sample articulated parts and presentation hooks from the playing clip while dropping
   root position frames from visual application.
@@ -2116,9 +2126,9 @@ no code references left — only stale prose. What remained:
   Collapsing them would push table knowledge into the controller layer, and the mapping between them
   is exactly what the resolvers exist to perform. Recorded on the type itself so the question is not
   reopened blind.
-- **`GroundedCameraDriveRequest` stays a third spelling**, as the plan predicted: it is the serde
-  boundary and must version independently of the internal type. Its *name* becomes wrong when the
-  grounded camera retires, so it renames with the dissolution rather than now.
+- **`GroundedCameraDriveRequest` no longer survives** just because it was an independently
+  versioned serde boundary. **Closed 2026-08-21:** the possessed controller cutover retired the
+  entire synthetic grounded-camera route, so this wire type was deleted rather than renamed.
 - The one surviving `reduced asset` reference was a test constant. The assertion is real — authored
   root motion reproduces content's measured 2.6017 m/s walk — so the constant became
   `MEASURED_WALK_SPEED` with the deleted mechanism's provenance kept as a comment.
@@ -2169,8 +2179,8 @@ Recorded so it is chosen rather than forgotten. None of these are fixed by this 
 | `SpatialSolveRequest::local_drive` as a sibling intent channel | Belongs to TUI adaptation after the Explorer-led design settles |
 | `Attack` and `Ethereal` hooks carried but unconsumed | Combat and collision-state systems are future work; the contract preserves them everywhere so that work needs no re-plumbing |
 | ~~Two public types named `MotionState`~~ **Closed 2026-08-20**: the core type is now `CharacterDrive`. Original entry retained for the reasoning: | `holtburger_core::client::movement_types::MotionState` is controller intent (`gait`, `longitudinal`, `lateral`, `turning`), while `holtburger_world::motion::MotionState` is retail's motion-table state machine (`style`, `substate`, `substate_mod`, modifiers) | Different crates, so nothing collides at compile time — which is exactly why it will go unnoticed. The world type is named after retail deliberately, so anyone cross-reading the decompile lands there; the core one is the misnomer, being a drive intent rather than a motion state. Rename during the Phase 7 vocabulary sweep |
-| The same four locomotion axes are spelled three times: `GroundedCharacterDrive` (frontend), `GroundedCameraDriveRequest` (Tauri wire), and `movement_types::MotionState` (core) | The wire type earns its separate existence; the other two do not. `MotionOrder` should absorb `movement_types::MotionState` rather than become a fourth spelling, which is a larger cutover than any remaining phase currently scopes |
-| `resolve_character_drive` computes continuous grounded movement with retail's **leave-ground** formula — **closing**, see `holtburger-possessed-entity-controller-surface-plan.md` Phase 3 | `CMotionInterp::get_state_velocity` (`acclient.c:329840-329875`) is reached only from `get_leave_ground_velocity` (`:330078`), so its hardcoded `3.12` walk, `4.0` run, and `1.25` sidestep scalars are the velocity retail carries into a *jump*. Retail's grounded movement is authored root motion through `CSequence`. Using the launch formula for continuous drive is a fair stand-in for a bodyless camera and wrong for a rendered character; a controllable entity must not inherit it |
+| ~~The same four locomotion axes are spelled three times~~ **Closed 2026-08-21:** the frontend spelling is now the shared `CharacterDrive`; the grounded-camera Tauri wire type was deleted; core `CharacterDrive` remains intentionally distinct from authored `MotionOrder` | The removed wire type earned an independent boundary only while its camera consumer existed. Possession now carries one semantic wire DTO and resolves that intent to authored orders at the host-owned policy boundary |
+| ~~`resolve_character_drive` computes continuous grounded movement with retail's leave-ground formula~~ **Closed 2026-08-21** by `holtburger-possessed-entity-controller-surface-plan.md` Phase 4: the synthetic grounded camera, resolver, export, and continuous-drive tests were deleted | `CMotionInterp::get_state_velocity` (`acclient.c:329840-329875`) is reached only from `get_leave_ground_velocity` (`:330078`), so its hardcoded `3.12` walk, `4.0` run, and `1.25` sidestep scalars remain used only to resolve jump launch velocity. Ordinary possessed locomotion is authored root motion through `CSequence` |
 | The motion contract is held for the process lifetime: every table and animation, decoded at startup, never refcounted or evicted | Ratified 2026-08-20. The footprint is small — 1.85 MB over the cycle-reachable slice before hash-map overhead — and the alternative is a lifecycle for a contract that every entity may reach at any moment. Recorded so the permanence is a decision rather than an accident of startup wiring |
 | `ContentDecodeCache` bounds each type by **record count, not bytes**, so 8,192 gfx objs could be 5 MB or 500 MB | Ratified as acceptable 2026-08-20: the failure mode is a re-decode rather than a leak, and byte budgeting is its own investigation rather than a drive-by capacity change. Revisit if host memory ever becomes a real constraint |
 | ~~Physical omega is never represented as a global rotation~~ **Split 2026-08-20 into the three situations it was conflating.** As one row it misled repeatedly: retail has *two* omegas on two objects, and this row named neither precisely | Superseded by the three rows below |
@@ -2182,7 +2192,7 @@ Recorded so it is chosen rather than forgotten. None of these are fixed by this 
 | Server interpolation offsets, which **assign** the tick's offset rather than composing with it (`acclient.c:372004-372094`) | Client-mode only; the Explorer has no server, so a basis variant would have no producer. Traced in "Phase 0 findings" for whoever builds client mode |
 | Dead-reckoning constraint damping, which scales and eventually zeroes offset translation as drift accumulates (`acclient.c:372268-372296`) | Same — arrives with client mode, specified now so it is not rediscovered |
 | ~~The Bats root-rotation divergence~~ **Closed 2026-08-20 by applying the frames.** Census over all 5,935 archive setups: 129 declare a bare default animation, exactly one authors root motion (setup 0x02001752 / WCID 36449, zero translation, 0.44 degrees of yaw per frame), and **zero carriers are collidable** — that one resolves to `EntityCollisionParticipation::Suppressed`. The old marker justified itself with "correcting this would route frontend animation back into collision authority", which was true of nothing in the archive. Turning root frames now drive the **visual root only**, guarded by `authoredRootTranslates` so a translating carrier is refused rather than applied, and the culling bound goes rotation-invariant when they are used | Closed, not deferred. The entry survives because the divergence was re-diagnosed wrongly three times from its own stated reason rather than from content |
-| The third-person boom has not been *watched*: possession is not drivable from the browser harness | The harness can spawn, tick, and probe the sweep, but has no possession command, so the composed visual result — follow lag, pull-in, ease-out, orbit under zoom — is covered at the state level and unproven at the pixel level. Closing it means a harness possession command plus a frame-stepped capture, which is its own task; the Tauri client is the user's to run |
+| ~~The third-person boom has not been exercised while driving possession~~ **Closed 2026-08-21:** the browser harness now possesses spawned WCIDs and drives the complete control scheme through the real host boundary | WCID 1, 3, and 14 scenarios verify keyboard/entity and pointer/camera isolation, backward/turn/combined motion, jump release and landing, fallback sidestep where required, wheel-owned boom distance, and the composed boom state. Pixel inspection is not retained as separate debt because these are controller, host-pose, playback, and boom-state guarantees rather than image-quality claims |
 | `apps/holtburger-3d` `check:trace` fails on `scripts/portal-work-trace.ts` | Pre-existing at HEAD and unrelated to motion: the trace script calls `ParticleSystem.collectCohorts` and passes `renderAnchorOrigin`, neither of which the current particle API has. Agent-owned diagnostic tooling, so fixing it is its own task rather than a drive-by in a motion change |
 | Animated physics-BSP collision: the retail client poses BSP parts from the current animation frame, `PreparedEntityBspPart` uses the static setup transform | Measured at 10 setups, of which 4 are reachable by 7 solid catalog templates; the rest ignore collisions. Closing it would require part frames host-side, contradicting D2 for a population that does not justify it. Ships as a `RETAIL DIVERGENCE` marker with the enumerated census |
 

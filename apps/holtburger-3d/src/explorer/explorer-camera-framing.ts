@@ -5,7 +5,7 @@ import {
 } from "../lib/game/landblocks";
 import { Vec3 } from "../lib/game/math/types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
-import type { FreeFlyCameraPose } from "./free-fly-camera-controller";
+import type { FreeFlyCameraPose } from "../lib/game/controls/frontend-camera-controller";
 
 /** Minimal terrain query needed to reproduce the Explorer's automatic outdoor camera policy. */
 export interface ExplorerOutdoorSurfaceQuery {

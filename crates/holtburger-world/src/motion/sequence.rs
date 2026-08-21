@@ -168,6 +168,21 @@ pub struct MotionSequenceRuntime {
     omega: Vector3,
 }
 
+/// How presentation should behave when the current clip reaches its traversal boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionClipCompletion {
+    /// Hold the terminal pose while the authoritative sequence advances to its successor.
+    Hold,
+    /// Re-enter the clip because it belongs to the sequence's looping tail.
+    Loop,
+}
+
+/// Current node paired with the cyclic-tail fact only the authoritative sequence owns.
+pub(super) struct CurrentSequenceClip<'a> {
+    pub node: &'a SequenceNode,
+    pub completion: MotionClipCompletion,
+}
+
 impl MotionSequenceRuntime {
     pub fn new() -> Self {
         Self::default()
@@ -200,8 +215,20 @@ impl MotionSequenceRuntime {
         self.frame_number.floor() as i32
     }
 
-    pub fn current_clip(&self) -> Option<&SequenceNode> {
-        self.current.and_then(|index| self.nodes.get(index))
+    pub(super) fn current_clip(&self) -> Option<CurrentSequenceClip<'_>> {
+        let index = self.current?;
+        let node = self.nodes.get(index)?;
+        let first_cyclic = self
+            .first_cyclic
+            .expect("a sequence with a current clip must have a cyclic-tail marker");
+        Some(CurrentSequenceClip {
+            node,
+            completion: if index < first_cyclic {
+                MotionClipCompletion::Hold
+            } else {
+                MotionClipCompletion::Loop
+            },
+        })
     }
 
     pub fn clips(&self) -> &[SequenceNode] {
@@ -446,37 +473,31 @@ impl MotionSequenceRuntime {
 
     /// Retail's `advance_to_next_animation` (`acclient.c:326935-327033`).
     ///
-    /// Leaving a clip whose rate opposes the tick direction removes that clip's current frame from
-    /// the offset, and entering a clip whose rate agrees with it composes the entry frame straight
-    /// away.
-    ///
-    /// RETAIL QUIRK: the entry frame is composed here and composed again by the next iteration when
-    /// the cursor departs it, so a clip entered mid-tick contributes its first frame twice
-    /// (`acclient.c:327012-327021` composing on entry, `:327150-327160` composing on departure).
-    /// The first clip of a sequence is never entered this way and so never doubles. Correcting it
-    /// would shorten every linked transition's authored displacement, and content is tuned against
-    /// the retail path. Census: reachable wherever a tick crosses a clip boundary, which the
-    /// canonical census measured at up to 8 boundaries per 30 Hz tick at stored rate and 24 at 3x.
+    /// RETAIL DIVERGENCE: retail conditionally removes the leaving clip's current frame, then
+    /// conditionally composes the successor's entry frame (`acclient.c:326991-327021`). On ordinary
+    /// forward playback that skips the leaving clip's terminal frame and composes the successor's
+    /// entry frame both here and again when it departs (`:327150-327160`). We instead depart the
+    /// terminal frame exactly once and merely position the cursor on entry. Besides making every
+    /// root frame contribute once, this fires terminal-frame hooks instead of silently skipping
+    /// them. A 2026-08-21 archive census of 26,421 directly-authored internal and cyclic boundaries
+    /// found no translation change at half, at most 1.54 cm at p95 and 5.10 cm at p99, with a 2.01 m
+    /// maximum; 77 boundaries changed rotation, with a 3.90-degree maximum. The larger outliers are
+    /// authored terminal strides that retail replaces with the next entry frame, so preserving the
+    /// defect is less natural than honoring the complete root track.
     fn advance_to_next_clip(&mut self, quantum: f32, tick: &mut SequenceTick) {
         let Some(current) = self.current else {
             return;
         };
         let leaving = self.nodes[current].clone();
         let forward = quantum >= 0.0;
-
-        let opposes = if forward {
-            leaving.framerate < 0.0
-        } else {
-            leaving.framerate >= 0.0
-        };
-        if opposes {
-            if let Some(authored) = leaving.root_offset(self.frame_number as i32) {
-                tick.offset = tick.offset.subtract(&authored);
-            }
-            if leaving.framerate.abs() > FRAMERATE_EPSILON {
-                tick.offset = self.apply_physics(tick.offset, 1.0 / leaving.framerate, quantum);
-            }
-        }
+        let frame_forward = leaving.framerate * quantum > 0.0;
+        self.depart_frame(
+            &leaving,
+            self.frame_number.floor() as i32,
+            quantum,
+            tick,
+            frame_forward,
+        );
 
         let next = if forward {
             if current + 1 < self.nodes.len() {
@@ -491,26 +512,12 @@ impl MotionSequenceRuntime {
         };
         self.current = Some(next);
 
-        let entered = self.nodes[next].clone();
+        let entered = &self.nodes[next];
         self.frame_number = if forward {
             entered.starting_frame()
         } else {
             entered.ending_frame()
         };
-
-        let agrees = if forward {
-            entered.framerate > 0.0
-        } else {
-            entered.framerate < 0.0
-        };
-        if agrees {
-            if let Some(authored) = entered.root_offset(self.frame_number as i32) {
-                tick.offset = tick.offset.combine(&authored);
-            }
-            if entered.framerate.abs() > FRAMERATE_EPSILON {
-                tick.offset = self.apply_physics(tick.offset, 1.0 / entered.framerate, quantum);
-            }
-        }
     }
 
     /// Retail's `CSequence::apply_physics` (`acclient.c:326355-326382`).

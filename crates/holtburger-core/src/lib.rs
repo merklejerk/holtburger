@@ -10,9 +10,12 @@ pub mod soul_emote_motion;
 pub use character_gen::{
     CharacterGenBuild, CharacterGenBuilder, CharacterGenPolicy, CharacterGenValidationError,
 };
+pub use client::character_axes::{
+    AdjustedCharacterAxes, AdjustedForwardAxis, CharacterAxisAdjustmentError, adjust_character_axes,
+};
 pub use client::character_jump::{
-    CharacterDriveResolutionError, CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump,
-    resolve_character_drive, resolve_character_jump, retail_jump_charge_profile,
+    CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump, resolve_character_jump,
+    retail_jump_charge_profile,
 };
 pub use client::character_kinematics::{
     CharacterJumpKinematics, CharacterKinematicsError, CharacterMovementKinematics,
@@ -47,11 +50,12 @@ pub use dynamic_entity::{
     remove_dynamic_entity_body, replace_dynamic_entity_body, resolve_dynamic_entity_launch,
 };
 pub use dynamic_entity_view::{
-    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityContactView, DynamicEntityEvent,
-    DynamicEntityHostTime, DynamicEntityIdentityView, DynamicEntityPathLeg, DynamicEntityPathPoint,
-    DynamicEntityPhysicsView, DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind,
-    DynamicEntityPlacementView, DynamicEntityPlayingClip, DynamicEntityPresentationView,
-    DynamicEntitySampleModeView, DynamicEntitySnapshot, DynamicEntityView, DynamicEntityViewSource,
+    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityClipCompletion,
+    DynamicEntityContactView, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
+    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsView,
+    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView,
+    DynamicEntityPlayingClip, DynamicEntityPresentationView, DynamicEntitySampleModeView,
+    DynamicEntitySnapshot, DynamicEntityView, DynamicEntityViewSource,
     PhysicalBodyParticipationView, project_dynamic_entity_view,
 };
 pub use holtburger_content::LandblockCollisionAsset;

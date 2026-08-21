@@ -5,7 +5,6 @@ import {
 	ExplorerDynamicEntitySession,
 	type ExplorerDynamicEntityTransport,
 } from "./explorer-dynamic-entity-session";
-import { IDLE_MOTION_ORDER } from "./explorer-entity-possession";
 
 /// Records every invocation and answers from a per-command script, for commands that publish no
 /// snapshot and therefore cannot be observed through the entity feed.
@@ -28,7 +27,7 @@ class RecordingTransport implements ExplorerDynamicEntityTransport {
 
 class FakeTransport implements ExplorerDynamicEntityTransport {
 	readonly calls: string[] = [];
-	handler: ((payload: unknown) => void) | null = null;
+	readonly handlers = new Map<string, (payload: unknown) => void>();
 	snapshotGuid = 2;
 
 	async listen(
@@ -36,10 +35,10 @@ class FakeTransport implements ExplorerDynamicEntityTransport {
 		handler: (payload: unknown) => void,
 	): Promise<() => void> {
 		this.calls.push(`listen:${event}`);
-		this.handler = handler;
+		this.handlers.set(event, handler);
 		return () => {
 			this.calls.push("unlisten");
-			this.handler = null;
+			this.handlers.delete(event);
 		};
 	}
 
@@ -60,7 +59,11 @@ class FakeTransport implements ExplorerDynamicEntityTransport {
 	}
 
 	emit(event: DynamicEntityEvent): void {
-		this.handler?.(event);
+		this.handlers.get("explorer-dynamic-entity")?.(event);
+	}
+
+	emitPossessionOutcome(outcome: unknown): void {
+		this.handlers.get("explorer-possession-event-outcome")?.(outcome);
 	}
 }
 
@@ -142,8 +145,9 @@ describe("ExplorerDynamicEntitySession", () => {
 		const transport = new FakeTransport();
 		const session = new ExplorerDynamicEntitySession(transport);
 		await session.start();
-		expect(transport.calls.slice(0, 2)).toEqual([
+		expect(transport.calls.slice(0, 3)).toEqual([
 			"listen:explorer-dynamic-entity",
+			"listen:explorer-possession-event-outcome",
 			"invoke:request_explorer_dynamic_entity_snapshot",
 		]);
 		expect(
@@ -158,7 +162,7 @@ describe("ExplorerDynamicEntitySession", () => {
 		).toEqual([3]);
 		expect(
 			transport.calls.filter((call) => call.startsWith("listen:")),
-		).toHaveLength(2);
+		).toHaveLength(4);
 	});
 
 	it("notifies subscribers only when an accepted event changes the mirror", async () => {
@@ -180,22 +184,60 @@ describe("ExplorerDynamicEntitySession", () => {
 		});
 		expect(changes).toBe(2);
 	});
+
+	it("decodes dedicated possession outcomes independently from entity delivery", async () => {
+		const transport = new FakeTransport();
+		const session = new ExplorerDynamicEntitySession(transport);
+		const outcomes: unknown[] = [];
+		session.subscribePossessionOutcomes((outcome) => outcomes.push(outcome));
+		await session.start();
+
+		transport.emitPossessionOutcome({
+			possessionGeneration: 4,
+			sequence: 2,
+			result: { kind: "rejected", reason: "airborne" },
+		});
+
+		expect(outcomes).toEqual([
+			{
+				possessionGeneration: 4,
+				sequence: 2,
+				result: { kind: "rejected", reason: "airborne" },
+			},
+		]);
+	});
 });
 
 describe("possession", () => {
-	it("possesses one entity and reports what its table models", async () => {
+	it("possesses one entity and reports its generation-bound stance capabilities", async () => {
 		const transport = new RecordingTransport();
 		transport.responses.set("possess_explorer_entity", {
+			acceptedStance: 0x8000003d,
+			entityGeneration: 7,
 			guid: 0xf0000001,
-			modelledCommands: ["0x45000005", "0x44000007"],
 			motionTableId: "0x09000001",
+			possessionGeneration: 9,
+			stances: [
+				{
+					chargeDurationMs: 1_000,
+					jumpPresentation: "ready-and-falling",
+					run: "target-authored",
+					sidestep: "standard-fallback-without-target-presentation",
+					style: 0x8000003d,
+					turn: "target-authored",
+					walk: "target-authored",
+				},
+			],
 		});
 		const session = new ExplorerDynamicEntitySession(transport);
 
 		const possession = await session.possess(0xf0000001);
 
 		expect(possession.motionTableId).toBe("0x09000001");
-		expect(possession.modelledCommands).toEqual(["0x45000005", "0x44000007"]);
+		expect(possession.possessionGeneration).toBe(9);
+		expect(possession.stances[0]?.sidestep).toBe(
+			"standard-fallback-without-target-presentation",
+		);
 		expect(transport.invocations).toContainEqual([
 			"possess_explorer_entity",
 			{ request: { guid: 0xf0000001 } },
@@ -205,9 +247,12 @@ describe("possession", () => {
 	it("releases by naming no entity", async () => {
 		const transport = new RecordingTransport();
 		transport.responses.set("possess_explorer_entity", {
+			acceptedStance: null,
+			entityGeneration: null,
 			guid: null,
-			modelledCommands: [],
 			motionTableId: null,
+			possessionGeneration: 10,
+			stances: [],
 		});
 		const session = new ExplorerDynamicEntitySession(transport);
 
@@ -218,11 +263,33 @@ describe("possession", () => {
 		]);
 	});
 
-	it("reports whether an order reached anything, so an unpossessed order is not silent", async () => {
+	it("returns typed replaceable-intent and lifecycle queue outcomes", async () => {
 		const transport = new RecordingTransport();
-		transport.responses.set("set_explorer_entity_motion", false);
+		transport.responses.set("set_explorer_possession_intent", "accepted");
+		transport.responses.set("queue_explorer_possession_event", {
+			result: "queued",
+			outcomes: [],
+		});
 		const session = new ExplorerDynamicEntitySession(transport);
+		const intent = {
+			drive: {
+				gait: "run" as const,
+				lateral: null,
+				longitudinal: "backward" as const,
+				turn: "left" as const,
+			},
+			possessionGeneration: 9,
+			revision: 3,
+			stance: 0x8000003d,
+		};
 
-		expect(await session.setMotionOrder(IDLE_MOTION_ORDER)).toBe(false);
+		expect(await session.setPossessionIntent(intent)).toBe("accepted");
+		expect(
+			await session.queuePossessionEvent({
+				...intent,
+				kind: "begin-jump",
+				sequence: 0,
+			}),
+		).toEqual({ result: "queued", outcomes: [] });
 	});
 });

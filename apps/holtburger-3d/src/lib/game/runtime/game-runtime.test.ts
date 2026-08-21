@@ -260,6 +260,7 @@ describe("GameRuntime view and interest control", () => {
 		expect(frames[0]?.frameSettings).toEqual({
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			ambientOcclusion: DEFAULT_FRAME_SETTINGS.ambientOcclusion,
+			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
 			distanceFogEnabled: true,
 			viewerLightEnabled:
 				FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
@@ -289,6 +290,7 @@ describe("GameRuntime view and interest control", () => {
 					intensity: 2,
 				},
 			},
+			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -312,6 +314,7 @@ describe("GameRuntime view and interest control", () => {
 					intensity: 2,
 				},
 			},
+			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -844,8 +847,8 @@ async function buildGameRuntimeForTest(
 class TestTerrainWorkerPort implements ClosedWorkerPort {
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	onmessage:
-		| ((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void)
-		| null = null;
+		((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void) | null =
+		null;
 	#terminated = false;
 
 	postMessage(

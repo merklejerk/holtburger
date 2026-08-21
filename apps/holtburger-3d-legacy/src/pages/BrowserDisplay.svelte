@@ -87,11 +87,7 @@
 	import type { OpenWorldStreamingDiagnosticsSnapshot } from "../lib/systems/open-world-streaming/diagnostics/contracts";
 
 	type BrowserPanelTab =
-		| "navigate"
-		| "settings"
-		| "spawns"
-		| "resources"
-		| "debug";
+		"navigate" | "settings" | "spawns" | "resources" | "debug";
 	type BrowserRuntimeSpawnRow = BrowserRuntimeSpawnRecord & {
 		readonly entityId: string;
 	};
@@ -2672,7 +2668,9 @@
 											</small>
 										</div>
 										<div class="browser-display__texture-page-metrics">
-											<span>{formatAssignedPixelRatio(page.assignedPixelRatio)} used</span>
+											<span
+												>{formatAssignedPixelRatio(page.assignedPixelRatio)} used</span
+											>
 											<span>{page.entryCount} entries</span>
 											<span>{page.ownerCount} owners</span>
 										</div>

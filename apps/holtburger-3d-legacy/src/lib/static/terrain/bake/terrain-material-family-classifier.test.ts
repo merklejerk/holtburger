@@ -246,11 +246,7 @@ function createTextureRole({
 	wrap = "repeat",
 }: {
 	readonly role?:
-		| "terrain-base"
-		| "terrain-alpha"
-		| "road"
-		| "road-alpha"
-		| "detail";
+		"terrain-base" | "terrain-alpha" | "road" | "road-alpha" | "detail";
 	readonly texture?: SurfaceTextureIdentity;
 	readonly textureBindingId: string | null;
 	readonly tiling?: number;

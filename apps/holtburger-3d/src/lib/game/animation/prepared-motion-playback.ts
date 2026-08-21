@@ -29,9 +29,7 @@ export interface PreparedMotionPlayback {
 
 /** Why one clip in a closure cannot be played. */
 type ClipRefusal =
-	| "blocking-hooks"
-	| "unbounded-root-rotation"
-	| "part-coverage";
+	"blocking-hooks" | "unbounded-root-rotation" | "part-coverage";
 
 const reported = new Set<string>();
 

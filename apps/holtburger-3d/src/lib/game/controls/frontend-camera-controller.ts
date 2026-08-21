@@ -7,15 +7,7 @@ import { THIRD_PERSON_CHARACTER_CONTROL_PROFILE } from "./third-person-character
 
 type DragMode = "pan" | "rotate";
 type MovementKey =
-	| "a"
-	| "c"
-	| "d"
-	| "pagedown"
-	| "pageup"
-	| "s"
-	| "space"
-	| "w"
-	| "z";
+	"a" | "c" | "d" | "pagedown" | "pageup" | "s" | "space" | "w" | "z";
 
 interface ActiveDrag {
 	readonly lastX: number;

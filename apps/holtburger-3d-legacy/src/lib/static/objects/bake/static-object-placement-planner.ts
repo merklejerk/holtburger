@@ -211,8 +211,7 @@ function collectStaticObjectTextureMaterialSlots(
 }
 
 type StaticObjectTextureMaterialSlot =
-	| StaticObjectMaterialSlotFacts
-	| StaticObjectPartMaterialSlotFacts;
+	StaticObjectMaterialSlotFacts | StaticObjectPartMaterialSlotFacts;
 
 function createMaterialSlotUseKey(
 	slot: StaticObjectTextureMaterialSlot,

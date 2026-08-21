@@ -2,8 +2,7 @@
 export interface ClosedWorkerPort {
 	onerror: ((event: ErrorEvent) => void) | null;
 	onmessage:
-		| ((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void)
-		| null;
+		((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void) | null;
 	postMessage(
 		message: ClosedWorkerRequest<unknown>,
 		transfer: readonly Transferable[],

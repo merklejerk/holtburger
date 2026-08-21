@@ -65,14 +65,10 @@ export type RuntimeSceneInterest =
 export type RuntimeCameraResidency = StaticSceneCameraResidency;
 
 export type RuntimeSceneInterestSource =
-	| "manual"
-	| "follow"
-	| "settings"
-	| "none";
+	"manual" | "follow" | "settings" | "none";
 
 export type RuntimeEvent =
-	| RuntimeSceneInterestUpdatedEvent
-	| RuntimeSceneInterestSettledEvent;
+	RuntimeSceneInterestUpdatedEvent | RuntimeSceneInterestSettledEvent;
 
 interface RuntimeSceneInterestUpdatedEvent {
 	readonly interest: RuntimeSceneInterest;
@@ -195,11 +191,7 @@ export interface RuntimeTexturePageInspectionSnapshot {
 	readonly pageId: string;
 	readonly preview: RuntimeTexturePageInspectionPreview | null;
 	readonly state:
-		| "planned"
-		| "building"
-		| "resident"
-		| "reclaimable"
-		| "missing";
+		"planned" | "building" | "resident" | "reclaimable" | "missing";
 	readonly texturePixelCount: number | null;
 }
 

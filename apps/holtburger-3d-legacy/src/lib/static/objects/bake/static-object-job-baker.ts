@@ -211,30 +211,26 @@ function createStaticObjectSourceMappingCoverage(
 	}
 
 	return [...buckets.values()]
-		.map(
-			(bucket): StaticObjectSourceMappingCoverage => ({
-				geometrySurfaceIds: [...bucket.geometrySurfaceIds].sort(
-					(left, right) => left - right,
-				),
-				gfxObj: bucket.gfxObj,
-				materialIds: [...bucket.materialIds].sort(
-					(left, right) => left - right,
-				),
-				materialSlot: bucket.materialSlot,
-				materialVariantSignatures: [...bucket.materialVariantSignatures].sort(
-					compareNullableStrings,
-				),
-				object: bucket.object,
-				partIndex: bucket.partIndex,
-				polygonCount: bucket.polygonIds.size,
-				polygonRange:
-					bucket.minPolygonId === null || bucket.maxPolygonId === null
-						? null
-						: { max: bucket.maxPolygonId, min: bucket.minPolygonId },
-				source: bucket.source,
-				sourceTriangleCount: bucket.sourceTriangleCount,
-			}),
-		)
+		.map((bucket): StaticObjectSourceMappingCoverage => ({
+			geometrySurfaceIds: [...bucket.geometrySurfaceIds].sort(
+				(left, right) => left - right,
+			),
+			gfxObj: bucket.gfxObj,
+			materialIds: [...bucket.materialIds].sort((left, right) => left - right),
+			materialSlot: bucket.materialSlot,
+			materialVariantSignatures: [...bucket.materialVariantSignatures].sort(
+				compareNullableStrings,
+			),
+			object: bucket.object,
+			partIndex: bucket.partIndex,
+			polygonCount: bucket.polygonIds.size,
+			polygonRange:
+				bucket.minPolygonId === null || bucket.maxPolygonId === null
+					? null
+					: { max: bucket.maxPolygonId, min: bucket.minPolygonId },
+			source: bucket.source,
+			sourceTriangleCount: bucket.sourceTriangleCount,
+		}))
 		.sort(compareSourceMappingCoverage);
 }
 

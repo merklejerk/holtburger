@@ -244,5 +244,7 @@ function compareCoverageBuckets(
 }
 
 type MutableCoverageBucket = {
-	-readonly [Key in keyof StaticMaterialCoverageBucket]: StaticMaterialCoverageBucket[Key];
+	-readonly [
+		Key in keyof StaticMaterialCoverageBucket
+	]: StaticMaterialCoverageBucket[Key];
 };

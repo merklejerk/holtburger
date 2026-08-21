@@ -579,9 +579,7 @@
 		readonly near: number;
 		readonly pitchDegrees: number;
 		readonly policy:
-			| "explicit-env-cell"
-			| "explicit-outdoor"
-			| "explorer-outdoor-focus";
+			"explicit-env-cell" | "explicit-outdoor" | "explorer-outdoor-focus";
 		readonly position: readonly [number, number, number];
 		readonly yawDegrees: number;
 	}

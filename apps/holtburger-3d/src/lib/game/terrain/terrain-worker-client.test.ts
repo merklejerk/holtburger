@@ -92,8 +92,8 @@ describe("WorkerTerrainGenerator", () => {
 class ExecutingTerrainWorkerPort implements ClosedWorkerPort {
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	onmessage:
-		| ((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void)
-		| null = null;
+		((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void) | null =
+		null;
 	detachedInputByteLengths: number[] = [];
 	detachedResultByteLengths: number[] = [];
 
@@ -135,8 +135,8 @@ class ExecutingTerrainWorkerPort implements ClosedWorkerPort {
 class RejectingTerrainWorkerPort implements ClosedWorkerPort {
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	onmessage:
-		| ((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void)
-		| null = null;
+		((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void) | null =
+		null;
 	terminated = false;
 
 	postMessage(message: ClosedWorkerRequest<unknown>): void {
@@ -159,8 +159,8 @@ class RejectingTerrainWorkerPort implements ClosedWorkerPort {
 class CrashingTerrainWorkerPort implements ClosedWorkerPort {
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	onmessage:
-		| ((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void)
-		| null = null;
+		((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void) | null =
+		null;
 	terminated = false;
 
 	postMessage(): void {

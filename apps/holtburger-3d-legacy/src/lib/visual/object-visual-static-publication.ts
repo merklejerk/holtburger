@@ -98,10 +98,7 @@ export interface ObjectVisualStructuredInteriorPublicationMetadata {
 }
 
 type ObjectVisualStaticSidecarKind =
-	| "portal"
-	| "source-mapping"
-	| "spatial"
-	| "visibility";
+	"portal" | "source-mapping" | "spatial" | "visibility";
 
 export interface ObjectVisualStaticSidecarResidencyMetadata {
 	readonly envCellId: number | null;

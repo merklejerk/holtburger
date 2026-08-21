@@ -106,9 +106,7 @@ export interface OpenWorldStreamingControllerOptions {
 }
 
 export type OpenWorldStreamingStaticPublicationMode =
-	| "normal"
-	| "suppress-dense-renderer"
-	| "defer-dense-renderer-until-ready";
+	"normal" | "suppress-dense-renderer" | "defer-dense-renderer-until-ready";
 
 export interface OpenWorldStreamingTerrainInterest {
 	readonly anchorLandblockId: number;

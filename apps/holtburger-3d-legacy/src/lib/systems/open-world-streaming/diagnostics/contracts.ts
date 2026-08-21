@@ -6,9 +6,7 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 	readonly kind: "open-world-streaming-diagnostics";
 	readonly pipeline: {
 		readonly staticPublicationMode:
-			| "normal"
-			| "suppress-dense-renderer"
-			| "defer-dense-renderer-until-ready";
+			"normal" | "suppress-dense-renderer" | "defer-dense-renderer-until-ready";
 		readonly status: "idle" | "active" | "disposed";
 		readonly selectedRuntimePipeline: "open-world-streaming";
 	};
@@ -198,8 +196,7 @@ type OpenWorldStreamingMaterialReadinessIssue =
 	  }
 	| {
 			readonly kind:
-				| "renderer-capability-deferred"
-				| "unsupported-source-material";
+				"renderer-capability-deferred" | "unsupported-source-material";
 			readonly domain: string;
 			readonly materialFamily: string;
 			readonly landblockId: number | null;
@@ -374,11 +371,7 @@ export interface OpenWorldStreamingTexturePageInspectionSnapshot {
 	readonly bucketKey: string;
 	readonly pageId: string;
 	readonly state:
-		| "resident"
-		| "planned"
-		| "building"
-		| "reclaimable"
-		| "missing";
+		"resident" | "planned" | "building" | "reclaimable" | "missing";
 	/** Last accepted renderer upload retained for interactive inspection. */
 	readonly preview: OpenWorldStreamingTexturePageInspectionPreview | null;
 	/** Total runtime texture page pixel count when dimensions are known. */

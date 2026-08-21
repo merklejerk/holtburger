@@ -260,26 +260,22 @@ function createPrimaryPortalOverlapCandidates(
 					edge.sourceKind === "env-cell-portal" &&
 					edge.sourceEnvCellId === envCellId,
 			)
-			.map(
-				(edge): PortalOverlapCandidate => ({
-					apertureRangeId: edge.apertureRangeId,
-					boundaryId: edge.edgeId,
-					sourceEnvCellId: edge.sourceEnvCellId,
-					sourceKind: "env-cell-portal",
-					targetEnvCellId: edge.targetEnvCellId,
-				}),
-			);
+			.map((edge): PortalOverlapCandidate => ({
+				apertureRangeId: edge.apertureRangeId,
+				boundaryId: edge.edgeId,
+				sourceEnvCellId: edge.sourceEnvCellId,
+				sourceKind: "env-cell-portal",
+				targetEnvCellId: edge.targetEnvCellId,
+			}));
 		const outdoorCrossingCandidates = input.projection.outdoorSceneCrossings
 			.filter((crossing) => crossing.targetEnvCellId === envCellId)
-			.map(
-				(crossing): PortalOverlapCandidate => ({
-					apertureRangeId: crossing.apertureRangeId,
-					boundaryId: crossing.crossingId,
-					sourceEnvCellId: null,
-					sourceKind: "building-transition",
-					targetEnvCellId: crossing.targetEnvCellId,
-				}),
-			);
+			.map((crossing): PortalOverlapCandidate => ({
+				apertureRangeId: crossing.apertureRangeId,
+				boundaryId: crossing.crossingId,
+				sourceEnvCellId: null,
+				sourceKind: "building-transition",
+				targetEnvCellId: crossing.targetEnvCellId,
+			}));
 		return [...edgeCandidates, ...outdoorCrossingCandidates];
 	}
 	if (input.residency.kind === "outdoor-landblock") {
@@ -289,15 +285,13 @@ function createPrimaryPortalOverlapCandidates(
 					edge.sourceKind === "building-transition" &&
 					edge.sourceEnvCellId === null,
 			)
-			.map(
-				(edge): PortalOverlapCandidate => ({
-					apertureRangeId: edge.apertureRangeId,
-					boundaryId: edge.edgeId,
-					sourceEnvCellId: null,
-					sourceKind: "building-transition",
-					targetEnvCellId: edge.targetEnvCellId,
-				}),
-			);
+			.map((edge): PortalOverlapCandidate => ({
+				apertureRangeId: edge.apertureRangeId,
+				boundaryId: edge.edgeId,
+				sourceEnvCellId: null,
+				sourceKind: "building-transition",
+				targetEnvCellId: edge.targetEnvCellId,
+			}));
 	}
 	return [];
 }
@@ -322,15 +316,13 @@ function createOneHopEnvCellPortalCandidates(
 				seedEnvCellIds.has(edge.sourceEnvCellId) &&
 				edge.targetEnvCellId !== envCellId,
 		)
-		.map(
-			(edge): PortalOverlapCandidate => ({
-				apertureRangeId: edge.apertureRangeId,
-				boundaryId: edge.edgeId,
-				sourceEnvCellId: edge.sourceEnvCellId,
-				sourceKind: "env-cell-portal",
-				targetEnvCellId: edge.targetEnvCellId,
-			}),
-		);
+		.map((edge): PortalOverlapCandidate => ({
+			apertureRangeId: edge.apertureRangeId,
+			boundaryId: edge.edgeId,
+			sourceEnvCellId: edge.sourceEnvCellId,
+			sourceKind: "env-cell-portal",
+			targetEnvCellId: edge.targetEnvCellId,
+		}));
 }
 
 function countOneHopSeedEnvCells(

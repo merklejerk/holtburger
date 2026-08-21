@@ -182,8 +182,7 @@ export interface EnvCellPortalScenePickDetails {
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly portal:
-		| StaticPortalInteriorRecord["envCells"][number]["portals"][number]
-		| null;
+		StaticPortalInteriorRecord["envCells"][number]["portals"][number] | null;
 	readonly portalAperture: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
 }
 

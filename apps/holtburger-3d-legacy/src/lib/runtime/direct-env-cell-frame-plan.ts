@@ -328,12 +328,10 @@ function createPortalBaseOverlapPlan(options: {
 			} as const;
 			const resources = createNodeResources(scene, options.indexes);
 			const reasons = (boundariesByTargetEnvCellId.get(envCellId) ?? [])
-				.map(
-					(boundary): PortalBaseOverlapReason => ({
-						apertureRangeId: boundary.apertureRangeId,
-						kind: boundary.sourceKind,
-					}),
-				)
+				.map((boundary): PortalBaseOverlapReason => ({
+					apertureRangeId: boundary.apertureRangeId,
+					kind: boundary.sourceKind,
+				}))
 				.sort(comparePortalBaseOverlapReasons);
 			return {
 				envCellId,

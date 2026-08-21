@@ -18,16 +18,11 @@ type VisualGeometryIndexType = "uint16" | "uint32";
 
 /** Renderer shader family selected by material batching planning. */
 export type VisualGeometryMaterialFamily =
-	| "flat-color"
-	| "indexed-paletted"
-	| "texture-rgba";
+	"flat-color" | "indexed-paletted" | "texture-rgba";
 
 /** Renderer pass selected by material batching planning. */
 export type VisualGeometryMaterialPass =
-	| "opaque"
-	| "alpha-test"
-	| "transparent"
-	| "additive";
+	"opaque" | "alpha-test" | "transparent" | "additive";
 
 /** Renderer-visible draw state shared by object-style static and dynamic visual geometry. */
 export interface VisualGeometryRenderState {

@@ -406,8 +406,7 @@ export type DynamicEntityRenderResidence =
 	  };
 
 type DynamicEntityNoResidenceReason =
-	| "render-residence-evicted"
-	| "render-residence-unassigned";
+	"render-residence-evicted" | "render-residence-unassigned";
 
 export type DynamicEntityAnimationSelection =
 	| {
@@ -443,8 +442,7 @@ interface StaticAuthoredDynamicEntitySourceFacts {
 }
 
 export type DynamicEntitySourceFacts =
-	| RuntimeSpawnDynamicEntitySourceFacts
-	| StaticAuthoredDynamicEntitySourceFacts;
+	RuntimeSpawnDynamicEntitySourceFacts | StaticAuthoredDynamicEntitySourceFacts;
 
 export interface DynamicEntityAnimationState {
 	readonly defaultAnimationId: number | null;
@@ -453,14 +451,10 @@ export interface DynamicEntityAnimationState {
 }
 
 type DynamicEntityAnimationStatus =
-	| "failed"
-	| "not-required"
-	| "pending-resource"
-	| "ready";
+	"failed" | "not-required" | "pending-resource" | "ready";
 
 type DynamicEntityAnimationNotRequiredReason =
-	| "animation-not-selected"
-	| "setup-default-animation-missing";
+	"animation-not-selected" | "setup-default-animation-missing";
 
 export type DynamicEntityAnimationPlaybackState =
 	| {
@@ -531,8 +525,7 @@ export interface DynamicEntityTransformState {
 }
 
 export type DynamicEntityBoundsPrecision =
-	| "none"
-	| "current-frame-source-part-bounds-aabb";
+	"none" | "current-frame-source-part-bounds-aabb";
 
 export interface DynamicEntityBoundsState {
 	readonly currentBounds: DynamicEntityCurrentBounds | null;
@@ -595,10 +588,7 @@ export interface DynamicEntityResourceState {
 }
 
 type DynamicEntityResourceStatus =
-	| "failed"
-	| "pending"
-	| "ready"
-	| "setup-animation-ready";
+	"failed" | "pending" | "ready" | "setup-animation-ready";
 
 export type DynamicEntitySetupAnimationResourceState =
 	| {
@@ -682,10 +672,7 @@ export interface DynamicEntityTextureRequirement {
 	readonly key: DynamicEntityResourceKey;
 	readonly material: ObjectVisualMaterialSourceFacts["identity"];
 	readonly role:
-		| "base-color"
-		| "base-index"
-		| "detail-overlay"
-		| "palette-rgba";
+		"base-color" | "base-index" | "detail-overlay" | "palette-rgba";
 	readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
 	/** Numeric bake-time placement lookup id. */
 	readonly placementItemId: TexturePlacementItemId;

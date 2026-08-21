@@ -189,8 +189,9 @@ function composePortalReferenceFrameWithPathLimit(
 		);
 	}
 
-	const views = [...viewByPath.values()].sort(compareViewPaths).map(
-		(view): PortalReferenceView =>
+	const views = [...viewByPath.values()]
+		.sort(compareViewPaths)
+		.map((view): PortalReferenceView =>
 			Object.freeze({
 				coverage: createPortalModelFootprint(
 					scene.pixelCount,
@@ -205,7 +206,7 @@ function composePortalReferenceFrameWithPathLimit(
 				parentViewId: view.parentViewId,
 				scopeId: view.scopeId,
 			}),
-	);
+		);
 	return Object.freeze({
 		diagnostics: Object.freeze({
 			maximumPathLength,

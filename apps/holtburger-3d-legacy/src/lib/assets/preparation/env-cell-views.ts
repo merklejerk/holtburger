@@ -68,8 +68,7 @@ function createResolverEnvCellPayloadView(
 ): ResolverLandblockEnvCellDto;
 function createResolverEnvCellPayloadView(
 	cell:
-		| EnvCellPayloadDto
-		| EnvCellSystemLayerSourcePayloadDto["envCells"][number],
+		EnvCellPayloadDto | EnvCellSystemLayerSourcePayloadDto["envCells"][number],
 ): ResolverEnvCellPayloadDto | ResolverLandblockEnvCellDto {
 	return {
 		...cell,

@@ -19,10 +19,7 @@ export type TerrainMaterialCode = (typeof TERRAIN_MATERIAL_CODES)[number];
 
 /** Ordered pcode corners match retail's southwest, southeast, northeast, northwest packing. */
 export type TerrainPcodeCorner =
-	| "southwest"
-	| "southeast"
-	| "northeast"
-	| "northwest";
+	"southwest" | "southeast" | "northeast" | "northwest";
 
 export interface TerrainOverlaySelection {
 	readonly terrainCode: number;

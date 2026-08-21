@@ -36,12 +36,10 @@ export type StaticDomain =
  * still being retired.
  */
 export type OutdoorStaticObjectLayerDomain =
-	| "outdoor-explicit-objects"
-	| "outdoor-generated-scenery";
+	"outdoor-explicit-objects" | "outdoor-generated-scenery";
 
 export type OutdoorStaticObjectDomain =
-	| "outdoor-buildings"
-	| OutdoorStaticObjectLayerDomain;
+	"outdoor-buildings" | OutdoorStaticObjectLayerDomain;
 
 /**
  * Runtime-authored object-material texture placement is not a static resolver
@@ -450,8 +448,7 @@ interface PreparedPaletteTextureUseIdentity {
 }
 
 export type MaterialTextureDataUseIdentity =
-	| PreparedRenderSurfaceTextureUseIdentity
-	| PreparedPaletteTextureUseIdentity;
+	PreparedRenderSurfaceTextureUseIdentity | PreparedPaletteTextureUseIdentity;
 
 type StaticTextureUseIdentity =
 	| SurfaceTextureIdentity
@@ -571,11 +568,7 @@ export interface RegionDetailRoleFacts {
 
 export interface TerrainTextureUseFacts {
 	readonly role:
-		| "terrain-base"
-		| "terrain-alpha"
-		| "road"
-		| "road-alpha"
-		| "detail";
+		"terrain-base" | "terrain-alpha" | "road" | "road-alpha" | "detail";
 	readonly texture: SurfaceTextureIdentity;
 	readonly renderSurface: RenderSurfaceIdentity | null;
 	readonly preparedTextureUse: PreparedRgbaRenderSurfaceTextureUseIdentity | null;
@@ -948,8 +941,7 @@ export interface StaticBakeJobInput {
 	readonly payload: StaticScopePayload;
 	/** Pre-bake texture placement assignments available to bakers that can partition by final pages. */
 	readonly texturePlacementSnapshot?:
-		| TexturePlacementSnapshot
-		| ObjectVisualTexturePlacementSnapshot;
+		TexturePlacementSnapshot | ObjectVisualTexturePlacementSnapshot;
 	readonly revision: number;
 }
 
@@ -1278,8 +1270,7 @@ interface StaticEnvCellPortalSummary {
 }
 
 export type StaticSourceMappingRecord =
-	| StaticTerrainSourceTriangleMappingRecord
-	| StaticEnvCellSourceMappingRecord;
+	StaticTerrainSourceTriangleMappingRecord | StaticEnvCellSourceMappingRecord;
 
 interface StaticTerrainSourceTriangleMappingRecord {
 	readonly kind: "terrain-source-triangle";
@@ -1450,25 +1441,16 @@ export interface StaticObjectRetainedTransparentPartitionReasonCounts {
 }
 
 export type StaticMaterialCoverageFamily =
-	| "flat-color"
-	| "texture-rgba"
-	| "indexed-paletted"
-	| "unsupported";
+	"flat-color" | "texture-rgba" | "indexed-paletted" | "unsupported";
 
 export type StaticMaterialCoveragePass =
-	| "opaque"
-	| "alpha-test"
-	| "transparent"
-	| "additive";
+	"opaque" | "alpha-test" | "transparent" | "additive";
 
 export type StaticMaterialRenderOutcome =
-	| "rendered"
-	| "render-deferred"
-	| "unsupported";
+	"rendered" | "render-deferred" | "unsupported";
 
 export type StaticMaterialCoverageFilteringMode =
-	| "none"
-	| "shader-palette-linear";
+	"none" | "shader-palette-linear";
 
 type StaticMaterialCoverageKind =
 	| "env-cell-static-object-placements"
@@ -1531,9 +1513,7 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly landblockId: number;
 	readonly domain: "outdoor-terrain";
 	readonly materialFamily:
-		| "terrain-debug-flat"
-		| "terrain-single-base-color"
-		| "terrain-layered";
+		"terrain-debug-flat" | "terrain-single-base-color" | "terrain-layered";
 	readonly materialBucketKey: string;
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
@@ -1704,10 +1684,7 @@ export interface StructuredInteriorMaterialPlanEntry {
 	readonly surfaceId: number;
 	readonly material: StaticMaterialSourceIdentity;
 	readonly family:
-		| "flat-color"
-		| "indexed-paletted"
-		| "texture-rgba"
-		| "unsupported";
+		"flat-color" | "indexed-paletted" | "texture-rgba" | "unsupported";
 	readonly pass: StaticObjectMaterialPass;
 	readonly outcome: StaticMaterialRenderOutcome;
 	/** Renderer material binding ids used by this material plan entry. */
@@ -1778,10 +1755,7 @@ export interface StaticMaterialTableEntry {
 }
 
 type StaticObjectMaterialPass =
-	| "opaque"
-	| "alpha-test"
-	| "transparent"
-	| "additive";
+	"opaque" | "alpha-test" | "transparent" | "additive";
 
 export interface StaticObjectRenderState {
 	readonly blend: StaticObjectBlendState;
@@ -1937,8 +1911,7 @@ interface StaticBakerJobDiagnostics {
 }
 
 type PortalApertureResourceSourceKind =
-	| "env-cell-portal"
-	| "building-transition";
+	"env-cell-portal" | "building-transition";
 
 export interface StaticPortalApertureResource {
 	readonly kind: "portal-aperture-resource";
@@ -1952,8 +1925,7 @@ export interface StaticPortalApertureResource {
 }
 
 export type StaticPortalApertureRange =
-	| StaticEnvCellPortalApertureRange
-	| StaticBuildingTransitionApertureRange;
+	StaticEnvCellPortalApertureRange | StaticBuildingTransitionApertureRange;
 
 interface StaticPortalApertureRangeBase {
 	readonly rangeId: string;

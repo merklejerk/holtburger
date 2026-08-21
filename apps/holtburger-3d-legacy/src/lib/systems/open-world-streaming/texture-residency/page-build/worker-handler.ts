@@ -17,7 +17,9 @@ import type {
 import type { OpenWorldTexturePageBuilder } from "./worker-client";
 
 export function installOpenWorldTexturePageBuildWorkerHandler(
-	createBuilder: (assetReader: PreparedAssetReader) => OpenWorldTexturePageBuilder,
+	createBuilder: (
+		assetReader: PreparedAssetReader,
+	) => OpenWorldTexturePageBuilder,
 	createAssetReader: (
 		context: WorkerExecuteContext<
 			never,
@@ -35,9 +37,9 @@ export function installOpenWorldTexturePageBuildWorkerHandler(
 		PreparedAssetServiceResponse
 	>({
 		execute: async (input, context) => {
-			const output = await createBuilder(
-				createAssetReader(context),
-			).buildPage(input);
+			const output = await createBuilder(createAssetReader(context)).buildPage(
+				input,
+			);
 			return {
 				output,
 				transfer: collectOpenWorldTexturePageBuildTransfers(output),

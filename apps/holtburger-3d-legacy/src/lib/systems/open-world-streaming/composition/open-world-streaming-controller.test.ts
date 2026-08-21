@@ -81,7 +81,9 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			queued: 0,
 			staleRejected: 0,
 		});
-		expect(controller.createDiagnosticsSnapshot().textureResidency).toMatchObject({
+		expect(
+			controller.createDiagnosticsSnapshot().textureResidency,
+		).toMatchObject({
 			byteEstimate: {
 				approximateBytes: null,
 				reason: "page-size-not-yet-canonical",

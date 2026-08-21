@@ -20,9 +20,7 @@ export async function prepareMaterialTexturePackingSource(options: {
 	);
 }
 
-function createMaterialTextureHostKey(
-	source: MaterialTextureDataUseIdentity,
-) {
+function createMaterialTextureHostKey(source: MaterialTextureDataUseIdentity) {
 	if (source.kind === "prepared-palette-texture-use") {
 		return createPreparedPaletteTextureHostKey(source);
 	}

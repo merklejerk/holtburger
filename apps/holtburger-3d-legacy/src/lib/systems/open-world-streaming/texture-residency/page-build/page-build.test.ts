@@ -249,16 +249,20 @@ describe("open-world texture page build", () => {
 
 	it("settles accepted page updates for bindings claimed while the page was building", () => {
 		const { registry, input } = createReservedRegistryPage();
-		registry.retainTextureBindings(ownerId("owner:terrain-reuse"), input.bucketKey, [
-			{
-				bindingId: bindingId("binding:terrain-reuse"),
-				bucketKey: input.bucketKey,
-				pageClass: pageClass("page-class:terrain"),
-				purpose: "terrain-color",
-				sourceKey: "source:terrain",
-				textureKey: textureKey("texture:terrain"),
-			},
-		]);
+		registry.retainTextureBindings(
+			ownerId("owner:terrain-reuse"),
+			input.bucketKey,
+			[
+				{
+					bindingId: bindingId("binding:terrain-reuse"),
+					bucketKey: input.bucketKey,
+					pageClass: pageClass("page-class:terrain"),
+					purpose: "terrain-color",
+					sourceKey: "source:terrain",
+					textureKey: textureKey("texture:terrain"),
+				},
+			],
+		);
 
 		const settlement = settleOpenWorldTexturePageBuildResult(
 			registry,

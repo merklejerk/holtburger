@@ -99,8 +99,7 @@ function createResidentPage(
 					sourceKey: createMaterialTextureSourceKey({
 						kind: "runtime",
 						sourceId: `fixture:${options.bindingId}`,
-						usage:
-							options.sampleClass === "index8" ? "index8" : "rgba-color",
+						usage: options.sampleClass === "index8" ? "index8" : "rgba-color",
 					}),
 				}),
 			},
@@ -120,7 +119,9 @@ function createResidentPage(
 	});
 }
 
-function createPageClass(sampleClass: TexturePageSampleClass): TexturePageClass {
+function createPageClass(
+	sampleClass: TexturePageSampleClass,
+): TexturePageClass {
 	return createTexturePageClass({
 		domain: "fixture-domain",
 		format: sampleClass === "index8" ? "index8" : "rgba8",

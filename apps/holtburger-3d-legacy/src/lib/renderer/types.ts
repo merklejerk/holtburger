@@ -178,8 +178,7 @@ function formatLayerLandblockId(landblockId: number): string {
 }
 
 export type DebugOverlayPrimitive =
-	| DebugOverlayAabbPrimitive
-	| DebugOverlayTrianglePrimitive;
+	DebugOverlayAabbPrimitive | DebugOverlayTrianglePrimitive;
 
 interface DebugOverlayAabbPrimitive {
 	readonly kind: "aabb";
@@ -405,14 +404,9 @@ export interface RendererTerrainMaterialDiagnostics {
 	readonly fallbackReasons: readonly string[];
 	readonly landblockId: number;
 	readonly materialFamily:
-		| "terrain-debug-flat"
-		| "terrain-single-base-color"
-		| "terrain-layered";
+		"terrain-debug-flat" | "terrain-single-base-color" | "terrain-layered";
 	readonly mode:
-		| "debug-flat"
-		| "flat-fallback"
-		| "layered"
-		| "single-base-color";
+		"debug-flat" | "flat-fallback" | "layered" | "single-base-color";
 	readonly nonResidentTextureBindings: readonly RendererTerrainTextureBindingDiagnostics[];
 	readonly textureBindingCount: number;
 }
@@ -420,10 +414,7 @@ export interface RendererTerrainMaterialDiagnostics {
 export interface RendererTerrainTextureBindingDiagnostics {
 	readonly bindingId: TextureBindingId;
 	readonly state:
-		| "failed"
-		| "missing-not-in-flight"
-		| "pending"
-		| "resident-without-texture";
+		"failed" | "missing-not-in-flight" | "pending" | "resident-without-texture";
 }
 
 export interface RendererResourceSnapshot {
@@ -442,10 +433,7 @@ export interface RendererResourceSnapshot {
 }
 
 export type RendererObjectMaterialTextureRole =
-	| "base-color"
-	| "detail"
-	| "index"
-	| "palette";
+	"base-color" | "detail" | "index" | "palette";
 
 export type RendererObjectMaterialTextureDiagnostics =
 	| {
@@ -692,8 +680,7 @@ export type PortalFrameSceneSource =
 	  };
 
 export type PortalApertureSourceKind =
-	| "env-cell-portal"
-	| "building-transition";
+	"env-cell-portal" | "building-transition";
 
 export interface PortalApertureGeometryResourcePlan {
 	readonly resourceId: string;

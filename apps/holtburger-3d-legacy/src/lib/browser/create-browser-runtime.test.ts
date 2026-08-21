@@ -157,15 +157,19 @@ describe("browser runtime routing", () => {
 			requestPreparedAsset: () =>
 				Promise.reject(new Error("test asset reader should not be called")),
 		};
-		const prepper = createWorkerDynamicVisualPrepper(assetReader, workers.length, {
-			createWorker: () => {
-				const worker = pendingWorkers.shift();
-				if (!worker) {
-					throw new Error("No fixture dynamic visual prep worker left.");
-				}
-				return worker;
+		const prepper = createWorkerDynamicVisualPrepper(
+			assetReader,
+			workers.length,
+			{
+				createWorker: () => {
+					const worker = pendingWorkers.shift();
+					if (!worker) {
+						throw new Error("No fixture dynamic visual prep worker left.");
+					}
+					return worker;
+				},
 			},
-		});
+		);
 
 		const input = createDynamicVisualPrepInput("dynamic-visual:test");
 		const pending = prepper.prepare(input);

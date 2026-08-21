@@ -2,7 +2,11 @@ import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 export type ExplorerRadiusKind =
-	"buildings" | "envCells" | "explicitObjects" | "generatedObjects" | "terrain";
+	| "buildings"
+	| "envCells"
+	| "explicitObjects"
+	| "generatedObjects"
+	| "terrain";
 
 /** Apply one Explorer residency-radius control while preserving the outdoor radius hierarchy. */
 export function updateExplorerResidencyRadius(

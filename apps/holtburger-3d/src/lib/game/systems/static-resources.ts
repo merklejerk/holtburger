@@ -20,7 +20,8 @@ export type InstallStaticGeometryKey =
 
 /** Logical identity for either reusable or installation-specific static geometry. */
 export type StaticGeometryKey =
-	ReusableStaticGeometryKey | InstallStaticGeometryKey;
+	| ReusableStaticGeometryKey
+	| InstallStaticGeometryKey;
 
 /** Per-instance values consumed by the shared object instancing program. */
 export interface ObjectInstanceData {

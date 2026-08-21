@@ -23,6 +23,30 @@ import {
  */
 const EVALUATED_LIGHT_ROLL_OFF_CEILING = 1;
 
+/** Directional-only lighting shared by full scene programs and distant terrain. */
+export const WEBGL2_DIRECTIONAL_LIGHTING_GLSL = `
+uniform vec3 uSunVector;
+uniform vec3 uSunColor;
+uniform vec3 uAmbientColor;
+uniform float uAmbientLevel;
+
+// Authored GfxObj normals may be exactly zero (2.6% of retail vertices). Retail never
+// normalizes, validates, or derives a face normal for them, and its software sun term
+// yields nothing because max(0, N.L) is zero. Returning zero reproduces that without
+// letting a zero-length normalize poison the result with NaN.
+vec3 safeNormal(vec3 normal) {
+	float lengthSquared = dot(normal, normal);
+	return lengthSquared > 0.0 ? normal * inversesqrt(lengthSquared) : vec3(0.0);
+}
+
+// Ambient and the sun are directional, so they interpolate correctly across even a very large
+// triangle. Deliberately unclamped: callers clamp the complete lighting contribution once.
+vec3 evaluateAmbientAndSun(vec3 normal) {
+	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
+	return uAmbientLevel * uAmbientColor + sun * uSunColor;
+}
+`;
+
 /**
  * Shared vertex-stage lighting for terrain and objects.
  *
@@ -38,10 +62,7 @@ const EVALUATED_LIGHT_ROLL_OFF_CEILING = 1;
  * exactly one owner.
  */
 export const WEBGL2_SCENE_LIGHTING_GLSL = `
-uniform vec3 uSunVector;
-uniform vec3 uSunColor;
-uniform vec3 uAmbientColor;
-uniform float uAmbientLevel;
+${WEBGL2_DIRECTIONAL_LIGHTING_GLSL}
 // Dynamic lights in anchor-relative space, packed as xyz = position, w = range and
 // rgb = colour, a = intensity. A count of zero costs one comparison and no iteration.
 uniform int uDynamicLightCount;
@@ -52,15 +73,6 @@ uniform vec4 uDynamicLightColorIntensity[${MAX_DYNAMIC_LIGHTS}];
 uniform int uStaticLightCount;
 uniform vec4 uStaticLightPositionRange[${MAX_STATIC_LIGHTS}];
 uniform vec4 uStaticLightColorIntensity[${MAX_STATIC_LIGHTS}];
-
-// Authored GfxObj normals may be exactly zero (2.6% of retail vertices). Retail never
-// normalizes, validates, or derives a face normal for them, and its software sun term
-// yields nothing because max(0, N.L) is zero. Returning zero reproduces that without
-// letting a zero-length normalize poison the result with NaN.
-vec3 safeNormal(vec3 normal) {
-	float lengthSquared = dot(normal, normal);
-	return lengthSquared > 0.0 ? normal * inversesqrt(lengthSquared) : vec3(0.0);
-}
 
 ${POINT_LIGHT_FALLOFF_GLSL}
 
@@ -152,14 +164,6 @@ vec3 evaluateRuntimeLights(vec3 position, vec3 unitNormal) {
 // before clamping once; burned-in interior lighting arrives through the emissive slot
 // (FFEmissiveColorSource = FromVertex, acclient.c:434243), so it adds here rather than
 // replacing the ambient term.
-// Ambient and the sun are directional, so they interpolate correctly across even a very large
-// triangle and stay in the vertex stage. Deliberately unclamped: callers that evaluate point
-// lights separately must clamp the total once, not each part.
-vec3 evaluateAmbientAndSun(vec3 normal) {
-	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
-	return uAmbientLevel * uAmbientColor + sun * uSunColor;
-}
-
 vec3 evaluateSceneLighting(vec3 position, vec3 normal, vec3 bakedLight) {
 	vec3 unitNormal = safeNormal(normal);
 	return min(
@@ -172,11 +176,15 @@ vec3 evaluateSceneLighting(vec3 position, vec3 normal, vec3 bakedLight) {
 `;
 
 /** Lighting uniform locations resolved by every lighting-aware renderer program. */
-export interface WebGL2LightingUniforms {
+export interface WebGL2DirectionalLightingUniforms {
 	readonly ambientColor: WebGLUniformLocation;
 	readonly ambientLevel: WebGLUniformLocation;
 	readonly sunColor: WebGLUniformLocation;
 	readonly sunVector: WebGLUniformLocation;
+}
+
+/** Full point- and directional-light uniform locations for near geometry. */
+export interface WebGL2LightingUniforms extends WebGL2DirectionalLightingUniforms {
 	readonly dynamicLightCount: WebGLUniformLocation;
 	readonly dynamicLightPositionRange: WebGLUniformLocation;
 	readonly dynamicLightColorIntensity: WebGLUniformLocation;
@@ -194,7 +202,7 @@ export interface DynamicLightScratch {
 /** Bind one draw's resolved lighting for its retail role. */
 export function bindWebGL2SceneLighting(
 	gl: WebGL2RenderingContext,
-	uniforms: WebGL2LightingUniforms,
+	uniforms: WebGL2DirectionalLightingUniforms,
 	lighting: ResolvedSceneLighting,
 ): void {
 	gl.uniform3f(

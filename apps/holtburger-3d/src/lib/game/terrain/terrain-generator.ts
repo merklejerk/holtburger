@@ -1,10 +1,6 @@
 import { AABB3, Vec3 } from "../math/types";
 import { getLandblockCoordinates } from "../landblocks";
-import {
-	MAXIMUM_TERRAIN_CODE,
-	roadCodeOf,
-	terrainCodeOf,
-} from "./terrain-sample";
+import { roadCodeOf, terrainCodeOf } from "./terrain-sample";
 import type { TerrainGeometryData } from "../renderer/geometry";
 import {
 	TERRAIN_GRID_CELLS,
@@ -13,6 +9,7 @@ import {
 	type TerrainPcodeField,
 } from "./types";
 import { usesSouthwestToNortheastCut } from "./terrain-surface";
+import type { ClosedWorkerPoolDiagnostics } from "../workers/closed-worker";
 
 /** Vertices along one axis of the authored-resolution mesh. */
 const SIDE_VERTICES = TERRAIN_GRID_CELLS + 1;
@@ -24,39 +21,10 @@ const INDEX_COUNT = TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS * 6;
 export interface TerrainGenerator {
 	/** Generate one landblock's terrain mesh and pcode field from its canonical source. */
 	generate(source: TerrainGenerationSource): Promise<TerrainGenerationResult>;
+	/** Read aggregate executor scheduling facts without exposing job payloads. */
+	getDiagnostics(): ClosedWorkerPoolDiagnostics;
 	/** Stop accepting terrain jobs and release any executor resources. */
 	destroy(): Promise<void>;
-}
-
-/**
- * Produces real, canonical-grid terrain on the runtime thread.
- *
- * A terrain source is a 9x9 grid and generation materializes fixed, bounded output. Keep this
- * implementation synchronous until profiling demonstrates a worker transport is necessary; the
- * `TerrainGenerator` port preserves that future replacement seam without mislabelling this
- * implementation as a worker pool.
- */
-export class InlineTerrainGenerator implements TerrainGenerator {
-	#destroyed = false;
-
-	static async build(): Promise<InlineTerrainGenerator> {
-		return new InlineTerrainGenerator();
-	}
-
-	async generate(
-		source: TerrainGenerationSource,
-	): Promise<TerrainGenerationResult> {
-		if (this.#destroyed) {
-			throw new Error(
-				"Cannot generate terrain after InlineTerrainGenerator is destroyed.",
-			);
-		}
-		return generateTerrain(source);
-	}
-
-	async destroy(): Promise<void> {
-		this.#destroyed = true;
-	}
 }
 
 /**
@@ -77,19 +45,23 @@ export function generateTerrain(
 	validateSource(source);
 	const positions = new Float32Array(VERTEX_COUNT * 3);
 	const textureCoordinates = new Float32Array(VERTEX_COUNT * 2);
+	const terrainColorCodes = new Uint8Array(VERTEX_COUNT);
 	for (let row = 0; row < SIDE_VERTICES; row += 1) {
 		for (let column = 0; column < SIDE_VERTICES; column += 1) {
 			const vertex = row * SIDE_VERTICES + column;
+			const sourceVertex = sourceIndex(source, row, column);
 			const positionOffset = vertex * 3;
 			// Canonical rows run south-to-north. Render-local -Z is north, matching the existing
 			// static-terrain conversion and the identity terrain-root transform.
 			positions[positionOffset] = column * source.tileSize;
-			positions[positionOffset + 1] =
-				source.heights[row * source.gridSize + column] ?? NaN;
+			positions[positionOffset + 1] = source.heights[sourceVertex] ?? NaN;
 			positions[positionOffset + 2] = row === 0 ? 0 : -row * source.tileSize;
 			const uvOffset = vertex * 2;
 			textureCoordinates[uvOffset] = column / TERRAIN_GRID_CELLS;
 			textureCoordinates[uvOffset + 1] = row / TERRAIN_GRID_CELLS;
+			terrainColorCodes[vertex] = terrainCodeOf(
+				source.terrainSamples[sourceVertex],
+			);
 		}
 	}
 
@@ -123,38 +95,15 @@ export function generateTerrain(
 		kind: "terrain",
 		normals: calculateNormals(positions, indices),
 		positions,
+		terrainColorCodes,
 		textureCoordinates,
 	};
 	const surfaceField = generateSurfaceField(source);
 	return {
 		bounds: boundsForPositions(positions),
-		dominantTerrainCode: dominantTerrainCode(surfaceField),
 		geometry,
 		surfaceField,
 	};
-}
-
-/**
- * The terrain code covering the most corners of this landblock.
- *
- * Stands in for the whole landblock once it is far enough away to render flat. Derived from the
- * generated pcodes rather than the raw samples so it names exactly what the composited surface
- * would have been built from. Ties break toward the lower code, which only has to be deterministic.
- */
-function dominantTerrainCode(field: TerrainPcodeField): number {
-	// The code range is small and fixed, so a dense tally beats a map.
-	const counts = new Uint16Array(MAXIMUM_TERRAIN_CODE + 1);
-	for (const pcode of field.cellPcodes) {
-		counts[(pcode >>> 15) & MAXIMUM_TERRAIN_CODE] += 1;
-		counts[(pcode >>> 10) & MAXIMUM_TERRAIN_CODE] += 1;
-		counts[(pcode >>> 5) & MAXIMUM_TERRAIN_CODE] += 1;
-		counts[pcode & MAXIMUM_TERRAIN_CODE] += 1;
-	}
-	let dominant = 0;
-	for (let code = 1; code < counts.length; code += 1) {
-		if (counts[code] > counts[dominant]) dominant = code;
-	}
-	return dominant;
 }
 
 function generateSurfaceField(

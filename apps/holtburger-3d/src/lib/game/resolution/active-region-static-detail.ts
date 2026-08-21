@@ -1,7 +1,7 @@
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { DatAssetId } from "../game-types";
-import { resolveActiveRegionTerrainPresentation } from "../terrain/active-region-terrain-resolver";
+import { resolveActiveRegionTerrainDetailRoles } from "../terrain/active-region-terrain-resolver";
 import {
 	createAssetTextureKey,
 	TexturePixelFormat,
@@ -97,7 +97,7 @@ export class ActiveRegionStaticDetailOwner {
 		activeRegionKey: string,
 	): Promise<ActiveRegionStaticDetailBinding> {
 		const sourceRoles = new Map(
-			resolveActiveRegionTerrainPresentation(activeRegion).detailRoles.map(
+			resolveActiveRegionTerrainDetailRoles(activeRegion).map(
 				(detail) => [detail.role, detail] as const,
 			),
 		);

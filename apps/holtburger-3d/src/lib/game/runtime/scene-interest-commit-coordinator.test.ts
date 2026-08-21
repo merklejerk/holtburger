@@ -9,6 +9,8 @@ import {
 	resolveTerrainTextureFacts,
 	type TerrainCompositionFacts,
 } from "../terrain/types";
+import { compileTerrainCompositionTable } from "../terrain/composition-table";
+import { resolveTerrainMaterialTable } from "../terrain/terrain-materials";
 import {
 	SceneInterestCommitCoordinator,
 	type SceneInterestCommitCoordinatorCallbacks,
@@ -98,6 +100,10 @@ function artifact(layer: LandblockLayerKind): LandblockLayerCommit {
 				},
 				presentation: {
 					composition: TERRAIN_COMPOSITION,
+					compositionTable: compileTerrainCompositionTable(
+						TERRAIN_COMPOSITION,
+						resolveTerrainTextureFacts(TERRAIN_COMPOSITION),
+					),
 					textures: resolveTerrainTextureFacts(TERRAIN_COMPOSITION),
 				},
 			},
@@ -127,7 +133,7 @@ const TERRAIN_COMPOSITION: TerrainCompositionFacts = {
 	landscapeDetail: { textureId: "0x05000001", tiling: 1 },
 	roadAlphaMaps: [{ roadCode: 1, roadMaskTextureId: "0x05000003" }],
 	sideTerrainAlphaMaps: [],
-	terrainTypes: [
+	terrainMaterials: resolveTerrainMaterialTable([
 		{
 			colorTextureId: "0x05000001",
 			colorVariation: {
@@ -141,7 +147,7 @@ const TERRAIN_COMPOSITION: TerrainCompositionFacts = {
 			terrainType: 0,
 			tiling: 1,
 		},
-	],
+	]),
 };
 
 function createCallbacks() {

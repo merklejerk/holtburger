@@ -29,8 +29,8 @@ describe("WebGL2GpuFrameProfiler", () => {
 		if (!frame)
 			throw new Error("Supported timer queries did not begin a frame.");
 
-		frame.beginPhase("terrain").finish();
-		frame.beginPhase("terrain").finish();
+		frame.beginPhase("nearTerrain").finish();
+		frame.beginPhase("farTerrain").finish();
 		frame.beginPhase("ambientOcclusion").finish();
 		frame.beginPhase("opaque").finish();
 		frame.beginPhase("particle").finish();
@@ -48,6 +48,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 		expect(profiler.getProfile()).toEqual({
 			ambientOcclusionMs: 1,
 			blendedMs: 0,
+			farTerrainMs: 1,
 			frameNumber: 7,
 			kind: "available",
 			opaqueMs: 1,
@@ -57,8 +58,8 @@ describe("WebGL2GpuFrameProfiler", () => {
 			portalCompositionMs: 2,
 			// This frame drives no sky pass, so its span stays zero rather than being absent.
 			skyMs: 0,
-			// Two terrain phases at 1 ms each aggregate; total is their sum, since elapsed queries
-			// cannot nest and no query spans the frame.
+			nearTerrainMs: 1,
+			// Near and far terrain remain available as one aggregate for existing consumers.
 			terrainMs: 2,
 			totalMs: 8,
 		});
@@ -72,7 +73,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 		const frame = profiler.beginFrame(1);
 		if (!frame)
 			throw new Error("Supported timer queries did not begin a frame.");
-		frame.beginPhase("terrain");
+		frame.beginPhase("nearTerrain");
 
 		// The single-active-query constraint is why there is no frame-wide span; a caller that
 		// opens overlapping phases must fail rather than silently mismeasure.

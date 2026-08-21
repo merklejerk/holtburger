@@ -279,15 +279,17 @@ export interface FrameSelectionMetrics {
 	readonly staticLightBinds: number;
 	/** Per-landblock terrain light-mask uploads; unlit landblocks skip theirs entirely. */
 	readonly terrainLightMaskUploads: number;
-	/** Terrain landblocks drawn as one flat colour because fog already hides their detail. */
-	readonly solidTerrainDraws: number;
+	/** Terrain landblocks drawn by the sampler-free far vertex-color program. */
+	readonly farTerrainDraws: number;
+	/** Complete 32-color palette uploads, one for each non-empty far terrain state group. */
+	readonly farTerrainPaletteUploads: number;
 	/**
-	 * Landblock ring at which terrain switches to flat, or null when fog leaves it composited.
+	 * Landblock ring at which terrain switches to far vertex colors, or null when fog leaves it near.
 	 *
 	 * Exposed because the ring is derived from the frame's fog rather than configured directly, so
-	 * this is the only way to see where a given `solidTerrainFogCoverage` actually landed.
+	 * this is the only way to see where a given `farTerrainFogCoverage` actually landed.
 	 */
-	readonly solidTerrainCutoffLandblocks: number | null;
+	readonly farTerrainCutoffLandblocks: number | null;
 	/** Lighting-uniform binds caused by a draw changing its retail lighting role. */
 	readonly objectLightingBinds: number;
 	/** Object-program activation count across every rendered view. */
@@ -386,6 +388,8 @@ export type RendererGpuFrameProfile =
 			readonly ambientOcclusionMs: number;
 			/** GPU elapsed-time span covering blended object commands. */
 			readonly blendedMs: number;
+			/** GPU elapsed-time span covering sampler-free far-terrain groups. */
+			readonly farTerrainMs: number;
 			/** Renderer frame identifier associated with this delayed result. */
 			readonly frameNumber: number;
 			readonly kind: "available";
@@ -413,6 +417,8 @@ export type RendererGpuFrameProfile =
 			 * sequentially and summed.
 			 */
 			readonly skyMs: number;
+			/** GPU elapsed-time span covering composed near-terrain groups. */
+			readonly nearTerrainMs: number;
 			/** GPU elapsed-time span covering terrain commands. */
 			readonly terrainMs: number;
 			/**

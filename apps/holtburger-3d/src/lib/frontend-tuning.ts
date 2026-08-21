@@ -309,19 +309,18 @@ export const FRONTEND_TUNING = {
 			far: 50,
 		},
 		/**
-		 * Fog coverage at which terrain stops compositing and renders one flat color.
+		 * Fog coverage at which terrain switches from near composition to far vertex colors.
 		 *
-		 * Distant terrain does not need to be correct, and a flat landblock skips its surface-field
-		 * bind, its light state, and its mask upload. Lower values move the switch nearer the camera
-		 * and flatten more of the window; raise it if the transition reads badly, since whatever
-		 * colour error the flat stand-in carries survives the fog blend in proportion to how much
-		 * fog is left at the ring.
+		 * The far pass skips surface, sampler, and point-light state while preserving authored type
+		 * changes across the mesh. Lower values move the switch nearer the camera; raise it if the
+		 * approximation reads badly, since its color error survives the fog blend in proportion to
+		 * how much fog is left at the ring.
 		 *
-		 * The ring itself is derived, not configured: `solidTerrainCutoffLandblocks` converts this
+		 * The ring itself is derived, not configured: `farTerrainCutoffLandblocks` converts this
 		 * and the frame's fog into whole landblocks, and the renderer reports where it landed as
-		 * `FrameSelectionMetrics.solidTerrainCutoffLandblocks`.
+		 * `FrameSelectionMetrics.farTerrainCutoffLandblocks`.
 		 */
-		solidTerrainFogCoverage: 0.33,
+		farTerrainFogCoverage: 0.33,
 		transparentObjects: {
 			/** Radius within which transparent objects receive exact camera-depth ordering. */
 			nearDistance: 16,

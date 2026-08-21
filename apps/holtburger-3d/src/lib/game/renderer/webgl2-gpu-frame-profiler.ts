@@ -12,7 +12,8 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 export type WebGL2GpuFramePhase =
 	| "ambientOcclusion"
 	| "sky"
-	| "terrain"
+	| "nearTerrain"
+	| "farTerrain"
 	| "opaque"
 	| "blended"
 	| "particle"
@@ -296,7 +297,8 @@ export class WebGL2GpuFrameProfiler {
 			NANOSECONDS_PER_MILLISECOND;
 		let ambientOcclusionMs = 0;
 		let skyMs = 0;
-		let terrainMs = 0;
+		let nearTerrainMs = 0;
+		let farTerrainMs = 0;
 		let opaqueMs = 0;
 		let blendedMs = 0;
 		let particleMs = 0;
@@ -311,8 +313,11 @@ export class WebGL2GpuFrameProfiler {
 				case "sky":
 					skyMs += durationMs;
 					break;
-				case "terrain":
-					terrainMs += durationMs;
+				case "nearTerrain":
+					nearTerrainMs += durationMs;
+					break;
+				case "farTerrain":
+					farTerrainMs += durationMs;
 					break;
 				case "opaque":
 					opaqueMs += durationMs;
@@ -330,9 +335,11 @@ export class WebGL2GpuFrameProfiler {
 					portalCompositionMs += durationMs;
 			}
 		}
+		const terrainMs = nearTerrainMs + farTerrainMs;
 		return {
 			ambientOcclusionMs,
 			blendedMs,
+			farTerrainMs,
 			frameNumber: frame.frameNumber,
 			kind: "available",
 			opaqueMs,
@@ -341,6 +348,7 @@ export class WebGL2GpuFrameProfiler {
 			portalCompositionMs,
 			pendingFrameCount: this.#pending.length,
 			skyMs,
+			nearTerrainMs,
 			terrainMs,
 			// The sum of what was measured, not wall-clock from first to last command. Elapsed
 			// queries cannot nest, so unattributed GPU work between phases is unmeasurable and is

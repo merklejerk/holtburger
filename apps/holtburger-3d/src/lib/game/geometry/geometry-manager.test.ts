@@ -68,6 +68,7 @@ function createTerrainGeometry(): RenderGeometryData {
 		kind: "terrain",
 		normals: new Float32Array(9),
 		positions: new Float32Array(9),
+		terrainColorCodes: new Uint8Array(3),
 		textureCoordinates: new Float32Array(6),
 	};
 }

@@ -1,4 +1,8 @@
-import { ROAD_TERRAIN_TYPE, TERRAIN_TYPE_COUNT } from "./pcode";
+import {
+	ROAD_TERRAIN_TYPE,
+	TERRAIN_COLOR_CODES,
+	TERRAIN_TYPE_COUNT,
+} from "./pcode";
 import type {
 	ResolvedTerrainTextureFacts,
 	TerrainCompositionFacts,
@@ -26,12 +30,6 @@ export function compileTerrainCompositionTable(
 	composition: TerrainCompositionFacts,
 	textures: ResolvedTerrainTextureFacts,
 ): TerrainCompositionTable {
-	const fallbackTerrain = composition.terrainTypes[0];
-	if (!fallbackTerrain) {
-		throw new Error(
-			`Terrain active region ${composition.activeRegionKey} has no terrain descriptor fallback.`,
-		);
-	}
 	const width = Math.max(
 		TERRAIN_TYPE_COUNT + 1,
 		composition.cornerTerrainAlphaMaps.length,
@@ -53,16 +51,12 @@ export function compileTerrainCompositionTable(
 		"road mask",
 	);
 
-	for (
-		let terrainType = 0;
-		terrainType < TERRAIN_TYPE_COUNT;
-		terrainType += 1
-	) {
+	for (const terrainType of TERRAIN_COLOR_CODES) {
 		writeTerrainType(
 			texels,
 			width,
 			terrainType,
-			findTerrainType(composition.terrainTypes, terrainType) ?? fallbackTerrain,
+			composition.terrainMaterials.byCode[terrainType],
 			colorLayers,
 		);
 	}
@@ -70,8 +64,7 @@ export function compileTerrainCompositionTable(
 		texels,
 		width,
 		ROAD_TERRAIN_TYPE,
-		findTerrainType(composition.terrainTypes, ROAD_TERRAIN_TYPE) ??
-			fallbackTerrain,
+		composition.terrainMaterials.byCode[ROAD_TERRAIN_TYPE],
 		colorLayers,
 	);
 
@@ -161,11 +154,4 @@ function requireLayer(
 		throw new Error(`Terrain ${label} ${assetId} is missing from its array.`);
 	}
 	return layer;
-}
-
-function findTerrainType(
-	terrainTypes: readonly TerrainMaterialType[],
-	terrainType: number,
-): TerrainMaterialType | undefined {
-	return terrainTypes.find((entry) => entry.terrainType === terrainType);
 }

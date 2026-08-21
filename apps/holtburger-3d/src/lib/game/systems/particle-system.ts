@@ -681,7 +681,7 @@ export class ParticleSystem {
 	 *
 	 * Retained deliberately as the **reference** for the GPU vertex stage rather than as a draw
 	 * path: the shader implements the same formulas, and this is what its output is checked
-	 * against. Production drawing goes through {@link collectCohorts}.
+	 * against. Production drawing goes through {@link collectDrawRanges}.
 	 */
 	sample(timeSeconds: number, anchor: SceneVector3): ParticleSample[] {
 		const samples: ParticleSample[] = [];

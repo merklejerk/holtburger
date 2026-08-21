@@ -7,6 +7,7 @@ import {
 	resolveTerrainTextureFacts,
 	type TerrainCompositionFacts,
 } from "./types";
+import { resolveTerrainMaterialTable } from "./terrain-materials";
 
 const VARIATION = {
 	maxVertexBrightness: 12,
@@ -29,7 +30,7 @@ describe("compileTerrainCompositionTable", () => {
 			sideTerrainAlphaMaps: [
 				{ blendMaskTextureId: "0x05000004", terrainCode: 9 },
 			],
-			terrainTypes: [
+			terrainMaterials: resolveTerrainMaterialTable([
 				{
 					colorTextureId: "0x05000001",
 					colorVariation: VARIATION,
@@ -42,7 +43,7 @@ describe("compileTerrainCompositionTable", () => {
 					terrainType: 2,
 					tiling: 3,
 				},
-			],
+			]),
 		};
 
 		const table = compileTerrainCompositionTable(

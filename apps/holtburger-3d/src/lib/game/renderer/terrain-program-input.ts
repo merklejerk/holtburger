@@ -1,5 +1,8 @@
 import type { LandblockId } from "../game-types";
-import type { TextureArrayBinding } from "../textures/texture-manager";
+import type {
+	TerrainColorTextureArrayBinding,
+	TextureArrayBinding,
+} from "../textures/texture-manager";
 import type {
 	GeometryResourceKey,
 	Texture2DResourceKey,
@@ -7,7 +10,7 @@ import type {
 
 /** Device-backed regional textures selected for one terrain draw. */
 export interface TerrainTextureBindings {
-	readonly colors: TextureArrayBinding;
+	readonly colors: TerrainColorTextureArrayBinding;
 	readonly blendMasks: TextureArrayBinding;
 	readonly roadMasks: TextureArrayBinding;
 	readonly detail: Texture2DResourceKey;
@@ -43,6 +46,7 @@ export function assertSharedTerrainRegion(
 	if (
 		expected.composition !== actual.composition ||
 		expected.textures.colors.resource !== actual.textures.colors.resource ||
+		expected.textures.colors.palette !== actual.textures.colors.palette ||
 		expected.textures.blendMasks.resource !==
 			actual.textures.blendMasks.resource ||
 		expected.textures.roadMasks.resource !==

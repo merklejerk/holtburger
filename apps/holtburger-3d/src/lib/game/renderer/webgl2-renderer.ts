@@ -4,7 +4,7 @@ import {
 	getLandblockCoordinates,
 	landblockChebyshevDistance,
 } from "../landblocks";
-import { solidTerrainCutoffLandblocks } from "../environment/terrain-fog";
+import { farTerrainCutoffLandblocks } from "../environment/terrain-fog";
 import {
 	createPerspectiveMat4,
 	createViewMat4,
@@ -63,9 +63,13 @@ import {
 	type WebGL2TextureArrayBinding,
 } from "./webgl2-resource-manager";
 import {
-	createWebGL2TerrainProgram,
-	type WebGL2TerrainProgram,
+	createWebGL2NearTerrainProgram,
+	type WebGL2NearTerrainProgram,
 } from "./webgl2-terrain-program";
+import {
+	createWebGL2FarTerrainProgram,
+	type WebGL2FarTerrainProgram,
+} from "./webgl2-far-terrain-program";
 import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import {
 	createWebGL2ObjectProgram,
@@ -98,26 +102,20 @@ import {
 	uploadWebGL2TerrainLightMask,
 	type WebGL2TerrainLightMaskTexture,
 } from "./webgl2-terrain-light-mask";
-
-/**
- * Texture unit for the terrain light mask, after the six the terrain shader samples: unit 0 is the
- * per-landblock surface field, units 1-5 the region-constant pass textures.
- * Object programs bind only units 0-2, so nothing contends for it.
- */
-const TERRAIN_LIGHT_MASK_TEXTURE_UNIT = 6;
 import {
 	objectLightingRole,
 	resolveAuthoredLightResponse,
 	resolveSceneLightingByRole,
 	type SceneLightingByRole,
 } from "../environment/scene-lighting";
-import { bindWebGL2DistanceFog } from "./webgl2-fog";
+import { bindWebGL2DistanceFog, type WebGL2FogUniforms } from "./webgl2-fog";
 import {
 	bindWebGL2DynamicLights,
 	bindWebGL2SceneLighting,
 	bindWebGL2StaticLights,
 	type LightAnchorOrigin,
 	createDynamicLightScratch,
+	type WebGL2DirectionalLightingUniforms,
 } from "./webgl2-lighting";
 import {
 	formAdjacentObjectInstanceRuns,
@@ -161,12 +159,6 @@ import {
 	type ParticleRecordFrame,
 	WebGL2ParticlePass,
 } from "./webgl2-particle-pass";
-
-/** Stand-in before any emitter has published records, so the context is never partially built. */
-const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
-	data: new Float32Array(0),
-	dirtySlots: null,
-};
 import {
 	EXTERIOR_PARTICLE_RENDER_OWNER,
 	SKY_PARTICLE_RENDER_OWNER,
@@ -202,18 +194,22 @@ import {
 } from "./ambient-occlusion-policy";
 import { WebGL2SaoPass, type WebGL2SaoCoverageCensus } from "./webgl2-sao-pass";
 
+/**
+ * Texture unit for the terrain light mask, after the six the terrain shader samples: unit 0 is the
+ * per-landblock surface field, units 1-5 the region-constant pass textures.
+ * Object programs bind only units 0-2, so nothing contends for it.
+ */
+const TERRAIN_LIGHT_MASK_TEXTURE_UNIT = 6;
+
+/** Stand-in before any emitter has published records, so the context is never partially built. */
+const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
+	data: new Float32Array(0),
+	dirtySlots: null,
+};
+
 /** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
 const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
 
-/** One visible landblock terrain source paired with selected renderer resources. */
-/**
- * Shading state threaded through every draw pass.
- *
- * Fog and lighting travel together because both are resolved from the same regional
- * keyframes and both must agree for a given draw. Phase 3 of the scene lighting plan
- * varies this per draw unit so portal-visible interiors can drop the sun while the
- * outdoor pass keeps it.
- */
 /**
  * Convert a canonical scene position into the frame's anchor-relative render frame.
  *
@@ -286,6 +282,17 @@ interface TerrainFrameInput {
 	readonly drawUnit: TerrainDrawUnit;
 	/** Device resources resolved by this renderer for the terrain shader contract. */
 	readonly program: TerrainProgramInput;
+}
+
+/** View-constant uniforms shared by the near and sampler-free far terrain programs. */
+interface TerrainGroupUniforms
+	extends WebGL2FogUniforms, WebGL2DirectionalLightingUniforms {
+	readonly cameraPosition: WebGLUniformLocation;
+	readonly clipTransform: WebGLUniformLocation;
+	readonly landblockOffset: WebGLUniformLocation;
+	readonly localToLandblock: WebGLUniformLocation;
+	readonly projection: WebGLUniformLocation;
+	readonly view: WebGLUniformLocation;
 }
 
 /** One opaque or alpha-test static-object range paired with its resolved node placement. */
@@ -548,8 +555,9 @@ interface MutableFrameSelectionMetrics {
 	staticLightBinds: number;
 	/** Per-landblock terrain mask uploads; unlit landblocks skip theirs entirely. */
 	terrainLightMaskUploads: number;
-	solidTerrainDraws: number;
-	solidTerrainCutoffLandblocks: number | null;
+	farTerrainDraws: number;
+	farTerrainPaletteUploads: number;
+	farTerrainCutoffLandblocks: number | null;
 	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
@@ -636,7 +644,8 @@ export class WebGL2Renderer implements Renderer {
 	readonly #selectedDynamicNodeIds = new Set<SceneNodeId>();
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
-	readonly #terrainProgram: WebGL2TerrainProgram;
+	readonly #nearTerrainProgram: WebGL2NearTerrainProgram;
+	readonly #farTerrainProgram: WebGL2FarTerrainProgram;
 	readonly #objectProgram: WebGL2FogObjectProgram;
 	readonly #instancedObjectProgram: WebGL2FogInstancedObjectProgram;
 	/** Transparent and additive materials deliberately use a shader with no fog uniforms. */
@@ -736,8 +745,9 @@ export class WebGL2Renderer implements Renderer {
 		droppedLights: 0,
 		staticLightBinds: 0,
 		terrainLightMaskUploads: 0,
-		solidTerrainDraws: 0,
-		solidTerrainCutoffLandblocks: null,
+		farTerrainDraws: 0,
+		farTerrainPaletteUploads: 0,
+		farTerrainCutoffLandblocks: null,
 		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
@@ -784,7 +794,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
 		this.#objectState = new WebGL2ObjectStateApplicator(gl);
 		this.#world = world;
-		this.#terrainProgram = createWebGL2TerrainProgram(gl);
+		this.#nearTerrainProgram = createWebGL2NearTerrainProgram(gl);
+		this.#farTerrainProgram = createWebGL2FarTerrainProgram(gl);
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
 		this.#instancedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: true,
@@ -1344,7 +1355,8 @@ export class WebGL2Renderer implements Renderer {
 			this.#gl.deleteProgram(this.#portalAtlasSkyProgram.program);
 		}
 		this.#portalAtlasSkyProgram = null;
-		this.#gl.deleteProgram(this.#terrainProgram.program);
+		this.#gl.deleteProgram(this.#nearTerrainProgram.program);
+		this.#gl.deleteProgram(this.#farTerrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
 		this.#gl.deleteProgram(this.#instancedObjectProgram.program);
 		this.#gl.deleteProgram(this.#blendedObjectProgram.program);
@@ -1686,7 +1698,9 @@ export class WebGL2Renderer implements Renderer {
 					blendMasks: this.#world.resolveTextureArray(
 						drawUnit.textures.blendMasks,
 					),
-					colors: this.#world.resolveTextureArray(drawUnit.textures.colors),
+					colors: this.#world.resolveTerrainColorTextureArray(
+						drawUnit.textures.colors,
+					),
 					detail: this.#world.resolveTexture2D(drawUnit.textures.detail),
 					roadMasks: this.#world.resolveTextureArray(
 						drawUnit.textures.roadMasks,
@@ -2040,8 +2054,9 @@ export class WebGL2Renderer implements Renderer {
 		metrics.droppedLights = 0;
 		metrics.staticLightBinds = 0;
 		metrics.terrainLightMaskUploads = 0;
-		metrics.solidTerrainDraws = 0;
-		metrics.solidTerrainCutoffLandblocks = null;
+		metrics.farTerrainDraws = 0;
+		metrics.farTerrainPaletteUploads = 0;
+		metrics.farTerrainCutoffLandblocks = null;
 		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
@@ -2410,15 +2425,13 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		const gpu = profile?.beginGpuPhase("terrain") ?? null;
 		const startedAt = profile?.beginCpuPhase();
 		try {
-			this.#drawTerrain(view, shading, portalPipeline);
+			this.#drawTerrain(view, shading, profile, portalPipeline);
 		} finally {
 			if (profile && startedAt !== undefined) {
 				profile.finishCpuPhase("terrainSubmission", startedAt);
 			}
-			gpu?.finish();
 		}
 	}
 
@@ -2457,14 +2470,29 @@ export class WebGL2Renderer implements Renderer {
 	#drawTerrain(
 		view: PreparedView,
 		shading: SceneShading,
+		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		if (view.terrain.length === 0) {
+		const [passResources] = view.terrain;
+		if (!passResources) {
 			portalPipeline?.routeTerrainPass(
 				0,
-				this.#terrainProgram.uniforms.clipTransform,
+				this.#nearTerrainProgram.uniforms.clipTransform,
 			);
 			return;
+		}
+		const farCutoff = farTerrainCutoffLandblocks(shading.fog);
+		this.#frameSelectionMetrics.farTerrainCutoffLandblocks = farCutoff;
+		let nearCount = 0;
+		let farCount = 0;
+		for (const terrain of view.terrain) {
+			assertSharedTerrainRegion(
+				passResources.program,
+				terrain.program,
+				terrain.drawUnit.landblockId,
+			);
+			if (this.#isFarTerrain(terrain, view, farCutoff)) farCount += 1;
+			else nearCount += 1;
 		}
 		const gl = this.#gl;
 		gl.depthMask(true);
@@ -2473,129 +2501,210 @@ export class WebGL2Renderer implements Renderer {
 		gl.cullFace(gl.BACK);
 		gl.enable(gl.POLYGON_OFFSET_FILL);
 		gl.polygonOffset(TERRAIN_DEPTH_OFFSET.factor, TERRAIN_DEPTH_OFFSET.units);
-		gl.useProgram(this.#terrainProgram.program);
-		gl.uniform4f(this.#terrainProgram.uniforms.clipTransform, 1, 1, 0, 0);
-		portalPipeline?.routeTerrainPass(
-			view.terrain.length,
-			this.#terrainProgram.uniforms.clipTransform,
-		);
+		let routedTerrainPass = false;
+		if (nearCount > 0) {
+			const gpu = profile?.beginGpuPhase("nearTerrain") ?? null;
+			try {
+				this.#beginNearTerrainGroup(
+					view,
+					shading,
+					passResources,
+					portalPipeline,
+					view.terrain.length,
+				);
+				routedTerrainPass = true;
+				this.#drawNearTerrainGroup(view, shading, farCutoff);
+			} finally {
+				gpu?.finish();
+			}
+		}
+		if (farCount > 0) {
+			const gpu = profile?.beginGpuPhase("farTerrain") ?? null;
+			try {
+				this.#beginFarTerrainGroup(
+					view,
+					shading,
+					passResources,
+					portalPipeline,
+					routedTerrainPass ? null : view.terrain.length,
+				);
+				this.#drawFarTerrainGroup(view, farCutoff);
+			} finally {
+				gpu?.finish();
+			}
+		}
+		gl.disable(gl.CULL_FACE);
+		gl.disable(gl.POLYGON_OFFSET_FILL);
+	}
+
+	#beginTerrainGroup(
+		view: PreparedView,
+		shading: SceneShading,
+		program: WebGLProgram,
+		uniforms: TerrainGroupUniforms,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+		routeSubmissionCount: number | null,
+	): void {
+		const gl = this.#gl;
+		gl.useProgram(program);
+		gl.uniform4f(uniforms.clipTransform, 1, 1, 0, 0);
+		if (portalPipeline) {
+			if (routeSubmissionCount === null) {
+				portalPipeline.routeOutdoorOpaqueSubmission(uniforms.clipTransform);
+			} else {
+				portalPipeline.routeTerrainPass(
+					routeSubmissionCount,
+					uniforms.clipTransform,
+				);
+			}
+		}
 		gl.uniformMatrix4fv(
-			this.#terrainProgram.uniforms.projection,
+			uniforms.projection,
 			false,
 			mat4ToFloat32Array(view.projection, this.#matrixScratch),
 		);
 		gl.uniform3f(
-			this.#terrainProgram.uniforms.cameraPosition,
+			uniforms.cameraPosition,
 			view.cameraPosition.x,
 			view.cameraPosition.y,
 			view.cameraPosition.z,
 		);
 		gl.uniformMatrix4fv(
-			this.#terrainProgram.uniforms.view,
+			uniforms.view,
 			false,
 			mat4ToFloat32Array(view.view, this.#matrixScratch),
 		);
+		gl.uniformMatrix4fv(
+			uniforms.localToLandblock,
+			false,
+			mat4ToFloat32Array(WebGL2Renderer.#identityMatrix),
+		);
+		bindWebGL2DistanceFog(gl, uniforms, shading.fog);
+		bindWebGL2SceneLighting(gl, uniforms, shading.lighting.terrain);
+	}
+
+	#beginNearTerrainGroup(
+		view: PreparedView,
+		shading: SceneShading,
+		passResources: TerrainFrameInput,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+		routeSubmissionCount: number,
+	): void {
+		const { program, uniforms } = this.#nearTerrainProgram;
+		this.#beginTerrainGroup(
+			view,
+			shading,
+			program,
+			uniforms,
+			portalPipeline,
+			routeSubmissionCount,
+		);
+		const gl = this.#gl;
 		gl.uniform1f(
-			this.#terrainProgram.uniforms.detailFadeNear,
+			uniforms.detailFadeNear,
 			FRONTEND_TUNING.rendering.terrainDetailFade.near,
 		);
 		gl.uniform1f(
-			this.#terrainProgram.uniforms.detailFadeFar,
+			uniforms.detailFadeFar,
 			FRONTEND_TUNING.rendering.terrainDetailFade.far,
-		);
-		bindWebGL2DistanceFog(gl, this.#terrainProgram.uniforms, shading.fog);
-		bindWebGL2SceneLighting(
-			gl,
-			this.#terrainProgram.uniforms,
-			shading.lighting.terrain,
 		);
 		bindWebGL2DynamicLights(
 			gl,
-			this.#terrainProgram.uniforms,
+			uniforms,
 			shading.dynamicLights,
 			shading.anchorOrigin,
 			this.#dynamicLightScratch,
 		);
 		this.#beginTerrainLightMasks();
-		// Safe because view.terrain is non-empty; the caller returned early otherwise.
-		const passResources = view.terrain[0]!;
 		this.#beginTerrainPassResources(passResources);
-		for (const terrain of view.terrain) {
-			assertSharedTerrainRegion(
-				passResources.program,
-				terrain.program,
-				terrain.drawUnit.landblockId,
-			);
-		}
-		// Landblocks at or past this ring render flat. Derived once from the frame's fog, which is
-		// itself scaled to the residency radius, so the ring tracks the interest window.
-		const solidCutoff = solidTerrainCutoffLandblocks(shading.fog);
-		this.#frameSelectionMetrics.solidTerrainCutoffLandblocks = solidCutoff;
-		// Two partitions rather than one interleaved loop, so `uSolidTerrain` changes exactly twice
-		// per pass. Submission order is not distance-sorted, so a single loop would toggle it once
-		// per run of like landblocks.
-		this.#drawTerrainPartition(view, shading, solidCutoff, false);
-		this.#drawTerrainPartition(view, shading, solidCutoff, true);
-		gl.disable(gl.CULL_FACE);
-		gl.disable(gl.POLYGON_OFFSET_FILL);
 	}
 
-	/**
-	 * Draw either the composited or the flat half of one terrain pass.
-	 *
-	 * A flat landblock skips its surface-field bind, its static-light uniforms, and its mask
-	 * upload: fog has already swallowed the detail those produce, and one terrain code names the
-	 * whole block.
-	 */
-	#drawTerrainPartition(
+	#beginFarTerrainGroup(
 		view: PreparedView,
 		shading: SceneShading,
-		solidCutoff: number | null,
-		solid: boolean,
+		passResources: TerrainFrameInput,
+		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
+		routeSubmissionCount: number | null,
 	): void {
-		const gl = this.#gl;
-		gl.uniform1i(this.#terrainProgram.uniforms.solidTerrain, solid ? 1 : 0);
+		const { program, uniforms } = this.#farTerrainProgram;
+		this.#beginTerrainGroup(
+			view,
+			shading,
+			program,
+			uniforms,
+			portalPipeline,
+			routeSubmissionCount,
+		);
+		this.#gl.uniform3fv(
+			uniforms.palette,
+			passResources.program.textures.colors.palette.colors,
+		);
+		this.#frameSelectionMetrics.farTerrainPaletteUploads += 1;
+	}
+
+	#drawNearTerrainGroup(
+		view: PreparedView,
+		shading: SceneShading,
+		farCutoff: number | null,
+	): void {
 		for (const terrain of view.terrain) {
-			const isSolid =
-				solidCutoff !== null &&
-				landblockChebyshevDistance(
-					terrain.drawUnit.coordinates,
-					view.anchorCoordinates,
-				) >= solidCutoff;
-			if (isSolid !== solid) continue;
+			if (this.#isFarTerrain(terrain, view, farCutoff)) continue;
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.coordinates,
 				view.anchorCoordinates,
 				this.#offsetScratch,
 			);
-			if (solid) {
-				gl.uniform1ui(
-					this.#terrainProgram.uniforms.solidTerrainCode,
-					terrain.drawUnit.dominantTerrainCode,
-				);
-				this.#frameSelectionMetrics.solidTerrainDraws += 1;
-			} else {
-				this.#bindTerrainSurfaceField(terrain);
-				const landblockLights = shading.staticLights(
-					terrain.drawUnit.landblockId,
-				);
-				bindWebGL2StaticLights(
-					gl,
-					this.#terrainProgram.uniforms,
-					landblockLights.lights,
-					shading.anchorOrigin,
-					shading.authoredLightResponse,
-					this.#dynamicLightScratch,
-				);
-				this.#uploadTerrainLightMask(landblockLights);
-				this.#frameSelectionMetrics.staticLightBinds += 1;
-			}
+			this.#bindTerrainSurfaceField(terrain);
+			const landblockLights = shading.staticLights(
+				terrain.drawUnit.landblockId,
+			);
+			bindWebGL2StaticLights(
+				this.#gl,
+				this.#nearTerrainProgram.uniforms,
+				landblockLights.lights,
+				shading.anchorOrigin,
+				shading.authoredLightResponse,
+				this.#dynamicLightScratch,
+			);
+			this.#uploadTerrainLightMask(landblockLights);
+			this.#frameSelectionMetrics.staticLightBinds += 1;
 			this.#drawTerrainGeometry(
 				terrain.program.geometry,
-				WebGL2Renderer.#identityMatrix,
+				this.#nearTerrainProgram.uniforms.landblockOffset,
 				landblockOffset,
 			);
 		}
+	}
+
+	#drawFarTerrainGroup(view: PreparedView, farCutoff: number | null): void {
+		for (const terrain of view.terrain) {
+			if (!this.#isFarTerrain(terrain, view, farCutoff)) continue;
+			const landblockOffset = createLandblockOffset(
+				terrain.drawUnit.coordinates,
+				view.anchorCoordinates,
+				this.#offsetScratch,
+			);
+			this.#drawTerrainGeometry(
+				terrain.program.geometry,
+				this.#farTerrainProgram.uniforms.landblockOffset,
+				landblockOffset,
+			);
+			this.#frameSelectionMetrics.farTerrainDraws += 1;
+		}
+	}
+
+	#isFarTerrain(
+		terrain: TerrainFrameInput,
+		view: PreparedView,
+		farCutoff: number | null,
+	): boolean {
+		return (
+			farCutoff !== null &&
+			landblockChebyshevDistance(
+				terrain.drawUnit.coordinates,
+				view.anchorCoordinates,
+			) >= farCutoff
+		);
 	}
 
 	/**
@@ -2611,11 +2720,6 @@ export class WebGL2Renderer implements Renderer {
 	 */
 	#beginTerrainPassResources(input: TerrainFrameInput): void {
 		const { textures } = input.program;
-		// Unit 0 must hold a real R32UI texture even when every landblock in the pass renders flat
-		// and never rebinds it. Composited landblocks overwrite it with their own.
-		const surfaceField = this.#resources.getTexture2D(
-			input.program.surfaceField,
-		);
 		const composition = this.#resources.getTexture2D(input.program.composition);
 		const colors = this.#resources.getTextureArray(textures.colors.resource);
 		const blendMasks = this.#resources.getTextureArray(
@@ -2627,23 +2731,16 @@ export class WebGL2Renderer implements Renderer {
 		const detail = this.#resources.getTexture2D(textures.detail);
 		const gl = this.#gl;
 		this.#bindTexture2D(
-			0,
-			surfaceField,
-			this.#terrainProgram.uniforms.surfaceField,
-			"exact",
-			TextureWrapMode.Clamp,
-		);
-		this.#bindTexture2D(
 			1,
 			composition,
-			this.#terrainProgram.uniforms.composition,
+			this.#nearTerrainProgram.uniforms.composition,
 			"exact",
 			TextureWrapMode.Clamp,
 		);
 		this.#bindTextureArray(
 			2,
 			colors,
-			this.#terrainProgram.uniforms.colors,
+			this.#nearTerrainProgram.uniforms.colors,
 			"filterable",
 			TextureWrapMode.Repeat,
 		);
@@ -2654,21 +2751,21 @@ export class WebGL2Renderer implements Renderer {
 		this.#bindTextureArray(
 			3,
 			blendMasks,
-			this.#terrainProgram.uniforms.blendMasks,
+			this.#nearTerrainProgram.uniforms.blendMasks,
 			"filterable",
 			TextureWrapMode.Clamp,
 		);
 		this.#bindTextureArray(
 			4,
 			roadMasks,
-			this.#terrainProgram.uniforms.roadMasks,
+			this.#nearTerrainProgram.uniforms.roadMasks,
 			"filterable",
 			TextureWrapMode.Clamp,
 		);
 		this.#bindTexture2D(
 			5,
 			detail,
-			this.#terrainProgram.uniforms.detail,
+			this.#nearTerrainProgram.uniforms.detail,
 			"filterable",
 			TextureWrapMode.Repeat,
 		);
@@ -2689,7 +2786,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#bindTexture2D(
 			0,
 			surfaceField,
-			this.#terrainProgram.uniforms.surfaceField,
+			this.#nearTerrainProgram.uniforms.surfaceField,
 			"exact",
 			TextureWrapMode.Clamp,
 		);
@@ -2713,7 +2810,7 @@ export class WebGL2Renderer implements Renderer {
 			wrap: TextureWrapMode.Clamp,
 		});
 		gl.uniform1i(
-			this.#terrainProgram.uniforms.staticLightMask,
+			this.#nearTerrainProgram.uniforms.staticLightMask,
 			TERRAIN_LIGHT_MASK_TEXTURE_UNIT,
 		);
 		gl.activeTexture(gl.TEXTURE0);
@@ -2777,18 +2874,13 @@ export class WebGL2Renderer implements Renderer {
 	/** Draw one landblock's whole terrain mesh; a landblock has exactly one. */
 	#drawTerrainGeometry(
 		geometryKey: GeometryResourceKey,
-		localToLandblock: Mat4,
+		landblockOffsetUniform: WebGLUniformLocation,
 		landblockOffset: Vec3,
 	): void {
 		const binding = this.#resources.getGeometry(geometryKey);
 		const gl = this.#gl;
-		gl.uniformMatrix4fv(
-			this.#terrainProgram.uniforms.localToLandblock,
-			false,
-			mat4ToFloat32Array(localToLandblock),
-		);
 		gl.uniform3f(
-			this.#terrainProgram.uniforms.landblockOffset,
+			landblockOffsetUniform,
 			landblockOffset.x,
 			landblockOffset.y,
 			landblockOffset.z,

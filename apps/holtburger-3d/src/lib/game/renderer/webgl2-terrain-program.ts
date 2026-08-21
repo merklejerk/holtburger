@@ -6,6 +6,9 @@ import {
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
 import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
 
+/** Integer attribute carrying one authored terrain type code per terrain vertex. */
+export const TERRAIN_COLOR_CODE_ATTRIBUTE = 3;
+
 const TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
@@ -78,10 +81,6 @@ uniform int uFogEnabled;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform vec3 uFogColor;
-// Non-zero when this landblock renders as one flat colour instead of compositing its cells.
-uniform int uSolidTerrain;
-// Terrain code standing in for the whole landblock while uSolidTerrain is set.
-uniform uint uSolidTerrainCode;
 
 ${WEBGL2_DISTANCE_FOG_GLSL}
 ${WEBGL2_SCENE_LIGHTING_GLSL}
@@ -282,35 +281,7 @@ vec3 applyRoads(vec3 color, uint pcode, TerrainUv uv) {
 	return mix(color, roadColor, clamp(1.0 - product, 0.0, 1.0));
 }
 
-/**
- * Flat stand-in colour for a landblock too fogged to be worth compositing.
- *
- * RETAIL DIVERGENCE: retail selected a composed surface for every terrain cell from its four
- * authored corner codes (CLandBlockStruct::GetCellRotation, acclient.c:339677-339713) and drew
- * every visible land cell against that surface array (acclient.c:438478-438495). This path instead
- * represents the whole far landblock with one dominant terrain texture average. Restoring retail
- * composition would remove the visible flat-colour boundary, but would also restore composition
- * sampling and texture state for 111 of 139 visible landblocks in the deterministic 0xda55ffff
- * radius-8, noon-fog census captured on 2026-08-20.
- *
- * Samples the dominant terrain type's colour texture at its smallest mip. Terrain colours carry a
- * complete mip chain, so that level is the box-filtered average of the whole texture -- the colour
- * the composited surface would average to, without a surface field, a blend, or a road lookup.
- * The explicit large LOD clamps to that level whatever the array's dimensions are.
- */
-vec3 solidTerrainColor() {
-	uvec4 record = compositionRecord(int(uSolidTerrainCode), 0);
-	return textureLod(uColors, vec3(0.5, 0.5, float(record.x)), 32.0).rgb;
-}
-
 void main() {
-	if (uSolidTerrain != 0) {
-		// Directional light only. A fogged landblock cannot show a lamp pool, and skipping point
-		// lights is what lets the draw omit its static-light state entirely.
-		vec3 flatColor = solidTerrainColor() * min(vAmbientSun, vec3(1.0));
-		fragmentColor = vec4(applyDistanceFog(flatColor, vViewerDistance), 1.0);
-		return;
-	}
 	ivec2 fieldSize = textureSize(uSurfaceField, 0);
 	TerrainUv uv;
 	uv.field = vGridUv * vec2(fieldSize);
@@ -338,7 +309,7 @@ void main() {
 `;
 
 /** Linked GPU program that composes one terrain cell directly from canonical source resources. */
-export interface WebGL2TerrainProgram {
+export interface WebGL2NearTerrainProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly ambientColor: WebGLUniformLocation;
@@ -369,16 +340,14 @@ export interface WebGL2TerrainProgram {
 		readonly sunVector: WebGLUniformLocation;
 		readonly staticLightMask: WebGLUniformLocation;
 		readonly surfaceField: WebGLUniformLocation;
-		readonly solidTerrain: WebGLUniformLocation;
-		readonly solidTerrainCode: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 	};
 }
 
 /** Compile the canonical terrain-composition draw program. */
-export function createWebGL2TerrainProgram(
+export function createWebGL2NearTerrainProgram(
 	gl: WebGL2RenderingContext,
-): WebGL2TerrainProgram {
+): WebGL2NearTerrainProgram {
 	const vertexShader = compileWebGL2Shader(
 		gl,
 		gl.VERTEX_SHADER,
@@ -463,12 +432,6 @@ export function createWebGL2TerrainProgram(
 				sunVector: requireWebGL2Uniform(gl, program, "uSunVector"),
 				staticLightMask: requireWebGL2Uniform(gl, program, "uStaticLightMask"),
 				surfaceField: requireWebGL2Uniform(gl, program, "uSurfaceField"),
-				solidTerrain: requireWebGL2Uniform(gl, program, "uSolidTerrain"),
-				solidTerrainCode: requireWebGL2Uniform(
-					gl,
-					program,
-					"uSolidTerrainCode",
-				),
 				view: requireWebGL2Uniform(gl, program, "uView"),
 			},
 		};

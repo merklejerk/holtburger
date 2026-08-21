@@ -9,7 +9,7 @@ describe("decodeTexturePixels", () => {
 			kind: "prepared-texture-surface" as const,
 			purpose: TexturePurpose.TerrainBlendMask,
 			sourceAssetId: "surface-texture/0x05001234" as const,
-		};
+		} satisfies TexturePreparationServiceRequest;
 
 		const response = decodeTexturePixels(
 			textureResponse({
@@ -32,7 +32,7 @@ describe("decodeTexturePixels", () => {
 			kind: "prepared-texture-surface" as const,
 			purpose: TexturePurpose.TerrainColor,
 			sourceAssetId: "surface-texture/0x05001234" as const,
-		};
+		} satisfies TexturePreparationServiceRequest;
 
 		expect(() =>
 			decodeTexturePixels(
@@ -70,11 +70,101 @@ describe("decodeTexturePixels", () => {
 		expect(response.kind).toBe("prepared-object-texture");
 		expect(response.surface.format).toBe("rg8");
 	});
+
+	it("requires mean RGB only for terrain-color responses", () => {
+		const terrainColorRequest = {
+			kind: "prepared-texture-surface" as const,
+			purpose: TexturePurpose.TerrainColor,
+			sourceAssetId: "surface-texture/0x05001234" as const,
+		} satisfies TexturePreparationServiceRequest;
+		const terrainColor = decodeTexturePixels(
+			textureResponse({
+				format: "rgba8",
+				height: 1,
+				meanRgb: [0.25, 0.5, 0.75],
+				pixels: [1, 2, 3, 4],
+				purpose: terrainColorRequest.purpose,
+				sourceAssetId: terrainColorRequest.sourceAssetId,
+				width: 1,
+			}),
+			terrainColorRequest,
+		);
+		if (terrainColor.purpose !== TexturePurpose.TerrainColor) {
+			throw new Error("Fixture returned the wrong texture purpose.");
+		}
+		expect(terrainColor.surface.meanRgb).toEqual([0.25, 0.5, 0.75]);
+
+		expect(() =>
+			decodeTexturePixels(
+				textureResponse({
+					format: "rgba8",
+					height: 1,
+					pixels: [1, 2, 3, 4],
+					purpose: terrainColorRequest.purpose,
+					sourceAssetId: terrainColorRequest.sourceAssetId,
+					width: 1,
+				}),
+				terrainColorRequest,
+			),
+		).toThrow("requires a mean RGB array");
+
+		const detailRequest = {
+			kind: "prepared-texture-surface" as const,
+			purpose: TexturePurpose.TerrainDetail,
+			sourceAssetId: "surface-texture/0x05001234" as const,
+		} satisfies TexturePreparationServiceRequest;
+		expect(() =>
+			decodeTexturePixels(
+				textureResponse({
+					format: "rgba8",
+					height: 1,
+					meanRgb: [0.25, 0.5, 0.75],
+					pixels: [1, 2, 3, 4],
+					purpose: detailRequest.purpose,
+					sourceAssetId: detailRequest.sourceAssetId,
+					width: 1,
+				}),
+				detailRequest,
+			),
+		).toThrow("must not carry terrain-color mean metadata");
+	});
+
+	it.each([
+		["non-array", "not-rgb", "requires a mean RGB array"],
+		["wrong channel count", [0.25, 0.5], "requires exactly three"],
+		["non-numeric channel", [0.25, "green", 0.75], "non-numeric"],
+		["out-of-range channel", [0.25, 1.01, 0.75], "out-of-range"],
+	] as const)(
+		"rejects %s terrain-color mean metadata",
+		(_, meanRgb, message) => {
+			const request = {
+				kind: "prepared-texture-surface" as const,
+				purpose: TexturePurpose.TerrainColor,
+				sourceAssetId: "surface-texture/0x05001234" as const,
+			} satisfies TexturePreparationServiceRequest;
+
+			expect(() =>
+				decodeTexturePixels(
+					textureResponse({
+						format: "rgba8",
+						height: 1,
+						meanRgb,
+						pixels: [1, 2, 3, 4],
+						purpose: request.purpose,
+						sourceAssetId: request.sourceAssetId,
+						width: 1,
+					}),
+					request,
+				),
+			).toThrow(message);
+		},
+	);
 });
 
 function textureResponse(options: {
 	readonly format: "rgba8" | "r8" | "rg8";
 	readonly height: number;
+	readonly meanRgb?: unknown;
 	readonly pixels: readonly number[];
 	readonly purpose: string;
 	readonly sourceAssetId: string;
@@ -98,6 +188,7 @@ function textureResponse(options: {
 			surface: {
 				format: options.format,
 				height: options.height,
+				...(options.meanRgb === undefined ? {} : { meanRgb: options.meanRgb }),
 				sourceRecordId: "0x06001234",
 				width: options.width,
 			},

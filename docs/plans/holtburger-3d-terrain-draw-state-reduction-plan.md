@@ -7,6 +7,11 @@ Created: 2026-08-14
 Related: `docs/plans/holtburger-3d-shader-composited-terrain-plan.md`,
 `docs/plans/holtburger-3d-terrain-loading-pipeline-plan.md`
 
+> Superseded for distant terrain by Phase 4 of
+> `docs/plans/holtburger-3d-worker-terrain-vertex-color-plan.md`. The whole-landblock solid-color
+> mechanism and its live vocabulary were deleted in favor of sampler-free per-vertex terrain
+> colors. Historical measurements and names below are retained as recorded evidence.
+
 ## Goal
 
 Three changes, in order:

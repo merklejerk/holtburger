@@ -22,6 +22,7 @@ import type {
 	StaticObjectRenderable,
 } from "../commit/artifacts";
 import type {
+	TerrainColorTextureArrayBinding,
 	TextureArrayBinding,
 	TextureAtlasBinding,
 } from "../textures/texture-manager";
@@ -97,6 +98,9 @@ interface RenderWorldSystems {
 			key: AssetTextureKey | GeneratedTextureKey,
 		): Texture2DResourceKey;
 		getTextureArrayBinding(key: TextureArrayKey): TextureArrayBinding;
+		getTerrainColorTextureArrayBinding(
+			key: TextureArrayKey,
+		): TerrainColorTextureArrayBinding;
 	};
 }
 
@@ -416,5 +420,11 @@ export class RenderWorld {
 
 	resolveTextureArray(key: TextureArrayKey): TextureArrayBinding {
 		return this.#systems.textures.getTextureArrayBinding(key);
+	}
+
+	resolveTerrainColorTextureArray(
+		key: TextureArrayKey,
+	): TerrainColorTextureArrayBinding {
+		return this.#systems.textures.getTerrainColorTextureArrayBinding(key);
 	}
 }

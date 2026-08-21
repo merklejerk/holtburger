@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateTerrain } from "./terrain-generator";
+import { TERRAIN_TYPE_COUNT } from "./pcode";
 import { TERRAIN_GRID_CELLS, type TerrainGenerationSource } from "./types";
 
 const SIDE_VERTICES = TERRAIN_GRID_CELLS + 1;
@@ -12,6 +13,7 @@ describe("generateTerrain", () => {
 		expect(result.geometry.positions.length).toBe(VERTEX_COUNT * 3);
 		expect(result.geometry.normals.length).toBe(VERTEX_COUNT * 3);
 		expect(result.geometry.textureCoordinates.length).toBe(VERTEX_COUNT * 2);
+		expect(result.geometry.terrainColorCodes.length).toBe(VERTEX_COUNT);
 		expect(result.geometry.indices.length).toBe(
 			TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS * 6,
 		);
@@ -19,6 +21,20 @@ describe("generateTerrain", () => {
 		expect(result.surfaceField.height).toBe(TERRAIN_GRID_CELLS);
 		expect(result.surfaceField.cellPcodes.length).toBe(
 			TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS,
+		);
+	});
+
+	it("retains authored terrain codes in canonical row-major vertex order", () => {
+		const source = createSource();
+		for (let index = 0; index < source.terrainSamples.length; index += 1) {
+			source.terrainSamples[index] = terrainSample(index % TERRAIN_TYPE_COUNT);
+		}
+
+		expect([...generateTerrain(source).geometry.terrainColorCodes]).toEqual(
+			Array.from(
+				{ length: VERTEX_COUNT },
+				(_, index) => index % TERRAIN_TYPE_COUNT,
+			),
 		);
 	});
 
@@ -100,8 +116,12 @@ describe("generateTerrain", () => {
 		const west = createSource("0x1111ffff");
 		for (let row = 0; row < SIDE_VERTICES; row += 1) {
 			const height = row * 3 + 1;
+			const code = (row * 7) % TERRAIN_TYPE_COUNT;
 			west.heights[row * west.gridSize + TERRAIN_GRID_CELLS] = height;
 			east.heights[row * east.gridSize] = height;
+			west.terrainSamples[row * west.gridSize + TERRAIN_GRID_CELLS] =
+				terrainSample(code);
+			east.terrainSamples[row * east.gridSize] = terrainSample(code);
 		}
 
 		const westResult = generateTerrain(west);
@@ -113,19 +133,10 @@ describe("generateTerrain", () => {
 			expect(westResult.geometry.positions[westVertex * 3 + 1]).toBe(
 				eastResult.geometry.positions[eastVertex * 3 + 1],
 			);
+			expect(westResult.geometry.terrainColorCodes[westVertex]).toBe(
+				eastResult.geometry.terrainColorCodes[eastVertex],
+			);
 		}
-	});
-
-	it("names the terrain code covering the most of the landblock", () => {
-		const source = createSource();
-		source.terrainSamples.fill(terrainSample(5));
-		expect(generateTerrain(source).dominantTerrainCode).toBe(5);
-
-		// A minority patch does not displace the code covering the rest of the grid.
-		for (const index of [0, 1, 9, 10]) {
-			source.terrainSamples[index] = terrainSample(3);
-		}
-		expect(generateTerrain(source).dominantTerrainCode).toBe(5);
 	});
 
 	it("rejects a source grid that is not the authored size", () => {

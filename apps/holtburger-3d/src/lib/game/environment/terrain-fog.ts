@@ -3,7 +3,7 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { ResolvedDistanceFog } from "./scene-environment";
 
 /**
- * Landblock ring at or beyond which terrain renders as one flat color.
+ * Landblock ring at or beyond which terrain uses its sampler-free far presentation.
  *
  * Fog supplies the derivation and landblocks supply the unit. Terrain fog is linear
  * (`webgl2-fog.ts`), so the configured coverage fraction lands at a plain interpolation between
@@ -11,18 +11,18 @@ import type { ResolvedDistanceFog } from "./scene-environment";
  *
  * Landblocks rather than world distance because the residency window, scene interest, and the
  * anchor are all already expressed that way, and because a landblock ring is stable: the solid set
- * changes only when the anchor does, so a landblock near the boundary cannot flicker between flat
- * and composited as the camera moves within its own landblock.
+ * changes only when the anchor does, so a landblock near the boundary cannot flicker between far
+ * vertex colors and near composition as the camera moves within its own landblock.
  *
- * Returns `null` when fog is disabled, so nothing goes flat without fog to hide the seam. Null
+ * Returns `null` when fog is disabled, so nothing switches without fog to hide the seam. Null
  * rather than `Infinity` because callers must handle "never" explicitly, and because `Infinity`
  * does not survive the JSON boundary that carries renderer diagnostics.
  */
-export function solidTerrainCutoffLandblocks(
+export function farTerrainCutoffLandblocks(
 	fog: ResolvedDistanceFog | null,
 ): number | null {
 	if (fog === null) return null;
-	const coverage = FRONTEND_TUNING.rendering.solidTerrainFogCoverage;
+	const coverage = FRONTEND_TUNING.rendering.farTerrainFogCoverage;
 	const distance = fog.near + (fog.far - fog.near) * coverage;
 	return Math.ceil(distance / OUTDOOR_LANDBLOCK_WORLD_SIZE);
 }

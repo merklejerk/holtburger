@@ -157,6 +157,47 @@ export const FRONTEND_TUNING = {
 	rendering: {
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },
+		/**
+		 * Presentation color grade, applied once to the finished scene.
+		 *
+		 * Deliberately ours rather than inherited: retail displays its clamped fixed-function
+		 * output directly, with no grading or tone mapping anywhere in its present path. This
+		 * exists to make the client look better than 1999 hardware allowed, not to match it.
+		 * Setting `enabledByDefault: false` restores retail-faithful presentation exactly —
+		 * the grade is bypassed rather than neutralized, so disabling it is bit-exact.
+		 *
+		 * These values are meant to be authored in the Explorer grading panel and pasted back
+		 * here — the panel's copy button emits exactly this block.
+		 */
+		colorGrade: {
+			enabledByDefault: true,
+			parameters: {
+				temperature: 0.03,
+				tint: 0,
+				saturation: 1.02,
+				curves: {
+					master: [
+						{ x: 0, y: 0 },
+						{ x: 0.0437, y: 0.0186 },
+						{ x: 0.1517, y: 0.1648 },
+						{ x: 0.7589, y: 0.8046 },
+						{ x: 1, y: 1 },
+					],
+					red: [
+						{ x: 0, y: 0 },
+						{ x: 1, y: 1 },
+					],
+					green: [
+						{ x: 0, y: 0 },
+						{ x: 1, y: 1 },
+					],
+					blue: [
+						{ x: 0, y: 0 },
+						{ x: 1, y: 1 },
+					],
+				},
+			},
+		},
 		/** Immutable quality choices and initial runtime values for near-field ambient occlusion. */
 		ambientOcclusion: {
 			/** Modern near-field presentation divergence; users may explicitly disable it. */

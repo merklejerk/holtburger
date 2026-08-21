@@ -228,6 +228,7 @@ function parseArgs(args) {
 		ambientOcclusionCoverage: false,
 		traceTerrainGl: false,
 		vitePort: DEFAULT_VITE_PORT,
+		colorGrade: null,
 		staticLights: true,
 		weather: true,
 		profileRenderer: false,
@@ -658,6 +659,20 @@ function parseArgs(args) {
 			case "--vite-port":
 				parsed.vitePort = Number(requireValue(args, ++index, arg));
 				break;
+			case "--color-grade": {
+				const source = requireValue(args, ++index, arg);
+				try {
+					parsed.colorGrade = JSON.parse(source);
+				} catch (cause) {
+					throw new Error(
+						"--color-grade must be JSON color-grade parameters.",
+						{
+							cause,
+						},
+					);
+				}
+				break;
+			}
 			case "--no-static-lights":
 				parsed.staticLights = false;
 				break;
@@ -1055,6 +1070,9 @@ Options:
                          exactly one terrain palette per activation.
   --vite-port <port>     Vite port to start or reuse. Change it when another worktree is running
                          a harness, or its server will silently serve that worktree's build.
+  --color-grade <json>  Override the presentation color grade with these JSON parameters, e.g.
+                         '{"temperature":0.6,"tint":0,"saturation":1.4,"curves":{...}}'. Omit it
+                         to use whatever FRONTEND_TUNING currently ships.
   --no-static-lights     Disable authored outdoor lamps, for same-scene A/B of their cost.
   --no-weather           Disable authored weather, mirroring retail's player option. Use it to
                          A/B a Rainy day group against the same scene without rain.
@@ -2910,6 +2928,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					options.cameraYawDegrees,
 					options.cameraPitchDegrees,
 				],
+			);
+			await delay(50);
+		}
+		if (options.colorGrade) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setColorGrade",
+				[options.colorGrade],
 			);
 			await delay(50);
 		}

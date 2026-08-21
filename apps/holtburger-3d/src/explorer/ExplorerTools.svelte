@@ -19,8 +19,10 @@
 	import type { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
 	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
+	import type { ColorGradeSettings } from "../lib/game/renderer/color-grade-policy";
 	import type { PhysicalFlyStatus } from "./physical-fly-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
+	import ExplorerGradingPanel from "./ExplorerGradingPanel.svelte";
 	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
 	import type { ExplorerCatalogCapability } from "./explorer-entity-commands";
 	import type { ExplorerPossession } from "./explorer-entity-possession";
@@ -28,6 +30,7 @@
 
 	type ExplorerTabId =
 		| "world"
+		| "grading"
 		| "frame"
 		| "textures"
 		| "assets"
@@ -65,6 +68,9 @@
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
 		readonly ambientOcclusion: AmbientOcclusionSettings;
+		/** Presentation grade authored in the grading panel. */
+		readonly colorGrade: ColorGradeSettings;
+		readonly updateColorGradeSettings: (settings: ColorGradeSettings) => void;
 		readonly viewerLightEnabled: boolean;
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
@@ -147,6 +153,8 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		ambientOcclusion,
+		colorGrade,
+		updateColorGradeSettings,
 		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
@@ -196,6 +204,12 @@
 			icon: "🗺️",
 			label: "World",
 			stub: "World inspection controls will live here.",
+		},
+		{
+			id: "grading",
+			icon: "🎨",
+			label: "Grading",
+			stub: "Presentation color grade authoring.",
 		},
 		{
 			id: "frame",
@@ -325,6 +339,8 @@
 								{renderScaleOptions}
 								{updateRenderScale}
 							/>
+						{:else if activeTab.id === "grading"}
+							<ExplorerGradingPanel {colorGrade} {updateColorGradeSettings} />
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel
 								diagnostics={rendererFrameDiagnostics}

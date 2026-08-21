@@ -35,6 +35,7 @@
 		type RendererFrameDiagnosticsSnapshot,
 	} from "../lib/game/renderer/renderer";
 	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
+	import type { ColorGradeSettings } from "../lib/game/renderer/color-grade-policy";
 	import {
 		ExplorerCameraCoordinator,
 		type ExplorerCameraFocusStatus,
@@ -268,6 +269,11 @@
 		ambientOcclusion: AmbientOcclusionSettings,
 	): void {
 		frameSettings = { ...frameSettings, ambientOcclusion };
+		applyFrameSettings();
+	}
+
+	function updateColorGradeSettings(colorGrade: ColorGradeSettings): void {
+		frameSettings = { ...frameSettings, colorGrade };
 		applyFrameSettings();
 	}
 
@@ -1322,6 +1328,8 @@
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			ambientOcclusion={frameSettings.ambientOcclusion}
+			colorGrade={frameSettings.colorGrade}
+			{updateColorGradeSettings}
 			{clockFollowing}
 			{interestFollowsCamera}
 			{updateInterestFollowsCamera}
